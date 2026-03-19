@@ -35,8 +35,8 @@ def authenticate_youtube():
 
     return build('youtube', 'v3', credentials=creds)
 
-def upload_video(youtube, video_file, title, description, tags):
-    """Uploads the final .mp4 to YouTube as a Private Short."""
+def upload_video(youtube, video_file, title, description, tags, thumbnail_file=None):
+    """Uploads the final .mp4 to YouTube as a Private Short and attaches a custom thumbnail."""
     print(f"🚀 [PHASE D] Preparing to upload: {video_file}")
 
     # Define the video metadata
@@ -73,6 +73,19 @@ def upload_video(youtube, video_file, title, description, tags):
             print(f"   Upload progress: {int(status.progress() * 100)}%")
 
     print(f"✅ Upload Complete! Video ID: {response['id']}")
+    
+    # --- NEW: Upload Thumbnail ---
+    if thumbnail_file and os.path.exists(thumbnail_file):
+        print(f"🖼️ Uploading custom thumbnail: {thumbnail_file}...")
+        try:
+            youtube.thumbnails().set(
+                videoId=response['id'],
+                media_body=MediaFileUpload(thumbnail_file, mimetype='image/jpeg')
+            ).execute()
+            print("✅ Custom thumbnail applied successfully!")
+        except Exception as e:
+            print(f"⚠️ Could not upload thumbnail (Note: you may need to verify your YouTube account for custom thumbnails). Error: {e}")
+
     return response['id']
 
 # Optional testing block

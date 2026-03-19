@@ -28,14 +28,16 @@ def download_pexels_video(keyword, output_filename):
         return None
 
     headers = {"Authorization": PEXELS_API_KEY}
-    # Request landscape videos to ensure we have high-res footage to crop
-    url = f"https://api.pexels.com/videos/search?query={keyword}&per_page=1&orientation=landscape"
+    # Fetch top 15 landscape videos to choose randomly to avoid the exact same footage every time
+    url = f"https://api.pexels.com/videos/search?query={keyword}&per_page=15&orientation=landscape"
     
     try:
         response = requests.get(url, headers=headers).json()
         
         if "videos" in response and len(response["videos"]) > 0:
-            video_files = response["videos"][0]["video_files"]
+            import random
+            random_video = random.choice(response["videos"])
+            video_files = random_video["video_files"]
             
             # Find the best HD link (1920x1080 usually)
             hd_file = next((file for file in video_files if file["quality"] == "hd"), video_files[0])
@@ -95,11 +97,11 @@ def add_dynamic_captions(audio_path, video_clip):
             try:
                 txt_clip = TextClip(
                     word_text, 
-                    fontsize=95, 
-                    color='white', 
+                    fontsize=105, 
+                    color='#FEFA00', 
                     font='/System/Library/Fonts/Supplemental/Arial Bold.ttf', # Direct path bypasses Mac font cache bugs
                     stroke_color='black',
-                    stroke_width=4,
+                    stroke_width=5,
                     method='caption',
                     size=(900, None) # Wraps text if it gets too long
                 )
@@ -133,6 +135,9 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         for vid_path in video_paths:
             clip = VideoFileClip(vid_path)
             
+            # Darken the background slightly by 30% so yellow text pops
+            clip = clip.fx(vfx.colorx, 0.7)
+            
             # Trim if too long, loop if too short
             if clip.duration > time_per_clip:
                 clip = clip.subclip(0, time_per_clip)
@@ -149,8 +154,34 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         # 🟢 NEW: BURN IN THE CAPTIONS HERE 🟢
         final_video = add_dynamic_captions(audio_path, final_video)
         
-        # Attach the voiceover and lock the duration to prevent infinite rendering loops
-        final_video = final_video.set_audio(audio_clip).set_duration(total_audio_duration)
+        # --- Add Background Music ---
+        bg_music_path = "bg_music.mp3"
+        if not os.path.exists(bg_music_path):
+            print("🎵 Downloading royalty-free suspense background music...")
+            import urllib.request
+            # A reliable, intense royalty-free looping background track
+            urllib.request.urlretrieve("https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", bg_music_path)
+            
+        bg_clip = AudioFileClip(bg_music_path).volumex(0.12) # 12% volume mix
+        
+        # Loop music if it's shorter than the voiceover
+        from moviepy.audio.fx.all import audio_loop
+        if bg_clip.duration < audio_clip.duration:
+            bg_clip = audio_loop(bg_clip, duration=audio_clip.duration)
+        else:
+            bg_clip = bg_clip.subclip(0, audio_clip.duration)
+            
+        from moviepy.audio.AudioClip import CompositeAudioClip
+        final_audio = CompositeAudioClip([bg_clip, audio_clip])
+        
+        # Attach the mixed voiceover + music and lock the duration to prevent infinite rendering loops
+        final_video = final_video.set_audio(final_audio).set_duration(total_audio_duration)
+        
+        # --- NEW: Thumbnail Extraction ---
+        thumbnail_path = "thumbnail.jpg"
+        print("📸 Extracting high-impact thumbnail frame...")
+        # Save the frame at 0.5 seconds where the yellow hook caption is perfectly visible
+        final_video.save_frame(thumbnail_path, t=0.5)
         
         print("⏳ Rendering MP4... (This will take a minute depending on your Mac's CPU/GPU)")
         

@@ -3,6 +3,7 @@ import json
 import time
 
 # Import the modules we built
+from phase_0_topic import generate_trending_topic
 from phase_a_generator import generate_shorts_script
 from phase_b_audio import generate_voiceover
 from phase_c_assembly import download_pexels_video, assemble_final_video
@@ -18,6 +19,10 @@ def run_autonomous_pipeline(topic):
     if not script_data:
         print("❌ Pipeline aborted: Failed to generate script.")
         return
+        
+    seo_description = script_data.get('youtube_description', f"The insane truth about {topic}.")
+    full_description = f"{seo_description}\n\nStart your own business today: [YOUR_AFFILIATE_LINK]\n\n#shorts #business #finance"
+    seo_tags = script_data.get('youtube_tags', ["business", "finance", "case study", "entrepreneur"])
 
     # Combine text for the voiceover
     full_text = f"{script_data['hook']} {' '.join(script_data['body_paragraphs'])} {script_data['call_to_action']}"
@@ -50,28 +55,42 @@ def run_autonomous_pipeline(topic):
         
     final_video_path = "FINAL_READY_TO_UPLOAD.mp4"
     assemble_final_video(audio_file, downloaded_vids, final_video_path)
+    final_thumbnail_path = "thumbnail.jpg"
 
     # --- PHASE D: UPLOAD ---
     print("\n--- [PHASE D] YOUTUBE UPLOAD ---")
     if os.path.exists(final_video_path):
         youtube = authenticate_youtube()
         
-        # We use the title from Phase A, and the description contains our affiliate link!
-        description = f"The insane truth about {topic}.\n\nStart your own business today: [YOUR_AFFILIATE_LINK]\n\n#shorts #business #finance"
-        tags = ["business", "finance", "case study", "entrepreneur"]
-        
-        video_id = upload_video(youtube, final_video_path, script_data['title'], description, tags)
+        video_id = upload_video(youtube, final_video_path, script_data['title'], full_description, seo_tags, final_thumbnail_path)
         
         print("\n🎉 PIPELINE COMPLETE! 🎉")
         print(f"Your video is waiting for your approval: https://studio.youtube.com/video/{video_id}/edit")
         
         # Optional: Clean up temporary files
         os.remove(audio_file)
+        if os.path.exists(final_thumbnail_path):
+            os.remove(final_thumbnail_path)
         for vid in downloaded_vids:
             os.remove(vid)
     else:
         print("❌ Pipeline aborted: Final video file not found.")
 
 if __name__ == "__main__":
-    # Press run!
-    run_autonomous_pipeline("How McDonald's actually makes its money from real estate.")
+    import sys
+    
+    # Check if a topic was passed as a command line argument
+    if len(sys.argv) > 1:
+        topic = " ".join(sys.argv[1:])
+    else:
+        # Otherwise, interactively ask the user for a topic
+        print("\n" + "="*50)
+        topic = input("🎬 Enter a topic (Or press ENTER to Auto-Generate the most lucrative topic!):\n> ")
+        print("="*50 + "\n")
+        
+    # Auto-generate if nothing was entered
+    if not topic.strip():
+        topic = generate_trending_topic()
+        print(f"🔥 Auto-Selected Topic: {topic}\n")
+        
+    run_autonomous_pipeline(topic)

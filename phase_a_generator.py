@@ -15,15 +15,21 @@ def generate_shorts_script(topic: str) -> dict:
     Generates a highly-engaging 60-second YouTube Shorts script.
     Enforces a strict JSON response.
     """
+    import random
+    styles = ["an aggressive, high-energy tone", "a mysterious, secretive tone", "a highly analytical, numbers-focused tone", "a storytelling, historical tone", "a contrarian, 'everything you know is wrong' tone"]
+    tone = random.choice(styles)
+    
     prompt = f"""
     You are an expert YouTube Shorts scriptwriter in the Business & Entrepreneurship niche. 
     Write a highly engaging, fast-paced 60-second case study about: "{topic}".
+    Use {tone}. Make sure the angle, hook, and body are completely unique and different from standard explanations!
     
     Rules:
     1. Hook: Start with a contrarian, mind-blowing, or secretive business fact (under 3 seconds).
     2. Body: Explain the business model, the massive failure, or the genius strategy in 3 punchy bullet points. Use exact numbers or dollar amounts if possible.
     3. Call to Action: End by telling them to subscribe for more business breakdowns.
     4. Length: Strictly under 140 words to ensure a fast-paced voiceover.
+    5. Pexels Keywords: Generate EXACTLY 10 to 12 highly relevant search keywords for B-roll footage.
     """
     
     # We define the expected JSON schema to guarantee the output structure
@@ -41,10 +47,19 @@ def generate_shorts_script(topic: str) -> dict:
             "pexels_search_keywords": {
                 "type": "ARRAY", 
                 "items": {"type": "STRING"},
-                "description": "Keywords for finding b-roll footage"
+                "description": "EXACTLY 10 to 12 keywords for finding b-roll footage. e.g. 'office building', 'money falling', 'frustrated person'"
+            },
+            "youtube_description": {
+                "type": "STRING",
+                "description": "An SEO-optimized 3-sentence YouTube video description loaded with keywords."
+            },
+            "youtube_tags": {
+                "type": "ARRAY",
+                "items": {"type": "STRING"},
+                "description": "EXACTLY 15 highly-targeted, viral YouTube tags relating to the topic."
             }
         },
-        "required": ["title", "hook", "body_paragraphs", "call_to_action", "pexels_search_keywords"]
+        "required": ["title", "hook", "body_paragraphs", "call_to_action", "pexels_search_keywords", "youtube_description", "youtube_tags"]
     }
     
     # Call the Gemini 2.5 Flash model
@@ -54,7 +69,7 @@ def generate_shorts_script(topic: str) -> dict:
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=response_schema,
-            temperature=0.7,
+            temperature=0.99,
         ),
     )
     
