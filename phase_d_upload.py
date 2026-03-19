@@ -35,7 +35,7 @@ def authenticate_youtube():
 
     return build('youtube', 'v3', credentials=creds)
 
-def upload_video(youtube, video_file, title, description, tags, thumbnail_file=None):
+def upload_video(youtube, video_file, title, description, tags, thumbnail_file=None, publish_at=None):
     """Uploads the final .mp4 to YouTube as a Private Short and attaches a custom thumbnail."""
     print(f"🚀 [PHASE D] Preparing to upload: {video_file}")
 
@@ -48,12 +48,16 @@ def upload_video(youtube, video_file, title, description, tags, thumbnail_file=N
             "categoryId": "27" # 27 = Education. 
         },
         "status": {
-            # CRITICAL: Upload as private so you can review it before making it public
+            # CRITICAL: Upload as private (required initially for scheduled videos)
             "privacyStatus": "private", 
             "madeForKids": False,
             "selfDeclaredMadeForKids": False
         }
     }
+    
+    if publish_at:
+        body["status"]["publishAt"] = publish_at
+        print(f"⏰ Scheduling video to go public automatically at: {publish_at}")
 
     # Load the physical file
     media = MediaFileUpload(video_file, chunksize=-1, resumable=True, mimetype="video/mp4")
@@ -80,7 +84,7 @@ def upload_video(youtube, video_file, title, description, tags, thumbnail_file=N
         try:
             youtube.thumbnails().set(
                 videoId=response['id'],
-                media_body=MediaFileUpload(thumbnail_file, mimetype='image/jpeg')
+                media_body=MediaFileUpload(thumbnail_file, mimetype='image/png')
             ).execute()
             print("✅ Custom thumbnail applied successfully!")
         except Exception as e:

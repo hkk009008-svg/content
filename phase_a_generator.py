@@ -47,7 +47,7 @@ def generate_shorts_script(topic: str) -> dict:
             "pexels_search_keywords": {
                 "type": "ARRAY", 
                 "items": {"type": "STRING"},
-                "description": "EXACTLY 10 to 12 keywords for finding b-roll footage. e.g. 'office building', 'money falling', 'frustrated person'"
+                "description": "EXACTLY 10 to 12 keywords for finding b-roll footage. CRITICAL: NEVER use specific names (ASML, Apple) or complex jargon (EUV). Translate specific nouns into generic visual stock concepts (e.g. 'microchip', 'machine', 'factory', 'money falling')."
             },
             "youtube_description": {
                 "type": "STRING",

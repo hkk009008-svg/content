@@ -54,23 +54,40 @@ def run_autonomous_pipeline(topic):
         return
         
     final_video_path = "FINAL_READY_TO_UPLOAD.mp4"
-    assemble_final_video(audio_file, downloaded_vids, final_video_path)
-    final_thumbnail_path = "thumbnail.jpg"
+    final_thumbnail_path = "thumbnail.png"
+    
+    # Pre-clean left-over files from previous runs to prevent uploading wrong videos if a crash occurs
+    for old_file in [final_video_path, final_thumbnail_path]:
+        if os.path.exists(old_file):
+            os.remove(old_file)
+
+    assembly_success = assemble_final_video(audio_file, downloaded_vids, final_video_path)
+    if not assembly_success or not os.path.exists(final_video_path):
+        print("❌ Pipeline aborted: Video assembly crashed. Aborting upload.")
+        return
 
     # --- PHASE D: UPLOAD ---
     print("\n--- [PHASE D] YOUTUBE UPLOAD ---")
     if os.path.exists(final_video_path):
         youtube = authenticate_youtube()
         
-        video_id = upload_video(youtube, final_video_path, script_data['title'], full_description, seo_tags, final_thumbnail_path)
+        import datetime
+        tomorrow = datetime.datetime.utcnow() + datetime.timedelta(days=1)
+        # Format as ISO 8601 string expected by YouTube API (e.g., 2026-03-20T15:00:00Z)
+        publish_at_str = tomorrow.isoformat().split('.')[0] + 'Z'
+        
+        video_id = upload_video(youtube, final_video_path, script_data['title'], full_description, seo_tags, final_thumbnail_path, publish_at=publish_at_str)
         
         print("\n🎉 PIPELINE COMPLETE! 🎉")
-        print(f"Your video is waiting for your approval: https://studio.youtube.com/video/{video_id}/edit")
+        print(f"Your video is completely done and SCHEDULED to automatically go public in exactly 24 hours!")
+        print(f"Verify it here: https://studio.youtube.com/video/{video_id}/edit")
         
-        # Optional: Clean up temporary files
+        # Cleanup ALL temporary files so nothing leaks into the next run
         os.remove(audio_file)
         if os.path.exists(final_thumbnail_path):
             os.remove(final_thumbnail_path)
+        if os.path.exists(final_video_path):
+            os.remove(final_video_path)
         for vid in downloaded_vids:
             os.remove(vid)
     else:
