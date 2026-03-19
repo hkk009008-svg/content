@@ -39,9 +39,11 @@ def download_pexels_video(keyword, output_filename):
             random_video = random.choice(response["videos"])
             video_files = random_video["video_files"]
             
-            # Find the best HD link (1920x1080 usually)
-            hd_file = next((file for file in video_files if file["quality"] == "hd"), video_files[0])
-            video_url = hd_file["link"]
+            # Grab raw 4K UHD if available, fallback to 1080p HD
+            best_file = next((file for file in video_files if file["quality"] == "uhd"), None)
+            if not best_file:
+                best_file = next((file for file in video_files if file["quality"] == "hd"), video_files[0])
+            video_url = best_file["link"]
             
             print(f"⬇️ Downloading background footage for '{keyword}'...")
             vid_data = requests.get(video_url).content
@@ -68,13 +70,38 @@ def crop_to_vertical(clip):
         x_center = clip.w / 2
         clip = clip.crop(x_center=x_center, y_center=clip.h/2, width=new_width, height=clip.h)
     
-    # Standardize all clips to 1080x1920 to prevent crashes during concatenation
-    return clip.resize((1080, 1920))
+    # Enforce strict 4K vertical cinema resolution (2160x3840) to prevent render crashes
+    return clip.resize((2160, 3840))
 
-def add_dynamic_captions(audio_path, video_clip):
+def add_top_banner(video_clip, topic_text):
+    """Adds a persistent 'Case File' authority banner to the top of the video."""
+    from moviepy.editor import ColorClip
+    
+    # Format the text so it's not obnoxiously long
+    clean_topic = topic_text[:35] + "..." if len(topic_text) > 35 else topic_text
+    banner_str = f"[ CASE FILE: {clean_topic.upper()} ]"
+    
+    # Transparent Black Bar at the top (Scaled for 4K)
+    banner_bg = ColorClip(size=(2160, 260), color=(0, 0, 0)).set_opacity(0.75).set_position(('center', 'top')).set_duration(video_clip.duration)
+    
+    # The text inside the banner (Scaled for 4K)
+    try:
+        banner_txt = TextClip(
+            banner_str, 
+            fontsize=80, 
+            color='white', 
+            font='/System/Library/Fonts/Supplemental/Courier New Bold.ttf' # Classic typewriter case file font
+        ).set_position(('center', 90)).set_duration(video_clip.duration)
+    except:
+        # Fallback to Arial if Courier is missing
+        banner_txt = TextClip(banner_str, fontsize=80, color='white', font='/System/Library/Fonts/Supplemental/Arial Bold.ttf').set_position(('center', 90)).set_duration(video_clip.duration)
+    
+    return CompositeVideoClip([video_clip, banner_bg, banner_txt])
+
+def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense"):
     """
     Uses local Whisper AI to transcribe audio and burn word-by-word 
-    captions onto the MoviePy video clip.
+    captions onto the MoviePy video clip with dynamically mapped styles.
     """
     print("🧠 [PHASE C] Loading Whisper AI model (this takes a few seconds)...")
     # 'base' is fast and highly accurate for English.
@@ -85,6 +112,48 @@ def add_dynamic_captions(audio_path, video_clip):
     result = model.transcribe(audio_path, word_timestamps=True)
     
     text_clips = []
+    word_index = 0
+    
+    # Define aesthetic mapping based on Gemini's emotional mood analysis (All dimensions scaled 2x for 4K geometry)
+    vibe_styles = {
+        "suspense": {
+            "font": '/System/Library/Fonts/Supplemental/Courier New Bold.ttf',
+            "colors": ["#FFFFFF", "#FF0000"], # White and Red strobe
+            "opacity": 0.85,
+            "stroke": 4,
+            "size": 170
+        },
+        "corporate": {
+            "font": '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+            "colors": ["#FEFA00"], # Solid static Hormozi Yellow
+            "opacity": 1.0,
+            "stroke": 10,
+            "size": 210
+        },
+        "lofi": {
+            "font": '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+            "colors": ["#FFFFFF"], # Solid Soft White
+            "opacity": 0.80,
+            "stroke": 4,
+            "size": 160
+        },
+        "upbeat": {
+            "font": '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+            "colors": ["#FEFA00", "#00FFFF"], # Exuberant Yellow and Cyan flash
+            "opacity": 1.0,
+            "stroke": 8,
+            "size": 200
+        },
+        "aggressive": {
+            "font": '/System/Library/Fonts/Supplemental/Courier New Bold.ttf',
+            "colors": ["#FF0000", "#FFFFFF"], # Intense Blood Red lead strobe
+            "opacity": 0.95,
+            "stroke": 6,
+            "size": 190
+        }
+    }
+    
+    style = vibe_styles.get(music_vibe, vibe_styles["suspense"])
     
     # Loop through the transcription data
     for segment in result['segments']:
@@ -93,18 +162,23 @@ def add_dynamic_captions(audio_path, video_clip):
             start_time = word_info['start']
             end_time = word_info['end']
             
-            # Create a bold graphic for each word
+            # --- Dynamic Mood Routing ---
+            colors = style["colors"]
+            color_choice = colors[word_index % len(colors)]
+            word_index += 1
+            
+            # Create a styled graphic for each word
             try:
                 txt_clip = TextClip(
                     word_text, 
-                    fontsize=105, 
-                    color='#FEFA00', 
-                    font='/System/Library/Fonts/Supplemental/Arial Bold.ttf', # Direct path bypasses Mac font cache bugs
+                    fontsize=style["size"],
+                    color=color_choice, 
+                    font=style["font"], 
                     stroke_color='black',
-                    stroke_width=5,
+                    stroke_width=style["stroke"],
                     method='caption',
-                    size=(900, None) # Wraps text if it gets too long
-                )
+                    size=(1800, None) # 4K boundary wrapper
+                ).set_opacity(style["opacity"])
                 
                 # Set exact timing and center it on screen
                 txt_clip = txt_clip.set_start(start_time).set_end(end_time)
@@ -120,7 +194,7 @@ def add_dynamic_captions(audio_path, video_clip):
     
     return final_video_with_subs
 
-def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_TO_UPLOAD.mp4"):
+def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_TO_UPLOAD.mp4", music_vibe="suspense", topic_text="CLASSIFIED"):
     """Stitches the cropped videos together and syncs the ElevenLabs audio."""
     print("\n🎬 [PHASE C] Assembling the final video cut...")
     
@@ -131,12 +205,54 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         # Calculate exactly how long each video clip should play
         time_per_clip = total_audio_duration / len(video_paths)
         
+        # 🟢 THE AI VISUAL DIRECTOR 🟢
+        # Map Gemini's emotional `music_vibe` directly to physical camera optics, 
+        # temporal warp speed, and cinematic color rendering.
+        optic_profiles = {
+            "suspense": {
+                "speed": 0.8, # Buttery slow-mo creeping dread
+                "scale": 1.05, 
+                "pan": "diagonal_down_right",
+                "color_grade": lambda c: c.fx(vfx.blackwhite).fx(vfx.colorx, 0.6) # Pitch black high contrast
+            },
+            "lofi": {
+                "speed": 0.6, # Dreamy hyperslow flow
+                "scale": 1.07, 
+                "pan": "horizontal_right",
+                "color_grade": lambda c: c.fx(vfx.colorx, 0.55) # Dimmed but keeps raw colors intact
+            },
+            "corporate": {
+                "speed": 1.0, # Stable reality
+                "scale": 1.04, 
+                "pan": "diagonal_up_left",
+                "color_grade": lambda c: c.fx(vfx.colorx, 0.85) # Clean documentary dimming
+            },
+            "upbeat": {
+                "speed": 1.15, # Fast paced hyper-energy
+                "scale": 1.04, 
+                "pan": "horizontal_left",
+                "color_grade": lambda c: c.fx(vfx.colorx, 0.95) # Bright and explosive
+            },
+            "aggressive": {
+                "speed": 1.3, # Violent fast forward
+                "scale": 1.15, # Massive pan distance mapping for frantic camera sweep
+                "pan": "diagonal_down_left",
+                "color_grade": lambda c: c.fx(vfx.blackwhite).fx(vfx.colorx, 0.5) # Grim and striking
+            }
+        }
+        
+        # Load the targeted profile
+        profile = optic_profiles.get(music_vibe, optic_profiles["suspense"])
+
         processed_clips = []
         for vid_path in video_paths:
             clip = VideoFileClip(vid_path)
             
-            # Darken the background slightly by 30% so yellow text pops
-            clip = clip.fx(vfx.colorx, 0.7)
+            # Apply dynamic emotional color grade
+            clip = profile["color_grade"](clip)
+            
+            # Apply dynamic time warp physics
+            clip = clip.fx(vfx.speedx, profile["speed"])
             
             # Trim if too long, loop if too short
             if clip.duration > time_per_clip:
@@ -144,23 +260,69 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
             else:
                 clip = clip.fx(vfx.loop, duration=time_per_clip)
                 
-            # Force into the vertical Shorts format
+            # Enforce strict 4K vertical cinema resolution (2160x3840) to prevent render crashes
             clip = crop_to_vertical(clip)
+            
+            # The Digital Camera Pan Rig
+            def add_cinematic_drift(c, p_scale, p_dir):
+                w_target, h_target = 2160, 3840
+                c_oversized = c.resize(p_scale)
+                w_over, h_over = c_oversized.size
+                
+                max_x = int(w_over - w_target)
+                max_y = int(h_over - h_target)
+                d = c.duration
+                
+                def drift_crop(get_frame, t):
+                    frame = get_frame(t)
+                    progress = t / d 
+                    
+                    if p_dir == "diagonal_down_right":
+                        x1, y1 = int(max_x * progress), int(max_y * progress)
+                    elif p_dir == "diagonal_up_left":
+                        x1, y1 = int(max_x * (1.0 - progress)), int(max_y * (1.0 - progress))
+                    elif p_dir == "horizontal_right":
+                        x1, y1 = int(max_x * progress), int(max_y / 2)
+                    elif p_dir == "horizontal_left":
+                        x1, y1 = int(max_x * (1.0 - progress)), int(max_y / 2)
+                    elif p_dir == "diagonal_down_left":
+                        x1, y1 = int(max_x * (1.0 - progress)), int(max_y * progress)
+                    else:
+                        x1, y1 = int(max_x * progress), int(max_y * progress)
+                        
+                    return frame[y1:y1+h_target, x1:x1+w_target]
+                    
+                return c_oversized.fl(drift_crop)
+                
+            clip = add_cinematic_drift(clip, profile["scale"], profile["pan"])
             processed_clips.append(clip)
         
         # Stitch them all together
         final_video = concatenate_videoclips(processed_clips, method="compose")
         
+        # 🟢 NEW: BURN IN THE AUTHORITY BANNER 🟢
+        final_video = add_top_banner(final_video, topic_text)
+        
         # 🟢 NEW: BURN IN THE CAPTIONS HERE 🟢
-        final_video = add_dynamic_captions(audio_path, final_video)
+        final_video = add_dynamic_captions(audio_path, final_video, music_vibe)
         
         # --- Add Background Music ---
-        bg_music_path = "bg_music.mp3"
+        bg_music_path = f"bg_{music_vibe}.mp3"
+        
+        # We assign different SoundHelix URLs for each vibe (in reality this could be an internal folder of your own MP3s)
+        music_library = {
+            "suspense": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+            "corporate": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
+            "lofi": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
+            "upbeat": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",
+            "aggressive": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3"
+        }
+        music_url = music_library.get(music_vibe, music_library["suspense"])
+        
         if not os.path.exists(bg_music_path):
-            print("🎵 Downloading royalty-free suspense background music...")
+            print(f"🎵 Downloading {music_vibe.upper()} royalty-free background music...")
             import urllib.request
-            # A reliable, intense royalty-free looping background track
-            urllib.request.urlretrieve("https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", bg_music_path)
+            urllib.request.urlretrieve(music_url, bg_music_path)
             
         bg_clip = AudioFileClip(bg_music_path).volumex(0.12) # 12% volume mix
         
@@ -185,12 +347,13 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         
         print("⏳ Rendering MP4... (This will take a minute depending on your Mac's CPU/GPU)")
         
-        # Write the final file
+        # Write the final 4K file
         final_video.write_videofile(
             output_filename, 
             fps=30, 
             codec="libx264", 
-            audio_codec="aac", 
+            audio_codec="aac",
+            bitrate="20000k", # Extremely high ceiling bitrate for 4K quality
             logger=None # Keeps your terminal output clean
         )
         print(f"\n✅ Success! Final video rendered as: {output_filename}")

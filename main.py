@@ -27,6 +27,9 @@ def run_autonomous_pipeline(topic):
     # Combine text for the voiceover
     full_text = f"{script_data['hook']} {' '.join(script_data['body_paragraphs'])} {script_data['call_to_action']}"
     print(f"✅ Script compiled. Length: {len(full_text.split())} words.")
+    
+    music_vibe = script_data.get('music_vibe', 'suspense')
+    print(f"🎵 Computed Music Vibe: {music_vibe.upper()}")
 
     # --- PHASE B: AUDIO ---
     print("\n--- [PHASE B] AUDIO GENERATION ---")
@@ -61,7 +64,7 @@ def run_autonomous_pipeline(topic):
         if os.path.exists(old_file):
             os.remove(old_file)
 
-    assembly_success = assemble_final_video(audio_file, downloaded_vids, final_video_path)
+    assembly_success = assemble_final_video(audio_file, downloaded_vids, final_video_path, music_vibe=music_vibe, topic_text=topic)
     if not assembly_success or not os.path.exists(final_video_path):
         print("❌ Pipeline aborted: Video assembly crashed. Aborting upload.")
         return
@@ -76,7 +79,8 @@ def run_autonomous_pipeline(topic):
         # Format as ISO 8601 string expected by YouTube API (e.g., 2026-03-20T15:00:00Z)
         publish_at_str = tomorrow.isoformat().split('.')[0] + 'Z'
         
-        video_id = upload_video(youtube, final_video_path, script_data['title'], full_description, seo_tags, final_thumbnail_path, publish_at=publish_at_str)
+        playlist_name = script_data.get('playlist_category', "Digital Case Studies")
+        video_id = upload_video(youtube, final_video_path, script_data['title'], full_description, seo_tags, final_thumbnail_path, publish_at=publish_at_str, playlist_name=playlist_name)
         
         print("\n🎉 PIPELINE COMPLETE! 🎉")
         print(f"Your video is completely done and SCHEDULED to automatically go public in exactly 24 hours!")

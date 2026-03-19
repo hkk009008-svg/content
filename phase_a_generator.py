@@ -57,9 +57,18 @@ def generate_shorts_script(topic: str) -> dict:
                 "type": "ARRAY",
                 "items": {"type": "STRING"},
                 "description": "EXACTLY 15 highly-targeted, viral YouTube tags relating to the topic."
+            },
+            "music_vibe": {
+                "type": "STRING",
+                "enum": ["suspense", "corporate", "lofi", "upbeat", "aggressive"],
+                "description": "Select the emotional vibe of the music that perfectly matches the topic of this case study."
+            },
+            "playlist_category": {
+                "type": "STRING",
+                "description": "A high-level YouTube playlist name this video belongs to (e.g. 'Business Secrets', 'Tech History', 'Marketing Psychology'). Max 3 words."
             }
         },
-        "required": ["title", "hook", "body_paragraphs", "call_to_action", "pexels_search_keywords", "youtube_description", "youtube_tags"]
+        "required": ["title", "hook", "body_paragraphs", "call_to_action", "pexels_search_keywords", "youtube_description", "youtube_tags", "music_vibe", "playlist_category"]
     }
     
     # Call the Gemini 2.5 Flash model
