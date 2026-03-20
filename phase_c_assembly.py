@@ -331,8 +331,14 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
             if current_dur >= total_audio_duration:
                 break
                 
-            # Apply dynamic emotional color grade
-            clip = profile["color_grade"](chunk)
+            # --- NEW: UNIVERSAL CINEMATIC SCHEME NORMALIZER ---
+            # Unifies the brightness, exposure, and contrast of ALL disparate footage (AI or Stock) 
+            # so they seamlessly share exactly the same cohesive visual vocabulary base.
+            clip = chunk.fx(vfx.colorx, 0.92) # Suppresses blown-out highlights
+            clip = clip.fx(vfx.gamma_corr, 0.95) # Deepens shadows for a unified cinematic look
+                
+            # Apply dynamic emotional color grade on top of the normalized unified baseline
+            clip = profile["color_grade"](clip)
             
             # Apply dynamic time warp physics based on AI video pacing multiplier
             pacing_mult = {"fast": 1.15, "moderate": 1.0, "relaxed": 0.85}.get(video_pacing, 1.0)

@@ -17,8 +17,12 @@ def run_autonomous_pipeline(topic):
         import requests, urllib.parse
         p = urllib.parse.quote("a highly minimal futuristic glowing neon blue geometric tech corporate logo on a pure pitch black background, vector flat icon, high resolution")
         try:
+            img_data = requests.get(f"https://image.pollinations.ai/prompt/{p}?width=400&height=400&nologo=True&model=flux").content
+            if len(img_data) < 5000:
+                print("⚠️ Pollinations blocked logo generation. Using uncompressed proxy placeholder.")
+                img_data = requests.get("https://picsum.photos/400/400").content
             with open("logo.png", "wb") as f:
-                f.write(requests.get(f"https://image.pollinations.ai/prompt/{p}?width=400&height=400&nologo=True").content)
+                f.write(img_data)
         except Exception as e:
             print(f"Failed to generate logo: {e}")
             
