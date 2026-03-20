@@ -57,7 +57,7 @@ def run_autonomous_pipeline(topic):
         return
         
     final_video_path = "FINAL_READY_TO_UPLOAD.mp4"
-    final_thumbnail_path = "thumbnail.png"
+    final_thumbnail_path = "thumbnail.jpg"
     
     # Pre-clean left-over files from previous runs to prevent uploading wrong videos if a crash occurs
     for old_file in [final_video_path, final_thumbnail_path]:

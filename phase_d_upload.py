@@ -5,8 +5,11 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-# This scope allows us to upload videos to your channel
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+# This scope allows us to upload videos to your channel and manage playlists
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube"
+]
 
 def authenticate_youtube():
     """Handles OAuth 2.0 authentication and saves the token for future runs."""
@@ -132,7 +135,7 @@ def upload_video(youtube, video_file, title, description, tags, thumbnail_file=N
         try:
             youtube.thumbnails().set(
                 videoId=response['id'],
-                media_body=MediaFileUpload(thumbnail_file, mimetype='image/png')
+                media_body=MediaFileUpload(thumbnail_file, mimetype='image/jpeg')
             ).execute()
             print("✅ Custom thumbnail applied successfully!")
         except Exception as e:

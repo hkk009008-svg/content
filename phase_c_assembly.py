@@ -340,7 +340,7 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         final_video = final_video.set_audio(final_audio).set_duration(total_audio_duration)
         
         # --- NEW: Thumbnail Extraction ---
-        thumbnail_path = "thumbnail.png"
+        thumbnail_path = "thumbnail.jpg"
         print("📸 Extracting high-impact thumbnail frame...")
         # Save the frame at 0.5 seconds where the yellow hook caption is perfectly visible
         final_video.save_frame(thumbnail_path, t=0.5)
