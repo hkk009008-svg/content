@@ -446,7 +446,6 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         if os.path.exists("logo.png"):
             print("🎨 Adding Channel Watermark Logo...")
             from moviepy.editor import ImageClip
-            import moviepy.video.fx.all as vfx
             # Load the AI logo, strip the black background completely using color masking thresholds,
             # scale it down, and permanently pin it inside the right side of the Top Banner
             logo_clip = ImageClip("logo.png").resize(width=160).fx(vfx.mask_color, color=[0, 0, 0], thr=35, s=15).set_position((2160 - 200, 80)).set_duration(total_audio_duration).set_opacity(0.85)
