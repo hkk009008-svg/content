@@ -23,13 +23,26 @@ def generate_ai_broll(prompt, output_filename):
     """Hits the Pollinations AI Stable Diffusion endpoint to generate a hyper-realistic vertical image."""
     print(f"🤖 [PHASE C] Generating AI B-Roll: '{prompt[:50]}...'")
     import urllib.parse
+    import time
     
     encoded_prompt = urllib.parse.quote(prompt)
-    # We enforce vertical 1080x1920 generation, disabling logos and explicitly setting high quality
-    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1080&height=1920&nologo=True"
+    # We enforce vertical 768x1365 generation (standard SD) and force model=flux to prevent Internal Server Errors
+    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=1365&nologo=True&model=flux"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     
     try:
-        img_data = requests.get(url).content
+        img_data = requests.get(url, headers=headers).content
+        if len(img_data) < 5000:
+            print(f"⚠️ Flux model failed. Attempting fallback... {img_data[:50]}")
+            time.sleep(2)
+            # Fallback to any available model, fixing the string slice IDE lint
+            safe_prompt = urllib.parse.quote("cinematic shot of " + prompt[:30])
+            url_fallback = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=768&height=1365&nologo=True"
+            img_data = requests.get(url_fallback, headers=headers).content
+            if len(img_data) < 5000:
+                print(f"⚠️ Pollinations 429 Limit Block. Using Unsplash Fallback to secure the render queue.")
+                img_data = requests.get("https://picsum.photos/768/1365").content
+                
         with open(output_filename, 'wb') as handler:
             handler.write(img_data)
         return output_filename
