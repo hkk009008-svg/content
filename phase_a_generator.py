@@ -16,19 +16,28 @@ def generate_shorts_script(topic: str) -> dict:
     Enforces a strict JSON response.
     """
     import random
+    from phase_e_learning import get_top_performing_context, fetch_live_youtube_trends
+    ab_memory = get_top_performing_context()
+    live_trends = fetch_live_youtube_trends()
+    
     styles = ["an aggressive, high-energy tone", "a mysterious, secretive tone", "a highly analytical, numbers-focused tone", "a storytelling, historical tone", "a contrarian, 'everything you know is wrong' tone"]
     tone = random.choice(styles)
     
     prompt = f"""
     You are an expert YouTube Shorts scriptwriter in the Business & Entrepreneurship niche. 
-    Write a highly engaging, fast-paced 60-second case study about: "{topic}".
+    
+    {ab_memory}
+    
+    {live_trends}
+    
+    Write a highly engaging 60-second case study about: "{topic}".
     Use {tone}. Make sure the angle, hook, and body are completely unique and different from standard explanations!
     
     Rules:
     1. Hook: Start with a contrarian, mind-blowing, or secretive business fact (under 3 seconds).
     2. Body: Explain the business model, the massive failure, or the genius strategy in 3 punchy bullet points. Use exact numbers or dollar amounts if possible.
     3. Call to Action: End by telling them to subscribe for more business breakdowns.
-    4. Length: Strictly under 140 words to ensure a fast-paced voiceover.
+    4. Length & Pacing: You must dictate the tempo of the voiceover. For a 'fast' video, output ~140 words. For 'moderate', output ~125 words. For 'relaxed', output under 110 words.   
     5. Pexels Keywords: Generate EXACTLY 10 to 12 highly relevant search keywords for B-roll footage.
     """
     
@@ -63,12 +72,17 @@ def generate_shorts_script(topic: str) -> dict:
                 "enum": ["suspense", "corporate", "lofi", "upbeat", "aggressive"],
                 "description": "Select the emotional vibe of the music that perfectly matches the topic of this case study."
             },
+            "video_pacing": {
+                "type": "STRING",
+                "enum": ["fast", "moderate", "relaxed"],
+                "description": "Select the overarching tempo/pacing that best suits the topic."
+            },
             "playlist_category": {
                 "type": "STRING",
                 "description": "A high-level YouTube playlist name this video belongs to (e.g. 'Business Secrets', 'Tech History', 'Marketing Psychology'). Max 3 words."
             }
         },
-        "required": ["title", "hook", "body_paragraphs", "call_to_action", "pexels_search_keywords", "youtube_description", "youtube_tags", "music_vibe", "playlist_category"]
+        "required": ["title", "hook", "body_paragraphs", "call_to_action", "pexels_search_keywords", "youtube_description", "youtube_tags", "music_vibe", "video_pacing", "playlist_category"]
     }
     
     # Call the Gemini 2.5 Flash model
@@ -83,7 +97,10 @@ def generate_shorts_script(topic: str) -> dict:
     )
     
     # Parse and return the JSON string into a Python dictionary
-    return json.loads(response.text)
+    parsed_json = json.loads(response.text)
+    # Inject the randomly selected tone for the experiment logger
+    parsed_json['tone_used'] = tone
+    return parsed_json
 
 # --- Testing the Module ---
 if __name__ == "__main__":

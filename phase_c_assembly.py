@@ -74,29 +74,41 @@ def crop_to_vertical(clip):
     return clip.resize((2160, 3840))
 
 def add_top_banner(video_clip, topic_text):
-    """Adds a persistent 'Case File' authority banner to the top of the video."""
-    from moviepy.editor import ColorClip
+    """Adds a persistent 'Case File' authority banner to the top of the video with proper word-wrapping."""
+    from moviepy.editor import ColorClip, TextClip, CompositeVideoClip
     
-    # Format the text so it's not obnoxiously long
-    clean_topic = topic_text[:35] + "..." if len(topic_text) > 35 else topic_text
-    banner_str = f"[ CASE FILE: {clean_topic.upper()} ]"
+    # 1. Background Box (Slightly taller to handle multiline text and almost fully opaque for legibility)
+    banner_bg = ColorClip(size=(2160, 360), color=(10, 10, 12)).set_opacity(0.95).set_position(('center', 'top')).set_duration(video_clip.duration)
     
-    # Transparent Black Bar at the top (Scaled for 4K)
-    banner_bg = ColorClip(size=(2160, 260), color=(0, 0, 0)).set_opacity(0.75).set_position(('center', 'top')).set_duration(video_clip.duration)
+    # 2. Modern Brand Accent Line (Neon Yellow Underline)
+    accent_line = ColorClip(size=(2160, 10), color=(255, 234, 0)).set_position(('center', 360)).set_duration(video_clip.duration)
     
-    # The text inside the banner (Scaled for 4K)
+    # 3. Small "Authority" Badge Text
     try:
-        banner_txt = TextClip(
-            banner_str, 
+        badge_txt = TextClip(
+            "// DECLASSIFIED CASE STUDY", 
+            fontsize=40, 
+            color='#FFEA00', # Neon Yellow
+            font='/System/Library/Fonts/Supplemental/Courier New Bold.ttf'
+        ).set_position((100, 70)).set_duration(video_clip.duration)
+    except:
+        badge_txt = TextClip("// DECLASSIFIED CASE STUDY", fontsize=40, color='#FFEA00').set_position((100, 70)).set_duration(video_clip.duration)
+        
+    # 4. Main Title properly word-wrapped inside a 1900px boundary so it NEVER cuts off
+    try:
+        main_txt = TextClip(
+            topic_text.upper(), 
             fontsize=80, 
             color='white', 
-            font='/System/Library/Fonts/Supplemental/Courier New Bold.ttf' # Classic typewriter case file font
-        ).set_position(('center', 90)).set_duration(video_clip.duration)
+            font='/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+            align='West',
+            method='caption',
+            size=(1900, None) # This tells MoviePy to auto word-wrap within 1900 pixels
+        ).set_position((100, 150)).set_duration(video_clip.duration)
     except:
-        # Fallback to Arial if Courier is missing
-        banner_txt = TextClip(banner_str, fontsize=80, color='white', font='/System/Library/Fonts/Supplemental/Arial Bold.ttf').set_position(('center', 90)).set_duration(video_clip.duration)
+        main_txt = TextClip(topic_text.upper(), fontsize=80, color='white', align='West', method='caption', size=(1900, None)).set_position((100, 150)).set_duration(video_clip.duration)
     
-    return CompositeVideoClip([video_clip, banner_bg, banner_txt])
+    return CompositeVideoClip([video_clip, banner_bg, accent_line, badge_txt, main_txt])
 
 def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense"):
     """
@@ -118,38 +130,38 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense"):
     vibe_styles = {
         "suspense": {
             "font": '/System/Library/Fonts/Supplemental/Courier New Bold.ttf',
-            "colors": ["#FFFFFF", "#FF0000"], # White and Red strobe
-            "opacity": 0.85,
-            "stroke": 4,
-            "size": 170
+            "colors": ["#E2FF3D"], # Acid/Cyber Yellow for suspense
+            "opacity": 1.0,
+            "stroke": 12,
+            "size": 220
         },
         "corporate": {
             "font": '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
-            "colors": ["#FEFA00"], # Solid static Hormozi Yellow
+            "colors": ["#FACC15"], # Clean Modern Gold for corporate
             "opacity": 1.0,
-            "stroke": 10,
-            "size": 210
+            "stroke": 12,
+            "size": 220
         },
         "lofi": {
             "font": '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
-            "colors": ["#FFFFFF"], # Solid Soft White
-            "opacity": 0.80,
-            "stroke": 4,
-            "size": 160
+            "colors": ["#FFD700"], # Chill Warm Gold for lofi
+            "opacity": 1.0,
+            "stroke": 12,
+            "size": 220
         },
         "upbeat": {
             "font": '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
-            "colors": ["#FEFA00", "#00FFFF"], # Exuberant Yellow and Cyan flash
+            "colors": ["#FFEA00"], # High-Energy Neon yellow for upbeat
             "opacity": 1.0,
-            "stroke": 8,
-            "size": 200
+            "stroke": 12,
+            "size": 220
         },
         "aggressive": {
             "font": '/System/Library/Fonts/Supplemental/Courier New Bold.ttf',
-            "colors": ["#FF0000", "#FFFFFF"], # Intense Blood Red lead strobe
-            "opacity": 0.95,
-            "stroke": 6,
-            "size": 190
+            "colors": ["#FFED00"], # Sharp Impact Yellow for aggressive
+            "opacity": 1.0,
+            "stroke": 12,
+            "size": 220
         }
     }
     
@@ -194,7 +206,7 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense"):
     
     return final_video_with_subs
 
-def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_TO_UPLOAD.mp4", music_vibe="suspense", topic_text="CLASSIFIED"):
+def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_TO_UPLOAD.mp4", music_vibe="suspense", topic_text="CLASSIFIED", video_pacing="moderate"):
     """Stitches the cropped videos together and syncs the ElevenLabs audio."""
     print("\n🎬 [PHASE C] Assembling the final video cut...")
     
@@ -210,31 +222,31 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         # temporal warp speed, and cinematic color rendering.
         optic_profiles = {
             "suspense": {
-                "speed": 0.8, # Buttery slow-mo creeping dread
+                "speed": 0.75, # Buttery slow-mo creeping dread
                 "scale": 1.05, 
                 "pan": "diagonal_down_right",
                 "color_grade": lambda c: c.fx(vfx.blackwhite).fx(vfx.colorx, 0.6) # Pitch black high contrast
             },
             "lofi": {
-                "speed": 0.6, # Dreamy hyperslow flow
+                "speed": 0.55, # Dreamy hyperslow flow
                 "scale": 1.07, 
                 "pan": "horizontal_right",
                 "color_grade": lambda c: c.fx(vfx.colorx, 0.55) # Dimmed but keeps raw colors intact
             },
             "corporate": {
-                "speed": 1.0, # Stable reality
+                "speed": 0.9, # Stable reality
                 "scale": 1.04, 
                 "pan": "diagonal_up_left",
                 "color_grade": lambda c: c.fx(vfx.colorx, 0.85) # Clean documentary dimming
             },
             "upbeat": {
-                "speed": 1.15, # Fast paced hyper-energy
+                "speed": 1.05, # Fast paced hyper-energy
                 "scale": 1.04, 
                 "pan": "horizontal_left",
                 "color_grade": lambda c: c.fx(vfx.colorx, 0.95) # Bright and explosive
             },
             "aggressive": {
-                "speed": 1.3, # Violent fast forward
+                "speed": 1.15, # Violent fast forward
                 "scale": 1.15, # Massive pan distance mapping for frantic camera sweep
                 "pan": "diagonal_down_left",
                 "color_grade": lambda c: c.fx(vfx.blackwhite).fx(vfx.colorx, 0.5) # Grim and striking
@@ -252,7 +264,9 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
             clip = profile["color_grade"](clip)
             
             # Apply dynamic time warp physics
-            clip = clip.fx(vfx.speedx, profile["speed"])
+            # Adjust the base profile speed by the requested AI video pacing multiplier
+            pacing_mult = {"fast": 1.15, "moderate": 1.0, "relaxed": 0.85}.get(video_pacing, 1.0)
+            clip = clip.fx(vfx.speedx, profile["speed"] * pacing_mult)
             
             # Trim if too long, loop if too short
             if clip.duration > time_per_clip:
@@ -343,7 +357,10 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         thumbnail_path = "thumbnail.jpg"
         print("📸 Extracting high-impact thumbnail frame...")
         # Save the frame at 0.5 seconds where the yellow hook caption is perfectly visible
-        final_video.save_frame(thumbnail_path, t=0.5)
+        import PIL.Image
+        frame_array = final_video.get_frame(0.5)
+        thumbnail_img = PIL.Image.fromarray(frame_array).convert("RGB")
+        thumbnail_img.save(thumbnail_path, "JPEG")
         
         print("⏳ Rendering MP4... (This will take a minute depending on your Mac's CPU/GPU)")
         

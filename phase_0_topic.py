@@ -31,8 +31,17 @@ def generate_trending_topic() -> str:
         recent_used = used_topics[-50:]
         avoid_clause = f"\n    CRITICAL: You MUST NOT pick any of these previously used topics, nor anything remotely similar:\n" + "\n".join([f"    - {t}" for t in recent_used]) + "\n"
 
+    from phase_e_learning import get_top_performing_context, fetch_live_youtube_trends
+    ab_memory = get_top_performing_context()
+    live_trends = fetch_live_youtube_trends()
+
     prompt = f"""
     You are an elite YouTube Shorts strategist prioritizing algorithmic virality and highly lucrative business content.
+    
+    {ab_memory}
+    
+    {live_trends}
+    
     Your goal is to brainstorm the SINGLE most intriguing, viral, and true business or entrepreneurship case study topic for today.
     
     Focus on areas that perform exceptionally well in short-form content:

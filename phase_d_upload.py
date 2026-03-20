@@ -5,10 +5,11 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
-# This scope allows us to upload videos to your channel and manage playlists
+# This scope allows us to upload videos to your channel, manage playlists, AND read advanced analytics
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
-    "https://www.googleapis.com/auth/youtube"
+    "https://www.googleapis.com/auth/youtube",
+    "https://www.googleapis.com/auth/yt-analytics.readonly"
 ]
 
 def authenticate_youtube():

@@ -8,6 +8,7 @@ from phase_a_generator import generate_shorts_script
 from phase_b_audio import generate_voiceover
 from phase_c_assembly import download_pexels_video, assemble_final_video
 from phase_d_upload import authenticate_youtube, upload_video
+from phase_e_learning import log_experiment, fetch_and_update_analytics
 
 def run_autonomous_pipeline(topic):
     print(f"🚀 STARTING PIPELINE FOR TOPIC: {topic}\n")
@@ -29,7 +30,9 @@ def run_autonomous_pipeline(topic):
     print(f"✅ Script compiled. Length: {len(full_text.split())} words.")
     
     music_vibe = script_data.get('music_vibe', 'suspense')
+    video_pacing = script_data.get('video_pacing', 'moderate')
     print(f"🎵 Computed Music Vibe: {music_vibe.upper()}")
+    print(f"⏱️ Computed Video Pacing: {video_pacing.upper()}")
 
     # --- PHASE B: AUDIO ---
     print("\n--- [PHASE B] AUDIO GENERATION ---")
@@ -64,7 +67,7 @@ def run_autonomous_pipeline(topic):
         if os.path.exists(old_file):
             os.remove(old_file)
 
-    assembly_success = assemble_final_video(audio_file, downloaded_vids, final_video_path, music_vibe=music_vibe, topic_text=topic)
+    assembly_success = assemble_final_video(audio_file, downloaded_vids, final_video_path, music_vibe=music_vibe, topic_text=topic, video_pacing=video_pacing)
     if not assembly_success or not os.path.exists(final_video_path):
         print("❌ Pipeline aborted: Video assembly crashed. Aborting upload.")
         return
@@ -74,6 +77,10 @@ def run_autonomous_pipeline(topic):
     if os.path.exists(final_video_path):
         youtube = authenticate_youtube()
         
+        # --- THE MACHINE LEARNING SYNC ---
+        # Sync the analytics for all previously uploaded shorts before uploading the new one
+        fetch_and_update_analytics(youtube)
+        
         import datetime
         tomorrow = datetime.datetime.utcnow() + datetime.timedelta(days=1)
         # Format as ISO 8601 string expected by YouTube API (e.g., 2026-03-20T15:00:00Z)
@@ -81,6 +88,18 @@ def run_autonomous_pipeline(topic):
         
         playlist_name = script_data.get('playlist_category', "Digital Case Studies")
         video_id = upload_video(youtube, final_video_path, script_data['title'], full_description, seo_tags, final_thumbnail_path, publish_at=publish_at_str, playlist_name=playlist_name)
+        
+        # --- NEW: LOG THE EXPERIMENT FOR FUTURE MACHINE LEARNING ---
+        log_experiment(
+            video_id=video_id,
+            title=script_data['title'],
+            topic=topic,
+            playlist_category=playlist_name,
+            music_vibe=music_vibe,
+            video_pacing=video_pacing,
+            script_tone=script_data.get('tone_used', 'unknown'),
+            hook_text=script_data['hook']
+        )
         
         print("\n🎉 PIPELINE COMPLETE! 🎉")
         print(f"Your video is completely done and SCHEDULED to automatically go public in exactly 24 hours!")
