@@ -302,16 +302,17 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
             
         micro_chunks = []
         current_dur = 0
-        last_img = None
+        img_index = 0
         
-        # Duplicate and shuffle them to infinitely fill the 60-second audio track
+        # Sequentially cycle through the images in the exact chronological order Gemini wrote them
+        # so the visual strictly accommodates the script's chronological story.
         while current_dur < total_audio_duration + target_cut_length: # Safety padding
-            options = [img for img in base_images if img != last_img]
-            if not options:
-                options = base_images # Fallback in case there's only 1 image somehow
-            chunk = random.choice(options)
-            micro_chunks.append(chunk) # MoviePy allows appending the same ImageClip obj multiple times
-            last_img = chunk
+            if not base_images:
+                break
+                
+            chunk = base_images[img_index % len(base_images)]
+            micro_chunks.append(chunk) 
+            img_index += 1
             current_dur += target_cut_length
         
         # The Digital Camera Pan Rig
