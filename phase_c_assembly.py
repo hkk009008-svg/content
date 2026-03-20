@@ -180,11 +180,18 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense"):
             word_index += 1
             
             # Create a styled graphic for each word
+            
+            # --- MAX RETENTION PATTERN INTERRUPT ---
+            # Shock the viewer's retina on the first 3 words to prevent swiping away
+            is_hook_word = word_index <= 3
+            current_color = "#FF0033" if is_hook_word else color_choice
+            current_size = int(style["size"] * 1.5) if is_hook_word else style["size"]
+            
             try:
                 txt_clip = TextClip(
                     word_text, 
-                    fontsize=style["size"],
-                    color=color_choice, 
+                    fontsize=current_size,
+                    color=current_color, 
                     font=style["font"], 
                     stroke_color='black',
                     stroke_width=style["stroke"],
@@ -338,14 +345,22 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
             import urllib.request
             urllib.request.urlretrieve(music_url, bg_music_path)
             
-        bg_clip = AudioFileClip(bg_music_path).volumex(0.12) # 12% volume mix
+        # --- Premium Podcast-Level Sound Experience Mixing ---
+        # 1. Boost the main voiceover by 50% so it punches heavily through mobile phone speakers
+        audio_clip = audio_clip.volumex(1.5)
+
+        # 2. Heavily duck the background music to 7% (down from 12%) so it's purely psychological ambient noise, never competing with the voice
+        bg_clip = AudioFileClip(bg_music_path).volumex(0.07) 
         
         # Loop music if it's shorter than the voiceover
-        from moviepy.audio.fx.all import audio_loop
+        from moviepy.audio.fx.all import audio_loop, audio_fadein, audio_fadeout
         if bg_clip.duration < audio_clip.duration:
             bg_clip = audio_loop(bg_clip, duration=audio_clip.duration)
         else:
             bg_clip = bg_clip.subclip(0, audio_clip.duration)
+            
+        # 3. Apply smooth fade-in (0.5s) and fade-out (2.0s) to the music so the video feels like a professional theater cut rather than harshly clipping on loop
+        bg_clip = bg_clip.fx(audio_fadein, 0.5).fx(audio_fadeout, 2.0)
             
         from moviepy.audio.AudioClip import CompositeAudioClip
         final_audio = CompositeAudioClip([bg_clip, audio_clip])

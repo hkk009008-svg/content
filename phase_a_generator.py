@@ -33,6 +33,9 @@ def generate_shorts_script(topic: str) -> dict:
     Write a highly engaging 60-second case study about: "{topic}".
     Use {tone}. Make sure the angle, hook, and body are completely unique and different from standard explanations!
     
+    [CRITICAL HOOK RULE - MAXIMIZE RETENTION]: 
+    Your first 3 seconds MUST be a hyper-aggressive pattern interrupt. Start immediately with a shocking contradiction, a massive monetary figure, or a deeply controversial statement to instantly hack viewer retention. Do NOT use standard greetings.
+    
     Rules:
     1. Hook: Start with a contrarian, mind-blowing, or secretive business fact (under 3 seconds).
     2. Body: Explain the business model, the massive failure, or the genius strategy in 3 punchy bullet points. Use exact numbers or dollar amounts if possible.
