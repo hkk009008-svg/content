@@ -6,11 +6,22 @@ import time
 from phase_0_topic import generate_trending_topic
 from phase_a_generator import generate_shorts_script
 from phase_b_audio import generate_voiceover
-from phase_c_assembly import download_pexels_video, assemble_final_video
+from phase_c_assembly import assemble_final_video
 from phase_d_upload import authenticate_youtube, upload_video
 from phase_e_learning import log_experiment, fetch_and_update_analytics
 
 def run_autonomous_pipeline(topic):
+    # Auto-generate the logo if it doesn't exist yet
+    if not os.path.exists("logo.png"):
+        print("🎨 [BRANDING] Generating Permanent Channel Logo...")
+        import requests, urllib.parse
+        p = urllib.parse.quote("a highly minimal futuristic glowing neon blue geometric tech corporate logo on a pure pitch black background, vector flat icon, high resolution")
+        try:
+            with open("logo.png", "wb") as f:
+                f.write(requests.get(f"https://image.pollinations.ai/prompt/{p}?width=400&height=400&nologo=True").content)
+        except Exception as e:
+            print(f"Failed to generate logo: {e}")
+            
     print(f"🚀 STARTING PIPELINE FOR TOPIC: {topic}\n")
     
     # --- PHASE A: SCRIPTING ---
@@ -46,17 +57,15 @@ def run_autonomous_pipeline(topic):
     print("\n--- [PHASE C] VIDEO ASSEMBLY ---")
     downloaded_vids = []
     
-    # Download 1 video for each keyword
-    for index, keyword in enumerate(script_data['pexels_search_keywords']):
-        # Remember our trick: clean the keyword of specific brands if needed
-        clean_keyword = keyword.replace("mcdonalds", "fast food building")
-        
-        vid_path = download_pexels_video(clean_keyword, f"temp_vid_{index}.mp4")
-        if vid_path:
-            downloaded_vids.append(vid_path)
+    # Download 1 AI Image for each detailed Midjourney prompt
+    from phase_c_assembly import generate_ai_broll
+    for index, prompt in enumerate(script_data['ai_image_prompts']):
+        img_path = generate_ai_broll(prompt, f"temp_img_{index}.jpg")
+        if img_path:
+            downloaded_vids.append(img_path)
             
     if not downloaded_vids:
-        print("❌ Pipeline aborted: Could not download any background footage.")
+        print("❌ Pipeline aborted: Could not generate any AI B-Roll images.")
         return
         
     final_video_path = "FINAL_READY_TO_UPLOAD.mp4"
@@ -134,3 +143,8 @@ if __name__ == "__main__":
         print(f"🔥 Auto-Selected Topic: {topic}\n")
         
     run_autonomous_pipeline(topic)
+    
+    # Check if the AI needs new YouTube engagement data to mathematical re-calibrate
+    # its Retention Variables (Jump Cuts & Flashes)
+    from phase_e_learning import check_calibration_milestone
+    check_calibration_milestone()

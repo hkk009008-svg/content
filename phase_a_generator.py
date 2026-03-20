@@ -45,7 +45,7 @@ def generate_shorts_script(topic: str) -> dict:
     3. The Payoff: Close the open loop at the very end with a satisfying, shocking conclusion.
     3. Call to Action: End by telling them to subscribe for more business breakdowns.
     4. Length & Pacing: You must dictate the tempo of the voiceover. For a 'fast' video, output ~140 words. For 'moderate', output ~125 words. For 'relaxed', output under 110 words.   
-    5. Pexels Keywords: Generate EXACTLY 10 to 12 highly relevant search keywords for B-roll footage.
+    5. Midjourney AI Prompts: Generate EXACTLY 12 hyper-detailed, incredibly descriptive AI image generation prompts for B-roll footage (e.g., 'Cinematic 4k hyperrealistic photo of a frustrated Wall Street trader slamming his desk, dramatic neon lighting'). Do NOT output single words! They must be full descriptive sentences to feed into Stable Diffusion!
     """
     
     # We define the expected JSON schema to guarantee the output structure
@@ -60,10 +60,10 @@ def generate_shorts_script(topic: str) -> dict:
                 "description": "3 punchy bullet points"
             },
             "call_to_action": {"type": "STRING", "description": "The ending sentence"},
-            "pexels_search_keywords": {
+            "ai_image_prompts": {
                 "type": "ARRAY", 
                 "items": {"type": "STRING"},
-                "description": "EXACTLY 10 to 12 keywords for finding b-roll footage. CRITICAL: NEVER use specific names (ASML, Apple) or complex jargon (EUV). Translate specific nouns into generic visual stock concepts (e.g. 'microchip', 'machine', 'factory', 'money falling')."
+                "description": "EXACTLY 12 highly detailed Midjourney AI image prompts perfectly tied to the text."
             },
             "youtube_description": {
                 "type": "STRING",
@@ -89,7 +89,7 @@ def generate_shorts_script(topic: str) -> dict:
                 "description": "A high-level YouTube playlist name this video belongs to (e.g. 'Business Secrets', 'Tech History', 'Marketing Psychology'). Max 3 words."
             }
         },
-        "required": ["title", "hook", "body_paragraphs", "call_to_action", "pexels_search_keywords", "youtube_description", "youtube_tags", "music_vibe", "video_pacing", "playlist_category"]
+        "required": ["title", "hook", "body_paragraphs", "call_to_action", "ai_image_prompts", "youtube_description", "youtube_tags", "music_vibe", "video_pacing", "playlist_category"]
     }
     
     # Call the Gemini 2.5 Flash model

@@ -19,44 +19,22 @@ import moviepy.video.fx.all as vfx
 load_dotenv()
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 
-def download_pexels_video(keyword, output_filename):
-    """Searches Pexels for a keyword and downloads the highest quality HD video."""
-    print(f"🔍 [PHASE C] Searching Pexels for: '{keyword}'...")
+def generate_ai_broll(prompt, output_filename):
+    """Hits the Pollinations AI Stable Diffusion endpoint to generate a hyper-realistic vertical image."""
+    print(f"🤖 [PHASE C] Generating AI B-Roll: '{prompt[:50]}...'")
+    import urllib.parse
     
-    if not PEXELS_API_KEY:
-        print("❌ Error: PEXELS_API_KEY not found in .env file.")
-        return None
-
-    headers = {"Authorization": PEXELS_API_KEY}
-    # Fetch top 15 landscape videos to choose randomly to avoid the exact same footage every time
-    url = f"https://api.pexels.com/videos/search?query={keyword}&per_page=15&orientation=landscape"
+    encoded_prompt = urllib.parse.quote(prompt)
+    # We enforce vertical 1080x1920 generation, disabling logos and explicitly setting high quality
+    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1080&height=1920&nologo=True"
     
     try:
-        response = requests.get(url, headers=headers).json()
-        
-        if "videos" in response and len(response["videos"]) > 0:
-            import random
-            random_video = random.choice(response["videos"])
-            video_files = random_video["video_files"]
-            
-            # Grab raw 4K UHD if available, fallback to 1080p HD
-            best_file = next((file for file in video_files if file["quality"] == "uhd"), None)
-            if not best_file:
-                best_file = next((file for file in video_files if file["quality"] == "hd"), video_files[0])
-            video_url = best_file["link"]
-            
-            print(f"⬇️ Downloading background footage for '{keyword}'...")
-            vid_data = requests.get(video_url).content
-            with open(output_filename, 'wb') as handler:
-                handler.write(vid_data)
-                
-            return output_filename
-        else:
-            print(f"⚠️ No video found on Pexels for keyword: '{keyword}'")
-            return None
-            
+        img_data = requests.get(url).content
+        with open(output_filename, 'wb') as handler:
+            handler.write(img_data)
+        return output_filename
     except Exception as e:
-        print(f"❌ Error downloading from Pexels: {e}")
+        print(f"❌ Error generating AI B-Roll: {e}")
         return None
 
 def crop_to_vertical(clip):
@@ -272,25 +250,36 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         # Load the targeted profile
         profile = optic_profiles.get(music_vibe, optic_profiles["suspense"])
 
-        # --- NEW: SYNERGISTIC HYPER-FAST ADDICTIVENESS CUTS ---
-        # Instead of playing one long clip, we mathematically link the jump-cut speed to the AI's pacing choice!
-        # This violently forces a visual scene change constantly, resetting the viewer's attention span.
+        # --- NEW: SYNERGISTIC HYPER-FAST ADDICTIVENESS CUTS FOR AI IMAGES ---
+        # We mathematically link the jump-cut speed to the AI's pacing choice!
         pacing_cut_map = {"fast": 1.5, "moderate": 2.2, "relaxed": 3.0}
         target_cut_length = pacing_cut_map.get(video_pacing, 2.0)
         
-        micro_chunks = []
+        from moviepy.editor import ImageClip
         import random
         
-        for vid_path in video_paths:
-            raw_clip = VideoFileClip(vid_path)
-            # Chop it into 2-second pieces
-            for start_pos in range(0, int(raw_clip.duration), int(target_cut_length)):
-                end_pos = min(start_pos + target_cut_length, raw_clip.duration)
-                if end_pos - start_pos >= 1.0: # Only keep usable chunks
-                    micro_chunks.append(raw_clip.subclip(start_pos, end_pos))
-                    
-        # Shuffle them so it feels completely chaotic and unpredictable
-        random.shuffle(micro_chunks)
+        # Load the dozen AI images and turn them into static video clips
+        base_images = []
+        for img_path in video_paths:
+            try:
+                img_clip = ImageClip(img_path).set_duration(target_cut_length)
+                base_images.append(img_clip)
+            except Exception as e:
+                print(f"⚠️ Skipping corrupted loaded AI image: {e}")
+            
+        micro_chunks = []
+        current_dur = 0
+        last_img = None
+        
+        # Duplicate and shuffle them to infinitely fill the 60-second audio track
+        while current_dur < total_audio_duration + target_cut_length: # Safety padding
+            options = [img for img in base_images if img != last_img]
+            if not options:
+                options = base_images # Fallback in case there's only 1 image somehow
+            chunk = random.choice(options)
+            micro_chunks.append(chunk) # MoviePy allows appending the same ImageClip obj multiple times
+            last_img = chunk
+            current_dur += target_cut_length
         
         # The Digital Camera Pan Rig
         def add_cinematic_drift(c, p_scale, p_dir):
@@ -302,7 +291,12 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
             d = c.duration
             def drift_crop(get_frame, t):
                 frame = get_frame(t)
-                progress = t / d 
+                
+                # --- NEW: CUBIC EASING PHYSICS ---
+                # A cubic polynomial progression instead of linear to simulate heavy, realistic gimbal motion
+                p = min(t / d, 1.0)
+                progress = (p**2) * (3.0 - 2.0 * p) 
+                
                 if p_dir == "diagonal_down_right":
                     x1, y1 = int(max_x * progress), int(max_y * progress)
                 elif p_dir == "diagonal_up_left":
@@ -405,12 +399,46 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         # 3. Apply smooth fade-in (0.5s) and fade-out (2.0s) to the music so the video feels like a professional theater cut rather than harshly clipping on loop
         bg_clip = bg_clip.fx(audio_fadein, 0.5).fx(audio_fadeout, 2.0)
             
+        # --- NEW: SYNTHESIZE CINEMATIC BASS DROP ---
+        sfx_path = "bass_drop.wav"
+        if not os.path.exists(sfx_path):
+            print("🔊 [PHASE C] Synthesizing 80Hz Cinematic Bass Drop...")
+            import wave, struct, math
+            sample_rate = 44100
+            duration = 1.5
+            wavef = wave.open(sfx_path, 'w')
+            wavef.setnchannels(1) # mono
+            wavef.setsampwidth(2) # 16-bit
+            wavef.setframerate(sample_rate)
+            
+            for i in range(int(duration * sample_rate)):
+                t = float(i) / sample_rate
+                # 80Hz sine wave sweeping down heavily with exponential decay
+                freq = 80.0 - (50.0 * t / duration)
+                val = 32767.0 * math.sin(2.0 * math.pi * freq * t) * math.exp(-t * 4.0)
+                data = struct.pack('<h', int(val))
+                wavef.writeframesraw(data)
+            wavef.close()
+            
+        # The Red Hook Flashes exactly at t=0.0 where the voiceover starts
+        sfx_clip = AudioFileClip(sfx_path).volumex(1.8)
+            
         from moviepy.audio.AudioClip import CompositeAudioClip
-        final_audio = CompositeAudioClip([bg_clip, audio_clip])
+        final_audio = CompositeAudioClip([bg_clip, audio_clip, sfx_clip])
         
         # Attach the mixed voiceover + music and lock the duration to prevent infinite rendering loops
         final_video = final_video.set_audio(final_audio).set_duration(total_audio_duration)
         
+        # 🟢 NEW: BURN IN THE CHANNEL LOGO WATERMARK 🟢
+        if os.path.exists("logo.png"):
+            print("🎨 Adding Channel Watermark Logo...")
+            from moviepy.editor import ImageClip
+            import moviepy.video.fx.all as vfx
+            # Load the AI logo, strip the black background completely using color masking thresholds,
+            # scale it down, and permanently pin it inside the right side of the Top Banner
+            logo_clip = ImageClip("logo.png").resize(width=160).fx(vfx.mask_color, color=[0, 0, 0], thr=35, s=15).set_position((2160 - 200, 80)).set_duration(total_audio_duration).set_opacity(0.85)
+            final_video = CompositeVideoClip([final_video, logo_clip])
+            
         # --- NEW: Thumbnail Extraction ---
         thumbnail_path = "thumbnail.jpg"
         print("📸 Extracting high-impact thumbnail frame...")

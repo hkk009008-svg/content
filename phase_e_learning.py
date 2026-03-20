@@ -110,6 +110,25 @@ def fetch_and_update_analytics(youtube_auth):
         
     conn.close()
 
+def check_calibration_milestone():
+    """Checks the database to see if we hit a multiple of 10 uploads and prints a terminal alert."""
+    init_db()
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM shorts_experiments')
+    count = cursor.fetchone()[0]
+    conn.close()
+    
+    if count > 0 and count % 10 == 0:
+        print("\n" + "🔥"*25)
+        print(f"🚨 CALIBRATION PROTOCOL TRIGGERED: {count} VIDEOS LOGGED 🚨")
+        print("🔥"*25)
+        print("AGENT MESSAGE: Please pause the engine and paste your current YouTube")
+        print("Studio Engagements Dashboard to your AI Architect immediately!")
+        print("We need to mathematically recalibrate the jump-cuts, Neon vibes,")
+        print("and visual psychology based on your new retention data.")
+        print("="*60 + "\n")
+
 def get_top_performing_context():
     """Returns a dynamic string for Gemini's prompt based on the highest Viral Score in DB."""
     init_db()
