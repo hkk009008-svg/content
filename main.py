@@ -17,10 +17,26 @@ def run_autonomous_pipeline(topic):
         import requests, urllib.parse
         p = urllib.parse.quote("a highly minimal futuristic glowing neon blue geometric tech corporate logo on a pure pitch black background, vector flat icon, high resolution")
         try:
-            img_data = requests.get(f"https://image.pollinations.ai/prompt/{p}?width=400&height=400&nologo=True&model=flux").content
+            from dotenv import load_dotenv
+            load_dotenv()
+            
+            fal_key = os.getenv("FAL_KEY")
+            img_data = b""
+            if fal_key:
+                url = "https://fal.run/fal-ai/flux/schnell"
+                headers = {"Authorization": f"Key {fal_key}", "Content-Type": "application/json"}
+                payload = {"prompt": "a highly minimal futuristic glowing neon blue geometric tech corporate logo on a pure pitch black background, vector flat icon, high resolution", "image_size": "square_hd", "num_inference_steps": 4}
+                resp = requests.post(url, json=payload, headers=headers)
+                if resp.status_code == 200:
+                    img_data = requests.get(resp.json()["images"][0]["url"]).content
+            
+            if len(img_data) < 5000:
+                img_data = requests.get(f"https://image.pollinations.ai/prompt/{p}?width=400&height=400&nologo=True&model=flux").content
+                
             if len(img_data) < 5000:
                 print("⚠️ Pollinations blocked logo generation. Using uncompressed proxy placeholder.")
                 img_data = requests.get("https://picsum.photos/400/400").content
+                
             with open("logo.png", "wb") as f:
                 f.write(img_data)
         except Exception as e:

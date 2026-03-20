@@ -20,28 +20,48 @@ load_dotenv()
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 
 def generate_ai_broll(prompt, output_filename):
-    """Hits the Pollinations AI Stable Diffusion endpoint to generate a hyper-realistic vertical image."""
+    """Hits the industrial Fal.ai Flux endpoint for instant, ban-free 4K vertical image generation."""
     print(f"🤖 [PHASE C] Generating AI B-Roll: '{prompt[:50]}...'")
+    import os
+    import requests
     import urllib.parse
-    import time
     
-    encoded_prompt = urllib.parse.quote(prompt)
-    # We enforce vertical 768x1365 generation (standard SD) and force model=flux to prevent Internal Server Errors
-    url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=1365&nologo=True&model=flux"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    fal_key = os.getenv("FAL_KEY")
     
     try:
-        img_data = requests.get(url, headers=headers).content
+        img_data = b""
+        if fal_key:
+            # Generate instantly using the premium Fal.ai Flux Schnell engine
+            url = "https://fal.run/fal-ai/flux/schnell"
+            headers = {
+                "Authorization": f"Key {fal_key}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "prompt": prompt,
+                "image_size": "portrait_16_9",
+                "num_inference_steps": 4,
+                "num_images": 1
+            }
+            resp = requests.post(url, json=payload, headers=headers)
+            
+            if resp.status_code == 200:
+                img_url = resp.json()["images"][0]["url"]
+                img_data = requests.get(img_url).content
+            else:
+                print(f"⚠️ Fal.ai failed with {resp.status_code}. Falling back to free tier...")
+        
+        # If no key is set or Fal.ai fails/runs out of credits, fallback to the free Pollinations proxy
         if len(img_data) < 5000:
-            print(f"⚠️ Flux model failed. Attempting fallback... {img_data[:50]}")
-            time.sleep(2)
-            # Fallback to any available model, fixing the string slice IDE lint
-            safe_prompt = urllib.parse.quote("cinematic shot of " + prompt[:30])
-            url_fallback = f"https://image.pollinations.ai/prompt/{safe_prompt}?width=768&height=1365&nologo=True"
-            img_data = requests.get(url_fallback, headers=headers).content
-            if len(img_data) < 5000:
-                print(f"⚠️ Pollinations 429 Limit Block. Using Unsplash Fallback to secure the render queue.")
-                img_data = requests.get("https://picsum.photos/768/1365").content
+            encoded_prompt = urllib.parse.quote(prompt)
+            url_fallback = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=1365&nologo=True&model=flux"
+            req_headers = {'User-Agent': 'Mozilla/5.0'}
+            img_data = requests.get(url_fallback, headers=req_headers).content
+        
+        # Last Resort Failsafe
+        if len(img_data) < 5000:
+            print(f"⚠️ Pollinations 429 Limit Block. Using Unsplash Fallback to secure the render queue.")
+            img_data = requests.get("https://picsum.photos/768/1365").content
                 
         with open(output_filename, 'wb') as handler:
             handler.write(img_data)
@@ -230,31 +250,31 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         optic_profiles = {
             "suspense": {
                 "speed": 0.75, # Buttery slow-mo creeping dread
-                "scale": 1.05, 
+                "scale": 1.02, # Greatly widened field of view
                 "pan": "diagonal_down_right",
                 "color_grade": lambda c: c.fx(vfx.blackwhite).fx(vfx.colorx, 0.6) # Pitch black high contrast
             },
             "lofi": {
                 "speed": 0.55, # Dreamy hyperslow flow
-                "scale": 1.07, 
+                "scale": 1.03, 
                 "pan": "horizontal_right",
                 "color_grade": lambda c: c.fx(vfx.colorx, 0.55) # Dimmed but keeps raw colors intact
             },
             "corporate": {
                 "speed": 0.9, # Stable reality
-                "scale": 1.04, 
+                "scale": 1.015, 
                 "pan": "diagonal_up_left",
                 "color_grade": lambda c: c.fx(vfx.colorx, 0.85) # Clean documentary dimming
             },
             "upbeat": {
                 "speed": 1.05, # Fast paced hyper-energy
-                "scale": 1.04, 
+                "scale": 1.02, 
                 "pan": "horizontal_left",
                 "color_grade": lambda c: c.fx(vfx.colorx, 0.95) # Bright and explosive
             },
             "aggressive": {
                 "speed": 1.15, # Violent fast forward
-                "scale": 1.15, # Massive pan distance mapping for frantic camera sweep
+                "scale": 1.04, # Slightly more zoom for chaos, but still heavily pulled back compared to 1.15
                 "pan": "diagonal_down_left",
                 "color_grade": lambda c: c.fx(vfx.blackwhite).fx(vfx.colorx, 0.5) # Grim and striking
             }
@@ -265,8 +285,8 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
 
         # --- NEW: SYNERGISTIC HYPER-FAST ADDICTIVENESS CUTS FOR AI IMAGES ---
         # We mathematically link the jump-cut speed to the AI's pacing choice!
-        pacing_cut_map = {"fast": 1.5, "moderate": 2.2, "relaxed": 3.0}
-        target_cut_length = pacing_cut_map.get(video_pacing, 2.0)
+        pacing_cut_map = {"fast": 2.8, "moderate": 3.6, "relaxed": 4.8}
+        target_cut_length = pacing_cut_map.get(video_pacing, 3.6)
         
         from moviepy.editor import ImageClip
         import random
@@ -341,7 +361,7 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
             clip = profile["color_grade"](clip)
             
             # Apply dynamic time warp physics based on AI video pacing multiplier
-            pacing_mult = {"fast": 1.15, "moderate": 1.0, "relaxed": 0.85}.get(video_pacing, 1.0)
+            pacing_mult = {"fast": 1.03, "moderate": 0.95, "relaxed": 0.85}.get(video_pacing, 1.0)
             clip = clip.fx(vfx.speedx, profile["speed"] * pacing_mult)
             
             # If this cut exceeds what we need to finish the video, crop the end of it
@@ -352,7 +372,13 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
             # Enforce strict 4K vertical cinema resolution (2160x3840) to prevent render crashes
             clip = crop_to_vertical(clip)
             
-            clip = add_cinematic_drift(clip, profile["scale"], profile["pan"])
+            # --- NEW: TRUE CINEMATIC CAMERA DIVERSITY ---
+            # Structure the gimbal so that no two consecutive shots physically share the exact same axis movement
+            available_pans = ["diagonal_down_right", "diagonal_up_left", "horizontal_right", "horizontal_left", "diagonal_down_left"]
+            selected_pan = random.choice([p for p in available_pans if p != profile.get("last_pan")])
+            profile["last_pan"] = selected_pan
+            
+            clip = add_cinematic_drift(clip, profile["scale"], selected_pan)
             processed_clips.append(clip)
             current_dur += clip.duration
         

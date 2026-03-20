@@ -45,7 +45,7 @@ def generate_shorts_script(topic: str) -> dict:
     3. The Payoff: Close the open loop at the very end with a satisfying, shocking conclusion.
     3. Call to Action: End by telling them to subscribe for more business breakdowns.
     4. Length & Pacing: You must dictate the tempo of the voiceover. For a 'fast' video, output ~140 words. For 'moderate', output ~125 words. For 'relaxed', output under 110 words.   
-    5. Midjourney AI Prompts: Generate EXACTLY 12 hyper-detailed, incredibly descriptive AI image generation prompts for B-roll footage (e.g., 'Cinematic 4k hyperrealistic photo of a frustrated Wall Street trader slamming his desk, dramatic neon lighting'). Do NOT output single words! They must be full descriptive sentences to feed into Stable Diffusion!
+    5. Cinematic Visual Diversity: Generate EXACTLY 12 hyper-detailed Midjourney AI image prompts for the background footage. You MUST provide a highly diverse mix of 'Ultra-Wide Cinematic Establishing Shots' (showing the full scale of the environment and context) interspersed with medium character shots. Do NOT exclusively use micro or macro close-ups! The audience needs to see the whole scene to understand what is going on.
     """
     
     # We define the expected JSON schema to guarantee the output structure
