@@ -36,9 +36,13 @@ def generate_shorts_script(topic: str) -> dict:
     [CRITICAL HOOK RULE - MAXIMIZE RETENTION]: 
     Your first 3 seconds MUST be a hyper-aggressive pattern interrupt. Start immediately with a shocking contradiction, a massive monetary figure, or a deeply controversial statement to instantly hack viewer retention. Do NOT use standard greetings.
     
+    [THE OPEN LOOP TRAP - ADDICTIVENESS BOOST]:
+    You MUST tease a massive, mind-blowing secret at the very beginning of the script, but deliberately REFUSE to reveal the answer until the final 5 seconds. This forces the viewer to stay until the end.
+    
     Rules:
-    1. Hook: Start with a contrarian, mind-blowing, or secretive business fact (under 3 seconds).
+    1. Hook: Start with a contrarian, mind-blowing, or secretive business fact (under 3 seconds) that opens a massive psychological loop.
     2. Body: Explain the business model, the massive failure, or the genius strategy in 3 punchy bullet points. Use exact numbers or dollar amounts if possible.
+    3. The Payoff: Close the open loop at the very end with a satisfying, shocking conclusion.
     3. Call to Action: End by telling them to subscribe for more business breakdowns.
     4. Length & Pacing: You must dictate the tempo of the voiceover. For a 'fast' video, output ~140 words. For 'moderate', output ~125 words. For 'relaxed', output under 110 words.   
     5. Pexels Keywords: Generate EXACTLY 10 to 12 highly relevant search keywords for B-roll footage.

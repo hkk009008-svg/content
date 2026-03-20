@@ -185,7 +185,17 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense"):
             # Shock the viewer's retina on the first 3 words to prevent swiping away
             is_hook_word = word_index <= 3
             current_color = "#FF0033" if is_hook_word else color_choice
-            current_size = int(style["size"] * 1.5) if is_hook_word else style["size"]
+            
+            # --- DYNAMIC FONT SCALING (PREVENT UGLY BREAKS) ---
+            # If a single word or number is excessively long (like "$1,000,000,000" or "entrepreneurship"),
+            # it physically exceeds the horizontal screen space. MoviePy tries to awkwardly split it 
+            # onto 2 lines. We fix this by crushing the font size inversely to its character length!
+            base_size = int(style["size"] * 1.5) if is_hook_word else style["size"]
+            
+            if len(word_text) > 8:
+                current_size = int(base_size * (8.0 / len(word_text)))
+            else:
+                current_size = base_size
             
             try:
                 txt_clip = TextClip(
@@ -195,8 +205,7 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense"):
                     font=style["font"], 
                     stroke_color='black',
                     stroke_width=style["stroke"],
-                    method='caption',
-                    size=(1800, None) # 4K boundary wrapper
+                    method='label' # Strictly forces the text to stay horizontally on ONE single line
                 ).set_opacity(style["opacity"])
                 
                 # Set exact timing and center it on screen
@@ -263,63 +272,95 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         # Load the targeted profile
         profile = optic_profiles.get(music_vibe, optic_profiles["suspense"])
 
-        processed_clips = []
+        # --- NEW: HYPER-FAST ADDICTIVENESS CUTS (2.0s average) ---
+        # Instead of playing one long clip, we slice all Pexels videos into raw 2-second micro-chunks
+        # This violently forces a visual scene change constantly, resetting the viewer's attention span.
+        target_cut_length = 2.0
+        micro_chunks = []
+        import random
+        
         for vid_path in video_paths:
-            clip = VideoFileClip(vid_path)
+            raw_clip = VideoFileClip(vid_path)
+            # Chop it into 2-second pieces
+            for start_pos in range(0, int(raw_clip.duration), int(target_cut_length)):
+                end_pos = min(start_pos + target_cut_length, raw_clip.duration)
+                if end_pos - start_pos >= 1.0: # Only keep usable chunks
+                    micro_chunks.append(raw_clip.subclip(start_pos, end_pos))
+                    
+        # Shuffle them so it feels completely chaotic and unpredictable
+        random.shuffle(micro_chunks)
+        
+        # The Digital Camera Pan Rig
+        def add_cinematic_drift(c, p_scale, p_dir):
+            w_target, h_target = 2160, 3840
+            c_oversized = c.resize(p_scale)
+            w_over, h_over = c_oversized.size
+            max_x = int(w_over - w_target)
+            max_y = int(h_over - h_target)
+            d = c.duration
+            def drift_crop(get_frame, t):
+                frame = get_frame(t)
+                progress = t / d 
+                if p_dir == "diagonal_down_right":
+                    x1, y1 = int(max_x * progress), int(max_y * progress)
+                elif p_dir == "diagonal_up_left":
+                    x1, y1 = int(max_x * (1.0 - progress)), int(max_y * (1.0 - progress))
+                elif p_dir == "horizontal_right":
+                    x1, y1 = int(max_x * progress), int(max_y / 2)
+                elif p_dir == "horizontal_left":
+                    x1, y1 = int(max_x * (1.0 - progress)), int(max_y / 2)
+                elif p_dir == "diagonal_down_left":
+                    x1, y1 = int(max_x * (1.0 - progress)), int(max_y * progress)
+                else:
+                    x1, y1 = int(max_x * progress), int(max_y * progress)
+                return frame[y1:y1+h_target, x1:x1+w_target]
+            return c_oversized.fl(drift_crop)
             
+        processed_clips = []
+        current_dur = 0
+        for chunk in micro_chunks:
+            if current_dur >= total_audio_duration:
+                break
+                
             # Apply dynamic emotional color grade
-            clip = profile["color_grade"](clip)
+            clip = profile["color_grade"](chunk)
             
-            # Apply dynamic time warp physics
-            # Adjust the base profile speed by the requested AI video pacing multiplier
+            # Apply dynamic time warp physics based on AI video pacing multiplier
             pacing_mult = {"fast": 1.15, "moderate": 1.0, "relaxed": 0.85}.get(video_pacing, 1.0)
             clip = clip.fx(vfx.speedx, profile["speed"] * pacing_mult)
             
-            # Trim if too long, loop if too short
-            if clip.duration > time_per_clip:
-                clip = clip.subclip(0, time_per_clip)
-            else:
-                clip = clip.fx(vfx.loop, duration=time_per_clip)
+            # If this cut exceeds what we need to finish the video, crop the end of it
+            time_needed = total_audio_duration - current_dur
+            if clip.duration > time_needed:
+                clip = clip.subclip(0, time_needed)
                 
             # Enforce strict 4K vertical cinema resolution (2160x3840) to prevent render crashes
             clip = crop_to_vertical(clip)
             
-            # The Digital Camera Pan Rig
-            def add_cinematic_drift(c, p_scale, p_dir):
-                w_target, h_target = 2160, 3840
-                c_oversized = c.resize(p_scale)
-                w_over, h_over = c_oversized.size
-                
-                max_x = int(w_over - w_target)
-                max_y = int(h_over - h_target)
-                d = c.duration
-                
-                def drift_crop(get_frame, t):
-                    frame = get_frame(t)
-                    progress = t / d 
-                    
-                    if p_dir == "diagonal_down_right":
-                        x1, y1 = int(max_x * progress), int(max_y * progress)
-                    elif p_dir == "diagonal_up_left":
-                        x1, y1 = int(max_x * (1.0 - progress)), int(max_y * (1.0 - progress))
-                    elif p_dir == "horizontal_right":
-                        x1, y1 = int(max_x * progress), int(max_y / 2)
-                    elif p_dir == "horizontal_left":
-                        x1, y1 = int(max_x * (1.0 - progress)), int(max_y / 2)
-                    elif p_dir == "diagonal_down_left":
-                        x1, y1 = int(max_x * (1.0 - progress)), int(max_y * progress)
-                    else:
-                        x1, y1 = int(max_x * progress), int(max_y * progress)
-                        
-                    return frame[y1:y1+h_target, x1:x1+w_target]
-                    
-                return c_oversized.fl(drift_crop)
-                
             clip = add_cinematic_drift(clip, profile["scale"], profile["pan"])
             processed_clips.append(clip)
+            current_dur += clip.duration
         
         # Stitch them all together
         final_video = concatenate_videoclips(processed_clips, method="compose")
+        
+        # --- NEW: PSYCHOLOGICAL COMPLETION ANXIETY PROGRESS BAR ---
+        # A Neon Red bar that slowly fills the bottom of the screen to force completions
+        def make_progress_bar_frame(t):
+            import numpy as np
+            progress = min(max(t / total_audio_duration, 0.0), 1.0)
+            frame = np.zeros((15, 2160, 3), dtype=np.uint8) # 15 pixels tall, 4K wide
+            pixel_width = int(2160 * progress)
+            if pixel_width > 0:
+                frame[:, :pixel_width] = [255, 0, 51] # Aggressive Neon Red
+            return frame
+            
+        from moviepy.video.VideoClip import VideoClip
+        progress_bar = VideoClip(make_progress_bar_frame, duration=total_audio_duration)
+        progress_bar = progress_bar.set_position(('center', 'bottom'))
+        
+        # Add the progress bar to the video
+        final_video = CompositeVideoClip([final_video, progress_bar])
         
         # 🟢 NEW: BURN IN THE AUTHORITY BANNER 🟢
         final_video = add_top_banner(final_video, topic_text)
