@@ -121,18 +121,20 @@ def add_top_banner(video_clip, topic_text):
     
     return CompositeVideoClip([video_clip, banner_bg, accent_line, badge_txt, main_txt])
 
-def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense"):
+def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense", pre_transcribed_result=None):
     """
     Uses local Whisper AI to transcribe audio and burn word-by-word 
     captions onto the MoviePy video clip with dynamically mapped styles.
     """
-    print("🧠 [PHASE C] Loading Whisper AI model (this takes a few seconds)...")
-    # 'base' is fast and highly accurate for English.
-    model = whisper.load_model("base") 
-    
-    print("📝 [PHASE C] Transcribing audio and extracting word timestamps...")
-    # word_timestamps=True is the secret to Hormozi-style pop-up captions
-    result = model.transcribe(audio_path, word_timestamps=True)
+    if not pre_transcribed_result:
+        print("🧠 [PHASE C] Loading Whisper AI model (this takes a few seconds)...")
+        # 'base' is fast and highly accurate for English.
+        model = whisper.load_model("base") 
+        print("📝 [PHASE C] Transcribing audio and extracting word timestamps...")
+        # word_timestamps=True is the secret to Hormozi-style pop-up captions
+        result = model.transcribe(audio_path, word_timestamps=True)
+    else:
+        result = pre_transcribed_result
     
     text_clips = []
     word_index = 0
@@ -241,8 +243,18 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         audio_clip = AudioFileClip(audio_path)
         total_audio_duration = audio_clip.duration
         
-        # Calculate exactly how long each video clip should play
-        time_per_clip = total_audio_duration / len(video_paths)
+        # --- 🟢 NEW: SYNCHRONIZING CINEMATIC TEMPO 🟢 ---
+        # Analyze the voiceover to extract exact physical sentence lengths for dynamic jump cuts
+        print("🧠 [PHASE C] Analyzing Voiceover Tempo via Whisper AI...")
+        import whisper
+        tempo_model = whisper.load_model("base")
+        whisper_result = tempo_model.transcribe(audio_path, word_timestamps=True)
+        
+        segment_durations = []
+        for segment in whisper_result['segments']:
+            dur = segment['end'] - segment['start']
+            if dur > 1.0: # Skip tiny sub-second glitches
+                segment_durations.append(dur)
         
         # 🟢 THE AI VISUAL DIRECTOR 🟢
         # Map Gemini's emotional `music_vibe` directly to physical camera optics, 
@@ -304,16 +316,23 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         current_dur = 0
         img_index = 0
         
-        # Sequentially cycle through the images in the exact chronological order Gemini wrote them
-        # so the visual strictly accommodates the script's chronological story.
-        while current_dur < total_audio_duration + target_cut_length: # Safety padding
+        # Snap the physical jump-cuts to the exact length of the spoken sentences!
+        while current_dur < total_audio_duration:
             if not base_images:
                 break
                 
             chunk = base_images[img_index % len(base_images)]
+            
+            # Map the visual cut directly to the spoken sentence length, or fallback to the AI pacing multiplier
+            if img_index < len(segment_durations):
+                active_cut_length = segment_durations[img_index]
+            else:
+                active_cut_length = target_cut_length
+                
+            chunk = chunk.set_duration(active_cut_length)
             micro_chunks.append(chunk) 
             img_index += 1
-            current_dur += target_cut_length
+            current_dur += active_cut_length
         
         # The Digital Camera Pan Rig
         def add_cinematic_drift(c, p_scale, p_dir):
@@ -408,7 +427,7 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         final_video = add_top_banner(final_video, topic_text)
         
         # 🟢 NEW: BURN IN THE CAPTIONS HERE 🟢
-        final_video = add_dynamic_captions(audio_path, final_video, music_vibe)
+        final_video = add_dynamic_captions(audio_path, final_video, music_vibe, pre_transcribed_result=whisper_result)
         
         # --- Add Background Music ---
         bg_music_path = f"bg_{music_vibe}.mp3"
