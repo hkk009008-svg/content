@@ -79,10 +79,21 @@ def run_autonomous_pipeline(topic):
     
     # Download 1 AI Image for each detailed Midjourney prompt
     from phase_c_assembly import generate_ai_broll
-    for index, prompt in enumerate(script_data['ai_image_prompts']):
+    for index, image_data in enumerate(script_data['ai_image_prompts']):
+        # Legacy support in case AI hallucinated standard strings
+        if isinstance(image_data, str):
+            prompt = image_data
+            camera_motion = "zoom_in_slow"
+        else:
+            prompt = image_data.get('prompt', '')
+            camera_motion = image_data.get('camera', 'zoom_in_slow')
+            
         img_path = generate_ai_broll(prompt, f"temp_img_{index}.jpg")
         if img_path:
-            downloaded_vids.append(img_path)
+            downloaded_vids.append({
+                "path": img_path,
+                "camera": camera_motion
+            })
             
     if not downloaded_vids:
         print("❌ Pipeline aborted: Could not generate any AI B-Roll images.")
@@ -141,7 +152,10 @@ def run_autonomous_pipeline(topic):
         if os.path.exists(final_video_path):
             os.remove(final_video_path)
         for vid in downloaded_vids:
-            os.remove(vid)
+            try:
+                os.remove(vid['path'] if isinstance(vid, dict) else vid)
+            except Exception:
+                pass
     else:
         print("❌ Pipeline aborted: Final video file not found.")
 

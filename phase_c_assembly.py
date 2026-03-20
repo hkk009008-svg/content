@@ -310,9 +310,12 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         
         # Load the dozen AI images and turn them into static video clips
         base_images = []
-        for img_path in video_paths:
+        for vid_data in video_paths:
+            img_path = vid_data['path'] if isinstance(vid_data, dict) else vid_data
+            c_motion = vid_data['camera'] if isinstance(vid_data, dict) else "zoom_in_slow"
             try:
                 img_clip = ImageClip(img_path).set_duration(target_cut_length)
+                img_clip.neural_camera = c_motion
                 base_images.append(img_clip)
             except Exception as e:
                 print(f"⚠️ Skipping corrupted loaded AI image: {e}")
@@ -326,7 +329,7 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
             if not base_images:
                 break
                 
-            chunk = base_images[img_index % len(base_images)]
+            original_chunk = base_images[img_index % len(base_images)]
             
             # Map the visual cut directly to the spoken sentence length, or fallback to the AI pacing multiplier
             if img_index < len(segment_durations):
@@ -334,41 +337,70 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
             else:
                 active_cut_length = target_cut_length
                 
-            chunk = chunk.set_duration(active_cut_length)
+            chunk = original_chunk.set_duration(active_cut_length)
+            chunk.neural_camera = getattr(original_chunk, 'neural_camera', 'zoom_in_slow')
             micro_chunks.append(chunk) 
             img_index += 1
             current_dur += active_cut_length
         
-        # The Digital Camera Pan Rig
-        def add_cinematic_drift(c, p_scale, p_dir):
-            w_target, h_target = 2160, 3840
-            c_oversized = c.resize(p_scale)
-            w_over, h_over = c_oversized.size
-            max_x = int(w_over - w_target)
-            max_y = int(h_over - h_target)
+        # The Neural Camera Rig
+        def apply_neural_camera(c, camera_motion):
+            import cv2
             d = c.duration
-            def drift_crop(get_frame, t):
+            def camera_physics(get_frame, t):
                 frame = get_frame(t)
+                h, w = frame.shape[:2] # Native Fal AI resolution
                 
-                # --- NEW: CUBIC EASING PHYSICS ---
-                # A cubic polynomial progression instead of linear to simulate heavy, realistic gimbal motion
-                p = min(t / d, 1.0)
-                progress = (p**2) * (3.0 - 2.0 * p) 
+                # --- CUBIC EASING PHYSICS ---
+                p = min(t / max(d, 0.01), 1.0)
+                eased = (p**2) * (3.0 - 2.0 * p) 
                 
-                if p_dir == "diagonal_down_right":
-                    x1, y1 = int(max_x * progress), int(max_y * progress)
-                elif p_dir == "diagonal_up_left":
-                    x1, y1 = int(max_x * (1.0 - progress)), int(max_y * (1.0 - progress))
-                elif p_dir == "horizontal_right":
-                    x1, y1 = int(max_x * progress), int(max_y / 2)
-                elif p_dir == "horizontal_left":
-                    x1, y1 = int(max_x * (1.0 - progress)), int(max_y / 2)
-                elif p_dir == "diagonal_down_left":
-                    x1, y1 = int(max_x * (1.0 - progress)), int(max_y * progress)
-                else:
-                    x1, y1 = int(max_x * progress), int(max_y * progress)
-                return frame[y1:y1+h_target, x1:x1+w_target]
-            return c_oversized.fl(drift_crop)
+                # Default safety
+                x1, y1, new_w, new_h = 0, 0, w, h
+                
+                if camera_motion in ["zoom_in_slow", "zoom_in_fast", "dolly_in_rapid", "static_drone", "zoom_out_slow"]:
+                    if camera_motion == "zoom_in_slow":
+                        scale = 1.0 + (0.08 * eased)
+                    elif camera_motion == "zoom_in_fast":
+                        scale = 1.0 + (0.15 * eased)
+                    elif camera_motion == "dolly_in_rapid":
+                        scale = 1.0 + (0.28 * eased)
+                    elif camera_motion == "zoom_out_slow":
+                        scale = 1.15 - (0.15 * eased)
+                    else: # static_drone
+                        scale = 1.0 + (0.02 * eased)
+                        
+                    new_w, new_h = int(w/scale), int(h/scale)
+                    cx, cy = w//2, h//2
+                    x1, y1 = cx - new_w//2, cy - new_h//2
+                    
+                else: 
+                    # Physical Pan
+                    scale = 1.15 # Give room to pan
+                    new_w, new_h = int(w/scale), int(h/scale)
+                    max_x = w - new_w
+                    max_y = h - new_h
+                    
+                    if camera_motion == "pan_right":
+                        x1, y1 = int(max_x * eased), max_y // 2
+                    elif camera_motion == "pan_left":
+                        x1, y1 = int(max_x * (1.0 - eased)), max_y // 2
+                    elif camera_motion == "pan_up_crane":
+                        x1, y1 = max_x // 2, int(max_y * (1.0 - eased))
+                    elif camera_motion == "pan_down":
+                        x1, y1 = max_x // 2, int(max_y * eased)
+                    else:
+                        x1, y1 = max_x // 2, max_y // 2
+                        
+                x2, y2 = x1 + new_w, y1 + new_h
+                x1, y1 = max(0, x1), max(0, y1)
+                x2, y2 = min(w, x2), min(h, y2)
+                
+                cropped = frame[y1:y2, x1:x2]
+                # Force strictly 2160x3840 4K for elite render quality
+                return cv2.resize(cropped, (2160, 3840), interpolation=cv2.INTER_LINEAR)
+                
+            return c.fl(camera_physics)
             
         processed_clips = []
         current_dur = 0
@@ -376,9 +408,9 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
             if current_dur >= total_audio_duration:
                 break
                 
-            # --- NEW: UNIVERSAL CINEMATIC SCHEME NORMALIZER ---
-            # Unifies the brightness, exposure, and contrast of ALL disparate footage (AI or Stock) 
-            # so they seamlessly share exactly the same cohesive visual vocabulary base.
+            c_motion = getattr(chunk, 'neural_camera', 'zoom_in_slow')
+                
+            # --- UNIVERSAL CINEMATIC SCHEME NORMALIZER ---
             clip = chunk.fx(vfx.colorx, 0.92) # Suppresses blown-out highlights
             clip = clip.fx(vfx.gamma_corr, 0.95) # Deepens shadows for a unified cinematic look
                 
@@ -394,16 +426,8 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
             if clip.duration > time_needed:
                 clip = clip.subclip(0, time_needed)
                 
-            # Enforce strict 4K vertical cinema resolution (2160x3840) to prevent render crashes
-            clip = crop_to_vertical(clip)
-            
-            # --- NEW: TRUE CINEMATIC CAMERA DIVERSITY ---
-            # Structure the gimbal so that no two consecutive shots physically share the exact same axis movement
-            available_pans = ["diagonal_down_right", "diagonal_up_left", "horizontal_right", "horizontal_left", "diagonal_down_left"]
-            selected_pan = random.choice([p for p in available_pans if p != profile.get("last_pan")])
-            profile["last_pan"] = selected_pan
-            
-            clip = add_cinematic_drift(clip, profile["scale"], selected_pan)
+            # --- PSYCHOLOGICALLY SYNCED CAMERA PHYSICS ---
+            clip = apply_neural_camera(clip, c_motion)
             processed_clips.append(clip)
             current_dur += clip.duration
         

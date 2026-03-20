@@ -51,7 +51,8 @@ def generate_shorts_script(topic: str) -> dict:
     3. The Payoff (DENSE & COMPACT): Close the open loop at the very end with a satisfying, mind-bending conclusion. The payoff MUST be brutally efficient—deliver the final philosophical truth in exactly one or two razor-sharp, unforgettable sentences. Do NOT ramble or explain.
     4. The Infinite Loop CTA: You MUST craft the final sentence of the script so it grammatically and flawlessly flows backward into the very first word of the Hook. Do NOT say 'Subscribe'. For example, if your Hook is 'Netflix is actually a debt machine.', the final sentence MUST cleanly end with '...and that is the terrifying reason why...' so when the video automatically loops, the viewer flawlessly hears: '...and that is the terrifying reason why Netflix is actually a debt machine.'
     5. Length & Pacing: You MUST dictate the pacing STRICTLY based on the tone of the story. If the story is 'aggressive' or 'upbeat', you MUST choose 'fast' pacing (~140 words) to maximize retention. If the story is 'suspense' or 'corporate', choose 'moderate' pacing (~125 words). ONLY choose 'relaxed' pacing if the story is 'lofi' and requires a deeply emotional, slow-burn psychological delivery (under 110 words). NEVER use 'relaxed' pacing for high-energy topics.
-    6. Cinematic Visual Diversity: Generate EXACTLY 12 hyper-detailed Midjourney AI image prompts for the background footage. You MUST provide a highly diverse mix of 'Ultra-Wide Cinematic Establishing Shots' (showing the full scale of the environment and context) interspersed with medium character shots. Do NOT exclusively use micro or macro close-ups! The audience needs to see the whole scene to understand what is going on.
+    6. The Neural Camera Director: For every single AI Image Prompt, you MUST explicitly assign a cinematic camera motion. If the sentence is aggressive, use 'dolly_in_rapid' or 'zoom_in_fast'. If building suspense, use 'pan_up_crane' or 'zoom_out_slow'. 
+    7. CRITICAL VISUAL-CAMERA SYNERGY: The physical image prompt MUST mathematically accommodate the camera motion! If you choose 'pan_up_crane', the image prompt MUST describe a towering vertical subject (like a skyscraper or deep chasm). If you choose 'zoom_out_slow', the prompt MUST explicitly describe a vast, wide environment. The generated image MUST physically support how the camera will physically move through it. Do NOT exclusively use macro close-ups.
     """
     
     # We define the expected JSON schema to guarantee the output structure
@@ -68,8 +69,19 @@ def generate_shorts_script(topic: str) -> dict:
             "infinite_loop_bridge": {"type": "STRING", "description": "The ending sentence designed to natively loop back into the hook."},
             "ai_image_prompts": {
                 "type": "ARRAY", 
-                "items": {"type": "STRING"},
-                "description": "EXACTLY 12 highly detailed Midjourney AI image prompts perfectly tied to the text."
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "prompt": {"type": "STRING", "description": "The exact Midjourney-style text prompt for the visual."},
+                        "camera": {
+                            "type": "STRING",
+                            "enum": ["zoom_in_slow", "zoom_out_slow", "zoom_in_fast", "pan_right", "pan_left", "pan_up_crane", "pan_down", "static_drone", "dolly_in_rapid"],
+                            "description": "Select the exact cinematic camera motion that matches the emotional velocity of the spoken audio."
+                        }
+                    },
+                    "required": ["prompt", "camera"]
+                },
+                "description": "EXACTLY 12 highly detailed visual prompt objects perfectly tied to the text."
             },
             "youtube_description": {
                 "type": "STRING",

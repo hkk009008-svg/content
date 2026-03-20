@@ -28,10 +28,18 @@ def init_db():
             last_updated TEXT
         )
     ''')
+    
+    # Gracefully upgrade table schema with new retention variables dynamically
+    try:
+        cursor.execute("ALTER TABLE shorts_experiments ADD COLUMN voice_id TEXT")
+        cursor.execute("ALTER TABLE shorts_experiments ADD COLUMN loop_bridge TEXT")
+    except sqlite3.OperationalError:
+        pass # Columns already exist
+
     conn.commit()
     conn.close()
 
-def log_experiment(video_id, title, topic, playlist_category, music_vibe, video_pacing, script_tone, hook_text):
+def log_experiment(video_id, title, topic, playlist_category, music_vibe, video_pacing, script_tone, hook_text, voice_id="pNInz6obpgDQGcFmaJgB", loop_bridge=""):
     """Logs the genesis parameters of a newly uploaded video."""
     init_db()
     conn = sqlite3.connect(DB_FILE)
@@ -40,9 +48,9 @@ def log_experiment(video_id, title, topic, playlist_category, music_vibe, video_
     
     cursor.execute('''
         INSERT OR REPLACE INTO shorts_experiments 
-        (video_id, title, topic, playlist_category, music_vibe, video_pacing, script_tone, hook_text, published_at, last_updated)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (video_id, title, topic, playlist_category, music_vibe, video_pacing, script_tone, hook_text, now, now))
+        (video_id, title, topic, playlist_category, music_vibe, video_pacing, script_tone, hook_text, voice_id, loop_bridge, published_at, last_updated)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (video_id, title, topic, playlist_category, music_vibe, video_pacing, script_tone, hook_text, voice_id, loop_bridge, now, now))
     
     conn.commit()
     conn.close()
@@ -136,18 +144,27 @@ def get_top_performing_context():
     cursor = conn.cursor()
     
     # Needs at least 150 views to be considered a 'proven' success pattern
-    cursor.execute('''
-        SELECT title, topic, playlist_category, music_vibe, video_pacing, script_tone, hook_text, views, likes, comments, viral_score
-        FROM shorts_experiments
-        WHERE views > 150
-        ORDER BY viral_score DESC
-        LIMIT 1
-    ''')
-    top_video = cursor.fetchone()
+    try:
+        cursor.execute('''
+            SELECT title, topic, playlist_category, music_vibe, video_pacing, script_tone, hook_text, voice_id, loop_bridge, views, likes, comments, viral_score
+            FROM shorts_experiments
+            WHERE views > 150
+            ORDER BY viral_score DESC
+            LIMIT 1
+        ''')
+        top_video = cursor.fetchone()
+    except sqlite3.OperationalError:
+        # Failsafe if columns haven't been migrated yet to prevent crash
+        top_video = None
+        
     conn.close()
     
     if top_video:
-        title, topic, playlist, vibe, pacing, tone, hook, views, likes, comments, score = top_video
+        try:
+            title, topic, playlist, vibe, pacing, tone, hook, voice_id, loop_bridge, views, likes, comments, score = top_video
+        except ValueError:
+            return "" # Failsafe for unmigrated DB rows
+            
         return f"""
         [⚠️ CRITICAL SYSTEM MEMORY: PREVIOUS A/B SUCCESS ⚠️]
         The algorithm strongly favors the following parameters based on our Analytics Database.
@@ -155,12 +172,14 @@ def get_top_performing_context():
         
         - Previous Winning Topic: "{topic}"
         - Previous Winning Playlist: "{playlist}"
-        - Previous Winning Vibe: {vibe} (This mathematically controls the Neon Flashes and Podcast Sound Mixing)
-        - Previous Winning Pacing: {pacing} (This chemically controls the exact Jump-Cut speed from 1.5s to 3.0s)
-        - Previous Winning Script Tone: {tone} (This controlled the delivery of the Open Loop trap)
+        - Previous Winning Vibe: {vibe} (This controls the Cinematic Color Grading)
+        - Previous Winning Pacing: {pacing} (This physically controls the Jump-Cut velocity)
         - Previous Winning Hook Style: "{hook}"
+        - Previous Winning Infinite Loop Bridge: "{loop_bridge}" (This successfully looped seamlessly into the Hook)
+        - Previous Winning Voice Actor ID: "{voice_id}"
         
-        INSTRUCTION: Because these physical visual/audio components were mathematically proven to maximize the "Stayed to Watch" retention metric on this audience, generate a script that perfectly synchronizes with these exact optimal parameters! Subvert their semantic expectations by generating completely new, shocking data that hits the exact opposite emotional notes, but firmly wrap it inside this exact winning pacing and aesthetic framework!
+        INSTRUCTION: The algorithm's self-learning matrix has detected that this previous video drove massive audience retention. You MUST mathematically weight your logic heavily toward the STORY ITSELF. Analyze exactly WHAT was said in that successful Hook, HOW it was phrased (tone, sentence structure, emotional trigger), and WHY it trapped the viewer's attention.
+        Tweak your next script to replicate that exact psychological story structure and narrative flow, applying it to the new topic. Subvert expectations with shocking new data, but firmly adopt the winning storytelling mechanism of that specific Hook and Loop Bridge!
         """
     else:
         # If no proven winners yet, let the AI act entirely random to explore the possibility space.
