@@ -18,12 +18,19 @@ def generate_voiceover(text_script, output_filename="temp_voiceover.mp3"):
     print("\n🎙️ [PHASE B] Sending script to ElevenLabs...")
     
     try:
-        # Generate the audio using ElevenLabs API v2+ structure
+        # Generate the audio using ElevenLabs API v2+ structure with Elite Emotional VoiceSettings
+        from elevenlabs import VoiceSettings
         audio = client.text_to_speech.convert(
             voice_id="pNInz6obpgDQGcFmaJgB", # 'Adam' voice ID
             output_format="mp3_44100_128",
             text=text_script,
-            model_id="eleven_multilingual_v2"
+            model_id="eleven_multilingual_v2",
+            voice_settings=VoiceSettings(
+                stability=0.35, # Dropped low to allow extreme emotional volatility and natural dynamic inflections
+                similarity_boost=0.85, # Keep the core hyper-realistic voice identity intact
+                style=0.65, # Heavy storytelling stylistic exaggeration for maximum addiction
+                use_speaker_boost=True
+            )
         )
         
         # Save the audio stream to a local file

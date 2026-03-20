@@ -42,6 +42,9 @@ def generate_shorts_script(topic: str) -> dict:
     [RUTHLESS PACING & VISCERAL STORYTELLING]:
     The script must flow exactly like a high-tension thriller. You must physically cut out ALL corporate fluff and gracefully eradicate all weak filler words ('basically', 'essentially', 'in conclusion'). Use extremely punchy, visceral, and aggressive power words. Speak directly to human greed, fear, curiosity, or shock.
     
+    [OMNISCIENT RESEARCH & THOUGHT-PROVOKING RESOLUTION]:
+    You must execute profound, deep-level research on the topic. Do NOT just surface generic Wikipedia facts. Unearth obscure historical connections, hidden insider motivations, or deeply psychological warfare strategies. The final payoff must NOT just be a boring business summary—it must be a profoundly captivating, thought-provoking, philosophical, and mind-bending resolution that leaves the viewer questioning everything or completely shifting their worldview.
+    
     Rules:
     1. Hook: Start with a contrarian, mind-blowing, or secretive business fact (under 3 seconds) that opens a massive psychological loop.
     2. Body: Explain the business model, the massive failure, or the genius strategy in 3 punchy, hyper-addictive bullet points. Use exact numbers or dollar amounts if possible.
