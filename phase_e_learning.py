@@ -39,8 +39,20 @@ def init_db():
     conn.commit()
     conn.close()
 
-def log_experiment(video_id, title, topic, playlist_category, music_vibe, video_pacing, script_tone, hook_text, voice_id="pNInz6obpgDQGcFmaJgB", loop_bridge=""):
-    """Logs the genesis parameters of a newly uploaded video."""
+def log_experiment(ctx: dict):
+    """Logs the genesis parameters of a newly uploaded video directly from the OmniContext."""
+    script_data = ctx.get("script_data", {})
+    video_id = ctx.get("youtube_video_id")
+    title = script_data.get("title", "")
+    topic = ctx.get("topic", "")
+    playlist_category = script_data.get("playlist_category", "")
+    music_vibe = ctx.get("music_vibe", "")
+    video_pacing = ctx.get("video_pacing", "")
+    script_tone = script_data.get("tone_used", "")
+    hook_text = script_data.get("hook", "")
+    voice_id = ctx.get("voice_id", "")
+    loop_bridge = script_data.get("infinite_loop_bridge", "")
+    
     init_db()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()

@@ -11,10 +11,14 @@ client = ElevenLabs(
     api_key=os.getenv("ELEVENLABS_API_KEY"),
 )
 
-def generate_voiceover(text_script, output_filename="temp_voiceover.mp3", music_vibe="suspense"):
+def generate_voiceover(ctx: dict) -> bool:
     """
-    Takes a text string and generates a hyper-realistic audio file using ElevenLabs.
+    Takes the text from OmniContext and generates a hyper-realistic audio file.
     """
+    text_script = ctx.get("full_text", "")
+    music_vibe = ctx.get("music_vibe", "suspense")
+    output_filename = "temp_voiceover.mp3"
+    
     print(f"\n🎙️ [PHASE B] Sending script to ElevenLabs (Mood: {music_vibe.upper()})...")
     
     # Map the script's psychological mood to the perfect physical voice actor
@@ -37,9 +41,11 @@ def generate_voiceover(text_script, output_filename="temp_voiceover.mp3", music_
             text=text_script,
             model_id="eleven_multilingual_v2",
             voice_settings=VoiceSettings(
-                stability=0.35, # Dropped low to allow extreme emotional volatility and natural dynamic inflections
-                similarity_boost=0.85, # Keep the core hyper-realistic voice identity intact
-                style=0.65, # Heavy storytelling stylistic exaggeration for maximum addiction
+                # Stability drops dynamically as tension rises (0.15 to 0.65)
+                stability=max(0.15, min(0.65, 0.8 - (0.3 * ctx.get("story_tension", 1.0)))),
+                similarity_boost=0.85, 
+                # Style multiplier increases as tension rises (0.30 to 0.85)
+                style=max(0.30, min(0.85, 0.2 + (0.3 * ctx.get("story_tension", 1.0)))), 
                 use_speaker_boost=True
             )
         )
@@ -48,11 +54,13 @@ def generate_voiceover(text_script, output_filename="temp_voiceover.mp3", music_
         save(audio, output_filename)
         print(f"✅ Success! Audio saved locally as: {output_filename}")
         
-        return output_filename
+        ctx["audio_path"] = output_filename
+        ctx["voice_id"] = target_voice_id
+        return True
         
     except Exception as e:
         print(f"❌ Error generating audio: {e}")
-        return None
+        return False
 
 # Optional: Run this file directly to test just the audio
 if __name__ == "__main__":

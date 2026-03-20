@@ -10,11 +10,12 @@ load_dotenv()
 # (Requires GOOGLE_API_KEY environment variable to be set)
 client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
-def generate_shorts_script(topic: str) -> dict:
+def generate_shorts_script(ctx: dict) -> bool:
     """
-    Generates a highly-engaging 60-second YouTube Shorts script.
+    Generates a highly-engaging 60-second YouTube Shorts script directly into the OmniContext.
     Enforces a strict JSON response.
     """
+    topic = ctx["topic"]
     import random
     from phase_e_learning import get_top_performing_context, fetch_live_youtube_trends
     ab_memory = get_top_performing_context()
@@ -53,6 +54,7 @@ def generate_shorts_script(topic: str) -> dict:
     5. Length & Pacing: You MUST dictate the pacing STRICTLY based on the tone of the story. If the story is 'aggressive' or 'upbeat', you MUST choose 'fast' pacing (~140 words) to maximize retention. If the story is 'suspense' or 'corporate', choose 'moderate' pacing (~125 words). ONLY choose 'relaxed' pacing if the story is 'lofi' and requires a deeply emotional, slow-burn psychological delivery (under 110 words). NEVER use 'relaxed' pacing for high-energy topics.
     6. The Neural Camera Director: For every single AI Image Prompt, you MUST explicitly assign a cinematic camera motion. If the sentence is aggressive, use 'dolly_in_rapid' or 'zoom_in_fast'. If building suspense, use 'pan_up_crane' or 'zoom_out_slow'. 
     7. CRITICAL VISUAL-CAMERA SYNERGY: The physical image prompt MUST mathematically accommodate the camera motion! If you choose 'pan_up_crane', the image prompt MUST describe a towering vertical subject (like a skyscraper or deep chasm). If you choose 'zoom_out_slow', the prompt MUST explicitly describe a vast, wide environment. The generated image MUST physically support how the camera will physically move through it. Do NOT exclusively use macro close-ups.
+    8. MACRO CINEMATIC RHYTHM: The 12 camera motions MUST NOT be random or chaotic. They must flow together in a cohesive, rhythmic sequence that mirrors the psychological arc of the story! Start with 'static_drone' or 'zoom_out_slow' to establish the world. Build tension with slow pans. When the script hits a climax or aggressive truth, punch in with a 'dolly_in_rapid', then immediately release the visual tension in the next shot with a smooth 'pan_up_crane'. Create a beautiful, pulsing, natural cinematic rhythm. NEVER use high-intensity motions (like dolly_in_rapid) back-to-back!
     """
     
     # We define the expected JSON schema to guarantee the output structure
@@ -125,7 +127,14 @@ def generate_shorts_script(topic: str) -> dict:
     parsed_json = json.loads(response.text)
     # Inject the randomly selected tone for the experiment logger
     parsed_json['tone_used'] = tone
-    return parsed_json
+    
+    ctx["script_data"] = parsed_json
+    # Derive core state parameters immediately
+    ctx["music_vibe"] = parsed_json.get("music_vibe", "suspense")
+    ctx["video_pacing"] = parsed_json.get("video_pacing", "moderate")
+    ctx["full_text"] = f"{parsed_json['hook']} {' '.join(parsed_json['body_paragraphs'])} {parsed_json['infinite_loop_bridge']}"
+    
+    return True
 
 # --- Testing the Module ---
 if __name__ == "__main__":

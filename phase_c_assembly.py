@@ -235,8 +235,20 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense", pre_tran
     
     return final_video_with_subs
 
-def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_TO_UPLOAD.mp4", music_vibe="suspense", topic_text="CLASSIFIED", video_pacing="moderate"):
-    """Stitches the cropped videos together and syncs the ElevenLabs audio."""
+def assemble_final_video(ctx: dict):
+    print(f"🎬 [PHASE C] Initializing Assembly Matrix for topic: '{ctx.get('topic')}'")
+    
+    audio_path = ctx.get("audio_path")
+    video_paths = ctx.get("downloaded_vids", [])
+    output_filename = ctx.get("final_video_path", "FINAL_READY_TO_UPLOAD.mp4")
+    music_vibe = ctx.get("music_vibe", "suspense")
+    video_pacing = ctx.get("video_pacing", "moderate")
+    topic_text = ctx.get("topic", "")
+    
+    import os
+    if not os.path.exists(audio_path):
+        print(f"❌ Error: Voiceover file {audio_path} not found.")
+        return None
     print("\n🎬 [PHASE C] Assembling the final video cut...")
     
     try:
@@ -359,16 +371,17 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
                 x1, y1, new_w, new_h = 0, 0, w, h
                 
                 if camera_motion in ["zoom_in_slow", "zoom_in_fast", "dolly_in_rapid", "static_drone", "zoom_out_slow"]:
+                    tension = ctx.get("story_tension", 1.0)
                     if camera_motion == "zoom_in_slow":
-                        scale = 1.0 + (0.08 * eased)
+                        scale = 1.0 + ((0.08 * tension) * eased)
                     elif camera_motion == "zoom_in_fast":
-                        scale = 1.0 + (0.15 * eased)
+                        scale = 1.0 + ((0.15 * tension) * eased)
                     elif camera_motion == "dolly_in_rapid":
-                        scale = 1.0 + (0.28 * eased)
+                        scale = 1.0 + ((0.28 * tension) * eased)
                     elif camera_motion == "zoom_out_slow":
-                        scale = 1.15 - (0.15 * eased)
+                        scale = 1.15 - ((0.15 * tension) * eased)
                     else: # static_drone
-                        scale = 1.0 + (0.02 * eased)
+                        scale = 1.0 + ((0.02 * tension) * eased)
                         
                     new_w, new_h = int(w/scale), int(h/scale)
                     cx, cy = w//2, h//2
@@ -417,9 +430,9 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
             # Apply dynamic emotional color grade on top of the normalized unified baseline
             clip = profile["color_grade"](clip)
             
-            # Apply dynamic time warp physics based on AI video pacing multiplier
-            pacing_mult = {"fast": 1.03, "moderate": 0.95, "relaxed": 0.85}.get(video_pacing, 1.0)
-            clip = clip.fx(vfx.speedx, profile["speed"] * pacing_mult)
+            # Apply dynamic time warp physics derived mathematically from Story Tension
+            base_multiplier = max(0.9, min(1.2, 0.9 + (0.1 * ctx.get("story_tension", 1.0))))
+            clip = clip.fx(vfx.speedx, profile["speed"] * base_multiplier)
             
             # If this cut exceeds what we need to finish the video, crop the end of it
             time_needed = total_audio_duration - current_dur

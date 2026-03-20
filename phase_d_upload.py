@@ -87,8 +87,16 @@ def add_to_playlist(youtube, video_id, playlist_name):
     ).execute()
     print("✅ Successfully routed into playlist!")
 
-def upload_video(youtube, video_file, title, description, tags, thumbnail_file=None, publish_at=None, playlist_name=None):
+def upload_video(youtube, ctx: dict, publish_at=None):
     """Uploads the final .mp4 to YouTube as a Private Short and attaches a custom thumbnail."""
+    video_file = ctx.get("final_video_path")
+    script_data = ctx.get("script_data", {})
+    title = script_data.get("title", "Untitled Short")
+    description = ctx.get("full_description", "")
+    tags = script_data.get("youtube_tags", [])
+    thumbnail_file = ctx.get("final_thumbnail_path")
+    playlist_name = script_data.get("playlist_category", "")
+    
     print(f"🚀 [PHASE D] Preparing to upload: {video_file}")
 
     # Define the video metadata
@@ -149,6 +157,7 @@ def upload_video(youtube, video_file, title, description, tags, thumbnail_file=N
         except Exception as e:
             print(f"⚠️ Could not add video to playlist. Error: {e}")
 
+    ctx["youtube_video_id"] = response['id']
     return response['id']
 
 # Optional testing block

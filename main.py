@@ -44,43 +44,62 @@ def run_autonomous_pipeline(topic):
             
     print(f"🚀 STARTING PIPELINE FOR TOPIC: {topic}\n")
     
+    # --- OMNI CONTEXT INITIALIZATION ---
+    ctx = {
+        "topic": topic,
+        "script_data": {},
+        "full_text": "",
+        "music_vibe": "",
+        "video_pacing": "",
+        "audio_path": "",
+        "voice_id": "",
+        "downloaded_vids": [],
+        "final_video_path": "FINAL_READY_TO_UPLOAD.mp4",
+        "final_thumbnail_path": "thumbnail.jpg",
+        "youtube_video_id": None,
+        "full_description": ""
+    }
+    
     # --- PHASE A: SCRIPTING ---
     print("--- [PHASE A] SCRIPT GENERATION ---")
-    script_data = generate_shorts_script(topic)
-    
-    if not script_data:
+    if not generate_shorts_script(ctx):
         print("❌ Pipeline aborted: Failed to generate script.")
         return
         
+    script_data = ctx["script_data"]
     seo_description = script_data.get('youtube_description', f"The insane truth about {topic}.")
-    full_description = f"{seo_description}\n\nStart your own business today: [YOUR_AFFILIATE_LINK]\n\n#shorts #business #finance"
-    seo_tags = script_data.get('youtube_tags', ["business", "finance", "case study", "entrepreneur"])
-
-    # Combine text for the voiceover
-    full_text = f"{script_data['hook']} {' '.join(script_data['body_paragraphs'])} {script_data['infinite_loop_bridge']}"
-    print(f"✅ Script compiled. Length: {len(full_text.split())} words.")
+    ctx["full_description"] = f"{seo_description}\n\nStart your own business today: [YOUR_AFFILIATE_LINK]\n\n#shorts #business #finance"
     
-    music_vibe = script_data.get('music_vibe', 'suspense')
-    video_pacing = script_data.get('video_pacing', 'moderate')
+    # --- UNIFIED STORY TENSION ALGORITHM ---
+    tension_map = {"lofi": 0.5, "corporate": 0.8, "suspense": 1.2, "upbeat": 1.5, "aggressive": 1.8}
+    pacing_map = {"relaxed": 0.8, "moderate": 1.0, "fast": 1.2}
+    
+    music_vibe = ctx.get("music_vibe", "suspense")
+    video_pacing = ctx.get("video_pacing", "moderate")
+    
+    base_tension = tension_map.get(music_vibe, 1.0)
+    pacing_modifier = pacing_map.get(video_pacing, 1.0)
+    story_tension = round(base_tension * pacing_modifier, 2)
+    
+    ctx["story_tension"] = story_tension
+    
+    print(f"✅ Script compiled. Length: {len(ctx['full_text'].split())} words.")
     print(f"🎵 Computed Music Vibe: {music_vibe.upper()}")
     print(f"⏱️ Computed Video Pacing: {video_pacing.upper()}")
+    print(f"🔥 UNIFIED STORY TENSION: {story_tension}x")
 
     # --- PHASE B: AUDIO ---
     print("\n--- [PHASE B] AUDIO GENERATION ---")
-    audio_file = generate_voiceover(full_text, "temp_voiceover.mp3", music_vibe=music_vibe)
-    
-    if not audio_file:
+    if not generate_voiceover(ctx):
         print("❌ Pipeline aborted: Failed to generate audio.")
         return
 
     # --- PHASE C: ASSEMBLY ---
     print("\n--- [PHASE C] VIDEO ASSEMBLY ---")
-    downloaded_vids = []
     
     # Download 1 AI Image for each detailed Midjourney prompt
-    from phase_c_assembly import generate_ai_broll
+    from phase_c_assembly import generate_ai_broll, assemble_final_video
     for index, image_data in enumerate(script_data['ai_image_prompts']):
-        # Legacy support in case AI hallucinated standard strings
         if isinstance(image_data, str):
             prompt = image_data
             camera_motion = "zoom_in_slow"
@@ -90,68 +109,54 @@ def run_autonomous_pipeline(topic):
             
         img_path = generate_ai_broll(prompt, f"temp_img_{index}.jpg")
         if img_path:
-            downloaded_vids.append({
+            ctx["downloaded_vids"].append({
                 "path": img_path,
                 "camera": camera_motion
             })
             
-    if not downloaded_vids:
+    if not ctx["downloaded_vids"]:
         print("❌ Pipeline aborted: Could not generate any AI B-Roll images.")
         return
         
-    final_video_path = "FINAL_READY_TO_UPLOAD.mp4"
-    final_thumbnail_path = "thumbnail.jpg"
-    
-    # Pre-clean left-over files from previous runs to prevent uploading wrong videos if a crash occurs
-    for old_file in [final_video_path, final_thumbnail_path]:
+    # Pre-clean left-over files from previous runs
+    for old_file in [ctx["final_video_path"], ctx["final_thumbnail_path"]]:
         if os.path.exists(old_file):
             os.remove(old_file)
 
-    assembly_success = assemble_final_video(audio_file, downloaded_vids, final_video_path, music_vibe=music_vibe, topic_text=topic, video_pacing=video_pacing)
-    if not assembly_success or not os.path.exists(final_video_path):
+    assembly_success = assemble_final_video(ctx)
+    if not assembly_success or not os.path.exists(ctx["final_video_path"]):
         print("❌ Pipeline aborted: Video assembly crashed. Aborting upload.")
         return
 
     # --- PHASE D: UPLOAD ---
     print("\n--- [PHASE D] YOUTUBE UPLOAD ---")
-    if os.path.exists(final_video_path):
+    if os.path.exists(ctx["final_video_path"]):
         youtube = authenticate_youtube()
         
         # --- THE MACHINE LEARNING SYNC ---
-        # Sync the analytics for all previously uploaded shorts before uploading the new one
         fetch_and_update_analytics(youtube)
         
         import datetime
         tomorrow = datetime.datetime.utcnow() + datetime.timedelta(days=1)
-        # Format as ISO 8601 string expected by YouTube API (e.g., 2026-03-20T15:00:00Z)
         publish_at_str = tomorrow.isoformat().split('.')[0] + 'Z'
         
-        playlist_name = script_data.get('playlist_category', "Digital Case Studies")
-        video_id = upload_video(youtube, final_video_path, script_data['title'], full_description, seo_tags, final_thumbnail_path, publish_at=publish_at_str, playlist_name=playlist_name)
+        upload_video(youtube, ctx, publish_at=publish_at_str)
         
         # --- NEW: LOG THE EXPERIMENT FOR FUTURE MACHINE LEARNING ---
-        log_experiment(
-            video_id=video_id,
-            title=script_data['title'],
-            topic=topic,
-            playlist_category=playlist_name,
-            music_vibe=music_vibe,
-            video_pacing=video_pacing,
-            script_tone=script_data.get('tone_used', 'unknown'),
-            hook_text=script_data['hook']
-        )
+        log_experiment(ctx)
         
-        print("\n🎉 PIPELINE COMPLETE! 🎉")
+        print("\n✅🎉 PIPELINE COMPLETED SUCCESSFULLY! 🎉✅")
         print(f"Your video is completely done and SCHEDULED to automatically go public in exactly 24 hours!")
-        print(f"Verify it here: https://studio.youtube.com/video/{video_id}/edit")
+        print(f"Verify it here: https://studio.youtube.com/video/{ctx['youtube_video_id']}/edit")
         
         # Cleanup ALL temporary files so nothing leaks into the next run
-        os.remove(audio_file)
-        if os.path.exists(final_thumbnail_path):
-            os.remove(final_thumbnail_path)
-        if os.path.exists(final_video_path):
-            os.remove(final_video_path)
-        for vid in downloaded_vids:
+        if os.path.exists(ctx["final_thumbnail_path"]):
+            os.remove(ctx["final_thumbnail_path"])
+        if os.path.exists(ctx["final_video_path"]):
+            os.remove(ctx["final_video_path"])
+        if ctx.get("audio_path") and os.path.exists(ctx["audio_path"]):
+            os.remove(ctx["audio_path"])
+        for vid in ctx["downloaded_vids"]:
             try:
                 os.remove(vid['path'] if isinstance(vid, dict) else vid)
             except Exception:
