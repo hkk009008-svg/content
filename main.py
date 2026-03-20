@@ -57,7 +57,7 @@ def run_autonomous_pipeline(topic):
     seo_tags = script_data.get('youtube_tags', ["business", "finance", "case study", "entrepreneur"])
 
     # Combine text for the voiceover
-    full_text = f"{script_data['hook']} {' '.join(script_data['body_paragraphs'])} {script_data['call_to_action']}"
+    full_text = f"{script_data['hook']} {' '.join(script_data['body_paragraphs'])} {script_data['infinite_loop_bridge']}"
     print(f"✅ Script compiled. Length: {len(full_text.split())} words.")
     
     music_vibe = script_data.get('music_vibe', 'suspense')
@@ -67,7 +67,7 @@ def run_autonomous_pipeline(topic):
 
     # --- PHASE B: AUDIO ---
     print("\n--- [PHASE B] AUDIO GENERATION ---")
-    audio_file = generate_voiceover(full_text, "temp_voiceover.mp3")
+    audio_file = generate_voiceover(full_text, "temp_voiceover.mp3", music_vibe=music_vibe)
     
     if not audio_file:
         print("❌ Pipeline aborted: Failed to generate audio.")

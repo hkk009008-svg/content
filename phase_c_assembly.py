@@ -264,31 +264,36 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
                 "speed": 0.75, # Buttery slow-mo creeping dread
                 "scale": 1.02, # Greatly widened field of view
                 "pan": "diagonal_down_right",
-                "color_grade": lambda c: c.fx(vfx.blackwhite).fx(vfx.colorx, 0.6) # Pitch black high contrast
+                # Highly contrasted shadows with slight dimming to preserve dread
+                "color_grade": lambda c: c.fx(vfx.lum_contrast, lum=-10, contrast=0.3, contrast_thr=127).fx(vfx.colorx, 0.85)
             },
             "lofi": {
                 "speed": 0.55, # Dreamy hyperslow flow
                 "scale": 1.03, 
                 "pan": "horizontal_right",
-                "color_grade": lambda c: c.fx(vfx.colorx, 0.55) # Dimmed but keeps raw colors intact
+                # Low contrast, soft, faded vintage ambient glow
+                "color_grade": lambda c: c.fx(vfx.lum_contrast, lum=15, contrast=-0.2, contrast_thr=127).fx(vfx.colorx, 0.9)
             },
             "corporate": {
                 "speed": 0.9, # Stable reality
                 "scale": 1.015, 
                 "pan": "diagonal_up_left",
-                "color_grade": lambda c: c.fx(vfx.colorx, 0.85) # Clean documentary dimming
+                # Complete clarity, pristine professional contrast, strong raw colors
+                "color_grade": lambda c: c.fx(vfx.lum_contrast, lum=5, contrast=0.1, contrast_thr=127).fx(vfx.colorx, 1.0)
             },
             "upbeat": {
                 "speed": 1.05, # Fast paced hyper-energy
                 "scale": 1.02, 
                 "pan": "horizontal_left",
-                "color_grade": lambda c: c.fx(vfx.colorx, 0.95) # Bright and explosive
+                # Extremely vibrant luminance, popping color strength
+                "color_grade": lambda c: c.fx(vfx.lum_contrast, lum=20, contrast=0.25, contrast_thr=127).fx(vfx.colorx, 1.1)
             },
             "aggressive": {
                 "speed": 1.15, # Violent fast forward
-                "scale": 1.04, # Slightly more zoom for chaos, but still heavily pulled back compared to 1.15
+                "scale": 1.04, # Zoomed in chaos
                 "pan": "diagonal_down_left",
-                "color_grade": lambda c: c.fx(vfx.blackwhite).fx(vfx.colorx, 0.5) # Grim and striking
+                # Brutal ultra-high contrast, harsh cinematic lighting, slightly crushed exposure
+                "color_grade": lambda c: c.fx(vfx.lum_contrast, lum=-20, contrast=0.5, contrast_thr=127).fx(vfx.colorx, 0.8)
             }
         }
         
@@ -461,8 +466,9 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         else:
             bg_clip = bg_clip.subclip(0, audio_clip.duration)
             
-        # 3. Apply smooth fade-in (0.5s) and fade-out (2.0s) to the music so the video feels like a professional theater cut rather than harshly clipping on loop
-        bg_clip = bg_clip.fx(audio_fadein, 0.5).fx(audio_fadeout, 2.0)
+        # 3. Apply smooth fade-in (0.5s) to the music so the video feels like a professional theater cut.
+        # CRITICAL: We explicitly DO NOT apply a fade-out. The music must abruptly cut at 100% volume so that when the video infinitely loops back to the start, the audio flawlessly bridges the gap.
+        bg_clip = bg_clip.fx(audio_fadein, 0.5)
             
         # --- NEW: SYNTHESIZE CINEMATIC BASS DROP ---
         sfx_path = "bass_drop.wav"

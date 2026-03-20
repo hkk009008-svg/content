@@ -42,13 +42,15 @@ def generate_trending_topic() -> str:
     
     {live_trends}
     
-    Your goal is to brainstorm the SINGLE most intriguing, viral, and true business or entrepreneurship case study topic for today.
+    Your goal is to brainstorm the SINGLE most wild, intensely controversial, and profoundly mind-blowing business or entrepreneurship case study topic for today.
     
-    Focus on areas that perform exceptionally well in short-form content:
-    - Secret billion-dollar monopolies
-    - Massive corporate failures or lawsuits
-    - Genius psychological marketing tricks
-    - How famous companies ACTUALLY make their money (like McDonald's and real estate)
+    You MUST focus exclusively on highly polarizing areas that break the internet:
+    - Highly illegal or deeply unethical corporate espionage and monopolies
+    - Massive, apocalyptic corporate failures, scandals, or lawsuits suppressed by the media
+    - Deeply manipulative, genius psychological marketing warfare used against the public
+    - Dark, hidden truths about how famous entities ACTUALLY make their billions
+    
+    The topic MUST be aggressive, wildly provocative, and deeply intriguing.
     {avoid_clause}
     Provide ONLY the topic in 12 words or less. Do not include quotes, markdown formatting, or any extra text. Make it incredibly punchy.
     """

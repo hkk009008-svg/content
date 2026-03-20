@@ -48,10 +48,10 @@ def generate_shorts_script(topic: str) -> dict:
     Rules:
     1. Hook: Start with a contrarian, mind-blowing, or secretive business fact (under 3 seconds) that opens a massive psychological loop.
     2. Body: Explain the business model, the massive failure, or the genius strategy in 3 punchy, hyper-addictive bullet points. Use exact numbers or dollar amounts if possible.
-    3. The Payoff: Close the open loop at the very end with a satisfying, shocking conclusion.
-    3. Call to Action: End by telling them to subscribe for more business breakdowns.
-    4. Length & Pacing: You must dictate the tempo of the voiceover. For a 'fast' video, output ~140 words. For 'moderate', output ~125 words. For 'relaxed', output under 110 words.   
-    5. Cinematic Visual Diversity: Generate EXACTLY 12 hyper-detailed Midjourney AI image prompts for the background footage. You MUST provide a highly diverse mix of 'Ultra-Wide Cinematic Establishing Shots' (showing the full scale of the environment and context) interspersed with medium character shots. Do NOT exclusively use micro or macro close-ups! The audience needs to see the whole scene to understand what is going on.
+    3. The Payoff (DENSE & COMPACT): Close the open loop at the very end with a satisfying, mind-bending conclusion. The payoff MUST be brutally efficient—deliver the final philosophical truth in exactly one or two razor-sharp, unforgettable sentences. Do NOT ramble or explain.
+    4. The Infinite Loop CTA: You MUST craft the final sentence of the script so it grammatically and flawlessly flows backward into the very first word of the Hook. Do NOT say 'Subscribe'. For example, if your Hook is 'Netflix is actually a debt machine.', the final sentence MUST cleanly end with '...and that is the terrifying reason why...' so when the video automatically loops, the viewer flawlessly hears: '...and that is the terrifying reason why Netflix is actually a debt machine.'
+    5. Length & Pacing: You MUST dictate the pacing STRICTLY based on the tone of the story. If the story is 'aggressive' or 'upbeat', you MUST choose 'fast' pacing (~140 words) to maximize retention. If the story is 'suspense' or 'corporate', choose 'moderate' pacing (~125 words). ONLY choose 'relaxed' pacing if the story is 'lofi' and requires a deeply emotional, slow-burn psychological delivery (under 110 words). NEVER use 'relaxed' pacing for high-energy topics.
+    6. Cinematic Visual Diversity: Generate EXACTLY 12 hyper-detailed Midjourney AI image prompts for the background footage. You MUST provide a highly diverse mix of 'Ultra-Wide Cinematic Establishing Shots' (showing the full scale of the environment and context) interspersed with medium character shots. Do NOT exclusively use micro or macro close-ups! The audience needs to see the whole scene to understand what is going on.
     """
     
     # We define the expected JSON schema to guarantee the output structure
@@ -65,7 +65,7 @@ def generate_shorts_script(topic: str) -> dict:
                 "items": {"type": "STRING"},
                 "description": "3 punchy bullet points"
             },
-            "call_to_action": {"type": "STRING", "description": "The ending sentence"},
+            "infinite_loop_bridge": {"type": "STRING", "description": "The ending sentence designed to natively loop back into the hook."},
             "ai_image_prompts": {
                 "type": "ARRAY", 
                 "items": {"type": "STRING"},
@@ -88,14 +88,14 @@ def generate_shorts_script(topic: str) -> dict:
             "video_pacing": {
                 "type": "STRING",
                 "enum": ["fast", "moderate", "relaxed"],
-                "description": "Select the overarching tempo/pacing that best suits the topic."
+                "description": "Select the pacing. MUST be 'fast' if upbeat/aggressive. MUST be 'moderate' if suspense/corporate. MUST be 'relaxed' uniquely for lofi storytelling."
             },
             "playlist_category": {
                 "type": "STRING",
                 "description": "A high-level YouTube playlist name this video belongs to (e.g. 'Business Secrets', 'Tech History', 'Marketing Psychology'). Max 3 words."
             }
         },
-        "required": ["title", "hook", "body_paragraphs", "call_to_action", "ai_image_prompts", "youtube_description", "youtube_tags", "music_vibe", "video_pacing", "playlist_category"]
+        "required": ["title", "hook", "body_paragraphs", "infinite_loop_bridge", "ai_image_prompts", "youtube_description", "youtube_tags", "music_vibe", "video_pacing", "playlist_category"]
     }
     
     # Call the Gemini 2.5 Flash model

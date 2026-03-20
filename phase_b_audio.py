@@ -11,17 +11,28 @@ client = ElevenLabs(
     api_key=os.getenv("ELEVENLABS_API_KEY"),
 )
 
-def generate_voiceover(text_script, output_filename="temp_voiceover.mp3"):
+def generate_voiceover(text_script, output_filename="temp_voiceover.mp3", music_vibe="suspense"):
     """
     Takes a text string and generates a hyper-realistic audio file using ElevenLabs.
     """
-    print("\n🎙️ [PHASE B] Sending script to ElevenLabs...")
+    print(f"\n🎙️ [PHASE B] Sending script to ElevenLabs (Mood: {music_vibe.upper()})...")
+    
+    # Map the script's psychological mood to the perfect physical voice actor
+    voice_profiles = {
+        "suspense": "pNInz6obpgDQGcFmaJgB", # Adam (Deep, authoritative gripping narration)
+        "lofi": "21m00Tcm4TlvDq8ikWAM", # Rachel (Soft, intimate, slow conversational)
+        "corporate": "ErXwobaYiN019PkySvjV", # Antoni (Clean, highly articulate professional)
+        "upbeat": "5Q0t7uMcjvnagumLfvZi", # Paul (Highly energetic, bright journalist)
+        "aggressive": "D38z5RcWu1voky8WS1ja" # Fin (Visceral, gritty, intense and fast)
+    }
+    
+    target_voice_id = voice_profiles.get(music_vibe, "pNInz6obpgDQGcFmaJgB")
     
     try:
         # Generate the audio using ElevenLabs API v2+ structure with Elite Emotional VoiceSettings
         from elevenlabs import VoiceSettings
         audio = client.text_to_speech.convert(
-            voice_id="pNInz6obpgDQGcFmaJgB", # 'Adam' voice ID
+            voice_id=target_voice_id,
             output_format="mp3_44100_128",
             text=text_script,
             model_id="eleven_multilingual_v2",
