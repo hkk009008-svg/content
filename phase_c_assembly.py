@@ -272,10 +272,12 @@ def assemble_final_video(audio_path, video_paths, output_filename="FINAL_READY_T
         # Load the targeted profile
         profile = optic_profiles.get(music_vibe, optic_profiles["suspense"])
 
-        # --- NEW: HYPER-FAST ADDICTIVENESS CUTS (2.0s average) ---
-        # Instead of playing one long clip, we slice all Pexels videos into raw 2-second micro-chunks
+        # --- NEW: SYNERGISTIC HYPER-FAST ADDICTIVENESS CUTS ---
+        # Instead of playing one long clip, we mathematically link the jump-cut speed to the AI's pacing choice!
         # This violently forces a visual scene change constantly, resetting the viewer's attention span.
-        target_cut_length = 2.0
+        pacing_cut_map = {"fast": 1.5, "moderate": 2.2, "relaxed": 3.0}
+        target_cut_length = pacing_cut_map.get(video_pacing, 2.0)
+        
         micro_chunks = []
         import random
         

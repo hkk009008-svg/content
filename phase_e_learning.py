@@ -136,12 +136,12 @@ def get_top_performing_context():
         
         - Previous Winning Topic: "{topic}"
         - Previous Winning Playlist: "{playlist}"
-        - Previous Winning Vibe: {vibe}
-        - Previous Winning Pacing: {pacing}
-        - Previous Winning Script Tone: {tone}
+        - Previous Winning Vibe: {vibe} (This mathematically controls the Neon Flashes and Podcast Sound Mixing)
+        - Previous Winning Pacing: {pacing} (This chemically controls the exact Jump-Cut speed from 1.5s to 3.0s)
+        - Previous Winning Script Tone: {tone} (This controlled the delivery of the Open Loop trap)
         - Previous Winning Hook Style: "{hook}"
         
-        INSTRUCTION: Analyze the core psychological triggers that made these specific traits successful. Then, use REVERSE PSYCHOLOGY. If the audience is currently conditioned to expect this exact winning vibe, pacing, and tone, subvert their expectations by generating a script that hits the exact opposite emotional notes to interrupt their scrolling pattern, while still being just as engaging!
+        INSTRUCTION: Because these physical visual/audio components were mathematically proven to maximize the "Stayed to Watch" retention metric on this audience, generate a script that perfectly synchronizes with these exact optimal parameters! Subvert their semantic expectations by generating completely new, shocking data that hits the exact opposite emotional notes, but firmly wrap it inside this exact winning pacing and aesthetic framework!
         """
     else:
         # If no proven winners yet, let the AI act entirely random to explore the possibility space.
