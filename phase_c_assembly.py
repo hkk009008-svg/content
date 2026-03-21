@@ -424,8 +424,8 @@ def assemble_final_video(ctx: dict):
             c_motion = getattr(chunk, 'neural_camera', 'zoom_in_slow')
                 
             # --- UNIVERSAL CINEMATIC SCHEME NORMALIZER ---
-            clip = chunk.fx(vfx.colorx, 0.92) # Suppresses blown-out highlights
-            clip = clip.fx(vfx.gamma_corr, 0.95) # Deepens shadows for a unified cinematic look
+            clip = chunk.fx(vfx.colorx, 1.25) # Massively boosts vivid saturation across the board
+            clip = clip.fx(vfx.gamma_corr, 1.15) # Lightens shadows for a bright, highly visible cinematic look
                 
             # Apply dynamic emotional color grade on top of the normalized unified baseline
             clip = profile["color_grade"](clip)

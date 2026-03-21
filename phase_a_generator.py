@@ -21,7 +21,12 @@ def generate_shorts_script(ctx: dict) -> bool:
     ab_memory = get_top_performing_context()
     live_trends = fetch_live_youtube_trends()
     
-    styles = ["an aggressive, high-energy tone", "a mysterious, secretive tone", "a highly analytical, numbers-focused tone", "a storytelling, historical tone", "a contrarian, 'everything you know is wrong' tone"]
+    styles = [
+        "a deep, late-night conversation with a close friend",
+        "a casual, intimate talk between friends sharing a mind-blowing realization",
+        "a very relaxed, informal but profound discussion between friends",
+        "a natural, unscripted conversation between two best friends"
+    ]
     tone = random.choice(styles)
     
     prompt = f"""
@@ -31,30 +36,33 @@ def generate_shorts_script(ctx: dict) -> bool:
     
     {live_trends}
     
-    Write a highly engaging 60-second case study about: "{topic}".
-    Use {tone}. Make sure the angle, hook, and body are completely unique and different from standard explanations!
+    Write a highly engaging 35-45 second video script about: "{topic}".
+    Use {tone}. Make sure the angle, hook, and body are completely factual and logically sound, but spoken exactly how real humans actually converse.
     
-    [CRITICAL HOOK RULE - MAXIMIZE RETENTION]: 
-    Your first 3 seconds MUST be a hyper-aggressive pattern interrupt. Start immediately with a shocking contradiction, a massive monetary figure, or a deeply controversial statement to instantly hack viewer retention. Do NOT use standard greetings.
+    [PROVEN WINNING ANGLES]:
+    Your analytics prove that audiences stay engaged when investigating a "Secret", a "Monopoly", or something being "Exposed". Casually frame this topic around one of these angles, but keep it feeling like an authentic conversation.
+    
+    [CRITICAL HOOK RULE - FLY UNDER THE RADAR]: 
+    Do NOT make the script feel like a staged or overly dramatic TikTok video. Your hook MUST be deeply effective but "fly under the radar". Start as if you're mid-conversation with a friend sharing something unbelievable you just learned. Use extremely simple, everyday language. No formal words.
     
     [THE OPEN LOOP TRAP - ADDICTIVENESS BOOST]:
-    You MUST tease a massive, mind-blowing secret at the very beginning of the script, but deliberately REFUSE to reveal the answer until the final 5 seconds. This forces the viewer to stay until the end.
+    Casually drop a complex question or missing variable early in the script, and unfold the answer naturally as if you're explaining it to an old buddy, culminating in the final 5 seconds.
     
-    [RUTHLESS PACING & VISCERAL STORYTELLING]:
-    The script must flow exactly like a high-tension thriller. You must physically cut out ALL corporate fluff and gracefully eradicate all weak filler words ('basically', 'essentially', 'in conclusion'). Use extremely punchy, visceral, and aggressive power words. Speak directly to human greed, fear, curiosity, or shock.
+    [AUTHENTIC, CASUAL CONVERSATION & WORD CHOICE]:
+    The script must flow absolutely naturally, like you're literally just hanging out. Use contractions (gonna, kinda, isn't), natural pauses (like, you know, um), and very simple, conversational word choices. If you wouldn't say the word out loud while grabbing coffee with a friend, DO NOT USE IT. Avoid formal, written-style narration entirely. Speak directly, casually, and authentically.
     
     [OMNISCIENT RESEARCH & THOUGHT-PROVOKING RESOLUTION]:
-    You must execute profound, deep-level research on the topic. Do NOT just surface generic Wikipedia facts. Unearth obscure historical connections, hidden insider motivations, or deeply psychological warfare strategies. The final payoff must NOT just be a boring business summary—it must be a profoundly captivating, thought-provoking, philosophical, and mind-bending resolution that leaves the viewer questioning everything or completely shifting their worldview.
+    You must execute profound, deep-level research on the topic. Provide actual numbers, historical context, or complex market dynamics broken down simply. The final payoff must provide a deeply satisfying, logical conclusion that makes your friend feel mind-blown.
     
     Rules:
-    1. Hook: Start with a contrarian, mind-blowing, or secretive business fact (under 3 seconds) that opens a massive psychological loop.
-    2. Body: Explain the business model, the massive failure, or the genius strategy in 3 punchy, hyper-addictive bullet points. Use exact numbers or dollar amounts if possible.
-    3. The Payoff (DENSE & COMPACT): Close the open loop at the very end with a satisfying, mind-bending conclusion. The payoff MUST be brutally efficient—deliver the final philosophical truth in exactly one or two razor-sharp, unforgettable sentences. Do NOT ramble or explain.
-    4. The Infinite Loop CTA: You MUST craft the final sentence of the script so it grammatically and flawlessly flows backward into the very first word of the Hook. Do NOT say 'Subscribe'. For example, if your Hook is 'Netflix is actually a debt machine.', the final sentence MUST cleanly end with '...and that is the terrifying reason why...' so when the video automatically loops, the viewer flawlessly hears: '...and that is the terrifying reason why Netflix is actually a debt machine.'
-    5. Length & Pacing: You MUST dictate the pacing STRICTLY based on the tone of the story. If the story is 'aggressive' or 'upbeat', you MUST choose 'fast' pacing (~140 words) to maximize retention. If the story is 'suspense' or 'corporate', choose 'moderate' pacing (~125 words). ONLY choose 'relaxed' pacing if the story is 'lofi' and requires a deeply emotional, slow-burn psychological delivery (under 110 words). NEVER use 'relaxed' pacing for high-energy topics.
-    6. The Neural Camera Director: For every single AI Image Prompt, you MUST explicitly assign a cinematic camera motion. If the sentence is aggressive, use 'dolly_in_rapid' or 'zoom_in_fast'. If building suspense, use 'pan_up_crane' or 'zoom_out_slow'. 
-    7. CRITICAL VISUAL-CAMERA SYNERGY: The physical image prompt MUST mathematically accommodate the camera motion! If you choose 'pan_up_crane', the image prompt MUST describe a towering vertical subject (like a skyscraper or deep chasm). If you choose 'zoom_out_slow', the prompt MUST explicitly describe a vast, wide environment. The generated image MUST physically support how the camera will physically move through it. Do NOT exclusively use macro close-ups.
-    8. MACRO CINEMATIC RHYTHM: The 12 camera motions MUST NOT be random or chaotic. They must flow together in a cohesive, rhythmic sequence that mirrors the psychological arc of the story! Start with 'static_drone' or 'zoom_out_slow' to establish the world. Build tension with slow pans. When the script hits a climax or aggressive truth, punch in with a 'dolly_in_rapid', then immediately release the visual tension in the next shot with a smooth 'pan_up_crane'. Create a beautiful, pulsing, natural cinematic rhythm. NEVER use high-intensity motions (like dolly_in_rapid) back-to-back!
+    1. Hook: Start mid-conversation (under 3 seconds), casually dropping a massive realization to a friend.
+    2. Body: Explain the business model or historical strategy casually in 3 clear points, using strictly conversational phrasing.
+    3. The Payoff (DENSE & COMPACT): Close the open loop at the very end with a satisfying conclusion in exactly one or two unforgettable, casual sentences.
+    4. The Infinite Loop CTA: You MUST craft the final sentence of the script so it grammatically and flawlessly flows backward into the very first word of the Hook. Do NOT say 'Subscribe'.
+    5. Length & Pacing (CRITICAL RETENTION OPTIMIZATION): You MUST write a 35 to 45 second script. DO NOT EXCEED 45 SECONDS. To achieve this, use 'relaxed' pacing (under 70 words) or tight 'moderate' pacing (~85 words). Do not rush. Let the words breathe like a real conversation.
+    6. The Neural Camera Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion. Focus on natural, grounded motions unless highlighting something intense.
+    7. CRITICAL VISUAL-CAMERA SYNERGY: The physical image prompt MUST mathematically accommodate the camera motion!
+    8. **BRIGHT & VIVID VISUALS**: The AI image prompts MUST explicitly describe scenes that are "bright, vividly colored, high-contrast, strictly lit with bright cinematic daylight, high visibility". The visuals must feel crisp and visually bright!
     """
     
     # We define the expected JSON schema to guarantee the output structure
@@ -97,12 +105,12 @@ def generate_shorts_script(ctx: dict) -> bool:
             "music_vibe": {
                 "type": "STRING",
                 "enum": ["suspense", "corporate", "lofi", "upbeat", "aggressive"],
-                "description": "Select the emotional vibe of the music that perfectly matches the topic of this case study."
+                "description": "Select the emotional vibe. DO NOT blindly default to 'suspense'. For a deep conversation between friends, heavily prefer 'lofi' to create a relaxed, intimate atmosphere."
             },
             "video_pacing": {
                 "type": "STRING",
                 "enum": ["fast", "moderate", "relaxed"],
-                "description": "Select the pacing. MUST be 'fast' if upbeat/aggressive. MUST be 'moderate' if suspense/corporate. MUST be 'relaxed' uniquely for lofi storytelling."
+                "description": "Select the pacing. DO NOT blindly default to 'moderate'. A deep conversation should often use 'relaxed' pacing for a calm vibe, or 'moderate' only if the realization is intense."
             },
             "playlist_category": {
                 "type": "STRING",
