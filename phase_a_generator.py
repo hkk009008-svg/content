@@ -43,7 +43,7 @@ def generate_shorts_script(ctx: dict) -> bool:
     Your analytics prove that audiences stay engaged when investigating a "Secret", a "Monopoly", or something being "Exposed". Casually frame this topic around one of these angles, but keep it feeling like an authentic conversation.
     
     [CRITICAL HOOK RULE - FLY UNDER THE RADAR]: 
-    Do NOT make the script feel like a staged or overly dramatic TikTok video. Your hook MUST be deeply effective but "fly under the radar". Start as if you're mid-conversation with a friend sharing something unbelievable you just learned. Use extremely simple, everyday language. No formal words.
+    Do NOT make the script feel like a staged or overly dramatic TikTok video. Your hook MUST be deeply effective but "fly under the radar". Start as if you're mid-conversation with a friend sharing something unbelievable you just learned. Use extremely simple, everyday language. CRITICAL: Do NOT start the script with forced slang like "Dude", "Bro", "Man", or "Yo". Just drop straight into the realization naturally.
     
     [THE OPEN LOOP TRAP - ADDICTIVENESS BOOST]:
     Casually drop a complex question or missing variable early in the script, and unfold the answer naturally as if you're explaining it to an old buddy, culminating in the final 5 seconds.
