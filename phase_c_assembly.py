@@ -89,35 +89,35 @@ def add_top_banner(video_clip, topic_text):
     from moviepy.editor import ColorClip, TextClip, CompositeVideoClip
     
     # 1. Background Box (Slightly taller to handle multiline text and almost fully opaque for legibility)
-    banner_bg = ColorClip(size=(2160, 360), color=(10, 10, 12)).set_opacity(0.95).set_position(('center', 'top')).set_duration(video_clip.duration)
+    banner_bg = ColorClip(size=(2160, 360), color=(10, 10, 10)).set_opacity(1.0).set_position(('center', 'top')).set_duration(video_clip.duration)
     
-    # 2. Modern Brand Accent Line (Neon Yellow Underline)
-    accent_line = ColorClip(size=(2160, 10), color=(255, 234, 0)).set_position(('center', 360)).set_duration(video_clip.duration)
+    # 2. Modern Brand Accent Line (Ultra-thin minimalist white line)
+    accent_line = ColorClip(size=(2160, 3), color=(255, 255, 255)).set_position(('center', 360)).set_duration(video_clip.duration)
     
-    # 3. Small "Authority" Badge Text
+    # 3. Small "Authority" Badge Text (Clean minimalist sans-serif)
     try:
         badge_txt = TextClip(
-            "// DECLASSIFIED CASE STUDY", 
+            "A N A L Y S I S", 
             fontsize=40, 
-            color='#FFEA00', # Neon Yellow
-            font='/System/Library/Fonts/Supplemental/Courier New Bold.ttf'
+            color='#E0E0E0', 
+            font='/System/Library/Fonts/Supplemental/Arial.ttf'
         ).set_position((100, 70)).set_duration(video_clip.duration)
     except:
-        badge_txt = TextClip("// DECLASSIFIED CASE STUDY", fontsize=40, color='#FFEA00').set_position((100, 70)).set_duration(video_clip.duration)
+        badge_txt = TextClip("A N A L Y S I S", fontsize=40, color='#E0E0E0').set_position((100, 70)).set_duration(video_clip.duration)
         
-    # 4. Main Title properly word-wrapped inside a 1900px boundary so it NEVER cuts off
+    # 4. Main Title (High-end editorial fashion serif)
     try:
         main_txt = TextClip(
             topic_text.upper(), 
-            fontsize=80, 
+            fontsize=65, 
             color='white', 
-            font='/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+            font='/System/Library/Fonts/Supplemental/Times New Roman.ttf',
             align='West',
             method='caption',
             size=(1900, None) # This tells MoviePy to auto word-wrap within 1900 pixels
         ).set_position((100, 150)).set_duration(video_clip.duration)
     except:
-        main_txt = TextClip(topic_text.upper(), fontsize=80, color='white', align='West', method='caption', size=(1900, None)).set_position((100, 150)).set_duration(video_clip.duration)
+        main_txt = TextClip(topic_text.upper(), fontsize=65, color='white', align='West', method='caption', size=(1900, None)).set_position((100, 150)).set_duration(video_clip.duration)
     
     return CompositeVideoClip([video_clip, banner_bg, accent_line, badge_txt, main_txt])
 
@@ -373,15 +373,15 @@ def assemble_final_video(ctx: dict):
                 if camera_motion in ["zoom_in_slow", "zoom_in_fast", "dolly_in_rapid", "static_drone", "zoom_out_slow"]:
                     tension = ctx.get("story_tension", 1.0)
                     if camera_motion == "zoom_in_slow":
-                        scale = 1.0 + ((0.08 * tension) * eased)
+                        scale = 1.0 + ((0.03 * tension) * eased)
                     elif camera_motion == "zoom_in_fast":
-                        scale = 1.0 + ((0.15 * tension) * eased)
+                        scale = 1.0 + ((0.06 * tension) * eased)
                     elif camera_motion == "dolly_in_rapid":
-                        scale = 1.0 + ((0.28 * tension) * eased)
+                        scale = 1.0 + ((0.10 * tension) * eased)
                     elif camera_motion == "zoom_out_slow":
-                        scale = 1.15 - ((0.15 * tension) * eased)
+                        scale = 1.06 - ((0.06 * tension) * eased)
                     else: # static_drone
-                        scale = 1.0 + ((0.02 * tension) * eased)
+                        scale = 1.0 + ((0.01 * tension) * eased)
                         
                     new_w, new_h = int(w/scale), int(h/scale)
                     cx, cy = w//2, h//2
@@ -389,7 +389,7 @@ def assemble_final_video(ctx: dict):
                     
                 else: 
                     # Physical Pan
-                    scale = 1.15 # Give room to pan
+                    scale = 1.06 # Give room to pan smoothly without zooming in too much
                     new_w, new_h = int(w/scale), int(h/scale)
                     max_x = w - new_w
                     max_y = h - new_h
@@ -542,8 +542,8 @@ def assemble_final_video(ctx: dict):
             print("🎨 Adding Channel Watermark Logo...")
             from moviepy.editor import ImageClip
             # Load the AI logo, strip the black background completely using color masking thresholds,
-            # scale it down, and permanently pin it inside the right side of the Top Banner
-            logo_clip = ImageClip("logo.png").resize(width=160).fx(vfx.mask_color, color=[0, 0, 0], thr=35, s=15).set_position((2160 - 200, 80)).set_duration(total_audio_duration).set_opacity(0.85)
+            # scale it down significantly for an elegant clean look, and permanently pin it inside the right side of the Top Banner
+            logo_clip = ImageClip("logo.png").resize(width=100).fx(vfx.mask_color, color=[0, 0, 0], thr=35, s=15).set_position((2160 - 150, 100)).set_duration(total_audio_duration).set_opacity(1.0)
             final_video = CompositeVideoClip([final_video, logo_clip])
             
         # --- NEW: Thumbnail Extraction ---

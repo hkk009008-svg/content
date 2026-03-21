@@ -105,12 +105,12 @@ def generate_shorts_script(ctx: dict) -> bool:
             "music_vibe": {
                 "type": "STRING",
                 "enum": ["suspense", "corporate", "lofi", "upbeat", "aggressive"],
-                "description": "Select the emotional vibe. DO NOT blindly default to 'suspense'. For a deep conversation between friends, heavily prefer 'lofi' to create a relaxed, intimate atmosphere."
+                "description": "Select the emotional vibe. CRITICAL: Do NOT just pick 'lofi' every time! Dynamically change the vibe based strictly on the topic. Use 'suspense' for a cover-up, 'corporate' for financial breakdowns, 'upbeat' for massive success, 'aggressive' for brutal market takeovers, or 'lofi' just for relaxed deep thoughts."
             },
             "video_pacing": {
                 "type": "STRING",
                 "enum": ["fast", "moderate", "relaxed"],
-                "description": "Select the pacing. DO NOT blindly default to 'moderate'. A deep conversation should often use 'relaxed' pacing for a calm vibe, or 'moderate' only if the realization is intense."
+                "description": "Select the pacing. CRITICAL: Adapt strictly to the vibe of the topic. If it's a fast-paced 'upbeat' or 'aggressive' story, use 'fast'. If it's a 'corporate' or 'suspenseful' mystery, use 'moderate'. If it's a calm 'lofi' reflection, use 'relaxed'."
             },
             "playlist_category": {
                 "type": "STRING",
