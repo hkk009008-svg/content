@@ -1,3 +1,8 @@
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", module="urllib3")
+warnings.filterwarnings("ignore", category=UserWarning)
+
 import os
 import json
 import time
