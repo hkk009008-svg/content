@@ -30,7 +30,7 @@ TARGET_LANGUAGES = [
     "Hindi"
 ]
 
-def run_autonomous_pipeline(topic, language):
+def run_autonomous_pipeline(topic, language, master_video_id=None):
     # Auto-generate the logo if it doesn't exist yet
     if not os.path.exists("logo.png"):
         print("🎨 [BRANDING] Generating Permanent Channel Logo...")
@@ -76,6 +76,7 @@ def run_autonomous_pipeline(topic, language):
     ctx = {
         "topic": topic,
         "language": language,
+        "youtube_video_id": master_video_id,
         "script_data": {},
         "full_text": "",
         "music_vibe": "",
@@ -124,17 +125,38 @@ def run_autonomous_pipeline(topic, language):
         return
 
     # FAST-TRACK BYPASS: Skip rendering 4K video infrastructure for non-English languages!
-    # They just need the raw audio locally saved to drag into YouTube Studio manually!
     if language != TARGET_LANGUAGES[0]:
         import shutil
         persistent_audio = f"exports/{topic_slug}_{lang_slug}_Vocals.mp3"
+        persistent_srt = f"exports/{topic_slug}_{lang_slug}_Subtitles.srt"
         if ctx.get("audio_path") and os.path.exists(ctx["audio_path"]):
             shutil.copy(ctx["audio_path"], persistent_audio)
-            print(f"\n✅🎉 {language.upper()} DUB GENERATED AND SAVED! 🎉✅")
+            
+            # --- NEW: GENERATE AND UPLOAD SRT ---
+            from phase_b_audio import generate_srt
+            generate_srt(persistent_audio, persistent_srt)
+            
+            if ctx.get("youtube_video_id"):
+                from phase_d_upload import authenticate_youtube, upload_caption, upload_localizations
+                youtube = authenticate_youtube()
+                
+                # Attach subtitles
+                upload_caption(youtube, ctx["youtube_video_id"], language, persistent_srt)
+                
+                # --- NEW: Inject Translated SEO Metadata ---
+                upload_localizations(
+                    youtube, 
+                    ctx["youtube_video_id"], 
+                    language, 
+                    ctx["script_data"].get("title", f"{topic} ({language})"),
+                    ctx.get("full_description", "")
+                )
+            
+            print(f"\n✅🎉 {language.upper()} DUB & CAPTIONS SAVED/ATTACHED! 🎉✅")
             print(f"🔉 Saved raw audio to: {persistent_audio}\n")
-            # Tomorrow-ready! We delete the temp audio and return, skipping the heavy video render.
+            
             os.remove(ctx["audio_path"])
-        return
+        return ctx.get("youtube_video_id")
 
     # --- PHASE C: ASSEMBLY ---
     print("\n--- [PHASE C] VIDEO ASSEMBLY ---")
@@ -188,6 +210,13 @@ def run_autonomous_pipeline(topic, language):
             
             upload_video(youtube, ctx, publish_at=publish_at_str)
             
+            # --- NEW: GENERATE AND UPLOAD MASTER SRT ---
+            persistent_srt = f"exports/{topic_slug}_{lang_slug}_Subtitles.srt"
+            from phase_b_audio import generate_srt
+            generate_srt(ctx["audio_path"], persistent_srt)
+            from phase_d_upload import upload_caption
+            upload_caption(youtube, ctx["youtube_video_id"], language, persistent_srt)
+            
             # --- NEW: LOG THE EXPERIMENT FOR FUTURE MACHINE LEARNING ---
             log_experiment(ctx)
             
@@ -207,6 +236,8 @@ def run_autonomous_pipeline(topic, language):
                 pass
     else:
         print("❌ Pipeline aborted: Final video file not found.")
+        
+    return ctx.get("youtube_video_id")
 
 if __name__ == "__main__":
     import sys
@@ -226,11 +257,12 @@ if __name__ == "__main__":
         print(f"🔥 Auto-Selected Topic: {topic}\n")
         
     # Run the autonomous pipeline for EVERY target language!
+    master_video_id = None
     for lang in TARGET_LANGUAGES:
         print(f"\n" + "="*50)
         print(f"🌍 BATCH GENERATING IN: {lang.upper()}")
         print("="*50)
-        run_autonomous_pipeline(topic, lang)
+        master_video_id = run_autonomous_pipeline(topic, lang, master_video_id=master_video_id)
     
     # Check if the AI needs new YouTube engagement data to mathematical re-calibrate
     # its Retention Variables (Jump Cuts & Flashes)

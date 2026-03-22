@@ -168,3 +168,102 @@ def upload_video(youtube, ctx: dict, publish_at=None):
 # Optional testing block
 if __name__ == "__main__":
     print("Run this through main.py to execute the full upload sequence!")
+
+def get_bcp47_language(language_name):
+    language_map = {
+        "english": "en",
+        "mandarin (simplified)": "zh-Hans",
+        "mandarin": "zh-Hans",
+        "korean": "ko",
+        "japanese": "ja",
+        "spanish (latin america)": "es-419",
+        "spanish": "es",
+        "hindi": "hi",
+        "french": "fr",
+        "german": "de",
+        "arabic": "ar"
+    }
+    return language_map.get(language_name.lower().strip(), "en")
+
+def upload_caption(youtube, video_id, language, srt_path):
+    import os
+    from googleapiclient.http import MediaFileUpload
+    
+    if not os.path.exists(srt_path):
+        print(f"⚠️ Caption file {srt_path} not found. Skipping upload.")
+        return
+        
+    bcp47_lang = get_bcp47_language(language)
+    print(f"🌍 [PHASE D] Uploading '{language}' ({bcp47_lang}) Custom Subtitles for video {video_id}...")
+    
+    try:
+        insert_request = youtube.captions().insert(
+            part="snippet",
+            body={
+                "snippet": {
+                    "videoId": video_id,
+                    "language": bcp47_lang,
+                    "name": f"{language} (Auto-Translated by AI)",
+                    "isDraft": False
+                }
+            },
+            media_body=MediaFileUpload(srt_path, mimetype='application/x-subrip')
+        )
+        response = insert_request.execute()
+        print(f"✅ Success! True-Synced '{language}' Subtitles attached to the video API!")
+        return response
+    except Exception as e:
+        print(f"❌ Error uploading customized {language} subtitles: {e}")
+
+def upload_localizations(youtube, video_id, language, title, description):
+    """
+    Automatically adds a translated Title and Description to the video's Localization metadata.
+    This ensures that foreign viewers see the video natively in their language on their YouTube feed.
+    """
+    bcp47_lang = get_bcp47_language(language)
+    print(f"🌍 [PHASE D] Injecting '{language}' translated Titles & Descriptions into Master Video...")
+    
+    try:
+        # Fetch current localizations so we don't wipe existing ones
+        request = youtube.videos().list(
+            part="snippet,localizations",
+            id=video_id
+        )
+        response = request.execute()
+        
+        if not response["items"]:
+            print(f"⚠️ Video {video_id} not found. Cannot add localizations.")
+            return
+            
+        video = response["items"][0]
+        
+        # YouTube REQUIRES the snippet.defaultLanguage to be set before adding localizations
+        if "defaultLanguage" not in video["snippet"]:
+            video["snippet"]["defaultLanguage"] = "en"
+            
+        localizations = video.get("localizations", {})
+        
+        # Inject the new translation
+        localizations[bcp47_lang] = {
+            "title": title[:100], # YouTube max title length is 100 characters
+            "description": description
+        }
+        
+        video["localizations"] = localizations
+        
+        # Push the update back to YouTube
+        update_request = youtube.videos().update(
+            part="snippet,localizations",
+            body={
+                "id": video_id,
+                "snippet": video["snippet"],
+                "localizations": video["localizations"]
+            }
+        )
+        update_response = update_request.execute()
+        print(f"✅ Success! YouTube's global search engine now natively indexes the '{language}' translation!")
+        return update_response
+        
+    except Exception as e:
+        print(f"❌ Error uploading localizations for {language}: {e}")
+

@@ -65,4 +65,33 @@ def generate_voiceover(ctx: dict) -> bool:
 # Optional: Run this file directly to test just the audio
 if __name__ == "__main__":
     test_text = "McDonald's isn't a fast-food company; it's the most aggressive real estate empire on the planet."
-    generate_voiceover(test_text, "test_mcdonalds_hook.mp3")
+    generate_voiceover({"full_text": test_text, "music_vibe": "suspense"})
+
+def generate_srt(audio_path: str, srt_path: str):
+    print(f"📝 [PHASE B] Transcribing audio back to precise SRT captions: {audio_path}")
+    import whisper
+    import datetime
+    
+    # Use the base model for speed and accuracy
+    model = whisper.load_model("base")
+    result = model.transcribe(audio_path)
+    
+    with open(srt_path, "w", encoding="utf-8") as f:
+        for i, segment in enumerate(result["segments"], start=1):
+            start = datetime.timedelta(seconds=segment["start"])
+            end = datetime.timedelta(seconds=segment["end"])
+            
+            # Format timedelta to SRT format (HH:MM:SS,mmm)
+            def format_time(td):
+                total_seconds = int(td.total_seconds())
+                hours, remainder = divmod(total_seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                milliseconds = int(td.microseconds / 1000)
+                return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+                
+            f.write(f"{i}\n")
+            f.write(f"{format_time(start)} --> {format_time(end)}\n")
+            f.write(f"{segment['text'].strip()}\n\n")
+            
+    print(f"✅ SRT successfully saved to {srt_path}")
+    return srt_path
