@@ -130,24 +130,50 @@ def fetch_and_update_analytics(youtube_auth):
         
     conn.close()
 
-def check_calibration_milestone():
-    """Checks the database to see if we hit a multiple of 10 uploads and prints a terminal alert."""
-    init_db()
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('SELECT COUNT(*) FROM shorts_experiments')
-    count = cursor.fetchone()[0]
-    conn.close()
+def autonomous_batch_calibration():
+    """Triggered after every batch. Scrapes the web for live trends and uses Gemini to synthesize the supreme strategy matrix."""
+    print("\n" + "🔥"*25)
+    print(f"🚨 AUTONOMOUS WEB-SCRAPING CALIBRATION SEQUENCE INITIATED 🚨")
+    print("🔥"*25)
+    print("AGENT MESSAGE: Scraping global data to recalibrate maximum algorithmic integrity...")
     
-    if count > 0 and count % 6 == 0:
-        print("\n" + "🔥"*25)
-        print(f"🚨 CALIBRATION PROTOCOL TRIGGERED: {count} VIDEOS LOGGED 🚨")
-        print("🔥"*25)
-        print("AGENT MESSAGE: Please pause the engine and paste your current YouTube")
-        print("Studio Engagements Dashboard to your AI Architect immediately!")
-        print("We need to mathematically recalibrate the jump-cuts, Neon vibes,")
-        print("and visual psychology based on your new retention data.")
+    live_youtube = fetch_live_youtube_trends()
+    live_reddit = fetch_external_market_sentiment()
+    
+    # Send all scraped live data to Gemini to formulate the master law
+    prompt = f"""
+    You are an elite, mathematical YouTube Growth Strategist.
+    I have just finished rendering a batch of videos. I need you to completely calibrate our strategy for the NEXT batch.
+    
+    Here is the live data I just scraped from the web THIS SECOND:
+    {live_youtube}
+    {live_reddit}
+    
+    INSTRUCTION: Read the above real-time data carefully. Synthesize the absolute highest integrity strategy for our next batch. 
+    Tell me exactly what pacing, emotion, hook structure, and niche topics are objectively dominating right now.
+    Write this as a strict set of 4 rules that the AI Video Generator MUST obey on its next run.
+    """
+    
+    import google.generativeai as genai
+    import os
+    
+    genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+    # We use gemini-pro (Gemini 1.5 Pro) for high-reasoning tasks
+    model = genai.GenerativeModel('gemini-1.5-pro-latest') 
+    
+    try:
+        response = model.generate_content(prompt)
+        calibration_rules = response.text
+        
+        # Save this to a physical file so the Generator uses it on the next run!
+        with open("CALIBRATION_MATRIX.txt", "w") as f:
+            f.write(calibration_rules)
+            
+        print("\n✅ [A/B BRAIN] Successful global scrape. New Master Matrix written to CALIBRATION_MATRIX.txt.")
+        print("The AI will intrinsically obey these new high-integrity rules on the very next generation run.")
         print("="*60 + "\n")
+    except Exception as e:
+        print(f"⚠️ Calibration scraping failed. {e}\n")
 
 def get_top_performing_context():
     """Returns a dynamic string for Gemini's prompt based on the highest Viral Score in DB."""

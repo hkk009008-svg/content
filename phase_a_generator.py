@@ -23,6 +23,13 @@ def generate_shorts_script(ctx: dict) -> bool:
     ab_memory = get_top_performing_context()
     live_trends = fetch_live_youtube_trends()
     
+    import os
+    calibration_matrix = ""
+    if os.path.exists("CALIBRATION_MATRIX.txt"):
+        with open("CALIBRATION_MATRIX.txt", "r") as f:
+            raw_matrix = f.read()
+            calibration_matrix = f"\n[🔥 THE OMNI-CALIBRATION MATRIX 🔥]\n{raw_matrix}\n"
+    
     styles = [
         "a casual but highly authoritative conversation with an industry expert",
         "an insightful, unscripted breakdown from a trusted advisor",
@@ -33,6 +40,8 @@ def generate_shorts_script(ctx: dict) -> bool:
     
     prompt = f"""
     You are an expert YouTube Shorts scriptwriter in the Business & Entrepreneurship niche. 
+    
+    {calibration_matrix}
     
     {ab_memory}
     

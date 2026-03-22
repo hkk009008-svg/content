@@ -105,7 +105,12 @@ def upload_video(youtube, ctx: dict, publish_at=None):
             "title": title,
             "description": description, 
             "tags": tags,
-            "categoryId": "27" # 27 = Education. 
+            "categoryId": "27", # 27 = Education. 
+            # CRITICAL: YouTube explicitly greys out the "Subtitles" panel 
+            # if a video is uploaded via the API without natively declaring 
+            # its original default language matrix!
+            "defaultLanguage": "en",
+            "defaultAudioLanguage": "en"
         },
         "status": {
             # CRITICAL: Upload as private (required initially for scheduled videos)

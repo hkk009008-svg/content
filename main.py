@@ -4,6 +4,7 @@ warnings.filterwarnings("ignore", module="urllib3")
 warnings.filterwarnings("ignore", category=UserWarning)
 
 import os
+import re
 import json
 import time
 
@@ -64,7 +65,6 @@ def run_autonomous_pipeline(topic, language):
             
     print(f"🚀 STARTING PIPELINE FOR TOPIC: {topic}\n")
     
-    import os, re
     # Create an exports directory so local copies are neatly saved permanently
     if not os.path.exists("exports"):
         os.makedirs("exports")
@@ -121,6 +121,18 @@ def run_autonomous_pipeline(topic, language):
     print("\n--- [PHASE B] AUDIO GENERATION ---")
     if not generate_voiceover(ctx):
         print("❌ Pipeline aborted: Failed to generate audio.")
+        return
+
+    # FAST-TRACK BYPASS: Skip rendering 4K video infrastructure for non-English languages!
+    # They just need the raw audio locally saved to drag into YouTube Studio manually!
+    if language != TARGET_LANGUAGES[0]:
+        import shutil
+        persistent_audio = f"exports/{topic_slug}_{lang_slug}_Vocals.mp3"
+        if ctx.get("audio_path") and os.path.exists(ctx["audio_path"]):
+            shutil.copy(ctx["audio_path"], persistent_audio)
+            print(f"\n✅🎉 {language.upper()} DUB GENERATED AND SAVED! 🎉✅")
+            print(f"🔉 Retained raw audio for manual YouTube upload: {persistent_audio}\n")
+            os.remove(ctx["audio_path"])
         return
 
     # --- PHASE C: ASSEMBLY ---
@@ -181,20 +193,10 @@ def run_autonomous_pipeline(topic, language):
             print("\n✅🎉 MASTER VIDEO UPLOADED SUCCESSFULLY! 🎉✅")
             print(f"Your Master Video is SCHEDULED to automatically go public in 24 hours!")
             print(f"Verify it here: https://studio.youtube.com/video/{ctx['youtube_video_id']}/edit")
-        else:
-            print(f"\n✅🎉 {language.upper()} DUB GENERATED! 🎉✅")
-            print("I skipped API upload to protect the algorithm. Please upload the raw audio to the Master Video's Multi-Language panel!")
         
         # Cleanup temporary files (but KEEP the exported video + thumbnail)
         print(f"💾 Permanently saved to local disk: {ctx['final_video_path']}")
         
-        # KEEP the raw MP3 file if it's not the primary language so the user can drag-and-drop it into YouTube Studio
-        if language != TARGET_LANGUAGES[0] and ctx.get("audio_path") and os.path.exists(ctx["audio_path"]):
-            import shutil
-            persistent_audio = f"exports/{topic_slug}_{lang_slug}_Vocals.mp3"
-            shutil.copy(ctx["audio_path"], persistent_audio)
-            print(f"🔉 Retained raw audio for manual YouTube upload: {persistent_audio}")
-            
         if ctx.get("audio_path") and os.path.exists(ctx["audio_path"]):
             os.remove(ctx["audio_path"])
         for vid in ctx["downloaded_vids"]:
@@ -231,5 +233,5 @@ if __name__ == "__main__":
     
     # Check if the AI needs new YouTube engagement data to mathematical re-calibrate
     # its Retention Variables (Jump Cuts & Flashes)
-    from phase_e_learning import check_calibration_milestone
-    check_calibration_milestone()
+    from phase_e_learning import autonomous_batch_calibration
+    autonomous_batch_calibration()
