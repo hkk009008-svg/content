@@ -20,7 +20,8 @@ def run_autonomous_pipeline(topic):
     if not os.path.exists("logo.png"):
         print("🎨 [BRANDING] Generating Permanent Channel Logo...")
         import requests, urllib.parse
-        p = urllib.parse.quote("a highly minimal futuristic glowing neon blue geometric tech corporate logo on a pure pitch black background, vector flat icon, high resolution")
+        new_prompt = "a simple, highly trustworthy and friendly youtube channel logo, clean welcoming aesthetic, warm colors, vector flat icon, high resolution, solid background"
+        p = urllib.parse.quote(new_prompt)
         try:
             from dotenv import load_dotenv
             load_dotenv()
@@ -30,7 +31,7 @@ def run_autonomous_pipeline(topic):
             if fal_key:
                 url = "https://fal.run/fal-ai/flux/schnell"
                 headers = {"Authorization": f"Key {fal_key}", "Content-Type": "application/json"}
-                payload = {"prompt": "a highly minimal futuristic glowing neon blue geometric tech corporate logo on a pure pitch black background, vector flat icon, high resolution", "image_size": "square_hd", "num_inference_steps": 4}
+                payload = {"prompt": new_prompt, "image_size": "square_hd", "num_inference_steps": 4}
                 resp = requests.post(url, json=payload, headers=headers)
                 if resp.status_code == 200:
                     img_data = requests.get(resp.json()["images"][0]["url"]).content
