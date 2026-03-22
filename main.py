@@ -97,7 +97,7 @@ def run_autonomous_pipeline(topic, language):
         
     script_data = ctx["script_data"]
     seo_description = script_data.get('youtube_description', f"The insane truth about {topic}.")
-    ctx["full_description"] = f"{seo_description}\n\nStart your own business today: [YOUR_AFFILIATE_LINK]\n\n#shorts #business #finance"
+    ctx["full_description"] = f"{seo_description}\n\nStart your own business today: https://your-website-or-affiliate-link-here.com\n\n#shorts #business #finance"
     
     # --- UNIFIED STORY TENSION ALGORITHM ---
     tension_map = {"lofi": 0.3, "corporate": 0.6, "suspense": 1.0, "upbeat": 1.5, "aggressive": 2.2}
@@ -131,7 +131,8 @@ def run_autonomous_pipeline(topic, language):
         if ctx.get("audio_path") and os.path.exists(ctx["audio_path"]):
             shutil.copy(ctx["audio_path"], persistent_audio)
             print(f"\n✅🎉 {language.upper()} DUB GENERATED AND SAVED! 🎉✅")
-            print(f"🔉 Retained raw audio for manual YouTube upload: {persistent_audio}\n")
+            print(f"🔉 Saved raw audio to: {persistent_audio}\n")
+            # Tomorrow-ready! We delete the temp audio and return, skipping the heavy video render.
             os.remove(ctx["audio_path"])
         return
 

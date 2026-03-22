@@ -81,7 +81,11 @@ def generate_shorts_script(ctx: dict) -> bool:
     response_schema = {
         "type": "OBJECT",
         "properties": {
-            "title": {"type": "STRING", "description": "A catchy title for the video"},
+            "ab_test_titles": {
+                "type": "ARRAY", 
+                "items": {"type": "STRING"},
+                "description": "Provide EXACTLY 3 extremely distinct video titles for rigorous algorithmic A/B testing. Title 1: High curiosity gap. Title 2: Aggressive bold claim. Title 3: Pure benefit/value."
+            },
             "hook": {"type": "STRING", "description": "The opening sentence"},
             "body_paragraphs": {
                 "type": "ARRAY", 
@@ -129,7 +133,7 @@ def generate_shorts_script(ctx: dict) -> bool:
                 "description": "A high-level YouTube playlist name this video belongs to (e.g. 'Business Secrets', 'Tech History', 'Marketing Psychology'). Max 3 words."
             }
         },
-        "required": ["title", "hook", "body_paragraphs", "infinite_loop_bridge", "ai_image_prompts", "youtube_description", "youtube_tags", "music_vibe", "video_pacing", "playlist_category"]
+        "required": ["ab_test_titles", "hook", "body_paragraphs", "infinite_loop_bridge", "ai_image_prompts", "youtube_description", "youtube_tags", "music_vibe", "video_pacing", "playlist_category"]
     }
     
     # Call the Gemini 2.5 Flash model
@@ -147,6 +151,19 @@ def generate_shorts_script(ctx: dict) -> bool:
     parsed_json = json.loads(response.text)
     # Inject the randomly selected tone for the experiment logger
     parsed_json['tone_used'] = tone
+    
+    # NEW: Extract the first A/B title as the master title for system compatibility
+    ab_titles = parsed_json.get("ab_test_titles", [])
+    if ab_titles and len(ab_titles) > 0:
+        parsed_json["title"] = ab_titles[0]
+        
+        print(f"\n🧪 [A/B TEST TITLES GENERATED FOR YOUTUBE STUDIO]")
+        print("Copy/Paste these into the Advanced Features 'Test & Compare' tool tomorrow:")
+        for i, t in enumerate(ab_titles):
+            print(f"   {i+1}. {t}")
+        print("="*60 + "\n")
+    else:
+        parsed_json["title"] = "Emergency Fallback Title"
     
     ctx["script_data"] = parsed_json
     # Derive core state parameters immediately
