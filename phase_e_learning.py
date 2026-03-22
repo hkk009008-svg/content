@@ -154,15 +154,16 @@ def autonomous_batch_calibration():
     Write this as a strict set of 4 rules that the AI Video Generator MUST obey on its next run.
     """
     
-    import google.generativeai as genai
+    from google import genai
     import os
     
-    genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
-    # We use gemini-pro (Gemini 1.5 Pro) for high-reasoning tasks
-    model = genai.GenerativeModel('gemini-1.5-pro-latest') 
-    
     try:
-        response = model.generate_content(prompt)
+        client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        # We use gemini-2.5-flash for high-reasoning context synthesis
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
         calibration_rules = response.text
         
         # Save this to a physical file so the Generator uses it on the next run!
