@@ -430,8 +430,8 @@ def assemble_final_video(ctx: dict):
             # Apply dynamic emotional color grade on top of the normalized unified baseline
             clip = profile["color_grade"](clip)
             
-            # Apply dynamic time warp physics derived mathematically from Story Tension
-            base_multiplier = max(0.9, min(1.2, 0.9 + (0.1 * ctx.get("story_tension", 1.0))))
+            # Apply dynamic time warp physics derived mathematically from Story Tension (Wider Scale)
+            base_multiplier = max(0.8, min(1.5, 0.85 + (0.15 * ctx.get("story_tension", 1.0))))
             clip = clip.fx(vfx.speedx, profile["speed"] * base_multiplier)
             
             # If this cut exceeds what we need to finish the video, crop the end of it

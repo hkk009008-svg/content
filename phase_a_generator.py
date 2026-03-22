@@ -22,10 +22,10 @@ def generate_shorts_script(ctx: dict) -> bool:
     live_trends = fetch_live_youtube_trends()
     
     styles = [
-        "a deep, late-night conversation with a close friend",
-        "a casual, intimate talk between friends sharing a mind-blowing realization",
-        "a very relaxed, informal but profound discussion between friends",
-        "a natural, unscripted conversation between two best friends"
+        "a casual but highly authoritative conversation with an industry expert",
+        "an insightful, unscripted breakdown from a trusted advisor",
+        "a relaxed, conversational explanation from a leading subject-matter expert",
+        "a deep, factual discussion with a knowledgeable mentor"
     ]
     tone = random.choice(styles)
     
@@ -37,27 +37,27 @@ def generate_shorts_script(ctx: dict) -> bool:
     {live_trends}
     
     Write a highly engaging 35-45 second video script about: "{topic}".
-    Use {tone}. Make sure the angle, hook, and body are completely factual and logically sound, but spoken exactly how real humans actually converse.
+    Use {tone}. Make sure the angle, hook, and body are completely factual, logically sound, and spoken with the confident clarity of an industry expert.
     
     [PROVEN WINNING ANGLES]:
-    Your analytics prove that audiences stay engaged when investigating a "Secret", a "Monopoly", or something being "Exposed". Casually frame this topic around one of these angles, but keep it feeling like an authentic conversation.
+    Your analytics prove that audiences stay engaged when investigating a "Secret", a "Monopoly", or something being "Exposed". Casually frame this topic around one of these angles, but keep it feeling like an authentic, authoritative conversation.
     
     [CRITICAL HOOK RULE - FLY UNDER THE RADAR]: 
-    Do NOT make the script feel like a staged or overly dramatic TikTok video. Your hook MUST be deeply effective but "fly under the radar". Start as if you're mid-conversation with a friend sharing something unbelievable you just learned. Use extremely simple, everyday language. CRITICAL: Do NOT start the script with forced slang like "Dude", "Bro", "Man", or "Yo". Just drop straight into the realization naturally.
+    Do NOT make the script feel like a staged or overly dramatic TikTok video. Your hook MUST be deeply effective but "fly under the radar". Start as if you're mid-conversation sharing a high-level realization. Use sophisticated yet accessible language. CRITICAL: Do NOT start the script with forced slang like "Dude", "Bro", "Man", or "Yo". Just drop straight into the realization naturally, with undeniable expertise.
     
     [THE OPEN LOOP TRAP - ADDICTIVENESS BOOST]:
-    Casually drop a complex question or missing variable early in the script, and unfold the answer naturally as if you're explaining it to an old buddy, culminating in the final 5 seconds.
+    Casually drop a complex question or missing variable early in the script, and unfold the answer logically as if you're mentoring someone, culminating in the final 5 seconds.
     
-    [AUTHENTIC, CASUAL CONVERSATION & WORD CHOICE]:
-    The script must flow absolutely naturally, like you're literally just hanging out. Use contractions (gonna, kinda, isn't), natural pauses (like, you know, um), and very simple, conversational word choices. If you wouldn't say the word out loud while grabbing coffee with a friend, DO NOT USE IT. Avoid formal, written-style narration entirely. Speak directly, casually, and authentically.
+    [AUTHENTIC, EXPERT CONVERSATION & WORD CHOICE]:
+    The script must flow absolutely naturally, like you're an expert speaking to a peer or mentee. Use natural conversational rhythm but avoid overly casual slang. If an industry leader wouldn't say it in a relaxed podcast interview, DO NOT USE IT. Avoid formal, written-style narration entirely. Speak directly, confidently, and authentically.
     
     [OMNISCIENT RESEARCH & THOUGHT-PROVOKING RESOLUTION]:
-    You must execute profound, deep-level research on the topic. Provide actual numbers, historical context, or complex market dynamics broken down simply. The final payoff must provide a deeply satisfying, logical conclusion that makes your friend feel mind-blown.
+    You must execute profound, deep-level research on the topic. Provide actual numbers, historical context, or complex market dynamics broken down simply. The final payoff must provide a deeply satisfying, logical conclusion that establishes unshakeable trust.
     
     Rules:
-    1. Hook: Start mid-conversation (under 3 seconds), casually dropping a massive realization to a friend.
-    2. Body: Explain the business model or historical strategy casually in 3 clear points, using strictly conversational phrasing.
-    3. The Payoff (DENSE & COMPACT): Close the open loop at the very end with a satisfying conclusion in exactly one or two unforgettable, casual sentences.
+    1. Hook: Start mid-conversation (under 3 seconds), casually dropping a massive realization with expert authority.
+    2. Body: Explain the business model or historical strategy casually in 3 clear points, using strictly conversational but expert phrasing.
+    3. The Payoff (DENSE & COMPACT): Close the open loop at the very end with a satisfying conclusion in exactly one or two unforgettable, authoritative sentences.
     4. The Infinite Loop CTA: You MUST craft the final sentence of the script so it grammatically and flawlessly flows backward into the very first word of the Hook. Do NOT say 'Subscribe'.
     5. Length & Pacing (CRITICAL RETENTION OPTIMIZATION): You MUST write a 35 to 45 second script. DO NOT EXCEED 45 SECONDS. To achieve this, use 'relaxed' pacing (under 70 words) or tight 'moderate' pacing (~85 words). Do not rush. Let the words breathe like a real conversation.
     6. The Neural Camera Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion. Focus on natural, grounded motions unless highlighting something intense.

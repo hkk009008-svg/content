@@ -31,9 +31,10 @@ def generate_trending_topic() -> str:
         recent_used = used_topics[-50:]
         avoid_clause = f"\n    CRITICAL: You MUST NOT pick any of these previously used topics, nor anything remotely similar:\n" + "\n".join([f"    - {t}" for t in recent_used]) + "\n"
 
-    from phase_e_learning import get_top_performing_context, fetch_live_youtube_trends
+    from phase_e_learning import get_top_performing_context, fetch_live_youtube_trends, fetch_external_market_sentiment
     ab_memory = get_top_performing_context()
     live_trends = fetch_live_youtube_trends()
+    global_sentiment = fetch_external_market_sentiment()
 
     prompt = f"""
     You are an elite YouTube Shorts strategist prioritizing algorithmic virality and highly lucrative business content.
@@ -42,15 +43,18 @@ def generate_trending_topic() -> str:
     
     {live_trends}
     
+    {global_sentiment}
+    
     Your goal is to brainstorm the SINGLE most wild, intensely controversial, and profoundly mind-blowing business or entrepreneurship case study topic for today.
     
-    You MUST focus exclusively on highly polarizing areas that break the internet:
-    - Highly illegal or deeply unethical corporate espionage and monopolies
-    - Massive, apocalyptic corporate failures, scandals, or lawsuits suppressed by the media
-    - Deeply manipulative, genius psychological marketing warfare used against the public
-    - Dark, hidden truths about how famous entities ACTUALLY make their billions
+    You MUST craft a story that breaks the internet by aggressively matching the emotional state of the current live trends (whether inspiring or catastrophic):
+    - [THE NEGATIVE EXTREME]: Deeply unethical corporate espionage, apocalyptic business failures, or manipulative marketing warfare.
+    - [THE POSITIVE EXTREME]: Unbelievably genius innovations, massive viral underdog success stories, or hidden systems that are actively saving industries or making people rich.
+    - [THE EDUCATIONAL REVELATION]: A profoundly brilliant, little-known business strategy or psychological framework that provides immense, positive value and actionable insight to the viewer.
     
-    The topic MUST be aggressive, wildly provocative, and deeply intriguing.
+    If the current scraped sentiment is fearful or angry, lean into the dark truths. If the current sentiment is optimistic, excited, or building, construct a deeply beneficial and awe-inspiring topic!
+    
+    The topic MUST be aggressive, wildly provocative, and deeply intriguing regardless of whether it is positive or negative.
     {avoid_clause}
     Provide ONLY the topic in 12 words or less. Do not include quotes, markdown formatting, or any extra text. Make it incredibly punchy.
     """

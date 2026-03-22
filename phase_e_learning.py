@@ -139,7 +139,7 @@ def check_calibration_milestone():
     count = cursor.fetchone()[0]
     conn.close()
     
-    if count > 0 and count % 10 == 0:
+    if count > 0 and count % 6 == 0:
         print("\n" + "🔥"*25)
         print(f"🚨 CALIBRATION PROTOCOL TRIGGERED: {count} VIDEOS LOGGED 🚨")
         print("🔥"*25)
@@ -194,7 +194,35 @@ def get_top_performing_context():
         Tweak your next script to replicate that exact psychological story structure and narrative flow, applying it to the new topic. Subvert expectations with shocking new data, but firmly adopt the winning storytelling mechanism of that specific Hook and Loop Bridge!
         """
     else:
-        # If no proven winners yet, let the AI act entirely random to explore the possibility space.
+        # 🟢 THE AUTONOMOUS GAP FILLER 🟢
+        # If the internal A/B testing database is empty or lacks proven winners, 
+        # we autonomously crawl external intelligence to bridge the gap!
+        print("🧠 [A/B BRAIN] Local database empty. Crawling external network for structural inspiration...")
+        try:
+            import requests
+            # Fetch the top 3 smartest, highest-voted tech/business headlines on Hacker News right now
+            hn_top = requests.get("https://hacker-news.firebaseio.com/v0/topstories.json", timeout=5).json()
+            fallback_headlines = []
+            for item_id in hn_top[:3]:
+                item_data = requests.get(f"https://hacker-news.firebaseio.com/v0/item/{item_id}.json", timeout=5).json()
+                if item_data and 'title' in item_data:
+                    fallback_headlines.append(f'- "{item_data["title"]}"')
+                    
+            if fallback_headlines:
+                headlines_str = "\n        ".join(fallback_headlines)
+                return f"""
+        [⚠️ CRITICAL SYSTEM MEMORY: AUTONOMOUS GAP FILLER INITIATED ⚠️]
+        Your internal A/B testing database currently has NO proven winners to model after. 
+        Instead of guessing blindly, the system has autonomously crawled the highest-voted, most intellectually engaging posts on Hacker News right at this very second.
+        
+        The absolute smartest people on the internet are currently clicking on these exact structural headlines:
+        {headlines_str}
+        
+        INSTRUCTION: You MUST reverse-engineer the psychological framing, curiosity gaps, and structural formatting of those exact headlines. Use them as a structural template to format your Hook and Topic angle. Borrow their genius to fill your database gap!
+        """
+        except Exception as e:
+            print(f"⚠️ Warning: Autonomous gap filler failed. {e}")
+            
         return ""
 
 def fetch_live_youtube_trends():
@@ -231,4 +259,46 @@ def fetch_live_youtube_trends():
         """
     except Exception as e:
         print(f"⚠️ Warning: Could not fetch live trends. {e}")
+        return ""
+
+def fetch_external_market_sentiment():
+    """Scrapes public Reddit JSON endpoints for real-time market and business sentiment."""
+    import requests
+    print("🌍 [A/B BRAIN] Scanning global market sentiment (Reddit/News)...")
+    
+    headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+    sentiment_titles = []
+    
+    try:
+        # Check WallStreetBets for raw market chaos/trends
+        wsb_url = "https://www.reddit.com/r/WallStreetBets/hot.json?limit=7"
+        wsb_resp = requests.get(wsb_url, headers=headers, timeout=5)
+        if wsb_resp.status_code == 200:
+            for post in wsb_resp.json().get('data', {}).get('children', []):
+                title = post['data'].get('title', '')
+                if len(title) > 15:
+                    sentiment_titles.append(f"[WSB] {title}")
+                    
+        # Check Entrepreneur for business strategies/struggles
+        ent_url = "https://www.reddit.com/r/Entrepreneur/hot.json?limit=7"
+        ent_resp = requests.get(ent_url, headers=headers, timeout=5)
+        if ent_resp.status_code == 200:
+            for post in ent_resp.json().get('data', {}).get('children', []):
+                title = post['data'].get('title', '')
+                if len(title) > 15:
+                    sentiment_titles.append(f"[Entrepreneur] {title}")
+                    
+        if not sentiment_titles:
+            return ""
+            
+        trend_str = "\n".join([f"        - {t}" for t in sentiment_titles])
+        return f"""
+        [🌍 LIVE GLOBAL MARKET & BUSINESS SENTIMENT 🌍]
+        Beyond just YouTube, here is what the internet is actively obsessing over, panicking about, or building right now on the front pages of business communities:
+{trend_str}
+        
+        INSTRUCTION: Synthesize these raw, real-world human emotions and trends. If the internet is panicking, lean into the dark scandal. But if the community is celebrating a massive win or obsessed with a profound positive innovation, mirror that excitement and make the topic highly beneficial and inspiring!
+        """
+    except Exception as e:
+        print(f"⚠️ Warning: Could not fetch external market sentiment. {e}")
         return ""

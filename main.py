@@ -71,8 +71,8 @@ def run_autonomous_pipeline(topic):
     ctx["full_description"] = f"{seo_description}\n\nStart your own business today: [YOUR_AFFILIATE_LINK]\n\n#shorts #business #finance"
     
     # --- UNIFIED STORY TENSION ALGORITHM ---
-    tension_map = {"lofi": 0.5, "corporate": 0.8, "suspense": 1.2, "upbeat": 1.5, "aggressive": 1.8}
-    pacing_map = {"relaxed": 0.8, "moderate": 1.0, "fast": 1.2}
+    tension_map = {"lofi": 0.3, "corporate": 0.6, "suspense": 1.0, "upbeat": 1.5, "aggressive": 2.2}
+    pacing_map = {"relaxed": 0.5, "moderate": 1.0, "fast": 1.5}
     
     music_vibe = ctx.get("music_vibe", "suspense")
     video_pacing = ctx.get("video_pacing", "moderate")

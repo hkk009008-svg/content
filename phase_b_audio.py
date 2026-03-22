@@ -42,10 +42,10 @@ def generate_voiceover(ctx: dict) -> bool:
             model_id="eleven_multilingual_v2",
             voice_settings=VoiceSettings(
                 # Limit the drop in stability so it always sounds reliable and trustful
-                stability=max(0.40, min(0.85, 0.70 - (0.15 * ctx.get("story_tension", 1.0)))),
+                stability=max(0.20, min(0.95, 0.85 - (0.15 * ctx.get("story_tension", 1.0)))),
                 similarity_boost=0.85, 
                 # Keep style severely constrained so it feels more like an organic conversation
-                style=max(0.10, min(0.40, 0.15 + (0.15 * ctx.get("story_tension", 1.0)))), 
+                style=max(0.00, min(0.60, 0.05 + (0.15 * ctx.get("story_tension", 1.0)))), 
                 use_speaker_boost=True
             )
         )
