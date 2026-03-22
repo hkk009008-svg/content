@@ -16,6 +16,8 @@ def generate_shorts_script(ctx: dict) -> bool:
     Enforces a strict JSON response.
     """
     topic = ctx["topic"]
+    language = ctx.get("language", "English")
+    print(f"\n✍️ [PHASE A] Writing highly-retentive script in {language.upper()} for topic: {topic}")
     import random
     from phase_e_learning import get_top_performing_context, fetch_live_youtube_trends
     ab_memory = get_top_performing_context()
@@ -63,6 +65,7 @@ def generate_shorts_script(ctx: dict) -> bool:
     6. The Neural Camera Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion. Focus on natural, grounded motions unless highlighting something intense.
     7. CRITICAL VISUAL-CAMERA SYNERGY: The physical image prompt MUST mathematically accommodate the camera motion!
     8. **BRIGHT & VIVID VISUALS**: The AI image prompts MUST explicitly describe scenes that are "bright, vividly colored, high-contrast, strictly lit with bright cinematic daylight, high visibility". The visuals must feel crisp and visually bright!
+    9. **CRITICAL OUTPUT LANGUAGE**: Ensure that the script, hook, title, and youtube tags are written completely and natively in {language.upper()}. If {language.upper()} is not English, you MUST STILL provide English strings for the image_prompts under `ai_image_prompts` (so the image generator doesn't fail). However, the audio text AND the video title/description MUST heavily prioritize native {language.upper()}.
     """
     
     # We define the expected JSON schema to guarantee the output structure

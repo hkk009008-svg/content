@@ -15,7 +15,21 @@ from phase_c_assembly import assemble_final_video
 from phase_d_upload import authenticate_youtube, upload_video
 from phase_e_learning import log_experiment, fetch_and_update_analytics
 
-def run_autonomous_pipeline(topic):
+# ==============================================================================
+# 🌍 GLOBAL CONFIGURATION: Set your target audience language list here!
+# Adding multiple languages here will batch-generate and upload ALL of them!
+# Examples: "English", "Hindi", "Mandarin (Simplified)", "Spanish", "Arabic"
+# ==============================================================================
+TARGET_LANGUAGES = [
+    "English", 
+    "Mandarin (Simplified)", 
+    "Korean", 
+    "Japanese", 
+    "Spanish (Latin America)", 
+    "Hindi"
+]
+
+def run_autonomous_pipeline(topic, language):
     # Auto-generate the logo if it doesn't exist yet
     if not os.path.exists("logo.png"):
         print("🎨 [BRANDING] Generating Permanent Channel Logo...")
@@ -50,9 +64,18 @@ def run_autonomous_pipeline(topic):
             
     print(f"🚀 STARTING PIPELINE FOR TOPIC: {topic}\n")
     
+    import os, re
+    # Create an exports directory so local copies are neatly saved permanently
+    if not os.path.exists("exports"):
+        os.makedirs("exports")
+        
+    topic_slug = re.sub(r'[^a-zA-Z0-9]+', '_', topic)[:50].strip('_')
+    lang_slug = language.replace(' ', '')
+    
     # --- OMNI CONTEXT INITIALIZATION ---
     ctx = {
         "topic": topic,
+        "language": language,
         "script_data": {},
         "full_text": "",
         "music_vibe": "",
@@ -60,8 +83,8 @@ def run_autonomous_pipeline(topic):
         "audio_path": "",
         "voice_id": "",
         "downloaded_vids": [],
-        "final_video_path": "FINAL_READY_TO_UPLOAD.mp4",
-        "final_thumbnail_path": "thumbnail.jpg",
+        "final_video_path": f"exports/{topic_slug}_{lang_slug}_Final.mp4",
+        "final_thumbnail_path": f"exports/{topic_slug}_{lang_slug}_Thumbnail.jpg",
         "youtube_video_id": None,
         "full_description": ""
     }
@@ -137,29 +160,41 @@ def run_autonomous_pipeline(topic):
     # --- PHASE D: UPLOAD ---
     print("\n--- [PHASE D] YOUTUBE UPLOAD ---")
     if os.path.exists(ctx["final_video_path"]):
-        youtube = authenticate_youtube()
+        # OPTION 2: THE MRBEAST STRATEGY
+        # Only physically upload the FIRST requested language to the main channel.
+        # Skip uploading the exact same video file 5 times to prevent algorithm suicide.
+        if language == TARGET_LANGUAGES[0]:
+            youtube = authenticate_youtube()
+            
+            # --- THE MACHINE LEARNING SYNC ---
+            fetch_and_update_analytics(youtube)
+            
+            import datetime
+            tomorrow = datetime.datetime.utcnow() + datetime.timedelta(days=1)
+            publish_at_str = tomorrow.isoformat().split('.')[0] + 'Z'
+            
+            upload_video(youtube, ctx, publish_at=publish_at_str)
+            
+            # --- NEW: LOG THE EXPERIMENT FOR FUTURE MACHINE LEARNING ---
+            log_experiment(ctx)
+            
+            print("\n✅🎉 MASTER VIDEO UPLOADED SUCCESSFULLY! 🎉✅")
+            print(f"Your Master Video is SCHEDULED to automatically go public in 24 hours!")
+            print(f"Verify it here: https://studio.youtube.com/video/{ctx['youtube_video_id']}/edit")
+        else:
+            print(f"\n✅🎉 {language.upper()} DUB GENERATED! 🎉✅")
+            print("I skipped API upload to protect the algorithm. Please upload the raw audio to the Master Video's Multi-Language panel!")
         
-        # --- THE MACHINE LEARNING SYNC ---
-        fetch_and_update_analytics(youtube)
+        # Cleanup temporary files (but KEEP the exported video + thumbnail)
+        print(f"💾 Permanently saved to local disk: {ctx['final_video_path']}")
         
-        import datetime
-        tomorrow = datetime.datetime.utcnow() + datetime.timedelta(days=1)
-        publish_at_str = tomorrow.isoformat().split('.')[0] + 'Z'
-        
-        upload_video(youtube, ctx, publish_at=publish_at_str)
-        
-        # --- NEW: LOG THE EXPERIMENT FOR FUTURE MACHINE LEARNING ---
-        log_experiment(ctx)
-        
-        print("\n✅🎉 PIPELINE COMPLETED SUCCESSFULLY! 🎉✅")
-        print(f"Your video is completely done and SCHEDULED to automatically go public in exactly 24 hours!")
-        print(f"Verify it here: https://studio.youtube.com/video/{ctx['youtube_video_id']}/edit")
-        
-        # Cleanup ALL temporary files so nothing leaks into the next run
-        if os.path.exists(ctx["final_thumbnail_path"]):
-            os.remove(ctx["final_thumbnail_path"])
-        if os.path.exists(ctx["final_video_path"]):
-            os.remove(ctx["final_video_path"])
+        # KEEP the raw MP3 file if it's not the primary language so the user can drag-and-drop it into YouTube Studio
+        if language != TARGET_LANGUAGES[0] and ctx.get("audio_path") and os.path.exists(ctx["audio_path"]):
+            import shutil
+            persistent_audio = f"exports/{topic_slug}_{lang_slug}_Vocals.mp3"
+            shutil.copy(ctx["audio_path"], persistent_audio)
+            print(f"🔉 Retained raw audio for manual YouTube upload: {persistent_audio}")
+            
         if ctx.get("audio_path") and os.path.exists(ctx["audio_path"]):
             os.remove(ctx["audio_path"])
         for vid in ctx["downloaded_vids"]:
@@ -187,7 +222,12 @@ if __name__ == "__main__":
         topic = generate_trending_topic()
         print(f"🔥 Auto-Selected Topic: {topic}\n")
         
-    run_autonomous_pipeline(topic)
+    # Run the autonomous pipeline for EVERY target language!
+    for lang in TARGET_LANGUAGES:
+        print(f"\n" + "="*50)
+        print(f"🌍 BATCH GENERATING IN: {lang.upper()}")
+        print("="*50)
+        run_autonomous_pipeline(topic, lang)
     
     # Check if the AI needs new YouTube engagement data to mathematical re-calibrate
     # its Retention Variables (Jump Cuts & Flashes)

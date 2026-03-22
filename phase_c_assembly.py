@@ -100,7 +100,7 @@ def add_top_banner(video_clip, topic_text):
             "A N A L Y S I S", 
             fontsize=40, 
             color='#E0E0E0', 
-            font='/System/Library/Fonts/Supplemental/Arial.ttf'
+            font='/System/Library/Fonts/Supplemental/Arial Unicode.ttf'
         ).set_position((100, 70)).set_duration(video_clip.duration)
     except:
         badge_txt = TextClip("A N A L Y S I S", fontsize=40, color='#E0E0E0').set_position((100, 70)).set_duration(video_clip.duration)
@@ -111,7 +111,7 @@ def add_top_banner(video_clip, topic_text):
             topic_text.upper(), 
             fontsize=65, 
             color='white', 
-            font='/System/Library/Fonts/Supplemental/Times New Roman.ttf',
+            font='/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
             align='West',
             method='caption',
             size=(1900, None) # This tells MoviePy to auto word-wrap within 1900 pixels
@@ -142,35 +142,35 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense", pre_tran
     # Define aesthetic mapping based on Gemini's emotional mood analysis (All dimensions scaled 2x for 4K geometry)
     vibe_styles = {
         "suspense": {
-            "font": '/System/Library/Fonts/Supplemental/Courier New Bold.ttf',
+            "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
             "colors": ["#E2FF3D"], # Acid/Cyber Yellow for suspense
             "opacity": 1.0,
             "stroke": 12,
             "size": 220
         },
         "corporate": {
-            "font": '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+            "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
             "colors": ["#FACC15"], # Clean Modern Gold for corporate
             "opacity": 1.0,
             "stroke": 12,
             "size": 220
         },
         "lofi": {
-            "font": '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+            "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
             "colors": ["#FFD700"], # Chill Warm Gold for lofi
             "opacity": 1.0,
             "stroke": 12,
             "size": 220
         },
         "upbeat": {
-            "font": '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+            "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
             "colors": ["#FFEA00"], # High-Energy Neon yellow for upbeat
             "opacity": 1.0,
             "stroke": 12,
             "size": 220
         },
         "aggressive": {
-            "font": '/System/Library/Fonts/Supplemental/Courier New Bold.ttf',
+            "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
             "colors": ["#FFED00"], # Sharp Impact Yellow for aggressive
             "opacity": 1.0,
             "stroke": 12,
@@ -547,8 +547,8 @@ def assemble_final_video(ctx: dict):
             final_video = CompositeVideoClip([final_video, logo_clip])
             
         # --- NEW: Thumbnail Extraction ---
-        thumbnail_path = "thumbnail.jpg"
-        print("📸 Extracting high-impact thumbnail frame...")
+        thumbnail_path = ctx.get("final_thumbnail_path", "thumbnail.jpg")
+        print(f"📸 Extracting high-impact thumbnail frame to {thumbnail_path}...")
         # Save the frame at 0.5 seconds where the yellow hook caption is perfectly visible
         import PIL.Image
         frame_array = final_video.get_frame(0.5)
