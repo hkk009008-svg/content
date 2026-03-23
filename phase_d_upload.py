@@ -9,7 +9,8 @@ from googleapiclient.http import MediaFileUpload
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube",
-    "https://www.googleapis.com/auth/yt-analytics.readonly"
+    "https://www.googleapis.com/auth/yt-analytics.readonly",
+    "https://www.googleapis.com/auth/youtube.force-ssl"
 ]
 
 def authenticate_youtube():
@@ -21,6 +22,11 @@ def authenticate_youtube():
     if os.path.exists('token.pickle'):
         with open('token.pickle', 'rb') as token:
             creds = pickle.load(token)
+            
+    # Check if the required scopes are present in the cached credentials
+    if creds and not creds.has_scopes(SCOPES):
+        print("⚠️ Scopes have changed. Forcing re-authentication...")
+        creds = None
             
     # If no valid credentials, let the user log in via browser
     if not creds or not creds.valid:

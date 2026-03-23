@@ -58,13 +58,16 @@ def generate_shorts_script(ctx: dict) -> bool:
     - The Contrarian/Pattern Interrupt: Challenge a widely held belief (e.g. "Everything you know about [Subject] is wrong.")
     - The Curiosity Gap: Present an extreme result but withhold the method (e.g. "How [Brand] achieved [Result] without [Expected Method].")
     - In Medias Res (Mid-Action): Bypass all context and begin at the point of maximum tension.
+    **CRITICAL 3-SECOND MATRIX CONSTRAINTS**:
+    1. CONCRETE ENTITY ANCHORING: Absolutely ban the use of vague pronouns ("This", "That", "The Industry", "The Market") in the first 3 seconds. Name the specific entity (e.g., Amazon, Apple, Boeing) instantly to bypass cognitive load.
+    2. AUDITORY HOOK: The opening sentence must pose an incomplete equation or challenge an assumption rather than stating a generic fact. Start instantly without filler.
     The hook must open a cognitive loop (the Zeigarnik effect) that the viewer's brain demands be closed. Do NOT use fake forced TikTok slang like "Dude" or "Yo". Speak cleanly and sharply.
     
-    [NARRATIVE BREADCRUMBING (POST-HOOK RETENTION)]:
-    To sustain >80% APV, you must insert continuous psychological resets across the script:
-    - Micro-Loops: Continually open secondary loops of curiosity before closing the primary hook loop.
-    - Progress Indicators: Verbally signal progression toward the payoff (e.g., "The third reason is the easiest...").
-    - The Anomaly Spike: Insert a brief, unexpected anomaly, ridiculous comparison, or radical idea perfectly in the mid-video to forcibly reset viewer attention.
+    [PAR RETENTION FRAMEWORK (Seconds 3-30)]:
+    To sustain >80% APV after the 3-second hook, you must execute a high-velocity Problem-Agitation-Resolution (PAR) sequence to artificially sustain cognitive tension:
+    - Phase 1: The Problem (Validate the hook's premise using concrete operational terminology to establish authority).
+    - Phase 2: The Agitation (Shift narrative focus to the viewer. Convert the abstract corporate issue into a direct financial/personal offense against the audience. Make them feel the impact).
+    - Phase 3: The Resolution & Action Trigger (Provide a partial release of tension built in Phase 2, and guide them into the payoff and call to action).
     
     [ALGORITHMIC ENGAGEMENT FARMING - COMMENT BAIT]:
     To trigger YouTube's comment-ranking algorithm, subtly weave in a highly specific or slightly polarizing statement that naturally invites debate. Make viewers feel smart by giving them a reason to pause the video, go to the comments, and share their own opinion or "correction". 
@@ -77,10 +80,10 @@ def generate_shorts_script(ctx: dict) -> bool:
     
     Rules:
     1. Hook (AUDIO SEO CRITICAL): Start mid-conversation (under 3 seconds), casually dropping a massive realization with expert authority. You MUST explicitly state the core topic ("{topic}") out loud within the first sentence for YouTube Audio-SEO indexing.
-    2. Body: Explain the business model or historical strategy casually in 3 clear points, using strictly conversational but expert phrasing. Embed strong SEO keywords naturally into the spoken audio.
-    3. The Payoff (DENSE & COMPACT): Close the open loop at the very end with a satisfying conclusion in exactly one or two unforgettable, authoritative sentences.
-    4. The Infinite Loop & Visual Continuity: You MUST craft the final sentence so it grammatically flows backward perfectly into the first word of the Hook to artificially boost Replay metrics >100%. CRITICAL VISUAL CONTINUITY: The very last AI Image request MUST visually match the framing, lighting, and posture of the very first AI Image request perfectly (e.g. "Frame 12 exactly matches Frame 1") to completely disguise the timeline reset. Never say 'Subscribe'.
-    5. Length & Vocal Pacing: You MUST write a densely packed 35 to 45 second script. DO NOT EXCEED 45 SECONDS. The pacing must be unnaturally fast and authoritative. Remove all written micro-pauses or trailing thoughts. Every sentence must immediately collide into the next.
+    2. Body: Execute the Problem-Agitation-Resolution (PAR) framework across 3 sequential phases, using strictly conversational but expert phrasing. Embed SEO keywords naturally.
+    3. The Payoff & Action Trigger: Provide a high-friction engagement command (e.g., "Hit subscribe and check the pinned comment") paired instantly with a satisfying, dense conclusion.
+    4. The Infinite Loop & Visual Continuity: You MUST craft the final sentence so it grammatically flows backward perfectly into the first word of the Hook to artificially boost Replay metrics >100%. CRITICAL VISUAL CONTINUITY: The very last AI Image request MUST visually match the framing, lighting, and posture of the very first AI Image request perfectly (e.g. "Frame 12 exactly matches Frame 1").
+    5. Length & Vocal Pacing: The entire script structure (Hook + PAR Body + Payoff/Loop) must total EXACTLY 75-80 words to maintain a rapid, urgent cadence of ~2.5 words per second. Every sentence must immediately collide into the next without micro-pauses.
     6. Algorithmic Audio Synchronization: YouTube indexes spoken audio. Ensure the exact keywords generated in your `ab_test_titles` and `youtube_tags` are woven naturally into the spoken audio script.
     7. The Neural Camera Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion. Focus on natural, grounded motions unless highlighting something intense.
     8. CRITICAL VISUAL-CAMERA SYNERGY: The physical image prompt MUST mathematically accommodate the camera motion!
@@ -101,7 +104,7 @@ def generate_shorts_script(ctx: dict) -> bool:
             "body_paragraphs": {
                 "type": "ARRAY", 
                 "items": {"type": "STRING"},
-                "description": "3 punchy bullet points"
+                "description": "EXACTLY 3 punchy paragraphs mapping directly to the PAR Framework: [1] Problem, [2] Agitation, [3] Resolution."
             },
             "infinite_loop_bridge": {"type": "STRING", "description": "The ending sentence designed to natively loop back into the hook."},
             "ai_image_prompts": {

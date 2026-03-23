@@ -268,6 +268,14 @@ def assemble_final_video(ctx: dict):
             dur = segment['end'] - segment['start']
             if dur > 1.0: # Skip tiny sub-second glitches
                 segment_durations.append(dur)
+                
+        # --- 3-SECOND FAILURE MATRIX VERIFICATION ---
+        # The visual pacing must interrupt before the 1.5-second mark (Concrete Graveyard blueprint dictates 1.2s)!
+        if len(segment_durations) > 0 and segment_durations[0] > 1.2:
+            remainder = segment_durations[0] - 1.2
+            segment_durations[0] = 1.2
+            segment_durations.insert(1, remainder)
+            print("⚡ [PHASE C] First sentence exceeded 1.2s! Forcing hyper-fast initial visual jump-cut.")
         
         # 🟢 THE AI VISUAL DIRECTOR 🟢
         # Map Gemini's emotional `music_vibe` directly to physical camera optics, 
