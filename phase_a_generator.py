@@ -53,11 +53,18 @@ def generate_shorts_script(ctx: dict) -> bool:
     [PROVEN WINNING ANGLES]:
     Your analytics prove that audiences stay engaged when investigating a "Secret", a "Monopoly", or something being "Exposed". Casually frame this topic around one of these angles, but keep it feeling like an authentic, authoritative conversation.
     
-    [CRITICAL HOOK RULE - FLY UNDER THE RADAR]: 
-    Do NOT make the script feel like a staged or overly dramatic TikTok video. Your hook MUST be deeply effective but "fly under the radar". Start as if you're mid-conversation sharing a high-level realization. Use sophisticated yet accessible language. CRITICAL: Do NOT start the script with forced slang like "Dude", "Bro", "Man", or "Yo". Just drop straight into the realization naturally, with undeniable expertise.
+    [TRIPARTITE HOOK ARCHITECTURE (0-3s)]: 
+    You MUST secure the viewer's attention instantly using one of these strict psychological frameworks:
+    - The Contrarian/Pattern Interrupt: Challenge a widely held belief (e.g. "Everything you know about [Subject] is wrong.")
+    - The Curiosity Gap: Present an extreme result but withhold the method (e.g. "How [Brand] achieved [Result] without [Expected Method].")
+    - In Medias Res (Mid-Action): Bypass all context and begin at the point of maximum tension.
+    The hook must open a cognitive loop (the Zeigarnik effect) that the viewer's brain demands be closed. Do NOT use fake forced TikTok slang like "Dude" or "Yo". Speak cleanly and sharply.
     
-    [THE OPEN LOOP TRAP - ADDICTIVENESS BOOST]:
-    Casually drop a complex question or missing variable early in the script, and unfold the answer logically as if you're mentoring someone, culminating in the final 5 seconds.
+    [NARRATIVE BREADCRUMBING (POST-HOOK RETENTION)]:
+    To sustain >80% APV, you must insert continuous psychological resets across the script:
+    - Micro-Loops: Continually open secondary loops of curiosity before closing the primary hook loop.
+    - Progress Indicators: Verbally signal progression toward the payoff (e.g., "The third reason is the easiest...").
+    - The Anomaly Spike: Insert a brief, unexpected anomaly, ridiculous comparison, or radical idea perfectly in the mid-video to forcibly reset viewer attention.
     
     [ALGORITHMIC ENGAGEMENT FARMING - COMMENT BAIT]:
     To trigger YouTube's comment-ranking algorithm, subtly weave in a highly specific or slightly polarizing statement that naturally invites debate. Make viewers feel smart by giving them a reason to pause the video, go to the comments, and share their own opinion or "correction". 
@@ -72,8 +79,8 @@ def generate_shorts_script(ctx: dict) -> bool:
     1. Hook (AUDIO SEO CRITICAL): Start mid-conversation (under 3 seconds), casually dropping a massive realization with expert authority. You MUST explicitly state the core topic ("{topic}") out loud within the first sentence for YouTube Audio-SEO indexing.
     2. Body: Explain the business model or historical strategy casually in 3 clear points, using strictly conversational but expert phrasing. Embed strong SEO keywords naturally into the spoken audio.
     3. The Payoff (DENSE & COMPACT): Close the open loop at the very end with a satisfying conclusion in exactly one or two unforgettable, authoritative sentences.
-    4. The Infinite Loop CTA (RETENTION HACK): You MUST craft the final sentence of the script so it grammatically and flawlessly flows backward into the very first word of the Hook to artificially boost Replay metrics over 100%. Never say 'Subscribe' or ask for likes.
-    5. Length & Pacing (CRITICAL RETENTION OPTIMIZATION): You MUST write a 35 to 45 second script. DO NOT EXCEED 45 SECONDS. To achieve this, use 'relaxed' pacing (under 70 words) or tight 'moderate' pacing (~85 words). Do not rush. Let the words breathe like a real conversation.
+    4. The Infinite Loop & Visual Continuity: You MUST craft the final sentence so it grammatically flows backward perfectly into the first word of the Hook to artificially boost Replay metrics >100%. CRITICAL VISUAL CONTINUITY: The very last AI Image request MUST visually match the framing, lighting, and posture of the very first AI Image request perfectly (e.g. "Frame 12 exactly matches Frame 1") to completely disguise the timeline reset. Never say 'Subscribe'.
+    5. Length & Vocal Pacing: You MUST write a densely packed 35 to 45 second script. DO NOT EXCEED 45 SECONDS. The pacing must be unnaturally fast and authoritative. Remove all written micro-pauses or trailing thoughts. Every sentence must immediately collide into the next.
     6. Algorithmic Audio Synchronization: YouTube indexes spoken audio. Ensure the exact keywords generated in your `ab_test_titles` and `youtube_tags` are woven naturally into the spoken audio script.
     7. The Neural Camera Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion. Focus on natural, grounded motions unless highlighting something intense.
     8. CRITICAL VISUAL-CAMERA SYNERGY: The physical image prompt MUST mathematically accommodate the camera motion!
@@ -102,7 +109,7 @@ def generate_shorts_script(ctx: dict) -> bool:
                 "items": {
                     "type": "OBJECT",
                     "properties": {
-                        "prompt": {"type": "STRING", "description": "The exact Midjourney-style text prompt for the visual."},
+                        "prompt": {"type": "STRING", "description": "The exact Midjourney-style text prompt for the visual. Frame 1 MUST contain high contrast and immediate subject focus. Frame 12 MUST visually match Frame 1 exactly for the seamless loop."},
                         "camera": {
                             "type": "STRING",
                             "enum": ["zoom_in_slow", "zoom_out_slow", "zoom_in_fast", "pan_right", "pan_left", "pan_up_crane", "pan_down", "static_drone", "dolly_in_rapid"],
@@ -185,8 +192,10 @@ if __name__ == "__main__":
     print(f"Generating script for: {trending_topic}\n")
     
     try:
-        final_script = generate_shorts_script(trending_topic)
-        print(json.dumps(final_script, indent=4))
+        # Pass a dictionary context as required by generate_shorts_script
+        ctx = {"topic": trending_topic}
+        generate_shorts_script(ctx)
+        print(json.dumps(ctx["script_data"], indent=4))
     except Exception as e:
         print(f"Error generating script: {e}")
         print("Make sure you have set the GOOGLE_API_KEY environment variable and installed google-genai.")

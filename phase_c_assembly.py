@@ -315,8 +315,9 @@ def assemble_final_video(ctx: dict):
 
         # --- NEW: SYNERGISTIC HYPER-FAST ADDICTIVENESS CUTS FOR AI IMAGES ---
         # We mathematically link the jump-cut speed to the AI's pacing choice!
-        pacing_cut_map = {"fast": 2.8, "moderate": 3.6, "relaxed": 4.8}
-        target_cut_length = pacing_cut_map.get(video_pacing, 3.6)
+        # [NEW]: Sensory Reset Rate mandates a visual shift every 2.0 to 3.0 seconds to prevent habituation.
+        pacing_cut_map = {"fast": 2.0, "moderate": 2.5, "relaxed": 3.0}
+        target_cut_length = pacing_cut_map.get(video_pacing, 2.5)
         
         from moviepy.editor import ImageClip
         import random
@@ -530,11 +531,39 @@ def assemble_final_video(ctx: dict):
                 wavef.writeframesraw(data)
             wavef.close()
             
+        # --- NEW: SYNTHESIZE QUICK TRANSITION SWOOSH / CLICK ---
+        swoosh_path = "transition_swoosh.wav"
+        if not os.path.exists(swoosh_path):
+            print("🔊 [PHASE C] Synthesizing Audio-Driven Transition Swoosh...")
+            import wave, struct, math, random
+            sample_rate = 44100
+            duration = 0.15 # Very fast and subtle
+            wavef = wave.open(swoosh_path, 'w')
+            wavef.setnchannels(1) # mono
+            wavef.setsampwidth(2) # 16-bit
+            wavef.setframerate(sample_rate)
+            
+            for i in range(int(duration * sample_rate)):
+                t = float(i) / sample_rate
+                # Quick sweeping white noise for a subtle 'swoosh' cut
+                val = 32767.0 * (random.random() * 2.0 - 1.0) * math.exp(-t * 30.0)
+                data = struct.pack('<h', int(val))
+                wavef.writeframesraw(data)
+            wavef.close()
+            
         # The Red Hook Flashes exactly at t=0.0 where the voiceover starts
         sfx_clip = AudioFileClip(sfx_path).volumex(1.8)
+        
+        # Build kinetic transition points based on exact jump cut timestamps
+        swoosh_clips = []
+        cut_time = 0.0
+        for p_clip in processed_clips[:-1]:
+            cut_time += p_clip.duration
+            if cut_time < total_audio_duration - 0.5:
+                swoosh_clips.append(AudioFileClip(swoosh_path).set_start(cut_time).volumex(0.3))
             
         from moviepy.audio.AudioClip import CompositeAudioClip
-        final_audio = CompositeAudioClip([bg_clip, audio_clip, sfx_clip])
+        final_audio = CompositeAudioClip([bg_clip, audio_clip, sfx_clip] + swoosh_clips)
         
         # Attach the mixed voiceover + music and lock the duration to prevent infinite rendering loops
         final_video = final_video.set_audio(final_audio).set_duration(total_audio_duration)
