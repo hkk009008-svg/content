@@ -59,6 +59,9 @@ def generate_shorts_script(ctx: dict) -> bool:
     [THE OPEN LOOP TRAP - ADDICTIVENESS BOOST]:
     Casually drop a complex question or missing variable early in the script, and unfold the answer logically as if you're mentoring someone, culminating in the final 5 seconds.
     
+    [ALGORITHMIC ENGAGEMENT FARMING - COMMENT BAIT]:
+    To trigger YouTube's comment-ranking algorithm, subtly weave in a highly specific or slightly polarizing statement that naturally invites debate. Make viewers feel smart by giving them a reason to pause the video, go to the comments, and share their own opinion or "correction". 
+    
     [AUTHENTIC, EXPERT CONVERSATION & WORD CHOICE]:
     The script must flow absolutely naturally, like you're an expert speaking to a peer or mentee. Use natural conversational rhythm but avoid overly casual slang. If an industry leader wouldn't say it in a relaxed podcast interview, DO NOT USE IT. Avoid formal, written-style narration entirely. Speak directly, confidently, and authentically.
     
@@ -66,15 +69,16 @@ def generate_shorts_script(ctx: dict) -> bool:
     You must execute profound, deep-level research on the topic. Provide actual numbers, historical context, or complex market dynamics broken down simply. The final payoff must provide a deeply satisfying, logical conclusion that establishes unshakeable trust.
     
     Rules:
-    1. Hook: Start mid-conversation (under 3 seconds), casually dropping a massive realization with expert authority.
-    2. Body: Explain the business model or historical strategy casually in 3 clear points, using strictly conversational but expert phrasing.
+    1. Hook (AUDIO SEO CRITICAL): Start mid-conversation (under 3 seconds), casually dropping a massive realization with expert authority. You MUST explicitly state the core topic ("{topic}") out loud within the first sentence for YouTube Audio-SEO indexing.
+    2. Body: Explain the business model or historical strategy casually in 3 clear points, using strictly conversational but expert phrasing. Embed strong SEO keywords naturally into the spoken audio.
     3. The Payoff (DENSE & COMPACT): Close the open loop at the very end with a satisfying conclusion in exactly one or two unforgettable, authoritative sentences.
-    4. The Infinite Loop CTA: You MUST craft the final sentence of the script so it grammatically and flawlessly flows backward into the very first word of the Hook. Do NOT say 'Subscribe'.
+    4. The Infinite Loop CTA (RETENTION HACK): You MUST craft the final sentence of the script so it grammatically and flawlessly flows backward into the very first word of the Hook to artificially boost Replay metrics over 100%. Never say 'Subscribe' or ask for likes.
     5. Length & Pacing (CRITICAL RETENTION OPTIMIZATION): You MUST write a 35 to 45 second script. DO NOT EXCEED 45 SECONDS. To achieve this, use 'relaxed' pacing (under 70 words) or tight 'moderate' pacing (~85 words). Do not rush. Let the words breathe like a real conversation.
-    6. The Neural Camera Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion. Focus on natural, grounded motions unless highlighting something intense.
-    7. CRITICAL VISUAL-CAMERA SYNERGY: The physical image prompt MUST mathematically accommodate the camera motion!
-    8. **BRIGHT & VIVID VISUALS**: The AI image prompts MUST explicitly describe scenes that are "bright, vividly colored, high-contrast, strictly lit with bright cinematic daylight, high visibility". The visuals must feel crisp and visually bright!
-    9. **CRITICAL OUTPUT LANGUAGE**: Ensure that the script, hook, title, and youtube tags are written completely and natively in {language.upper()}. If {language.upper()} is not English, you MUST STILL provide English strings for the image_prompts under `ai_image_prompts` (so the image generator doesn't fail). However, the audio text AND the video title/description MUST heavily prioritize native {language.upper()}.
+    6. Algorithmic Audio Synchronization: YouTube indexes spoken audio. Ensure the exact keywords generated in your `ab_test_titles` and `youtube_tags` are woven naturally into the spoken audio script.
+    7. The Neural Camera Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion. Focus on natural, grounded motions unless highlighting something intense.
+    8. CRITICAL VISUAL-CAMERA SYNERGY: The physical image prompt MUST mathematically accommodate the camera motion!
+    9. **BRIGHT & VIVID VISUALS**: The AI image prompts MUST explicitly describe scenes that are "bright, vividly colored, high-contrast, strictly lit with bright cinematic daylight, high visibility". The visuals must feel crisp and visually bright!
+    10. **CRITICAL OUTPUT LANGUAGE**: Ensure that the script, hook, title, and youtube tags are written completely and natively in {language.upper()}. If {language.upper()} is not English, you MUST STILL provide English strings for the image_prompts under `ai_image_prompts` (so the image generator doesn't fail). However, the audio text AND the video title/description MUST heavily prioritize native {language.upper()}.
     """
     
     # We define the expected JSON schema to guarantee the output structure

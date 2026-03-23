@@ -68,10 +68,12 @@ def log_experiment(ctx: dict):
     conn.close()
     print(f"🧠 [A/B BRAIN] Logged experiment parameters for Video ID: {video_id}")
 
-def calculate_viral_score(views, likes, comments, avg_duration):
+def calculate_viral_score(views, likes, comments, avg_duration, velocity=0.0):
     """Formula weighing raw traffic vs engagement vs retention. Tweak this as the channel grows."""
-    # Base weight on views, heavy multiplier on likes/comments, and bonus for long retention
-    return views + (likes * 10) + (comments * 25) + (avg_duration * 5)
+    # Base weight on views, heavy multiplier on engagement. 
+    # CRITICAL 2026 ALGORITHM CALIBRATION: Retention (Average View Duration) and Velocity are the primary metrics.
+    # Velocity (Views/Hour) allows instant pivoting to breakout trends within hours of uploading.
+    return views + (likes * 10) + (comments * 25) + (avg_duration * 50) + (velocity * 100)
 
 def fetch_and_update_analytics(youtube_auth):
     """
@@ -101,7 +103,12 @@ def fetch_and_update_analytics(youtube_auth):
             id=video_ids
         ).execute()
 
-        now = datetime.datetime.utcnow().isoformat() + "Z"
+        now_dt = datetime.datetime.utcnow()
+        now_iso = now_dt.isoformat() + "Z"
+
+        # We need the published_at date to calculate velocity
+        cursor.execute("SELECT video_id, published_at FROM shorts_experiments")
+        publish_dates = {row[0]: row[1] for row in cursor.fetchall()}
 
         for item in stats_response.get("items", []):
             vid = item["id"]
@@ -111,17 +118,28 @@ def fetch_and_update_analytics(youtube_auth):
             likes = int(stats.get("likeCount", 0))
             comments = int(stats.get("commentCount", 0))
             
+            # --- VIEW VELOCITY CALCULUS ---
+            pub_date_str = publish_dates.get(vid)
+            velocity = 0.0
+            if pub_date_str:
+                try:
+                    pub_dt = datetime.datetime.fromisoformat(pub_date_str.replace("Z", ""))
+                    hours_alive = max(0.1, (now_dt - pub_dt).total_seconds() / 3600.0)
+                    velocity = views / hours_alive
+                except ValueError:
+                    pass
+            
             # TODO: Add Analytics API call for Average View Duration here once traffic is high enough.
             # YouTube Analytics API requires the video to have sufficient watch time before returning rows.
             avg_duration = 0.0 
             
-            viral_score = calculate_viral_score(views, likes, comments, avg_duration)
+            viral_score = calculate_viral_score(views, likes, comments, avg_duration, velocity)
 
             cursor.execute('''
                 UPDATE shorts_experiments 
                 SET views=?, likes=?, comments=?, avg_view_duration_seconds=?, viral_score=?, last_updated=?
                 WHERE video_id=?
-            ''', (views, likes, comments, avg_duration, viral_score, now, vid))
+            ''', (views, likes, comments, avg_duration, viral_score, now_iso, vid))
             
         conn.commit()
         print("✅ [A/B BRAIN] Database mathematically synchronized.")
@@ -129,6 +147,33 @@ def fetch_and_update_analytics(youtube_auth):
         print(f"⚠️ Warning: Could not sync analytics. {e}")
         
     conn.close()
+
+def calculate_macro_statistics():
+    """Crunches historical DB data to find the highest-performing autonomous variables."""
+    init_db()
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    stats_string = ""
+    try:
+        # Get best vibe
+        cursor.execute("SELECT music_vibe, AVG(viral_score) as avg_score FROM shorts_experiments WHERE views > 50 GROUP BY music_vibe ORDER BY avg_score DESC LIMIT 1")
+        best_vibe = cursor.fetchone()
+        if best_vibe:
+            stats_string += f"        - HIGHEST PERFORMING CINEMATIC VIBE: '{best_vibe[0]}' (Average Score: {best_vibe[1]:.1f})\n"
+            
+        # Get best pacing
+        cursor.execute("SELECT video_pacing, AVG(viral_score) as avg_score FROM shorts_experiments WHERE views > 50 GROUP BY video_pacing ORDER BY avg_score DESC LIMIT 1")
+        best_pacing = cursor.fetchone()
+        if best_pacing:
+            stats_string += f"        - HIGHEST PERFORMING JUMP-CUT PACING: '{best_pacing[0]}' (Average Score: {best_pacing[1]:.1f})\n"
+    except sqlite3.OperationalError:
+        pass
+    conn.close()
+    
+    if stats_string:
+        return f"\n        [🧠 MACRO-STATISTICAL NEURAL AGGREGATION]\n        Based on a mathematical aggregation of our entire historical database, the following parameters are statistically proven to drive the highest retention:\n{stats_string}"
+    return ""
 
 def autonomous_batch_calibration():
     """Triggered after every batch. Scrapes the web for live trends and uses Gemini to synthesize the supreme strategy matrix."""
@@ -139,6 +184,7 @@ def autonomous_batch_calibration():
     
     live_youtube = fetch_live_youtube_trends()
     live_reddit = fetch_external_market_sentiment()
+    macro_stats = calculate_macro_statistics()
     
     # Send all scraped live data to Gemini to formulate the master law
     prompt = f"""
@@ -148,10 +194,13 @@ def autonomous_batch_calibration():
     Here is the live data I just scraped from the web THIS SECOND:
     {live_youtube}
     {live_reddit}
+    {macro_stats}
     
     INSTRUCTION: Read the above real-time data carefully. Synthesize the absolute highest integrity strategy for our next batch. 
     Tell me exactly what pacing, emotion, hook structure, and niche topics are objectively dominating right now.
-    Write this as a strict set of 4 rules that the AI Video Generator MUST obey on its next run.
+    
+    [STRICT OUTPUT FORMAT]:
+    You MUST output your strategy as a mathematically rigid set of instructions (Rule 1, Rule 2, Rule 3, Rule 4). Do not give generic advice. Give absolute, binary instructions that the AI Video Generator cannot misunderstand. Example: "RULE 1: The visual vibe MUST be 'Corporate' because..."
     """
     
     from google import genai
@@ -204,6 +253,8 @@ def get_top_performing_context():
         except ValueError:
             return "" # Failsafe for unmigrated DB rows
             
+        macro_stats = calculate_macro_statistics()
+        
         return f"""
         [⚠️ CRITICAL SYSTEM MEMORY: PREVIOUS A/B SUCCESS ⚠️]
         The algorithm strongly favors the following parameters based on our Analytics Database.
@@ -216,6 +267,7 @@ def get_top_performing_context():
         - Previous Winning Hook Style: "{hook}"
         - Previous Winning Infinite Loop Bridge: "{loop_bridge}" (This successfully looped seamlessly into the Hook)
         - Previous Winning Voice Actor ID: "{voice_id}"
+        {macro_stats}
         
         INSTRUCTION: The algorithm's self-learning matrix has detected that this previous video drove massive audience retention. You MUST mathematically weight your logic heavily toward the STORY ITSELF. Analyze exactly WHAT was said in that successful Hook, HOW it was phrased (tone, sentence structure, emotional trigger), and WHY it trapped the viewer's attention.
         Tweak your next script to replicate that exact psychological story structure and narrative flow, applying it to the new topic. Subvert expectations with shocking new data, but firmly adopt the winning storytelling mechanism of that specific Hook and Loop Bridge!

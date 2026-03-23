@@ -206,7 +206,8 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense", pre_tran
             base_size = int(style["size"] * 1.5) if is_hook_word else style["size"]
             
             if len(word_text) > 8:
-                current_size = int(base_size * (8.0 / len(word_text)))
+                # Add a strict floor boundary of 60% of base size to prevent long words from becoming microscopically unreadable
+                current_size = max(int(base_size * 0.60), int(base_size * (8.0 / len(word_text))))
             else:
                 current_size = base_size
             
@@ -373,15 +374,15 @@ def assemble_final_video(ctx: dict):
                 if camera_motion in ["zoom_in_slow", "zoom_in_fast", "dolly_in_rapid", "static_drone", "zoom_out_slow"]:
                     tension = ctx.get("story_tension", 1.0)
                     if camera_motion == "zoom_in_slow":
-                        scale = 1.0 + ((0.03 * tension) * eased)
+                        scale = 1.0 + ((0.15 * tension) * eased) # Increased from 3% to 15% visible zoom
                     elif camera_motion == "zoom_in_fast":
-                        scale = 1.0 + ((0.06 * tension) * eased)
+                        scale = 1.0 + ((0.25 * tension) * eased) # Increased from 6% to 25% aggressive zoom
                     elif camera_motion == "dolly_in_rapid":
-                        scale = 1.0 + ((0.10 * tension) * eased)
+                        scale = 1.0 + ((0.40 * tension) * eased) # Increased from 10% to 40% rapid zoom
                     elif camera_motion == "zoom_out_slow":
-                        scale = 1.06 - ((0.06 * tension) * eased)
+                        scale = 1.15 - ((0.15 * tension) * eased) # Calibrated zoom out range
                     else: # static_drone
-                        scale = 1.0 + ((0.01 * tension) * eased)
+                        scale = 1.0 + ((0.02 * tension) * eased)
                         
                     new_w, new_h = int(w/scale), int(h/scale)
                     cx, cy = w//2, h//2
@@ -389,7 +390,7 @@ def assemble_final_video(ctx: dict):
                     
                 else: 
                     # Physical Pan
-                    scale = 1.06 # Give room to pan smoothly without zooming in too much
+                    scale = 1.20 # Expanded pan room from 6% to 20% for deep, noticeable physical panning
                     new_w, new_h = int(w/scale), int(h/scale)
                     max_x = w - new_w
                     max_y = h - new_h
@@ -424,8 +425,9 @@ def assemble_final_video(ctx: dict):
             c_motion = getattr(chunk, 'neural_camera', 'zoom_in_slow')
                 
             # --- UNIVERSAL CINEMATIC SCHEME NORMALIZER ---
-            clip = chunk.fx(vfx.colorx, 1.25) # Massively boosts vivid saturation across the board
-            clip = clip.fx(vfx.gamma_corr, 1.15) # Lightens shadows for a bright, highly visible cinematic look
+            # Reduced colorx multiplier from 1.25 to 1.10, and gamma from 1.15 to 1.05 to prevent massive cinematic color blowout when stacking 
+            clip = chunk.fx(vfx.colorx, 1.10) 
+            clip = clip.fx(vfx.gamma_corr, 1.05) 
                 
             # Apply dynamic emotional color grade on top of the normalized unified baseline
             clip = profile["color_grade"](clip)
