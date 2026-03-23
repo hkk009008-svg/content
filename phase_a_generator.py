@@ -111,7 +111,7 @@ def generate_shorts_script(ctx: dict) -> bool:
             },
             "youtube_description": {
                 "type": "STRING",
-                "description": "An SEO-optimized 3-sentence YouTube video description loaded with keywords."
+                "description": "A deep, comprehensive, and highly-detailed 3-paragraph SEO-optimized YouTube video description. Naturally weave in all logical context, historical facts, and 15 targeted keywords. This must be as exhaustive as possible to maximize YouTube's 5000 character limit for Discovery indexing."
             },
             "youtube_tags": {
                 "type": "ARRAY",

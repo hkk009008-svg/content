@@ -8,12 +8,15 @@ import re
 import json
 import time
 
+import shutil
+import datetime
+
 # Import the modules we built
 from phase_0_topic import generate_trending_topic
 from phase_a_generator import generate_shorts_script
-from phase_b_audio import generate_voiceover
-from phase_c_assembly import assemble_final_video
-from phase_d_upload import authenticate_youtube, upload_video
+from phase_b_audio import generate_voiceover, generate_srt
+from phase_c_assembly import assemble_final_video, generate_ai_broll
+from phase_d_upload import authenticate_youtube, upload_video, upload_caption, upload_localizations
 from phase_e_learning import log_experiment, fetch_and_update_analytics
 
 # ==============================================================================
@@ -98,7 +101,7 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
         
     script_data = ctx["script_data"]
     seo_description = script_data.get('youtube_description', f"The insane truth about {topic}.")
-    ctx["full_description"] = f"{seo_description}\n\nStart your own business today: https://your-website-or-affiliate-link-here.com\n\n#shorts #business #finance"
+    ctx["full_description"] = f"{seo_description}\n\nStart your own business today: [YOUR ACTUAL LINK HERE! Edit line 104 in main.py]\n\n#shorts #business #finance"
     
     # --- UNIFIED STORY TENSION ALGORITHM ---
     tension_map = {"lofi": 0.3, "corporate": 0.6, "suspense": 1.0, "upbeat": 1.5, "aggressive": 2.2}
@@ -119,50 +122,32 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
     print(f"🔥 UNIFIED STORY TENSION: {story_tension}x")
 
     # --- PHASE B: AUDIO ---
-    print("\n--- [PHASE B] AUDIO GENERATION ---")
-    if not generate_voiceover(ctx):
-        print("❌ Pipeline aborted: Failed to generate audio.")
-        return
+    if language == TARGET_LANGUAGES[0]:
+        print("\n--- [PHASE B] AUDIO GENERATION ---")
+        if not generate_voiceover(ctx):
+            print("❌ Pipeline aborted: Failed to generate audio.")
+            return
 
-    # FAST-TRACK BYPASS: Skip rendering 4K video infrastructure for non-English languages!
+    # OPTION 2: AUTO-DUB OPTIMIZED BYPASS 
+    # YouTube Auto-Dub handles the foreign voices and captions natively, so we only need to inject SEO Meta-Data!
     if language != TARGET_LANGUAGES[0]:
-        import shutil
-        persistent_audio = f"exports/{topic_slug}_{lang_slug}_Vocals.mp3"
-        persistent_srt = f"exports/{topic_slug}_{lang_slug}_Subtitles.srt"
-        if ctx.get("audio_path") and os.path.exists(ctx["audio_path"]):
-            shutil.copy(ctx["audio_path"], persistent_audio)
+        if ctx.get("youtube_video_id"):
+            youtube = authenticate_youtube()
+            upload_localizations(
+                youtube, 
+                ctx["youtube_video_id"], 
+                language, 
+                ctx["script_data"].get("title", f"{topic} ({language})"),
+                ctx.get("full_description", "")
+            )
+            print(f"\n✅🎉 {language.upper()} NATIVE TRANSLATION SEO INJECTED! 🎉✅")
             
-            # --- NEW: GENERATE AND UPLOAD SRT ---
-            from phase_b_audio import generate_srt
-            generate_srt(persistent_audio, persistent_srt)
-            
-            if ctx.get("youtube_video_id"):
-                from phase_d_upload import authenticate_youtube, upload_caption, upload_localizations
-                youtube = authenticate_youtube()
-                
-                # Attach subtitles
-                upload_caption(youtube, ctx["youtube_video_id"], language, persistent_srt)
-                
-                # --- NEW: Inject Translated SEO Metadata ---
-                upload_localizations(
-                    youtube, 
-                    ctx["youtube_video_id"], 
-                    language, 
-                    ctx["script_data"].get("title", f"{topic} ({language})"),
-                    ctx.get("full_description", "")
-                )
-            
-            print(f"\n✅🎉 {language.upper()} DUB & CAPTIONS SAVED/ATTACHED! 🎉✅")
-            print(f"🔉 Saved raw audio to: {persistent_audio}\n")
-            
-            os.remove(ctx["audio_path"])
         return ctx.get("youtube_video_id")
 
     # --- PHASE C: ASSEMBLY ---
     print("\n--- [PHASE C] VIDEO ASSEMBLY ---")
     
     # Download 1 AI Image for each detailed Midjourney prompt
-    from phase_c_assembly import generate_ai_broll, assemble_final_video
     for index, image_data in enumerate(script_data['ai_image_prompts']):
         if isinstance(image_data, str):
             prompt = image_data
@@ -204,25 +189,25 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
             # --- THE MACHINE LEARNING SYNC ---
             fetch_and_update_analytics(youtube)
             
-            import datetime
             tomorrow = datetime.datetime.utcnow() + datetime.timedelta(days=1)
             publish_at_str = tomorrow.isoformat().split('.')[0] + 'Z'
             
             upload_video(youtube, ctx, publish_at=publish_at_str)
             
-            # --- NEW: GENERATE AND UPLOAD MASTER SRT ---
-            persistent_srt = f"exports/{topic_slug}_{lang_slug}_Subtitles.srt"
-            from phase_b_audio import generate_srt
-            generate_srt(ctx["audio_path"], persistent_srt)
-            from phase_d_upload import upload_caption
-            upload_caption(youtube, ctx["youtube_video_id"], language, persistent_srt)
-            
-            # --- NEW: LOG THE EXPERIMENT FOR FUTURE MACHINE LEARNING ---
-            log_experiment(ctx)
-            
-            print("\n✅🎉 MASTER VIDEO UPLOADED SUCCESSFULLY! 🎉✅")
-            print(f"Your Master Video is SCHEDULED to automatically go public in 24 hours!")
-            print(f"Verify it here: https://studio.youtube.com/video/{ctx['youtube_video_id']}/edit")
+            if ctx.get("youtube_video_id"):
+                # --- NEW: GENERATE AND UPLOAD MASTER SRT ---
+                persistent_srt = f"exports/{topic_slug}_{lang_slug}_Subtitles.srt"
+                generate_srt(ctx["audio_path"], persistent_srt)
+                upload_caption(youtube, ctx["youtube_video_id"], language, persistent_srt)
+                
+                # --- NEW: LOG THE EXPERIMENT FOR FUTURE MACHINE LEARNING ---
+                log_experiment(ctx)
+                
+                print("\n✅🎉 MASTER VIDEO UPLOADED SUCCESSFULLY! 🎉✅")
+                print(f"Your Master Video is SCHEDULED to automatically go public in 24 hours!")
+                print(f"Verify it here: https://studio.youtube.com/video/{ctx['youtube_video_id']}/edit")
+            else:
+                print("❌ Master Video Upload failed. Skipping subtitles and logging.")
         
         # Cleanup temporary files (but KEEP the exported video + thumbnail)
         print(f"💾 Permanently saved to local disk: {ctx['final_video_path']}")

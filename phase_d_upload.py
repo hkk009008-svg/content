@@ -91,8 +91,9 @@ def upload_video(youtube, ctx: dict, publish_at=None):
     """Uploads the final .mp4 to YouTube as a Private Short and attaches a custom thumbnail."""
     video_file = ctx.get("final_video_path")
     script_data = ctx.get("script_data", {})
-    title = script_data.get("title", "Untitled Short")
-    description = ctx.get("full_description", "")
+    # Strict YouTube character limits
+    title = script_data.get("title", "Untitled Short")[:100]
+    description = ctx.get("full_description", "")[:5000]
     tags = script_data.get("youtube_tags", [])
     thumbnail_file = ctx.get("final_thumbnail_path")
     playlist_name = script_data.get("playlist_category", "")
@@ -136,12 +137,16 @@ def upload_video(youtube, ctx: dict, publish_at=None):
 
     print("📤 Uploading to YouTube servers (this may take a moment)...")
     response = None
-    while response is None:
-        status, response = request.next_chunk()
-        if status:
-            print(f"   Upload progress: {int(status.progress() * 100)}%")
+    try:
+        while response is None:
+            status, response = request.next_chunk()
+            if status:
+                print(f"   Upload progress: {int(status.progress() * 100)}%")
 
-    print(f"✅ Upload Complete! Video ID: {response['id']}")
+        print(f"✅ Upload Complete! Video ID: {response['id']}")
+    except Exception as e:
+        print(f"❌ FATAL ERROR during YouTube Upload: {e}")
+        return None
     
     # --- NEW: Upload Thumbnail ---
     if thumbnail_file and os.path.exists(thumbnail_file):
