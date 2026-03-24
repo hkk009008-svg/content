@@ -31,35 +31,35 @@ def generate_shorts_script(ctx: dict) -> bool:
             calibration_matrix = f"\n[🔥 THE OMNI-CALIBRATION MATRIX 🔥]\n{raw_matrix}\n"
     
     master_storyteller_matrix = {
-        "Sagan": {
-            "name": "The Sagan Perspective (Cosmic Romanticism)",
-            "aesthetic": "Cosmic Romanticism and profound beauty. Emphasize the romantic connection between the viewer and the infinite. Focus on stardust, gentle interconnectedness, and the poetic scale of the cosmos.",
-            "hook": "The Peaceful Realization: Gently introduce a beautiful, staggering fact that makes the viewer feel warmly connected to the universe.",
-            "pacing": "Flowing, poetic, deeply rhythmic, and highly romantic."
+        "The Forensics": {
+            "name": "The Forensic Investigator (Analytical Deep-Dive)",
+            "aesthetic": "Cold, calculated, and terrifyingly precise. Emphasize the hidden mechanisms behind massive systems. Break down business models, historical mysteries, or tech like a master detective solving a global crime.",
+            "hook": "The Sudden Reveal: Instantly expose a massive lie or a hidden truth about a system everyone takes for granted.",
+            "pacing": "Methodical, sharp, authoritative, and brilliantly analytical."
         },
-        "Lovecraft": {
-            "name": "The Lovecraftian Dread (Cosmic Horror)",
-            "aesthetic": "Terrifying cosmic scale and human insignificance. Emphasize the sheer, incomprehensible enormity of reality. Make the viewer feel terribly fragile and microscopic compared to the brutal vastness of nature or space.",
-            "hook": "The Staggering Insignificance: Instantly crush their sense of scale with a terrifying, heavy, and haunting realization of how small they are.",
-            "pacing": "Slow, brooding, heavy, and ominous."
+        "The Machiavellian": {
+            "name": "The Machiavellian Mastermind (Power & Strategy)",
+            "aesthetic": "Ruthless efficiency, leverage, and global power plays. Focus on the psychology of manipulation, brilliant marketing, and how empires—corporate or historical—control the masses.",
+            "hook": "The Power Shift: Dramatically reveal how the viewer is currently being manipulated or outsmarted by the subject.",
+            "pacing": "Calculated, dominant, slightly sinister, and unbroken."
         },
-        "Watts": {
-            "name": "The Alan Watts Philosophy (Zen Interconnectedness)",
-            "aesthetic": "Zen philosophy, the illusion of separation. Treat the subject as a single breath of the universe. Focus on harmony, paradox, and the beautiful absurdity of human anxiety.",
-            "hook": "The Haunting Recontextualization: Dramatically shatter a preconceived notion they hold about reality, revealing that everything is one giant playing mechanism.",
-            "pacing": "Warm, philosophical, deeply paradoxical, and unhurried."
+        "The Cyber-Prophet": {
+            "name": "The Cyber-Prophet (Futuristic Inevitability)",
+            "aesthetic": "Neon, data-driven, and slightly dystopian. Treat the subject as an inevitable mathematical future. Focus on terrifyingly beautiful cybernetics, global networks, and unstoppable technological shifts.",
+            "hook": "The Ticking Clock: A heavy, inevitable realization that the future has already quietly arrived while they weren't looking.",
+            "pacing": "Sleek, rapid, electric, and unstoppable."
         },
-        "Orwell": {
-            "name": "The Orwellian Mechanic (Brutal Realism)",
-            "aesthetic": "Cold, brutal, mechanical reality. Strip away emotion. Focus on harsh, mechanical, and uncompromising truths of nature, physics, or societal structures. It is what it is, and it is beautifully brutal.",
-            "hook": "The Cold Truth: Deliver a sharp, unemotional, and undeniably brutal fact. Do not sugarcoat it.",
-            "pacing": "Short, sharp, authoritative, and mercilessly logical."
+        "The Archivist": {
+            "name": "The Secret Archivist (Forbidden History)",
+            "aesthetic": "Dusty, secretive, forbidden knowledge. Treat the subject like a classified document just uncovered. Focus on the staggering scale of forgotten history, lost engineering, or covered-up truths.",
+            "hook": "The Unearthing: Softly but urgently reveal a piece of information that was never meant to be found.",
+            "pacing": "Hushed, urgent, mysterious, and awe-striking."
         },
-        "Poe": {
-            "name": "The Edgar Allan Poe Method (Gothic Suspense)",
-            "aesthetic": "Dark, rhythmic, and haunting suspense. Use gothic vocabulary to build a sense of inescapable fate, profound mystery, or deep melancholy.",
-            "hook": "The Quiet Immensity: A deeply poetic, softly spoken but terribly haunting realization wrapped in gothic phrasing.",
-            "pacing": "Rhythmic, melancholic, very deliberate, and gothic."
+        "The Architect": {
+            "name": "The Grand Architect (Master Design)",
+            "aesthetic": "Elegant design, massive scale, architectural brilliance. Focus on the terrifyingly perfect design of systems—whether it's the Pyramids, a casino floor, or a global supply chain.",
+            "hook": "The Blueprint: Expose the hidden design flaw or the brilliant invisible structure right under their nose.",
+            "pacing": "Elegant, precise, smooth, and awe-inspiring."
         }
     }
     
@@ -68,7 +68,7 @@ def generate_shorts_script(ctx: dict) -> bool:
     tone = f"the legendary writing style of {lens['name']}"
     
     prompt = f"""
-    You are an elite, award-winning cinematic scriptwriter and documentary narrator.
+    You are an elite, award-winning cinematic scriptwriter, documentary narrator, and behavioral psychology expert specializing in short-form retention.
     
     {calibration_matrix}
     
@@ -78,6 +78,11 @@ def generate_shorts_script(ctx: dict) -> bool:
     
     Write a highly engaging 35-45 second video script about: "{topic}".
     Write the script exclusively using {tone}. Make sure the angle, hook, and body are completely factual, logically sound, and spoken with the profound, breathtaking gravity of this specific narrative philosophy.
+    
+    [BEHAVIORAL PSYCHOLOGY & THE CORE POINT]:
+    1. The "So What?" Connection: The story MUST have a sharp, undeniable point. Connect the core concept directly to the viewer's fundamental reality or human experience. Do not just list facts.
+    2. Concrete Evidence: Back up your narrative with a specific, staggering fact or clear mechanism. Provide proof to emphasize the narrative weight.
+    3. Cognitive Engagement: Use curiosity gaps, pattern interruption, and emotional dissonance to psychologically lock the viewer's attention.
     
     [THE MASTER LENS - {lens['name'].upper()}]:
     Your ideal aesthetic is {lens['aesthetic']}
@@ -89,11 +94,11 @@ def generate_shorts_script(ctx: dict) -> bool:
     1. CONCRETE ENTITY ANCHORING: Name the specific entity instantly.
     2. RAW AUDITORY HOOK: The opening sentence must feel like a profound revelation. Speak cleanly, dramatically, and with heavy, deliberate, emotional pauses.
     
-    [THE JOURNEY OF AWE (Seconds 3-30)]:
-    To sustain breathtaking attention after the hook, you must execute a "Journey of Awe" sequence:
-    - Phase 1: The Breathtaking Reality (Describe the intense, epic reality of the subject using highly evocative, cinematic terminology matching your Lens).
-    - Phase 2: The Core Mechanic (Zoom in on the microscopic perfection or pull out to the terrifying enormity of the cosmos. Make the viewer feel the true weight of the subject).
-    - Phase 3: The Haunting Resolution (Provide a deeply poetic, thought-provoking conclusion that leaves them quite literally breathless and staring at their screen).
+    [THE JOURNEY OF AWE & ENGAGEMENT (Seconds 3-30)]:
+    To sustain breathless retention after the hook, execute this psychologically optimized sequence:
+    - Phase 1: The Paradigm Shift (Introduce the reality using a behavioral hook like a paradox or hidden truth. State the hard evidence that backs it up).
+    - Phase 2: The Core Mechanic & Connection (Explain HOW it works and WHY it matters. Give the story its core 'point'. Connect it deeply to the viewer's existence).
+    - Phase 3: The Haunting Resolution (Bring it to a deeply relatable, thought-provoking conclusion that leaves them quite literally breathless and staring at their screen).
     
     [ALGORITHMIC ENGAGEMENT - THE THOUGHT-PROVOKING ELEMENT]:
     Instead of cheap engagement bait, you MUST end the video with a deeply thought-provoking element. Deliver a paradigm-shifting final sentence or a profound, haunting philosophical question that fundamentally alters how the viewer sees their own reality exactly according to your assigned Lens. It should leave them staring at the screen, forcing them to pause, reflect, and organically engage in the comments.
@@ -103,20 +108,20 @@ def generate_shorts_script(ctx: dict) -> bool:
     Flow with intense emotional gravity. Use intentional, dramatic pauses. Every single word must carry heavy narrative weight.
     
     [OMNISCIENT RESEARCH & THOUGHT-PROVOKING RESOLUTION]:
-    Provide deeply satisfying, elegant, breathtaking facts that invoke true ontological shock and cosmic wonder.
+    Provide deeply satisfying, elegant, breathtaking facts that invoke true ontological shock and profound realization.
     
     Rules:
     1. Hook (AUDIO SEO CRITICAL): Start smoothly, gracefully dropping a massive realization with warm authority. You MUST explicitly state the core topic ("{topic}") out loud within the first sentence.
     2. Body: Execute the "Journey of Awe" framework across 3 sequential phases, using strictly conversational and poetic phrasing. Embed SEO keywords naturally.
     3. The Payoff & Action Trigger: Provide a gentle engagement request (e.g., "Take a deep breath, and softly tap subscribe if you felt this.") paired instantly with a relaxing conclusion.
-    4. The Infinite Loop & Visual Continuity: You MUST craft the final sentence so it grammatically flows incredibly smoothly back into the first word of the Hook. CRITICAL VISUAL CONTINUITY: The very last AI Image request MUST visually match the framing, lighting, and posture of the very first AI Image request perfectly (e.g. "Frame 12 exactly matches Frame 1").
+    4. The Master Infinite Loop & Visual Continuity: Your final sentence (`infinite_loop_bridge`) MUST NOT restate the beginning. Instead, it MUST be an incomplete thought or lead-in clause that grammatically REQUIRES the very first word of the Hook to finish the sentence. (e.g., If your hook starts with "Black holes...", your ending must be something like "Because the ultimate truth is hidden within..."). CRITICAL: The last AI Image (Frame 12) MUST explicitly describe the exact same framing, lighting, and subject posture as Frame 1.
     5. Length & Vocal Pacing: The script must total EXACTLY 50-65 words. Since you are speaking SOOTHINGLY and SLOWLY, fewer words take up the same 45 seconds. Use punctuation to force ElevenLabs to pause and breathe.
     6. Algorithmic Audio Synchronization: Ensure the exact keywords generated in your `ab_test_titles` and `youtube_tags` are woven naturally into the spoken audio script.
     7. Dual-Model Video Routing (CRITICAL): Assign `target_api` for EVERY visual prompt. 
        - Trigger "RUNWAY" if the scene requires rigid digital structures, geometric data visualization, camera zooms, or minimal physics. 
        - Trigger "VEO" if the scene requires organic fluid dynamics, particle collisions, hyper-macro textures, or natively synchronized ASMR Foley (water, gears, etc.).
-    8. The Neural Camera Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion. Focus on extremely smooth, calming motions unless highlighting intense dynamics.
-    9. **VISUAL NEGATIVE SPACE**: The AI image prompts MUST explicitly describe scenes with heavily vignette edges, dark or blurred backgrounds, and a highly saturated central subject to perfectly fit the UI without feeling cluttered. The aesthetic is deep, moody, and ultra-high fidelity.
+    8. The Neural Camera Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion. Focus on dynamic, high-stakes tracking shots for Business/Cybernetics or sweeping, revelatory crane shots for Historical Mysteries.
+    9. **VISUAL NEGATIVE SPACE**: The AI image prompts MUST explicitly describe scenes with heavily vignette edges, dark or blurred backgrounds, and a highly saturated central subject to perfectly fit the UI without feeling cluttered. Customize the lighting to fit the lens: Moody corporate shadows, dusty ancient sunbeams, or high-contrast neon cyber-aesthetics.
     10. **CRITICAL OUTPUT LANGUAGE**: Ensure that the script, hook, title, and youtube tags are written completely and natively in {language.upper()}. If {language.upper()} is not English, you MUST STILL provide English strings for the image_prompts under `ai_image_prompts` (so the image generator doesn't fail). However, the audio text AND the video title/description MUST heavily prioritize native {language.upper()}.
     """
     
@@ -133,9 +138,9 @@ def generate_shorts_script(ctx: dict) -> bool:
             "body_paragraphs": {
                 "type": "ARRAY", 
                 "items": {"type": "STRING"},
-                "description": "EXACTLY 3 poetic paragraphs mapping directly to the Journey of Awe: [1] Observation, [2] Deep Dive, [3] Comforting Resolution."
+                "description": "EXACTLY 3 poetic paragraphs mapping to the Journey of Awe & Engagement: [1] The Paradigm Shift & Evidence, [2] The Core Mechanic & Connection (The Point), [3] The Haunting Resolution."
             },
-            "infinite_loop_bridge": {"type": "STRING", "description": "The serene ending sentence designed to natively reflect back into the hook."},
+            "infinite_loop_bridge": {"type": "STRING", "description": "The final lead-in clause. It MUST be an incomplete grammatical bridge that perfectly sets up the very first word of the Hook without repeating it (e.g. 'Which makes you realize that...')."},
             "ai_image_prompts": {
                 "type": "ARRAY", 
                 "items": {
@@ -168,8 +173,8 @@ def generate_shorts_script(ctx: dict) -> bool:
             },
             "music_vibe": {
                 "type": "STRING",
-                "enum": ["lofi", "suspense"],
-                "description": "Select the emotional vibe. CRITICAL: Use 'lofi' for peaceful, awe-inspiring, or comforting topics to maintain the soothing visual comfort aesthetic. Use 'suspense' ONLY for dark, dangerous, or terrifying cosmic concepts."
+                "enum": ["suspense", "corporate"],
+                "description": "Select the emotional vibe. CRITICAL: Use 'corporate' for clean business breakdowns or architectural awe. Use 'suspense' for historical coverups, cybernetics, or deep psychological tactics."
             },
             "video_pacing": {
                 "type": "STRING",
@@ -178,7 +183,7 @@ def generate_shorts_script(ctx: dict) -> bool:
             },
             "playlist_category": {
                 "type": "STRING",
-                "description": "A high-level YouTube playlist name this video belongs to (e.g. 'Cosmic Secrets', 'Tech Mechanics', 'Physics Psychology'). Max 3 words."
+                "description": "A high-level YouTube playlist name this video belongs to (e.g. 'Business Secrets', 'Historical Mysteries', 'Cybernetics'). Max 3 words."
             }
         },
         "required": ["ab_test_titles", "hook", "body_paragraphs", "infinite_loop_bridge", "ai_image_prompts", "youtube_description", "youtube_tags", "music_vibe", "video_pacing", "playlist_category"]

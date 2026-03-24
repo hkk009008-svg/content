@@ -50,15 +50,13 @@ def generate_trending_topic() -> str:
     
     {global_sentiment}
     
-    Your goal is to brainstorm ONE deeply soothing, mesmerizing, and profoundly fascinating topic focused on low-cortisol visual wonders for today.
+    Your goal is to brainstorm ONE profoundly fascinating topic for today. It must seamlessly match the emotional state of the current live trends, but MUST fall into one of these highly-lucrative narrative vectors:
     
-    You MUST craft a topic that seamlessly matches the emotional state of the current live trends but fits within these unified, calming vectors of awe:
-    - [MACRO-SCALE AWE]: Epically massive scales of deep space or deep time that evoke profound peace and validate insignificance (e.g., astrophotography, silent galaxies).
-    - [GENTLE NATURAL MECHANICS]: Deconstructing how complex natural or soft systems work seamlessly (e.g., the silent growth of crystals, deep ocean currents).
-    - [HARMONIZED PHYSICS]: Explaining the hidden elegant math of reality in a comforting way (e.g., golden ratios in nature, quantum probability clouds).
-    - [HYPER-MACRO SENSORY]: Extreme, slow-motion close-ups of fascinating, calming textures (e.g., softly shifting ferrofluid, melting ice, microscopic flora).
+    - [BUSINESS & PSYCHOLOGY]: Deconstructing hidden psychological tactics, global economic machines, or brilliant marketing strategies (e.g., How McDonald's is a real estate empire, the psychology of casino floor designs).
+    - [HISTORICAL MYSTERIES & ENGINEERING]: Unsolved ancient mechanisms, the profound scale of historical megastructures, or lost technologies (e.g., The Antikythera mechanism, the acoustic engineering of ancient temples).
+    - [FUTURISM & CYBERNETICS]: The terrifying but beautiful reality of artificial intelligence, planetary-scale data centers, or future megastructures (e.g., Dyson spheres, how glowing fiber optics silently run the global economy).
     
-    CRITICAL: Look at the current scraped sentiment. The vibe must remain deeply soothing, visually comforting, and fundamentally awe-inspiring (the "Oasis" aesthetic). DO NOT use alarming, hyper-aggressive, or clickbait framing.
+    CRITICAL: Look at the current scraped sentiment. The vibe must remain deeply immersive, highly-cinematic, and fundamentally fascinating. DO NOT use cheap, hyper-aggressive, or clickbait framing. Make it feel like a premium documentary.
     
     {avoid_clause}
     Provide ONLY the topic in 12 words or less. Do not include quotes, markdown formatting, or any extra text. Make it incredibly punchy.

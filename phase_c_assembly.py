@@ -143,14 +143,14 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense", pre_tran
     vibe_styles = {
         "suspense": {
             "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-            "colors": ["#E2FF3D"], # Acid/Cyber Yellow for suspense
+            "colors": ["#39FF14", "#FFFFFF"], # Cyberpunk Neon Green and crisp white for stark contrast
             "opacity": 1.0,
             "stroke": 6,
             "size": 110
         },
         "corporate": {
             "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-            "colors": ["#FACC15"], # Clean Modern Gold for corporate
+            "colors": ["#FFFFFF", "#FACC15"], # Elite minimal white flashing to Gold for emphasis
             "opacity": 1.0,
             "stroke": 6,
             "size": 110
@@ -275,37 +275,22 @@ def assemble_final_video(ctx: dict):
         ass_path = "whisper_captions.ass"
         generate_ass_subtitles(whisper_result, ass_path)
         
-        segment_durations = []
-        for segment in whisper_result.get('segments', []):
-            dur = segment['end'] - segment['start']
-            if dur > 1.0:
-                segment_durations.append(dur)
-                
-        if len(segment_durations) > 0 and segment_durations[0] > 1.2:
-            remainder = segment_durations[0] - 1.2
-            segment_durations[0] = 1.2
-            segment_durations.insert(1, remainder)
-            
-        pacing_cut_map = {"fast": 2.0, "moderate": 2.5, "relaxed": 3.0}
-        target_cut_length = pacing_cut_map.get(video_pacing, 2.5)
+        # # PERFECT SYNC DURATION CALCULATION # #
+        # Match narration evenly across the generated visual frames
+        num_clips = len(video_paths)
+        clip_duration = total_audio_duration / num_clips if num_clips > 0 else 3.0
         
         normalized_clips = []
         current_dur = 0
         img_index = 0
         
-        print("⚡ [PHASE C] Normalizing and Trimming Base Video Modules...")
+        print(f"⚡ [PHASE C] Normalizing {num_clips} Base Video Modules to {clip_duration:.2f}s each...")
         
         # 2. DYNAMIC API CLIP SYNC AND NORMALIZATION 
         for vid_data in video_paths:
-            if current_dur >= total_audio_duration:
-                break
-                
             raw_vid_path = vid_data['path'] if isinstance(vid_data, dict) else vid_data
             
-            if img_index < len(segment_durations):
-                active_cut_length = segment_durations[img_index]
-            else:
-                active_cut_length = target_cut_length
+            active_cut_length = clip_duration
             
             norm_path = f"norm_clip_{img_index}.mp4"
             normalize_clip(raw_vid_path, norm_path, duration_sec=active_cut_length)

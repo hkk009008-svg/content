@@ -34,15 +34,19 @@ def generate_voiceover(ctx: dict) -> bool:
     }
     
     breathtaking_voices = [
-        "pNInz6obpgDQGcFmaJgB", # Adam (Epic deep narrator)
-        "cjVigY5qzO86Huf0OWal", # Eric (Grizzly, massive weight)
-        "21m00Tcm4TlvDq8ikWAM", # Rachel (Ethereal, intimate)
-        "JBFqnCBcs6TW3vCU1E2R", # George (British cinematic)
-        "ThT5KcBeYPX3keUQqHPh"  # Dorothy (British haunting whisper)
+        {"id": "pNInz6obpgDQGcFmaJgB", "name": "Adam (Epic Deep Narrator)"},
+        {"id": "cjVigY5qzO86Huf0OWal", "name": "Eric (Grizzly & Mature)"},
+        {"id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel (Ethereal & Intimate)"},
+        {"id": "JBFqnCBcs6TW3vCU1E2R", "name": "George (British Cinematic)"},
+        {"id": "ThT5KcBeYPX3keUQqHPh", "name": "Dorothy (British Haunting Whisper)"},
+        {"id": "EXAVITQu4vr4xnSDxMaL", "name": "Bella (Soft & Gentle)"},
+        {"id": "TxGEqnHWrfWFTfGW9XjX", "name": "Josh (Relatable & Clear)"}
     ]
     
     import random
-    target_voice_id = random.choice(breathtaking_voices)
+    chosen_actor = random.choice(breathtaking_voices)
+    target_voice_id = chosen_actor["id"]
+    print(f"🎭 [PHASE B] Randomly Selected Voice Actor: {chosen_actor['name']}")
     
     try:
         # Generate the audio using ElevenLabs API v2+ structure with Elite Emotional VoiceSettings
@@ -91,9 +95,9 @@ def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42):
     try:
         import fal_client
         vibe_prompts = {
-            "suspense": "Slow, deep sub-bass drones, cinematic suspense, ominous, dark ambient, 432Hz.",
+            "suspense": "Slow, deep sub-bass drones, cinematic espionage suspense, ominous dark ambient thriller, ticking clock tension, Hans Zimmer.",
             "lofi": "Deeply soothing ambient soundscape, slow ethereal synth pads, Hans Zimmer cosmic awe, frequencies of healing, very slow tempo.",
-            "corporate": "Bright, uplifting tech ambient, clean synth arpeggios, neutral documentary tone.",
+            "corporate": "Sleek, atmospheric tech ambient, minimalist synth pulses, high-stakes global documentary, Ridley Scott neo-noir.",
             "upbeat": "High tempo electronic breakbeat, energetic, pulsing synthesizer, driving rhythm.",
             "aggressive": "Heavy industrial distorted bass, aggressive synth wave, cyberpunk, hard hitting."
         }
