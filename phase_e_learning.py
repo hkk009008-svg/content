@@ -279,7 +279,7 @@ def get_top_performing_context():
         print("🧠 [A/B BRAIN] Local database empty. Crawling external network for structural inspiration...")
         try:
             import requests
-            # Fetch the top 3 smartest, highest-voted tech/business headlines on Hacker News right now
+            # Fetch the top 3 smartest, highest-voted scientific/philosophical headlines on Hacker News right now
             hn_top = requests.get("https://hacker-news.firebaseio.com/v0/topstories.json", timeout=5).json()
             fallback_headlines = []
             for item_id in hn_top[:3]:
@@ -312,10 +312,10 @@ def fetch_live_youtube_trends():
     youtube = authenticate_youtube()
     two_weeks_ago = (datetime.datetime.utcnow() - datetime.timedelta(days=14)).isoformat() + "Z"
     
-    print("📡 [A/B BRAIN] Harvesting live YouTube algorithm trends for the business niche...")
+    print("📡 [A/B BRAIN] Harvesting live YouTube algorithm trends for the scientific wonder niche...")
     try:
         search_response = youtube.search().list(
-            q="business entrepreneurship #shorts",
+            q="science universe macro #shorts",
             part="snippet",
             maxResults=10,
             order="viewCount",
@@ -341,31 +341,31 @@ def fetch_live_youtube_trends():
         return ""
 
 def fetch_external_market_sentiment():
-    """Scrapes public Reddit JSON endpoints for real-time market and business sentiment."""
+    """Scrapes public Reddit JSON endpoints for real-time global existential and scientific curiosity."""
     import requests
-    print("🌍 [A/B BRAIN] Scanning global market sentiment (Reddit/News)...")
+    print("🌍 [A/B BRAIN] Scanning global scientific curiosity (Reddit/News)...")
     
     headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
     sentiment_titles = []
     
     try:
-        # Check WallStreetBets for raw market chaos/trends
-        wsb_url = "https://www.reddit.com/r/WallStreetBets/hot.json?limit=7"
+        # Check r/space for cosmic discoveries
+        wsb_url = "https://www.reddit.com/r/space/hot.json?limit=7"
         wsb_resp = requests.get(wsb_url, headers=headers, timeout=5)
         if wsb_resp.status_code == 200:
             for post in wsb_resp.json().get('data', {}).get('children', []):
                 title = post['data'].get('title', '')
                 if len(title) > 15:
-                    sentiment_titles.append(f"[WSB] {title}")
+                    sentiment_titles.append(f"[Space] {title}")
                     
-        # Check Entrepreneur for business strategies/struggles
-        ent_url = "https://www.reddit.com/r/Entrepreneur/hot.json?limit=7"
+        # Check r/science for discoveries
+        ent_url = "https://www.reddit.com/r/science/hot.json?limit=7"
         ent_resp = requests.get(ent_url, headers=headers, timeout=5)
         if ent_resp.status_code == 200:
             for post in ent_resp.json().get('data', {}).get('children', []):
                 title = post['data'].get('title', '')
                 if len(title) > 15:
-                    sentiment_titles.append(f"[Entrepreneur] {title}")
+                    sentiment_titles.append(f"[Science] {title}")
                     
         if not sentiment_titles:
             return ""

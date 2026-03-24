@@ -56,6 +56,10 @@ def generate_voiceover(ctx: dict) -> bool:
         
         ctx["audio_path"] = output_filename
         ctx["voice_id"] = target_voice_id
+        
+        # Generate BGM dynamically alongside Voiceover
+        generate_fal_bgm(music_vibe, f"bg_{music_vibe}.mp3")
+        
         return True
         
     except Exception as e:
@@ -66,6 +70,49 @@ def generate_voiceover(ctx: dict) -> bool:
 if __name__ == "__main__":
     test_text = "McDonald's isn't a fast-food company; it's the most aggressive real estate empire on the planet."
     generate_voiceover({"full_text": test_text, "music_vibe": "suspense"})
+
+def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42):
+    """Uses Fal.ai's text-to-audio engine to generate custom background music."""
+    import os
+    import urllib.request
+    
+    print(f"🎵 [PHASE B] Generating Custom [{music_vibe.upper()}] Background Audio via Fal.ai...")
+    try:
+        import fal_client
+        vibe_prompts = {
+            "suspense": "Slow, deep sub-bass drones, cinematic suspense, ominous, dark ambient, 432Hz.",
+            "lofi": "Ambient lo-fi hip hop, very slow tempo, relaxing, chill tape hiss, soft electric piano.",
+            "corporate": "Bright, uplifting tech ambient, clean synth arpeggios, neutral documentary tone.",
+            "upbeat": "High tempo electronic breakbeat, energetic, pulsing synthesizer, driving rhythm.",
+            "aggressive": "Heavy industrial distorted bass, aggressive synth wave, cyberpunk, hard hitting."
+        }
+        prompt = vibe_prompts.get(music_vibe.lower(), "Ambient cinematic drone, slow, ethereal, beautiful.")
+        
+        result = fal_client.subscribe(
+            "fal-ai/stable-audio", # Top tier ambient/music generation
+            arguments={
+                "prompt": prompt,
+                "seconds_total": duration
+            }
+        )
+        
+        audio_url = None
+        if 'audio_file' in result:
+            audio_url = result['audio_file']['url']
+        elif 'audio' in result:
+            o = result['audio']
+            audio_url = o['url'] if isinstance(o, dict) else o
+        
+        if audio_url:
+            urllib.request.urlretrieve(audio_url, output_filename)
+            print(f"✅ Fal.ai Generated BGM saved as: {output_filename}")
+            return True
+            
+        print("⚠️ Fal.ai BGM Warning: No audio URL returned.")
+        return False
+    except Exception as e:
+        print(f"⚠️ Fal.ai BGM Generation Sub-Error (Using fallback generic BGM via assembly): {e}")
+        return False
 
 def generate_srt(audio_path: str, srt_path: str):
     print(f"📝 [PHASE B] Transcribing audio back to precise SRT captions: {audio_path}")

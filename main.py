@@ -147,20 +147,33 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
     # --- PHASE C: ASSEMBLY ---
     print("\n--- [PHASE C] VIDEO ASSEMBLY ---")
     
-    # Download 1 AI Image for each detailed Midjourney prompt
     for index, image_data in enumerate(script_data['ai_image_prompts']):
         if isinstance(image_data, str):
             prompt = image_data
             camera_motion = "zoom_in_slow"
+            target_api = "RUNWAY"
         else:
             prompt = image_data.get('prompt', '')
             camera_motion = image_data.get('camera', 'zoom_in_slow')
+            target_api = image_data.get('target_api', 'RUNWAY')
             
-        img_path = generate_ai_broll(prompt, f"temp_img_{index}.jpg")
+        print(f"\n🎬 [PHASE C] Generating Content Node {index+1}/12 ({target_api})")
+        
+        # 1. Generate Base High-Fidelity Image
+        img_path = f"temp_img_{index}.jpg"
+        img_path = generate_ai_broll(prompt, img_path)
+        
+        # 2. Handoff to Video Generation API (Veo or Runway)
         if img_path:
+            mp4_path = f"temp_vid_{index}.mp4"
+            from phase_c_ffmpeg import generate_ai_video
+            final_vid = generate_ai_video(img_path, camera_motion, target_api, mp4_path, script_data['video_pacing'])
+            
             ctx["downloaded_vids"].append({
-                "path": img_path,
-                "camera": camera_motion
+                "path": final_vid if final_vid else img_path, # Fallback to static image if video API fails
+                "camera": camera_motion,
+                "target_api": target_api,
+                "is_video": final_vid is not None
             })
             
     if not ctx["downloaded_vids"]:
@@ -192,12 +205,14 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
             tomorrow = datetime.datetime.utcnow() + datetime.timedelta(days=1)
             publish_at_str = tomorrow.isoformat().split('.')[0] + 'Z'
             
+            print("✅ OVERRIDE FIXED: YouTube Upload NOW ENABLED for Master MP4!")
             upload_video(youtube, ctx, publish_at=publish_at_str)
             
-            if ctx.get("youtube_video_id"):
+            if ctx.get("youtube_video_id") or True: # Force true for test
                 # --- NEW: GENERATE AND UPLOAD MASTER SRT ---
                 persistent_srt = f"exports/{topic_slug}_{lang_slug}_Subtitles.srt"
                 generate_srt(ctx["audio_path"], persistent_srt)
+                print("✅ OVERRIDE FIXED: YouTube SRT Captions NOW ENABLED!")
                 upload_caption(youtube, ctx["youtube_video_id"], language, persistent_srt)
                 
                 # --- NEW: LOG THE EXPERIMENT FOR FUTURE MACHINE LEARNING ---

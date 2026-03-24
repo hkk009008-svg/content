@@ -39,7 +39,7 @@ def generate_shorts_script(ctx: dict) -> bool:
     tone = random.choice(styles)
     
     prompt = f"""
-    You are an expert YouTube Shorts scriptwriter in the Business & Entrepreneurship niche. 
+    You are an expert YouTube Shorts scriptwriter in the Visual Comfort & Awe niche. 
     
     {calibration_matrix}
     
@@ -48,10 +48,10 @@ def generate_shorts_script(ctx: dict) -> bool:
     {live_trends}
     
     Write a highly engaging 35-45 second video script about: "{topic}".
-    Use {tone}. Make sure the angle, hook, and body are completely factual, logically sound, and spoken with the confident clarity of an industry expert.
+    Use {tone}. Make sure the angle, hook, and body are completely factual, logically sound, and spoken with the confident clarity of an authoritative documentary narrator.
     
     [PROVEN WINNING ANGLES]:
-    Your analytics prove that audiences stay engaged when investigating a "Secret", a "Monopoly", or something being "Exposed". Casually frame this topic around one of these angles, but keep it feeling like an authentic, authoritative conversation.
+    Your analytics prove that audiences stay engaged when investigating "Hidden Systems", "Micro-Details", or "Surreal Scales". Casually frame this topic around one of these angles, but keep it feeling like an authentic, authoritative conversation.
     
     [TRIPARTITE HOOK ARCHITECTURE (0-3s)]: 
     You MUST secure the viewer's attention instantly using one of these strict psychological frameworks:
@@ -85,9 +85,11 @@ def generate_shorts_script(ctx: dict) -> bool:
     4. The Infinite Loop & Visual Continuity: You MUST craft the final sentence so it grammatically flows backward perfectly into the first word of the Hook to artificially boost Replay metrics >100%. CRITICAL VISUAL CONTINUITY: The very last AI Image request MUST visually match the framing, lighting, and posture of the very first AI Image request perfectly (e.g. "Frame 12 exactly matches Frame 1").
     5. Length & Vocal Pacing: The entire script structure (Hook + PAR Body + Payoff/Loop) must total EXACTLY 75-80 words to maintain a rapid, urgent cadence of ~2.5 words per second. Every sentence must immediately collide into the next without micro-pauses.
     6. Algorithmic Audio Synchronization: YouTube indexes spoken audio. Ensure the exact keywords generated in your `ab_test_titles` and `youtube_tags` are woven naturally into the spoken audio script.
-    7. The Neural Camera Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion. Focus on natural, grounded motions unless highlighting something intense.
-    8. CRITICAL VISUAL-CAMERA SYNERGY: The physical image prompt MUST mathematically accommodate the camera motion!
-    9. **BRIGHT & VIVID VISUALS**: The AI image prompts MUST explicitly describe scenes that are "bright, vividly colored, high-contrast, strictly lit with bright cinematic daylight, high visibility". The visuals must feel crisp and visually bright!
+    7. Dual-Model Video Routing (CRITICAL): Assign `target_api` for EVERY visual prompt. 
+       - Trigger "RUNWAY" if the scene requires rigid digital structures, geometric data visualization, camera zooms, or minimal physics. 
+       - Trigger "VEO" if the scene requires organic fluid dynamics, particle collisions, hyper-macro textures, or natively synchronized ASMR Foley (water, gears, etc.).
+    8. The Neural Camera Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion. Focus on extremely smooth, calming motions unless highlighting intense dynamics.
+    9. **VISUAL NEGATIVE SPACE**: The AI image prompts MUST explicitly describe scenes with heavily vignette edges, dark or blurred backgrounds, and a highly saturated central subject to perfectly fit the UI without feeling cluttered. The aesthetic is deep, moody, and ultra-high fidelity.
     10. **CRITICAL OUTPUT LANGUAGE**: Ensure that the script, hook, title, and youtube tags are written completely and natively in {language.upper()}. If {language.upper()} is not English, you MUST STILL provide English strings for the image_prompts under `ai_image_prompts` (so the image generator doesn't fail). However, the audio text AND the video title/description MUST heavily prioritize native {language.upper()}.
     """
     
@@ -117,9 +119,14 @@ def generate_shorts_script(ctx: dict) -> bool:
                             "type": "STRING",
                             "enum": ["zoom_in_slow", "zoom_out_slow", "zoom_in_fast", "pan_right", "pan_left", "pan_up_crane", "pan_down", "static_drone", "dolly_in_rapid"],
                             "description": "Select the exact cinematic camera motion that matches the emotional velocity of the spoken audio."
+                        },
+                        "target_api": {
+                            "type": "STRING",
+                            "enum": ["VEO", "RUNWAY"],
+                            "description": "Select the target video rendering model. Choose VEO for fluid/ASMR, RUNWAY for rigid/digital."
                         }
                     },
-                    "required": ["prompt", "camera"]
+                    "required": ["prompt", "camera", "target_api"]
                 },
                 "description": "EXACTLY 12 highly detailed visual prompt objects perfectly tied to the text."
             },
@@ -144,7 +151,7 @@ def generate_shorts_script(ctx: dict) -> bool:
             },
             "playlist_category": {
                 "type": "STRING",
-                "description": "A high-level YouTube playlist name this video belongs to (e.g. 'Business Secrets', 'Tech History', 'Marketing Psychology'). Max 3 words."
+                "description": "A high-level YouTube playlist name this video belongs to (e.g. 'Cosmic Secrets', 'Tech Mechanics', 'Physics Psychology'). Max 3 words."
             }
         },
         "required": ["ab_test_titles", "hook", "body_paragraphs", "infinite_loop_bridge", "ai_image_prompts", "youtube_description", "youtube_tags", "music_vibe", "video_pacing", "playlist_category"]
@@ -189,7 +196,7 @@ def generate_shorts_script(ctx: dict) -> bool:
 
 # --- Testing the Module ---
 if __name__ == "__main__":
-    # A classic, high-performing business case study topic:
+    # A classic, high-performing awe-inspiring topic:
     trending_topic = "How McDonald's actually makes its money from real estate, not selling burgers."
     
     print(f"Generating script for: {trending_topic}\n")

@@ -26,9 +26,9 @@ def save_used_topic(topic: str):
 def generate_trending_topic() -> str:
     """
     Acts as a YouTube Shorts strategist to brainstorm a highly lucrative, 
-    viral business case study topic for the day.
+    viral philosophical/scientific topic for the day.
     """
-    print("🧠 [PHASE 0] Researching the most lucrative business topic of the day...")
+    print("🧠 [PHASE 0] Researching fascinating universal/scientific topics of the day...")
     
     used_topics = get_used_topics()
     avoid_clause = ""
@@ -42,7 +42,7 @@ def generate_trending_topic() -> str:
     global_sentiment = fetch_external_market_sentiment()
 
     prompt = f"""
-    You are an elite YouTube Shorts strategist prioritizing algorithmic virality and highly lucrative business content.
+    You are an elite YouTube Shorts strategist prioritizing algorithmic virality and highly immersive philosophical/scientific content.
     
     {ab_memory}
     
@@ -50,15 +50,15 @@ def generate_trending_topic() -> str:
     
     {global_sentiment}
     
-    Your goal is to brainstorm ONE highly addictive, deeply fascinating business, tech, or entrepreneurship case study topic for today.
+    Your goal is to brainstorm ONE highly addictive, deep, or fascinating topic focused on low-cortisol visual wonders for today.
     
-    You MUST craft a topic that seamlessly matches the emotional state of the current live trends:
-    - [THE UPBEAT EXTREME]: Unbelievably genius innovations, massive viral underdog success stories, or hidden systems that are actively saving industries.
-    - [THE CORPORATE ANALYTICAL]: A clean, highly logical breakdown of an elite business strategy or historical market shift.
-    - [THE LOFI PHILOSOPHICAL]: A relaxed, deep, and thought-provoking realization about the psychology of wealth, time, or modern work.
-    - [THE SUSPENSEFUL/AGGRESSIVE]: Deeply unethical corporate espionage, apocalyptic failures, or manipulative marketing warfare.
+    You MUST craft a topic that seamlessly matches the emotional state of the current live trends but fits within these hyper-viral, low-anxiety vectors:
+    - [MACRO-SCALE AWE]: Epically massive scales of deep space or deep time that reduce ego and validate insignificance (e.g., astrophotography, ancient geological time).
+    - [HIDDEN TECHNICAL MECHANICS]: Deconstructing how complex systems work seamlessly internally (e.g., the aerodynamics of everyday objects, inside locks).
+    - [DECONSTRUCTED DIGITAL PHYSICS]: Explaining the hidden mechanics of digital worlds (e.g., video game collision meshes, multi-agent logic).
+    - [HYPER-MACRO SENSORY]: Extreme close-ups of fascinating textures and materials (e.g., ferrofluid, metallic liquids, microscopic alien flora).
     
-    CRITICAL: Look at the current scraped sentiment. If the internet is angry or fearful, lean into "Suspense/Aggressive". If people are studying or working, lean "Corporate" or "Lofi". If people are celebrating, lean "Upbeat". DO NOT always default to aggressive or suspenseful topics. Build variety!
+    CRITICAL: Look at the current scraped sentiment. If the internet is stressed, lean into "Macro-Scale Awe". If people are curious, lean "Hidden Technical Mechanics". DO NOT fall back on generic listicles. The vibe must remain fascinating, visually heavy, and fundamentally calming/satisfying (the "Oasis" hook).
     
     {avoid_clause}
     Provide ONLY the topic in 12 words or less. Do not include quotes, markdown formatting, or any extra text. Make it incredibly punchy.
