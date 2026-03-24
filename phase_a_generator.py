@@ -68,7 +68,7 @@ def generate_shorts_script(ctx: dict) -> bool:
     tone = f"the legendary writing style of {lens['name']}"
     
     prompt = f"""
-    You are an elite, award-winning cinematic scriptwriter, documentary narrator, and behavioral psychology expert specializing in short-form retention.
+    You are a down-to-earth, engaging documentary narrator and educator specializing in high-quality short-form informational content.
     
     {calibration_matrix}
     
@@ -76,52 +76,49 @@ def generate_shorts_script(ctx: dict) -> bool:
     
     {live_trends}
     
-    Write a highly engaging 35-45 second video script about: "{topic}".
-    Write the script exclusively using {tone}. Make sure the angle, hook, and body are completely factual, logically sound, and spoken with the profound, breathtaking gravity of this specific narrative philosophy.
+    Write an informational, educational, and interesting 35-45 second video script about: "{topic}".
+    Write the script using an accessible, down-to-earth vocabulary while adopting the style of {tone}. Make sure the angle, hook, and body are completely factual and logically sound. Avoid over-sensationalized or overly dramatic language—speak naturally, simply, but powerfully to the viewer.
     
     [BEHAVIORAL PSYCHOLOGY & THE CORE POINT]:
-    1. The "So What?" Connection: The story MUST have a sharp, undeniable point. Connect the core concept directly to the viewer's fundamental reality or human experience. Do not just list facts.
-    2. Concrete Evidence: Back up your narrative with a specific, staggering fact or clear mechanism. Provide proof to emphasize the narrative weight.
-    3. Cognitive Engagement: Use curiosity gaps, pattern interruption, and emotional dissonance to psychologically lock the viewer's attention.
+    1. The Humanity Concern Connection: The story MUST have a clear point that commands the viewer to think deeply about the topic and its impact on the world. For example, if the topic is nuclear submarines, mention concrete consequences like "a nuclear submarine carries enough radioactive fuel that if it breached in the ocean, it could cause massive devastation to marine life." Frame facts around broader humanity concerns or relatable thought experiments that make people care.
+    2. Concrete Evidence: Back up your narrative with specific, understandable facts and mechanisms rather than vague grandeur. Provide proof to emphasize the narrative weight.
+    3. Informational Engagement: Use curiosity gaps, pattern interruption, and interesting educational framing to lock the viewer's attention organically without sounding pretentious.
     
     [THE MASTER LENS - {lens['name'].upper()}]:
     Your ideal aesthetic is {lens['aesthetic']}
     
-    [THE BREATHTAKING HOOK ARCHITECTURE (0-3s)]: 
-    You MUST completely paralyze the viewer's scrolling thumb instantly using this epic psychological framework:
+    [THE HOOK ARCHITECTURE (0-3s)]: 
+    Capture the viewer's attention immediately with a strong, compelling opening using this framework:
     Hook Mechanism: {lens['hook']}
     **CRITICAL 3-SECOND MATRIX CONSTRAINTS**:
     1. CONCRETE ENTITY ANCHORING: Name the specific entity instantly.
-    2. RAW AUDITORY HOOK: The opening sentence must feel like a profound revelation. Speak cleanly, dramatically, and with heavy, deliberate, emotional pauses.
+    2. RAW AUDITORY HOOK: The opening sentence must feel like a strong, undeniable realization. Speak clearly, steadily, and with commanding conversational authority.
     
-    [THE JOURNEY OF AWE & ENGAGEMENT (Seconds 3-30)]:
-    To sustain breathless retention after the hook, execute this psychologically optimized sequence:
-    - Phase 1: The Paradigm Shift (Introduce the reality using a behavioral hook like a paradox or hidden truth. State the hard evidence that backs it up).
-    - Phase 2: The Core Mechanic & Connection (Explain HOW it works and WHY it matters. Give the story its core 'point'. Connect it deeply to the viewer's existence).
-    - Phase 3: The Haunting Resolution (Bring it to a deeply relatable, thought-provoking conclusion that leaves them quite literally breathless and staring at their screen).
+    [THE EDUCATIONAL JOURNEY (Seconds 3-30)]:
+    To sustain engagement after the hook, execute this sequence:
+    - Phase 1: The Context (Introduce the reality using a strong, interesting informational hook like a paradox or hidden truth. State the hard evidence that backs it up).
+    - Phase 2: The Core Mechanic & Consequence (Explain HOW it works and WHY it matters. Explain the real-world impact or humanity concern. Command the viewer to think about the topic).
+    - Phase 3: The Informational Resolution (Bring it to an educational, thought-provoking conclusion that leaves them pondering the subject).
     
     [ALGORITHMIC ENGAGEMENT - THE THOUGHT-PROVOKING ELEMENT]:
-    Instead of cheap engagement bait, you MUST end the video with a deeply thought-provoking element. Deliver a paradigm-shifting final sentence or a profound, haunting philosophical question that fundamentally alters how the viewer sees their own reality exactly according to your assigned Lens. It should leave them staring at the screen, forcing them to pause, reflect, and organically engage in the comments.
+    Instead of cheap engagement bait, end the video with a deeply thought-provoking element. Deliver a final sentence or a philosophical question that makes the viewer seriously consider the topic's impact on their reality or the world, prompting them to organically engage in the comments. Use down-to-earth language.
     
-    [EPIC NARRATION & WORD CHOICE]:
+    [NARRATION & WORD CHOICE]:
     Pacing and vocabulary: {lens['pacing']}
-    Flow with intense emotional gravity. Use intentional, dramatic pauses. Every single word must carry heavy narrative weight.
-    
-    [OMNISCIENT RESEARCH & THOUGHT-PROVOKING RESOLUTION]:
-    Provide deeply satisfying, elegant, breathtaking facts that invoke true ontological shock and profound realization.
+    Flow with steady, strong educational authority. Use intentional pauses. Choose down-to-earth, widely understandable language rather than obscure or epic vocabulary. Every single word must carry narrative weight.
     
     Rules:
-    1. Hook (AUDIO SEO CRITICAL): Start smoothly, gracefully dropping a massive realization with warm authority. You MUST explicitly state the core topic ("{topic}") out loud within the first sentence.
-    2. Body: Execute the "Journey of Awe" framework across 3 sequential phases, using strictly conversational and poetic phrasing. Embed SEO keywords naturally.
-    3. The Payoff & Action Trigger: Provide a gentle engagement request (e.g., "Take a deep breath, and softly tap subscribe if you felt this.") paired instantly with a relaxing conclusion.
+    1. Hook (AUDIO SEO CRITICAL): Start with a strong, impactful delivery of an interesting fact. You MUST explicitly state the core topic ("{topic}") out loud within the first sentence.
+    2. Body: Execute the "Educational Journey" framework across 3 sequential phases, using strictly conversational phrasing. Embed SEO keywords naturally.
+    3. The Payoff & Action Trigger: Provide a gentle engagement request (e.g., "What do you think about this? Let me know below and subscribe for more.") paired with a calm conclusion.
     4. The Master Infinite Loop & Visual Continuity: Your final sentence (`infinite_loop_bridge`) MUST NOT restate the beginning. Instead, it MUST be an incomplete thought or lead-in clause that grammatically REQUIRES the very first word of the Hook to finish the sentence. (e.g., If your hook starts with "Black holes...", your ending must be something like "Because the ultimate truth is hidden within..."). CRITICAL: The last AI Image (Frame 12) MUST explicitly describe the exact same framing, lighting, and subject posture as Frame 1.
     5. Length & Vocal Pacing: The script must total EXACTLY 50-65 words. Since you are speaking SOOTHINGLY and SLOWLY, fewer words take up the same 45 seconds. Use punctuation to force ElevenLabs to pause and breathe.
     6. Algorithmic Audio Synchronization: Ensure the exact keywords generated in your `ab_test_titles` and `youtube_tags` are woven naturally into the spoken audio script.
     7. Dual-Model Video Routing (CRITICAL): Assign `target_api` for EVERY visual prompt. 
        - Trigger "RUNWAY" if the scene requires rigid digital structures, geometric data visualization, camera zooms, or minimal physics. 
        - Trigger "VEO" if the scene requires organic fluid dynamics, particle collisions, hyper-macro textures, or natively synchronized ASMR Foley (water, gears, etc.).
-    8. The Neural Camera Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion. Focus on dynamic, high-stakes tracking shots for Business/Cybernetics or sweeping, revelatory crane shots for Historical Mysteries.
-    9. **VISUAL NEGATIVE SPACE**: The AI image prompts MUST explicitly describe scenes with heavily vignette edges, dark or blurred backgrounds, and a highly saturated central subject to perfectly fit the UI without feeling cluttered. Customize the lighting to fit the lens: Moody corporate shadows, dusty ancient sunbeams, or high-contrast neon cyber-aesthetics.
+    8. The Camera Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion that suits the documentary style.
+    9. **VISUAL NEGATIVE SPACE**: The AI image prompts MUST explicitly describe scenes with heavily vignette edges, dark or blurred backgrounds, and a highly saturated central subject to perfectly fit the UI without feeling cluttered. Customize the lighting to fit the lens: Moody shadows, natural documentary sunbeams, or high-contrast aesthetics.
     10. **CRITICAL OUTPUT LANGUAGE**: Ensure that the script, hook, title, and youtube tags are written completely and natively in {language.upper()}. If {language.upper()} is not English, you MUST STILL provide English strings for the image_prompts under `ai_image_prompts` (so the image generator doesn't fail). However, the audio text AND the video title/description MUST heavily prioritize native {language.upper()}.
     """
     
@@ -132,13 +129,13 @@ def generate_shorts_script(ctx: dict) -> bool:
             "ab_test_titles": {
                 "type": "ARRAY", 
                 "items": {"type": "STRING"},
-                "description": "Provide EXACTLY 3 extremely distinct, highly attractive and soothing video titles. Title 1: Gentle curiosity gap. Title 2: Calming realization. Title 3: Peaceful benefit/value. Avoid aggressive clickbait."
+                "description": "Provide EXACTLY 3 extremely distinct, highly attractive and interesting educational video titles. Title 1: Curiosity gap. Title 2: Realization. Title 3: Real-world concern/impact. Avoid aggressive clickbait."
             },
-            "hook": {"type": "STRING", "description": "The opening gentle, soothing sentence"},
+            "hook": {"type": "STRING", "description": "The opening conversational, interesting sentence"},
             "body_paragraphs": {
                 "type": "ARRAY", 
                 "items": {"type": "STRING"},
-                "description": "EXACTLY 3 poetic paragraphs mapping to the Journey of Awe & Engagement: [1] The Paradigm Shift & Evidence, [2] The Core Mechanic & Connection (The Point), [3] The Haunting Resolution."
+                "description": "EXACTLY 3 down-to-earth documentary style paragraphs mapping to the Educational Journey: [1] Context & Evidence, [2] Core Mechanic & Humanity Concern, [3] Thought-Provoking Resolution."
             },
             "infinite_loop_bridge": {"type": "STRING", "description": "The final lead-in clause. It MUST be an incomplete grammatical bridge that perfectly sets up the very first word of the Hook without repeating it (e.g. 'Which makes you realize that...')."},
             "ai_image_prompts": {
@@ -150,7 +147,7 @@ def generate_shorts_script(ctx: dict) -> bool:
                         "camera": {
                             "type": "STRING",
                             "enum": ["zoom_in_slow", "zoom_out_slow", "zoom_in_fast", "pan_right", "pan_left", "pan_up_crane", "pan_down", "static_drone", "dolly_in_rapid"],
-                            "description": "Select the exact cinematic camera motion that matches the emotional velocity of the spoken audio."
+                            "description": "Select the exact cinematic camera motion that matches the educational documentary tone."
                         },
                         "target_api": {
                             "type": "STRING",
@@ -164,17 +161,17 @@ def generate_shorts_script(ctx: dict) -> bool:
             },
             "youtube_description": {
                 "type": "STRING",
-                "description": "A deep, comprehensive, and highly-detailed 3-paragraph SEO-optimized YouTube video description. Naturally weave in all logical context, historical facts, and 15 targeted keywords. This must be as exhaustive as possible to maximize YouTube's 5000 character limit for Discovery indexing."
+                "description": "A comprehensive, down-to-earth, informational, and highly-detailed 3-paragraph SEO-optimized YouTube video description. Naturally weave in all logical context, historical facts, and 15 targeted keywords. This must be as exhaustive as possible to maximize YouTube's 5000 character limit for Discovery indexing."
             },
             "youtube_tags": {
                 "type": "ARRAY",
                 "items": {"type": "STRING"},
-                "description": "EXACTLY 15 highly-targeted, viral YouTube tags relating to the topic."
+                "description": "EXACTLY 15 highly-targeted, relevant YouTube tags relating to the topic."
             },
             "music_vibe": {
                 "type": "STRING",
                 "enum": ["suspense", "corporate"],
-                "description": "Select the emotional vibe. CRITICAL: Use 'corporate' for clean business breakdowns or architectural awe. Use 'suspense' for historical coverups, cybernetics, or deep psychological tactics."
+                "description": "Select the emotional vibe. CRITICAL: Use 'corporate' for clean business breakdowns or architectural setups. Use 'suspense' for humanity concerns, cybernetics, or mysteries."
             },
             "video_pacing": {
                 "type": "STRING",
@@ -183,7 +180,7 @@ def generate_shorts_script(ctx: dict) -> bool:
             },
             "playlist_category": {
                 "type": "STRING",
-                "description": "A high-level YouTube playlist name this video belongs to (e.g. 'Business Secrets', 'Historical Mysteries', 'Cybernetics'). Max 3 words."
+                "description": "A high-level YouTube playlist name this video belongs to (e.g. 'Humanity Constraints', 'Historical Truths', 'Our Future'). Max 3 words."
             }
         },
         "required": ["ab_test_titles", "hook", "body_paragraphs", "infinite_loop_bridge", "ai_image_prompts", "youtube_description", "youtube_tags", "music_vibe", "video_pacing", "playlist_category"]
