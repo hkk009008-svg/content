@@ -26,31 +26,94 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return out if os.path.exists(out) else None
 
-    # RunwayML Elite Cinematic Generation
-    runway_key = os.getenv("RUNWAYML_API_SECRET", "key_eefac4c47c6d62fdb7403d236542e8bee22a05cfcc2ee0224f4f9582e6a3a42c3a6d3238a2ba3f896eb5fa6d6096b8a0d16cdb01445f7b31f2340bc912b358ff")
-    if runway_key:
-        try:
-            runway_client = RunwayML(api_key=runway_key)
-            video_task = runway_client.image_to_video.create(
-                model="gen3a_turbo",
-                prompt_image=image_path,
-                prompt_text=f"Smooth {camera_motion}. Cinematic lighting.",
-                ratio="720:1280",
-                duration=5,
-                watermark=False
-            )
-            print(f"   ↳ Runway Task {video_task.id} queued. Polling...")
-            completed_task = video_task.wait_for_task_output()
-            final_video_url = completed_task.output[0]
-            # Download it
-            import urllib.request
-            urllib.request.urlretrieve(final_video_url, output_mp4)
-            return output_mp4
-        except Exception as e:
-            print(f"   ⚠️ Runway API Error: {e}")
+    if target_api.upper() == "VEO":
+        gemini_key = os.getenv("GOOGLE_API_KEY")
+        if gemini_key:
+            try:
+                from google import genai
+                from google.genai import types
+                import urllib.request
+                import time
+                
+                client = genai.Client(api_key=gemini_key)
+                
+                with open(image_path, "rb") as f:
+                    img_data = f.read()
+                
+                # Veo 2.0 Cinematic Generation (with 429 RPM Auto-Retry)
+                max_retries = 2
+                operation = None
+                for attempt in range(max_retries):
+                    try:
+                        operation = client.models.generate_videos(
+                            model='veo-2.0-generate-001',
+                            source=types.GenerateVideosSource(
+                                prompt=f"Smooth {camera_motion}. Cinematic lighting.",
+                                image=types.Image(
+                                    image_bytes=img_data,
+                                    mime_type="image/jpeg"
+                                )
+                            )
+                        )
+                        break
+                    except Exception as api_e:
+                        if '429' in str(api_e) and attempt < max_retries - 1:
+                            print(f"   ⚠️ Veo API Rate Limit (429). Cooling down for 65s before retry {attempt+1}/{max_retries}...")
+                            time.sleep(65)
+                        else:
+                            raise api_e
+                print(f"   ↳ Veo Task {operation.name} queued. Polling...")
+                while not operation.done:
+                    time.sleep(10)
+                    operation = client.operations.get(operation)
+                
+                if operation.error:
+                    print(f"   ⚠️ Veo API Error: {operation.error}")
+                    return fallback_ffmpeg_zoom(image_path, output_mp4)
+                
+                final_video_url = operation.result.generated_videos[0].video.uri
+                req = urllib.request.Request(final_video_url, headers={"x-goog-api-key": gemini_key})
+                with urllib.request.urlopen(req) as response, open(output_mp4, 'wb') as f:
+                    f.write(response.read())
+                return output_mp4
+            except Exception as e:
+                print(f"   ⚠️ Veo API Error: {e}")
+                return fallback_ffmpeg_zoom(image_path, output_mp4)
+        else:
             return fallback_ffmpeg_zoom(image_path, output_mp4)
+            
     else:
-        return fallback_ffmpeg_zoom(image_path, output_mp4)
+        # RunwayML Elite Cinematic Generation
+        runway_key = os.getenv("RUNWAYML_API_SECRET")
+        if runway_key:
+            try:
+                import base64
+                with open(image_path, "rb") as f:
+                    b64_img = base64.b64encode(f.read()).decode('utf-8')
+                data_uri = f"data:image/jpeg;base64,{b64_img}"
+
+                runway_client = RunwayML(api_key=runway_key)
+                video_task = runway_client.image_to_video.create(
+                    model="gen3a_turbo",
+                    prompt_image=data_uri,
+                    prompt_text=f"Smooth {camera_motion}. Cinematic lighting.",
+                    ratio="768:1280",
+                    duration=5
+                )
+                print(f"   ↳ Runway Task {video_task.id} queued. Polling...")
+                completed_task = video_task.wait_for_task_output()
+                final_video_url = completed_task.output[0]
+                # Download it
+                import urllib.request
+                urllib.request.urlretrieve(final_video_url, output_mp4)
+                return output_mp4
+            except Exception as e:
+                print(f"   ⚠️ Runway API Error: {e}")
+                print("   ⚠️ Re-routing gracefully to VEO 2.0 Engine...")
+                return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing)
+        else:
+            print("   ⚠️ RunwayML key missing. Re-routing gracefully to VEO 2.0 Engine...")
+            return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing)
 
 def generate_ass_subtitles(whisper_result: dict, output_path: str):
     """Converts Whisper word-level timestamps to an advanced SubStation Alpha (.ass) file."""
@@ -61,7 +124,7 @@ PlayResY: 1920
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Roboto,96,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,3,2,10,10,600,1
+Style: Default,Roboto,64,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,3,2,60,60,600,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -117,8 +180,8 @@ def normalize_clip(input_path: str, output_path: str, duration_sec: float = None
         cmd.extend(["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"])
         
     cmd.extend([
-        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-        "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=24",
+        "-c:v", "h264_videotoolbox", "-b:v", "8M",
+        "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30",
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"
     ])
     
@@ -129,7 +192,12 @@ def normalize_clip(input_path: str, output_path: str, duration_sec: float = None
         cmd.append("-shortest")
         
     cmd.append(output_path)
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as e:
+        print(f"      ❌ FFMPEG NORM_CLIP ERROR: {e.stderr.decode()}")
+        raise
+        
     print(f"      Normalized: {output_path} | Audio: {has_audio} | Duration: {duration_sec}s")
     return output_path
 
@@ -138,13 +206,18 @@ def stitch_modules(module_paths: list, final_output: str) -> str:
     list_file = "concat_list.txt"
     with open(list_file, "w") as f:
         for path in module_paths:
-            f.write(f"file '{os.path.abspath(path)}'\\n")
+            f.write(f"file '{os.path.abspath(path)}'\n")
             
     cmd = [
         "ffmpeg", "-y", "-f", "concat", "-safe", "0",
         "-i", list_file, "-c", "copy", final_output
     ]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as e:
+        print(f"      ❌ FFMPEG CONCAT ERROR: {e.stderr.decode()}")
+        raise
+        
     os.remove(list_file)
     print(f"      Stitched sequence: {final_output}")
     return final_output
@@ -152,9 +225,7 @@ def stitch_modules(module_paths: list, final_output: str) -> str:
 def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str, ass_path: str, output_path: str, topic_text: str = ""):
     """
     Executes a single-pass zero-loss FFmpeg complex filtergraph to:
-      1. Overlay the top banner natively
-      2. Render .ASS subtitles
-      3. Mix Foley, TTS, and ducked BGM using sidechaincompress
+      1. Mix Foley, TTS, and ducked BGM using sidechaincompress
     """
     cmd = [
         "ffmpeg", "-y", 
@@ -170,35 +241,22 @@ def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str
     # 5. [mixed]: amix all tracks
     # 6. [final_audio]: Apply loudnorm
     
-    safe_topic = topic_text.replace("'", "").replace(":", "\\\\:") if topic_text else "A N A L Y S I S"
-    
-    # Text Banner Filter (equivalent to MoviePy logic)
-    text_filter = f"drawtext=text='A N A L Y S I S':fontcolor=white:fontsize=40:x=(w-text_w)/2:y=150:box=1:boxcolor=black@0.5:boxborderw=20,"
-    text_filter += f"drawtext=text='{safe_topic}':fontcolor=white:fontsize=60:x=(w-text_w)/2:y=220,"
-    
-    # ASS Subtitle Filter (Relative path fixes Mac parsing errors)
-    subtitle_filter = f"subtitles='{os.path.basename(ass_path)}'"
-    
-    # Note: Because the ASS file might contain complex formatting or commas, 
-    # it's best to isolate subtitle processing to [v_final].
-    v_graph = f"[0:v]{text_filter}{subtitle_filter}[v_final]"
-    
     a_graph = (
-        "[1:a]volume=1.0[tts_v];"
+        "[1:a]volume=1.0,asplit=2[tts_sc][tts_mix];"
         "[2:a]volume=0.4,aloop=loop=-1:size=2e9[bgm_looped];"
-        "[bgm_looped][tts_v]sidechaincompress=threshold=0.08:ratio=4:attack=50:release=300[bgm_ducked];"
+        "[bgm_looped][tts_sc]sidechaincompress=threshold=0.08:ratio=4:attack=50:release=300[bgm_ducked];"
         "[0:a]volume=0.6[foley];"
-        "[foley][tts_v][bgm_ducked]amix=inputs=3:duration=first:dropout_transition=2[mixed];"
+        "[foley][tts_mix][bgm_ducked]amix=inputs=3:duration=first:dropout_transition=2[mixed];"
         "[mixed]loudnorm=I=-14:LRA=11:TP=-1.5[final_audio]"
     )
     
-    filtercomplex = f"{v_graph};{a_graph}"
+    filtercomplex = f"{a_graph}"
     
     cmd.extend([
         "-filter_complex", filtercomplex,
-        "-map", "[v_final]", 
+        "-map", "0:v", 
         "-map", "[final_audio]",
-        "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+        "-c:v", "copy",
         "-c:a", "aac", "-b:a", "192k", 
         "-shortest",
         output_path

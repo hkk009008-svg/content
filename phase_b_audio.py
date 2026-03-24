@@ -81,7 +81,7 @@ def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42):
         import fal_client
         vibe_prompts = {
             "suspense": "Slow, deep sub-bass drones, cinematic suspense, ominous, dark ambient, 432Hz.",
-            "lofi": "Ambient lo-fi hip hop, very slow tempo, relaxing, chill tape hiss, soft electric piano.",
+            "lofi": "Deeply soothing ambient soundscape, slow ethereal synth pads, Hans Zimmer cosmic awe, frequencies of healing, very slow tempo.",
             "corporate": "Bright, uplifting tech ambient, clean synth arpeggios, neutral documentary tone.",
             "upbeat": "High tempo electronic breakbeat, energetic, pulsing synthesizer, driving rhythm.",
             "aggressive": "Heavy industrial distorted bass, aggressive synth wave, cyberpunk, hard hitting."

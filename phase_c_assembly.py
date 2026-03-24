@@ -157,10 +157,10 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense", pre_tran
         },
         "lofi": {
             "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-            "colors": ["#FFD700"], # Chill Warm Gold for lofi
-            "opacity": 1.0,
-            "stroke": 12,
-            "size": 220
+            "colors": ["#F0F8FF", "#E6E6FA"], # Soft Alice Blue and Lavender for cosmic soothe
+            "opacity": 0.9,
+            "stroke": 8,
+            "size": 180
         },
         "upbeat": {
             "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
@@ -194,10 +194,10 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense", pre_tran
             
             # Create a styled graphic for each word
             
-            # --- MAX RETENTION PATTERN INTERRUPT ---
-            # Shock the viewer's retina on the first 3 words to prevent swiping away
+            # --- GENTLE IMMERSION ---
+            # No aggressive retina shock. Just smooth, pleasing text.
             is_hook_word = word_index <= 3
-            current_color = "#FF0033" if is_hook_word else color_choice
+            current_color = color_choice
             
             # --- DYNAMIC FONT SCALING (PREVENT UGLY BREAKS) ---
             # If a single word or number is excessively long (like "$1,000,000,000" or "entrepreneurship"),
@@ -318,15 +318,32 @@ def assemble_final_video(ctx: dict):
         stitched_path = "temp_stitched_master.mp4"
         stitch_modules(normalized_clips, stitched_path)
         
-        # 4. MASTER FFMPEG AUDIO MIX & ZERO-LOSS GRAPHICAL BURN
+        # 3. HIGH-FIDELITY MOVIEPY OVERLAYS (Captions, Banners, Logos)
+        from moviepy.editor import VideoFileClip
+        final_video = VideoFileClip(stitched_path)
+        final_video = add_top_banner(final_video, topic_text)
+        final_video = add_dynamic_captions(audio_path, final_video, music_vibe, pre_transcribed_result=whisper_result)
+        
+        temp_overlay_mp4 = "temp_captions_ready.mp4"
+        print("⏳ Blazing Fast GPU Rendering CapCut-Style Graphical Master...")
+        final_video.write_videofile(
+            temp_overlay_mp4, 
+            fps=30, 
+            codec="h264_videotoolbox", 
+            audio=True,
+            bitrate="8000k",
+            logger=None
+        )
+        final_video.close()
+        
+        # 4. MASTER FFMPEG AUDIO MIX
         bg_music_path = f"bg_{music_vibe}.mp3"
         if not os.path.exists(bg_music_path):
             print(f"⚠️ Warning: Missing bespoke AI audio ({bg_music_path}). Please ensure phase_b_audio successfully called Fal.ai API.")
-
             
-        print("🔊 Orchestrating Master FFMPEG Filtergraph (Banners, Captions, Audio Ducking)...")
+        print("🔊 Orchestrating Master FFMPEG Filtergraph (Audio Ducking)...")
         success = execute_master_ffmpeg_assembly(
-            video_path=stitched_path,
+            video_path=temp_overlay_mp4,
             tts_path=audio_path,
             bgm_path=bg_music_path,
             ass_path=ass_path,
@@ -335,7 +352,7 @@ def assemble_final_video(ctx: dict):
         )
         
         if success:
-            print(f"\n✅ Success! Final video rendered autonomously natively via FFmpeg: {output_filename}")
+            print(f"\n✅ Success! Final video rendered successfully: {output_filename}")
             return True
         return False
         

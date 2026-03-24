@@ -50,15 +50,15 @@ def generate_trending_topic() -> str:
     
     {global_sentiment}
     
-    Your goal is to brainstorm ONE highly addictive, deep, or fascinating topic focused on low-cortisol visual wonders for today.
+    Your goal is to brainstorm ONE deeply soothing, mesmerizing, and profoundly fascinating topic focused on low-cortisol visual wonders for today.
     
-    You MUST craft a topic that seamlessly matches the emotional state of the current live trends but fits within these hyper-viral, low-anxiety vectors:
-    - [MACRO-SCALE AWE]: Epically massive scales of deep space or deep time that reduce ego and validate insignificance (e.g., astrophotography, ancient geological time).
-    - [HIDDEN TECHNICAL MECHANICS]: Deconstructing how complex systems work seamlessly internally (e.g., the aerodynamics of everyday objects, inside locks).
-    - [DECONSTRUCTED DIGITAL PHYSICS]: Explaining the hidden mechanics of digital worlds (e.g., video game collision meshes, multi-agent logic).
-    - [HYPER-MACRO SENSORY]: Extreme close-ups of fascinating textures and materials (e.g., ferrofluid, metallic liquids, microscopic alien flora).
+    You MUST craft a topic that seamlessly matches the emotional state of the current live trends but fits within these unified, calming vectors of awe:
+    - [MACRO-SCALE AWE]: Epically massive scales of deep space or deep time that evoke profound peace and validate insignificance (e.g., astrophotography, silent galaxies).
+    - [GENTLE NATURAL MECHANICS]: Deconstructing how complex natural or soft systems work seamlessly (e.g., the silent growth of crystals, deep ocean currents).
+    - [HARMONIZED PHYSICS]: Explaining the hidden elegant math of reality in a comforting way (e.g., golden ratios in nature, quantum probability clouds).
+    - [HYPER-MACRO SENSORY]: Extreme, slow-motion close-ups of fascinating, calming textures (e.g., softly shifting ferrofluid, melting ice, microscopic flora).
     
-    CRITICAL: Look at the current scraped sentiment. If the internet is stressed, lean into "Macro-Scale Awe". If people are curious, lean "Hidden Technical Mechanics". DO NOT fall back on generic listicles. The vibe must remain fascinating, visually heavy, and fundamentally calming/satisfying (the "Oasis" hook).
+    CRITICAL: Look at the current scraped sentiment. The vibe must remain deeply soothing, visually comforting, and fundamentally awe-inspiring (the "Oasis" aesthetic). DO NOT use alarming, hyper-aggressive, or clickbait framing.
     
     {avoid_clause}
     Provide ONLY the topic in 12 words or less. Do not include quotes, markdown formatting, or any extra text. Make it incredibly punchy.

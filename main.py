@@ -38,7 +38,7 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
     if not os.path.exists("logo.png"):
         print("🎨 [BRANDING] Generating Permanent Channel Logo...")
         import requests, urllib.parse
-        new_prompt = "a simple, highly trustworthy and friendly youtube channel logo, clean welcoming aesthetic, warm colors, vector flat icon, high resolution, solid background"
+        new_prompt = "a deeply soothing, elegant, and visually comforting youtube channel logo, cosmic awe aesthetic, soft glowing gradients, minimalist vector icon, high resolution, solid dark background"
         p = urllib.parse.quote(new_prompt)
         try:
             from dotenv import load_dotenv
@@ -89,7 +89,6 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
         "downloaded_vids": [],
         "final_video_path": f"exports/{topic_slug}_{lang_slug}_Final.mp4",
         "final_thumbnail_path": f"exports/{topic_slug}_{lang_slug}_Thumbnail.jpg",
-        "youtube_video_id": None,
         "full_description": ""
     }
     
