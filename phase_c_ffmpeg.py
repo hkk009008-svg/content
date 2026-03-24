@@ -243,8 +243,8 @@ def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str
     
     a_graph = (
         "[1:a]volume=1.0,asplit=2[tts_sc][tts_mix];"
-        "[2:a]volume=0.4,aloop=loop=-1:size=2e9[bgm_looped];"
-        "[bgm_looped][tts_sc]sidechaincompress=threshold=0.08:ratio=4:attack=50:release=300[bgm_ducked];"
+        "[2:a]volume=0.85,aloop=loop=-1:size=2e9[bgm_looped];"
+        "[bgm_looped][tts_sc]sidechaincompress=threshold=0.1:ratio=2:attack=50:release=300[bgm_ducked];"
         "[0:a]volume=0.6[foley];"
         "[foley][tts_mix][bgm_ducked]amix=inputs=3:duration=first:dropout_transition=2[mixed];"
         "[mixed]loudnorm=I=-14:LRA=11:TP=-1.5[final_audio]"

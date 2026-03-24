@@ -23,29 +23,40 @@ def generate_voiceover(ctx: dict) -> bool:
     
     # Map the script's psychological mood to the perfect physical voice actor
     voice_profiles = {
-        "suspense": "pNInz6obpgDQGcFmaJgB", # Adam (Deep, authoritative gripping narration)
-        "lofi": "21m00Tcm4TlvDq8ikWAM", # Rachel (Soft, intimate, slow conversational)
-        "corporate": "ErXwobaYiN019PkySvjV", # Antoni (Clean, highly articulate professional)
-        "upbeat": "5Q0t7uMcjvnagumLfvZi", # Paul (Highly energetic, bright journalist)
-        "aggressive": "D38z5RcWu1voky8WS1ja" # Fin (Visceral, gritty, intense and fast)
+        "suspense": "pNInz6obpgDQGcFmaJgB", # Adam (Deep, authoritative)
+        "lofi": "21m00Tcm4TlvDq8ikWAM", # Rachel (Soft, intimate)
+        "corporate": "ErXwobaYiN019PkySvjV", # Antoni (Clean professional)
+        "upbeat": "5Q0t7uMcjvnagumLfvZi", # Paul (Highly energetic)
+        "aggressive": "D38z5RcWu1voky8WS1ja", # Fin (Visceral, gritty)
+        "deep": "cjVigY5qzO86Huf0OWal", # Eric (Grizzly, mature)
+        "narrator": "JBFqnCBcs6TW3vCU1E2R", # George (British mentor)
+        "smooth": "ThT5KcBeYPX3keUQqHPh" # Dorothy (British, soft)
     }
     
-    target_voice_id = voice_profiles.get(music_vibe, "pNInz6obpgDQGcFmaJgB")
+    breathtaking_voices = [
+        "pNInz6obpgDQGcFmaJgB", # Adam (Epic deep narrator)
+        "cjVigY5qzO86Huf0OWal", # Eric (Grizzly, massive weight)
+        "21m00Tcm4TlvDq8ikWAM", # Rachel (Ethereal, intimate)
+        "JBFqnCBcs6TW3vCU1E2R", # George (British cinematic)
+        "ThT5KcBeYPX3keUQqHPh"  # Dorothy (British haunting whisper)
+    ]
+    
+    import random
+    target_voice_id = random.choice(breathtaking_voices)
     
     try:
         # Generate the audio using ElevenLabs API v2+ structure with Elite Emotional VoiceSettings
         from elevenlabs import VoiceSettings
+        # For breathtaking narration, we want high style (emotion) but solid stability
         audio = client.text_to_speech.convert(
             voice_id=target_voice_id,
             output_format="mp3_44100_128",
             text=text_script,
             model_id="eleven_multilingual_v2",
             voice_settings=VoiceSettings(
-                # Limit the drop in stability so it always sounds reliable and trustful
-                stability=max(0.20, min(0.95, 0.85 - (0.15 * ctx.get("story_tension", 1.0)))),
+                stability=0.55, # Slightly lower stability allows the AI actor to dramatically inflect
                 similarity_boost=0.85, 
-                # Keep style severely constrained so it feels more like an organic conversation
-                style=max(0.00, min(0.60, 0.05 + (0.15 * ctx.get("story_tension", 1.0)))), 
+                style=0.60, # Substantially boosted style constraint to force passionate, sweeping emotional delivery
                 use_speaker_boost=True
             )
         )

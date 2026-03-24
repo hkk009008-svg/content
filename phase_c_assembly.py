@@ -145,36 +145,36 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense", pre_tran
             "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
             "colors": ["#E2FF3D"], # Acid/Cyber Yellow for suspense
             "opacity": 1.0,
-            "stroke": 12,
-            "size": 220
+            "stroke": 6,
+            "size": 110
         },
         "corporate": {
             "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
             "colors": ["#FACC15"], # Clean Modern Gold for corporate
             "opacity": 1.0,
-            "stroke": 12,
-            "size": 220
+            "stroke": 6,
+            "size": 110
         },
         "lofi": {
             "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
             "colors": ["#F0F8FF", "#E6E6FA"], # Soft Alice Blue and Lavender for cosmic soothe
             "opacity": 0.9,
-            "stroke": 8,
-            "size": 180
+            "stroke": 4,
+            "size": 90
         },
         "upbeat": {
             "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
             "colors": ["#FFEA00"], # High-Energy Neon yellow for upbeat
             "opacity": 1.0,
-            "stroke": 12,
-            "size": 220
+            "stroke": 6,
+            "size": 110
         },
         "aggressive": {
             "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
             "colors": ["#FFED00"], # Sharp Impact Yellow for aggressive
             "opacity": 1.0,
-            "stroke": 12,
-            "size": 220
+            "stroke": 6,
+            "size": 110
         }
     }
     
@@ -321,7 +321,7 @@ def assemble_final_video(ctx: dict):
         # 3. HIGH-FIDELITY MOVIEPY OVERLAYS (Captions, Banners, Logos)
         from moviepy.editor import VideoFileClip
         final_video = VideoFileClip(stitched_path)
-        final_video = add_top_banner(final_video, topic_text)
+        # final_video = add_top_banner(final_video, topic_text) # Removed banner for edge-to-edge full screen
         final_video = add_dynamic_captions(audio_path, final_video, music_vibe, pre_transcribed_result=whisper_result)
         
         temp_overlay_mp4 = "temp_captions_ready.mp4"

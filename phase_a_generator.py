@@ -30,16 +30,45 @@ def generate_shorts_script(ctx: dict) -> bool:
             raw_matrix = f.read()
             calibration_matrix = f"\n[🔥 THE OMNI-CALIBRATION MATRIX 🔥]\n{raw_matrix}\n"
     
-    styles = [
-        "a casual but highly authoritative conversation with an industry expert",
-        "an insightful, unscripted breakdown from a trusted advisor",
-        "a relaxed, conversational explanation from a leading subject-matter expert",
-        "a deep, factual discussion with a knowledgeable mentor"
-    ]
-    tone = random.choice(styles)
+    master_storyteller_matrix = {
+        "Sagan": {
+            "name": "The Sagan Perspective (Cosmic Romanticism)",
+            "aesthetic": "Cosmic Romanticism and profound beauty. Emphasize the romantic connection between the viewer and the infinite. Focus on stardust, gentle interconnectedness, and the poetic scale of the cosmos.",
+            "hook": "The Peaceful Realization: Gently introduce a beautiful, staggering fact that makes the viewer feel warmly connected to the universe.",
+            "pacing": "Flowing, poetic, deeply rhythmic, and highly romantic."
+        },
+        "Lovecraft": {
+            "name": "The Lovecraftian Dread (Cosmic Horror)",
+            "aesthetic": "Terrifying cosmic scale and human insignificance. Emphasize the sheer, incomprehensible enormity of reality. Make the viewer feel terribly fragile and microscopic compared to the brutal vastness of nature or space.",
+            "hook": "The Staggering Insignificance: Instantly crush their sense of scale with a terrifying, heavy, and haunting realization of how small they are.",
+            "pacing": "Slow, brooding, heavy, and ominous."
+        },
+        "Watts": {
+            "name": "The Alan Watts Philosophy (Zen Interconnectedness)",
+            "aesthetic": "Zen philosophy, the illusion of separation. Treat the subject as a single breath of the universe. Focus on harmony, paradox, and the beautiful absurdity of human anxiety.",
+            "hook": "The Haunting Recontextualization: Dramatically shatter a preconceived notion they hold about reality, revealing that everything is one giant playing mechanism.",
+            "pacing": "Warm, philosophical, deeply paradoxical, and unhurried."
+        },
+        "Orwell": {
+            "name": "The Orwellian Mechanic (Brutal Realism)",
+            "aesthetic": "Cold, brutal, mechanical reality. Strip away emotion. Focus on harsh, mechanical, and uncompromising truths of nature, physics, or societal structures. It is what it is, and it is beautifully brutal.",
+            "hook": "The Cold Truth: Deliver a sharp, unemotional, and undeniably brutal fact. Do not sugarcoat it.",
+            "pacing": "Short, sharp, authoritative, and mercilessly logical."
+        },
+        "Poe": {
+            "name": "The Edgar Allan Poe Method (Gothic Suspense)",
+            "aesthetic": "Dark, rhythmic, and haunting suspense. Use gothic vocabulary to build a sense of inescapable fate, profound mystery, or deep melancholy.",
+            "hook": "The Quiet Immensity: A deeply poetic, softly spoken but terribly haunting realization wrapped in gothic phrasing.",
+            "pacing": "Rhythmic, melancholic, very deliberate, and gothic."
+        }
+    }
+    
+    lens_key = random.choice(list(master_storyteller_matrix.keys()))
+    lens = master_storyteller_matrix[lens_key]
+    tone = f"the legendary writing style of {lens['name']}"
     
     prompt = f"""
-    You are an expert YouTube Shorts scriptwriter in the Visual Comfort & Awe niche. 
+    You are an elite, award-winning cinematic scriptwriter and documentary narrator.
     
     {calibration_matrix}
     
@@ -48,34 +77,33 @@ def generate_shorts_script(ctx: dict) -> bool:
     {live_trends}
     
     Write a highly engaging 35-45 second video script about: "{topic}".
-    Use {tone}. Make sure the angle, hook, and body are completely factual, logically sound, and spoken with the confident clarity of an authoritative documentary narrator.
+    Write the script exclusively using {tone}. Make sure the angle, hook, and body are completely factual, logically sound, and spoken with the profound, breathtaking gravity of this specific narrative philosophy.
     
-    [PROVEN WINNING ANGLES]:
-    Your ideal aesthetic is the "Oasis of Awe". Frame everything around "Cosmic Serenity", "Hidden Elegance", or "The Beauty of Mechanics". Make it feel authentically calming and deeply thought-provoking.
+    [THE MASTER LENS - {lens['name'].upper()}]:
+    Your ideal aesthetic is {lens['aesthetic']}
     
-    [THE GENTLE HOOK ARCHITECTURE (0-3s)]: 
-    You MUST gracefully invite the viewer's attention instantly using one of these soothing psychological frameworks:
-    - The Peaceful Realization: Gently introduce a profound fact that recontextualizes their day (e.g. "Right now, above you, [Subject] is doing [Gentle Action].")
-    - The Micro-Mystery: Warmly invite them to observe something hidden (e.g. "Most people never notice how [Subject] actually [Fascinating Detail].")
-    - The Cosmic Perspective: Zoom out immediately to provide emotional relief through scale.
+    [THE BREATHTAKING HOOK ARCHITECTURE (0-3s)]: 
+    You MUST completely paralyze the viewer's scrolling thumb instantly using this epic psychological framework:
+    Hook Mechanism: {lens['hook']}
     **CRITICAL 3-SECOND MATRIX CONSTRAINTS**:
-    1. CONCRETE ENTITY ANCHORING: Name the specific entity instantly to ground the viewer.
-    2. SOOTHING AUDITORY HOOK: The opening sentence must feel like a deep breath. Speak cleanly, warmly, and with a soft, slow, measured cadence. No sudden noises or aggressive claims.
+    1. CONCRETE ENTITY ANCHORING: Name the specific entity instantly.
+    2. RAW AUDITORY HOOK: The opening sentence must feel like a profound revelation. Speak cleanly, dramatically, and with heavy, deliberate, emotional pauses.
     
     [THE JOURNEY OF AWE (Seconds 3-30)]:
-    To sustain gentle attention after the hook, you must execute a "Journey of Awe" sequence that avoids anxiety and builds profound wonder:
-    - Phase 1: The Observation (Describe the beautiful reality of the subject using poetic but scientifically accurate terminology).
-    - Phase 2: The Deep Dive (Zoom in on the intricate mechanics or zoom out to the cosmic scale. Make the viewer feel a sense of harmony with the universe).
-    - Phase 3: The Comforting Resolution (Provide a thoughtful, peaceful conclusion that leaves them feeling calm and enriched).
+    To sustain breathtaking attention after the hook, you must execute a "Journey of Awe" sequence:
+    - Phase 1: The Breathtaking Reality (Describe the intense, epic reality of the subject using highly evocative, cinematic terminology matching your Lens).
+    - Phase 2: The Core Mechanic (Zoom in on the microscopic perfection or pull out to the terrifying enormity of the cosmos. Make the viewer feel the true weight of the subject).
+    - Phase 3: The Haunting Resolution (Provide a deeply poetic, thought-provoking conclusion that leaves them quite literally breathless and staring at their screen).
     
-    [ALGORITHMIC ENGAGEMENT - THE REFLECTIVE PAUSE]:
-    Instead of polarizing comment-bait, end with a gentle philosophical question that naturally invites viewers to reflect and share their own peaceful thoughts or experiences in the comments. 
+    [ALGORITHMIC ENGAGEMENT - THE THOUGHT-PROVOKING ELEMENT]:
+    Instead of cheap engagement bait, you MUST end the video with a deeply thought-provoking element. Deliver a paradigm-shifting final sentence or a profound, haunting philosophical question that fundamentally alters how the viewer sees their own reality exactly according to your assigned Lens. It should leave them staring at the screen, forcing them to pause, reflect, and organically engage in the comments.
     
-    [AUTHENTIC, EXPERT CONVERSATION & WORD CHOICE]:
-    Flow absolutely naturally, like a wise mentor passing down cosmic secrets by a fireplace. Use natural conversational rhythm with intentional, slow pauses. Speak warmly, softly, and authentically.
+    [EPIC NARRATION & WORD CHOICE]:
+    Pacing and vocabulary: {lens['pacing']}
+    Flow with intense emotional gravity. Use intentional, dramatic pauses. Every single word must carry heavy narrative weight.
     
     [OMNISCIENT RESEARCH & THOUGHT-PROVOKING RESOLUTION]:
-    Provide deeply satisfying, elegant facts. The final payoff must provide a calming, unshakeable sense of cosmic trust and wonder.
+    Provide deeply satisfying, elegant, breathtaking facts that invoke true ontological shock and cosmic wonder.
     
     Rules:
     1. Hook (AUDIO SEO CRITICAL): Start smoothly, gracefully dropping a massive realization with warm authority. You MUST explicitly state the core topic ("{topic}") out loud within the first sentence.
