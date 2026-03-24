@@ -337,7 +337,10 @@ def fetch_live_youtube_trends():
         INSTRUCTION: Deeply analyze the keywords, structures, and psychological hooks of these viral titles. Weight your generated output to strictly align with what the algorithm is currently rewarding in search rankings!
         """
     except Exception as e:
-        print(f"⚠️ Warning: Could not fetch live trends. {e}")
+        if "quotaExceeded" in str(e):
+            print("⚠️ Warning: YouTube API quota exceeded. Falling back to external sentiment.")
+        else:
+            print(f"⚠️ Warning: Could not fetch live trends. {e}")
         return ""
 
 def fetch_external_market_sentiment():
