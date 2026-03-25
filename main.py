@@ -33,13 +33,7 @@ TARGET_LANGUAGES = [
     # "Hindi"
 ]
 
-# ==============================================================================
-# 💰 MONETIZATION CONFIGURATION: Drop in your affiliate, newsletter, or product links
-# These are automatically formatted and injected into all YouTube Descriptions.
-# ==============================================================================
 AFFILIATE_LINKS = """
-🚀 Build Your Unfair Advantage -> [Link]
-💼 Scale Your Business Automations -> [Link]
 """
 
 def run_autonomous_pipeline(topic, language, master_video_id=None, offset_hours=0):
@@ -109,7 +103,7 @@ def run_autonomous_pipeline(topic, language, master_video_id=None, offset_hours=
         
     script_data = ctx["script_data"]
     seo_description = script_data.get('youtube_description', f"The insane truth about {topic}.")
-    ctx["full_description"] = f"{seo_description}\n\nStart your own business today: [YOUR ACTUAL LINK HERE! Edit line 104 in main.py]\n\n#shorts #business #finance"
+    ctx["full_description"] = f"{seo_description}"
     
     # --- UNIFIED STORY TENSION ALGORITHM ---
     tension_map = {"lofi": 0.3, "corporate": 0.6, "suspense": 1.0, "upbeat": 1.5, "aggressive": 2.2}
