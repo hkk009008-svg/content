@@ -2,6 +2,8 @@ import os
 import time
 import subprocess
 
+_VEO_QUOTA_EXHAUSTED = False
+
 try:
     from runwayml import RunwayML, TaskFailedError
 except Exception:
@@ -27,6 +29,11 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
         return out if os.path.exists(out) else None
 
     if target_api.upper() == "VEO":
+        global _VEO_QUOTA_EXHAUSTED
+        if _VEO_QUOTA_EXHAUSTED:
+            print("   ⚠️ VEO QUOTA EXHAUSTED DETECTED: Fast-failing to FFMPEG fallback to save time.")
+            return fallback_ffmpeg_zoom(image_path, output_mp4)
+            
         gemini_key = os.getenv("GOOGLE_API_KEY")
         if gemini_key:
             try:
@@ -77,6 +84,10 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
                     f.write(response.read())
                 return output_mp4
             except Exception as e:
+                error_str = str(e).lower()
+                if '429' in error_str or 'quota' in error_str or 'exhausted' in error_str:
+                    _VEO_QUOTA_EXHAUSTED = True
+                    print("   ⚠️ VEO QUOTA EXHAUSTED DETECTED! Permanently routing future calls to fallback mode.")
                 print(f"   ⚠️ Veo API Error: {e}")
                 return fallback_ffmpeg_zoom(image_path, output_mp4)
         else:

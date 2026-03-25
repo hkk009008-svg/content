@@ -25,15 +25,24 @@ from phase_e_learning import log_experiment, fetch_and_update_analytics
 # Examples: "English", "Hindi", "Mandarin (Simplified)", "Spanish", "Arabic"
 # ==============================================================================
 TARGET_LANGUAGES = [
-    "English", 
-    "Mandarin (Simplified)", 
-    "Korean", 
-    "Japanese", 
-    "Spanish (Latin America)", 
-    "Hindi"
+    "English"
+    # "Mandarin (Simplified)", 
+    # "Korean", 
+    # "Japanese", 
+    # "Spanish (Latin America)", 
+    # "Hindi"
 ]
 
-def run_autonomous_pipeline(topic, language, master_video_id=None):
+# ==============================================================================
+# 💰 MONETIZATION CONFIGURATION: Drop in your affiliate, newsletter, or product links
+# These are automatically formatted and injected into all YouTube Descriptions.
+# ==============================================================================
+AFFILIATE_LINKS = """
+🚀 Build Your Unfair Advantage -> [Link]
+💼 Scale Your Business Automations -> [Link]
+"""
+
+def run_autonomous_pipeline(topic, language, master_video_id=None, offset_hours=0):
     # Auto-generate the logo if it doesn't exist yet
     if not os.path.exists("logo.png"):
         print("🎨 [BRANDING] Generating Permanent Channel Logo...")
@@ -201,10 +210,25 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
             # --- THE MACHINE LEARNING SYNC ---
             fetch_and_update_analytics(youtube)
             
-            tomorrow = datetime.datetime.utcnow() + datetime.timedelta(days=1)
-            publish_at_str = tomorrow.isoformat().split('.')[0] + 'Z'
+            publish_at_str = None
+            if offset_hours > 0:
+                future_time = datetime.datetime.utcnow() + datetime.timedelta(hours=offset_hours)
+                publish_at_str = future_time.isoformat().split('.')[0] + 'Z'
             
-            print("✅ OVERRIDE FIXED: YouTube Upload NOW ENABLED for Master MP4!")
+            # --- NEW: A/B TEST EXPORT ---
+            ab_test_file = f"exports/{topic_slug}_{lang_slug}_AB_TITLES.txt"
+            with open(ab_test_file, "w", encoding="utf-8") as f:
+                f.write(f"TEST TITLES FOR TOPIC: {topic}\n\n")
+                f.write("Copy and paste these into the YouTube Studio 'Test & Compare' Tool:\n")
+                for idx, t in enumerate(script_data.get('ab_test_titles', []), 1):
+                    f.write(f"{idx}. {t}\n")
+            print(f"📦 A/B Test Titles packaged: {ab_test_file}")
+            
+            # Compile the final native description with SEO and Affiliate Links
+            base_description = script_data.get('youtube_description', '')
+            ctx["full_description"] = f"{base_description}\n\n---\n{AFFILIATE_LINKS}"
+            
+            print(f"✅ Master MP4 Payload locked. Scheduling upload for offset: +{offset_hours}hr!")
             upload_video(youtube, ctx, publish_at=publish_at_str)
             
             if ctx.get("youtube_video_id") or True: # Force true for test
@@ -223,14 +247,15 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
             else:
                 print("❌ Master Video Upload failed. Skipping subtitles and logging.")
         
-        # Cleanup temporary files (but KEEP the exported video + thumbnail)
+        # Cleanup ALL temporary generated files inside the root directory
+        import glob
         print(f"💾 Permanently saved to local disk: {ctx['final_video_path']}")
+        print("🧹 Sweeping all intermediate temporary nodes from the root directory...")
         
-        if ctx.get("audio_path") and os.path.exists(ctx["audio_path"]):
-            os.remove(ctx["audio_path"])
-        for vid in ctx["downloaded_vids"]:
+        for temp_file in glob.glob("temp_*") + glob.glob("norm_clip_*") + glob.glob("bg_*.mp3"):
             try:
-                os.remove(vid['path'] if isinstance(vid, dict) else vid)
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
             except Exception:
                 pass
     else:
@@ -241,29 +266,35 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
 if __name__ == "__main__":
     import sys
     
+    print("\n" + "="*50)
+    print("🔥 LAUNCHING ADVANCED V3 AUTONOMOUS BATCH PIPELINE 🔥")
+    print("="*50)
+    
     # Check if a topic was passed as a command line argument
     if len(sys.argv) > 1:
         topic = " ".join(sys.argv[1:])
+        run_autonomous_pipeline(topic, "English")
     else:
-        # Otherwise, interactively ask the user for a topic
-        print("\n" + "="*50)
-        topic = input("🎬 Enter a topic (Or press ENTER to Auto-Generate the most lucrative topic!):\n> ")
-        print("="*50 + "\n")
+        # 🧠 BATCH GENERATION SCALING 
+        # Set this to the number of videos you want to produce today.
+        VIDEOS_PER_DAY = 3
+        OFFSET_HOURS = 8 # Time between each video going public
         
-    # Auto-generate if nothing was entered
-    if not topic.strip():
-        topic = generate_trending_topic()
-        print(f"🔥 Auto-Selected Topic: {topic}\n")
-        
-    # Run the autonomous pipeline for EVERY target language!
-    master_video_id = None
-    for lang in TARGET_LANGUAGES:
-        print(f"\n" + "="*50)
-        print(f"🌍 BATCH GENERATING IN: {lang.upper()}")
-        print("="*50)
-        master_video_id = run_autonomous_pipeline(topic, lang, master_video_id=master_video_id)
-    
+        for i in range(VIDEOS_PER_DAY):
+            print(f"\n--- 📅 BATCH GENERATION {i+1} OF {VIDEOS_PER_DAY} ---")
+            topic = generate_trending_topic()
+            print(f"✅ Selected Master Topic: {topic}\n")
+            
+            # We calculate this video's publish offset
+            sched_offset = i * OFFSET_HOURS
+            master_vid_id = run_autonomous_pipeline(topic, "English", master_video_id=None, offset_hours=sched_offset)
+            print("="*50 + "\n")
+            time.sleep(10) # Safety buffer before launching next video
+            
     # Check if the AI needs new YouTube engagement data to mathematical re-calibrate
     # its Retention Variables (Jump Cuts & Flashes)
-    from phase_e_learning import autonomous_batch_calibration
-    autonomous_batch_calibration()
+    try:
+        from phase_e_learning import autonomous_batch_calibration
+        autonomous_batch_calibration()
+    except Exception:
+        pass

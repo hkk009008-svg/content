@@ -139,96 +139,113 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense", pre_tran
     text_clips = []
     word_index = 0
     
-    # Define aesthetic mapping based on Gemini's emotional mood analysis (All dimensions scaled 2x for 4K geometry)
-    vibe_styles = {
-        "suspense": {
-            "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-            "colors": ["#39FF14", "#FFFFFF"], # Cyberpunk Neon Green and crisp white for stark contrast
-            "opacity": 1.0,
-            "stroke": 6,
-            "size": 110
-        },
-        "corporate": {
-            "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-            "colors": ["#FFFFFF", "#FACC15"], # Elite minimal white flashing to Gold for emphasis
-            "opacity": 1.0,
-            "stroke": 6,
-            "size": 110
-        },
-        "lofi": {
-            "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-            "colors": ["#F0F8FF", "#E6E6FA"], # Soft Alice Blue and Lavender for cosmic soothe
-            "opacity": 0.9,
-            "stroke": 4,
-            "size": 90
-        },
-        "upbeat": {
-            "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-            "colors": ["#FFEA00"], # High-Energy Neon yellow for upbeat
-            "opacity": 1.0,
-            "stroke": 6,
-            "size": 110
-        },
-        "aggressive": {
-            "font": '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-            "colors": ["#FFED00"], # Sharp Impact Yellow for aggressive
-            "opacity": 1.0,
-            "stroke": 6,
-            "size": 110
-        }
-    }
+    # 👾 SUBLIMINAL GLITCH STIMULATION ENGINE 👾
+    # Creates mathematically random micro-tears in the background video behind the text
+    import numpy as np
+    import random
     
-    style = vibe_styles.get(music_vibe, vibe_styles["suspense"])
+    def glitch_filter(get_frame, t):
+        frame = get_frame(t)
+        # 3% chance per frame for a faint cybernetic horizontal tear
+        if random.random() < 0.03:
+            h, w, c = frame.shape
+            y_start = random.randint(0, int(h * 0.9))
+            y_end = y_start + random.randint(15, 60)
+            shift_amount = random.randint(20, 50) * random.choice([-1, 1])
+            
+            # Avoid mutating the read-only frame buffer directly
+            glitched = np.copy(frame)
+            glitched[y_start:y_end, :, :] = np.roll(glitched[y_start:y_end, :, :], shift=shift_amount, axis=1)
+            
+            # 1% chance for an absolute color inversion (subliminal frame flash)
+            if random.random() < 0.33:
+                glitched = 255 - glitched
+                
+            return glitched
+        return frame
+        
+    print("👾 [PHASE C] Applying Faint Subliminal VHS Glitching to Background Layer...")
+    video_clip = video_clip.fl(glitch_filter)
     
-    # Loop through the transcription data
+    # 💥 VERY CLEAN & NEAT V4 AESTHETIC 💥
+    # Focus: Highest legibility, vivid white bold, thin crisp outline, soft outer shadow
+    font_choice = '/System/Library/Fonts/Supplemental/Arial Unicode.ttf'
+    font_size = 85
+
+    # Extract ALL individual words globally
+    words_data = []
     for segment in result['segments']:
-        for word_info in segment['words']:
-            word_text = word_info['word'].strip().upper() # ALL CAPS for visual impact
-            start_time = word_info['start']
-            end_time = word_info['end']
+        if 'words' in segment:
+            for w in segment['words']:
+                words_data.append({
+                    'text': w['word'].strip().upper(),
+                    'start': w['start'],
+                    'end': w['end']
+                })
+        else:
+            words_data.append({
+                'text': segment['text'].strip().upper(),
+                'start': segment['start'],
+                'end': segment['end']
+            })
+
+    # Group into 1-2 words max for standard legible pacing
+    kinetic_chunks = []
+    current_chunk = []
+    current_start = 0
+    
+    for i, w_dict in enumerate(words_data):
+        current_chunk.append(w_dict['text'])
+        if len(current_chunk) == 1:
+            current_start = w_dict['start']
             
-            # --- Dynamic Mood Routing ---
-            colors = style["colors"]
-            color_choice = colors[word_index % len(colors)]
-            word_index += 1
+        if len(current_chunk) >= 2 or len(w_dict['text']) > 8 or i == len(words_data) - 1:
+            kinetic_chunks.append({
+                'text': " ".join(current_chunk),
+                'start': current_start,
+                'end': w_dict['end']
+            })
+            current_chunk = []
+
+    # Generate the hyper-legible shadow-layered TextClips
+    for chunk in kinetic_chunks:
+        segment_text = chunk['text']
+        start_time = chunk['start']
+        end_time = chunk['end']
+        
+        try:
+            # 1. The Soft Outer Shadow (Thick semi-transparent black stroke creates a soft glow layer)
+            shadow_clip = TextClip(
+                segment_text, 
+                fontsize=font_size,
+                color='black', 
+                font=font_choice, 
+                stroke_color='black',
+                stroke_width=12,
+                method='caption',
+                size=(950, None), 
+                align='center'
+            ).set_opacity(0.4).set_start(start_time).set_end(end_time).set_position(('center', 'center'))
             
-            # Create a styled graphic for each word
+            # 2. The Vivid Inner Text (White bold with very thin crisp black outline)
+            main_clip = TextClip(
+                segment_text, 
+                fontsize=font_size,
+                color='white', 
+                font=font_choice, 
+                stroke_color='black',
+                stroke_width=2,
+                method='caption',
+                size=(950, None), 
+                align='center'
+            ).set_opacity(1.0).set_start(start_time).set_end(end_time).set_position(('center', 'center'))
             
-            # --- GENTLE IMMERSION ---
-            # No aggressive retina shock. Just smooth, pleasing text.
-            is_hook_word = word_index <= 3
-            current_color = color_choice
+            # Append BOTH to the visual pipeline to compound the 3D aesthetic
+            text_clips.append(shadow_clip)
+            text_clips.append(main_clip)
             
-            # --- DYNAMIC FONT SCALING (PREVENT UGLY BREAKS) ---
-            # If a single word or number is excessively long (like "$1,000,000,000" or "entrepreneurship"),
-            # it physically exceeds the horizontal screen space. MoviePy tries to awkwardly split it 
-            # onto 2 lines. We fix this by crushing the font size inversely to its character length!
-            base_size = int(style["size"] * 1.5) if is_hook_word else style["size"]
-            
-            if len(word_text) > 8:
-                # Add a strict floor boundary of 60% of base size to prevent long words from becoming microscopically unreadable
-                current_size = max(int(base_size * 0.60), int(base_size * (8.0 / len(word_text))))
-            else:
-                current_size = base_size
-            
-            try:
-                txt_clip = TextClip(
-                    word_text, 
-                    fontsize=current_size,
-                    color=current_color, 
-                    font=style["font"], 
-                    stroke_color='black',
-                    stroke_width=style["stroke"],
-                    method='label' # Strictly forces the text to stay horizontally on ONE single line
-                ).set_opacity(style["opacity"])
-                
-                # Set exact timing and center it on screen
-                txt_clip = txt_clip.set_start(start_time).set_end(end_time)
-                txt_clip = txt_clip.set_position(('center', 'center'))
-                
-                text_clips.append(txt_clip)
-            except Exception as e:
-                print(f"⚠️ Warning: Could not generate text clip for word '{word_text}'. Error: {e}")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not generate typography for '{segment_text}'. Error: {e}")
                 
     print("🔥 [PHASE C] Burning captions into the video timeline...")
     # Overlay all the text graphics onto the background video

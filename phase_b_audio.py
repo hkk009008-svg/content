@@ -24,23 +24,16 @@ def generate_voiceover(ctx: dict) -> bool:
     # Map the script's psychological mood to the perfect physical voice actor
     voice_profiles = {
         "suspense": "pNInz6obpgDQGcFmaJgB", # Adam (Deep, authoritative)
-        "lofi": "21m00Tcm4TlvDq8ikWAM", # Rachel (Soft, intimate)
         "corporate": "ErXwobaYiN019PkySvjV", # Antoni (Clean professional)
-        "upbeat": "5Q0t7uMcjvnagumLfvZi", # Paul (Highly energetic)
-        "aggressive": "D38z5RcWu1voky8WS1ja", # Fin (Visceral, gritty)
-        "deep": "cjVigY5qzO86Huf0OWal", # Eric (Grizzly, mature)
-        "narrator": "JBFqnCBcs6TW3vCU1E2R", # George (British mentor)
-        "smooth": "ThT5KcBeYPX3keUQqHPh" # Dorothy (British, soft)
+        "gritty": "D38z5RcWu1voky8WS1ja", # Fin (Visceral, gritty)
+        "cyberpunk": "cjVigY5qzO86Huf0OWal", # Eric (Grizzly, mature, dark)
     }
     
     breathtaking_voices = [
         {"id": "pNInz6obpgDQGcFmaJgB", "name": "Adam (Epic Deep Narrator)"},
         {"id": "cjVigY5qzO86Huf0OWal", "name": "Eric (Grizzly & Mature)"},
-        {"id": "21m00Tcm4TlvDq8ikWAM", "name": "Rachel (Ethereal & Intimate)"},
-        {"id": "JBFqnCBcs6TW3vCU1E2R", "name": "George (British Cinematic)"},
-        {"id": "ThT5KcBeYPX3keUQqHPh", "name": "Dorothy (British Haunting Whisper)"},
-        {"id": "EXAVITQu4vr4xnSDxMaL", "name": "Bella (Soft & Gentle)"},
-        {"id": "TxGEqnHWrfWFTfGW9XjX", "name": "Josh (Relatable & Clear)"}
+        {"id": "D38z5RcWu1voky8WS1ja", "name": "Fin (Visceral & Gritty)"},
+        {"id": "ErXwobaYiN019PkySvjV", "name": "Antoni (Clean Professional)"}
     ]
     
     import random
@@ -67,6 +60,22 @@ def generate_voiceover(ctx: dict) -> bool:
         
         # Save the audio stream to a local file
         save(audio, output_filename)
+        
+        # --- NEW: Strip leading and trailing silence to ensure perfect infinite loops ---
+        import subprocess
+        import os
+        trimmed_file = "temp_trimmed_" + output_filename
+        try:
+            subprocess.run([
+                "ffmpeg", "-y", "-i", output_filename,
+                "-af", "silenceremove=start_periods=1:start_duration=0.05:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_duration=0.05:start_threshold=-45dB,areverse",
+                trimmed_file
+            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            os.replace(trimmed_file, output_filename)
+            print("✂️  [PHASE B] Silence trimmed from audio to guarantee infinite loop sync!")
+        except Exception as e:
+            print(f"⚠️ Warning: Failed to trim silence from TTS track. {e}")
+            
         print(f"✅ Success! Audio saved locally as: {output_filename}")
         
         ctx["audio_path"] = output_filename
@@ -96,10 +105,9 @@ def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42):
         import fal_client
         vibe_prompts = {
             "suspense": "Slow, deep sub-bass drones, cinematic espionage suspense, ominous dark ambient thriller, ticking clock tension, Hans Zimmer.",
-            "lofi": "Deeply soothing ambient soundscape, slow ethereal synth pads, Hans Zimmer cosmic awe, frequencies of healing, very slow tempo.",
             "corporate": "Sleek, atmospheric tech ambient, minimalist synth pulses, high-stakes global documentary, Ridley Scott neo-noir.",
-            "upbeat": "High tempo electronic breakbeat, energetic, pulsing synthesizer, driving rhythm.",
-            "aggressive": "Heavy industrial distorted bass, aggressive synth wave, cyberpunk, hard hitting."
+            "gritty": "Heavy industrial distorted bass, gritty tension, visceral mechanical pulse, hard hitting, dark documentary.",
+            "cyberpunk": "Dark synthwave, neon cyberpunk atmosphere, driving analog synthesizers, futuristic dystopia ambient."
         }
         prompt = vibe_prompts.get(music_vibe.lower(), "Ambient cinematic drone, slow, ethereal, beautiful.")
         

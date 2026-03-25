@@ -1,19 +1,13 @@
-Here is your calibrated strategy for the next batch of videos, based on real-time market sentiment and historical performance data:
+Here is the calibrated strategy for your next batch of videos, derived from mathematical precision and real-time market sentiment:
 
-RULE 1: The jump-cut pacing MUST be 'moderate'. This parameter has a statistically proven average score of 989.5, indicating optimal viewer retention and engagement.
+RULE 1: The primary niche topics MUST be **"Cosmic Mysteries & Paradigm Shifts"** and **"Hidden Dangers & Systemic Failures."** Specifically:
+    *   **Cosmic Mysteries:** Focus on recent astronomical discoveries from the James Webb Space Telescope that challenge existing understanding or hint at profound, potentially unsettling truths about the universe (e.g., "Little Red Dots" as baby galaxies or supermassive black holes; Pope Leo's statement on Webb's revelations; the potential of "failed stars" finding new life).
+    *   **Hidden Dangers:** Focus on ongoing, overlooked, or long-simmering threats/failures with significant societal or environmental impact (e.g., the silently leaking Soviet submarine; ignored warning signs in law enforcement leading to misconduct; the vast and often functional e-waste crisis).
 
-RULE 2: The primary cinematic vibe MUST be 'suspense'. With a statistical average score of 1134.8, 'suspense' maximizes retention and perfectly aligns with the internet's current obsession with profound cosmic mysteries (e.g., 'Little Red Dots', 'failed stars'), hidden dangers (e.g., 'Sunken Soviet Submarine leaking radiation'), and unsettling revelations (e.g., 'Police misconduct ignored red flags').
+RULE 2: The overarching cinematic vibe MUST be **'suspense'**. The emotional tone MUST evoke profound intrigue, intellectual disquiet, and a sense of "what if" or "what's truly hidden?" This leans into the global fascination with the unknown and the human tendency to confront unspoken threats or unsettling revelations.
 
-RULE 3: The hook structure MUST immediately establish a profound mystery, an impending revelation, or an overlooked danger. It should pose a compelling question that suggests a hidden truth or an unexpected twist, creating immediate engagement through intellectual suspense. Example: "For decades, we’ve ignored the silent threat lurking beneath..." or "Scientists just found something in deep space that changes EVERYTHING we thought we knew about..."
+RULE 3: The jump-cut pacing MUST be **'moderate'**. This pacing optimizes retention by allowing tension and information to build effectively, without overwhelming the viewer or feeling sluggish. It supports the 'suspense' vibe by giving moments for contemplation and gradual revelation.
 
-RULE 4: The video content MUST strictly adhere to the following niche topics, leveraging the identified 'suspense' vibe:
-    *   **PRIMARY NICHE TOPIC: Cosmic Mysteries & Profound Revelations.** Focus on astronomical phenomena that challenge existing paradigms, present profound unknowns, or unveil unexpected aspects of the universe. Examples include:
-        *   "Are 'Little Red Dots' Baby Galaxies or Supermassive Black Holes? The Webb Telescope's Most Baffling Mystery."
-        *   "The 'Failed Stars' That Found a Second Chance: A Cosmic Anomaly Rewriting Stellar Evolution."
-        *   "Mars's Invisible Lightning: The Faint Sparks Hiding in the Red Planet's Dust Storms."
-        *   "Pope Leo's Revelation: How the James Webb Telescope Forced a Re-evaluation of Ancient Truths."
-    *   **SECONDARY NICHE TOPIC: Unsettling Societal & Environmental Truths.** Focus on exposing hidden issues, systemic failures, or overlooked crises with significant impact, framed with a sense of revelation and impending consequence. Examples include:
-        *   "The Sunken Soviet Submarine's Quiet Radiation Leak: A Decades-Long Threat Ignored."
-        *   "Police Misconduct: The Ignored Red Flags Hiding in Plain Sight, Systematically Overlooked."
-        *   "The E-Waste Scandal: Why Nearly Two-Thirds of Functional Devices Are Thrown Away Annually."
-        *   "Fathers' Silent Crisis: The Hidden Mental Health Decline Years After Childbirth."
+RULE 4: The hook structure MUST immediately establish a **profound, unanswered question or an impending, overlooked revelation/threat.** It must be designed to challenge the viewer's current understanding or expose a shocking truth they were unaware of.
+    *   **For Cosmic Mysteries:** Begin by posing a monumental question or hinting at a discovery that fundamentally alters our perception of reality. *Example: "What if everything we thought we knew about the universe's birth was just shattered by a cluster of tiny red dots?"*
+    *   **For Hidden Dangers:** Start by revealing a silent, escalating problem or a systemic flaw that has gone ignored, building immediate concern. *Example: "For decades, a silent ticking time bomb has been leaking beneath the waves, and its true impact is only now being revealed."*

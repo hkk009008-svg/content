@@ -42,7 +42,7 @@ def generate_trending_topic() -> str:
     global_sentiment = fetch_external_market_sentiment()
 
     prompt = f"""
-    You are an elite YouTube Shorts strategist prioritizing algorithmic virality and highly immersive philosophical/scientific content.
+    You are an elite YouTube Shorts strategist aggressively optimizing for the 25-35 male demographic. They value strategic thinking, uncovering hidden systems, brutal efficiency, power dynamics, and financial/technological leverage.
     
     {ab_memory}
     
@@ -50,13 +50,13 @@ def generate_trending_topic() -> str:
     
     {global_sentiment}
     
-    Your goal is to brainstorm ONE profoundly fascinating topic for today. It must seamlessly match the emotional state of the current live trends, but MUST fall into one of these highly-lucrative narrative vectors:
+    Your goal is to brainstorm ONE profoundly fascinating topic for today. It must seamlessly match the emotional state of the current live trends, but MUST utilize REVERSE PSYCHOLOGY by framing the topic as a paradigm-shattering truth, a contrarian reality, or a forbidden system the average person is fundamentally wrong about. It MUST fall into one of these highly-lucrative narrative vectors:
     
-    - [BUSINESS & PSYCHOLOGY]: Deconstructing hidden psychological tactics, global economic machines, or brilliant marketing strategies (e.g., How McDonald's is a real estate empire, the psychology of casino floor designs).
-    - [HISTORICAL MYSTERIES & ENGINEERING]: Unsolved ancient mechanisms, the profound scale of historical megastructures, or lost technologies (e.g., The Antikythera mechanism, the acoustic engineering of ancient temples).
-    - [FUTURISM & CYBERNETICS]: The terrifying but beautiful reality of artificial intelligence, planetary-scale data centers, or future megastructures (e.g., Dyson spheres, how glowing fiber optics silently run the global economy).
+    - [THE ILLUSION OF CONTROL & MASSIVE STRATEGY]: Deconstructing hidden psychological tactics, global economic machines, or brilliant power plays (e.g., How McDonald's is a real estate empire, the psychology of casino floor designs, how your attention is algorithmically harvested).
+    - [FORBIDDEN ECONOMIES & THE UGLY TRUTH]: Unsolved mechanical mysteries, the profound scale of industrial megastructures, or ruthless logistics of the modern world (e.g., The terrifying acoustics of ancient temples, the hidden multi-billion dollar economy of deep-sea cables).
+    - [CYBERNETICS & MASSIVE SCALE INEVITABILITY]: The terrifying but beautiful reality of artificial intelligence, planetary-scale data centers, or future tech leverage (e.g., Dyson spheres, how glowing fiber optics silently run the global economy while we sleep).
     
-    CRITICAL: Look at the current scraped sentiment. The vibe must remain deeply immersive, highly-cinematic, and fundamentally fascinating. DO NOT use cheap, hyper-aggressive, or clickbait framing. Make it feel like a premium documentary.
+    CRITICAL: Look at the current scraped sentiment. The vibe must remain deeply immersive, cool, highly-cinematic, and fundamentally strategic. Utilize reverse-psychology—make the topic sound like something the system doesn't want them to think about. DO NOT use cheap, hyper-emotional, or fluffy framing. Make it feel like a premium, gritty, contrarian documentary.
     
     {avoid_clause}
     Provide ONLY the topic in 12 words or less. Do not include quotes, markdown formatting, or any extra text. Make it incredibly punchy.

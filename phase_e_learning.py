@@ -352,23 +352,32 @@ def fetch_external_market_sentiment():
     sentiment_titles = []
     
     try:
-        # Check r/space for cosmic discoveries
-        wsb_url = "https://www.reddit.com/r/space/hot.json?limit=7"
+        # Check r/wallstreetbets for financial/market leverage and anomalies
+        wsb_url = "https://www.reddit.com/r/wallstreetbets/hot.json?limit=7"
         wsb_resp = requests.get(wsb_url, headers=headers, timeout=5)
         if wsb_resp.status_code == 200:
             for post in wsb_resp.json().get('data', {}).get('children', []):
                 title = post['data'].get('title', '')
                 if len(title) > 15:
-                    sentiment_titles.append(f"[Space] {title}")
+                    sentiment_titles.append(f"[Finance/Leverage] {title}")
                     
-        # Check r/science for discoveries
-        ent_url = "https://www.reddit.com/r/science/hot.json?limit=7"
+        # Check r/Entrepreneur for business systems and strategy
+        ent_url = "https://www.reddit.com/r/Entrepreneur/hot.json?limit=7"
         ent_resp = requests.get(ent_url, headers=headers, timeout=5)
         if ent_resp.status_code == 200:
             for post in ent_resp.json().get('data', {}).get('children', []):
                 title = post['data'].get('title', '')
                 if len(title) > 15:
-                    sentiment_titles.append(f"[Science] {title}")
+                    sentiment_titles.append(f"[Business/Strategy] {title}")
+
+        # Check r/technology for massive scale tech changes
+        tech_url = "https://www.reddit.com/r/technology/hot.json?limit=7"
+        tech_resp = requests.get(tech_url, headers=headers, timeout=5)
+        if tech_resp.status_code == 200:
+            for post in tech_resp.json().get('data', {}).get('children', []):
+                title = post['data'].get('title', '')
+                if len(title) > 15:
+                    sentiment_titles.append(f"[Tech/Cybernetics] {title}")
                     
         if not sentiment_titles:
             return ""

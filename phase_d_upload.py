@@ -120,8 +120,8 @@ def upload_video(youtube, ctx: dict, publish_at=None):
             "defaultAudioLanguage": "en"
         },
         "status": {
-            # CRITICAL: Upload as private (required initially for scheduled videos)
-            "privacyStatus": "private", 
+            # CRITICAL: Upload as private for scheduled videos, but public if releasing now!
+            "privacyStatus": "private" if publish_at else "public", 
             "madeForKids": False,
             "selfDeclaredMadeForKids": False
         }
