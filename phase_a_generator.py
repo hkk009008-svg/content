@@ -1,29 +1,40 @@
 import os
 import json
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from anthropic import Anthropic
 
 load_dotenv()
 
-# Initialize the Gemini client 
-# (Requires GOOGLE_API_KEY environment variable to be set)
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+# Initialize the Anthropic client 
+# (Requires ANTHROPIC_API_KEY environment variable to be set)
+client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 def generate_shorts_script(ctx: dict) -> bool:
     """
     Generates a highly-engaging 60-second YouTube Shorts script directly into the OmniContext.
-    Enforces a strict JSON response.
+    Enforces a strict JSON response via Claude 3.5 Sonnet's "Tool Use" functionality.
     """
     topic = ctx["topic"]
     language = ctx.get("language", "English")
-    print(f"\n✍️ [PHASE A] Writing highly-retentive script in {language.upper()} for topic: {topic}")
+    print(f"\n✍️ [PHASE A] Writing highly-retentive script via Claude 3.5 Sonnet in {language.upper()} for topic: {topic}")
     import random
     from phase_e_learning import get_top_performing_context, fetch_live_youtube_trends
     ab_memory = get_top_performing_context()
     live_trends = fetch_live_youtube_trends()
     
-    import os
+    blueprint = ctx.get("production_blueprint", {})
+    blueprint_str = ""
+    if blueprint:
+        blueprint_str = f"""
+        [MASTER DIRECTOR'S PRODUCTION BLUEPRINT]
+        Read and OBEY these absolute constraints set by the Chief Director:
+        - Director's Narrative Vision: {blueprint.get('director_vision', 'None')}
+        - Cinematography Rules: {blueprint.get('cinematography_rules', 'None')}
+        - Color Grading & Aesthetic: {blueprint.get('color_grading_palette', 'None')}
+        - Sound Design & Music: {blueprint.get('sound_design_and_music', 'None')}
+        - The Master Hero Subject: {blueprint.get('hero_subject', 'A mysterious object')}
+        """
+    
     calibration_matrix = ""
     if os.path.exists("CALIBRATION_MATRIX.txt"):
         with open("CALIBRATION_MATRIX.txt", "r") as f:
@@ -67,14 +78,16 @@ def generate_shorts_script(ctx: dict) -> bool:
     lens = master_storyteller_matrix[lens_key]
     tone = f"the legendary writing style of {lens['name']}"
     
-    prompt = f"""
-    You are a down-to-earth, engaging documentary narrator and educator specializing in high-quality short-form informational content.
+    system_prompt = f"""
+    You are a highly-skilled but subordinate scriptwriter and cinematography assistant. You MUST strictly follow the attached Master Director's Production Blueprint to create high-quality short-form visual content.
     
     {calibration_matrix}
     
     {ab_memory}
     
     {live_trends}
+    
+    {blueprint_str}
     
     Write an informational, educational, and interesting 35-45 second video script about: "{topic}".
     Write the script using an accessible, down-to-earth vocabulary while adopting the style of {tone}. Make sure the angle, hook, and body are completely factual and logically sound. Avoid over-sensationalized or overly dramatic language—speak naturally, simply, but powerfully to the viewer.
@@ -116,120 +129,132 @@ def generate_shorts_script(ctx: dict) -> bool:
     4. The Master Infinite Loop & Visual Continuity: Your final sentence (`infinite_loop_bridge`) MUST NOT restate the beginning. Instead, it MUST be an incomplete thought or lead-in clause that grammatically REQUIRES the very first word of the Hook to finish the sentence. (e.g., If your hook starts with "Black holes...", your ending must be something like "Because the ultimate truth is hidden within..."). CRITICAL: The last AI Image (Frame 12) MUST explicitly describe the exact same framing, lighting, and subject posture as Frame 1.
     5. Length & Vocal Pacing: The script must total EXACTLY 50-65 words. Since you are speaking SOOTHINGLY and SLOWLY, fewer words take up the same 45 seconds. Use punctuation to force ElevenLabs to pause and breathe.
     6. High-CPM Algorithmic Synchronization: Ensure the exact keywords generated in your `ab_test_titles` and `youtube_tags` are wove naturally into the spoken audio script. You must actively target High-CPM AdSense keyword structures (Finance, Strategy, Enterprise Tech, Economics) even if the topic is historical or scientific.
-    7. Dual-Model Video Routing (CRITICAL): Assign `target_api` for EVERY visual prompt. 
-       - Trigger "RUNWAY" if the scene requires rigid digital structures, geometric data visualization, camera zooms, or minimal physics. 
-       - Trigger "VEO" if the scene requires organic fluid dynamics, particle collisions, hyper-macro textures, or natively synchronized ASMR Foley (water, gears, etc.).
-    8. The Camera Psychology Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion based on emotional resonance. Use `zoom_in_fast` or `dolly_in_rapid` (push-ins) exclusively for sudden shocking realizations or massive perspective shifts. Use `static_drone` or `pan_right` for establishing scale/context. Use `pan_down` for revealing hidden underlying structures.
-    9. Dynamic Visual Effects: For every prompt, assign a `visual_effect` that matches the story's beat. Frame 1 should usually be `cyberpunk_glitch` or `gritty_contrast` for impact. Introspective scenes can use `cinematic_glow` or `dreamy_blur`.
-    10. **VISUAL PSYCHOLOGY & HIGH COMBUSTION AESTHETIC**: Every visual MUST leverage the Rule of Thirds (place the primary subject significantly off-center to create visual tension) and heavy NEGATIVE SPACE (leaving vast, empty surrounding areas to create a premium, minimalist cinematic scale). Use extremely high-contrast lighting—brilliant neon/bright accents against absolute pitch-black backgrounds to reduce cognitive load and force a dopamine gaze-lock. Frame 1 (The Hook) MUST explicitly be an EXTREME CLOSE-UP (ECU) of a highly detailed object, face, or texture to instantly capture biological focus.
-    10. **CRITICAL OUTPUT LANGUAGE**: Ensure that the script, hook, title, and youtube tags are written completely and natively in {language.upper()}. If {language.upper()} is not English, you MUST STILL provide English strings for the image_prompts under `ai_image_prompts` (so the image generator doesn't fail). However, the audio text AND the video title/description MUST heavily prioritize native {language.upper()}.
+    8. The Camera Psychology Director: You must strictly adhere to the `Cinematography Rules` defined in the Master Director's Blueprint above. 
+    9. Dynamic Visual Effects: For every prompt, explicitly inject the `Color Grading & Aesthetic` from the Director's Blueprint into your visual setup to guarantee exact color mapping.
+    10. **HERO SUBJECT CONTINUITY**: You MUST use the exact `The Master Hero Subject` defined in the Blueprint as the core anchor for every single shot. Frame 1 MUST be an 'Extreme Close-Up (ECU)' of this Hero Subject. Every single of the 12 image prompts MUST explicitly feature this same Hero Subject. Describe different cinematic spatial angles (low angle, wide shot, high angle) to keep it dynamic.
+    11. **VISUAL PSYCHOLOGY & HIGH COMBUSTION AESTHETIC**: Every visual MUST leverage the Rule of Thirds and heavy NEGATIVE SPACE. Frame 1 (The Hook) MUST explicitly be an EXTREME CLOSE-UP (ECU) of the Hero Subject to instantly capture biological focus.
+    12. **CRITICAL OUTPUT LANGUAGE**: Ensure that the script, hook, title, and youtube tags are written completely and natively in {language.upper()}.
     """
     
-    # We define the expected JSON schema to guarantee the output structure
-    response_schema = {
-        "type": "OBJECT",
-        "properties": {
-            "ab_test_titles": {
-                "type": "ARRAY", 
-                "items": {"type": "STRING"},
-                "description": "Provide EXACTLY 3 extremely distinct, highly attractive educational video titles. The primary keyword MUST appear within the first 40 characters. Use Power Words like 'Ultimate', 'Proven', or 'Surprising'. Title 1: Curiosity gap. Title 2: Realization. Title 3: Real-world concern/impact."
-            },
-            "hook": {"type": "STRING", "description": "The opening conversational, interesting sentence"},
-            "body_paragraphs": {
-                "type": "ARRAY", 
-                "items": {"type": "STRING"},
-                "description": "EXACTLY 3 down-to-earth documentary style paragraphs mapping to the Educational Journey: [1] Context & Evidence, [2] Core Mechanic & Humanity Concern, [3] Thought-Provoking Resolution."
-            },
-            "infinite_loop_bridge": {"type": "STRING", "description": "The final lead-in clause. It MUST be an incomplete grammatical bridge that perfectly sets up the very first word of the Hook without repeating it (e.g. 'Which makes you realize that...')."},
-            "ai_image_prompts": {
-                "type": "ARRAY", 
-                "items": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "prompt": {"type": "STRING", "description": "The Midjourney visual prompt. CRITICAL: Frame 1 MUST be an 'Extreme Close-Up (ECU)' with hyper-contrast. All other frames MUST explicitly use the 'Rule of Thirds' composition and heavy NEGATIVE SPACE (minimalist, wide cinematic scale with deep empty backgrounds) to elevate visual aesthetic. Frame 12 MUST visually match Frame 1 exactly for the loop."},
-                        "camera": {
-                            "type": "STRING",
-                            "enum": ["zoom_in_slow", "zoom_out_slow", "zoom_in_fast", "pan_right", "pan_left", "pan_up_crane", "pan_down", "static_drone", "dolly_in_rapid"],
-                            "description": "Select the exact cinematic camera motion that matches the educational documentary tone."
-                        },
-                        "visual_effect": {
-                            "type": "STRING",
-                            "enum": ["gritty_contrast", "cinematic_glow", "cyberpunk_glitch", "dreamy_blur", "documentary_neutral"],
-                            "description": "Select an FFMPEG post-production aesthetic filter that perfectly matches the narrative emotion of this specific clip."
-                        },
-                        "target_api": {
-                            "type": "STRING",
-                            "enum": ["VEO", "RUNWAY"],
-                            "description": "Select the target video engine. CRITICAL: You MUST forcefully balance the usage! Ensure a 50/50 mixed distribution of 'VEO' and 'RUNWAY' across the 12 clips regardless of the visual content."
-                        }
-                    },
-                    "required": ["prompt", "camera", "target_api"]
+    # We define the expected JSON schema aggressively formatted for Anthropic Tool Use
+    tool_schema = {
+        "name": "generate_script",
+        "description": "Outputs the final orchestrated script following the required JSON schema.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ab_test_titles": {
+                    "type": "array", 
+                    "items": {"type": "string"},
+                    "description": "Provide EXACTLY 3 extremely distinct, highly attractive educational video titles. The primary keyword MUST appear within the first 40 characters. Use Power Words like 'Ultimate', 'Proven', or 'Surprising'. Title 1: Curiosity gap. Title 2: Realization. Title 3: Real-world concern/impact."
                 },
-                "description": "EXACTLY 12 highly detailed visual prompt objects perfectly tied to the text."
+                "hook": {"type": "string", "description": "The opening conversational, interesting sentence"},
+                "body_paragraphs": {
+                    "type": "array", 
+                    "items": {"type": "string"},
+                    "description": "EXACTLY 3 down-to-earth documentary style paragraphs mapping to the Educational Journey: [1] Context & Evidence, [2] Core Mechanic & Humanity Concern, [3] Thought-Provoking Resolution."
+                },
+                "infinite_loop_bridge": {"type": "string", "description": "The final lead-in clause. It MUST be an incomplete grammatical bridge that perfectly sets up the very first word of the Hook without repeating it (e.g. 'Which makes you realize that...')."},
+                "ai_image_prompts": {
+                    "type": "array", 
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "prompt": {"type": "string", "description": "The visual prompt. CRITICAL: You MUST include the exact `Color Grading & Aesthetic` commands and ensure the exact same `The Master Hero Subject` is in all 12 frames to ensure visual continuity. Frame 1 MUST be an 'Extreme Close-Up (ECU)' of the Hero Subject. Use varying cinematic spatial angles (low angle, wide shot, high angle). All frames MUST explicitly use 'Rule of Thirds' and heavy NEGATIVE SPACE. Frame 12 MUST visually match Frame 1 exactly."},
+                            "camera": {
+                                "type": "string",
+                                "enum": ["zoom_in_slow", "zoom_out_slow", "zoom_in_fast", "pan_right", "pan_left", "pan_up_crane", "pan_down", "static_drone", "dolly_in_rapid"],
+                                "description": "Select the exact cinematic camera motion. CRITICAL: You MUST execute the exact `Cinematography Rules` specified in the Director's Blueprint."
+                            },
+                            "visual_effect": {
+                                "type": "string",
+                                "enum": ["gritty_contrast", "cinematic_glow", "cyberpunk_glitch", "dreamy_blur", "documentary_neutral"],
+                                "description": "Select an FFMPEG post-production aesthetic filter that perfectly matches the narrative emotion of this specific clip."
+                            },
+                            "target_api": {
+                                "type": "string",
+                                "enum": ["VEO", "RUNWAY", "LUMA"],
+                                "description": "Select the target video engine. CRITICAL: You MUST forcefully balance the usage! Ensure an equal mixed distribution of 'VEO', 'RUNWAY', and 'LUMA' across the 12 clips to bypass API rate-limits."
+                            }
+                        },
+                        "required": ["prompt", "camera", "visual_effect", "target_api"]
+                    },
+                    "description": "EXACTLY 12 highly detailed visual prompt objects perfectly tied to the text."
+                },
+                "youtube_description": {
+                    "type": "string",
+                    "description": "A comprehensive, SEO-optimized YouTube video description. CRITICAL: The first 3 lines MUST contain a clear value proposition for LLM parsing. Naturally weave in massive historical context and heavily prioritize high-RPM/high-CPM business, tech, or strategy financial keywords. This must be exhaustive but prioritize the top 3 lines."
+                },
+                "youtube_tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "EXACTLY 15 highly-targeted YouTube tags. Focus on lucrative algorithmic search terms that target the 25-35 male demographic (e.g., Business Strategy, Tech Leverage, Global Economics, Automation, Success Patterns)."
+                },
+                "music_vibe": {
+                    "type": "string",
+                    "enum": ["suspense", "corporate", "gritty", "cyberpunk"],
+                    "description": "Select the emotional vibe. CRITICAL: Use 'corporate' for clean business/financial breakdowns, 'gritty' for survival/mechanical power, 'cyberpunk' for AI/futurism, and 'suspense' for hidden psychological mysteries."
+                },
+                "video_pacing": {
+                    "type": "string",
+                    "enum": ["calculated"],
+                    "description": "Select the pacing. CRITICAL: ALWAYS use 'calculated' for this strategic aesthetic."
+                },
+                "playlist_category": {
+                    "type": "string",
+                    "description": "A high-level YouTube playlist name this video belongs to (e.g. 'Humanity Constraints', 'Historical Truths', 'Our Future'). Max 3 words."
+                }
             },
-            "youtube_description": {
-                "type": "STRING",
-                "description": "A comprehensive, SEO-optimized YouTube video description. CRITICAL: The first 3 lines MUST contain a clear value proposition for LLM parsing. Naturally weave in massive historical context and heavily prioritize high-RPM/high-CPM business, tech, or strategy financial keywords. This must be exhaustive but prioritize the top 3 lines."
-            },
-            "youtube_tags": {
-                "type": "ARRAY",
-                "items": {"type": "STRING"},
-                "description": "EXACTLY 15 highly-targeted YouTube tags. Focus on lucrative algorithmic search terms that target the 25-35 male demographic (e.g., Business Strategy, Tech Leverage, Global Economics, Automation, Success Patterns)."
-            },
-            "music_vibe": {
-                "type": "STRING",
-                "enum": ["suspense", "corporate", "gritty", "cyberpunk"],
-                "description": "Select the emotional vibe. CRITICAL: Use 'corporate' for clean business/financial breakdowns, 'gritty' for survival/mechanical power, 'cyberpunk' for AI/futurism, and 'suspense' for hidden psychological mysteries."
-            },
-            "video_pacing": {
-                "type": "STRING",
-                "enum": ["calculated"],
-                "description": "Select the pacing. CRITICAL: ALWAYS use 'calculated' for this strategic aesthetic."
-            },
-            "playlist_category": {
-                "type": "STRING",
-                "description": "A high-level YouTube playlist name this video belongs to (e.g. 'Humanity Constraints', 'Historical Truths', 'Our Future'). Max 3 words."
-            }
-        },
-        "required": ["ab_test_titles", "hook", "body_paragraphs", "infinite_loop_bridge", "ai_image_prompts", "youtube_description", "youtube_tags", "music_vibe", "video_pacing", "playlist_category"]
+            "required": ["ab_test_titles", "hook", "body_paragraphs", "infinite_loop_bridge", "ai_image_prompts", "youtube_description", "youtube_tags", "music_vibe", "video_pacing", "playlist_category"]
+        }
     }
     
-    # Call the Gemini 2.5 Flash model
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=response_schema,
-            temperature=0.99,
-        ),
-    )
-    
-    # Parse and return the JSON string into a Python dictionary
-    parsed_json = json.loads(response.text)
-    # Inject the randomly selected tone for the experiment logger
-    parsed_json['tone_used'] = tone
-    
-    # NEW: Extract the first A/B title as the master title for system compatibility
-    ab_titles = parsed_json.get("ab_test_titles", [])
-    if ab_titles and len(ab_titles) > 0:
-        parsed_json["title"] = ab_titles[0]
+    try:
+        # Call the Claude 3.5 Sonnet model forcing structured output
+        response = client.messages.create(
+            model="claude-3-5-sonnet-20240620",
+            max_tokens=3000,
+            system=system_prompt,
+            messages=[
+                {"role": "user", "content": "Generate the masterpiece script using the `generate_script` tool."}
+            ],
+            tools=[tool_schema],
+            tool_choice={"type": "tool", "name": "generate_script"}
+        )
         
-        print(f"\n🧪 [A/B TEST TITLES GENERATED FOR YOUTUBE STUDIO]")
-        print("Copy/Paste these into the Advanced Features 'Test & Compare' tool tomorrow:")
-        for i, t in enumerate(ab_titles):
-            print(f"   {i+1}. {t}")
-        print("="*60 + "\n")
-    else:
-        parsed_json["title"] = "Emergency Fallback Title"
-    
-    ctx["script_data"] = parsed_json
-    # Derive core state parameters immediately
-    ctx["music_vibe"] = parsed_json.get("music_vibe", "suspense")
-    ctx["video_pacing"] = parsed_json.get("video_pacing", "moderate")
-    ctx["full_text"] = f"{parsed_json['hook']} {' '.join(parsed_json['body_paragraphs'])} {parsed_json['infinite_loop_bridge']}"
-    
-    return True
+        # Extract the tool use payload generated by Claude
+        tool_call = next((block for block in response.content if block.type == "tool_use"), None)
+        if not tool_call:
+            raise Exception("Claude did not return the tool call payload as requested.")
+            
+        parsed_json = tool_call.input
+        
+        # Inject the randomly selected tone for the experiment logger
+        parsed_json['tone_used'] = tone
+        
+        # Extract the first A/B title as the master title for system compatibility
+        ab_titles = parsed_json.get("ab_test_titles", [])
+        if ab_titles and len(ab_titles) > 0:
+            parsed_json["title"] = ab_titles[0]
+            
+            print(f"\n🧪 [A/B TEST TITLES GENERATED FOR YOUTUBE STUDIO]")
+            print("Copy/Paste these into the Advanced Features 'Test & Compare' tool tomorrow:")
+            for i, t in enumerate(ab_titles):
+                print(f"   {i+1}. {t}")
+            print("="*60 + "\n")
+        else:
+            parsed_json["title"] = "Emergency Fallback Title"
+        
+        ctx["script_data"] = parsed_json
+        # Derive core state parameters immediately
+        ctx["music_vibe"] = parsed_json.get("music_vibe", "suspense")
+        ctx["video_pacing"] = parsed_json.get("video_pacing", "moderate")
+        ctx["full_text"] = f"{parsed_json['hook']} {' '.join(parsed_json['body_paragraphs'])} {parsed_json['infinite_loop_bridge']}"
+        
+        return True
+    except Exception as e:
+        print(f"❌ Error generating script via Claude 3.5 Sonnet: {e}")
+        return False
 
 # --- Testing the Module ---
 if __name__ == "__main__":
@@ -239,10 +264,8 @@ if __name__ == "__main__":
     print(f"Generating script for: {trending_topic}\n")
     
     try:
-        # Pass a dictionary context as required by generate_shorts_script
         ctx = {"topic": trending_topic}
         generate_shorts_script(ctx)
         print(json.dumps(ctx["script_data"], indent=4))
     except Exception as e:
         print(f"Error generating script: {e}")
-        print("Make sure you have set the GOOGLE_API_KEY environment variable and installed google-genai.")

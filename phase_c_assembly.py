@@ -121,7 +121,7 @@ def add_top_banner(video_clip, topic_text):
     
     return CompositeVideoClip([video_clip, banner_bg, accent_line, badge_txt, main_txt])
 
-def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense", pre_transcribed_result=None):
+def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense", pre_transcribed_result=None, clip_duration=None):
     """
     Uses local Whisper AI to transcribe audio and burn word-by-word 
     captions onto the MoviePy video clip with dynamically mapped styles.
@@ -146,6 +146,16 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense", pre_tran
     
     def glitch_filter(get_frame, t):
         frame = get_frame(t)
+        
+        # --- ACTION MOVIE BEAT-SYNC FLASHES ---
+        # Cinematic flash exactly at the mathematically predicted camera cuts!
+        if clip_duration and t > 0.1:
+            time_in_clip = t % clip_duration
+            if time_in_clip < 0.15: # 150ms flash decay
+                flash_intensity = max(0, 1.0 - (time_in_clip / 0.15))
+                # Soft blend towards white to create adrenaline impact without blinding viewers
+                frame = (frame * (1 - flash_intensity * 0.75) + np.array([255, 255, 255]) * (flash_intensity * 0.75)).astype(np.uint8)
+                
         # 1% chance per frame for a faint cybernetic horizontal tear (lowered frequency)
         if random.random() < 0.01:
             h, w, c = frame.shape
@@ -343,7 +353,7 @@ def assemble_final_video(ctx: dict):
         from moviepy.editor import VideoFileClip
         final_video = VideoFileClip(stitched_path)
         # final_video = add_top_banner(final_video, topic_text) # Removed banner for edge-to-edge full screen
-        final_video = add_dynamic_captions(audio_path, final_video, music_vibe, pre_transcribed_result=whisper_result)
+        final_video = add_dynamic_captions(audio_path, final_video, music_vibe, pre_transcribed_result=whisper_result, clip_duration=clip_duration)
         
         temp_overlay_mp4 = "temp_captions_ready.mp4"
         print("⏳ Blazing Fast GPU Rendering CapCut-Style Graphical Master...")

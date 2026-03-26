@@ -93,7 +93,7 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
         else:
             return fallback_ffmpeg_zoom(image_path, output_mp4)
             
-    else:
+    elif target_api.upper() == "RUNWAY":
         # RunwayML Elite Cinematic Generation
         runway_key = os.getenv("RUNWAYML_API_SECRET")
         if runway_key:
@@ -114,7 +114,6 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
                 print(f"   ↳ Runway Task {video_task.id} queued. Polling...")
                 completed_task = video_task.wait_for_task_output()
                 final_video_url = completed_task.output[0]
-                # Download it
                 import urllib.request
                 urllib.request.urlretrieve(final_video_url, output_mp4)
                 return output_mp4
@@ -125,6 +124,51 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
         else:
             print("   ⚠️ RunwayML key missing. Re-routing gracefully to VEO 2.0 Engine...")
             return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing)
+            
+    elif target_api.upper() == "LUMA":
+        luma_key = os.getenv("LUMAAI_API_KEY")
+        if luma_key:
+            try:
+                import requests
+                print(f"   ↳ Generating via LUMA Dream Machine API...")
+                url = "https://api.lumalabs.ai/dream-machine/v1/generations"
+                payload = {
+                    "prompt": f"Smooth {camera_motion}. Cinematic lighting. High definition details.",
+                    "aspect_ratio": "9:16",
+                    "loop": False
+                }
+                headers = {
+                    "Authorization": f"Bearer {luma_key}",
+                    "Content-Type": "application/json"
+                }
+                resp = requests.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+                gen_id = resp.json()["id"]
+                print(f"   ↳ Luma Task {gen_id} queued. Polling...")
+                
+                while True:
+                    time.sleep(10)
+                    poll_resp = requests.get(f"{url}/{gen_id}", headers=headers).json()
+                    state = poll_resp.get("state", "")
+                    if state == "completed":
+                        video_url = poll_resp["assets"]["video"]
+                        import urllib.request
+                        urllib.request.urlretrieve(video_url, output_mp4)
+                        return output_mp4
+                    elif state == "failed":
+                        print(f"   ⚠️ Luma API Gen Failed. Re-routing gracefully to VEO 2.0 Engine...")
+                        return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing)
+            except Exception as e:
+                print(f"   ⚠️ Luma API Error: {e}")
+                print("   ⚠️ Re-routing gracefully to VEO 2.0 Engine...")
+                return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing)
+        else:
+            print("   ⚠️ LUMAAI_API_KEY missing. Re-routing gracefully to VEO 2.0 Engine...")
+            return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing)
+    
+    else:
+        # Fallback if UNKNOWN target API is given
+        return fallback_ffmpeg_zoom(image_path, output_mp4)
 
 def generate_ass_subtitles(whisper_result: dict, output_path: str):
     """Converts Whisper word-level timestamps to an advanced SubStation Alpha (.ass) file."""
@@ -273,25 +317,20 @@ def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str
             time_expr = f"enable='between(t,{st},{en})'"
             
             if eff == "cyberpunk_glitch":
-                dynamic_voice_filters.append(f"acrusher=bits=8:mix=0.6:{time_expr}")
-                dynamic_voice_filters.append(f"vibrato=f=15:d=0.7:{time_expr}")
+                dynamic_voice_filters.append(f"acrusher=bits=12:mix=0.15:{time_expr}") # Subtle 15% bitcrush
             elif eff == "dreamy_blur":
-                dynamic_voice_filters.append(f"lowpass=f=2000:{time_expr}")
-                dynamic_voice_filters.append(f"vibrato=f=4:d=0.4:{time_expr}")
+                dynamic_voice_filters.append(f"lowpass=f=3000:{time_expr}")
             elif eff == "cinematic_glow":
-                dynamic_voice_filters.append(f"highpass=f=400:{time_expr}")
-                dynamic_voice_filters.append(f"tremolo=f=3:d=0.5:{time_expr}")
+                dynamic_voice_filters.append(f"highpass=f=250:{time_expr}")
             elif eff == "gritty_contrast":
-                dynamic_voice_filters.append(f"acrusher=bits=10:mix=0.4:{time_expr}")
-                dynamic_voice_filters.append(f"tremolo=f=10:d=0.6:{time_expr}")
+                dynamic_voice_filters.append(f"acrusher=bits=12:mix=0.1:{time_expr}")
                 
+    # Keep the voice ultra-clear, removing demonic pitching and chorus. 
+    # Just a light highpass, light compression, and ultra-subtle room reverb for cinema.
     voice_base = (
-        "[1:a]asetrate=44100*0.95,aresample=44100,atempo=1/0.95,"
-        "highpass=f=120,treble=g=5,"
-        "acrusher=bits=14:mix=0.08,"
-        "aecho=0.8:0.88:40:0.2,"
-        "chorus=0.5:0.8:50|60:0.4|0.3:0.25|0.4:2|2.3,"
-        "acompressor=threshold=-14dB:ratio=6:attack=5:release=50:makeup=4"
+        "[1:a]highpass=f=80,treble=g=3,"
+        "aecho=0.8:0.88:15:0.1,"
+        "acompressor=threshold=-14dB:ratio=4:attack=5:release=50:makeup=3"
     )
     
     if dynamic_voice_filters:

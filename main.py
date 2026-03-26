@@ -13,9 +13,11 @@ import datetime
 
 # Import the modules we built
 from phase_0_topic import generate_trending_topic
+from phase_0_director import generate_production_blueprint
 from phase_a_generator import generate_shorts_script
 from phase_b_audio import generate_voiceover, generate_srt
 from phase_c_assembly import assemble_final_video, generate_ai_broll
+from phase_c_vision import quality_control_image
 from phase_d_upload import authenticate_youtube, upload_video, upload_caption, upload_localizations
 from phase_e_learning import log_experiment, fetch_and_update_analytics
 
@@ -71,13 +73,12 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
             
     print(f"🚀 STARTING PIPELINE FOR TOPIC: {topic}\n")
     
-    # Create an exports directory so local copies are neatly saved permanently
-    if not os.path.exists("exports"):
-        os.makedirs("exports")
-        
     topic_slug = re.sub(r'[^a-zA-Z0-9]+', '_', topic)[:50].strip('_')
-    lang_slug = language.replace(' ', '')
     
+    export_dir = f"exports/{topic_slug}"
+    if not os.path.exists(export_dir):
+        os.makedirs(export_dir)
+        
     # --- OMNI CONTEXT INITIALIZATION ---
     ctx = {
         "topic": topic,
@@ -90,13 +91,19 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
         "audio_path": "",
         "voice_id": "",
         "downloaded_vids": [],
-        "final_video_path": f"exports/{topic_slug}_{lang_slug}_Final.mp4",
-        "final_thumbnail_path": f"exports/{topic_slug}_{lang_slug}_Thumbnail.jpg",
+        "final_video_path": f"{export_dir}/video.mp4",
+        "final_thumbnail_path": f"{export_dir}/thumbnail.jpg",
+        "metadata_path": f"{export_dir}/metadata.txt",
         "full_description": ""
     }
     
+    # --- PHASE 0: DIRECTOR BLUEPRINT ---
+    if not generate_production_blueprint(ctx):
+        print("❌ Pipeline aborted: Failed to generate Master Production Blueprint.")
+        return
+        
     # --- PHASE A: SCRIPTING ---
-    print("--- [PHASE A] SCRIPT GENERATION ---")
+    print("\n--- [PHASE A] SCRIPT GENERATION ---")
     if not generate_shorts_script(ctx):
         print("❌ Pipeline aborted: Failed to generate script.")
         return
@@ -161,9 +168,20 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
             
         print(f"\n🎬 [PHASE C] Generating Content Node {index+1}/12 ({target_api})")
         
-        # 1. Generate Base High-Fidelity Image
+        # 1. Generate Base High-Fidelity Image with Vision QC
         img_path = f"temp_img_{index}.jpg"
-        img_path = generate_ai_broll(prompt, img_path)
+        
+        max_qc_retries = 3
+        hero_subject = ctx.get("production_blueprint", {}).get("hero_subject", "A mysterious subject")
+        for qc_attempt in range(max_qc_retries):
+            # Pass a modified prompt so Pollinations/Fal generate a different seed on retry
+            mod_prompt = prompt if qc_attempt == 0 else f"{prompt} (high definition, ultra realistic, highly detailed variant {qc_attempt})"
+            img_path = generate_ai_broll(mod_prompt, img_path)
+            
+            if img_path and quality_control_image(img_path, hero_subject):
+                break
+            else:
+                print(f"   🔄 [VISION QC] Retrying generation ({qc_attempt+1}/{max_qc_retries})...")
         
         # 2. Handoff to Video Generation API (Veo or Runway)
         if img_path:
@@ -203,6 +221,22 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
                 os.remove(temp_file)
         except Exception:
             pass
+            
+    # ✅ METADATA EXPORT
+    # Write the SEO metadata to a highly readable local txt file
+    script_data = ctx.get("script_data", {})
+    export_metadata_path = ctx.get("metadata_path", f"exports/{topic_slug}/metadata.txt")
+    with open(export_metadata_path, "w", encoding="utf-8") as f:
+        f.write(f"=== YOUTUBE UPLOAD METADATA ===\n\n")
+        f.write(f"TITLE (Optimized):\n{script_data.get('title', 'Unknown Title')}\n\n")
+        f.write("A/B TEST TITLES (For the YouTube 'Test & Compare' Tool):\n")
+        for idx, t in enumerate(script_data.get('ab_test_titles', []), 1):
+            f.write(f"{idx}. {t}\n")
+        f.write(f"\nDESCRIPTION:\n{ctx.get('full_description', '')}\n\n")
+        f.write(f"TAGS (Comma separated):\n{', '.join(script_data.get('youtube_tags', []))}\n\n")
+        f.write(f"PLAYLIST CATEGORY:\n{script_data.get('playlist_category', '')}\n")
+    
+    print(f"📝 Metadata saved to: {export_metadata_path}")
             
     return ctx
 
@@ -271,69 +305,25 @@ if __name__ == "__main__":
     import sys
     
     print("\n" + "="*50)
-    print("🔥 LAUNCHING ADVANCED V3 AUTONOMOUS BATCH PIPELINE 🔥")
+    print("🔥 LAUNCHING LOCAL EXPORT PIPELINE 🔥")
     print("="*50)
     
     # Check if a topic was passed as a command line argument
     if len(sys.argv) > 1:
         topic = " ".join(sys.argv[1:])
-        ctx = run_autonomous_pipeline(topic, "English")
-        if ctx:
-            upload_pipeline(ctx, offset_hours=0)
     else:
-        # 🧠 BATCH GENERATION SCALING 
-        # Set this to the number of videos you want to produce today.
-        VIDEOS_PER_DAY = 6
-        OFFSET_HOURS = 24 # Time between each video going public
+        # Generate a single trending topic to perform an isolated run
+        topic = generate_trending_topic()
+        print(f"✅ Selected Autopilot Topic: {topic}\n")
         
-        generated_contexts = []
-        
-        for i in range(VIDEOS_PER_DAY):
-            print(f"\n--- 📅 BATCH GENERATION {i+1} OF {VIDEOS_PER_DAY} ---")
-            topic = generate_trending_topic()
-            print(f"✅ Selected Master Topic: {topic}\n")
-            
-            ctx = run_autonomous_pipeline(topic, "English", master_video_id=None)
-            if ctx:
-                generated_contexts.append(ctx)
-            print("="*50 + "\n")
-            time.sleep(10) # Safety buffer before launching next video
-            
-        if not generated_contexts:
-            print("❌ No videos were generated successfully. Exiting.")
-            sys.exit(1)
-            
+    ctx = run_autonomous_pipeline(topic, "English")
+    
+    if ctx:
+        topic_slug = re.sub(r'[^a-zA-Z0-9]+', '_', topic)[:50].strip('_')
         print("\n" + "="*50)
-        print("🎬 REVIEW TIME! Here are the generated videos:")
-        print("Please review the generated videos in the 'exports/' folder.")
-        print("="*50)
-        
-        for idx, ctx in enumerate(generated_contexts):
-            print(f"[{idx + 1}] Topic: {ctx['topic']}")
-            print(f"    File:  {ctx['final_video_path']}")
-            print(f"    Title: {ctx.get('script_data', {}).get('title', 'Unknown Title')}")
-            print("-" * 50)
-            
-        while True:
-            choice = input(f"\n👉 Which video would you like to upload? (1-{len(generated_contexts)}): ")
-            try:
-                choice_idx = int(choice) - 1
-                if 0 <= choice_idx < len(generated_contexts):
-                    selected_ctx = generated_contexts[choice_idx]
-                    break
-                else:
-                    print(f"⚠️ Please enter a number between 1 and {len(generated_contexts)}.")
-            except ValueError:
-                print("⚠️ Invalid input. Please enter a valid number.")
-                
-        print(f"\n🚀 You selected video {choice_idx + 1}: {selected_ctx['topic']}")
-        print(f"Starting upload sequence...")
-        upload_pipeline(selected_ctx, offset_hours=OFFSET_HOURS)
-            
-    # Check if the AI needs new YouTube engagement data to mathematical re-calibrate
-    # its Retention Variables (Jump Cuts & Flashes)
-    try:
-        from phase_e_learning import autonomous_batch_calibration
-        autonomous_batch_calibration()
-    except Exception:
-        pass
+        print("✅ SUCCESS! PIPELINE COMPLETE.")
+        print(f"Your video, thumbnail, and SEO metadata text file have been securely packaged in:")
+        print(f"📁 exports/{topic_slug}/")
+        print("="*50 + "\n")
+    else:
+        print("❌ Pipeline failed to complete the export.")
