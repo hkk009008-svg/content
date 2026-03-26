@@ -276,11 +276,11 @@ def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str
                 dynamic_voice_filters.append(f"acrusher=bits=8:mix=0.6:{time_expr}")
                 dynamic_voice_filters.append(f"vibrato=f=15:d=0.7:{time_expr}")
             elif eff == "dreamy_blur":
-                dynamic_voice_filters.append(f"aecho=0.8:0.9:100:0.5:{time_expr}")
-                dynamic_voice_filters.append(f"chorus=0.5:0.7:50|60:0.4|0.4:0.25|0.4:2|2:{time_expr}")
+                dynamic_voice_filters.append(f"lowpass=f=2000:{time_expr}")
+                dynamic_voice_filters.append(f"vibrato=f=4:d=0.4:{time_expr}")
             elif eff == "cinematic_glow":
                 dynamic_voice_filters.append(f"highpass=f=400:{time_expr}")
-                dynamic_voice_filters.append(f"aecho=0.8:0.88:40:0.3:{time_expr}")
+                dynamic_voice_filters.append(f"tremolo=f=3:d=0.5:{time_expr}")
             elif eff == "gritty_contrast":
                 dynamic_voice_filters.append(f"acrusher=bits=10:mix=0.4:{time_expr}")
                 dynamic_voice_filters.append(f"tremolo=f=10:d=0.6:{time_expr}")
