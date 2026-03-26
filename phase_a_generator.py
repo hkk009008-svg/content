@@ -121,7 +121,7 @@ def generate_shorts_script(ctx: dict) -> bool:
        - Trigger "VEO" if the scene requires organic fluid dynamics, particle collisions, hyper-macro textures, or natively synchronized ASMR Foley (water, gears, etc.).
     8. The Camera Psychology Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion based on emotional resonance. Use `zoom_in_fast` or `dolly_in_rapid` (push-ins) exclusively for sudden shocking realizations or massive perspective shifts. Use `static_drone` or `pan_right` for establishing scale/context. Use `pan_down` for revealing hidden underlying structures.
     9. Dynamic Visual Effects: For every prompt, assign a `visual_effect` that matches the story's beat. Frame 1 should usually be `cyberpunk_glitch` or `gritty_contrast` for impact. Introspective scenes can use `cinematic_glow` or `dreamy_blur`.
-    10. **VISUAL PSYCHOLOGY & HIGH COMBUSTION AESTHETIC**: Every visual MUST leverage the Rule of Thirds (place the primary subject significantly off-center to create visual tension). Use extremely high-contrast lighting—brilliant neon/bright accents against absolute pitch-black backgrounds to reduce cognitive load and force a dopamine gaze-lock. Frame 1 (The Hook) MUST explicitly be an EXTREME CLOSE-UP (ECU) of a highly detailed object, face, or texture to instantly capture biological focus.
+    10. **VISUAL PSYCHOLOGY & HIGH COMBUSTION AESTHETIC**: Every visual MUST leverage the Rule of Thirds (place the primary subject significantly off-center to create visual tension) and heavy NEGATIVE SPACE (leaving vast, empty surrounding areas to create a premium, minimalist cinematic scale). Use extremely high-contrast lighting—brilliant neon/bright accents against absolute pitch-black backgrounds to reduce cognitive load and force a dopamine gaze-lock. Frame 1 (The Hook) MUST explicitly be an EXTREME CLOSE-UP (ECU) of a highly detailed object, face, or texture to instantly capture biological focus.
     10. **CRITICAL OUTPUT LANGUAGE**: Ensure that the script, hook, title, and youtube tags are written completely and natively in {language.upper()}. If {language.upper()} is not English, you MUST STILL provide English strings for the image_prompts under `ai_image_prompts` (so the image generator doesn't fail). However, the audio text AND the video title/description MUST heavily prioritize native {language.upper()}.
     """
     
@@ -146,7 +146,7 @@ def generate_shorts_script(ctx: dict) -> bool:
                 "items": {
                     "type": "OBJECT",
                     "properties": {
-                        "prompt": {"type": "STRING", "description": "The Midjourney visual prompt. CRITICAL: Frame 1 MUST be an 'Extreme Close-Up (ECU)' with hyper-contrast. All other frames MUST explicitly use the 'Rule of Thirds' composition. Frame 12 MUST visually match Frame 1 exactly for the loop."},
+                        "prompt": {"type": "STRING", "description": "The Midjourney visual prompt. CRITICAL: Frame 1 MUST be an 'Extreme Close-Up (ECU)' with hyper-contrast. All other frames MUST explicitly use the 'Rule of Thirds' composition and heavy NEGATIVE SPACE (minimalist, wide cinematic scale with deep empty backgrounds) to elevate visual aesthetic. Frame 12 MUST visually match Frame 1 exactly for the loop."},
                         "camera": {
                             "type": "STRING",
                             "enum": ["zoom_in_slow", "zoom_out_slow", "zoom_in_fast", "pan_right", "pan_left", "pan_up_crane", "pan_down", "static_drone", "dolly_in_rapid"],

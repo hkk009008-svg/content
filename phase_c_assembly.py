@@ -146,19 +146,19 @@ def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense", pre_tran
     
     def glitch_filter(get_frame, t):
         frame = get_frame(t)
-        # 3% chance per frame for a faint cybernetic horizontal tear
-        if random.random() < 0.03:
+        # 1% chance per frame for a faint cybernetic horizontal tear (lowered frequency)
+        if random.random() < 0.01:
             h, w, c = frame.shape
             y_start = random.randint(0, int(h * 0.9))
             y_end = y_start + random.randint(15, 60)
-            shift_amount = random.randint(20, 50) * random.choice([-1, 1])
+            shift_amount = random.randint(5, 15) * random.choice([-1, 1])  # lowered strength
             
             # Avoid mutating the read-only frame buffer directly
             glitched = np.copy(frame)
             glitched[y_start:y_end, :, :] = np.roll(glitched[y_start:y_end, :, :], shift=shift_amount, axis=1)
             
-            # 1% chance for an absolute color inversion (subliminal frame flash)
-            if random.random() < 0.33:
+            # Lowered probability for subliminal frame flash
+            if random.random() < 0.05:
                 glitched = 255 - glitched
                 
             return glitched
@@ -303,12 +303,30 @@ def assemble_final_video(ctx: dict):
         
         print(f"⚡ [PHASE C] Normalizing {num_clips} Base Video Modules to {clip_duration:.2f}s each...")
         
+        import random
+        # Map out complementary visual filters for different emotional themes
+        vibe_effects = {
+            "suspense": ["gritty_contrast", "cinematic_glow", "cyberpunk_glitch", "gritty_contrast"],
+            "aggressive": ["cyberpunk_glitch", "gritty_contrast", "cinematic_glow"],
+            "lofi": ["dreamy_blur", "cinematic_glow", "documentary_neutral"],
+            "corporate": ["documentary_neutral", "cinematic_glow"],
+            "upbeat": ["cinematic_glow", "documentary_neutral"]
+        }
+        active_effects_pool = vibe_effects.get(music_vibe, ["gritty_contrast", "cinematic_glow", "documentary_neutral", "cyberpunk_glitch", "dreamy_blur"])
+        
         # 2. DYNAMIC API CLIP SYNC AND NORMALIZATION 
+        timeline_effects = []
         for vid_data in video_paths:
             raw_vid_path = vid_data['path'] if isinstance(vid_data, dict) else vid_data
-            visual_effect = vid_data.get('effect', 'gritty_contrast') if isinstance(vid_data, dict) else 'gritty_contrast'
+            
+            # Apply dynamic multiple effects to complement the scene, avoiding consistent boredom
+            if isinstance(vid_data, dict) and vid_data.get('effect'):
+                visual_effect = vid_data['effect']
+            else:
+                visual_effect = random.choice(active_effects_pool)
             
             active_cut_length = clip_duration
+            timeline_effects.append({"effect": visual_effect, "start": current_dur, "end": current_dur + active_cut_length})
             
             norm_path = f"norm_clip_{img_index}.mp4"
             normalize_clip(raw_vid_path, norm_path, duration_sec=active_cut_length, effect=visual_effect)
@@ -352,7 +370,8 @@ def assemble_final_video(ctx: dict):
             ass_path=ass_path,
             output_path=output_filename,
             topic_text=topic_text,
-            tts_duration=total_audio_duration
+            tts_duration=total_audio_duration,
+            timeline_effects=timeline_effects
         )
         
         if success:

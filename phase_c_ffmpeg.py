@@ -158,9 +158,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 end_pts = format_time(word_obj['end'] + 0.1)
                 
                 # Active yellow text with white outline + KINETIC POP-IN TEXT (Visual Psychology hack)
-                # We start the word at 135% scale and immediately smoothly shrink it down to 100% in 150ms 
+                # We start the word at 110% scale and immediately smoothly shrink it down to 100% in 150ms 
                 # This forcefully hijacks the brain's motion-tracking reflex to glue eyeballs to the screen.
-                event_line = f"Dialogue: 0,{start_pts},{end_pts},Default,,0,0,0,,{{\\\\fscx135\\\\fscy135\\\\t(0,150,\\\\fscx100\\\\fscy100)\\\\1c&H00D4FF&}}{word}"
+                event_line = f"Dialogue: 0,{start_pts},{end_pts},Default,,0,0,0,,{{\\\\fscx110\\\\fscy110\\\\t(0,150,\\\\fscx100\\\\fscy100)\\\\1c&H00D4FF&}}{word}"
                 lines.append(event_line)
         else:
             text = segment['text'].strip().upper()
@@ -194,15 +194,15 @@ def normalize_clip(input_path: str, output_path: str, duration_sec: float = None
         
     base_vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920"
     if effect == "cinematic_glow":
-        style_vf = "eq=contrast=1.05:saturation=1.1:brightness=0.02,gblur=sigma=1.0"
+        style_vf = "eq=contrast=1.05:saturation=1.05:brightness=0.02,gblur=sigma=0.5"
     elif effect == "cyberpunk_glitch":
-        style_vf = "eq=contrast=1.3:saturation=1.4:gamma_g=0.9,unsharp=5:5:1.5"
+        style_vf = "eq=contrast=1.15:saturation=1.2:gamma_g=0.95,unsharp=5:5:0.8"
     elif effect == "dreamy_blur":
-        style_vf = "eq=contrast=0.9:saturation=0.8,gblur=sigma=3.0"
+        style_vf = "eq=contrast=0.95:saturation=0.9,gblur=sigma=1.5"
     elif effect == "documentary_neutral":
         style_vf = "eq=contrast=1.0:saturation=1.0"
     else: # gritty_contrast
-        style_vf = "eq=contrast=1.12:saturation=1.20,unsharp=3:3:1.0"
+        style_vf = "eq=contrast=1.05:saturation=1.10,unsharp=3:3:0.5"
         
     cmd.extend([
         "-c:v", "h264_videotoolbox", "-b:v", "8M",
@@ -247,7 +247,7 @@ def stitch_modules(module_paths: list, final_output: str) -> str:
     print(f"      Stitched sequence: {final_output}")
     return final_output
 
-def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str, ass_path: str, output_path: str, topic_text: str = "", tts_duration: float = None):
+def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str, ass_path: str, output_path: str, topic_text: str = "", tts_duration: float = None, timeline_effects: list = None):
     """
     Executes a single-pass zero-loss FFmpeg complex filtergraph to:
       1. Mix Foley, TTS, and ducked BGM using sidechaincompress
@@ -263,15 +263,65 @@ def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str
     # 2. [bgm_looped]: Loop BGM infinitely
     # 3. [bgm_ducked]: Sidechain compress BGM via TTS signal
     # 4. [foley]: Lower native Veo audio
-    # 5. [mixed]: amix all tracks
-    # 6. [final_audio]: Apply loudnorm
+    dynamic_voice_filters = []
+    if timeline_effects:
+        for fx in timeline_effects:
+            eff = fx.get('effect')
+            st = round(fx.get('start', 0), 3)
+            en = round(fx.get('end', 0), 3)
+            # The enable expression matches the exact time bounds of the current visual clip
+            time_expr = f"enable='between(t,{st},{en})'"
+            
+            if eff == "cyberpunk_glitch":
+                dynamic_voice_filters.append(f"acrusher=bits=8:mix=0.6:{time_expr}")
+                dynamic_voice_filters.append(f"vibrato=f=15:d=0.7:{time_expr}")
+            elif eff == "dreamy_blur":
+                dynamic_voice_filters.append(f"aecho=0.8:0.9:100:0.5:{time_expr}")
+                dynamic_voice_filters.append(f"chorus=0.5:0.7:50|60:0.4|0.4:0.25|0.4:2|2:{time_expr}")
+            elif eff == "cinematic_glow":
+                dynamic_voice_filters.append(f"highpass=f=400:{time_expr}")
+                dynamic_voice_filters.append(f"aecho=0.8:0.88:40:0.3:{time_expr}")
+            elif eff == "gritty_contrast":
+                dynamic_voice_filters.append(f"acrusher=bits=10:mix=0.4:{time_expr}")
+                dynamic_voice_filters.append(f"tremolo=f=10:d=0.6:{time_expr}")
+                
+    voice_base = (
+        "[1:a]asetrate=44100*0.95,aresample=44100,atempo=1/0.95,"
+        "highpass=f=120,treble=g=5,"
+        "acrusher=bits=14:mix=0.08,"
+        "aecho=0.8:0.88:40:0.2,"
+        "chorus=0.5:0.8:50|60:0.4|0.3:0.25|0.4:2|2.3,"
+        "acompressor=threshold=-14dB:ratio=6:attack=5:release=50:makeup=4"
+    )
     
+    if dynamic_voice_filters:
+        fx_chain = ",".join(dynamic_voice_filters)
+        voice_bus = f"{voice_base},{fx_chain},asplit=2[tts_sc][tts_mix];"
+    else:
+        voice_bus = f"{voice_base},asplit=2[tts_sc][tts_mix];"
+
     a_graph = (
-        "[1:a]volume=1.0,asplit=2[tts_sc][tts_mix];"
-        "[2:a]volume=0.85,aloop=loop=-1:size=2e9[bgm_looped];"
-        "[bgm_looped][tts_sc]sidechaincompress=threshold=0.1:ratio=2:attack=50:release=300[bgm_ducked];"
-        "[0:a]volume=0.6[foley];"
-        "[foley][tts_mix][bgm_ducked]amix=inputs=3:duration=first:dropout_transition=2[mixed];"
+        # 1. VOICE PROCESSING (Base + Scene-Specific Dynamic Effects)
+        f"{voice_bus}"
+        
+        # 2. BGM AUTOMATION & AGGRESSIVE DUCKING
+        "[2:a]volume=0.9,aloop=loop=-1:size=2e9[bgm_looped];"
+        "[bgm_looped][tts_sc]sidechaincompress=threshold=0.015:ratio=12:attack=5:release=200:makeup=1.8[bgm_ducked];"
+        
+        # 3. SFX SYNTHESIS (Cinematic Room Boom + Noise Cyber-Rise)
+        "aevalsrc='0.8*sin(150*exp(-t*4)*t)|0.8*sin(150*exp(-t*4)*t)':d=3:s=48000,"
+        "afade=t=in:st=0:d=0.05,afade=t=out:st=1.5:d=1.5,"
+        "aecho=0.8:0.9:50|100:0.5|0.3[sfx_boom];"
+        
+        "anoisesrc=d=2:c=pink:r=48000:a=0.3,"
+        "vibrato=f=20:d=0.5,lowpass=f=600,"
+        "afade=t=in:st=0:d=0.05,afade=t=out:st=0.5:d=1.5[sfx_noise];"
+        
+        # 4. FOLEY BUS
+        "[0:a]volume=0.5[foley];"
+        
+        # 5. MASTER MIX BUS
+        "[foley][tts_mix][bgm_ducked][sfx_boom][sfx_noise]amix=inputs=5:duration=first:dropout_transition=2[mixed];"
         "[mixed]loudnorm=I=-14:LRA=11:TP=-1.5[final_audio]"
     )
     

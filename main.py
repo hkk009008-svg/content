@@ -36,7 +36,7 @@ TARGET_LANGUAGES = [
 AFFILIATE_LINKS = """
 """
 
-def run_autonomous_pipeline(topic, language, master_video_id=None, offset_hours=0):
+def run_autonomous_pipeline(topic, language, master_video_id=None):
     # Auto-generate the logo if it doesn't exist yet
     if not os.path.exists("logo.png"):
         print("🎨 [BRANDING] Generating Permanent Channel Logo...")
@@ -190,7 +190,28 @@ def run_autonomous_pipeline(topic, language, master_video_id=None, offset_hours=
     assembly_success = assemble_final_video(ctx)
     if not assembly_success or not os.path.exists(ctx["final_video_path"]):
         print("❌ Pipeline aborted: Video assembly crashed. Aborting upload.")
-        return
+        return None
+
+    # Cleanup ALL temporary generated files inside the root directory
+    import glob
+    print(f"💾 Permanently saved to local disk: {ctx['final_video_path']}")
+    print("🧹 Sweeping all intermediate temporary nodes from the root directory...")
+    
+    for temp_file in glob.glob("temp_*") + glob.glob("norm_clip_*") + glob.glob("bg_*.mp3"):
+        try:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+        except Exception:
+            pass
+            
+    return ctx
+
+def upload_pipeline(ctx, offset_hours=0):
+    topic = ctx["topic"]
+    language = ctx["language"]
+    topic_slug = re.sub(r'[^a-zA-Z0-9]+', '_', topic)[:50].strip('_')
+    lang_slug = language.replace(' ', '')
+    script_data = ctx["script_data"]
 
     # --- PHASE D: UPLOAD ---
     print("\n--- [PHASE D] YOUTUBE UPLOAD ---")
@@ -241,18 +262,6 @@ def run_autonomous_pipeline(topic, language, master_video_id=None, offset_hours=
                 print(f"Review your scheduled video here: https://studio.youtube.com/video/{ctx['youtube_video_id']}/edit")
             else:
                 print("❌ Master Video Upload failed. Skipping subtitles and logging.")
-        
-        # Cleanup ALL temporary generated files inside the root directory
-        import glob
-        print(f"💾 Permanently saved to local disk: {ctx['final_video_path']}")
-        print("🧹 Sweeping all intermediate temporary nodes from the root directory...")
-        
-        for temp_file in glob.glob("temp_*") + glob.glob("norm_clip_*") + glob.glob("bg_*.mp3"):
-            try:
-                if os.path.exists(temp_file):
-                    os.remove(temp_file)
-            except Exception:
-                pass
     else:
         print("❌ Pipeline aborted: Final video file not found.")
         
@@ -268,23 +277,58 @@ if __name__ == "__main__":
     # Check if a topic was passed as a command line argument
     if len(sys.argv) > 1:
         topic = " ".join(sys.argv[1:])
-        run_autonomous_pipeline(topic, "English")
+        ctx = run_autonomous_pipeline(topic, "English")
+        if ctx:
+            upload_pipeline(ctx, offset_hours=0)
     else:
         # 🧠 BATCH GENERATION SCALING 
         # Set this to the number of videos you want to produce today.
-        VIDEOS_PER_DAY = 1
+        VIDEOS_PER_DAY = 6
         OFFSET_HOURS = 24 # Time between each video going public
+        
+        generated_contexts = []
         
         for i in range(VIDEOS_PER_DAY):
             print(f"\n--- 📅 BATCH GENERATION {i+1} OF {VIDEOS_PER_DAY} ---")
             topic = generate_trending_topic()
             print(f"✅ Selected Master Topic: {topic}\n")
             
-            # We calculate this video's publish offset (Ensure the first video is delayed by OFFSET_HOURS)
-            sched_offset = OFFSET_HOURS + (i * OFFSET_HOURS)
-            master_vid_id = run_autonomous_pipeline(topic, "English", master_video_id=None, offset_hours=sched_offset)
+            ctx = run_autonomous_pipeline(topic, "English", master_video_id=None)
+            if ctx:
+                generated_contexts.append(ctx)
             print("="*50 + "\n")
             time.sleep(10) # Safety buffer before launching next video
+            
+        if not generated_contexts:
+            print("❌ No videos were generated successfully. Exiting.")
+            sys.exit(1)
+            
+        print("\n" + "="*50)
+        print("🎬 REVIEW TIME! Here are the generated videos:")
+        print("Please review the generated videos in the 'exports/' folder.")
+        print("="*50)
+        
+        for idx, ctx in enumerate(generated_contexts):
+            print(f"[{idx + 1}] Topic: {ctx['topic']}")
+            print(f"    File:  {ctx['final_video_path']}")
+            print(f"    Title: {ctx.get('script_data', {}).get('title', 'Unknown Title')}")
+            print("-" * 50)
+            
+        while True:
+            choice = input(f"\n👉 Which video would you like to upload? (1-{len(generated_contexts)}): ")
+            try:
+                choice_idx = int(choice) - 1
+                if 0 <= choice_idx < len(generated_contexts):
+                    selected_ctx = generated_contexts[choice_idx]
+                    break
+                else:
+                    print(f"⚠️ Please enter a number between 1 and {len(generated_contexts)}.")
+            except ValueError:
+                print("⚠️ Invalid input. Please enter a valid number.")
+                
+        print(f"\n🚀 You selected video {choice_idx + 1}: {selected_ctx['topic']}")
+        print(f"Starting upload sequence...")
+        upload_pipeline(selected_ctx, offset_hours=OFFSET_HOURS)
             
     # Check if the AI needs new YouTube engagement data to mathematical re-calibrate
     # its Retention Variables (Jump Cuts & Flashes)
