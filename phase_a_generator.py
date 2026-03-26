@@ -87,11 +87,11 @@ def generate_shorts_script(ctx: dict) -> bool:
     [THE MASTER LENS - {lens['name'].upper()}]:
     Your ideal aesthetic is {lens['aesthetic']}
     
-    [THE HOOK ARCHITECTURE (0-3s)]: 
-    Capture the viewer's attention immediately with a hyper-aggressive, paradigm-breaking opening using this framework:
+    [THE HOOK ARCHITECTURE (0-2s)] (SHORTS BINARY GATE OPTIMIZATION): 
+    Capture the viewer's attention immediately with a hyper-aggressive, paradigm-breaking opening using this framework to force the Swipe-Away Rate below 15%:
     Hook Mechanism: {lens['hook']}
-    **CRITICAL 3-SECOND MATRIX CONSTRAINTS**:
-    1. THE REVERSE PSYCHOLOGY ANCHOR: The hook MUST instantly tell the viewer what they *think* is true, and violently shatter it, or explicitly state that the system wants to keep them blind to this mechanism. 
+    **CRITICAL 2-SECOND MATRIX CONSTRAINTS**:
+    1. THE REVERSE PSYCHOLOGY ANCHOR: The hook MUST instantly tell the viewer what they *think* is true, and violently shatter it. Your goal is to secure the 2-Second Hook metric to boost completion probability by 60%.
     2. CONCRETE ENTITY ANCHORING: Name the specific entity instantly.
     3. RAW AUDITORY HOOK: Speak clearly, steadily, and with absolute, almost dangerous, conversational authority.
     
@@ -107,6 +107,7 @@ def generate_shorts_script(ctx: dict) -> bool:
     [NARRATION & WORD CHOICE]:
     Pacing and vocabulary: {lens['pacing']}
     Flow with steady, strong educational authority. Use intentional pauses. Choose down-to-earth, widely understandable language rather than obscure or epic vocabulary. Every single word must carry narrative weight.
+    CRITICAL AUDIO SEO: Ensure that the spoken script naturally contains the exact high-RPM keywords that will be placed in the title and description, as the platform's auto-captioning systems now index audio vectors directly.
     
     Rules:
     1. Hook (AUDIO SEO CRITICAL): Start with a strong, impactful delivery of an interesting fact. You MUST explicitly state the core topic ("{topic}") out loud within the first sentence.
@@ -118,8 +119,9 @@ def generate_shorts_script(ctx: dict) -> bool:
     7. Dual-Model Video Routing (CRITICAL): Assign `target_api` for EVERY visual prompt. 
        - Trigger "RUNWAY" if the scene requires rigid digital structures, geometric data visualization, camera zooms, or minimal physics. 
        - Trigger "VEO" if the scene requires organic fluid dynamics, particle collisions, hyper-macro textures, or natively synchronized ASMR Foley (water, gears, etc.).
-    8. The Camera Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion that suits the documentary style.
-    10. **VISUAL NEGATIVE SPACE & CINEMATIC AESTHETIC**: The AI image prompts MUST explicitly describe scenes with heavily cinematic, True Detective or Denis Villeneuve style lighting, dark moody shadows, high-contrast, and sleek aesthetic that appeals to young professional men. Heavily vignette edges, dark background, and a highly saturated central subject to perfectly fit the UI without feeling cluttered.
+    8. The Camera Psychology Director: For every single AI Image Prompt, explicitly assign a cinematic camera motion based on emotional resonance. Use `zoom_in_fast` or `dolly_in_rapid` (push-ins) exclusively for sudden shocking realizations or massive perspective shifts. Use `static_drone` or `pan_right` for establishing scale/context. Use `pan_down` for revealing hidden underlying structures.
+    9. Dynamic Visual Effects: For every prompt, assign a `visual_effect` that matches the story's beat. Frame 1 should usually be `cyberpunk_glitch` or `gritty_contrast` for impact. Introspective scenes can use `cinematic_glow` or `dreamy_blur`.
+    10. **VISUAL PSYCHOLOGY & HIGH COMBUSTION AESTHETIC**: Every visual MUST leverage the Rule of Thirds (place the primary subject significantly off-center to create visual tension). Use extremely high-contrast lighting—brilliant neon/bright accents against absolute pitch-black backgrounds to reduce cognitive load and force a dopamine gaze-lock. Frame 1 (The Hook) MUST explicitly be an EXTREME CLOSE-UP (ECU) of a highly detailed object, face, or texture to instantly capture biological focus.
     10. **CRITICAL OUTPUT LANGUAGE**: Ensure that the script, hook, title, and youtube tags are written completely and natively in {language.upper()}. If {language.upper()} is not English, you MUST STILL provide English strings for the image_prompts under `ai_image_prompts` (so the image generator doesn't fail). However, the audio text AND the video title/description MUST heavily prioritize native {language.upper()}.
     """
     
@@ -130,7 +132,7 @@ def generate_shorts_script(ctx: dict) -> bool:
             "ab_test_titles": {
                 "type": "ARRAY", 
                 "items": {"type": "STRING"},
-                "description": "Provide EXACTLY 3 extremely distinct, highly attractive and interesting educational video titles. Title 1: Curiosity gap. Title 2: Realization. Title 3: Real-world concern/impact. Avoid aggressive clickbait."
+                "description": "Provide EXACTLY 3 extremely distinct, highly attractive educational video titles. The primary keyword MUST appear within the first 40 characters. Use Power Words like 'Ultimate', 'Proven', or 'Surprising'. Title 1: Curiosity gap. Title 2: Realization. Title 3: Real-world concern/impact."
             },
             "hook": {"type": "STRING", "description": "The opening conversational, interesting sentence"},
             "body_paragraphs": {
@@ -144,11 +146,16 @@ def generate_shorts_script(ctx: dict) -> bool:
                 "items": {
                     "type": "OBJECT",
                     "properties": {
-                        "prompt": {"type": "STRING", "description": "The exact Midjourney-style text prompt for the visual. Frame 1 MUST contain high contrast and immediate subject focus. Frame 12 MUST visually match Frame 1 exactly for the seamless loop."},
+                        "prompt": {"type": "STRING", "description": "The Midjourney visual prompt. CRITICAL: Frame 1 MUST be an 'Extreme Close-Up (ECU)' with hyper-contrast. All other frames MUST explicitly use the 'Rule of Thirds' composition. Frame 12 MUST visually match Frame 1 exactly for the loop."},
                         "camera": {
                             "type": "STRING",
                             "enum": ["zoom_in_slow", "zoom_out_slow", "zoom_in_fast", "pan_right", "pan_left", "pan_up_crane", "pan_down", "static_drone", "dolly_in_rapid"],
                             "description": "Select the exact cinematic camera motion that matches the educational documentary tone."
+                        },
+                        "visual_effect": {
+                            "type": "STRING",
+                            "enum": ["gritty_contrast", "cinematic_glow", "cyberpunk_glitch", "dreamy_blur", "documentary_neutral"],
+                            "description": "Select an FFMPEG post-production aesthetic filter that perfectly matches the narrative emotion of this specific clip."
                         },
                         "target_api": {
                             "type": "STRING",
@@ -162,7 +169,7 @@ def generate_shorts_script(ctx: dict) -> bool:
             },
             "youtube_description": {
                 "type": "STRING",
-                "description": "A comprehensive, down-to-earth, informational, and highly-detailed 3-paragraph SEO-optimized YouTube video description. Naturally weave in massive historical context and heavily prioritize high-RPM/high-CPM business, tech, or strategy financial keywords. This must be exhaustive to maximize YouTube's 5000 character Discovery limit."
+                "description": "A comprehensive, SEO-optimized YouTube video description. CRITICAL: The first 3 lines MUST contain a clear value proposition for LLM parsing. Naturally weave in massive historical context and heavily prioritize high-RPM/high-CPM business, tech, or strategy financial keywords. This must be exhaustive but prioritize the top 3 lines."
             },
             "youtube_tags": {
                 "type": "ARRAY",

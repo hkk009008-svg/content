@@ -94,7 +94,13 @@ def fetch_and_update_analytics(youtube_auth):
         return
 
     # Extract all IDs as a comma-separated string for a batch Data API request
-    video_ids = ",".join([row[0] for row in rows])
+    valid_ids = [row[0] for row in rows if row[0] is not None]
+    if not valid_ids:
+        print("   No valid previous videos to analyze yet.")
+        conn.close()
+        return
+        
+    video_ids = ",".join(valid_ids)
     
     try:
         # First, grab basic stats (Views, Likes, Comments) via the Data API (v3)

@@ -306,11 +306,12 @@ def assemble_final_video(ctx: dict):
         # 2. DYNAMIC API CLIP SYNC AND NORMALIZATION 
         for vid_data in video_paths:
             raw_vid_path = vid_data['path'] if isinstance(vid_data, dict) else vid_data
+            visual_effect = vid_data.get('effect', 'gritty_contrast') if isinstance(vid_data, dict) else 'gritty_contrast'
             
             active_cut_length = clip_duration
             
             norm_path = f"norm_clip_{img_index}.mp4"
-            normalize_clip(raw_vid_path, norm_path, duration_sec=active_cut_length)
+            normalize_clip(raw_vid_path, norm_path, duration_sec=active_cut_length, effect=visual_effect)
             normalized_clips.append(norm_path)
             
             current_dur += active_cut_length
@@ -350,7 +351,8 @@ def assemble_final_video(ctx: dict):
             bgm_path=bg_music_path,
             ass_path=ass_path,
             output_path=output_filename,
-            topic_text=topic_text
+            topic_text=topic_text,
+            tts_duration=total_audio_duration
         )
         
         if success:

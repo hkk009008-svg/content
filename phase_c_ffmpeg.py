@@ -157,8 +157,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 # Extend end time slightly so words don't blink too fast
                 end_pts = format_time(word_obj['end'] + 0.1)
                 
-                # Active yellow text with white outline: {\1c&H00D4FF&}
-                event_line = f"Dialogue: 0,{start_pts},{end_pts},Default,,0,0,0,,{{\\\\1c&H00D4FF&}}{word}"
+                # Active yellow text with white outline + KINETIC POP-IN TEXT (Visual Psychology hack)
+                # We start the word at 135% scale and immediately smoothly shrink it down to 100% in 150ms 
+                # This forcefully hijacks the brain's motion-tracking reflex to glue eyeballs to the screen.
+                event_line = f"Dialogue: 0,{start_pts},{end_pts},Default,,0,0,0,,{{\\\\fscx135\\\\fscy135\\\\t(0,150,\\\\fscx100\\\\fscy100)\\\\1c&H00D4FF&}}{word}"
                 lines.append(event_line)
         else:
             text = segment['text'].strip().upper()
@@ -182,7 +184,7 @@ def probe_audio(file_path: str) -> bool:
     result = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
     return len(result.stdout.strip()) > 0
 
-def normalize_clip(input_path: str, output_path: str, duration_sec: float = None) -> str:
+def normalize_clip(input_path: str, output_path: str, duration_sec: float = None, effect: str = "gritty_contrast") -> str:
     """Forces 1080x1920 scaling, exact 24fps, injects silent audio, and explicitly trims to match spoken sentence lengths."""
     has_audio = probe_audio(input_path)
     cmd = ["ffmpeg", "-y", "-i", input_path]
@@ -190,9 +192,21 @@ def normalize_clip(input_path: str, output_path: str, duration_sec: float = None
     if not has_audio:
         cmd.extend(["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"])
         
+    base_vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920"
+    if effect == "cinematic_glow":
+        style_vf = "eq=contrast=1.05:saturation=1.1:brightness=0.02,gblur=sigma=1.0"
+    elif effect == "cyberpunk_glitch":
+        style_vf = "eq=contrast=1.3:saturation=1.4:gamma_g=0.9,unsharp=5:5:1.5"
+    elif effect == "dreamy_blur":
+        style_vf = "eq=contrast=0.9:saturation=0.8,gblur=sigma=3.0"
+    elif effect == "documentary_neutral":
+        style_vf = "eq=contrast=1.0:saturation=1.0"
+    else: # gritty_contrast
+        style_vf = "eq=contrast=1.12:saturation=1.20,unsharp=3:3:1.0"
+        
     cmd.extend([
         "-c:v", "h264_videotoolbox", "-b:v", "8M",
-        "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30",
+        "-vf", f"{base_vf},{style_vf},fps=30",
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2"
     ])
     
@@ -233,7 +247,7 @@ def stitch_modules(module_paths: list, final_output: str) -> str:
     print(f"      Stitched sequence: {final_output}")
     return final_output
 
-def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str, ass_path: str, output_path: str, topic_text: str = ""):
+def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str, ass_path: str, output_path: str, topic_text: str = "", tts_duration: float = None):
     """
     Executes a single-pass zero-loss FFmpeg complex filtergraph to:
       1. Mix Foley, TTS, and ducked BGM using sidechaincompress
@@ -269,9 +283,13 @@ def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str
         "-map", "[final_audio]",
         "-c:v", "copy",
         "-c:a", "aac", "-b:a", "192k", 
-        "-shortest",
-        output_path
+        "-shortest"
     ])
+    
+    if tts_duration is not None:
+        cmd.extend(["-t", str(tts_duration)])
+        
+    cmd.append(output_path)
     
     print(f"      Executing Single-Pass FFmpeg Master Assembly...")
     try:

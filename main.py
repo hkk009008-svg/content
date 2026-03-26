@@ -204,10 +204,12 @@ def run_autonomous_pipeline(topic, language, master_video_id=None, offset_hours=
             # --- THE MACHINE LEARNING SYNC ---
             fetch_and_update_analytics(youtube)
             
-            publish_at_str = None
-            if offset_hours > 0:
-                future_time = datetime.datetime.utcnow() + datetime.timedelta(hours=offset_hours)
-                publish_at_str = future_time.isoformat().split('.')[0] + 'Z'
+            import datetime
+            # --- SCHEDULED RELEASE WORKFLOW ---
+            # Automatically schedule the video to be published x hours in the future
+            publish_time = datetime.datetime.utcnow() + datetime.timedelta(hours=offset_hours)
+            # YouTube API requires ISO 8601 formatting with a fractional seconds truncation
+            publish_at_str = publish_time.strftime("%Y-%m-%dT%H:%M:%S.000Z")
             
             # --- NEW: A/B TEST EXPORT ---
             ab_test_file = f"exports/{topic_slug}_{lang_slug}_AB_TITLES.txt"
@@ -218,11 +220,11 @@ def run_autonomous_pipeline(topic, language, master_video_id=None, offset_hours=
                     f.write(f"{idx}. {t}\n")
             print(f"📦 A/B Test Titles packaged: {ab_test_file}")
             
-            # Compile the final native description with SEO and Affiliate Links
+            # Compile the final native description with SEO (Spam Footprints Removed)
             base_description = script_data.get('youtube_description', '')
-            ctx["full_description"] = f"{base_description}\n\n---\n{AFFILIATE_LINKS}"
+            ctx["full_description"] = f"{base_description}"
             
-            print(f"✅ Master MP4 Payload locked. Scheduling upload for offset: +{offset_hours}hr!")
+            print(f"✅ Master MP4 Payload locked. Uploading and scheduling for {offset_hours} hours from now.")
             upload_video(youtube, ctx, publish_at=publish_at_str)
             
             if ctx.get("youtube_video_id") or True: # Force true for test
@@ -235,9 +237,8 @@ def run_autonomous_pipeline(topic, language, master_video_id=None, offset_hours=
                 # --- NEW: LOG THE EXPERIMENT FOR FUTURE MACHINE LEARNING ---
                 log_experiment(ctx)
                 
-                print("\n✅🎉 MASTER VIDEO UPLOADED SUCCESSFULLY! 🎉✅")
-                print(f"Your Master Video is SCHEDULED to automatically go public in 24 hours!")
-                print(f"Verify it here: https://studio.youtube.com/video/{ctx['youtube_video_id']}/edit")
+                print(f"\n✅🎉 MASTER VIDEO SUCCESSFULLY SCHEDULED FOR RELEASE IN {offset_hours} HOURS! 🎉✅")
+                print(f"Review your scheduled video here: https://studio.youtube.com/video/{ctx['youtube_video_id']}/edit")
             else:
                 print("❌ Master Video Upload failed. Skipping subtitles and logging.")
         
@@ -271,16 +272,16 @@ if __name__ == "__main__":
     else:
         # 🧠 BATCH GENERATION SCALING 
         # Set this to the number of videos you want to produce today.
-        VIDEOS_PER_DAY = 3
-        OFFSET_HOURS = 8 # Time between each video going public
+        VIDEOS_PER_DAY = 1
+        OFFSET_HOURS = 24 # Time between each video going public
         
         for i in range(VIDEOS_PER_DAY):
             print(f"\n--- 📅 BATCH GENERATION {i+1} OF {VIDEOS_PER_DAY} ---")
             topic = generate_trending_topic()
             print(f"✅ Selected Master Topic: {topic}\n")
             
-            # We calculate this video's publish offset
-            sched_offset = i * OFFSET_HOURS
+            # We calculate this video's publish offset (Ensure the first video is delayed by OFFSET_HOURS)
+            sched_offset = OFFSET_HOURS + (i * OFFSET_HOURS)
             master_vid_id = run_autonomous_pipeline(topic, "English", master_video_id=None, offset_hours=sched_offset)
             print("="*50 + "\n")
             time.sleep(10) # Safety buffer before launching next video
