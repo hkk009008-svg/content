@@ -171,11 +171,11 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
         if isinstance(image_data, str):
             prompt = image_data
             camera_motion = "zoom_in_slow"
-            target_api = "RUNWAY"
+            target_api = "KLING_3_0"
         else:
             prompt = image_data.get('prompt', '')
             camera_motion = image_data.get('camera', 'zoom_in_slow')
-            target_api = image_data.get('target_api', 'RUNWAY')
+            target_api = image_data.get('target_api', 'KLING_3_0')
             
         total_clips = len(script_data['ai_image_prompts'])
         print(f"\n🎬 [PHASE C] Generating Content Node {index+1}/{total_clips} ({target_api})")

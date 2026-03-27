@@ -22,7 +22,7 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
     print(f"   ↳ Routing to {target_api} API engine... (Attempting premium cinematic motion)")
     
     def try_next_api():
-        premium_engines = ["VEO", "KLING_3_0", "RUNWAY", "LUMA"]
+        premium_engines = ["KLING_3_0", "RUNWAY", "LUMA", "VEO", "COMFY_UI"]
         for api in premium_engines:
             if api not in attempted_apis:
                 print(f"   🔄 Cascading heavily to next premium AI video engine: {api}...")
@@ -172,7 +172,7 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
                     poll_url = f"https://api.klingai.com/v1/videos/text2video/{task_id}"
                     final_video_url = None
                     poll_attempts = 0
-                    max_polls = 30  # 30 polls * 10 seconds = 5 Minutes
+                    max_polls = 360  # 360 polls * 10 seconds = 60 Minutes
                     
                     while True:
                         if poll_attempts >= max_polls:
@@ -185,7 +185,10 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
                         stat_resp = requests.get(poll_url, headers={"Authorization": f"Bearer {p_token}"})
                         if stat_resp.status_code == 200:
                             status = stat_resp.json().get('data', {}).get('task_status')
-                            if status == "success":
+                            if poll_attempts % 2 == 0:
+                                print(f"      ↳ Polling update ({poll_attempts}/{max_polls}): {str(status).upper()}...")
+                                
+                            if status in ["success", "succeed"]:
                                 res_list = stat_resp.json().get('data', {}).get('task_result', [])
                                 if res_list:
                                     final_video_url = res_list[0].get('videos', [{}])[0].get('url')
@@ -345,12 +348,12 @@ def generate_ass_subtitles(whisper_result: dict, output_path: str):
     """Converts Whisper word-level timestamps to an advanced SubStation Alpha (.ass) file."""
     ass_header = '''[Script Info]
 ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
+PlayResX: 1920
+PlayResY: 1080
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Roboto,64,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,3,2,60,60,600,1
+Style: Default,Roboto,64,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,3,2,60,60,80,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -483,7 +486,7 @@ def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str
     foley_filters = []
     foley_mix_labels = []
     
-    import os
+    
     if foley_paths:
         for i, path in enumerate(foley_paths, start=3):
             if path and os.path.exists(path):

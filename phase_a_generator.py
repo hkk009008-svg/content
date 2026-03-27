@@ -163,8 +163,8 @@ def generate_shorts_script(ctx: dict) -> bool:
                             },
                             "target_api": {
                                 "type": "string",
-                                "enum": ["VEO", "COMFY_UI", "KLING_3_0"],
-                                "description": "Select the target video engine. Route heavy, complex multi-angle action sequences to 'KLING_3_0'. Route physically complex single portrait or IP-Adapter shots to 'COMFY_UI'. Use 'VEO' for environmental B-roll."
+                                "enum": ["KLING_3_0", "COMFY_UI", "VEO"],
+                                "description": "Select the highest-quality cinematic video engine. Route all sweeping, atmospheric B-roll or complex cinematic motion to 'KLING_3_0'. Route any Extreme Close-Ups (ECU) and portrait shots that require perfect character facial continuity to 'COMFY_UI'. Use 'VEO' only as a rare fallback."
                             },
                             "scene_foley": {
                                 "type": "string",

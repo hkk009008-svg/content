@@ -58,7 +58,7 @@ def validate_identity(video_path, character_id, threshold=0.60):
         result = DeepFace.verify(
             img1_path=temp_frame, 
             img2_path=reference_image, 
-            model_name="ArcFace",
+            model_name="GhostFaceNet",
             distance_metric="cosine",
             enforce_detection=False # Prevents crash if frame is highly styled/dark
         )
