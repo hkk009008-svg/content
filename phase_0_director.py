@@ -137,7 +137,7 @@ def generate_production_blueprint(ctx: dict) -> bool:
         max_tool_calls = 3
         for _ in range(max_tool_calls):
             response = openai_client.chat.completions.create(
-                model="gpt-5.4-pro",
+                model="gpt-4o",
                 messages=messages,
                 tools=tools,
                 tool_choice="auto"
@@ -169,7 +169,7 @@ def generate_production_blueprint(ctx: dict) -> bool:
         # Step 2: Final JSON Generation
         print("   ↳ Research Complete. Director is formulating the Final Blueprint...")
         final_response = openai_client.chat.completions.create(
-            model="gpt-5.4-pro",
+            model="gpt-4o",
             messages=messages,
             response_format={"type": "json_schema", "json_schema": response_schema}
         )

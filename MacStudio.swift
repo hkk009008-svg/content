@@ -1,6 +1,20 @@
 import SwiftUI
 import AVKit
 import Foundation
+import AppKit
+
+struct AVPlayerViewRepresentable: NSViewRepresentable {
+    let player: AVPlayer
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = player
+        view.controlsStyle = .inline
+        return view
+    }
+    func updateNSView(_ nsView: AVPlayerView, context: Context) {
+        nsView.player = player
+    }
+}
 
 @main
 struct MacStudioApp: App {
@@ -63,11 +77,30 @@ struct StudioDashboardView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 15)
                 
+                Text("SYSTEM LOGS")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.gray)
+                    .padding(.horizontal)
+                
+                ScrollView {
+                    Text(pipelineLogs)
+                        .font(.custom("Menlo", size: 10))
+                        .foregroundColor(.green)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
+                .frame(height: 100)
+                .background(Color.black)
+                .cornerRadius(8)
+                .padding(.horizontal)
+                
                 Text("ARCHIVES")
                     .font(.caption)
                     .fontWeight(.bold)
                     .foregroundColor(.gray)
                     .padding(.horizontal)
+                    .padding(.top, 10)
                 
                 List(projects, selection: $selectedProject) { project in
                     NavigationLink(destination: ContinuityViewer(videoURL: project.videoPath, title: project.title)) {
@@ -129,12 +162,13 @@ struct StudioDashboardView: View {
     /// Spawns a background process to construct the film
     func runPythonPipeline() {
         isGenerating = true
+        self.pipelineLogs = "Initializing autonomous pipeline..."
         
         DispatchQueue.global(qos: .userInitiated).async {
             let task = Process()
-            task.executableURL = URL(fileURLWithPath: "\(self.workspaceRoot)/.venv/bin/python")
-            task.arguments = ["\(self.workspaceRoot)/main.py"]
-            task.currentDirectoryURL = URL(fileURLWithPath: self.workspaceRoot)
+            task.executableURL = URL(fileURLWithPath: "/bin/bash")
+            let cmd = "cd \(self.workspaceRoot) && ./.venv/bin/python main.py"
+            task.arguments = ["-c", cmd]
             
             // Capture output
             let pipe = Pipe()
@@ -143,14 +177,22 @@ struct StudioDashboardView: View {
             
             do {
                 try task.run()
+                
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let outputLog = String(data: data, encoding: .utf8) ?? "No output."
+                
                 task.waitUntilExit()
+                
+                DispatchQueue.main.async {
+                    self.pipelineLogs = "Pipeline Execution Finished.\nSee terminal or exports folder.\nLog Snapshot:\n\(String(outputLog.prefix(400)))"
+                    self.isGenerating = false
+                    self.loadProjects() // Refresh
+                }
             } catch {
-                print("Failed to run pipeline: \(error)")
-            }
-            
-            DispatchQueue.main.async {
-                self.isGenerating = false
-                self.loadProjects() // Refresh to see the new film!
+                DispatchQueue.main.async {
+                    self.pipelineLogs = "Failed to launch pipeline: \(error.localizedDescription)"
+                    self.isGenerating = false
+                }
             }
         }
     }
@@ -171,7 +213,7 @@ struct ContinuityViewer: View {
                 .padding(.top, 30)
             
             // The massive cinematic 16:9 canvas
-            VideoPlayer(player: player)
+            AVPlayerViewRepresentable(player: player)
                 .aspectRatio(16/9, contentMode: .fit)
                 .cornerRadius(12)
                 .shadow(color: .black.opacity(0.8), radius: 30)

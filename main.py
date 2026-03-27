@@ -197,14 +197,34 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
             else:
                 print(f"   🔄 [VISION QC] Retrying generation ({qc_attempt+1}/{max_qc_retries})...")
         
-        # 2. Handoff to Video Generation API (Veo or Runway)
+        # 2. Handoff to Video Generation API with Autonomous Vision Feedback Loop
         if img_path:
             mp4_path = f"temp_vid_{index}.mp4"
             from phase_c_ffmpeg import generate_ai_video
-            final_vid = generate_ai_video(img_path, camera_motion, target_api, mp4_path, script_data['video_pacing'])
+            from phase_c_vision import validate_identity
+            
+            max_video_retries = 3
+            final_vid = None
+            char_id = script_data.get('character_id')
+            
+            for v_attempt in range(max_video_retries):
+                print(f"   🎬 Generating Video Cut ({v_attempt+1}/{max_video_retries})...")
+                temp_vid = generate_ai_video(img_path, camera_motion, target_api, mp4_path, script_data['video_pacing'], char_id)
+                
+                if temp_vid and char_id:
+                    is_valid = validate_identity(temp_vid, char_id)
+                    if is_valid:
+                        final_vid = temp_vid
+                        print("   ✅ [IDENTITY_ACCEPTED] Structural cinematic continuity confirmed.")
+                        break
+                    else:
+                        print(f"   🔄 [IDENTITY_REJECT] Drift detected. Mutating LLM constraints and regenerating...")
+                else:
+                    final_vid = temp_vid
+                    break # Skip validation if no character constraint
             
             ctx["downloaded_vids"].append({
-                "path": final_vid if final_vid else img_path, # Fallback to static image if video API fails
+                "path": final_vid if final_vid else img_path, # Fallback to static image if video API fails entirely
                 "camera": camera_motion,
                 "target_api": target_api,
                 "is_video": final_vid is not None

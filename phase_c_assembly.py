@@ -185,12 +185,14 @@ def assemble_final_video(ctx: dict):
         )
         final_video.close()
         
-        # 4. MASTER FFMPEG AUDIO MIX
+        # 4. MASTER FFMPEG AUDIO MIX & VISUAL COLOR GRADING
         bg_music_path = f"bg_{music_vibe}.mp3"
+        lut_path = f"lut_{music_vibe}.png" # Programmatic cinematic color mapping
+        
         if not os.path.exists(bg_music_path):
             print(f"⚠️ Warning: Missing bespoke AI audio ({bg_music_path}). Please ensure phase_b_audio successfully called Fal.ai API.")
             
-        print("🔊 Orchestrating Master FFMPEG Filtergraph (Audio Ducking)...")
+        print("🔊 Orchestrating Master FFMPEG Filtergraph (Audio Ducking & HaldCLUT Color Grading)...")
         success = execute_master_ffmpeg_assembly(
             video_path=temp_overlay_mp4,
             tts_path=audio_path,
@@ -200,7 +202,8 @@ def assemble_final_video(ctx: dict):
             topic_text=topic_text,
             tts_duration=total_audio_duration,
             timeline_effects=timeline_effects,
-            foley_paths=ctx.get("foley_audio_paths", [])
+            foley_paths=ctx.get("foley_audio_paths", []),
+            lut_path=lut_path
         )
         
         if success:

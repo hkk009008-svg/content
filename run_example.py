@@ -52,7 +52,7 @@ def run_local_example():
         if img_path:
             mp4_path = f"temp_vid_{index}.mp4"
             from phase_c_ffmpeg import generate_ai_video
-            final_vid = generate_ai_video(img_path, camera_motion, target_api, mp4_path, script_data['video_pacing'])
+            final_vid = generate_ai_video(img_path, camera_motion, target_api, mp4_path, script_data['video_pacing'], script_data.get('character_id'))
             
             ctx["downloaded_vids"].append({
                 "path": final_vid if final_vid else img_path,

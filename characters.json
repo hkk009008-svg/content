@@ -1,0 +1,23 @@
+{
+    "the_strategist": {
+        "name": "The Master Strategist",
+        "description": "A sharp, corporate mastermind in a perfectly tailored dark suit. Calculated eyes, cinematic lighting.",
+        "voice_id": "ErXwobaYiN019PkySvjV",
+        "reference_image": "characters/strategist_front.jpg",
+        "ip_adapter_weight": 0.85
+    },
+    "the_cyber_architect": {
+        "name": "The Cyber-Architect",
+        "description": "A brooding, futuristic builder surrounded by neon and shadow. Sleek tech-wear, intense atmospheric presence.",
+        "voice_id": "cjVigY5qzO86Huf0OWal",
+        "reference_image": "characters/cyber_front.jpg",
+        "ip_adapter_weight": 0.90
+    },
+    "the_machiavellian": {
+        "name": "The Machiavellian Operator",
+        "description": "An elegant, ruthless historical figure in a dimly lit, luxurious study. Intense cinematic contrast.",
+        "voice_id": "pNInz6obpgDQGcFmaJgB",
+        "reference_image": "characters/machiavelli_front.jpg",
+        "ip_adapter_weight": 0.85
+    }
+}
