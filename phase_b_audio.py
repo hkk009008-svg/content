@@ -165,3 +165,31 @@ def generate_srt(audio_path: str, srt_path: str):
             
     print(f"✅ SRT successfully saved to {srt_path}")
     return srt_path
+
+def generate_scene_foley_library(ctx: dict) -> bool:
+    """Iterates through each cinematic shot and generates custom ambient Foley layer using ElevenLabs."""
+    print("\n🎧 [PHASE B] Generating Immersive Environmental Foley for each scene...")
+    prompts = ctx.get("script_data", {}).get("ai_image_prompts", [])
+    ctx["foley_audio_paths"] = []
+    
+    for i, p in enumerate(prompts):
+        foley_desc = p.get("scene_foley", "soft cinematic room tone, faint ambient hum")
+        print(f"   ↳ Generating Foley Scene {i+1}: '{foley_desc}'")
+        output_filename = f"temp_foley_{i}.mp3"
+        try:
+            # Generate the sound effect
+            result = client.text_to_sound_effects.convert(
+                text=foley_desc,
+                duration_seconds=5, # Average visual clip length
+                prompt_influence=0.4
+            )
+            with open(output_filename, "wb") as f:
+                for chunk in result:
+                    if chunk:
+                        f.write(chunk)
+            ctx["foley_audio_paths"].append(output_filename)
+        except Exception as e:
+            print(f"      ⚠️ Warning: Foley generation failed for Scene {i+1}: {e}")
+            ctx["foley_audio_paths"].append(None) # Safe fallback
+            
+    return True

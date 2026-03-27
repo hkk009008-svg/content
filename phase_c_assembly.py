@@ -19,7 +19,7 @@ import moviepy.video.fx.all as vfx
 load_dotenv()
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 
-def generate_ai_broll(prompt, output_filename):
+def generate_ai_broll(prompt, output_filename, seed=None):
     """Hits the industrial Fal.ai Flux endpoint for instant, ban-free 4K vertical image generation."""
     print(f"🤖 [PHASE C] Generating AI B-Roll: '{prompt[:50]}...'")
     import os
@@ -31,18 +31,20 @@ def generate_ai_broll(prompt, output_filename):
     try:
         img_data = b""
         if fal_key:
-            # Generate instantly using the premium Fal.ai Flux Schnell engine
-            url = "https://fal.run/fal-ai/flux/schnell"
+            # Generate premium photorealistic 4K frames using Flux 1.1 Pro Ultra
+            url = "https://fal.run/fal-ai/flux-pro/v1.1-ultra"
             headers = {
                 "Authorization": f"Key {fal_key}",
                 "Content-Type": "application/json"
             }
             payload = {
                 "prompt": prompt,
-                "image_size": "portrait_16_9",
-                "num_inference_steps": 4,
-                "num_images": 1
+                "aspect_ratio": "9:16",
+                "raw": True
             }
+            if seed is not None:
+                payload["seed"] = seed
+                
             resp = requests.post(url, json=payload, headers=headers)
             
             if resp.status_code == 200:
@@ -55,6 +57,9 @@ def generate_ai_broll(prompt, output_filename):
         if len(img_data) < 5000:
             encoded_prompt = urllib.parse.quote(prompt)
             url_fallback = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=1365&nologo=True&model=flux"
+            if seed is not None:
+                url_fallback += f"&seed={seed}"
+                
             req_headers = {'User-Agent': 'Mozilla/5.0'}
             img_data = requests.get(url_fallback, headers=req_headers).content
         
@@ -70,198 +75,13 @@ def generate_ai_broll(prompt, output_filename):
         print(f"❌ Error generating AI B-Roll: {e}")
         return None
 
-def crop_to_vertical(clip):
-    """Automatically crops a horizontal video to the 9:16 YouTube Shorts standard."""
-    target_ratio = 9 / 16
-    current_ratio = clip.w / clip.h
-    
-    if current_ratio > target_ratio:
-        # Video is wider than 9:16, crop the sides to center it
-        new_width = int(clip.h * target_ratio)
-        x_center = clip.w / 2
-        clip = clip.crop(x_center=x_center, y_center=clip.h/2, width=new_width, height=clip.h)
-    
-    # Enforce strict 4K vertical cinema resolution (2160x3840) to prevent render crashes
-    return clip.resize((2160, 3840))
+def scale_to_widescreen(clip):
+    """Enforces strict 4K widescreen cinema resolution (3840x2160) for long-form movies."""
+    # Ensure standard 1080p high definition to prevent MoviePy OOM crashing, but mapped natively for widescreen
+    return clip.resize((1920, 1080))
 
-def add_top_banner(video_clip, topic_text):
-    """Adds a persistent 'Case File' authority banner to the top of the video with proper word-wrapping."""
-    from moviepy.editor import ColorClip, TextClip, CompositeVideoClip
-    
-    # 1. Background Box (Slightly taller to handle multiline text and almost fully opaque for legibility)
-    banner_bg = ColorClip(size=(2160, 360), color=(10, 10, 10)).set_opacity(1.0).set_position(('center', 'top')).set_duration(video_clip.duration)
-    
-    # 2. Modern Brand Accent Line (Ultra-thin minimalist white line)
-    accent_line = ColorClip(size=(2160, 3), color=(255, 255, 255)).set_position(('center', 360)).set_duration(video_clip.duration)
-    
-    # 3. Small "Authority" Badge Text (Clean minimalist sans-serif)
-    try:
-        badge_txt = TextClip(
-            "A N A L Y S I S", 
-            fontsize=40, 
-            color='#E0E0E0', 
-            font='/System/Library/Fonts/Supplemental/Arial Unicode.ttf'
-        ).set_position((100, 70)).set_duration(video_clip.duration)
-    except:
-        badge_txt = TextClip("A N A L Y S I S", fontsize=40, color='#E0E0E0').set_position((100, 70)).set_duration(video_clip.duration)
-        
-    # 4. Main Title (High-end editorial fashion serif)
-    try:
-        main_txt = TextClip(
-            topic_text.upper(), 
-            fontsize=65, 
-            color='white', 
-            font='/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
-            align='West',
-            method='caption',
-            size=(1900, None) # This tells MoviePy to auto word-wrap within 1900 pixels
-        ).set_position((100, 150)).set_duration(video_clip.duration)
-    except:
-        main_txt = TextClip(topic_text.upper(), fontsize=65, color='white', align='West', method='caption', size=(1900, None)).set_position((100, 150)).set_duration(video_clip.duration)
-    
-    return CompositeVideoClip([video_clip, banner_bg, accent_line, badge_txt, main_txt])
-
-def add_dynamic_captions(audio_path, video_clip, music_vibe="suspense", pre_transcribed_result=None, clip_duration=None):
-    """
-    Uses local Whisper AI to transcribe audio and burn word-by-word 
-    captions onto the MoviePy video clip with dynamically mapped styles.
-    """
-    if not pre_transcribed_result:
-        print("🧠 [PHASE C] Loading Whisper AI model (this takes a few seconds)...")
-        # 'base' is fast and highly accurate for English.
-        model = whisper.load_model("base") 
-        print("📝 [PHASE C] Transcribing audio and extracting word timestamps...")
-        # word_timestamps=True is the secret to Hormozi-style pop-up captions
-        result = model.transcribe(audio_path, word_timestamps=True)
-    else:
-        result = pre_transcribed_result
-    
-    text_clips = []
-    word_index = 0
-    
-    # 👾 SUBLIMINAL GLITCH STIMULATION ENGINE 👾
-    # Creates mathematically random micro-tears in the background video behind the text
-    import numpy as np
-    import random
-    
-    def glitch_filter(get_frame, t):
-        frame = get_frame(t)
-        
-        # --- ACTION MOVIE BEAT-SYNC FLASHES ---
-        # Cinematic flash exactly at the mathematically predicted camera cuts!
-        if clip_duration and t > 0.1:
-            time_in_clip = t % clip_duration
-            if time_in_clip < 0.15: # 150ms flash decay
-                flash_intensity = max(0, 1.0 - (time_in_clip / 0.15))
-                # Soft blend towards white to create adrenaline impact without blinding viewers
-                frame = (frame * (1 - flash_intensity * 0.75) + np.array([255, 255, 255]) * (flash_intensity * 0.75)).astype(np.uint8)
-                
-        # 1% chance per frame for a faint cybernetic horizontal tear (lowered frequency)
-        if random.random() < 0.01:
-            h, w, c = frame.shape
-            y_start = random.randint(0, int(h * 0.9))
-            y_end = y_start + random.randint(15, 60)
-            shift_amount = random.randint(5, 15) * random.choice([-1, 1])  # lowered strength
-            
-            # Avoid mutating the read-only frame buffer directly
-            glitched = np.copy(frame)
-            glitched[y_start:y_end, :, :] = np.roll(glitched[y_start:y_end, :, :], shift=shift_amount, axis=1)
-            
-            # Lowered probability for subliminal frame flash
-            if random.random() < 0.05:
-                glitched = 255 - glitched
-                
-            return glitched
-        return frame
-        
-    print("👾 [PHASE C] Applying Faint Subliminal VHS Glitching to Background Layer...")
-    video_clip = video_clip.fl(glitch_filter)
-    
-    # 💥 VERY CLEAN & NEAT V4 AESTHETIC 💥
-    # Focus: Highest legibility, vivid white bold, thin crisp outline, soft outer shadow
-    font_choice = '/System/Library/Fonts/Supplemental/Arial Unicode.ttf'
-    font_size = 85
-
-    # Extract ALL individual words globally
-    words_data = []
-    for segment in result['segments']:
-        if 'words' in segment:
-            for w in segment['words']:
-                words_data.append({
-                    'text': w['word'].strip().upper(),
-                    'start': w['start'],
-                    'end': w['end']
-                })
-        else:
-            words_data.append({
-                'text': segment['text'].strip().upper(),
-                'start': segment['start'],
-                'end': segment['end']
-            })
-
-    # Group into 1-2 words max for standard legible pacing
-    kinetic_chunks = []
-    current_chunk = []
-    current_start = 0
-    
-    for i, w_dict in enumerate(words_data):
-        current_chunk.append(w_dict['text'])
-        if len(current_chunk) == 1:
-            current_start = w_dict['start']
-            
-        if len(current_chunk) >= 2 or len(w_dict['text']) > 8 or i == len(words_data) - 1:
-            kinetic_chunks.append({
-                'text': " ".join(current_chunk),
-                'start': current_start,
-                'end': w_dict['end']
-            })
-            current_chunk = []
-
-    # Generate the hyper-legible shadow-layered TextClips
-    for chunk in kinetic_chunks:
-        segment_text = chunk['text']
-        start_time = chunk['start']
-        end_time = chunk['end']
-        
-        try:
-            # 1. The Soft Outer Shadow (Thick semi-transparent black stroke creates a soft glow layer)
-            shadow_clip = TextClip(
-                segment_text, 
-                fontsize=font_size,
-                color='black', 
-                font=font_choice, 
-                stroke_color='black',
-                stroke_width=12,
-                method='caption',
-                size=(950, None), 
-                align='center'
-            ).set_opacity(0.4).set_start(start_time).set_end(end_time).set_position(('center', 'center'))
-            
-            # 2. The Vivid Inner Text (White bold with very thin crisp black outline)
-            main_clip = TextClip(
-                segment_text, 
-                fontsize=font_size,
-                color='white', 
-                font=font_choice, 
-                stroke_color='black',
-                stroke_width=2,
-                method='caption',
-                size=(950, None), 
-                align='center'
-            ).set_opacity(1.0).set_start(start_time).set_end(end_time).set_position(('center', 'center'))
-            
-            # Append BOTH to the visual pipeline to compound the 3D aesthetic
-            text_clips.append(shadow_clip)
-            text_clips.append(main_clip)
-            
-        except Exception as e:
-            print(f"⚠️ Warning: Could not generate typography for '{segment_text}'. Error: {e}")
-                
-    print("🔥 [PHASE C] Burning captions into the video timeline...")
-    # Overlay all the text graphics onto the background video
-    final_video_with_subs = CompositeVideoClip([video_clip] + text_clips)
-    
-    return final_video_with_subs
+# --- CINEMATIC TEXT BANNER ABOLISHED ---
+# The Long-Form engine relies solely on pure uninterrupted visual narrative.
 
 def assemble_final_video(ctx: dict):
     print(f"🎬 [PHASE C] Initializing Zero-Loss Assembly Matrix for topic: '{ctx.get('topic')}'")
@@ -282,7 +102,7 @@ def assemble_final_video(ctx: dict):
     try:
         from phase_c_ffmpeg import normalize_clip, stitch_modules, generate_ass_subtitles, execute_master_ffmpeg_assembly
         
-        print("🧠 [PHASE C] Analyzing Voiceover Tempo via Whisper AI...")
+        print("🧠 [PHASE C] Analyzing Voiceover Tempo via Whisper AI [LARGE-V3]...")
         import whisper
         import math
         
@@ -295,12 +115,11 @@ def assemble_final_video(ctx: dict):
         stderr=subprocess.STDOUT)
         total_audio_duration = float(result.stdout)
         
-        tempo_model = whisper.load_model("base")
+        tempo_model = whisper.load_model("turbo")
         whisper_result = tempo_model.transcribe(audio_path, word_timestamps=True)
         
-        # 1. GENERATE .ASS SUBTITLES NATIVELY
-        ass_path = "whisper_captions.ass"
-        generate_ass_subtitles(whisper_result, ass_path)
+        # 1. GENERATE NATIVE SCENE METADATA (Subtitles disabled for Cinematic Engine) 
+        # (ass generation skipped)
         
         # # PERFECT SYNC DURATION CALCULATION # #
         # Match narration evenly across the generated visual frames
@@ -349,11 +168,10 @@ def assemble_final_video(ctx: dict):
         stitched_path = "temp_stitched_master.mp4"
         stitch_modules(normalized_clips, stitched_path)
         
-        # 3. HIGH-FIDELITY MOVIEPY OVERLAYS (Captions, Banners, Logos)
+        # 3. HIGH-FIDELITY MOVIEPY OVERLAYS (Captions Disabled)
         from moviepy.editor import VideoFileClip
         final_video = VideoFileClip(stitched_path)
-        # final_video = add_top_banner(final_video, topic_text) # Removed banner for edge-to-edge full screen
-        final_video = add_dynamic_captions(audio_path, final_video, music_vibe, pre_transcribed_result=whisper_result, clip_duration=clip_duration)
+
         
         temp_overlay_mp4 = "temp_captions_ready.mp4"
         print("⏳ Blazing Fast GPU Rendering CapCut-Style Graphical Master...")
@@ -377,11 +195,12 @@ def assemble_final_video(ctx: dict):
             video_path=temp_overlay_mp4,
             tts_path=audio_path,
             bgm_path=bg_music_path,
-            ass_path=ass_path,
+            ass_path=None, # Passed as None to ensure disabled subtitles
             output_path=output_filename,
             topic_text=topic_text,
             tts_duration=total_audio_duration,
-            timeline_effects=timeline_effects
+            timeline_effects=timeline_effects,
+            foley_paths=ctx.get("foley_audio_paths", [])
         )
         
         if success:

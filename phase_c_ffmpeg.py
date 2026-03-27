@@ -108,7 +108,7 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
                     model="gen3a_turbo",
                     prompt_image=data_uri,
                     prompt_text=f"Smooth {camera_motion}. Cinematic lighting.",
-                    ratio="768:1280",
+                    ratio="1280:768",
                     duration=5
                 )
                 print(f"   ↳ Runway Task {video_task.id} queued. Polling...")
@@ -134,7 +134,7 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
                 url = "https://api.lumalabs.ai/dream-machine/v1/generations"
                 payload = {
                     "prompt": f"Smooth {camera_motion}. Cinematic lighting. High definition details.",
-                    "aspect_ratio": "9:16",
+                    "aspect_ratio": "16:9",
                     "loop": False
                 }
                 headers = {
@@ -229,14 +229,14 @@ def probe_audio(file_path: str) -> bool:
     return len(result.stdout.strip()) > 0
 
 def normalize_clip(input_path: str, output_path: str, duration_sec: float = None, effect: str = "gritty_contrast") -> str:
-    """Forces 1080x1920 scaling, exact 24fps, injects silent audio, and explicitly trims to match spoken sentence lengths."""
+    """Forces 1920x1080 widescreen scaling, exact 24fps, injects silent audio, and explicitly trims to match spoken sentence lengths."""
     has_audio = probe_audio(input_path)
     cmd = ["ffmpeg", "-y", "-i", input_path]
     
     if not has_audio:
         cmd.extend(["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"])
         
-    base_vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920"
+    base_vf = "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080"
     if effect == "cinematic_glow":
         style_vf = "eq=contrast=1.05:saturation=1.05:brightness=0.02,gblur=sigma=0.5"
     elif effect == "cyberpunk_glitch":
@@ -291,17 +291,37 @@ def stitch_modules(module_paths: list, final_output: str) -> str:
     print(f"      Stitched sequence: {final_output}")
     return final_output
 
-def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str, ass_path: str, output_path: str, topic_text: str = "", tts_duration: float = None, timeline_effects: list = None):
+def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str, ass_path: str, output_path: str, topic_text: str = "", tts_duration: float = None, timeline_effects: list = None, foley_paths: list = None):
     """
     Executes a single-pass zero-loss FFmpeg complex filtergraph to:
       1. Mix Foley, TTS, and ducked BGM using sidechaincompress
+      2. Layer async Scene-Specific Foley `.mp3` tracks via dynamic adelay filters.
     """
     cmd = [
         "ffmpeg", "-y", 
-        "-i", video_path, 
-        "-i", tts_path, 
-        "-i", bgm_path
+        "-i", video_path,   # [0:v/a]
+        "-i", tts_path,     # [1:a]
+        "-i", bgm_path      # [2:a]
     ]
+    
+    foley_filters = []
+    foley_mix_labels = []
+    
+    import os
+    if foley_paths:
+        for i, path in enumerate(foley_paths, start=3):
+            if path and os.path.exists(path):
+                # Calculate the exact start time in milliseconds for the delay filter
+                st_ms = round(timeline_effects[i-3].get("start", 0) * 1000) if timeline_effects and (i-3) < len(timeline_effects) else 0
+                cmd.extend(["-i", path])
+                foley_filters.append(f"[{i}:a]adelay={st_ms}|{st_ms},volume=0.8[f_delayed_{i}];")
+                foley_mix_labels.append(f"[f_delayed_{i}]")
+                
+    if foley_mix_labels:
+        foley_mix_bus = f"{''.join(foley_filters)}{''.join(foley_mix_labels)}amix=inputs={len(foley_mix_labels)}:duration=first:dropout_transition=2[foley_layer];"
+    else:
+        # Fallback empty track if Foley generation failed or was bypassed
+        foley_mix_bus = "aevalsrc=0:d=1[foley_layer];"
     
     # 1. [tts_v]: TTS track wrapper
     # 2. [bgm_looped]: Loop BGM infinitely
@@ -356,11 +376,12 @@ def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str
         "vibrato=f=20:d=0.5,lowpass=f=600,"
         "afade=t=in:st=0:d=0.05,afade=t=out:st=0.5:d=1.5[sfx_noise];"
         
-        # 4. FOLEY BUS
-        "[0:a]volume=0.5[foley];"
+        # 4. SCENE FOLEY BUS & MASTER MIX BUS
+        f"{foley_mix_bus}"
+        "[0:a]volume=0.3[original_foley];"
         
-        # 5. MASTER MIX BUS
-        "[foley][tts_mix][bgm_ducked][sfx_boom][sfx_noise]amix=inputs=5:duration=first:dropout_transition=2[mixed];"
+        # 5. MASTER MIX BUS (Combine everything)
+        "[original_foley][tts_mix][bgm_ducked][sfx_boom][sfx_noise][foley_layer]amix=inputs=6:duration=first:dropout_transition=2[mixed];"
         "[mixed]loudnorm=I=-14:LRA=11:TP=-1.5[final_audio]"
     )
     

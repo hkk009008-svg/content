@@ -89,51 +89,36 @@ def generate_shorts_script(ctx: dict) -> bool:
     
     {blueprint_str}
     
-    Write an informational, educational, and interesting 35-45 second video script about: "{topic}".
-    Write the script using an accessible, down-to-earth vocabulary while adopting the style of {tone}. Make sure the angle, hook, and body are completely factual and logically sound. Avoid over-sensationalized or overly dramatic language—speak naturally, simply, but powerfully to the viewer.
+    Write a sweeping, profoundly emotional, 1-2 minute cinematic short film script exploring the deepest human meaning of: "{topic}".
+    Write the script using an accessible, down-to-earth vocabulary while adopting the style of an A24 art-house film. The entire goal is to leave the viewer feeling: "Yes... I know that exact feeling too. I have experienced it."
     
-    [REVERSE PSYCHOLOGY & THE CORE POINT]:
-    1. The Paradigm Flip (Reverse Psychology): The story MUST aggressively challenge the viewer's core assumptions. Tell them they are currently being played, that the system is rigged against their understanding, or that a "forbidden" mechanism is operating right in front of them. Make the truth feel like an uncomfortable secret they aren't supposed to know.
-    2. Concrete Evidence of Power: Back up your narrative with specific, undeniable facts, money metrics, or engineering mechanics rather than vague grandeur. Provide proof of the leverage and power scale.
-    3. The Cognitive Dissonance: Use deep curiosity gaps and pattern interruption to lock their attention organically. Make the viewer feel like they must watch to the end to un-learn a lie they've been taught.
+    [PROFOUND HUMAN CONNECTION & THE CORE EMOTION]:
+    1. The Relatable Truth: The story MUST explore the meaning of life, love, family, and the profound beauty of ordinary things. Leave the viewer with the profound feeling of: "Yes... I know that exact feeling too. I have experienced it." That emotional resonance is the absolute Master Goal.
+    2. Tension & Tranquility: Your script must ride an emotional rollercoaster into the director's mind. Alternate between immersive, intense tension and beautiful, breathtaking tranquility. Make it deeply human.
+    3. The Mirror: Make the viewer see themselves in the narrative.
     
     [THE MASTER LENS - {lens['name'].upper()}]:
     Your ideal aesthetic is {lens['aesthetic']}
     
-    [THE HOOK ARCHITECTURE (0-2s)] (SHORTS BINARY GATE OPTIMIZATION): 
-    Capture the viewer's attention immediately with a hyper-aggressive, paradigm-breaking opening using this framework to force the Swipe-Away Rate below 15%:
-    Hook Mechanism: {lens['hook']}
-    **CRITICAL 2-SECOND MATRIX CONSTRAINTS**:
-    1. THE REVERSE PSYCHOLOGY ANCHOR: The hook MUST instantly tell the viewer what they *think* is true, and violently shatter it. Your goal is to secure the 2-Second Hook metric to boost completion probability by 60%.
-    2. CONCRETE ENTITY ANCHORING: Name the specific entity instantly.
-    3. RAW AUDITORY HOOK: Speak clearly, steadily, and with absolute, almost dangerous, conversational authority.
+    [THE CINEMATIC SHORT FILM (1-2 minutes)]:
+    You are writing a sweeping, cinematic A24-style art-house short film. There are no algorithmic constraints. 
+    1. THE ARCHITECTURE: The script must unfold poetically. It must take its time, breathe, and build immense atmospheric and emotional weight.
+    2. THE MOOD: Speak clearly, steadily, and with profound vulnerability and deep emotion. 
+    3. THE PACING: {lens['pacing']} Use down-to-earth language. Every single word must carry deep narrative weight. The total script must be roughly 150-200 words to span a visually complex 2-minute timeline.
     
-    [THE EDUCATIONAL JOURNEY (Seconds 3-30)]:
-    To sustain engagement after the hook, execute this sequence:
-    - Phase 1: The Context (Introduce the reality using a strong, interesting informational hook like a paradox or hidden truth. State the hard evidence that backs it up).
-    - Phase 2: The Core Mechanic & Consequence (Explain HOW it works and WHY it matters. Explain the real-world impact or humanity concern. Command the viewer to think about the topic).
-    - Phase 3: The Informational Resolution (Bring it to an educational, thought-provoking conclusion that leaves them pondering the subject).
-    
-    [ALGORITHMIC ENGAGEMENT - THE THOUGHT-PROVOKING ELEMENT]:
-    Instead of cheap engagement bait, end the video with a deeply thought-provoking element. Deliver a final sentence or a philosophical question that makes the viewer seriously consider the topic's impact on their reality or the world, prompting them to organically engage in the comments. Use down-to-earth language.
-    
-    [NARRATION & WORD CHOICE]:
-    Pacing and vocabulary: {lens['pacing']}
-    Flow with steady, strong educational authority. Use intentional pauses. Choose down-to-earth, widely understandable language rather than obscure or epic vocabulary. Every single word must carry narrative weight.
-    CRITICAL AUDIO SEO: Ensure that the spoken script naturally contains the exact high-RPM keywords that will be placed in the title and description, as the platform's auto-captioning systems now index audio vectors directly.
+    [EMOTIONAL IMMERSION]:
+    End the film with a deeply thought-provoking, existential, or poetic question that makes the viewer seriously consider their own humanity, prompting them to organically sit in silence and reflect on their existence.
     
     Rules:
-    1. Hook (AUDIO SEO CRITICAL): Start with a strong, impactful delivery of an interesting fact. You MUST explicitly state the core topic ("{topic}") out loud within the first sentence.
-    2. Body: Execute the "Educational Journey" framework across 3 sequential phases, using strictly conversational phrasing.
-    3. The Payoff & Action Trigger: Provide a gentle engagement request (e.g., "What do you think about this? Let me know below and subscribe for more.") paired with a calm conclusion.
-    4. The Master Infinite Loop & Visual Continuity: Your final sentence (`infinite_loop_bridge`) MUST NOT restate the beginning. Instead, it MUST be an incomplete thought or lead-in clause that grammatically REQUIRES the very first word of the Hook to finish the sentence. (e.g., If your hook starts with "Black holes...", your ending must be something like "Because the ultimate truth is hidden within..."). CRITICAL: The last AI Image (Frame 12) MUST explicitly describe the exact same framing, lighting, and subject posture as Frame 1.
-    5. Length & Vocal Pacing: The script must total EXACTLY 50-65 words. Since you are speaking SOOTHINGLY and SLOWLY, fewer words take up the same 45 seconds. Use punctuation to force ElevenLabs to pause and breathe.
-    6. High-CPM Algorithmic Synchronization: Ensure the exact keywords generated in your `ab_test_titles` and `youtube_tags` are wove naturally into the spoken audio script. You must actively target High-CPM AdSense keyword structures (Finance, Strategy, Enterprise Tech, Economics) even if the topic is historical or scientific.
-    8. The Camera Psychology Director: You must strictly adhere to the `Cinematography Rules` defined in the Master Director's Blueprint above. 
-    9. Dynamic Visual Effects: For every prompt, explicitly inject the `Color Grading & Aesthetic` from the Director's Blueprint into your visual setup to guarantee exact color mapping.
-    10. **HERO SUBJECT CONTINUITY**: You MUST use the exact `The Master Hero Subject` defined in the Blueprint as the core anchor for every single shot. Frame 1 MUST be an 'Extreme Close-Up (ECU)' of this Hero Subject. Every single of the 12 image prompts MUST explicitly feature this same Hero Subject. Describe different cinematic spatial angles (low angle, wide shot, high angle) to keep it dynamic.
-    11. **VISUAL PSYCHOLOGY & HIGH COMBUSTION AESTHETIC**: Every visual MUST leverage the Rule of Thirds and heavy NEGATIVE SPACE. Frame 1 (The Hook) MUST explicitly be an EXTREME CLOSE-UP (ECU) of the Hero Subject to instantly capture biological focus.
-    12. **CRITICAL OUTPUT LANGUAGE**: Ensure that the script, hook, title, and youtube tags are written completely and natively in {language.upper()}.
+    1. Hook: Start with a deeply atmospheric, poetic opening observation about ordinary life or the human condition.
+    2. Body: Expand the cinematic journey, diving into psychological exploration, love, nostalgia, tension, and tranquility.
+    3. The Payoff: Bring the narrative to a stunning, poetic, and philosophical conclusion. NO engagement bait.
+    4. FOLEY & SOUND: For every single visual frame, you must strictly imagine the environmental sound. You will provide a `scene_foley` instruction for the Audio Mixer to generate the precise sound effects (wind, rain, silence, footsteps) to lay underneath the actor's voice over that specific image!
+    5. The Camera Psychology Director: You must strictly adhere to the `Cinematography Rules` defined in the Master Director's Blueprint above. 
+    6. Dynamic Visual Effects: For every prompt, explicitly inject the `Color Grading & Aesthetic` from the Director's Blueprint into your visual setup to guarantee exact color mapping.
+    7. **HERO SUBJECT CONTINUITY**: You MUST use the exact `The Master Hero Subject` defined in the Blueprint as the core anchor for every single shot. Frame 1 MUST be an 'Extreme Close-Up (ECU)' of this Hero Subject. Every single of the 20 image prompts MUST explicitly feature this same Hero Subject. Describe different cinematic spatial angles (low angle, wide shot, high angle) to keep it dynamic.
+    8. **VISUAL PSYCHOLOGY**: Every visual MUST leverage the Rule of Thirds and heavy NEGATIVE SPACE for an ultra-premium widescreen aesthetic.
+    9. **CRITICAL OUTPUT LANGUAGE**: Ensure that the script is written completely and natively in {language.upper()}.
     """
     
     # We define the expected JSON schema aggressively formatted for Anthropic Tool Use
@@ -160,7 +145,7 @@ def generate_shorts_script(ctx: dict) -> bool:
                     "items": {
                         "type": "object",
                         "properties": {
-                            "prompt": {"type": "string", "description": "The visual prompt. CRITICAL: You MUST include the exact `Color Grading & Aesthetic` commands and ensure the exact same `The Master Hero Subject` is in all 12 frames to ensure visual continuity. Frame 1 MUST be an 'Extreme Close-Up (ECU)' of the Hero Subject. Use varying cinematic spatial angles (low angle, wide shot, high angle). All frames MUST explicitly use 'Rule of Thirds' and heavy NEGATIVE SPACE. Frame 12 MUST visually match Frame 1 exactly."},
+                            "prompt": {"type": "string", "description": "The visual prompt. CRITICAL: You MUST include the exact `Color Grading & Aesthetic` commands and ensure the exact same `The Master Hero Subject` is in all 20 frames to ensure visual continuity. Frame 1 MUST be an 'Extreme Close-Up (ECU)' of the Hero Subject. Use varying cinematic spatial angles (low angle, wide shot, high angle). All frames MUST explicitly use 'Rule of Thirds' and heavy NEGATIVE SPACE. Frame 20 MUST visually match Frame 1 exactly."},
                             "camera": {
                                 "type": "string",
                                 "enum": ["zoom_in_slow", "zoom_out_slow", "zoom_in_fast", "pan_right", "pan_left", "pan_up_crane", "pan_down", "static_drone", "dolly_in_rapid"],
@@ -174,12 +159,16 @@ def generate_shorts_script(ctx: dict) -> bool:
                             "target_api": {
                                 "type": "string",
                                 "enum": ["VEO", "RUNWAY", "LUMA"],
-                                "description": "Select the target video engine. CRITICAL: You MUST forcefully balance the usage! Ensure an equal mixed distribution of 'VEO', 'RUNWAY', and 'LUMA' across the 12 clips to bypass API rate-limits."
+                                "description": "Select the target video engine. CRITICAL: You MUST forcefully balance the usage! Ensure an equal mixed distribution of 'VEO', 'RUNWAY', and 'LUMA' across the 20 clips to bypass API rate-limits."
+                            },
+                            "scene_foley": {
+                                "type": "string",
+                                "description": "Crucial for audio immersion. Describe the raw environmental Foley Sound FX for this scene. Examples: 'Heavy rain pouring on concrete', 'Hollow wind blowing through empty room', 'Children laughing softly in the distance', 'Mechanical clock ticking'."
                             }
                         },
-                        "required": ["prompt", "camera", "visual_effect", "target_api"]
+                        "required": ["prompt", "camera", "visual_effect", "target_api", "scene_foley"]
                     },
-                    "description": "EXACTLY 12 highly detailed visual prompt objects perfectly tied to the text."
+                    "description": "EXACTLY 20 highly detailed visual prompt objects perfectly tied to the text."
                 },
                 "youtube_description": {
                     "type": "string",
@@ -210,9 +199,9 @@ def generate_shorts_script(ctx: dict) -> bool:
     }
     
     try:
-        # Call the Claude 3.5 Sonnet model forcing structured output
+        # Call the absolute bleeding-edge Claude 4.6 Opus model forcing structured output
         response = client.messages.create(
-            model="claude-3-5-sonnet-20240620",
+            model="claude-opus-4-6",
             max_tokens=3000,
             system=system_prompt,
             messages=[

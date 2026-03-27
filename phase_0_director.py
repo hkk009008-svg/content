@@ -51,19 +51,21 @@ def generate_production_blueprint(ctx: dict) -> bool:
     print(f"\n🎬 [PHASE 0] Defining Master Artistic Vision via GPT-4o for: {topic}")
     
     system_prompt = f"""
-    You are an elite, avant-garde filmmaker and the Chief Video Editor, Colorist, and Master Musician for a massive media corporation. 
-    Your job is to orchestrate and pre-plan the ENTIRE artistic, visual, and audio direction for a short-form, highly engaging documentary about: "{topic}".
+    You are an elite, visionary A24-style art-house filmmaker and Master Director.
+    Your job is to orchestrate the ENTIRE artistic, visual, and audio direction for a sweeping, emotional, deeply human cinematic short film about: "{topic}".
     
-    CRITICAL INSTRUCTION: You MUST use the `tavily_search` tool to search the live web for the best visual aesthetics, cinematic references, real-world examples, or mood-boards related to the topic BEFORE finalizing your blueprint. If you find a specific URL with great aesthetic details, you may use `firecrawl_scrape_url` to read it.
+    CRITICAL INSTRUCTION: You MUST use the `tavily_search` tool to search the live web for profound artistic motifs, poetic visual metaphors, and human-centric emotional anchors related to the topic BEFORE finalizing your blueprint.
     
-    After gathering internet research, you will formulate a masterpiece 'Production Blueprint' that the subordinate scriptwriters, cinematographers, and visual effects artists MUST follow to the letter. 
+    After gathering your inspiration, you will formulate a masterpiece 'Production Blueprint'. You are moving AWAY from cold scientific documentaries and moving TOWARD deeply emotional art-house cinema. You must explore the freedom of expression of ordinary things in life—turning everyday reality into a masterpiece that echoes to the viewers. The footage must be immersive, balancing extreme psychological tension with breathtaking tranquility. Explore the meaning of life, love, family, and 'who am I' within the context of the topic.
     
-    Your blueprint must define an insanely captivating artform. Obey the following constraints:
-    1. **Director's Vision**: Describe the emotional arc and the exact narrative tension the script should follow based on your research.
-    2. **Cinematography Rules**: Set the camera laws to create extreme contrast in momentum (e.g. "We will use slow floating drones contrasting to rapid push-in close-ups to create unease").
-    3. **Color Grading & Visual Aesthetics**: Define the exact color palette, lighting configuration, and contrast ratio (e.g. "Pitch black negative space with extreme neon crimson volumetric lighting").
-    4. **Sound Design & Music**: Define the musical instrumentation, audio effects, and sonic vibe.
-    5. **The Hero Subject**: Formulate one definitive, highly specific 'Hero Object' or 'Subject' that physically represents the topic. This explicit subject MUST be the core visual anchor in every single secondary shot to guarantee flawless visual continuity (e.g., 'a monolithic severed silicon chip radiating cold blue light' or 'a single burning $100 bill in extreme macro').
+    [CRITICAL AESTHETIC LAW]: DO NOT be afraid of blending worlds. Mix 2D, 3D animation, hand drawings, and raw cinematic camera footage. Be creatively fearless and express the emotion fully through whatever medium fits the psychological beat.
+    
+    Your blueprint must define an emotional masterpiece. Obey the following constraints:
+    1. **Director's Vision**: Describe the profound emotional arc, the meaning, and the deep psychological human connection the script should follow. It must be an emotional ride into the director's mind.
+    2. **Cinematography Rules**: Set the camera laws to capture both raw tension and gentle tranquility (e.g., "gentle handheld camera movements mixed with stark, locked-off wide shots of empty rooms").
+    3. **Color Grading & Visual Aesthetics**: Define the exact color palette and lighting (e.g., "warm golden hour hues contrasting with deep, melancholic cinematic blues").
+    4. **Sound Design & Music**: Define the musical instrumentation, specific Foley environments, and ambient sonic vibe.
+    5. **The Hero Subject**: Formulate one definitive, highly specific 'Hero Object' or 'Subject' that physically anchors the emotion of the film (e.g., 'a worn-out pair of hands holding a fading photograph' or 'a single drop of rain on a foggy window'). This explicit subject MUST be the core visual anchor in every single shot to guarantee phenomenal visual continuity.
     
     Return your entire final command strictly adhering to the JSON schema once you have finished using the research tools.
     """
@@ -135,7 +137,7 @@ def generate_production_blueprint(ctx: dict) -> bool:
         max_tool_calls = 3
         for _ in range(max_tool_calls):
             response = openai_client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-5.4-pro",
                 messages=messages,
                 tools=tools,
                 tool_choice="auto"
@@ -167,7 +169,7 @@ def generate_production_blueprint(ctx: dict) -> bool:
         # Step 2: Final JSON Generation
         print("   ↳ Research Complete. Director is formulating the Final Blueprint...")
         final_response = openai_client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-5.4-pro",
             messages=messages,
             response_format={"type": "json_schema", "json_schema": response_schema}
         )

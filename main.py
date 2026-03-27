@@ -15,7 +15,7 @@ import datetime
 from phase_0_topic import generate_trending_topic
 from phase_0_director import generate_production_blueprint
 from phase_a_generator import generate_shorts_script
-from phase_b_audio import generate_voiceover, generate_srt
+from phase_b_audio import generate_voiceover, generate_srt, generate_scene_foley_library
 from phase_c_assembly import assemble_final_video, generate_ai_broll
 from phase_c_vision import quality_control_image
 from phase_d_upload import authenticate_youtube, upload_video, upload_caption, upload_localizations
@@ -79,11 +79,16 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
     if not os.path.exists(export_dir):
         os.makedirs(export_dir)
         
+    import random
+    master_seed = random.randint(100000, 999999)
+    print(f"🔒 [CONTINUITY ENGINE] Locked Global Image Seed: {master_seed}")
+        
     # --- OMNI CONTEXT INITIALIZATION ---
     ctx = {
         "topic": topic,
         "language": language,
         "youtube_video_id": master_video_id,
+        "master_image_seed": master_seed,
         "script_data": {},
         "full_text": "",
         "music_vibe": "",
@@ -136,6 +141,9 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
         if not generate_voiceover(ctx):
             print("❌ Pipeline aborted: Failed to generate audio.")
             return
+            
+        print("\n--- [PHASE B.5] FOLEY GENERATION ---")
+        generate_scene_foley_library(ctx)
 
     # OPTION 2: AUTO-DUB OPTIMIZED BYPASS 
     # YouTube Auto-Dub handles the foreign voices and captions natively, so we only need to inject SEO Meta-Data!
@@ -173,10 +181,16 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
         
         max_qc_retries = 3
         hero_subject = ctx.get("production_blueprint", {}).get("hero_subject", "A mysterious subject")
+        locked_seed = ctx.get("master_image_seed")
+        
         for qc_attempt in range(max_qc_retries):
-            # Pass a modified prompt so Pollinations/Fal generate a different seed on retry
+            # Pass a modified prompt so Pollinations/Fal generate a different angle on retry
             mod_prompt = prompt if qc_attempt == 0 else f"{prompt} (high definition, ultra realistic, highly detailed variant {qc_attempt})"
-            img_path = generate_ai_broll(mod_prompt, img_path)
+            
+            # Use the global seed, optionally perturbing it trivially upon a Vision QC rejection
+            current_seed = locked_seed + qc_attempt if locked_seed else None
+            
+            img_path = generate_ai_broll(mod_prompt, img_path, seed=current_seed)
             
             if img_path and quality_control_image(img_path, hero_subject):
                 break

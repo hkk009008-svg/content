@@ -42,7 +42,7 @@ def generate_trending_topic() -> str:
     global_sentiment = fetch_external_market_sentiment()
 
     prompt = f"""
-    You are an elite YouTube Shorts strategist aggressively optimizing for the 25-35 male demographic. They value strategic thinking, uncovering hidden systems, brutal efficiency, power dynamics, and financial/technological leverage.
+    You are an elite art-house film director and existential writer. You are deeply focused on uncovering human emotion, existential meaning, and universal connection.
     
     {ab_memory}
     
@@ -50,13 +50,13 @@ def generate_trending_topic() -> str:
     
     {global_sentiment}
     
-    Your goal is to brainstorm ONE profoundly fascinating topic for today. It must seamlessly match the emotional state of the current live trends, but MUST utilize REVERSE PSYCHOLOGY by framing the topic as a paradigm-shattering truth, a contrarian reality, or a forbidden system the average person is fundamentally wrong about. It MUST fall into one of these highly-lucrative narrative vectors:
+    Your goal is to brainstorm ONE profoundly beautiful, cinematic, and emotionally resonant topic for today. It must seamlessly match the emotional state of the current live data, but MUST focus entirely on profound, relatable human truths. It MUST fall into one of these cinematic narrative vectors:
     
-    - [THE ILLUSION OF CONTROL & MASSIVE STRATEGY]: Deconstructing hidden psychological tactics, global economic machines, or brilliant power plays (e.g., How McDonald's is a real estate empire, the psychology of casino floor designs, how your attention is algorithmically harvested).
-    - [FORBIDDEN ECONOMIES & THE UGLY TRUTH]: Unsolved mechanical mysteries, the profound scale of industrial megastructures, or ruthless logistics of the modern world (e.g., The terrifying acoustics of ancient temples, the hidden multi-billion dollar economy of deep-sea cables).
-    - [CYBERNETICS & MASSIVE SCALE INEVITABILITY]: The terrifying but beautiful reality of artificial intelligence, planetary-scale data centers, or future tech leverage (e.g., Dyson spheres, how glowing fiber optics silently run the global economy while we sleep).
+    - [THE MEANING OF ORDINARY LIFE]: Finding breathtaking beauty, tranquility, and cinematic tension inside everyday moments (e.g., The profound silence of an empty childhood room, the poetry of a solitary morning coffee, the echo of rain against a window).
+    - [THE WEIGHT OF LOVE & FAMILY]: Unpicking the complex, quiet sacrifices of parenthood, inherited memories, nostalgia, or the fleeting nature of human connection.
+    - [EXISTENTIAL REFLECTION]: "Who am I?", the passage of time, the quiet struggle to understand our place in the universe, and the beauty of human imperfection.
     
-    CRITICAL: Look at the current scraped sentiment. The vibe must remain deeply immersive, cool, highly-cinematic, and fundamentally strategic. Utilize reverse-psychology—make the topic sound like something the system doesn't want them to think about. DO NOT use cheap, hyper-emotional, or fluffy framing. Make it feel like a premium, gritty, contrarian documentary.
+    CRITICAL: Look at the current scraped market sentiment but synthesize it into a profoundly emotional concept. The vibe must remain deeply immersive and touching. Try to evoke the feeling: "Yes, I know exactly what that feels like. I have experienced it too." Do NOT use cheap engagement hooks, clickbait, or 'viral hacks.' Make it feel like an A24 masterpiece exploring the depths of the human condition.
     
     {avoid_clause}
     Provide ONLY the topic in 12 words or less. Do not include quotes, markdown formatting, or any extra text. Make it incredibly punchy.
