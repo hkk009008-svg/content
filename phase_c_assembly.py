@@ -19,60 +19,121 @@ import moviepy.video.fx.all as vfx
 load_dotenv()
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 
-def generate_ai_broll(prompt, output_filename, seed=None):
-    """Hits the industrial Fal.ai Flux endpoint for instant, ban-free 4K vertical image generation."""
-    print(f"🤖 [PHASE C] Generating AI B-Roll: '{prompt[:50]}...'")
-    import os
-    import requests
-    import urllib.parse
-    
-    fal_key = os.getenv("FAL_KEY")
-    
-    try:
-        img_data = b""
-        if fal_key:
-            # Generate premium photorealistic 4K frames using Flux 1.1 Pro Ultra
-            url = "https://fal.run/fal-ai/flux-pro/v1.1-ultra"
-            headers = {
-                "Authorization": f"Key {fal_key}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "prompt": prompt,
-                "aspect_ratio": "9:16",
-                "raw": True
-            }
-            if seed is not None:
-                payload["seed"] = seed
-                
-            resp = requests.post(url, json=payload, headers=headers)
-            
-            if resp.status_code == 200:
-                img_url = resp.json()["images"][0]["url"]
-                img_data = requests.get(img_url).content
+import json
+import uuid
+import time
+import requests
+
+class RunPodComfyUI:
+    def __init__(self, server_url):
+        self.server_url = server_url.rstrip('/')
+        self.client_id = str(uuid.uuid4())
+
+    def upload_image(self, image_path):
+        print(f"      ↳ Uploading {os.path.basename(image_path)} to RunPod ephemeral disk...")
+        url = f"{self.server_url}/upload/image"
+        with open(image_path, 'rb') as f:
+            files = {'image': f}
+            response = requests.post(url, files=files)
+            if response.status_code == 200:
+                return response.json()['name']
             else:
-                print(f"⚠️ Fal.ai failed with {resp.status_code}. Falling back to free tier...")
+                raise Exception(f"Failed to upload image: {response.text}")
+
+    def queue_prompt(self, prompt_workflow):
+        p = {"prompt": prompt_workflow, "client_id": self.client_id}
+        url = f"{self.server_url}/prompt"
+        response = requests.post(url, json=p)
+        if response.status_code == 200:
+            return response.json()['prompt_id']
+        else:
+            raise Exception(f"Failed to queue prompt: {response.text}")
+
+    def get_image(self, filename, subfolder, folder_type):
+        url = f"{self.server_url}/view"
+        params = {"filename": filename, "subfolder": subfolder, "type": folder_type}
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            return response.content
+        return None
+
+    def get_history(self, prompt_id):
+        url = f"{self.server_url}/history/{prompt_id}"
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.json()
+        return {}
+
+def generate_ai_broll(prompt, output_filename, seed=None, character_image=None):
+    """Executes the exact pulid.json blueprint headlessly via RunPod ComfyUI."""
+    print(f"🤖 [PHASE C] Generating Cinematic AI B-Roll headlessly via Private ComfyUI: '{prompt[:50]}...'")
+    
+    server_url = os.getenv("COMFYUI_SERVER_URL")
+    if not server_url:
+        print("❌ CRITICAL: COMFYUI_SERVER_URL is completely missing from your .env file!")
+        print("   Please paste your RunPod URL (e.g. https://xxx-8188.proxy.runpod.net) into your .env!")
+        return None
         
-        # If no key is set or Fal.ai fails/runs out of credits, fallback to the free Pollinations proxy
-        if len(img_data) < 5000:
-            encoded_prompt = urllib.parse.quote(prompt)
-            url_fallback = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=768&height=1365&nologo=True&model=flux"
-            if seed is not None:
-                url_fallback += f"&seed={seed}"
-                
-            req_headers = {'User-Agent': 'Mozilla/5.0'}
-            img_data = requests.get(url_fallback, headers=req_headers).content
+    try:
+        if not os.path.exists("pulid.json"):
+            print("❌ CRITICAL: pulid.json blueprint is missing from the working directory!")
+            return None
+            
+        with open("pulid.json", "r") as f:
+            workflow = json.load(f)
+            
+        comfy = RunPodComfyUI(server_url)
         
-        # Last Resort Failsafe
-        if len(img_data) < 5000:
-            print(f"⚠️ Pollinations 429 Limit Block. Using Unsplash Fallback to secure the render queue.")
-            img_data = requests.get("https://picsum.photos/768/1365").content
-                
-        with open(output_filename, 'wb') as handler:
-            handler.write(img_data)
-        return output_filename
+        # 1. Surgical Bypass: Inject LLM Text prompt natively to CLIP, bypassing Florence2 vision model
+        # The CLIPTextEncode node id in pulid.json is "122"
+        workflow["122"]["inputs"]["text"] = prompt
+        
+        # 2. Hardcode 16:9 widescreen layout for FLUX
+        # The EmptyLatentImage node id is "102"
+        workflow["102"]["inputs"]["width"] = 1344
+        workflow["102"]["inputs"]["height"] = 768
+        workflow["102"]["inputs"]["batch_size"] = 1
+        
+        # 3. Synchronize Continuous Seed
+        # The RandomNoise node is "25"
+        if seed is not None:
+             workflow["25"]["inputs"]["noise_seed"] = seed
+             
+        # 4. Upload & Inject Master Character Face
+        # The LoadImage node for PuLID is "93"
+        if character_image and os.path.exists(character_image):
+            remote_face_filename = comfy.upload_image(character_image)
+            workflow["93"]["inputs"]["image"] = remote_face_filename
+        else:
+            print("   ⚠️ No Character identity injected! Proceeding globally without face lock.")
+            
+        # 5. Fire Master Execution Workflow
+        prompt_id = comfy.queue_prompt(workflow)
+        print(f"      ↳ ComfyUI Task {prompt_id} queued flawlessly. Awaiting GPU cluster computation...")
+        
+        # 6. Polling loop with Timeout
+        max_retries = 150 # 150 * 2 = 300 seconds (5 min)
+        for attempt in range(max_retries):
+            history = comfy.get_history(prompt_id)
+            if prompt_id in history:
+                outputs = history[prompt_id].get('outputs', {})
+                for node_id, node_output in outputs.items():
+                    if 'images' in node_output:
+                        img_info = node_output['images'][0]
+                        img_data = comfy.get_image(img_info['filename'], img_info['subfolder'], img_info['type'])
+                        if img_data:
+                            with open(output_filename, 'wb') as f:
+                                f.write(img_data)
+                            print(f"      ✅ Successfully downloaded 16:9 high-fidelity render: {output_filename}")
+                            return output_filename
+                break # History exists but no images?
+            time.sleep(2)
+            
+        print("❌ ComfyUI inference timed out or crashed natively.")
+        return None
+        
     except Exception as e:
-        print(f"❌ Error generating AI B-Roll: {e}")
+        print(f"❌ Error firing Headless ComfyUI Node Generator: {e}")
         return None
 
 def scale_to_widescreen(clip):

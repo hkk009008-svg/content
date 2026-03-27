@@ -8,6 +8,9 @@ import re
 import json
 import time
 
+# Mac OpenMP libomp.dylib runtime conflict crash permanently fixed
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 import shutil
 import datetime
 
@@ -174,7 +177,8 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
             camera_motion = image_data.get('camera', 'zoom_in_slow')
             target_api = image_data.get('target_api', 'RUNWAY')
             
-        print(f"\n🎬 [PHASE C] Generating Content Node {index+1}/12 ({target_api})")
+        total_clips = len(script_data['ai_image_prompts'])
+        print(f"\n🎬 [PHASE C] Generating Content Node {index+1}/{total_clips} ({target_api})")
         
         # 1. Generate Base High-Fidelity Image with Vision QC
         img_path = f"temp_img_{index}.jpg"
@@ -183,6 +187,13 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
         hero_subject = ctx.get("production_blueprint", {}).get("hero_subject", "A mysterious subject")
         locked_seed = ctx.get("master_image_seed")
         
+        char_id = script_data.get('character_id')
+        ref_img = None
+        if char_id and os.path.exists("characters.json"):
+            with open("characters.json", "r") as f:
+                chars = json.load(f)
+            ref_img = chars.get(char_id, {}).get("reference_image")
+        
         for qc_attempt in range(max_qc_retries):
             # Pass a modified prompt so Pollinations/Fal generate a different angle on retry
             mod_prompt = prompt if qc_attempt == 0 else f"{prompt} (high definition, ultra realistic, highly detailed variant {qc_attempt})"
@@ -190,7 +201,7 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
             # Use the global seed, optionally perturbing it trivially upon a Vision QC rejection
             current_seed = locked_seed + qc_attempt if locked_seed else None
             
-            img_path = generate_ai_broll(mod_prompt, img_path, seed=current_seed)
+            img_path = generate_ai_broll(mod_prompt, img_path, seed=current_seed, character_image=ref_img)
             
             if img_path and quality_control_image(img_path, hero_subject):
                 break

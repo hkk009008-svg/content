@@ -31,22 +31,19 @@ def validate_identity(video_path, character_id, threshold=0.60):
     # 1. Load configuration
     char_db_path = "characters.json"
     if not os.path.exists(char_db_path):
-        print(f"   ⚠️ characters.json missing. Cannot mathematically validate identity.")
-        return True # Fallback pass through
+        raise FileNotFoundError(f"   ❌ FATAL VISION ERROR: '{char_db_path}' database is missing. The Vision Agent refuses to bypass.")
         
     with open(char_db_path, "r") as f:
         chars = json.load(f)
         
     char_data = chars.get(character_id)
     if not char_data or 'reference_image' not in char_data:
-        print(f"   ⚠️ Character '{character_id}' missing reference image.")
-        return True 
+        raise ValueError(f"   ❌ FATAL VISION ERROR: Character '{character_id}' missing reference_image mapping in database. The Vision Agent refuses to bypass.") 
         
     reference_image = char_data['reference_image']
     
     if not os.path.exists(reference_image):
-        print(f"   ⚠️ Reference image {reference_image} does not exist on disk!")
-        return True
+        raise FileNotFoundError(f"   ❌ FATAL VISION ERROR: Reference image '{reference_image}' does not exist on disk! The Vision Agent refuses to bypass.")
     
     # 2. Extract Frame for structural analysis
     temp_frame = "temp_validation_frame.jpg"
@@ -80,9 +77,9 @@ def validate_identity(video_path, character_id, threshold=0.60):
         return passed
         
     except Exception as e:
-        print(f"   ⚠️ DeepFace Vision API Error: {e}")
-        # Soft fallback during experimental rendering
-        return True 
+        print(f"   ⚠️ DeepFace Vision API Error (Face likely not detected in video): {e}")
+        # Return False so the pipeline forcefully retries the generation. No bypasses.
+        return False 
 
 if __name__ == "__main__":
     valid = validate_identity("temp_vid_0.mp4", "the_strategist")

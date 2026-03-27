@@ -9,30 +9,37 @@ try:
 except Exception:
     pass # Will gracefully fail/mock later
 
-def generate_ai_video(image_path: str, camera_motion: str, target_api: str, output_mp4: str, pacing: str = "moderate", character_id: str = None) -> str:
+def generate_ai_video(image_path: str, camera_motion: str, target_api: str, output_mp4: str, pacing: str = "moderate", character_id: str = None, attempted_apis: set = None) -> str:
     """
     Routes an image to ComfyUI, Kling 3.0, RunwayML, or Google Veo based on the target_api flag.
-    If the respective SDK or API key is missing, falls back to an FFMPEG zoom effect.
+    If an API fails, it aggressively cascades through the premium video engines. 
+    It NEVER defaults back to an FFMPEG zoom effect to ensure pure cinematic perfection.
     """
-    print(f"   ↳ Routing to {target_api} API engine...")
+    if attempted_apis is None:
+        attempted_apis = set()
+    attempted_apis.add(target_api.upper())
     
-    # Base fallback mechanism (if APIs fail or aren't configured)
-    def fallback_ffmpeg_zoom(img: str, out: str) -> str:
-        curr_dur = 5.0
-        print("   ⚠️ APIs unavailable. Falling back to local FFMPEG slow-zoom.")
-        cmd = [
-            "ffmpeg", "-y", "-loop", "1", "-i", img,
-            "-vf", "zoompan=z='min(zoom+0.0015,1.5)':d=125:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',scale=1080:1920",
-            "-c:v", "libx264", "-t", str(curr_dur), "-preset", "ultrafast", out
-        ]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return out if os.path.exists(out) else None
+    print(f"   ↳ Routing to {target_api} API engine... (Attempting premium cinematic motion)")
+    
+    def try_next_api():
+        premium_engines = ["VEO", "KLING_3_0", "RUNWAY", "LUMA"]
+        for api in premium_engines:
+            if api not in attempted_apis:
+                print(f"   🔄 Cascading heavily to next premium AI video engine: {api}...")
+                return generate_ai_video(image_path, camera_motion, api, output_mp4, pacing, character_id, attempted_apis)
+        
+        # If all premium APIs are exhausted, loop to wait for quota to refresh rather than compromising quality
+        print("   ⚠️ ALL PREMIUM VIDEO APIS ARE OVERLOADED OR OUT OF CREDITS.")
+        print("   ⚠️ STANDBY: Sleeping for 3 minutes to wait for quotas, then attacking VEO again... (NO FFMPEG COMPROMISE)")
+        import time
+        time.sleep(180)
+        return generate_ai_video(image_path, camera_motion, "KLING_3_0", output_mp4, pacing, character_id, set())
 
     if target_api.upper() == "VEO":
         global _VEO_QUOTA_EXHAUSTED
         if _VEO_QUOTA_EXHAUSTED:
-            print("   ⚠️ VEO QUOTA EXHAUSTED DETECTED: Fast-failing to FFMPEG fallback to save time.")
-            return fallback_ffmpeg_zoom(image_path, output_mp4)
+            print("   ⚠️ VEO QUOTA EXHAUSTED DETECTED: Re-routing...")
+            return try_next_api()
             
         gemini_key = os.getenv("GOOGLE_API_KEY")
         if gemini_key:
@@ -76,7 +83,7 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
                 
                 if operation.error:
                     print(f"   ⚠️ Veo API Error: {operation.error}")
-                    return fallback_ffmpeg_zoom(image_path, output_mp4)
+                    return try_next_api()
                 
                 final_video_url = operation.result.generated_videos[0].video.uri
                 req = urllib.request.Request(final_video_url, headers={"x-goog-api-key": gemini_key})
@@ -87,11 +94,12 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
                 error_str = str(e).lower()
                 if '429' in error_str or 'quota' in error_str or 'exhausted' in error_str:
                     _VEO_QUOTA_EXHAUSTED = True
-                    print("   ⚠️ VEO QUOTA EXHAUSTED DETECTED! Permanently routing future calls to fallback mode.")
+                    print("   ⚠️ VEO QUOTA EXHAUSTED DETECTED! Permanently flagging Veo dead.")
                 print(f"   ⚠️ Veo API Error: {e}")
-                return fallback_ffmpeg_zoom(image_path, output_mp4)
+                return try_next_api()
         else:
-            return fallback_ffmpeg_zoom(image_path, output_mp4)
+            print("   ⚠️ VEO API Key Missing. Re-routing...")
+            return try_next_api()
             
     elif target_api.upper() == "KLING_3_0":
         # Official Native Kling 3.0 Endpoint Integration
@@ -99,100 +107,112 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
         kling_sk = os.getenv("KLING_SECRET_KEY")
         
         if kling_ak and kling_sk:
-            try:
-                import time
-                import requests
-                import jwt # PyJWT required for native Kling authentication
-                
-                print(f"   ↳ Generating multi-shot unified latent sequence via NATIVE KLING 3.0 API...")
-                
-                # 1. Synthesize secure JWT Token
-                headers = {"alg": "HS256", "typ": "JWT"}
-                payload = {
-                    "iss": kling_ak,
-                    "exp": int(time.time()) + 1800,
-                    "nbf": int(time.time()) - 5
-                }
-                token = jwt.encode(payload, kling_sk, algorithm="HS256", headers=headers)
-                
-                # 2. Extract Character ID Reference for Structural Locking
-                import json
-                image_url = ""
-                # Since native Kling often expects a public URL, we upload via Fal.ai or local proxy if public HTTP isn't natively available
-                # In production, you'd upload your master character refs to an S3 bucket or Imgur. 
-                # For this local execution, we'll continue utilizing Fal's CDN to upload the local asset, then feed that URL directly to native Kling.
-                import fal_client
-                if character_id and os.path.exists("characters.json"):
-                    with open("characters.json") as f:
-                        chars = json.load(f)
-                    ref_img = chars.get(character_id, {}).get("reference_image")
-                    if ref_img and os.path.exists(ref_img):
-                        try:
-                            image_url = fal_client.upload_file(ref_img)
-                            print(f"      ↳ Locked Character Identity: {character_id}")
-                        except Exception: pass
-                        
-                if not image_url:
-                    try:
-                        image_url = fal_client.upload_file(image_path)
-                    except Exception:
-                        image_url = "https://picsum.photos/768/1365"
-                        
-                # 3. Fire Native Inference Task
-                api_url = "https://api.klingai.com/v1/videos/text2video"
-                req_headers = {
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json"
-                }
-                data = {
-                    "model": "kling-v1", # The specific backbone ID
-                    "prompt": f"Smooth {camera_motion}. Cinematic lighting, exact character structure.",
-                    "image": image_url,
-                    "duration": "5",
-                    "aspect_ratio": "16:9"
-                }
-                
-                resp = requests.post(api_url, json=data, headers=req_headers)
-                resp.raise_for_status()
-                task_id = resp.json().get('data', {}).get('task_id')
-                
-                if not task_id:
-                    raise Exception(f"Failed to obtain Task ID from Kling API. Response: {resp.text}")
+            max_kling_attempts = 2
+            for attempt in range(1, max_kling_attempts + 1):
+                try:
+                    import time
+                    import requests
+                    import jwt # PyJWT required for native Kling authentication
                     
-                print(f"   ↳ Native Kling Task {task_id} queued. Polling synthesis matrix...")
-                
-                # 4. Polling Loop
-                poll_url = f"https://api.klingai.com/v1/videos/text2video/{task_id}"
-                final_video_url = None
-                while True:
-                    time.sleep(10)
-                    # Regenerate token for long polls
-                    p_token = jwt.encode({"iss": kling_ak, "exp": int(time.time()) + 1800, "nbf": int(time.time()) - 5}, kling_sk, algorithm="HS256")
-                    stat_resp = requests.get(poll_url, headers={"Authorization": f"Bearer {p_token}"})
-                    if stat_resp.status_code == 200:
-                        status = stat_resp.json().get('data', {}).get('task_status')
-                        if status == "success":
-                            res_list = stat_resp.json().get('data', {}).get('task_result', [])
-                            if res_list:
-                                final_video_url = res_list[0].get('videos', [{}])[0].get('url')
-                            break
-                        elif status in ["failed", "canceled"]:
-                            raise Exception("Kling Inference Task aborted by GPU cluster.")
-                    else:
-                        print(f"   ⚠️ Polling error: {stat_resp.status_code}")
+                    print(f"   ↳ Generating multi-shot unified latent sequence via NATIVE KLING 3.0 API (Attempt {attempt}/{max_kling_attempts})...")
+                    
+                    # 1. Synthesize secure JWT Token
+                    headers = {"alg": "HS256", "typ": "JWT"}
+                    payload = {
+                        "iss": kling_ak,
+                        "exp": int(time.time()) + 1800,
+                        "nbf": int(time.time()) - 5
+                    }
+                    token = jwt.encode(payload, kling_sk, algorithm="HS256", headers=headers)
+                    
+                    # 2. Extract Character ID Reference for Structural Locking
+                    import json
+                    image_url = ""
+                    import fal_client
+                    if character_id and os.path.exists("characters.json"):
+                        with open("characters.json") as f:
+                            chars = json.load(f)
+                        ref_img = chars.get(character_id, {}).get("reference_image")
+                        if ref_img and os.path.exists(ref_img):
+                            try:
+                                image_url = fal_client.upload_file(ref_img)
+                                print(f"      ↳ Locked Character Identity: {character_id}")
+                            except Exception: pass
+                            
+                    if not image_url:
+                        try:
+                            image_url = fal_client.upload_file(image_path)
+                        except Exception:
+                            image_url = "https://picsum.photos/768/1365"
+                            
+                    # 3. Fire Native Inference Task
+                    api_url = "https://api.klingai.com/v1/videos/text2video"
+                    req_headers = {
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json"
+                    }
+                    data = {
+                        "model": "kling-v1", # The specific backbone ID
+                        "prompt": f"Smooth {camera_motion}. Cinematic lighting, exact character structure.",
+                        "image": image_url,
+                        "duration": "5",
+                        "aspect_ratio": "16:9"
+                    }
+                    
+                    resp = requests.post(api_url, json=data, headers=req_headers)
+                    resp.raise_for_status()
+                    task_id = resp.json().get('data', {}).get('task_id')
+                    
+                    if not task_id:
+                        raise Exception(f"Failed to obtain Task ID from Kling API. Response: {resp.text}")
                         
-                if final_video_url:
-                    import urllib.request
-                    urllib.request.urlretrieve(final_video_url, output_mp4)
-                    return output_mp4
-                return fallback_ffmpeg_zoom(image_path, output_mp4)
-            except Exception as e:
-                print(f"   ⚠️ KLING 3.0 NATIVE API Error: {e}")
-                print("   ⚠️ Re-routing gracefully to VEO 2.0 Engine...")
-                return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing, character_id)
+                    print(f"   ↳ Native Kling Task {task_id} queued. Polling synthesis matrix...")
+                    
+                    # 4. Polling Loop
+                    poll_url = f"https://api.klingai.com/v1/videos/text2video/{task_id}"
+                    final_video_url = None
+                    poll_attempts = 0
+                    max_polls = 30  # 30 polls * 10 seconds = 5 Minutes
+                    
+                    while True:
+                        if poll_attempts >= max_polls:
+                            raise Exception("Kling API Polling Timeout. The GPU cluster ghosted the request.")
+                            
+                        time.sleep(10)
+                        poll_attempts += 1
+                        # Regenerate token for long polls
+                        p_token = jwt.encode({"iss": kling_ak, "exp": int(time.time()) + 1800, "nbf": int(time.time()) - 5}, kling_sk, algorithm="HS256")
+                        stat_resp = requests.get(poll_url, headers={"Authorization": f"Bearer {p_token}"})
+                        if stat_resp.status_code == 200:
+                            status = stat_resp.json().get('data', {}).get('task_status')
+                            if status == "success":
+                                res_list = stat_resp.json().get('data', {}).get('task_result', [])
+                                if res_list:
+                                    final_video_url = res_list[0].get('videos', [{}])[0].get('url')
+                                break
+                            elif status in ["failed", "canceled"]:
+                                raise Exception("Kling Inference Task aborted by GPU cluster.")
+                        else:
+                            print(f"   ⚠️ Polling error: {stat_resp.status_code}")
+                            
+                    if final_video_url:
+                        import urllib.request
+                        urllib.request.urlretrieve(final_video_url, output_mp4)
+                        return output_mp4
+                    return try_next_api()
+                    
+                except Exception as e:
+                    print(f"   ⚠️ KLING 3.0 NATIVE API Error: {e}")
+                    if attempt < max_kling_attempts:
+                        print(f"   🔄 Retrying KLING 3.0 API (Attempt {attempt+1}/{max_kling_attempts})...")
+                        time.sleep(5)
+                        continue
+                    else:
+                        print("   ⚠️ Max Kling retries reached. Re-routing gracefully...")
+                        return try_next_api()
         else:
-            print("   ⚠️ KLING keys missing! (Wait, how?). Re-routing gracefully to VEO 2.0 Engine...")
-            return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing, character_id)
+            print("   ⚠️ KLING keys missing! (Wait, how?). Re-routing gracefully...")
+            return try_next_api()
 
     elif target_api.upper() == "COMFY_UI":
         # Headless ComfyUI execution via Fal.ai Serverless Endpoint
@@ -236,20 +256,21 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
                     import urllib.request
                     urllib.request.urlretrieve(video_url, output_mp4)
                     return output_mp4
-                return fallback_ffmpeg_zoom(image_path, output_mp4)
+                return try_next_api()
             except Exception as e:
                 print(f"   ⚠️ COMFY_UI Serverless Error: {e}")
-                print("   ⚠️ Re-routing gracefully to VEO 2.0 Engine...")
-                return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing, character_id)
+                print("   ⚠️ Re-routing gracefully...")
+                return try_next_api()
         else:
-            print("   ⚠️ FAL_KEY missing. Re-routing gracefully to VEO 2.0 Engine...")
-            return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing, character_id)
+            print("   ⚠️ FAL_KEY missing. Re-routing gracefully...")
+            return try_next_api()
             
     elif target_api.upper() == "RUNWAY":
         # RunwayML Elite Cinematic Generation
         runway_key = os.getenv("RUNWAYML_API_SECRET")
         if runway_key:
             try:
+                from runwayml import RunwayML
                 import base64
                 with open(image_path, "rb") as f:
                     b64_img = base64.b64encode(f.read()).decode('utf-8')
@@ -271,11 +292,10 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
                 return output_mp4
             except Exception as e:
                 print(f"   ⚠️ Runway API Error: {e}")
-                print("   ⚠️ Re-routing gracefully to VEO 2.0 Engine...")
-                return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing)
+                return try_next_api()
         else:
-            print("   ⚠️ RunwayML key missing. Re-routing gracefully to VEO 2.0 Engine...")
-            return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing)
+            print("   ⚠️ RunwayML key missing. Re-routing gracefully...")
+            return try_next_api()
             
     elif target_api.upper() == "LUMA":
         luma_key = os.getenv("LUMAAI_API_KEY")
@@ -308,19 +328,18 @@ def generate_ai_video(image_path: str, camera_motion: str, target_api: str, outp
                         urllib.request.urlretrieve(video_url, output_mp4)
                         return output_mp4
                     elif state == "failed":
-                        print(f"   ⚠️ Luma API Gen Failed. Re-routing gracefully to VEO 2.0 Engine...")
-                        return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing)
+                        print(f"   ⚠️ Luma API Gen Failed. Re-routing gracefully...")
+                        return try_next_api()
             except Exception as e:
                 print(f"   ⚠️ Luma API Error: {e}")
-                print("   ⚠️ Re-routing gracefully to VEO 2.0 Engine...")
-                return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing)
+                return try_next_api()
         else:
-            print("   ⚠️ LUMAAI_API_KEY missing. Re-routing gracefully to VEO 2.0 Engine...")
-            return generate_ai_video(image_path, camera_motion, "VEO", output_mp4, pacing)
+            print("   ⚠️ LUMAAI_API_KEY missing. Re-routing gracefully...")
+            return try_next_api()
     
     else:
         # Fallback if UNKNOWN target API is given
-        return fallback_ffmpeg_zoom(image_path, output_mp4)
+        return try_next_api()
 
 def generate_ass_subtitles(whisper_result: dict, output_path: str):
     """Converts Whisper word-level timestamps to an advanced SubStation Alpha (.ass) file."""

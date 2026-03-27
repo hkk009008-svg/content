@@ -117,7 +117,7 @@ def generate_shorts_script(ctx: dict) -> bool:
     5. The Camera Psychology Director: You must strictly adhere to the `Cinematography Rules` defined in the Master Director's Blueprint above. 
     6. Dynamic Visual Effects: For every prompt, explicitly inject the `Color Grading & Aesthetic` from the Director's Blueprint into your visual setup to guarantee exact color mapping.
     7. **HERO SUBJECT CONTINUITY**: You MUST use the exact `The Master Hero Subject` defined in the Blueprint as the core anchor for every single shot. Frame 1 MUST be an 'Extreme Close-Up (ECU)' of this Hero Subject. Every single of the 20 image prompts MUST explicitly feature this same Hero Subject. Describe different cinematic spatial angles (low angle, wide shot, high angle) to keep it dynamic.
-    8. **VISUAL PSYCHOLOGY**: Every visual MUST leverage the Rule of Thirds and heavy NEGATIVE SPACE for an ultra-premium widescreen aesthetic.
+    8. **ENVIRONMENTAL & VISUAL CONTINUITY**: You MUST establish ONE single, hyper-realistic physical location/setting (e.g. 'a dimly lit brutalist concrete office', 'a snowy neo-noir alleyway') and strictly write this EXACT same background description into ALL 20 image prompts so the surrounding objects and environment remain perfectly consistent. Every visual MUST also leverage the Rule of Thirds and heavy NEGATIVE SPACE.
     9. **CRITICAL OUTPUT LANGUAGE**: Ensure that the script is written completely and natively in {language.upper()}.
     """
     
