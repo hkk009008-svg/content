@@ -1,0 +1,80 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #0c0c14;
+  color: #eaecf5;
+}
+
+/* Smooth transitions everywhere */
+*, *::before, *::after {
+  transition-property: background-color, border-color, box-shadow, opacity;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Scrollbar — subtle, minimal */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a2a3e;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a50;
+}
+
+/* Selection color */
+::selection {
+  background: rgba(124, 106, 240, 0.3);
+  color: #eaecf5;
+}
+
+/* Glass morphism utility */
+@layer utilities {
+  .glass {
+    background: rgba(20, 20, 31, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .glass-border {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+}
+
+/* Input focus rings */
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: #7c6af0 !important;
+  box-shadow: 0 0 0 2px rgba(124, 106, 240, 0.2);
+}
+
+/* Button base styles */
+button {
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Mono font for technical text */
+.font-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}

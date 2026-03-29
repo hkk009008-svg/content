@@ -1,341 +1,171 @@
 {
   "8": {
     "inputs": {
-      "samples": [
-        "13",
-        0
-      ],
-      "vae": [
-        "10",
-        0
-      ]
+      "samples": ["13", 0],
+      "vae": ["10", 0],
+      "tile_size": 512,
+      "overlap": 64,
+      "temporal_size": 64,
+      "temporal_overlap": 8
     },
-    "class_type": "VAEDecode",
-    "_meta": {
-      "title": "VAE Decode"
-    }
+    "class_type": "VAEDecodeTiled",
+    "_meta": { "title": "VAE Decode Tiled (OOM-safe)" }
   },
   "9": {
-    "inputs": {
-      "filename_prefix": "FLUX",
-      "images": [
-        "8",
-        0
-      ]
-    },
+    "inputs": { "filename_prefix": "FLUX_PuLID", "images": ["502", 0] },
     "class_type": "SaveImage",
-    "_meta": {
-      "title": "Save Image"
-    }
+    "_meta": { "title": "Save Image" }
   },
   "10": {
-    "inputs": {
-      "vae_name": "flux-vae-bf16.safetensors"
-    },
+    "inputs": { "vae_name": "ae.safetensors" },
     "class_type": "VAELoader",
-    "_meta": {
-      "title": "Load VAE"
-    }
+    "_meta": { "title": "Load VAE" }
   },
   "11": {
     "inputs": {
-      "clip_name1": "t5/t5xxl_fp16.safetensors",
+      "clip_name1": "t5/t5xxl_fp8_e4m3fn.safetensors",
       "clip_name2": "clip_l.safetensors",
       "type": "flux",
       "device": "default"
     },
     "class_type": "DualCLIPLoader",
-    "_meta": {
-      "title": "DualCLIPLoader"
-    }
+    "_meta": { "title": "DualCLIPLoader" }
   },
   "13": {
     "inputs": {
-      "noise": [
-        "25",
-        0
-      ],
-      "guider": [
-        "22",
-        0
-      ],
-      "sampler": [
-        "16",
-        0
-      ],
-      "sigmas": [
-        "17",
-        0
-      ],
-      "latent_image": [
-        "102",
-        0
-      ]
+      "noise": ["25", 0],
+      "guider": ["22", 0],
+      "sampler": ["16", 0],
+      "sigmas": ["17", 0],
+      "latent_image": ["102", 0]
     },
     "class_type": "SamplerCustomAdvanced",
-    "_meta": {
-      "title": "SamplerCustomAdvanced"
-    }
+    "_meta": { "title": "SamplerCustomAdvanced" }
   },
   "16": {
-    "inputs": {
-      "sampler_name": "euler"
-    },
+    "inputs": { "sampler_name": "dpmpp_2m" },
     "class_type": "KSamplerSelect",
-    "_meta": {
-      "title": "KSamplerSelect"
-    }
+    "_meta": { "title": "KSamplerSelect" }
   },
   "17": {
     "inputs": {
-      "scheduler": "simple",
-      "steps": 15,
+      "scheduler": "sgm_uniform",
+      "steps": 20,
       "denoise": 1,
-      "model": [
-        "100",
-        0
-      ]
+      "model": ["301", 0]
     },
     "class_type": "BasicScheduler",
-    "_meta": {
-      "title": "BasicScheduler"
-    }
+    "_meta": { "title": "BasicScheduler" }
   },
   "22": {
     "inputs": {
-      "model": [
-        "100",
-        0
-      ],
-      "conditioning": [
-        "60",
-        0
-      ]
+      "model": ["301", 0],
+      "conditioning": ["60", 0]
     },
     "class_type": "BasicGuider",
-    "_meta": {
-      "title": "BasicGuider"
-    }
+    "_meta": { "title": "BasicGuider" }
   },
   "25": {
-    "inputs": {
-      "noise_seed": 1093488902531153
-    },
+    "inputs": { "noise_seed": 42 },
     "class_type": "RandomNoise",
-    "_meta": {
-      "title": "RandomNoise"
-    }
+    "_meta": { "title": "RandomNoise" }
   },
   "60": {
     "inputs": {
-      "guidance": 3,
-      "conditioning": [
-        "122",
-        0
-      ]
+      "guidance": 3.5,
+      "conditioning": ["122", 0]
     },
     "class_type": "FluxGuidance",
-    "_meta": {
-      "title": "FluxGuidance"
-    }
+    "_meta": { "title": "FluxGuidance" }
   },
   "93": {
-    "inputs": {
-      "image": "strategist_front.jpg"
-    },
+    "inputs": { "image": "face_reference.jpg" },
     "class_type": "LoadImage",
-    "_meta": {
-      "title": "Load Image Face"
-    }
+    "_meta": { "title": "Load Face Reference" }
   },
   "97": {
-    "inputs": {
-      "provider": "CUDA"
-    },
-    "class_type": "PulidFluxInsightFaceLoader",
-    "_meta": {
-      "title": "Load InsightFace (PuLID Flux)"
-    }
+    "inputs": { "provider": "CUDA" },
+    "class_type": "PulidInsightFaceLoader",
+    "_meta": { "title": "Load InsightFace (PuLID)" }
   },
   "99": {
-    "inputs": {
-      "pulid_file": "pulid_flux_v0.9.1.safetensors"
-    },
-    "class_type": "PulidFluxModelLoader",
-    "_meta": {
-      "title": "Load PuLID Flux Model"
-    }
+    "inputs": { "pulid_file": "ip-adapter_pulid_sdxl_fp16.safetensors" },
+    "class_type": "PulidModelLoader",
+    "_meta": { "title": "Load PuLID Model" }
   },
   "100": {
     "inputs": {
       "weight": 1,
-      "start_at": 0.4,
+      "method": "fidelity",
+      "start_at": 0.3,
       "end_at": 1,
-      "fusion": "mean",
-      "fusion_weight_max": 1,
-      "fusion_weight_min": 0,
-      "train_step": 1000,
-      "use_gray": true,
-      "model": [
-        "112",
-        0
-      ],
-      "pulid_flux": [
-        "99",
-        0
-      ],
-      "eva_clip": [
-        "101",
-        0
-      ],
-      "face_analysis": [
-        "97",
-        0
-      ],
-      "image": [
-        "93",
-        0
-      ]
+      "model": ["112", 0],
+      "pulid": ["99", 0],
+      "eva_clip": ["101", 0],
+      "face_analysis": ["97", 0],
+      "image": ["93", 0]
     },
-    "class_type": "ApplyPulidFlux",
-    "_meta": {
-      "title": "Apply PuLID Flux"
-    }
+    "class_type": "ApplyPulid",
+    "_meta": { "title": "Apply PuLID" }
   },
   "101": {
     "inputs": {},
-    "class_type": "PulidFluxEvaClipLoader",
-    "_meta": {
-      "title": "Load Eva Clip (PuLID Flux)"
-    }
+    "class_type": "PulidEvaClipLoader",
+    "_meta": { "title": "Load Eva Clip (PuLID)" }
   },
   "102": {
-    "inputs": {
-      "width": [
-        "117",
-        1
-      ],
-      "height": [
-        "117",
-        2
-      ],
-      "batch_size": 1
-    },
+    "inputs": { "width": 1344, "height": 768, "batch_size": 1 },
     "class_type": "EmptyLatentImage",
-    "_meta": {
-      "title": "Empty Latent Image"
-    }
+    "_meta": { "title": "Empty Latent Image" }
   },
   "112": {
     "inputs": {
-      "unet_name": "flux1-dev-fp8.safetensors",
+      "unet_name": "FLUX1/flux1-dev-fp8.safetensors",
       "weight_dtype": "default"
     },
     "class_type": "UNETLoader",
-    "_meta": {
-      "title": "Load Diffusion Model"
-    }
-  },
-  "113": {
-    "inputs": {
-      "text_input": "",
-      "task": "more_detailed_caption",
-      "fill_mask": true,
-      "keep_model_loaded": false,
-      "max_new_tokens": 1024,
-      "num_beams": 3,
-      "do_sample": true,
-      "output_mask_select": "",
-      "seed": 711346824996086,
-      "image": [
-        "114",
-        0
-      ],
-      "florence2_model": [
-        "115",
-        0
-      ]
-    },
-    "class_type": "Florence2Run",
-    "_meta": {
-      "title": "Florence2Run"
-    }
-  },
-  "114": {
-    "inputs": {
-      "image": "download.jpeg"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Load Image Prompt"
-    }
-  },
-  "115": {
-    "inputs": {
-      "model": "microsoft/Florence-2-base",
-      "precision": "fp16",
-      "attention": "sdpa",
-      "convert_to_safetensors": false
-    },
-    "class_type": "DownloadAndLoadFlorence2Model",
-    "_meta": {
-      "title": "DownloadAndLoadFlorence2Model"
-    }
-  },
-  "116": {
-    "inputs": {
-      "text_0": "The image is a portrait of a young man in a formal attire. He is wearing a dark blue suit with a white shirt and a brown tie. He has a small red boutonniere pinned to his lapel. The man has a beard and is looking directly at the camera with a serious expression. The background is a plain grey color. The overall mood of the image is sophisticated and sophisticated.",
-      "text": [
-        "113",
-        2
-      ]
-    },
-    "class_type": "ShowText|pysssss",
-    "_meta": {
-      "title": "Show Text 🐍"
-    }
-  },
-  "117": {
-    "inputs": {
-      "image": [
-        "120",
-        0
-      ]
-    },
-    "class_type": "GetImageSizeAndCount",
-    "_meta": {
-      "title": "Get Image Size & Count"
-    }
-  },
-  "120": {
-    "inputs": {
-      "upscale_method": "nearest-exact",
-      "megapixels": 1,
-      "resolution_steps": 1,
-      "image": [
-        "114",
-        0
-      ]
-    },
-    "class_type": "ImageScaleToTotalPixels",
-    "_meta": {
-      "title": "ImageScaleToTotalPixels"
-    }
+    "_meta": { "title": "Load Diffusion Model" }
   },
   "122": {
     "inputs": {
-      "text": [
-        "116",
-        0
-      ],
-      "clip": [
-        "11",
-        0
-      ]
+      "text": "photorealistic cinematic portrait",
+      "clip": ["11", 0]
     },
     "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "CLIP Text Encode (Prompt)"
-    }
+    "_meta": { "title": "CLIP Text Encode" }
+  },
+  "301": {
+    "inputs": {
+      "scale": 3.0,
+      "model": ["100", 0]
+    },
+    "class_type": "PerturbedAttentionGuidance",
+    "_meta": { "title": "PAG (Detail Enhancement)" }
+  },
+  "500": {
+    "inputs": {
+      "upscale_model": ["501", 0],
+      "image": ["8", 0]
+    },
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": { "title": "4x Upscale (Real-ESRGAN)" }
+  },
+  "501": {
+    "inputs": {
+      "model_name": "RealESRGAN_x4plus.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": { "title": "Load Upscale Model" }
+  },
+  "502": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "width": 2688,
+      "height": 1536,
+      "crop": "disabled",
+      "image": ["500", 0]
+    },
+    "class_type": "ImageScale",
+    "_meta": { "title": "Scale to 2.7K Cinema (2688x1536)" }
   }
 }
