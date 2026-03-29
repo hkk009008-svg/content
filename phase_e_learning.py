@@ -1,6 +1,7 @@
 import sqlite3
 import datetime
 import os
+from quality_tracker import QualityTracker, VBenchResult
 
 DB_FILE = "experiments.db"
 
@@ -191,22 +192,33 @@ def autonomous_batch_calibration():
     live_youtube = fetch_live_youtube_trends()
     live_reddit = fetch_external_market_sentiment()
     macro_stats = calculate_macro_statistics()
-    
+
+    # --- VBench Quality Integration ---
+    quality_tracker = QualityTracker()
+    quality_summary = quality_tracker.get_batch_quality_summary()
+
     # Send all scraped live data to Gemini to formulate the master law
     prompt = f"""
     You are an elite, mathematical YouTube Growth Strategist.
     I have just finished rendering a batch of videos. I need you to completely calibrate our strategy for the NEXT batch.
-    
+
     Here is the live data I just scraped from the web THIS SECOND:
     {live_youtube}
     {live_reddit}
     {macro_stats}
-    
-    INSTRUCTION: Read the above real-time data carefully. Synthesize the absolute highest integrity strategy for our next batch. 
+
+    Here is our current VIDEO QUALITY data from VBench evaluations across all generation APIs:
+    {quality_summary}
+
+    INSTRUCTION: Read the above real-time data carefully. Synthesize the absolute highest integrity strategy for our next batch.
     Tell me exactly what pacing, emotion, hook structure, and niche topics are objectively dominating right now.
-    
+    ALSO analyze the VBench quality data above. Identify which APIs produce the best identity preservation, which have quality regressions, and which offer the best quality-per-dollar ratio.
+
     [STRICT OUTPUT FORMAT]:
-    You MUST output your strategy as a mathematically rigid set of instructions (Rule 1, Rule 2, Rule 3, Rule 4). Do not give generic advice. Give absolute, binary instructions that the AI Video Generator cannot misunderstand. Example: "RULE 1: The visual vibe MUST be 'Corporate' because..."
+    You MUST output your strategy as a mathematically rigid set of instructions (Rule 1 through Rule 6). Do not give generic advice. Give absolute, binary instructions that the AI Video Generator cannot misunderstand.
+    Rules 1-4: Content & engagement strategy. Example: "RULE 1: The visual vibe MUST be 'Corporate' because..."
+    Rule 5: A quality-routing rule for identity-critical shots based on the VBench data. Format: "RULE 5: Identity-critical shots MUST use [best API for identity] (avg identity: X.XX)"
+    Rule 6: A quality-avoidance rule based on regressions or poor performers. Format: "RULE 6: Avoid [worst API] for [shot type] (quality regression detected)"
     """
     
     from google import genai
@@ -230,6 +242,50 @@ def autonomous_batch_calibration():
         print("="*60 + "\n")
     except Exception as e:
         print(f"⚠️ Calibration scraping failed. {e}\n")
+
+def log_video_quality(video_id: str, shot_results: list):
+    """Logs per-shot VBench quality metrics and costs to the quality tracker.
+
+    Args:
+        video_id: The YouTube video ID this batch of shots belongs to.
+        shot_results: A list of dicts, each containing:
+            - shot_id (str)
+            - shot_type (str)
+            - target_api (str)
+            - vbench (dict, optional): keys matching VBenchResult fields
+              (identity_score, flicker_score, motion_score, aesthetic_score,
+               prompt_adherence_score, physics_score, overall_vbench)
+            - generation_cost (float, optional)
+            - llm_cost (float, optional)
+            - attempt (int, optional)
+    """
+    quality_tracker = QualityTracker()
+
+    for shot in shot_results:
+        vbench_data = shot.get("vbench", {})
+        vbench_result = VBenchResult(
+            identity_score=vbench_data.get("identity_score", 0.0),
+            flicker_score=vbench_data.get("flicker_score", 0.0),
+            motion_score=vbench_data.get("motion_score", 0.0),
+            aesthetic_score=vbench_data.get("aesthetic_score", 0.0),
+            prompt_adherence_score=vbench_data.get("prompt_adherence_score", 0.0),
+            physics_score=vbench_data.get("physics_score", 0.0),
+            overall_vbench=vbench_data.get("overall_vbench", 0.0),
+        )
+
+        quality_tracker.log_shot_quality(
+            shot_id=shot["shot_id"],
+            video_id=video_id,
+            shot_type=shot["shot_type"],
+            target_api=shot["target_api"],
+            vbench_result=vbench_result,
+            generation_cost=shot.get("generation_cost", 0.0),
+            llm_cost=shot.get("llm_cost", 0.0),
+            attempt=shot.get("attempt", 1),
+        )
+
+    print(f"📊 [QUALITY] Logged {len(shot_results)} shot quality records for video {video_id}")
+
 
 def get_top_performing_context():
     """Returns a dynamic string for Gemini's prompt based on the highest Viral Score in DB."""

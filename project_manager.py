@@ -10,6 +10,7 @@ import uuid
 import random
 import shutil
 import tempfile
+from datetime import datetime
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from typing import Optional, List, Dict
@@ -332,3 +333,148 @@ def reorder_scenes(project: dict, scene_ids: list[str]) -> None:
 
 def get_project_dir(project_id: str) -> str:
     return _project_dir(project_id)
+
+
+# ---------------------------------------------------------------------------
+# Shot-as-Atomic-Unit Architecture
+# ---------------------------------------------------------------------------
+
+def _shot_dir(project_id: str, shot_id: str) -> str:
+    return os.path.join(_project_dir(project_id), "shots", shot_id)
+
+
+def ensure_shot_package(project_id: str, shot_id: str) -> str:
+    """
+    Create the canonical directory structure for a shot package:
+
+        projects/{project_id}/shots/{shot_id}/
+            ├── inputs/
+            └── outputs/
+
+    Returns the shot directory path.
+    """
+    shot_path = _shot_dir(project_id, shot_id)
+    os.makedirs(os.path.join(shot_path, "inputs"), exist_ok=True)
+    os.makedirs(os.path.join(shot_path, "outputs"), exist_ok=True)
+    return shot_path
+
+
+def save_shot_spec(project_id: str, shot_id: str, shot_spec: dict) -> str:
+    """
+    Save a shot specification dict as JSON to the shot package.
+
+    shot_spec should include keys such as:
+        prompt, camera, visual_effect, target_api,
+        characters_in_frame, seed, model_version, timestamp
+
+    A 'timestamp' field is added automatically if not already present.
+    Returns the path to the written shot.json file.
+    """
+    shot_path = ensure_shot_package(project_id, shot_id)
+    if "timestamp" not in shot_spec:
+        shot_spec["timestamp"] = datetime.utcnow().isoformat() + "Z"
+    spec_file = os.path.join(shot_path, "shot.json")
+    with open(spec_file, "w", encoding="utf-8") as f:
+        json.dump(shot_spec, f, indent=2, ensure_ascii=False)
+    return spec_file
+
+
+def save_shot_output(
+    project_id: str,
+    shot_id: str,
+    output_type: str,
+    file_path: str,
+) -> str:
+    """
+    Copy an output file into the shot package's outputs/ directory.
+
+    The file is stored as  outputs/{output_type}{ext}  where ext is
+    preserved from the original file_path.
+
+    output_type examples: "keyframe", "video", "video_post", "audio"
+
+    Returns the new file path inside the shot package.
+    """
+    shot_path = ensure_shot_package(project_id, shot_id)
+    _, ext = os.path.splitext(file_path)
+    dest = os.path.join(shot_path, "outputs", f"{output_type}{ext}")
+    shutil.copy2(file_path, dest)
+    return dest
+
+
+def save_shot_metrics(project_id: str, shot_id: str, metrics: dict) -> str:
+    """
+    Save evaluation / cost metrics for a shot.
+
+    Writes metrics dict as JSON to outputs/metrics.json.
+    metrics can include: vbench_scores, identity_scores,
+    coherence_scores, cost, etc.
+
+    Returns the path to the written metrics.json file.
+    """
+    shot_path = ensure_shot_package(project_id, shot_id)
+    metrics_file = os.path.join(shot_path, "outputs", "metrics.json")
+    with open(metrics_file, "w", encoding="utf-8") as f:
+        json.dump(metrics, f, indent=2, ensure_ascii=False)
+    return metrics_file
+
+
+def get_shot_package(project_id: str, shot_id: str) -> Optional[dict]:
+    """
+    Return a manifest of all files currently in a shot package.
+
+    Returns a dict shaped like:
+        {
+            "shot_id": "...",
+            "shot_dir": "...",
+            "spec": "projects/.../shot.json" or None,
+            "inputs": {"reference": "path", "pose": "path", ...},
+            "outputs": {"keyframe": "path", "video": "path",
+                        "metrics": "path", ...},
+        }
+
+    Returns None if the shot directory does not exist.
+    """
+    shot_path = _shot_dir(project_id, shot_id)
+    if not os.path.isdir(shot_path):
+        return None
+
+    package: Dict[str, object] = {
+        "shot_id": shot_id,
+        "shot_dir": shot_path,
+        "spec": None,
+        "inputs": {},
+        "outputs": {},
+    }
+
+    spec_path = os.path.join(shot_path, "shot.json")
+    if os.path.isfile(spec_path):
+        package["spec"] = spec_path
+
+    inputs_dir = os.path.join(shot_path, "inputs")
+    if os.path.isdir(inputs_dir):
+        for fname in os.listdir(inputs_dir):
+            key = os.path.splitext(fname)[0]
+            package["inputs"][key] = os.path.join(inputs_dir, fname)
+
+    outputs_dir = os.path.join(shot_path, "outputs")
+    if os.path.isdir(outputs_dir):
+        for fname in os.listdir(outputs_dir):
+            key = os.path.splitext(fname)[0]
+            package["outputs"][key] = os.path.join(outputs_dir, fname)
+
+    return package
+
+
+def list_shot_packages(project_id: str) -> List[str]:
+    """
+    Return a sorted list of shot_ids that have packages under
+    projects/{project_id}/shots/.
+    """
+    shots_root = os.path.join(_project_dir(project_id), "shots")
+    if not os.path.isdir(shots_root):
+        return []
+    return sorted(
+        d for d in os.listdir(shots_root)
+        if os.path.isdir(os.path.join(shots_root, d))
+    )

@@ -10,7 +10,9 @@ Each type optimizes: PuLID weight, guidance, steps, denoise for maximum quality.
 """
 
 import re
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+
+from quality_tracker import QualityTracker
 
 # Shot type → optimized parameters
 # Based on the paper's recommendation to route tasks to appropriate engines
@@ -260,3 +262,133 @@ def get_shot_workflow_summary(shot: dict) -> str:
         f"steps={params['steps']} "
         f"({params['description']})"
     )
+
+
+def get_optimal_api(
+    shot_type: str,
+    character_ids: Optional[List[str]] = None,
+    budget_remaining: Optional[float] = None,
+) -> List[Dict]:
+    """
+    Use historical VBench quality data to dynamically rank APIs for a given shot type.
+
+    Scoring formula:
+        score = quality_weight * avg_vbench + cost_weight * (1 - normalized_cost)
+
+    If character_ids are present, identity_score is weighted more heavily
+    (quality_weight shifts from 0.7 → 0.8, cost_weight from 0.3 → 0.2).
+
+    Args:
+        shot_type: One of "portrait", "medium", "wide", "action", "landscape".
+        character_ids: Optional list of character IDs in the shot — if present,
+            identity preservation is weighted more heavily.
+        budget_remaining: Optional remaining budget ($). APIs whose avg_cost
+            exceeds this are filtered out.
+
+    Returns:
+        Ranked list of dicts:
+        [{"api": "KLING_NATIVE", "score": 0.82, "avg_quality": 0.78, "avg_cost": 0.15}, ...]
+        Falls back to the static WORKFLOW_TEMPLATES ordering if no historical data exists.
+    """
+    quality_tracker = QualityTracker()
+    api_stats = quality_tracker.get_api_quality_stats()
+
+    # Filter to stats relevant to this shot_type (if the tracker provides per-shot-type breakdowns)
+    shot_stats = {}
+    for api_name, stats in api_stats.items():
+        # Support both flat stats and per-shot-type nested stats
+        if isinstance(stats, dict) and shot_type in stats:
+            shot_stats[api_name] = stats[shot_type]
+        elif isinstance(stats, dict) and "avg_vbench" in stats:
+            shot_stats[api_name] = stats
+
+    # Fallback: no historical data → derive ranking from static templates
+    if not shot_stats:
+        template = WORKFLOW_TEMPLATES.get(shot_type, WORKFLOW_TEMPLATES["medium"])
+        primary = template["target_api"]
+        fallbacks = template.get("video_fallbacks", [])
+        ranked = [{"api": primary, "score": 1.0, "avg_quality": 0.0, "avg_cost": 0.0}]
+        for i, fb in enumerate(fallbacks):
+            ranked.append({"api": fb, "score": round(0.9 - i * 0.1, 2), "avg_quality": 0.0, "avg_cost": 0.0})
+        return ranked
+
+    # --- Determine weights ---
+    has_characters = character_ids is not None and len(character_ids) > 0
+    quality_weight = 0.8 if has_characters else 0.7
+    cost_weight = 0.2 if has_characters else 0.3
+
+    # Normalize costs across all candidate APIs
+    costs = [s.get("avg_cost", 0.0) for s in shot_stats.values()]
+    max_cost = max(costs) if costs and max(costs) > 0 else 1.0
+
+    scored: List[Dict] = []
+    for api_name, stats in shot_stats.items():
+        avg_vbench = stats.get("avg_vbench", 0.0)
+        avg_cost = stats.get("avg_cost", 0.0)
+        identity_score = stats.get("identity_score", 0.0)
+
+        # Budget filter
+        if budget_remaining is not None and avg_cost > budget_remaining:
+            continue
+
+        normalized_cost = avg_cost / max_cost
+
+        # Base score
+        quality_metric = avg_vbench
+        # If characters are present and identity_score is available, blend it in
+        if has_characters and identity_score > 0:
+            quality_metric = 0.6 * avg_vbench + 0.4 * identity_score
+
+        score = quality_weight * quality_metric + cost_weight * (1 - normalized_cost)
+
+        scored.append({
+            "api": api_name,
+            "score": round(score, 4),
+            "avg_quality": round(avg_vbench, 4),
+            "avg_cost": round(avg_cost, 4),
+        })
+
+    # Sort descending by score
+    scored.sort(key=lambda x: x["score"], reverse=True)
+
+    # If budget filtering removed everything, fall back to static
+    if not scored:
+        return get_optimal_api(shot_type, character_ids, budget_remaining=None)
+
+    return scored
+
+
+def get_dynamic_workflow(
+    shot_type: str,
+    character_ids: Optional[List[str]] = None,
+    budget_remaining: Optional[float] = None,
+) -> Dict:
+    """
+    Build a workflow parameter dict that merges static template params
+    (PuLID weight, guidance, steps, etc.) with dynamically-selected APIs
+    based on historical quality data.
+
+    Args:
+        shot_type: One of "portrait", "medium", "wide", "action", "landscape".
+        character_ids: Optional list of character IDs — influences API ranking.
+        budget_remaining: Optional remaining budget ($) — filters expensive APIs.
+
+    Returns:
+        Full workflow params dict with target_api and video_fallbacks updated
+        from quality data, all other params from the static template.
+    """
+    # Start with the static template
+    params = get_workflow_params(shot_type)
+
+    # Get quality-ranked APIs
+    ranked = get_optimal_api(shot_type, character_ids, budget_remaining)
+
+    if ranked:
+        # Best API becomes primary target
+        params["target_api"] = ranked[0]["api"]
+        # Remaining become fallbacks (preserve order = descending quality score)
+        params["video_fallbacks"] = [r["api"] for r in ranked[1:]]
+        # Attach ranking metadata for logging / downstream decisions
+        params["_api_ranking"] = ranked
+
+    return params

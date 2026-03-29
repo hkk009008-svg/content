@@ -9,6 +9,7 @@ from typing import Optional, List
 import os
 import json
 from dotenv import load_dotenv
+from llm_ensemble import LLMEnsemble
 
 load_dotenv()
 
@@ -330,6 +331,313 @@ Only use tools if they would genuinely improve shot quality. Skip if the scene i
         print(f"   [ERROR] GPT-4o decomposition failed: {e}")
         traceback.print_exc()
         return _fallback_decompose(scene, characters, location)
+
+
+def competitive_decompose_scene(
+    scene: dict,
+    characters: List[dict],
+    location: dict,
+    global_settings: dict,
+    style_rules: Optional[dict] = None,
+) -> List[dict]:
+    """
+    Multi-LLM competitive scene decomposition.
+
+    Generates shot breakdowns from GPT-4o and Claude Sonnet in parallel via
+    LLMEnsemble, has the Chief Director (judge model) pick the better one,
+    and returns the winning shot list.  Falls back to the single-model
+    ``decompose_scene()`` if the ensemble pipeline fails.
+
+    Args:
+        scene: The Scene dict from the project
+        characters: List of CharacterRecord dicts for characters in this scene
+        location: The LocationRecord dict for this scene's location
+        global_settings: Project global settings (aspect ratio, color palette, etc.)
+        style_rules: Optional cinematography/color rules from style_director
+
+    Returns:
+        List of shot dicts ready for continuity enhancement and image generation.
+    """
+
+    # ------------------------------------------------------------------
+    # 1. Build character descriptions (identical to decompose_scene)
+    # ------------------------------------------------------------------
+    char_descriptions = []
+    char_id_map = {}
+    for c in characters:
+        char_descriptions.append(
+            f"- {c['name']} (ID: {c['id']}): {c.get('physical_traits', c.get('description', ''))}"
+        )
+        char_id_map[c["name"].lower()] = c["id"]
+
+    # ------------------------------------------------------------------
+    # 2. Build location context
+    # ------------------------------------------------------------------
+    loc_description = location.get("description", "an unspecified location")
+    loc_lighting = location.get("lighting", "natural lighting")
+    loc_time = location.get("time_of_day", "day")
+    loc_weather = location.get("weather", "clear")
+
+    # ------------------------------------------------------------------
+    # 3. Style rules context
+    # ------------------------------------------------------------------
+    style_ctx = ""
+    if style_rules:
+        style_ctx = f"""
+[STYLE CONSTRAINTS]:
+- Cinematography: {style_rules.get('cinematography_rules', 'cinematic, photorealistic')}
+- Color Grading: {style_rules.get('color_grading_palette', global_settings.get('color_palette', 'natural cinematic'))}
+- Mood: {style_rules.get('director_vision', scene.get('mood', 'neutral'))}
+"""
+
+    # ------------------------------------------------------------------
+    # 4. Research-enhanced context (optional)
+    # ------------------------------------------------------------------
+    research_ctx = ""
+    try:
+        from research_engine import research_cinematography
+        mood = scene.get("mood", "cinematic")
+        action = scene.get("action", "")
+        reference = research_cinematography(mood, loc_description, action)
+        if reference:
+            research_ctx = f"\n{reference}\n"
+    except Exception:
+        pass  # Research is optional — never blocks generation
+
+    # ------------------------------------------------------------------
+    # 5. Target shot count based on duration
+    # ------------------------------------------------------------------
+    duration = scene.get("duration_seconds", 5)
+    target_shots = max(2, min(5, int(duration / 2.5)))
+
+    # ------------------------------------------------------------------
+    # 6. Build system prompt (same template as decompose_scene)
+    # ------------------------------------------------------------------
+    system_prompt = f"""<SYSTEM_PERSONA>
+You are "CineDecompose v1.0". You operate as a strict cinematic shot decomposition engine.
+Your singular purpose is to decompose scenes into exactly {target_shots} technically precise shot descriptions.
+You follow the OUTPUT_SCHEMA with zero deviation. You do not improvise, embellish, or add unrequested content.
+TONE: Strictly technical. Zero creative flourish. Output structured data only.
+</SYSTEM_PERSONA>
+
+<HARD_CONSTRAINTS>
+HC1-IDENTITY_FIREWALL: You MUST NEVER describe any character's face, hair color, hair style,
+    glasses, skin tone, eye color, facial structure, age appearance, or body shape.
+    The face-locking system handles identity from a reference photo.
+    If you describe the face, it CONFLICTS with the face-lock and produces a DIFFERENT PERSON.
+    VIOLATION OF HC1 = PIPELINE FAILURE.
+
+HC2-SCHEMA_LOCK: Every shot prompt MUST contain exactly these 5 labeled sections in order:
+    [SHOT] [SCENE] [ACTION] [OUTFIT] [QUALITY]. No other sections. No unlabeled text.
+
+HC3-LOCATION_LOCK: The [SCENE] section MUST describe the SAME location across all shots.
+    Use identical environment details. Only camera angle and framing change between shots.
+
+HC4-LIGHTING_LOCK: Light direction, color temperature, and intensity MUST be identical
+    across all shots in this scene. Specify once, repeat verbatim.
+
+HC5-FACE_DIRECTION: Every [ACTION] MUST include the character facing the camera.
+    Use: "facing the camera", "looking toward the camera", "three-quarter view toward camera".
+    NEVER: "turning away", "looking down", "silhouette", "back to camera".
+</HARD_CONSTRAINTS>
+
+<TRIPWIRES>
+Before outputting, verify:
+[T1] Does ANY prompt contain words describing face/hair/skin/glasses/eyes? → REMOVE THEM.
+[T2] Does every prompt contain all 5 sections [SHOT][SCENE][ACTION][OUTFIT][QUALITY]? → If not, ADD missing sections.
+[T3] Is the location description identical across all shots? → If not, UNIFY.
+[T4] Is the lighting description identical across all shots? → If not, UNIFY.
+</TRIPWIRES>
+
+<OUTPUT_SCHEMA>
+Each shot prompt follows this exact structure:
+
+"[SHOT] {{shot type}}, {{focal length}} lens, {{depth of field}}, {{camera height and angle}}.
+[SCENE] {{environment description}}, {{weather}}, {{lighting: direction, color temp, fill ratio}}, {{atmospheric depth cue: haze, dust, volumetric light}}.
+[ACTION] The character {{physical action}}, {{camera-facing direction}}, {{interaction with props/environment}}, {{weight and physicality of movement}}.
+[OUTFIT] {{clothing items, fabric texture, fit — NO hair, face, or body description}}.
+[QUALITY] Photorealistic, visible skin pores and subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, volumetric atmospheric lighting, micro-detail in fabric weave and material texture, no AI artifacts, no smooth plastic skin, no over-saturated colors."
+</OUTPUT_SCHEMA>
+
+<EXAMPLE>
+"[SHOT] Medium shot, 85mm f/1.4 lens, shallow depth of field, camera at eye level slightly below subject. [SCENE] A snow-covered park with bare oak trees lining a path, overcast sky, soft diffused natural light at 4500K, fill ratio 1:3 from camera-left, faint breath vapor in cold air. [ACTION] The character walks toward the camera along the snow-covered path with natural gait weight, golden retriever on a leash in right hand, looking directly at the camera with a gentle expression. [OUTFIT] Red wool peacoat with visible fabric texture over cream turtleneck knit, dark fitted jeans, black leather ankle boots with slight wear. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, volumetric cold-air haze, micro-detail in wool weave, no AI artifacts, no smooth plastic skin."
+</EXAMPLE>
+
+<SCENE_DATA>
+[CHARACTERS IN THIS SCENE]:
+{chr(10).join(char_descriptions)}
+(NOTE: Character names are for reference ONLY. Do NOT describe their physical appearance.)
+
+[LOCATION]:
+{loc_description}
+Lighting: {loc_lighting}
+Time of day: {loc_time}
+Weather: {loc_weather}
+
+{style_ctx}
+{research_ctx}
+</SCENE_DATA>
+
+<ADDITIONAL_RULES>
+R1. Shots follow physical logic — characters do not teleport between shots.
+R2. Camera angles are physically achievable and cinematic.
+R3. Every shot specifies environmental Foley sound effects in scene_foley field.
+R4. Aspect ratio: {global_settings.get('aspect_ratio', '16:9')} widescreen.
+R5. Set target_api intelligently using the API EXPERTISE below. Do NOT default to "AUTO" — pick the best API for each shot.
+R6. In [OUTFIT], describe ONLY clothing and accessories — NEVER hair, face, body, or physical traits.
+</ADDITIONAL_RULES>
+
+<VIDEO_API_EXPERTISE>
+You have access to 5 video generation APIs. Choose the BEST one per shot based on shot type:
+
+| Shot Type (from [SHOT] section) | Best API (target_api) | Why |
+|---------------------------------|----------------------|-----|
+| Close-up / portrait / headshot / 85mm | KLING_NATIVE | Subject binding + face_consistency flag = strongest identity lock |
+| Medium / waist-up / 50mm / two-shot | KLING_NATIVE | Good face + scene balance, subject binding available |
+| Wide / establishing / 24mm / full shot | LTX | 4K support, camera motion params, cheapest, depth-aware |
+| Action / tracking / chase / dynamic / handheld | SORA_NATIVE | Best motion physics, cloth simulation, body momentum |
+| Landscape / aerial / drone / panoramic / no character | LTX | 4K, no face needed, lowest cost, best environments |
+| Style-locked / consistent visual style needed | RUNWAY_GEN4 | Style lock with reference images |
+| Shot-to-shot transition / first+last frame | VEO_NATIVE | Unique first+last frame interpolation |
+
+CAMERA MOTION GUIDANCE per API:
+- KLING_NATIVE: Best with zoom_in_slow, dolly_in_rapid (face-focused motions)
+- SORA_NATIVE: Best with pan_right, pan_left, tracking shots (dynamic motion)
+- LTX: Has 15 native camera_motion params — use for any complex camera move
+- VEO_NATIVE: Best with static or slow motions (leverages reference images)
+- RUNWAY_GEN4: Best with zoom_in_slow, static_drone (style-lock motions)
+
+COST ORDER (cheapest first): LTX ($) → Kling ($$) → Veo ($$$) → Runway ($$$) → Sora ($$$$)
+Use LTX for all landscape/environment shots to save budget for character-critical shots.
+</VIDEO_API_EXPERTISE>
+
+Output ONLY a valid JSON array of shot objects. No markdown wrapping. No explanation."""
+
+    shot_schema = {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "prompt": {"type": "string", "description": "Detailed photorealistic image generation prompt including ALL character physical descriptions and FULL location description"},
+                "camera": {"type": "string", "enum": CAMERA_MOTIONS},
+                "visual_effect": {"type": "string", "enum": VISUAL_EFFECTS},
+                "target_api": {"type": "string", "enum": TARGET_APIS},
+                "scene_foley": {"type": "string", "description": "Environmental sound effects for this moment"},
+                "characters_in_frame": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Character IDs visible in this shot",
+                },
+                "action_context": {"type": "string", "description": "What is physically happening in this shot for temporal continuity"},
+            },
+            "required": ["prompt", "camera", "visual_effect", "target_api", "scene_foley", "characters_in_frame", "action_context"],
+        },
+    }
+
+    user_prompt = f"""Decompose this scene into exactly {target_shots} shots:
+
+SCENE TITLE: {scene.get('title', 'Untitled')}
+ACTION: {scene.get('action', '')}
+DIALOGUE: {scene.get('dialogue', 'None')}
+MOOD: {scene.get('mood', 'neutral')}
+CAMERA DIRECTION: {scene.get('camera_direction', 'Cinematic, varied angles')}
+DURATION: ~{duration} seconds
+
+Character IDs to use in characters_in_frame: {json.dumps([c['id'] for c in characters])}
+
+Output ONLY the raw JSON array. No markdown wrapping."""
+
+    full_system = system_prompt + "\n\nJSON Schema:\n" + json.dumps(shot_schema, indent=2)
+
+    # ------------------------------------------------------------------
+    # 7. Run competitive generation via LLMEnsemble
+    # ------------------------------------------------------------------
+    try:
+        ensemble = LLMEnsemble()
+        result = ensemble.competitive_generate(
+            task_type="decompose",
+            system_prompt=full_system,
+            user_prompt=user_prompt,
+            json_mode=True,
+        )
+
+        print(
+            f"   [Ensemble] Models used: {result.models_used} | "
+            f"Scores: {result.scores} | Winner: {result.models_used[result.winner_index]}"
+        )
+        print(f"   [Ensemble] Judge reasoning: {result.reasoning[:200]}")
+
+        winning_raw = result.winner_content
+        if winning_raw is None:
+            print("   [Ensemble] Winning candidate was None — falling back to decompose_scene()")
+            return decompose_scene(scene, characters, location, global_settings, style_rules)
+
+        # ------------------------------------------------------------------
+        # 8. Parse the winning output into a shot list
+        # ------------------------------------------------------------------
+        if isinstance(winning_raw, str):
+            # Strip possible markdown fences
+            cleaned = winning_raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[-1]
+            if cleaned.endswith("```"):
+                cleaned = cleaned.rsplit("```", 1)[0]
+            parsed = json.loads(cleaned.strip())
+        elif isinstance(winning_raw, (dict, list)):
+            parsed = winning_raw
+        else:
+            parsed = json.loads(str(winning_raw))
+
+        # Handle both {"shots": [...]} and bare [...] formats
+        shots = parsed if isinstance(parsed, list) else parsed.get("shots", [])
+
+        if not shots and isinstance(parsed, dict):
+            if "prompt" in parsed:
+                shots = [parsed]
+            else:
+                for key in parsed:
+                    val = parsed[key]
+                    if isinstance(val, list) and len(val) > 0 and isinstance(val[0], dict):
+                        shots = val
+                        break
+
+        if not shots:
+            print("   [Ensemble] Could not extract shots from winner — falling back to decompose_scene()")
+            return decompose_scene(scene, characters, location, global_settings, style_rules)
+
+        # ------------------------------------------------------------------
+        # 9. Validate and enrich each shot (camera, visual_effect, target_api)
+        # ------------------------------------------------------------------
+        validated = []
+        for i, shot in enumerate(shots):
+            validated.append({
+                "id": f"shot_{i}",
+                "prompt": shot.get("prompt", ""),
+                "camera": shot.get("camera", "zoom_in_slow") if shot.get("camera") in CAMERA_MOTIONS else "zoom_in_slow",
+                "visual_effect": shot.get("visual_effect", "cinematic_glow") if shot.get("visual_effect") in VISUAL_EFFECTS else "cinematic_glow",
+                "target_api": shot.get("target_api", "AUTO") if shot.get("target_api") in TARGET_APIS else "AUTO",
+                "scene_foley": shot.get("scene_foley", "ambient room tone"),
+                "characters_in_frame": shot.get("characters_in_frame", [c["id"] for c in characters]),
+                "primary_character": shot.get("characters_in_frame", [c["id"] for c in characters])[0] if shot.get("characters_in_frame") or characters else "",
+                "action_context": shot.get("action_context", scene.get("action", "")),
+                "generated_image": "",
+                "generated_video": "",
+                "ensemble_winner": result.models_used[result.winner_index],
+                "ensemble_scores": result.scores,
+            })
+
+        print(
+            f"   ✅ [Competitive] Decomposed scene '{scene.get('title')}' into "
+            f"{len(validated)} shots (winner: {result.models_used[result.winner_index]})"
+        )
+        return validated
+
+    except Exception as e:
+        import traceback
+        print(f"   [Ensemble] Competitive decomposition failed: {e}")
+        traceback.print_exc()
+        print("   [Ensemble] Falling back to single-model decompose_scene()")
+        return decompose_scene(scene, characters, location, global_settings, style_rules)
 
 
 def _fallback_decompose(

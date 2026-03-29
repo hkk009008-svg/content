@@ -41,6 +41,11 @@ from lip_sync import (
     upscale_video_seedvr2,
 )
 from chief_director import ChiefDirector
+from llm_ensemble import LLMEnsemble
+from vbench_evaluator import VBenchEvaluator
+from quality_tracker import QualityTracker
+from cost_tracker import CostTracker
+from scene_decomposer import competitive_decompose_scene
 
 
 def _build_transition_prompt(from_mood: str, to_mood: str) -> str:
@@ -109,6 +114,12 @@ class CinemaPipeline:
         self.current_stage = ""
         self.current_scene_id = ""
         self.current_shot_id = ""
+
+        # Quality systems
+        self.vbench = VBenchEvaluator()
+        self.quality_tracker = QualityTracker()
+        self.cost_tracker = CostTracker()
+        self.ensemble = LLMEnsemble()
 
         # Checkpoint: completed scene indices (for resume)
         self._completed_scene_indices = set()
@@ -687,7 +698,11 @@ class CinemaPipeline:
             shots = scene.get("shots", [])
             if not shots:
                 self.progress("DECOMPOSE", f"Decomposing scene into shots...", base_pct + 2)
-                shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules)
+                try:
+                    shots = competitive_decompose_scene(scene, chars_in_scene, location, settings, style_rules)
+                except Exception as e_cd:
+                    print(f"   [DECOMPOSE] Competitive decomposition failed ({e_cd}), falling back to standard")
+                    shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules)
 
                 # CHIEF DIRECTOR VALIDATION — review shots before generation
                 self.progress("DIRECTOR", "Chief Director reviewing shots...", base_pct + 3)
@@ -1009,6 +1024,24 @@ class CinemaPipeline:
                         final_vid = temp_vid
                         break
 
+                # --- VBench QUALITY EVALUATION ---
+                if final_vid:
+                    try:
+                        vbench_result = self.vbench.evaluate(final_vid, shot.get("prompt", ""), reference_images=[ref_img] if ref_img else None, shot_type=shot_type)
+                        self.quality_tracker.log_shot_quality(
+                            shot_id=shot.get("id", f"shot_{shot_index}"),
+                            video_id=self.project.get("id", "unknown"),
+                            shot_type=shot_type,
+                            target_api=str(target_api),
+                            vbench_result=vbench_result,
+                            generation_cost=0.0,
+                            llm_cost=0.0,
+                            attempt=mutation_level,
+                        )
+                        print(f"      [VBENCH] Score: {vbench_result.overall_score:.3f}")
+                    except Exception as e:
+                        print(f"      [VBENCH] Evaluation skipped: {e}")
+
                 # --- QUALITY-GATED POST-PROCESSING ---
                 if final_vid:
                     try:
@@ -1301,6 +1334,15 @@ class CinemaPipeline:
                     self.progress("CLEANUP", f"Cleaned {cleanup_result['files_deleted']} temp files ({cleanup_result['mb_freed']} MB)", 98)
             except Exception as e:
                 print(f"   [CLEANUP] Auto-cleanup failed (non-fatal): {e}")
+
+            # Log final cost summary
+            try:
+                video_id = self.project.get("id", "unknown")
+                cost_summary = self.cost_tracker.get_video_cost(video_id)
+                if cost_summary.get("total_usd", 0) > 0:
+                    print(f"\n   💰 [COST] Total: ${cost_summary['total_usd']:.2f} | LLM: ${cost_summary.get('llm_usd', 0):.2f} | API: ${cost_summary.get('api_usd', 0):.2f}")
+            except Exception:
+                pass
 
             self._clear_checkpoint()  # Success — no need for checkpoint anymore
             self.progress("COMPLETE", f"Video exported: {final_path}", 100)

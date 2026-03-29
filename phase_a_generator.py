@@ -16,7 +16,7 @@ def generate_shorts_script(ctx: dict) -> bool:
     """
     topic = ctx["topic"]
     language = ctx.get("language", "English")
-    print(f"\n✍️ [PHASE A] Writing highly-retentive script via GPT-4o in {language.upper()} for topic: {topic}")
+    print(f"\n✍️ [PHASE A] Writing cinematic script (Claude primary, GPT-4o fallback) in {language.upper()} for topic: {topic}")
     import random
     from phase_e_learning import get_top_performing_context, fetch_live_youtube_trends
     ab_memory = get_top_performing_context()
@@ -203,51 +203,84 @@ def generate_shorts_script(ctx: dict) -> bool:
         }
     }
     
-    # Inject schema into GPT-4o System Prompt
-    full_system_prompt = system_prompt + "\n\nCRITICAL RULES:\n1. You MUST output ONLY a valid, parseable JSON object.\n2. Do NOT wrap the JSON in markdown formatting blocks like ```json.\n3. The JSON MUST perfectly match this schema structure:\n" + json.dumps(tool_schema["input_schema"], indent=2)
-    
-    try:
-        import openai
-        openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        
-        response = openai_client.chat.completions.create(
-            model="gpt-4o",
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": full_system_prompt},
-                {"role": "user", "content": "Generate the masterpiece script targeting the A24 aesthetic. Output ONLY the raw JSON object."}
-            ]
-        )
-        
-        raw_output = response.choices[0].message.content.strip()
-        parsed_json = json.loads(raw_output)
-        
-        # Inject the randomly selected tone for the experiment logger
-        parsed_json['tone_used'] = tone
-        
-        # Extract the first A/B title as the master title for system compatibility
-        ab_titles = parsed_json.get("ab_test_titles", [])
-        if ab_titles and len(ab_titles) > 0:
-            parsed_json["title"] = ab_titles[0]
-            
-            print(f"\n🧪 [A/B TEST TITLES GENERATED FOR YOUTUBE STUDIO]")
-            print("Copy/Paste these into the Advanced Features 'Test & Compare' tool tomorrow:")
-            for i, t in enumerate(ab_titles):
-                print(f"   {i+1}. {t}")
-            print("="*60 + "\n")
-        else:
-            parsed_json["title"] = "Emergency Fallback Title"
-        
-        ctx["script_data"] = parsed_json
-        # Derive core state parameters immediately
-        ctx["music_vibe"] = parsed_json.get("music_vibe", "suspense")
-        ctx["video_pacing"] = parsed_json.get("video_pacing", "moderate")
-        ctx["full_text"] = f"{parsed_json['hook']} {' '.join(parsed_json['body_paragraphs'])} {parsed_json['infinite_loop_bridge']}"
-        
-        return True
-    except Exception as e:
-        print(f"❌ Error generating script via GPT-4o API: {e}")
+    # ─── PRIMARY: Claude Sonnet 4.6 via Tool Use (superior creative writing) ───
+    parsed_json = None
+
+    if os.getenv("ANTHROPIC_API_KEY"):
+        try:
+            print(f"   [PHASE A] Using Claude Sonnet (primary) for creative script generation...")
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=8192,
+                temperature=0.9,
+                system=system_prompt,
+                tools=[tool_schema],
+                messages=[
+                    {"role": "user", "content": "Generate the masterpiece script targeting the A24 aesthetic. Use the generate_script tool to output your complete script."}
+                ],
+            )
+
+            # Extract tool use result from response
+            for block in response.content:
+                if block.type == "tool_use" and block.name == "generate_script":
+                    parsed_json = block.input
+                    break
+
+            if parsed_json:
+                print(f"   [PHASE A] Claude script generation successful (tool_use)")
+        except Exception as e:
+            print(f"   ⚠️ Claude script generation failed: {e} — falling back to GPT-4o")
+
+    # ─── FALLBACK: GPT-4o with Structured Outputs (guaranteed JSON schema) ───
+    if parsed_json is None:
+        try:
+            import openai
+            print(f"   [PHASE A] Using GPT-4o (fallback) for structured script generation...")
+            openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+            full_system_prompt = system_prompt + "\n\nCRITICAL RULES:\n1. You MUST output ONLY a valid, parseable JSON object.\n2. Do NOT wrap the JSON in markdown formatting blocks like ```json.\n3. The JSON MUST perfectly match this schema structure:\n" + json.dumps(tool_schema["input_schema"], indent=2)
+
+            response = openai_client.chat.completions.create(
+                model="gpt-4o",
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": full_system_prompt},
+                    {"role": "user", "content": "Generate the masterpiece script targeting the A24 aesthetic. Output ONLY the raw JSON object."}
+                ]
+            )
+
+            raw_output = response.choices[0].message.content.strip()
+            parsed_json = json.loads(raw_output)
+            print(f"   [PHASE A] GPT-4o script generation successful")
+        except Exception as e:
+            print(f"❌ Error generating script via GPT-4o API: {e}")
+            return False
+
+    if parsed_json is None:
+        print(f"❌ Both Claude and GPT-4o script generation failed")
         return False
+
+    # ─── Post-process the script output ───
+    parsed_json['tone_used'] = tone
+
+    ab_titles = parsed_json.get("ab_test_titles", [])
+    if ab_titles and len(ab_titles) > 0:
+        parsed_json["title"] = ab_titles[0]
+
+        print(f"\n   [A/B TEST TITLES GENERATED FOR YOUTUBE STUDIO]")
+        print("   Copy/Paste these into the Advanced Features 'Test & Compare' tool tomorrow:")
+        for i, t in enumerate(ab_titles):
+            print(f"   {i+1}. {t}")
+        print("="*60 + "\n")
+    else:
+        parsed_json["title"] = "Emergency Fallback Title"
+
+    ctx["script_data"] = parsed_json
+    ctx["music_vibe"] = parsed_json.get("music_vibe", "suspense")
+    ctx["video_pacing"] = parsed_json.get("video_pacing", "moderate")
+    ctx["full_text"] = f"{parsed_json['hook']} {' '.join(parsed_json['body_paragraphs'])} {parsed_json['infinite_loop_bridge']}"
+
+    return True
 
 # --- Testing the Module ---
 if __name__ == "__main__":

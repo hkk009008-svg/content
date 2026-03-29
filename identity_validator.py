@@ -32,6 +32,9 @@ try:
 except ImportError:
     DEEPFACE_AVAILABLE = False
 
+# Vision-LLM identity validation is always available as primary fallback
+from phase_c_vision import validate_identity_vision
+
 
 class IdentityValidator:
     """
@@ -60,13 +63,17 @@ class IdentityValidator:
     ) -> IdentityValidationResult:
         """
         Validate identity in a single generated IMAGE against a reference.
+        Uses DeepFace when available, falls back to Claude Vision identity check.
         Backward-compatible: result.get("passed") and result.get("similarity") work.
         """
-        if not DEEPFACE_AVAILABLE:
-            return self._bypass_result(shot_type, threshold or 0.70)
-
         if not os.path.exists(image_path) or not os.path.exists(reference_path):
-            return self._bypass_result(shot_type, threshold or 0.70)
+            return self._no_file_result(shot_type, threshold or 0.70)
+
+        if not DEEPFACE_AVAILABLE:
+            return self._vision_llm_validate_image(
+                image_path, reference_path, character_id, character_name,
+                shot_type, threshold or get_threshold_for_shot(shot_type),
+            )
 
         if threshold is None:
             threshold = get_threshold_for_shot(shot_type)
@@ -74,7 +81,7 @@ class IdentityValidator:
         # Get reference embedding
         ref_emb = self._get_embedding(reference_path, character_id)
         if ref_emb is None:
-            return self._bypass_result(shot_type, threshold)
+            return self._no_file_result(shot_type, threshold)
 
         # Analyze the image as a single "frame"
         frame_sample = self._analyze_single_image(
@@ -130,9 +137,14 @@ class IdentityValidator:
             attempt: Current retry attempt (0-based).
             max_attempts: Total retries planned.
         """
-        if not DEEPFACE_AVAILABLE or not character_configs:
-            th = threshold or get_threshold_for_shot(shot_type, mode, attempt, max_attempts)
-            return self._bypass_result(shot_type, th)
+        th = threshold or get_threshold_for_shot(shot_type, mode, attempt, max_attempts)
+        if not character_configs:
+            return self._no_file_result(shot_type, th)
+
+        if not DEEPFACE_AVAILABLE:
+            return self._vision_llm_validate_video(
+                video_path, character_configs, shot_type, th,
+            )
 
         if threshold is None:
             threshold = get_threshold_for_shot(shot_type, mode, attempt, max_attempts)
@@ -151,7 +163,7 @@ class IdentityValidator:
                 ref_embeddings[cid] = emb
 
         if not ref_embeddings:
-            return self._bypass_result(shot_type, threshold)
+            return self._no_file_result(shot_type, threshold)
 
         # Open video and compute adaptive sample positions
         cap = cv2.VideoCapture(video_path)
@@ -668,10 +680,185 @@ class IdentityValidator:
             return +0.10  # Clear failure
 
     @staticmethod
-    def _bypass_result(shot_type: str, threshold: float) -> IdentityValidationResult:
-        """Return a passing result when validation is unavailable."""
+    def _no_file_result(shot_type: str, threshold: float) -> IdentityValidationResult:
+        """Return a passing result when reference/input files are missing."""
         return IdentityValidationResult(
             passed=True, overall_score=1.0, character_results={},
             frames_sampled=0, video_duration_seconds=0.0,
             shot_type=shot_type, threshold_used=threshold,
         )
+
+    def _vision_llm_validate_image(
+        self,
+        image_path: str,
+        reference_path: str,
+        character_id: str,
+        character_name: str,
+        shot_type: str,
+        threshold: float,
+    ) -> IdentityValidationResult:
+        """
+        Vision-LLM identity validation when DeepFace is unavailable.
+        Uses Claude Sonnet Vision to compare reference vs generated face.
+        Returns real scores (never fake 1.0) to preserve feedback loop integrity.
+        """
+        print(f"   [IDENTITY] Using Claude Vision (DeepFace unavailable)")
+        result = validate_identity_vision(reference_path, image_path)
+
+        confidence = result.get("confidence", 0.0)
+        matched = confidence >= threshold
+        failure = FailureReason.PASSED if matched else FailureReason.WRONG_PERSON
+
+        # Map confidence issues to failure reasons
+        issues = result.get("issues", [])
+        if any("angle" in i.lower() or "profile" in i.lower() for i in issues):
+            failure = FailureReason.FACE_ANGLE_EXTREME if not matched else failure
+        if any("occlu" in i.lower() for i in issues):
+            failure = FailureReason.OCCLUSION if not matched else failure
+        if any("no face" in i.lower() or "not visible" in i.lower() for i in issues):
+            failure = FailureReason.NO_FACE_DETECTED if not matched else failure
+
+        frame_sample = FrameSample(
+            frame_index=0, frame_position_ratio=0.0,
+            face_detected=confidence > 0.1,
+            face_confidence=confidence,
+            face_area_ratio=0.0,
+            face_angle_estimate="unknown",
+            similarity=confidence,
+            matched=matched,
+            failure_reason=failure,
+        )
+
+        char_result = CharacterIdentityResult(
+            character_id=character_id,
+            character_name=character_name or character_id,
+            best_similarity=confidence,
+            mean_similarity=confidence,
+            min_similarity=confidence,
+            frame_results=[frame_sample],
+            matched=matched,
+            primary_failure_reason=failure,
+            suggested_pulid_adjustment=self._compute_pulid_delta(confidence, matched),
+        )
+
+        validation_result = IdentityValidationResult(
+            passed=matched,
+            overall_score=confidence,
+            character_results={character_id: char_result} if character_id else {},
+            frames_sampled=1,
+            video_duration_seconds=0.0,
+            shot_type=shot_type,
+            threshold_used=threshold,
+        )
+
+        self.history.append(validation_result)
+        icon = "✅" if matched else "❌"
+        print(f"      {icon} Vision-LLM identity: confidence={confidence:.3f} (threshold={threshold})")
+        return validation_result
+
+    def _vision_llm_validate_video(
+        self,
+        video_path: str,
+        character_configs: list,
+        shot_type: str,
+        threshold: float,
+    ) -> IdentityValidationResult:
+        """
+        Vision-LLM video identity validation when DeepFace is unavailable.
+        Extracts frames at 10%, 50%, 90% and validates each against references.
+        """
+        print(f"   [IDENTITY] Using Claude Vision for video (DeepFace unavailable)")
+
+        cap = cv2.VideoCapture(video_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
+        duration = total_frames / max(fps, 1.0)
+
+        if total_frames == 0:
+            cap.release()
+            return IdentityValidationResult(
+                passed=False, overall_score=0.0, character_results={},
+                frames_sampled=0, video_duration_seconds=0.0,
+                shot_type=shot_type, threshold_used=threshold,
+            )
+
+        # Sample 3 frames: 10%, 50%, 90%
+        sample_positions = [0.1, 0.5, 0.9]
+        frame_paths = []
+
+        for pos in sample_positions:
+            frame_idx = max(0, min(int(pos * total_frames), total_frames - 1))
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if ret:
+                tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+                cv2.imwrite(tmp.name, frame)
+                frame_paths.append(tmp.name)
+        cap.release()
+
+        if not frame_paths:
+            return IdentityValidationResult(
+                passed=False, overall_score=0.0, character_results={},
+                frames_sampled=0, video_duration_seconds=duration,
+                shot_type=shot_type, threshold_used=threshold,
+            )
+
+        # Validate middle frame (best representative) per character
+        character_results = {}
+        mid_frame = frame_paths[len(frame_paths) // 2]
+
+        for cfg in character_configs:
+            cid = cfg["id"]
+            ref_img = cfg.get("reference_image", "")
+            char_name = cfg.get("name", cid)
+
+            if not ref_img or not os.path.exists(ref_img):
+                continue
+
+            result = validate_identity_vision(ref_img, mid_frame)
+            confidence = result.get("confidence", 0.0)
+            matched = confidence >= threshold
+            failure = FailureReason.PASSED if matched else FailureReason.WRONG_PERSON
+
+            frame_sample = FrameSample(
+                frame_index=0, frame_position_ratio=0.5,
+                face_detected=confidence > 0.1,
+                face_confidence=confidence,
+                face_area_ratio=0.0, face_angle_estimate="unknown",
+                similarity=confidence, matched=matched,
+                failure_reason=failure,
+            )
+
+            character_results[cid] = CharacterIdentityResult(
+                character_id=cid, character_name=char_name,
+                best_similarity=confidence, mean_similarity=confidence,
+                min_similarity=confidence, frame_results=[frame_sample],
+                matched=matched, primary_failure_reason=failure,
+                suggested_pulid_adjustment=self._compute_pulid_delta(confidence, matched),
+            )
+
+        # Cleanup temp frames
+        for fp in frame_paths:
+            if os.path.exists(fp):
+                os.remove(fp)
+
+        scores = [cr.best_similarity for cr in character_results.values()]
+        overall = sum(scores) / len(scores) if scores else 0.0
+        all_passed = all(cr.matched for cr in character_results.values()) if character_results else True
+
+        validation_result = IdentityValidationResult(
+            passed=all_passed, overall_score=overall,
+            character_results=character_results,
+            frames_sampled=len(frame_paths),
+            video_duration_seconds=duration,
+            shot_type=shot_type, threshold_used=threshold,
+        )
+
+        self.history.append(validation_result)
+
+        for cid, cr in character_results.items():
+            icon = "✅" if cr.matched else "❌"
+            reason_str = f" [{cr.primary_failure_reason.value}]" if not cr.matched else ""
+            print(f"      {icon} {cr.character_name}: confidence={cr.best_similarity:.3f} (threshold={threshold}){reason_str}")
+
+        return validation_result

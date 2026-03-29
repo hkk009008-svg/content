@@ -25,8 +25,6 @@ def validate_identity(video_path, character_id, threshold=0.60):
     DEPRECATED: Use IdentityValidator.validate_video() for rich diagnostics.
     Kept for backward compatibility — returns bool.
     """
-    if not VISION_AVAILABLE:
-        return True
 
     char_db_path = "characters.json"
     if not os.path.exists(char_db_path):
@@ -59,8 +57,6 @@ def validate_identity_image(image_path: str, reference_path: str, threshold: flo
     DEPRECATED: Use IdentityValidator.validate_image() for rich diagnostics.
     Kept for backward compatibility — returns {"passed": bool, "similarity": float}.
     """
-    if not VISION_AVAILABLE:
-        return {"passed": True, "similarity": 1.0}
 
     if not os.path.exists(image_path) or not os.path.exists(reference_path):
         return {"passed": True, "similarity": 0.0}
@@ -75,8 +71,6 @@ def validate_multi_identity(video_path, character_configs: list, threshold=0.55)
     DEPRECATED: Use IdentityValidator.validate_video() for rich diagnostics.
     Kept for backward compatibility — returns {"passed": bool, "results": {char_id: {...}}}.
     """
-    if not VISION_AVAILABLE:
-        return {"passed": True, "results": {}}
 
     if not character_configs:
         return {"passed": True, "results": {}}
@@ -166,13 +160,26 @@ if __name__ == "__main__":
 
 def quality_control_image(image_path: str, prompt_text: str = "") -> bool:
     """
-    Validates structural integrity of a generated latent frame.
-    Given TensorFlow limitations over PIP on MacOS Apple Silicon, this acts as a
-    graceful passthrough if proper vision validation routines are missing.
+    Validates structural integrity of a generated latent frame using GPT-4o Vision.
+    Returns True if image passes quality threshold (score >= 7/10), False otherwise.
     """
-    if not VISION_AVAILABLE:
+    if not os.path.exists(image_path):
+        print(f"[QC] WARNING: Image not found: {image_path} — skipping QC")
         return True
-    return True
+
+    result = validate_shot_quality_vision(image_path, prompt_text)
+    passed = result.get("pass", True)
+    score = result.get("score", 7)
+    source = result.get("source", "unknown")
+
+    if not passed:
+        print(f"[QC] REJECTED (score={score}/10, source={source})")
+        for issue in result.get("issues", []):
+            print(f"   - {issue}")
+    else:
+        print(f"[QC] PASSED (score={score}/10, source={source})")
+
+    return passed
 
 
 # ======================================================================
