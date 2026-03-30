@@ -284,7 +284,7 @@ class KlingNativeAPI:
             task_id = self.create_image_to_video(image_path, prompt, **kwargs)
             print(f"[KLING-NATIVE] Task {task_id} queued...")
 
-            timeout = kwargs.pop("timeout", 600)
+            timeout = kwargs.pop("timeout", 180)
             result = self.poll_task(task_id, timeout=timeout)
 
             # Extract video URL from result

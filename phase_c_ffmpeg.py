@@ -196,11 +196,11 @@ def generate_ai_video(
                 )
 
         # All APIs failed — retry up to 2 times with quota cooldown
-        if _cascade_retries >= 2:
-            print("   [WARN] All video APIs exhausted after 2 full cascade retries.")
+        if _cascade_retries >= 1:
+            print("   [WARN] All video APIs exhausted after 1 full cascade retry.")
             return None
-        print(f"   [WARN] All APIs exhausted. Waiting 2 min for refresh (retry {_cascade_retries + 1}/2)...")
-        time.sleep(120)
+        print(f"   [WARN] All APIs exhausted. Waiting 30s for refresh (retry {_cascade_retries + 1}/2)...")
+        time.sleep(30)
         first_api = (video_fallbacks or ["KLING_NATIVE"])[0]
         return generate_ai_video(
             image_path, camera_motion, first_api, output_mp4, pacing,
