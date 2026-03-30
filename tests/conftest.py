@@ -61,4 +61,21 @@ def quality_tracker():
 
     tracker = QualityTracker(db_path=":memory:")
     yield tracker
-    tracker.close()
+    if tracker._persistent_conn:
+        tracker._persistent_conn.close()
+
+
+@pytest.fixture
+def evaluator_vbench_result():
+    """A sample vbench_evaluator.VBenchResult with realistic scores."""
+    from vbench_evaluator import VBenchResult
+
+    return VBenchResult(
+        identity_consistency=0.95,
+        temporal_flicker=0.88,
+        motion_smoothness=0.76,
+        aesthetic_quality=0.82,
+        prompt_adherence=0.91,
+        physics_plausibility=0.70,
+        overall_score=0.85,
+    )

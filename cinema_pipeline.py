@@ -43,7 +43,7 @@ from lip_sync import (
 from chief_director import ChiefDirector
 from llm_ensemble import LLMEnsemble
 from vbench_evaluator import VBenchEvaluator
-from quality_tracker import QualityTracker
+from quality_tracker import QualityTracker, map_vbench_result
 from cost_tracker import CostTracker
 from scene_decomposer import competitive_decompose_scene
 
@@ -1046,7 +1046,8 @@ class CinemaPipeline:
                 # --- VBench QUALITY EVALUATION ---
                 if final_vid:
                     try:
-                        vbench_result = self.vbench.evaluate(final_vid, shot.get("prompt", ""), reference_images=[ref_img] if ref_img else None, shot_type=shot_type)
+                        vbench_raw = self.vbench.evaluate(final_vid, shot.get("prompt", ""), reference_images=[ref_img] if ref_img else None, shot_type=shot_type)
+                        vbench_result = map_vbench_result(vbench_raw)
                         self.quality_tracker.log_shot_quality(
                             shot_id=shot.get("id", f"shot_{shot_index}"),
                             video_id=self.project.get("id", "unknown"),
@@ -1057,7 +1058,7 @@ class CinemaPipeline:
                             llm_cost=0.0,
                             attempt=mutation_level,
                         )
-                        print(f"      [VBENCH] Score: {vbench_result.overall_score:.3f}")
+                        print(f"      [VBENCH] Score: {vbench_result.overall_vbench:.3f}")
                     except Exception as e:
                         print(f"      [VBENCH] Evaluation skipped: {e}")
 

@@ -57,6 +57,38 @@ VBENCH_DIMENSIONS = [
 
 
 # ---------------------------------------------------------------------------
+# Field mapping from vbench_evaluator.VBenchResult → quality_tracker.VBenchResult
+# ---------------------------------------------------------------------------
+
+VBENCH_EVALUATOR_FIELD_MAP = {
+    "identity_consistency": "identity_score",
+    "temporal_flicker": "flicker_score",
+    "motion_smoothness": "motion_score",
+    "aesthetic_quality": "aesthetic_score",
+    "prompt_adherence": "prompt_adherence_score",
+    "physics_plausibility": "physics_score",
+    "overall_score": "overall_vbench",
+}
+
+
+def map_vbench_result(evaluator_result) -> "VBenchResult":
+    """Convert a vbench_evaluator.VBenchResult into a quality_tracker.VBenchResult.
+
+    Accepts either a vbench_evaluator.VBenchResult dataclass or a plain dict
+    with the evaluator's field names.
+    """
+    if isinstance(evaluator_result, dict):
+        src = evaluator_result
+    else:
+        src = {k: getattr(evaluator_result, k, 0.0) for k in VBENCH_EVALUATOR_FIELD_MAP}
+
+    return VBenchResult(**{
+        tracker_field: float(src.get(eval_field, 0.0))
+        for eval_field, tracker_field in VBENCH_EVALUATOR_FIELD_MAP.items()
+    })
+
+
+# ---------------------------------------------------------------------------
 # QualityTracker
 # ---------------------------------------------------------------------------
 
