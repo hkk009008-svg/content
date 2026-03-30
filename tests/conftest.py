@@ -62,3 +62,33 @@ def quality_tracker():
     tracker = QualityTracker(db_path=":memory:")
     yield tracker
     tracker.close()
+
+
+# ---------------------------------------------------------------------------
+# Synthetic frame fixtures for signal-level tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def synthetic_stable_frames():
+    """Five near-identical 128x128 frames (minimal variation)."""
+    import numpy as np
+
+    frames = []
+    for i in range(5):
+        frame = np.full((128, 128, 3), 128, dtype=np.uint8)
+        frame[:, :, 0] = 128 + i
+        frames.append(frame)
+    return frames
+
+
+@pytest.fixture
+def synthetic_flickery_frames():
+    """Five alternating bright/dark 128x128 frames."""
+    import numpy as np
+
+    frames = []
+    for i in range(5):
+        val = 50 if i % 2 == 0 else 200
+        frames.append(np.full((128, 128, 3), val, dtype=np.uint8))
+    return frames

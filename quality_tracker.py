@@ -116,7 +116,49 @@ class QualityTracker:
                     generation_cost_usd REAL DEFAULT 0.0,
                     llm_cost_usd REAL DEFAULT 0.0,
                     total_cost_usd REAL DEFAULT 0.0,
+                    -- Parameter configuration (for tuning data collection)
+                    pulid_weight REAL,
+                    guidance_scale REAL,
+                    pag_scale REAL,
+                    denoise_strength REAL,
+                    controlnet_depth REAL,
+                    ip_adapter_weight REAL,
+                    diffusion_steps INTEGER,
+                    color_grade_preset TEXT,
+                    voice_stability REAL,
+                    voice_style REAL,
+                    -- Production timing
+                    generation_time_seconds REAL,
+                    cascade_depth INTEGER DEFAULT 0,
                     -- Meta
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            # Parameter sweep results table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS parameter_sweep_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    sweep_id TEXT,
+                    parameter_name TEXT,
+                    parameter_value REAL,
+                    shot_type TEXT,
+                    target_api TEXT,
+                    -- VBench dimensions
+                    identity_score REAL DEFAULT 0.0,
+                    flicker_score REAL DEFAULT 0.0,
+                    motion_score REAL DEFAULT 0.0,
+                    aesthetic_score REAL DEFAULT 0.0,
+                    prompt_adherence_score REAL DEFAULT 0.0,
+                    physics_score REAL DEFAULT 0.0,
+                    overall_vbench REAL DEFAULT 0.0,
+                    -- Coherence
+                    coherence_score REAL DEFAULT 0.0,
+                    color_drift REAL DEFAULT 0.0,
+                    -- Cost & timing
+                    cost_usd REAL DEFAULT 0.0,
+                    generation_time_seconds REAL DEFAULT 0.0,
+                    -- Extra metadata (JSON)
+                    extra_json TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -140,11 +182,21 @@ class QualityTracker:
         generation_cost: float = 0.0,
         llm_cost: float = 0.0,
         attempt: int = 1,
+        param_config: Optional[Dict] = None,
     ) -> None:
-        """Insert or replace a shot's quality record."""
+        """Insert or replace a shot's quality record.
+
+        Args:
+            param_config: Optional dict of generation parameters for tuning data.
+                Supported keys: pulid_weight, guidance_scale, pag_scale,
+                denoise_strength, controlnet_depth, ip_adapter_weight,
+                diffusion_steps, color_grade_preset, voice_stability,
+                voice_style, generation_time_seconds, cascade_depth.
+        """
 
         vb = vbench_result or VBenchResult()
         total_cost = generation_cost + llm_cost
+        pc = param_config or {}
 
         conn = self._connect()
         try:
@@ -157,11 +209,21 @@ class QualityTracker:
                     overall_vbench,
                     identity_similarity, coherence_score,
                     generation_cost_usd, llm_cost_usd, total_cost_usd,
+                    pulid_weight, guidance_scale, pag_scale,
+                    denoise_strength, controlnet_depth, ip_adapter_weight,
+                    diffusion_steps, color_grade_preset,
+                    voice_stability, voice_style,
+                    generation_time_seconds, cascade_depth,
                     created_at
                 ) VALUES (?, ?, ?, ?, ?,
                           ?, ?, ?, ?, ?, ?, ?,
                           ?, ?,
                           ?, ?, ?,
+                          ?, ?, ?,
+                          ?, ?, ?,
+                          ?, ?,
+                          ?, ?,
+                          ?, ?,
                           ?)
                 """,
                 (
@@ -171,12 +233,93 @@ class QualityTracker:
                     vb.overall_vbench,
                     identity_similarity, coherence_score,
                     generation_cost, llm_cost, total_cost,
+                    pc.get("pulid_weight"), pc.get("guidance_scale"), pc.get("pag_scale"),
+                    pc.get("denoise_strength"), pc.get("controlnet_depth"), pc.get("ip_adapter_weight"),
+                    pc.get("diffusion_steps"), pc.get("color_grade_preset"),
+                    pc.get("voice_stability"), pc.get("voice_style"),
+                    pc.get("generation_time_seconds"), pc.get("cascade_depth", 0),
                     datetime.utcnow().isoformat(),
                 ),
             )
             conn.commit()
         finally:
             self._close(conn)
+
+    # ------------------------------------------------------------------
+    # (a2) log_sweep_result
+    # ------------------------------------------------------------------
+
+    def log_sweep_result(
+        self,
+        sweep_id: str,
+        parameter_name: str,
+        parameter_value: float,
+        shot_type: str,
+        target_api: str = "",
+        vbench_result: Optional[VBenchResult] = None,
+        coherence_score: float = 0.0,
+        color_drift: float = 0.0,
+        cost_usd: float = 0.0,
+        generation_time_seconds: float = 0.0,
+        extra_json: str = "",
+    ) -> None:
+        """Log a parameter sweep data point."""
+
+        vb = vbench_result or VBenchResult()
+
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO parameter_sweep_results (
+                    sweep_id, parameter_name, parameter_value, shot_type, target_api,
+                    identity_score, flicker_score, motion_score,
+                    aesthetic_score, prompt_adherence_score, physics_score,
+                    overall_vbench,
+                    coherence_score, color_drift,
+                    cost_usd, generation_time_seconds,
+                    extra_json, created_at
+                ) VALUES (?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?,
+                          ?, ?,
+                          ?, ?)
+                """,
+                (
+                    sweep_id, parameter_name, parameter_value, shot_type, target_api,
+                    vb.identity_score, vb.flicker_score, vb.motion_score,
+                    vb.aesthetic_score, vb.prompt_adherence_score, vb.physics_score,
+                    vb.overall_vbench,
+                    coherence_score, color_drift,
+                    cost_usd, generation_time_seconds,
+                    extra_json, datetime.utcnow().isoformat(),
+                ),
+            )
+            conn.commit()
+        finally:
+            self._close(conn)
+
+    # ------------------------------------------------------------------
+    # (a3) get_sweep_results
+    # ------------------------------------------------------------------
+
+    def get_sweep_results(self, sweep_id: str = None) -> List[Dict]:
+        """Retrieve parameter sweep results, optionally filtered by sweep_id."""
+
+        if sweep_id:
+            sql = "SELECT * FROM parameter_sweep_results WHERE sweep_id = ? ORDER BY created_at"
+            params = (sweep_id,)
+        else:
+            sql = "SELECT * FROM parameter_sweep_results ORDER BY created_at"
+            params = ()
+
+        conn = self._connect()
+        try:
+            rows = conn.execute(sql, params).fetchall()
+        finally:
+            self._close(conn)
+
+        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     # (b) get_baseline
@@ -458,3 +601,13 @@ class QualityTracker:
             }
             for r in rows
         ]
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def close(self):
+        """Close the persistent connection (if any)."""
+        if self._persistent_conn is not None:
+            self._persistent_conn.close()
+            self._persistent_conn = None
