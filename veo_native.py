@@ -99,9 +99,12 @@ class VeoNativeAPI:
             operation = self.client.models.generate_videos(**generate_kwargs)
             print(f"[VEO-NATIVE] Operation submitted, polling for completion...")
 
-            # Poll until done
+            # Poll until done (max 20 minutes to avoid indefinite hangs)
             poll_count = 0
+            max_polls = 120  # 120 * 10s = 1200s = 20 minutes
             while not operation.done:
+                if poll_count >= max_polls:
+                    raise TimeoutError(f"VEO operation timed out after {poll_count * 10}s")
                 time.sleep(10)
                 poll_count += 1
                 operation = self.client.operations.get(operation)
@@ -192,7 +195,10 @@ class VeoNativeAPI:
             print(f"[VEO-NATIVE] 4K operation submitted, polling for completion...")
 
             poll_count = 0
+            max_polls = 120  # 120 * 10s = 1200s = 20 minutes
             while not operation.done:
+                if poll_count >= max_polls:
+                    raise TimeoutError(f"VEO 4K operation timed out after {poll_count * 10}s")
                 time.sleep(10)
                 poll_count += 1
                 operation = self.client.operations.get(operation)
@@ -302,7 +308,10 @@ class VeoNativeAPI:
             print(f"[VEO-NATIVE] Frame interpolation submitted, polling...")
 
             poll_count = 0
+            max_polls = 120  # 120 * 10s = 1200s = 20 minutes
             while not operation.done:
+                if poll_count >= max_polls:
+                    raise TimeoutError(f"VEO interpolation timed out after {poll_count * 10}s")
                 time.sleep(10)
                 poll_count += 1
                 operation = self.client.operations.get(operation)
@@ -387,7 +396,10 @@ class VeoNativeAPI:
             print(f"[VEO-NATIVE] Dialogue operation submitted, polling...")
 
             poll_count = 0
+            max_polls = 120  # 120 * 10s = 1200s = 20 minutes
             while not operation.done:
+                if poll_count >= max_polls:
+                    raise TimeoutError(f"VEO dialogue operation timed out after {poll_count * 10}s")
                 time.sleep(10)
                 poll_count += 1
                 operation = self.client.operations.get(operation)
