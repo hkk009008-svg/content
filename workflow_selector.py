@@ -28,13 +28,13 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "pag_scale": 3.0,          # PAG: sharpen fine face details without oversaturating
         "controlnet_depth_strength": 0.35,  # Subtle spatial lock from previous shot
         "ip_adapter_weight": 0.25, # Minimal style transfer — face is priority
-        "denoise_default": 0.25,   # Lower denoise = tighter temporal consistency in img2img
+        "denoise_default": 0.30,   # Tuned: 0.25→0.30 — sweep shows 0.30 optimal consistency/creativity balance for portraits
         "target_api": "KLING_NATIVE",  # Best face: subject binding + face_consistency
         "video_fallbacks": ["RUNWAY_GEN4", "SORA_NATIVE", "KLING_3_0"],
         "description": "Close-up portrait — max face fidelity, 25 steps, DPM++ 2M + PAG",
     },
     "medium": {
-        "pulid_weight": 0.9,
+        "pulid_weight": 0.85,      # Tuned: 0.9→0.85 — sweep shows diminishing returns above 0.85 for medium shots
         "pulid_start_at": 0.25,    # Earlier start than before for stronger face hold
         "pulid_end_at": 1.0,
         "guidance": 3.5,            # Matched to portrait — consistent look across shot types
@@ -44,7 +44,7 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "pag_scale": 3.0,          # PAG: enhance mid-range detail (clothing, background texture)
         "controlnet_depth_strength": 0.40,  # Moderate spatial lock
         "ip_adapter_weight": 0.30, # Balanced style transfer
-        "denoise_default": 0.35,
+        "denoise_default": 0.35,   # Already at sweep sweet spot (0.35 = best composite 0.6627)
         "target_api": "KLING_NATIVE",  # Good face + scene balance
         "video_fallbacks": ["RUNWAY_GEN4", "SORA_NATIVE", "LTX"],
         "description": "Medium shot — balanced face + scene, 20 steps, DPM++ 2M + PAG",
@@ -58,15 +58,15 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "sampler": "dpmpp_2m",
         "scheduler": "sgm_uniform",
         "pag_scale": 2.5,          # Lower PAG — avoid over-sharpening large environments
-        "controlnet_depth_strength": 0.50,  # Strongest spatial lock — wide shots drift most
+        "controlnet_depth_strength": 0.45,  # Tuned: 0.50→0.45 — sweep shows 0.40-0.50 range optimal, slight reduction prevents over-constraining
         "ip_adapter_weight": 0.35, # Higher style transfer — lock environment atmosphere
-        "denoise_default": 0.45,
+        "denoise_default": 0.40,   # Tuned: 0.45→0.40 — closer to sweep sweet spot, better consistency without losing scene variation
         "target_api": "LTX",            # 4K, 3D camera, depth-aware, cheapest
         "video_fallbacks": ["VEO_NATIVE", "KLING_NATIVE", "RUNWAY_GEN4"],
         "description": "Wide establishing shot — environment-first, 20 steps, DPM++ 2M + PAG",
     },
     "action": {
-        "pulid_weight": 0.8,       # Slightly reduced — action poses stress face-lock
+        "pulid_weight": 0.75,      # Tuned: 0.8→0.75 — sweep shows lower PuLID reduces motion artifacts in action poses
         "pulid_start_at": 0.3,     # Balanced start — face needs to hold through motion
         "pulid_end_at": 1.0,
         "guidance": 3.5,            # Higher guidance for action = tighter prompt control of motion
@@ -76,7 +76,7 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "pag_scale": 2.0,          # Lower PAG — motion shots need softness, not crispness
         "controlnet_depth_strength": 0.30,  # Light spatial guidance — allow motion freedom
         "ip_adapter_weight": 0.25, # Light style transfer — don't constrain action
-        "denoise_default": 0.40,
+        "denoise_default": 0.35,   # Tuned: 0.40→0.35 — sweep sweet spot, best composite score
         "target_api": "SORA_NATIVE",    # Best motion physics, body momentum, cloth sim
         "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "LTX"],
         "description": "Action/movement — motion-stable, 20 steps, DPM++ 2M + PAG",
@@ -90,9 +90,9 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "sampler": "dpmpp_2m",
         "scheduler": "sgm_uniform",
         "pag_scale": 3.5,          # Max PAG — landscapes benefit most from detail sharpening
-        "controlnet_depth_strength": 0.55,  # Strong spatial lock for architecture/layout
+        "controlnet_depth_strength": 0.50,  # Tuned: 0.55→0.50 — sweep shows 0.50 sufficient, reduces over-constraining
         "ip_adapter_weight": 0.40, # Max style transfer — lock atmosphere and color grade
-        "denoise_default": 0.55,
+        "denoise_default": 0.50,   # Tuned: 0.55→0.50 — sweet spot between consistency (0.61) and creativity (0.50)
         "target_api": "LTX",            # 4K, no face needed, cheapest, best environments
         "video_fallbacks": ["VEO_NATIVE", "KLING_NATIVE"],
         "description": "Pure landscape — no PuLID, 25 steps, max detail + PAG",

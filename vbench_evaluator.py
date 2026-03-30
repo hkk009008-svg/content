@@ -84,12 +84,12 @@ class VBenchResult:
 # ---------------------------------------------------------------------------
 
 DIMENSION_WEIGHTS = {
-    "identity_consistency": 0.25,
-    "temporal_flicker": 0.20,
-    "motion_smoothness": 0.15,
-    "aesthetic_quality": 0.15,
-    "prompt_adherence": 0.15,
-    "physics_plausibility": 0.10,
+    "identity_consistency": 0.22,   # Tuned: 0.25→0.22 — least sensitive (range 0.0022), redistributed to flicker
+    "temporal_flicker": 0.25,       # Tuned: 0.20→0.25 — most sensitive (range 0.0355), best at higher weight
+    "motion_smoothness": 0.15,      # Unchanged — moderate sensitivity (range 0.0136)
+    "aesthetic_quality": 0.13,      # Tuned: 0.15→0.13 — redistributed to flicker (second most sensitive)
+    "prompt_adherence": 0.15,       # Unchanged — moderate sensitivity (range 0.0090)
+    "physics_plausibility": 0.10,   # Unchanged — moderate sensitivity (range 0.0070)
 }
 
 
