@@ -144,3 +144,67 @@ class TestGetThresholdForShot:
         thresholds = SHOT_TYPE_THRESHOLDS[shot_type]
         for mode in ("strict", "standard", "lenient"):
             assert mode in thresholds, f"{shot_type} missing mode '{mode}'"
+
+
+# --- Parametric boundary tests ---
+
+
+class TestThresholdOrdering:
+    """Verify strict > standard > lenient for all shot types."""
+
+    @pytest.mark.parametrize("shot_type", [st for st in SHOT_TYPE_THRESHOLDS if st != "landscape"])
+    def test_strict_greater_than_standard(self, shot_type):
+        t = SHOT_TYPE_THRESHOLDS[shot_type]
+        assert t["strict"] > t["standard"], (
+            f"{shot_type}: strict ({t['strict']}) should be > standard ({t['standard']})"
+        )
+
+    @pytest.mark.parametrize("shot_type", [st for st in SHOT_TYPE_THRESHOLDS if st != "landscape"])
+    def test_standard_greater_than_lenient(self, shot_type):
+        t = SHOT_TYPE_THRESHOLDS[shot_type]
+        assert t["standard"] > t["lenient"], (
+            f"{shot_type}: standard ({t['standard']}) should be > lenient ({t['lenient']})"
+        )
+
+
+class TestThresholdDegradation:
+    """Verify thresholds degrade monotonically across retry attempts."""
+
+    @pytest.mark.parametrize("shot_type", [st for st in SHOT_TYPE_THRESHOLDS if st != "landscape"])
+    @pytest.mark.parametrize("mode", ["strict", "standard", "lenient"])
+    def test_monotonic_degradation(self, shot_type, mode):
+        max_attempts = 4
+        prev = float("inf")
+        for attempt in range(max_attempts):
+            threshold = get_threshold_for_shot(shot_type, mode=mode, attempt=attempt, max_attempts=max_attempts)
+            assert threshold <= prev + 1e-9, (
+                f"{shot_type}/{mode}: attempt {attempt} threshold ({threshold}) "
+                f"should be <= attempt {attempt-1} ({prev})"
+            )
+            prev = threshold
+
+    @pytest.mark.parametrize("shot_type", [st for st in SHOT_TYPE_THRESHOLDS if st != "landscape"])
+    def test_final_attempt_equals_lenient(self, shot_type):
+        max_attempts = 4
+        threshold = get_threshold_for_shot(
+            shot_type, mode="strict", attempt=max_attempts - 1, max_attempts=max_attempts
+        )
+        expected = SHOT_TYPE_THRESHOLDS[shot_type]["lenient"]
+        assert abs(threshold - expected) < 1e-9, (
+            f"{shot_type}: final attempt ({threshold}) should equal lenient ({expected})"
+        )
+
+    def test_landscape_always_zero_across_attempts(self):
+        for attempt in range(5):
+            for mode in ("strict", "standard", "lenient"):
+                threshold = get_threshold_for_shot("landscape", mode=mode, attempt=attempt, max_attempts=5)
+                assert threshold == 0.0
+
+
+class TestThresholdPositive:
+    """All non-landscape thresholds should be positive."""
+
+    @pytest.mark.parametrize("shot_type", [st for st in SHOT_TYPE_THRESHOLDS if st != "landscape"])
+    @pytest.mark.parametrize("mode", ["strict", "standard", "lenient"])
+    def test_all_thresholds_positive(self, shot_type, mode):
+        assert SHOT_TYPE_THRESHOLDS[shot_type][mode] > 0
