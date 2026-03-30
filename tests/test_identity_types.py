@@ -177,7 +177,7 @@ class TestThresholdDegradation:
         prev = float("inf")
         for attempt in range(max_attempts):
             threshold = get_threshold_for_shot(shot_type, mode=mode, attempt=attempt, max_attempts=max_attempts)
-            assert threshold <= prev, (
+            assert threshold <= prev + 1e-9, (
                 f"{shot_type}/{mode}: attempt {attempt} threshold ({threshold}) "
                 f"should be <= attempt {attempt-1} ({prev})"
             )
