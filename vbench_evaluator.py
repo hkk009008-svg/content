@@ -151,8 +151,11 @@ class VBenchEvaluator:
     Uses OpenCV for signal-level metrics and vision LLMs for semantic metrics.
     """
 
-    def __init__(self, verbose: bool = True):
+    def __init__(self, verbose: bool = True, flicker_threshold: float = 0.85,
+                 regression_tolerance: float = 0.05):
         self.verbose = verbose
+        self.flicker_threshold = flicker_threshold
+        self.regression_tolerance = regression_tolerance
         self._cost = 0.0  # accumulate estimated API cost
 
     def _log(self, msg: str):
@@ -702,7 +705,7 @@ class VBenchEvaluator:
         self,
         current_scores: VBenchResult,
         baseline: dict,
-        tolerance: float = 0.05,
+        tolerance: float | None = None,
     ) -> list[str]:
         """
         Compare current evaluation against a baseline.
@@ -710,11 +713,13 @@ class VBenchEvaluator:
         Args:
             current_scores: VBenchResult from the current evaluation.
             baseline: Dict of {dimension_name: float} baseline scores.
-            tolerance: Allowed drop before flagging a regression (default 0.05).
+            tolerance: Allowed drop before flagging. Defaults to self.regression_tolerance.
 
         Returns:
             List of dimension names that regressed beyond tolerance.
         """
+        if tolerance is None:
+            tolerance = self.regression_tolerance
         regressions = []
 
         for dim, baseline_score in baseline.items():

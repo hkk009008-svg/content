@@ -85,6 +85,38 @@ ROUTING_TABLE: dict[str, dict] = {
 }
 
 
+def get_routing_table(settings: dict | None = None) -> dict[str, dict]:
+    """Return ROUTING_TABLE with optional overrides from project settings."""
+    table = {k: dict(v) for k, v in ROUTING_TABLE.items()}  # deep copy
+    if not settings:
+        return table
+
+    creative_map = {
+        "claude-sonnet": "claude-sonnet-4-20250514",
+        "gpt-4o": "gpt-4o",
+    }
+    judge_map = {
+        "claude-opus": "claude-opus-4-20250918",
+        "gpt-4o": "gpt-4o",
+        "gemini-pro": "gemini-2.5-pro",
+    }
+
+    creative_pref = settings.get("creative_llm", "auto")
+    if creative_pref != "auto" and creative_pref in creative_map:
+        model = creative_map[creative_pref]
+        for key in ("creative_scene", "scene_decompose", "chief_director"):
+            if key in table:
+                table[key]["primary"] = model
+
+    judge_pref = settings.get("quality_judge_llm", "auto")
+    if judge_pref != "auto" and judge_pref in judge_map:
+        model = judge_map[judge_pref]
+        if "quality_review" in table:
+            table["quality_review"]["primary"] = model
+
+    return table
+
+
 def _provider_for_model(model: str) -> str:
     if model.startswith("claude"):
         return "anthropic"

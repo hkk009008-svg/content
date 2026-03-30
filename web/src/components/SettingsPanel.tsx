@@ -15,6 +15,8 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
   const [advancedExpanded, setAdvancedExpanded] = useState(false)
   const [postProcExpanded, setPostProcExpanded] = useState(false)
   const [apiEnginesExpanded, setApiEnginesExpanded] = useState(false)
+  const [budgetExpanded, setBudgetExpanded] = useState(false)
+  const [qualityEngineExpanded, setQualityEngineExpanded] = useState(false)
   const [generatingStyle, setGeneratingStyle] = useState(false)
   const [diskUsage, setDiskUsage] = useState<Record<string, number> | null>(null)
   const [cleaning, setCleaning] = useState(false)
@@ -205,6 +207,46 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
             ) : (
               <p className="text-[10px] text-cinema-muted italic">Research-enhanced style rules generated from your mood + color palette settings.</p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Section: Budget & Cost */}
+      <button onClick={() => setBudgetExpanded(!budgetExpanded)} className="flex items-center justify-between w-full mt-5 mb-3">
+        <h2 className="text-[11px] font-semibold text-cinema-gold uppercase tracking-widest">Budget & Cost</h2>
+        <span className="text-cinema-muted text-xs">{budgetExpanded ? '▾' : '▸'}</span>
+      </button>
+
+      {budgetExpanded && (
+        <div className="space-y-4">
+          {/* Budget Limit */}
+          <div>
+            <label className="text-[10px] text-cinema-text-secondary block mb-1.5 uppercase tracking-wider">Budget Limit (USD)</label>
+            <input type="number" min={0} step={1}
+              value={(s as any).budget_limit_usd ?? 0}
+              onChange={e => update('budget_limit_usd', parseFloat(e.target.value) || 0)}
+              placeholder="0 = no limit"
+              className="w-full bg-cinema-bg border border-cinema-border-subtle rounded-lg px-3 py-2 text-sm text-cinema-text font-mono" />
+            <p className="text-[9px] text-cinema-muted mt-0.5">Max spend per video. 0 = unlimited. Pipeline pauses when limit reached.</p>
+          </div>
+
+          {/* Cost Optimization Level */}
+          <div>
+            <label className="text-[10px] text-cinema-text-secondary block mb-1.5 uppercase tracking-wider">Cost Optimization</label>
+            <select value={(s as any).cost_optimization || 'quality_first'}
+              onChange={e => update('cost_optimization', e.target.value)}
+              className="w-full bg-cinema-bg border border-cinema-border-subtle rounded-lg px-3 py-2 text-sm text-cinema-text">
+              {(config as any)?.cost_optimization_levels?.map((opt: any) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              )) || (
+                <>
+                  <option value="quality_first">Quality First</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="budget_conscious">Budget Conscious</option>
+                </>
+              )}
+            </select>
+            <p className="text-[9px] text-cinema-muted mt-0.5">Quality First = best API always. Budget Conscious = cheapest passing API.</p>
           </div>
         </div>
       )}
@@ -410,6 +452,97 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
               className="w-full accent-cinema-accent h-1" />
             <p className="text-[9px] text-cinema-muted">Min smoothness score to accept video. Below threshold → auto RIFE or regenerate.</p>
           </div>
+
+          {/* Coherence Check Toggle */}
+          <div className="flex items-center gap-2 bg-cinema-bg rounded-lg px-3 py-2 border border-cinema-border-subtle">
+            <input type="checkbox"
+              checked={(s as any).coherence_check_enabled !== false}
+              onChange={e => update('coherence_check_enabled', e.target.checked)}
+              className="accent-cinema-accent" />
+            <div>
+              <span className="text-[10px] text-cinema-text font-medium">Coherence Analysis</span>
+              <p className="text-[9px] text-cinema-muted">Color/lighting/composition consistency between shots</p>
+            </div>
+          </div>
+
+          {/* Color Drift Sensitivity */}
+          {(s as any).coherence_check_enabled !== false && (
+            <div>
+              <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+                <span className="font-mono">Color drift sensitivity</span>
+                <span className="text-cinema-accent font-bold">{(s as any).color_drift_sensitivity ?? 0.3}</span>
+              </div>
+              <input type="range" min={0.1} max={0.5} step={0.05}
+                value={(s as any).color_drift_sensitivity ?? 0.3}
+                onChange={e => update('color_drift_sensitivity', parseFloat(e.target.value))}
+                className="w-full accent-cinema-accent h-1" />
+              <p className="text-[9px] text-cinema-muted">Max color histogram drift before triggering prompt adjustment. Lower = stricter.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Section: Quality Engine (VBench) */}
+      <button onClick={() => setQualityEngineExpanded(!qualityEngineExpanded)} className="flex items-center justify-between w-full mt-5 mb-3">
+        <h2 className="text-[11px] font-semibold text-cinema-gold uppercase tracking-widest">Quality Engine</h2>
+        <span className="text-cinema-muted text-xs">{qualityEngineExpanded ? '▾' : '▸'}</span>
+      </button>
+
+      {qualityEngineExpanded && (
+        <div className="space-y-4">
+          <p className="text-[9px] text-cinema-muted">VBench-2.0 quality thresholds. Shots scoring below these thresholds trigger regeneration or post-processing fixes.</p>
+
+          {/* VBench Overall Threshold */}
+          <div>
+            <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+              <span className="font-mono">VBench acceptance threshold</span>
+              <span className="text-cinema-accent font-bold">{(s as any).vbench_overall_threshold ?? 0.60}</span>
+            </div>
+            <input type="range" min={0} max={1} step={0.05}
+              value={(s as any).vbench_overall_threshold ?? 0.60}
+              onChange={e => update('vbench_overall_threshold', parseFloat(e.target.value))}
+              className="w-full accent-cinema-accent h-1" />
+            <p className="text-[9px] text-cinema-muted">Min overall quality score to accept a shot. Below = auto-regenerate.</p>
+          </div>
+
+          {/* Identity Strictness */}
+          <div>
+            <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+              <span className="font-mono">Identity strictness</span>
+              <span className="text-cinema-accent font-bold">{(s as any).identity_strictness ?? 0.60}</span>
+            </div>
+            <input type="range" min={0} max={1} step={0.05}
+              value={(s as any).identity_strictness ?? 0.60}
+              onChange={e => update('identity_strictness', parseFloat(e.target.value))}
+              className="w-full accent-cinema-accent h-1" />
+            <p className="text-[9px] text-cinema-muted">Below this score → recommends face-swap. Higher = stricter face matching.</p>
+          </div>
+
+          {/* Temporal Flicker Tolerance */}
+          <div>
+            <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+              <span className="font-mono">Temporal flicker tolerance</span>
+              <span className="text-cinema-accent font-bold">{(s as any).temporal_flicker_tolerance ?? 0.85}</span>
+            </div>
+            <input type="range" min={0} max={1} step={0.05}
+              value={(s as any).temporal_flicker_tolerance ?? 0.85}
+              onChange={e => update('temporal_flicker_tolerance', parseFloat(e.target.value))}
+              className="w-full accent-cinema-accent h-1" />
+            <p className="text-[9px] text-cinema-muted">Below this → triggers RIFE interpolation. Lower = more permissive.</p>
+          </div>
+
+          {/* Regression Sensitivity */}
+          <div>
+            <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+              <span className="font-mono">Regression sensitivity</span>
+              <span className="text-cinema-accent font-bold">{(s as any).regression_sensitivity ?? 0.05}</span>
+            </div>
+            <input type="range" min={0.01} max={0.20} step={0.01}
+              value={(s as any).regression_sensitivity ?? 0.05}
+              onChange={e => update('regression_sensitivity', parseFloat(e.target.value))}
+              className="w-full accent-cinema-accent h-1" />
+            <p className="text-[9px] text-cinema-muted">Quality drop (%) vs baseline before flagging regression. 0.05 = 5% drop triggers alert.</p>
+          </div>
         </div>
       )}
 
@@ -562,6 +695,88 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
               onChange={e => update('coherence_threshold', parseFloat(e.target.value))}
               className="w-full accent-cinema-accent h-1" />
             <p className="text-[9px] text-cinema-muted">Min scene coherence score (color+lighting+composition) to accept. Below = mutation retry.</p>
+          </div>
+
+          {/* LLM Preferences */}
+          <div>
+            <label className="text-[10px] text-cinema-text-secondary block mb-2 uppercase tracking-wider">LLM Preferences</label>
+            <div className="space-y-3">
+              {/* Creative LLM */}
+              <div>
+                <label className="text-[10px] text-cinema-muted block mb-0.5 font-mono">Creative LLM</label>
+                <select value={(s as any).creative_llm || 'auto'}
+                  onChange={e => update('creative_llm', e.target.value)}
+                  className="w-full bg-cinema-bg border border-cinema-border-subtle rounded-lg px-3 py-1.5 text-[10px] text-cinema-text">
+                  {(config as any)?.creative_llm_options?.map((opt: any) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  )) || (
+                    <>
+                      <option value="auto">Auto (Router decides)</option>
+                      <option value="claude-sonnet">Claude Sonnet 4</option>
+                      <option value="gpt-4o">GPT-4o</option>
+                    </>
+                  )}
+                </select>
+                <p className="text-[9px] text-cinema-muted">Primary model for scripts, scene descriptions, prompts.</p>
+              </div>
+
+              {/* Quality Judge */}
+              <div>
+                <label className="text-[10px] text-cinema-muted block mb-0.5 font-mono">Quality Judge</label>
+                <select value={(s as any).quality_judge_llm || 'auto'}
+                  onChange={e => update('quality_judge_llm', e.target.value)}
+                  className="w-full bg-cinema-bg border border-cinema-border-subtle rounded-lg px-3 py-1.5 text-[10px] text-cinema-text">
+                  {(config as any)?.quality_judge_options?.map((opt: any) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  )) || (
+                    <>
+                      <option value="auto">Auto (Best available)</option>
+                      <option value="claude-opus">Claude Opus 4</option>
+                      <option value="gpt-4o">GPT-4o</option>
+                      <option value="gemini-pro">Gemini 2.5 Pro</option>
+                    </>
+                  )}
+                </select>
+                <p className="text-[9px] text-cinema-muted">Model for ensemble judging and quality evaluation.</p>
+              </div>
+
+              {/* Competitive Generation Toggle */}
+              <div className="flex items-center gap-2 bg-cinema-bg rounded-lg px-3 py-2 border border-cinema-border-subtle">
+                <input type="checkbox"
+                  checked={(s as any).competitive_generation !== false}
+                  onChange={e => update('competitive_generation', e.target.checked)}
+                  className="accent-cinema-accent" />
+                <div>
+                  <span className="text-[10px] text-cinema-text font-medium">Competitive Generation</span>
+                  <p className="text-[9px] text-cinema-muted">Generate with 2 LLMs, judge picks best. Better quality, 2x LLM cost.</p>
+                </div>
+              </div>
+
+              {/* Quality vs Cost Weight */}
+              <div>
+                <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+                  <span className="font-mono">Quality ↔ Cost weight</span>
+                  <span className="text-cinema-accent font-bold">{(s as any).quality_cost_weight ?? 0.8}</span>
+                </div>
+                <input type="range" min={0.5} max={1.0} step={0.05}
+                  value={(s as any).quality_cost_weight ?? 0.8}
+                  onChange={e => update('quality_cost_weight', parseFloat(e.target.value))}
+                  className="w-full accent-cinema-accent h-1" />
+                <p className="text-[9px] text-cinema-muted">API selection bias. 0.5 = equal weight. 1.0 = quality only. Affects which API is chosen per shot.</p>
+              </div>
+
+              {/* Adaptive PuLID Toggle */}
+              <div className="flex items-center gap-2 bg-cinema-bg rounded-lg px-3 py-2 border border-cinema-border-subtle">
+                <input type="checkbox"
+                  checked={(s as any).adaptive_pulid !== false}
+                  onChange={e => update('adaptive_pulid', e.target.checked)}
+                  className="accent-cinema-accent" />
+                <div>
+                  <span className="text-[10px] text-cinema-text font-medium">Adaptive PuLID</span>
+                  <p className="text-[9px] text-cinema-muted">Auto-adjust face-lock strength based on rolling identity scores.</p>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Master Seed */}
