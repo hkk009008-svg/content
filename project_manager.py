@@ -13,11 +13,28 @@ import tempfile
 from datetime import datetime
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
-from typing import Optional, List, Dict
+from typing import Any, Callable, Optional, List, Dict
 
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 PROJECTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects")
+
+
+class ProjectLockError(RuntimeError):
+    """Raised when a project mutation cannot acquire the project lock in time."""
+
+    def __init__(self, project_id: str, timeout: float):
+        self.project_id = project_id
+        self.timeout = timeout
+        super().__init__(
+            f"Project '{project_id}' is locked by another operation. Retry shortly."
+        )
+
+
+@dataclass
+class MutationResult:
+    value: Any
+    save: bool = True
 
 
 def _ensure_projects_dir():
@@ -36,6 +53,52 @@ def _project_lock_path(project_id: str) -> str:
     return os.path.join(_project_dir(project_id), "project.lock")
 
 
+def _ensure_project_dir(project_id: str):
+    _ensure_projects_dir()
+    os.makedirs(_project_dir(project_id), exist_ok=True)
+
+
+@contextmanager
+def _acquire_project_lock(project_id: str, timeout: float = 10):
+    _ensure_project_dir(project_id)
+    lock = FileLock(_project_lock_path(project_id), timeout=timeout)
+    try:
+        with lock:
+            yield
+    except Timeout as exc:
+        raise ProjectLockError(project_id, timeout) from exc
+
+
+def _load_project_unlocked(project_id: str) -> Optional[dict]:
+    path = _project_file(project_id)
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _save_project_unlocked(project: dict) -> None:
+    pid = project["id"]
+    _ensure_project_dir(pid)
+    target = _project_file(pid)
+    fd, tmp_path = tempfile.mkstemp(suffix=".json.tmp", dir=_project_dir(pid))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(project, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, target)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+
+
+def _sync_project_snapshot(snapshot: Optional[dict], latest: dict) -> None:
+    if snapshot is None or snapshot is latest:
+        return
+    snapshot.clear()
+    snapshot.update(latest)
+
+
 @contextmanager
 def project_lock(project_id: str, timeout: int = 10):
     """
@@ -47,9 +110,7 @@ def project_lock(project_id: str, timeout: int = 10):
             proj["name"] = "new"
             save_project(proj)
     """
-    os.makedirs(_project_dir(project_id), exist_ok=True)
-    lock = FileLock(_project_lock_path(project_id), timeout=timeout)
-    with lock:
+    with _acquire_project_lock(project_id, timeout):
         yield
 
 
@@ -177,7 +238,7 @@ def create_project(name: str) -> dict:
     _ensure_projects_dir()
     project = make_project(name)
     pid = project["id"]
-    os.makedirs(_project_dir(pid), exist_ok=True)
+    _ensure_project_dir(pid)
     os.makedirs(os.path.join(_project_dir(pid), "characters"), exist_ok=True)
     os.makedirs(os.path.join(_project_dir(pid), "locations"), exist_ok=True)
     os.makedirs(os.path.join(_project_dir(pid), "exports"), exist_ok=True)
@@ -187,50 +248,66 @@ def create_project(name: str) -> dict:
     return project
 
 
-def save_project(project: dict) -> None:
+def save_project(project: dict, timeout: float = 10) -> None:
     """
     Atomically save project JSON.
     Writes to a temp file first, then replaces the target — prevents
     half-written files if the process crashes mid-write.
     Uses per-project file lock to prevent concurrent-write corruption.
     """
-    pid = project["id"]
-    _ensure_projects_dir()
-    os.makedirs(_project_dir(pid), exist_ok=True)
-
-    target = _project_file(pid)
-    lock = FileLock(_project_lock_path(pid), timeout=10)
-    with lock:
-        fd, tmp_path = tempfile.mkstemp(
-            suffix=".json.tmp", dir=_project_dir(pid)
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(project, f, indent=2, ensure_ascii=False)
-            os.replace(tmp_path, target)  # atomic on POSIX
-        except BaseException:
-            # Clean up temp file on any failure
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            raise
+    with _acquire_project_lock(project["id"], timeout):
+        _save_project_unlocked(project)
 
 
-def load_project(project_id: str) -> Optional[dict]:
+def load_project(project_id: str, timeout: float = 10) -> Optional[dict]:
     """Load project JSON with file-lock protection against concurrent writes."""
-    path = _project_file(project_id)
-    if not os.path.exists(path):
-        return None
-    lock = FileLock(_project_lock_path(project_id), timeout=10)
-    with lock:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+    with _acquire_project_lock(project_id, timeout):
+        return _load_project_unlocked(project_id)
 
 
-def delete_project(project_id: str) -> bool:
+def mutate_project(
+    project_id: str,
+    mutator: Callable[[dict], Any],
+    timeout: float = 10,
+    snapshot: Optional[dict] = None,
+):
+    """
+    Atomically apply a read-modify-write mutation under a single project lock.
+
+    The callback receives the latest project snapshot from disk. It may return a
+    plain value or a MutationResult(value, save=bool) to skip saving unchanged
+    state.
+    """
+    latest_project: Optional[dict] = None
+    result_value: Any = None
+    save_project_state = True
+
+    with _acquire_project_lock(project_id, timeout):
+        latest_project = _load_project_unlocked(project_id)
+        if latest_project is None:
+            return None
+
+        result = mutator(latest_project)
+        if isinstance(result, MutationResult):
+            result_value = result.value
+            save_project_state = result.save
+        else:
+            result_value = result
+
+        if save_project_state:
+            _save_project_unlocked(latest_project)
+
+    _sync_project_snapshot(snapshot, latest_project)
+    return result_value
+
+
+def delete_project(project_id: str, timeout: float = 10) -> bool:
     d = _project_dir(project_id)
     if os.path.exists(d):
-        shutil.rmtree(d)
-        return True
+        with _acquire_project_lock(project_id, timeout):
+            if os.path.exists(d):
+                shutil.rmtree(d)
+                return True
     return False
 
 
@@ -248,19 +325,28 @@ def list_projects() -> List[dict]:
 # Project mutation helpers
 # ---------------------------------------------------------------------------
 
-def add_character(project: dict, character: dict) -> dict:
-    project["characters"].append(character)
-    save_project(project)
-    return character
+def add_character(project: dict, character: dict, timeout: float = 10) -> dict:
+    pid = project["id"]
+
+    def _mutate(latest: dict):
+        latest["characters"].append(character)
+        return character
+
+    result = mutate_project(pid, _mutate, timeout=timeout, snapshot=project)
+    if result is None:
+        raise FileNotFoundError(f"Project '{pid}' not found")
+    return result
 
 
-def remove_character(project: dict, char_id: str) -> bool:
-    before = len(project["characters"])
-    project["characters"] = [c for c in project["characters"] if c["id"] != char_id]
-    if len(project["characters"]) < before:
-        save_project(project)
-        return True
-    return False
+def remove_character(project: dict, char_id: str, timeout: float = 10) -> bool:
+    def _mutate(latest: dict):
+        before = len(latest["characters"])
+        latest["characters"] = [c for c in latest["characters"] if c["id"] != char_id]
+        changed = len(latest["characters"]) < before
+        return MutationResult(changed, save=changed)
+
+    result = mutate_project(project["id"], _mutate, timeout=timeout, snapshot=project)
+    return bool(result)
 
 
 def get_character(project: dict, char_id: str) -> Optional[dict]:
@@ -270,19 +356,28 @@ def get_character(project: dict, char_id: str) -> Optional[dict]:
     return None
 
 
-def add_location(project: dict, location: dict) -> dict:
-    project["locations"].append(location)
-    save_project(project)
-    return location
+def add_location(project: dict, location: dict, timeout: float = 10) -> dict:
+    pid = project["id"]
+
+    def _mutate(latest: dict):
+        latest["locations"].append(location)
+        return location
+
+    result = mutate_project(pid, _mutate, timeout=timeout, snapshot=project)
+    if result is None:
+        raise FileNotFoundError(f"Project '{pid}' not found")
+    return result
 
 
-def remove_location(project: dict, loc_id: str) -> bool:
-    before = len(project["locations"])
-    project["locations"] = [l for l in project["locations"] if l["id"] != loc_id]
-    if len(project["locations"]) < before:
-        save_project(project)
-        return True
-    return False
+def remove_location(project: dict, loc_id: str, timeout: float = 10) -> bool:
+    def _mutate(latest: dict):
+        before = len(latest["locations"])
+        latest["locations"] = [l for l in latest["locations"] if l["id"] != loc_id]
+        changed = len(latest["locations"]) < before
+        return MutationResult(changed, save=changed)
+
+    result = mutate_project(project["id"], _mutate, timeout=timeout, snapshot=project)
+    return bool(result)
 
 
 def get_location(project: dict, loc_id: str) -> Optional[dict]:
@@ -292,43 +387,59 @@ def get_location(project: dict, loc_id: str) -> Optional[dict]:
     return None
 
 
-def add_scene(project: dict, scene: dict) -> dict:
-    scene["order"] = len(project["scenes"])
-    project["scenes"].append(scene)
-    save_project(project)
-    return scene
+def add_scene(project: dict, scene: dict, timeout: float = 10) -> dict:
+    pid = project["id"]
+
+    def _mutate(latest: dict):
+        scene["order"] = len(latest["scenes"])
+        latest["scenes"].append(scene)
+        return scene
+
+    result = mutate_project(pid, _mutate, timeout=timeout, snapshot=project)
+    if result is None:
+        raise FileNotFoundError(f"Project '{pid}' not found")
+    return result
 
 
-def update_scene(project: dict, scene_id: str, updates: dict) -> Optional[dict]:
-    for s in project["scenes"]:
-        if s["id"] == scene_id:
-            s.update(updates)
-            save_project(project)
-            return s
-    return None
+def update_scene(project: dict, scene_id: str, updates: dict, timeout: float = 10) -> Optional[dict]:
+    def _mutate(latest: dict):
+        for scene in latest["scenes"]:
+            if scene["id"] == scene_id:
+                scene.update(updates)
+                return scene
+        return MutationResult(None, save=False)
+
+    return mutate_project(project["id"], _mutate, timeout=timeout, snapshot=project)
 
 
-def remove_scene(project: dict, scene_id: str) -> bool:
-    before = len(project["scenes"])
-    project["scenes"] = [s for s in project["scenes"] if s["id"] != scene_id]
-    for i, s in enumerate(project["scenes"]):
-        s["order"] = i
-    if len(project["scenes"]) < before:
-        save_project(project)
+def remove_scene(project: dict, scene_id: str, timeout: float = 10) -> bool:
+    def _mutate(latest: dict):
+        before = len(latest["scenes"])
+        latest["scenes"] = [scene for scene in latest["scenes"] if scene["id"] != scene_id]
+        changed = len(latest["scenes"]) < before
+        if not changed:
+            return MutationResult(False, save=False)
+        for index, scene in enumerate(latest["scenes"]):
+            scene["order"] = index
         return True
-    return False
+
+    result = mutate_project(project["id"], _mutate, timeout=timeout, snapshot=project)
+    return bool(result)
 
 
-def reorder_scenes(project: dict, scene_ids: list[str]) -> None:
-    id_to_scene = {s["id"]: s for s in project["scenes"]}
-    reordered = []
-    for i, sid in enumerate(scene_ids):
-        if sid in id_to_scene:
-            scene = id_to_scene[sid]
-            scene["order"] = i
-            reordered.append(scene)
-    project["scenes"] = reordered
-    save_project(project)
+def reorder_scenes(project: dict, scene_ids: list[str], timeout: float = 10) -> None:
+    def _mutate(latest: dict):
+        id_to_scene = {scene["id"]: scene for scene in latest["scenes"]}
+        reordered = []
+        for index, scene_id in enumerate(scene_ids):
+            if scene_id in id_to_scene:
+                scene = id_to_scene[scene_id]
+                scene["order"] = index
+                reordered.append(scene)
+        latest["scenes"] = reordered
+        return MutationResult(None, save=True)
+
+    mutate_project(project["id"], _mutate, timeout=timeout, snapshot=project)
 
 
 def get_project_dir(project_id: str) -> str:

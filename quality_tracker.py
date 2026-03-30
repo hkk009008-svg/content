@@ -9,7 +9,7 @@ that feed into phase_e_learning.py calibration and workflow_selector routing.
 import sqlite3
 import os
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 
@@ -89,7 +89,7 @@ class QualityTracker:
     def _close(self, conn: sqlite3.Connection) -> None:
         """Close the connection unless it is the persistent in-memory one."""
         if conn is not self._persistent_conn:
-            self._close(conn)
+            conn.close()
 
     def _ensure_table(self) -> None:
         conn = self._connect()
@@ -171,7 +171,7 @@ class QualityTracker:
                     vb.overall_vbench,
                     identity_similarity, coherence_score,
                     generation_cost, llm_cost, total_cost,
-                    datetime.utcnow().isoformat(),
+                    datetime.now(timezone.utc).isoformat(),
                 ),
             )
             conn.commit()

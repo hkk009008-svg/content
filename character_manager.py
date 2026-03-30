@@ -94,6 +94,7 @@ def create_character_with_images(
     reference_image_paths: Optional[List[str]] = None,
     voice_id: str = "",
     ip_adapter_weight: float = 0.85,
+    commit_timeout: float = 10,
 ) -> dict:
     """
     Creates a character from REAL uploaded photos.
@@ -155,7 +156,12 @@ def create_character_with_images(
     character["physical_traits"] = description
     character["identity_anchor"] = build_identity_anchor(character)
 
-    add_character(project, character)
+    try:
+        add_character(project, character, timeout=commit_timeout)
+    except Exception:
+        shutil.rmtree(char_path, ignore_errors=True)
+        raise
+
     print(f"   [OK] Character '{name}' created: {cid} (refs={len(stored_refs)}, angles={len(multi_angles)})")
     return character
 

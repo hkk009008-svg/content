@@ -684,12 +684,21 @@ def _fallback_decompose(
     return shots
 
 
-def update_scene_shots(project: dict, scene_id: str, shots: list[dict]) -> None:
+def update_scene_shots(
+    project: dict,
+    scene_id: str,
+    shots: list[dict],
+    timeout: float = 10,
+) -> None:
     """Save decomposed shots back into the project's scene."""
-    from project_manager import save_project
-    for scene in project["scenes"]:
-        if scene["id"] == scene_id:
-            scene["shots"] = shots
-            scene["num_shots"] = len(shots)
-            save_project(project)
-            return
+    from project_manager import MutationResult, mutate_project
+
+    def _mutate(latest_project: dict):
+        for scene in latest_project["scenes"]:
+            if scene["id"] == scene_id:
+                scene["shots"] = shots
+                scene["num_shots"] = len(shots)
+                return True
+        return MutationResult(False, save=False)
+
+    mutate_project(project["id"], _mutate, timeout=timeout, snapshot=project)

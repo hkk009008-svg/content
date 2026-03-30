@@ -6,6 +6,7 @@ Serves the React frontend and exposes all project/character/location/scene endpo
 
 import os
 import warnings
+from functools import wraps
 
 # Suppress noisy warnings from google/urllib3 libraries
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -26,7 +27,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from project_manager import (
-    create_project, load_project, save_project, delete_project, list_projects,
+    MutationResult, ProjectLockError, create_project, load_project, delete_project,
+    list_projects, mutate_project,
     add_character, remove_character, add_location, remove_location,
     add_scene, update_scene, remove_scene, reorder_scenes,
     make_character, make_location, make_scene, get_project_dir,
@@ -44,6 +46,7 @@ CORS(app)
 # SSE progress queues per project
 _progress_queues: dict[str, queue.Queue] = {}
 _running_pipelines: dict[str, CinemaPipeline] = {}
+HTTP_PROJECT_TIMEOUT = 2.0
 
 def _get_delivery_styles():
     """Get delivery styles with descriptions for the frontend."""
@@ -52,6 +55,38 @@ def _get_delivery_styles():
         return {k: v.get("description", k) for k, v in VOICE_DIRECTIONS.items()}
     except Exception:
         return {}
+
+
+def _project_conflict_response(code: str, error: str):
+    return jsonify({"code": code, "retryable": True, "error": error}), 409
+
+
+def _project_locked_response(exc: ProjectLockError):
+    return _project_conflict_response("project_locked", str(exc))
+
+
+def _project_busy_response(pid: str):
+    return _project_conflict_response(
+        "project_busy",
+        f"Project '{pid}' is busy with an active generation run. Retry shortly.",
+    )
+
+
+def _reject_if_project_busy(pid: str):
+    if pid in _running_pipelines:
+        return _project_busy_response(pid)
+    return None
+
+
+def _project_lock_guard(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except ProjectLockError as exc:
+            return _project_locked_response(exc)
+
+    return wrapper
 
 
 # ---------------------------------------------------------------------------
@@ -154,22 +189,35 @@ def api_get_project(pid):
 
 
 @app.route("/api/projects/<pid>", methods=["PUT"])
+@_project_lock_guard
 def api_update_project(pid):
-    project = load_project(pid)
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
+    data = request.json or {}
+
+    def _mutate_project(project: dict):
+        if "name" in data:
+            project["name"] = data["name"]
+        if "global_settings" in data:
+            project["global_settings"].update(data["global_settings"])
+        return project
+
+    project = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
     if not project:
         return jsonify({"error": "Project not found"}), 404
-    data = request.json or {}
-    if "name" in data:
-        project["name"] = data["name"]
-    if "global_settings" in data:
-        project["global_settings"].update(data["global_settings"])
-    save_project(project)
     return jsonify(project)
 
 
 @app.route("/api/projects/<pid>", methods=["DELETE"])
+@_project_lock_guard
 def api_delete_project(pid):
-    if delete_project(pid):
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
+    if delete_project(pid, timeout=HTTP_PROJECT_TIMEOUT):
         return jsonify({"deleted": True})
     return jsonify({"error": "Project not found"}), 404
 
@@ -179,7 +227,12 @@ def api_delete_project(pid):
 # ---------------------------------------------------------------------------
 
 @app.route("/api/projects/<pid>/characters", methods=["POST"])
+@_project_lock_guard
 def api_add_character(pid):
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -209,14 +262,20 @@ def api_add_character(pid):
         reference_image_paths=image_paths,
         voice_id=voice_id,
         ip_adapter_weight=ip_weight,
+        commit_timeout=HTTP_PROJECT_TIMEOUT,
     )
 
     return jsonify(character), 201
 
 
 @app.route("/api/projects/<pid>/characters/<cid>", methods=["PUT"])
+@_project_lock_guard
 def api_update_character(pid, cid):
     """Update an existing character's fields. Supports JSON or multipart (for file uploads)."""
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -230,13 +289,8 @@ def api_update_character(pid, cid):
     else:
         data = request.form.to_dict()
 
-    for field in ["name", "description", "voice_id", "physical_traits"]:
-        if field in data:
-            char[field] = data[field]
-    if "ip_adapter_weight" in data:
-        char["ip_adapter_weight"] = float(data["ip_adapter_weight"])
-
     # Handle reference image uploads
+    saved_paths = []
     if request.files.getlist("reference_images"):
         project_dir = get_project_dir(pid)
         char_dir = os.path.join(project_dir, "characters", cid)
@@ -246,22 +300,54 @@ def api_update_character(pid, cid):
                 safe_name = f.filename.replace("/", "_").replace("\\", "_")
                 save_path = os.path.join(char_dir, safe_name)
                 f.save(save_path)
-                if save_path not in char.get("reference_images", []):
-                    char.setdefault("reference_images", []).append(save_path)
-                # Set canonical reference if not already set
-                if not char.get("canonical_reference"):
-                    char["canonical_reference"] = save_path
+                saved_paths.append(save_path)
 
-    save_project(project)
-    return jsonify({"updated": True, "character": char})
+    def _mutate_project(latest_project: dict):
+        latest_char = next(
+            (character for character in latest_project["characters"] if character["id"] == cid),
+            None,
+        )
+        if not latest_char:
+            return MutationResult(None, save=False)
+
+        for field in ["name", "description", "voice_id", "physical_traits"]:
+            if field in data:
+                latest_char[field] = data[field]
+        if "ip_adapter_weight" in data:
+            latest_char["ip_adapter_weight"] = float(data["ip_adapter_weight"])
+
+        if saved_paths:
+            refs = latest_char.setdefault("reference_images", [])
+            for save_path in saved_paths:
+                if save_path not in refs:
+                    refs.append(save_path)
+            if not latest_char.get("canonical_reference"):
+                latest_char["canonical_reference"] = saved_paths[0]
+
+        return latest_char
+
+    updated_char = mutate_project(
+        pid,
+        _mutate_project,
+        timeout=HTTP_PROJECT_TIMEOUT,
+        snapshot=project,
+    )
+    if not updated_char:
+        return jsonify({"error": "Character not found"}), 404
+    return jsonify({"updated": True, "character": updated_char})
 
 
 @app.route("/api/projects/<pid>/characters/<cid>", methods=["DELETE"])
+@_project_lock_guard
 def api_remove_character(pid, cid):
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
-    if remove_character(project, cid):
+    if remove_character(project, cid, timeout=HTTP_PROJECT_TIMEOUT):
         return jsonify({"deleted": True})
     return jsonify({"error": "Character not found"}), 404
 
@@ -271,7 +357,12 @@ def api_remove_character(pid, cid):
 # ---------------------------------------------------------------------------
 
 @app.route("/api/projects/<pid>/locations", methods=["POST"])
+@_project_lock_guard
 def api_add_location(pid):
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -298,14 +389,20 @@ def api_add_location(pid):
         lighting=lighting,
         time_of_day=time_of_day,
         weather=weather,
+        commit_timeout=HTTP_PROJECT_TIMEOUT,
     )
 
     return jsonify(location), 201
 
 
 @app.route("/api/projects/<pid>/locations/<lid>", methods=["PUT"])
+@_project_lock_guard
 def api_update_location(pid, lid):
     """Update an existing location's fields. Supports JSON or multipart for file uploads."""
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -314,11 +411,8 @@ def api_update_location(pid, lid):
         return jsonify({"error": "Location not found"}), 404
 
     data = request.json if request.is_json else request.form.to_dict()
-    for field in ["name", "description", "lighting", "time_of_day", "weather"]:
-        if field in data:
-            loc[field] = data[field]
-
     # Handle reference image uploads
+    saved_paths = []
     if request.files.getlist("reference_images"):
         project_dir = get_project_dir(pid)
         loc_dir = os.path.join(project_dir, "locations", lid)
@@ -328,19 +422,50 @@ def api_update_location(pid, lid):
                 safe_name = f.filename.replace("/", "_").replace("\\", "_")
                 save_path = os.path.join(loc_dir, safe_name)
                 f.save(save_path)
-                if save_path not in loc.get("reference_images", []):
-                    loc.setdefault("reference_images", []).append(save_path)
+                saved_paths.append(save_path)
 
-    save_project(project)
-    return jsonify({"updated": True, "location": loc})
+    def _mutate_project(latest_project: dict):
+        latest_location = next(
+            (location for location in latest_project["locations"] if location["id"] == lid),
+            None,
+        )
+        if not latest_location:
+            return MutationResult(None, save=False)
+
+        for field in ["name", "description", "lighting", "time_of_day", "weather"]:
+            if field in data:
+                latest_location[field] = data[field]
+
+        if saved_paths:
+            refs = latest_location.setdefault("reference_images", [])
+            for save_path in saved_paths:
+                if save_path not in refs:
+                    refs.append(save_path)
+
+        return latest_location
+
+    updated_location = mutate_project(
+        pid,
+        _mutate_project,
+        timeout=HTTP_PROJECT_TIMEOUT,
+        snapshot=project,
+    )
+    if not updated_location:
+        return jsonify({"error": "Location not found"}), 404
+    return jsonify({"updated": True, "location": updated_location})
 
 
 @app.route("/api/projects/<pid>/locations/<lid>", methods=["DELETE"])
+@_project_lock_guard
 def api_remove_location(pid, lid):
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
-    if remove_location(project, lid):
+    if remove_location(project, lid, timeout=HTTP_PROJECT_TIMEOUT):
         return jsonify({"deleted": True})
     return jsonify({"error": "Location not found"}), 404
 
@@ -350,7 +475,12 @@ def api_remove_location(pid, lid):
 # ---------------------------------------------------------------------------
 
 @app.route("/api/projects/<pid>/scenes", methods=["POST"])
+@_project_lock_guard
 def api_add_scene(pid):
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -366,40 +496,55 @@ def api_add_scene(pid):
         camera_direction=data.get("camera_direction", ""),
         duration_seconds=float(data.get("duration_seconds", 5)),
     )
-    result = add_scene(project, scene)
+    result = add_scene(project, scene, timeout=HTTP_PROJECT_TIMEOUT)
     return jsonify(result), 201
 
 
 @app.route("/api/projects/<pid>/scenes/<sid>", methods=["PUT"])
+@_project_lock_guard
 def api_update_scene(pid, sid):
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
     data = request.json or {}
-    result = update_scene(project, sid, data)
+    result = update_scene(project, sid, data, timeout=HTTP_PROJECT_TIMEOUT)
     if result:
         return jsonify(result)
     return jsonify({"error": "Scene not found"}), 404
 
 
 @app.route("/api/projects/<pid>/scenes/<sid>", methods=["DELETE"])
+@_project_lock_guard
 def api_remove_scene(pid, sid):
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
-    if remove_scene(project, sid):
+    if remove_scene(project, sid, timeout=HTTP_PROJECT_TIMEOUT):
         return jsonify({"deleted": True})
     return jsonify({"error": "Scene not found"}), 404
 
 
 @app.route("/api/projects/<pid>/scenes/reorder", methods=["POST"])
+@_project_lock_guard
 def api_reorder_scenes(pid):
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
     data = request.json or {}
     scene_ids = data.get("scene_ids", [])
-    reorder_scenes(project, scene_ids)
+    reorder_scenes(project, scene_ids, timeout=HTTP_PROJECT_TIMEOUT)
     return jsonify({"reordered": True})
 
 
@@ -427,7 +572,12 @@ def api_generate_dialogue(pid, sid):
 # ---------------------------------------------------------------------------
 
 @app.route("/api/projects/<pid>/scenes/<sid>/decompose", methods=["POST"])
+@_project_lock_guard
 def api_decompose_scene(pid, sid):
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -442,7 +592,7 @@ def api_decompose_scene(pid, sid):
     style_rules = settings.get("style_rules", {})
 
     shots = decompose_scene(scene, chars, location, settings, style_rules)
-    update_scene_shots(project, sid, shots)
+    update_scene_shots(project, sid, shots, timeout=HTTP_PROJECT_TIMEOUT)
 
     return jsonify({"shots": shots})
 
@@ -452,7 +602,12 @@ def api_decompose_scene(pid, sid):
 # ---------------------------------------------------------------------------
 
 @app.route("/api/projects/<pid>/style-rules", methods=["POST"])
+@_project_lock_guard
 def api_generate_style_rules(pid):
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
@@ -470,8 +625,17 @@ def api_generate_style_rules(pid):
         use_web_research=data.get("use_web_research", False),
     )
 
-    settings["style_rules"] = rules
-    save_project(project)
+    def _mutate_project(latest_project: dict):
+        latest_settings = latest_project.setdefault("global_settings", {})
+        latest_settings["style_rules"] = rules
+        return latest_settings["style_rules"]
+
+    mutate_project(
+        pid,
+        _mutate_project,
+        timeout=HTTP_PROJECT_TIMEOUT,
+        snapshot=project,
+    )
     return jsonify(rules)
 
 
@@ -605,63 +769,77 @@ def api_serve_file(pid):
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/approve", methods=["POST"])
+@_project_lock_guard
 def api_approve_shot(pid, shot_id):
     """Approve a shot's generated image — proceed to video generation."""
-    project = load_project(pid)
-    if not project:
+    def _mutate_project(project: dict):
+        for scene in project["scenes"]:
+            for shot in scene.get("shots", []):
+                if shot.get("id") == shot_id:
+                    shot["approved"] = True
+                    return True
+        return MutationResult(False, save=False)
+
+    result = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
+    if result is None:
         return jsonify({"error": "Project not found"}), 404
-    # Mark shot as approved in project data
-    for scene in project["scenes"]:
-        for shot in scene.get("shots", []):
-            if shot.get("id") == shot_id:
-                shot["approved"] = True
-                save_project(project)
-                return jsonify({"approved": True, "shot_id": shot_id})
+    if result:
+        return jsonify({"approved": True, "shot_id": shot_id})
     return jsonify({"error": "Shot not found"}), 404
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/reject", methods=["POST"])
+@_project_lock_guard
 def api_reject_shot(pid, shot_id):
     """Reject a shot's image — mark for regeneration."""
-    project = load_project(pid)
-    if not project:
-        return jsonify({"error": "Project not found"}), 404
     reason = request.json.get("reason", "") if request.is_json else ""
-    for scene in project["scenes"]:
-        for shot in scene.get("shots", []):
-            if shot.get("id") == shot_id:
-                shot["approved"] = False
-                shot["rejection_reason"] = reason
-                save_project(project)
-                return jsonify({"rejected": True, "shot_id": shot_id, "reason": reason})
+
+    def _mutate_project(project: dict):
+        for scene in project["scenes"]:
+            for shot in scene.get("shots", []):
+                if shot.get("id") == shot_id:
+                    shot["approved"] = False
+                    shot["rejection_reason"] = reason
+                    return True
+        return MutationResult(False, save=False)
+
+    result = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
+    if result is None:
+        return jsonify({"error": "Project not found"}), 404
+    if result:
+        return jsonify({"rejected": True, "shot_id": shot_id, "reason": reason})
     return jsonify({"error": "Shot not found"}), 404
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/prompt", methods=["PUT"])
+@_project_lock_guard
 def api_update_shot_prompt(pid, shot_id):
     """Update a shot's prompt before regeneration."""
-    project = load_project(pid)
-    if not project:
-        return jsonify({"error": "Project not found"}), 404
     if not request.is_json:
         return jsonify({"error": "JSON body required"}), 400
 
     new_prompt = request.json.get("prompt", "")
-    for scene in project["scenes"]:
-        for shot in scene.get("shots", []):
-            if shot.get("id") == shot_id:
-                shot["prompt"] = new_prompt
-                save_project(project)
-                return jsonify({"updated": True, "shot_id": shot_id})
+
+    def _mutate_project(project: dict):
+        for scene in project["scenes"]:
+            for shot in scene.get("shots", []):
+                if shot.get("id") == shot_id:
+                    shot["prompt"] = new_prompt
+                    return True
+        return MutationResult(False, save=False)
+
+    result = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
+    if result is None:
+        return jsonify({"error": "Project not found"}), 404
+    if result:
+        return jsonify({"updated": True, "shot_id": shot_id})
     return jsonify({"error": "Shot not found"}), 404
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>", methods=["PUT"])
+@_project_lock_guard
 def api_update_shot(pid, shot_id):
     """Update shot fields (target_api, camera, visual_effect, prompt, scene_foley)."""
-    project = load_project(pid)
-    if not project:
-        return jsonify({"error": "Project not found"}), 404
     if not request.is_json:
         return jsonify({"error": "JSON body required"}), 400
 
@@ -672,12 +850,19 @@ def api_update_shot(pid, shot_id):
     if "target_api" in updates and updates["target_api"] not in TARGET_APIS:
         return jsonify({"error": f"Invalid target_api. Must be one of: {TARGET_APIS}"}), 400
 
-    for scene in project["scenes"]:
-        for shot in scene.get("shots", []):
-            if shot.get("id") == shot_id:
-                shot.update(updates)
-                save_project(project)
-                return jsonify({"updated": True, "shot_id": shot_id, "fields": list(updates.keys())})
+    def _mutate_project(project: dict):
+        for scene in project["scenes"]:
+            for shot in scene.get("shots", []):
+                if shot.get("id") == shot_id:
+                    shot.update(updates)
+                    return True
+        return MutationResult(False, save=False)
+
+    result = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
+    if result is None:
+        return jsonify({"error": "Project not found"}), 404
+    if result:
+        return jsonify({"updated": True, "shot_id": shot_id, "fields": list(updates.keys())})
     return jsonify({"error": "Shot not found"}), 404
 
 
@@ -715,30 +900,26 @@ def api_pipeline_state(pid):
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/regenerate", methods=["POST"])
+@_project_lock_guard
 def api_regenerate_shot(pid, shot_id):
     """Regenerate a single shot. Supports positive_prompt and negative_prompt."""
     pipeline = _running_pipelines.get(pid)
+    new_prompt = request.json.get("positive_prompt") if request.is_json else None
 
-    project = load_project(pid)
-    if not project:
-        return jsonify({"error": "Project not found"}), 404
-
-    scene_id = None
-    for scene in project["scenes"]:
-        for shot in scene.get("shots", []):
-            if shot.get("id") == shot_id:
-                scene_id = scene["id"]
-                # Update shot prompt if provided
-                if request.is_json:
-                    new_prompt = request.json.get("positive_prompt")
+    def _mutate_project(project: dict):
+        for scene in project["scenes"]:
+            for shot in scene.get("shots", []):
+                if shot.get("id") == shot_id:
                     if new_prompt:
                         shot["prompt"] = new_prompt
-                        save_project(project)
-                break
-        if scene_id:
-            break
+                        return scene["id"]
+                    return MutationResult(scene["id"], save=False)
+        return MutationResult(False, save=False)
 
-    if not scene_id:
+    scene_id = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
+    if scene_id is None:
+        return jsonify({"error": "Project not found"}), 404
+    if scene_id is False:
         return jsonify({"error": "Shot not found"}), 404
 
     if pipeline:

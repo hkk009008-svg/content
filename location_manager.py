@@ -12,7 +12,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from project_manager import (
-    make_location, add_location, save_project, get_project_dir, get_location
+    MutationResult, make_location, add_location, get_project_dir, get_location,
+    mutate_project,
 )
 
 
@@ -30,6 +31,7 @@ def create_location_with_images(
     lighting: str = "",
     time_of_day: str = "day",
     weather: str = "clear",
+    commit_timeout: float = 10,
 ) -> dict:
     """
     Creates a location, copies reference images, and generates
@@ -62,7 +64,12 @@ def create_location_with_images(
     # Generate the prompt fragment
     location["prompt_fragment"] = build_location_prompt_fragment(location)
 
-    add_location(project, location)
+    try:
+        add_location(project, location, timeout=commit_timeout)
+    except Exception:
+        shutil.rmtree(loc_path, ignore_errors=True)
+        raise
+
     print(f"   ✅ Location '{name}' created: {lid}")
     return location
 
@@ -120,9 +127,18 @@ def get_location_prompt(project: dict, loc_id: str) -> str:
         return ""
     fragment = loc.get("prompt_fragment", "")
     if not fragment:
-        fragment = build_location_prompt_fragment(loc)
-        loc["prompt_fragment"] = fragment
-        save_project(project)
+        def _mutate(latest_project: dict):
+            latest_location = get_location(latest_project, loc_id)
+            if not latest_location:
+                return MutationResult("", save=False)
+            latest_fragment = latest_location.get("prompt_fragment", "")
+            if latest_fragment:
+                return MutationResult(latest_fragment, save=False)
+            latest_fragment = build_location_prompt_fragment(latest_location)
+            latest_location["prompt_fragment"] = latest_fragment
+            return latest_fragment
+
+        fragment = mutate_project(project["id"], _mutate, snapshot=project) or ""
     return fragment
 
 

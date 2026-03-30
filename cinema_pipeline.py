@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from project_manager import load_project, save_project, get_project_dir
+from project_manager import load_project, get_project_dir, mutate_project
 from character_manager import get_reference_image
 from location_manager import get_location_prompt, get_location_seed
 from continuity_engine import ContinuityEngine
@@ -269,12 +269,31 @@ class CinemaPipeline:
             "scenes_completed": len(self.scene_clips),
         }
 
+    def _refresh_project_snapshot(self, timeout: float = 10) -> Optional[dict]:
+        latest = load_project(self.project["id"], timeout=timeout)
+        if not latest:
+            return None
+
+        self.project.clear()
+        self.project.update(latest)
+        self.continuity.project = self.project
+        self.continuity.character_tracker.project = self.project
+        self.continuity.character_tracker.characters = {
+            character["id"]: character for character in self.project["characters"]
+        }
+        self.continuity.location_persistence.project = self.project
+        self.continuity.location_persistence.locations = {
+            location["id"]: location for location in self.project["locations"]
+        }
+        self.director.project = self.project
+        return self.project
+
     def regenerate_shot(self, scene_id: str, shot_id: str) -> dict:
         """
         Regenerate a single shot without restarting the full pipeline.
         Returns {"success": bool, "image": path, "video": path, "identity_score": float}.
         """
-        project = self.project
+        project = self._refresh_project_snapshot() or self.project
         scene = next((s for s in project["scenes"] if s["id"] == scene_id), None)
         if not scene:
             return {"success": False, "error": "Scene not found"}
@@ -595,7 +614,7 @@ class CinemaPipeline:
         Full production pipeline. Returns path to final video or None on failure.
         Pass resume=True to continue from the last checkpoint.
         """
-        project = self.project
+        project = self._refresh_project_snapshot() or self.project
         scenes = project.get("scenes", [])
         if not scenes:
             self.progress("ERROR", "No scenes defined in project", 0)
@@ -622,8 +641,18 @@ class CinemaPipeline:
                 music_mood=settings.get("music_mood", "suspense"),
                 aspect_ratio=settings.get("aspect_ratio", "16:9"),
             )
-            settings["style_rules"] = style_rules
-            save_project(project)
+            def _persist_style_rules(latest_project: dict):
+                latest_settings = latest_project.setdefault("global_settings", {})
+                latest_settings["style_rules"] = style_rules
+                return latest_settings["style_rules"]
+
+            mutate_project(
+                project["id"],
+                _persist_style_rules,
+                timeout=10,
+                snapshot=self.project,
+            )
+            settings = project.get("global_settings", {})
 
         style_suffix = style_rules_to_prompt_suffix(style_rules)
 
