@@ -125,6 +125,23 @@ def get_config():
                 "enabled": True, "duration": 10, "resolution": "1080p",
             },
         },
+        # V11: dropdown options for new settings
+        "cost_optimization_levels": [
+            {"value": "quality_first", "label": "Quality First"},
+            {"value": "balanced", "label": "Balanced"},
+            {"value": "budget_conscious", "label": "Budget Conscious"},
+        ],
+        "creative_llm_options": [
+            {"value": "auto", "label": "Auto (Router decides)"},
+            {"value": "claude-sonnet", "label": "Claude Sonnet 4"},
+            {"value": "gpt-4o", "label": "GPT-4o"},
+        ],
+        "quality_judge_options": [
+            {"value": "auto", "label": "Auto (Best available)"},
+            {"value": "claude-opus", "label": "Claude Opus 4"},
+            {"value": "gpt-4o", "label": "GPT-4o"},
+            {"value": "gemini-pro", "label": "Gemini 2.5 Pro"},
+        ],
     })
 
 
