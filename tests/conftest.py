@@ -6,6 +6,16 @@ import tempfile
 
 import pytest
 
+
+# ---------------------------------------------------------------------------
+# Custom markers for tiered test execution
+# ---------------------------------------------------------------------------
+
+def pytest_configure(config):
+    """Register custom markers so pytest doesn't warn about them."""
+    config.addinivalue_line("markers", "e2e: end-to-end tests requiring GPU pod + API keys")
+    config.addinivalue_line("markers", "grid_search: parameter grid search tests (long-running)")
+
 # ---------------------------------------------------------------------------
 # Ensure the project root is importable
 # ---------------------------------------------------------------------------
