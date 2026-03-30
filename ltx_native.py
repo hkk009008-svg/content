@@ -3,6 +3,7 @@ LTX Video 2.3 API Client
 Native LTX API when key is available, FAL.ai proxy otherwise.
 Supports: image-to-video, keyframe transition, 4K generation.
 """
+from __future__ import annotations
 
 import os
 import json

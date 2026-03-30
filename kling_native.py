@@ -6,6 +6,7 @@ Uses JWT (HS256) authentication with access/secret key pairs.
 Requirements:
     pip install PyJWT requests
 """
+from __future__ import annotations
 
 import os
 import time

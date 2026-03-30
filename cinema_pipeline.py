@@ -855,6 +855,8 @@ class CinemaPipeline:
                     shot_id = shot.get("id", f"shot_{si}")
                     self.current_shot_id = shot_id
                     self.current_stage = "GENERATE"
+                    shot_start_time = time.time()
+                    MAX_SHOT_SECONDS = 300  # 5 min hard timeout per shot
 
                     # Helper for shot-scoped progress events
                     def shot_progress(stage, detail, pct=shot_pct, **kwargs):
@@ -1005,6 +1007,10 @@ class CinemaPipeline:
                         break
 
                 for v_attempt in range(max_vid_retries):
+                    # Per-shot timeout guard
+                    if time.time() - shot_start_time > MAX_SHOT_SECONDS:
+                        shot_progress("TIMEOUT", f"Shot {si+1} exceeded {MAX_SHOT_SECONDS}s — skipping video", shot_pct)
+                        break
                     shot_progress("VIDEO", f"Video gen attempt {v_attempt+1} ({target_api})", shot_pct + 3)
 
                     # Pass per-API engine overrides from project settings
@@ -1157,7 +1163,7 @@ class CinemaPipeline:
                         except (subprocess.SubprocessError, ValueError, OSError):
                             _dlg_dur = 3.0
 
-                        _shot_type = continuity_config.get("shot_type", "medium") if continuity_config else "medium"
+                        _shot_type = cc.get("shot_type", "medium") if cc else "medium"
                         # User override from settings takes precedence over auto-recommendation
                         _user_ls_mode = settings.get("lip_sync_mode", "auto")
                         if _user_ls_mode != "auto":

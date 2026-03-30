@@ -710,6 +710,8 @@ def api_generate(pid):
             result = pipeline.generate(resume=resume)
             q.put({"stage": "DONE", "detail": result or "Failed", "percent": 100})
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             q.put({"stage": "ERROR", "detail": str(e), "percent": 0})
         finally:
             _running_pipelines.pop(pid, None)

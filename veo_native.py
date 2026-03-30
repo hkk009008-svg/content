@@ -3,6 +3,7 @@ Veo Native API Client — Direct Google Veo 3.1 integration via google-genai SDK
 Bypasses fal.ai proxy for native access to Veo's first+last frame control,
 reference image character preservation, and synced audio generation.
 """
+from __future__ import annotations
 
 import os
 import time

@@ -361,7 +361,7 @@ def generate_ai_video(
                     f"Natural body movement, consistent lighting, photorealistic quality."
                 ),
                 duration=10,
-                ratio="16:9",
+                ratio="1280:720",
             )
             # Poll
             task = client.tasks.retrieve(id=task.id)

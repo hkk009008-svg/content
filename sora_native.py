@@ -5,6 +5,7 @@ up to 20s duration at 1080p.
 
 Note: OpenAI has announced Sora will shut down September 2026.
 """
+from __future__ import annotations
 
 import os
 import time
