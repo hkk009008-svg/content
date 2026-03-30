@@ -9,6 +9,7 @@ Orchestrates: scene decomposition → continuity enhancement → image gen → v
 import os
 import threading
 from typing import Optional, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 import json
 import time
@@ -785,18 +786,22 @@ class CinemaPipeline:
                     self.scene_audio[scene_id] = scene_audio_path
 
             # --- 2c. Generate layered foley per shot (ambience + action + texture) ---
-            foley_paths = []
-            for si, shot in enumerate(shots):
+            # Parallelized: each shot's foley is fully independent
+            def _generate_foley_for_shot(si_shot_pair):
+                si, _shot = si_shot_pair
                 foley_path = os.path.join(self.temp_dir, f"foley_{scene_id}_{si}.mp3")
-                # Try layered foley first (3-layer mix), fall back to simple
-                result = generate_layered_foley(
-                    shot, scene, foley_path,
-                    duration=min(5.0, scene.get("duration_seconds", 10) / max(len(shots), 1)),
-                )
+                dur = min(5.0, scene.get("duration_seconds", 10) / max(len(shots), 1))
+                result = generate_layered_foley(_shot, scene, foley_path, duration=dur)
                 if not result:
-                    foley_desc = shot.get("scene_foley", "ambient room tone")
+                    foley_desc = _shot.get("scene_foley", "ambient room tone")
                     result = generate_scene_foley(foley_desc, foley_path)
-                foley_paths.append(result)
+                return si, result
+
+            foley_paths = [None] * len(shots)
+            with ThreadPoolExecutor(max_workers=min(len(shots), 4)) as foley_pool:
+                foley_futures = foley_pool.map(_generate_foley_for_shot, enumerate(shots))
+                for si, result in foley_futures:
+                    foley_paths[si] = result
 
             # --- 2d. Generate visual content per shot ---
             scene_clip_paths = []
@@ -1072,23 +1077,36 @@ class CinemaPipeline:
                         final_vid = temp_vid
                         break
 
-                # --- VBench QUALITY EVALUATION ---
+                # --- VBench QUALITY EVALUATION (async — does not gate downstream) ---
                 if final_vid:
-                    try:
-                        vbench_result = self.vbench.evaluate(final_vid, shot.get("prompt", ""), reference_images=[ref_img] if ref_img else None, shot_type=shot_type)
-                        self.quality_tracker.log_shot_quality(
-                            shot_id=shot.get("id", f"shot_{shot_index}"),
-                            video_id=self.project.get("id", "unknown"),
-                            shot_type=shot_type,
-                            target_api=str(target_api),
-                            vbench_result=vbench_result,
-                            generation_cost=0.0,
-                            llm_cost=0.0,
-                            attempt=mutation_level,
-                        )
-                        print(f"      [VBENCH] Score: {vbench_result.overall_score:.3f}")
-                    except Exception as e:
-                        print(f"      [VBENCH] Evaluation skipped: {e}")
+                    _vb_vid = final_vid
+                    _vb_prompt = shot.get("prompt", "")
+                    _vb_ref = [ref_img] if ref_img else None
+                    _vb_shot_type = shot_type
+                    _vb_shot_id = shot.get("id", f"shot_{shot_index}")
+                    _vb_api = str(target_api)
+                    _vb_mutation = mutation_level
+
+                    def _run_vbench(_vid=_vb_vid, _prompt=_vb_prompt, _ref=_vb_ref,
+                                    _st=_vb_shot_type, _sid=_vb_shot_id, _api=_vb_api,
+                                    _mut=_vb_mutation):
+                        try:
+                            vbench_result = self.vbench.evaluate(_vid, _prompt, reference_images=_ref, shot_type=_st)
+                            self.quality_tracker.log_shot_quality(
+                                shot_id=_sid,
+                                video_id=self.project.get("id", "unknown"),
+                                shot_type=_st,
+                                target_api=_api,
+                                vbench_result=vbench_result,
+                                generation_cost=0.0,
+                                llm_cost=0.0,
+                                attempt=_mut,
+                            )
+                            print(f"      [VBENCH] Score: {vbench_result.overall_score:.3f}")
+                        except Exception as e:
+                            print(f"      [VBENCH] Evaluation skipped: {e}")
+
+                    threading.Thread(target=_run_vbench, daemon=True).start()
 
                 # --- QUALITY-GATED POST-PROCESSING ---
                 if final_vid:
@@ -1206,23 +1224,40 @@ class CinemaPipeline:
                         self._last_frame_for_chaining = last_frame
 
             # --- GENERATE TRANSITION CLIPS between shots (Wan FLF2V) ---
+            # Parallelized: extract frames sequentially (fast), then generate all
+            # transition clips concurrently (slow API calls, fully independent).
             if len(scene_clip_paths) > 1:
-                chained_clips = [scene_clip_paths[0]]
+                # Phase 1: extract boundary frames (CPU-only, fast)
+                transition_tasks = []  # [(index, prev_last_path, curr_first_path, output_path)]
                 for i in range(1, len(scene_clip_paths)):
-                    prev_clip = scene_clip_paths[i - 1]
-                    curr_clip = scene_clip_paths[i]
-                    # Extract last frame of prev, first frame (keyframe) of curr
                     prev_last = os.path.join(self.temp_dir, f"chain_last_{scene_id}_{i-1}.jpg")
                     curr_first = os.path.join(self.temp_dir, f"img_{scene_id}_{i}.jpg")
-                    if extract_last_frame(prev_clip, prev_last) and os.path.exists(curr_first):
-                        transition = os.path.join(self.temp_dir, f"transition_{scene_id}_{i}.mp4")
-                        trans_result = generate_transition_clip(
-                            prev_last, curr_first, transition,
-                            prompt=f"Smooth transition, same character, continuous motion",
+                    if extract_last_frame(scene_clip_paths[i - 1], prev_last) and os.path.exists(curr_first):
+                        out_path = os.path.join(self.temp_dir, f"transition_{scene_id}_{i}.mp4")
+                        transition_tasks.append((i, prev_last, curr_first, out_path))
+
+                # Phase 2: generate transition clips in parallel
+                transition_results = {}  # index -> path or None
+                if transition_tasks:
+                    def _gen_transition(task):
+                        idx, p_last, c_first, out = task
+                        res = generate_transition_clip(
+                            p_last, c_first, out,
+                            prompt="Smooth transition, same character, continuous motion",
                         )
-                        if trans_result:
-                            chained_clips.append(trans_result)
-                    chained_clips.append(curr_clip)
+                        return idx, res
+
+                    with ThreadPoolExecutor(max_workers=min(len(transition_tasks), 3)) as trans_pool:
+                        for idx, res in trans_pool.map(_gen_transition, transition_tasks):
+                            transition_results[idx] = res
+
+                # Phase 3: interleave clips and transitions in order
+                chained_clips = [scene_clip_paths[0]]
+                for i in range(1, len(scene_clip_paths)):
+                    trans = transition_results.get(i)
+                    if trans:
+                        chained_clips.append(trans)
+                    chained_clips.append(scene_clip_paths[i])
                 scene_clip_paths = chained_clips
 
             self.scene_clips[scene_id] = scene_clip_paths
