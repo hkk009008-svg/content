@@ -89,7 +89,7 @@ class QualityTracker:
     def _close(self, conn: sqlite3.Connection) -> None:
         """Close the connection unless it is the persistent in-memory one."""
         if conn is not self._persistent_conn:
-            self._close(conn)
+            conn.close()
 
     def _ensure_table(self) -> None:
         conn = self._connect()

@@ -130,8 +130,8 @@ class LLMEnsemble:
                 for model in models
             }
             results: list[tuple[str, Any]] = []
-            for future in concurrent.futures.as_completed(futures):
-                results.append(future.result())
+            for future in concurrent.futures.as_completed(futures, timeout=120):
+                results.append(future.result(timeout=120))
 
         # Preserve original model ordering (as_completed may reorder).
         result_by_model = {model: output for model, output in results}
@@ -214,10 +214,10 @@ class LLMEnsemble:
             for name, fn, args in tasks:
                 future_to_name[pool.submit(fn, *args)] = name
 
-            for future in concurrent.futures.as_completed(future_to_name):
+            for future in concurrent.futures.as_completed(future_to_name, timeout=120):
                 name = future_to_name[future]
                 try:
-                    result = future.result()
+                    result = future.result(timeout=120)
                     votes.append({"name": name, **result})
                 except Exception as exc:
                     votes.append({
