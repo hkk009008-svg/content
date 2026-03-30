@@ -115,11 +115,15 @@ class CinemaPipeline:
         self.current_scene_id = ""
         self.current_shot_id = ""
 
-        # Quality systems
-        self.vbench = VBenchEvaluator()
+        # Quality systems — parameterized from project settings
+        _gs = self.project.get("global_settings", {})
+        self.vbench = VBenchEvaluator(
+            flicker_threshold=_gs.get("temporal_flicker_tolerance", 0.85),
+            regression_tolerance=_gs.get("regression_sensitivity", 0.05),
+        )
         self.quality_tracker = QualityTracker()
         self.cost_tracker = CostTracker()
-        self.ensemble = LLMEnsemble()
+        self.ensemble = LLMEnsemble(settings=_gs)
 
         # Checkpoint: completed scene indices (for resume)
         self._completed_scene_indices = set()
@@ -436,7 +440,9 @@ class CinemaPipeline:
                 result["recommendations"].append({"tool": "regenerate", "reason": "Severe motion artifacts"})
 
         # Coherence (compare against previous shot's image in same scene)
-        if image_path and os.path.exists(str(image_path)):
+        _diag_settings = self.project.get("global_settings", {})
+        _coherence_enabled = _diag_settings.get("coherence_check_enabled", True)
+        if _coherence_enabled and image_path and os.path.exists(str(image_path)):
             shot_idx = clip.get("shot_index", 0)
             if shot_idx > 0:
                 prev_img = os.path.join(self.temp_dir, f"img_{scene_id}_{shot_idx - 1}.jpg")
@@ -445,7 +451,8 @@ class CinemaPipeline:
                     coh = assess_coherence(str(image_path), prev_img)
                     result["scores"]["coherence"] = coh.overall_coherence_score
                     result["scores"]["color_drift"] = coh.color_drift
-                    if coh.color_drift > 0.3:
+                    _drift_threshold = _diag_settings.get("color_drift_sensitivity", 0.3)
+                    if coh.color_drift > _drift_threshold:
                         result["recommendations"].append({"tool": "color_grade", "reason": "Color palette drift detected"})
 
         return result
@@ -727,10 +734,14 @@ class CinemaPipeline:
             shots = scene.get("shots", [])
             if not shots:
                 self.progress("DECOMPOSE", f"Decomposing scene into shots...", base_pct + 2)
-                try:
-                    shots = competitive_decompose_scene(scene, chars_in_scene, location, settings, style_rules)
-                except Exception as e_cd:
-                    print(f"   [DECOMPOSE] Competitive decomposition failed ({e_cd}), falling back to standard")
+                use_competitive = settings.get("competitive_generation", True)
+                if use_competitive:
+                    try:
+                        shots = competitive_decompose_scene(scene, chars_in_scene, location, settings, style_rules)
+                    except Exception as e_cd:
+                        print(f"   [DECOMPOSE] Competitive decomposition failed ({e_cd}), falling back to standard")
+                        shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules)
+                else:
                     shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules)
 
                 # CHIEF DIRECTOR VALIDATION — review shots before generation
@@ -978,6 +989,14 @@ class CinemaPipeline:
                 max_vid_retries = 3
                 final_vid = None
                 chars_in_frame = shot.get("characters_in_frame", [])
+
+                # Budget check before video generation
+                _budget_limit = settings.get("budget_limit_usd", 0)
+                if _budget_limit > 0:
+                    _spent = self.cost_tracker.get_video_cost(project["id"]).get("total_usd", 0) if hasattr(self.cost_tracker, 'get_video_cost') else 0
+                    if _spent >= _budget_limit:
+                        shot_progress("BUDGET", f"Budget limit reached (${_spent:.2f}/${_budget_limit:.2f})", shot_pct + 3)
+                        break
 
                 for v_attempt in range(max_vid_retries):
                     shot_progress("VIDEO", f"Video gen attempt {v_attempt+1} ({target_api})", shot_pct + 3)

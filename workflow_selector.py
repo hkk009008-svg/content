@@ -268,6 +268,7 @@ def get_optimal_api(
     shot_type: str,
     character_ids: Optional[List[str]] = None,
     budget_remaining: Optional[float] = None,
+    quality_cost_weight: float = 0.8,
 ) -> List[Dict]:
     """
     Use historical VBench quality data to dynamically rank APIs for a given shot type.
@@ -314,8 +315,8 @@ def get_optimal_api(
 
     # --- Determine weights ---
     has_characters = character_ids is not None and len(character_ids) > 0
-    quality_weight = 0.8 if has_characters else 0.7
-    cost_weight = 0.2 if has_characters else 0.3
+    quality_weight = quality_cost_weight if has_characters else max(quality_cost_weight - 0.1, 0.5)
+    cost_weight = 1.0 - quality_weight
 
     # Normalize costs across all candidate APIs
     costs = [s.get("avg_cost", 0.0) for s in shot_stats.values()]
@@ -353,7 +354,7 @@ def get_optimal_api(
 
     # If budget filtering removed everything, fall back to static
     if not scored:
-        return get_optimal_api(shot_type, character_ids, budget_remaining=None)
+        return get_optimal_api(shot_type, character_ids, budget_remaining=None, quality_cost_weight=quality_cost_weight)
 
     return scored
 
@@ -362,6 +363,7 @@ def get_dynamic_workflow(
     shot_type: str,
     character_ids: Optional[List[str]] = None,
     budget_remaining: Optional[float] = None,
+    quality_cost_weight: float = 0.8,
 ) -> Dict:
     """
     Build a workflow parameter dict that merges static template params
@@ -381,7 +383,7 @@ def get_dynamic_workflow(
     params = get_workflow_params(shot_type)
 
     # Get quality-ranked APIs
-    ranked = get_optimal_api(shot_type, character_ids, budget_remaining)
+    ranked = get_optimal_api(shot_type, character_ids, budget_remaining, quality_cost_weight)
 
     if ranked:
         # Best API becomes primary target

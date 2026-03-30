@@ -96,6 +96,23 @@ export interface GlobalSettings {
   // API Engines
   cascade_retry_limit?: number
   api_engines?: Record<string, ApiEngineConfig>
+  // V11: Budget & Cost
+  budget_limit_usd?: number
+  cost_optimization?: string
+  // V11: Quality Engine (VBench)
+  vbench_overall_threshold?: number
+  identity_strictness?: number
+  temporal_flicker_tolerance?: number
+  regression_sensitivity?: number
+  // V11: LLM Preferences
+  creative_llm?: string
+  quality_judge_llm?: string
+  competitive_generation?: boolean
+  // V11: Workflow & Coherence
+  quality_cost_weight?: number
+  adaptive_pulid?: boolean
+  coherence_check_enabled?: boolean
+  color_drift_sensitivity?: number
 }
 
 export interface ApiInfo {
@@ -216,4 +233,8 @@ export interface AppConfig {
   color_grade_presets?: string[]
   lip_sync_modes?: string[]
   api_engine_defaults?: Record<string, ApiEngineConfig>
+  // V11 config options
+  cost_optimization_levels?: { value: string; label: string }[]
+  creative_llm_options?: { value: string; label: string }[]
+  quality_judge_options?: { value: string; label: string }[]
 }

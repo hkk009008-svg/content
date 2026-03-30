@@ -60,7 +60,7 @@ _DEFAULT_JUDGE = "claude-sonnet-4-20250514"
 class LLMEnsemble:
     """Orchestrates competitive generation across multiple LLM providers."""
 
-    def __init__(self) -> None:
+    def __init__(self, settings: dict | None = None) -> None:
         # Lazy-import clients so the module can be imported even when the
         # underlying SDKs are not installed (they just need to be present
         # at call time).
@@ -73,6 +73,20 @@ class LLMEnsemble:
         self.openai_client = openai.OpenAI(
             api_key=os.environ.get("OPENAI_API_KEY", ""),
         )
+
+        # Apply settings overrides
+        self.competitive_enabled = True
+        self.judge_model_override: str | None = None
+        if settings:
+            self.competitive_enabled = settings.get("competitive_generation", True)
+            judge_pref = settings.get("quality_judge_llm", "auto")
+            if judge_pref != "auto":
+                judge_map = {
+                    "claude-opus": "claude-opus-4-20250918",
+                    "gpt-4o": "gpt-4o",
+                    "gemini-pro": "gemini-2.5-pro",
+                }
+                self.judge_model_override = judge_map.get(judge_pref)
 
     # ------------------------------------------------------------------
     # Public API
@@ -130,8 +144,8 @@ class LLMEnsemble:
                 for model in models
             }
             results: list[tuple[str, Any]] = []
-            for future in concurrent.futures.as_completed(futures):
-                results.append(future.result())
+            for future in concurrent.futures.as_completed(futures, timeout=120):
+                results.append(future.result(timeout=120))
 
         # Preserve original model ordering (as_completed may reorder).
         result_by_model = {model: output for model, output in results}
@@ -214,10 +228,10 @@ class LLMEnsemble:
             for name, fn, args in tasks:
                 future_to_name[pool.submit(fn, *args)] = name
 
-            for future in concurrent.futures.as_completed(future_to_name):
+            for future in concurrent.futures.as_completed(future_to_name, timeout=120):
                 name = future_to_name[future]
                 try:
-                    result = future.result()
+                    result = future.result(timeout=120)
                     votes.append({"name": name, **result})
                 except Exception as exc:
                     votes.append({
