@@ -1084,6 +1084,12 @@ class CinemaPipeline:
                         final_vid = temp_vid
                         break
 
+                # Accept best-effort video if identity validation rejected all attempts
+                # but a video file exists on disk — better than a still image fallback
+                if not final_vid and os.path.exists(vid_path):
+                    final_vid = vid_path
+                    shot_progress("ACCEPTED", f"Accepting best-effort video (identity below threshold)", shot_pct + 4)
+
                 # --- VBench QUALITY EVALUATION (async — does not gate downstream) ---
                 if final_vid:
                     _vb_vid = final_vid
