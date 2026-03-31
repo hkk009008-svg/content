@@ -233,16 +233,12 @@ class QualityTracker:
                     vb.overall_vbench,
                     identity_similarity, coherence_score,
                     generation_cost, llm_cost, total_cost,
-<<<<<<< HEAD
-                    datetime.now(timezone.utc).isoformat(),
-=======
                     pc.get("pulid_weight"), pc.get("guidance_scale"), pc.get("pag_scale"),
                     pc.get("denoise_strength"), pc.get("controlnet_depth"), pc.get("ip_adapter_weight"),
                     pc.get("diffusion_steps"), pc.get("color_grade_preset"),
                     pc.get("voice_stability"), pc.get("voice_style"),
                     pc.get("generation_time_seconds"), pc.get("cascade_depth", 0),
-                    datetime.utcnow().isoformat(),
->>>>>>> 100b0469549ec803fc5e6a5c944747b8ed2b2811
+                    datetime.now(timezone.utc).isoformat(),
                 ),
             )
             conn.commit()

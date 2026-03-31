@@ -68,9 +68,12 @@ for node_name in "${!CUSTOM_NODES[@]}"; do
     node_path="$CUSTOM_NODES_DIR/$node_name"
     if [ ! -d "$node_path" ]; then
         echo "  Installing $node_name..."
-        git clone "${CUSTOM_NODES[$node_name]}" "$node_path" -q
-        if [ -f "$node_path/requirements.txt" ]; then
-            pip install -r "$node_path/requirements.txt" -q
+        if git clone "${CUSTOM_NODES[$node_name]}" "$node_path" -q 2>/dev/null; then
+            if [ -f "$node_path/requirements.txt" ]; then
+                pip install -r "$node_path/requirements.txt" -q
+            fi
+        else
+            echo "  WARNING: Failed to clone $node_name (skipping — may require auth)"
         fi
     else
         echo "  $node_name already installed."

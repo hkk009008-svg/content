@@ -329,6 +329,8 @@ def list_projects() -> List[dict]:
     _ensure_projects_dir()
     projects = []
     for pid in os.listdir(PROJECTS_DIR):
+        if not os.path.isdir(os.path.join(PROJECTS_DIR, pid)) or pid.startswith("."):
+            continue
         p = load_project(pid)
         if p:
             projects.append({"id": p["id"], "name": p["name"]})
