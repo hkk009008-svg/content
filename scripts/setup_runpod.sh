@@ -61,7 +61,7 @@ mkdir -p "$CUSTOM_NODES_DIR"
 rm -rf "$CUSTOM_NODES_DIR/comfyui-reactor-node" 2>/dev/null
 
 declare -A CUSTOM_NODES=(
-    ["ComfyUI-PuLID"]="https://github.com/cubiq/ComfyUI_PuLID/archive/refs/heads/main.tar.gz"
+    ["ComfyUI-PuLID"]="https://github.com/cubiq/PuLID_ComfyUI/archive/refs/heads/main.tar.gz"
     ["ComfyUI_IPAdapter_plus"]="https://github.com/cubiq/ComfyUI_IPAdapter_plus/archive/refs/heads/main.tar.gz"
     ["ComfyUI_essentials"]="https://github.com/cubiq/ComfyUI_essentials/archive/refs/heads/main.tar.gz"
     ["ComfyUI-ReActor"]="https://github.com/Gourieff/ComfyUI-ReActor/archive/refs/heads/main.tar.gz"
