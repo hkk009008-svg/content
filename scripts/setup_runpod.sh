@@ -61,7 +61,7 @@ declare -A CUSTOM_NODES=(
     ["ComfyUI-PuLID"]="https://github.com/cubiq/ComfyUI_PuLID.git"
     ["ComfyUI_IPAdapter_plus"]="https://github.com/cubiq/ComfyUI_IPAdapter_plus.git"
     ["ComfyUI_essentials"]="https://github.com/cubiq/ComfyUI_essentials.git"
-    ["comfyui-reactor-node"]="https://github.com/Gourieff/comfyui-reactor-node.git"
+    ["ComfyUI-ReActor"]="https://github.com/Gourieff/ComfyUI-ReActor.git"
 )
 
 for node_name in "${!CUSTOM_NODES[@]}"; do
