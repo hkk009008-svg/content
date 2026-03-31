@@ -585,8 +585,8 @@ def apply_au_plugin(
             for k, v in parameters.items():
                 try:
                     setattr(plugin, k, v)
-                except Exception:
-                    pass
+                except (AttributeError, ValueError, TypeError) as e_param:
+                    print(f"   [AU] Could not set plugin param {k}: {e_param}")
 
         # Process audio
         with AudioFile(audio_path) as f:

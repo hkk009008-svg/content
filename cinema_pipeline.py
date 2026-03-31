@@ -683,7 +683,7 @@ class CinemaPipeline:
                     bgm_path = mastered
                     self.progress("AUDIO", "BGM mastered (cinema_master preset)", 6)
             except Exception as e_master:
-                pass  # Mastering is enhancement, not critical
+                print(f"   [AUDIO] BGM mastering skipped (non-critical): {e_master}")
 
         # ----------------------------------------------------------
         # STEP 2: Process each scene
@@ -955,8 +955,9 @@ class CinemaPipeline:
                                     image_url=img_path, identity_score=sim_score)
                                 mutation_level = min(mutation_level + 1, 2)
                                 continue
-                        except Exception:
-                            break  # If validation unavailable, accept the result
+                        except (ImportError, RuntimeError) as e_val:
+                            print(f"      [IDENTITY] Validation unavailable ({e_val}), accepting result")
+                            break
                     elif result:
                         break
 
@@ -1126,7 +1127,7 @@ class CinemaPipeline:
                                           motion_score=motion_s)
                         # "regenerate" recommendation is handled by the retry loop above
                     except Exception as e:
-                        pass  # Motion quality assessment is best-effort
+                        print(f"      [QUALITY] Motion assessment skipped: {e}")
 
                 # --- FACE-SWAP POST-PROCESSING (FaceFusion) ---
                 if final_vid and primary_ref and settings.get("face_swap_enabled", True):
@@ -1153,7 +1154,7 @@ class CinemaPipeline:
                                 capture_output=True, text=True, timeout=10,
                             )
                             _dlg_dur = float(_dur_r.stdout.strip()) if _dur_r.returncode == 0 else 3.0
-                        except Exception:
+                        except (subprocess.SubprocessError, ValueError, OSError):
                             _dlg_dur = 3.0
 
                         _shot_type = continuity_config.get("shot_type", "medium") if continuity_config else "medium"
@@ -1373,7 +1374,8 @@ class CinemaPipeline:
                              "-q:v", "1", first_frame_path],
                             capture_output=True, timeout=15
                         )
-                    except Exception:
+                    except (subprocess.SubprocessError, OSError) as e_ff:
+                        print(f"   [TRANSITION] Frame extract failed: {e_ff}")
                         continue
 
                 if last_result and os.path.exists(first_frame_path):
@@ -1424,8 +1426,8 @@ class CinemaPipeline:
                 cost_summary = self.cost_tracker.get_video_cost(video_id)
                 if cost_summary.get("total_usd", 0) > 0:
                     print(f"\n   💰 [COST] Total: ${cost_summary['total_usd']:.2f} | LLM: ${cost_summary.get('llm_usd', 0):.2f} | API: ${cost_summary.get('api_usd', 0):.2f}")
-            except Exception:
-                pass
+            except Exception as e_cost:
+                print(f"   [COST] Could not retrieve cost summary: {e_cost}")
 
             self._clear_checkpoint()  # Success — no need for checkpoint anymore
             self.progress("COMPLETE", f"Video exported: {final_path}", 100)
@@ -1553,7 +1555,8 @@ class CinemaPipeline:
                     normalize_clip(transition_out, trans_norm, duration_sec=2.5, effect="cinematic_glow")
                     all_normalized.append(trans_norm)
                     print(f"   [ASSEMBLY] Inserted transition after scene {si+1}")
-                except Exception:
+                except Exception as e_tn:
+                    print(f"   [WARN] Transition normalize failed: {e_tn}")
                     all_normalized.append(transition_out)
 
         if not all_normalized:
@@ -1671,7 +1674,8 @@ class CinemaPipeline:
             try:
                 stitch_modules(valid_clips, preview_path)
                 return preview_path
-            except Exception:
+            except Exception as e_stitch:
+                print(f"   [PREVIEW] Stitch failed, returning first clip: {e_stitch}")
                 return valid_clips[0] if valid_clips else None
         return None
 
@@ -1684,7 +1688,7 @@ class CinemaPipeline:
         for f in glob.glob(os.path.join(self.temp_dir, "*")):
             try:
                 os.remove(f)
-            except Exception:
+            except OSError:
                 pass
 
 

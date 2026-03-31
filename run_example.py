@@ -69,7 +69,7 @@ def run_local_example():
             try:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
-            except Exception:
+            except OSError:
                 pass
 
 if __name__ == "__main__":

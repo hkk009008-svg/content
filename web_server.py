@@ -53,7 +53,8 @@ def _get_delivery_styles():
     try:
         from phase_b_audio import VOICE_DIRECTIONS
         return {k: v.get("description", k) for k, v in VOICE_DIRECTIONS.items()}
-    except Exception:
+    except (ImportError, AttributeError) as e:
+        print(f"   [WEB] Could not load delivery styles: {e}")
         return {}
 
 

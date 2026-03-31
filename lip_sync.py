@@ -88,7 +88,7 @@ def check_overlay_prerequisites(video_path: str, audio_path: str) -> Prerequisit
         if vid_width < 256:
             warnings.append(f"WARNING: Video resolution low ({vid_width}px) — face region may be too small for quality lip sync")
 
-    except Exception:
+    except (subprocess.SubprocessError, ValueError, OSError, KeyError):
         warnings.append("WARNING: Could not probe video — proceeding anyway")
 
     # Check audio duration
@@ -105,7 +105,7 @@ def check_overlay_prerequisites(video_path: str, audio_path: str) -> Prerequisit
         if audio_duration > 120:
             warnings.append(f"WARNING: Audio very long ({audio_duration:.0f}s) — may cause sync drift")
 
-    except Exception:
+    except (subprocess.SubprocessError, ValueError, OSError, KeyError):
         warnings.append("WARNING: Could not probe audio — proceeding anyway")
 
     passed = len(blockers) == 0
@@ -142,7 +142,7 @@ def check_generation_prerequisites(image_path: str, audio_path: str) -> Prerequi
             warnings.append(f"WARNING: Image small ({w}x{h}) — Omnihuman works best at 512x512+")
         if w / h > 2.0 or h / w > 2.0:
             warnings.append(f"WARNING: Image aspect ratio extreme ({w}x{h}) — portrait framing recommended")
-    except Exception:
+    except (ImportError, OSError, ValueError):
         warnings.append("WARNING: Could not check image dimensions")
 
     # Check audio duration
@@ -159,7 +159,7 @@ def check_generation_prerequisites(image_path: str, audio_path: str) -> Prerequi
         elif duration > 30:
             warnings.append(f"WARNING: Audio > 30s — will generate at 720p only (not 1080p)")
 
-    except Exception:
+    except (subprocess.SubprocessError, ValueError, OSError, KeyError):
         warnings.append("WARNING: Could not probe audio duration")
 
     passed = len(blockers) == 0

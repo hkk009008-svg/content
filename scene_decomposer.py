@@ -123,7 +123,7 @@ def decompose_scene(
         reference = research_cinematography(mood, loc_description, action)
         if reference:
             research_ctx = f"\n{reference}\n"
-    except Exception:
+    except (ImportError, RuntimeError) as e:
         pass  # Research is optional — never blocks generation
 
     # Target shot count based on duration
@@ -401,7 +401,7 @@ def competitive_decompose_scene(
         reference = research_cinematography(mood, loc_description, action)
         if reference:
             research_ctx = f"\n{reference}\n"
-    except Exception:
+    except (ImportError, RuntimeError) as e:
         pass  # Research is optional — never blocks generation
 
     # ------------------------------------------------------------------
