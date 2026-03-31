@@ -53,34 +53,32 @@ else
     echo "  ComfyUI already installed at $COMFYUI_DIR"
 fi
 
-# Custom nodes
+# Custom nodes — use tarball download (avoids git credential issues on pods)
 CUSTOM_NODES_DIR="$COMFYUI_DIR/custom_nodes"
 mkdir -p "$CUSTOM_NODES_DIR"
-
-# Prevent git from prompting for credentials (all repos are public)
-export GIT_TERMINAL_PROMPT=0
 
 # Clean up any stale partial clones from previous failed attempts
 rm -rf "$CUSTOM_NODES_DIR/comfyui-reactor-node" 2>/dev/null
 
 declare -A CUSTOM_NODES=(
-    ["ComfyUI-PuLID"]="https://github.com/cubiq/ComfyUI_PuLID.git"
-    ["ComfyUI_IPAdapter_plus"]="https://github.com/cubiq/ComfyUI_IPAdapter_plus.git"
-    ["ComfyUI_essentials"]="https://github.com/cubiq/ComfyUI_essentials.git"
-    ["ComfyUI-ReActor"]="https://github.com/Gourieff/ComfyUI-ReActor.git"
+    ["ComfyUI-PuLID"]="https://github.com/cubiq/ComfyUI_PuLID/archive/refs/heads/main.tar.gz"
+    ["ComfyUI_IPAdapter_plus"]="https://github.com/cubiq/ComfyUI_IPAdapter_plus/archive/refs/heads/main.tar.gz"
+    ["ComfyUI_essentials"]="https://github.com/cubiq/ComfyUI_essentials/archive/refs/heads/main.tar.gz"
+    ["ComfyUI-ReActor"]="https://github.com/Gourieff/ComfyUI-ReActor/archive/refs/heads/main.tar.gz"
 )
 
 for node_name in "${!CUSTOM_NODES[@]}"; do
     node_path="$CUSTOM_NODES_DIR/$node_name"
     if [ ! -d "$node_path" ]; then
         echo "  Installing $node_name..."
-        if git clone "${CUSTOM_NODES[$node_name]}" "$node_path" -q; then
+        mkdir -p "$node_path"
+        if curl -sL "${CUSTOM_NODES[$node_name]}" | tar xz --strip-components=1 -C "$node_path"; then
             if [ -f "$node_path/requirements.txt" ]; then
                 pip install -r "$node_path/requirements.txt" -q
             fi
         else
-            echo "  ERROR: Failed to clone $node_name"
-            echo "    URL: ${CUSTOM_NODES[$node_name]}"
+            echo "  ERROR: Failed to download $node_name"
+            rm -rf "$node_path"
         fi
     else
         echo "  $node_name already installed."
