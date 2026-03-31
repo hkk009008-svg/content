@@ -57,6 +57,12 @@ fi
 CUSTOM_NODES_DIR="$COMFYUI_DIR/custom_nodes"
 mkdir -p "$CUSTOM_NODES_DIR"
 
+# Prevent git from prompting for credentials (all repos are public)
+export GIT_TERMINAL_PROMPT=0
+
+# Clean up any stale partial clones from previous failed attempts
+rm -rf "$CUSTOM_NODES_DIR/comfyui-reactor-node" 2>/dev/null
+
 declare -A CUSTOM_NODES=(
     ["ComfyUI-PuLID"]="https://github.com/cubiq/ComfyUI_PuLID.git"
     ["ComfyUI_IPAdapter_plus"]="https://github.com/cubiq/ComfyUI_IPAdapter_plus.git"
@@ -68,12 +74,13 @@ for node_name in "${!CUSTOM_NODES[@]}"; do
     node_path="$CUSTOM_NODES_DIR/$node_name"
     if [ ! -d "$node_path" ]; then
         echo "  Installing $node_name..."
-        if git clone "${CUSTOM_NODES[$node_name]}" "$node_path" -q 2>/dev/null; then
+        if git clone "${CUSTOM_NODES[$node_name]}" "$node_path" -q; then
             if [ -f "$node_path/requirements.txt" ]; then
                 pip install -r "$node_path/requirements.txt" -q
             fi
         else
-            echo "  WARNING: Failed to clone $node_name (skipping — may require auth)"
+            echo "  ERROR: Failed to clone $node_name"
+            echo "    URL: ${CUSTOM_NODES[$node_name]}"
         fi
     else
         echo "  $node_name already installed."
