@@ -14,15 +14,15 @@ tavily_client = None
 if os.getenv("TAVILY_API_KEY"):
     try:
         tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
-    except:
-        pass
+    except (ImportError, ValueError, RuntimeError) as e:
+        print(f"   [WARN] Tavily client init failed: {e}")
 
 firecrawl_app = None
 if os.getenv("FIRECRAWL_API_KEY"):
     try:
         firecrawl_app = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
-    except:
-        pass
+    except (ImportError, ValueError, RuntimeError) as e:
+        print(f"   [WARN] Firecrawl client init failed: {e}")
 
 def search_tavily(query: str) -> str:
     print(f"   🔍 [WEB] Searching Tavily for: {query}")

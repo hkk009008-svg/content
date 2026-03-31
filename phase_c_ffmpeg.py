@@ -9,8 +9,9 @@ _VEO_QUOTA_EXHAUSTED = False
 
 try:
     from runwayml import RunwayML, TaskFailedError
-except Exception:
-    pass  # Will gracefully fail/mock later
+except ImportError:
+    RunwayML = None
+    TaskFailedError = None
 
 try:
     import fal_client
@@ -98,8 +99,8 @@ def generate_kling_storyboard(
                 for ref_path in valid_refs[1:6]:  # Up to 5 additional angles
                     try:
                         extra_urls.append(fal_client.upload_file(ref_path))
-                    except Exception:
-                        pass
+                    except (OSError, RuntimeError) as e:
+                        print(f"   [STORYBOARD] Failed to upload ref {ref_path}: {e}")
                 args["elements"] = [{
                     "frontal_image_url": frontal_url,
                     "reference_image_urls": extra_urls,
@@ -461,8 +462,8 @@ def generate_ai_video(
                         if os.path.exists(ref_path):
                             try:
                                 image_urls.append(fal_client.upload_file(ref_path))
-                            except Exception:
-                                pass
+                            except (OSError, RuntimeError) as e:
+                                print(f"   [WARN] Failed to upload ref {ref_path}: {e}")
 
                 # Always include the source keyframe
                 if not image_urls:
@@ -563,8 +564,8 @@ def generate_ai_video(
                             for ref_path in valid_refs[1:6]:  # Up to 5 additional angles  # Max 3 additional angles
                                 try:
                                     extra_urls.append(fal_client.upload_file(ref_path))
-                                except Exception:
-                                    pass
+                                except (OSError, RuntimeError) as e:
+                                    print(f"   [WARN] Failed to upload ref {ref_path}: {e}")
 
                             args["elements"] = [{
                                 "frontal_image_url": frontal_url,

@@ -190,8 +190,8 @@ class CharacterContinuityTracker:
                                 best_results[cid]["similarity"] = similarity
                                 best_results[cid]["matched"] = similarity >= threshold
 
-                    except Exception:
-                        pass
+                    except (ValueError, RuntimeError) as e_emb:
+                        print(f"   [CONTINUITY] Embedding comparison failed: {e_emb}")
                     finally:
                         if os.path.exists(temp_face):
                             os.remove(temp_face)
