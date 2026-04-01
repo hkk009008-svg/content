@@ -1,0 +1,375 @@
+{
+  "id": "048e3a757831",
+  "name": "Neon Requiem - Stress Test",
+  "characters": [
+    {
+      "id": "char_6fcedcb4d9de",
+      "name": "Detective Mira Chen",
+      "description": "East Asian woman in her 30s, sharp jawline, dark eyes, short black hair with a silver streak. Wears a weathered leather jacket over a dark turtleneck. Scar on left cheek. Determined, intense expression.",
+      "reference_images": [
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_6fcedcb4d9de/mira_1.jpg"
+      ],
+      "canonical_reference": "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_6fcedcb4d9de/canonical.jpg",
+      "voice_id": "21m00Tcm4TlvDq8ikWAM",
+      "ip_adapter_weight": 0.9,
+      "physical_traits": "East Asian woman in her 30s, sharp jawline, dark eyes, short black hair with a silver streak. Wears a weathered leather jacket over a dark turtleneck. Scar on left cheek. Determined, intense expression.",
+      "embedding_cache": "",
+      "multi_angle_refs": [
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_6fcedcb4d9de/canonical.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_6fcedcb4d9de/angle_45.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_6fcedcb4d9de/angle_profile.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_6fcedcb4d9de/angle_back.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_6fcedcb4d9de/expression_smile.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_6fcedcb4d9de/lighting_outdoor.jpg"
+      ],
+      "identity_anchor": "Detective Mira Chen: East Asian woman in her 30s, sharp jawline, dark eyes, short black hair with a silver streak. Wears a weathered leather jacket over a dark turtleneck. Scar on left cheek. Determined, intense expression."
+    },
+    {
+      "id": "char_576167c628bd",
+      "name": "Viktor Volkov",
+      "description": "Eastern European man in his 50s, bald head, thick salt-and-pepper beard, piercing blue eyes, imposing build. Wears an immaculate charcoal suit with a crimson pocket square. Cold, calculating demeanor.",
+      "reference_images": [
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_576167c628bd/ref_0.jpg"
+      ],
+      "canonical_reference": "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_576167c628bd/canonical.jpg",
+      "voice_id": "pNInz6obpgDQGcFmaJgB",
+      "ip_adapter_weight": 0.85,
+      "physical_traits": "Eastern European man in his 50s, bald head, thick salt-and-pepper beard, piercing blue eyes, imposing build. Wears an immaculate charcoal suit with a crimson pocket square. Cold, calculating demeanor.",
+      "embedding_cache": "",
+      "multi_angle_refs": [
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_576167c628bd/canonical.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_576167c628bd/angle_45.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_576167c628bd/angle_profile.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_576167c628bd/angle_back.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_576167c628bd/expression_smile.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_576167c628bd/lighting_outdoor.jpg"
+      ],
+      "identity_anchor": "Viktor Volkov: Eastern European man in his 50s, bald head, thick salt-and-pepper beard, piercing blue eyes, imposing build. Wears an immaculate charcoal suit with a crimson pocket square. Cold, calculating demeanor."
+    },
+    {
+      "id": "char_5173682e056f",
+      "name": "Pixel",
+      "description": "Non-binary person in their early 20s, dyed teal hair shaved on one side, multiple ear piercings, holographic glasses. Wears an oversized hoodie covered in circuit-board patterns. Nervous energy, quick movements.",
+      "reference_images": [
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_5173682e056f/ref_0.jpg"
+      ],
+      "canonical_reference": "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_5173682e056f/canonical.jpg",
+      "voice_id": "jsCqWAovK2LkecY7zXl4",
+      "ip_adapter_weight": 0.8,
+      "physical_traits": "Non-binary person in their early 20s, dyed teal hair shaved on one side, multiple ear piercings, holographic glasses. Wears an oversized hoodie covered in circuit-board patterns. Nervous energy, quick movements.",
+      "embedding_cache": "",
+      "multi_angle_refs": [
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_5173682e056f/canonical.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_5173682e056f/angle_45.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_5173682e056f/angle_profile.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_5173682e056f/angle_back.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_5173682e056f/expression_smile.jpg",
+        "/Users/hyungkoookkim/Content/projects/048e3a757831/characters/char_5173682e056f/lighting_outdoor.jpg"
+      ],
+      "identity_anchor": "Pixel: Non-binary person in their early 20s, dyed teal hair shaved on one side, multiple ear piercings, holographic glasses. Wears an oversized hoodie covered in circuit-board patterns. Nervous energy, quick movements."
+    }
+  ],
+  "locations": [
+    {
+      "id": "loc_108d24e18c72",
+      "name": "The Red Lantern Bar",
+      "description": "Dimly lit underground speakeasy with crimson neon signs, velvet booths, smoke haze, art deco brass fixtures. A long mahogany bar with backlit bottles. Jazz playing softly.",
+      "reference_images": [],
+      "prompt_fragment": "Setting: Dimly lit underground speakeasy with crimson neon signs, velvet booths, smoke haze, art deco brass fixtures. A long mahogany bar with backlit bottles. Jazz playing softly., low-key noir with red neon accents. Photorealistic, cinematic composition, rule of thirds",
+      "lighting": "low-key noir with red neon accents",
+      "time_of_day": "night",
+      "weather": "clear",
+      "seed": 966813
+    },
+    {
+      "id": "loc_92780dc8ec65",
+      "name": "Rooftop Helipad",
+      "description": "Rain-soaked rooftop of a 60-story corporate tower. Helicopter landing pad with flashing perimeter lights. City skyline stretching to the horizon with holographic billboards. Puddles reflecting neon.",
+      "reference_images": [],
+      "prompt_fragment": "Setting: Rain-soaked rooftop of a 60-story corporate tower. Helicopter landing pad with flashing perimeter lights. City skyline stretching to the horizon with holographic billboards. Puddles reflecting neon., high contrast with lightning flashes and neon reflections, rain visible through windows, wet reflective surfaces. Photorealistic, cinematic composition, rule of thirds",
+      "lighting": "high contrast with lightning flashes and neon reflections",
+      "time_of_day": "night",
+      "weather": "rain",
+      "seed": 218492
+    },
+    {
+      "id": "loc_4ac650ccec77",
+      "name": "Pixel's Hacker Den",
+      "description": "Cramped apartment converted into a server farm. Walls of monitors showing scrolling code, tangled cable bundles, energy drink cans, holographic displays floating mid-air. Blue LED strip lighting.",
+      "reference_images": [],
+      "prompt_fragment": "Setting: Cramped apartment converted into a server farm. Walls of monitors showing scrolling code, tangled cable bundles, energy drink cans, holographic displays floating mid-air. Blue LED strip lighting., cool blue LED with monitor glow. Photorealistic, cinematic composition, rule of thirds",
+      "lighting": "cool blue LED with monitor glow",
+      "time_of_day": "night",
+      "weather": "clear",
+      "seed": 835868
+    },
+    {
+      "id": "loc_8ed2d55be215",
+      "name": "Industrial Waterfront",
+      "description": "Abandoned shipyard at dawn. Rusted cargo cranes silhouetted against an orange sky. Fog rolling off the water. Concrete docks with moss and graffiti. A single black sedan parked under a flickering streetlight.",
+      "reference_images": [],
+      "prompt_fragment": "Setting: Abandoned shipyard at dawn. Rusted cargo cranes silhouetted against an orange sky. Fog rolling off the water. Concrete docks with moss and graffiti. A single black sedan parked under a flickering streetlight., golden hour with volumetric fog, atmospheric fog or haze softening the background. Photorealistic, cinematic composition, rule of thirds",
+      "lighting": "golden hour with volumetric fog",
+      "time_of_day": "dawn",
+      "weather": "fog",
+      "seed": 361168
+    }
+  ],
+  "scenes": [
+    {
+      "id": "scene_e9750942ea15",
+      "order": 0,
+      "title": "The Warning",
+      "location_id": "loc_108d24e18c72",
+      "characters_present": [
+        "char_6fcedcb4d9de",
+        "char_576167c628bd"
+      ],
+      "action": "Detective Mira Chen confronts Viktor Volkov at his private booth. She slides a photograph across the table. He examines it without expression, then locks eyes with her. Tension escalates as he leans forward and whispers a threat.",
+      "dialogue": "Mira: You think you can hide behind your lawyers forever, Viktor? I have three witnesses. Viktor: Witnesses have a way of... reconsidering their testimony. You should take care of yourself, Detective. This city can be dangerous.",
+      "mood": "suspense",
+      "camera_direction": "Start wide establishing the bar, move to over-the-shoulder shots during dialogue, end on extreme close-up of Viktor whispering",
+      "duration_seconds": 25.0,
+      "num_shots": 5,
+      "shots": [
+        {
+          "id": "shot_0",
+          "prompt": "[SHOT] Wide shot, 24mm f/2.8 lens, deep depth of field, camera at shoulder height. [SCENE] Dimly lit underground speakeasy with crimson neon signs, velvet booths, smoke haze, art deco brass fixtures, long mahogany bar with backlit bottles, low-key noir with red neon accents, night, clear. [ACTION] Characters seated at a booth, facing the camera, detective sliding a photograph across the table toward Viktor, natural movement accentuating tension. [OUTFIT] Mira in a weathered leather jacket over a dark turtleneck, Viktor in an immaculate charcoal suit with a crimson pocket square. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, volumetric atmospheric lighting, micro-detail in fabric weave and material texture, no AI artifacts, no smooth plastic skin, no over-saturated colors.",
+          "camera": "zoom_in_slow",
+          "visual_effect": "gritty_contrast",
+          "target_api": "LTX",
+          "scene_foley": "muffled jazz music, clinking glasses, soft murmur of conversation",
+          "characters_in_frame": [
+            "char_6fcedcb4d9de",
+            "char_576167c628bd"
+          ],
+          "primary_character": "char_6fcedcb4d9de",
+          "action_context": "Establishing shot of the speakeasy with Mira approaching Viktor's booth.",
+          "generated_image": "",
+          "generated_video": "",
+          "approved": true
+        },
+        {
+          "id": "shot_1",
+          "prompt": "[SHOT] Medium close-up, 50mm f/1.8 lens, medium depth of field, camera at eye level. [SCENE] Dimly lit underground speakeasy with crimson neon signs, velvet booths, smoke haze, art deco brass fixtures, low-key noir with red neon accents. [ACTION] Detective Mira Chen facing the camera, intense focus on Viktor, photograph in hand about to slide it, calm but tense demeanor. [OUTFIT] Weathered leather jacket over a dark turtleneck. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, micro-detail in leather texture, sharp light rendering, no AI artifacts, no smooth plastic skin, no over-saturated colors.",
+          "camera": "zoom_in_slow",
+          "visual_effect": "gritty_contrast",
+          "target_api": "KLING_NATIVE",
+          "scene_foley": "soft rustle of photograph paper against table, distant clinking of glasses",
+          "characters_in_frame": [
+            "char_6fcedcb4d9de"
+          ],
+          "primary_character": "char_6fcedcb4d9de",
+          "action_context": "Mira confronting Viktor, preparing to reveal evidence.",
+          "generated_image": "",
+          "generated_video": "",
+          "approved": true
+        },
+        {
+          "id": "shot_2",
+          "prompt": "[SHOT] Over-the-shoulder shot, 35mm f/2.0 lens, medium depth of field, camera over Mira's shoulder angled toward Viktor. [SCENE] Dimly lit underground speakeasy with crimson neon signs, velvet booths, smoke haze, art deco brass fixtures, low-key noir with red neon accents. [ACTION] Viktor examining the photograph on the table, subtly facing the camera, calculating demeanor without showing expression. [OUTFIT] Immaculate charcoal suit with a crimson pocket square. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, micro-detail in suit texture, subtle light play, no AI artifacts, no smooth plastic skin.",
+          "camera": "pan_right",
+          "visual_effect": "gritty_contrast",
+          "target_api": "SORA_NATIVE",
+          "scene_foley": "crinkling of paper, soft jazz playing in background",
+          "characters_in_frame": [
+            "char_576167c628bd"
+          ],
+          "primary_character": "char_576167c628bd",
+          "action_context": "Viktor assessing the evidence Mira presented.",
+          "generated_image": "",
+          "generated_video": ""
+        },
+        {
+          "id": "shot_3",
+          "prompt": "[SHOT] Close-up, 85mm f/1.4 lens, shallow depth of field, camera at eye level focusing on Viktor's expression. [SCENE] Dimly lit underground speakeasy with crimson neon signs, velvet booths, smoke haze, art deco brass fixtures, low-key noir with red neon accents. [ACTION] Viktor locks eyes with Mira, faint inner tension visible, facing the camera fully, posture leaning slightly forward. [OUTFIT] Immaculate charcoal suit with a crimson pocket square. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, micro-detail in beard and suit weave, intense light/shadow contrast, no AI artifacts, no smooth plastic skin.",
+          "camera": "zoom_in_slow",
+          "visual_effect": "gritty_contrast",
+          "target_api": "KLING_NATIVE",
+          "scene_foley": "jazz music with heightened suspense, distant whispers",
+          "characters_in_frame": [
+            "char_576167c628bd"
+          ],
+          "primary_character": "char_576167c628bd",
+          "action_context": "Viktor responding non-verbally to Mira's accusations.",
+          "generated_image": "",
+          "generated_video": ""
+        },
+        {
+          "id": "shot_4",
+          "prompt": "[SHOT] Extreme close-up, 105mm f/1.4 lens, very shallow depth of field, camera tightly framed on Viktor's lips. [SCENE] Dimly lit underground speakeasy with crimson neon signs, velvet booths, smoke haze, art deco brass fixtures, low-key noir with red neon accents. [ACTION] Viktor whispering his threat to Mira, full attention on the camera, giving an ominous, confident sign of danger. [OUTFIT] Edge of crimson pocket square noticeable, blur on lapel due to shallow DoF. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, very shallow depth of field with circular bokeh, natural film grain ISO 400, detailed texture in beard, intense dramatic close-up, no AI artifacts, no smooth plastic skin.",
+          "camera": "zoom_in_slow",
+          "visual_effect": "gritty_contrast",
+          "target_api": "VEO_NATIVE",
+          "scene_foley": "amplified sound of whisper, bar ambiance in the background",
+          "characters_in_frame": [
+            "char_576167c628bd"
+          ],
+          "primary_character": "char_576167c628bd",
+          "action_context": "Viktor delivering a whispered threat to Mira, lowering tension with ominous insinuation.",
+          "generated_image": "",
+          "generated_video": ""
+        }
+      ]
+    },
+    {
+      "id": "scene_b86bfbbea742",
+      "order": 1,
+      "title": "Digital Breadcrumbs",
+      "location_id": "loc_4ac650ccec77",
+      "characters_present": [
+        "char_6fcedcb4d9de",
+        "char_5173682e056f"
+      ],
+      "action": "Pixel furiously types as holographic data streams around them. Mira watches over their shoulder. A firewall breach triggers alarms — screens flash red. Pixel rips out a cable, pivots to a backup terminal, and extracts the data just before the trace completes.",
+      "dialogue": "Pixel: I am in their mainframe. Oh no — they have counter-intrusion AI. Mira: How long? Pixel: Thirty seconds before they trace us. Grab the drive!",
+      "mood": "action",
+      "camera_direction": "Rapid dolly between monitors, handheld shaky cam on Pixel typing, slow-motion on the cable pull, static drone overhead shot of the den",
+      "duration_seconds": 20.0,
+      "num_shots": 2,
+      "shots": [
+        {
+          "id": "shot_0",
+          "prompt": "[SHOT] Establishing wide shot, 24mm lens, deep depth of field, camera at low angle. [SCENE] Cramped apartment converted into a server farm. Walls of monitors showing scrolling code, tangled cable bundles, energy drink cans, holographic displays floating mid-air. Blue LED strip lighting., natural ambient lighting. [ACTION] East Asian woman in her 30s, sharp jawline, dark eyes, short black hair with a silver streak. Wears a weathered leather jacket over a dark turtleneck. Scar on left cheek. Determined, intense expression., Non-binary person in their early 20s, dyed teal hair shaved on one side, multiple ear piercings, holographic glasses. Wears an oversized hoodie covered in circuit-board patterns. Nervous energy, quick movements.. Pixel furiously types as holographic data streams around them. Mira watches over their shoulder. A firewall breach triggers alarms — screens flash red. Pixel rips out a cable, pivots to a backup terminal, and extracts the data just before the trace completes., facing the camera. [OUTFIT] Current wardrobe. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, natural film grain ISO 400, volumetric atmospheric lighting, no AI artifacts, no smooth plastic skin.",
+          "camera": "zoom_in_slow",
+          "visual_effect": "cinematic_glow",
+          "target_api": "AUTO",
+          "scene_foley": "ambient environmental sound",
+          "characters_in_frame": [
+            "char_6fcedcb4d9de",
+            "char_5173682e056f"
+          ],
+          "primary_character": "char_6fcedcb4d9de",
+          "action_context": "Pixel furiously types as holographic data streams around them. Mira watches over their shoulder. A firewall breach triggers alarms — screens flash red. Pixel rips out a cable, pivots to a backup terminal, and extracts the data just before the trace completes.",
+          "generated_image": "",
+          "generated_video": ""
+        },
+        {
+          "id": "shot_1",
+          "prompt": "[SHOT] Medium close-up, 85mm f/1.4 lens, shallow depth of field, eye-level camera. [SCENE] Cramped apartment converted into a server farm. Walls of monitors showing scrolling code, tangled cable bundles, energy drink cans, holographic displays floating mid-air. Blue LED strip lighting., natural motivated key light from camera-left. [ACTION] East Asian woman in her 30s, sharp jawline, dark eyes, short black hair with a silver streak. Wears a weathered leather jacket over a dark turtleneck. Scar on left cheek. Determined, intense expression., Non-binary person in their early 20s, dyed teal hair shaved on one side, multiple ear piercings, holographic glasses. Wears an oversized hoodie covered in circuit-board patterns. Nervous energy, quick movements.. Pixel furiously types as holographic data streams around them. Mira watches over their shoulder. A firewall breach triggers alarms — screens flash red. Pixel rips out a cable, pivots to a backup terminal, and extracts the data just before the trace completes., looking directly at the camera. [OUTFIT] Current wardrobe with visible fabric texture. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, no AI artifacts, no smooth plastic skin.",
+          "camera": "dolly_in_rapid",
+          "visual_effect": "cinematic_glow",
+          "target_api": "AUTO",
+          "scene_foley": "subtle environmental ambience",
+          "characters_in_frame": [
+            "char_6fcedcb4d9de"
+          ],
+          "primary_character": "char_6fcedcb4d9de",
+          "action_context": "Pixel furiously types as holographic data streams around them. Mira watches over their shoulder. A firewall breach triggers alarms — screens flash red. Pixel rips out a cable, pivots to a backup terminal, and extracts the data just before the trace completes.",
+          "generated_image": "",
+          "generated_video": ""
+        }
+      ]
+    },
+    {
+      "id": "scene_1693b3b44b2a",
+      "order": 2,
+      "title": "Above the Storm",
+      "location_id": "loc_92780dc8ec65",
+      "characters_present": [
+        "char_6fcedcb4d9de"
+      ],
+      "action": "Mira sprints across the rain-soaked rooftop, dodging ventilation units. Lightning illuminates the city below. She reaches the helipad edge and looks down — a helicopter rises from below the building. The city skyline stretches endlessly behind her.",
+      "dialogue": "",
+      "mood": "thriller",
+      "camera_direction": "Tracking shot following Mira running, crane shot rising with helicopter, wide landscape of city skyline in rain, close-up of her rain-streaked face",
+      "duration_seconds": 20.0,
+      "num_shots": 1,
+      "shots": [
+        {
+          "id": "shot_0",
+          "prompt": "",
+          "camera": "zoom_in_slow",
+          "visual_effect": "cinematic_glow",
+          "target_api": "AUTO",
+          "scene_foley": "ambient room tone",
+          "characters_in_frame": [
+            "char_6fcedcb4d9de"
+          ],
+          "primary_character": "char_6fcedcb4d9de",
+          "action_context": "Mira sprints across the rain-soaked rooftop, dodging ventilation units. Lightning illuminates the city below. She reaches the helipad edge and looks down — a helicopter rises from below the building. The city skyline stretches endlessly behind her.",
+          "generated_image": "",
+          "generated_video": ""
+        }
+      ]
+    },
+    {
+      "id": "scene_a1da24c95182",
+      "order": 3,
+      "title": "First Light",
+      "location_id": "loc_8ed2d55be215",
+      "characters_present": [
+        "char_6fcedcb4d9de",
+        "char_576167c628bd"
+      ],
+      "action": "Dawn breaks over the waterfront. Mira stands alone on the dock, staring at the water. Viktor approaches from the shadows. They face each other in silence. She holds up a USB drive. He reaches for it. She drops it into the harbor.",
+      "dialogue": "Viktor: You are making a terrible mistake. Mira: No. I am correcting one.",
+      "mood": "melancholic",
+      "camera_direction": "Landscape establishing shot of dawn waterfront, slow zoom on Mira alone, medium two-shot of confrontation, close-up of USB drive falling into water",
+      "duration_seconds": 25.0,
+      "num_shots": 2,
+      "shots": [
+        {
+          "id": "shot_0",
+          "prompt": "[SHOT] Establishing wide shot, 24mm lens, deep depth of field, camera at low angle. [SCENE] Abandoned shipyard at dawn. Rusted cargo cranes silhouetted against an orange sky. Fog rolling off the water. Concrete docks with moss and graffiti. A single black sedan parked under a flickering streetlight., natural ambient lighting. [ACTION] East Asian woman in her 30s, sharp jawline, dark eyes, short black hair with a silver streak. Wears a weathered leather jacket over a dark turtleneck. Scar on left cheek. Determined, intense expression., Eastern European man in his 50s, bald head, thick salt-and-pepper beard, piercing blue eyes, imposing build. Wears an immaculate charcoal suit with a crimson pocket square. Cold, calculating demeanor.. Dawn breaks over the waterfront. Mira stands alone on the dock, staring at the water. Viktor approaches from the shadows. They face each other in silence. She holds up a USB drive. He reaches for it. She drops it into the harbor., facing the camera. [OUTFIT] Current wardrobe. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, natural film grain ISO 400, volumetric atmospheric lighting, no AI artifacts, no smooth plastic skin.",
+          "camera": "zoom_in_slow",
+          "visual_effect": "cinematic_glow",
+          "target_api": "AUTO",
+          "scene_foley": "ambient environmental sound",
+          "characters_in_frame": [
+            "char_6fcedcb4d9de",
+            "char_576167c628bd"
+          ],
+          "primary_character": "char_6fcedcb4d9de",
+          "action_context": "Dawn breaks over the waterfront. Mira stands alone on the dock, staring at the water. Viktor approaches from the shadows. They face each other in silence. She holds up a USB drive. He reaches for it. She drops it into the harbor.",
+          "generated_image": "",
+          "generated_video": ""
+        },
+        {
+          "id": "shot_1",
+          "prompt": "[SHOT] Medium close-up, 85mm f/1.4 lens, shallow depth of field, eye-level camera. [SCENE] Abandoned shipyard at dawn. Rusted cargo cranes silhouetted against an orange sky. Fog rolling off the water. Concrete docks with moss and graffiti. A single black sedan parked under a flickering streetlight., natural motivated key light from camera-left. [ACTION] East Asian woman in her 30s, sharp jawline, dark eyes, short black hair with a silver streak. Wears a weathered leather jacket over a dark turtleneck. Scar on left cheek. Determined, intense expression., Eastern European man in his 50s, bald head, thick salt-and-pepper beard, piercing blue eyes, imposing build. Wears an immaculate charcoal suit with a crimson pocket square. Cold, calculating demeanor.. Dawn breaks over the waterfront. Mira stands alone on the dock, staring at the water. Viktor approaches from the shadows. They face each other in silence. She holds up a USB drive. He reaches for it. She drops it into the harbor., looking directly at the camera. [OUTFIT] Current wardrobe with visible fabric texture. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, no AI artifacts, no smooth plastic skin.",
+          "camera": "dolly_in_rapid",
+          "visual_effect": "cinematic_glow",
+          "target_api": "AUTO",
+          "scene_foley": "subtle environmental ambience",
+          "characters_in_frame": [
+            "char_6fcedcb4d9de"
+          ],
+          "primary_character": "char_6fcedcb4d9de",
+          "action_context": "Dawn breaks over the waterfront. Mira stands alone on the dock, staring at the water. Viktor approaches from the shadows. They face each other in silence. She holds up a USB drive. He reaches for it. She drops it into the harbor.",
+          "generated_image": "",
+          "generated_video": ""
+        }
+      ]
+    }
+  ],
+  "global_settings": {
+    "aspect_ratio": "16:9",
+    "music_mood": "suspense",
+    "color_palette": "",
+    "master_seed": 987888,
+    "style_rules": {
+      "director_vision": "The visual style of 'Neon Requiem - Stress Test' will aim to envelope the audience in an atmosphere of tension and thrill through dynamic yet subtle cues, reflecting the psychological depth and suspense of the story. The emotional arc will be enhanced by a deliberate manipulation of space and color, ensuring the audience is fully immersed in the protagonist's journey.",
+      "cinematography_rules": "Utilize dynamic camera movements, including pans and tracking shots, to enhance the feeling of unpredictability. Utilize close-ups for emotional impact and wide shots sparingly to isolate characters within their surroundings, underscoring a sense of vulnerability. Keep framing tight and focused, often using the longer end of the zoom to condense the depth of field and direct attention.",
+      "color_grading_palette": "Primary tones should hover on the cooler spectrum with deep blues and sickly greens to create unease. High contrast with desaturated shadows and slightly boosted highlights, maintaining natural skin tones. Saturation should be reduced overall, except for specific color pops in key visual motifs—neon lights or significant objects, ensuring they grab but do not overwhelm attention.",
+      "lighting_rules": "Opt for high contrast lighting with distinct shadows to enhance depth and mystery. Key lights should come from unconventional angles to create unsettling shapes and silhouettes, with minimal fill lighting to maintain shadow depth. Use practical lights with a cooler temperature, around 5000K, to mimic urban and industrial environments.",
+      "sound_design": "Sound design should incorporate ambient city noises with layered, barely discernible whispers and tones to create subliminal unease. Use low-frequency rumbles sparingly to build tension slowly, matching music crescendos with narrative shifts.",
+      "photorealism_rules": "Employ lenses that mimic human vision, like a 50mm lens for tight shots, to ensure realism. Use high resolution and fine textures in backgrounds to simulate a palpable atmosphere but maintain subtle film grain for authenticity. Depth of field should mimic reality closely, avoiding overly shallow focus unless in direct conjunction with emotional highpoints.",
+      "composition_rules": "Employ the rule of thirds to keep the viewer's attention balanced yet engaged. Use leading lines to draw focus towards potential threats or narrative focal points. Utilize negative space to create a sense of isolation and anticipation, making characters appear small or overwhelmed within the frame."
+    },
+    "default_video_api": "AUTO",
+    "budget_limit_usd": 0,
+    "cost_optimization": "quality_first",
+    "vbench_overall_threshold": 0.6,
+    "identity_strictness": 0.6,
+    "temporal_flicker_tolerance": 0.85,
+    "regression_sensitivity": 0.05,
+    "creative_llm": "auto",
+    "quality_judge_llm": "auto",
+    "competitive_generation": true,
+    "quality_cost_weight": 0.8,
+    "adaptive_pulid": true,
+    "coherence_check_enabled": true,
+    "color_drift_sensitivity": 0.3
+  }
+}

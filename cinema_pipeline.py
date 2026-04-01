@@ -807,11 +807,12 @@ class CinemaPipeline:
             scene_clip_paths = []
             num_shots = len(shots)
 
-            # --- TRY KLING STORYBOARD MODE FIRST (unified latent space) ---
-            # Paper: "Because the cuts share this unified space, the hero character
-            # maintains absolute temporal and visual consistency across the entire sequence."
+            # --- KLING STORYBOARD MODE (DISABLED) ---
+            # Disabled: per-shot generation produces higher quality output because each
+            # shot gets independent API routing, PuLID tuning, identity validation,
+            # RIFE interpolation, and upscaling. Storyboard bypasses all of these.
             storyboard_result = None
-            if num_shots >= 2 and num_shots <= 6:
+            if False:  # was: num_shots >= 2 and num_shots <= 6
                 first_enhanced = self.continuity.enhance_shot_prompt(shots[0], scene, None, 0)
                 first_cc = first_enhanced.get("continuity_config", {})
                 first_ref = first_cc.get("primary_reference")
@@ -890,348 +891,347 @@ class CinemaPipeline:
                     max_retries = 3
                     primary_ref = cc.get("primary_reference")
                     loc_seed = scene_seed or cc.get("location_seed")
-                init_img = cc.get("init_image") if cc.get("use_img2img") else None
-                denoise = cc.get("denoise_strength", 1.0)
+                    init_img = cc.get("init_image") if cc.get("use_img2img") else None
+                    denoise = cc.get("denoise_strength", 1.0)
 
-                # RECURSIVE PROMPT MUTATION LOOP
-                # Architecture: generate → evaluate identity → mutate prompt → regenerate
-                # Each retry progressively strengthens identity preservation
-                identity_anchor = cc.get("identity_anchor", "")
-                mutation_level = 0  # 0=normal, 1=strengthened, 2=maximum preservation
+                    # RECURSIVE PROMPT MUTATION LOOP
+                    # Architecture: generate → evaluate identity → mutate prompt → regenerate
+                    # Each retry progressively strengthens identity preservation
+                    identity_anchor = cc.get("identity_anchor", "")
+                    mutation_level = 0  # 0=normal, 1=strengthened, 2=maximum preservation
 
-                for attempt in range(max_retries):
-                    current_seed = (loc_seed + attempt) if loc_seed else None
+                    for attempt in range(max_retries):
+                        current_seed = (loc_seed + attempt) if loc_seed else None
 
-                    # PROMPT MUTATION based on previous failure
-                    if mutation_level == 0:
-                        mod_prompt = full_prompt
-                    elif mutation_level == 1:
-                        # Strengthen: simplify scene, boost identity language
-                        mod_prompt = (
-                            f"CRITICAL: Maintain exact face from reference. "
-                            f"{full_prompt}. "
-                            f"The character's face MUST match the reference photo exactly."
-                        )
-                        shot_progress("MUTATE", f"Prompt mutation level 1: strengthened identity", shot_pct)
-                    else:
-                        # Maximum: strip scene to minimal, force identity
-                        sections = {}
-                        import re
-                        for tag in ["SHOT", "SCENE", "ACTION", "OUTFIT", "QUALITY"]:
-                            match = re.search(rf'\[{tag}\]\s*(.+?)(?=\[(?:SHOT|SCENE|ACTION|OUTFIT|QUALITY)\]|$)', full_prompt, re.DOTALL)
-                            if match:
-                                sections[tag] = match.group(1).strip()
-                        # Use ONLY scene + simple action — strip everything else
-                        mod_prompt = (
-                            f"[SHOT] Close-up portrait, 85mm f/1.4 lens. "
-                            f"[SCENE] {sections.get('SCENE', 'neutral background')}. "
-                            f"[ACTION] The character faces the camera directly. "
-                            f"[QUALITY] Photorealistic, 8K, face clearly visible."
-                        )
-                        shot_progress("MUTATE", f"Prompt mutation level 2: maximum identity lock", shot_pct)
-
-                    result = generate_ai_broll(
-                        mod_prompt, img_path,
-                        seed=current_seed,
-                        character_image=primary_ref,
-                        init_image=init_img,
-                        denoise_strength=denoise,
-                        multi_angle_refs=cc.get("multi_angle_refs", []),
-                        identity_anchor=identity_anchor,
-                        pulid_weight_override=cc.get("pulid_weight_override"),
-                    )
-
-                    # EVALUATE: check identity before accepting
-                    if result and primary_ref and os.path.exists(img_path):
-                        from phase_c_vision import validate_identity_image
-                        try:
-                            # Quick image-level identity check
-                            img_sim = validate_identity_image(img_path, primary_ref, threshold=cc.get("identity_threshold", 0.70))
-                            if img_sim.get("passed", True):
-                                shot_progress("IDENTITY_OK", f"Image identity verified (attempt {attempt+1})", shot_pct,
-                                    image_url=img_path, identity_score=img_sim.get("similarity", 0.8))
-                                break
-                            else:
-                                sim_score = img_sim.get("similarity", 0)
-                                shot_progress("IDENTITY_FAIL", f"Image identity {sim_score:.2f} < threshold", shot_pct,
-                                    image_url=img_path, identity_score=sim_score)
-                                mutation_level = min(mutation_level + 1, 2)
-                                continue
-                        except (ImportError, RuntimeError) as e_val:
-                            print(f"      [IDENTITY] Validation unavailable ({e_val}), accepting result")
-                            break
-                    elif result:
-                        break
-
-                    shot_progress("RETRY", f"Image retry {attempt+1}/{max_retries}", shot_pct)
-
-                if not os.path.exists(img_path):
-                    shot_progress("SHOT_FAILED", f"Image generation failed for shot {si+1} — skipping", shot_pct)
-                    self.failed_shots.append(shot_id)
-                    self.shot_results[shot_id] = {"image": None, "video": None, "identity_score": 0.0, "status": "failed"}
-                    continue
-
-                # Record for temporal chaining
-                self.continuity.record_shot_generated(img_path, scene_id)
-
-                # --- VIDEO GENERATION (with cascade + identity validation) ---
-                vid_path = os.path.join(self.temp_dir, f"vid_{scene_id}_{si}.mp4")
-                camera = shot.get("camera", "zoom_in_slow")
-
-                # Resolve AUTO → concrete API + shot-type-aware fallback chain
-                raw_api = shot.get("target_api", "AUTO")
-                video_fallbacks = None
-                resolved_shot_type = None
-                if raw_api == "AUTO":
-                    from workflow_selector import classify_shot_type, WORKFLOW_TEMPLATES
-                    resolved_shot_type = classify_shot_type(
-                        shot.get("prompt", ""), camera, shot.get("characters_in_frame", [])
-                    )
-                    template = WORKFLOW_TEMPLATES.get(resolved_shot_type, WORKFLOW_TEMPLATES["medium"])
-                    target_api = template["target_api"]
-                    video_fallbacks = template.get("video_fallbacks")
-                    shot_progress("ROUTING", f"AUTO → {target_api} (shot type: {resolved_shot_type})", shot_pct)
-                else:
-                    target_api = raw_api
-
-                max_vid_retries = 3
-                final_vid = None
-                chars_in_frame = shot.get("characters_in_frame", [])
-
-                # Budget check before video generation
-                _budget_limit = settings.get("budget_limit_usd", 0)
-                if _budget_limit > 0:
-                    _spent = self.cost_tracker.get_video_cost(project["id"]).get("total_usd", 0) if hasattr(self.cost_tracker, 'get_video_cost') else 0
-                    if _spent >= _budget_limit:
-                        shot_progress("BUDGET", f"Budget limit reached (${_spent:.2f}/${_budget_limit:.2f})", shot_pct + 3)
-                        break
-
-                for v_attempt in range(max_vid_retries):
-                    # Per-shot timeout guard
-                    if time.time() - shot_start_time > MAX_SHOT_SECONDS:
-                        shot_progress("TIMEOUT", f"Shot {si+1} exceeded {MAX_SHOT_SECONDS}s — skipping video", shot_pct)
-                        break
-                    shot_progress("VIDEO", f"Video gen attempt {v_attempt+1} ({target_api})", shot_pct + 3)
-
-                    # Pass per-API engine overrides from project settings
-                    _api_engines = settings.get("api_engines", {})
-                    _api_cfg = _api_engines.get(target_api, {})
-
-                    # Filter out disabled APIs from fallback chain
-                    _active_fallbacks = [
-                        fb for fb in (video_fallbacks or [])
-                        if _api_engines.get(fb, {}).get("enabled", True) is not False
-                    ]
-
-                    temp_vid = generate_ai_video(
-                        img_path, camera, target_api, vid_path,
-                        pacing="calculated",
-                        character_id=cc.get("primary_character", ""),
-                        multi_angle_refs=cc.get("multi_angle_refs", []),
-                        shot_type=resolved_shot_type,
-                        video_fallbacks=_active_fallbacks if _active_fallbacks else video_fallbacks,
-                    )
-
-                    if temp_vid and chars_in_frame and primary_ref:
-                        # Build validation configs
-                        val_configs = []
-                        for cid in chars_in_frame[:1]:  # Validate primary character
-                            ref = get_reference_image(self.project, cid)
-                            char = next((c for c in chars_in_scene if c["id"] == cid), None)
-                            if ref and char:
-                                val_configs.append({"id": cid, "reference_image": ref, "name": char["name"]})
-
-                        shot_type = cc.get("shot_type", "medium")
-                        if val_configs:
-                            # Use continuity engine's shared validator for rolling history
-                            vid_result = self.continuity.validate_shot(
-                                temp_vid, [cfg["id"] for cfg in val_configs],
-                                shot_type=shot_type,
-                                mode="standard",
-                                attempt=v_attempt,
-                                max_attempts=max_vid_retries,
+                        # PROMPT MUTATION based on previous failure
+                        if mutation_level == 0:
+                            mod_prompt = full_prompt
+                        elif mutation_level == 1:
+                            # Strengthen: simplify scene, boost identity language
+                            mod_prompt = (
+                                f"CRITICAL: Maintain exact face from reference. "
+                                f"{full_prompt}. "
+                                f"The character's face MUST match the reference photo exactly."
                             )
-                            is_passed = vid_result.get("passed") if hasattr(vid_result, 'get') else vid_result.passed
-                            score = vid_result.overall_score if hasattr(vid_result, 'overall_score') else 0.0
-
-                            if is_passed:
-                                final_vid = temp_vid
-                                # Build quality metrics for SSE
-                                qm = {"identity_score": round(score, 3), "shot_type": shot_type}
-                                if hasattr(vid_result, 'character_results'):
-                                    for cid, cr in vid_result.character_results.items():
-                                        qm[f"char_{cr.character_name}_sim"] = round(cr.best_similarity, 3)
-                                shot_progress("VALIDATED", f"Identity confirmed ✓ ({score:.2f})", shot_pct + 5,
-                                              identity_score=score, shot_type=shot_type, quality_metrics=qm)
-                                self.shot_results[shot_id] = {
-                                    "image": img_path, "video": temp_vid,
-                                    "identity_score": score, "status": "validated",
-                                }
-                                break
-                            else:
-                                fail_reason = ""
-                                if hasattr(vid_result, 'character_results'):
-                                    for cr in vid_result.character_results.values():
-                                        if not cr.matched:
-                                            fail_reason = cr.primary_failure_reason.value
-                                            break
-                                shot_progress("IDENTITY_FAIL", f"Retrying video ({v_attempt+1}): {fail_reason}", shot_pct + 3,
-                                              identity_score=score, failure_reason=fail_reason)
+                            shot_progress("MUTATE", f"Prompt mutation level 1: strengthened identity", shot_pct)
                         else:
+                            # Maximum: strip scene to minimal, force identity
+                            sections = {}
+                            import re
+                            for tag in ["SHOT", "SCENE", "ACTION", "OUTFIT", "QUALITY"]:
+                                match = re.search(rf'\[{tag}\]\s*(.+?)(?=\[(?:SHOT|SCENE|ACTION|OUTFIT|QUALITY)\]|$)', full_prompt, re.DOTALL)
+                                if match:
+                                    sections[tag] = match.group(1).strip()
+                            # Use ONLY scene + simple action — strip everything else
+                            mod_prompt = (
+                                f"[SHOT] Close-up portrait, 85mm f/1.4 lens. "
+                                f"[SCENE] {sections.get('SCENE', 'neutral background')}. "
+                                f"[ACTION] The character faces the camera directly. "
+                                f"[QUALITY] Photorealistic, 8K, face clearly visible."
+                            )
+                            shot_progress("MUTATE", f"Prompt mutation level 2: maximum identity lock", shot_pct)
+
+                        result = generate_ai_broll(
+                            mod_prompt, img_path,
+                            seed=current_seed,
+                            character_image=primary_ref,
+                            init_image=init_img,
+                            denoise_strength=denoise,
+                            multi_angle_refs=cc.get("multi_angle_refs", []),
+                            identity_anchor=identity_anchor,
+                            pulid_weight_override=cc.get("pulid_weight_override"),
+                        )
+
+                        # EVALUATE: check identity before accepting
+                        if result and primary_ref and os.path.exists(img_path):
+                            from phase_c_vision import validate_identity_image
+                            try:
+                                # Quick image-level identity check
+                                img_sim = validate_identity_image(img_path, primary_ref, threshold=cc.get("identity_threshold", 0.70))
+                                if img_sim.get("passed", True):
+                                    shot_progress("IDENTITY_OK", f"Image identity verified (attempt {attempt+1})", shot_pct,
+                                        image_url=img_path, identity_score=img_sim.get("similarity", 0.8))
+                                    break
+                                else:
+                                    sim_score = img_sim.get("similarity", 0)
+                                    shot_progress("IDENTITY_FAIL", f"Image identity {sim_score:.2f} < threshold", shot_pct,
+                                        image_url=img_path, identity_score=sim_score)
+                                    mutation_level = min(mutation_level + 1, 2)
+                                    continue
+                            except (ImportError, RuntimeError) as e_val:
+                                print(f"      [IDENTITY] Validation unavailable ({e_val}), accepting result")
+                                break
+                        elif result:
+                            break
+
+                        shot_progress("RETRY", f"Image retry {attempt+1}/{max_retries}", shot_pct)
+
+                    if not os.path.exists(img_path):
+                        shot_progress("SHOT_FAILED", f"Image generation failed for shot {si+1} — skipping", shot_pct)
+                        self.failed_shots.append(shot_id)
+                        self.shot_results[shot_id] = {"image": None, "video": None, "identity_score": 0.0, "status": "failed"}
+                        continue
+
+                    # Record for temporal chaining
+                    self.continuity.record_shot_generated(img_path, scene_id)
+
+                    # --- VIDEO GENERATION (with cascade + identity validation) ---
+                    vid_path = os.path.join(self.temp_dir, f"vid_{scene_id}_{si}.mp4")
+                    camera = shot.get("camera", "zoom_in_slow")
+
+                    # Resolve AUTO → concrete API + shot-type-aware fallback chain
+                    raw_api = shot.get("target_api", "AUTO")
+                    video_fallbacks = None
+                    resolved_shot_type = None
+                    if raw_api == "AUTO":
+                        from workflow_selector import classify_shot_type, WORKFLOW_TEMPLATES
+                        resolved_shot_type = classify_shot_type(shot)
+                        template = WORKFLOW_TEMPLATES.get(resolved_shot_type, WORKFLOW_TEMPLATES["medium"])
+                        target_api = template["target_api"]
+                        video_fallbacks = template.get("video_fallbacks")
+                        shot_progress("ROUTING", f"AUTO → {target_api} (shot type: {resolved_shot_type})", shot_pct)
+                    else:
+                        target_api = raw_api
+
+                    max_vid_retries = 3
+                    final_vid = None
+                    chars_in_frame = shot.get("characters_in_frame", [])
+                    shot_type = cc.get("shot_type", "medium") if cc else "medium"
+
+                    # Budget check before video generation
+                    _budget_limit = settings.get("budget_limit_usd", 0)
+                    if _budget_limit > 0:
+                        _spent = self.cost_tracker.get_video_cost(project["id"]).get("total_usd", 0) if hasattr(self.cost_tracker, 'get_video_cost') else 0
+                        if _spent >= _budget_limit:
+                            shot_progress("BUDGET", f"Budget limit reached (${_spent:.2f}/${_budget_limit:.2f})", shot_pct + 3)
+                            break
+
+                    for v_attempt in range(max_vid_retries):
+                        # Per-shot timeout guard
+                        if time.time() - shot_start_time > MAX_SHOT_SECONDS:
+                            shot_progress("TIMEOUT", f"Shot {si+1} exceeded {MAX_SHOT_SECONDS}s — skipping video", shot_pct)
+                            break
+                        shot_progress("VIDEO", f"Video gen attempt {v_attempt+1} ({target_api})", shot_pct + 3)
+
+                        # Pass per-API engine overrides from project settings
+                        _api_engines = settings.get("api_engines", {})
+                        _api_cfg = _api_engines.get(target_api, {})
+
+                        # Filter out disabled APIs from fallback chain
+                        _active_fallbacks = [
+                            fb for fb in (video_fallbacks or [])
+                            if _api_engines.get(fb, {}).get("enabled", True) is not False
+                        ]
+
+                        temp_vid = generate_ai_video(
+                            img_path, camera, target_api, vid_path,
+                            pacing="calculated",
+                            character_id=cc.get("primary_character", ""),
+                            multi_angle_refs=cc.get("multi_angle_refs", []),
+                            shot_type=resolved_shot_type,
+                            video_fallbacks=_active_fallbacks if _active_fallbacks else video_fallbacks,
+                        )
+
+                        if temp_vid and chars_in_frame and primary_ref:
+                            # Build validation configs
+                            val_configs = []
+                            for cid in chars_in_frame[:1]:  # Validate primary character
+                                ref = get_reference_image(self.project, cid)
+                                char = next((c for c in chars_in_scene if c["id"] == cid), None)
+                                if ref and char:
+                                    val_configs.append({"id": cid, "reference_image": ref, "name": char["name"]})
+
+                            shot_type = cc.get("shot_type", "medium")
+                            if val_configs:
+                                # Use continuity engine's shared validator for rolling history
+                                vid_result = self.continuity.validate_shot(
+                                    temp_vid, [cfg["id"] for cfg in val_configs],
+                                    shot_type=shot_type,
+                                    mode="standard",
+                                    attempt=v_attempt,
+                                    max_attempts=max_vid_retries,
+                                )
+                                is_passed = vid_result.get("passed") if hasattr(vid_result, 'get') else vid_result.passed
+                                score = vid_result.overall_score if hasattr(vid_result, 'overall_score') else 0.0
+
+                                if is_passed:
+                                    final_vid = temp_vid
+                                    # Build quality metrics for SSE
+                                    qm = {"identity_score": round(score, 3), "shot_type": shot_type}
+                                    if hasattr(vid_result, 'character_results'):
+                                        for cid, cr in vid_result.character_results.items():
+                                            qm[f"char_{cr.character_name}_sim"] = round(cr.best_similarity, 3)
+                                    shot_progress("VALIDATED", f"Identity confirmed ✓ ({score:.2f})", shot_pct + 5,
+                                                  identity_score=score, shot_type=shot_type, quality_metrics=qm)
+                                    self.shot_results[shot_id] = {
+                                        "image": img_path, "video": temp_vid,
+                                        "identity_score": score, "status": "validated",
+                                    }
+                                    break
+                                else:
+                                    fail_reason = ""
+                                    if hasattr(vid_result, 'character_results'):
+                                        for cr in vid_result.character_results.values():
+                                            if not cr.matched:
+                                                fail_reason = cr.primary_failure_reason.value
+                                                break
+                                    shot_progress("IDENTITY_FAIL", f"Retrying video ({v_attempt+1}): {fail_reason}", shot_pct + 3,
+                                                  identity_score=score, failure_reason=fail_reason)
+                            else:
+                                final_vid = temp_vid
+                                break
+                        elif temp_vid:
                             final_vid = temp_vid
                             break
-                    elif temp_vid:
-                        final_vid = temp_vid
-                        break
 
-                # Accept best-effort video if identity validation rejected all attempts
-                # but a video file exists on disk — better than a still image fallback
-                if not final_vid and os.path.exists(vid_path):
-                    final_vid = vid_path
-                    shot_progress("ACCEPTED", f"Accepting best-effort video (identity below threshold)", shot_pct + 4)
+                    # Accept best-effort video if identity validation rejected all attempts
+                    # but a video file exists on disk — better than a still image fallback
+                    if not final_vid and os.path.exists(vid_path):
+                        final_vid = vid_path
+                        shot_progress("ACCEPTED", f"Accepting best-effort video (identity below threshold)", shot_pct + 4)
 
-                # --- VBench QUALITY EVALUATION (async — does not gate downstream) ---
-                if final_vid:
-                    _vb_vid = final_vid
-                    _vb_prompt = shot.get("prompt", "")
-                    _vb_ref = [ref_img] if ref_img else None
-                    _vb_shot_type = shot_type
-                    _vb_shot_id = shot.get("id", f"shot_{shot_index}")
-                    _vb_api = str(target_api)
-                    _vb_mutation = mutation_level
+                    # --- VBench QUALITY EVALUATION (async — does not gate downstream) ---
+                    if final_vid:
+                        _vb_vid = final_vid
+                        _vb_prompt = shot.get("prompt", "")
+                        _vb_ref = [primary_ref] if primary_ref else None
+                        _vb_shot_type = shot_type
+                        _vb_shot_id = shot.get("id", f"shot_{si}")
+                        _vb_api = str(target_api)
+                        _vb_mutation = mutation_level
 
-                    def _run_vbench(_vid=_vb_vid, _prompt=_vb_prompt, _ref=_vb_ref,
-                                    _st=_vb_shot_type, _sid=_vb_shot_id, _api=_vb_api,
-                                    _mut=_vb_mutation):
+                        def _run_vbench(_vid=_vb_vid, _prompt=_vb_prompt, _ref=_vb_ref,
+                                        _st=_vb_shot_type, _sid=_vb_shot_id, _api=_vb_api,
+                                        _mut=_vb_mutation):
+                            try:
+                                vbench_result = self.vbench.evaluate(_vid, _prompt, reference_images=_ref, shot_type=_st)
+                                self.quality_tracker.log_shot_quality(
+                                    shot_id=_sid,
+                                    video_id=self.project.get("id", "unknown"),
+                                    shot_type=_st,
+                                    target_api=_api,
+                                    vbench_result=vbench_result,
+                                    generation_cost=0.0,
+                                    llm_cost=0.0,
+                                    attempt=_mut,
+                                )
+                                print(f"      [VBENCH] Score: {vbench_result.overall_score:.3f}")
+                            except Exception as e:
+                                print(f"      [VBENCH] Evaluation skipped: {e}")
+
+                        threading.Thread(target=_run_vbench, daemon=True).start()
+
+                    # --- QUALITY-GATED POST-PROCESSING ---
+                    if final_vid:
                         try:
-                            vbench_result = self.vbench.evaluate(_vid, _prompt, reference_images=_ref, shot_type=_st)
-                            self.quality_tracker.log_shot_quality(
-                                shot_id=_sid,
-                                video_id=self.project.get("id", "unknown"),
-                                shot_type=_st,
-                                target_api=_api,
-                                vbench_result=vbench_result,
-                                generation_cost=0.0,
-                                llm_cost=0.0,
-                                attempt=_mut,
-                            )
-                            print(f"      [VBENCH] Score: {vbench_result.overall_score:.3f}")
+                            from phase_c_ffmpeg import assess_motion_quality
+                            mq = assess_motion_quality(final_vid)
+                            motion_s = mq["smoothness_score"]
+                            if mq["recommendation"] == "interpolate":
+                                shot_progress("INTERP", f"Motion quality {motion_s:.2f} — applying RIFE", shot_pct + 4,
+                                              motion_score=motion_s)
+                                interp_path = os.path.join(self.temp_dir, f"interp_{scene_id}_{si}.mp4")
+                                interp_result = generate_rife_interpolation(final_vid, interp_path)
+                                if interp_result:
+                                    final_vid = interp_result
+                            elif mq["recommendation"] == "accept":
+                                shot_progress("QUALITY", f"Motion quality OK ({motion_s:.2f}) — skipping RIFE", shot_pct + 4,
+                                              motion_score=motion_s)
+                            # "regenerate" recommendation is handled by the retry loop above
                         except Exception as e:
-                            print(f"      [VBENCH] Evaluation skipped: {e}")
+                            print(f"      [QUALITY] Motion assessment skipped: {e}")
 
-                    threading.Thread(target=_run_vbench, daemon=True).start()
+                    # --- FACE-SWAP POST-PROCESSING (FaceFusion) ---
+                    if final_vid and primary_ref and settings.get("face_swap_enabled", True):
+                        swapped_path = os.path.join(self.temp_dir, f"swapped_{scene_id}_{si}.mp4")
+                        swap_result = face_swap_video_frames(final_vid, primary_ref, swapped_path)
+                        if swap_result:
+                            final_vid = swap_result
 
-                # --- QUALITY-GATED POST-PROCESSING ---
-                if final_vid:
-                    try:
-                        from phase_c_ffmpeg import assess_motion_quality
-                        mq = assess_motion_quality(final_vid)
-                        motion_s = mq["smoothness_score"]
-                        if mq["recommendation"] == "interpolate":
-                            shot_progress("INTERP", f"Motion quality {motion_s:.2f} — applying RIFE", shot_pct + 4,
-                                          motion_score=motion_s)
-                            interp_path = os.path.join(self.temp_dir, f"interp_{scene_id}_{si}.mp4")
-                            interp_result = generate_rife_interpolation(final_vid, interp_path)
-                            if interp_result:
-                                final_vid = interp_result
-                        elif mq["recommendation"] == "accept":
-                            shot_progress("QUALITY", f"Motion quality OK ({motion_s:.2f}) — skipping RIFE", shot_pct + 4,
-                                          motion_score=motion_s)
-                        # "regenerate" recommendation is handled by the retry loop above
-                    except Exception as e:
-                        print(f"      [QUALITY] Motion assessment skipped: {e}")
+                    # --- LIP SYNC (smart mode: overlay on existing video OR generate from photo) ---
+                    if final_vid and primary_ref:
+                        scene_audio_path = self.scene_audio.get(scene_id)
+                        has_dialogue = scene.get("dialogue") or scene.get("voiceover")
+                        if has_dialogue and scene_audio_path and os.path.exists(scene_audio_path):
+                            lipsync_path = os.path.join(self.temp_dir, f"lipsync_{scene_id}_{si}.mp4")
 
-                # --- FACE-SWAP POST-PROCESSING (FaceFusion) ---
-                if final_vid and primary_ref and settings.get("face_swap_enabled", True):
-                    swapped_path = os.path.join(self.temp_dir, f"swapped_{scene_id}_{si}.mp4")
-                    swap_result = face_swap_video_frames(final_vid, primary_ref, swapped_path)
-                    if swap_result:
-                        final_vid = swap_result
+                            # Smart pre-analysis: recommend_lip_sync_mode() analyzes shot content
+                            # to decide overlay vs generation vs skip before wasting API calls
+                            from lip_sync import recommend_lip_sync_mode
+                            import subprocess as _sp
+                            try:
+                                _dur_r = _sp.run(
+                                    ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                                     "-of", "default=noprint_wrappers=1:nokey=1", scene_audio_path],
+                                    capture_output=True, text=True, timeout=10,
+                                )
+                                _dlg_dur = float(_dur_r.stdout.strip()) if _dur_r.returncode == 0 else 3.0
+                            except (subprocess.SubprocessError, ValueError, OSError):
+                                _dlg_dur = 3.0
 
-                # --- LIP SYNC (smart mode: overlay on existing video OR generate from photo) ---
-                if final_vid and primary_ref:
-                    scene_audio_path = self.scene_audio.get(scene_id)
-                    has_dialogue = scene.get("dialogue") or scene.get("voiceover")
-                    if has_dialogue and scene_audio_path and os.path.exists(scene_audio_path):
-                        lipsync_path = os.path.join(self.temp_dir, f"lipsync_{scene_id}_{si}.mp4")
+                            _shot_type = cc.get("shot_type", "medium") if cc else "medium"
+                            # User override from settings takes precedence over auto-recommendation
+                            _user_ls_mode = settings.get("lip_sync_mode", "auto")
+                            if _user_ls_mode != "auto":
+                                ls_rec = {"mode": _user_ls_mode, "reason": f"user override: {_user_ls_mode}"}
+                            else:
+                                ls_rec = recommend_lip_sync_mode(
+                                    video_path=final_vid, shot_type=_shot_type,
+                                    dialogue_length_seconds=_dlg_dur,
+                                )
+                            ls_mode = ls_rec.get("mode", "auto")
+                            shot_progress("LIPSYNC",
+                                          f"Lip sync: {ls_mode} ({ls_rec.get('reason', '')[:40]})",
+                                          shot_pct + 4)
 
-                        # Smart pre-analysis: recommend_lip_sync_mode() analyzes shot content
-                        # to decide overlay vs generation vs skip before wasting API calls
-                        from lip_sync import recommend_lip_sync_mode
-                        import subprocess as _sp
-                        try:
-                            _dur_r = _sp.run(
-                                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                                 "-of", "default=noprint_wrappers=1:nokey=1", scene_audio_path],
-                                capture_output=True, text=True, timeout=10,
-                            )
-                            _dlg_dur = float(_dur_r.stdout.strip()) if _dur_r.returncode == 0 else 3.0
-                        except (subprocess.SubprocessError, ValueError, OSError):
-                            _dlg_dur = 3.0
+                            if ls_mode != "skip":
+                                lipsync_result = generate_lip_sync_video(
+                                    character_image_path=primary_ref,
+                                    audio_path=scene_audio_path,
+                                    output_path=lipsync_path,
+                                    existing_video_path=final_vid if ls_mode != "generation" else None,
+                                    mode=ls_mode if ls_mode in ("overlay", "generation") else "auto",
+                                    resolution="720p",
+                                )
+                                if lipsync_result:
+                                    final_vid = lipsync_result
+                            else:
+                                shot_progress("LIPSYNC", f"Lip sync skipped: {ls_rec.get('reason', '')}", shot_pct + 4)
 
-                        _shot_type = cc.get("shot_type", "medium") if cc else "medium"
-                        # User override from settings takes precedence over auto-recommendation
-                        _user_ls_mode = settings.get("lip_sync_mode", "auto")
-                        if _user_ls_mode != "auto":
-                            ls_rec = {"mode": _user_ls_mode, "reason": f"user override: {_user_ls_mode}"}
+                    # --- RIFE FRAME INTERPOLATION (cloud via fal.ai) ---
+                    if final_vid and settings.get("rife_enabled", True):
+                        shot_progress("INTERP", "Cloud frame interpolation (RIFE)", shot_pct + 5)
+                        interp_path = os.path.join(self.temp_dir, f"interp_{scene_id}_{si}.mp4")
+                        interpolated = generate_rife_interpolation(
+                            final_vid, interp_path, num_frames=2, use_scene_detection=True,
+                        )
+                        if interpolated:
+                            final_vid = interpolated
                         else:
-                            ls_rec = recommend_lip_sync_mode(
-                                video_path=final_vid, shot_type=_shot_type,
-                                dialogue_length_seconds=_dlg_dur,
-                            )
-                        ls_mode = ls_rec.get("mode", "auto")
-                        shot_progress("LIPSYNC",
-                                      f"Lip sync: {ls_mode} ({ls_rec.get('reason', '')[:40]})",
-                                      shot_pct + 4)
+                            # Fallback to local FFmpeg minterpolate
+                            local_interp = self._frame_interpolate(final_vid, scene_id, si)
+                            if local_interp:
+                                final_vid = local_interp
 
-                        if ls_mode != "skip":
-                            lipsync_result = generate_lip_sync_video(
-                                character_image_path=primary_ref,
-                                audio_path=scene_audio_path,
-                                output_path=lipsync_path,
-                                existing_video_path=final_vid if ls_mode != "generation" else None,
-                                mode=ls_mode if ls_mode in ("overlay", "generation") else "auto",
-                                resolution="720p",
-                            )
-                            if lipsync_result:
-                                final_vid = lipsync_result
+                    # --- UPSCALE: SeedVR2 cloud (temporally consistent) → fallback to Real-ESRGAN ---
+                    if final_vid and settings.get("video_upscale_enabled", True):
+                        upscale_path = os.path.join(self.temp_dir, f"upscale_{scene_id}_{si}.mp4")
+                        upscaled = upscale_video_seedvr2(final_vid, upscale_path, target_resolution="1080p")
+                        if upscaled:
+                            final_vid = upscaled
                         else:
-                            shot_progress("LIPSYNC", f"Lip sync skipped: {ls_rec.get('reason', '')}", shot_pct + 4)
+                            # Fallback to local Real-ESRGAN
+                            local_up = self._upscale_video(final_vid, scene_id, si)
+                            if local_up:
+                                final_vid = local_up
 
-                # --- RIFE FRAME INTERPOLATION (cloud via fal.ai) ---
-                if final_vid and settings.get("rife_enabled", True):
-                    shot_progress("INTERP", "Cloud frame interpolation (RIFE)", shot_pct + 5)
-                    interp_path = os.path.join(self.temp_dir, f"interp_{scene_id}_{si}.mp4")
-                    interpolated = generate_rife_interpolation(
-                        final_vid, interp_path, num_frames=2, use_scene_detection=True,
-                    )
-                    if interpolated:
-                        final_vid = interpolated
-                    else:
-                        # Fallback to local FFmpeg minterpolate
-                        local_interp = self._frame_interpolate(final_vid, scene_id, si)
-                        if local_interp:
-                            final_vid = local_interp
+                    scene_clip_paths.append(final_vid or img_path)
+                    self._save_checkpoint()  # Per-shot checkpoint
 
-                # --- UPSCALE: SeedVR2 cloud (temporally consistent) → fallback to Real-ESRGAN ---
-                if final_vid and settings.get("video_upscale_enabled", True):
-                    upscale_path = os.path.join(self.temp_dir, f"upscale_{scene_id}_{si}.mp4")
-                    upscaled = upscale_video_seedvr2(final_vid, upscale_path, target_resolution="1080p")
-                    if upscaled:
-                        final_vid = upscaled
-                    else:
-                        # Fallback to local Real-ESRGAN
-                        local_up = self._upscale_video(final_vid, scene_id, si)
-                        if local_up:
-                            final_vid = local_up
-
-                scene_clip_paths.append(final_vid or img_path)
-                self._save_checkpoint()  # Per-shot checkpoint
-
-                # --- FRAME CHAINING: extract last frame for next shot's start ---
-                if final_vid and os.path.exists(final_vid):
-                    last_frame = os.path.join(self.temp_dir, f"lastframe_{scene_id}_{si}.jpg")
-                    extract_last_frame(final_vid, last_frame)
+                    # --- FRAME CHAINING: extract last frame for next shot's start ---
+                    if final_vid and os.path.exists(final_vid):
+                        last_frame = os.path.join(self.temp_dir, f"lastframe_{scene_id}_{si}.jpg")
+                        extract_last_frame(final_vid, last_frame)
                     # Store for use as next shot's start_image via Kling
                     if os.path.exists(last_frame):
                         self._last_frame_for_chaining = last_frame
@@ -1621,7 +1621,7 @@ class CinemaPipeline:
             # Add BGM if available
             if os.path.exists(bgm_path):
                 cmd.extend(["-i", bgm_path])
-                filter_parts.append(f"[{input_idx}:a]aloop=loop=-1:size=2e+09,volume=0.15[bgm]")
+                filter_parts.append(f"[{input_idx}:a]aloop=loop=-1:size=2e+09,volume=0.15,atrim=0:duration=120[bgm]")
                 input_idx += 1
 
             # Add first dialogue track if available
@@ -1642,8 +1642,9 @@ class CinemaPipeline:
                 cmd.extend([
                     "-filter_complex", all_filters,
                     "-map", "0:v", "-map", "[aout]",
-                    "-c:v", "libx264", "-preset", "slow", "-crf", "18",
+                    "-c:v", "libx264", "-preset", "medium", "-crf", "20",
                     "-c:a", "aac", "-b:a", "192k",
+                    "-shortest",
                     final_output,
                 ])
             else:

@@ -1,0 +1,71 @@
+{
+  "project_id": "048e3a757831",
+  "current_stage": "GENERATE",
+  "current_scene_id": "scene_a1da24c95182",
+  "current_shot_id": "shot_1",
+  "completed_scene_indices": [
+    0,
+    1,
+    2
+  ],
+  "scene_clips": {
+    "scene_e9750942ea15": [
+      "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/interp_scene_e9750942ea15_0.mp4",
+      "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/transition_scene_e9750942ea15_1.mp4",
+      "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/upscale_scene_e9750942ea15_1.mp4",
+      "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/transition_scene_e9750942ea15_2.mp4",
+      "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/upscale_scene_e9750942ea15_2.mp4",
+      "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/transition_scene_e9750942ea15_3.mp4",
+      "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/upscale_scene_e9750942ea15_3.mp4",
+      "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/transition_scene_e9750942ea15_4.mp4",
+      "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/upscale_scene_e9750942ea15_4.mp4"
+    ],
+    "scene_b86bfbbea742": [
+      "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/upscale_scene_b86bfbbea742_0.mp4",
+      "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/transition_scene_b86bfbbea742_1.mp4",
+      "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/upscale_scene_b86bfbbea742_1.mp4"
+    ],
+    "scene_1693b3b44b2a": [
+      "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/upscale_scene_1693b3b44b2a_0.mp4"
+    ]
+  },
+  "scene_audio": {
+    "scene_e9750942ea15": "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/audio_scene_e9750942ea15.mp3",
+    "scene_b86bfbbea742": "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/audio_scene_b86bfbbea742.mp3",
+    "scene_1693b3b44b2a": "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/audio_scene_1693b3b44b2a.mp3",
+    "scene_a1da24c95182": "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/audio_scene_a1da24c95182.mp3"
+  },
+  "shot_results": {
+    "shot_0": {
+      "image": "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/img_scene_a1da24c95182_0.jpg",
+      "video": "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/vid_scene_a1da24c95182_0.mp4",
+      "identity_score": 0.7,
+      "status": "validated"
+    },
+    "shot_1": {
+      "image": "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/img_scene_a1da24c95182_1.jpg",
+      "video": "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/vid_scene_a1da24c95182_1.mp4",
+      "identity_score": 0.7,
+      "status": "validated"
+    },
+    "shot_2": {
+      "image": "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/img_scene_e9750942ea15_2.jpg",
+      "video": "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/vid_scene_e9750942ea15_2.mp4",
+      "identity_score": 0.7,
+      "status": "validated"
+    },
+    "shot_3": {
+      "image": "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/img_scene_e9750942ea15_3.jpg",
+      "video": "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/vid_scene_e9750942ea15_3.mp4",
+      "identity_score": 0.7,
+      "status": "validated"
+    },
+    "shot_4": {
+      "image": "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/img_scene_e9750942ea15_4.jpg",
+      "video": "/Users/hyungkoookkim/Content/projects/048e3a757831/temp/vid_scene_e9750942ea15_4.mp4",
+      "identity_score": 0.7,
+      "status": "validated"
+    }
+  },
+  "failed_shots": []
+}
