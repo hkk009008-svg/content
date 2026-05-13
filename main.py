@@ -16,7 +16,7 @@ import datetime
 
 # Import the modules we built
 from phase_0_topic import generate_trending_topic
-from phase_0_director import generate_production_blueprint
+from llm.blueprint_director import generate_production_blueprint
 from phase_a_generator import generate_shorts_script
 from phase_b_audio import generate_voiceover, generate_srt, generate_scene_foley_library
 from phase_c_assembly import assemble_final_video, generate_ai_broll

@@ -13,7 +13,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from typing import Any
-from config.settings import settings
+from config.settings import settings as env_settings   # aliased to avoid clash with the per-instance `settings: dict` ctor arg below
 
 
 # ---------------------------------------------------------------------------
@@ -69,10 +69,10 @@ class LLMEnsemble:
         import openai
 
         self.anthropic_client = anthropic.Anthropic(
-            api_key=settings.anthropic_api_key,
+            api_key=env_settings.anthropic_api_key,
         )
         self.openai_client = openai.OpenAI(
-            api_key=settings.openai_api_key,
+            api_key=env_settings.openai_api_key,
         )
 
         # Apply settings overrides
@@ -203,6 +203,10 @@ class LLMEnsemble:
         -------
         EnsembleQualityResult
         """
+        # Lazy import to keep phase_c_vision out of llm.ensemble's import
+        # graph. The vision checks are an outlier on this class — every other
+        # method is a pure LLM call — and depending on phase_c_vision at module
+        # scope would create a one-way design coupling we'd rather avoid.
         from phase_c_vision import (
             validate_identity_vision,
             validate_scene_coherence_vision,

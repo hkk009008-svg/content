@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from llm_router import (
+from llm.router import (
     COST_PER_1M,
     ROUTING_TABLE,
     CinemaLLMRouter,

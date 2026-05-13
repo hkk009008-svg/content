@@ -38,7 +38,7 @@ from character_manager import create_character_with_images, VOICE_POOL
 from location_manager import create_location_with_images
 from scene_decomposer import decompose_scene, update_scene_shots, CAMERA_MOTIONS, VISUAL_EFFECTS, TARGET_APIS, API_REGISTRY, MUSIC_MOODS
 from dialogue_writer import generate_dialogue
-from style_director import generate_style_rules
+from llm.style_director import generate_style_rules
 from cinema_pipeline import CinemaPipeline
 from workflow_selector import WORKFLOW_TEMPLATES
 

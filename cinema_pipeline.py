@@ -22,7 +22,7 @@ from location_manager import get_location_prompt, get_location_seed
 from continuity_engine import ContinuityEngine
 from scene_decomposer import decompose_scene, update_scene_shots
 from dialogue_writer import generate_dialogue, format_dialogue_for_voiceover
-from style_director import generate_style_rules, style_rules_to_prompt_suffix
+from llm.style_director import generate_style_rules, style_rules_to_prompt_suffix
 from phase_c_assembly import generate_ai_broll
 from phase_c_ffmpeg import generate_ai_video, generate_kling_storyboard, normalize_clip, stitch_modules
 from phase_c_vision import (
@@ -37,8 +37,8 @@ from lip_sync import (
     extract_last_frame, generate_transition_clip,
     upscale_video_seedvr2,
 )
-from chief_director import ChiefDirector
-from llm_ensemble import LLMEnsemble
+from llm.chief_director import ChiefDirector
+from llm.ensemble import LLMEnsemble
 from vbench_evaluator import VBenchEvaluator
 from quality_tracker import QualityTracker
 from cost_tracker import CostTracker

@@ -8,7 +8,7 @@ from typing import Optional, List
 
 import os
 import json
-from llm_ensemble import LLMEnsemble
+from llm.ensemble import LLMEnsemble
 from pipeline_context import PIPELINE_CONTEXT
 from project_manager import make_shot
 from config.settings import settings
