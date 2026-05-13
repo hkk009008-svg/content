@@ -3,7 +3,7 @@ import datetime
 import os
 from quality_tracker import QualityTracker, VBenchResult
 
-DB_FILE = "experiments.db"
+DB_FILE = "data/experiments.db"
 
 def init_db():
     """Initializes the SQLite database if it doesn't already exist."""

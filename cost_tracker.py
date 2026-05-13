@@ -78,7 +78,7 @@ class CostTracker:
     and produces spend summaries for the cinema pipeline.
     """
 
-    def __init__(self, db_path: str = "experiments.db"):
+    def __init__(self, db_path: str = "data/experiments.db"):
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row

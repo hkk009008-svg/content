@@ -16,9 +16,41 @@ __pycache__/
 client_secrets.json
 token.pickle
 
+# Cloud / API credentials
+vertex-ai-key.json
+*-key.json
+*.pem
+
 # Media Output (Prevents git from hanging on large video files)
 *.mp4
 *.mp3
 *.wav
 *.aiff
+
+# OS metadata
+.DS_Store
+**/.DS_Store
+Thumbs.db
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Build artifacts (compiled Swift binary lives at repo root)
+MacStudio
+dist/
+
+# Local data directory (DBs, runtime caches)
+data/*
+!data/.gitkeep
+
+# Per-project runtime artifacts
+projects/*/temp/
+projects/*/exports/
+
+# GitNexus index
 .gitnexus
+
+# Claude subagent worktrees (created at runtime, not source)
+.claude/worktrees/

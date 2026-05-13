@@ -243,7 +243,7 @@ def export_analysis_csv(
 # ---------------------------------------------------------------------------
 
 
-def run_analysis(db_path: str = "experiments.db", run_sweeps: bool = False) -> Dict:
+def run_analysis(db_path: str = "data/experiments.db", run_sweeps: bool = False) -> Dict:
     """Run the full analysis pipeline.
 
     1. Optionally run parameter sweeps to populate data
@@ -493,7 +493,7 @@ class TestExportAnalysisCsv:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyze parameter sweep results")
-    parser.add_argument("--db", default="experiments.db", help="Path to experiments.db")
+    parser.add_argument("--db", default="data/experiments.db", help="Path to experiments.db")
     parser.add_argument("--run-sweeps", action="store_true", help="Run sweeps before analysis")
     args = parser.parse_args()
     run_analysis(db_path=args.db, run_sweeps=args.run_sweeps)

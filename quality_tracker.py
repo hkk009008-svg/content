@@ -64,7 +64,7 @@ class QualityTracker:
     """Persists per-shot quality metrics and surfaces baselines, regressions,
     API rankings, and cost summaries for the cinema pipeline."""
 
-    def __init__(self, db_path: str = "experiments.db"):
+    def __init__(self, db_path: str = "data/experiments.db"):
         self.db_path = db_path
         # For in-memory DBs, keep a single persistent connection so the
         # schema survives across method calls.  File-backed DBs open a
