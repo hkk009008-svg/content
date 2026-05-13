@@ -12,13 +12,13 @@ Features:
 
 import os
 import tempfile
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Callable
 from collections import Counter
 
 import cv2
 import numpy as np
 
-from identity_types import (
+from identity.types import (
     FailureReason,
     FrameSample,
     CharacterIdentityResult,
@@ -32,8 +32,10 @@ try:
 except ImportError:
     DEEPFACE_AVAILABLE = False
 
-# Vision-LLM identity validation is always available as primary fallback
-from phase_c_vision import validate_identity_vision
+
+# Type alias for the vision-LLM fallback hook.
+# Returns {"confidence": float, "issues": list[str], ...}.
+VisionValidator = Callable[[str, str], Dict]
 
 
 class IdentityValidator:
@@ -41,12 +43,23 @@ class IdentityValidator:
     Unified identity validation for the cinema pipeline.
     Replaces validate_identity(), validate_identity_image(),
     validate_multi_identity(), and CharacterContinuityTracker.validate_multi_identity().
+
+    The vision-LLM fallback (used when DeepFace is unavailable) is injected via
+    `vision_fallback` so this module does not depend on phase_c_vision. Use the
+    `make_validator()` factory in `identity/__init__.py` to get a validator
+    pre-wired with the default vision fallback.
     """
 
-    def __init__(self, embedding_cache: Dict[str, np.ndarray] = None, cache_dir: str = ""):
+    def __init__(
+        self,
+        embedding_cache: Dict[str, np.ndarray] = None,
+        cache_dir: str = "",
+        vision_fallback: Optional[VisionValidator] = None,
+    ):
         self.embedding_cache = embedding_cache or {}
         self.cache_dir = cache_dir  # Directory for persisting embeddings to disk
         self.history: List[IdentityValidationResult] = []
+        self._vision_fallback = vision_fallback
 
     # ------------------------------------------------------------------
     # Public API
@@ -703,7 +716,12 @@ class IdentityValidator:
         Returns real scores (never fake 1.0) to preserve feedback loop integrity.
         """
         print(f"   [IDENTITY] Using Claude Vision (DeepFace unavailable)")
-        result = validate_identity_vision(reference_path, image_path)
+        if self._vision_fallback is None:
+            raise RuntimeError(
+                "vision_fallback not configured. Construct IdentityValidator "
+                "with vision_fallback=..., or use identity.make_validator()."
+            )
+        result = self._vision_fallback(reference_path, image_path)
 
         confidence = result.get("confidence", 0.0)
         matched = confidence >= threshold
@@ -815,7 +833,12 @@ class IdentityValidator:
             if not ref_img or not os.path.exists(ref_img):
                 continue
 
-            result = validate_identity_vision(ref_img, mid_frame)
+            if self._vision_fallback is None:
+                raise RuntimeError(
+                    "vision_fallback not configured. Construct IdentityValidator "
+                    "with vision_fallback=..., or use identity.make_validator()."
+                )
+            result = self._vision_fallback(ref_img, mid_frame)
             confidence = result.get("confidence", 0.0)
             matched = confidence >= threshold
             failure = FailureReason.PASSED if matched else FailureReason.WRONG_PERSON

@@ -51,7 +51,7 @@ if HAS_E2E_DEPS:
     from phase_c_ffmpeg import generate_ai_video
     from vbench_evaluator import VBenchEvaluator
     from vbench_evaluator import VBenchResult as EvalVBenchResult
-    from identity_validator import IdentityValidator
+    from identity.validator import IdentityValidator
     from cost_tracker import CostTracker
     from quality_tracker import QualityTracker, VBenchResult as QTVBenchResult
 

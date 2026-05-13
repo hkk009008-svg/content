@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 import pytest
 
-from identity_types import SHOT_TYPE_THRESHOLDS, get_threshold_for_shot
+from identity.types import SHOT_TYPE_THRESHOLDS, get_threshold_for_shot
 from quality_tracker import QualityTracker, VBenchResult
 
 

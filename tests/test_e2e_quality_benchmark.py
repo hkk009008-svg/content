@@ -56,7 +56,7 @@ if HAS_E2E_DEPS:
     from vbench_evaluator import VBenchEvaluator
     from vbench_evaluator import VBenchResult as EvalVBenchResult
     from coherence_analyzer import assess_coherence
-    from identity_validator import IdentityValidator
+    from identity.validator import IdentityValidator
     from cost_tracker import CostTracker
     from quality_tracker import QualityTracker, VBenchResult as QTVBenchResult
     from workflow_selector import get_workflow_params

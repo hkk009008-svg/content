@@ -241,7 +241,7 @@ def get_adaptive_pulid_weight(
     delta = stats.get("suggested_pulid_delta", 0.0)
 
     # Don't boost PuLID for failures it can't fix
-    from identity_types import FailureReason
+    from identity.types import FailureReason
     common_failure = stats.get("common_failure")
     if common_failure == FailureReason.FACE_ANGLE_EXTREME:
         delta = min(delta, 0.0)

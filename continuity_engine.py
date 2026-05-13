@@ -411,10 +411,10 @@ class ContinuityEngine:
 
         # Shared identity validator with rolling history for adaptive PuLID
         # Pass cache_dir so embeddings persist to disk across pipeline runs
-        from identity_validator import IdentityValidator
+        from identity import make_validator
         from project_manager import get_project_dir
         cache_dir = os.path.join(get_project_dir(project["id"]), "characters")
-        self.identity_validator = IdentityValidator(
+        self.identity_validator = make_validator(
             embedding_cache=self.character_tracker.embeddings,
             cache_dir=cache_dir,
         )
@@ -497,7 +497,7 @@ class ContinuityEngine:
 
         # Classify shot type for adaptive thresholds and PuLID weights
         from workflow_selector import classify_shot_type, get_adaptive_pulid_weight
-        from identity_types import get_threshold_for_shot
+        from identity.types import get_threshold_for_shot
         shot_type = classify_shot_type(shot)
         identity_threshold = get_threshold_for_shot(shot_type, mode="standard")
 
@@ -570,7 +570,7 @@ class ContinuityEngine:
         Uses the shared IdentityValidator for adaptive thresholds and history tracking.
         Returns IdentityValidationResult (backward-compatible via .get()).
         """
-        from identity_types import get_threshold_for_shot
+        from identity.types import get_threshold_for_shot
 
         if threshold is None:
             threshold = get_threshold_for_shot(shot_type, mode, attempt, max_attempts)

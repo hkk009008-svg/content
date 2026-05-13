@@ -44,8 +44,8 @@ def validate_identity(video_path, character_id, threshold=0.60):
     if not os.path.exists(ref_img):
         return True
 
-    from identity_validator import IdentityValidator
-    validator = IdentityValidator()
+    from identity.validator import IdentityValidator
+    validator = IdentityValidator(vision_fallback=validate_identity_vision)
     result = validator.validate_video(
         video_path,
         [{"id": character_id, "reference_image": ref_img, "name": character_id}],
@@ -63,8 +63,8 @@ def validate_identity_image(image_path: str, reference_path: str, threshold: flo
     if not os.path.exists(image_path) or not os.path.exists(reference_path):
         return {"passed": True, "similarity": 0.0}
 
-    from identity_validator import IdentityValidator
-    validator = IdentityValidator()
+    from identity.validator import IdentityValidator
+    validator = IdentityValidator(vision_fallback=validate_identity_vision)
     result = validator.validate_image(image_path, reference_path, threshold=threshold)
     return {"passed": result.passed, "similarity": result.overall_score}
 
@@ -77,8 +77,8 @@ def validate_multi_identity(video_path, character_configs: list, threshold=0.55)
     if not character_configs:
         return {"passed": True, "results": {}}
 
-    from identity_validator import IdentityValidator
-    validator = IdentityValidator()
+    from identity.validator import IdentityValidator
+    validator = IdentityValidator(vision_fallback=validate_identity_vision)
     result = validator.validate_video(video_path, character_configs, threshold=threshold)
     return {
         "passed": result.passed,
