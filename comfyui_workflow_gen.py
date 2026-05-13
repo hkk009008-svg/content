@@ -13,6 +13,7 @@ import os
 import json
 import random
 from typing import Dict, List, Optional, Tuple
+from config.settings import settings
 
 # ---------------------------------------------------------------------------
 # Node reference — documents key node IDs in the base PuLID/FLUX workflow
@@ -364,11 +365,11 @@ class ComfyUIWorkflowGenerator:
         Returns:
             (api_key, api_base_url, model_name) or (None, "", "") if no key found.
         """
-        mistral_key = os.environ.get("MISTRAL_API_KEY")
+        mistral_key = settings.mistral_api_key
         if mistral_key:
             return mistral_key, "https://codestral.mistral.ai/v1", "codestral-2501"
 
-        openai_key = os.environ.get("OPENAI_API_KEY")
+        openai_key = settings.openai_api_key
         if openai_key:
             return openai_key, "https://api.openai.com/v1", "codestral-2501"
 

@@ -6,10 +6,7 @@ Reused from phase_0_director.py pattern, extracted for shared use.
 
 import os
 import json
-from dotenv import load_dotenv
-
-load_dotenv()
-
+from config.settings import settings
 # Initialize clients once
 _tavily_client = None
 _firecrawl_app = None
@@ -17,10 +14,10 @@ _firecrawl_app = None
 
 def _get_tavily():
     global _tavily_client
-    if _tavily_client is None and os.getenv("TAVILY_API_KEY"):
+    if _tavily_client is None and settings.tavily_api_key:
         try:
             from tavily import TavilyClient
-            _tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+            _tavily_client = TavilyClient(api_key=settings.tavily_api_key)
         except Exception:
             pass
     return _tavily_client
@@ -28,10 +25,10 @@ def _get_tavily():
 
 def _get_firecrawl():
     global _firecrawl_app
-    if _firecrawl_app is None and os.getenv("FIRECRAWL_API_KEY"):
+    if _firecrawl_app is None and settings.firecrawl_api_key:
         try:
             from firecrawl import FirecrawlApp
-            _firecrawl_app = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
+            _firecrawl_app = FirecrawlApp(api_key=settings.firecrawl_api_key)
         except Exception:
             pass
     return _firecrawl_app

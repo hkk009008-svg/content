@@ -13,6 +13,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from typing import Any
+from config.settings import settings
 
 
 # ---------------------------------------------------------------------------
@@ -68,10 +69,10 @@ class LLMEnsemble:
         import openai
 
         self.anthropic_client = anthropic.Anthropic(
-            api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+            api_key=settings.anthropic_api_key,
         )
         self.openai_client = openai.OpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY", ""),
+            api_key=settings.openai_api_key,
         )
 
         # Apply settings overrides

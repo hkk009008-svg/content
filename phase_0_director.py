@@ -1,27 +1,24 @@
 import os
 import json
-from dotenv import load_dotenv
 from openai import OpenAI
 from tavily import TavilyClient
 from firecrawl import FirecrawlApp
 from pipeline_context import PIPELINE_CONTEXT
-
-load_dotenv()
-
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from config.settings import settings
+openai_client = OpenAI(api_key=settings.openai_api_key)
 
 # Initialize optional web tools if keys are present
 tavily_client = None
-if os.getenv("TAVILY_API_KEY"):
+if settings.tavily_api_key:
     try:
-        tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+        tavily_client = TavilyClient(api_key=settings.tavily_api_key)
     except (ImportError, ValueError, RuntimeError) as e:
         print(f"   [WARN] Tavily client init failed: {e}")
 
 firecrawl_app = None
-if os.getenv("FIRECRAWL_API_KEY"):
+if settings.firecrawl_api_key:
     try:
-        firecrawl_app = FirecrawlApp(api_key=os.getenv("FIRECRAWL_API_KEY"))
+        firecrawl_app = FirecrawlApp(api_key=settings.firecrawl_api_key)
     except (ImportError, ValueError, RuntimeError) as e:
         print(f"   [WARN] Firecrawl client init failed: {e}")
 

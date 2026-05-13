@@ -7,10 +7,6 @@ for consistent environments across scenes.
 import os
 import shutil
 from typing import Optional, List
-from dotenv import load_dotenv
-
-load_dotenv()
-
 from project_manager import (
     MutationResult, make_location, add_location, get_project_dir, get_location,
     mutate_project,

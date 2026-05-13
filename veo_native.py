@@ -10,6 +10,7 @@ import time
 
 from google import genai
 from google.genai import types
+from config.settings import settings
 
 VEO_RESOLUTIONS = {
     "720p": "720p",
@@ -29,8 +30,8 @@ class VeoNativeAPI:
 
     def __init__(self):
         # Prefer Vertex AI for native audio generation support
-        gcp_project = os.getenv("GOOGLE_CLOUD_PROJECT", "project-ffb1f53f-bb4c-4add-8e7")
-        gcp_location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        gcp_project = settings.google_cloud_project or "project-ffb1f53f-bb4c-4add-8e7"
+        gcp_location = settings.google_cloud_location
         try:
             self.client = genai.Client(
                 vertexai=True,
@@ -41,7 +42,7 @@ class VeoNativeAPI:
             print(f"[VEO-NATIVE] Vertex AI client initialized (project={gcp_project}, location={gcp_location})")
         except Exception as e:
             print(f"[VEO-NATIVE] Vertex AI unavailable ({e}), falling back to Gemini API")
-            api_key = os.getenv("GOOGLE_API_KEY")
+            api_key = settings.google_api_key
             if not api_key:
                 raise EnvironmentError(
                     "[VEO-NATIVE] Neither Vertex AI nor GOOGLE_API_KEY available."

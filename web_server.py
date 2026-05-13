@@ -27,10 +27,6 @@ import queue
 from flask import Flask, request, jsonify, send_from_directory, Response, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
-from dotenv import load_dotenv
-
-load_dotenv()
-
 from project_manager import (
     MutationResult, ProjectLockError, create_project, load_project, delete_project,
     list_projects, mutate_project,

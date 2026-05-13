@@ -8,13 +8,10 @@ from typing import Optional, List
 
 import os
 import json
-from dotenv import load_dotenv
 from llm_ensemble import LLMEnsemble
 from pipeline_context import PIPELINE_CONTEXT
 from project_manager import make_shot
-
-load_dotenv()
-
+from config.settings import settings
 # Camera motion options — reused from phase_a_generator.py line 155
 CAMERA_MOTIONS = [
     "zoom_in_slow", "zoom_out_slow", "zoom_in_fast",
@@ -84,7 +81,7 @@ def decompose_scene(
     """
     import openai
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = settings.openai_api_key
     if not api_key:
         print("❌ OPENAI_API_KEY not set. Cannot decompose scene.")
         return _fallback_decompose(scene, characters, location)

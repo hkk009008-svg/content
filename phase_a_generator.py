@@ -1,13 +1,10 @@
 import os
 import json
-from dotenv import load_dotenv
 from anthropic import Anthropic
-
-load_dotenv()
-
+from config.settings import settings
 # Initialize the Anthropic client 
 # (Requires ANTHROPIC_API_KEY environment variable to be set)
-client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+client = Anthropic(api_key=settings.anthropic_api_key)
 
 def generate_shorts_script(ctx: dict) -> bool:
     """
@@ -206,7 +203,7 @@ def generate_shorts_script(ctx: dict) -> bool:
     # ─── PRIMARY: Claude Sonnet 4.6 via Tool Use (superior creative writing) ───
     parsed_json = None
 
-    if os.getenv("ANTHROPIC_API_KEY"):
+    if settings.anthropic_api_key:
         try:
             print(f"   [PHASE A] Using Claude Sonnet (primary) for creative script generation...")
             response = client.messages.create(
@@ -236,7 +233,7 @@ def generate_shorts_script(ctx: dict) -> bool:
         try:
             import openai
             print(f"   [PHASE A] Using GPT-4o (fallback) for structured script generation...")
-            openai_client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            openai_client = openai.OpenAI(api_key=settings.openai_api_key)
 
             full_system_prompt = system_prompt + "\n\nCRITICAL RULES:\n1. You MUST output ONLY a valid, parseable JSON object.\n2. Do NOT wrap the JSON in markdown formatting blocks like ```json.\n3. The JSON MUST perfectly match this schema structure:\n" + json.dumps(tool_schema["input_schema"], indent=2)
 

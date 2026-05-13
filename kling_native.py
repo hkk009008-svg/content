@@ -13,6 +13,7 @@ import time
 import base64
 import jwt
 import requests
+from config.settings import settings
 
 
 class KlingNativeAPI:
@@ -29,8 +30,8 @@ class KlingNativeAPI:
         Raises:
             ValueError: If required environment variables are not set.
         """
-        self.access_key = os.environ.get("KLING_ACCESS_KEY")
-        self.secret_key = os.environ.get("KLING_SECRET_KEY")
+        self.access_key = settings.kling_access_key
+        self.secret_key = settings.kling_secret_key
 
         if not self.access_key or not self.secret_key:
             raise ValueError(

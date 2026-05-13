@@ -27,6 +27,7 @@ import subprocess
 import urllib.request
 from typing import Optional, Dict, List
 from dataclasses import dataclass
+from config.settings import settings
 
 try:
     import fal_client
@@ -182,7 +183,7 @@ def lipsync_overlay(
 
     Fallback chain: MuseTalk → LatentSync → Sync Lipsync v2
     """
-    if not FAL_AVAILABLE or not os.getenv("FAL_KEY"):
+    if not FAL_AVAILABLE or not settings.fal_key:
         print("   [LIPSYNC-OVERLAY] FAL not available")
         return None
 
@@ -277,7 +278,7 @@ def lipsync_generation(
 
     Fallback chain: Kling Lip Sync → Omnihuman v1.5 → Creatify Aurora
     """
-    if not FAL_AVAILABLE or not os.getenv("FAL_KEY"):
+    if not FAL_AVAILABLE or not settings.fal_key:
         print("   [LIPSYNC-GEN] FAL not available")
         return None
 
@@ -388,7 +389,7 @@ def generate_lip_sync_video(
     - If only image + audio → GENERATION (create from scratch)
     - User can force a specific mode
     """
-    if not FAL_AVAILABLE or not os.getenv("FAL_KEY"):
+    if not FAL_AVAILABLE or not settings.fal_key:
         print("   [LIPSYNC] FAL not available — skipping")
         return None
 
@@ -429,7 +430,7 @@ def generate_rife_interpolation(
     Returns:
         Path to interpolated video, or None on failure
     """
-    if not FAL_AVAILABLE or not os.getenv("FAL_KEY"):
+    if not FAL_AVAILABLE or not settings.fal_key:
         print("   [RIFE] FAL not available — skipping cloud interpolation")
         return None
 
@@ -481,7 +482,7 @@ def upscale_video_seedvr2(
     Returns:
         Path to upscaled video, or None on failure
     """
-    if not FAL_AVAILABLE or not os.getenv("FAL_KEY"):
+    if not FAL_AVAILABLE or not settings.fal_key:
         print("   [UPSCALE] FAL not available — skipping cloud upscaling")
         return None
 
@@ -556,7 +557,7 @@ def generate_transition_clip(
     Returns:
         Path to transition video, or None on failure
     """
-    if not FAL_AVAILABLE or not os.getenv("FAL_KEY"):
+    if not FAL_AVAILABLE or not settings.fal_key:
         print("   [CHAIN] FAL not available — skipping transition")
         return None
 

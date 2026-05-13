@@ -10,6 +10,7 @@ import json
 import base64
 import urllib.request
 import time
+from config.settings import settings
 
 try:
     import fal_client
@@ -46,8 +47,8 @@ class LTXVideoAPI:
     ]
 
     def __init__(self):
-        self.ltx_key = os.getenv("LTX_API_KEY")
-        self.fal_key = os.getenv("FAL_KEY")
+        self.ltx_key = settings.ltx_api_key
+        self.fal_key = settings.fal_key
         self.mode = None
 
         if self.ltx_key:

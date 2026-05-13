@@ -3,10 +3,10 @@ import os
 # Hardcode the Homebrew ImageMagick path before MoviePy imports
 os.environ["IMAGEMAGICK_BINARY"] = "/opt/homebrew/bin/magick"
 
+from config.settings import settings
+
 import requests
 import whisper
-from dotenv import load_dotenv
-
 # Monkey-patch for MoviePy 1.0.3 compatibility with new Pillow versions
 import PIL.Image
 if not hasattr(PIL.Image, 'ANTIALIAS'):
@@ -15,9 +15,7 @@ if not hasattr(PIL.Image, 'ANTIALIAS'):
 from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips, TextClip, CompositeVideoClip
 import moviepy.video.fx.all as vfx
 
-# Load environment variables
-load_dotenv()
-PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
+PEXELS_API_KEY = settings.pexels_api_key
 
 import json
 import uuid
@@ -88,10 +86,10 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     mode = "img2img" if init_image else "txt2img"
 
     # PRIORITY 1: ComfyUI + PuLID on RunPod RTX 4090 (fastest + strongest face-lock)
-    server_url = os.getenv("COMFYUI_SERVER_URL")
+    server_url = settings.comfyui_server_url
     if server_url and os.path.exists("pulid.json"):
         print(f"   [PHASE C] Generating [{mode}] via ComfyUI PuLID (RTX 4090): '{prompt[:60]}...'")
-    elif character_image and os.path.exists(character_image) and os.getenv("FAL_KEY"):
+    elif character_image and os.path.exists(character_image) and settings.fal_key:
         # PRIORITY 2: FLUX Kontext Max Multi (fallback if ComfyUI unavailable)
         result = _fal_flux_fallback(
             prompt, output_filename, seed,
@@ -420,7 +418,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
     - NEVER pass raw character descriptions to Kontext (they compete with face ref)
     - Use Kontext Max Multi with up to 9 reference images (AuraFace embeddings)
     """
-    fal_key = os.getenv("FAL_KEY")
+    fal_key = settings.fal_key
     if not fal_key:
         print("   [FAIL] FAL_KEY missing. No image generation available.")
         return None

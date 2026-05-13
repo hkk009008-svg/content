@@ -1,6 +1,7 @@
 import json
 import os
 import urllib.request
+from config.settings import settings
 
 try:
     import fal_client
@@ -9,9 +10,6 @@ except ImportError:
     FAL_AVAILABLE = False
 
 def auto_generate_roster():
-    from dotenv import load_dotenv
-    load_dotenv()
-    
     print("==================================================")
     print("🎭 AUTONOMOUS VISION ROSTER SYNTHESIZER")
     print("==================================================")
@@ -25,7 +23,7 @@ def auto_generate_roster():
     with open("characters.json", "r") as f:
         char_db = json.load(f)
         
-    if not FAL_AVAILABLE or not os.getenv("FAL_KEY"):
+    if not FAL_AVAILABLE or not settings.fal_key:
         print("❌ WARNING: 'fal_client' or 'FAL_KEY' missing in environment.")
         print("Please install requirements and set FAL_KEY to synthesize ultra-high-resolution faces.")
         return

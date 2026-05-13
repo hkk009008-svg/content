@@ -14,13 +14,14 @@ import mimetypes
 import urllib.request
 
 import openai
+from config.settings import settings
 
 
 class SoraNativeAPI:
     """Native OpenAI Sora 2 client using the openai SDK."""
 
     def __init__(self):
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = settings.openai_api_key
         if not api_key:
             raise EnvironmentError(
                 "[SORA-NATIVE] OPENAI_API_KEY not set. "

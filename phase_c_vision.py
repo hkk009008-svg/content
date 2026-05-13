@@ -3,6 +3,7 @@ import os
 import json
 import base64
 from pipeline_context import PIPELINE_CONTEXT
+from config.settings import settings
 try:
     from deepface import DeepFace
     VISION_AVAILABLE = True
@@ -110,7 +111,7 @@ def face_swap_video_frames(video_path, reference_image, output_path):
         import fal_client
         import urllib.request
 
-        if os.getenv("FAL_KEY"):
+        if settings.fal_key:
             print(f"   [FACESWAP] Uploading to fal.ai...")
             video_url = fal_client.upload_file(video_path)
             face_url = fal_client.upload_file(reference_image)
@@ -218,7 +219,7 @@ def validate_shot_quality_vision(image_path: str, original_prompt: str) -> dict:
         "source": "default",
     }
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = settings.openai_api_key
     if not api_key:
         print("[VISION-QA] WARNING: No OPENAI_API_KEY — returning default pass")
         return default_pass
@@ -307,7 +308,7 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
         "source": "default",
     }
 
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = settings.anthropic_api_key
     if not api_key:
         print("[VISION-ID] WARNING: No ANTHROPIC_API_KEY — returning default pass")
         return default_pass
@@ -409,7 +410,7 @@ def validate_scene_coherence_vision(shot_images: list[str]) -> dict:
         "source": "default",
     }
 
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    api_key = settings.gemini_api_key or settings.google_api_key
     if not api_key:
         print("[VISION-COHERENCE] WARNING: No GEMINI_API_KEY — returning default pass")
         return default_pass

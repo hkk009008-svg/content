@@ -16,10 +16,6 @@ import json
 import shutil
 import urllib.request
 import numpy as np
-from dotenv import load_dotenv
-
-load_dotenv()
-
 try:
     from deepface import DeepFace
     DEEPFACE_AVAILABLE = True
@@ -37,6 +33,7 @@ IDENTITY_THRESHOLD = 0.70
 # Minimum acceptable threshold (for fallback / lenient mode)
 IDENTITY_THRESHOLD_LENIENT = 0.55
 
+from config.settings import settings
 from project_manager import (
     make_character, add_character, save_project, get_project_dir, get_character
 )
@@ -205,7 +202,7 @@ def _generate_multi_angle_refs(
     Output: up to 3 additional angles (45°, profile, back) stored in char_path.
     These are used for Kling 3.0 Pro subject binding (multi-image references).
     """
-    if not FAL_AVAILABLE or not os.getenv("FAL_KEY"):
+    if not FAL_AVAILABLE or not settings.fal_key:
         print("   [WARN] FAL not available — skipping multi-angle generation")
         return [canonical_path]  # Return just the canonical
 

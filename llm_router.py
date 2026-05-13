@@ -14,10 +14,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 from collections import defaultdict
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
+from config.settings import settings
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -151,7 +148,7 @@ class CinemaLLMRouter:
         if self._anthropic_client is None:
             import anthropic
             self._anthropic_client = anthropic.Anthropic(
-                api_key=os.getenv("ANTHROPIC_API_KEY"),
+                api_key=settings.anthropic_api_key,
             )
         return self._anthropic_client
 
@@ -159,14 +156,14 @@ class CinemaLLMRouter:
         if self._openai_client is None:
             from openai import OpenAI
             self._openai_client = OpenAI(
-                api_key=os.getenv("OPENAI_API_KEY"),
+                api_key=settings.openai_api_key,
             )
         return self._openai_client
 
     def _ensure_gemini(self):
         if not self._gemini_configured:
             from google import genai
-            api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            api_key = settings.gemini_api_key or settings.google_api_key
             self._gemini_client = genai.Client(api_key=api_key)
             self._gemini_configured = True
 
@@ -636,7 +633,7 @@ if __name__ == "__main__":
         print(f"  {model:30s}  ${rates['input']:.2f} in / ${rates['output']:.2f} out  (per 1M)")
 
     # Quick smoke test — only runs if API keys are set
-    api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("GEMINI_API_KEY")
+    api_key = settings.anthropic_api_key or settings.openai_api_key or settings.gemini_api_key
     if api_key:
         print("\n--- Smoke test: classification task ---")
         try:

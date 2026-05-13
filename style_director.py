@@ -7,12 +7,8 @@ that feed into every scene's shot decomposition.
 
 import os
 import json
-from dotenv import load_dotenv
 from pipeline_context import PIPELINE_CONTEXT
-
-load_dotenv()
-
-
+from config.settings import settings
 def generate_style_rules(
     project_name: str,
     mood: str = "cinematic",
@@ -39,7 +35,7 @@ def generate_style_rules(
     """
     import openai
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = settings.openai_api_key
     if not api_key:
         return _default_style_rules(mood, color_palette, music_mood)
 
@@ -146,7 +142,7 @@ def _default_style_rules(mood: str, color_palette: str, music_mood: str) -> dict
 
 def _research_aesthetic(reference_films: str) -> str:
     """Use Tavily to research aesthetic references (reused from phase_0_director logic)."""
-    tavily_key = os.getenv("TAVILY_API_KEY")
+    tavily_key = settings.tavily_api_key
     if not tavily_key:
         return ""
 

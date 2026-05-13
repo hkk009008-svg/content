@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import pytest
+from config.settings import settings
 
 # ---------------------------------------------------------------------------
 # Project root on path
@@ -29,14 +30,14 @@ if PROJECT_ROOT not in sys.path:
 # ---------------------------------------------------------------------------
 # Skip conditions
 # ---------------------------------------------------------------------------
-COMFYUI_URL = os.getenv("COMFYUI_SERVER_URL", "")
+COMFYUI_URL = settings.comfyui_server_url
 HAS_COMFYUI = bool(COMFYUI_URL)
-HAS_KLING = bool(os.getenv("KLING_ACCESS_KEY"))
-HAS_RUNWAY = bool(os.getenv("RUNWAYML_API_SECRET"))
-HAS_OPENAI = bool(os.getenv("OPENAI_API_KEY"))
-HAS_GOOGLE = bool(os.getenv("GOOGLE_API_KEY"))
-HAS_FAL = bool(os.getenv("FAL_KEY"))
-HAS_LTX = bool(os.getenv("LTX_API_KEY"))
+HAS_KLING = bool(settings.kling_access_key)
+HAS_RUNWAY = bool(settings.runwayml_api_secret)
+HAS_OPENAI = bool(settings.openai_api_key)
+HAS_GOOGLE = bool(settings.google_api_key)
+HAS_FAL = bool(settings.fal_key)
+HAS_LTX = bool(settings.ltx_api_key)
 
 # Minimum: ComfyUI for image gen + at least one video API
 HAS_E2E_DEPS = HAS_COMFYUI and (HAS_KLING or HAS_FAL or HAS_LTX)

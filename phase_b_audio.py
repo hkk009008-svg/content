@@ -1,15 +1,13 @@
 import os
-from dotenv import load_dotenv
 from typing import Optional, List
 from elevenlabs.client import ElevenLabs
 from elevenlabs import save
+from config.settings import settings
 
 # Load environment variables
-load_dotenv()
-
 # Initialize the ElevenLabs client
 client = ElevenLabs(
-    api_key=os.getenv("ELEVENLABS_API_KEY"),
+    api_key=settings.elevenlabs_api_key,
 )
 
 def generate_voiceover(ctx: dict) -> bool:

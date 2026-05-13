@@ -4,14 +4,11 @@ warnings.filterwarnings("ignore", module="urllib3")
 warnings.filterwarnings("ignore", category=UserWarning)
 
 import os
-from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-
-load_dotenv()
-
+from config.settings import settings
 # Initialize the Gemini client 
-client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+client = genai.Client(api_key=settings.google_api_key)
 
 def get_used_topics() -> list:
     if not os.path.exists("used_topics.txt"):

@@ -22,6 +22,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field, asdict
 from typing import Optional
+from config.settings import settings
 
 # Pipeline imports — graceful fallback if unavailable
 try:
@@ -332,7 +333,7 @@ class VBenchEvaluator:
             self._log("Identity consistency: no reference images, returning 0.75 default")
             return 0.75
 
-        api_key = os.getenv("ANTHROPIC_API_KEY")
+        api_key = settings.anthropic_api_key
         if not api_key or not VISION_MODULE_AVAILABLE:
             self._log("Identity consistency: no ANTHROPIC_API_KEY or vision module, returning 0.75 default")
             return 0.75
@@ -387,7 +388,7 @@ class VBenchEvaluator:
         Normalizes the 0-10 score to 0-1.
         Returns 0.7 neutral default if no API key.
         """
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = settings.openai_api_key
         if not api_key or not VISION_MODULE_AVAILABLE:
             self._log("Aesthetic quality: no OPENAI_API_KEY or vision module, returning 0.7 default")
             return 0.7
@@ -424,7 +425,7 @@ class VBenchEvaluator:
         Send the middle frame + prompt to Gemini 2.5 Flash for semantic match scoring.
         Returns 0.7 neutral default if no API key.
         """
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        api_key = settings.google_api_key or settings.gemini_api_key
         if not api_key:
             self._log("Prompt adherence: no GOOGLE_API_KEY/GEMINI_API_KEY, returning 0.7 default")
             return 0.7
@@ -496,7 +497,7 @@ class VBenchEvaluator:
         Send 3 frames (start, mid, end) to Gemini for physics violation analysis.
         Returns 0.75 neutral default if no API key.
         """
-        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        api_key = settings.google_api_key or settings.gemini_api_key
         if not api_key:
             self._log("Physics plausibility: no GOOGLE_API_KEY/GEMINI_API_KEY, returning 0.75 default")
             return 0.75

@@ -2,6 +2,7 @@ import sqlite3
 import datetime
 import os
 from quality_tracker import QualityTracker, VBenchResult
+from config.settings import settings
 
 DB_FILE = "data/experiments.db"
 
@@ -225,7 +226,7 @@ def autonomous_batch_calibration():
     import os
     
     try:
-        client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        client = genai.Client(api_key=settings.google_api_key)
         # We use gemini-2.5-flash for high-reasoning context synthesis
         response = client.models.generate_content(
             model='gemini-2.5-flash',

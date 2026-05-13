@@ -7,12 +7,8 @@ from typing import Optional, List
 
 import os
 import json
-from dotenv import load_dotenv
 from pipeline_context import PIPELINE_CONTEXT
-
-load_dotenv()
-
-
+from config.settings import settings
 def generate_dialogue(
     scene: dict,
     characters: List[dict],
@@ -34,7 +30,7 @@ def generate_dialogue(
     """
     import openai
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = settings.openai_api_key
     if not api_key:
         print("❌ OPENAI_API_KEY not set. Cannot generate dialogue.")
         return []

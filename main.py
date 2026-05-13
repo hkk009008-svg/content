@@ -23,6 +23,7 @@ from phase_c_assembly import assemble_final_video, generate_ai_broll
 from phase_c_vision import quality_control_image
 from phase_d_upload import authenticate_youtube, upload_video, upload_caption, upload_localizations
 from phase_e_learning import log_experiment, fetch_and_update_analytics
+from config.settings import settings
 
 # ==============================================================================
 # 🌍 GLOBAL CONFIGURATION: Set your target audience language list here!
@@ -49,10 +50,7 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
         new_prompt = "a deeply soothing, elegant, and visually comforting youtube channel logo, cosmic awe aesthetic, soft glowing gradients, minimalist vector icon, high resolution, solid dark background"
         p = urllib.parse.quote(new_prompt)
         try:
-            from dotenv import load_dotenv
-            load_dotenv()
-            
-            fal_key = os.getenv("FAL_KEY")
+            fal_key = settings.fal_key
             img_data = b""
             if fal_key:
                 url = "https://fal.run/fal-ai/flux/schnell"

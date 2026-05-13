@@ -20,6 +20,7 @@ from itertools import product
 from typing import Dict, List, Optional
 
 import pytest
+from config.settings import settings
 
 # ---------------------------------------------------------------------------
 # Project root
@@ -31,13 +32,13 @@ if PROJECT_ROOT not in sys.path:
 # ---------------------------------------------------------------------------
 # Skip conditions
 # ---------------------------------------------------------------------------
-COMFYUI_URL = os.getenv("COMFYUI_SERVER_URL", "")
+COMFYUI_URL = settings.comfyui_server_url
 HAS_COMFYUI = bool(COMFYUI_URL)
-HAS_KLING = bool(os.getenv("KLING_ACCESS_KEY"))
-HAS_OPENAI = bool(os.getenv("OPENAI_API_KEY"))
-HAS_ELEVENLABS = bool(os.getenv("ELEVENLABS_API_KEY"))
-HAS_FAL = bool(os.getenv("FAL_KEY"))
-HAS_LTX = bool(os.getenv("LTX_API_KEY"))
+HAS_KLING = bool(settings.kling_access_key)
+HAS_OPENAI = bool(settings.openai_api_key)
+HAS_ELEVENLABS = bool(settings.elevenlabs_api_key)
+HAS_FAL = bool(settings.fal_key)
+HAS_LTX = bool(settings.ltx_api_key)
 
 HAS_GRID_DEPS = HAS_COMFYUI and (HAS_KLING or HAS_FAL or HAS_LTX)
 

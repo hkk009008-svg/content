@@ -2,6 +2,7 @@ import os
 import time
 import json
 import subprocess
+from config.settings import settings
 
 # VEO removed from cascade — quota exhaustion made it unreliable
 # Keep the flag for backward compatibility but it's not used in the optimized cascade
@@ -45,7 +46,7 @@ def generate_kling_storyboard(
     Returns:
         Path to generated video, or None on failure
     """
-    if not FAL_AVAILABLE or not os.getenv("FAL_KEY"):
+    if not FAL_AVAILABLE or not settings.fal_key:
         print("   [STORYBOARD] FAL not available")
         return None
 
@@ -341,7 +342,7 @@ def generate_ai_video(
         # Runway Gen-4 — style lock with 3 refs, best prompt adherence
         try:
             from runwayml import RunwayML
-            client = RunwayML(api_key=os.getenv("RUNWAYML_API_SECRET"))
+            client = RunwayML(api_key=settings.runwayml_api_secret)
             import urllib.request
 
             print(f"   [RUNWAY-GEN4] Runway Gen-4 I2V with style lock")
@@ -393,7 +394,7 @@ def generate_ai_video(
 
     elif target_api.upper() == "SORA_2":
         # Sora 2 via fal.ai — strongest motion physics, 25 seconds continuous
-        fal_key = os.getenv("FAL_KEY")
+        fal_key = settings.fal_key
         if fal_key and FAL_AVAILABLE:
             try:
                 import urllib.request
@@ -448,7 +449,7 @@ def generate_ai_video(
             print("   [VEO] Quota exhausted flag set. Cascading...")
             return try_next_api()
 
-        fal_key = os.getenv("FAL_KEY")
+        fal_key = settings.fal_key
         if fal_key and FAL_AVAILABLE:
             try:
                 import urllib.request
@@ -515,7 +516,7 @@ def generate_ai_video(
             
     elif target_api.upper() == "KLING_3_0":
         # Kling 3.0 Pro via fal.ai — with subject binding + multi-angle references
-        fal_key = os.getenv("FAL_KEY")
+        fal_key = settings.fal_key
         if fal_key and FAL_AVAILABLE:
             max_attempts = 2
             for attempt in range(1, max_attempts + 1):
@@ -600,7 +601,7 @@ def generate_ai_video(
 
     elif target_api.upper() == "COMFY_UI":
         # Headless ComfyUI execution via Fal.ai Serverless Endpoint
-        fal_key = os.getenv("FAL_KEY")
+        fal_key = settings.fal_key
         if fal_key and FAL_AVAILABLE:
             try:
                 print(f"   ↳ Generating precise surgical frame via Headless COMFY_UI API...")
@@ -649,7 +650,7 @@ def generate_ai_video(
             
     elif target_api.upper() == "RUNWAY":
         # RunwayML Elite Cinematic Generation
-        runway_key = os.getenv("RUNWAYML_API_SECRET")
+        runway_key = settings.runwayml_api_secret
         if runway_key:
             try:
                 from runwayml import RunwayML
@@ -682,7 +683,7 @@ def generate_ai_video(
     elif target_api.upper() == "SEEDANCE":
         # Seedance 2.0 (ByteDance) — supports up to 9 reference images for multi-character
         # Best for: multi-character scenes, complex interactions, long duration (20s)
-        seedance_key = os.getenv("SEEDANCE_API_KEY")
+        seedance_key = settings.seedance_api_key
         if seedance_key:
             try:
                 import requests

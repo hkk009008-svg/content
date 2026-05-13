@@ -18,12 +18,8 @@ import os
 import json
 import base64
 from typing import Optional, List, Dict
-from dotenv import load_dotenv
 from pipeline_context import PIPELINE_CONTEXT
-
-load_dotenv()
-
-
+from config.settings import settings
 class ChiefDirector:
     """
     Metacognitive AI overseer for the cinema production pipeline.
@@ -39,7 +35,7 @@ class ChiefDirector:
     def _init_client(self):
         """Initialize the best available LLM client."""
         # Prefer Anthropic Claude for structured metacognitive reasoning
-        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        anthropic_key = settings.anthropic_api_key
         if anthropic_key:
             try:
                 import anthropic
@@ -49,7 +45,7 @@ class ChiefDirector:
                 pass
 
         # Fallback to OpenAI GPT-4o
-        openai_key = os.getenv("OPENAI_API_KEY")
+        openai_key = settings.openai_api_key
         if openai_key:
             try:
                 from openai import OpenAI

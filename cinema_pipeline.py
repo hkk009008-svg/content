@@ -16,10 +16,6 @@ import time
 import glob
 import random
 import subprocess
-from dotenv import load_dotenv
-
-load_dotenv()
-
 from project_manager import MutationResult, load_project, get_project_dir, mutate_project, make_take
 from character_manager import get_reference_image
 from location_manager import get_location_prompt, get_location_seed
