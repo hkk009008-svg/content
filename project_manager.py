@@ -122,6 +122,29 @@ def new_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+def _now_iso() -> str:
+    return datetime.utcnow().isoformat() + "Z"
+
+
+def make_take(
+    kind: str,
+    path: str = "",
+    *,
+    source_take_id: str = "",
+    status: str = "generated",
+    metadata: Optional[dict] = None,
+) -> dict:
+    return {
+        "id": f"take_{new_id()}",
+        "kind": kind,
+        "path": path,
+        "source_take_id": source_take_id,
+        "status": status,
+        "created_at": _now_iso(),
+        "metadata": metadata or {},
+    }
+
+
 def make_character(
     name: str,
     description: str,
@@ -197,9 +220,10 @@ def make_shot(
     scene_foley: str = "",
     characters_in_frame: Optional[List[str]] = None,
     primary_character: str = "",
+    shot_id: str = "",
 ) -> dict:
     return {
-        "id": f"shot_{new_id()}",
+        "id": shot_id or f"shot_{new_id()}",
         "prompt": prompt,
         "camera": camera,
         "visual_effect": visual_effect,
@@ -207,8 +231,21 @@ def make_shot(
         "scene_foley": scene_foley,
         "characters_in_frame": characters_in_frame or [],
         "primary_character": primary_character,
+        "action_context": "",
         "generated_image": "",
         "generated_video": "",
+        "plan_status": "pending_review",
+        "plan_rejection_reason": "",
+        "keyframe_takes": [],
+        "approved_keyframe_take_id": "",
+        "motion_takes": [],
+        "approved_motion_take_id": "",
+        "postprocess_variants": [],
+        "approved_final_take_id": "",
+        "diagnostics": [],
+        "intent_notes": "",
+        "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+        "continuity_constraints": "",
     }
 
 
@@ -244,6 +281,220 @@ def make_project(name: str) -> dict:
     }
 
 
+def _normalize_take_list(takes: Any, kind: str) -> tuple[list[dict], bool]:
+    changed = False
+    normalized: list[dict] = []
+
+    if not isinstance(takes, list):
+        return [], takes not in (None, [])
+
+    seen_ids: set[str] = set()
+    for take in takes:
+        if not isinstance(take, dict):
+            changed = True
+            continue
+
+        take_copy = dict(take)
+        take_id = take_copy.get("id")
+        if not take_id or take_id in seen_ids:
+            take_copy["id"] = f"take_{new_id()}"
+            changed = True
+        seen_ids.add(take_copy["id"])
+
+        if take_copy.get("kind") != kind:
+            take_copy["kind"] = kind
+            changed = True
+
+        if "path" not in take_copy:
+            take_copy["path"] = ""
+            changed = True
+        if "status" not in take_copy:
+            take_copy["status"] = "generated"
+            changed = True
+        if "source_take_id" not in take_copy:
+            take_copy["source_take_id"] = ""
+            changed = True
+        if "created_at" not in take_copy:
+            take_copy["created_at"] = _now_iso()
+            changed = True
+        if not isinstance(take_copy.get("metadata"), dict):
+            take_copy["metadata"] = {}
+            changed = True
+
+        normalized.append(take_copy)
+
+    return normalized, changed
+
+
+def normalize_shot_schema(
+    shot: Any,
+    *,
+    scene_id: str,
+    shot_index: int,
+    seen_ids: set[str],
+) -> bool:
+    changed = False
+    if not isinstance(shot, dict):
+        return False
+
+    proposed_id = shot.get("id")
+    if not proposed_id or proposed_id in seen_ids:
+        shot["id"] = f"shot_{scene_id}_{shot_index}"
+        changed = True
+    seen_ids.add(shot["id"])
+
+    defaults = {
+        "prompt": "",
+        "camera": "zoom_in_slow",
+        "visual_effect": "cinematic_glow",
+        "target_api": "AUTO",
+        "scene_foley": "",
+        "characters_in_frame": [],
+        "primary_character": "",
+        "action_context": "",
+        "generated_image": "",
+        "generated_video": "",
+        "plan_rejection_reason": "",
+        "diagnostics": [],
+        "intent_notes": "",
+        "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+        "continuity_constraints": "",
+    }
+    for key, value in defaults.items():
+        if key not in shot:
+            shot[key] = value[:] if isinstance(value, list) else value
+            changed = True
+
+    if not isinstance(shot.get("characters_in_frame"), list):
+        shot["characters_in_frame"] = []
+        changed = True
+    if not isinstance(shot.get("diagnostics"), list):
+        shot["diagnostics"] = []
+        changed = True
+
+    if "plan_status" not in shot:
+        if shot.get("approved") is True:
+            shot["plan_status"] = "approved"
+        elif shot.get("approved") is False:
+            shot["plan_status"] = "rejected"
+        else:
+            shot["plan_status"] = "pending_review"
+        changed = True
+
+    keyframe_takes, keyframe_changed = _normalize_take_list(shot.get("keyframe_takes"), "keyframe")
+    motion_takes, motion_changed = _normalize_take_list(shot.get("motion_takes"), "motion")
+    postprocess_takes, postprocess_changed = _normalize_take_list(shot.get("postprocess_variants"), "postprocess")
+    if keyframe_changed or shot.get("keyframe_takes") is None:
+        shot["keyframe_takes"] = keyframe_takes
+        changed = True
+    else:
+        shot["keyframe_takes"] = keyframe_takes
+    if motion_changed or shot.get("motion_takes") is None:
+        shot["motion_takes"] = motion_takes
+        changed = True
+    else:
+        shot["motion_takes"] = motion_takes
+    if postprocess_changed or shot.get("postprocess_variants") is None:
+        shot["postprocess_variants"] = postprocess_takes
+        changed = True
+    else:
+        shot["postprocess_variants"] = postprocess_takes
+
+    # Migrate legacy generated outputs into additive take history.
+    if shot.get("generated_image") and not shot["keyframe_takes"]:
+        legacy_take = make_take("keyframe", path=shot["generated_image"], status="legacy_migrated")
+        shot["keyframe_takes"].append(legacy_take)
+        changed = True
+
+    if shot.get("generated_video") and not shot["motion_takes"]:
+        source_take_id = shot.get("approved_keyframe_take_id") or (
+            shot["keyframe_takes"][0]["id"] if shot["keyframe_takes"] else ""
+        )
+        legacy_take = make_take(
+            "motion",
+            path=shot["generated_video"],
+            source_take_id=source_take_id,
+            status="legacy_migrated",
+        )
+        shot["motion_takes"].append(legacy_take)
+        changed = True
+
+    for approval_field in (
+        "approved_keyframe_take_id",
+        "approved_motion_take_id",
+        "approved_final_take_id",
+    ):
+        if approval_field not in shot:
+            shot[approval_field] = ""
+            changed = True
+
+    if not shot["approved_keyframe_take_id"] and shot["keyframe_takes"] and shot.get("approved") is True:
+        shot["approved_keyframe_take_id"] = shot["keyframe_takes"][-1]["id"]
+        changed = True
+
+    if not shot["approved_motion_take_id"] and shot["motion_takes"] and shot.get("approved") is True:
+        shot["approved_motion_take_id"] = shot["motion_takes"][-1]["id"]
+        changed = True
+
+    if not shot["approved_final_take_id"]:
+        if shot["postprocess_variants"] and shot.get("approved") is True:
+            shot["approved_final_take_id"] = shot["postprocess_variants"][-1]["id"]
+            changed = True
+        elif shot["motion_takes"] and shot.get("approved") is True:
+            shot["approved_final_take_id"] = shot["motion_takes"][-1]["id"]
+            changed = True
+
+    return changed
+
+
+def normalize_project_schema(project: Optional[dict]) -> bool:
+    if not project:
+        return False
+
+    changed = False
+    if "characters" not in project or not isinstance(project["characters"], list):
+        project["characters"] = []
+        changed = True
+    if "locations" not in project or not isinstance(project["locations"], list):
+        project["locations"] = []
+        changed = True
+    if "scenes" not in project or not isinstance(project["scenes"], list):
+        project["scenes"] = []
+        changed = True
+
+    settings = project.setdefault("global_settings", {})
+    if not isinstance(settings, dict):
+        project["global_settings"] = {}
+        settings = project["global_settings"]
+        changed = True
+
+    seen_shot_ids: set[str] = set()
+    for scene_index, scene in enumerate(project["scenes"]):
+        if not isinstance(scene, dict):
+            continue
+        if scene.get("order") != scene_index:
+            scene["order"] = scene_index
+            changed = True
+        shots = scene.get("shots")
+        if not isinstance(shots, list):
+            scene["shots"] = []
+            shots = scene["shots"]
+            changed = True
+        if scene.get("num_shots") != len(shots):
+            scene["num_shots"] = len(shots)
+            changed = True
+        for shot_index, shot in enumerate(shots):
+            if normalize_shot_schema(
+                shot,
+                scene_id=scene.get("id", f"scene_{scene_index}"),
+                shot_index=shot_index,
+                seen_ids=seen_shot_ids,
+            ):
+                changed = True
+
+    return changed
+
+
 # ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------
@@ -257,6 +508,7 @@ def create_project(name: str) -> dict:
     os.makedirs(os.path.join(_project_dir(pid), "locations"), exist_ok=True)
     os.makedirs(os.path.join(_project_dir(pid), "exports"), exist_ok=True)
     os.makedirs(os.path.join(_project_dir(pid), "temp"), exist_ok=True)
+    os.makedirs(os.path.join(_project_dir(pid), "shots"), exist_ok=True)
     save_project(project)
     print(f"🎬 Created project '{name}' → projects/{pid}/")
     return project
@@ -276,7 +528,12 @@ def save_project(project: dict, timeout: float = 10) -> None:
 def load_project(project_id: str, timeout: float = 10) -> Optional[dict]:
     """Load project JSON with file-lock protection against concurrent writes."""
     with _acquire_project_lock(project_id, timeout):
-        return _load_project_unlocked(project_id)
+        project = _load_project_unlocked(project_id)
+        if project is None:
+            return None
+        if normalize_project_schema(project):
+            _save_project_unlocked(project)
+        return project
 
 
 def mutate_project(
@@ -300,6 +557,7 @@ def mutate_project(
         latest_project = _load_project_unlocked(project_id)
         if latest_project is None:
             return None
+        normalized = normalize_project_schema(latest_project)
 
         result = mutator(latest_project)
         if isinstance(result, MutationResult):
@@ -308,7 +566,7 @@ def mutate_project(
         else:
             result_value = result
 
-        if save_project_state:
+        if save_project_state or normalized:
             _save_project_unlocked(latest_project)
 
     _sync_project_snapshot(snapshot, latest_project)

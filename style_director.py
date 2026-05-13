@@ -8,6 +8,7 @@ that feed into every scene's shot decomposition.
 import os
 import json
 from dotenv import load_dotenv
+from pipeline_context import PIPELINE_CONTEXT
 
 load_dotenv()
 
@@ -85,6 +86,10 @@ Output a JSON object with these exact keys:
 - sound_design: Sound design philosophy and ambient texture
 - photorealism_rules: Specific instructions for maximum photorealism (skin texture, depth of field, lens choice, film grain)
 - composition_rules: Framing and composition guidelines (rule of thirds, leading lines, negative space)
+
+
+
+{PIPELINE_CONTEXT}
 
 Output ONLY valid JSON."""
 

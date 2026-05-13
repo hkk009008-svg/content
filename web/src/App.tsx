@@ -22,6 +22,7 @@ export default function App() {
     events, latest, isStreaming, start: startSSE, stop: stopSSE,
     stages, activeStage, shotStates, directorReview, processEvent,
     isPaused, failedShots, pause: pausePipeline, resume: resumePipeline,
+    approveShotPlan, rejectShotPlan, generateKeyframe, approveKeyframe, generateMotion, approveFinal,
     regenerateShot, correctShot, diagnoseShot, proceedToAssembly,
   } = usePipelineState(project?.id ?? null)
 
@@ -58,10 +59,34 @@ export default function App() {
     setMode('setup')
   }
 
+  const withRefresh = useCallback(async (action: () => Promise<any>) => {
+    const result = await action()
+    await refreshProject()
+    return result
+  }, [refreshProject])
+
   // Process SSE events through pipeline state router
   useEffect(() => {
     if (latest) processEvent(latest)
   }, [latest, processEvent])
+
+  useEffect(() => {
+    if (!latest || !project) return
+    const refreshStages = new Set([
+      'DECOMPOSE',
+      'PLAN_REVIEW',
+      'KEYFRAME_READY',
+      'KEYFRAME_REVIEW',
+      'MOTION_READY',
+      'POSTPROCESS_READY',
+      'REVIEW',
+      'SCENE_PREVIEW',
+      'COMPLETE',
+    ])
+    if (refreshStages.has(latest.stage)) {
+      refreshProject()
+    }
+  }, [latest, project, refreshProject])
 
   // Watch for generation completion
   useEffect(() => {
@@ -92,10 +117,16 @@ export default function App() {
         onCancel={handleCancel}
         onPause={pausePipeline}
         onResume={resumePipeline}
-        onRegenerateShot={regenerateShot}
-        onCorrectShot={correctShot}
-        onDiagnoseShot={diagnoseShot}
-        onProceedToAssembly={proceedToAssembly}
+        onApproveShotPlan={(shotId) => withRefresh(() => approveShotPlan(shotId))}
+        onRejectShotPlan={(shotId, reason) => withRefresh(() => rejectShotPlan(shotId, reason))}
+        onGenerateKeyframe={(shotId, positive, negative) => withRefresh(() => generateKeyframe(shotId, positive, negative))}
+        onApproveKeyframe={(shotId, takeId) => withRefresh(() => approveKeyframe(shotId, takeId))}
+        onGenerateMotion={(shotId) => withRefresh(() => generateMotion(shotId))}
+        onApproveFinal={(shotId, takeId) => withRefresh(() => approveFinal(shotId, takeId))}
+        onRegenerateShot={(shotId, positive, negative) => withRefresh(() => regenerateShot(shotId, positive, negative))}
+        onCorrectShot={(shotId, action, params, takeId) => withRefresh(() => correctShot(shotId, action, params, takeId))}
+        onDiagnoseShot={(shotId, takeId) => diagnoseShot(shotId, takeId)}
+        onProceedToAssembly={() => withRefresh(() => proceedToAssembly())}
       />
     )
   }

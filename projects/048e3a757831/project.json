@@ -1,6 +1,6 @@
 {
   "id": "048e3a757831",
-  "name": "Neon Requiem - Stress Test",
+  "name": "Neon Requiem - Continuity & Dialogue Stress Test",
   "characters": [
     {
       "id": "char_6fcedcb4d9de",
@@ -147,7 +147,19 @@
           "action_context": "Establishing shot of the speakeasy with Mira approaching Viktor's booth.",
           "generated_image": "",
           "generated_video": "",
-          "approved": true
+          "approved": true,
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "approved",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
         },
         {
           "id": "shot_1",
@@ -163,7 +175,18 @@
           "action_context": "Mira confronting Viktor, preparing to reveal evidence.",
           "generated_image": "",
           "generated_video": "",
-          "approved": true
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
         },
         {
           "id": "shot_2",
@@ -178,7 +201,19 @@
           "primary_character": "char_576167c628bd",
           "action_context": "Viktor assessing the evidence Mira presented.",
           "generated_image": "",
-          "generated_video": ""
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
         },
         {
           "id": "shot_3",
@@ -193,14 +228,26 @@
           "primary_character": "char_576167c628bd",
           "action_context": "Viktor responding non-verbally to Mira's accusations.",
           "generated_image": "",
-          "generated_video": ""
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
         },
         {
           "id": "shot_4",
           "prompt": "[SHOT] Extreme close-up, 105mm f/1.4 lens, very shallow depth of field, camera tightly framed on Viktor's lips. [SCENE] Dimly lit underground speakeasy with crimson neon signs, velvet booths, smoke haze, art deco brass fixtures, low-key noir with red neon accents. [ACTION] Viktor whispering his threat to Mira, full attention on the camera, giving an ominous, confident sign of danger. [OUTFIT] Edge of crimson pocket square noticeable, blur on lapel due to shallow DoF. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, very shallow depth of field with circular bokeh, natural film grain ISO 400, detailed texture in beard, intense dramatic close-up, no AI artifacts, no smooth plastic skin.",
           "camera": "zoom_in_slow",
           "visual_effect": "gritty_contrast",
-          "target_api": "VEO_NATIVE",
+          "target_api": "KLING_NATIVE",
           "scene_foley": "amplified sound of whisper, bar ambiance in the background",
           "characters_in_frame": [
             "char_576167c628bd"
@@ -208,7 +255,19 @@
           "primary_character": "char_576167c628bd",
           "action_context": "Viktor delivering a whispered threat to Mira, lowering tension with ominous insinuation.",
           "generated_image": "",
-          "generated_video": ""
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
         }
       ]
     },
@@ -229,7 +288,7 @@
       "num_shots": 2,
       "shots": [
         {
-          "id": "shot_0",
+          "id": "shot_scene_b86bfbbea742_0",
           "prompt": "[SHOT] Establishing wide shot, 24mm lens, deep depth of field, camera at low angle. [SCENE] Cramped apartment converted into a server farm. Walls of monitors showing scrolling code, tangled cable bundles, energy drink cans, holographic displays floating mid-air. Blue LED strip lighting., natural ambient lighting. [ACTION] East Asian woman in her 30s, sharp jawline, dark eyes, short black hair with a silver streak. Wears a weathered leather jacket over a dark turtleneck. Scar on left cheek. Determined, intense expression., Non-binary person in their early 20s, dyed teal hair shaved on one side, multiple ear piercings, holographic glasses. Wears an oversized hoodie covered in circuit-board patterns. Nervous energy, quick movements.. Pixel furiously types as holographic data streams around them. Mira watches over their shoulder. A firewall breach triggers alarms — screens flash red. Pixel rips out a cable, pivots to a backup terminal, and extracts the data just before the trace completes., facing the camera. [OUTFIT] Current wardrobe. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, natural film grain ISO 400, volumetric atmospheric lighting, no AI artifacts, no smooth plastic skin.",
           "camera": "zoom_in_slow",
           "visual_effect": "cinematic_glow",
@@ -239,17 +298,29 @@
             "char_6fcedcb4d9de",
             "char_5173682e056f"
           ],
-          "primary_character": "char_6fcedcb4d9de",
+          "primary_character": "char_5173682e056f",
           "action_context": "Pixel furiously types as holographic data streams around them. Mira watches over their shoulder. A firewall breach triggers alarms — screens flash red. Pixel rips out a cable, pivots to a backup terminal, and extracts the data just before the trace completes.",
           "generated_image": "",
-          "generated_video": ""
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
         },
         {
-          "id": "shot_1",
+          "id": "shot_scene_b86bfbbea742_1",
           "prompt": "[SHOT] Medium close-up, 85mm f/1.4 lens, shallow depth of field, eye-level camera. [SCENE] Cramped apartment converted into a server farm. Walls of monitors showing scrolling code, tangled cable bundles, energy drink cans, holographic displays floating mid-air. Blue LED strip lighting., natural motivated key light from camera-left. [ACTION] East Asian woman in her 30s, sharp jawline, dark eyes, short black hair with a silver streak. Wears a weathered leather jacket over a dark turtleneck. Scar on left cheek. Determined, intense expression., Non-binary person in their early 20s, dyed teal hair shaved on one side, multiple ear piercings, holographic glasses. Wears an oversized hoodie covered in circuit-board patterns. Nervous energy, quick movements.. Pixel furiously types as holographic data streams around them. Mira watches over their shoulder. A firewall breach triggers alarms — screens flash red. Pixel rips out a cable, pivots to a backup terminal, and extracts the data just before the trace completes., looking directly at the camera. [OUTFIT] Current wardrobe with visible fabric texture. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, no AI artifacts, no smooth plastic skin.",
           "camera": "dolly_in_rapid",
           "visual_effect": "cinematic_glow",
-          "target_api": "AUTO",
+          "target_api": "VEO_NATIVE",
           "scene_foley": "subtle environmental ambience",
           "characters_in_frame": [
             "char_6fcedcb4d9de"
@@ -257,7 +328,19 @@
           "primary_character": "char_6fcedcb4d9de",
           "action_context": "Pixel furiously types as holographic data streams around them. Mira watches over their shoulder. A firewall breach triggers alarms — screens flash red. Pixel rips out a cable, pivots to a backup terminal, and extracts the data just before the trace completes.",
           "generated_image": "",
-          "generated_video": ""
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
         }
       ]
     },
@@ -273,23 +356,116 @@
       "dialogue": "",
       "mood": "thriller",
       "camera_direction": "Tracking shot following Mira running, crane shot rising with helicopter, wide landscape of city skyline in rain, close-up of her rain-streaked face",
-      "duration_seconds": 20.0,
-      "num_shots": 1,
+      "duration_seconds": 30.0,
+      "num_shots": 4,
       "shots": [
         {
-          "id": "shot_0",
-          "prompt": "",
+          "id": "shot_scene_1693b3b44b2a_0",
+          "prompt": "[SHOT] Establishing wide shot, 24mm f/2.8 lens, deep depth of field, low angle. [SCENE] Rain-soaked rooftop of a 60-story corporate tower. Helicopter landing pad with flashing perimeter lights. City skyline with holographic billboards. Puddles reflecting neon. High contrast with lightning flashes. [ACTION] Mira sprints toward the camera across the wet rooftop, leather jacket whipping in the wind. Rain pelts her face. [OUTFIT] Weathered leather jacket over dark turtleneck, soaked from rain. [QUALITY] Photorealistic, visible rain droplets, wet skin reflections, shallow depth of field, natural film grain ISO 400, volumetric atmospheric lighting, no AI artifacts.",
           "camera": "zoom_in_slow",
           "visual_effect": "cinematic_glow",
-          "target_api": "AUTO",
-          "scene_foley": "ambient room tone",
+          "target_api": "SORA_NATIVE",
+          "scene_foley": "heavy rain, wind gusts, distant thunder",
           "characters_in_frame": [
             "char_6fcedcb4d9de"
           ],
           "primary_character": "char_6fcedcb4d9de",
-          "action_context": "Mira sprints across the rain-soaked rooftop, dodging ventilation units. Lightning illuminates the city below. She reaches the helipad edge and looks down — a helicopter rises from below the building. The city skyline stretches endlessly behind her.",
+          "action_context": "Mira sprinting across the rain-soaked rooftop.",
           "generated_image": "",
-          "generated_video": ""
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
+        },
+        {
+          "id": "shot_scene_1693b3b44b2a_1",
+          "prompt": "[SHOT] Medium close-up, 85mm f/1.4 lens, shallow depth of field, eye-level tracking shot. [SCENE] Rain-soaked rooftop, flashing perimeter lights, city skyline behind. High contrast with lightning. [ACTION] Mira dodging ventilation units, face determined, hair plastered to her forehead from rain. Camera tracks her lateral movement. [OUTFIT] Weathered leather jacket, dark turtleneck, rain-soaked. [QUALITY] Photorealistic, visible skin pores with water droplets, subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, no AI artifacts, no smooth plastic skin.",
+          "camera": "pan_right",
+          "visual_effect": "cinematic_glow",
+          "target_api": "KLING_NATIVE",
+          "scene_foley": "metallic footsteps on wet surface, rain, ventilation hum",
+          "characters_in_frame": [
+            "char_6fcedcb4d9de"
+          ],
+          "primary_character": "char_6fcedcb4d9de",
+          "action_context": "Mira dodging obstacles on the rooftop, mid-sprint.",
+          "generated_image": "",
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
+        },
+        {
+          "id": "shot_scene_1693b3b44b2a_2",
+          "prompt": "[SHOT] Close-up, 105mm f/1.4 lens, very shallow depth of field, static camera. [SCENE] Rain-soaked rooftop edge. City skyline bokeh behind. Lightning flash illumination. [ACTION] Mira reaches the helipad edge, stops abruptly. Camera on her rain-streaked face — a beat of realization. Eyes wide, breathing heavy. Looking directly at the camera. [OUTFIT] Leather jacket collar up, water streaming down scar on left cheek. [QUALITY] Photorealistic, visible skin pores, water droplets on skin with subsurface scattering, very shallow depth of field, natural film grain ISO 400, intense dramatic close-up, no AI artifacts.",
+          "camera": "zoom_in_slow",
+          "visual_effect": "cinematic_glow",
+          "target_api": "KLING_NATIVE",
+          "scene_foley": "sharp breath intake, rain, distant helicopter rotors",
+          "characters_in_frame": [
+            "char_6fcedcb4d9de"
+          ],
+          "primary_character": "char_6fcedcb4d9de",
+          "action_context": "Mira reaches the edge of the helipad, moment of realization.",
+          "generated_image": "",
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
+        },
+        {
+          "id": "shot_scene_1693b3b44b2a_3",
+          "prompt": "[SHOT] Wide landscape shot, 16mm f/4 lens, deep depth of field, crane shot rising. [SCENE] Rain-soaked rooftop with full city skyline panorama. Holographic billboards glowing through fog. Helicopter rising from below the building, rotors cutting through rain. [ACTION] Silhouette of Mira at the helipad edge as the helicopter rises behind her. City lights stretch to the horizon. [OUTFIT] Dark silhouette against orange city glow. [QUALITY] Photorealistic, volumetric rain and fog, city lights with realistic bokeh, natural film grain ISO 400, epic scale, no AI artifacts.",
+          "camera": "crane_up",
+          "visual_effect": "cinematic_glow",
+          "target_api": "LTX",
+          "scene_foley": "helicopter rotors crescendo, heavy rain, wind",
+          "characters_in_frame": [
+            "char_6fcedcb4d9de"
+          ],
+          "primary_character": "char_6fcedcb4d9de",
+          "action_context": "Helicopter rising behind Mira, epic cityscape reveal.",
+          "generated_image": "",
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
         }
       ]
     },
@@ -310,27 +486,39 @@
       "num_shots": 2,
       "shots": [
         {
-          "id": "shot_0",
+          "id": "shot_scene_a1da24c95182_0",
           "prompt": "[SHOT] Establishing wide shot, 24mm lens, deep depth of field, camera at low angle. [SCENE] Abandoned shipyard at dawn. Rusted cargo cranes silhouetted against an orange sky. Fog rolling off the water. Concrete docks with moss and graffiti. A single black sedan parked under a flickering streetlight., natural ambient lighting. [ACTION] East Asian woman in her 30s, sharp jawline, dark eyes, short black hair with a silver streak. Wears a weathered leather jacket over a dark turtleneck. Scar on left cheek. Determined, intense expression., Eastern European man in his 50s, bald head, thick salt-and-pepper beard, piercing blue eyes, imposing build. Wears an immaculate charcoal suit with a crimson pocket square. Cold, calculating demeanor.. Dawn breaks over the waterfront. Mira stands alone on the dock, staring at the water. Viktor approaches from the shadows. They face each other in silence. She holds up a USB drive. He reaches for it. She drops it into the harbor., facing the camera. [OUTFIT] Current wardrobe. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, natural film grain ISO 400, volumetric atmospheric lighting, no AI artifacts, no smooth plastic skin.",
           "camera": "zoom_in_slow",
           "visual_effect": "cinematic_glow",
-          "target_api": "AUTO",
+          "target_api": "VEO_NATIVE",
           "scene_foley": "ambient environmental sound",
           "characters_in_frame": [
             "char_6fcedcb4d9de",
             "char_576167c628bd"
           ],
-          "primary_character": "char_6fcedcb4d9de",
+          "primary_character": "char_576167c628bd",
           "action_context": "Dawn breaks over the waterfront. Mira stands alone on the dock, staring at the water. Viktor approaches from the shadows. They face each other in silence. She holds up a USB drive. He reaches for it. She drops it into the harbor.",
           "generated_image": "",
-          "generated_video": ""
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
         },
         {
-          "id": "shot_1",
+          "id": "shot_scene_a1da24c95182_1",
           "prompt": "[SHOT] Medium close-up, 85mm f/1.4 lens, shallow depth of field, eye-level camera. [SCENE] Abandoned shipyard at dawn. Rusted cargo cranes silhouetted against an orange sky. Fog rolling off the water. Concrete docks with moss and graffiti. A single black sedan parked under a flickering streetlight., natural motivated key light from camera-left. [ACTION] East Asian woman in her 30s, sharp jawline, dark eyes, short black hair with a silver streak. Wears a weathered leather jacket over a dark turtleneck. Scar on left cheek. Determined, intense expression., Eastern European man in his 50s, bald head, thick salt-and-pepper beard, piercing blue eyes, imposing build. Wears an immaculate charcoal suit with a crimson pocket square. Cold, calculating demeanor.. Dawn breaks over the waterfront. Mira stands alone on the dock, staring at the water. Viktor approaches from the shadows. They face each other in silence. She holds up a USB drive. He reaches for it. She drops it into the harbor., looking directly at the camera. [OUTFIT] Current wardrobe with visible fabric texture. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, no AI artifacts, no smooth plastic skin.",
           "camera": "dolly_in_rapid",
           "visual_effect": "cinematic_glow",
-          "target_api": "AUTO",
+          "target_api": "VEO_NATIVE",
           "scene_foley": "subtle environmental ambience",
           "characters_in_frame": [
             "char_6fcedcb4d9de"
@@ -338,7 +526,147 @@
           "primary_character": "char_6fcedcb4d9de",
           "action_context": "Dawn breaks over the waterfront. Mira stands alone on the dock, staring at the water. Viktor approaches from the shadows. They face each other in silence. She holds up a USB drive. He reaches for it. She drops it into the harbor.",
           "generated_image": "",
-          "generated_video": ""
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
+        }
+      ]
+    },
+    {
+      "id": "scene_dlg_stress_test",
+      "order": 4,
+      "title": "The Confession",
+      "location_id": "loc_108d24e18c72",
+      "characters_present": [
+        "char_6fcedcb4d9de",
+        "char_576167c628bd"
+      ],
+      "action": "Back in the Red Lantern Bar. Mira returns to Viktor's booth one last time. This time, Viktor is the one who slides something across the table — a sealed envelope. His composure cracks for the first time. He confesses his role in the conspiracy, but warns her the real enemy is still out there.",
+      "dialogue": "Viktor: I did not come here to fight you, Detective. I came to warn you. The photograph you showed me — I took it myself. Twenty years ago. Mira: Then you know who killed him. Viktor: I know who ordered it. And they know you are close. Take this envelope. Inside you will find names, dates, account numbers. Everything you need. Mira: Why now? Why help me after all these years? Viktor: Because my daughter asks about her grandfather. And I have no more lies left to tell.",
+      "voiceover": "",
+      "mood": "melancholic",
+      "camera_direction": "Intimate two-shot, slow push-in on Viktor as he confesses, close-up reaction from Mira, extreme close-up of the envelope",
+      "duration_seconds": 35.0,
+      "num_shots": 4,
+      "shots": [
+        {
+          "id": "shot_scene_dlg_stress_test_0",
+          "prompt": "[SHOT] Medium two-shot, 50mm f/1.8 lens, medium depth of field, eye-level. [SCENE] Dimly lit underground speakeasy with crimson neon signs, velvet booths, smoke haze, art deco brass fixtures. Low-key noir with red neon accents. [ACTION] Viktor and Mira seated across from each other. Viktor slides a sealed envelope toward Mira. His hands tremble slightly. [OUTFIT] Viktor in charcoal suit, Mira in leather jacket. [QUALITY] Photorealistic, visible skin pores, subsurface scattering, shallow depth of field, natural film grain ISO 400, micro-detail in fabric, no AI artifacts.",
+          "camera": "dolly_in_slow",
+          "visual_effect": "gritty_contrast",
+          "target_api": "AUTO",
+          "scene_foley": "soft jazz, glasses clinking, envelope sliding on wood",
+          "characters_in_frame": [
+            "char_6fcedcb4d9de",
+            "char_576167c628bd"
+          ],
+          "primary_character": "char_576167c628bd",
+          "action_context": "Viktor slides the envelope, beginning his confession.",
+          "generated_image": "",
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
+        },
+        {
+          "id": "shot_scene_dlg_stress_test_1",
+          "prompt": "[SHOT] Close-up, 85mm f/1.4 lens, shallow depth of field, eye-level with slow push-in. [SCENE] Dimly lit speakeasy, crimson neon, smoke haze. [ACTION] Viktor speaking directly to camera, composure cracking, eyes showing years of guilt. Mouth clearly visible for dialogue. [OUTFIT] Charcoal suit, loosened tie, crimson pocket square. [QUALITY] Photorealistic, visible skin pores, subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, intense emotion in eyes, micro-detail in beard texture, no AI artifacts.",
+          "camera": "zoom_in_slow",
+          "visual_effect": "gritty_contrast",
+          "target_api": "VEO_NATIVE",
+          "scene_foley": "quiet bar ambiance, soft breathing",
+          "characters_in_frame": [
+            "char_576167c628bd"
+          ],
+          "primary_character": "char_576167c628bd",
+          "action_context": "Viktor confessing — his composure breaks for the first time.",
+          "generated_image": "",
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
+        },
+        {
+          "id": "shot_scene_dlg_stress_test_2",
+          "prompt": "[SHOT] Close-up reaction shot, 85mm f/1.4 lens, shallow depth of field, eye-level. [SCENE] Dimly lit speakeasy, red neon backlighting Mira's face. [ACTION] Mira listening to Viktor's confession, processing the revelation. Eyes searching his face for truth. Slight nod. Speaking her response directly to camera. [OUTFIT] Leather jacket, dark turtleneck. Scar visible on left cheek. [QUALITY] Photorealistic, visible skin pores, subsurface scattering, shallow depth of field, natural film grain ISO 400, emotional intensity, no AI artifacts.",
+          "camera": "static",
+          "visual_effect": "gritty_contrast",
+          "target_api": "VEO_NATIVE",
+          "scene_foley": "quiet bar ambiance",
+          "characters_in_frame": [
+            "char_6fcedcb4d9de"
+          ],
+          "primary_character": "char_6fcedcb4d9de",
+          "action_context": "Mira reacting to Viktor's confession, asking why now.",
+          "generated_image": "",
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
+        },
+        {
+          "id": "shot_scene_dlg_stress_test_3",
+          "prompt": "[SHOT] Extreme close-up, 105mm f/1.2 lens, very shallow depth of field, static. [SCENE] Dimly lit speakeasy. [ACTION] Viktor's final line about his daughter. Face fills the frame. A single tear forms but does not fall. Mouth clearly visible, speaking directly to camera. [OUTFIT] Charcoal suit, tie loosened. [QUALITY] Photorealistic, visible skin pores, tear refraction, subsurface scattering, very shallow depth of field, natural film grain ISO 400, extreme emotional close-up, micro-detail in skin and beard, no AI artifacts.",
+          "camera": "zoom_in_slow",
+          "visual_effect": "gritty_contrast",
+          "target_api": "VEO_NATIVE",
+          "scene_foley": "near silence, soft jazz in far distance",
+          "characters_in_frame": [
+            "char_576167c628bd"
+          ],
+          "primary_character": "char_576167c628bd",
+          "action_context": "Viktor delivers his final line about his daughter and his exhaustion with lies.",
+          "generated_image": "",
+          "generated_video": "",
+          "plan_rejection_reason": "",
+          "diagnostics": [],
+          "intent_notes": "",
+          "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+          "continuity_constraints": "",
+          "plan_status": "pending_review",
+          "keyframe_takes": [],
+          "motion_takes": [],
+          "postprocess_variants": [],
+          "approved_keyframe_take_id": "",
+          "approved_motion_take_id": "",
+          "approved_final_take_id": ""
         }
       ]
     }
@@ -371,5 +699,6 @@
     "adaptive_pulid": true,
     "coherence_check_enabled": true,
     "color_drift_sensitivity": 0.3
-  }
+  },
+  "title": "Neon Requiem - Continuity & Dialogue Stress Test"
 }

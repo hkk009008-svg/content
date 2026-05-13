@@ -22,17 +22,24 @@ interface Props {
   onCancel: () => void
   onPause: () => void
   onResume: () => void
+  onApproveShotPlan: (shotId: string) => Promise<any>
+  onRejectShotPlan: (shotId: string, reason?: string) => Promise<any>
+  onGenerateKeyframe: (shotId: string, positive?: string, negative?: string) => Promise<any>
+  onApproveKeyframe: (shotId: string, takeId: string) => Promise<any>
+  onGenerateMotion: (shotId: string) => Promise<any>
+  onApproveFinal: (shotId: string, takeId: string) => Promise<any>
   onRegenerateShot: (shotId: string, positive?: string, negative?: string) => Promise<any>
-  onCorrectShot: (shotId: string, action: string, params?: Record<string, any>) => Promise<any>
-  onDiagnoseShot: (shotId: string) => Promise<any>
-  onProceedToAssembly: () => void
+  onCorrectShot: (shotId: string, action: string, params?: Record<string, any>, takeId?: string) => Promise<any>
+  onDiagnoseShot: (shotId: string, takeId?: string) => Promise<any>
+  onProceedToAssembly: () => Promise<any>
 }
 
 export default function PipelineLayout({
   project, events, latest, stages, activeStage,
   shotStates, directorReview, isGenerating, isPaused, failedShots,
-  onBack, onCancel, onPause, onResume, onRegenerateShot,
-  onCorrectShot, onDiagnoseShot, onProceedToAssembly,
+  onBack, onCancel, onPause, onResume, onApproveShotPlan, onRejectShotPlan,
+  onGenerateKeyframe, onApproveKeyframe, onGenerateMotion, onApproveFinal,
+  onRegenerateShot, onCorrectShot, onDiagnoseShot, onProceedToAssembly,
 }: Props) {
   const isComplete = latest?.stage === 'COMPLETE' || latest?.stage === 'DONE'
 
@@ -98,11 +105,18 @@ export default function PipelineLayout({
 
         {/* Execution Board */}
         <div className="flex-1 overflow-y-auto p-4">
-          {activeStage === 'REVIEW' || isPaused && activeStage === 'REVIEW' ? (
+          {(['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'REVIEW'].includes(activeStage || '')) || (isPaused && ['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'REVIEW'].includes(activeStage || '')) ? (
             /* Director's Cut Review Stage */
             <ReviewStage
               project={project}
+              activeStage={activeStage}
               shotStates={shotStates}
+              onApprovePlan={onApproveShotPlan}
+              onRejectPlan={onRejectShotPlan}
+              onGenerateKeyframe={onGenerateKeyframe}
+              onApproveKeyframe={onApproveKeyframe}
+              onGenerateMotion={onGenerateMotion}
+              onApproveFinal={onApproveFinal}
               onCorrect={onCorrectShot}
               onDiagnose={onDiagnoseShot}
               onRegenerate={onRegenerateShot}

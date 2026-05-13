@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from project_manager import load_project, get_project_dir, mutate_project
+from project_manager import MutationResult, load_project, get_project_dir, mutate_project, make_take
 from character_manager import get_reference_image
 from location_manager import get_location_prompt, get_location_seed
 from continuity_engine import ContinuityEngine
@@ -263,6 +263,7 @@ class CinemaPipeline:
 
     def get_state(self) -> dict:
         """Return current pipeline state for the UI."""
+        gate_status = self._project_gate_status()
         return {
             "paused": self.paused,
             "cancelled": self.cancelled,
@@ -272,6 +273,7 @@ class CinemaPipeline:
             "shot_results": self.shot_results,
             "failed_shots": self.failed_shots,
             "scenes_completed": len(self.scene_clips),
+            "gate_status": gate_status,
         }
 
     def _refresh_project_snapshot(self, timeout: float = 10) -> Optional[dict]:
@@ -293,131 +295,558 @@ class CinemaPipeline:
         self.director.project = self.project
         return self.project
 
-    def regenerate_shot(self, scene_id: str, shot_id: str) -> dict:
-        """
-        Regenerate a single shot without restarting the full pipeline.
-        Returns {"success": bool, "image": path, "video": path, "identity_score": float}.
-        """
-        project = self._refresh_project_snapshot() or self.project
-        scene = next((s for s in project["scenes"] if s["id"] == scene_id), None)
-        if not scene:
-            return {"success": False, "error": "Scene not found"}
+    def _all_shots(self, project: Optional[dict] = None) -> list[tuple[dict, int, dict]]:
+        active_project = project or self.project
+        rows: list[tuple[dict, int, dict]] = []
+        for scene in active_project.get("scenes", []):
+            for shot_index, shot in enumerate(scene.get("shots", [])):
+                rows.append((scene, shot_index, shot))
+        return rows
 
-        shot = None
-        shot_index = 0
-        for i, s in enumerate(scene.get("shots", [])):
-            if s.get("id") == shot_id:
-                shot = s
-                shot_index = i
-                break
-        if not shot:
+    def _find_shot(
+        self,
+        shot_id: str,
+        project: Optional[dict] = None,
+        scene_id: str = "",
+    ) -> tuple[Optional[dict], Optional[dict], int]:
+        active_project = project or self.project
+        for scene in active_project.get("scenes", []):
+            if scene_id and scene.get("id") != scene_id:
+                continue
+            for shot_index, shot in enumerate(scene.get("shots", [])):
+                if shot.get("id") == shot_id:
+                    return scene, shot, shot_index
+        return None, None, -1
+
+    def _find_take(self, shot: dict, take_id: str) -> tuple[Optional[str], Optional[dict]]:
+        for collection_name in ("keyframe_takes", "motion_takes", "postprocess_variants"):
+            for take in shot.get(collection_name, []):
+                if take.get("id") == take_id:
+                    return collection_name, take
+        return None, None
+
+    def _latest_take(self, shot: dict, collection_name: str) -> Optional[dict]:
+        takes = shot.get(collection_name, [])
+        return takes[-1] if takes else None
+
+    def _resolve_take_path(self, shot: dict, take_id: str) -> str:
+        _, take = self._find_take(shot, take_id)
+        return take.get("path", "") if take else ""
+
+    def _candidate_take(self, shot: dict) -> Optional[dict]:
+        if shot.get("approved_final_take_id"):
+            _, take = self._find_take(shot, shot["approved_final_take_id"])
+            if take:
+                return take
+        for collection_name in ("postprocess_variants", "motion_takes", "keyframe_takes"):
+            take = self._latest_take(shot, collection_name)
+            if take:
+                return take
+        return None
+
+    def _project_gate_status(self, project: Optional[dict] = None) -> dict:
+        active_project = project or self.project
+        shots = [shot for _, _, shot in self._all_shots(active_project)]
+        total = len(shots)
+        return {
+            "total_shots": total,
+            "plans_approved": sum(1 for shot in shots if shot.get("plan_status") == "approved"),
+            "keyframes_approved": sum(1 for shot in shots if shot.get("approved_keyframe_take_id")),
+            "motions_generated": sum(1 for shot in shots if shot.get("motion_takes")),
+            "finals_approved": sum(1 for shot in shots if shot.get("approved_final_take_id")),
+        }
+
+    def _gate_satisfied(self, gate: str, project: Optional[dict] = None) -> bool:
+        active_project = project or self.project
+        shots = [shot for _, _, shot in self._all_shots(active_project)]
+        if not shots:
+            return False
+        if gate == "PLAN_REVIEW":
+            return all(shot.get("plan_status") == "approved" for shot in shots)
+        if gate == "KEYFRAME_REVIEW":
+            return all(shot.get("approved_keyframe_take_id") for shot in shots)
+        if gate == "REVIEW":
+            return all(shot.get("approved_final_take_id") for shot in shots)
+        return False
+
+    def _wait_for_gate(self, gate: str, detail: str, percent: float) -> bool:
+        while True:
+            project = self._refresh_project_snapshot() or self.project
+            if self._gate_satisfied(gate, project):
+                return True
+            self.current_stage = gate
+            self.progress(gate, detail, percent)
+            self.pause()
+            if not self._check_pause():
+                return False
+
+    def _take_output_path(self, shot_id: str, take_id: str, ext: str) -> str:
+        output_dir = os.path.join(self.project_dir, "shots", shot_id, "outputs")
+        os.makedirs(output_dir, exist_ok=True)
+        return os.path.join(output_dir, f"{take_id}{ext}")
+
+    def _mutate_shot(self, shot_id: str, mutator, timeout: float = 10):
+        def _mutate(latest_project: dict):
+            for scene in latest_project.get("scenes", []):
+                for shot in scene.get("shots", []):
+                    if shot.get("id") == shot_id:
+                        return mutator(scene, shot)
+            return MutationResult(None, save=False)
+
+        result = mutate_project(self.project["id"], _mutate, timeout=timeout, snapshot=self.project)
+        self._refresh_project_snapshot()
+        return result
+
+    def _record_diagnostic(self, shot_id: str, diagnostic: dict) -> None:
+        def _mutator(_scene: dict, shot: dict):
+            shot.setdefault("diagnostics", []).append(diagnostic)
+            return MutationResult(diagnostic, save=True)
+
+        self._mutate_shot(shot_id, _mutator)
+
+    def _rebuild_review_clips(self, project: Optional[dict] = None) -> dict:
+        active_project = project or self.project
+        manifest = {}
+        for scene, shot_index, shot in self._all_shots(active_project):
+            candidate = self._candidate_take(shot) or {}
+            keyframe_path = self._resolve_take_path(shot, shot.get("approved_keyframe_take_id", "")) or (
+                self._latest_take(shot, "keyframe_takes") or {}
+            ).get("path")
+            manifest[shot["id"]] = {
+                "scene_id": scene.get("id", ""),
+                "shot_index": shot_index,
+                "prompt": shot.get("prompt", ""),
+                "camera": shot.get("camera", ""),
+                "target_api": shot.get("target_api", "AUTO"),
+                "image": keyframe_path,
+                "video": candidate.get("path", "") if candidate.get("kind") != "keyframe" else "",
+                "take_id": candidate.get("id", ""),
+                "take_kind": candidate.get("kind", ""),
+                "status": "pending_review",
+            }
+        self.review_clips = manifest
+        return manifest
+
+    def approve_shot_plan(self, shot_id: str, approved: bool, reason: str = "") -> dict:
+        status = "approved" if approved else "rejected"
+
+        def _mutator(_scene: dict, shot: dict):
+            shot["plan_status"] = status
+            shot["plan_rejection_reason"] = "" if approved else reason
+            return MutationResult(
+                {"shot_id": shot_id, "plan_status": shot["plan_status"], "reason": shot["plan_rejection_reason"]},
+                save=True,
+            )
+
+        result = self._mutate_shot(shot_id, _mutator)
+        return result or {"error": "Shot not found"}
+
+    def approve_take(self, shot_id: str, take_id: str, approval_kind: str) -> dict:
+        def _resolve_motion_source(shot: dict, candidate_take: dict) -> str:
+            current = candidate_take
+            visited = set()
+            while current and current.get("id") not in visited:
+                visited.add(current.get("id"))
+                collection_name, _ = self._find_take(shot, current.get("id", ""))
+                if collection_name == "motion_takes":
+                    return current.get("id", "")
+                source_take_id = current.get("source_take_id", "")
+                if not source_take_id:
+                    break
+                _, current = self._find_take(shot, source_take_id)
+            return ""
+
+        def _mutator(_scene: dict, shot: dict):
+            collection_name, take = self._find_take(shot, take_id)
+            if not take:
+                return MutationResult({"error": "Take not found"}, save=False)
+            if approval_kind == "keyframe":
+                if collection_name != "keyframe_takes":
+                    return MutationResult({"error": "Take is not a keyframe"}, save=False)
+                shot["approved_keyframe_take_id"] = take_id
+            elif approval_kind == "final":
+                if collection_name == "keyframe_takes":
+                    return MutationResult({"error": "Keyframes cannot be approved as final takes"}, save=False)
+                motion_take_id = take_id if collection_name == "motion_takes" else _resolve_motion_source(shot, take)
+                if motion_take_id:
+                    shot["approved_motion_take_id"] = motion_take_id
+                shot["approved_final_take_id"] = take_id
+            else:
+                return MutationResult({"error": f"Unsupported approval kind '{approval_kind}'"}, save=False)
+            return MutationResult({"shot_id": shot_id, "take_id": take_id, "approval_kind": approval_kind}, save=True)
+
+        result = self._mutate_shot(shot_id, _mutator)
+        return result or {"error": "Shot not found"}
+
+    def _resolve_previous_approved_keyframe(self, scene: dict, shot_index: int) -> str:
+        if shot_index <= 0:
+            return ""
+        previous_shot = scene.get("shots", [])[shot_index - 1]
+        take_id = previous_shot.get("approved_keyframe_take_id", "")
+        return self._resolve_take_path(previous_shot, take_id)
+
+    def _ensure_scene_audio(self, scene: dict, characters: list[dict]) -> Optional[str]:
+        scene_id = scene.get("id", "")
+        existing = self.scene_audio.get(scene_id)
+        if existing and os.path.exists(existing):
+            return existing
+
+        dialogue = scene.get("dialogue", "")
+        action = scene.get("action", "")
+        if characters and not dialogue and action:
+            dialogue_lines = generate_dialogue(scene, characters, scene.get("mood", "neutral"))
+        elif dialogue:
+            if isinstance(dialogue, list):
+                dialogue_lines = dialogue
+            else:
+                dialogue_lines = generate_dialogue(scene, characters, scene.get("mood", "neutral"))
+        else:
+            return None
+
+        if not dialogue_lines:
+            return None
+
+        output_path = os.path.join(self.temp_dir, f"audio_{scene_id}.mp3")
+        result = generate_dialogue_voiceover(dialogue_lines, characters, output_path)
+        if result and os.path.exists(output_path):
+            self.scene_audio[scene_id] = output_path
+            self._save_checkpoint()
+            return output_path
+        return None
+
+    def _ensure_bgm(self, settings: dict) -> str:
+        self.progress("AUDIO", "Generating background music...", 5)
+        music_mood = settings.get("music_mood", "suspense")
+        bgm_path = os.path.join(self.temp_dir, f"bgm_{music_mood}.mp3")
+        if not os.path.exists(bgm_path):
+            generate_fal_bgm(music_mood, bgm_path, duration=47)
+
+        if os.path.exists(bgm_path):
+            try:
+                from phase_b_audio import master_music
+                mastered_path = os.path.join(self.temp_dir, f"bgm_{music_mood}_mastered.mp3")
+                mastered = master_music(bgm_path, mastered_path, preset="cinema_master")
+                if mastered and os.path.exists(mastered):
+                    bgm_path = mastered
+                    self.progress("AUDIO", "BGM mastered (cinema_master preset)", 6)
+            except Exception as e_master:
+                print(f"   [AUDIO] BGM mastering skipped (non-critical): {e_master}")
+        return bgm_path
+
+    def _build_scene_packages(self, project: Optional[dict] = None) -> tuple[list[dict], list[str]]:
+        active_project = project or self.project
+        scene_packages = []
+        missing_shots: list[str] = []
+        self.scene_clips = {}
+
+        for scene in active_project.get("scenes", []):
+            scene_id = scene.get("id", "")
+            clips = []
+            for shot in scene.get("shots", []):
+                final_take_id = shot.get("approved_final_take_id", "")
+                final_path = self._resolve_take_path(shot, final_take_id)
+                if not final_path or not os.path.exists(final_path):
+                    missing_shots.append(shot.get("id", ""))
+                    continue
+                clips.append(final_path)
+
+            self.scene_clips[scene_id] = clips
+            characters = [
+                character for character in active_project.get("characters", [])
+                if character.get("id") in scene.get("characters_present", [])
+            ]
+            scene_audio = self._ensure_scene_audio(scene, characters)
+            scene_packages.append({
+                "scene_id": scene_id,
+                "clips": clips,
+                "audio": scene_audio,
+                "foley": [],
+            })
+
+        return scene_packages, missing_shots
+
+    def generate_keyframe_take(
+        self,
+        scene_id: str,
+        shot_id: str,
+        positive_prompt: Optional[str] = None,
+        negative_prompt: Optional[str] = None,
+    ) -> dict:
+        project = self._refresh_project_snapshot() or self.project
+        scene, shot, shot_index = self._find_shot(shot_id, project, scene_id)
+        if not scene or not shot:
             return {"success": False, "error": "Shot not found"}
+        if shot.get("plan_status") != "approved":
+            return {"success": False, "error": "Shot plan must be approved before generating a keyframe"}
 
         settings = project.get("global_settings", {})
         style_suffix = style_rules_to_prompt_suffix(settings.get("style_rules", {}))
-
-        # Enhance prompt
-        prev_shot = scene["shots"][shot_index - 1] if shot_index > 0 else None
-        enhanced = self.continuity.enhance_shot_prompt(shot, scene, prev_shot, shot_index)
-        full_prompt = enhanced["prompt"]
+        prev_shot = scene.get("shots", [])[shot_index - 1] if shot_index > 0 else None
+        approved_anchor = self._resolve_previous_approved_keyframe(scene, shot_index)
+        enhanced = self.continuity.enhance_shot_prompt(
+            shot,
+            scene,
+            prev_shot,
+            shot_index,
+            approved_anchor_image=approved_anchor,
+        )
+        full_prompt = positive_prompt or enhanced["prompt"]
         if style_suffix:
             full_prompt = f"{full_prompt}. {style_suffix}"
 
         cc = enhanced.get("continuity_config", {})
         primary_ref = cc.get("primary_reference")
-        scene_seed = cc.get("scene_seed")
+        take = make_take(
+            "keyframe",
+            metadata={
+                "scene_id": scene_id,
+                "shot_id": shot_id,
+                "prompt": full_prompt,
+                "camera": shot.get("camera", "zoom_in_slow"),
+                "target_api": shot.get("target_api", "AUTO"),
+            },
+        )
+        img_path = self._take_output_path(shot_id, take["id"], ".jpg")
+        self.current_stage = "KEYFRAME"
+        self.current_scene_id = scene_id
+        self.current_shot_id = shot_id
+        self.progress(
+            "KEYFRAME",
+            f"Generating keyframe for {shot_id}",
+            -1,
+            scene_id=scene_id,
+            shot_id=shot_id,
+            take_id=take["id"],
+        )
 
-        img_path = os.path.join(self.temp_dir, f"img_{scene_id}_{shot_index}.jpg")
-        vid_path = os.path.join(self.temp_dir, f"vid_{scene_id}_{shot_index}.mp4")
-
-        self.progress("REGENERATE", f"Regenerating shot {shot_id}", -1,
-                      scene_id=scene_id, shot_id=shot_id)
-
-        # Generate image
         result = generate_ai_broll(
-            full_prompt, img_path,
-            seed=scene_seed,
+            full_prompt,
+            img_path,
+            seed=cc.get("scene_seed"),
             character_image=primary_ref,
             init_image=cc.get("init_image") if cc.get("use_img2img") else None,
             denoise_strength=cc.get("denoise_strength", 1.0),
             multi_angle_refs=cc.get("multi_angle_refs", []),
             identity_anchor=cc.get("identity_anchor", ""),
             pulid_weight_override=cc.get("pulid_weight_override"),
+            negative_prompt=negative_prompt or cc.get("negative_constraints") or shot.get("negative_constraints", ""),
         )
-
         if not result or not os.path.exists(img_path):
             return {"success": False, "error": "Image generation failed"}
 
-        # Validate identity
         identity_score = 0.0
         if primary_ref:
             from phase_c_vision import validate_identity_image
             img_sim = validate_identity_image(img_path, primary_ref, threshold=cc.get("identity_threshold", 0.70))
             identity_score = img_sim.get("similarity", 0.0)
+            take["metadata"]["identity_score"] = identity_score
 
-        # Generate video — resolve AUTO the same way as main generation
-        camera = shot.get("camera", "zoom_in_slow")
+        take["path"] = img_path
+
+        def _mutator(_scene: dict, project_shot: dict):
+            project_shot.setdefault("keyframe_takes", []).append(take)
+            project_shot["generated_image"] = img_path
+            return MutationResult(take, save=True)
+
+        stored_take = self._mutate_shot(shot_id, _mutator)
+        self.shot_results[shot_id] = {
+            "image": img_path,
+            "video": None,
+            "identity_score": identity_score,
+            "status": "keyframe_review",
+            "take_id": take["id"],
+        }
+        self._rebuild_review_clips()
+        self._save_checkpoint()
+        self.progress(
+            "KEYFRAME_READY",
+            f"Keyframe ready for {shot_id}",
+            -1,
+            scene_id=scene_id,
+            shot_id=shot_id,
+            image_url=img_path,
+            identity_score=identity_score,
+            take_id=take["id"],
+            take_kind="keyframe",
+        )
+        return {
+            "success": True,
+            "take": stored_take,
+            "image": img_path,
+            "identity_score": identity_score,
+        }
+
+    def generate_motion_take(self, scene_id: str, shot_id: str) -> dict:
+        project = self._refresh_project_snapshot() or self.project
+        scene, shot, shot_index = self._find_shot(shot_id, project, scene_id)
+        if not scene or not shot:
+            return {"success": False, "error": "Shot not found"}
+        if shot.get("plan_status") != "approved":
+            return {"success": False, "error": "Shot plan must be approved before generating motion"}
+        keyframe_take_id = shot.get("approved_keyframe_take_id", "")
+        if not keyframe_take_id:
+            return {"success": False, "error": "Approved keyframe required before generating motion"}
+
+        source_image = self._resolve_take_path(shot, keyframe_take_id)
+        if not source_image or not os.path.exists(source_image):
+            return {"success": False, "error": "Approved keyframe asset is missing"}
+
+        prev_shot = scene.get("shots", [])[shot_index - 1] if shot_index > 0 else None
+        approved_anchor = self._resolve_previous_approved_keyframe(scene, shot_index)
+        enhanced = self.continuity.enhance_shot_prompt(
+            shot,
+            scene,
+            prev_shot,
+            shot_index,
+            approved_anchor_image=approved_anchor,
+        )
+        cc = enhanced.get("continuity_config", {})
+        from workflow_selector import classify_shot_type, WORKFLOW_TEMPLATES
+
+        resolved_shot_type = classify_shot_type(shot)
         raw_api = shot.get("target_api", "AUTO")
-        video_fallbacks = None
-        resolved_shot_type = None
         if raw_api == "AUTO":
-            from workflow_selector import classify_shot_type, WORKFLOW_TEMPLATES
-            resolved_shot_type = classify_shot_type(
-                shot.get("prompt", ""), camera, shot.get("characters_in_frame", [])
-            )
             template = WORKFLOW_TEMPLATES.get(resolved_shot_type, WORKFLOW_TEMPLATES["medium"])
             target_api = template["target_api"]
             video_fallbacks = template.get("video_fallbacks")
         else:
             target_api = raw_api
+            video_fallbacks = None
+
+        take = make_take(
+            "motion",
+            source_take_id=keyframe_take_id,
+            metadata={
+                "scene_id": scene_id,
+                "shot_id": shot_id,
+                "target_api": target_api,
+                "shot_type": resolved_shot_type,
+            },
+        )
+        vid_path = self._take_output_path(shot_id, take["id"], ".mp4")
+        self.current_stage = "MOTION"
+        self.current_scene_id = scene_id
+        self.current_shot_id = shot_id
+        self.progress(
+            "MOTION",
+            f"Generating motion for {shot_id}",
+            -1,
+            scene_id=scene_id,
+            shot_id=shot_id,
+            take_id=take["id"],
+        )
 
         temp_vid = generate_ai_video(
-            img_path, camera, target_api, vid_path,
+            source_image,
+            shot.get("camera", "zoom_in_slow"),
+            target_api,
+            vid_path,
             pacing="calculated",
             character_id=cc.get("primary_character", ""),
             multi_angle_refs=cc.get("multi_angle_refs", []),
+            negative_prompt=shot.get("negative_constraints", ""),
             shot_type=resolved_shot_type,
             video_fallbacks=video_fallbacks,
         )
+        final_vid = temp_vid or vid_path
+        if not final_vid or not os.path.exists(final_vid):
+            return {"success": False, "error": "Video generation failed"}
 
-        # Update state
+        identity_score = 0.0
+        primary_ref = cc.get("primary_reference")
+        chars_in_frame = shot.get("characters_in_frame", [])
+        if chars_in_frame and primary_ref:
+            vid_result = self.continuity.validate_shot(
+                final_vid,
+                [chars_in_frame[0]],
+                shot_type=resolved_shot_type,
+                mode="standard",
+                attempt=0,
+                max_attempts=1,
+            )
+            identity_score = vid_result.overall_score if hasattr(vid_result, "overall_score") else 0.0
+            take["metadata"]["identity_score"] = identity_score
+
+        take["path"] = final_vid
+
+        def _mutator(_scene: dict, project_shot: dict):
+            project_shot.setdefault("motion_takes", []).append(take)
+            project_shot["generated_video"] = final_vid
+            return MutationResult(take, save=True)
+
+        stored_take = self._mutate_shot(shot_id, _mutator)
         self.shot_results[shot_id] = {
-            "image": img_path,
-            "video": temp_vid or vid_path,
+            "image": source_image,
+            "video": final_vid,
             "identity_score": identity_score,
-            "status": "regenerated",
+            "status": "final_review",
+            "take_id": take["id"],
         }
-
-        self.progress("REGENERATED", f"Shot {shot_id} regenerated (identity: {identity_score:.2f})", -1,
-                      scene_id=scene_id, shot_id=shot_id,
-                      image_url=img_path, identity_score=identity_score)
-
+        self._rebuild_review_clips()
+        self._save_checkpoint()
+        self.progress(
+            "MOTION_READY",
+            f"Motion take ready for {shot_id}",
+            -1,
+            scene_id=scene_id,
+            shot_id=shot_id,
+            video_url=final_vid,
+            identity_score=identity_score,
+            take_id=take["id"],
+            take_kind="motion",
+        )
         return {
             "success": True,
-            "image": img_path,
-            "video": temp_vid,
+            "take": stored_take,
+            "video": final_vid,
             "identity_score": identity_score,
         }
+
+    def regenerate_shot(self, scene_id: str, shot_id: str) -> dict:
+        """Compatibility wrapper for the older regenerate endpoint."""
+        project = self._refresh_project_snapshot() or self.project
+        _, shot, _ = self._find_shot(shot_id, project, scene_id)
+        if not shot:
+            return {"success": False, "error": "Shot not found"}
+        if shot.get("approved_keyframe_take_id"):
+            return self.generate_motion_take(scene_id, shot_id)
+        return self.generate_keyframe_take(scene_id, shot_id)
 
     # ------------------------------------------------------------------
     # DIRECTOR'S CUT — Correction & Diagnosis
     # ------------------------------------------------------------------
 
-    def diagnose_clip(self, shot_id: str) -> dict:
+    def diagnose_clip(self, shot_id: str, take_id: str = "") -> dict:
         """
         Run all quality analyzers on a clip and return scores + recommendations.
         """
-        clip = self.review_clips.get(shot_id) or self.shot_results.get(shot_id)
-        if not clip:
+        project = self._refresh_project_snapshot() or self.project
+        scene, shot, shot_index = self._find_shot(shot_id, project)
+        if not scene or not shot:
             return {"error": "Clip not found"}
 
-        result = {"shot_id": shot_id, "scores": {}, "recommendations": []}
-        video_path = clip.get("video")
-        image_path = clip.get("image")
+        candidate = None
+        if take_id:
+            _, candidate = self._find_take(shot, take_id)
+        if candidate is None:
+            candidate = self._candidate_take(shot)
+        if candidate is None:
+            return {"error": "No take available for diagnosis"}
+
+        result = {
+            "shot_id": shot_id,
+            "take_id": candidate.get("id", ""),
+            "take_kind": candidate.get("kind", ""),
+            "scores": {},
+            "recommendations": [],
+        }
+        video_path = candidate.get("path", "") if candidate.get("kind") != "keyframe" else ""
+        image_path = candidate.get("path", "") if candidate.get("kind") == "keyframe" else self._resolve_take_path(
+            shot,
+            shot.get("approved_keyframe_take_id", ""),
+        ) or (self._latest_take(shot, "keyframe_takes") or {}).get("path", "")
 
         # Identity validation
-        scene_id = clip.get("scene_id", "")
-        scene = next((s for s in self.project["scenes"] if s["id"] == scene_id), {})
         chars = scene.get("characters_present", [])
         if chars and image_path and os.path.exists(str(image_path)):
             primary_ref = get_reference_image(self.project, chars[0])
@@ -444,9 +873,11 @@ class CinemaPipeline:
         _diag_settings = self.project.get("global_settings", {})
         _coherence_enabled = _diag_settings.get("coherence_check_enabled", True)
         if _coherence_enabled and image_path and os.path.exists(str(image_path)):
-            shot_idx = clip.get("shot_index", 0)
-            if shot_idx > 0:
-                prev_img = os.path.join(self.temp_dir, f"img_{scene_id}_{shot_idx - 1}.jpg")
+            if shot_index > 0:
+                previous_shot = scene.get("shots", [])[shot_index - 1]
+                prev_img = self._resolve_take_path(previous_shot, previous_shot.get("approved_keyframe_take_id", "")) or (
+                    self._latest_take(previous_shot, "keyframe_takes") or {}
+                ).get("path", "")
                 if os.path.exists(prev_img):
                     from coherence_analyzer import assess_coherence
                     coh = assess_coherence(str(image_path), prev_img)
@@ -456,9 +887,16 @@ class CinemaPipeline:
                     if coh.color_drift > _drift_threshold:
                         result["recommendations"].append({"tool": "color_grade", "reason": "Color palette drift detected"})
 
+        self._record_diagnostic(shot_id, {
+            "created_at": time.time(),
+            "take_id": result["take_id"],
+            "take_kind": result["take_kind"],
+            "scores": result["scores"],
+            "recommendations": result["recommendations"],
+        })
         return result
 
-    def apply_correction(self, shot_id: str, action: str, params: dict = None) -> dict:
+    def apply_correction(self, shot_id: str, action: str, params: dict = None, take_id: str = "") -> dict:
         """
         Apply a correction tool to a clip in the review stage.
 
@@ -466,75 +904,57 @@ class CinemaPipeline:
                  rife, upscale, color_grade, speed, voice_regen, foley_regen
         """
         params = params or {}
-        clip = self.review_clips.get(shot_id)
-        if not clip:
+        project = self._refresh_project_snapshot() or self.project
+        scene, shot, shot_index = self._find_shot(shot_id, project)
+        if not scene or not shot:
             return {"success": False, "error": "Clip not found in review"}
 
-        video_path = clip.get("video")
-        image_path = clip.get("image")
-        scene_id = clip.get("scene_id", "")
-        shot_index = clip.get("shot_index", 0)
-        output_dir = self.temp_dir
+        base_take = None
+        if take_id:
+            _, base_take = self._find_take(shot, take_id)
+        if base_take is None:
+            base_take = self._candidate_take(shot)
+        if base_take is None:
+            return {"success": False, "error": "No take available to correct"}
+
+        video_path = base_take.get("path", "") if base_take.get("kind") != "keyframe" else ""
+        scene_id = scene.get("id", "")
 
         self.progress("CORRECTING", f"Applying {action} to {shot_id}", -1,
                       scene_id=scene_id, shot_id=shot_id)
 
         try:
             if action == "regenerate_image":
-                positive = params.get("positive_prompt", clip.get("prompt", ""))
-                negative = params.get("negative_prompt", "blur, distort, deformed face, identity change")
-                scene = next((s for s in self.project["scenes"] if s["id"] == scene_id), {})
-                chars = scene.get("characters_present", [])
-                primary_ref = get_reference_image(self.project, chars[0]) if chars else None
-                out_path = os.path.join(output_dir, f"corrected_img_{scene_id}_{shot_index}.jpg")
-
-                result = generate_ai_broll(
-                    positive, out_path,
-                    character_image=primary_ref,
-                    negative_prompt=negative,
+                return self.generate_keyframe_take(
+                    scene_id,
+                    shot_id,
+                    positive_prompt=params.get("positive_prompt"),
+                    negative_prompt=params.get("negative_prompt"),
                 )
-                if result and os.path.exists(out_path):
-                    clip["image"] = out_path
-                    clip["status"] = "corrected"
-                    return {"success": True, "image": out_path}
 
-            elif action == "regenerate_video":
-                positive = params.get("positive_prompt", "")
-                negative = params.get("negative_prompt", "blur, distort, deformed face, identity change")
-                camera = params.get("camera", clip.get("camera", "zoom_in_slow"))
-                target_api = params.get("target_api", clip.get("target_api", "KLING_3_0"))
-                source_img = clip.get("image")
-                out_path = os.path.join(output_dir, f"corrected_vid_{scene_id}_{shot_index}.mp4")
+            if action == "regenerate_video":
+                return self.generate_motion_take(scene_id, shot_id)
 
-                if source_img and os.path.exists(str(source_img)):
-                    result = generate_ai_video(
-                        str(source_img), camera, target_api, out_path,
-                        negative_prompt=negative,
-                    )
-                    if result and os.path.exists(out_path):
-                        clip["video"] = out_path
-                        clip["status"] = "corrected"
-                        return {"success": True, "video": out_path}
+            variant = make_take(
+                "postprocess",
+                source_take_id=base_take.get("id", ""),
+                metadata={"action": action, "params": params},
+            )
+            out_path = self._take_output_path(shot_id, variant["id"], ".mp4")
 
-            elif action == "face_swap":
-                scene = next((s for s in self.project["scenes"] if s["id"] == scene_id), {})
+            if action == "face_swap":
                 chars = scene.get("characters_present", [])
                 primary_ref = get_reference_image(self.project, chars[0]) if chars else None
                 if video_path and primary_ref:
-                    out_path = os.path.join(output_dir, f"faceswap_{scene_id}_{shot_index}.mp4")
                     result = face_swap_video_frames(str(video_path), primary_ref, out_path)
                     if result:
-                        clip["video"] = result
-                        clip["status"] = "corrected"
-                        return {"success": True, "video": result}
+                        variant["path"] = result
 
             elif action == "lip_sync":
-                scene = next((s for s in self.project["scenes"] if s["id"] == scene_id), {})
                 chars = scene.get("characters_present", [])
                 primary_ref = get_reference_image(self.project, chars[0]) if chars else None
-                audio_path = self.scene_audio.get(scene_id)
+                audio_path = self._ensure_scene_audio(scene, [c for c in self.project["characters"] if c["id"] in chars])
                 if video_path and primary_ref and audio_path:
-                    out_path = os.path.join(output_dir, f"lipsync_fix_{scene_id}_{shot_index}.mp4")
                     result = generate_lip_sync_video(
                         character_image_path=primary_ref,
                         audio_path=audio_path,
@@ -543,75 +963,131 @@ class CinemaPipeline:
                         mode="auto",
                     )
                     if result:
-                        clip["video"] = result
-                        clip["status"] = "corrected"
-                        return {"success": True, "video": result}
+                        variant["path"] = result
 
             elif action == "rife":
                 if video_path:
-                    out_path = os.path.join(output_dir, f"rife_fix_{scene_id}_{shot_index}.mp4")
                     result = generate_rife_interpolation(str(video_path), out_path)
                     if result:
-                        clip["video"] = result
-                        clip["status"] = "corrected"
-                        return {"success": True, "video": result}
+                        variant["path"] = result
 
             elif action == "upscale":
                 if video_path:
-                    out_path = os.path.join(output_dir, f"upscale_fix_{scene_id}_{shot_index}.mp4")
                     result = upscale_video_seedvr2(str(video_path), out_path)
                     if result:
-                        clip["video"] = result
-                        clip["status"] = "corrected"
-                        return {"success": True, "video": result}
+                        variant["path"] = result
 
             elif action == "color_grade":
                 from phase_c_ffmpeg import apply_color_grade
                 preset = params.get("preset", "warm_cinema")
                 lut_path = params.get("lut_path")
                 if video_path:
-                    out_path = os.path.join(output_dir, f"graded_{scene_id}_{shot_index}.mp4")
                     result = apply_color_grade(str(video_path), out_path, preset=preset, lut_path=lut_path)
                     if result:
-                        clip["video"] = result
-                        clip["status"] = "corrected"
-                        return {"success": True, "video": result}
+                        variant["path"] = result
 
             elif action == "speed":
                 from phase_c_ffmpeg import adjust_speed
                 factor = float(params.get("factor", 1.0))
                 if video_path and factor != 1.0:
-                    out_path = os.path.join(output_dir, f"speed_{scene_id}_{shot_index}.mp4")
                     result = adjust_speed(str(video_path), out_path, factor=factor)
                     if result:
-                        clip["video"] = result
-                        clip["status"] = "corrected"
-                        return {"success": True, "video": result}
+                        variant["path"] = result
 
             elif action == "voice_regen":
-                text = params.get("text", "")
-                voice_id = params.get("voice_id", "")
-                stability = float(params.get("stability", 0.55))
-                style = float(params.get("style", 0.6))
-                if text and voice_id:
-                    out_path = os.path.join(output_dir, f"voice_fix_{scene_id}_{shot_index}.mp3")
-                    result = generate_dialogue_voiceover(
-                        [{"character_name": "Character", "text": text, "voice_id": voice_id}],
-                        out_path,
-                    )
-                    if result and os.path.exists(out_path):
-                        self.scene_audio[scene_id] = out_path
-                        return {"success": True, "audio": out_path}
+                return {"success": False, "error": "voice_regen is not part of the staged clip correction workflow"}
 
-            return {"success": False, "error": f"Action '{action}' failed or not applicable"}
+            if not variant.get("path") or not os.path.exists(variant["path"]):
+                return {"success": False, "error": f"Action '{action}' failed or not applicable"}
+
+            def _mutator(_scene: dict, project_shot: dict):
+                project_shot.setdefault("postprocess_variants", []).append(variant)
+                return MutationResult(variant, save=True)
+
+            stored_variant = self._mutate_shot(shot_id, _mutator)
+            self._rebuild_review_clips()
+            self._save_checkpoint()
+            self.progress(
+                "POSTPROCESS_READY",
+                f"{action} ready for {shot_id}",
+                -1,
+                scene_id=scene_id,
+                shot_id=shot_id,
+                video_url=variant["path"],
+                take_id=variant["id"],
+                take_kind="postprocess",
+            )
+            return {"success": True, "take": stored_variant, "video": variant["path"]}
 
         except Exception as e:
             return {"success": False, "error": str(e)}
 
     def proceed_to_assembly(self):
         """Resume pipeline from REVIEW stage to transitions + assembly."""
+        project = self._refresh_project_snapshot() or self.project
+        if not self._gate_satisfied("REVIEW", project):
+            missing = [
+                shot.get("id")
+                for _, _, shot in self._all_shots(project)
+                if not shot.get("approved_final_take_id")
+            ]
+            return {"success": False, "error": f"Final approvals missing for: {', '.join(missing)}"}
         self.progress("REVIEW_COMPLETE", "Director's Cut approved — proceeding to assembly", 88)
         self.resume()
+        return {"success": True}
+
+    def assemble_approved_takes(self) -> dict:
+        project = self._refresh_project_snapshot() or self.project
+        if not self._gate_satisfied("REVIEW", project):
+            missing = [
+                shot.get("id", "")
+                for _, _, shot in self._all_shots(project)
+                if not shot.get("approved_final_take_id")
+            ]
+            return {"success": False, "error": f"Final approvals missing for: {', '.join(missing)}"}
+
+        settings = project.get("global_settings", {})
+        bgm_path = self._ensure_bgm(settings)
+        scene_data, missing_shots = self._build_scene_packages(project)
+        if missing_shots:
+            return {"success": False, "error": f"Approved take files are missing for: {', '.join(missing_shots)}"}
+
+        preview_total = max(len(scene_data), 1)
+        for idx, scene_package in enumerate(scene_data):
+            scene_id = scene_package.get("scene_id", "")
+            self.current_stage = "SCENE_PREVIEW"
+            self.current_scene_id = scene_id
+            percent = 86 + int((idx / preview_total) * 4)
+            self.progress("SCENE_PREVIEW", f"Building scene preview for {scene_id}", percent, scene_id=scene_id)
+            preview_path = self.generate_scene_preview(scene_id)
+            if preview_path:
+                scene_package["preview"] = preview_path
+
+        self.current_stage = "ASSEMBLY"
+        self.progress("ASSEMBLY", "Assembling final video...", 92)
+        final_path = self._assemble_final(scene_data, bgm_path, settings)
+        if not final_path or not os.path.exists(final_path):
+            return {"success": False, "error": "Final assembly failed"}
+
+        try:
+            from cleanup import cleanup_project
+            cleanup_result = cleanup_project(self.project["id"], aggressive=False)
+            if cleanup_result["files_deleted"] > 0:
+                self.progress("CLEANUP", f"Cleaned {cleanup_result['files_deleted']} temp files ({cleanup_result['mb_freed']} MB)", 98)
+        except Exception as e:
+            print(f"   [CLEANUP] Auto-cleanup failed (non-fatal): {e}")
+
+        try:
+            video_id = self.project.get("id", "unknown")
+            cost_summary = self.cost_tracker.get_video_cost(video_id)
+            if cost_summary.get("total_usd", 0) > 0:
+                print(f"\n   💰 [COST] Total: ${cost_summary['total_usd']:.2f} | LLM: ${cost_summary.get('llm_usd', 0):.2f} | API: ${cost_summary.get('api_usd', 0):.2f}")
+        except Exception as e_cost:
+            print(f"   [COST] Could not retrieve cost summary: {e_cost}")
+
+        self._clear_checkpoint()
+        self.progress("COMPLETE", f"Video exported: {final_path}", 100)
+        return {"success": True, "final_path": final_path}
 
     # ------------------------------------------------------------------
     # MAIN PIPELINE
@@ -628,17 +1104,11 @@ class CinemaPipeline:
             self.progress("ERROR", "No scenes defined in project", 0)
             return None
 
+        if resume:
+            self._restore_from_checkpoint()
+            self._rebuild_review_clips(project)
+
         settings = project.get("global_settings", {})
-        total_scenes = len(scenes)
-
-        # Restore checkpoint if resuming
-        skip_scenes = set()
-        if resume and self.has_checkpoint():
-            skip_scenes = self._restore_from_checkpoint()
-
-        # ----------------------------------------------------------
-        # STEP 0: Generate style rules
-        # ----------------------------------------------------------
         self.progress("STYLE", "Generating production style rules...", 2)
         style_rules = settings.get("style_rules", {})
         if not style_rules:
@@ -662,33 +1132,7 @@ class CinemaPipeline:
             )
             settings = project.get("global_settings", {})
 
-        style_suffix = style_rules_to_prompt_suffix(style_rules)
-
-        # ----------------------------------------------------------
-        # STEP 1: Generate BGM
-        # ----------------------------------------------------------
-        self.progress("AUDIO", "Generating background music...", 5)
-        music_mood = settings.get("music_mood", "suspense")
-        bgm_path = os.path.join(self.temp_dir, f"bgm_{music_mood}.mp3")
-        if not os.path.exists(bgm_path):
-            generate_fal_bgm(music_mood, bgm_path, duration=47)  # FAL max is 47s, loops in assembly
-
-        # Master the BGM for cinema-grade audio (EQ, compression, limiting)
-        if os.path.exists(bgm_path):
-            try:
-                from phase_b_audio import master_music
-                mastered_path = os.path.join(self.temp_dir, f"bgm_{music_mood}_mastered.mp3")
-                mastered = master_music(bgm_path, mastered_path, preset="cinema_master")
-                if mastered and os.path.exists(mastered):
-                    bgm_path = mastered
-                    self.progress("AUDIO", "BGM mastered (cinema_master preset)", 6)
-            except Exception as e_master:
-                print(f"   [AUDIO] BGM mastering skipped (non-critical): {e_master}")
-
-        # ----------------------------------------------------------
-        # STEP 2: Process each scene
-        # ----------------------------------------------------------
-        all_scene_videos = []
+        self._ensure_bgm(settings)
 
         for scene_idx, scene in enumerate(scenes):
             if self.cancelled:
@@ -697,30 +1141,9 @@ class CinemaPipeline:
 
             scene_id = scene["id"]
             scene_title = scene.get("title", f"Scene {scene_idx + 1}")
-            base_pct = 10 + (scene_idx / total_scenes) * 80
-
-            # Skip scenes already completed in a previous run
-            if scene_idx in skip_scenes and scene_id in self.scene_clips:
-                self.progress("SKIP", f"Scene {scene_idx+1} already complete (resumed)", base_pct)
-                all_scene_videos.append({
-                    "scene_id": scene_id,
-                    "clips": self.scene_clips[scene_id],
-                    "audio": self.scene_audio.get(scene_id),
-                    "foley": [],
-                })
-                continue
-
-            self.progress("SCENE", f"Processing scene {scene_idx+1}/{total_scenes}: {scene_title}", base_pct)
+            self.progress("SCENE", f"Processing scene {scene_idx+1}/{len(scenes)}: {scene_title}", 10 + scene_idx)
             self.current_stage = "SCENE"
             self.current_scene_id = scene_id
-
-            # Pause checkpoint — between scenes
-            if not self._check_pause():
-                self.progress("CANCELLED", "Pipeline cancelled by user", 0)
-                return None
-
-            # Reset temporal consistency for new scene
-            self.continuity.reset_scene()
 
             # --- 2a. Scene decomposition ---
             chars_in_scene = [
@@ -734,7 +1157,7 @@ class CinemaPipeline:
 
             shots = scene.get("shots", [])
             if not shots:
-                self.progress("DECOMPOSE", f"Decomposing scene into shots...", base_pct + 2)
+                self.progress("DECOMPOSE", f"Decomposing scene into shots...", 12 + scene_idx)
                 use_competitive = settings.get("competitive_generation", True)
                 if use_competitive:
                     try:
@@ -746,7 +1169,7 @@ class CinemaPipeline:
                     shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules)
 
                 # CHIEF DIRECTOR VALIDATION — review shots before generation
-                self.progress("DIRECTOR", "Chief Director reviewing shots...", base_pct + 3)
+                self.progress("DIRECTOR", "Chief Director reviewing shots...", 13 + scene_idx)
                 review = self.director.validate_shot_prompts(shots, scene)
                 if review.get("decision") == "MODIFIED":
                     shots = review.get("shots", shots)
@@ -757,696 +1180,57 @@ class CinemaPipeline:
                     shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules)
 
                 update_scene_shots(project, scene_id, shots)
+                self._save_checkpoint()
+            self._ensure_scene_audio(scene, chars_in_scene)
 
-            # --- 2b. Generate dialogue audio ---
-            scene_audio_path = None
-            dialogue = scene.get("dialogue", "")
-            action = scene.get("action", "")
-
-            # Auto-generate dialogue if characters are present but no dialogue written
-            if chars_in_scene and not dialogue and action:
-                self.progress("DIALOGUE", "Auto-generating dialogue from action...", base_pct + 5)
-                dialogue_lines = generate_dialogue(scene, chars_in_scene, scene.get("mood", "neutral"))
-            elif dialogue:
-                self.progress("DIALOGUE", "Generating dialogue audio...", base_pct + 5)
-                if isinstance(dialogue, list):
-                    dialogue_lines = dialogue
-                else:
-                    # Parse written dialogue into structured lines
-                    dialogue_lines = generate_dialogue(scene, chars_in_scene, scene.get("mood", "neutral"))
-            else:
-                dialogue_lines = []
-
-            if dialogue_lines:
-                scene_audio_path = os.path.join(self.temp_dir, f"audio_{scene_id}.mp3")
-                result = generate_dialogue_voiceover(
-                    dialogue_lines, chars_in_scene, scene_audio_path
-                )
-                if result:
-                    self.scene_audio[scene_id] = scene_audio_path
-
-            # --- 2c. Generate layered foley per shot (ambience + action + texture) ---
-            # Parallelized: each shot's foley is fully independent
-            def _generate_foley_for_shot(si_shot_pair):
-                si, _shot = si_shot_pair
-                foley_path = os.path.join(self.temp_dir, f"foley_{scene_id}_{si}.mp3")
-                dur = min(5.0, scene.get("duration_seconds", 10) / max(len(shots), 1))
-                result = generate_layered_foley(_shot, scene, foley_path, duration=dur)
-                if not result:
-                    foley_desc = _shot.get("scene_foley", "ambient room tone")
-                    result = generate_scene_foley(foley_desc, foley_path)
-                return si, result
-
-            foley_paths = [None] * len(shots)
-            with ThreadPoolExecutor(max_workers=min(len(shots), 4)) as foley_pool:
-                foley_futures = foley_pool.map(_generate_foley_for_shot, enumerate(shots))
-                for si, result in foley_futures:
-                    foley_paths[si] = result
-
-            # --- 2d. Generate visual content per shot ---
-            scene_clip_paths = []
-            num_shots = len(shots)
-
-            # --- KLING STORYBOARD MODE (DISABLED) ---
-            # Disabled: per-shot generation produces higher quality output because each
-            # shot gets independent API routing, PuLID tuning, identity validation,
-            # RIFE interpolation, and upscaling. Storyboard bypasses all of these.
-            storyboard_result = None
-            if False:  # was: num_shots >= 2 and num_shots <= 6
-                first_enhanced = self.continuity.enhance_shot_prompt(shots[0], scene, None, 0)
-                first_cc = first_enhanced.get("continuity_config", {})
-                first_ref = first_cc.get("primary_reference")
-                first_img = os.path.join(self.temp_dir, f"img_{scene_id}_0.jpg")
-
-                # Generate first keyframe for storyboard start_image
-                if first_ref and os.path.exists(str(first_ref)):
-                    first_prompt = first_enhanced["prompt"]
-                    if style_suffix:
-                        first_prompt = f"{first_prompt}. {style_suffix}"
-                    generate_ai_broll(
-                        first_prompt, first_img,
-                        character_image=first_ref,
-                        multi_angle_refs=first_cc.get("multi_angle_refs", []),
-                        identity_anchor=first_cc.get("identity_anchor", ""),
-                    )
-
-                if os.path.exists(first_img):
-                    storyboard_vid = os.path.join(self.temp_dir, f"storyboard_{scene_id}.mp4")
-                    self.progress("STORYBOARD", f"Kling storyboard: {num_shots} shots unified", base_pct + 15)
-                    storyboard_result = generate_kling_storyboard(
-                        shots, first_img, storyboard_vid,
-                        multi_angle_refs=first_cc.get("multi_angle_refs", []),
-                    )
-
-            if storyboard_result and os.path.exists(storyboard_result):
-                # Storyboard succeeded — use the unified video for all shots
-                print(f"   [STORYBOARD] Unified video generated — skipping per-shot generation")
-                scene_clip_paths.append(storyboard_result)
-            else:
-                # Fall back to per-shot generation
-                if storyboard_result is None and num_shots >= 2:
-                    print(f"   [STORYBOARD] Storyboard failed — falling back to per-shot generation")
-
-                for si, shot in enumerate(shots):
-                    if not self._check_pause():
-                        self.progress("CANCELLED", "Pipeline cancelled by user", 0)
-                        return None
-
-                    shot_pct = base_pct + 10 + (si / num_shots) * 60 * (1 / total_scenes)
-                    shot_id = shot.get("id", f"shot_{si}")
-                    self.current_shot_id = shot_id
-                    self.current_stage = "GENERATE"
-                    shot_start_time = time.time()
-                    MAX_SHOT_SECONDS = 300  # 5 min hard timeout per shot
-
-                    # Helper for shot-scoped progress events
-                    def shot_progress(stage, detail, pct=shot_pct, **kwargs):
-                        self.progress(stage, detail, pct, scene_id=scene_id, shot_id=shot_id, **kwargs)
-
-                    shot_progress("GENERATE", f"Shot {si+1}/{num_shots} of scene '{scene_title}'")
-
-                    # Enhance prompt with continuity engine
-                    prev_shot = shots[si - 1] if si > 0 else None
-                    enhanced = self.continuity.enhance_shot_prompt(shot, scene, prev_shot, si)
-                    full_prompt = enhanced["prompt"]
-                    if style_suffix:
-                        full_prompt = f"{full_prompt}. {style_suffix}"
-
-                    cc = enhanced.get("continuity_config", {})
-
-                    # WORKFLOW SELECTOR — log which template is used per shot
-                    try:
-                        from workflow_selector import get_shot_workflow_summary
-                        wf_summary = get_shot_workflow_summary(shot)
-                        print(f"   {wf_summary}")
-                        shot_progress("WORKFLOW", wf_summary, shot_pct)
-                    except ImportError:
-                        pass
-
-                    # SEED LOCKING — use scene_seed for uniform generation across all shots
-                    scene_seed = cc.get("scene_seed")
-
-                    # --- IMAGE GENERATION (with QC loop) ---
-                    img_path = os.path.join(self.temp_dir, f"img_{scene_id}_{si}.jpg")
-                    max_retries = 3
-                    primary_ref = cc.get("primary_reference")
-                    loc_seed = scene_seed or cc.get("location_seed")
-                    init_img = cc.get("init_image") if cc.get("use_img2img") else None
-                    denoise = cc.get("denoise_strength", 1.0)
-
-                    # RECURSIVE PROMPT MUTATION LOOP
-                    # Architecture: generate → evaluate identity → mutate prompt → regenerate
-                    # Each retry progressively strengthens identity preservation
-                    identity_anchor = cc.get("identity_anchor", "")
-                    mutation_level = 0  # 0=normal, 1=strengthened, 2=maximum preservation
-
-                    for attempt in range(max_retries):
-                        current_seed = (loc_seed + attempt) if loc_seed else None
-
-                        # PROMPT MUTATION based on previous failure
-                        if mutation_level == 0:
-                            mod_prompt = full_prompt
-                        elif mutation_level == 1:
-                            # Strengthen: simplify scene, boost identity language
-                            mod_prompt = (
-                                f"CRITICAL: Maintain exact face from reference. "
-                                f"{full_prompt}. "
-                                f"The character's face MUST match the reference photo exactly."
-                            )
-                            shot_progress("MUTATE", f"Prompt mutation level 1: strengthened identity", shot_pct)
-                        else:
-                            # Maximum: strip scene to minimal, force identity
-                            sections = {}
-                            import re
-                            for tag in ["SHOT", "SCENE", "ACTION", "OUTFIT", "QUALITY"]:
-                                match = re.search(rf'\[{tag}\]\s*(.+?)(?=\[(?:SHOT|SCENE|ACTION|OUTFIT|QUALITY)\]|$)', full_prompt, re.DOTALL)
-                                if match:
-                                    sections[tag] = match.group(1).strip()
-                            # Use ONLY scene + simple action — strip everything else
-                            mod_prompt = (
-                                f"[SHOT] Close-up portrait, 85mm f/1.4 lens. "
-                                f"[SCENE] {sections.get('SCENE', 'neutral background')}. "
-                                f"[ACTION] The character faces the camera directly. "
-                                f"[QUALITY] Photorealistic, 8K, face clearly visible."
-                            )
-                            shot_progress("MUTATE", f"Prompt mutation level 2: maximum identity lock", shot_pct)
-
-                        result = generate_ai_broll(
-                            mod_prompt, img_path,
-                            seed=current_seed,
-                            character_image=primary_ref,
-                            init_image=init_img,
-                            denoise_strength=denoise,
-                            multi_angle_refs=cc.get("multi_angle_refs", []),
-                            identity_anchor=identity_anchor,
-                            pulid_weight_override=cc.get("pulid_weight_override"),
-                        )
-
-                        # EVALUATE: check identity before accepting
-                        if result and primary_ref and os.path.exists(img_path):
-                            from phase_c_vision import validate_identity_image
-                            try:
-                                # Quick image-level identity check
-                                img_sim = validate_identity_image(img_path, primary_ref, threshold=cc.get("identity_threshold", 0.70))
-                                if img_sim.get("passed", True):
-                                    shot_progress("IDENTITY_OK", f"Image identity verified (attempt {attempt+1})", shot_pct,
-                                        image_url=img_path, identity_score=img_sim.get("similarity", 0.8))
-                                    break
-                                else:
-                                    sim_score = img_sim.get("similarity", 0)
-                                    shot_progress("IDENTITY_FAIL", f"Image identity {sim_score:.2f} < threshold", shot_pct,
-                                        image_url=img_path, identity_score=sim_score)
-                                    mutation_level = min(mutation_level + 1, 2)
-                                    continue
-                            except (ImportError, RuntimeError) as e_val:
-                                print(f"      [IDENTITY] Validation unavailable ({e_val}), accepting result")
-                                break
-                        elif result:
-                            break
-
-                        shot_progress("RETRY", f"Image retry {attempt+1}/{max_retries}", shot_pct)
-
-                    if not os.path.exists(img_path):
-                        shot_progress("SHOT_FAILED", f"Image generation failed for shot {si+1} — skipping", shot_pct)
-                        self.failed_shots.append(shot_id)
-                        self.shot_results[shot_id] = {"image": None, "video": None, "identity_score": 0.0, "status": "failed"}
-                        continue
-
-                    # Record for temporal chaining
-                    self.continuity.record_shot_generated(img_path, scene_id)
-
-                    # --- VIDEO GENERATION (with cascade + identity validation) ---
-                    vid_path = os.path.join(self.temp_dir, f"vid_{scene_id}_{si}.mp4")
-                    camera = shot.get("camera", "zoom_in_slow")
-
-                    # Resolve AUTO → concrete API + shot-type-aware fallback chain
-                    raw_api = shot.get("target_api", "AUTO")
-                    video_fallbacks = None
-                    resolved_shot_type = None
-                    if raw_api == "AUTO":
-                        from workflow_selector import classify_shot_type, WORKFLOW_TEMPLATES
-                        resolved_shot_type = classify_shot_type(shot)
-                        template = WORKFLOW_TEMPLATES.get(resolved_shot_type, WORKFLOW_TEMPLATES["medium"])
-                        target_api = template["target_api"]
-                        video_fallbacks = template.get("video_fallbacks")
-                        shot_progress("ROUTING", f"AUTO → {target_api} (shot type: {resolved_shot_type})", shot_pct)
-                    else:
-                        target_api = raw_api
-
-                    max_vid_retries = 3
-                    final_vid = None
-                    chars_in_frame = shot.get("characters_in_frame", [])
-                    shot_type = cc.get("shot_type", "medium") if cc else "medium"
-
-                    # Budget check before video generation
-                    _budget_limit = settings.get("budget_limit_usd", 0)
-                    if _budget_limit > 0:
-                        _spent = self.cost_tracker.get_video_cost(project["id"]).get("total_usd", 0) if hasattr(self.cost_tracker, 'get_video_cost') else 0
-                        if _spent >= _budget_limit:
-                            shot_progress("BUDGET", f"Budget limit reached (${_spent:.2f}/${_budget_limit:.2f})", shot_pct + 3)
-                            break
-
-                    for v_attempt in range(max_vid_retries):
-                        # Per-shot timeout guard
-                        if time.time() - shot_start_time > MAX_SHOT_SECONDS:
-                            shot_progress("TIMEOUT", f"Shot {si+1} exceeded {MAX_SHOT_SECONDS}s — skipping video", shot_pct)
-                            break
-                        shot_progress("VIDEO", f"Video gen attempt {v_attempt+1} ({target_api})", shot_pct + 3)
-
-                        # Pass per-API engine overrides from project settings
-                        _api_engines = settings.get("api_engines", {})
-                        _api_cfg = _api_engines.get(target_api, {})
-
-                        # Filter out disabled APIs from fallback chain
-                        _active_fallbacks = [
-                            fb for fb in (video_fallbacks or [])
-                            if _api_engines.get(fb, {}).get("enabled", True) is not False
-                        ]
-
-                        temp_vid = generate_ai_video(
-                            img_path, camera, target_api, vid_path,
-                            pacing="calculated",
-                            character_id=cc.get("primary_character", ""),
-                            multi_angle_refs=cc.get("multi_angle_refs", []),
-                            shot_type=resolved_shot_type,
-                            video_fallbacks=_active_fallbacks if _active_fallbacks else video_fallbacks,
-                        )
-
-                        if temp_vid and chars_in_frame and primary_ref:
-                            # Build validation configs
-                            val_configs = []
-                            for cid in chars_in_frame[:1]:  # Validate primary character
-                                ref = get_reference_image(self.project, cid)
-                                char = next((c for c in chars_in_scene if c["id"] == cid), None)
-                                if ref and char:
-                                    val_configs.append({"id": cid, "reference_image": ref, "name": char["name"]})
-
-                            shot_type = cc.get("shot_type", "medium")
-                            if val_configs:
-                                # Use continuity engine's shared validator for rolling history
-                                vid_result = self.continuity.validate_shot(
-                                    temp_vid, [cfg["id"] for cfg in val_configs],
-                                    shot_type=shot_type,
-                                    mode="standard",
-                                    attempt=v_attempt,
-                                    max_attempts=max_vid_retries,
-                                )
-                                is_passed = vid_result.get("passed") if hasattr(vid_result, 'get') else vid_result.passed
-                                score = vid_result.overall_score if hasattr(vid_result, 'overall_score') else 0.0
-
-                                if is_passed:
-                                    final_vid = temp_vid
-                                    # Build quality metrics for SSE
-                                    qm = {"identity_score": round(score, 3), "shot_type": shot_type}
-                                    if hasattr(vid_result, 'character_results'):
-                                        for cid, cr in vid_result.character_results.items():
-                                            qm[f"char_{cr.character_name}_sim"] = round(cr.best_similarity, 3)
-                                    shot_progress("VALIDATED", f"Identity confirmed ✓ ({score:.2f})", shot_pct + 5,
-                                                  identity_score=score, shot_type=shot_type, quality_metrics=qm)
-                                    self.shot_results[shot_id] = {
-                                        "image": img_path, "video": temp_vid,
-                                        "identity_score": score, "status": "validated",
-                                    }
-                                    break
-                                else:
-                                    fail_reason = ""
-                                    if hasattr(vid_result, 'character_results'):
-                                        for cr in vid_result.character_results.values():
-                                            if not cr.matched:
-                                                fail_reason = cr.primary_failure_reason.value
-                                                break
-                                    shot_progress("IDENTITY_FAIL", f"Retrying video ({v_attempt+1}): {fail_reason}", shot_pct + 3,
-                                                  identity_score=score, failure_reason=fail_reason)
-                            else:
-                                final_vid = temp_vid
-                                break
-                        elif temp_vid:
-                            final_vid = temp_vid
-                            break
-
-                    # Accept best-effort video if identity validation rejected all attempts
-                    # but a video file exists on disk — better than a still image fallback
-                    if not final_vid and os.path.exists(vid_path):
-                        final_vid = vid_path
-                        shot_progress("ACCEPTED", f"Accepting best-effort video (identity below threshold)", shot_pct + 4)
-
-                    # --- VBench QUALITY EVALUATION (async — does not gate downstream) ---
-                    if final_vid:
-                        _vb_vid = final_vid
-                        _vb_prompt = shot.get("prompt", "")
-                        _vb_ref = [primary_ref] if primary_ref else None
-                        _vb_shot_type = shot_type
-                        _vb_shot_id = shot.get("id", f"shot_{si}")
-                        _vb_api = str(target_api)
-                        _vb_mutation = mutation_level
-
-                        def _run_vbench(_vid=_vb_vid, _prompt=_vb_prompt, _ref=_vb_ref,
-                                        _st=_vb_shot_type, _sid=_vb_shot_id, _api=_vb_api,
-                                        _mut=_vb_mutation):
-                            try:
-                                vbench_result = self.vbench.evaluate(_vid, _prompt, reference_images=_ref, shot_type=_st)
-                                self.quality_tracker.log_shot_quality(
-                                    shot_id=_sid,
-                                    video_id=self.project.get("id", "unknown"),
-                                    shot_type=_st,
-                                    target_api=_api,
-                                    vbench_result=vbench_result,
-                                    generation_cost=0.0,
-                                    llm_cost=0.0,
-                                    attempt=_mut,
-                                )
-                                print(f"      [VBENCH] Score: {vbench_result.overall_score:.3f}")
-                            except Exception as e:
-                                print(f"      [VBENCH] Evaluation skipped: {e}")
-
-                        threading.Thread(target=_run_vbench, daemon=True).start()
-
-                    # --- QUALITY-GATED POST-PROCESSING ---
-                    if final_vid:
-                        try:
-                            from phase_c_ffmpeg import assess_motion_quality
-                            mq = assess_motion_quality(final_vid)
-                            motion_s = mq["smoothness_score"]
-                            if mq["recommendation"] == "interpolate":
-                                shot_progress("INTERP", f"Motion quality {motion_s:.2f} — applying RIFE", shot_pct + 4,
-                                              motion_score=motion_s)
-                                interp_path = os.path.join(self.temp_dir, f"interp_{scene_id}_{si}.mp4")
-                                interp_result = generate_rife_interpolation(final_vid, interp_path)
-                                if interp_result:
-                                    final_vid = interp_result
-                            elif mq["recommendation"] == "accept":
-                                shot_progress("QUALITY", f"Motion quality OK ({motion_s:.2f}) — skipping RIFE", shot_pct + 4,
-                                              motion_score=motion_s)
-                            # "regenerate" recommendation is handled by the retry loop above
-                        except Exception as e:
-                            print(f"      [QUALITY] Motion assessment skipped: {e}")
-
-                    # --- FACE-SWAP POST-PROCESSING (FaceFusion) ---
-                    if final_vid and primary_ref and settings.get("face_swap_enabled", True):
-                        swapped_path = os.path.join(self.temp_dir, f"swapped_{scene_id}_{si}.mp4")
-                        swap_result = face_swap_video_frames(final_vid, primary_ref, swapped_path)
-                        if swap_result:
-                            final_vid = swap_result
-
-                    # --- LIP SYNC (smart mode: overlay on existing video OR generate from photo) ---
-                    if final_vid and primary_ref:
-                        scene_audio_path = self.scene_audio.get(scene_id)
-                        has_dialogue = scene.get("dialogue") or scene.get("voiceover")
-                        if has_dialogue and scene_audio_path and os.path.exists(scene_audio_path):
-                            lipsync_path = os.path.join(self.temp_dir, f"lipsync_{scene_id}_{si}.mp4")
-
-                            # Smart pre-analysis: recommend_lip_sync_mode() analyzes shot content
-                            # to decide overlay vs generation vs skip before wasting API calls
-                            from lip_sync import recommend_lip_sync_mode
-                            import subprocess as _sp
-                            try:
-                                _dur_r = _sp.run(
-                                    ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                                     "-of", "default=noprint_wrappers=1:nokey=1", scene_audio_path],
-                                    capture_output=True, text=True, timeout=10,
-                                )
-                                _dlg_dur = float(_dur_r.stdout.strip()) if _dur_r.returncode == 0 else 3.0
-                            except (subprocess.SubprocessError, ValueError, OSError):
-                                _dlg_dur = 3.0
-
-                            _shot_type = cc.get("shot_type", "medium") if cc else "medium"
-                            # User override from settings takes precedence over auto-recommendation
-                            _user_ls_mode = settings.get("lip_sync_mode", "auto")
-                            if _user_ls_mode != "auto":
-                                ls_rec = {"mode": _user_ls_mode, "reason": f"user override: {_user_ls_mode}"}
-                            else:
-                                ls_rec = recommend_lip_sync_mode(
-                                    video_path=final_vid, shot_type=_shot_type,
-                                    dialogue_length_seconds=_dlg_dur,
-                                )
-                            ls_mode = ls_rec.get("mode", "auto")
-                            shot_progress("LIPSYNC",
-                                          f"Lip sync: {ls_mode} ({ls_rec.get('reason', '')[:40]})",
-                                          shot_pct + 4)
-
-                            if ls_mode != "skip":
-                                lipsync_result = generate_lip_sync_video(
-                                    character_image_path=primary_ref,
-                                    audio_path=scene_audio_path,
-                                    output_path=lipsync_path,
-                                    existing_video_path=final_vid if ls_mode != "generation" else None,
-                                    mode=ls_mode if ls_mode in ("overlay", "generation") else "auto",
-                                    resolution="720p",
-                                )
-                                if lipsync_result:
-                                    final_vid = lipsync_result
-                            else:
-                                shot_progress("LIPSYNC", f"Lip sync skipped: {ls_rec.get('reason', '')}", shot_pct + 4)
-
-                    # --- RIFE FRAME INTERPOLATION (cloud via fal.ai) ---
-                    if final_vid and settings.get("rife_enabled", True):
-                        shot_progress("INTERP", "Cloud frame interpolation (RIFE)", shot_pct + 5)
-                        interp_path = os.path.join(self.temp_dir, f"interp_{scene_id}_{si}.mp4")
-                        interpolated = generate_rife_interpolation(
-                            final_vid, interp_path, num_frames=2, use_scene_detection=True,
-                        )
-                        if interpolated:
-                            final_vid = interpolated
-                        else:
-                            # Fallback to local FFmpeg minterpolate
-                            local_interp = self._frame_interpolate(final_vid, scene_id, si)
-                            if local_interp:
-                                final_vid = local_interp
-
-                    # --- UPSCALE: SeedVR2 cloud (temporally consistent) → fallback to Real-ESRGAN ---
-                    if final_vid and settings.get("video_upscale_enabled", True):
-                        upscale_path = os.path.join(self.temp_dir, f"upscale_{scene_id}_{si}.mp4")
-                        upscaled = upscale_video_seedvr2(final_vid, upscale_path, target_resolution="1080p")
-                        if upscaled:
-                            final_vid = upscaled
-                        else:
-                            # Fallback to local Real-ESRGAN
-                            local_up = self._upscale_video(final_vid, scene_id, si)
-                            if local_up:
-                                final_vid = local_up
-
-                    scene_clip_paths.append(final_vid or img_path)
-                    self._save_checkpoint()  # Per-shot checkpoint
-
-                    # --- FRAME CHAINING: extract last frame for next shot's start ---
-                    if final_vid and os.path.exists(final_vid):
-                        last_frame = os.path.join(self.temp_dir, f"lastframe_{scene_id}_{si}.jpg")
-                        extract_last_frame(final_vid, last_frame)
-                    # Store for use as next shot's start_image via Kling
-                    if os.path.exists(last_frame):
-                        self._last_frame_for_chaining = last_frame
-
-            # --- GENERATE TRANSITION CLIPS between shots (Wan FLF2V) ---
-            # Parallelized: extract frames sequentially (fast), then generate all
-            # transition clips concurrently (slow API calls, fully independent).
-            if len(scene_clip_paths) > 1:
-                # Phase 1: extract boundary frames (CPU-only, fast)
-                transition_tasks = []  # [(index, prev_last_path, curr_first_path, output_path)]
-                for i in range(1, len(scene_clip_paths)):
-                    prev_last = os.path.join(self.temp_dir, f"chain_last_{scene_id}_{i-1}.jpg")
-                    curr_first = os.path.join(self.temp_dir, f"img_{scene_id}_{i}.jpg")
-                    if extract_last_frame(scene_clip_paths[i - 1], prev_last) and os.path.exists(curr_first):
-                        out_path = os.path.join(self.temp_dir, f"transition_{scene_id}_{i}.mp4")
-                        transition_tasks.append((i, prev_last, curr_first, out_path))
-
-                # Phase 2: generate transition clips in parallel
-                transition_results = {}  # index -> path or None
-                if transition_tasks:
-                    def _gen_transition(task):
-                        idx, p_last, c_first, out = task
-                        res = generate_transition_clip(
-                            p_last, c_first, out,
-                            prompt="Smooth transition, same character, continuous motion",
-                        )
-                        return idx, res
-
-                    with ThreadPoolExecutor(max_workers=min(len(transition_tasks), 3)) as trans_pool:
-                        for idx, res in trans_pool.map(_gen_transition, transition_tasks):
-                            transition_results[idx] = res
-
-                # Phase 3: interleave clips and transitions in order
-                chained_clips = [scene_clip_paths[0]]
-                for i in range(1, len(scene_clip_paths)):
-                    trans = transition_results.get(i)
-                    if trans:
-                        chained_clips.append(trans)
-                    chained_clips.append(scene_clip_paths[i])
-                scene_clip_paths = chained_clips
-
-            self.scene_clips[scene_id] = scene_clip_paths
-            self._completed_scene_indices.add(scene_idx)
-            self._save_checkpoint(scene_idx)
-
-            all_scene_videos.append({
-                "scene_id": scene_id,
-                "clips": scene_clip_paths,
-                "audio": self.scene_audio.get(scene_id),
-                "foley": foley_paths,
-            })
-
-        # ----------------------------------------------------------
-        # STEP 2.5: DIRECTOR'S CUT — Review & Refine
-        # ----------------------------------------------------------
-        # Auto-pause so the user can review every clip, apply corrections,
-        # regenerate with adjusted prompts, and approve before assembly.
-
-        # Build review manifest
-        self.review_clips = {}
-        for scene_data in all_scene_videos:
-            sid = scene_data["scene_id"]
-            scene = next((s for s in project["scenes"] if s["id"] == sid), {})
-            for si, clip_path in enumerate(scene_data.get("clips", [])):
-                shots = scene.get("shots", [])
-                shot = shots[si] if si < len(shots) else {}
-                shot_id = shot.get("id", f"shot_{si}")
-                img_path = os.path.join(self.temp_dir, f"img_{sid}_{si}.jpg")
-                self.review_clips[shot_id] = {
-                    "image": img_path if os.path.exists(img_path) else None,
-                    "video": clip_path,
-                    "scene_id": sid,
-                    "shot_index": si,
-                    "prompt": shot.get("prompt", ""),
-                    "camera": shot.get("camera", ""),
-                    "target_api": shot.get("target_api", "KLING_3_0"),
-                    "status": "pending_review",
-                }
-
-        self.progress("REVIEW", f"All {len(self.review_clips)} clips ready for Director's Cut review", 87)
-        self.current_stage = "REVIEW"
-
-        # Auto-pause — user reviews, applies corrections, then calls proceed_to_assembly()
-        self.pause()
-
-        # Block until user resumes (after reviewing and approving clips)
-        if not self._check_pause():
-            self.progress("CANCELLED", "Pipeline cancelled during review", 0)
+        if not self._wait_for_gate("PLAN_REVIEW", "Approve all shot plans to continue", 25):
+            self.progress("CANCELLED", "Pipeline cancelled during shot-plan review", 0)
             return None
 
-        # Update all_scene_videos with any corrected clips
-        for scene_data in all_scene_videos:
-            sid = scene_data["scene_id"]
-            scene = next((s for s in project["scenes"] if s["id"] == sid), {})
-            updated_clips = []
-            for si, clip_path in enumerate(scene_data.get("clips", [])):
-                shots = scene.get("shots", [])
-                shot = shots[si] if si < len(shots) else {}
-                shot_id = shot.get("id", f"shot_{si}")
-                review = self.review_clips.get(shot_id, {})
-                # Use corrected video if available
-                updated_clips.append(review.get("video", clip_path))
-            scene_data["clips"] = updated_clips
+        project = self._refresh_project_snapshot() or self.project
+        for scene, _shot_index, shot in self._all_shots(project):
+            if self.cancelled:
+                self.progress("CANCELLED", "Pipeline cancelled by user", 0)
+                return None
+            if shot.get("approved_keyframe_take_id"):
+                continue
+            result = self.generate_keyframe_take(scene["id"], shot["id"])
+            if not result.get("success"):
+                self.failed_shots.append(shot["id"])
+                self.progress("SHOT_FAILED", result.get("error", "Keyframe generation failed"), 40, scene_id=scene["id"], shot_id=shot["id"])
 
-        # ----------------------------------------------------------
-        # STEP 2.6: Inter-Scene Transitions (Wan FLF2V)
-        # ----------------------------------------------------------
-        # Generate smooth transition clips between the last frame of scene N
-        # and the first frame of scene N+1 using first-last-frame interpolation.
-        # This creates visual continuity across scene boundaries.
+        if not self._wait_for_gate("KEYFRAME_REVIEW", "Approve all keyframes to continue", 55):
+            self.progress("CANCELLED", "Pipeline cancelled during keyframe review", 0)
+            return None
 
-        if len(all_scene_videos) > 1:
-            self.progress("TRANSITIONS", f"Generating {len(all_scene_videos)-1} scene transitions...", 88)
+        project = self._refresh_project_snapshot() or self.project
+        for scene, _shot_index, shot in self._all_shots(project):
+            if self.cancelled:
+                self.progress("CANCELLED", "Pipeline cancelled by user", 0)
+                return None
+            if shot.get("approved_final_take_id"):
+                continue
+            result = self.generate_motion_take(scene["id"], shot["id"])
+            if not result.get("success"):
+                self.failed_shots.append(shot["id"])
+                self.progress("SHOT_FAILED", result.get("error", "Motion generation failed"), 70, scene_id=scene["id"], shot_id=shot["id"])
 
-            for i in range(len(all_scene_videos) - 1):
-                if self.cancelled:
-                    return None
+        project = self._refresh_project_snapshot() or self.project
+        self._rebuild_review_clips(project)
+        self._save_checkpoint()
+        if not self._wait_for_gate("REVIEW", "Approve all final shot takes before assembly", 82):
+            self.progress("CANCELLED", "Pipeline cancelled during final review", 0)
+            return None
 
-                curr_scene = all_scene_videos[i]
-                next_scene = all_scene_videos[i + 1]
-
-                curr_clips = curr_scene.get("clips", [])
-                next_clips = next_scene.get("clips", [])
-
-                if not curr_clips or not next_clips:
-                    continue
-
-                # Extract last frame of current scene's last clip
-                last_clip = curr_clips[-1]
-                first_clip = next_clips[0]
-
-                if not (last_clip and os.path.exists(str(last_clip))):
-                    continue
-
-                last_frame_path = os.path.join(self.temp_dir, f"scene_transition_last_{i}.jpg")
-                first_frame_path = os.path.join(self.temp_dir, f"scene_transition_first_{i+1}.jpg")
-
-                # Extract last frame from previous scene
-                last_result = extract_last_frame(last_clip, last_frame_path)
-
-                # Extract first frame from next scene (use keyframe image if available)
-                next_scene_id = next_scene.get("scene_id", "")
-                next_keyframe = os.path.join(self.temp_dir, f"img_{next_scene_id}_0.jpg")
-                if os.path.exists(next_keyframe):
-                    import shutil
-                    shutil.copy2(next_keyframe, first_frame_path)
-                elif first_clip and os.path.exists(str(first_clip)):
-                    # Extract first frame from video
-                    try:
-                        subprocess.run(
-                            ["ffmpeg", "-y", "-i", str(first_clip), "-vframes", "1",
-                             "-q:v", "1", first_frame_path],
-                            capture_output=True, timeout=15
-                        )
-                    except (subprocess.SubprocessError, OSError) as e_ff:
-                        print(f"   [TRANSITION] Frame extract failed: {e_ff}")
-                        continue
-
-                if last_result and os.path.exists(first_frame_path):
-                    # Determine transition style from scene moods
-                    curr_scene_data = next((s for s in self.project["scenes"] if s["id"] == curr_scene.get("scene_id")), {})
-                    next_scene_data = next((s for s in self.project["scenes"] if s["id"] == next_scene.get("scene_id")), {})
-                    curr_mood = curr_scene_data.get("mood", "neutral")
-                    next_mood = next_scene_data.get("mood", "neutral")
-
-                    transition_prompt = _build_transition_prompt(curr_mood, next_mood)
-
-                    transition_path = os.path.join(self.temp_dir, f"scene_transition_{i}_to_{i+1}.mp4")
-                    self.progress("TRANSITIONS", f"Scene {i+1} → {i+2}: {transition_prompt[:40]}...", 88 + i)
-
-                    trans_result = generate_transition_clip(
-                        last_frame_path, first_frame_path, transition_path,
-                        prompt=transition_prompt,
-                        duration_frames=41,  # ~2.5 seconds at 16fps — brief bridge
-                    )
-
-                    if trans_result:
-                        # Insert transition clip between scenes
-                        curr_scene["transition_out"] = trans_result
-                        print(f"   [TRANSITION] Scene {i+1} → {i+2}: {transition_path}")
-
-        # ----------------------------------------------------------
-        # STEP 3: Global Assembly
-        # ----------------------------------------------------------
         if self.cancelled:
             return None
 
-        self.progress("ASSEMBLY", "Assembling final video...", 92)
-        final_path = self._assemble_final(all_scene_videos, bgm_path, settings)
+        assembly_result = self.assemble_approved_takes()
+        if assembly_result.get("success"):
+            return assembly_result.get("final_path")
 
-        if final_path and os.path.exists(final_path):
-            # AUTO-CLEANUP: remove intermediate temp files after successful export
-            try:
-                from cleanup import cleanup_project
-                cleanup_result = cleanup_project(self.project["id"], aggressive=False)
-                if cleanup_result["files_deleted"] > 0:
-                    self.progress("CLEANUP", f"Cleaned {cleanup_result['files_deleted']} temp files ({cleanup_result['mb_freed']} MB)", 98)
-            except Exception as e:
-                print(f"   [CLEANUP] Auto-cleanup failed (non-fatal): {e}")
-
-            # Log final cost summary
-            try:
-                video_id = self.project.get("id", "unknown")
-                cost_summary = self.cost_tracker.get_video_cost(video_id)
-                if cost_summary.get("total_usd", 0) > 0:
-                    print(f"\n   💰 [COST] Total: ${cost_summary['total_usd']:.2f} | LLM: ${cost_summary.get('llm_usd', 0):.2f} | API: ${cost_summary.get('api_usd', 0):.2f}")
-            except Exception as e_cost:
-                print(f"   [COST] Could not retrieve cost summary: {e_cost}")
-
-            self._clear_checkpoint()  # Success — no need for checkpoint anymore
-            self.progress("COMPLETE", f"Video exported: {final_path}", 100)
-            return final_path
-        else:
-            self.progress("ERROR", "Final assembly failed", 95)
-            return None
+        self.progress("ERROR", assembly_result.get("error", "Final assembly failed"), 95)
+        return None
 
     # ------------------------------------------------------------------
     # POST-PROCESSING HELPERS
@@ -1535,55 +1319,73 @@ class CinemaPipeline:
 
     def _assemble_final(self, scene_data: list, bgm_path: str, settings: dict) -> Optional[str]:
         """
-        Assembles all scene clips into the final video with:
-        - Per-scene clip stitching
-        - Cross-scene dissolve transitions (0.5s)
-        - Dialogue audio per scene
-        - Background music with sidechain compression
-        - Foley layering
+        Assembles all scene clips into the final video:
+        - Hard cuts between all clips (no transitions)
+        - Preserves embedded audio from dialogue clips (Omnihuman/Veo)
+        - Normalizes to 1920x1080@30fps WITHOUT forcing duration (preserves natural clip length)
+        - Mixes: clip audio (dialogue) + BGM (plays once, low volume)
+        - Color grading applied globally
         """
         final_output = os.path.join(self.export_dir, "final_cinema.mp4")
-        pacing = settings.get("video_pacing", "calculated")
 
-        # 1. Normalize all clips + insert inter-scene transitions
-        all_normalized = []
+        # 1. Collect clips in scene order — deduplicate (use only final version per shot)
+        all_clips = []
         for si, sd in enumerate(scene_data):
-            # Scene clips
-            for clip_path in sd["clips"]:
+            scene_id = sd.get("scene_id", f"scene_{si}")
+            clips = sd.get("clips", [])
+            for clip_path in clips:
                 if clip_path and os.path.exists(clip_path):
-                    norm_path = clip_path.replace(".mp4", "_norm.mp4").replace(".jpg", "_norm.mp4")
-                    try:
-                        normalize_clip(clip_path, norm_path, duration_sec=4.0, effect="cinematic_glow")
-                        all_normalized.append(norm_path)
-                    except Exception as e:
-                        print(f"   [WARN] Normalize failed: {e}")
-                        all_normalized.append(clip_path)
+                    all_clips.append(clip_path)
+                    print(f"   [ASSEMBLY] S{si} clip: {os.path.basename(clip_path)}")
 
-            # Inter-scene transition clip (generated in Step 2.5)
-            transition_out = sd.get("transition_out")
-            if transition_out and os.path.exists(transition_out):
-                trans_norm = transition_out.replace(".mp4", "_norm.mp4")
-                try:
-                    normalize_clip(transition_out, trans_norm, duration_sec=2.5, effect="cinematic_glow")
-                    all_normalized.append(trans_norm)
-                    print(f"   [ASSEMBLY] Inserted transition after scene {si+1}")
-                except Exception as e_tn:
-                    print(f"   [WARN] Transition normalize failed: {e_tn}")
-                    all_normalized.append(transition_out)
-
-        if not all_normalized:
+        if not all_clips:
+            print("   ⚠️ No clips to assemble")
             return None
 
-        # 2. Stitch into timeline
+        print(f"   [ASSEMBLY] {len(all_clips)} clips total")
+
+        # 2. Normalize clips: 1920x1080@30fps, PRESERVE audio, PRESERVE original duration
+        all_normalized = []
+        for clip_path in all_clips:
+            norm_path = os.path.join(self.temp_dir,
+                os.path.basename(clip_path).replace(".mp4", "_norm.mp4"))
+            try:
+                # Normalize resolution + fps without forcing duration or stripping audio
+                cmd = [
+                    "ffmpeg", "-y", "-i", clip_path,
+                    "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30",
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+                    "-c:a", "aac", "-b:a", "192k",  # Preserve audio
+                    "-shortest",
+                    norm_path,
+                ]
+                subprocess.run(cmd, check=True, capture_output=True, timeout=60)
+                all_normalized.append(norm_path)
+            except Exception as e:
+                print(f"   [WARN] Normalize failed for {os.path.basename(clip_path)}: {e}")
+                all_normalized.append(clip_path)  # Use original as fallback
+
+        # 3. Stitch with hard cuts using concat demuxer
         stitched = os.path.join(self.temp_dir, "stitched.mp4")
+        concat_list = os.path.join(self.temp_dir, "concat_list.txt")
+        with open(concat_list, "w") as f:
+            for clip in all_normalized:
+                f.write(f"file '{os.path.abspath(clip)}'\n")
+
         try:
-            stitch_modules(all_normalized, stitched)
+            # Use concat demuxer — requires same codec/resolution (normalized above)
+            subprocess.run([
+                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                "-i", concat_list,
+                "-c", "copy",
+                stitched,
+            ], check=True, capture_output=True, timeout=120)
+            print(f"   [ASSEMBLY] Stitched {len(all_normalized)} clips → {stitched}")
         except Exception as e:
             print(f"   ⚠️ Stitch failed: {e}")
             return None
 
-        # 2b. Apply color grading to stitched timeline
-        # Maps mood → color preset for consistent cinematic look
+        # 4. Color grading
         try:
             from phase_c_ffmpeg import apply_color_grade
             mood = settings.get("mood", "cinematic")
@@ -1605,65 +1407,59 @@ class CinemaPipeline:
         except Exception as e_cg:
             print(f"   [COLOR] Color grading skipped: {e_cg}")
 
-        # 3. Mix audio layers with ffmpeg
-        # Collect all dialogue audio
-        dialogue_files = []
-        for sd in scene_data:
-            if sd.get("audio") and os.path.exists(sd["audio"]):
-                dialogue_files.append(sd["audio"])
-
-        # Simple final assembly: video + BGM (dialogue mixed if available)
+        # 5. Mix BGM under existing audio (dialogue clips already have voice baked in)
+        # The stitched video already has audio from dialogue clips (Omnihuman/Veo).
+        # We just add BGM at low volume underneath.
         try:
-            cmd = ["ffmpeg", "-y", "-i", stitched]
-            filter_parts = []
-            input_idx = 1
-
-            # Add BGM if available
             if os.path.exists(bgm_path):
-                cmd.extend(["-i", bgm_path])
-                filter_parts.append(f"[{input_idx}:a]aloop=loop=-1:size=2e+09,volume=0.15,atrim=0:duration=120[bgm]")
-                input_idx += 1
-
-            # Add first dialogue track if available
-            if dialogue_files:
-                cmd.extend(["-i", dialogue_files[0]])
-                filter_parts.append(f"[{input_idx}:a]volume=1.0[dialogue]")
-                input_idx += 1
-
-            # Build audio mix
-            if filter_parts:
-                if len(filter_parts) == 2:
-                    all_filters = ";".join(filter_parts) + ";[bgm][dialogue]amix=inputs=2:duration=longest[aout]"
-                elif len(filter_parts) == 1 and "bgm" in filter_parts[0]:
-                    all_filters = filter_parts[0].replace("[bgm]", "[aout]")
-                else:
-                    all_filters = filter_parts[0].replace("[dialogue]", "[aout]")
-
-                cmd.extend([
-                    "-filter_complex", all_filters,
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-i", stitched,
+                    "-i", bgm_path,
+                    "-filter_complex",
+                    # If stitched has audio, mix it with BGM. If not, use BGM only.
+                    "[0:a]volume=1.0[voice];"
+                    "[1:a]volume=0.12[bgm];"
+                    "[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]",
                     "-map", "0:v", "-map", "[aout]",
-                    "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+                    "-c:v", "copy",  # No re-encode — just audio mix
+                    "-c:a", "aac", "-b:a", "192k",
+                    final_output,
+                ]
+                subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+                print(f"   ✅ Final cinema video with BGM: {final_output}")
+            else:
+                # No BGM — just copy stitched as final
+                import shutil
+                shutil.copy2(stitched, final_output)
+                print(f"   ✅ Final cinema video (no BGM): {final_output}")
+
+            return final_output
+
+        except subprocess.CalledProcessError as e:
+            # BGM mix failed (maybe stitched has no audio) — try without voice mix
+            print(f"   [WARN] BGM mix failed ({e.stderr[-200:] if e.stderr else ''}), trying BGM-only...")
+            try:
+                cmd_fallback = [
+                    "ffmpeg", "-y",
+                    "-i", stitched,
+                    "-i", bgm_path,
+                    "-filter_complex",
+                    "[1:a]volume=0.15[aout]",
+                    "-map", "0:v", "-map", "[aout]",
+                    "-c:v", "copy",
                     "-c:a", "aac", "-b:a", "192k",
                     "-shortest",
                     final_output,
-                ])
-            else:
-                cmd.extend([
-                    "-c:v", "libx264", "-preset", "slow", "-crf", "18",
-                    "-c:a", "copy",
-                    final_output,
-                ])
-
-            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-            print(f"   ✅ Final cinema video: {final_output}")
-            return final_output
-
-        except Exception as e:
-            print(f"   ⚠️ Final assembly error: {e}")
-            # Fallback: just copy stitched as final
-            import shutil
-            shutil.copy2(stitched, final_output)
-            return final_output
+                ]
+                subprocess.run(cmd_fallback, check=True, capture_output=True, timeout=120)
+                print(f"   ✅ Final cinema video (BGM only, no dialogue audio): {final_output}")
+                return final_output
+            except Exception as e2:
+                print(f"   ⚠️ All audio mixing failed: {e2}")
+                import shutil
+                shutil.copy2(stitched, final_output)
+                return final_output
 
     # ------------------------------------------------------------------
     # SCENE-LEVEL PREVIEW
@@ -1671,14 +1467,21 @@ class CinemaPipeline:
 
     def generate_scene_preview(self, scene_id: str) -> Optional[str]:
         """Generate just one scene for preview purposes."""
-        project = self.project
+        project = self._refresh_project_snapshot() or self.project
         scene = next((s for s in project["scenes"] if s["id"] == scene_id), None)
         if not scene:
             return None
 
         clips = self.scene_clips.get(scene_id, [])
         if not clips:
-            return None
+            clips = []
+            for shot in scene.get("shots", []):
+                final_path = self._resolve_take_path(shot, shot.get("approved_final_take_id", ""))
+                if final_path and os.path.exists(final_path):
+                    clips.append(final_path)
+            if not clips:
+                return None
+            self.scene_clips[scene_id] = clips
 
         # Stitch scene clips into a preview
         preview_path = os.path.join(self.export_dir, f"preview_{scene_id}.mp4")

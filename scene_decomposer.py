@@ -10,6 +10,8 @@ import os
 import json
 from dotenv import load_dotenv
 from llm_ensemble import LLMEnsemble
+from pipeline_context import PIPELINE_CONTEXT
+from project_manager import make_shot
 
 load_dotenv()
 
@@ -204,29 +206,7 @@ R5. Set target_api intelligently using the API EXPERTISE below. Do NOT default t
 R6. In [OUTFIT], describe ONLY clothing and accessories — NEVER hair, face, body, or physical traits.
 </ADDITIONAL_RULES>
 
-<VIDEO_API_EXPERTISE>
-You have access to 5 video generation APIs. Choose the BEST one per shot based on shot type:
-
-| Shot Type (from [SHOT] section) | Best API (target_api) | Why |
-|---------------------------------|----------------------|-----|
-| Close-up / portrait / headshot / 85mm | KLING_NATIVE | Subject binding + face_consistency flag = strongest identity lock |
-| Medium / waist-up / 50mm / two-shot | KLING_NATIVE | Good face + scene balance, subject binding available |
-| Wide / establishing / 24mm / full shot | LTX | 4K support, camera motion params, cheapest, depth-aware |
-| Action / tracking / chase / dynamic / handheld | SORA_NATIVE | Best motion physics, cloth simulation, body momentum |
-| Landscape / aerial / drone / panoramic / no character | LTX | 4K, no face needed, lowest cost, best environments |
-| Style-locked / consistent visual style needed | RUNWAY_GEN4 | Style lock with reference images |
-| Shot-to-shot transition / first+last frame | VEO_NATIVE | Unique first+last frame interpolation |
-
-CAMERA MOTION GUIDANCE per API:
-- KLING_NATIVE: Best with zoom_in_slow, dolly_in_rapid (face-focused motions)
-- SORA_NATIVE: Best with pan_right, pan_left, tracking shots (dynamic motion)
-- LTX: Has 15 native camera_motion params — use for any complex camera move
-- VEO_NATIVE: Best with static or slow motions (leverages reference images)
-- RUNWAY_GEN4: Best with zoom_in_slow, static_drone (style-lock motions)
-
-COST ORDER (cheapest first): LTX ($) → Kling ($$) → Veo ($$$) → Runway ($$$) → Sora ($$$$)
-Use LTX for all landscape/environment shots to save budget for character-critical shots.
-</VIDEO_API_EXPERTISE>
+{PIPELINE_CONTEXT}
 
 Output ONLY a valid JSON array of shot objects. No markdown wrapping. No explanation."""
 
@@ -235,7 +215,7 @@ Output ONLY a valid JSON array of shot objects. No markdown wrapping. No explana
         "items": {
             "type": "object",
             "properties": {
-                "prompt": {"type": "string", "description": "Detailed photorealistic image generation prompt including ALL character physical descriptions and FULL location description"},
+                "prompt": {"type": "string", "description": "Detailed photorealistic image generation prompt with location, action, wardrobe, and quality cues while leaving facial identity to reference locking"},
                 "camera": {"type": "string", "enum": CAMERA_MOTIONS},
                 "visual_effect": {"type": "string", "enum": VISUAL_EFFECTS},
                 "target_api": {"type": "string", "enum": TARGET_APIS},
@@ -309,19 +289,20 @@ Only use tools if they would genuinely improve shot quality. Skip if the scene i
         # Validate and enrich shots
         validated = []
         for i, shot in enumerate(shots):
-            validated.append({
-                "id": f"shot_{i}",
-                "prompt": shot.get("prompt", ""),
-                "camera": shot.get("camera", "zoom_in_slow") if shot.get("camera") in CAMERA_MOTIONS else "zoom_in_slow",
-                "visual_effect": shot.get("visual_effect", "cinematic_glow") if shot.get("visual_effect") in VISUAL_EFFECTS else "cinematic_glow",
-                "target_api": shot.get("target_api", "AUTO") if shot.get("target_api") in TARGET_APIS else "AUTO",
-                "scene_foley": shot.get("scene_foley", "ambient room tone"),
-                "characters_in_frame": shot.get("characters_in_frame", [c["id"] for c in characters]),
-                "primary_character": shot.get("characters_in_frame", [c["id"] for c in characters])[0] if shot.get("characters_in_frame") or characters else "",
-                "action_context": shot.get("action_context", scene.get("action", "")),
-                "generated_image": "",
-                "generated_video": "",
-            })
+            char_ids = shot.get("characters_in_frame", [c["id"] for c in characters])
+            shot_record = make_shot(
+                prompt=shot.get("prompt", ""),
+                camera=shot.get("camera", "zoom_in_slow") if shot.get("camera") in CAMERA_MOTIONS else "zoom_in_slow",
+                visual_effect=shot.get("visual_effect", "cinematic_glow") if shot.get("visual_effect") in VISUAL_EFFECTS else "cinematic_glow",
+                target_api=shot.get("target_api", "AUTO") if shot.get("target_api") in TARGET_APIS else "AUTO",
+                scene_foley=shot.get("scene_foley", "ambient room tone"),
+                characters_in_frame=char_ids,
+                primary_character=char_ids[0] if char_ids else "",
+                shot_id=f"shot_{scene.get('id', 'scene')}_{i}",
+            )
+            shot_record["action_context"] = shot.get("action_context", scene.get("action", ""))
+            shot_record["intent_notes"] = scene.get("action", "")
+            validated.append(shot_record)
 
         print(f"   ✅ Decomposed scene '{scene.get('title')}' into {len(validated)} shots")
         return validated
@@ -487,29 +468,7 @@ R5. Set target_api intelligently using the API EXPERTISE below. Do NOT default t
 R6. In [OUTFIT], describe ONLY clothing and accessories — NEVER hair, face, body, or physical traits.
 </ADDITIONAL_RULES>
 
-<VIDEO_API_EXPERTISE>
-You have access to 5 video generation APIs. Choose the BEST one per shot based on shot type:
-
-| Shot Type (from [SHOT] section) | Best API (target_api) | Why |
-|---------------------------------|----------------------|-----|
-| Close-up / portrait / headshot / 85mm | KLING_NATIVE | Subject binding + face_consistency flag = strongest identity lock |
-| Medium / waist-up / 50mm / two-shot | KLING_NATIVE | Good face + scene balance, subject binding available |
-| Wide / establishing / 24mm / full shot | LTX | 4K support, camera motion params, cheapest, depth-aware |
-| Action / tracking / chase / dynamic / handheld | SORA_NATIVE | Best motion physics, cloth simulation, body momentum |
-| Landscape / aerial / drone / panoramic / no character | LTX | 4K, no face needed, lowest cost, best environments |
-| Style-locked / consistent visual style needed | RUNWAY_GEN4 | Style lock with reference images |
-| Shot-to-shot transition / first+last frame | VEO_NATIVE | Unique first+last frame interpolation |
-
-CAMERA MOTION GUIDANCE per API:
-- KLING_NATIVE: Best with zoom_in_slow, dolly_in_rapid (face-focused motions)
-- SORA_NATIVE: Best with pan_right, pan_left, tracking shots (dynamic motion)
-- LTX: Has 15 native camera_motion params — use for any complex camera move
-- VEO_NATIVE: Best with static or slow motions (leverages reference images)
-- RUNWAY_GEN4: Best with zoom_in_slow, static_drone (style-lock motions)
-
-COST ORDER (cheapest first): LTX ($) → Kling ($$) → Veo ($$$) → Runway ($$$) → Sora ($$$$)
-Use LTX for all landscape/environment shots to save budget for character-critical shots.
-</VIDEO_API_EXPERTISE>
+{PIPELINE_CONTEXT}
 
 Output ONLY a valid JSON array of shot objects. No markdown wrapping. No explanation."""
 
@@ -610,21 +569,22 @@ Output ONLY the raw JSON array. No markdown wrapping."""
         # ------------------------------------------------------------------
         validated = []
         for i, shot in enumerate(shots):
-            validated.append({
-                "id": f"shot_{i}",
-                "prompt": shot.get("prompt", ""),
-                "camera": shot.get("camera", "zoom_in_slow") if shot.get("camera") in CAMERA_MOTIONS else "zoom_in_slow",
-                "visual_effect": shot.get("visual_effect", "cinematic_glow") if shot.get("visual_effect") in VISUAL_EFFECTS else "cinematic_glow",
-                "target_api": shot.get("target_api", "AUTO") if shot.get("target_api") in TARGET_APIS else "AUTO",
-                "scene_foley": shot.get("scene_foley", "ambient room tone"),
-                "characters_in_frame": shot.get("characters_in_frame", [c["id"] for c in characters]),
-                "primary_character": shot.get("characters_in_frame", [c["id"] for c in characters])[0] if shot.get("characters_in_frame") or characters else "",
-                "action_context": shot.get("action_context", scene.get("action", "")),
-                "generated_image": "",
-                "generated_video": "",
-                "ensemble_winner": result.models_used[result.winner_index],
-                "ensemble_scores": result.scores,
-            })
+            char_ids = shot.get("characters_in_frame", [c["id"] for c in characters])
+            shot_record = make_shot(
+                prompt=shot.get("prompt", ""),
+                camera=shot.get("camera", "zoom_in_slow") if shot.get("camera") in CAMERA_MOTIONS else "zoom_in_slow",
+                visual_effect=shot.get("visual_effect", "cinematic_glow") if shot.get("visual_effect") in VISUAL_EFFECTS else "cinematic_glow",
+                target_api=shot.get("target_api", "AUTO") if shot.get("target_api") in TARGET_APIS else "AUTO",
+                scene_foley=shot.get("scene_foley", "ambient room tone"),
+                characters_in_frame=char_ids,
+                primary_character=char_ids[0] if char_ids else "",
+                shot_id=f"shot_{scene.get('id', 'scene')}_{i}",
+            )
+            shot_record["action_context"] = shot.get("action_context", scene.get("action", ""))
+            shot_record["intent_notes"] = scene.get("action", "")
+            shot_record["ensemble_winner"] = result.models_used[result.winner_index]
+            shot_record["ensemble_scores"] = result.scores
+            validated.append(shot_record)
 
         print(
             f"   ✅ [Competitive] Decomposed scene '{scene.get('title')}' into "
@@ -647,38 +607,37 @@ def _fallback_decompose(
 ) -> List[dict]:
     """Simple fallback decomposition when GPT-4o is unavailable."""
     char_ids = [c["id"] for c in characters]
-    char_descs = ", ".join(c.get("physical_traits", c.get("description", c["name"])) for c in characters)
     loc_desc = location.get("description", "a cinematic location")
     action = scene.get("action", "standing in the scene")
+    scene_id = scene.get("id", "scene")
+    subject_phrase = "the character" if len(char_ids) == 1 else "the characters"
 
     shots = [
-        {
-            "id": "shot_0",
-            "prompt": f"[SHOT] Establishing wide shot, 24mm lens, deep depth of field, camera at low angle. [SCENE] {loc_desc}, natural ambient lighting. [ACTION] {char_descs}. {action}, facing the camera. [OUTFIT] Current wardrobe. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, natural film grain ISO 400, volumetric atmospheric lighting, no AI artifacts, no smooth plastic skin.",
-            "camera": "zoom_in_slow",
-            "visual_effect": "cinematic_glow",
-            "target_api": "AUTO",
-            "scene_foley": "ambient environmental sound",
-            "characters_in_frame": char_ids,
-            "primary_character": char_ids[0] if char_ids else "",
-            "action_context": action,
-            "generated_image": "",
-            "generated_video": "",
-        },
-        {
-            "id": "shot_1",
-            "prompt": f"[SHOT] Medium close-up, 85mm f/1.4 lens, shallow depth of field, eye-level camera. [SCENE] {loc_desc}, natural motivated key light from camera-left. [ACTION] {char_descs}. {action}, looking directly at the camera. [OUTFIT] Current wardrobe with visible fabric texture. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, no AI artifacts, no smooth plastic skin.",
-            "camera": "dolly_in_rapid",
-            "visual_effect": "cinematic_glow",
-            "target_api": "AUTO",
-            "scene_foley": "subtle environmental ambience",
-            "characters_in_frame": char_ids[:1],
-            "primary_character": char_ids[0] if char_ids else "",
-            "action_context": action,
-            "generated_image": "",
-            "generated_video": "",
-        },
+        make_shot(
+            prompt=f"[SHOT] Establishing wide shot, 24mm lens, deep depth of field, camera at low angle. [SCENE] {loc_desc}, natural ambient lighting. [ACTION] {subject_phrase} perform the scene action, facing the camera, with grounded physical weight and clear interaction with the environment. [OUTFIT] Current wardrobe with visible fabric texture and material detail. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, natural film grain ISO 400, volumetric atmospheric lighting, no AI artifacts, no smooth plastic skin.",
+            camera="zoom_in_slow",
+            visual_effect="cinematic_glow",
+            target_api="AUTO",
+            scene_foley="ambient environmental sound",
+            characters_in_frame=char_ids,
+            primary_character=char_ids[0] if char_ids else "",
+            shot_id=f"shot_{scene_id}_0",
+        ),
+        make_shot(
+            prompt=f"[SHOT] Medium close-up, 85mm f/1.4 lens, shallow depth of field, eye-level camera. [SCENE] {loc_desc}, natural motivated key light from camera-left. [ACTION] The primary character continues the scene action, looking directly at the camera with physically motivated movement and prop interaction. [OUTFIT] Current wardrobe with visible fabric texture and natural folds. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, no AI artifacts, no smooth plastic skin.",
+            camera="dolly_in_rapid",
+            visual_effect="cinematic_glow",
+            target_api="AUTO",
+            scene_foley="subtle environmental ambience",
+            characters_in_frame=char_ids[:1],
+            primary_character=char_ids[0] if char_ids else "",
+            shot_id=f"shot_{scene_id}_1",
+        ),
     ]
+
+    for shot in shots:
+        shot["action_context"] = action
+        shot["intent_notes"] = action
 
     print(f"   ⚠️ Used fallback decomposition for scene '{scene.get('title')}' → {len(shots)} shots")
     return shots

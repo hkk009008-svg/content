@@ -855,6 +855,44 @@ def generate_dialogue_voiceover(
         return temp_files[0] if temp_files else None
 
 
+def generate_single_line_audio(
+    text: str,
+    voice_id: str,
+    delivery: str = "natural",
+    output_path: str = "temp_single_line.mp3",
+) -> Optional[str]:
+    """
+    Generate TTS audio for a SINGLE dialogue line.
+    Used for per-shot audio assignment so each shot gets only its character's line.
+    """
+    from elevenlabs import VoiceSettings
+
+    if not text.strip() or not voice_id:
+        return None
+
+    voice_profile = get_voice_direction(delivery)
+    directed_text = voice_profile["markup"](text) if voice_profile.get("markup") else text
+
+    try:
+        audio = client.text_to_speech.convert(
+            voice_id=voice_id,
+            output_format="mp3_44100_128",
+            text=directed_text,
+            model_id="eleven_v3",
+            voice_settings=VoiceSettings(
+                stability=voice_profile["stability"],
+                similarity_boost=voice_profile["similarity"],
+                style=voice_profile["style"],
+                use_speaker_boost=voice_profile.get("speaker_boost", True),
+            ),
+        )
+        save(audio, output_path)
+        return output_path
+    except Exception as e:
+        print(f"   ⚠️ Single line TTS failed: {e}")
+        return None
+
+
 def generate_scene_foley(foley_description: str, output_filename: str, duration: float = 5.0) -> Optional[str]:
     """Generate a single foley sound effect for a specific shot."""
     try:

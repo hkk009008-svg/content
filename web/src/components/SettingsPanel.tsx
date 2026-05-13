@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { Project, AppConfig } from '../types/project'
+import { PRODUCTION_PRESETS } from '../lib/guidance'
 
 const API = '/api'
 
@@ -27,6 +28,17 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ global_settings: { ...s, [key]: value } }),
+    })
+    onRefresh()
+  }
+
+  const applyPreset = async (presetId: string) => {
+    const preset = PRODUCTION_PRESETS.find((entry) => entry.id === presetId)
+    if (!preset) return
+    await fetch(`${API}/projects/${project.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ global_settings: { ...s, ...preset.settings } }),
     })
     onRefresh()
   }
@@ -70,6 +82,32 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
 
       {expanded && (
         <div className="space-y-4">
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="block text-[10px] uppercase tracking-wider text-cinema-text-secondary">Guided Presets</label>
+              <span className="text-[9px] text-cinema-muted">Start from the footage goal, then fine-tune.</span>
+            </div>
+            <div className="space-y-2">
+              {PRODUCTION_PRESETS.map((preset) => (
+                <div key={preset.id} className="rounded-lg border border-cinema-border-subtle bg-cinema-bg p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-semibold text-cinema-text">{preset.label}</div>
+                      <p className="mt-1 text-[10px] leading-relaxed text-cinema-muted">{preset.summary}</p>
+                      <p className="mt-1 text-[10px] text-cinema-accent">Use when: {preset.useWhen}</p>
+                    </div>
+                    <button
+                      onClick={() => applyPreset(preset.id)}
+                      className="rounded border border-cinema-accent/40 px-2.5 py-1.5 text-[10px] text-cinema-accent hover:bg-cinema-accent/10"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* Aspect Ratio */}
           <div>
             <label className="text-[10px] text-cinema-text-secondary block mb-1.5 uppercase tracking-wider">Aspect Ratio</label>
@@ -123,6 +161,34 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
             </select>
             <p className="text-[9px] text-cinema-muted mt-1">Per-shot overrides take precedence. Auto picks best API per shot type.</p>
           </div>
+
+          {config?.workflow_templates && (
+            <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[10px] font-mono font-bold uppercase text-cinema-accent">Shot-Type Routing</span>
+                <span className="text-[9px] text-cinema-muted">These are the quality defaults the pipeline uses.</span>
+              </div>
+              <div className="space-y-2">
+                {Object.entries(config.workflow_templates).map(([shotType, template]) => (
+                  <div key={shotType} className="rounded border border-cinema-border-subtle bg-cinema-panel px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-semibold capitalize text-cinema-text">{shotType}</span>
+                      <span className="rounded bg-cinema-bg px-2 py-0.5 text-[10px] text-cinema-muted">
+                        API: {config.api_registry?.[template.target_api]?.label || template.target_api}
+                      </span>
+                      <span className="rounded bg-cinema-bg px-2 py-0.5 text-[10px] text-cinema-muted">
+                        CFG {template.guidance} / {template.steps} steps
+                      </span>
+                      <span className="rounded bg-cinema-bg px-2 py-0.5 text-[10px] text-cinema-muted">
+                        Denoise {template.denoise_default}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[10px] leading-relaxed text-cinema-muted">{template.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Music Mood — categorized with descriptions */}
           <div>

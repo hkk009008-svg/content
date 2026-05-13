@@ -34,6 +34,18 @@ export interface Shot {
   action_context: string
   generated_image: string
   generated_video: string
+  plan_status: 'pending_review' | 'approved' | 'rejected'
+  plan_rejection_reason?: string
+  keyframe_takes: TakeRecord[]
+  approved_keyframe_take_id: string
+  motion_takes: TakeRecord[]
+  approved_motion_take_id: string
+  postprocess_variants: TakeRecord[]
+  approved_final_take_id: string
+  diagnostics: ShotDiagnostic[]
+  intent_notes: string
+  negative_constraints: string
+  continuity_constraints: string
 }
 
 export interface Scene {
@@ -121,6 +133,23 @@ export interface ApiInfo {
   description: string
 }
 
+export interface WorkflowTemplate {
+  pulid_weight: number
+  pulid_start_at: number
+  pulid_end_at: number
+  guidance: number
+  steps: number
+  sampler: string
+  scheduler: string
+  pag_scale: number
+  controlnet_depth_strength: number
+  ip_adapter_weight: number
+  denoise_default: number
+  target_api: string
+  video_fallbacks: string[]
+  description: string
+}
+
 export interface Project {
   id: string
   name: string
@@ -128,6 +157,24 @@ export interface Project {
   locations: Location[]
   scenes: Scene[]
   global_settings: GlobalSettings
+}
+
+export interface TakeRecord {
+  id: string
+  kind: 'keyframe' | 'motion' | 'postprocess'
+  path: string
+  source_take_id?: string
+  status?: string
+  created_at?: string
+  metadata?: Record<string, any>
+}
+
+export interface ShotDiagnostic {
+  created_at: string | number
+  take_id: string
+  take_kind: string
+  scores: Record<string, number>
+  recommendations: { tool: string; reason: string }[]
 }
 
 export interface QualityMetrics {
@@ -143,6 +190,9 @@ export interface ProgressEvent {
   scene_id?: string
   shot_id?: string
   image_url?: string
+  video_url?: string
+  take_id?: string
+  take_kind?: string
   identity_score?: number
   director_review?: DirectorReview
   coherence_score?: number
@@ -150,6 +200,7 @@ export interface ProgressEvent {
   shot_type?: string
   failure_reason?: string
   quality_metrics?: QualityMetrics
+  gate_status?: GateStatus
 }
 
 export interface PipelineState {
@@ -161,15 +212,26 @@ export interface PipelineState {
   shot_results: Record<string, { image: string | null; video: string | null; identity_score: number; status: string }>
   failed_shots: string[]
   scenes_completed: number
+  gate_status: GateStatus
+}
+
+export interface GateStatus {
+  total_shots: number
+  plans_approved: number
+  keyframes_approved: number
+  motions_generated: number
+  finals_approved: number
 }
 
 // --- Pipeline Mode Types ---
 
 export type ShotStatus =
   | 'pending'
+  | 'plan_review'
   | 'generating_image'
   | 'image_review'
   | 'generating_video'
+  | 'final_review'
   | 'post_processing'
   | 'complete'
   | 'failed'
@@ -202,6 +264,8 @@ export interface ShotState {
   identity_score: number | null
   generated_video: string | null
   approved: boolean | null
+  take_id?: string
+  take_kind?: string
   retry_count: number
   coherence_score?: number | null
   motion_score?: number | null
@@ -223,6 +287,7 @@ export interface AppConfig {
   visual_effects: string[]
   target_apis: string[]
   api_registry: Record<string, ApiInfo>
+  workflow_templates?: Record<string, WorkflowTemplate>
   music_moods: string[]
   voice_pool: { id: string; name: string; style: string }[]
   aspect_ratios: string[]

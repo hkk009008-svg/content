@@ -8,6 +8,7 @@ from typing import Optional, List
 import os
 import json
 from dotenv import load_dotenv
+from pipeline_context import PIPELINE_CONTEXT
 
 load_dotenv()
 
@@ -55,11 +56,13 @@ Write natural, cinematic dialogue for the following scene.
 [RULES]:
 1. Dialogue must sound like real people talking — no exposition dumps
 2. Each line should be 1-2 sentences max (cinema, not theater)
-3. Include delivery notes (whispered, firm, trailing off, etc.)
+3. Include delivery notes (whispered, firm, trailing off, etc.) — these directly control voice synthesis
 4. Mood: {mood}
 5. Style: {style}
 6. If only one character, they can have internal monologue or narration
 7. Output ONLY valid JSON array of line objects
+
+{PIPELINE_CONTEXT}
 
 JSON Schema per line:
 {{"character_id": "char_xxx", "character_name": "Name", "text": "dialogue text", "delivery": "how to deliver"}}"""

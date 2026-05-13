@@ -21,17 +21,37 @@ VEO_DURATIONS = ["5s", "6s", "8s"]
 
 
 class VeoNativeAPI:
-    """Native Google Veo 3.1 client using the google-genai SDK."""
+    """Native Google Veo 3.1 client using the google-genai SDK.
+
+    Prefers Vertex AI (supports generate_audio for native speech).
+    Falls back to Gemini API (no audio generation) if Vertex AI unavailable.
+    """
 
     def __init__(self):
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise EnvironmentError(
-                "[VEO-NATIVE] GOOGLE_API_KEY not set. "
-                "Export it or add to .env before using VeoNativeAPI."
+        # Prefer Vertex AI for native audio generation support
+        gcp_project = os.getenv("GOOGLE_CLOUD_PROJECT", "project-ffb1f53f-bb4c-4add-8e7")
+        gcp_location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
+        try:
+            self.client = genai.Client(
+                vertexai=True,
+                project=gcp_project,
+                location=gcp_location,
             )
-        self.client = genai.Client(api_key=api_key)
-        print("[VEO-NATIVE] Client initialized")
+            self._backend = "vertex"
+            print(f"[VEO-NATIVE] Vertex AI client initialized (project={gcp_project}, location={gcp_location})")
+        except Exception as e:
+            print(f"[VEO-NATIVE] Vertex AI unavailable ({e}), falling back to Gemini API")
+            api_key = os.getenv("GOOGLE_API_KEY")
+            if not api_key:
+                raise EnvironmentError(
+                    "[VEO-NATIVE] Neither Vertex AI nor GOOGLE_API_KEY available."
+                )
+            self.client = genai.Client(api_key=api_key)
+            self._backend = "gemini"
+            print("[VEO-NATIVE] Gemini API client initialized (no audio generation)")
+
+        # Vertex AI uses stable model names; Gemini API uses -preview suffix
+        self._model = "veo-3.1-generate" if self._backend == "vertex" else "veo-3.1-generate-preview"
 
     def generate_video(
         self,
@@ -78,7 +98,7 @@ class VeoNativeAPI:
 
             # Build the generation request kwargs
             generate_kwargs = {
-                "model": "veo-3.1-generate-preview",
+                "model": self._model,
                 "prompt": prompt,
                 "image": start_image,
                 "config": config,
@@ -112,8 +132,17 @@ class VeoNativeAPI:
                 if poll_count % 6 == 0:
                     print(f"[VEO-NATIVE] Still generating... ({poll_count * 10}s elapsed)")
 
-            # Download result — files.download returns bytes
-            generated_video = operation.response.generated_videos[0]
+            # Check for RAI content filter rejection
+            resp = operation.response
+            if not resp or not resp.generated_videos:
+                rai_reasons = getattr(resp, "rai_media_filtered_reasons", []) if resp else []
+                if rai_reasons:
+                    print(f"[VEO-NATIVE] RAI filter: {rai_reasons[0][:120]}")
+                else:
+                    print(f"[VEO-NATIVE] No video generated (empty response)")
+                return None
+
+            generated_video = resp.generated_videos[0]
             video_data = self.client.files.download(file=generated_video.video)
             with open(output_path, "wb") as f:
                 f.write(video_data)
@@ -170,11 +199,11 @@ class VeoNativeAPI:
                 person_generation="allow_adult",
                 aspect_ratio="16:9",
                 resolution=resolved_resolution,
-                generate_audio=audio,
+                generate_audio=audio if self._backend == "vertex" else False,  # Only Vertex AI supports audio
             )
 
             generate_kwargs = {
-                "model": "veo-3.1-generate",
+                "model": self._model,
                 "prompt": prompt,
                 "image": start_image,
                 "config": config,
@@ -206,7 +235,13 @@ class VeoNativeAPI:
                 if poll_count % 6 == 0:
                     print(f"[VEO-NATIVE] Still generating... ({poll_count * 10}s elapsed)")
 
-            generated_video = operation.response.generated_videos[0]
+            resp = operation.response
+            if not resp or not resp.generated_videos:
+                rai_reasons = getattr(resp, "rai_media_filtered_reasons", []) if resp else []
+                if rai_reasons:
+                    print(f"[VEO-NATIVE] RAI filter: {rai_reasons[0][:120]}")
+                return None, None
+            generated_video = resp.generated_videos[0]
 
             # Download video
             video_data = self.client.files.download(file=generated_video.video)
@@ -282,11 +317,11 @@ class VeoNativeAPI:
                 person_generation="allow_adult",
                 aspect_ratio="16:9",
                 resolution=resolved_resolution,
-                generate_audio=audio,
+                generate_audio=audio if self._backend == "vertex" else False,  # Only Vertex AI supports audio
             )
 
             generate_kwargs = {
-                "model": "veo-3.1-generate-preview",
+                "model": self._model,
                 "prompt": prompt,
                 "image": first_image,
                 "end_image": last_image,
@@ -319,7 +354,13 @@ class VeoNativeAPI:
                 if poll_count % 6 == 0:
                     print(f"[VEO-NATIVE] Still interpolating... ({poll_count * 10}s elapsed)")
 
-            video = operation.response.generated_videos[0].video
+            resp = operation.response
+            if not resp or not resp.generated_videos:
+                rai_reasons = getattr(resp, "rai_media_filtered_reasons", []) if resp else []
+                if rai_reasons:
+                    print(f"[VEO-NATIVE] RAI filter: {rai_reasons[0][:120]}")
+                return None
+            video = resp.generated_videos[0].video
             self.client.files.download(file=video, path=output_path)
 
             if os.path.exists(output_path):
@@ -375,14 +416,16 @@ class VeoNativeAPI:
 
             start_image = types.Image.from_file(location=start_frame_path)
 
+            # Enable native audio on Vertex AI — Veo generates speech from the prompt.
+            # On Gemini API, generate_audio is unsupported — video is silent.
             config = types.GenerateVideosConfig(
                 person_generation="allow_adult",
                 aspect_ratio="16:9",
-                generate_audio=True,
+                generate_audio=True if self._backend == "vertex" else False,
             )
 
             generate_kwargs = {
-                "model": "veo-3.1-generate",
+                "model": self._model,
                 "prompt": prompt,
                 "image": start_image,
                 "config": config,
@@ -407,7 +450,18 @@ class VeoNativeAPI:
                 if poll_count % 6 == 0:
                     print(f"[VEO-NATIVE] Still generating... ({poll_count * 10}s elapsed)")
 
-            generated_video = operation.response.generated_videos[0]
+            # Check for RAI content filter rejection
+            resp = operation.response
+            if not resp or not resp.generated_videos:
+                rai_reasons = getattr(resp, "rai_media_filtered_reasons", []) if resp else []
+                rai_count = getattr(resp, "rai_media_filtered_count", 0) if resp else 0
+                if rai_reasons:
+                    print(f"[VEO-NATIVE] RAI content filter rejected ({rai_count} filtered): {rai_reasons[0][:120]}")
+                else:
+                    print(f"[VEO-NATIVE] No video generated (empty response)")
+                return None, None
+
+            generated_video = resp.generated_videos[0]
 
             # Download video
             video_data = self.client.files.download(file=generated_video.video)
@@ -417,7 +471,7 @@ class VeoNativeAPI:
             file_size = os.path.getsize(output_path) / (1024 * 1024)
             print(f"[VEO-NATIVE] Dialogue video saved: {output_path} ({file_size:.1f} MB)")
 
-            # Extract synced audio
+            # Extract synced audio if available
             synced_audio_path = None
             if hasattr(generated_video, "audio") and generated_video.audio:
                 synced_audio_path = output_path.rsplit(".", 1)[0] + "_audio.wav"

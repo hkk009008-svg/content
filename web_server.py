@@ -16,6 +16,11 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # Fix OpenMP libomp.dylib conflict (same as main.py)
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
+# Ensure Homebrew binaries (ffmpeg, ffprobe) are in PATH
+_homebrew_bin = "/opt/homebrew/bin"
+if _homebrew_bin not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = _homebrew_bin + ":" + os.environ.get("PATH", "")
+
 import json
 import threading
 import queue
@@ -39,6 +44,7 @@ from scene_decomposer import decompose_scene, update_scene_shots, CAMERA_MOTIONS
 from dialogue_writer import generate_dialogue
 from style_director import generate_style_rules
 from cinema_pipeline import CinemaPipeline
+from workflow_selector import WORKFLOW_TEMPLATES
 
 app = Flask(__name__, static_folder="web/dist", static_url_path="")
 CORS(app)
@@ -47,6 +53,72 @@ CORS(app)
 _progress_queues: dict[str, queue.Queue] = {}
 _running_pipelines: dict[str, CinemaPipeline] = {}
 HTTP_PROJECT_TIMEOUT = 2.0
+
+
+def _ensure_progress_queue(pid: str) -> queue.Queue:
+    q = _progress_queues.get(pid)
+    if q is None:
+        q = queue.Queue()
+        _progress_queues[pid] = q
+    return q
+
+
+def _make_progress_cb(pid: str, q: queue.Queue | None = None):
+    progress_queue = q or _progress_queues.get(pid)
+
+    def progress_cb(stage, detail, percent, scene_id="", shot_id="",
+                    image_url="", identity_score=-1, director_review=None,
+                    coherence_score=-1, motion_score=-1, shot_type="",
+                    failure_reason="", quality_metrics=None, video_url="",
+                    take_id="", take_kind="", gate_status=None, **kwargs):
+        event = {"stage": stage, "detail": detail, "percent": percent}
+        if scene_id:
+            event["scene_id"] = scene_id
+        if shot_id:
+            event["shot_id"] = shot_id
+        if image_url:
+            event["image_url"] = image_url
+        if video_url:
+            event["video_url"] = video_url
+        if take_id:
+            event["take_id"] = take_id
+        if take_kind:
+            event["take_kind"] = take_kind
+        if identity_score >= 0:
+            event["identity_score"] = identity_score
+        if director_review:
+            event["director_review"] = director_review
+        if coherence_score >= 0:
+            event["coherence_score"] = coherence_score
+        if motion_score >= 0:
+            event["motion_score"] = motion_score
+        if shot_type:
+            event["shot_type"] = shot_type
+        if failure_reason:
+            event["failure_reason"] = failure_reason
+        if quality_metrics:
+            event["quality_metrics"] = quality_metrics
+        if gate_status:
+            event["gate_status"] = gate_status
+        if progress_queue:
+            progress_queue.put(event)
+
+    return progress_cb
+
+
+def _get_stage_pipeline(pid: str) -> CinemaPipeline:
+    pipeline = _running_pipelines.get(pid)
+    if pipeline:
+        return pipeline
+    return CinemaPipeline(pid, progress_callback=_make_progress_cb(pid))
+
+
+def _locate_shot(project: dict, shot_id: str):
+    for scene in project.get("scenes", []):
+        for shot in scene.get("shots", []):
+            if shot.get("id") == shot_id:
+                return scene, shot
+    return None, None
 
 def _get_delivery_styles():
     """Get delivery styles with descriptions for the frontend."""
@@ -178,6 +250,7 @@ def get_config():
             {"value": "gpt-4o", "label": "GPT-4o"},
             {"value": "gemini-pro", "label": "Gemini 2.5 Pro"},
         ],
+        "workflow_templates": WORKFLOW_TEMPLATES,
     })
 
 
@@ -671,35 +744,8 @@ def api_generate(pid):
         return jsonify({"error": "Generation already in progress"}), 409
 
     # Create progress queue for SSE
-    q = queue.Queue()
-    _progress_queues[pid] = q
-
-    def progress_cb(stage, detail, percent, scene_id="", shot_id="",
-                    image_url="", identity_score=-1, director_review=None,
-                    coherence_score=-1, motion_score=-1, shot_type="",
-                    failure_reason="", quality_metrics=None):
-        event = {"stage": stage, "detail": detail, "percent": percent}
-        if scene_id:
-            event["scene_id"] = scene_id
-        if shot_id:
-            event["shot_id"] = shot_id
-        if image_url:
-            event["image_url"] = image_url
-        if identity_score >= 0:
-            event["identity_score"] = identity_score
-        if director_review:
-            event["director_review"] = director_review
-        if coherence_score >= 0:
-            event["coherence_score"] = coherence_score
-        if motion_score >= 0:
-            event["motion_score"] = motion_score
-        if shot_type:
-            event["shot_type"] = shot_type
-        if failure_reason:
-            event["failure_reason"] = failure_reason
-        if quality_metrics:
-            event["quality_metrics"] = quality_metrics
-        q.put(event)
+    q = _ensure_progress_queue(pid)
+    progress_cb = _make_progress_cb(pid, q)
 
     resume = request.json.get("resume", False) if request.is_json else False
 
@@ -791,44 +837,119 @@ def api_serve_file(pid):
 @app.route("/api/projects/<pid>/shots/<shot_id>/approve", methods=["POST"])
 @_project_lock_guard
 def api_approve_shot(pid, shot_id):
-    """Approve a shot's generated image — proceed to video generation."""
-    def _mutate_project(project: dict):
-        for scene in project["scenes"]:
-            for shot in scene.get("shots", []):
-                if shot.get("id") == shot_id:
-                    shot["approved"] = True
-                    return True
-        return MutationResult(False, save=False)
-
-    result = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
-    if result is None:
+    """Compatibility route: approve the shot plan."""
+    try:
+        result = _get_stage_pipeline(pid).approve_shot_plan(shot_id, approved=True)
+    except ValueError:
         return jsonify({"error": "Project not found"}), 404
-    if result:
-        return jsonify({"approved": True, "shot_id": shot_id})
-    return jsonify({"error": "Shot not found"}), 404
+    if result.get("error"):
+        return jsonify(result), 404
+    return jsonify({"approved": True, **result})
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/reject", methods=["POST"])
 @_project_lock_guard
 def api_reject_shot(pid, shot_id):
-    """Reject a shot's image — mark for regeneration."""
+    """Compatibility route: reject the shot plan."""
     reason = request.json.get("reason", "") if request.is_json else ""
-
-    def _mutate_project(project: dict):
-        for scene in project["scenes"]:
-            for shot in scene.get("shots", []):
-                if shot.get("id") == shot_id:
-                    shot["approved"] = False
-                    shot["rejection_reason"] = reason
-                    return True
-        return MutationResult(False, save=False)
-
-    result = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
-    if result is None:
+    try:
+        result = _get_stage_pipeline(pid).approve_shot_plan(shot_id, approved=False, reason=reason)
+    except ValueError:
         return jsonify({"error": "Project not found"}), 404
-    if result:
-        return jsonify({"rejected": True, "shot_id": shot_id, "reason": reason})
-    return jsonify({"error": "Shot not found"}), 404
+    if result.get("error"):
+        return jsonify(result), 404
+    return jsonify({"rejected": True, **result})
+
+
+@app.route("/api/projects/<pid>/shots/<shot_id>/plan/approve", methods=["POST"])
+@_project_lock_guard
+def api_approve_shot_plan(pid, shot_id):
+    try:
+        result = _get_stage_pipeline(pid).approve_shot_plan(shot_id, approved=True)
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
+    if result.get("error"):
+        return jsonify(result), 404
+    return jsonify({"approved": True, **result})
+
+
+@app.route("/api/projects/<pid>/shots/<shot_id>/plan/reject", methods=["POST"])
+@_project_lock_guard
+def api_reject_shot_plan(pid, shot_id):
+    reason = request.json.get("reason", "") if request.is_json else ""
+    try:
+        result = _get_stage_pipeline(pid).approve_shot_plan(shot_id, approved=False, reason=reason)
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
+    if result.get("error"):
+        return jsonify(result), 404
+    return jsonify({"rejected": True, **result})
+
+
+@app.route("/api/projects/<pid>/shots/<shot_id>/keyframes/generate", methods=["POST"])
+@_project_lock_guard
+def api_generate_keyframe(pid, shot_id):
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+    scene, _shot = _locate_shot(project, shot_id)
+    if not scene:
+        return jsonify({"error": "Shot not found"}), 404
+
+    data = request.json if request.is_json else {}
+    try:
+        result = _get_stage_pipeline(pid).generate_keyframe_take(
+            scene["id"],
+            shot_id,
+            positive_prompt=data.get("positive_prompt"),
+            negative_prompt=data.get("negative_prompt"),
+        )
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
+
+    status = 200 if result.get("success") else 409
+    return jsonify(result), status
+
+
+@app.route("/api/projects/<pid>/shots/<shot_id>/keyframes/<take_id>/approve", methods=["POST"])
+@_project_lock_guard
+def api_approve_keyframe_take(pid, shot_id, take_id):
+    try:
+        result = _get_stage_pipeline(pid).approve_take(shot_id, take_id, "keyframe")
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
+    status = 200 if not result.get("error") else 409
+    return jsonify(result), status
+
+
+@app.route("/api/projects/<pid>/shots/<shot_id>/motion/generate", methods=["POST"])
+@_project_lock_guard
+def api_generate_motion(pid, shot_id):
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+    scene, _shot = _locate_shot(project, shot_id)
+    if not scene:
+        return jsonify({"error": "Shot not found"}), 404
+
+    try:
+        result = _get_stage_pipeline(pid).generate_motion_take(scene["id"], shot_id)
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
+
+    status = 200 if result.get("success") else 409
+    return jsonify(result), status
+
+
+@app.route("/api/projects/<pid>/shots/<shot_id>/final/<take_id>/approve", methods=["POST"])
+@_project_lock_guard
+def api_approve_final_take(pid, shot_id, take_id):
+    try:
+        result = _get_stage_pipeline(pid).approve_take(shot_id, take_id, "final")
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
+    status = 200 if not result.get("error") else 409
+    return jsonify(result), status
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/prompt", methods=["PUT"])
@@ -859,12 +980,21 @@ def api_update_shot_prompt(pid, shot_id):
 @app.route("/api/projects/<pid>/shots/<shot_id>", methods=["PUT"])
 @_project_lock_guard
 def api_update_shot(pid, shot_id):
-    """Update shot fields (target_api, camera, visual_effect, prompt, scene_foley)."""
+    """Update shot fields used by the guided shot editor."""
     if not request.is_json:
         return jsonify({"error": "JSON body required"}), 400
 
     data = request.json
-    allowed_fields = {"target_api", "camera", "visual_effect", "prompt", "scene_foley"}
+    allowed_fields = {
+        "target_api",
+        "camera",
+        "visual_effect",
+        "prompt",
+        "scene_foley",
+        "negative_constraints",
+        "continuity_constraints",
+        "intent_notes",
+    }
     updates = {k: v for k, v in data.items() if k in allowed_fields}
 
     if "target_api" in updates and updates["target_api"] not in TARGET_APIS:
@@ -916,7 +1046,10 @@ def api_pipeline_state(pid):
     pipeline = _running_pipelines.get(pid)
     if pipeline:
         return jsonify(pipeline.get_state())
-    return jsonify({"error": "No generation in progress", "paused": False, "cancelled": False}), 404
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found", "paused": False, "cancelled": False}), 404
+    return jsonify(CinemaPipeline(pid).get_state())
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/regenerate", methods=["POST"])
@@ -946,24 +1079,8 @@ def api_regenerate_shot(pid, shot_id):
         result = pipeline.regenerate_shot(scene_id, shot_id)
         return jsonify(result)
 
-    q = _progress_queues.get(pid)
-
-    def progress_cb(stage, detail, percent, scene_id="", shot_id="",
-                    image_url="", identity_score=-1, director_review=None, **kwargs):
-        event = {"stage": stage, "detail": detail, "percent": percent}
-        if scene_id:
-            event["scene_id"] = scene_id
-        if shot_id:
-            event["shot_id"] = shot_id
-        if image_url:
-            event["image_url"] = image_url
-        if identity_score >= 0:
-            event["identity_score"] = identity_score
-        if q:
-            q.put(event)
-
     try:
-        temp_pipeline = CinemaPipeline(pid, progress_callback=progress_cb)
+        temp_pipeline = CinemaPipeline(pid, progress_callback=_make_progress_cb(pid))
         result = temp_pipeline.regenerate_shot(scene_id, shot_id)
         return jsonify(result)
     except Exception as e:
@@ -971,43 +1088,52 @@ def api_regenerate_shot(pid, shot_id):
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/correct", methods=["POST"])
+@_project_lock_guard
 def api_correct_shot(pid, shot_id):
     """Apply a correction tool to a clip during Director's Cut review."""
-    pipeline = _running_pipelines.get(pid)
-    if not pipeline:
-        return jsonify({"error": "No pipeline running — start generation first"}), 404
-
     data = request.json if request.is_json else {}
     action = data.get("action", "")
     params = data.get("params", {})
+    take_id = data.get("take_id", "")
 
     if not action:
         return jsonify({"error": "Missing 'action' field"}), 400
 
-    result = pipeline.apply_correction(shot_id, action, params)
-    return jsonify(result)
+    try:
+        result = _get_stage_pipeline(pid).apply_correction(shot_id, action, params, take_id=take_id)
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
+    status = 200 if result.get("success") else 409
+    return jsonify(result), status
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/diagnose", methods=["POST"])
 def api_diagnose_shot(pid, shot_id):
     """Run quality diagnostics on a clip."""
-    pipeline = _running_pipelines.get(pid)
-    if not pipeline:
-        return jsonify({"error": "No pipeline running"}), 404
-
-    result = pipeline.diagnose_clip(shot_id)
+    take_id = request.json.get("take_id", "") if request.is_json else ""
+    try:
+        result = _get_stage_pipeline(pid).diagnose_clip(shot_id, take_id=take_id)
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
     return jsonify(result)
 
 
+@app.route("/api/projects/<pid>/assemble", methods=["POST"])
 @app.route("/api/projects/<pid>/proceed-assembly", methods=["POST"])
 def api_proceed_assembly(pid):
-    """Resume pipeline from Director's Cut review to final assembly."""
+    """Assemble only from approved final takes, or resume the paused batch wrapper."""
     pipeline = _running_pipelines.get(pid)
     if not pipeline:
-        return jsonify({"error": "No pipeline running"}), 404
+        try:
+            result = CinemaPipeline(pid, progress_callback=_make_progress_cb(pid)).assemble_approved_takes()
+        except ValueError:
+            return jsonify({"error": "Project not found"}), 404
+        status = 200 if result.get("success") else 409
+        return jsonify(result), status
 
-    pipeline.proceed_to_assembly()
-    return jsonify({"proceeding": True})
+    result = pipeline.proceed_to_assembly()
+    status = 200 if result.get("success") else 409
+    return jsonify(result), status
 
 
 # ---------------------------------------------------------------------------

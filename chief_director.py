@@ -19,6 +19,7 @@ import json
 import base64
 from typing import Optional, List, Dict
 from dotenv import load_dotenv
+from pipeline_context import PIPELINE_CONTEXT
 
 load_dotenv()
 
@@ -154,28 +155,9 @@ Before outputting, verify:
 [T9] Is target_api appropriate for the shot type? → If not, recommend correct API.
 </TRIPWIRES>
 
-<VIDEO_GENERATION_EXPERTISE>
-You understand the full AI video generation pipeline. Use this knowledge for smarter validation and mutation:
+""" + PIPELINE_CONTEXT + """
 
-API ROUTING VALIDATION:
-- Portrait/close-up shots SHOULD use KLING_NATIVE (subject binding + face_consistency)
-- Action/dynamic shots SHOULD use SORA_NATIVE (best motion physics, cloth sim)
-- Wide/establishing shots SHOULD use LTX (4K, cheapest, depth-aware)
-- Landscape/environment shots SHOULD use LTX (no face lock needed, lowest cost)
-- If target_api doesn't match shot type, flag as violation and suggest correct API.
-
-IDENTITY SYSTEM (PuLID/Kontext):
-- The pipeline uses PuLID for face-locking: reference photos → face embedding → injected into generation
-- PuLID weight varies by shot type: portrait=1.0, medium=0.9, wide=0.65, action=0.8, landscape=0.0
-- Describing faces in prompts CONFLICTS with PuLID → produces a DIFFERENT PERSON (HC2 is critical)
-- Identity validation uses DeepFace with thresholds: portrait=0.70, medium=0.65, wide=0.55, action=0.60
-
-COMFYUI PARAMETERS (image generation):
-- Sampler: dpmpp_2m, Scheduler: sgm_uniform (always — optimized for FLUX)
-- Guidance: 3.5 (FLUX sweet spot), Steps: 20-25
-- PAG scale: 3.0 for portraits, 2.0 for action (softness allows motion), 3.5 for landscape (max detail)
-
-MUTATION STRATEGY:
+<CHIEF_DIRECTOR_MUTATION_STRATEGY>
 When suggesting prompt_mutation for failures:
 - identity_only (face mismatch): Add "facing camera directly" to [ACTION], remove any face descriptors,
   suggest increasing PuLID weight. Do NOT change [SCENE] or [QUALITY].
@@ -184,12 +166,7 @@ When suggesting prompt_mutation for failures:
 - aggressive (both failing): Simplify entire prompt — shorter prompts give models more room.
   Remove decorative adjectives, keep only structural descriptions.
   Reduce prompt to under 100 words for maximum model compliance.
-
-PROMPT LENGTH WISDOM:
-- Prompts over 150 words risk "prompt wrestling" where model can't satisfy all constraints
-- For retry mutations, SHORTEN the prompt — don't add more constraints
-- The 5-section structure ([SHOT][SCENE][ACTION][OUTFIT][QUALITY]) is the maximum complexity
-</VIDEO_GENERATION_EXPERTISE>"""
+</CHIEF_DIRECTOR_MUTATION_STRATEGY>"""
 
     def validate_shot_prompts(self, shots: List[Dict], scene: Dict) -> Dict:
         """

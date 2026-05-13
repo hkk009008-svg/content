@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Project, AppConfig, Scene } from '../types/project'
+import { classifyShotType, getSceneGuidance, getShotTemplate } from '../lib/guidance'
 
 const API = '/api'
 
@@ -124,6 +125,21 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
         : [...f.characters_present, charId],
     }))
   }
+
+  const addSceneGuidance = getSceneGuidance({
+    id: 'draft',
+    order: 0,
+    title: form.title,
+    location_id: form.location_id,
+    characters_present: form.characters_present,
+    action: form.action,
+    dialogue: form.dialogue,
+    mood: form.mood,
+    camera_direction: form.camera_direction,
+    duration_seconds: parseFloat(form.duration_seconds || '0') || 0,
+    num_shots: 0,
+    shots: [],
+  })
 
   return (
     <div className="p-4">
@@ -275,19 +291,68 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                     className="w-full bg-cinema-panel border border-cinema-border rounded px-3 py-2 text-xs text-cinema-text placeholder:text-cinema-muted focus:outline-none focus:border-cinema-accent" />
                 </div>
 
+                {(() => {
+                  const guidance = getSceneGuidance(scene)
+                  return (
+                    <div className="rounded-lg border border-cinema-accent/20 bg-cinema-accent/5 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-semibold text-cinema-text">{guidance.title}</div>
+                          <p className="mt-1 text-[11px] leading-relaxed text-cinema-muted">{guidance.recommendation}</p>
+                        </div>
+                        <span className="rounded bg-cinema-bg px-2 py-0.5 text-[10px] uppercase tracking-wide text-cinema-accent">{guidance.mode}</span>
+                      </div>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <div>
+                          <div className="text-[10px] font-mono uppercase text-cinema-accent">Coverage</div>
+                          <div className="mt-1 space-y-1">
+                            {guidance.coverage.map((item) => (
+                              <div key={item} className="text-[11px] text-cinema-muted">{item}</div>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] font-mono uppercase text-cinema-accent">Parameter Focus</div>
+                          <div className="mt-1 space-y-1">
+                            {guidance.parameterTips.map((item) => (
+                              <div key={item} className="text-[11px] text-cinema-muted">{item}</div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })()}
+
                 {/* Shot breakdown preview */}
                 {scene.shots && scene.shots.length > 0 && (
                   <div>
                     <label className="text-xs text-cinema-muted block mb-1">Shot Breakdown ({scene.shots.length} shots)</label>
                     <div className="space-y-1">
-                      {scene.shots.map((shot, si) => (
-                        <div key={shot.id || si} className="bg-cinema-panel rounded px-2 py-1.5 text-[10px] text-cinema-muted flex gap-2">
-                          <span className="text-cinema-accent font-mono">{si + 1}</span>
-                          <span className="flex-1 line-clamp-1">{shot.prompt?.slice(0, 80)}...</span>
-                          <span className="text-cinema-muted">{shot.camera}</span>
-                          <span className="text-cinema-muted">{shot.target_api}</span>
-                        </div>
-                      ))}
+                      {scene.shots.map((shot, si) => {
+                        const shotType = classifyShotType(shot)
+                        const template = getShotTemplate(shot, config)
+                        const recommendedApi = template?.target_api || shot.target_api
+                        return (
+                          <div key={shot.id || si} className="rounded bg-cinema-panel px-2 py-1.5 text-[10px] text-cinema-muted">
+                            <div className="flex gap-2">
+                              <span className="font-mono text-cinema-accent">{si + 1}</span>
+                              <span className="flex-1 line-clamp-1">{shot.prompt?.slice(0, 80)}...</span>
+                              <span>{shot.camera}</span>
+                              <span>{shot.target_api}</span>
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-2">
+                              <span className="rounded bg-cinema-bg px-1.5 py-0.5 text-[9px] uppercase text-cinema-accent">{shotType}</span>
+                              {template && (
+                                <>
+                                  <span className="rounded bg-cinema-bg px-1.5 py-0.5 text-[9px]">Best API: {config?.api_registry?.[recommendedApi]?.label || recommendedApi}</span>
+                                  <span className="rounded bg-cinema-bg px-1.5 py-0.5 text-[9px]">CFG {template.guidance} / {template.steps} steps</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
@@ -339,6 +404,33 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
             <input type="number" min={2} max={30} step={0.5} value={form.duration_seconds}
               onChange={e => setForm({ ...form, duration_seconds: e.target.value })}
               className="bg-cinema-bg border border-cinema-border rounded px-2 py-1.5 text-xs text-cinema-text" placeholder="Duration (s)" />
+          </div>
+          <div className="rounded-lg border border-cinema-accent/20 bg-cinema-accent/5 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xs font-semibold text-cinema-text">{addSceneGuidance.title}</div>
+                <p className="mt-1 text-[11px] leading-relaxed text-cinema-muted">{addSceneGuidance.recommendation}</p>
+              </div>
+              <span className="rounded bg-cinema-bg px-2 py-0.5 text-[10px] uppercase tracking-wide text-cinema-accent">{addSceneGuidance.mode}</span>
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div>
+                <div className="text-[10px] font-mono uppercase text-cinema-accent">Coverage</div>
+                <div className="mt-1 space-y-1">
+                  {addSceneGuidance.coverage.map((item) => (
+                    <div key={item} className="text-[11px] text-cinema-muted">{item}</div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] font-mono uppercase text-cinema-accent">Parameter Focus</div>
+                <div className="mt-1 space-y-1">
+                  {addSceneGuidance.parameterTips.map((item) => (
+                    <div key={item} className="text-[11px] text-cinema-muted">{item}</div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
           <div className="flex gap-2">
             <button onClick={handleAdd} disabled={!form.title.trim()}

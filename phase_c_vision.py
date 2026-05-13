@@ -2,6 +2,7 @@ import cv2
 import os
 import json
 import base64
+from pipeline_context import PIPELINE_CONTEXT
 try:
     from deepface import DeepFace
     VISION_AVAILABLE = True
@@ -243,7 +244,8 @@ def validate_shot_quality_vision(image_path: str, original_prompt: str) -> dict:
             "5. Prompt adherence — does the image match what was requested?\n"
             "6. Artifact detection — any glitches, extra limbs, blurry regions, text artifacts?\n\n"
             "Respond ONLY with valid JSON:\n"
-            '{"score": <0-10>, "issues": ["..."], "suggestions": ["..."]}'
+            '{"score": <0-10>, "issues": ["..."], "suggestions": ["..."]}\n\n'
+            + PIPELINE_CONTEXT
         )
 
         response = client.chat.completions.create(
@@ -337,7 +339,8 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
             "IGNORE differences in: clothing, background, lighting, pose, expression, "
             "image style (photo vs illustration).\n\n"
             "Respond ONLY with valid JSON:\n"
-            '{"confidence": <0.0-1.0>, "issues": ["..."]}'
+            '{"confidence": <0.0-1.0>, "issues": ["..."]}\n\n'
+            + PIPELINE_CONTEXT
         )
 
         response = client.messages.create(

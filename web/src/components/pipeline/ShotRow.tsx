@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
-import type { Shot, ShotState, ApiInfo } from '../../types/project'
+import type { Shot, ShotState, ApiInfo, AppConfig } from '../../types/project'
 import ShotApprovalControls from './ShotApprovalControls'
 import PromptEditor from './PromptEditor'
+import { classifyShotType, getShotTemplate } from '../../lib/guidance'
 
 // Module-level cache for API registry (shared across all ShotRow instances)
-let _apiRegistryCache: Record<string, ApiInfo> | null = null
+let _configCache: AppConfig | null = null
 
 interface Props {
   shot: Shot
@@ -47,15 +48,16 @@ function getStatusBadge(status: string | undefined) {
 export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId, onRegenerate }: Props) {
   const [editingPrompt, setEditingPrompt] = useState(false)
   const [regenerating, setRegenerating] = useState(false)
-  const [apiRegistry, setApiRegistry] = useState<Record<string, ApiInfo> | null>(_apiRegistryCache)
+  const [config, setConfig] = useState<AppConfig | null>(_configCache)
+  const apiRegistry: Record<string, ApiInfo> | null = config?.api_registry || null
 
   // Load API registry once (module-level cache shared across instances)
   useEffect(() => {
-    if (_apiRegistryCache) { setApiRegistry(_apiRegistryCache); return }
+    if (_configCache) { setConfig(_configCache); return }
     fetch('/api/config').then(r => r.json()).then(cfg => {
       if (cfg.api_registry) {
-        _apiRegistryCache = cfg.api_registry
-        setApiRegistry(cfg.api_registry)
+        _configCache = cfg
+        setConfig(cfg)
       }
     }).catch(() => {})
   }, [])
@@ -74,7 +76,8 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
   const coherenceScore = shotState?.coherence_score
   const motionScore = shotState?.motion_score
   const failureReason = shotState?.failure_reason
-  const shotType = shotState?.shot_type
+  const shotType = shotState?.shot_type || classifyShotType(shot)
+  const shotTemplate = getShotTemplate(shot, config)
   const isReviewable = status === 'image_review' || (imageUrl && status !== 'generating_image')
   const isFailed = status === 'failed'
 
@@ -165,7 +168,23 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
               {shot.target_api}
             </span>
           )}
+          {shotTemplate && (
+            <>
+              <span className="text-[10px] text-cinema-muted bg-cinema-panel px-1.5 py-0.5 rounded">
+                Best: {apiRegistry?.[shotTemplate.target_api]?.label || shotTemplate.target_api}
+              </span>
+              <span className="text-[10px] text-cinema-muted bg-cinema-panel px-1.5 py-0.5 rounded">
+                CFG {shotTemplate.guidance} / {shotTemplate.steps} steps
+              </span>
+            </>
+          )}
         </div>
+
+        {shotTemplate && (
+          <p className="mt-1 text-[10px] text-cinema-muted">
+            {shotTemplate.description}
+          </p>
+        )}
 
         {/* Quality metrics row */}
         {(identityScore != null || coherenceScore != null || motionScore != null) && (
@@ -241,6 +260,7 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
       {/* Prompt editor modal */}
       {editingPrompt && (
         <PromptEditor
+          shot={shot}
           shotId={shot.id}
           projectId={projectId}
           currentPrompt={shot.prompt}

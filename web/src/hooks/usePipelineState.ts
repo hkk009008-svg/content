@@ -7,11 +7,12 @@ const PIPELINE_STAGES: PipelineStage[] = [
   { id: 'AUDIO', label: 'Background Music', status: 'pending' },
   { id: 'DECOMPOSE', label: 'Shot Decomposition', status: 'pending' },
   { id: 'DIRECTOR', label: 'Director Review', status: 'pending' },
-  { id: 'DIALOGUE', label: 'Dialogue Audio', status: 'pending' },
-  { id: 'GENERATE', label: 'Image Generation', status: 'pending' },
-  { id: 'VIDEO', label: 'Video Generation', status: 'pending' },
-  { id: 'INTERP', label: 'Frame Interpolation', status: 'pending' },
-  { id: 'REVIEW', label: "Director's Cut", status: 'pending' },
+  { id: 'PLAN_REVIEW', label: 'Shot Plans', status: 'pending' },
+  { id: 'KEYFRAME', label: 'Keyframes', status: 'pending' },
+  { id: 'KEYFRAME_REVIEW', label: 'Keyframe Review', status: 'pending' },
+  { id: 'MOTION', label: 'Motion', status: 'pending' },
+  { id: 'REVIEW', label: 'Final Review', status: 'pending' },
+  { id: 'SCENE_PREVIEW', label: 'Scene Preview', status: 'pending' },
   { id: 'ASSEMBLY', label: 'Final Assembly', status: 'pending' },
 ]
 
@@ -26,7 +27,7 @@ export function usePipelineState(projectId: string | null) {
 
   // Route incoming events to the right state buckets
   const processEvent = useCallback((event: ProgressEvent) => {
-    const { stage, scene_id, shot_id, image_url, identity_score, director_review,
+    const { stage, scene_id, shot_id, image_url, video_url, take_id, take_kind, identity_score, director_review,
             coherence_score, motion_score, shot_type, failure_reason, quality_metrics } = event
 
     // Track pause/resume
@@ -59,6 +60,9 @@ export function usePipelineState(projectId: string | null) {
         const updated = { ...existing }
 
         if (image_url) updated.generated_image = image_url
+        if (video_url) updated.generated_video = video_url
+        if (take_id) updated.take_id = take_id
+        if (take_kind) updated.take_kind = take_kind
         if (identity_score !== undefined && identity_score >= 0) updated.identity_score = identity_score
         if (coherence_score !== undefined && coherence_score >= 0) updated.coherence_score = coherence_score
         if (motion_score !== undefined && motion_score >= 0) updated.motion_score = motion_score
@@ -67,14 +71,14 @@ export function usePipelineState(projectId: string | null) {
         if (quality_metrics) updated.quality_metrics = quality_metrics
 
         // Map stage to shot status
-        if (stage === 'GENERATE' || stage === 'REGENERATE') updated.status = 'generating_image'
-        if (stage === 'VALIDATED' || stage === 'IDENTITY_OK') updated.status = 'image_review'
-        if (stage === 'REGENERATED') updated.status = 'image_review'
-        if (stage === 'IDENTITY_FAIL') updated.status = 'generating_image'
+        if (stage === 'PLAN_REVIEW') updated.status = 'plan_review'
+        if (stage === 'KEYFRAME') updated.status = 'generating_image'
+        if (stage === 'KEYFRAME_READY' || stage === 'KEYFRAME_REVIEW') updated.status = 'image_review'
         if (stage === 'SHOT_FAILED') updated.status = 'failed'
-        if (stage === 'VIDEO') updated.status = 'generating_video'
-        if (stage === 'INTERP' || stage === 'LIPSYNC' || stage === 'QUALITY') updated.status = 'post_processing'
-        if (stage === 'UPSCALE') updated.status = 'post_processing'
+        if (stage === 'MOTION') updated.status = 'generating_video'
+        if (stage === 'MOTION_READY' || stage === 'REVIEW') updated.status = 'final_review'
+        if (stage === 'POSTPROCESS_READY') updated.status = 'post_processing'
+        if (stage === 'COMPLETE') updated.status = 'complete'
 
         next.set(shot_id, updated)
         return next
@@ -107,39 +111,70 @@ export function usePipelineState(projectId: string | null) {
     setIsPaused(false)
   }, [projectId])
 
+  const postJson = useCallback(async (path: string, body?: Record<string, any>) => {
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    })
+    return res.json()
+  }, [])
+
   const regenerateShot = useCallback(async (shotId: string, positivePrompt?: string, negativePrompt?: string) => {
     if (!projectId) return null
     const body: any = {}
     if (positivePrompt) body.positive_prompt = positivePrompt
     if (negativePrompt) body.negative_prompt = negativePrompt
-    const res = await fetch(`/api/projects/${projectId}/shots/${shotId}/regenerate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    return res.json()
-  }, [projectId])
+    return postJson(`/api/projects/${projectId}/shots/${shotId}/regenerate`, body)
+  }, [projectId, postJson])
 
-  const correctShot = useCallback(async (shotId: string, action: string, params: Record<string, any> = {}) => {
+  const approveShotPlan = useCallback(async (shotId: string) => {
     if (!projectId) return null
-    const res = await fetch(`/api/projects/${projectId}/shots/${shotId}/correct`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, params }),
-    })
-    return res.json()
-  }, [projectId])
+    return postJson(`/api/projects/${projectId}/shots/${shotId}/plan/approve`)
+  }, [projectId, postJson])
 
-  const diagnoseShot = useCallback(async (shotId: string) => {
+  const rejectShotPlan = useCallback(async (shotId: string, reason = '') => {
     if (!projectId) return null
-    const res = await fetch(`/api/projects/${projectId}/shots/${shotId}/diagnose`, { method: 'POST' })
-    return res.json()
-  }, [projectId])
+    return postJson(`/api/projects/${projectId}/shots/${shotId}/plan/reject`, { reason })
+  }, [projectId, postJson])
+
+  const generateKeyframe = useCallback(async (shotId: string, positivePrompt?: string, negativePrompt?: string) => {
+    if (!projectId) return null
+    const body: Record<string, any> = {}
+    if (positivePrompt) body.positive_prompt = positivePrompt
+    if (negativePrompt) body.negative_prompt = negativePrompt
+    return postJson(`/api/projects/${projectId}/shots/${shotId}/keyframes/generate`, body)
+  }, [projectId, postJson])
+
+  const approveKeyframe = useCallback(async (shotId: string, takeId: string) => {
+    if (!projectId) return null
+    return postJson(`/api/projects/${projectId}/shots/${shotId}/keyframes/${takeId}/approve`)
+  }, [projectId, postJson])
+
+  const generateMotion = useCallback(async (shotId: string) => {
+    if (!projectId) return null
+    return postJson(`/api/projects/${projectId}/shots/${shotId}/motion/generate`)
+  }, [projectId, postJson])
+
+  const approveFinal = useCallback(async (shotId: string, takeId: string) => {
+    if (!projectId) return null
+    return postJson(`/api/projects/${projectId}/shots/${shotId}/final/${takeId}/approve`)
+  }, [projectId, postJson])
+
+  const correctShot = useCallback(async (shotId: string, action: string, params: Record<string, any> = {}, takeId?: string) => {
+    if (!projectId) return null
+    return postJson(`/api/projects/${projectId}/shots/${shotId}/correct`, { action, params, take_id: takeId })
+  }, [projectId, postJson])
+
+  const diagnoseShot = useCallback(async (shotId: string, takeId?: string) => {
+    if (!projectId) return null
+    return postJson(`/api/projects/${projectId}/shots/${shotId}/diagnose`, takeId ? { take_id: takeId } : {})
+  }, [projectId, postJson])
 
   const proceedToAssembly = useCallback(async () => {
     if (!projectId) return
-    await fetch(`/api/projects/${projectId}/proceed-assembly`, { method: 'POST' })
-  }, [projectId])
+    return postJson(`/api/projects/${projectId}/assemble`)
+  }, [projectId, postJson])
 
   // Enhanced start that also processes events
   const start = useCallback(() => {
@@ -163,6 +198,12 @@ export function usePipelineState(projectId: string | null) {
     // Pipeline controls
     pause,
     resume,
+    approveShotPlan,
+    rejectShotPlan,
+    generateKeyframe,
+    approveKeyframe,
+    generateMotion,
+    approveFinal,
     regenerateShot,
     correctShot,
     diagnoseShot,

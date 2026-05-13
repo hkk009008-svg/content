@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from tavily import TavilyClient
 from firecrawl import FirecrawlApp
+from pipeline_context import PIPELINE_CONTEXT
 
 load_dotenv()
 
@@ -68,6 +69,8 @@ def generate_production_blueprint(ctx: dict) -> bool:
     5. **The Hero Subject**: Formulate one definitive, highly specific 'Hero Object' or 'Subject' that physically anchors the emotion of the film (e.g., 'a worn-out pair of hands holding a fading photograph' or 'a single drop of rain on a foggy window'). This explicit subject MUST be the core visual anchor in every single shot to guarantee phenomenal visual continuity.
     
     Return your entire final command strictly adhering to the JSON schema once you have finished using the research tools.
+
+    {PIPELINE_CONTEXT}
     """
     
     tools = [

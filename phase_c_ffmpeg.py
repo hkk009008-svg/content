@@ -955,8 +955,8 @@ def execute_master_ffmpeg_assembly(video_path: str, tts_path: str, bgm_path: str
         f"{voice_bus}"
         
         # 2. BGM AUTOMATION & AGGRESSIVE DUCKING
-        "[2:a]volume=0.9,aloop=loop=-1:size=2e9[bgm_looped];"
-        "[bgm_looped][tts_sc]sidechaincompress=threshold=0.015:ratio=12:attack=5:release=200:makeup=1.8[bgm_ducked];"
+        "[2:a]volume=0.9[bgm_ready];"
+        "[bgm_ready][tts_sc]sidechaincompress=threshold=0.015:ratio=12:attack=5:release=200:makeup=1.8[bgm_ducked];"
         
         # 3. SFX SYNTHESIS (Cinematic Room Boom + Noise Cyber-Rise)
         "aevalsrc='0.8*sin(150*exp(-t*4)*t)|0.8*sin(150*exp(-t*4)*t)':d=3:s=48000,"

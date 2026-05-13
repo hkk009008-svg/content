@@ -54,10 +54,10 @@ class CharacterContinuityTracker:
         scene_context: str = "",
     ) -> str:
         """
-        Builds a detailed prompt fragment for a character that includes:
-        - Physical description and traits
-        - Wardrobe continuity from last appearance
-        - Spatial position hints
+        Builds a continuity-safe prompt fragment for a character.
+        Identity remains bound to reference images and embeddings; this fragment
+        only reinforces safe continuity cues such as wardrobe, approved
+        reference usage, and spatial position.
         """
         char = self.characters.get(char_id)
         if not char:
@@ -65,15 +65,13 @@ class CharacterContinuityTracker:
 
         parts = []
 
-        # Core physical identity
         name = char.get("name", "character")
-        traits = char.get("physical_traits", char.get("description", ""))
-        parts.append(f"{name}: {traits}")
+        parts.append(f"{name} must match the approved reference identity")
 
         # Wardrobe continuity — use last known appearance if available
         last_appearance = self.appearance_log.get(char_id, {})
         if last_appearance.get("wardrobe"):
-            parts.append(f"wearing {last_appearance['wardrobe']}")
+            parts.append(f"wardrobe continuity: {last_appearance['wardrobe']}")
 
         # Spatial position
         if spatial_position:
@@ -278,7 +276,7 @@ class PhysicsPromptEngineer:
             curr_camera = current_shot.get("camera", "")
             if prev_camera and curr_camera:
                 constraints.append(
-                    f"Camera smoothly transitions from {prev_camera} to {curr_camera}"
+                    f"Camera cuts from {prev_camera} to {curr_camera} — hard cut, no dissolve"
                 )
 
         constraints.append(
@@ -427,6 +425,7 @@ class ContinuityEngine:
         scene: dict,
         previous_shot: Optional[dict] = None,
         shot_index: int = 0,
+        approved_anchor_image: Optional[str] = None,
     ) -> dict:
         """
         Takes a raw shot prompt from the scene decomposer and enhances it with:
@@ -481,9 +480,14 @@ class ContinuityEngine:
         if motion:
             prompt_parts.append(motion)
 
+        continuity_notes = shot.get("continuity_constraints", "")
+        if continuity_notes:
+            prompt_parts.append(f"Continuity note: {continuity_notes}")
+
         # 5. Temporal consistency config
         scene_id = scene.get("id", "")
-        use_img2img = self.temporal_manager.should_use_img2img(scene_id, shot_index)
+        anchor_image = approved_anchor_image if approved_anchor_image and os.path.exists(approved_anchor_image) else None
+        use_img2img = bool(anchor_image) or self.temporal_manager.should_use_img2img(scene_id, shot_index)
 
         primary_char = self.character_tracker.get_primary_character(chars_in_frame)
 
@@ -514,7 +518,7 @@ class ContinuityEngine:
 
         continuity_config = {
             "use_img2img": use_img2img,
-            "init_image": self.temporal_manager.get_init_image() if use_img2img else None,
+            "init_image": anchor_image or (self.temporal_manager.get_init_image() if use_img2img else None),
             "denoise_strength": denoise,
             "location_seed": loc_seed,
             "scene_seed": scene_seed,
@@ -525,6 +529,8 @@ class ContinuityEngine:
             "identity_threshold": identity_threshold,
             "shot_type": shot_type,
             "pulid_weight_override": pulid_weight_override,
+            "negative_constraints": shot.get("negative_constraints", ""),
+            "approved_anchor_image": anchor_image,
         }
 
         # Get PuLID reference + multi-angle refs + identity anchor for primary character

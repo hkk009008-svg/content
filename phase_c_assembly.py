@@ -283,14 +283,15 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             except Exception as e_ipa:
                 print(f"      ↳ IP-Adapter skipped (node not available): {e_ipa}")
 
-        # 5d. FACE REFINEMENT: FaceDetailer (Impact Pack) or ReActor post-generation
-        # FaceDetailer detects faces, crops the region, regenerates at higher detail,
-        # then composites back — fixing eye/mouth artifacts without full regeneration.
-        # Falls back to FAL PixVerse cloud face swap if no ComfyUI nodes available.
-        if character_image and os.path.exists(character_image):
+        # 5d. FACE REFINEMENT: FaceDetailer / ReActor (DISABLED)
+        # FaceDetailer and ReActor require Impact Pack which has missing deps (cv2)
+        # on the current RunPod pod. ComfyUI's /object_info returns 200 for nodes
+        # that exist on disk but failed to import, causing workflow queue rejection.
+        # PuLID face-locking provides sufficient identity — skip refinement.
+        # Re-enable when Impact Pack deps are installed (pip install opencv-python-headless insightface).
+        if False and character_image and os.path.exists(character_image):
             _face_refine_node = None
             try:
-                # Check which face refinement nodes are available on the pod
                 for node_class in ["FaceDetailer", "ReActorFaceSwap"]:
                     _obj_info = requests.get(f"{server_url}/object_info/{node_class}", timeout=5)
                     if _obj_info.status_code == 200:
