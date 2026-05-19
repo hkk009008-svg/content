@@ -2,8 +2,7 @@
 Competitive multi-LLM generation and judging system for the cinema pipeline.
 
 Generates candidate outputs from multiple models in parallel, then uses a
-judge model to select the best result.  Also provides ensemble quality voting
-that aggregates vision-based QA checks across different model backends.
+judge model to select the best result.
 """
 
 from __future__ import annotations
@@ -30,15 +29,6 @@ class EnsembleResult:
     candidates: list[Any]
     models_used: list[str]
     judge_model: str
-
-
-@dataclass
-class EnsembleQualityResult:
-    """Aggregated result of multi-model quality voting."""
-    passed: bool
-    votes: list[dict]
-    confidence: float
-    reasons: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -172,99 +162,6 @@ class LLMEnsemble:
             candidates=ordered_candidates,
             models_used=ordered_models,
             judge_model=judge_model or _DEFAULT_JUDGE,
-        )
-
-    def ensemble_quality_vote(
-        self,
-        image_path: str,
-        prompt: str,
-        reference_path: str | None = None,
-    ) -> EnsembleQualityResult:
-        """Run 2-3 vision quality checks in parallel and aggregate votes.
-
-        Checks executed:
-        1. ``validate_shot_quality_vision`` (GPT-4o) -- composition / artifacts
-        2. ``validate_identity_vision`` (Claude) -- identity match (if *reference_path*)
-        3. ``validate_scene_coherence_vision`` (Gemini) -- scene coherence
-
-        A candidate passes if at least ``ceil(N/2)`` of the available voters
-        pass (i.e. 2-of-3 when all three run, 1-of-2 when only two run).
-
-        Parameters
-        ----------
-        image_path:
-            Path to the generated image to evaluate.
-        prompt:
-            The original generation prompt (used by shot-quality check).
-        reference_path:
-            Optional reference image for identity comparison.
-
-        Returns
-        -------
-        EnsembleQualityResult
-        """
-        # Lazy import to keep phase_c_vision out of llm.ensemble's import
-        # graph. The vision checks are an outlier on this class — every other
-        # method is a pure LLM call — and depending on phase_c_vision at module
-        # scope would create a one-way design coupling we'd rather avoid.
-        from phase_c_vision import (
-            validate_identity_vision,
-            validate_scene_coherence_vision,
-            validate_shot_quality_vision,
-        )
-
-        tasks: list[tuple[str, Any, tuple]] = [
-            ("shot_quality", validate_shot_quality_vision, (image_path, prompt)),
-            (
-                "scene_coherence",
-                validate_scene_coherence_vision,
-                ([image_path],),  # expects a list; treat single image as 1-shot sequence
-            ),
-        ]
-        if reference_path is not None:
-            tasks.append(
-                ("identity", validate_identity_vision, (reference_path, image_path)),
-            )
-
-        # Execute checks in parallel.
-        votes: list[dict] = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(tasks)) as pool:
-            future_to_name: dict[concurrent.futures.Future, str] = {}
-            for name, fn, args in tasks:
-                future_to_name[pool.submit(fn, *args)] = name
-
-            for future in concurrent.futures.as_completed(future_to_name, timeout=120):
-                name = future_to_name[future]
-                try:
-                    result = future.result(timeout=120)
-                    votes.append({"name": name, **result})
-                except Exception as exc:
-                    votes.append({
-                        "name": name,
-                        "passed": False,
-                        "score": 0.0,
-                        "issues": [f"Check failed with error: {exc}"],
-                    })
-
-        # Aggregate.
-        pass_count = sum(1 for v in votes if v.get("passed", False))
-        total = len(votes)
-        threshold = (total // 2) + 1  # majority: 2-of-3 or 1-of-2 (ceildiv)
-        passed = pass_count >= threshold
-
-        scores = [v.get("score", 0.0) for v in votes]
-        confidence = sum(scores) / len(scores) if scores else 0.0
-
-        reasons: list[str] = []
-        for v in votes:
-            for issue in v.get("issues", []):
-                reasons.append(f"[{v['name']}] {issue}")
-
-        return EnsembleQualityResult(
-            passed=passed,
-            votes=votes,
-            confidence=confidence,
-            reasons=reasons,
         )
 
     # ------------------------------------------------------------------

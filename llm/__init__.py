@@ -11,7 +11,7 @@ Public re-exports below are the high-traffic ones. Import a submodule
 directly if you need internals.
 """
 
-from llm.ensemble import LLMEnsemble, EnsembleResult, EnsembleQualityResult
+from llm.ensemble import LLMEnsemble, EnsembleResult
 from llm.chief_director import ChiefDirector
 from llm.blueprint_director import generate_production_blueprint
 from llm.style_director import generate_style_rules, style_rules_to_prompt_suffix
@@ -19,7 +19,6 @@ from llm.style_director import generate_style_rules, style_rules_to_prompt_suffi
 __all__ = [
     "LLMEnsemble",
     "EnsembleResult",
-    "EnsembleQualityResult",
     "ChiefDirector",
     "generate_production_blueprint",
     "generate_style_rules",
