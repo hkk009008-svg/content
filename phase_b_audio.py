@@ -4,6 +4,11 @@ from elevenlabs.client import ElevenLabs
 from elevenlabs import save
 from config.settings import settings
 
+# Phase 6 backward-compat re-exports: functions moved into focused submodules
+# under audio/. Existing callers using `from phase_b_audio import generate_srt`
+# keep working; new code should import from audio.* directly.
+from audio.srt import generate_srt  # noqa: F401
+
 # Load environment variables
 # Initialize the ElevenLabs client
 client = ElevenLabs(
@@ -1288,34 +1293,8 @@ def master_music(
     return audio_path
 
 
-def generate_srt(audio_path: str, srt_path: str):
-    print(f"📝 [PHASE B] Transcribing audio back to precise SRT captions: {audio_path}")
-    import whisper
-    import datetime
-    
-    # Use the base model for speed and accuracy
-    model = whisper.load_model("base")
-    result = model.transcribe(audio_path)
-    
-    with open(srt_path, "w", encoding="utf-8") as f:
-        for i, segment in enumerate(result["segments"], start=1):
-            start = datetime.timedelta(seconds=segment["start"])
-            end = datetime.timedelta(seconds=segment["end"])
-            
-            # Format timedelta to SRT format (HH:MM:SS,mmm)
-            def format_time(td):
-                total_seconds = int(td.total_seconds())
-                hours, remainder = divmod(total_seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                milliseconds = int(td.microseconds / 1000)
-                return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
-                
-            f.write(f"{i}\n")
-            f.write(f"{format_time(start)} --> {format_time(end)}\n")
-            f.write(f"{segment['text'].strip()}\n\n")
-            
-    print(f"✅ SRT successfully saved to {srt_path}")
-    return srt_path
+# generate_srt was here — moved to audio/srt.py in Phase 6 slice 1.
+# Backward-compat import is at the top of this file.
 
 def generate_scene_foley_library(ctx: dict) -> bool:
     """Iterates through each cinematic shot and generates custom ambient Foley layer using ElevenLabs."""
