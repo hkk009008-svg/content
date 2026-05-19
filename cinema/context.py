@@ -42,6 +42,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields, asdict
 from typing import Any, Iterator, Optional
 
+from cinema.lifecycle import LifecycleService, NullLifecycle
+
 
 @dataclass
 class PipelineContext:
@@ -52,6 +54,14 @@ class PipelineContext:
     language: str = "English"
     youtube_video_id: Optional[str] = None
     master_image_seed: int = 0
+
+    # --- lifecycle (cancel / pause / gate-wait / progress) ---
+    # Default is the no-op NullLifecycle so phases can call
+    # ``ctx.lifecycle.check_pause()`` etc. unconditionally without the
+    # CLI path needing to construct anything. Interactive callers
+    # (web_server) construct a ThreadedLifecycle and assign it before
+    # calling driver.run().
+    lifecycle: LifecycleService = field(default_factory=NullLifecycle)
 
     # --- script & blueprint ---
     script_data: dict = field(default_factory=dict)
