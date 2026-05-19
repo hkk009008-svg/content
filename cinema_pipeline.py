@@ -36,7 +36,10 @@ from lip_sync import (
     extract_last_frame, generate_transition_clip,
     upscale_video_seedvr2,
 )
+from cinema.context import PipelineContext
 from cinema.lifecycle import ThreadedLifecycle
+from cinema.phases.keyframe_render import KeyframeRenderPhase
+from cinema.phases.motion_render import MotionRenderPhase
 from cinema.shots.controller import ShotControllerMixin
 from cinema.review.controller import ReviewControllerMixin
 from cinema.checkpoint import CheckpointStoreMixin
@@ -488,33 +491,59 @@ class CinemaPipeline(ShotControllerMixin, ReviewControllerMixin, CheckpointStore
             self.progress("CANCELLED", "Pipeline cancelled during shot-plan review", 0)
             return None
 
+        # Slice E (Option B): the per-shot keyframe + motion loops are
+        # extracted into dedicated Phase classes so they can be invoked
+        # independently from main.py or test code. Gates remain inline
+        # because they're not phase-shaped (they wait on operator input).
+        ctx = PipelineContext(lifecycle=self.lifecycle)
+
         project = self._refresh_project_snapshot() or self.project
-        for scene, _shot_index, shot in self._all_shots(project):
-            if self.cancelled:
-                self.progress("CANCELLED", "Pipeline cancelled by user", 0)
-                return None
-            if shot.get("approved_keyframe_take_id"):
-                continue
-            result = self.generate_keyframe_take(scene["id"], shot["id"])
-            if not result.get("success"):
-                self.failed_shots.append(shot["id"])
-                self.progress("SHOT_FAILED", result.get("error", "Keyframe generation failed"), 40, scene_id=scene["id"], shot_id=shot["id"])
+
+        def _on_keyframe_fail(scene_id: str, shot_id: str, error: str):
+            self.failed_shots.append(shot_id)
+            self.progress(
+                "SHOT_FAILED",
+                error or "Keyframe generation failed",
+                40,
+                scene_id=scene_id,
+                shot_id=shot_id,
+            )
+
+        keyframe_result = KeyframeRenderPhase(
+            shot_generator=self,
+            project=project,
+            on_failure=_on_keyframe_fail,
+        ).run(ctx)
+        self.progress("KEYFRAME_DONE", keyframe_result.message, 50)
+        if self.lifecycle.is_cancelled():
+            self.progress("CANCELLED", "Pipeline cancelled by user", 0)
+            return None
 
         if not self._wait_for_gate("KEYFRAME_REVIEW", "Approve all keyframes to continue", 55):
             self.progress("CANCELLED", "Pipeline cancelled during keyframe review", 0)
             return None
 
         project = self._refresh_project_snapshot() or self.project
-        for scene, _shot_index, shot in self._all_shots(project):
-            if self.cancelled:
-                self.progress("CANCELLED", "Pipeline cancelled by user", 0)
-                return None
-            if shot.get("approved_final_take_id"):
-                continue
-            result = self.generate_motion_take(scene["id"], shot["id"])
-            if not result.get("success"):
-                self.failed_shots.append(shot["id"])
-                self.progress("SHOT_FAILED", result.get("error", "Motion generation failed"), 70, scene_id=scene["id"], shot_id=shot["id"])
+
+        def _on_motion_fail(scene_id: str, shot_id: str, error: str):
+            self.failed_shots.append(shot_id)
+            self.progress(
+                "SHOT_FAILED",
+                error or "Motion generation failed",
+                70,
+                scene_id=scene_id,
+                shot_id=shot_id,
+            )
+
+        motion_result = MotionRenderPhase(
+            shot_generator=self,
+            project=project,
+            on_failure=_on_motion_fail,
+        ).run(ctx)
+        self.progress("MOTION_DONE", motion_result.message, 80)
+        if self.lifecycle.is_cancelled():
+            self.progress("CANCELLED", "Pipeline cancelled by user", 0)
+            return None
 
         project = self._refresh_project_snapshot() or self.project
         self._rebuild_review_clips(project)
