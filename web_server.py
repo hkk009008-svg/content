@@ -40,6 +40,7 @@ from scene_decomposer import decompose_scene, update_scene_shots, CAMERA_MOTIONS
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
 from cinema_pipeline import CinemaPipeline
+from cinema.services import state_snapshot, checkpoint_info
 from workflow_selector import WORKFLOW_TEMPLATES
 from web_services import make_progress_callback
 
@@ -742,12 +743,10 @@ def api_checkpoint(pid):
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
-    try:
-        pipeline = CinemaPipeline(pid)
-        info = pipeline.resume_info()
-        return jsonify(info)
-    except Exception as e:
-        return jsonify({"resumable": False, "error": str(e)})
+    # Lightweight path — reads the checkpoint JSON directly. No need to
+    # construct CinemaPipeline (with its ContinuityEngine + ChiefDirector
+    # + LLMEnsemble + tracker instantiation) just to read a JSON file.
+    return jsonify(checkpoint_info(pid))
 
 
 @app.route("/api/projects/<pid>/stream")
@@ -1016,7 +1015,9 @@ def api_pipeline_state(pid):
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found", "paused": False, "cancelled": False}), 404
-    return jsonify(CinemaPipeline(pid).get_state())
+    # Lightweight path — replicates get_state() shape without spinning
+    # up CinemaPipeline's heavy ctor.
+    return jsonify(state_snapshot(pid))
 
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/regenerate", methods=["POST"])
