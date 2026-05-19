@@ -7,27 +7,31 @@ Two functions plus the mastering-presets dictionary, moved out of
   master_music            -- Pedalboard / FFmpeg mastering chain
   MUSIC_MASTERING_PRESETS -- preset dictionary used by master_music
 
-Cross-module dependency note
-============================
+Cross-module dependencies
+=========================
 
-`master_music` references three symbols that still live in
-`phase_b_audio.py`:
+`master_music` uses three symbols from `audio.effects`:
 
-  apply_au_plugin           (will move to audio/effects.py)
-  apply_pedalboard_chain    (will move to audio/effects.py)
-  PEDALBOARD_AVAILABLE      (will move to audio/effects.py)
+  apply_au_plugin
+  apply_pedalboard_chain
+  PEDALBOARD_AVAILABLE
 
-To avoid a circular import (phase_b_audio.py re-exports our symbols
-from audio.music, so audio.music CANNOT import from phase_b_audio at
-module-load time), we use a lazy import inside master_music. When the
-audio effects migrate in a future slice, update this lazy import to
-point at `audio.effects` instead — the import path will be the only
-thing that changes.
+These were lazy-imported from `phase_b_audio` during slice 2 because
+the effects helpers still lived there and phase_b_audio re-exports
+audio.music's symbols (which would have caused a load-time cycle).
+Phase 6 slice 4 moved those helpers into `audio.effects`, so the
+import is now eager at module top — no cycle, no lazy fallback.
 """
 
 from __future__ import annotations
 
 import os
+
+from audio.effects import (
+    apply_au_plugin,
+    apply_pedalboard_chain,
+    PEDALBOARD_AVAILABLE,
+)
 from typing import Optional
 
 
@@ -199,17 +203,6 @@ def master_music(
         preset: Preset name from MUSIC_MASTERING_PRESETS
         au_plugin: Optional AU plugin name to apply instead of preset
     """
-    # Lazy import — the effects helpers + PEDALBOARD_AVAILABLE flag still
-    # live in phase_b_audio.py. Update this when audio/effects.py lands in
-    # a later Phase 6 slice. Lazy keeps the import edge from triggering at
-    # module-load time, which would create a cycle with phase_b_audio.py
-    # re-exporting us.
-    from phase_b_audio import (
-        apply_au_plugin,
-        apply_pedalboard_chain,
-        PEDALBOARD_AVAILABLE,
-    )
-
     if au_plugin and PEDALBOARD_AVAILABLE:
         result = apply_au_plugin(audio_path, output_path, au_plugin)
         if result != audio_path:
