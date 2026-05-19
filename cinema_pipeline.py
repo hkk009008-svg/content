@@ -7,7 +7,6 @@ Orchestrates: scene decomposition → continuity enhancement → image gen → v
 """
 
 import os
-import threading
 from typing import Optional, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
@@ -37,6 +36,7 @@ from lip_sync import (
     extract_last_frame, generate_transition_clip,
     upscale_video_seedvr2,
 )
+from cinema.lifecycle import ThreadedLifecycle
 from cinema.shots.controller import ShotControllerMixin
 from cinema.review.controller import ReviewControllerMixin
 from cinema.checkpoint import CheckpointStoreMixin
@@ -96,13 +96,17 @@ class CinemaPipeline(ShotControllerMixin, ReviewControllerMixin, CheckpointStore
 
         self.continuity = ContinuityEngine(self.project)
         self.director = ChiefDirector(self.project)
-        self.progress = progress_callback or self._default_progress
-        self.cancelled = False
 
-        # Pause/resume control
-        self._resume_event = threading.Event()
-        self._resume_event.set()  # Start unpaused
-        self.paused = False
+        # Lifecycle service — replaces the previous self.cancelled +
+        # self.paused + self._resume_event quartet with a single
+        # injectable abstraction (see cinema/lifecycle.py). The
+        # progress_callback parameter becomes the ThreadedLifecycle's
+        # report_progress sink. self.progress remains as a bound method
+        # for backward compatibility with the dozens of existing call
+        # sites that do `self.progress(stage, detail, percent, ...)`.
+        self.lifecycle = ThreadedLifecycle(
+            progress_callback=progress_callback or self._default_progress
+        )
 
         # Generation state
         self.scene_clips = {}  # scene_id -> list of video clip paths
@@ -143,28 +147,55 @@ class CinemaPipeline(ShotControllerMixin, ReviewControllerMixin, CheckpointStore
                           director_review: dict = None, **kwargs):
         print(f"[{percent:.0f}%] {stage}: {detail}")
 
+    # ------------------------------------------------------------------
+    # Lifecycle — thin delegations to self.lifecycle (ThreadedLifecycle).
+    # ``self.cancelled`` and ``self.paused`` are kept as backward-compat
+    # properties so existing checks like ``if self.cancelled:`` keep
+    # working everywhere they appear in generate() and the controllers.
+    # ------------------------------------------------------------------
+
+    @property
+    def cancelled(self) -> bool:
+        return self.lifecycle.is_cancelled()
+
+    @property
+    def paused(self) -> bool:
+        return self.lifecycle.is_paused()
+
     def cancel(self):
-        self.cancelled = True
-        self._resume_event.set()  # Unblock if paused so cancellation takes effect
+        self.lifecycle.cancel()
 
     def pause(self):
         """Pause the pipeline at the next checkpoint."""
-        if not self.paused:
-            self.paused = True
-            self._resume_event.clear()
+        if not self.lifecycle.is_paused():
+            self.lifecycle.pause()
             self.progress("PAUSED", "Pipeline paused — waiting for resume", -1)
 
     def resume(self):
         """Resume a paused pipeline."""
-        if self.paused:
-            self.paused = False
-            self._resume_event.set()
+        if self.lifecycle.is_paused():
+            self.lifecycle.resume()
             self.progress("RESUMED", "Pipeline resumed", -1)
 
     def _check_pause(self):
-        """Checkpoint: block if paused, return False if cancelled."""
-        self._resume_event.wait()  # Blocks until resume() is called
-        return not self.cancelled
+        """Checkpoint: block if paused, return False if cancelled.
+
+        Preserved as a method (not just self.lifecycle.check_pause()) so
+        the existing ``if not self._check_pause(): return None`` pattern
+        in generate() keeps working — those call sites need the bool.
+        """
+        self.lifecycle.check_pause()
+        return not self.lifecycle.is_cancelled()
+
+    @property
+    def progress(self):
+        """Thin proxy: self.progress(...) routes to self.lifecycle.report_progress(...).
+
+        Kept as a property returning the bound method so existing
+        ``self.progress(stage, detail, percent, ...)`` call sites are
+        unchanged. Looks identical to a bound method to the caller.
+        """
+        return self.lifecycle.report_progress
 
     def get_state(self) -> dict:
         """Return current pipeline state for the UI."""
