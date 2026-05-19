@@ -39,6 +39,7 @@ from lip_sync import (
 )
 from cinema.shots.controller import ShotControllerMixin
 from cinema.review.controller import ReviewControllerMixin
+from cinema.checkpoint import CheckpointStoreMixin
 from llm.chief_director import ChiefDirector
 from llm.ensemble import LLMEnsemble
 from vbench_evaluator import VBenchEvaluator
@@ -76,13 +77,11 @@ def _build_transition_prompt(from_mood: str, to_mood: str) -> str:
     return f"Cinematic transition from {from_mood} to {to_mood} mood, smooth camera movement, natural temporal flow, professional film edit"
 
 
-class CinemaPipeline(ShotControllerMixin, ReviewControllerMixin):
+class CinemaPipeline(ShotControllerMixin, ReviewControllerMixin, CheckpointStoreMixin):
     """
     Interactive cinema production pipeline with maximum API utilization
     and state-of-the-art continuity techniques.
     """
-
-    CHECKPOINT_FILE = "pipeline_state.json"
 
     def __init__(self, project_id: str, progress_callback=None):
         self.project = load_project(project_id)
@@ -131,104 +130,12 @@ class CinemaPipeline(ShotControllerMixin, ReviewControllerMixin):
     # Checkpoint / Resume
     # ------------------------------------------------------------------
 
-    def _checkpoint_path(self) -> str:
-        return os.path.join(self.temp_dir, self.CHECKPOINT_FILE)
 
-    def _save_checkpoint(self, completed_scene_idx: int = -1):
-        """
-        Persist pipeline state to disk after each meaningful step.
-        Uses atomic write (temp + replace) to avoid half-written files.
-        """
-        state = {
-            "project_id": self.project["id"],
-            "current_stage": self.current_stage,
-            "current_scene_id": self.current_scene_id,
-            "current_shot_id": self.current_shot_id,
-            "completed_scene_indices": sorted(self._completed_scene_indices),
-            "scene_clips": self.scene_clips,
-            "scene_audio": self.scene_audio,
-            "shot_results": self.shot_results,
-            "failed_shots": self.failed_shots,
-        }
-        path = self._checkpoint_path()
-        import tempfile as _tmp
-        fd, tmp = _tmp.mkstemp(suffix=".json.tmp", dir=self.temp_dir)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(state, f, indent=2, ensure_ascii=False, default=str)
-            os.replace(tmp, path)
-        except BaseException:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-            raise
 
-    def _load_checkpoint(self) -> dict:
-        """Load saved checkpoint if it exists and files are still valid."""
-        path = self._checkpoint_path()
-        if not os.path.exists(path):
-            return {}
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                state = json.load(f)
-            # Validate that referenced files still exist
-            for shot_id, sr in state.get("shot_results", {}).items():
-                for key in ("image", "video"):
-                    p = sr.get(key)
-                    if p and not os.path.exists(p):
-                        sr[key] = None
-                        sr["status"] = "lost"
-            return state
-        except (json.JSONDecodeError, OSError):
-            return {}
 
-    def _clear_checkpoint(self):
-        """Remove checkpoint file after successful completion."""
-        path = self._checkpoint_path()
-        if os.path.exists(path):
-            os.remove(path)
 
-    def has_checkpoint(self) -> bool:
-        """Check if a resumable checkpoint exists."""
-        return os.path.exists(self._checkpoint_path())
 
-    def resume_info(self) -> dict:
-        """Return summary of what can be resumed."""
-        state = self._load_checkpoint()
-        if not state:
-            return {"resumable": False}
-        completed = state.get("completed_scene_indices", [])
-        total = len(self.project.get("scenes", []))
-        return {
-            "resumable": True,
-            "completed_scenes": len(completed),
-            "total_scenes": total,
-            "stage": state.get("current_stage", ""),
-            "shots_done": len([s for s in state.get("shot_results", {}).values()
-                               if s.get("status") not in ("failed", "lost")]),
-            "shots_failed": len(state.get("failed_shots", [])),
-        }
 
-    def _restore_from_checkpoint(self) -> set:
-        """
-        Restore pipeline state from checkpoint.
-        Returns set of completed scene indices to skip.
-        """
-        state = self._load_checkpoint()
-        if not state:
-            return set()
-
-        self.scene_clips = state.get("scene_clips", {})
-        self.scene_audio = state.get("scene_audio", {})
-        self.shot_results = state.get("shot_results", {})
-        self.failed_shots = state.get("failed_shots", [])
-        completed = set(state.get("completed_scene_indices", []))
-        self._completed_scene_indices = completed
-
-        n = len(completed)
-        if n > 0:
-            self.progress("RESUME", f"Resuming from checkpoint — {n} scene(s) already complete", 5)
-
-        return completed
 
     def _default_progress(self, stage: str, detail: str, percent: float = 0,
                           scene_id: str = "", shot_id: str = "",
