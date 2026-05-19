@@ -23,6 +23,15 @@ from phase_c_assembly import assemble_final_video, generate_ai_broll
 from phase_c_vision import quality_control_image
 from phase_d_upload import authenticate_youtube, upload_video, upload_caption, upload_localizations
 from phase_e_learning import log_experiment, fetch_and_update_analytics
+
+# Phase 5 driver — replaces sequential generate_X(ctx) calls with a typed
+# orchestrator over a list of Phase instances. Per-shot loop and finalisation
+# stay inline (they aren't Phase-shaped).
+from cinema.context import PipelineContext
+from cinema.pipeline import CinemaPipeline
+from cinema.phases.blueprint import BlueprintPhase
+from cinema.phases.generation import GenerationPhase
+from cinema.phases.audio import AudioPhase
 from config.settings import settings
 
 # ==============================================================================
@@ -85,64 +94,62 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
     print(f"🔒 [CONTINUITY ENGINE] Locked Global Image Seed: {master_seed}")
         
     # --- OMNI CONTEXT INITIALIZATION ---
-    ctx = {
-        "topic": topic,
-        "language": language,
-        "youtube_video_id": master_video_id,
-        "master_image_seed": master_seed,
-        "script_data": {},
-        "full_text": "",
-        "music_vibe": "",
-        "video_pacing": "",
-        "audio_path": "",
-        "voice_id": "",
-        "downloaded_vids": [],
-        "final_video_path": f"{export_dir}/video.mp4",
-        "final_thumbnail_path": f"{export_dir}/thumbnail.jpg",
-        "metadata_path": f"{export_dir}/metadata.txt",
-        "full_description": ""
-    }
-    
-    # --- PHASE 0: DIRECTOR BLUEPRINT ---
-    if not generate_production_blueprint(ctx):
-        print("❌ Pipeline aborted: Failed to generate Master Production Blueprint.")
+    # PipelineContext is a typed dataclass; supports dict-API (ctx["key"],
+    # ctx.get(...)) for downstream legacy code AND typed attribute access
+    # (ctx.topic) for new code. Drop-in replacement for the legacy ctx dict.
+    ctx = PipelineContext(
+        topic=topic,
+        language=language,
+        youtube_video_id=master_video_id,
+        master_image_seed=master_seed,
+        final_video_path=f"{export_dir}/video.mp4",
+        final_thumbnail_path=f"{export_dir}/thumbnail.jpg",
+        metadata_path=f"{export_dir}/metadata.txt",
+    )
+
+    # --- PHASES 0+A: BLUEPRINT + SCRIPT (via driver) ---
+    # Replaces the sequential generate_production_blueprint + generate_shorts_script
+    # calls with one driver run. Driver short-circuits on the first ok=False.
+    result = CinemaPipeline(
+        phases=[BlueprintPhase(), GenerationPhase()],
+        ctx=ctx,
+    ).run()
+    if not result.ok:
+        print(f"❌ Pipeline aborted at {result.failed_phase}: {result.failed_message}")
         return
-        
-    # --- PHASE A: SCRIPTING ---
-    print("\n--- [PHASE A] SCRIPT GENERATION ---")
-    if not generate_shorts_script(ctx):
-        print("❌ Pipeline aborted: Failed to generate script.")
-        return
-        
+
+    # --- Inline post-generation glue (not phase-shaped) ---
+    # SEO description + story tension — short transformations between
+    # phases that don't deserve their own Phase classes.
     script_data = ctx["script_data"]
     seo_description = script_data.get('youtube_description', f"The insane truth about {topic}.")
     ctx["full_description"] = f"{seo_description}"
-    
-    # --- UNIFIED STORY TENSION ALGORITHM ---
+
     tension_map = {"lofi": 0.3, "corporate": 0.6, "suspense": 1.0, "upbeat": 1.5, "aggressive": 2.2}
     pacing_map = {"relaxed": 0.5, "moderate": 1.0, "fast": 1.5}
-    
+
     music_vibe = ctx.get("music_vibe", "suspense")
     video_pacing = ctx.get("video_pacing", "moderate")
-    
+
     base_tension = tension_map.get(music_vibe, 1.0)
     pacing_modifier = pacing_map.get(video_pacing, 1.0)
     story_tension = round(base_tension * pacing_modifier, 2)
-    
+
     ctx["story_tension"] = story_tension
-    
+
     print(f"✅ Script compiled. Length: {len(ctx['full_text'].split())} words.")
     print(f"🎵 Computed Music Vibe: {music_vibe.upper()}")
     print(f"⏱️ Computed Video Pacing: {video_pacing.upper()}")
     print(f"🔥 UNIFIED STORY TENSION: {story_tension}x")
 
-    # --- PHASE B: AUDIO ---
+    # --- PHASE B: AUDIO (via driver, primary language only) ---
+    # Foley stays inline below — best-effort, return value ignored by legacy.
     if language == TARGET_LANGUAGES[0]:
-        print("\n--- [PHASE B] AUDIO GENERATION ---")
-        if not generate_voiceover(ctx):
-            print("❌ Pipeline aborted: Failed to generate audio.")
+        result = CinemaPipeline(phases=[AudioPhase()], ctx=ctx).run()
+        if not result.ok:
+            print(f"❌ Pipeline aborted at {result.failed_phase}: {result.failed_message}")
             return
-            
+
         print("\n--- [PHASE B.5] FOLEY GENERATION ---")
         generate_scene_foley_library(ctx)
 
