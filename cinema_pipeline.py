@@ -15,10 +15,9 @@ import time
 import glob
 import random
 import subprocess
-from project_manager import MutationResult, load_project, get_project_dir, mutate_project, make_take
+from project_manager import MutationResult, load_project, mutate_project, make_take
 from character_manager import get_reference_image
 from location_manager import get_location_prompt, get_location_seed
-from continuity_engine import ContinuityEngine
 from scene_decomposer import decompose_scene, update_scene_shots
 from dialogue_writer import generate_dialogue, format_dialogue_for_voiceover
 from llm.style_director import generate_style_rules, style_rules_to_prompt_suffix
@@ -37,17 +36,13 @@ from lip_sync import (
     upscale_video_seedvr2,
 )
 from cinema.context import PipelineContext
+from cinema.core import PipelineCore, build_pipeline_core
 from cinema.lifecycle import ThreadedLifecycle
 from cinema.phases.keyframe_render import KeyframeRenderPhase
 from cinema.phases.motion_render import MotionRenderPhase
 from cinema.shots.controller import ShotControllerMixin
 from cinema.review.controller import ReviewControllerMixin
 from cinema.checkpoint import CheckpointStoreMixin
-from llm.chief_director import ChiefDirector
-from llm.ensemble import LLMEnsemble
-from vbench_evaluator import VBenchEvaluator
-from quality_tracker import QualityTracker
-from cost_tracker import CostTracker
 from scene_decomposer import competitive_decompose_scene
 
 
@@ -86,52 +81,99 @@ class CinemaPipeline(ShotControllerMixin, ReviewControllerMixin, CheckpointStore
     and state-of-the-art continuity techniques.
     """
 
-    def __init__(self, project_id: str, progress_callback=None):
-        self.project = load_project(project_id)
-        if not self.project:
-            raise ValueError(f"Project '{project_id}' not found")
+    def __init__(
+        self,
+        project_id: str,
+        progress_callback=None,
+        core: Optional[PipelineCore] = None,
+    ):
+        """
+        Parameters
+        ----------
+        project_id:
+            Project to operate on. Required even when ``core`` is
+            provided, for diagnostics and error messages.
+        progress_callback:
+            Optional callable wired into the ThreadedLifecycle for SSE
+            event emission. Defaults to ``_default_progress`` (stdout).
+        core:
+            Pre-built ``PipelineCore`` (long-lived deps + services). If
+            None, a fresh one is built via ``build_pipeline_core(project_id)``.
+            Future standalone controllers + tests can share a single
+            core across multiple consumers, avoiding the cost of
+            re-instantiating ContinuityEngine / ChiefDirector / LLMEnsemble /
+            trackers.
+        """
+        self._core = core if core is not None else build_pipeline_core(project_id)
 
-        self.project_dir = get_project_dir(project_id)
-        self.temp_dir = os.path.join(self.project_dir, "temp")
-        self.export_dir = os.path.join(self.project_dir, "exports")
-        os.makedirs(self.temp_dir, exist_ok=True)
-        os.makedirs(self.export_dir, exist_ok=True)
-
-        self.continuity = ContinuityEngine(self.project)
-        self.director = ChiefDirector(self.project)
-
-        # Lifecycle service — replaces the previous self.cancelled +
-        # self.paused + self._resume_event quartet with a single
-        # injectable abstraction (see cinema/lifecycle.py). The
-        # progress_callback parameter becomes the ThreadedLifecycle's
-        # report_progress sink. self.progress remains as a bound method
-        # for backward compatibility with the dozens of existing call
-        # sites that do `self.progress(stage, detail, percent, ...)`.
+        # Lifecycle — per-run mutable runtime service. Replaces the
+        # previous self.cancelled + self.paused + self._resume_event
+        # quartet (see cinema/lifecycle.py). self.progress remains as a
+        # property that proxies to lifecycle.report_progress, so the
+        # dozens of existing `self.progress(stage, detail, percent, ...)`
+        # call sites are unchanged.
         self.lifecycle = ThreadedLifecycle(
             progress_callback=progress_callback or self._default_progress
         )
 
-        # Generation state
-        self.scene_clips = {}  # scene_id -> list of video clip paths
-        self.scene_audio = {}  # scene_id -> audio path
-        self.shot_results = {}  # shot_id -> {"image": path, "video": path, "identity": score, "status": str}
-        self.failed_shots = []  # shot_ids that failed and were skipped
+        # Per-run runtime state — populated during generate(), reset
+        # for each run. None of this belongs in PipelineCore.
+        self.scene_clips = {}        # scene_id -> list of video clip paths
+        self.scene_audio = {}        # scene_id -> audio path
+        self.shot_results = {}       # shot_id -> {"image", "video", "identity_score", "status", "take_id"}
+        self.failed_shots = []       # shot_ids that failed and were skipped
         self.current_stage = ""
         self.current_scene_id = ""
         self.current_shot_id = ""
+        self._completed_scene_indices = set()  # for checkpoint resume
 
-        # Quality systems — parameterized from project settings
-        _gs = self.project.get("global_settings", {})
-        self.vbench = VBenchEvaluator(
-            flicker_threshold=_gs.get("temporal_flicker_tolerance", 0.85),
-            regression_tolerance=_gs.get("regression_sensitivity", 0.05),
-        )
-        self.quality_tracker = QualityTracker()
-        self.cost_tracker = CostTracker()
-        self.ensemble = LLMEnsemble(settings=_gs)
+    # ------------------------------------------------------------------
+    # PipelineCore proxies — backward-compat property accessors so the
+    # mixin code that reads self.project / self.continuity / etc. keeps
+    # working unchanged. All proxies return the underlying object (NOT
+    # a copy), so in-place mutations like ``self.project.clear()`` in
+    # _refresh_project_snapshot() continue to work correctly.
+    # ------------------------------------------------------------------
 
-        # Checkpoint: completed scene indices (for resume)
-        self._completed_scene_indices = set()
+    @property
+    def project(self) -> dict:
+        return self._core.project
+
+    @property
+    def project_dir(self) -> str:
+        return self._core.project_dir
+
+    @property
+    def temp_dir(self) -> str:
+        return self._core.temp_dir
+
+    @property
+    def export_dir(self) -> str:
+        return self._core.export_dir
+
+    @property
+    def continuity(self):
+        return self._core.continuity
+
+    @property
+    def director(self):
+        return self._core.director
+
+    @property
+    def vbench(self):
+        return self._core.vbench
+
+    @property
+    def quality_tracker(self):
+        return self._core.quality_tracker
+
+    @property
+    def cost_tracker(self):
+        return self._core.cost_tracker
+
+    @property
+    def ensemble(self):
+        return self._core.ensemble
 
     # ------------------------------------------------------------------
     # Checkpoint / Resume
