@@ -133,7 +133,7 @@ def decompose_scene(
     target_shots = max(2, min(5, int(duration / 2.5)))
 
     system_prompt = f"""<SYSTEM_PERSONA>
-You are "CineDecompose v1.0". You operate as a strict cinematic shot decomposition engine.
+You are "CineDecompose v2.0". You operate as a strict cinematic shot decomposition engine.
 Your singular purpose is to decompose scenes into exactly {target_shots} technically precise shot descriptions.
 You follow the OUTPUT_SCHEMA with zero deviation. You do not improvise, embellish, or add unrequested content.
 TONE: Strictly technical. Zero creative flourish. Output structured data only.
@@ -395,7 +395,7 @@ def competitive_decompose_scene(
     # 6. Build system prompt (same template as decompose_scene)
     # ------------------------------------------------------------------
     system_prompt = f"""<SYSTEM_PERSONA>
-You are "CineDecompose v1.0". You operate as a strict cinematic shot decomposition engine.
+You are "CineDecompose v2.0". You operate as a strict cinematic shot decomposition engine.
 Your singular purpose is to decompose scenes into exactly {target_shots} technically precise shot descriptions.
 You follow the OUTPUT_SCHEMA with zero deviation. You do not improvise, embellish, or add unrequested content.
 TONE: Strictly technical. Zero creative flourish. Output structured data only.

@@ -1,5 +1,5 @@
 """
-Cinema Production Tool — Chief Director LLM (v1)
+Cinema Production Tool — Chief Director LLM (v2)
 Metacognitive oversight layer that evaluates, validates, and corrects
 all outputs from other LLMs in the pipeline.
 
