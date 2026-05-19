@@ -1,31 +1,26 @@
 """AudioPhase — generates the main voiceover from ctx.full_text.
 
-Wraps `phase_b_audio.generate_voiceover(ctx)` in the Phase protocol.
+Wraps `audio.voiceover.generate_voiceover(ctx)` in the Phase protocol.
 Standard transformer-phase shape: reads ctx.full_text + ctx.music_vibe,
 writes ctx.audio_path (and ctx.voice_id), returns bool mapped to ok.
 
 What this phase intentionally does NOT do (deferred)
 ====================================================
 
-`phase_b_audio` is the third large V1 module exposing one or two
-orchestrator entries plus a constellation of utilities (same shape as
-phase_c_assembly + phase_c_ffmpeg + phase_c_vision):
+The audio domain (Phase 6 of the refactor) is now split across focused
+submodules under ``audio/``:
 
-  generate_voiceover(ctx)              -- WRAPPED HERE (main voiceover)
-  generate_scene_foley_library(ctx)    -- best-effort foley generation
-                                          deferred to a future FoleyPhase
-  generate_srt(audio_path, srt_path)   -- caption file writer, used during
-                                          upload (not audio phase)
+  audio.voiceover.generate_voiceover           -- WRAPPED HERE
+  audio.foley.generate_scene_foley_library     -- best-effort foley,
+                                                  deferred to a future FoleyPhase
+  audio.srt.generate_srt                       -- caption file writer,
+                                                  used during upload (not here)
 
-  ...plus 15 utility/helper functions (generate_narration,
-  generate_dialogue_voiceover, generate_layered_foley, generate_fal_bgm,
-  master_music, apply_au_plugin, apply_pedalboard_chain, etc.) that
-  remain free functions called per-shot or transitively.
-
-The workflow doc's Phase 6 separately plans to split phase_b_audio.py
-itself into a `audio/` sub-package (audio/voiceover.py, audio/foley.py,
-audio/music.py, audio/srt.py) — that's a refactor of the LEGACY module,
-distinct from this AudioPhase wrapper.
+  ...plus the per-character TTS (audio.dialogue), the voice/narration
+  helpers (audio.voiceover.generate_narration, generate_single_line_audio),
+  the music chain (audio.music.generate_fal_bgm + master_music), and the
+  DSP/effects helpers (audio.effects.apply_*) — all free functions called
+  per-shot or transitively.
 
 Foley deferral note
 ===================
@@ -83,9 +78,9 @@ class AudioPhase:
                 elapsed_s=time.time() - start,
             )
 
-        # Lazy import — phase_b_audio pulls ElevenLabs, whisper, pedalboard,
-        # and various DSP deps. Heavy.
-        from phase_b_audio import generate_voiceover
+        # Lazy import — audio.voiceover pulls ElevenLabs SDK and audio.music
+        # (which itself pulls Fal.ai). Heavy.
+        from audio.voiceover import generate_voiceover
 
         try:
             ok = generate_voiceover(ctx)

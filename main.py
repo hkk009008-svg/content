@@ -18,7 +18,9 @@ import datetime
 from phase_0_topic import generate_trending_topic
 from llm.blueprint_director import generate_production_blueprint
 from phase_a_generator import generate_shorts_script
-from phase_b_audio import generate_voiceover, generate_srt, generate_scene_foley_library
+from audio.voiceover import generate_voiceover
+from audio.srt import generate_srt
+from audio.foley import generate_scene_foley_library
 from phase_c_assembly import assemble_final_video, generate_ai_broll
 from phase_c_vision import quality_control_image
 from phase_d_upload import authenticate_youtube, upload_video, upload_caption, upload_localizations

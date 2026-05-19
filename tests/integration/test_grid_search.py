@@ -62,7 +62,7 @@ if HAS_GRID_DEPS:
 
 if HAS_ELEVENLABS:
     try:
-        from phase_b_audio import generate_dialogue_voiceover
+        from audio.dialogue import generate_dialogue_voiceover
     except ImportError:
         generate_dialogue_voiceover = None
 

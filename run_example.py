@@ -2,7 +2,7 @@ import os
 import re
 from phase_0_topic import generate_trending_topic
 from phase_a_generator import generate_shorts_script
-from phase_b_audio import generate_voiceover
+from audio.voiceover import generate_voiceover
 from phase_c_assembly import assemble_final_video, generate_ai_broll
 
 def run_local_example():

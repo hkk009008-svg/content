@@ -28,10 +28,10 @@ from phase_c_ffmpeg import generate_ai_video, generate_kling_storyboard, normali
 from phase_c_vision import (
     validate_identity, validate_multi_identity, face_swap_video_frames
 )
-from phase_b_audio import (
-    generate_dialogue_voiceover, generate_fal_bgm, generate_scene_foley, generate_layered_foley,
-    generate_srt,
-)
+from audio.dialogue import generate_dialogue_voiceover
+from audio.music import generate_fal_bgm
+from audio.foley import generate_scene_foley, generate_layered_foley
+from audio.srt import generate_srt
 from lip_sync import (
     generate_lip_sync_video, generate_rife_interpolation,
     extract_last_frame, generate_transition_clip,
@@ -519,7 +519,7 @@ class CinemaPipeline:
 
         if os.path.exists(bgm_path):
             try:
-                from phase_b_audio import master_music
+                from audio.music import master_music
                 mastered_path = os.path.join(self.temp_dir, f"bgm_{music_mood}_mastered.mp3")
                 mastered = master_music(bgm_path, mastered_path, preset="cinema_master")
                 if mastered and os.path.exists(mastered):

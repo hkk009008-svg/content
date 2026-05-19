@@ -119,7 +119,7 @@ def _locate_shot(project: dict, shot_id: str):
 def _get_delivery_styles():
     """Get delivery styles with descriptions for the frontend."""
     try:
-        from phase_b_audio import VOICE_DIRECTIONS
+        from audio.voiceover import VOICE_DIRECTIONS
         return {k: v.get("description", k) for k, v in VOICE_DIRECTIONS.items()}
     except (ImportError, AttributeError) as e:
         print(f"   [WEB] Could not load delivery styles: {e}")
