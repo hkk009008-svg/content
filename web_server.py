@@ -41,6 +41,7 @@ from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
 from cinema_pipeline import CinemaPipeline
 from workflow_selector import WORKFLOW_TEMPLATES
+from web_services import make_progress_callback
 
 app = Flask(__name__, static_folder="web/dist", static_url_path="")
 CORS(app)
@@ -60,46 +61,16 @@ def _ensure_progress_queue(pid: str) -> queue.Queue:
 
 
 def _make_progress_cb(pid: str, q: queue.Queue | None = None):
+    """Per-project SSE progress callback. Thin wrapper around web_services.
+
+    Resolves the queue (explicit arg or module-state lookup), then
+    delegates to ``web_services.make_progress_callback`` which contains
+    the actual SSE-event-shaping logic. Keeping this resolver in
+    web_server.py preserves the module-state contract used by other
+    endpoints; the pure builder is reusable.
+    """
     progress_queue = q or _progress_queues.get(pid)
-
-    def progress_cb(stage, detail, percent, scene_id="", shot_id="",
-                    image_url="", identity_score=-1, director_review=None,
-                    coherence_score=-1, motion_score=-1, shot_type="",
-                    failure_reason="", quality_metrics=None, video_url="",
-                    take_id="", take_kind="", gate_status=None, **kwargs):
-        event = {"stage": stage, "detail": detail, "percent": percent}
-        if scene_id:
-            event["scene_id"] = scene_id
-        if shot_id:
-            event["shot_id"] = shot_id
-        if image_url:
-            event["image_url"] = image_url
-        if video_url:
-            event["video_url"] = video_url
-        if take_id:
-            event["take_id"] = take_id
-        if take_kind:
-            event["take_kind"] = take_kind
-        if identity_score >= 0:
-            event["identity_score"] = identity_score
-        if director_review:
-            event["director_review"] = director_review
-        if coherence_score >= 0:
-            event["coherence_score"] = coherence_score
-        if motion_score >= 0:
-            event["motion_score"] = motion_score
-        if shot_type:
-            event["shot_type"] = shot_type
-        if failure_reason:
-            event["failure_reason"] = failure_reason
-        if quality_metrics:
-            event["quality_metrics"] = quality_metrics
-        if gate_status:
-            event["gate_status"] = gate_status
-        if progress_queue:
-            progress_queue.put(event)
-
-    return progress_cb
+    return make_progress_callback(progress_queue)
 
 
 def _get_stage_pipeline(pid: str) -> CinemaPipeline:
