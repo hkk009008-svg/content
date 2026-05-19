@@ -3,13 +3,12 @@
 Consolidates the LLM-facing modules under a single namespace:
 
   llm.ensemble           — multi-model competitive generation + judging
-  llm.router             — model routing table + cost computation
   llm.chief_director     — meta-cognitive output reviewer
   llm.blueprint_director — production-blueprint generator (was phase_0_director)
   llm.style_director     — per-project style rules
 
-Public re-exports below are the high-traffic ones. Import the submodule
-directly if you need internals (e.g. `from llm.router import CinemaLLMRouter`).
+Public re-exports below are the high-traffic ones. Import a submodule
+directly if you need internals.
 """
 
 from llm.ensemble import LLMEnsemble, EnsembleResult, EnsembleQualityResult
