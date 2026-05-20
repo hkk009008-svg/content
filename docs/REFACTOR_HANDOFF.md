@@ -586,24 +586,6 @@ The `PostToolUse:Bash` hook reports "GitNexus index is stale" with a "last index
 
 The index IS fresh after analyze (verify by looking at `.gitnexus/meta.json` or by the analyze run's "N nodes | M edges" output). The hook's marker is just a cached value somewhere that doesn't catch up. Not actionable.
 
-### 8.14 ShotControllerHost protocol with underscore method names (NEW in Slice 2)
-
-When extracting a class whose methods call into other classes' "private" `_foo` methods, the Protocol that declares the interface looks weird:
-
-```python
-class ShotControllerHost(Protocol):
-    def _refresh_project_snapshot(self) -> Optional[dict]: ...
-    def _save_checkpoint(self) -> None: ...
-```
-
-Python's Protocol matching is by name regardless of convention — leading underscores are fine. The alternative is to rename the host's methods to public, which expands the slice. Pick name-stability over visual consistency unless you're already touching the host's other API.
-
-### 8.15 Composition slice's "Modified" symbols include the renamed class members (NEW in Slice 2)
-
-After Slice 2, gitnexus_detect_changes reports every method in `cinema/shots/controller.py` as "Modified" with `risk_level: critical`. The reason: the class containing them was renamed (`ShotControllerMixin` -> `ShotController`) and many bodies got `self._host._X` substitutions. The behavior is preserved (verified by the 11 Slice 2 checks), but file-location-based change detection can't see that.
-
-Mitigation: cross-check with the actual behavioral verification (Slice 2-A through Slice 2-K in the commit's verification block). detect_changes's risk label is one input; the behavioral pass is the trump card.
-
 ### 8.13 Dead-import sweep after extraction (NEW)
 
 When a slice moves methods/constructors into a new module, imports in the source file become dead. Examples from this round:
@@ -621,6 +603,24 @@ done
 ```
 
 If `count == 1`, the import is dead. Remove it in the same commit as the structural change (it's caused by, not orthogonal to, the slice).
+
+### 8.14 ShotControllerHost protocol with underscore method names (NEW in Slice 2)
+
+When extracting a class whose methods call into other classes' "private" `_foo` methods, the Protocol that declares the interface looks weird:
+
+```python
+class ShotControllerHost(Protocol):
+    def _refresh_project_snapshot(self) -> Optional[dict]: ...
+    def _save_checkpoint(self) -> None: ...
+```
+
+Python's Protocol matching is by name regardless of convention — leading underscores are fine. The alternative is to rename the host's methods to public, which expands the slice. Pick name-stability over visual consistency unless you're already touching the host's other API.
+
+### 8.15 Composition slice's "Modified" symbols include the renamed class members (NEW in Slice 2)
+
+After Slice 2, gitnexus_detect_changes reports every method in `cinema/shots/controller.py` as "Modified" with `risk_level: critical`. The reason: the class containing them was renamed (`ShotControllerMixin` -> `ShotController`) and many bodies got `self._host._X` substitutions. The behavior is preserved (verified by the 11 Slice 2 checks), but file-location-based change detection can't see that.
+
+Mitigation: cross-check with the actual behavioral verification (Slice 2-A through Slice 2-K in the commit's verification block). detect_changes's risk label is one input; the behavioral pass is the trump card.
 
 ### 8.16 Composition slices can silently break cross-mixin self.X calls (NEW in V1 close-out)
 
