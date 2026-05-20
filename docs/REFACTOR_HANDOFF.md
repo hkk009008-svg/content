@@ -1,7 +1,7 @@
 # Cinema Pipeline — Architecture Refactor Handoff (Round 2)
 
-**Status:** in progress, 37 commits deep on branch `refactor/architecture-cleanup`.
-**As of:** end of standalone-controllers slice 1 (commit `42a290f`).
+**Status:** in progress, 38 commits deep on branch `refactor/architecture-cleanup`.
+**As of:** end of standalone-controllers slice 1 (commit `42a290f`) + this handoff (commit `6f85c38`).
 **Last completed:** `PipelineCore` extraction — `CinemaPipeline.__init__` split into long-lived deps + per-run runtime state.
 **Author of this doc:** previous chat session, end-of-day handoff.
 **Supersedes:** the original handoff (which covered through Phase 6 slice 3). The original is preserved in git history at the parent of `92a0bba`.
@@ -11,8 +11,8 @@ This document is the operating manual for continuing the refactor. It is
 max capacity without re-deriving context from commit history.
 
 > **Most important sentence in this doc:** every refactor slice follows
-> the same five-step playbook (read → write → re-export → verify with
-> identity check → commit). The playbook is at §6. Read it first.
+> the same five-step playbook (read -> write -> re-export -> verify with
+> identity check -> commit). The playbook is at section 6. Read it first.
 
 ---
 
@@ -20,8 +20,8 @@ max capacity without re-deriving context from commit history.
 
 ```bash
 cd /Users/hyungkoookkim/Content
-git status                          # untracked: docs/, projects/70940580b872/, .venv-py39-backup if upgrade in progress
-git log --oneline -10               # HEAD should be 42a290f (PipelineCore extraction)
+git status                          # untracked: projects/70940580b872/, .venv-py39-backup if upgrade in progress
+git log --oneline -10               # HEAD should be 6f85c38 (handoff doc) or 42a290f (PipelineCore)
 git branch --show-current           # should be refactor/architecture-cleanup
 git tag -l | grep refactor          # should list pre-refactor-baseline
 ```
@@ -41,7 +41,7 @@ for py in pathlib.Path('.').rglob('*.py'):
     if any(d in rel for d in ('.venv', '.claude', '__pycache__', '.gitnexus', '.serena', 'web/node_modules')): continue
     try: py_compile.compile(str(py), doraise=True); ok += 1
     except py_compile.PyCompileError as e: failed += 1; print(f'FAIL {rel}: {e}')
-print(f'COMPILE: {ok} ok, {failed} failed')   # expected: 106 ok, 0 failed (count grows as files are added)
+print(f'COMPILE: {ok} ok, {failed} failed')
 
 # 2. Phase 3 invariant: identity.validator does NOT pull phase_c_vision
 before = set(sys.modules.keys())
@@ -95,7 +95,7 @@ q = queue.Queue(); cb = make_progress_callback(q); cb('S', 'd', 50)
 assert q.qsize() == 1
 print('OK web_services.make_progress_callback')
 
-# 7. cinema/services.py — read-only endpoint helpers
+# 7. cinema/services.py - read-only endpoint helpers
 from cinema.services import state_snapshot, checkpoint_info
 s = state_snapshot('nonexistent-pid'); assert s['paused'] == False
 assert checkpoint_info('nonexistent-pid') == {'resumable': False}
@@ -109,17 +109,17 @@ print('OK main.py imports cleanly')
 
 If any of those FAIL, **stop and diagnose before doing any new work.**
 
-> **3.9 venv caveat:** `cinema_pipeline.py`, `cinema/core.py`, `web_server.py`, and `vbench_evaluator.py` use PEP 604 (`X | None`) in function defaults, which py_compile accepts but runtime `import` rejects in 3.9. The smoke above intentionally avoids importing those modules at runtime. Production environment is 3.10+. See §5 issue 1 for the venv-upgrade instructions handed to the user.
+> **3.9 venv caveat:** `cinema_pipeline.py`, `cinema/core.py`, `web_server.py`, and `vbench_evaluator.py` use PEP 604 (`X | None`) in function defaults, which py_compile accepts but runtime `import` rejects in 3.9. The smoke above intentionally avoids importing those modules at runtime. Production environment is 3.10+. See section 5 issue 1 for the venv-upgrade instructions handed to the user.
 
 ---
 
 ## 1. What the codebase is
 
-**AI cinema/video generation pipeline.** Takes a topic, generates a 60-second YouTube Shorts video end-to-end (topic → blueprint → script → audio → per-shot gen → assembly → upload → learning).
+**AI cinema/video generation pipeline.** Takes a topic, generates a 60-second YouTube Shorts video end-to-end (topic -> blueprint -> script -> audio -> per-shot gen -> assembly -> upload -> learning).
 
 Two entry points:
 - **`main.py:run_autonomous_pipeline`** — CLI / non-interactive. Uses `cinema.pipeline.CinemaPipeline` (the simple driver) for 3 migrated phases + legacy free-functions for the rest.
-- **`web_server.py`** → **`cinema_pipeline.CinemaPipeline`** — interactive Flask dashboard with operator review gates, pause/resume, SSE progress streaming. **Now decomposed** into mixins + LifecycleService + PipelineCore (see §3).
+- **`web_server.py`** -> **`cinema_pipeline.CinemaPipeline`** — interactive Flask dashboard with operator review gates, pause/resume, SSE progress streaming. **Now decomposed** into mixins + LifecycleService + PipelineCore (see section 3).
 
 User context (from memory profile):
 - Solo architect-via-LLM, AuDHD+BPD configuration
@@ -130,10 +130,10 @@ User context (from memory profile):
 
 ## 2. Branch state
 
-37 commits ahead of `pre-refactor-baseline`. The most recent block (chronological, oldest first):
+38 commits ahead of `pre-refactor-baseline`. The most recent block (chronological, oldest first):
 
 ```
-3b277de  Phase 5 — Phase protocol POC
+3b277de  Phase 5 - Phase protocol POC
 c63420b  TopicPhase
 d1066a3  BlueprintPhase
 e554f93  UploadPhase (minimal)
@@ -143,7 +143,7 @@ e8e825a  LearningPhase
 adb540c  AudioPhase
 8fc8b4a  driver + main.py migrate (3 phases)
 
-— Phase 6 audio decomposition —
+- Phase 6 audio decomposition -
 8f9dc22  audio/srt.py            (slice 1)
 ffe2e52  audio/music.py          (slice 2)
 cf02946  audio/foley.py          (slice 3)
@@ -151,18 +151,18 @@ cf02946  audio/foley.py          (slice 3)
 4de520c  audio/voiceover.py + audio/_client.py (slice 5)
 ea4bc45  audio/dialogue.py       (slice 6)
 
-— Post-Phase-6 cleanups + Phase 7-10 —
+- Post-Phase-6 cleanups + Phase 7-10 -
 188654f  delete dead llm/router.py + its test
 0a7f9b3  delete dead LLMEnsemble.ensemble_quality_vote + EnsembleQualityResult
 11596db  .env.example completed (all 18 env vars)
-96262ff  tests/ reorg → unit/ (12) + integration/ (3)
+96262ff  tests/ reorg -> unit/ (12) + integration/ (3)
 4205077  CLAUDE.md architecture preamble (Phase 10 partial)
-8f54eb2  domain/ package — 6 project/character/location modules (Phase 8)
+8f54eb2  domain/ package - 6 project/character/location modules (Phase 8)
 d8c1461  migrate 7 phase_b_audio callers + delete phase_b_audio.py
 c21bbbb  docs/CINEMA_PIPELINE_MIGRATION_DESIGN.md
 bdedd17  web_services.make_progress_callback (Phase 7 partial)
 
-— cinema_pipeline.py migration (Slices A-E) —
+- cinema_pipeline.py migration (Slices A-E) -
 e31e266  Slice A: LifecycleService protocol + wired into PipelineContext
 4db9b8a  Slice B: ShotControllerMixin
 bcd5255  Slice C: ReviewControllerMixin
@@ -171,8 +171,11 @@ a10b653  Slice E (scoped): LifecycleService adoption in CinemaPipeline
 bc98a01  Phase 7 proper: cinema/services.py + read-only endpoint decoupling
 362bed9  Slice E proper: KeyframeRenderPhase + MotionRenderPhase (Option B)
 
-— Standalone controllers (slice 1 of 2-3) —
-42a290f  PipelineCore extraction — split __init__ into long-lived + runtime
+- Standalone controllers (slice 1 of 2-3) -
+42a290f  PipelineCore extraction - split __init__ into long-lived + runtime
+
+- Handoff -
+6f85c38  docs(handoff): this file
 ```
 
 **Branch:** `refactor/architecture-cleanup`
@@ -184,92 +187,92 @@ bc98a01  Phase 7 proper: cinema/services.py + read-only endpoint decoupling
 
 ```
 Content/
-├── config/                          ← Phase 2 — settings singleton + prompts
-│   ├── settings.py
-│   ├── __init__.py
-│   └── prompts/pipeline_context.md
-├── identity/                        ← Phase 3 — face validation domain
-│   ├── types.py
-│   ├── validator.py
-│   └── __init__.py
-├── llm/                             ← Phase 4 — LLM domain
-│   ├── ensemble.py                  (ensemble_quality_vote deleted)
-│   ├── chief_director.py
-│   ├── blueprint_director.py
-│   ├── style_director.py
-│   └── __init__.py                  (no longer exports EnsembleQualityResult)
-├── cinema/                          ← Phase 5 + cinema_pipeline migration
-│   ├── pipeline.py                  the simple driver (linear, non-interactive)
-│   ├── context.py                   PipelineContext + .lifecycle field
-│   ├── lifecycle.py                 LifecycleService protocol + Null + Threaded
-│   ├── core.py                      PipelineCore dataclass + build_pipeline_core factory
-│   ├── services.py                  state_snapshot + checkpoint_info (Phase 7 helpers)
-│   ├── checkpoint.py                CheckpointStoreMixin
-│   ├── shots/
-│   │   ├── controller.py            ShotControllerMixin (12 methods)
-│   │   └── __init__.py
-│   ├── review/
-│   │   ├── controller.py            ReviewControllerMixin (11 methods)
-│   │   └── __init__.py
-│   └── phases/                      10 Phase classes
-│       ├── base.py                  Phase protocol + PhaseResult
-│       ├── topic.py
-│       ├── blueprint.py
-│       ├── generation.py
-│       ├── audio.py
-│       ├── assembly.py
-│       ├── vision.py
-│       ├── upload.py
-│       ├── learning.py
-│       ├── keyframe_render.py       NEW — per-shot keyframe loop as Phase
-│       ├── motion_render.py         NEW — per-shot motion loop as Phase
-│       └── __init__.py
-├── audio/                           ← Phase 6 — 7 focused submodules
-│   ├── _client.py                   shared ElevenLabs singleton
-│   ├── srt.py
-│   ├── music.py
-│   ├── effects.py
-│   ├── voiceover.py
-│   ├── dialogue.py
-│   ├── foley.py
-│   └── __init__.py
-├── domain/                          ← Phase 8 — project/scene/character/location
-│   ├── project_manager.py
-│   ├── character_manager.py
-│   ├── location_manager.py
-│   ├── continuity_engine.py
-│   ├── scene_decomposer.py
-│   ├── dialogue_writer.py
-│   └── __init__.py
-├── data/                            runtime data (gitignored experiments.db)
-├── docs/
-│   ├── REFACTOR_HANDOFF.md          this file
-│   └── CINEMA_PIPELINE_MIGRATION_DESIGN.md
-├── tests/
-│   ├── conftest.py                  pytest fixtures + sys.path bootstrap
-│   ├── analyze_sweep_results.py     analysis utility (not a test)
-│   ├── unit/                        12 files — pure logic + mocks
-│   └── integration/                 3 files — exercise real APIs / e2e
-└── (root)                           legacy + glue
-    ├── cinema_pipeline.py           interactive orchestrator (now mixin-composed)
-    ├── web_server.py                Flask app
-    ├── web_services.py              make_progress_callback (Phase 7 partial)
-    ├── main.py                      CLI entry
-    ├── run_example.py
-    ├── cleanup.py
-    ├── project_manager.py           root re-export shim → domain.project_manager
-    ├── character_manager.py         (and 5 more domain shims)
-    ├── phase_a_generator.py         legacy module — not yet migrated
-    ├── phase_c_assembly.py
-    ├── phase_c_ffmpeg.py
-    ├── phase_c_vision.py
-    ├── phase_d_upload.py
-    ├── phase_e_learning.py
-    ├── phase_0_topic.py
-    └── (per-shot loop deps not yet touched — lip_sync, workflow_selector,
-         kling/sora/veo/ltx_native, comfyui_workflow_gen, cost_tracker,
-         quality_tracker, vbench_evaluator, coherence_analyzer,
-         research_engine, web_research, etc.)
+- config/                          <- Phase 2 — settings singleton + prompts
+  - settings.py
+  - __init__.py
+  - prompts/pipeline_context.md
+- identity/                        <- Phase 3 — face validation domain
+  - types.py
+  - validator.py
+  - __init__.py
+- llm/                             <- Phase 4 — LLM domain
+  - ensemble.py                    (ensemble_quality_vote deleted)
+  - chief_director.py
+  - blueprint_director.py
+  - style_director.py
+  - __init__.py                    (no longer exports EnsembleQualityResult)
+- cinema/                          <- Phase 5 + cinema_pipeline migration
+  - pipeline.py                    the simple driver (linear, non-interactive)
+  - context.py                     PipelineContext + .lifecycle field
+  - lifecycle.py                   LifecycleService protocol + Null + Threaded
+  - core.py                        PipelineCore dataclass + build_pipeline_core factory
+  - services.py                    state_snapshot + checkpoint_info (Phase 7 helpers)
+  - checkpoint.py                  CheckpointStoreMixin
+  - shots/
+    - controller.py                ShotControllerMixin (12 methods)
+    - __init__.py
+  - review/
+    - controller.py                ReviewControllerMixin (11 methods)
+    - __init__.py
+  - phases/                        10 Phase classes
+    - base.py                      Phase protocol + PhaseResult
+    - topic.py
+    - blueprint.py
+    - generation.py
+    - audio.py
+    - assembly.py
+    - vision.py
+    - upload.py
+    - learning.py
+    - keyframe_render.py           NEW - per-shot keyframe loop as Phase
+    - motion_render.py             NEW - per-shot motion loop as Phase
+    - __init__.py
+- audio/                           <- Phase 6 — 7 focused submodules
+  - _client.py                     shared ElevenLabs singleton
+  - srt.py
+  - music.py
+  - effects.py
+  - voiceover.py
+  - dialogue.py
+  - foley.py
+  - __init__.py
+- domain/                          <- Phase 8 — project/scene/character/location
+  - project_manager.py
+  - character_manager.py
+  - location_manager.py
+  - continuity_engine.py
+  - scene_decomposer.py
+  - dialogue_writer.py
+  - __init__.py
+- data/                            runtime data (gitignored experiments.db)
+- docs/
+  - REFACTOR_HANDOFF.md            this file
+  - CINEMA_PIPELINE_MIGRATION_DESIGN.md
+- tests/
+  - conftest.py                    pytest fixtures + sys.path bootstrap
+  - analyze_sweep_results.py       analysis utility (not a test)
+  - unit/                          12 files - pure logic + mocks
+  - integration/                   3 files - exercise real APIs / e2e
+- (root)                           legacy + glue
+  - cinema_pipeline.py             interactive orchestrator (now mixin-composed)
+  - web_server.py                  Flask app
+  - web_services.py                make_progress_callback (Phase 7 partial)
+  - main.py                        CLI entry
+  - run_example.py
+  - cleanup.py
+  - project_manager.py             root re-export shim -> domain.project_manager
+  - character_manager.py           (and 5 more domain shims)
+  - phase_a_generator.py           legacy module - not yet migrated
+  - phase_c_assembly.py
+  - phase_c_ffmpeg.py
+  - phase_c_vision.py
+  - phase_d_upload.py
+  - phase_e_learning.py
+  - phase_0_topic.py
+  - (per-shot loop deps not yet touched - lip_sync, workflow_selector,
+       kling/sora/veo/ltx_native, comfyui_workflow_gen, cost_tracker,
+       quality_tracker, vbench_evaluator, coherence_analyzer,
+       research_engine, web_research, etc.)
 ```
 
 **Notably gone:** `phase_b_audio.py` (deleted in commit `d8c1461`).
@@ -278,7 +281,7 @@ Content/
 
 ## 4. Invariants (MUST be preserved by every commit)
 
-Each is verified by the §0 smoke block. The "why" tells you what the invariant protects.
+Each is verified by the section 0 smoke block. The "why" tells you what the invariant protects.
 
 | # | Invariant | Why |
 |---|---|---|
@@ -293,32 +296,32 @@ Each is verified by the §0 smoke block. The "why" tells you what the invariant 
 | 9 | `cinema.services.state_snapshot(pid)` and `checkpoint_info(pid)` return the expected shapes | Phase 7 deep decoupling |
 
 **Retired:**
-- Old invariant #7 (`phase_b_audio.client` is an `ElevenLabs` instance) — retired with the file deletion. Successor is invariant #5 (audio._client.client).
+- Old invariant 7 (`phase_b_audio.client` is an `ElevenLabs` instance) — retired with the file deletion. Successor is invariant 5 (audio._client.client).
 
 **Verification limit on local 3.9 venv:**
-- `cinema_pipeline.py`, `cinema/core.py`, `web_server.py`, `vbench_evaluator.py` py_compile in 3.9 but fail at runtime import (PEP 604 in function defaults). Production environment is 3.10+. AST + selective import are the verification strategies for those files until the venv upgrades (see §5 issue 1).
+- `cinema_pipeline.py`, `cinema/core.py`, `web_server.py`, `vbench_evaluator.py` py_compile in 3.9 but fail at runtime import (PEP 604 in function defaults). Production environment is 3.10+. AST + selective import are the verification strategies for those files until the venv upgrades (see section 5 issue 1).
 
 ---
 
 ## 5. Open issues (flag for future work, not blocking)
 
-Updated from the original handoff. ✅ = resolved this round, ✏️ = updated status, 🔲 = still open.
+Updated from the original handoff. RESOLVED = closed this round, UPDATED = status changed, OPEN = still open.
 
 | # | Issue | Status | Notes |
 |---|---|---|---|
-| 1 | Python 3.9 vs PEP 604 syntax | 🔲 | User has instructions to upgrade to 3.11 via `brew install python@3.11`. `requirements-frozen-py39.txt` will be the migration snapshot. Until then, AST + selective imports are the verification ceiling for `cinema_pipeline.py` / `web_server.py` / `cinema/core.py` / `vbench_evaluator.py`. |
-| 2 | `.env.example` incomplete | ✅ | Resolved in `11596db`. All 18 env vars documented. |
-| 3 | `llm/router.py` dead | ✅ | Deleted in `188654f`. |
-| 4 | `LLMEnsemble.ensemble_quality_vote` dead | ✅ | Deleted in `0a7f9b3` along with `EnsembleQualityResult`. |
-| 5 | `cinema_pipeline.py` god module | ✏️ | Decomposed via Slices A-E + standalone-controllers slice 1. File now 803 lines (was 1,526). Split into ShotControllerMixin + ReviewControllerMixin + CheckpointStoreMixin + LifecycleService + PipelineCore. Slice 2 (standalone ShotController class) and Slice 3 (controller caching in web_server) remain — see §9. |
-| 6 | `tests/` reorg into unit/integration | ✅ | Resolved in `96262ff`. |
-| 7 | No structured logging | 🔲 | Multi-week, ~100-file `print()` → logger conversion. Still deferred. Phase 10's preamble portion landed in `4205077`. |
-| 8 | Lazy imports in `audio/` | ✅ | Resolved in Slices 4-6. All audio submodules use eager top-level imports. `audio/_client.py` is the cycle-free shared dependency. |
+| 1 | Python 3.9 vs PEP 604 syntax | OPEN | User has instructions to upgrade to 3.11 via `brew install python@3.11`. `requirements-frozen-py39.txt` will be the migration snapshot. Until then, AST + selective imports are the verification ceiling for `cinema_pipeline.py` / `web_server.py` / `cinema/core.py` / `vbench_evaluator.py`. |
+| 2 | `.env.example` incomplete | RESOLVED | Resolved in `11596db`. All 18 env vars documented. |
+| 3 | `llm/router.py` dead | RESOLVED | Deleted in `188654f`. |
+| 4 | `LLMEnsemble.ensemble_quality_vote` dead | RESOLVED | Deleted in `0a7f9b3` along with `EnsembleQualityResult`. |
+| 5 | `cinema_pipeline.py` god module | UPDATED | Decomposed via Slices A-E + standalone-controllers slice 1. File now 803 lines (was 1,526). Split into ShotControllerMixin + ReviewControllerMixin + CheckpointStoreMixin + LifecycleService + PipelineCore. Slice 2 (standalone ShotController class) and Slice 3 (controller caching in web_server) remain — see section 9. |
+| 6 | `tests/` reorg into unit/integration | RESOLVED | Resolved in `96262ff`. |
+| 7 | No structured logging | OPEN | Multi-week, ~100-file `print()` -> logger conversion. Still deferred. Phase 10's preamble portion landed in `4205077`. |
+| 8 | Lazy imports in `audio/` | RESOLVED | Resolved in Slices 4-6. All audio submodules use eager top-level imports. `audio/_client.py` is the cycle-free shared dependency. |
 | 9 | V2 plugin architecture (cinema_pipeline_v2 path) | N/A | Per user, that path is dead. The V2 source tree still exists at `~/cinema_pipeline_v2/` but is not integrated. |
-| 10 | `vertex-ai-key.json` (empty) at repo root | 🔲 | Gitignored. Safe to delete if user confirms it's not used. |
-| 11 | Cleanup `PipelineContext` dict-API methods | 🔲 | Still has `__getitem__`/`__setitem__`/`get`/`update`/`keys`/`items`/`values`/`as_dict` for legacy `ctx["foo"]` compat. Per §9.3 item 5 of the original handoff: removable once all callers migrate to `ctx.foo`. No urgency. |
-| 12 | Per-test `sys.path.insert` lines now point at the wrong dir | 🔲 | After Phase 9 moved tests into `tests/unit/` and `tests/integration/`, each test's own `sys.path.insert(0, os.path.join(__file__, ".."))` points at `tests/` instead of project root. Harmless because `tests/conftest.py` does it at module-load time first. Polish opportunity. |
-| 13 | `_wait_for_gate` doesn't use `lifecycle.wait_for_gate` | 🔲 | Slice E (scoped) adopted LifecycleService but `ReviewControllerMixin._wait_for_gate` still uses the old `self.pause()` + poll pattern. Small follow-on, low leverage, low risk. |
+| 10 | `vertex-ai-key.json` (empty) at repo root | OPEN | Gitignored. Safe to delete if user confirms it's not used. |
+| 11 | Cleanup `PipelineContext` dict-API methods | OPEN | Still has `__getitem__`/`__setitem__`/`get`/`update`/`keys`/`items`/`values`/`as_dict` for legacy `ctx["foo"]` compat. Per section 9.3 item 5 of the original handoff: removable once all callers migrate to `ctx.foo`. No urgency. |
+| 12 | Per-test `sys.path.insert` lines now point at the wrong dir | OPEN | After Phase 9 moved tests into `tests/unit/` and `tests/integration/`, each test's own `sys.path.insert(0, os.path.join(__file__, ".."))` points at `tests/` instead of project root. Harmless because `tests/conftest.py` does it at module-load time first. Polish opportunity. |
+| 13 | `_wait_for_gate` doesn't use `lifecycle.wait_for_gate` | OPEN | Slice E (scoped) adopted LifecycleService but `ReviewControllerMixin._wait_for_gate` still uses the old `self.pause()` + poll pattern. Small follow-on, low leverage, low risk. |
 
 ---
 
@@ -339,7 +342,7 @@ Updated from the original handoff. ✅ = resolved this round, ✏️ = updated s
 - Public name matches the legacy name exactly (no renames during the move).
 
 ### Step 3 — Update the legacy module with re-export
-- **Remove** the old function definitions. For large blocks, use AST-based extraction via a Python script (this round used the pattern repeatedly — see §7 Pattern J).
+- **Remove** the old function definitions. For large blocks, use AST-based extraction via a Python script (this round used the pattern repeatedly — see section 7 Pattern J).
 - **Add** a re-export at the top: `from new.module import X  # noqa: F401`.
 - **Leave a marker comment** where the function used to be.
 
@@ -364,7 +367,7 @@ from legacy.module import target as legacy_path
 assert new_path is legacy_path, f'identity mismatch'
 print('OK identity holds')
 
-# Run the §0 smoke block to confirm all 9 invariants still hold
+# Run the section 0 smoke block to confirm all 9 invariants still hold
 "
 ```
 
@@ -427,7 +430,7 @@ When you want to extract long-lived state into a dataclass (`PipelineCore`) but 
 class CinemaPipeline(...):
     def __init__(self, project_id, core=None):
         self._core = core or build_pipeline_core(project_id)
-    
+
     @property
     def project(self) -> dict:
         return self._core.project  # reference, not copy — mutations persist
@@ -456,10 +459,10 @@ Phases call `ctx.lifecycle.is_cancelled()` / `check_pause()` / `report_progress(
 When an orchestrator's `generate()` method contains a mix of phase-shaped logic (transformations) and not-phase-shaped logic (gate waits, operator input), don't force everything into the Phase protocol. Extract only the phase-shaped parts; let the rest stay procedural.
 
 Used by Slice E proper: `KeyframeRenderPhase` and `MotionRenderPhase` were extracted; the three gates (`PLAN_REVIEW`, `KEYFRAME_REVIEW`, `REVIEW`) stayed as inline `_wait_for_gate(...)` calls in `generate()`. The cost-benefit:
-- ✅ Per-shot loop becomes testable in isolation (build a fake `shot_generator`)
-- ✅ The loop logic is reusable from main.py or scripts
-- ❌ The two orchestrators (driver vs CinemaPipeline) don't fully unify
-- ✅ Avoids the "gate-phase" hack (a "phase" that does nothing but wait)
+- YES Per-shot loop becomes testable in isolation (build a fake `shot_generator`)
+- YES The loop logic is reusable from main.py or scripts
+- NO The two orchestrators (driver vs CinemaPipeline) don't fully unify
+- YES Avoids the "gate-phase" hack (a "phase" that does nothing but wait)
 
 ### Pattern K — AST-based bulk method extraction (NEW)
 
@@ -505,21 +508,21 @@ Bash commands that span multiple seconds (e.g., long Python heredocs) sometimes 
 
 `def f(x: int | None = None):` is two different things to Python 3.9:
 - **Annotation** (`x: int | None`) — stored as a string if `from __future__ import annotations`, never evaluated at runtime.
-- **Default value** (`= None`) — annotation expression evaluated at function definition time → `TypeError: unsupported operand type(s) for |`.
+- **Default value** (`= None`) — annotation expression evaluated at function definition time -> `TypeError: unsupported operand type(s) for |`.
 
 Files in this repo with PEP 604 in function defaults that fail to runtime-import on 3.9: `vbench_evaluator.py`, `cinema_pipeline.py`, `web_server.py`, `cinema/core.py` (transitively via vbench_evaluator import). py_compile passes for all of them — the bytecode is fine; only the import-time evaluation fails.
 
-Don't conflate "compiles" with "imports". The §0 smoke test does both for the modules that CAN runtime-import on 3.9; for the others, py_compile + AST inspection are the verification ceiling.
+Don't conflate "compiles" with "imports". The section 0 smoke test does both for the modules that CAN runtime-import on 3.9; for the others, py_compile + AST inspection are the verification ceiling.
 
 ### 8.9 Mixin pattern preserves identity (NEW)
 
-When a method moves from a class body into a mixin: `LegacyClass.method is Mixin.method` evaluates True (the function object is reached via MRO; not copied). This means the identity-check pattern from §6 Step 4 still works on mixin moves.
+When a method moves from a class body into a mixin: `LegacyClass.method is Mixin.method` evaluates True (the function object is reached via MRO; not copied). This means the identity-check pattern from section 6 Step 4 still works on mixin moves.
 
 But: gitnexus_detect_changes flags every moved method as "Modified" because it tracks symbols by **file location**, not Python identity. The "Modified" count after a mixin extraction is the count of moved methods — but `affected_processes` is correctly 0 because the call edges are preserved.
 
 ### 8.10 `gitnexus_impact "HIGH" risk` is often a false positive on extractions (NEW)
 
-When extracting a method, gitnexus_impact computes the transitive reach (depth 1 → 2 → 3 callers) and reports the maximum reach as the risk label. For methods called transitively by `run_pipeline` → `generate` → ..., the label becomes HIGH even though only the d=1 callers (which are usually 1-2 internal methods) actually need to be updated.
+When extracting a method, gitnexus_impact computes the transitive reach (depth 1 -> 2 -> 3 callers) and reports the maximum reach as the risk label. For methods called transitively by `run_pipeline` -> `generate` -> ..., the label becomes HIGH even though only the d=1 callers (which are usually 1-2 internal methods) actually need to be updated.
 
 **Mitigation:** focus on the d=1 list explicitly. If d=1 is all-internal-to-the-file-being-modified AND the slice preserves the import surface (re-export shim or mixin MRO), the HIGH risk label is benign.
 
@@ -527,10 +530,10 @@ When extracting a method, gitnexus_impact computes the transitive reach (depth 1
 
 `@property def x(self): return self._core.x` returns the **same object** that `self._core.x` holds, not a copy. So:
 
-- ✅ `self.x.clear()` clears the underlying dict (works through the property)
-- ✅ `self.x.append(...)` mutates the underlying list
-- ✅ `self.x.frob = "y"` sets an attribute on the underlying instance
-- ❌ `self.x = new_value` does NOT work — it tries to set an attribute on the host class, hitting the property's lack of a setter
+- YES `self.x.clear()` clears the underlying dict (works through the property)
+- YES `self.x.append(...)` mutates the underlying list
+- YES `self.x.frob = "y"` sets an attribute on the underlying instance
+- NO `self.x = new_value` does NOT work — it tries to set an attribute on the host class, hitting the property's lack of a setter
 
 This bit me when planning the `_refresh_project_snapshot` integration. The method calls `self.project.clear()` + `self.project.update(latest)` — both work through the property. But if any caller wrote `self.project = latest` (full assignment) instead, the property would have needed a setter.
 
@@ -570,7 +573,7 @@ Slice 1 (`42a290f`, PipelineCore extraction) introduced the architectural seam. 
 
 **Open question to resolve before starting Slice 2:** does the mixin survive as a shim, or does CinemaPipeline switch to composition (`self._shot_ctrl = ShotController(self._core, self.lifecycle)`)? Composition is cleaner but requires CinemaPipeline methods that delegate to the controller — adds ~12 delegate methods.
 
-**Slice 3 (medium effort):** Web server caching. `_running_pipelines` → `_running_cores` keyed by project_id. Per-endpoint controllers are built per-request from a shared core. Real amortization of the heavy service construction.
+**Slice 3 (medium effort):** Web server caching. `_running_pipelines` -> `_running_cores` keyed by project_id. Per-endpoint controllers are built per-request from a shared core. Real amortization of the heavy service construction.
 
 After Slices 2 and 3, web_server.py's remaining 5 `CinemaPipeline(...)` construction sites can all be replaced with thinner controller construction.
 
@@ -578,10 +581,10 @@ After Slices 2 and 3, web_server.py's remaining 5 `CinemaPipeline(...)` construc
 
 | Phase | Status |
 |---|---|
-| 7 — Web service layer | ✏️ Partial. `web_services.py` + `cinema/services.py` + 2 endpoints decoupled. 5 endpoints still need standalone controllers (track 9.1 above). |
-| 8 — Domain reorg | ✅ Complete (`8f54eb2`). |
-| 9 — Tests reorg | ✅ Complete (`96262ff`). |
-| 10 — Structured logging + CLAUDE.md preamble | ✏️ Preamble done (`4205077`). Structured logging deferred — multi-week, ~100-file effort. |
+| 7 — Web service layer | UPDATED. Partial. `web_services.py` + `cinema/services.py` + 2 endpoints decoupled. 5 endpoints still need standalone controllers (track 9.1 above). |
+| 8 — Domain reorg | RESOLVED (`8f54eb2`). |
+| 9 — Tests reorg | RESOLVED (`96262ff`). |
+| 10 — Structured logging + CLAUDE.md preamble | UPDATED. Preamble done (`4205077`). Structured logging deferred — multi-week, ~100-file effort. |
 
 ### 9.3 Other follow-ups
 
@@ -648,7 +651,7 @@ for name in ('generate_keyframe_take', 'generate_motion_take', 'regenerate_shot'
     # Whether mixin survives as a shim OR the methods migrate fully — must decide in Slice 2
     pass
 
-# 4. All §0 invariants still hold (re-run that block)
+# 4. All section 0 invariants still hold (re-run that block)
 " 2>&1 | grep -v 'FutureWarning\|NotOpenSSL\|warnings.warn'
 ```
 
@@ -670,7 +673,7 @@ for name in ('generate_keyframe_take', 'generate_motion_take', 'regenerate_shot'
 
 ## 13. Tips for the next chat
 
-1. **Read §6 (the playbook) before anything else.** Then §0 (smoke test). These two together are 80% of what you need to operate.
+1. **Read section 6 (the playbook) before anything else.** Then section 0 (smoke test). These two together are 80% of what you need to operate.
 
 2. **Don't skip the identity check** (or its AST equivalent for class moves). It catches the subtle bug where you accidentally redefined a function with slightly different behavior. `assert a is b` >> `assert callable(b)`.
 
@@ -682,11 +685,11 @@ for name in ('generate_keyframe_take', 'generate_motion_take', 'regenerate_shot'
 
 6. **The mixin pattern (Pattern G) is the established way to decompose god classes** in this codebase. Don't try to invent a "better" pattern unless you're prepared to defend it against the existing one.
 
-7. **Open design questions in `docs/CINEMA_PIPELINE_MIGRATION_DESIGN.md` §7 are still open.** Three questions about assembly ownership, checkpoint storage contract, and controller caching. If your slice touches any of those, resolve the relevant question first or document the deferral.
+7. **Open design questions in `docs/CINEMA_PIPELINE_MIGRATION_DESIGN.md` section 7 are still open.** Three questions about assembly ownership, checkpoint storage contract, and controller caching. If your slice touches any of those, resolve the relevant question first or document the deferral.
 
 8. **The user said "do 1" / "go with b" / "proceed".** Match that energy. Brief options-with-recommendation; let them pick; execute. Don't over-explain.
 
-9. **Update this handoff doc at the end of your session.** Replace the "**As of:**" line, add your new commits to §2, update §5 issues, update §9 roadmap. The next chat reads this doc cold.
+9. **Update this handoff doc at the end of your session.** Replace the "**As of:**" line, add your new commits to section 2, update section 5 issues, update section 9 roadmap. The next chat reads this doc cold.
 
 ---
 
@@ -702,9 +705,9 @@ git -C /Users/hyungkoookkim/Content status --short
 git -C /Users/hyungkoookkim/Content show 42a290f --stat
 git -C /Users/hyungkoookkim/Content show 42a290f -- cinema/core.py
 
-# Run smoke (the canonical version is at §0)
+# Run smoke (the canonical version is at section 0)
 PY=/Users/hyungkoookkim/Content/.venv/bin/python
-cd /Users/hyungkoookkim/Content && $PY -c "...§0 block..."
+cd /Users/hyungkoookkim/Content && $PY -c "...section 0 block..."
 
 # Find a function across the codebase
 grep -rn -E "^def function_name\b" --include="*.py" --exclude-dir=.venv --exclude-dir=.claude /Users/hyungkoookkim/Content
@@ -740,11 +743,11 @@ npx gitnexus analyze   # refresh after commits (the hook reminds you; sometimes 
 
 If you're a chat picking this up: welcome.
 
-1. Run §0's smoke test first. Confirm 9 invariants hold.
-2. Read §6 (the playbook) and §10 (user prefs).
-3. Pick a slice from §9. Standalone-controllers Slice 2 is the highest-leverage next step.
+1. Run section 0's smoke test first. Confirm 9 invariants hold.
+2. Read section 6 (the playbook) and section 10 (user prefs).
+3. Pick a slice from section 9. Standalone-controllers Slice 2 is the highest-leverage next step.
 4. Brief the user on your scope before starting — present options + recommendation.
-5. Make exactly one commit per slice. Verify with §6 step 4.
+5. Make exactly one commit per slice. Verify with section 6 step 4.
 6. Update this doc at the end of your session.
 
 If anything in this doc is unclear, the commit history (especially the verbose messages on `42a290f`, `362bed9`, `a10b653`, `e31e266`, `c21bbbb`, `8f54eb2`, `d8c1461`) is the next source of truth. Each commit message explains exactly what was done and why.
