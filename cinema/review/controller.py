@@ -33,12 +33,15 @@ State expected from the host class
   _refresh_project_snapshot   (CinemaPipeline implementation)
   _find_take                  (delegated to ShotController by host)
   _mutate_shot                (delegated to ShotController by host)
-  _check_pause                (CinemaPipeline implementation; returns
-                              bool unlike LifecycleService.check_pause)
-  pause()                     (host pause + progress("PAUSED") emit)
-  resume()                    (host resume + progress("RESUMED") emit)
+  resume()                    (host resume + progress("RESUMED") emit
+                              -- called by proceed_to_assembly only)
   current_stage               (writable attribute -- updated during
                               _wait_for_gate)
+
+Phase 2 removed pause() + _check_pause from this list. _wait_for_gate
+now uses lifecycle.wait_for_gate (predicate-poll), so gates no longer
+pause the pipeline. Manual pause via pipeline.pause() is still
+respected at other lifecycle.check_pause() call sites in generate().
 
 Body-rewrite policy
 ===================
@@ -49,12 +52,14 @@ mechanical substitutions:
   self._refresh_project_snapshot()  -> self._host._refresh_project_snapshot()
   self._find_take(...)              -> self._host._find_take(...)
   self._mutate_shot(...)            -> self._host._mutate_shot(...)
-  self._check_pause()               -> self._host._check_pause()
-  self.pause()                      -> self._host.pause()
   self.resume()                     -> self._host.resume()
   self.current_stage = gate         -> self._host.current_stage = gate
   self.project                      -- preserved (proxies to self._core.project)
   self.progress(...)                -- preserved (proxies to self._lifecycle.report_progress)
+
+Phase 2 rewrote _wait_for_gate to use self._lifecycle.wait_for_gate
+instead of the pause()+_check_pause cycle. See the method docstring
+for the behavior-change rationale.
 """
 
 from __future__ import annotations
@@ -84,9 +89,9 @@ class ReviewControllerHost(Protocol):
     ) -> tuple[Optional[str], Optional[dict]]: ...
     def _mutate_shot(self, shot_id: str, mutator, timeout: float = 10): ...
 
-    # -- Lifecycle wrappers that preserve progress-event emit --
-    def _check_pause(self) -> bool: ...
-    def pause(self) -> None: ...
+    # -- Resume wrapper preserves the RESUMED progress emit. (Phase 2
+    #    removed pause() and _check_pause from this protocol -- gates
+    #    no longer pause the pipeline; they poll via lifecycle.wait_for_gate.)
     def resume(self) -> None: ...
 
     # -- Orchestrator-shared progress pointer (writable attribute) --
@@ -202,15 +207,32 @@ class ReviewController:
         return False
 
     def _wait_for_gate(self, gate: str, detail: str, percent: float) -> bool:
-        while True:
+        """Block until the named gate is satisfied (or run cancelled).
+
+        Phase 2 migration: uses ``LifecycleService.wait_for_gate``'s
+        predicate-poll pattern instead of the previous
+        ``self._host.pause()`` + ``self._host._check_pause()`` cycle.
+
+        The predicate re-refreshes the project snapshot on each poll
+        (default 0.5s interval) so operator approvals that mutate the
+        on-disk project state are picked up automatically. No explicit
+        "Resume" click is required after approving; the gate auto-
+        resolves within ``poll_interval`` seconds of the last approval.
+
+        Manual pause (via pipeline.pause() / Pause button) is still
+        respected at every other ctx.lifecycle.check_pause() call
+        site in the generate() loop -- this method just removes the
+        coupling between gate state and pause state. Gates no longer
+        force a pause.
+        """
+        self._host.current_stage = gate
+        self.progress(gate, detail, percent)
+
+        def predicate() -> bool:
             project = self._host._refresh_project_snapshot() or self.project
-            if self._gate_satisfied(gate, project):
-                return True
-            self._host.current_stage = gate
-            self.progress(gate, detail, percent)
-            self._host.pause()
-            if not self._host._check_pause():
-                return False
+            return self._gate_satisfied(gate, project)
+
+        return self._lifecycle.wait_for_gate(gate, predicate)
 
     def _rebuild_review_clips(self, project: Optional[dict] = None) -> dict:
         active_project = project or self.project
