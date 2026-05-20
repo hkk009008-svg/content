@@ -22,7 +22,6 @@ import argparse
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from quality_tracker import QualityTracker, VBenchResult
 

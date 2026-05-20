@@ -6,10 +6,6 @@ import tempfile
 
 import pytest
 
-# Ensure project root is on sys.path so we can import cost_tracker directly.
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
 
 from cost_tracker import CostEntry, CostTracker, PRICING, _detect_provider
 

@@ -6,7 +6,6 @@ Isolated unit tests: no external APIs, no DeepFace, no project files needed.
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import tempfile
 import pytest

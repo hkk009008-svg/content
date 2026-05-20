@@ -66,25 +66,33 @@ mechanical substitutions:
   self.continuity                    -- preserved (proxies to self._core.continuity)
   self.progress(...)                 -- preserved (proxies to self._lifecycle.report_progress)
 
-The original latent import bugs in apply_correction (``time``,
-``get_reference_image``, ``face_swap_video_frames``,
-``generate_lip_sync_video``, ``generate_rife_interpolation``,
-``upscale_video_seedvr2``, ``stitch_modules``) are preserved as-is.
-Those code paths fail at runtime today and will continue to fail
-exactly the same way after this slice. Fixing them is a separate
-follow-up, not part of the architectural extraction.
+Note on previously-latent imports: ``time``, ``get_reference_image``,
+``face_swap_video_frames``, ``generate_lip_sync_video``,
+``generate_rife_interpolation``, ``upscale_video_seedvr2``, and
+``stitch_modules`` were referenced bare in method bodies but missing
+from the module-level imports through Slice 2. They've been added in
+Phase 0 of the V1-close-out track so the rare ``apply_correction`` /
+``diagnose_clip`` / ``generate_scene_preview`` code paths no longer
+crash on import-time NameError when they execute.
 """
 
 from __future__ import annotations
 
 import os
+import time
 from typing import TYPE_CHECKING, Optional, Protocol
 
 from project_manager import MutationResult, mutate_project, make_take
 from llm.style_director import style_rules_to_prompt_suffix
+from character_manager import get_reference_image
 from phase_c_assembly import generate_ai_broll
-from phase_c_ffmpeg import generate_ai_video
-from phase_c_vision import validate_identity
+from phase_c_ffmpeg import generate_ai_video, stitch_modules
+from phase_c_vision import validate_identity, face_swap_video_frames
+from lip_sync import (
+    generate_lip_sync_video,
+    generate_rife_interpolation,
+    upscale_video_seedvr2,
+)
 
 from cinema.lifecycle import LifecycleService
 

@@ -6,7 +6,6 @@ Uses synthetic images created with OpenCV/numpy (no real assets needed).
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import tempfile
 import numpy as np
