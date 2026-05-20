@@ -1,92 +1,51 @@
 """CheckpointStore -- pipeline state persistence to disk.
 
-Standalone-controllers Slice 3b (Phase 1b) of REFACTOR_HANDOFF.md.
-Replaces the prior CheckpointStoreMixin (Slice D) with a composable
-class -- mirroring Slice 2 (ShotController) and Phase 1a
-(ReviewController).
+V1.1 #5 update: CheckpointStore no longer needs a host. All the
+state it reads + writes now lives on the shared ``RunState`` instance
+(see ``cinema/runstate.py``), which it accesses directly. The
+previous ``CheckpointStoreHost`` protocol class is deleted.
 
-Architectural note
-==================
+Constructor: ``CheckpointStore(core, lifecycle, runstate)``. The
+lifecycle param is used only for the RESUME progress emit.
 
-Unlike Shot and Review controllers, CheckpointStore owns no per-run
-state. It's a pure file-I/O service that serializes host attributes
-to JSON and reads them back. The class still takes a lifecycle
-(only used for the RESUME progress emit in _restore_from_checkpoint)
-to match the constructor shape of the other two controllers.
-
-State expected from the host class
-==================================
+State expected from RunState
+============================
 
 Read by the save path:
   current_stage, current_scene_id, current_shot_id,
-  _completed_scene_indices, scene_clips, scene_audio,
+  completed_scene_indices, scene_clips, scene_audio,
   shot_results, failed_shots
 
-Written by the restore path (all FULL ASSIGNMENT -- the host must
-expose settable attributes for these):
+Written by the restore path (FULL ASSIGNMENT to the runstate
+dataclass fields, which are mutable by default):
   scene_clips, scene_audio, shot_results, failed_shots,
-  _completed_scene_indices
+  completed_scene_indices
 
-shot_results on CinemaPipeline is a property with a setter (added in
-Slice 2 because CheckpointStoreMixin already did full reassignment).
-The other four are plain instance attributes on CinemaPipeline.
-
-Body-rewrite policy
-===================
-
-Method bodies preserved verbatim with these mechanical substitutions:
-
-  self.project       -- preserved (proxies to self._core.project)
-  self.temp_dir      -- preserved (proxies to self._core.temp_dir)
-  self.progress(...) -- preserved (proxies to self._lifecycle.report_progress)
-  self.current_*     -> self._host.current_*  (reads)
-  self.scene_clips   -> self._host.scene_clips  (reads + writes)
-  self.scene_audio   -> self._host.scene_audio
-  self.shot_results  -> self._host.shot_results  (writes via @property setter)
-  self.failed_shots  -> self._host.failed_shots
-  self._completed_scene_indices  -> self._host._completed_scene_indices
+The previous Slice-3b version used a CheckpointStoreHost protocol to
+declare these as writable host attributes. After V1.1 #5, the host
+abstraction collapses -- the runstate IS the contract.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
 from cinema.lifecycle import LifecycleService
 
 if TYPE_CHECKING:
     # See Pattern L in REFACTOR_HANDOFF.md section 7.
     from cinema.core import PipelineCore
-
-
-@runtime_checkable
-class CheckpointStoreHost(Protocol):
-    """Attributes that CheckpointStore reads from and writes to its host.
-
-    All declared as writable attributes (no methods). The host must
-    expose each one as either a plain instance attribute or a property
-    with a setter.
-    """
-
-    current_stage: str
-    current_scene_id: str
-    current_shot_id: str
-    _completed_scene_indices: set
-    scene_clips: dict
-    scene_audio: dict
-    shot_results: dict
-    failed_shots: list
+    from cinema.runstate import RunState
 
 
 class CheckpointStore:
     """Atomic JSON checkpoint persistence for the interactive pipeline.
 
     Lets a long generation run resume across process restarts: after each
-    meaningful step, the in-memory state (completed scene indices, scene
-    clips/audio mapping, per-shot results, failed shots) is serialized
-    to a temp file under self.temp_dir and atomically replaced via
-    os.replace().
+    meaningful step, the in-memory RunState is serialized to a temp file
+    under self.temp_dir and atomically replaced via os.replace().
     """
 
     CHECKPOINT_FILE = "pipeline_state.json"
@@ -95,11 +54,11 @@ class CheckpointStore:
         self,
         core: PipelineCore,
         lifecycle: LifecycleService,
-        host: CheckpointStoreHost,
+        runstate: RunState,
     ):
         self._core = core
         self._lifecycle = lifecycle
-        self._host = host
+        self._runstate = runstate
 
     # ------------------------------------------------------------------
     # PipelineCore + Lifecycle property proxies.
@@ -132,14 +91,14 @@ class CheckpointStore:
         """
         state = {
             "project_id": self.project["id"],
-            "current_stage": self._host.current_stage,
-            "current_scene_id": self._host.current_scene_id,
-            "current_shot_id": self._host.current_shot_id,
-            "completed_scene_indices": sorted(self._host._completed_scene_indices),
-            "scene_clips": self._host.scene_clips,
-            "scene_audio": self._host.scene_audio,
-            "shot_results": self._host.shot_results,
-            "failed_shots": self._host.failed_shots,
+            "current_stage": self._runstate.current_stage,
+            "current_scene_id": self._runstate.current_scene_id,
+            "current_shot_id": self._runstate.current_shot_id,
+            "completed_scene_indices": sorted(self._runstate.completed_scene_indices),
+            "scene_clips": self._runstate.scene_clips,
+            "scene_audio": self._runstate.scene_audio,
+            "shot_results": self._runstate.shot_results,
+            "failed_shots": self._runstate.failed_shots,
         }
         path = self._checkpoint_path()
         import tempfile as _tmp
@@ -201,19 +160,19 @@ class CheckpointStore:
 
     def _restore_from_checkpoint(self) -> set:
         """
-        Restore pipeline state from checkpoint.
+        Restore pipeline state from checkpoint into the runstate.
         Returns set of completed scene indices to skip.
         """
         state = self._load_checkpoint()
         if not state:
             return set()
 
-        self._host.scene_clips = state.get("scene_clips", {})
-        self._host.scene_audio = state.get("scene_audio", {})
-        self._host.shot_results = state.get("shot_results", {})
-        self._host.failed_shots = state.get("failed_shots", [])
+        self._runstate.scene_clips = state.get("scene_clips", {})
+        self._runstate.scene_audio = state.get("scene_audio", {})
+        self._runstate.shot_results = state.get("shot_results", {})
+        self._runstate.failed_shots = state.get("failed_shots", [])
         completed = set(state.get("completed_scene_indices", []))
-        self._host._completed_scene_indices = completed
+        self._runstate.completed_scene_indices = completed
 
         n = len(completed)
         if n > 0:

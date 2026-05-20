@@ -40,6 +40,7 @@ from cinema.core import PipelineCore, build_pipeline_core
 from cinema.lifecycle import ThreadedLifecycle
 from cinema.phases.keyframe_render import KeyframeRenderPhase
 from cinema.phases.motion_render import MotionRenderPhase
+from cinema.runstate import RunState
 from cinema.shots.controller import ShotController
 from cinema.review.controller import ReviewController
 from cinema.checkpoint import CheckpointStore
@@ -116,36 +117,25 @@ class CinemaPipeline:
             progress_callback=progress_callback or self._default_progress
         )
 
-        # Per-run runtime state — populated during generate(), reset
-        # for each run. None of this belongs in PipelineCore.
-        self.scene_clips = {}        # scene_id -> list of video clip paths
-        self.scene_audio = {}        # scene_id -> audio path
-        self.failed_shots = []       # shot_ids that failed and were skipped
-        self.current_stage = ""
-        self.current_scene_id = ""
-        self.current_shot_id = ""
-        self._completed_scene_indices = set()  # for checkpoint resume
+        # V1.1 #5: per-run mutable state lives on a shared RunState
+        # instance. Single canonical home (vs. previously scattered
+        # across ShotController.shot_results, ReviewController.review_clips,
+        # and CinemaPipeline's own attributes). All three controllers
+        # share the SAME RunState reference -- mutations propagate.
+        self._runstate = RunState()
 
-        # ShotController -- standalone-controllers Slice 2. Owns
-        # shot_results (the only runtime-state field where shot methods
-        # are the primary writers). Cross-controller calls and the
-        # progress-pointer triple still flow through self (the host),
-        # via the ShotControllerHost protocol.
-        self._shot_ctrl = ShotController(self._core, self.lifecycle, self)
+        # ShotController -- composed. Cross-controller calls still flow
+        # through self (the host); state reads/writes flow through
+        # self._runstate.
+        self._shot_ctrl = ShotController(self._core, self.lifecycle, self, self._runstate)
 
-        # ReviewController -- Slice 3b (Phase 1a). Owns review_clips.
-        # Operator approval gates + per-shot review queries. Cross-
-        # controller calls flow through self via ReviewControllerHost
-        # (_find_take + _mutate_shot delegated to ShotController; the
-        # rest stay on CinemaPipeline).
-        self._review_ctrl = ReviewController(self._core, self.lifecycle, self)
+        # ReviewController -- composed. Same shape as ShotController.
+        self._review_ctrl = ReviewController(self._core, self.lifecycle, self, self._runstate)
 
-        # CheckpointStore -- Slice 3b (Phase 1b). Stateless file-I/O
-        # service. Reads + writes host attributes (scene_clips,
-        # scene_audio, shot_results, failed_shots, _completed_scene_indices,
-        # current_*) via the CheckpointStoreHost protocol. shot_results
-        # writes go through the @property setter added in Slice 2.
-        self._checkpoint = CheckpointStore(self._core, self.lifecycle, self)
+        # CheckpointStore -- composed. V1.1 #5 removed its host
+        # protocol entirely; it now reads/writes self._runstate directly,
+        # no host needed.
+        self._checkpoint = CheckpointStore(self._core, self.lifecycle, self._runstate)
 
     # ------------------------------------------------------------------
     # PipelineCore proxies — backward-compat property accessors so the
@@ -196,40 +186,76 @@ class CinemaPipeline:
         return self._core.ensemble
 
     # ------------------------------------------------------------------
-    # ShotController delegates + state proxy (Slice 2).
-    # The six public shot methods now live on self._shot_ctrl; these
-    # delegates preserve the CinemaPipeline call surface for web_server
-    # endpoints, tests, and the inline self.generate_scene_preview()
-    # call in assemble_approved_takes().
+    # RunState forwarders (V1.1 #5).
+    # All 9 per-run state fields live on self._runstate. The orchestrator
+    # and web_server.py read these as attributes on CinemaPipeline (e.g.,
+    # pipeline.shot_results). Each forwarder is a @property + setter
+    # pair so that in-place mutations (pipeline.shot_results[X] = Y),
+    # full assignment (pipeline.scene_clips = {}), and read-style
+    # access all keep working.
     # ------------------------------------------------------------------
 
     @property
     def shot_results(self) -> dict:
-        """Proxy to ShotController's run-state dict.
-
-        Returns the underlying object (not a copy) so in-place mutations
-        like ``self.shot_results[shot_id] = {...}`` from generate() keep
-        working through the property.
-        """
-        return self._shot_ctrl.shot_results
-
+        return self._runstate.shot_results
     @shot_results.setter
     def shot_results(self, value: dict) -> None:
-        # Needed for full-assignment sites in CheckpointStoreMixin
-        # (_restore_from_checkpoint reassigns the dict wholesale).
-        self._shot_ctrl.shot_results = value
+        self._runstate.shot_results = value
 
-    def update_progress_pointer(self, stage: str, scene_id: str, shot_id: str) -> None:
-        """Update the current_stage / current_scene_id / current_shot_id triple atomically.
+    @property
+    def scene_clips(self) -> dict:
+        return self._runstate.scene_clips
+    @scene_clips.setter
+    def scene_clips(self, value: dict) -> None:
+        self._runstate.scene_clips = value
 
-        Called by ShotController via the ShotControllerHost protocol.
-        The orchestrator's generate() loop still writes the fields
-        directly; this method just keeps the controller's writes from
-        scattering three attribute assignments at every step.
-        """
-        self.current_stage = stage
-        self.current_scene_id = scene_id
-        self.current_shot_id = shot_id
+    @property
+    def scene_audio(self) -> dict:
+        return self._runstate.scene_audio
+    @scene_audio.setter
+    def scene_audio(self, value: dict) -> None:
+        self._runstate.scene_audio = value
+
+    @property
+    def failed_shots(self) -> list:
+        return self._runstate.failed_shots
+    @failed_shots.setter
+    def failed_shots(self, value: list) -> None:
+        self._runstate.failed_shots = value
+
+    @property
+    def current_stage(self) -> str:
+        return self._runstate.current_stage
+    @current_stage.setter
+    def current_stage(self, value: str) -> None:
+        self._runstate.current_stage = value
+
+    @property
+    def current_scene_id(self) -> str:
+        return self._runstate.current_scene_id
+    @current_scene_id.setter
+    def current_scene_id(self, value: str) -> None:
+        self._runstate.current_scene_id = value
+
+    @property
+    def current_shot_id(self) -> str:
+        return self._runstate.current_shot_id
+    @current_shot_id.setter
+    def current_shot_id(self, value: str) -> None:
+        self._runstate.current_shot_id = value
+
+    @property
+    def _completed_scene_indices(self) -> set:
+        # Legacy underscore name preserved for orchestrator + CheckpointStore.
+        # On RunState the field is named completed_scene_indices (no underscore).
+        return self._runstate.completed_scene_indices
+    @_completed_scene_indices.setter
+    def _completed_scene_indices(self, value: set) -> None:
+        self._runstate.completed_scene_indices = value
+
+    # ------------------------------------------------------------------
+    # ShotController delegates.
+    # ------------------------------------------------------------------
 
     def generate_keyframe_take(self, *args, **kwargs) -> dict:
         return self._shot_ctrl.generate_keyframe_take(*args, **kwargs)
@@ -264,14 +290,17 @@ class CinemaPipeline:
         return self._shot_ctrl._mutate_shot(*args, **kwargs)
 
     # ------------------------------------------------------------------
-    # ReviewController delegates + state proxy (Slice 3b Phase 1a).
-    # Preserve the call surface for web_server endpoints, generate()
-    # loop gate-waits, and ShotController-via-host cross-calls.
+    # ReviewController delegates (Slice 3b Phase 1a; review_clips
+    # property moved into the RunState forwarders block above as part
+    # of V1.1 #5).
     # ------------------------------------------------------------------
 
     @property
     def review_clips(self) -> dict:
-        return self._review_ctrl.review_clips
+        return self._runstate.review_clips
+    @review_clips.setter
+    def review_clips(self, value: dict) -> None:
+        self._runstate.review_clips = value
 
     # Public operator API (called from web_server endpoints)
     def approve_shot_plan(self, *args, **kwargs) -> dict:

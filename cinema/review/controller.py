@@ -75,11 +75,17 @@ if TYPE_CHECKING:
     # cinema.core at runtime on Python 3.9 (PEP 604 issue via
     # vbench_evaluator).
     from cinema.core import PipelineCore
+    from cinema.runstate import RunState
 
 
 @runtime_checkable
 class ReviewControllerHost(Protocol):
-    """Methods + attributes that ReviewController calls on its host."""
+    """Methods that ReviewController calls on its host.
+
+    V1.1 #5 dropped ``current_stage`` from this protocol -- the
+    progress-pointer state lives on RunState now and ReviewController
+    writes via ``self._runstate.current_stage = gate`` directly.
+    """
 
     # -- Project-state refresh (lives on CinemaPipeline directly) --
     def _refresh_project_snapshot(self, timeout: float = 10) -> Optional[dict]: ...
@@ -94,9 +100,6 @@ class ReviewControllerHost(Protocol):
     #    removed pause() and _check_pause from this protocol -- gates
     #    no longer pause the pipeline; they poll via lifecycle.wait_for_gate.)
     def resume(self) -> None: ...
-
-    # -- Orchestrator-shared progress pointer (writable attribute) --
-    current_stage: str
 
 
 class ReviewController:
@@ -121,13 +124,14 @@ class ReviewController:
         core: PipelineCore,
         lifecycle: LifecycleService,
         host: ReviewControllerHost,
+        runstate: RunState,
     ):
         self._core = core
         self._lifecycle = lifecycle
         self._host = host
-
-        # Per-run state owned by this controller.
-        self.review_clips: dict = {}
+        # V1.1 #5: review_clips + current_stage live on the shared
+        # RunState.
+        self._runstate = runstate
 
     # ------------------------------------------------------------------
     # PipelineCore + Lifecycle property proxies -- preserve self.X
@@ -226,7 +230,7 @@ class ReviewController:
         coupling between gate state and pause state. Gates no longer
         force a pause.
         """
-        self._host.current_stage = gate
+        self._runstate.current_stage = gate
         self.progress(gate, detail, percent)
 
         def predicate() -> bool:
@@ -255,7 +259,7 @@ class ReviewController:
                 "take_kind": candidate.get("kind", ""),
                 "status": "pending_review",
             }
-        self.review_clips = manifest
+        self._runstate.review_clips = manifest
         return manifest
 
     # ------------------------------------------------------------------

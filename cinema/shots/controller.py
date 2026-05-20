@@ -106,38 +106,32 @@ if TYPE_CHECKING:
     # strings), the import is unnecessary at runtime. Gating it under
     # TYPE_CHECKING keeps the local 3.9 verification path runnable.
     from cinema.core import PipelineCore
+    from cinema.runstate import RunState
 
 
 @runtime_checkable
 class ShotControllerHost(Protocol):
-    """Methods + attributes that ShotController calls on its host.
+    """Cross-controller methods that ShotController calls on its host.
 
-    Names use leading underscores to match CinemaPipeline's existing
-    method names (the host doesn't promote them to public just to fit
-    a protocol). Python's Protocol matches by name regardless of
-    visibility convention.
+    V1.1 #5 simplified this protocol: ``scene_clips`` moved to RunState,
+    and ``update_progress_pointer`` moved to RunState as a method.
+    The host protocol now declares only the method calls that route
+    OUT of ShotController to other controllers (Review, Checkpoint) or
+    to the orchestrator (Audio phase).
     """
 
-    # -- ReviewController methods (live on ReviewControllerMixin today) --
+    # -- ReviewController methods --
     def _refresh_project_snapshot(self, timeout: float = 10) -> Optional[dict]: ...
     def _rebuild_review_clips(self, project: Optional[dict] = None) -> dict: ...
     def _candidate_take(self, shot: dict) -> Optional[dict]: ...
     def _resolve_take_path(self, shot: dict, take_id: str) -> str: ...
     def _latest_take(self, shot: dict, collection_name: str) -> Optional[dict]: ...
 
-    # -- CheckpointStore method (lives on CheckpointStoreMixin today) --
+    # -- CheckpointStore method --
     def _save_checkpoint(self, completed_scene_idx: int = -1) -> None: ...
 
-    # -- Audio-phase method (lives on CinemaPipeline today) --
+    # -- Audio-phase method (still on CinemaPipeline) --
     def _ensure_scene_audio(self, scene: dict, characters: list) -> Optional[str]: ...
-
-    # -- Progress-pointer write (orchestrator-shared state) --
-    def update_progress_pointer(
-        self, stage: str, scene_id: str, shot_id: str
-    ) -> None: ...
-
-    # -- Orchestrator-owned attribute that shot methods read/write --
-    scene_clips: dict
 
 
 class ShotController:
@@ -167,15 +161,15 @@ class ShotController:
         core: PipelineCore,
         lifecycle: LifecycleService,
         host: ShotControllerHost,
+        runstate: RunState,
     ):
         self._core = core
         self._lifecycle = lifecycle
         self._host = host
-
-        # Per-run runtime state owned by this controller.
-        # Other run-state fields stay on the orchestrator (see module
-        # docstring). The only field that moves in Slice 2 is shot_results.
-        self.shot_results: dict = {}
+        # V1.1 #5: shot_results + scene_clips + current_* live on the
+        # shared RunState. Single canonical home; no per-controller
+        # state ownership.
+        self._runstate = runstate
 
     # ------------------------------------------------------------------
     # PipelineCore + Lifecycle property proxies -- preserve self.X access
@@ -302,7 +296,7 @@ class ShotController:
             },
         )
         img_path = self._take_output_path(shot_id, take["id"], ".jpg")
-        self._host.update_progress_pointer("KEYFRAME", scene_id, shot_id)
+        self._runstate.update_progress_pointer("KEYFRAME", scene_id, shot_id)
         self.progress(
             "KEYFRAME",
             f"Generating keyframe for {shot_id}",
@@ -342,7 +336,7 @@ class ShotController:
             return MutationResult(take, save=True)
 
         stored_take = self._mutate_shot(shot_id, _mutator)
-        self.shot_results[shot_id] = {
+        self._runstate.shot_results[shot_id] = {
             "image": img_path,
             "video": None,
             "identity_score": identity_score,
@@ -417,7 +411,7 @@ class ShotController:
             },
         )
         vid_path = self._take_output_path(shot_id, take["id"], ".mp4")
-        self._host.update_progress_pointer("MOTION", scene_id, shot_id)
+        self._runstate.update_progress_pointer("MOTION", scene_id, shot_id)
         self.progress(
             "MOTION",
             f"Generating motion for {shot_id}",
@@ -466,7 +460,7 @@ class ShotController:
             return MutationResult(take, save=True)
 
         stored_take = self._mutate_shot(shot_id, _mutator)
-        self.shot_results[shot_id] = {
+        self._runstate.shot_results[shot_id] = {
             "image": source_image,
             "video": final_vid,
             "identity_score": identity_score,
@@ -716,7 +710,7 @@ class ShotController:
         if not scene:
             return None
 
-        clips = self._host.scene_clips.get(scene_id, [])
+        clips = self._runstate.scene_clips.get(scene_id, [])
         if not clips:
             clips = []
             for shot in scene.get("shots", []):
@@ -725,7 +719,7 @@ class ShotController:
                     clips.append(final_path)
             if not clips:
                 return None
-            self._host.scene_clips[scene_id] = clips
+            self._runstate.scene_clips[scene_id] = clips
 
         # Stitch scene clips into a preview
         preview_path = os.path.join(self._core.export_dir, f"preview_{scene_id}.mp4")
