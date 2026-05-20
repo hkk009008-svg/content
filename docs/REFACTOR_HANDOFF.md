@@ -1,8 +1,8 @@
 # Cinema Pipeline — Architecture Refactor Handoff (Round 2)
 
-**Status:** in progress, 40 commits deep on branch `refactor/architecture-cleanup`.
-**As of:** end of standalone-controllers slice 2 (this commit) + handoff refresh.
-**Last completed:** Standalone `ShotController` class — composition replaces `ShotControllerMixin`. `shot_results` moves to the controller; cross-controller calls flow through a `ShotControllerHost(Protocol)`.
+**Status:** V1 close-out complete, 47 commits deep on branch `refactor/architecture-cleanup`.
+**As of:** end of Phase 4 (this commit). V1 architectural completion shipped.
+**Last completed:** Phase 4 -- final handoff refresh closing out V1. All standalone-controllers slices done. The `cinema_pipeline.py` god-module decomposition is structurally complete (empty base class list; three standalone controllers + LifecycleService + PipelineCore composed). `web_server.py` caches the heavy `PipelineCore` per project. Contracts documented in `docs/CONTRACTS.md`.
 **Author of this doc:** previous chat session, end-of-day handoff.
 **Supersedes:** the original handoff (which covered through Phase 6 slice 3). The original is preserved in git history at the parent of `92a0bba`.
 
@@ -179,8 +179,17 @@ bc98a01  Phase 7 proper: cinema/services.py + read-only endpoint decoupling
 0e369db  docs(handoff): regenerate with ASCII-friendly characters
 
 - Standalone controllers (slice 2 of 3) -
-<pending>  ShotController class - composition replaces ShotControllerMixin
-<pending>  docs(handoff): update for slice 2 completion
+11e5795  ShotController class - composition replaces ShotControllerMixin
+
+- V1 close-out: Phases 0 through 4 -
+294851b  chore: Phase 0 pre-V1-completion cleanup (latent imports, vertex-ai-key, sys.path.insert)
+f9c575c  fix: restore _find_take + _mutate_shot delegates broken by Slice 2 (regression hunt)
+22aa710  refactor(cinema/review): promote ReviewController to standalone (Slice 3b Phase 1a)
+70cafc7  refactor(cinema/checkpoint): promote CheckpointStore to standalone (Slice 3b Phase 1b)
+c62f9cd  refactor(web_server): cache PipelineCore per project (Slice 3b Phase 1c)
+c1350ae  refactor(cinema/review): migrate _wait_for_gate to lifecycle.wait_for_gate (Phase 2)
+82a27e6  docs(cinema): document Phase Protocol contracts, approval state, take lineage (Phase 3)
+<this>   docs(handoff): close out V1 refactor (Phase 4)
 ```
 
 **Branch:** `refactor/architecture-cleanup`
@@ -314,19 +323,24 @@ Updated from the original handoff. RESOLVED = closed this round, UPDATED = statu
 
 | # | Issue | Status | Notes |
 |---|---|---|---|
-| 1 | Python 3.9 vs PEP 604 syntax | OPEN | User has instructions to upgrade to 3.11 via `brew install python@3.11`. `requirements-frozen-py39.txt` will be the migration snapshot. Until then, AST + selective imports are the verification ceiling for `cinema_pipeline.py` / `web_server.py` / `cinema/core.py` / `vbench_evaluator.py`. |
+| 1 | Python 3.9 vs PEP 604 syntax | DEFERRED | Out of V1 scope (user-side action). User has instructions to upgrade to 3.11 via `brew install python@3.11`. `requirements-frozen-py39.txt` is the migration snapshot. AST + selective-import verification remains the strategy for `cinema_pipeline.py` / `web_server.py` / `cinema/core.py` / `vbench_evaluator.py` until upgrade. |
 | 2 | `.env.example` incomplete | RESOLVED | Resolved in `11596db`. All 18 env vars documented. |
 | 3 | `llm/router.py` dead | RESOLVED | Deleted in `188654f`. |
 | 4 | `LLMEnsemble.ensemble_quality_vote` dead | RESOLVED | Deleted in `0a7f9b3` along with `EnsembleQualityResult`. |
-| 5 | `cinema_pipeline.py` god module | UPDATED | Decomposed via Slices A-E + standalone-controllers slices 1-2. File now 933 lines (was 1,526). Split into ShotController (standalone class, composition) + ReviewControllerMixin + CheckpointStoreMixin + LifecycleService + PipelineCore. Slice 3 (controller caching in web_server) remains — see section 9. |
+| 5 | `cinema_pipeline.py` god module | RESOLVED | Decomposed via Slices A-E + standalone-controllers Slices 1+2+3b (Phases 1a/1b/1c). File now 1,027 lines (was 1,526; -33%). `class CinemaPipeline:` with EMPTY base class list. Three standalone controllers (ShotController + ReviewController + CheckpointStore) + LifecycleService + PipelineCore, all composed. |
 | 6 | `tests/` reorg into unit/integration | RESOLVED | Resolved in `96262ff`. |
-| 7 | No structured logging | OPEN | Multi-week, ~100-file `print()` -> logger conversion. Still deferred. Phase 10's preamble portion landed in `4205077`. |
+| 7 | No structured logging | DEFERRED | Out of V1 scope (multi-week, ~100-file `print()` -> logger conversion). Phase 10's preamble portion landed in `4205077`. Filed as a separate future track. |
 | 8 | Lazy imports in `audio/` | RESOLVED | Resolved in Slices 4-6. All audio submodules use eager top-level imports. `audio/_client.py` is the cycle-free shared dependency. |
-| 9 | V2 plugin architecture (cinema_pipeline_v2 path) | N/A | Per user, that path is dead. The V2 source tree still exists at `~/cinema_pipeline_v2/` but is not integrated. |
-| 10 | `vertex-ai-key.json` (empty) at repo root | OPEN | Gitignored. Safe to delete if user confirms it's not used. |
-| 11 | Cleanup `PipelineContext` dict-API methods | OPEN | Still has `__getitem__`/`__setitem__`/`get`/`update`/`keys`/`items`/`values`/`as_dict` for legacy `ctx["foo"]` compat. Per section 9.3 item 5 of the original handoff: removable once all callers migrate to `ctx.foo`. No urgency. |
-| 12 | Per-test `sys.path.insert` lines now point at the wrong dir | OPEN | After Phase 9 moved tests into `tests/unit/` and `tests/integration/`, each test's own `sys.path.insert(0, os.path.join(__file__, ".."))` points at `tests/` instead of project root. Harmless because `tests/conftest.py` does it at module-load time first. Polish opportunity. |
-| 13 | `_wait_for_gate` doesn't use `lifecycle.wait_for_gate` | OPEN | Slice E (scoped) adopted LifecycleService but `ReviewControllerMixin._wait_for_gate` still uses the old `self.pause()` + poll pattern. Small follow-on, low leverage, low risk. |
+| 9 | V2 plugin architecture (cinema_pipeline_v2 path) | N/A | Per user, that path is dead. Critique filed (V2_HANDOFF_CRITIQUE deltas) -- the V2-applicable contract gaps that map to V1 are addressed in `docs/CONTRACTS.md`. |
+| 10 | `vertex-ai-key.json` (empty) at repo root | RESOLVED | Deleted in Phase 0 (`294851b`). |
+| 11 | Cleanup `PipelineContext` dict-API methods | DEFERRED | Out of V1 scope. Still has `__getitem__`/`__setitem__`/`get`/`update`/... for legacy `ctx["foo"]` compat. Removable once all callers migrate to `ctx.foo`. No urgency. |
+| 12 | Per-test `sys.path.insert` lines now point at the wrong dir | RESOLVED | Phase 0 (`294851b`) bulk-removed via Python script -- 16 files cleaned (3 patterns: A semicolon-form, B standalone, C PROJECT_ROOT-block). Conftest's legitimate PROJECT_ROOT line untouched. |
+| 13 | `_wait_for_gate` doesn't use `lifecycle.wait_for_gate` | RESOLVED | Phase 2 (`c1350ae`). Now uses predicate-poll via `lifecycle.wait_for_gate`. Pattern I consistently applied across the codebase. Behavior change: no Resume click needed after approvals (auto-resolves within poll_interval). Manual pause still works independently. |
+| 14 | Latent missing imports in `cinema/shots/controller.py` | RESOLVED | Phase 0 (`294851b`). Added: `time`, `get_reference_image`, `face_swap_video_frames`, `generate_lip_sync_video`, `generate_rife_interpolation`, `upscale_video_seedvr2`, `stitch_modules`. Previously latent NameError in `apply_correction` / `diagnose_clip` / `generate_scene_preview` code paths. |
+| 15 | Slice 2 regression: cross-mixin `self._find_take` broken | RESOLVED | Phase 0.5 (`f9c575c`). Slice 2 dropped ShotControllerMixin but didn't add `_find_take` + `_mutate_shot` delegates -- ReviewControllerMixin's call chain silently broke. Restored via delegates on CinemaPipeline. Hunt + fix took 2 turns; behavioral verification template added (see Lesson 8.17). |
+| 16 | Unused `import sys, os` lines in 5 test files (Phase 0 follow-up) | OPEN | Phase 0's Pattern A removed the `; sys.path.insert(...)` clause but kept the bare imports. Some are now likely unused. Removing safely requires AST-level reference detection per file. Polish opportunity. |
+| 17 | Web endpoints don't call `lifecycle.signal_gate` after approvals | OPEN | Phase 2 left the polling fallback in place. If endpoints called `pipeline.lifecycle.signal_gate(gate_name)` after each approval, the gate-wait would unblock within ~60ms instead of ~500ms (verified empirically). UX optimization, not a correctness issue. |
+| 18 | `_running_cores` cache invalidation | OPEN | Phase 1c added the cache without invalidation. If `settings.json` changes on disk while the server runs, cached `ContinuityEngine` / `ChiefDirector` have stale config. Operational fix today: restart the server. A file-watcher or settings-version hook would invalidate cleanly. |
 
 ---
 
@@ -608,59 +622,113 @@ done
 
 If `count == 1`, the import is dead. Remove it in the same commit as the structural change (it's caused by, not orthogonal to, the slice).
 
+### 8.16 Composition slices can silently break cross-mixin self.X calls (NEW in V1 close-out)
+
+When Slice 2 dropped `ShotControllerMixin` from `CinemaPipeline`'s base list and composed `ShotController` instead, the public method surface was preserved via 6 delegate methods. But 6 PRIVATE helpers (`_find_take`, `_mutate_shot`, `_take_output_path`, ...) only existed on the composed instance. `ReviewControllerMixin` had been calling `self._find_take` and `self._mutate_shot` via MRO -- those calls silently broke (AttributeError on first invocation).
+
+The breakage was dormant because:
+- The §0 smoke can't runtime-import `cinema_pipeline.py` (PEP 604; Lesson 8.8).
+- Slice 2-I behavioral check used a stub host with `_resolve_take_path` stubbed -- exercising ShotController in isolation, never the real CinemaPipeline -> ReviewControllerMixin chain.
+- The structural Slice 2 checks (A-G) verified delegate presence but not the cross-controller call graph.
+
+Bug found + fixed in Phase 0.5 (`f9c575c`) by adding `_find_take` + `_mutate_shot` delegates to CinemaPipeline.
+
+**Lesson:** when composition replaces mixin, identify EVERY method that other mixins call via `self.X`. Public + private. Add delegates for the ones still called. The Pattern G identity check (`a is b`) used to catch this for free via MRO; composition has to do it explicitly.
+
+### 8.17 Behavioral test template for cross-controller chains (NEW)
+
+The Slice 2-I check that missed Lesson 8.16's bug used a single-controller stub. The Phase 1a verification block introduced a better template: build a `TestPipeline` host that satisfies BOTH `ShotControllerHost` AND `ReviewControllerHost`, instantiate both controllers, exercise the cross-controller chain end-to-end. Example from `c1350ae`'s verification:
+
+```python
+class TestPipeline:  # satisfies both ControllerHost protocols
+    def __init__(self, core, lifecycle):
+        self._shot_ctrl = ShotController(core, lifecycle, self)
+        self._review_ctrl = ReviewController(core, lifecycle, self)
+        # ... satisfy both protocols by delegating
+
+# Exercise the actual chain: ReviewController calls host._find_take
+# which delegates to ShotController._find_take
+manifest = host._review_ctrl._rebuild_review_clips()
+# -> self._resolve_take_path(...) -> self._host._find_take(...) -> ShotController._find_take(...)
+# If any link is broken, this raises AttributeError or returns wrong shape
+```
+
+Future composition slices MUST exercise the cross-controller chain explicitly, not stub the cross-call. Filed as Phase 4 follow-up #7 to formalize as `tests/integration/test_cross_controller.py`.
+
+### 8.18 Thread safety for module-level caches in Flask (NEW)
+
+`web_server.py`'s `_running_pipelines: dict[str, CinemaPipeline]` was added before Phase 1c without a lock -- the GIL makes single-bucket reads/writes atomic, but the "check-then-set" pattern in `_get_stage_pipeline` (look up by pid; if None, build) had a theoretical race where two concurrent requests could both build a pipeline.
+
+Phase 1c added `_running_cores: dict[str, PipelineCore]` with `_cores_lock: threading.Lock` for the same pattern, because PipelineCore construction is expensive (~500ms). The lock prevents wasted builds under contention.
+
+The existing `_running_pipelines` race wasn't fixed because (a) the user is a solo operator typically making 1 request at a time, and (b) the race produces a wasted CinemaPipeline construction, not a corrupted cache. Documenting the inconsistency: cache locking pattern should be uniform; can be aligned in a future polish slice.
+
+### 8.19 lifecycle.wait_for_gate changes the UX subtly (NEW in Phase 2)
+
+Phase 2 migrated `_wait_for_gate` from the old `pause() + _check_pause()` cycle to `lifecycle.wait_for_gate(predicate)`. The functional difference: operator no longer needs to click "Resume" after approving all shots at a gate. The predicate polls every 500ms and the gate auto-resolves.
+
+This was a UX change worth documenting because:
+- Old workflow: Approve all → click Resume → pipeline continues
+- New workflow: Approve all → pipeline auto-continues within 500ms
+
+Manual pause (via Pause button -> `pipeline.pause()`) still works independently; the other `lifecycle.check_pause()` call sites in the generate() loop honor manual pause.
+
+If you want to restore the "click Resume" requirement (e.g., for batch UX where the operator wants a final go-ahead), revert this Phase or add a separate manual-gate concept. The current code is open to either direction.
+
 ---
 
 ## 9. Remaining work — concrete roadmap
 
-### 9.1 Standalone controllers (continuing the post-Slice-E track)
+### 9.1 Standalone controllers (RESOLVED)
 
-Slice 1 (`42a290f`, PipelineCore extraction) introduced the architectural seam. Slice 2 (this commit) delivered standalone composition. One more slice on this track:
+All three slices on this track shipped. Final state:
 
-**Slice 2 — DONE.** Resolved the mixin-vs-composition fork by picking **composition**. `ShotController(core, lifecycle, host)` is now a standalone class in `cinema/shots/controller.py`. CinemaPipeline drops `ShotControllerMixin` from its base list and instantiates `self._shot_ctrl = ShotController(self._core, self.lifecycle, self)`. Six delegate methods on CinemaPipeline preserve the call surface for web_server endpoints + tests. `shot_results` moves to ShotController with a getter+setter `@property` on CinemaPipeline (the setter is required because `CheckpointStoreMixin._restore_from_checkpoint` does full reassignment).
+- **Slice 1 (`42a290f`)** -- PipelineCore extraction. Long-lived deps separated from runtime state.
+- **Slice 2 (`11e5795`)** -- ShotController standalone via composition. Owns `shot_results`.
+- **Slice 3b (`22aa710` + `70cafc7` + `c62f9cd`)** -- ReviewController + CheckpointStore standalone; web_server PipelineCore caching. Slice 3b was the "full" path (vs. 3a's pragmatic shortcut).
 
-Cross-controller dependencies (`_refresh_project_snapshot`, `_rebuild_review_clips`, `_candidate_take`, `_resolve_take_path`, `_latest_take`, `_save_checkpoint`, `_ensure_scene_audio`) flow through a `ShotControllerHost(Protocol)`. CinemaPipeline implements it via its remaining mixins and passes `self` as the host. The progress-pointer triple (`current_stage` / `current_scene_id` / `current_shot_id`) stays on the orchestrator; ShotController updates them via `host.update_progress_pointer(stage, scene_id, shot_id)`.
-
-State ownership recap: only `shot_results` moved this slice. `scene_clips`, `scene_audio`, `failed_shots`, `current_*`, `_completed_scene_indices` stayed on the orchestrator (the generate() loop writes them more often than shot methods do). The 11 Slice 2 verification checks (AST + behavioral) all pass; all 9 section 0 invariants still hold.
-
-**Slice 3 (medium effort):** Web server caching. `_running_pipelines` -> `_running_cores` keyed by project_id. Per-endpoint controllers are built per-request from a shared core. Real amortization of the heavy service construction. With Slice 2's ShotController standalone, this can now be done by:
+`cinema_pipeline.py` is now 1,027 lines (was 1,526). `class CinemaPipeline:` has an EMPTY base list. The orchestrator composes:
 
 ```python
-# in web_server.py
-_running_cores: dict[str, PipelineCore] = {}
-
-def _shot_controller_for(pid: str) -> ShotController:
-    core = _running_cores.setdefault(pid, build_pipeline_core(pid))
-    lifecycle = ThreadedLifecycle(progress_callback=_make_progress_cb(pid))
-    host = _build_host(core, lifecycle)  # implements ShotControllerHost via Review/Checkpoint standalone equivalents
-    return ShotController(core, lifecycle, host)
+self._core       = PipelineCore(...)              # heavy long-lived deps + services
+self.lifecycle   = ThreadedLifecycle(...)         # per-run progress + cancel
+self._shot_ctrl  = ShotController(core, lifecycle, host=self)
+self._review_ctrl = ReviewController(core, lifecycle, host=self)
+self._checkpoint = CheckpointStore(core, lifecycle, host=self)
 ```
 
-The blocker for the "clean" version of Slice 3 is that `ShotControllerHost` currently requires methods that live on `ReviewControllerMixin` + `CheckpointStoreMixin` — both still need a `CinemaPipeline`-like host. Two sub-paths:
+CinemaPipeline itself has ~30 delegate methods that forward to the three controllers. Each controller has its own `ControllerHost(Protocol)` declaring exactly which `self.X` attributes/methods it needs from the host. CinemaPipeline implements all three protocols.
 
-- **3a (pragmatic):** Cache `CinemaPipeline` itself, but rebuild per-request lifecycles. Smaller win, simpler.
-- **3b (full):** Promote `ReviewController` + `CheckpointStore` to standalone classes too. Larger slice, full decoupling.
+State ownership at end of V1:
+- `shot_results` -> ShotController
+- `review_clips` -> ReviewController
+- (CheckpointStore has no per-run state -- pure file I/O)
+- `scene_clips`, `scene_audio`, `failed_shots`, `current_*`, `_completed_scene_indices` -> orchestrator (CinemaPipeline)
 
-Decide before starting (matches the §10 "design docs gate hard architectural slices" preference).
+web_server.py caches `PipelineCore` instances per project_id via `_running_cores: dict[str, PipelineCore]` + `_cores_lock: threading.Lock`. The 4 CinemaPipeline construction sites now reuse the cached core, amortizing the heavy service construction (ContinuityEngine + ChiefDirector + LLMEnsemble + VBenchEvaluator + QualityTracker + CostTracker) across endpoint calls.
 
 ### 9.2 Original workflow doc Phases 7-10 (post-Phase-6)
 
 | Phase | Status |
 |---|---|
-| 7 — Web service layer | UPDATED. Partial. `web_services.py` + `cinema/services.py` + 2 endpoints decoupled. 5 endpoints still need standalone controllers (track 9.1 above). |
-| 8 — Domain reorg | RESOLVED (`8f54eb2`). |
-| 9 — Tests reorg | RESOLVED (`96262ff`). |
-| 10 — Structured logging + CLAUDE.md preamble | UPDATED. Preamble done (`4205077`). Structured logging deferred — multi-week, ~100-file effort. |
+| 7 -- Web service layer | RESOLVED. `web_services.py` + `cinema/services.py` decoupled the 2 read-only endpoints in Phase 7 proper. Slice 3b (Phase 1c) caches PipelineCore per project, amortizing construction across the remaining 5 endpoints. The "decouple per-endpoint construction from CinemaPipeline" framing is delivered via the cache rather than per-endpoint controller construction. |
+| 8 -- Domain reorg | RESOLVED (`8f54eb2`). |
+| 9 -- Tests reorg | RESOLVED (`96262ff`). |
+| 10 -- Structured logging + CLAUDE.md preamble | DEFERRED. Preamble done (`4205077`). Structured logging out of V1 scope -- multi-week, ~100-file effort. Filed as separate future track. |
 
-### 9.3 Other follow-ups
+### 9.3 Other follow-ups (post-V1)
 
-| # | Item | Effort | Priority |
+V1-close-out items resolved this round are removed from this list. What remains:
+
+| # | Item | Effort | Status |
 |---|---|---|---|
-| 1 | Migrate `_wait_for_gate` to `lifecycle.wait_for_gate` | small | low |
-| 2 | Python venv upgrade to 3.10+ (env, not code) | user-side | medium |
-| 3 | Delete `vertex-ai-key.json` if confirmed unused | trivial | low |
-| 4 | Polish: clean up the dead `sys.path.insert` lines in tests/unit/* and tests/integration/* | small | low |
-| 5 | Cleanup `PipelineContext` dict-API methods (after all callers migrate to `ctx.X`) | medium | low |
-| 6 | Structured logging conversion | weeks | medium |
+| 1 | Python venv upgrade to 3.10+ (env, not code) | user-side | DEFERRED out of V1 scope |
+| 2 | Cleanup `PipelineContext` dict-API methods (after all callers migrate to `ctx.X`) | medium | DEFERRED out of V1 scope (no urgency) |
+| 3 | Structured logging conversion | weeks | DEFERRED out of V1 scope |
+| 4 | Unused `import sys, os` lines in 5 test files (Phase 0 follow-up) | small | OPEN (polish; needs AST-level reference detection per file) |
+| 5 | Web endpoints call `lifecycle.signal_gate` after approvals | small | OPEN (UX optimization; polling fallback already works) |
+| 6 | `_running_cores` cache invalidation on settings.json change | small | OPEN (operational fix today: restart server) |
+| 7 | Behavioral-test template for cross-controller chains (Lesson 8.17) | medium | OPEN (formalize as a tests/integration/test_cross_controller.py to catch future composition regressions) |
 
 ---
 
@@ -804,19 +872,41 @@ npx gitnexus analyze   # refresh after commits (the hook reminds you; sometimes 
 
 ---
 
-## 15. End of handoff
+## 15. End of handoff (V1 close-out)
 
-If you're a chat picking this up: welcome.
+V1 architectural completion shipped in commits `294851b` through Phase 4. Branch `refactor/architecture-cleanup` is at 47 commits ahead of `pre-refactor-baseline`. Ready to merge to main OR to keep as a feature branch indefinitely -- both states are stable.
 
-1. Run section 0's smoke test first. Confirm 9 invariants hold.
-2. Read section 6 (the playbook) and section 10 (user prefs).
-3. Pick a slice from section 9. Standalone-controllers Slice 2 is the highest-leverage next step.
-4. Brief the user on your scope before starting — present options + recommendation.
-5. Make exactly one commit per slice. Verify with section 6 step 4.
-6. Update this doc at the end of your session.
+### What V1 close-out delivered
 
-If anything in this doc is unclear, the commit history (especially the verbose messages on `42a290f`, `362bed9`, `a10b653`, `e31e266`, `c21bbbb`, `8f54eb2`, `d8c1461`) is the next source of truth. Each commit message explains exactly what was done and why.
+| Track | Outcome |
+|-------|---------|
+| `cinema_pipeline.py` god-module decomposition | DONE. Empty base class list. 1,526 -> 1,027 lines (-33%). ShotController + ReviewController + CheckpointStore standalone; LifecycleService + PipelineCore composed. |
+| Web server PipelineCore caching | DONE. `_running_cores` cache with `threading.Lock` amortizes heavy service construction across endpoint calls. |
+| Lifecycle consistency | DONE. `_wait_for_gate` migrated to `lifecycle.wait_for_gate` (Phase 2). Pattern I consistently applied. |
+| Contract documentation | DONE. `docs/CONTRACTS.md` documents Phase Protocol behavioral contracts, approval state model, take lineage. |
+| Slice 2 silent regression | FIXED in Phase 0.5. Behavioral-test template (Lesson 8.17) added to prevent recurrence. |
+| Latent import bugs | FIXED in Phase 0. 7 names now bound at module scope in `cinema/shots/controller.py`. |
+| Dead `sys.path.insert` lines | FIXED in Phase 0. 16 test files cleaned via Python AST script. |
+| `vertex-ai-key.json` | DELETED in Phase 0. |
 
-The architecture is in a sustainable place. None of the remaining items is BLOCKING. They're all incremental improvements. Don't rush.
+### What's explicitly out of V1 scope (deferred, see §9.3)
+
+- Python 3.9 -> 3.10+ venv upgrade (user-side)
+- Structured logging conversion (multi-week)
+- `PipelineContext` dict-API cleanup (waits for all callers to migrate)
+- Unused-import sweep (5 files, Phase 0 follow-up)
+- Web-endpoint `lifecycle.signal_gate` calls (UX optimization)
+- `_running_cores` cache invalidation hook (operational fix: restart server)
+- Formalize behavioral-test template as integration test
+
+### For the next session picking this up
+
+If V2 ever revives: the V2-applicable contract gaps (approval state semantics, take lineage, behavioral contracts on Phase Protocol) are in `docs/CONTRACTS.md`. Regenerate any V2 handoff doc under the calibration framework rather than editing the existing one.
+
+If V1 continues with polish: §9.3 has 7 OPEN items. Pick by leverage; none block anything.
+
+If diagnostics surface a regression: commit messages on `f9c575c` (Phase 0.5 regression hunt) document the verification template that catches cross-controller breakage. Use it for any future composition slice.
+
+The architecture is in a sustainable place. The mixin->composition migration is structurally complete. Future development can build on top of standalone controllers (Shot/Review/Checkpoint) and a cached `PipelineCore` without needing to think about CinemaPipeline as a god class.
 
 Good luck.
