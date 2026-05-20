@@ -235,6 +235,20 @@ class CinemaPipeline(ReviewControllerMixin, CheckpointStoreMixin):
     def generate_scene_preview(self, *args, **kwargs):
         return self._shot_ctrl.generate_scene_preview(*args, **kwargs)
 
+    # Private-helper delegates -- needed because ReviewControllerMixin
+    # calls self._find_take (6x) and self._mutate_shot (2x) which used
+    # to resolve via MRO through ShotControllerMixin. After Slice 2
+    # dropped that mixin, these calls would AttributeError. Restored
+    # as delegates here so ReviewControllerMixin keeps working until
+    # Slice 3b promotes ReviewController to standalone (at which point
+    # these become cross-controller-via-host calls).
+
+    def _find_take(self, *args, **kwargs):
+        return self._shot_ctrl._find_take(*args, **kwargs)
+
+    def _mutate_shot(self, *args, **kwargs):
+        return self._shot_ctrl._mutate_shot(*args, **kwargs)
+
     # ------------------------------------------------------------------
     # Checkpoint / Resume
     # ------------------------------------------------------------------
