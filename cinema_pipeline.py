@@ -42,7 +42,7 @@ from cinema.phases.keyframe_render import KeyframeRenderPhase
 from cinema.phases.motion_render import MotionRenderPhase
 from cinema.shots.controller import ShotController
 from cinema.review.controller import ReviewController
-from cinema.checkpoint import CheckpointStoreMixin
+from cinema.checkpoint import CheckpointStore
 from scene_decomposer import competitive_decompose_scene
 
 
@@ -75,7 +75,7 @@ def _build_transition_prompt(from_mood: str, to_mood: str) -> str:
     return f"Cinematic transition from {from_mood} to {to_mood} mood, smooth camera movement, natural temporal flow, professional film edit"
 
 
-class CinemaPipeline(CheckpointStoreMixin):
+class CinemaPipeline:
     """
     Interactive cinema production pipeline with maximum API utilization
     and state-of-the-art continuity techniques.
@@ -139,6 +139,13 @@ class CinemaPipeline(CheckpointStoreMixin):
         # (_find_take + _mutate_shot delegated to ShotController; the
         # rest stay on CinemaPipeline).
         self._review_ctrl = ReviewController(self._core, self.lifecycle, self)
+
+        # CheckpointStore -- Slice 3b (Phase 1b). Stateless file-I/O
+        # service. Reads + writes host attributes (scene_clips,
+        # scene_audio, shot_results, failed_shots, _completed_scene_indices,
+        # current_*) via the CheckpointStoreHost protocol. shot_results
+        # writes go through the @property setter added in Slice 2.
+        self._checkpoint = CheckpointStore(self._core, self.lifecycle, self)
 
     # ------------------------------------------------------------------
     # PipelineCore proxies — backward-compat property accessors so the
@@ -304,8 +311,27 @@ class CinemaPipeline(CheckpointStoreMixin):
         return self._review_ctrl._candidate_take(*args, **kwargs)
 
     # ------------------------------------------------------------------
-    # Checkpoint / Resume
+    # CheckpointStore delegates (Slice 3b Phase 1b). The store is
+    # stateless; CinemaPipeline still owns the state attributes the
+    # store reads (current_*, scene_clips, scene_audio, failed_shots,
+    # _completed_scene_indices) and writes via the @property setter
+    # for shot_results from Slice 2.
     # ------------------------------------------------------------------
+
+    def has_checkpoint(self, *args, **kwargs) -> bool:
+        return self._checkpoint.has_checkpoint(*args, **kwargs)
+
+    def resume_info(self, *args, **kwargs) -> dict:
+        return self._checkpoint.resume_info(*args, **kwargs)
+
+    def _save_checkpoint(self, *args, **kwargs):
+        return self._checkpoint._save_checkpoint(*args, **kwargs)
+
+    def _restore_from_checkpoint(self, *args, **kwargs):
+        return self._checkpoint._restore_from_checkpoint(*args, **kwargs)
+
+    def _clear_checkpoint(self, *args, **kwargs):
+        return self._checkpoint._clear_checkpoint(*args, **kwargs)
 
 
 

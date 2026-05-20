@@ -1,60 +1,125 @@
-"""CheckpointStore — pipeline state persistence to disk.
+"""CheckpointStore -- pipeline state persistence to disk.
 
-Migration Slice D from docs/CINEMA_PIPELINE_MIGRATION_DESIGN.md.
+Standalone-controllers Slice 3b (Phase 1b) of REFACTOR_HANDOFF.md.
+Replaces the prior CheckpointStoreMixin (Slice D) with a composable
+class -- mirroring Slice 2 (ShotController) and Phase 1a
+(ReviewController).
 
-Atomic JSON checkpointing for the interactive pipeline. Lets a long
-generation run resume across process restarts: after each meaningful
-step, the in-memory state (completed scene indices, scene clips/audio
-mapping, per-shot results, failed shots) is serialized to a temp file
-under self.temp_dir and atomically replaced via os.replace().
+Architectural note
+==================
 
-Same mixin pattern as Slices B and C — delivered as a mixin on
-CinemaPipeline; the moved methods see exactly the same ``self`` they
-saw before, so no body rewrites.
-
-Contents
-========
-
-  CHECKPOINT_FILE             — class constant "pipeline_state.json"
-  _checkpoint_path()          — absolute path under self.temp_dir
-  _save_checkpoint(completed_scene_idx=-1)  — atomic write of state JSON
-  _load_checkpoint()          — load + validate (missing files marked "lost")
-  _clear_checkpoint()         — delete on successful completion
-  has_checkpoint()            — file-exists predicate
-  resume_info()               — human-readable summary for the UI
-  _restore_from_checkpoint()  — populate self.{scene_clips, scene_audio,
-                                shot_results, failed_shots} from disk
+Unlike Shot and Review controllers, CheckpointStore owns no per-run
+state. It's a pure file-I/O service that serializes host attributes
+to JSON and reads them back. The class still takes a lifecycle
+(only used for the RESUME progress emit in _restore_from_checkpoint)
+to match the constructor shape of the other two controllers.
 
 State expected from the host class
 ==================================
 
 Read by the save path:
-  self.project["id"], self.current_stage, self.current_scene_id,
-  self.current_shot_id, self._completed_scene_indices, self.scene_clips,
-  self.scene_audio, self.shot_results, self.failed_shots
+  current_stage, current_scene_id, current_shot_id,
+  _completed_scene_indices, scene_clips, scene_audio,
+  shot_results, failed_shots
 
-Written by the restore path:
-  self.scene_clips, self.scene_audio, self.shot_results,
-  self.failed_shots, self._completed_scene_indices
+Written by the restore path (all FULL ASSIGNMENT -- the host must
+expose settable attributes for these):
+  scene_clips, scene_audio, shot_results, failed_shots,
+  _completed_scene_indices
 
-Directory deps:
-  self.temp_dir
+shot_results on CinemaPipeline is a property with a setter (added in
+Slice 2 because CheckpointStoreMixin already did full reassignment).
+The other four are plain instance attributes on CinemaPipeline.
+
+Body-rewrite policy
+===================
+
+Method bodies preserved verbatim with these mechanical substitutions:
+
+  self.project       -- preserved (proxies to self._core.project)
+  self.temp_dir      -- preserved (proxies to self._core.temp_dir)
+  self.progress(...) -- preserved (proxies to self._lifecycle.report_progress)
+  self.current_*     -> self._host.current_*  (reads)
+  self.scene_clips   -> self._host.scene_clips  (reads + writes)
+  self.scene_audio   -> self._host.scene_audio
+  self.shot_results  -> self._host.shot_results  (writes via @property setter)
+  self.failed_shots  -> self._host.failed_shots
+  self._completed_scene_indices  -> self._host._completed_scene_indices
 """
 
 from __future__ import annotations
 
 import json
 import os
+from typing import TYPE_CHECKING, Protocol
+
+from cinema.lifecycle import LifecycleService
+
+if TYPE_CHECKING:
+    # See Pattern L in REFACTOR_HANDOFF.md section 7.
+    from cinema.core import PipelineCore
 
 
-class CheckpointStoreMixin:
-    """Mixin providing checkpoint persistence (atomic JSON to self.temp_dir).
+class CheckpointStoreHost(Protocol):
+    """Attributes that CheckpointStore reads from and writes to its host.
 
-    Designed to be mixed into ``cinema_pipeline.CinemaPipeline`` alongside
-    ShotControllerMixin (Slice B) and ReviewControllerMixin (Slice C).
+    All declared as writable attributes (no methods). The host must
+    expose each one as either a plain instance attribute or a property
+    with a setter.
+    """
+
+    current_stage: str
+    current_scene_id: str
+    current_shot_id: str
+    _completed_scene_indices: set
+    scene_clips: dict
+    scene_audio: dict
+    shot_results: dict
+    failed_shots: list
+
+
+class CheckpointStore:
+    """Atomic JSON checkpoint persistence for the interactive pipeline.
+
+    Lets a long generation run resume across process restarts: after each
+    meaningful step, the in-memory state (completed scene indices, scene
+    clips/audio mapping, per-shot results, failed shots) is serialized
+    to a temp file under self.temp_dir and atomically replaced via
+    os.replace().
     """
 
     CHECKPOINT_FILE = "pipeline_state.json"
+
+    def __init__(
+        self,
+        core: PipelineCore,
+        lifecycle: LifecycleService,
+        host: CheckpointStoreHost,
+    ):
+        self._core = core
+        self._lifecycle = lifecycle
+        self._host = host
+
+    # ------------------------------------------------------------------
+    # PipelineCore + Lifecycle property proxies.
+    # ------------------------------------------------------------------
+
+    @property
+    def project(self) -> dict:
+        return self._core.project
+
+    @property
+    def temp_dir(self) -> str:
+        return self._core.temp_dir
+
+    @property
+    def progress(self):
+        """Bound-method-shaped proxy so self.progress(...) calls work."""
+        return self._lifecycle.report_progress
+
+    # ------------------------------------------------------------------
+    # File-path + atomic save.
+    # ------------------------------------------------------------------
 
     def _checkpoint_path(self) -> str:
         return os.path.join(self.temp_dir, self.CHECKPOINT_FILE)
@@ -66,14 +131,14 @@ class CheckpointStoreMixin:
         """
         state = {
             "project_id": self.project["id"],
-            "current_stage": self.current_stage,
-            "current_scene_id": self.current_scene_id,
-            "current_shot_id": self.current_shot_id,
-            "completed_scene_indices": sorted(self._completed_scene_indices),
-            "scene_clips": self.scene_clips,
-            "scene_audio": self.scene_audio,
-            "shot_results": self.shot_results,
-            "failed_shots": self.failed_shots,
+            "current_stage": self._host.current_stage,
+            "current_scene_id": self._host.current_scene_id,
+            "current_shot_id": self._host.current_shot_id,
+            "completed_scene_indices": sorted(self._host._completed_scene_indices),
+            "scene_clips": self._host.scene_clips,
+            "scene_audio": self._host.scene_audio,
+            "shot_results": self._host.shot_results,
+            "failed_shots": self._host.failed_shots,
         }
         path = self._checkpoint_path()
         import tempfile as _tmp
@@ -142,15 +207,15 @@ class CheckpointStoreMixin:
         if not state:
             return set()
 
-        self.scene_clips = state.get("scene_clips", {})
-        self.scene_audio = state.get("scene_audio", {})
-        self.shot_results = state.get("shot_results", {})
-        self.failed_shots = state.get("failed_shots", [])
+        self._host.scene_clips = state.get("scene_clips", {})
+        self._host.scene_audio = state.get("scene_audio", {})
+        self._host.shot_results = state.get("shot_results", {})
+        self._host.failed_shots = state.get("failed_shots", [])
         completed = set(state.get("completed_scene_indices", []))
-        self._completed_scene_indices = completed
+        self._host._completed_scene_indices = completed
 
         n = len(completed)
         if n > 0:
-            self.progress("RESUME", f"Resuming from checkpoint — {n} scene(s) already complete", 5)
+            self.progress("RESUME", f"Resuming from checkpoint -- {n} scene(s) already complete", 5)
 
         return completed
