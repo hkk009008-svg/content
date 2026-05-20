@@ -185,14 +185,12 @@ class CinemaPipeline:
     def ensemble(self):
         return self._core.ensemble
 
+    # GENERATED BEGIN -- tools/gen_delegates.py
+    # DO NOT EDIT BY HAND. Run `python tools/gen_delegates.py` to regenerate.
     # ------------------------------------------------------------------
-    # RunState forwarders (V1.1 #5).
-    # All 9 per-run state fields live on self._runstate. The orchestrator
-    # and web_server.py read these as attributes on CinemaPipeline (e.g.,
-    # pipeline.shot_results). Each forwarder is a @property + setter
-    # pair so that in-place mutations (pipeline.shot_results[X] = Y),
-    # full assignment (pipeline.scene_clips = {}), and read-style
-    # access all keep working.
+    # RunState forwarders (one @property + setter pair per field).
+    # Lets pipeline.shot_results / pipeline.scene_clips / etc. read +
+    # write through to the shared self._runstate instance.
     # ------------------------------------------------------------------
 
     @property
@@ -201,6 +199,13 @@ class CinemaPipeline:
     @shot_results.setter
     def shot_results(self, value: dict) -> None:
         self._runstate.shot_results = value
+
+    @property
+    def review_clips(self) -> dict:
+        return self._runstate.review_clips
+    @review_clips.setter
+    def review_clips(self, value: dict) -> None:
+        self._runstate.review_clips = value
 
     @property
     def scene_clips(self) -> dict:
@@ -246,42 +251,32 @@ class CinemaPipeline:
 
     @property
     def _completed_scene_indices(self) -> set:
-        # Legacy underscore name preserved for orchestrator + CheckpointStore.
-        # On RunState the field is named completed_scene_indices (no underscore).
         return self._runstate.completed_scene_indices
     @_completed_scene_indices.setter
     def _completed_scene_indices(self, value: set) -> None:
         self._runstate.completed_scene_indices = value
 
     # ------------------------------------------------------------------
-    # ShotController delegates.
+    # Delegates -> self._shot_ctrl
     # ------------------------------------------------------------------
 
-    def generate_keyframe_take(self, *args, **kwargs) -> dict:
+    def generate_keyframe_take(self, *args, **kwargs):
         return self._shot_ctrl.generate_keyframe_take(*args, **kwargs)
 
-    def generate_motion_take(self, *args, **kwargs) -> dict:
+    def generate_motion_take(self, *args, **kwargs):
         return self._shot_ctrl.generate_motion_take(*args, **kwargs)
 
-    def regenerate_shot(self, *args, **kwargs) -> dict:
+    def regenerate_shot(self, *args, **kwargs):
         return self._shot_ctrl.regenerate_shot(*args, **kwargs)
 
-    def diagnose_clip(self, *args, **kwargs) -> dict:
+    def diagnose_clip(self, *args, **kwargs):
         return self._shot_ctrl.diagnose_clip(*args, **kwargs)
 
-    def apply_correction(self, *args, **kwargs) -> dict:
+    def apply_correction(self, *args, **kwargs):
         return self._shot_ctrl.apply_correction(*args, **kwargs)
 
     def generate_scene_preview(self, *args, **kwargs):
         return self._shot_ctrl.generate_scene_preview(*args, **kwargs)
-
-    # Private-helper delegates -- needed because ReviewControllerMixin
-    # calls self._find_take (6x) and self._mutate_shot (2x) which used
-    # to resolve via MRO through ShotControllerMixin. After Slice 2
-    # dropped that mixin, these calls would AttributeError. Restored
-    # as delegates here so ReviewControllerMixin keeps working until
-    # Slice 3b promotes ReviewController to standalone (at which point
-    # these become cross-controller-via-host calls).
 
     def _find_take(self, *args, **kwargs):
         return self._shot_ctrl._find_take(*args, **kwargs)
@@ -290,67 +285,50 @@ class CinemaPipeline:
         return self._shot_ctrl._mutate_shot(*args, **kwargs)
 
     # ------------------------------------------------------------------
-    # ReviewController delegates (Slice 3b Phase 1a; review_clips
-    # property moved into the RunState forwarders block above as part
-    # of V1.1 #5).
+    # Delegates -> self._review_ctrl
     # ------------------------------------------------------------------
 
-    @property
-    def review_clips(self) -> dict:
-        return self._runstate.review_clips
-    @review_clips.setter
-    def review_clips(self, value: dict) -> None:
-        self._runstate.review_clips = value
-
-    # Public operator API (called from web_server endpoints)
-    def approve_shot_plan(self, *args, **kwargs) -> dict:
+    def approve_shot_plan(self, *args, **kwargs):
         return self._review_ctrl.approve_shot_plan(*args, **kwargs)
 
-    def approve_take(self, *args, **kwargs) -> dict:
+    def approve_take(self, *args, **kwargs):
         return self._review_ctrl.approve_take(*args, **kwargs)
 
     def proceed_to_assembly(self, *args, **kwargs):
         return self._review_ctrl.proceed_to_assembly(*args, **kwargs)
 
-    # Gate machinery (called from CinemaPipeline.generate() + get_state)
-    def _project_gate_status(self, *args, **kwargs) -> dict:
+    def _project_gate_status(self, *args, **kwargs):
         return self._review_ctrl._project_gate_status(*args, **kwargs)
 
-    def _gate_satisfied(self, *args, **kwargs) -> bool:
+    def _gate_satisfied(self, *args, **kwargs):
         return self._review_ctrl._gate_satisfied(*args, **kwargs)
 
-    def _wait_for_gate(self, *args, **kwargs) -> bool:
+    def _wait_for_gate(self, *args, **kwargs):
         return self._review_ctrl._wait_for_gate(*args, **kwargs)
 
-    def _rebuild_review_clips(self, *args, **kwargs) -> dict:
+    def _rebuild_review_clips(self, *args, **kwargs):
         return self._review_ctrl._rebuild_review_clips(*args, **kwargs)
 
-    # Per-shot query helpers (called by ShotController via host + by
-    # CinemaPipeline._build_scene_packages / assemble_approved_takes)
     def _all_shots(self, *args, **kwargs):
         return self._review_ctrl._all_shots(*args, **kwargs)
 
     def _latest_take(self, *args, **kwargs):
         return self._review_ctrl._latest_take(*args, **kwargs)
 
-    def _resolve_take_path(self, *args, **kwargs) -> str:
+    def _resolve_take_path(self, *args, **kwargs):
         return self._review_ctrl._resolve_take_path(*args, **kwargs)
 
     def _candidate_take(self, *args, **kwargs):
         return self._review_ctrl._candidate_take(*args, **kwargs)
 
     # ------------------------------------------------------------------
-    # CheckpointStore delegates (Slice 3b Phase 1b). The store is
-    # stateless; CinemaPipeline still owns the state attributes the
-    # store reads (current_*, scene_clips, scene_audio, failed_shots,
-    # _completed_scene_indices) and writes via the @property setter
-    # for shot_results from Slice 2.
+    # Delegates -> self._checkpoint
     # ------------------------------------------------------------------
 
-    def has_checkpoint(self, *args, **kwargs) -> bool:
+    def has_checkpoint(self, *args, **kwargs):
         return self._checkpoint.has_checkpoint(*args, **kwargs)
 
-    def resume_info(self, *args, **kwargs) -> dict:
+    def resume_info(self, *args, **kwargs):
         return self._checkpoint.resume_info(*args, **kwargs)
 
     def _save_checkpoint(self, *args, **kwargs):
@@ -361,6 +339,8 @@ class CinemaPipeline:
 
     def _clear_checkpoint(self, *args, **kwargs):
         return self._checkpoint._clear_checkpoint(*args, **kwargs)
+
+    # GENERATED END
 
 
 
