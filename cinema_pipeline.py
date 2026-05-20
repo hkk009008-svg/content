@@ -41,7 +41,7 @@ from cinema.lifecycle import ThreadedLifecycle
 from cinema.phases.keyframe_render import KeyframeRenderPhase
 from cinema.phases.motion_render import MotionRenderPhase
 from cinema.shots.controller import ShotController
-from cinema.review.controller import ReviewControllerMixin
+from cinema.review.controller import ReviewController
 from cinema.checkpoint import CheckpointStoreMixin
 from scene_decomposer import competitive_decompose_scene
 
@@ -75,7 +75,7 @@ def _build_transition_prompt(from_mood: str, to_mood: str) -> str:
     return f"Cinematic transition from {from_mood} to {to_mood} mood, smooth camera movement, natural temporal flow, professional film edit"
 
 
-class CinemaPipeline(ReviewControllerMixin, CheckpointStoreMixin):
+class CinemaPipeline(CheckpointStoreMixin):
     """
     Interactive cinema production pipeline with maximum API utilization
     and state-of-the-art continuity techniques.
@@ -132,6 +132,13 @@ class CinemaPipeline(ReviewControllerMixin, CheckpointStoreMixin):
         # progress-pointer triple still flow through self (the host),
         # via the ShotControllerHost protocol.
         self._shot_ctrl = ShotController(self._core, self.lifecycle, self)
+
+        # ReviewController -- Slice 3b (Phase 1a). Owns review_clips.
+        # Operator approval gates + per-shot review queries. Cross-
+        # controller calls flow through self via ReviewControllerHost
+        # (_find_take + _mutate_shot delegated to ShotController; the
+        # rest stay on CinemaPipeline).
+        self._review_ctrl = ReviewController(self._core, self.lifecycle, self)
 
     # ------------------------------------------------------------------
     # PipelineCore proxies — backward-compat property accessors so the
@@ -248,6 +255,53 @@ class CinemaPipeline(ReviewControllerMixin, CheckpointStoreMixin):
 
     def _mutate_shot(self, *args, **kwargs):
         return self._shot_ctrl._mutate_shot(*args, **kwargs)
+
+    # ------------------------------------------------------------------
+    # ReviewController delegates + state proxy (Slice 3b Phase 1a).
+    # Preserve the call surface for web_server endpoints, generate()
+    # loop gate-waits, and ShotController-via-host cross-calls.
+    # ------------------------------------------------------------------
+
+    @property
+    def review_clips(self) -> dict:
+        return self._review_ctrl.review_clips
+
+    # Public operator API (called from web_server endpoints)
+    def approve_shot_plan(self, *args, **kwargs) -> dict:
+        return self._review_ctrl.approve_shot_plan(*args, **kwargs)
+
+    def approve_take(self, *args, **kwargs) -> dict:
+        return self._review_ctrl.approve_take(*args, **kwargs)
+
+    def proceed_to_assembly(self, *args, **kwargs):
+        return self._review_ctrl.proceed_to_assembly(*args, **kwargs)
+
+    # Gate machinery (called from CinemaPipeline.generate() + get_state)
+    def _project_gate_status(self, *args, **kwargs) -> dict:
+        return self._review_ctrl._project_gate_status(*args, **kwargs)
+
+    def _gate_satisfied(self, *args, **kwargs) -> bool:
+        return self._review_ctrl._gate_satisfied(*args, **kwargs)
+
+    def _wait_for_gate(self, *args, **kwargs) -> bool:
+        return self._review_ctrl._wait_for_gate(*args, **kwargs)
+
+    def _rebuild_review_clips(self, *args, **kwargs) -> dict:
+        return self._review_ctrl._rebuild_review_clips(*args, **kwargs)
+
+    # Per-shot query helpers (called by ShotController via host + by
+    # CinemaPipeline._build_scene_packages / assemble_approved_takes)
+    def _all_shots(self, *args, **kwargs):
+        return self._review_ctrl._all_shots(*args, **kwargs)
+
+    def _latest_take(self, *args, **kwargs):
+        return self._review_ctrl._latest_take(*args, **kwargs)
+
+    def _resolve_take_path(self, *args, **kwargs) -> str:
+        return self._review_ctrl._resolve_take_path(*args, **kwargs)
+
+    def _candidate_take(self, *args, **kwargs):
+        return self._review_ctrl._candidate_take(*args, **kwargs)
 
     # ------------------------------------------------------------------
     # Checkpoint / Resume

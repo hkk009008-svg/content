@@ -1,5 +1,5 @@
-"""Review controller package."""
+"""Operator review controller package."""
 
-from cinema.review.controller import ReviewControllerMixin
+from cinema.review.controller import ReviewController, ReviewControllerHost
 
-__all__ = ["ReviewControllerMixin"]
+__all__ = ["ReviewController", "ReviewControllerHost"]
