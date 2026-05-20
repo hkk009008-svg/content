@@ -1,8 +1,8 @@
 # Cinema Pipeline — Architecture Refactor Handoff (Round 2)
 
-**Status:** in progress, 38 commits deep on branch `refactor/architecture-cleanup`.
-**As of:** end of standalone-controllers slice 1 (commit `42a290f`) + this handoff (commit `6f85c38`).
-**Last completed:** `PipelineCore` extraction — `CinemaPipeline.__init__` split into long-lived deps + per-run runtime state.
+**Status:** in progress, 40 commits deep on branch `refactor/architecture-cleanup`.
+**As of:** end of standalone-controllers slice 2 (this commit) + handoff refresh.
+**Last completed:** Standalone `ShotController` class — composition replaces `ShotControllerMixin`. `shot_results` moves to the controller; cross-controller calls flow through a `ShotControllerHost(Protocol)`.
 **Author of this doc:** previous chat session, end-of-day handoff.
 **Supersedes:** the original handoff (which covered through Phase 6 slice 3). The original is preserved in git history at the parent of `92a0bba`.
 
@@ -176,6 +176,11 @@ bc98a01  Phase 7 proper: cinema/services.py + read-only endpoint decoupling
 
 - Handoff -
 6f85c38  docs(handoff): this file
+0e369db  docs(handoff): regenerate with ASCII-friendly characters
+
+- Standalone controllers (slice 2 of 3) -
+<pending>  ShotController class - composition replaces ShotControllerMixin
+<pending>  docs(handoff): update for slice 2 completion
 ```
 
 **Branch:** `refactor/architecture-cleanup`
@@ -313,7 +318,7 @@ Updated from the original handoff. RESOLVED = closed this round, UPDATED = statu
 | 2 | `.env.example` incomplete | RESOLVED | Resolved in `11596db`. All 18 env vars documented. |
 | 3 | `llm/router.py` dead | RESOLVED | Deleted in `188654f`. |
 | 4 | `LLMEnsemble.ensemble_quality_vote` dead | RESOLVED | Deleted in `0a7f9b3` along with `EnsembleQualityResult`. |
-| 5 | `cinema_pipeline.py` god module | UPDATED | Decomposed via Slices A-E + standalone-controllers slice 1. File now 803 lines (was 1,526). Split into ShotControllerMixin + ReviewControllerMixin + CheckpointStoreMixin + LifecycleService + PipelineCore. Slice 2 (standalone ShotController class) and Slice 3 (controller caching in web_server) remain — see section 9. |
+| 5 | `cinema_pipeline.py` god module | UPDATED | Decomposed via Slices A-E + standalone-controllers slices 1-2. File now 933 lines (was 1,526). Split into ShotController (standalone class, composition) + ReviewControllerMixin + CheckpointStoreMixin + LifecycleService + PipelineCore. Slice 3 (controller caching in web_server) remains — see section 9. |
 | 6 | `tests/` reorg into unit/integration | RESOLVED | Resolved in `96262ff`. |
 | 7 | No structured logging | OPEN | Multi-week, ~100-file `print()` -> logger conversion. Still deferred. Phase 10's preamble portion landed in `4205077`. |
 | 8 | Lazy imports in `audio/` | RESOLVED | Resolved in Slices 4-6. All audio submodules use eager top-level imports. `audio/_client.py` is the cycle-free shared dependency. |
@@ -464,6 +469,30 @@ Used by Slice E proper: `KeyframeRenderPhase` and `MotionRenderPhase` were extra
 - NO The two orchestrators (driver vs CinemaPipeline) don't fully unify
 - YES Avoids the "gate-phase" hack (a "phase" that does nothing but wait)
 
+### Pattern L — TYPE_CHECKING guard for PEP-604-incompatible transitive imports (NEW in Slice 2)
+
+When a new file needs to type-annotate parameters with a class whose module transitively imports a file with PEP 604 in function defaults (e.g., `cinema.core` -> `vbench_evaluator.py`'s `tolerance: float | None = None`), don't import the type at runtime. With `from __future__ import annotations` in effect, annotations are strings and never evaluated, so the import is purely for type-checkers.
+
+```python
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from cinema.core import PipelineCore  # only for type-checkers
+
+class ShotController:
+    def __init__(self, core: PipelineCore, ...):  # string annotation at runtime
+        self._core = core
+```
+
+This restored the local 3.9 verification path for `cinema/shots/controller.py` after Slice 2 introduced the new `PipelineCore` parameter. Without the guard, importing the module on 3.9 fails at `cinema.core`'s `vbench_evaluator` import.
+
+Use whenever a new module:
+- Needs a type from a 3.9-broken module, AND
+- Doesn't use that name at runtime (only as an annotation).
+
+Don't use for runtime usage — Protocols you `isinstance`-check against, classes you instantiate, etc.
+
 ### Pattern K — AST-based bulk method extraction (NEW)
 
 When moving many methods out of a class file, hand-editing is error-prone. Use a Python script with `ast` to identify exact line ranges and extract them precisely:
@@ -543,6 +572,24 @@ The `PostToolUse:Bash` hook reports "GitNexus index is stale" with a "last index
 
 The index IS fresh after analyze (verify by looking at `.gitnexus/meta.json` or by the analyze run's "N nodes | M edges" output). The hook's marker is just a cached value somewhere that doesn't catch up. Not actionable.
 
+### 8.14 ShotControllerHost protocol with underscore method names (NEW in Slice 2)
+
+When extracting a class whose methods call into other classes' "private" `_foo` methods, the Protocol that declares the interface looks weird:
+
+```python
+class ShotControllerHost(Protocol):
+    def _refresh_project_snapshot(self) -> Optional[dict]: ...
+    def _save_checkpoint(self) -> None: ...
+```
+
+Python's Protocol matching is by name regardless of convention — leading underscores are fine. The alternative is to rename the host's methods to public, which expands the slice. Pick name-stability over visual consistency unless you're already touching the host's other API.
+
+### 8.15 Composition slice's "Modified" symbols include the renamed class members (NEW in Slice 2)
+
+After Slice 2, gitnexus_detect_changes reports every method in `cinema/shots/controller.py` as "Modified" with `risk_level: critical`. The reason: the class containing them was renamed (`ShotControllerMixin` -> `ShotController`) and many bodies got `self._host._X` substitutions. The behavior is preserved (verified by the 11 Slice 2 checks), but file-location-based change detection can't see that.
+
+Mitigation: cross-check with the actual behavioral verification (Slice 2-A through Slice 2-K in the commit's verification block). detect_changes's risk label is one input; the behavioral pass is the trump card.
+
 ### 8.13 Dead-import sweep after extraction (NEW)
 
 When a slice moves methods/constructors into a new module, imports in the source file become dead. Examples from this round:
@@ -567,15 +614,33 @@ If `count == 1`, the import is dead. Remove it in the same commit as the structu
 
 ### 9.1 Standalone controllers (continuing the post-Slice-E track)
 
-Slice 1 (`42a290f`, PipelineCore extraction) introduced the architectural seam. Two more slices on this track:
+Slice 1 (`42a290f`, PipelineCore extraction) introduced the architectural seam. Slice 2 (this commit) delivered standalone composition. One more slice on this track:
 
-**Slice 2 (medium effort):** Extract a standalone `ShotController(core, lifecycle)` class. Today the methods live as `ShotControllerMixin`, which requires `CinemaPipeline.__init__` to set up runtime state (shot_results, failed_shots, etc.). Slice 2 introduces a parallel class that takes core + lifecycle directly, with a thin local runtime-state holder. The mixin stays as a backward-compat shim OR gets deleted.
+**Slice 2 — DONE.** Resolved the mixin-vs-composition fork by picking **composition**. `ShotController(core, lifecycle, host)` is now a standalone class in `cinema/shots/controller.py`. CinemaPipeline drops `ShotControllerMixin` from its base list and instantiates `self._shot_ctrl = ShotController(self._core, self.lifecycle, self)`. Six delegate methods on CinemaPipeline preserve the call surface for web_server endpoints + tests. `shot_results` moves to ShotController with a getter+setter `@property` on CinemaPipeline (the setter is required because `CheckpointStoreMixin._restore_from_checkpoint` does full reassignment).
 
-**Open question to resolve before starting Slice 2:** does the mixin survive as a shim, or does CinemaPipeline switch to composition (`self._shot_ctrl = ShotController(self._core, self.lifecycle)`)? Composition is cleaner but requires CinemaPipeline methods that delegate to the controller — adds ~12 delegate methods.
+Cross-controller dependencies (`_refresh_project_snapshot`, `_rebuild_review_clips`, `_candidate_take`, `_resolve_take_path`, `_latest_take`, `_save_checkpoint`, `_ensure_scene_audio`) flow through a `ShotControllerHost(Protocol)`. CinemaPipeline implements it via its remaining mixins and passes `self` as the host. The progress-pointer triple (`current_stage` / `current_scene_id` / `current_shot_id`) stays on the orchestrator; ShotController updates them via `host.update_progress_pointer(stage, scene_id, shot_id)`.
 
-**Slice 3 (medium effort):** Web server caching. `_running_pipelines` -> `_running_cores` keyed by project_id. Per-endpoint controllers are built per-request from a shared core. Real amortization of the heavy service construction.
+State ownership recap: only `shot_results` moved this slice. `scene_clips`, `scene_audio`, `failed_shots`, `current_*`, `_completed_scene_indices` stayed on the orchestrator (the generate() loop writes them more often than shot methods do). The 11 Slice 2 verification checks (AST + behavioral) all pass; all 9 section 0 invariants still hold.
 
-After Slices 2 and 3, web_server.py's remaining 5 `CinemaPipeline(...)` construction sites can all be replaced with thinner controller construction.
+**Slice 3 (medium effort):** Web server caching. `_running_pipelines` -> `_running_cores` keyed by project_id. Per-endpoint controllers are built per-request from a shared core. Real amortization of the heavy service construction. With Slice 2's ShotController standalone, this can now be done by:
+
+```python
+# in web_server.py
+_running_cores: dict[str, PipelineCore] = {}
+
+def _shot_controller_for(pid: str) -> ShotController:
+    core = _running_cores.setdefault(pid, build_pipeline_core(pid))
+    lifecycle = ThreadedLifecycle(progress_callback=_make_progress_cb(pid))
+    host = _build_host(core, lifecycle)  # implements ShotControllerHost via Review/Checkpoint standalone equivalents
+    return ShotController(core, lifecycle, host)
+```
+
+The blocker for the "clean" version of Slice 3 is that `ShotControllerHost` currently requires methods that live on `ReviewControllerMixin` + `CheckpointStoreMixin` — both still need a `CinemaPipeline`-like host. Two sub-paths:
+
+- **3a (pragmatic):** Cache `CinemaPipeline` itself, but rebuild per-request lifecycles. Smaller win, simpler.
+- **3b (full):** Promote `ReviewController` + `CheckpointStore` to standalone classes too. Larger slice, full decoupling.
+
+Decide before starting (matches the §10 "design docs gate hard architectural slices" preference).
 
 ### 9.2 Original workflow doc Phases 7-10 (post-Phase-6)
 

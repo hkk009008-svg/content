@@ -1,62 +1,84 @@
-"""ShotController — per-shot generation + correction state machine.
+"""ShotController -- per-shot generation + correction state machine.
 
-Migration Slice B from docs/CINEMA_PIPELINE_MIGRATION_DESIGN.md.
+Standalone-controllers Slice 2 (from REFACTOR_HANDOFF.md section 9.1).
+Replaces the prior ShotControllerMixin (Slice B) with a composable class
+that takes PipelineCore + LifecycleService + a ShotControllerHost
+protocol directly.
 
-The 6 operator-callable per-shot methods (generate_keyframe_take,
-generate_motion_take, regenerate_shot, diagnose_clip, apply_correction,
-generate_scene_preview) plus their immediate helpers (_find_shot,
-_find_take, _take_output_path, _mutate_shot, _record_diagnostic,
-_resolve_previous_approved_keyframe) live here.
+Architectural seam
+==================
 
-Implementation choice
-=====================
+ShotController is constructable independently of
+``cinema_pipeline.CinemaPipeline``. This unblocks the planned Slice 3
+(web_server caching) goal of per-request controller construction
+sharing a cached PipelineCore across endpoints.
 
-The class is delivered as a **mixin** rather than a standalone class
-holding a CinemaPipeline reference. Reasons:
+Cross-controller dependencies (refresh_project_snapshot,
+save_checkpoint, candidate_take, ...) are declared as a Protocol
+(``ShotControllerHost``) and injected via the constructor.
+CinemaPipeline implements the protocol via its remaining mixins
+(``ReviewControllerMixin``, ``CheckpointStoreMixin``) and passes
+``self`` as the host. A future slice could decouple these further by
+making Review and Checkpoint standalone too; for now the host keeps
+the call graph honest while still allowing isolated testing of
+ShotController (with a stub host).
 
-  - Zero body rewrites: every ``self.X`` reference in the moved
-    methods continues to resolve correctly on a CinemaPipeline
-    instance (the methods see the same ``self`` either way).
+Runtime state ownership
+=======================
 
-  - Identity preserved: ``CinemaPipeline.generate_keyframe_take is
-    ShotControllerMixin.generate_keyframe_take`` evaluates True via
-    MRO. The Python function objects are the same.
+ShotController owns ``shot_results`` (per-shot output dict, the only
+runtime-state field where shot methods are the primary writers). The
+remaining run-state fields stay on the orchestrator because they're
+written from the generate() loop more often than from shot methods:
 
-  - File-level separation: cinema_pipeline.py no longer carries
-    these ~540 LOC; reviewers can read this file in isolation.
+  scene_clips         -- shared (orchestrator's _build_scene_packages
+                         writes; generate_scene_preview reads/writes).
+                         Accessed via host.
+  scene_audio         -- audio-phase state.
+  failed_shots        -- orchestrator-only writes.
+  current_stage |
+  current_scene_id |
+  current_shot_id     -- progress pointer. Updated via
+                         host.update_progress_pointer(stage, scene_id, shot_id)
+                         which writes the trio atomically.
+  _completed_scene_indices -- checkpoint internal.
 
-The trade-off: a standalone ``ShotController(project_dir, lifecycle)``
-constructor isn't available yet. Slice E (driver rewire) is where the
-controllers become truly composable. For now, the mixin pattern gets
-us the file-level decomposition with minimal disruption.
+Body-rewrite policy
+===================
 
-State expected from the host class
-==================================
+Method bodies are preserved verbatim from the prior mixin with these
+mechanical substitutions:
 
-The mixin references the following ``self.X`` attributes that
-``CinemaPipeline.__init__`` is responsible for setting up:
+  self._refresh_project_snapshot()   -> self._host._refresh_project_snapshot()
+  self._rebuild_review_clips()       -> self._host._rebuild_review_clips()
+  self._save_checkpoint()            -> self._host._save_checkpoint()
+  self._resolve_take_path(...)       -> self._host._resolve_take_path(...)
+  self._candidate_take(...)          -> self._host._candidate_take(...)
+  self._latest_take(...)             -> self._host._latest_take(...)
+  self._ensure_scene_audio(...)      -> self._host._ensure_scene_audio(...)
+  self.current_stage = "X"           -> self._host.update_progress_pointer("X", scene_id, shot_id)
+  self.current_scene_id = ...        -- absorbed into update_progress_pointer
+  self.current_shot_id = ...         -- absorbed into update_progress_pointer
+  self.scene_clips                   -> self._host.scene_clips
+  self.export_dir                    -> self._core.export_dir
+  self.project                       -- preserved (proxies to self._core.project)
+  self.project_dir                   -- preserved (proxies to self._core.project_dir)
+  self.continuity                    -- preserved (proxies to self._core.continuity)
+  self.progress(...)                 -- preserved (proxies to self._lifecycle.report_progress)
 
-  self.project, self.project_dir, self.temp_dir
-  self.continuity (ContinuityEngine)
-  self.director (ChiefDirector)
-  self.ensemble (LLMEnsemble)
-  self.vbench, self.quality_tracker, self.cost_tracker
-  self.progress (callable)
-  self.shot_results (dict)
-  self.failed_shots (list)
-  self.current_stage / current_scene_id / current_shot_id (str)
-
-Plus the following methods provided by ReviewControllerMixin (Slice C)
-or remaining in CinemaPipeline directly:
-
-  self._refresh_project_snapshot, self._rebuild_review_clips,
-  self._save_checkpoint, self._candidate_take, self._resolve_take_path
+The original latent import bugs in apply_correction (``time``,
+``get_reference_image``, ``face_swap_video_frames``,
+``generate_lip_sync_video``, ``generate_rife_interpolation``,
+``upscale_video_seedvr2``, ``stitch_modules``) are preserved as-is.
+Those code paths fail at runtime today and will continue to fail
+exactly the same way after this slice. Fixing them is a separate
+follow-up, not part of the architectural extraction.
 """
 
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import TYPE_CHECKING, Optional, Protocol
 
 from project_manager import MutationResult, mutate_project, make_take
 from llm.style_director import style_rules_to_prompt_suffix
@@ -64,13 +86,113 @@ from phase_c_assembly import generate_ai_broll
 from phase_c_ffmpeg import generate_ai_video
 from phase_c_vision import validate_identity
 
+from cinema.lifecycle import LifecycleService
 
-class ShotControllerMixin:
-    """Mixin providing per-shot generation and correction methods.
+if TYPE_CHECKING:
+    # PipelineCore lives in cinema.core, which transitively imports
+    # vbench_evaluator.py — that file uses PEP 604 in function defaults
+    # (``X | None = None``), which fails at import-time on Python 3.9
+    # (lesson 8.8 in REFACTOR_HANDOFF.md). Since this file only uses
+    # ``PipelineCore`` as a type annotation and ``from __future__ import
+    # annotations`` is in effect (annotations are evaluated lazily as
+    # strings), the import is unnecessary at runtime. Gating it under
+    # TYPE_CHECKING keeps the local 3.9 verification path runnable.
+    from cinema.core import PipelineCore
 
-    Designed to be mixed into ``cinema_pipeline.CinemaPipeline``. See
-    the module docstring for the contract with the host class.
+
+class ShotControllerHost(Protocol):
+    """Methods + attributes that ShotController calls on its host.
+
+    Names use leading underscores to match CinemaPipeline's existing
+    method names (the host doesn't promote them to public just to fit
+    a protocol). Python's Protocol matches by name regardless of
+    visibility convention.
     """
+
+    # -- ReviewController methods (live on ReviewControllerMixin today) --
+    def _refresh_project_snapshot(self, timeout: float = 10) -> Optional[dict]: ...
+    def _rebuild_review_clips(self, project: Optional[dict] = None) -> dict: ...
+    def _candidate_take(self, shot: dict) -> Optional[dict]: ...
+    def _resolve_take_path(self, shot: dict, take_id: str) -> str: ...
+    def _latest_take(self, shot: dict, collection_name: str) -> Optional[dict]: ...
+
+    # -- CheckpointStore method (lives on CheckpointStoreMixin today) --
+    def _save_checkpoint(self, completed_scene_idx: int = -1) -> None: ...
+
+    # -- Audio-phase method (lives on CinemaPipeline today) --
+    def _ensure_scene_audio(self, scene: dict, characters: list) -> Optional[str]: ...
+
+    # -- Progress-pointer write (orchestrator-shared state) --
+    def update_progress_pointer(
+        self, stage: str, scene_id: str, shot_id: str
+    ) -> None: ...
+
+    # -- Orchestrator-owned attribute that shot methods read/write --
+    scene_clips: dict
+
+
+class ShotController:
+    """Per-shot generation + correction, composed from PipelineCore + Lifecycle + Host.
+
+    Constructable independently of CinemaPipeline -- the seam that
+    enables Slice 3's per-request controller construction with a
+    cached PipelineCore.
+
+    Parameters
+    ----------
+    core : PipelineCore
+        Long-lived project deps + services. Provides project, project_dir,
+        continuity, etc. Single instance can be reused across runs.
+    lifecycle : LifecycleService
+        Per-run progress reporting / cancellation. Phases poll for
+        cancellation at safe points; progress is emitted via
+        ``self.progress(stage, detail, percent, **kwargs)``.
+    host : ShotControllerHost
+        Cross-controller + orchestrator-shared callables and attributes
+        that shot methods need. CinemaPipeline implements this protocol;
+        tests can pass a lightweight stub.
+    """
+
+    def __init__(
+        self,
+        core: PipelineCore,
+        lifecycle: LifecycleService,
+        host: ShotControllerHost,
+    ):
+        self._core = core
+        self._lifecycle = lifecycle
+        self._host = host
+
+        # Per-run runtime state owned by this controller.
+        # Other run-state fields stay on the orchestrator (see module
+        # docstring). The only field that moves in Slice 2 is shot_results.
+        self.shot_results: dict = {}
+
+    # ------------------------------------------------------------------
+    # PipelineCore + Lifecycle property proxies -- preserve self.X access
+    # in the moved method bodies (Pattern H, REFACTOR_HANDOFF.md section 7).
+    # ------------------------------------------------------------------
+
+    @property
+    def project(self) -> dict:
+        return self._core.project
+
+    @property
+    def project_dir(self) -> str:
+        return self._core.project_dir
+
+    @property
+    def continuity(self):
+        return self._core.continuity
+
+    @property
+    def progress(self):
+        """Bound-method-shaped proxy so legacy self.progress(...) calls work."""
+        return self._lifecycle.report_progress
+
+    # ------------------------------------------------------------------
+    # Private helpers (moved from ShotControllerMixin).
+    # ------------------------------------------------------------------
 
     def _find_shot(
         self,
@@ -108,7 +230,7 @@ class ShotControllerMixin:
             return MutationResult(None, save=False)
 
         result = mutate_project(self.project["id"], _mutate, timeout=timeout, snapshot=self.project)
-        self._refresh_project_snapshot()
+        self._host._refresh_project_snapshot()
         return result
 
     def _record_diagnostic(self, shot_id: str, diagnostic: dict) -> None:
@@ -123,7 +245,11 @@ class ShotControllerMixin:
             return ""
         previous_shot = scene.get("shots", [])[shot_index - 1]
         take_id = previous_shot.get("approved_keyframe_take_id", "")
-        return self._resolve_take_path(previous_shot, take_id)
+        return self._host._resolve_take_path(previous_shot, take_id)
+
+    # ------------------------------------------------------------------
+    # Public methods.
+    # ------------------------------------------------------------------
 
     def generate_keyframe_take(
         self,
@@ -132,7 +258,7 @@ class ShotControllerMixin:
         positive_prompt: Optional[str] = None,
         negative_prompt: Optional[str] = None,
     ) -> dict:
-        project = self._refresh_project_snapshot() or self.project
+        project = self._host._refresh_project_snapshot() or self.project
         scene, shot, shot_index = self._find_shot(shot_id, project, scene_id)
         if not scene or not shot:
             return {"success": False, "error": "Shot not found"}
@@ -167,9 +293,7 @@ class ShotControllerMixin:
             },
         )
         img_path = self._take_output_path(shot_id, take["id"], ".jpg")
-        self.current_stage = "KEYFRAME"
-        self.current_scene_id = scene_id
-        self.current_shot_id = shot_id
+        self._host.update_progress_pointer("KEYFRAME", scene_id, shot_id)
         self.progress(
             "KEYFRAME",
             f"Generating keyframe for {shot_id}",
@@ -216,8 +340,8 @@ class ShotControllerMixin:
             "status": "keyframe_review",
             "take_id": take["id"],
         }
-        self._rebuild_review_clips()
-        self._save_checkpoint()
+        self._host._rebuild_review_clips()
+        self._host._save_checkpoint()
         self.progress(
             "KEYFRAME_READY",
             f"Keyframe ready for {shot_id}",
@@ -237,7 +361,7 @@ class ShotControllerMixin:
         }
 
     def generate_motion_take(self, scene_id: str, shot_id: str) -> dict:
-        project = self._refresh_project_snapshot() or self.project
+        project = self._host._refresh_project_snapshot() or self.project
         scene, shot, shot_index = self._find_shot(shot_id, project, scene_id)
         if not scene or not shot:
             return {"success": False, "error": "Shot not found"}
@@ -247,7 +371,7 @@ class ShotControllerMixin:
         if not keyframe_take_id:
             return {"success": False, "error": "Approved keyframe required before generating motion"}
 
-        source_image = self._resolve_take_path(shot, keyframe_take_id)
+        source_image = self._host._resolve_take_path(shot, keyframe_take_id)
         if not source_image or not os.path.exists(source_image):
             return {"success": False, "error": "Approved keyframe asset is missing"}
 
@@ -284,9 +408,7 @@ class ShotControllerMixin:
             },
         )
         vid_path = self._take_output_path(shot_id, take["id"], ".mp4")
-        self.current_stage = "MOTION"
-        self.current_scene_id = scene_id
-        self.current_shot_id = shot_id
+        self._host.update_progress_pointer("MOTION", scene_id, shot_id)
         self.progress(
             "MOTION",
             f"Generating motion for {shot_id}",
@@ -342,8 +464,8 @@ class ShotControllerMixin:
             "status": "final_review",
             "take_id": take["id"],
         }
-        self._rebuild_review_clips()
-        self._save_checkpoint()
+        self._host._rebuild_review_clips()
+        self._host._save_checkpoint()
         self.progress(
             "MOTION_READY",
             f"Motion take ready for {shot_id}",
@@ -364,7 +486,7 @@ class ShotControllerMixin:
 
     def regenerate_shot(self, scene_id: str, shot_id: str) -> dict:
         """Compatibility wrapper for the older regenerate endpoint."""
-        project = self._refresh_project_snapshot() or self.project
+        project = self._host._refresh_project_snapshot() or self.project
         _, shot, _ = self._find_shot(shot_id, project, scene_id)
         if not shot:
             return {"success": False, "error": "Shot not found"}
@@ -376,7 +498,7 @@ class ShotControllerMixin:
         """
         Run all quality analyzers on a clip and return scores + recommendations.
         """
-        project = self._refresh_project_snapshot() or self.project
+        project = self._host._refresh_project_snapshot() or self.project
         scene, shot, shot_index = self._find_shot(shot_id, project)
         if not scene or not shot:
             return {"error": "Clip not found"}
@@ -385,7 +507,7 @@ class ShotControllerMixin:
         if take_id:
             _, candidate = self._find_take(shot, take_id)
         if candidate is None:
-            candidate = self._candidate_take(shot)
+            candidate = self._host._candidate_take(shot)
         if candidate is None:
             return {"error": "No take available for diagnosis"}
 
@@ -397,10 +519,10 @@ class ShotControllerMixin:
             "recommendations": [],
         }
         video_path = candidate.get("path", "") if candidate.get("kind") != "keyframe" else ""
-        image_path = candidate.get("path", "") if candidate.get("kind") == "keyframe" else self._resolve_take_path(
+        image_path = candidate.get("path", "") if candidate.get("kind") == "keyframe" else self._host._resolve_take_path(
             shot,
             shot.get("approved_keyframe_take_id", ""),
-        ) or (self._latest_take(shot, "keyframe_takes") or {}).get("path", "")
+        ) or (self._host._latest_take(shot, "keyframe_takes") or {}).get("path", "")
 
         # Identity validation
         chars = scene.get("characters_present", [])
@@ -431,8 +553,8 @@ class ShotControllerMixin:
         if _coherence_enabled and image_path and os.path.exists(str(image_path)):
             if shot_index > 0:
                 previous_shot = scene.get("shots", [])[shot_index - 1]
-                prev_img = self._resolve_take_path(previous_shot, previous_shot.get("approved_keyframe_take_id", "")) or (
-                    self._latest_take(previous_shot, "keyframe_takes") or {}
+                prev_img = self._host._resolve_take_path(previous_shot, previous_shot.get("approved_keyframe_take_id", "")) or (
+                    self._host._latest_take(previous_shot, "keyframe_takes") or {}
                 ).get("path", "")
                 if os.path.exists(prev_img):
                     from coherence_analyzer import assess_coherence
@@ -460,7 +582,7 @@ class ShotControllerMixin:
                  rife, upscale, color_grade, speed, voice_regen, foley_regen
         """
         params = params or {}
-        project = self._refresh_project_snapshot() or self.project
+        project = self._host._refresh_project_snapshot() or self.project
         scene, shot, shot_index = self._find_shot(shot_id, project)
         if not scene or not shot:
             return {"success": False, "error": "Clip not found in review"}
@@ -469,7 +591,7 @@ class ShotControllerMixin:
         if take_id:
             _, base_take = self._find_take(shot, take_id)
         if base_take is None:
-            base_take = self._candidate_take(shot)
+            base_take = self._host._candidate_take(shot)
         if base_take is None:
             return {"success": False, "error": "No take available to correct"}
 
@@ -509,7 +631,7 @@ class ShotControllerMixin:
             elif action == "lip_sync":
                 chars = scene.get("characters_present", [])
                 primary_ref = get_reference_image(self.project, chars[0]) if chars else None
-                audio_path = self._ensure_scene_audio(scene, [c for c in self.project["characters"] if c["id"] in chars])
+                audio_path = self._host._ensure_scene_audio(scene, [c for c in self.project["characters"] if c["id"] in chars])
                 if video_path and primary_ref and audio_path:
                     result = generate_lip_sync_video(
                         character_image_path=primary_ref,
@@ -561,8 +683,8 @@ class ShotControllerMixin:
                 return MutationResult(variant, save=True)
 
             stored_variant = self._mutate_shot(shot_id, _mutator)
-            self._rebuild_review_clips()
-            self._save_checkpoint()
+            self._host._rebuild_review_clips()
+            self._host._save_checkpoint()
             self.progress(
                 "POSTPROCESS_READY",
                 f"{action} ready for {shot_id}",
@@ -580,24 +702,24 @@ class ShotControllerMixin:
 
     def generate_scene_preview(self, scene_id: str) -> Optional[str]:
         """Generate just one scene for preview purposes."""
-        project = self._refresh_project_snapshot() or self.project
+        project = self._host._refresh_project_snapshot() or self.project
         scene = next((s for s in project["scenes"] if s["id"] == scene_id), None)
         if not scene:
             return None
 
-        clips = self.scene_clips.get(scene_id, [])
+        clips = self._host.scene_clips.get(scene_id, [])
         if not clips:
             clips = []
             for shot in scene.get("shots", []):
-                final_path = self._resolve_take_path(shot, shot.get("approved_final_take_id", ""))
+                final_path = self._host._resolve_take_path(shot, shot.get("approved_final_take_id", ""))
                 if final_path and os.path.exists(final_path):
                     clips.append(final_path)
             if not clips:
                 return None
-            self.scene_clips[scene_id] = clips
+            self._host.scene_clips[scene_id] = clips
 
         # Stitch scene clips into a preview
-        preview_path = os.path.join(self.export_dir, f"preview_{scene_id}.mp4")
+        preview_path = os.path.join(self._core.export_dir, f"preview_{scene_id}.mp4")
         valid_clips = [c for c in clips if c and os.path.exists(c)]
         if valid_clips:
             try:

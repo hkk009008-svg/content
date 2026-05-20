@@ -40,7 +40,7 @@ from cinema.core import PipelineCore, build_pipeline_core
 from cinema.lifecycle import ThreadedLifecycle
 from cinema.phases.keyframe_render import KeyframeRenderPhase
 from cinema.phases.motion_render import MotionRenderPhase
-from cinema.shots.controller import ShotControllerMixin
+from cinema.shots.controller import ShotController
 from cinema.review.controller import ReviewControllerMixin
 from cinema.checkpoint import CheckpointStoreMixin
 from scene_decomposer import competitive_decompose_scene
@@ -75,7 +75,7 @@ def _build_transition_prompt(from_mood: str, to_mood: str) -> str:
     return f"Cinematic transition from {from_mood} to {to_mood} mood, smooth camera movement, natural temporal flow, professional film edit"
 
 
-class CinemaPipeline(ShotControllerMixin, ReviewControllerMixin, CheckpointStoreMixin):
+class CinemaPipeline(ReviewControllerMixin, CheckpointStoreMixin):
     """
     Interactive cinema production pipeline with maximum API utilization
     and state-of-the-art continuity techniques.
@@ -120,12 +120,18 @@ class CinemaPipeline(ShotControllerMixin, ReviewControllerMixin, CheckpointStore
         # for each run. None of this belongs in PipelineCore.
         self.scene_clips = {}        # scene_id -> list of video clip paths
         self.scene_audio = {}        # scene_id -> audio path
-        self.shot_results = {}       # shot_id -> {"image", "video", "identity_score", "status", "take_id"}
         self.failed_shots = []       # shot_ids that failed and were skipped
         self.current_stage = ""
         self.current_scene_id = ""
         self.current_shot_id = ""
         self._completed_scene_indices = set()  # for checkpoint resume
+
+        # ShotController -- standalone-controllers Slice 2. Owns
+        # shot_results (the only runtime-state field where shot methods
+        # are the primary writers). Cross-controller calls and the
+        # progress-pointer triple still flow through self (the host),
+        # via the ShotControllerHost protocol.
+        self._shot_ctrl = ShotController(self._core, self.lifecycle, self)
 
     # ------------------------------------------------------------------
     # PipelineCore proxies — backward-compat property accessors so the
@@ -174,6 +180,60 @@ class CinemaPipeline(ShotControllerMixin, ReviewControllerMixin, CheckpointStore
     @property
     def ensemble(self):
         return self._core.ensemble
+
+    # ------------------------------------------------------------------
+    # ShotController delegates + state proxy (Slice 2).
+    # The six public shot methods now live on self._shot_ctrl; these
+    # delegates preserve the CinemaPipeline call surface for web_server
+    # endpoints, tests, and the inline self.generate_scene_preview()
+    # call in assemble_approved_takes().
+    # ------------------------------------------------------------------
+
+    @property
+    def shot_results(self) -> dict:
+        """Proxy to ShotController's run-state dict.
+
+        Returns the underlying object (not a copy) so in-place mutations
+        like ``self.shot_results[shot_id] = {...}`` from generate() keep
+        working through the property.
+        """
+        return self._shot_ctrl.shot_results
+
+    @shot_results.setter
+    def shot_results(self, value: dict) -> None:
+        # Needed for full-assignment sites in CheckpointStoreMixin
+        # (_restore_from_checkpoint reassigns the dict wholesale).
+        self._shot_ctrl.shot_results = value
+
+    def update_progress_pointer(self, stage: str, scene_id: str, shot_id: str) -> None:
+        """Update the current_stage / current_scene_id / current_shot_id triple atomically.
+
+        Called by ShotController via the ShotControllerHost protocol.
+        The orchestrator's generate() loop still writes the fields
+        directly; this method just keeps the controller's writes from
+        scattering three attribute assignments at every step.
+        """
+        self.current_stage = stage
+        self.current_scene_id = scene_id
+        self.current_shot_id = shot_id
+
+    def generate_keyframe_take(self, *args, **kwargs) -> dict:
+        return self._shot_ctrl.generate_keyframe_take(*args, **kwargs)
+
+    def generate_motion_take(self, *args, **kwargs) -> dict:
+        return self._shot_ctrl.generate_motion_take(*args, **kwargs)
+
+    def regenerate_shot(self, *args, **kwargs) -> dict:
+        return self._shot_ctrl.regenerate_shot(*args, **kwargs)
+
+    def diagnose_clip(self, *args, **kwargs) -> dict:
+        return self._shot_ctrl.diagnose_clip(*args, **kwargs)
+
+    def apply_correction(self, *args, **kwargs) -> dict:
+        return self._shot_ctrl.apply_correction(*args, **kwargs)
+
+    def generate_scene_preview(self, *args, **kwargs):
+        return self._shot_ctrl.generate_scene_preview(*args, **kwargs)
 
     # ------------------------------------------------------------------
     # Checkpoint / Resume
