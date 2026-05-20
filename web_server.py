@@ -40,6 +40,7 @@ from scene_decomposer import decompose_scene, update_scene_shots, CAMERA_MOTIONS
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
 from cinema_pipeline import CinemaPipeline
+from cinema.core import PipelineCore, build_pipeline_core
 from cinema.services import state_snapshot, checkpoint_info
 from workflow_selector import WORKFLOW_TEMPLATES
 from web_services import make_progress_callback
@@ -50,7 +51,33 @@ CORS(app)
 # SSE progress queues per project
 _progress_queues: dict[str, queue.Queue] = {}
 _running_pipelines: dict[str, CinemaPipeline] = {}
+
+# PipelineCore cache (Slice 3b Phase 1c). Caches the heavy long-lived
+# services (ContinuityEngine, ChiefDirector, LLMEnsemble, VBenchEvaluator,
+# QualityTracker, CostTracker) per project_id so that per-endpoint
+# CinemaPipeline construction doesn't re-instantiate them on every
+# request. Lifetime: until process restart. Not invalidated on
+# project-settings change on disk -- known limitation; restart the
+# server if you edit settings.json out-of-band.
+_running_cores: dict[str, PipelineCore] = {}
+_cores_lock = threading.Lock()
 HTTP_PROJECT_TIMEOUT = 2.0
+
+
+def _get_or_build_core(pid: str) -> PipelineCore:
+    """Return a cached PipelineCore for ``pid``, building one if absent.
+
+    Thread-safe via _cores_lock. Raises ValueError (from
+    build_pipeline_core) if the project_id doesn't resolve to a saved
+    project -- callers handle the same way they handled the equivalent
+    raise from CinemaPipeline.__init__ before this slice.
+    """
+    with _cores_lock:
+        core = _running_cores.get(pid)
+        if core is None:
+            core = build_pipeline_core(pid)
+            _running_cores[pid] = core
+        return core
 
 
 def _ensure_progress_queue(pid: str) -> queue.Queue:
@@ -78,7 +105,9 @@ def _get_stage_pipeline(pid: str) -> CinemaPipeline:
     pipeline = _running_pipelines.get(pid)
     if pipeline:
         return pipeline
-    return CinemaPipeline(pid, progress_callback=_make_progress_cb(pid))
+    # Build a per-request CinemaPipeline that shares the cached core --
+    # amortizes the heavy service construction across endpoint calls.
+    return CinemaPipeline(pid, core=_get_or_build_core(pid), progress_callback=_make_progress_cb(pid))
 
 
 def _locate_shot(project: dict, shot_id: str):
@@ -719,7 +748,7 @@ def api_generate(pid):
 
     def run_pipeline():
         try:
-            pipeline = CinemaPipeline(pid, progress_callback=progress_cb)
+            pipeline = CinemaPipeline(pid, core=_get_or_build_core(pid), progress_callback=progress_cb)
             _running_pipelines[pid] = pipeline
             result = pipeline.generate(resume=resume)
             q.put({"stage": "DONE", "detail": result or "Failed", "percent": 100})
@@ -1048,7 +1077,7 @@ def api_regenerate_shot(pid, shot_id):
         return jsonify(result)
 
     try:
-        temp_pipeline = CinemaPipeline(pid, progress_callback=_make_progress_cb(pid))
+        temp_pipeline = CinemaPipeline(pid, core=_get_or_build_core(pid), progress_callback=_make_progress_cb(pid))
         result = temp_pipeline.regenerate_shot(scene_id, shot_id)
         return jsonify(result)
     except Exception as e:
@@ -1093,7 +1122,7 @@ def api_proceed_assembly(pid):
     pipeline = _running_pipelines.get(pid)
     if not pipeline:
         try:
-            result = CinemaPipeline(pid, progress_callback=_make_progress_cb(pid)).assemble_approved_takes()
+            result = CinemaPipeline(pid, core=_get_or_build_core(pid), progress_callback=_make_progress_cb(pid)).assemble_approved_takes()
         except ValueError:
             return jsonify({"error": "Project not found"}), 404
         status = 200 if result.get("success") else 409
