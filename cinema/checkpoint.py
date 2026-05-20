@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from cinema.lifecycle import LifecycleService
 
@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     from cinema.core import PipelineCore
 
 
+@runtime_checkable
 class CheckpointStoreHost(Protocol):
     """Attributes that CheckpointStore reads from and writes to its host.
 

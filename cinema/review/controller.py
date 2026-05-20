@@ -64,7 +64,7 @@ for the behavior-change rationale.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Protocol
+from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 from project_manager import MutationResult, mutate_project
 
@@ -77,6 +77,7 @@ if TYPE_CHECKING:
     from cinema.core import PipelineCore
 
 
+@runtime_checkable
 class ReviewControllerHost(Protocol):
     """Methods + attributes that ReviewController calls on its host."""
 

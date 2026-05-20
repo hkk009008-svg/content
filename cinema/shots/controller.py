@@ -80,7 +80,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import TYPE_CHECKING, Optional, Protocol
+from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 from project_manager import MutationResult, mutate_project, make_take
 from llm.style_director import style_rules_to_prompt_suffix
@@ -108,6 +108,7 @@ if TYPE_CHECKING:
     from cinema.core import PipelineCore
 
 
+@runtime_checkable
 class ShotControllerHost(Protocol):
     """Methods + attributes that ShotController calls on its host.
 
