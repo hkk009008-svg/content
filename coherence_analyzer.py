@@ -18,12 +18,21 @@ import numpy as np
 
 @dataclass
 class SceneCoherenceResult:
-    """Aggregate coherence result for a pair or sequence of shots."""
+    """Aggregate coherence result for a pair or sequence of shots.
+
+    Callers MUST check ``valid`` before trusting the scores. When ``valid``
+    is False, the scores are meaningless (e.g. an input image failed to
+    load) and ``error`` describes why. Previously the analyzer silently
+    returned 0.0/0.5 placeholder scores that looked like "perfect
+    coherence", masking unreadable inputs.
+    """
     overall_coherence_score: float       # 0-1 (weighted: 0.4 color + 0.3 lighting + 0.3 composition)
     color_drift: float                   # 0-1 (higher = more drift)
     lighting_consistency: float          # 0-1 (higher = more consistent)
     composition_similarity: float        # 0-1
     recommendations: List[str] = field(default_factory=list)
+    valid: bool = True                   # False when inputs couldn't be analyzed
+    error: str = ""                      # human-readable reason when ``valid`` is False
 
 
 class ColorCoherenceAnalyzer:
@@ -190,6 +199,19 @@ class CompositionAnalyzer:
 # Main coherence assessment function
 # ---------------------------------------------------------------------------
 
+def _invalid_coherence(reason: str) -> SceneCoherenceResult:
+    """Build a SceneCoherenceResult signalling inputs couldn't be analyzed."""
+    return SceneCoherenceResult(
+        overall_coherence_score=0.0,
+        color_drift=0.0,
+        lighting_consistency=0.0,
+        composition_similarity=0.0,
+        recommendations=[],
+        valid=False,
+        error=reason,
+    )
+
+
 def assess_coherence(
     current_image: str,
     previous_image: str,
@@ -200,10 +222,21 @@ def assess_coherence(
     Optionally compares against the full scene palette if scene_images provided.
 
     Returns SceneCoherenceResult with per-dimension scores and recommendations.
+    If either image cannot be loaded (file missing or OpenCV decode failure),
+    returns a result with ``valid=False`` — callers must check this flag
+    before acting on the scores.
     """
     color_analyzer = ColorCoherenceAnalyzer()
     comp_analyzer = CompositionAnalyzer()
     recommendations = []
+
+    # Verify both inputs decode before doing the math. cv2.imread returns
+    # None silently on missing files, so checking with cv2 not os.path is
+    # what catches "the file exists but is corrupt or non-image".
+    if cv2.imread(current_image) is None:
+        return _invalid_coherence(f"cannot read current_image: {current_image!r}")
+    if cv2.imread(previous_image) is None:
+        return _invalid_coherence(f"cannot read previous_image: {previous_image!r}")
 
     # 1. Color coherence
     color_drift = color_analyzer.detect_palette_drift(
@@ -240,4 +273,5 @@ def assess_coherence(
         lighting_consistency=lighting,
         composition_similarity=composition_sim,
         recommendations=recommendations,
+        valid=True,
     )

@@ -357,8 +357,17 @@ def get_optimal_api(
     # Sort descending by score
     scored.sort(key=lambda x: x["score"], reverse=True)
 
-    # If budget filtering removed everything, fall back to static
+    # If budget filtering removed everything, fall back to static — but
+    # warn the caller. Previously this recursive call silently bypassed
+    # the budget constraint, returning APIs the caller had explicitly
+    # priced out.
     if not scored:
+        if budget_remaining is not None:
+            print(
+                f"   [WARN] Budget filter removed every candidate "
+                f"(budget=${budget_remaining:.4f}). Falling back to "
+                f"unfiltered ranking — caller-supplied budget is being ignored."
+            )
         return get_optimal_api(shot_type, character_ids, budget_remaining=None, quality_cost_weight=quality_cost_weight)
 
     return scored

@@ -39,25 +39,31 @@ def generate_voiceover(ctx: dict) -> bool:
 
     print(f"\n🎙️ [PHASE B] Sending script to ElevenLabs (Mood: {music_vibe.upper()})...")
 
-    # Map the script's psychological mood to the perfect physical voice actor
+    # Map the script's psychological mood to the perfect physical voice actor.
+    # If the mood isn't in the map, fall back to a random pick from the
+    # narrator-grade pool below.
     voice_profiles = {
-        "suspense": "pNInz6obpgDQGcFmaJgB", # Adam (Deep, authoritative)
-        "corporate": "ErXwobaYiN019PkySvjV", # Antoni (Clean professional)
-        "gritty": "D38z5RcWu1voky8WS1ja", # Fin (Visceral, gritty)
-        "cyberpunk": "cjVigY5qzO86Huf0OWal", # Eric (Grizzly, mature, dark)
+        "suspense": {"id": "pNInz6obpgDQGcFmaJgB", "name": "Adam (Epic Deep Narrator)"},
+        "corporate": {"id": "ErXwobaYiN019PkySvjV", "name": "Antoni (Clean Professional)"},
+        "gritty":   {"id": "D38z5RcWu1voky8WS1ja", "name": "Fin (Visceral & Gritty)"},
+        "cyberpunk": {"id": "cjVigY5qzO86Huf0OWal", "name": "Eric (Grizzly & Mature)"},
     }
 
     breathtaking_voices = [
         {"id": "pNInz6obpgDQGcFmaJgB", "name": "Adam (Epic Deep Narrator)"},
         {"id": "cjVigY5qzO86Huf0OWal", "name": "Eric (Grizzly & Mature)"},
         {"id": "D38z5RcWu1voky8WS1ja", "name": "Fin (Visceral & Gritty)"},
-        {"id": "ErXwobaYiN019PkySvjV", "name": "Antoni (Clean Professional)"}
+        {"id": "ErXwobaYiN019PkySvjV", "name": "Antoni (Clean Professional)"},
     ]
 
     import random
-    chosen_actor = random.choice(breathtaking_voices)
+    if music_vibe in voice_profiles:
+        chosen_actor = voice_profiles[music_vibe]
+        print(f"🎭 [PHASE B] Mood-matched Voice Actor: {chosen_actor['name']} (mood={music_vibe})")
+    else:
+        chosen_actor = random.choice(breathtaking_voices)
+        print(f"🎭 [PHASE B] Unmapped mood {music_vibe!r} — random fallback: {chosen_actor['name']}")
     target_voice_id = chosen_actor["id"]
-    print(f"🎭 [PHASE B] Randomly Selected Voice Actor: {chosen_actor['name']}")
 
     try:
         # Generate the audio using ElevenLabs API v2+ structure with Elite Emotional VoiceSettings

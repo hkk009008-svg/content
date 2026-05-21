@@ -313,8 +313,9 @@ def upload_pipeline(ctx, offset_hours=0):
             
             import datetime
             # --- SCHEDULED RELEASE WORKFLOW ---
-            # Automatically schedule the video to be published x hours in the future
-            publish_time = datetime.datetime.utcnow() + datetime.timedelta(hours=offset_hours)
+            # Automatically schedule the video to be published x hours in the future.
+            # Use timezone-aware UTC; datetime.utcnow() is deprecated in 3.12+.
+            publish_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=offset_hours)
             # YouTube API requires ISO 8601 formatting with a fractional seconds truncation
             publish_at_str = publish_time.strftime("%Y-%m-%dT%H:%M:%S.000Z")
             
@@ -334,16 +335,19 @@ def upload_pipeline(ctx, offset_hours=0):
             print(f"✅ Master MP4 Payload locked. Uploading and scheduling for {offset_hours} hours from now.")
             upload_video(youtube, ctx, publish_at=publish_at_str)
             
-            if ctx.get("youtube_video_id") or True: # Force true for test
+            # Only proceed with caption upload + experiment logging when the
+            # video actually uploaded. upload_video returns None on failure
+            # and only writes ctx["youtube_video_id"] on success.
+            if ctx.get("youtube_video_id"):
                 # --- NEW: GENERATE AND UPLOAD MASTER SRT ---
                 persistent_srt = f"exports/{topic_slug}_{lang_slug}_Subtitles.srt"
                 generate_srt(ctx["audio_path"], persistent_srt)
-                print("✅ OVERRIDE FIXED: YouTube SRT Captions NOW ENABLED!")
+                print("✅ YouTube SRT Captions enabled.")
                 upload_caption(youtube, ctx["youtube_video_id"], language, persistent_srt)
-                
+
                 # --- NEW: LOG THE EXPERIMENT FOR FUTURE MACHINE LEARNING ---
                 log_experiment(ctx)
-                
+
                 print(f"\n✅🎉 MASTER VIDEO SUCCESSFULLY SCHEDULED FOR RELEASE IN {offset_hours} HOURS! 🎉✅")
                 print(f"Review your scheduled video here: https://studio.youtube.com/video/{ctx['youtube_video_id']}/edit")
             else:

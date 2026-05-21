@@ -4,7 +4,11 @@ import time
 import argparse
 from phase_d_upload import authenticate_youtube
 
-# The strings that triggered the spam classifiers
+# The strings that triggered the spam classifiers.
+# Be conservative — generic markers like "---" (markdown rule) and "🚀"
+# (common in legitimate descriptions) caused this to drop real content,
+# so they're no longer in the list. Only include footprints that are
+# specific to the templated affiliate boilerplate.
 FOOTER_FOOTPRINTS = [
     "[Link]",
     "[YOUR_AFFILIATE_LINK]",
@@ -12,9 +16,6 @@ FOOTER_FOOTPRINTS = [
     "Start your own business today:",
     "Build Your Unfair Advantage ->",
     "Scale Your Business Automations ->",
-    "🚀",
-    "💼",
-    "---"
 ]
 
 def sanitize_description(desc):

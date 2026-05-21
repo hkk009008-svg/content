@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Content** (2083 symbols, 11937 relationships, 177 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Content** (2292 symbols, 13551 relationships, 194 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -168,4 +168,3 @@ Beyond the GitNexus checks above, the refactor-branch workflow expects:
 - Don't combine concerns. A bug fix isn't a refactor isn't a feature.
 - See REFACTOR_HANDOFF.md §6 for the canonical five-step slice playbook
   (read → write → re-export → verify with identity check → commit).
-

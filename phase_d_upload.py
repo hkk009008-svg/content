@@ -247,9 +247,12 @@ def upload_localizations(youtube, video_id, language, title, description):
             return
             
         video = response["items"][0]
-        
-        # YouTube REQUIRES the snippet.defaultLanguage to be set before adding localizations
-        if "defaultLanguage" not in video["snippet"]:
+
+        # YouTube REQUIRES snippet.defaultLanguage to be set before adding
+        # localizations. Only set it when missing — overwriting a video that
+        # was originally uploaded with (say) "ko" would silently relabel the
+        # master language and degrade YouTube search/SEO.
+        if not video["snippet"].get("defaultLanguage"):
             video["snippet"]["defaultLanguage"] = "en"
             
         localizations = video.get("localizations", {})

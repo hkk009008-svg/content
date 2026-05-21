@@ -7,8 +7,9 @@ Provides budget checking, cost-per-second analysis, and spend summaries.
 
 import sqlite3
 import os
+import warnings
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +122,8 @@ class CostTracker:
         video_id: str = "",
     ) -> CostEntry:
         """Insert a cost record into the database."""
-        ts = datetime.utcnow().isoformat()
+        # Timezone-aware UTC; datetime.utcnow() is deprecated in 3.12+.
+        ts = datetime.now(timezone.utc).isoformat()
         self.conn.execute(
             """
             INSERT INTO cost_log
@@ -156,9 +158,18 @@ class CostTracker:
         Log an LLM call.
 
         Automatically detects the provider and calculates cost from the
-        PRICING table.  Falls back to $0.00 if the model is unknown.
+        PRICING table. If the model is unknown, emits a warning AND prints
+        a banner so the cost is not silently lost (previously this defaulted
+        to $0.00 with no signal, breaking budget governance).
         """
         provider = _detect_provider(model)
+        if model not in PRICING:
+            warnings.warn(
+                f"[cost_tracker] Unknown model {model!r}; recording $0.00 cost. "
+                f"Add it to PRICING in cost_tracker.py for accurate budgeting.",
+                stacklevel=2,
+            )
+            print(f"⚠️ [COST] Unknown model {model!r} — cost not tracked.")
         pricing = PRICING.get(model, {"input": 0.0, "output": 0.0})
         cost_usd = (
             (input_tokens / 1_000_000) * pricing["input"]
@@ -243,9 +254,15 @@ class CostTracker:
             "shot_count": len(shot_ids),
         }
 
-    def get_session_cost(self) -> float:
-        """Total cost of the current session (last 24 hours)."""
-        cutoff = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+    def get_session_cost(self, lookback_hours: float = 24.0) -> float:
+        """Total cost spent in the last ``lookback_hours`` (default 24h).
+
+        Note: this is a rolling-window total, not a true "session" delimited
+        by process start. Callers wanting per-process spend should pass a
+        smaller window or track their own start timestamp.
+        """
+        # Timezone-aware UTC; datetime.utcnow() is deprecated in 3.12+.
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
         row = self.conn.execute(
             "SELECT COALESCE(SUM(cost_usd), 0.0) AS total FROM cost_log WHERE timestamp >= ?",
             (cutoff,),
@@ -303,6 +320,7 @@ class CostTracker:
             return "No cost data recorded yet."
 
         total = 0.0
+        llm_total = 0.0  # LLM-only spend, used by the per-LLM efficiency metrics
         by_provider: dict[str, float] = {}
         by_operation: dict[str, float] = {}
         total_input_tokens = 0
@@ -319,6 +337,7 @@ class CostTracker:
             total_output_tokens += r["output_tokens"]
             if r["input_tokens"] > 0 or r["output_tokens"] > 0:
                 llm_calls += 1
+                llm_total += cost
             else:
                 api_calls += 1
 
@@ -348,13 +367,14 @@ class CostTracker:
             lines.append(f"  {op:<28} ${by_operation[op]:>8.4f}  {pct:5.1f}%")
         lines.append("")
 
-        # Efficiency metrics
+        # Efficiency metrics — use LLM-only totals so API spend doesn't
+        # inflate the per-LLM-call averages.
         if llm_calls > 0:
-            avg_llm_cost = total / llm_calls if llm_calls else 0
+            avg_llm_cost = llm_total / llm_calls
             lines.append("  --- Efficiency Metrics ---")
             lines.append(f"  Avg cost per LLM call:  ${avg_llm_cost:.6f}")
             if total_input_tokens > 0:
-                cost_per_1k_in = (total / total_input_tokens) * 1000
+                cost_per_1k_in = (llm_total / total_input_tokens) * 1000
                 lines.append(f"  Cost per 1K input tok:  ${cost_per_1k_in:.6f}")
 
         lines.append("=" * 52)

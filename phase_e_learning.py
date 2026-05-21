@@ -31,12 +31,18 @@ def init_db():
         )
     ''')
     
-    # Gracefully upgrade table schema with new retention variables dynamically
-    try:
-        cursor.execute("ALTER TABLE shorts_experiments ADD COLUMN voice_id TEXT")
-        cursor.execute("ALTER TABLE shorts_experiments ADD COLUMN loop_bridge TEXT")
-    except sqlite3.OperationalError:
-        pass # Columns already exist
+    # Gracefully upgrade table schema with new retention variables dynamically.
+    # Each ALTER must be in its own try/except — sharing one block means
+    # if the first column already exists, the OperationalError aborts the
+    # block and the second column never gets added.
+    for column_ddl in (
+        "ALTER TABLE shorts_experiments ADD COLUMN voice_id TEXT",
+        "ALTER TABLE shorts_experiments ADD COLUMN loop_bridge TEXT",
+    ):
+        try:
+            cursor.execute(column_ddl)
+        except sqlite3.OperationalError:
+            pass  # Column already exists; that's fine.
 
     conn.commit()
     conn.close()
@@ -58,7 +64,8 @@ def log_experiment(ctx: dict):
     init_db()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    now = datetime.datetime.utcnow().isoformat() + "Z"
+    # Timezone-aware UTC; datetime.utcnow() is deprecated in 3.12+.
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     
     cursor.execute('''
         INSERT OR REPLACE INTO shorts_experiments 
@@ -102,17 +109,31 @@ def fetch_and_update_analytics(youtube_auth):
         conn.close()
         return
         
-    video_ids = ",".join(valid_ids)
-    
-    try:
-        # First, grab basic stats (Views, Likes, Comments) via the Data API (v3)
-        stats_response = youtube_auth.videos().list(
-            part="statistics",
-            id=video_ids
-        ).execute()
+    # YouTube Data API caps videos.list at 50 IDs per call. Chunk so we
+    # don't silently truncate (or error) on channels with > 50 historical videos.
+    YT_VIDEOS_LIST_BATCH = 50
+    id_batches = [
+        valid_ids[i : i + YT_VIDEOS_LIST_BATCH]
+        for i in range(0, len(valid_ids), YT_VIDEOS_LIST_BATCH)
+    ]
 
-        now_dt = datetime.datetime.utcnow()
-        now_iso = now_dt.isoformat() + "Z"
+    try:
+        # Timezone-aware UTC; datetime.utcnow() is deprecated in 3.12+.
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
+        now_iso = now_dt.isoformat()
+
+        # Aggregate items across batches so the rest of the function can
+        # iterate over a single list, matching the original interface.
+        stats_items: list = []
+        for batch in id_batches:
+            batch_resp = youtube_auth.videos().list(
+                part="statistics",
+                id=",".join(batch),
+            ).execute()
+            stats_items.extend(batch_resp.get("items", []))
+
+        # Shape the aggregated list the way the legacy code expected.
+        stats_response = {"items": stats_items}
 
         # We need the published_at date to calculate velocity
         cursor.execute("SELECT video_id, published_at FROM shorts_experiments")

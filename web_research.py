@@ -12,25 +12,35 @@ _tavily_client = None
 _firecrawl_app = None
 
 
+# When the lazy import / construction of a client fails, we cache the
+# reason so subsequent callers see "import failed: foo" rather than the
+# misleading "API not configured" (which actually means the key was set
+# but loading the SDK failed).
+_tavily_init_error: str = ""
+_firecrawl_init_error: str = ""
+
+
 def _get_tavily():
-    global _tavily_client
+    global _tavily_client, _tavily_init_error
     if _tavily_client is None and settings.tavily_api_key:
         try:
             from tavily import TavilyClient
             _tavily_client = TavilyClient(api_key=settings.tavily_api_key)
-        except Exception:
-            pass
+        except Exception as e:
+            _tavily_init_error = f"{type(e).__name__}: {e}"
+            print(f"   ⚠️ [WEB] Tavily client init failed: {_tavily_init_error}")
     return _tavily_client
 
 
 def _get_firecrawl():
-    global _firecrawl_app
+    global _firecrawl_app, _firecrawl_init_error
     if _firecrawl_app is None and settings.firecrawl_api_key:
         try:
             from firecrawl import FirecrawlApp
             _firecrawl_app = FirecrawlApp(api_key=settings.firecrawl_api_key)
-        except Exception:
-            pass
+        except Exception as e:
+            _firecrawl_init_error = f"{type(e).__name__}: {e}"
+            print(f"   ⚠️ [WEB] Firecrawl client init failed: {_firecrawl_init_error}")
     return _firecrawl_app
 
 
@@ -39,7 +49,9 @@ def search_web(query: str) -> str:
     print(f"   🔍 [WEB] Searching: {query}")
     client = _get_tavily()
     if not client:
-        return "Tavily API not configured."
+        if _tavily_init_error:
+            return f"Tavily client failed to initialize: {_tavily_init_error}"
+        return "Tavily API not configured (TAVILY_API_KEY missing)."
     try:
         res = client.search(query=query, search_depth="advanced", max_results=3)
         parts = []
@@ -55,7 +67,9 @@ def scrape_url(url: str) -> str:
     print(f"   🕷️ [WEB] Scraping: {url}")
     app = _get_firecrawl()
     if not app:
-        return "Firecrawl API not configured."
+        if _firecrawl_init_error:
+            return f"Firecrawl client failed to initialize: {_firecrawl_init_error}"
+        return "Firecrawl API not configured (FIRECRAWL_API_KEY missing)."
     try:
         res = app.scrape_url(url, params={"formats": ["markdown"]})
         return res.get("markdown", str(res))[:4000]

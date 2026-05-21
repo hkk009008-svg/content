@@ -85,27 +85,31 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     """
     mode = "img2img" if init_image else "txt2img"
 
-    # PRIORITY 1: ComfyUI + PuLID on RunPod RTX 4090 (fastest + strongest face-lock)
+    # ----- Backend selection (PRIORITY order) -----
+    # The previous implementation relied on a confusing if/elif/else where
+    # only branch #1 fell through to the ComfyUI path below, and the
+    # downstream `if not server_url` check was dead code (the else-branch
+    # had already returned). Rewriting with explicit early-returns so the
+    # control flow is self-evident.
     server_url = settings.comfyui_server_url
-    if server_url and os.path.exists("pulid.json"):
-        print(f"   [PHASE C] Generating [{mode}] via ComfyUI PuLID (RTX 4090): '{prompt[:60]}...'")
-    elif character_image and os.path.exists(character_image) and settings.fal_key:
-        # PRIORITY 2: FLUX Kontext Max Multi (fallback if ComfyUI unavailable)
-        result = _fal_flux_fallback(
+
+    # PRIORITY 2 / 3: ComfyUI is unavailable — route to FLUX fallback.
+    # (Same args as the old elif/else, consolidated.)
+    if not (server_url and os.path.exists("pulid.json")):
+        if character_image and os.path.exists(character_image) and settings.fal_key:
+            return _fal_flux_fallback(
+                prompt, output_filename, seed,
+                character_image=character_image,
+                multi_angle_refs=multi_angle_refs,
+                identity_anchor=identity_anchor,
+            )
+        return _fal_flux_fallback(
             prompt, output_filename, seed,
             character_image=character_image,
-            multi_angle_refs=multi_angle_refs,
-            identity_anchor=identity_anchor,
         )
-        if result:
-            return result
-        return None
-    else:
-        return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image)
 
-    # ComfyUI path continues below
-    if not server_url:
-        return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image)
+    # PRIORITY 1: ComfyUI + PuLID on RunPod RTX 4090 (fastest + strongest face-lock)
+    print(f"   [PHASE C] Generating [{mode}] via ComfyUI PuLID (RTX 4090): '{prompt[:60]}...'")
 
     try:
         if not os.path.exists("pulid.json"):

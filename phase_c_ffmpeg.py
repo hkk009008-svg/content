@@ -196,11 +196,16 @@ def generate_ai_video(
                     shot_type=shot_type, video_fallbacks=video_fallbacks,
                 )
 
-        # All APIs failed — retry up to 2 times with quota cooldown
-        if _cascade_retries >= 1:
-            print("   [WARN] All video APIs exhausted after 1 full cascade retry.")
+        # All APIs failed — try the cascade once more after a quota cooldown.
+        # Counts: initial pass + 1 retry = 2 total attempts.
+        MAX_CASCADE_RETRIES = 1
+        if _cascade_retries >= MAX_CASCADE_RETRIES:
+            print(f"   [WARN] All video APIs exhausted after {MAX_CASCADE_RETRIES} retry pass(es).")
             return None
-        print(f"   [WARN] All APIs exhausted. Waiting 30s for refresh (retry {_cascade_retries + 1}/2)...")
+        print(
+            f"   [WARN] All APIs exhausted. Waiting 30s for quota refresh "
+            f"(retry {_cascade_retries + 1}/{MAX_CASCADE_RETRIES})..."
+        )
         time.sleep(30)
         first_api = (video_fallbacks or ["KLING_NATIVE"])[0]
         return generate_ai_video(
@@ -616,13 +621,21 @@ def generate_ai_video(
                         print(f"      ↳ Injecting IP-Adapter Weights for Character: {character_id}")
                         try:
                             ref_img_url = fal_client.upload_file(ref_img)
-                        except AttributeError:
-                            pass
+                        except AttributeError as e:
+                            # fal_client.upload_file missing — SDK not loaded properly.
+                            # We previously swallowed this and proceeded with an empty
+                            # ref URL (silent identity loss). Surface it and cascade.
+                            print(f"   [ERROR] fal_client.upload_file missing while uploading character ref: {e}")
+                            return try_next_api()
 
                 try:
                     base_img_url = fal_client.upload_file(image_path)
-                except AttributeError:
-                    base_img_url = "https://picsum.photos/768/1365"
+                except AttributeError as e:
+                    # We previously substituted a random picsum.photos placeholder.
+                    # That produced "successful" videos with the wrong content.
+                    # Fail cleanly so the cascade can route to a working backend.
+                    print(f"   [ERROR] fal_client.upload_file missing for base image ({image_path}): {e}")
+                    return try_next_api()
 
                 # Standard serverless call simulating a ComfyUI execution backbone
                 result = fal_client.subscribe(
