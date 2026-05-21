@@ -1,80 +1,171 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* ─────────────────────────────────────────────────────────────
+   EDITORIAL CINEMA — Typography
+   ─────────────────────────────────────────────────────────────
+   Display: Fraunces (variable, optical sizing — at opsz=144 it sets
+            like a 35mm film title card; lower opsz for body serif).
+   Sans:    Be Vietnam Pro — characterful neo-grotesque, NOT in the
+            usual AI-trend pool.
+   Mono:    JetBrains Mono — kept for diagnostics + timecode.
+   ───────────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=Be+Vietnam+Pro:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-* {
-  box-sizing: border-box;
+* { box-sizing: border-box; }
+
+:root {
+  /* Optical-sizing tokens for Fraunces */
+  --fraunces-display: 'opsz' 144, 'wght' 400, 'SOFT' 0;
+  --fraunces-headline: 'opsz' 96, 'wght' 500, 'SOFT' 20;
+  --fraunces-body: 'opsz' 14, 'wght' 400, 'SOFT' 50;
 }
 
 body {
   margin: 0;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Be Vietnam Pro', system-ui, sans-serif;
+  font-weight: 400;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: #0c0c14;
-  color: #eaecf5;
+  background: #0a0a0a;
+  color: #f0ebe1;
+  /* Subtle vignette — projection-screen falloff */
+  background-image:
+    radial-gradient(ellipse 90% 60% at 50% 0%, rgba(212, 168, 90, 0.04), transparent 60%),
+    radial-gradient(ellipse 80% 50% at 50% 100%, rgba(191, 55, 55, 0.03), transparent 70%);
+  background-attachment: fixed;
 }
 
-/* Smooth transitions everywhere */
-*, *::before, *::after {
-  transition-property: background-color, border-color, box-shadow, opacity;
-  transition-duration: 150ms;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+/* Film grain — animated noise overlay, multiply-blended.
+   The element itself goes on <body>::before so it doesn't intercept clicks. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1000;
+  opacity: 0.06;
+  background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 1 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  animation: grain 8s steps(6) infinite;
+  mix-blend-mode: overlay;
 }
 
-/* Scrollbar — subtle, minimal */
-::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: #2a2a3e;
-  border-radius: 10px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #3a3a50;
+@keyframes grain {
+  0%, 100% { transform: translate(0, 0); }
+  10% { transform: translate(-2%, -3%); }
+  20% { transform: translate(-4%, 2%); }
+  30% { transform: translate(3%, -3%); }
+  40% { transform: translate(-3%, 4%); }
+  50% { transform: translate(-4%, 1%); }
+  60% { transform: translate(2%, 3%); }
+  70% { transform: translate(-3%, 2%); }
+  80% { transform: translate(4%, -1%); }
+  90% { transform: translate(-1%, 3%); }
 }
 
-/* Selection color */
+/* Editorial display class — apply with `.font-display` */
+.font-display {
+  font-family: 'Fraunces', Georgia, serif;
+  font-variation-settings: var(--fraunces-display);
+  letter-spacing: -0.02em;
+  line-height: 0.92;
+}
+.font-display-headline {
+  font-family: 'Fraunces', Georgia, serif;
+  font-variation-settings: var(--fraunces-headline);
+  letter-spacing: -0.015em;
+  line-height: 1.0;
+}
+.font-display-body {
+  font-family: 'Fraunces', Georgia, serif;
+  font-variation-settings: var(--fraunces-body);
+  letter-spacing: 0;
+}
+.font-sans { font-family: 'Be Vietnam Pro', system-ui, sans-serif; }
+.font-mono { font-family: 'JetBrains Mono', monospace; letter-spacing: -0.01em; }
+
+/* Hairline editorial rule — replaces decorative borders */
+.rule-hairline { height: 1px; background: #2a2a2a; }
+.rule-double { height: 3px; border-top: 1px solid #2a2a2a; border-bottom: 1px solid #2a2a2a; background: transparent; }
+
+/* Marquee — used for the NOW SHOWING ticker */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.marquee-track {
+  display: inline-flex;
+  animation: marquee 32s linear infinite;
+  white-space: nowrap;
+}
+
+/* Editorial number reveal — staggered fade-up on mount */
+@keyframes ink-up {
+  from { opacity: 0; transform: translateY(8px); filter: blur(4px); }
+  to   { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+.ink-up { animation: ink-up 700ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* A small "projection flicker" used on the active-status indicator */
+@keyframes projection-flicker {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+  52% { opacity: 1; }
+  54% { opacity: 0.7; }
+  56% { opacity: 1; }
+}
+.flicker { animation: projection-flicker 3.2s infinite; }
+
+/* Selection — curtain red on ivory */
 ::selection {
-  background: rgba(124, 106, 240, 0.3);
-  color: #eaecf5;
+  background: #bf3737;
+  color: #f0ebe1;
 }
 
-/* Glass morphism utility */
+/* Scrollbar — invisible until hover, very thin */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: #d4a85a; }
+
+/* Form focus — single hairline underline, ivory glow */
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: #d4a85a !important;
+  box-shadow: 0 1px 0 0 #d4a85a;
+}
+
+button { cursor: pointer; transition: all 180ms ease; }
+button:active:not(:disabled) { transform: translateY(1px); }
+
+/* Editorial link underline animation */
+.link-editorial {
+  position: relative;
+  display: inline-block;
+  padding-bottom: 2px;
+}
+.link-editorial::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 1px;
+  background: currentColor;
+  transform-origin: right;
+  transform: scaleX(0);
+  transition: transform 320ms cubic-bezier(0.65, 0, 0.35, 1);
+}
+.link-editorial:hover::after {
+  transform-origin: left;
+  transform: scaleX(1);
+}
+
+/* Glass utility kept for inner panels (the existing components use it) */
 @layer utilities {
   .glass {
-    background: rgba(20, 20, 31, 0.7);
+    background: rgba(20, 20, 20, 0.7);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
   }
-  .glass-border {
-    border: 1px solid rgba(255, 255, 255, 0.06);
-  }
-}
-
-/* Input focus rings */
-input:focus, textarea:focus, select:focus {
-  outline: none;
-  border-color: #7c6af0 !important;
-  box-shadow: 0 0 0 2px rgba(124, 106, 240, 0.2);
-}
-
-/* Button base styles */
-button {
-  cursor: pointer;
-  transition: all 150ms ease;
-}
-button:active:not(:disabled) {
-  transform: scale(0.97);
-}
-
-/* Mono font for technical text */
-.font-mono {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  .glass-border { border: 1px solid rgba(240, 235, 225, 0.08); }
 }
