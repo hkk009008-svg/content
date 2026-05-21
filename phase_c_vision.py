@@ -9,6 +9,28 @@ except ImportError:
     VISION_AVAILABLE = False
     print("⚠️ [VISION WARNING] DeepFace/Tensorflow unavailable via PIP. Identity validation loop bypassed.")
 
+def _strip_json_fences(raw: str) -> str:
+    """Strip ```json ... ``` (or plain ```) fences from an LLM response.
+
+    Raises ValueError if the fenced payload is empty so callers can treat
+    parse failures distinctly from a passing result.
+    """
+    raw = raw.strip()
+    if raw.startswith("```"):
+        if "\n" in raw:
+            raw = raw.split("\n", 1)[1]
+        else:
+            raw = raw[3:]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        if raw.endswith("```"):
+            raw = raw[:-3]
+        raw = raw.strip()
+    if not raw:
+        raise ValueError("Empty JSON payload after stripping markdown fences")
+    return raw
+
+
 def get_middle_frame(video_path, output_image_path):
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -270,15 +292,8 @@ def validate_shot_quality_vision(image_path: str, original_prompt: str) -> dict:
             temperature=0.2,
         )
 
-        raw = response.choices[0].message.content.strip()
-        # Strip markdown code fences if present
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-            if raw.endswith("```"):
-                raw = raw[:-3]
-            raw = raw.strip()
-
-        result = json.loads(raw)
+        raw = response.choices[0].message.content
+        result = json.loads(_strip_json_fences(raw))
         result["pass"] = result.get("score", 0) >= 7
         result["source"] = "gpt-4o"
         print(f"[VISION-QA] GPT-4o score: {result['score']}/10 — {'PASS' if result['pass'] else 'FAIL'}")
@@ -287,6 +302,15 @@ def validate_shot_quality_vision(image_path: str, original_prompt: str) -> dict:
                 print(f"   - {issue}")
         return result
 
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"[VISION-QA] GPT-4o response parse failed ({e}) — failing closed")
+        return {
+            "score": 0,
+            "issues": [f"vision response unparseable: {e}"],
+            "pass": False,
+            "suggestions": [],
+            "source": "parse-error",
+        }
     except Exception as e:
         print(f"[VISION-QA] GPT-4o validation failed: {e}")
         return default_pass
@@ -373,14 +397,8 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
             ],
         )
 
-        raw = response.content[0].text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-            if raw.endswith("```"):
-                raw = raw[:-3]
-            raw = raw.strip()
-
-        result = json.loads(raw)
+        raw = response.content[0].text
+        result = json.loads(_strip_json_fences(raw))
         result["match"] = result.get("confidence", 0.0) >= 0.7
         result["source"] = "claude-sonnet"
         status = "MATCH" if result["match"] else "MISMATCH"
@@ -390,6 +408,14 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
                 print(f"   - {issue}")
         return result
 
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"[VISION-ID] Claude response parse failed ({e}) — failing closed")
+        return {
+            "match": False,
+            "confidence": 0.0,
+            "issues": [f"vision response unparseable: {e}"],
+            "source": "parse-error",
+        }
     except Exception as e:
         print(f"[VISION-ID] Claude identity validation failed: {e}")
         return default_pass
@@ -453,14 +479,8 @@ def validate_scene_coherence_vision(shot_images: list[str]) -> dict:
             contents=[*image_parts, contents[0]],
         )
 
-        raw = response.text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-            if raw.endswith("```"):
-                raw = raw[:-3]
-            raw = raw.strip()
-
-        result = json.loads(raw)
+        raw = response.text
+        result = json.loads(_strip_json_fences(raw))
         result["source"] = "gemini-flash"
         status = "COHERENT" if result.get("coherent", False) else "ISSUES FOUND"
         print(f"[VISION-COHERENCE] Gemini scene check: {status}")
@@ -469,6 +489,13 @@ def validate_scene_coherence_vision(shot_images: list[str]) -> dict:
                 print(f"   - {issue}")
         return result
 
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"[VISION-COHERENCE] Gemini response parse failed ({e}) — failing closed")
+        return {
+            "coherent": False,
+            "issues": [f"vision response unparseable: {e}"],
+            "source": "parse-error",
+        }
     except Exception as e:
         print(f"[VISION-COHERENCE] Gemini coherence check failed: {e}")
         return default_pass

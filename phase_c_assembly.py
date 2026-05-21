@@ -390,6 +390,21 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image)
 
 
+def _extract_flux_image_url(result, source_label: str) -> str:
+    """Pull the first image URL out of a FAL FLUX response, raising a clear
+    error if the response shape is unexpected so the caller's fallback path
+    logs a meaningful reason instead of an opaque IndexError/KeyError."""
+    if not isinstance(result, dict):
+        raise ValueError(f"{source_label} returned non-dict response: {type(result).__name__}")
+    images = result.get("images")
+    if not images:
+        raise ValueError(f"{source_label} returned no images: {result!r}")
+    first = images[0]
+    if not isinstance(first, dict) or "url" not in first:
+        raise ValueError(f"{source_label} image entry missing 'url': {first!r}")
+    return first["url"]
+
+
 def _parse_structured_prompt(prompt: str) -> dict:
     """
     Parse a structured prompt with [SHOT][SCENE][ACTION][OUTFIT][QUALITY] sections.
@@ -511,7 +526,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                         "num_images": 1,
                     },
                 )
-                img_url = result["images"][0]["url"]
+                img_url = _extract_flux_image_url(result, "FLUX Kontext")
                 urllib.request.urlretrieve(img_url, output_filename)
                 print(f"      [OK] FLUX Kontext image: {output_filename}")
                 return output_filename
@@ -532,7 +547,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                     "guidance_scale": 3.5,
                 },
             )
-            img_url = result["images"][0]["url"]
+            img_url = _extract_flux_image_url(result, "FLUX-Pro")
             urllib.request.urlretrieve(img_url, output_filename)
             print(f"      [OK] FLUX-Pro image: {output_filename}")
             return output_filename
@@ -551,7 +566,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                     "seed": seed,
                 },
             )
-            img_url = result["images"][0]["url"]
+            img_url = _extract_flux_image_url(result, "FLUX-schnell")
             urllib.request.urlretrieve(img_url, output_filename)
             print(f"      ✅ FAL FLUX-schnell image: {output_filename}")
             return output_filename

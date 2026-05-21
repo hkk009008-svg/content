@@ -362,7 +362,27 @@ class QualityTracker:
         tolerance: float = 0.05,
     ) -> List[RegressionAlert]:
         """Compare *current_vbench* against the rolling baseline and return
-        alerts for any dimension that drops below baseline - tolerance."""
+        alerts for any dimension that drops below baseline - tolerance.
+
+        Returns an empty list both when there are no regressions AND when no
+        baseline exists yet; the latter case logs a warning so the caller is
+        not misled into thinking the run was clean.
+        """
+
+        conn = self._connect()
+        try:
+            row_count = conn.execute(
+                "SELECT COUNT(*) FROM shot_quality"
+            ).fetchone()[0]
+        finally:
+            self._close(conn)
+
+        if row_count == 0:
+            print(
+                "[QualityTracker] check_regression: no baseline data yet — "
+                "skipping regression check."
+            )
+            return []
 
         baseline = self.get_baseline()
         alerts: List[RegressionAlert] = []

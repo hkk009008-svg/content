@@ -419,8 +419,20 @@ class LLMEnsemble:
                 )
 
             parsed = json.loads(raw) if isinstance(raw, str) else raw
-            judge_scores: list[float] = [float(s) for s in parsed["scores"]]
+            if not isinstance(parsed, dict):
+                raise ValueError(f"judge response not a JSON object: {type(parsed).__name__}")
+            if "scores" not in parsed or "winner" not in parsed:
+                raise KeyError(f"judge response missing required keys (got {list(parsed)})")
+            scores_raw = parsed["scores"]
+            if not isinstance(scores_raw, list):
+                raise ValueError(f"judge 'scores' must be a list, got {type(scores_raw).__name__}")
+            judge_scores: list[float] = [float(s) for s in scores_raw]
             winner_among_valid: int = int(parsed["winner"])
+            if not 0 <= winner_among_valid < len(valid):
+                raise ValueError(
+                    f"judge 'winner' index {winner_among_valid} out of range "
+                    f"for {len(valid)} valid candidates"
+                )
             reasoning: str = parsed.get("reasoning", "")
 
             # Map the winner index back to the original candidate list.

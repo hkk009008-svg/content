@@ -308,7 +308,9 @@ Only use tools if they would genuinely improve shot quality. Skip if the scene i
 
         # Validate and enrich shots
         validated = []
+        default_char_ids = [c["id"] for c in characters]
         for i, shot in enumerate(shots):
+            chars_in_frame = shot.get("characters_in_frame") or default_char_ids
             validated.append({
                 "id": f"shot_{i}",
                 "prompt": shot.get("prompt", ""),
@@ -316,8 +318,8 @@ Only use tools if they would genuinely improve shot quality. Skip if the scene i
                 "visual_effect": shot.get("visual_effect", "cinematic_glow") if shot.get("visual_effect") in VISUAL_EFFECTS else "cinematic_glow",
                 "target_api": shot.get("target_api", "AUTO") if shot.get("target_api") in TARGET_APIS else "AUTO",
                 "scene_foley": shot.get("scene_foley", "ambient room tone"),
-                "characters_in_frame": shot.get("characters_in_frame", [c["id"] for c in characters]),
-                "primary_character": shot.get("characters_in_frame", [c["id"] for c in characters])[0] if shot.get("characters_in_frame") or characters else "",
+                "characters_in_frame": chars_in_frame,
+                "primary_character": chars_in_frame[0] if chars_in_frame else "",
                 "action_context": shot.get("action_context", scene.get("action", "")),
                 "generated_image": "",
                 "generated_video": "",
@@ -609,7 +611,9 @@ Output ONLY the raw JSON array. No markdown wrapping."""
         # 9. Validate and enrich each shot (camera, visual_effect, target_api)
         # ------------------------------------------------------------------
         validated = []
+        default_char_ids = [c["id"] for c in characters]
         for i, shot in enumerate(shots):
+            chars_in_frame = shot.get("characters_in_frame") or default_char_ids
             validated.append({
                 "id": f"shot_{i}",
                 "prompt": shot.get("prompt", ""),
@@ -617,8 +621,8 @@ Output ONLY the raw JSON array. No markdown wrapping."""
                 "visual_effect": shot.get("visual_effect", "cinematic_glow") if shot.get("visual_effect") in VISUAL_EFFECTS else "cinematic_glow",
                 "target_api": shot.get("target_api", "AUTO") if shot.get("target_api") in TARGET_APIS else "AUTO",
                 "scene_foley": shot.get("scene_foley", "ambient room tone"),
-                "characters_in_frame": shot.get("characters_in_frame", [c["id"] for c in characters]),
-                "primary_character": shot.get("characters_in_frame", [c["id"] for c in characters])[0] if shot.get("characters_in_frame") or characters else "",
+                "characters_in_frame": chars_in_frame,
+                "primary_character": chars_in_frame[0] if chars_in_frame else "",
                 "action_context": shot.get("action_context", scene.get("action", "")),
                 "generated_image": "",
                 "generated_video": "",

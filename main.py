@@ -264,8 +264,8 @@ def run_autonomous_pipeline(topic, language, master_video_id=None):
         try:
             if os.path.exists(temp_file):
                 os.remove(temp_file)
-        except Exception:
-            pass
+        except OSError as cleanup_err:
+            print(f"   ⚠️ Failed to remove temp file {temp_file}: {cleanup_err}")
             
     # ✅ METADATA EXPORT
     # Write the SEO metadata to a highly readable local txt file
