@@ -180,12 +180,30 @@ def score_motion_fidelity(
 
 def needs_remotion(
     score: Optional[float],
-    floor: float = DEFAULT_MOTION_FLOOR,
+    shot_type: Optional[str] = None,
+    floor_override: Optional[float] = None,
 ) -> bool:
-    """True when the gate's score is below ``floor`` AND the gate ran.
+    """True when the gate's score is below the per-shot-type floor.
 
-    Returns False when score is None (inconclusive — defer to operator).
+    Returns False when score is None (inconclusive — defer to operator) OR
+    when the shot type has no floor (landscape opts out).
+
+    Resolution order:
+      1. floor_override (caller forces a value, e.g., per-shot tuning)
+      2. workflow_selector.get_motion_fidelity_floor(shot_type)
+      3. DEFAULT_MOTION_FLOOR (legacy single-value behavior)
     """
     if score is None:
         return False
+
+    if floor_override is not None:
+        floor = floor_override
+    elif shot_type:
+        from workflow_selector import get_motion_fidelity_floor
+        floor = get_motion_fidelity_floor(shot_type)
+        if floor is None:
+            return False  # shot type opts out (landscape)
+    else:
+        floor = DEFAULT_MOTION_FLOOR
+
     return score < floor

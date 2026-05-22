@@ -89,9 +89,9 @@ def test_motion_gate_needs_remotion_only_when_scored():
     """needs_remotion is False when the gate didn't run (score=None)."""
     from performance.motion_gate import needs_remotion
     assert needs_remotion(None) is False
-    assert needs_remotion(0.30, floor=0.50) is True
-    assert needs_remotion(0.80, floor=0.50) is False
-    assert needs_remotion(0.50, floor=0.50) is False  # ==floor doesn't fail
+    assert needs_remotion(0.30, floor_override=0.50) is True
+    assert needs_remotion(0.80, floor_override=0.50) is False
+    assert needs_remotion(0.50, floor_override=0.50) is False  # ==floor doesn't fail
 
 
 def test_motion_gate_matches_same_direction_above_opposite_direction():
