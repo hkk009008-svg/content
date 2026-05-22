@@ -401,7 +401,7 @@ def get_max_quality_params(shot_type: str) -> Dict:
 # They MUST be replaced with operator-calibrated values derived from a 20-shot
 # grading pass before these floors carry any production meaning.
 # See scripts/calibrate_motion_floor.py for the calibration workflow.
-MOTION_FIDELITY_FLOORS: dict[str, Optional[float]] = {
+MOTION_FIDELITY_FLOORS: Dict[str, Optional[float]] = {
     "portrait":  0.42,
     "medium":    0.55,
     "wide":      0.65,
@@ -411,7 +411,7 @@ MOTION_FIDELITY_FLOORS: dict[str, Optional[float]] = {
 }
 
 
-def motion_floor_for(shot_type: str) -> Optional[float]:
+def get_motion_fidelity_floor(shot_type: str) -> Optional[float]:
     """Return the motion-fidelity floor for a shot type, or None when motion
     capture doesn't apply (landscapes)."""
     return MOTION_FIDELITY_FLOORS.get(shot_type)
