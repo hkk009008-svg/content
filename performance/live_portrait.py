@@ -15,10 +15,13 @@ from __future__ import annotations
 import json
 import os
 import time
-import urllib.request
 from typing import Optional
 
 from config.settings import settings
+from performance._net import safe_download
+
+
+_POLL_INTERVAL_S = 2
 
 
 def _cost_log(duration_s: float, shot_id: str = "", video_id: str = "") -> None:
@@ -132,7 +135,9 @@ def generate_live_portrait_performance(
                                 f"{server_url}/view"
                                 f"?filename={fname}&subfolder={sub}&type={ftype}"
                             )
-                            urllib.request.urlretrieve(view, output_mp4)
+                            # ComfyUI pod is internal-trusted; allow http.
+                            if not safe_download(view, output_mp4, allow_http=True):
+                                return None
                             _cost_log(duration_s, shot_id, video_id)
                             print(f"   ✅ LivePortrait: {output_mp4}")
                             return output_mp4
@@ -140,7 +145,7 @@ def generate_live_portrait_performance(
                 if status.get("status_str") == "error":
                     print(f"   [LIVE-PORTRAIT] error: {status.get('messages', [])[:200]}")
                     return None
-            time.sleep(2)
+            time.sleep(_POLL_INTERVAL_S)
 
         print(f"   [LIVE-PORTRAIT] timed out after {poll_timeout_s}s")
         return None

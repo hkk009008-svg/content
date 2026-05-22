@@ -15,10 +15,19 @@ from __future__ import annotations
 
 import os
 import time
-import urllib.request
 from typing import Optional
 
 from config.settings import settings
+from performance._net import safe_download
+
+
+# Polling configuration — pulled to constants so timing is auditable and tunable
+# without rummaging through the body. Hedra typically returns within 60-120s;
+# SadTalker via ComfyUI is bursty, often longer.
+_HEDRA_POLL_TIMEOUT_S = 240
+_HEDRA_POLL_INTERVAL_S = 3
+_SADTALKER_POLL_TIMEOUT_S = 240
+_SADTALKER_POLL_INTERVAL_S = 2
 
 
 def _cost_log(provider: str, duration_s: float, shot_id: str, video_id: str) -> None:
@@ -65,8 +74,7 @@ def _synth_via_hedra(
                 with_logs=False,
             )
             video_url = result.get("video", {}).get("url")
-            if video_url:
-                urllib.request.urlretrieve(video_url, output_mp4)
+            if video_url and safe_download(video_url, output_mp4):
                 _cost_log("hedra", duration_s, shot_id, video_id)
                 print(f"   ✅ Hedra (FAL) driving face: {output_mp4}")
                 return output_mp4
@@ -97,7 +105,7 @@ def _synth_via_hedra(
 
         if not out_url and job_id:
             start = time.time()
-            while time.time() - start < 240:
+            while time.time() - start < _HEDRA_POLL_TIMEOUT_S:
                 pr = requests.get(
                     f"https://api.hedra.com/v1/jobs/{job_id}",
                     headers={"Authorization": f"Bearer {api_key}"},
@@ -110,11 +118,12 @@ def _synth_via_hedra(
                         break
                     if (pb.get("status") or "").lower() in ("failed", "error"):
                         return None
-                time.sleep(3)
+                time.sleep(_HEDRA_POLL_INTERVAL_S)
 
         if not out_url:
             return None
-        urllib.request.urlretrieve(out_url, output_mp4)
+        if not safe_download(out_url, output_mp4):
+            return None
         _cost_log("hedra", duration_s, shot_id, video_id)
         print(f"   ✅ Hedra (direct) driving face: {output_mp4}")
         return output_mp4
@@ -179,7 +188,7 @@ def _synth_via_sadtalker(
         prompt_id = qr.json().get("prompt_id")
 
         start = time.time()
-        while time.time() - start < 240:
+        while time.time() - start < _SADTALKER_POLL_TIMEOUT_S:
             hr = requests.get(f"{server_url}/history/{prompt_id}", timeout=15)
             if hr.ok and prompt_id in hr.json():
                 hist = hr.json()[prompt_id]
@@ -194,14 +203,17 @@ def _synth_via_sadtalker(
                             f"&subfolder={item.get('subfolder', '')}"
                             f"&type={item.get('type', 'output')}"
                         )
-                        urllib.request.urlretrieve(view, output_mp4)
+                        # ComfyUI pod is internal-trusted; allow http (RunPod often
+                        # exposes the proxy URL without TLS).
+                        if not safe_download(view, output_mp4, allow_http=True):
+                            return None
                         _cost_log("sadtalker", duration_s, shot_id, video_id)
                         print(f"   ✅ SadTalker driving face: {output_mp4}")
                         return output_mp4
                 status = hist.get("status", {})
                 if status.get("status_str") == "error":
                     return None
-            time.sleep(2)
+            time.sleep(_SADTALKER_POLL_INTERVAL_S)
         return None
     except Exception as e:
         print(f"   [DRIVING/SADTALKER] failed: {e}")

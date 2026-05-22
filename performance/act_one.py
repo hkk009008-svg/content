@@ -17,10 +17,13 @@ from __future__ import annotations
 
 import os
 import time
-import urllib.request
 from typing import Optional
 
 from config.settings import settings
+from performance._net import safe_download
+
+
+_POLL_INTERVAL_S = 3
 
 
 def _cost_log(operation: str, duration_s: float, shot_id: str = "", video_id: str = "") -> None:
@@ -104,14 +107,15 @@ def generate_act_one_performance(
                 if not out_url:
                     print("   [ACT-ONE] SUCCEEDED but no output URL")
                     return None
-                urllib.request.urlretrieve(out_url, output_mp4)
+                if not safe_download(out_url, output_mp4):
+                    return None
                 _cost_log("performance_capture", duration_s, shot_id, video_id)
                 print(f"   ✅ Act-One: {output_mp4}")
                 return output_mp4
             if status in ("FAILED", "CANCELLED"):
                 print(f"   [ACT-ONE] task {status}: {getattr(t, 'failure', '?')}")
                 return None
-            time.sleep(3)
+            time.sleep(_POLL_INTERVAL_S)
         print(f"   [ACT-ONE] timed out after {poll_timeout_s}s")
         return None
     except ImportError:
@@ -125,10 +129,11 @@ def generate_act_one_performance(
 
 
 def _to_data_uri_or_path(path: str) -> str:
-    """Runway SDK accepts data URIs or pre-uploaded HTTPS URLs. For local
-    files we return the path; the SDK handles upload when its uri field
-    accepts a file path (newer SDK versions). On older SDKs that need URLs,
-    you'll get an error here and the call falls through to REST or fails."""
+    """Pass-through. Newer Runway SDK versions accept a file path for the `uri`
+    field directly; on older SDKs this would need conversion to a data URI or
+    pre-uploaded HTTPS URL. Kept as a seam in case the SDK behavior changes —
+    the call falls through to REST on any SDK incompatibility.
+    """
     return path
 
 
@@ -193,13 +198,14 @@ def _raw_rest_call(
                     out_url = (body.get("output") or [None])[0]
                     if not out_url:
                         return None
-                    urllib.request.urlretrieve(out_url, output_mp4)
+                    if not safe_download(out_url, output_mp4):
+                        return None
                     _cost_log("performance_capture", duration_s, shot_id, video_id)
                     print(f"   ✅ Act-One (REST): {output_mp4}")
                     return output_mp4
                 if status in ("FAILED", "CANCELLED"):
                     return None
-            time.sleep(3)
+            time.sleep(_POLL_INTERVAL_S)
         return None
     except Exception as e:
         print(f"   [ACT-ONE/REST] failed: {e}")

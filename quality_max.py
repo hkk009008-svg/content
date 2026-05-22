@@ -35,6 +35,8 @@ import hashlib
 import json
 import os
 import random
+import shutil
+import threading
 import time
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -64,15 +66,24 @@ _NODE_AVAILABILITY_CACHED: Optional[Set[str]] = None
 _NODE_AVAILABILITY_SERVER: Optional[str] = None  # server_url it was probed against
 _UPLOAD_CACHE: Dict[str, str] = {}  # content_hash -> remote_filename
 
+# Locks for module-level mutable caches. The web_server processes requests in
+# threads (and ShotController may parallelize candidate generation), so two
+# threads can race the lazy-load. The granularity is per-cache so the workflow
+# JSON load doesn't block uploads, etc.
+_WORKFLOW_LOCK = threading.Lock()
+_NODE_AVAILABILITY_LOCK = threading.Lock()
+_UPLOAD_CACHE_LOCK = threading.Lock()
+
 
 def _load_max_workflow() -> dict:
     """Load pulid_max.json once and deep-copy on each access."""
     global _MAX_WORKFLOW_CACHED
-    if _MAX_WORKFLOW_CACHED is None:
-        if not os.path.exists(_MAX_WORKFLOW_PATH):
-            raise FileNotFoundError(f"pulid_max.json not found at {_MAX_WORKFLOW_PATH}")
-        with open(_MAX_WORKFLOW_PATH, "r") as f:
-            _MAX_WORKFLOW_CACHED = json.load(f)
+    with _WORKFLOW_LOCK:
+        if _MAX_WORKFLOW_CACHED is None:
+            if not os.path.exists(_MAX_WORKFLOW_PATH):
+                raise FileNotFoundError(f"pulid_max.json not found at {_MAX_WORKFLOW_PATH}")
+            with open(_MAX_WORKFLOW_PATH, "r") as f:
+                _MAX_WORKFLOW_CACHED = json.load(f)
     return copy.deepcopy(_MAX_WORKFLOW_CACHED)
 
 
@@ -135,10 +146,16 @@ def _probe_node_availability(server_url: str) -> Set[str]:
     Returns the set of class_types the pod actually exposes. Used to prune
     nodes for missing custom-node packs before submission, so workflows
     fail-loud at probe time instead of failing-cryptic at queue time.
+
+    Failure handling: a transient probe failure is NOT cached — the next call
+    re-probes. Previously a single network blip cached an empty set forever,
+    silently disabling pruning for the rest of the process. Now the empty set
+    is returned just for this call and the cache remains unset.
     """
     global _NODE_AVAILABILITY_CACHED, _NODE_AVAILABILITY_SERVER
-    if _NODE_AVAILABILITY_CACHED is not None and _NODE_AVAILABILITY_SERVER == server_url:
-        return _NODE_AVAILABILITY_CACHED
+    with _NODE_AVAILABILITY_LOCK:
+        if _NODE_AVAILABILITY_CACHED is not None and _NODE_AVAILABILITY_SERVER == server_url:
+            return _NODE_AVAILABILITY_CACHED
 
     try:
         url = f"{server_url.rstrip('/')}/object_info"
@@ -147,15 +164,16 @@ def _probe_node_availability(server_url: str) -> Set[str]:
         info = r.json()
         available = set(info.keys())
         print(f"[quality_max] Pod /object_info: {len(available)} node classes available")
-        _NODE_AVAILABILITY_CACHED = available
-        _NODE_AVAILABILITY_SERVER = server_url
+        with _NODE_AVAILABILITY_LOCK:
+            _NODE_AVAILABILITY_CACHED = available
+            _NODE_AVAILABILITY_SERVER = server_url
         return available
     except Exception as e:
         print(f"[quality_max] /object_info probe failed ({e}). Assuming all-available "
-              f"(workflow may fail at queue time).")
-        _NODE_AVAILABILITY_CACHED = set()  # empty = no pruning (best effort)
-        _NODE_AVAILABILITY_SERVER = server_url
-        return _NODE_AVAILABILITY_CACHED
+              f"for THIS call (cache not poisoned; next call will retry).")
+        # Return an empty set for this caller but DO NOT mutate the cache —
+        # the next request gets a fresh probe attempt.
+        return set()
 
 
 def _content_hash(path: str) -> str:
@@ -171,13 +189,23 @@ def _upload_with_cache(comfy: RunPodComfyUI, local_path: str) -> str:
     """Upload local_path to the pod. Returns remote filename. Cached by content
     hash so the same file (e.g., character face anchor) is uploaded once per
     pipeline run, not once per shot.
+
+    Thread-safety: the cache check and the upload-then-insert are bracketed by
+    a lock so two concurrent shots referencing the same content can't both
+    upload (wasted bandwidth) or both insert (last-writer-wins is fine in this
+    direction but the duplicate upload was the cost).
     """
     h = _content_hash(local_path)
-    if h in _UPLOAD_CACHE:
-        return _UPLOAD_CACHE[h]
+    with _UPLOAD_CACHE_LOCK:
+        cached = _UPLOAD_CACHE.get(h)
+        if cached is not None:
+            return cached
     remote = comfy.upload_image(local_path)
-    _UPLOAD_CACHE[h] = remote
-    return remote
+    with _UPLOAD_CACHE_LOCK:
+        # Honor an earlier writer if one slipped in while we were uploading —
+        # cheap correctness; the remote is content-addressed so any winner is OK.
+        _UPLOAD_CACHE.setdefault(h, remote)
+        return _UPLOAD_CACHE[h]
 
 
 # ---------------------------------------------------------------------------
@@ -530,14 +558,11 @@ def generate_ai_broll_max(
     _inject_latent_source(workflow, init_remote, params)
     _inject_post_passes(workflow, params, available)
 
-    # Hires-fix denoise (Pass 2)
-    if "901" in workflow:
-        # Pass 2 reuses the Pass 1 sigmas slot — we override below at generation time
-        # by inserting a second BasicScheduler. For brevity, set denoise via DenoiseSigma
-        # trick: scale the existing sigmas by denoise factor. Simplest: leave the JSON
-        # baseline (sigmas slot output index 1 is unused) and rely on Pass 1 + downstream.
-        # Hires-fix here is best-effort; if denoise tuning needed, swap KSamplerSelect.
-        pass
+    # NOTE: hires-fix Pass-2 (nodes 901/902) is currently NOT injected — the
+    # workflow runs whatever denoise the JSON baseline encodes. Wiring a true
+    # second-pass denoise (via a second BasicScheduler or sigma-scale node) is
+    # tracked separately; today the post-passes (FaceDetailer / ReActor / SUPIR)
+    # carry the quality lift end-of-pipeline.
 
     # ---- Best-of-N adaptive halt loop ----
     n_max = int(params.get("candidate_count", 8))
@@ -610,10 +635,11 @@ def generate_ai_broll_max(
                 best = retry_score
                 candidate_paths.append(saved)
 
-    # Promote best candidate to output_filename
+    # Promote best candidate to output_filename. Use shutil.copyfile so we don't
+    # load the whole image into memory and to keep filesystem metadata semantics
+    # consistent with the rest of the pipeline.
     if best.image_path != output_filename:
-        with open(best.image_path, "rb") as src, open(output_filename, "wb") as dst:
-            dst.write(src.read())
+        shutil.copyfile(best.image_path, output_filename)
 
     # Cleanup losers (optional — keeping them for now in case caller wants forensics)
     print(f"[quality_max] DONE: best seed={best.seed} composite={best.composite:.3f} "

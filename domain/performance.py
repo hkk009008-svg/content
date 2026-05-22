@@ -55,7 +55,9 @@ def _has_dialogue(shot: dict) -> bool:
     """True when the shot has any spoken text to drive performance off of."""
     d = shot.get("dialogue", "")
     if isinstance(d, list):
-        return any(getattr(line, "get", lambda *a, **k: "")("text", "").strip() for line in d if isinstance(line, dict))
+        # The isinstance(line, dict) filter guarantees line.get exists, so the
+        # earlier defensive getattr(line, "get", lambda *a, **k: "") was dead.
+        return any((line.get("text") or "").strip() for line in d if isinstance(line, dict))
     return bool((d or "").strip())
 
 
@@ -69,6 +71,11 @@ def should_capture(shot: dict, scene: Optional[dict] = None) -> bool:
 
     True when the shot has characters AND (dialogue OR action). False for
     landscape, wide-no-character, or empty shots — those route to SKIP.
+
+    The `scene` param is reserved for future scene-level routing signals
+    (e.g., scene-wide budget mode, scene mood). Today it is unused; keep
+    the param so call sites don't need to change when scene-level routing
+    lands.
     """
     if not _has_characters(shot):
         return False
@@ -99,6 +106,9 @@ def route_performance_engine(shot: dict, scene: Optional[dict]) -> str:
       3. LIVE_PORTRAIT — dialogue + close-up + explicit budget signal
       4. VIGGLE — action shot type, no dialogue
       5. Default — ACT_ONE if dialogue, else SKIP
+
+    `scene` is reserved for future scene-level routing signals; today only
+    shot-local fields drive the decision.
     """
     # 1. SKIP rules
     if not should_capture(shot, scene):

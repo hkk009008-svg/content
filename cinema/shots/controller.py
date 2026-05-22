@@ -313,10 +313,11 @@ class ShotController:
         # identical to before.
         quality_tier = settings.get("quality_tier", "production")
         char_lora_paths = settings.get("char_lora_paths", {}) or {}
-        # Pick the LoRA for the primary character in this shot
-        primary_char_id = shot.get("primary_character") or (
-            shot.get("characters_in_frame", [""])[0] if shot.get("characters_in_frame") else ""
-        )
+        # Pick the LoRA for the primary character in this shot. Prefer the
+        # explicit primary_character field; otherwise take the first entry in
+        # characters_in_frame; otherwise empty string (which yields no LoRA).
+        in_frame = shot.get("characters_in_frame") or []
+        primary_char_id = shot.get("primary_character") or (in_frame[0] if in_frame else "")
         char_lora_path = char_lora_paths.get(primary_char_id) or None
         style_refs = settings.get("style_reference_paths", []) or []
         style_reference = style_refs[0] if style_refs else None

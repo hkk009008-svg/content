@@ -19,8 +19,19 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from dataclasses import dataclass, asdict
-from typing import List, Optional
+from typing import List, Optional, Tuple
+
+
+# Model caches — loading whisperx-base is ~140 MB GPU VRAM and ~1-2s wall time;
+# load_align_model is similar per language. Without caching, a 60-shot project
+# loaded the same models 60 times. The lock guards against two shots racing
+# the lazy-load (rare but cheap to fix).
+_WHISPERX_MODEL_CACHE: dict = {}        # key: (device, compute_type) -> whisperx model
+_ALIGN_MODEL_CACHE: dict = {}           # key: (language_code, device) -> (model, metadata)
+_WHISPER_MODEL_CACHE: dict = {}         # key: "base" etc. -> whisper model
+_MODEL_LOCK = threading.Lock()
 
 
 @dataclass
@@ -81,19 +92,32 @@ def _try_whisperx(
     lang_code = _LANG_NAME_TO_CODE.get((language or "english").lower().strip(), None)
 
     try:
-        # 1. Transcribe with language hint when known (avoids auto-detect drift)
-        model = whisperx.load_model("base", device=device, compute_type=compute_type)
+        # 1. Transcribe with language hint when known (avoids auto-detect drift).
+        # Cache the whisperx model — loading is expensive (140MB GPU + 1-2s).
+        wx_key = (device, compute_type)
+        with _MODEL_LOCK:
+            model = _WHISPERX_MODEL_CACHE.get(wx_key)
+            if model is None:
+                model = whisperx.load_model("base", device=device, compute_type=compute_type)
+                _WHISPERX_MODEL_CACHE[wx_key] = model
         audio = whisperx.load_audio(audio_path)
         transcribe_kwargs = {}
         if lang_code:
             transcribe_kwargs["language"] = lang_code
         result = model.transcribe(audio, **transcribe_kwargs)
 
-        # 2. Align with wav2vec2 (use pinned language code if given, else what whisper detected)
+        # 2. Align with wav2vec2 (use pinned language code if given, else what whisper detected).
+        # Cache per language — different languages need different wav2vec2 models.
         effective_lang = lang_code or result.get("language", "en")
-        align_model, align_meta = whisperx.load_align_model(
-            language_code=effective_lang, device=device
-        )
+        align_key = (effective_lang, device)
+        with _MODEL_LOCK:
+            cached_align = _ALIGN_MODEL_CACHE.get(align_key)
+            if cached_align is None:
+                cached_align = whisperx.load_align_model(
+                    language_code=effective_lang, device=device
+                )
+                _ALIGN_MODEL_CACHE[align_key] = cached_align
+        align_model, align_meta = cached_align
         aligned = whisperx.align(
             result["segments"], align_model, align_meta, audio, device,
             return_char_alignments=False,
@@ -153,8 +177,13 @@ def _try_whisper_word_ts(
 
     try:
         # "base" model is the right balance — small/fast, accurate enough for
-        # dialogue (which is typically short and clean)
-        model = whisper.load_model("base")
+        # dialogue (which is typically short and clean). Cache to avoid the
+        # ~1-2s load on every shot.
+        with _MODEL_LOCK:
+            model = _WHISPER_MODEL_CACHE.get("base")
+            if model is None:
+                model = whisper.load_model("base")
+                _WHISPER_MODEL_CACHE["base"] = model
         transcribe_kwargs = {"word_timestamps": True, "verbose": False}
         if whisper_lang:
             transcribe_kwargs["language"] = whisper_lang
