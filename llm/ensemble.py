@@ -199,6 +199,23 @@ class LLMEnsemble:
             print(f"[LLMEnsemble] Generation failed for {model}: {exc}")
             return (model, None)
 
+    @staticmethod
+    def _system_blocks(text: str) -> list[dict]:
+        """Wrap a system prompt string in a cache_control-bearing content block list.
+
+        Anthropic's SDK accepts system as either a bare string or a list of
+        content blocks. The list form is required to attach cache_control, which
+        enables prompt caching on stable system blocks and reduces input-token
+        spend by ~70-80% on warm calls.
+        """
+        return [
+            {
+                "type": "text",
+                "text": text,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
     def _generate_anthropic(
         self,
         model: str,
@@ -210,7 +227,7 @@ class LLMEnsemble:
         kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": 4096,
-            "system": system_prompt,
+            "system": self._system_blocks(system_prompt),
             "messages": [{"role": "user", "content": user_prompt}],
         }
         if tool_schema is not None:
