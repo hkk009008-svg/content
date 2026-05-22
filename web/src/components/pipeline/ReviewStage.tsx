@@ -161,7 +161,7 @@ function ClipCard({
   const performanceMetadata = latestPerformanceTake?.metadata || {}
   const motionFidelity: number | null | undefined = performanceMetadata.motion_fidelity
   const performanceIdentity: number | null | undefined = performanceMetadata.identity_score
-  const resolvedShotType: string = (shot as any).shot_type || 'unknown'
+  const resolvedShotType = shot.shot_type
 
   useEffect(() => {
     if (shot.approved_keyframe_take_id) {
@@ -448,8 +448,11 @@ function ClipCard({
                     </div>
                   </div>
                 </div>
-                {performanceMetadata.motion_floor_failed === true && (
-                  <span className="ml-2 rounded bg-editorial-curtain/20 px-1.5 py-0.5 text-eyebrow-lg text-editorial-curtain">
+                {performanceMetadata.motion_floor_failed === true && resolvedShotType && (
+                  <span
+                    role="status"
+                    className="ml-2 rounded bg-editorial-curtain/20 px-1.5 py-0.5 text-eyebrow-lg text-editorial-curtain"
+                  >
                     below {resolvedShotType} floor
                   </span>
                 )}
