@@ -94,6 +94,42 @@ def test_motion_gate_needs_remotion_only_when_scored():
     assert needs_remotion(0.50, floor_override=0.50) is False  # ==floor doesn't fail
 
 
+def test_needs_remotion_portrait_above_floor_passes():
+    """score ≥ portrait floor (0.42) → no re-motion needed."""
+    from performance.motion_gate import needs_remotion
+    assert needs_remotion(0.50, shot_type="portrait") is False
+
+
+def test_needs_remotion_wide_below_floor_fails():
+    """score < wide floor (0.65) → re-motion required."""
+    from performance.motion_gate import needs_remotion
+    assert needs_remotion(0.50, shot_type="wide") is True
+
+
+def test_needs_remotion_landscape_always_passes():
+    """landscape opts out of motion-gate entirely — any score, even 0.0, returns False."""
+    from performance.motion_gate import needs_remotion
+    assert needs_remotion(0.0, shot_type="landscape") is False
+    assert needs_remotion(0.0, shot_type="landscape") is False  # deterministic
+
+
+def test_needs_remotion_floor_override_beats_shot_type():
+    """floor_override takes priority over shot_type, even when shot_type would opt out."""
+    from performance.motion_gate import needs_remotion
+    # landscape would normally opt out; override forces the comparison
+    assert needs_remotion(0.30, shot_type="landscape", floor_override=0.5) is True
+
+
+def test_needs_remotion_unknown_shot_type_opts_out():
+    """Unknown shot types route through the None branch and never trigger re-motion.
+
+    Keeps a typo'd shot_type from blocking a shot — per the audit note at
+    motion_gate.py:207-211 (unknown/typo'd shot types treated same as opt-out).
+    """
+    from performance.motion_gate import needs_remotion
+    assert needs_remotion(0.10, shot_type="xyzzy") is False
+
+
 def test_motion_gate_matches_same_direction_above_opposite_direction():
     """Same-direction clips score higher than opposite-direction clips.
 
