@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Project } from '../../types/project'
 
 export interface FilmstripProps {
@@ -26,6 +26,11 @@ function statusLabel(status?: string): string {
 
 export default function Filmstrip({ project, apiBase = '', projectId, onShotClick }: FilmstripProps) {
   const [visibleCount, setVisibleCount] = useState(FILMSTRIP_WINDOW)
+
+  useEffect(() => {
+    setVisibleCount(FILMSTRIP_WINDOW)
+  }, [projectId])
+
   const base = apiBase || '/api'
 
   const allShots = project?.scenes?.flatMap(s => s.shots || []) || []
