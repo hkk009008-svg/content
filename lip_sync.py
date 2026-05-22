@@ -235,8 +235,9 @@ def lipsync_overlay(
         )
         out_url = result.get("video", {}).get("url")
         if out_url:
-            safe_download(out_url, output_path)
-            if _overlay_gate_or_stash("syncSoV3"):
+            if safe_download(out_url, output_path) is None:
+                print(f"   [LIPSYNC-OVERLAY] sync.so v3 download failed")
+            elif _overlay_gate_or_stash("syncSoV3"):
                 print(f"   [LIPSYNC-OVERLAY] sync.so v3 success: {output_path}")
                 return output_path
     except Exception as e:
@@ -257,8 +258,9 @@ def lipsync_overlay(
         )
         out_url = result.get("video", {}).get("url")
         if out_url:
-            safe_download(out_url, output_path)
-            if _overlay_gate_or_stash("MuseTalk"):
+            if safe_download(out_url, output_path) is None:
+                print(f"   [LIPSYNC-OVERLAY] MuseTalk download failed")
+            elif _overlay_gate_or_stash("MuseTalk"):
                 print(f"   [LIPSYNC-OVERLAY] MuseTalk success: {output_path}")
                 return output_path
     except Exception as e:
@@ -277,8 +279,9 @@ def lipsync_overlay(
         )
         out_url = result.get("video", {}).get("url")
         if out_url:
-            safe_download(out_url, output_path)
-            if _overlay_gate_or_stash("LatentSync"):
+            if safe_download(out_url, output_path) is None:
+                print(f"   [LIPSYNC-OVERLAY] LatentSync download failed")
+            elif _overlay_gate_or_stash("LatentSync"):
                 print(f"   [LIPSYNC-OVERLAY] LatentSync success: {output_path}")
                 return output_path
     except Exception as e:
@@ -297,8 +300,9 @@ def lipsync_overlay(
         )
         out_url = result.get("video", {}).get("url")
         if out_url:
-            safe_download(out_url, output_path)
-            if _overlay_gate_or_stash("SyncV2"):
+            if safe_download(out_url, output_path) is None:
+                print(f"   [LIPSYNC-OVERLAY] Sync Lipsync v2 download failed")
+            elif _overlay_gate_or_stash("SyncV2"):
                 print(f"   [LIPSYNC-OVERLAY] Sync Lipsync v2 success: {output_path}")
                 return output_path
     except Exception as e:
@@ -496,8 +500,9 @@ def lipsync_generation(
         )
         video_url = result.get("video", {}).get("url")
         if video_url:
-            safe_download(video_url, output_path)
-            if _gate_or_stash("Hedra"):
+            if safe_download(video_url, output_path) is None:
+                print(f"   [LIPSYNC-GEN] Hedra Character-3 download failed")
+            elif _gate_or_stash("Hedra"):
                 print(f"   [LIPSYNC-GEN] Hedra Character-3 success: {output_path}")
                 return output_path
     except Exception as e:
@@ -519,8 +524,9 @@ def lipsync_generation(
         )
         video_url = result.get("video", {}).get("url")
         if video_url:
-            safe_download(video_url, output_path)
-            if _gate_or_stash("Kling"):
+            if safe_download(video_url, output_path) is None:
+                print(f"   [LIPSYNC-GEN] Kling lip sync download failed")
+            elif _gate_or_stash("Kling"):
                 print(f"   [LIPSYNC-GEN] Kling lip sync success: {output_path}")
                 return output_path
     except Exception as e:
@@ -542,8 +548,9 @@ def lipsync_generation(
         video_url = result.get("video", {}).get("url")
         duration = result.get("duration", 0)
         if video_url:
-            safe_download(video_url, output_path)
-            if _gate_or_stash("Omnihuman"):
+            if safe_download(video_url, output_path) is None:
+                print(f"   [LIPSYNC-GEN] Omnihuman download failed")
+            elif _gate_or_stash("Omnihuman"):
                 print(f"   [LIPSYNC-GEN] Omnihuman success: {output_path} ({duration:.1f}s)")
                 return output_path
     except Exception as e:
@@ -563,8 +570,9 @@ def lipsync_generation(
         )
         video_url = result.get("video", {}).get("url")
         if video_url:
-            safe_download(video_url, output_path)
-            if _gate_or_stash("Aurora"):
+            if safe_download(video_url, output_path) is None:
+                print(f"   [LIPSYNC-GEN] Aurora download failed")
+            elif _gate_or_stash("Aurora"):
                 print(f"   [LIPSYNC-GEN] Aurora success: {output_path}")
                 return output_path
     except Exception as e:
@@ -656,7 +664,9 @@ def lipsync_act_one(
         if not out_url:
             print("   [LIPSYNC-ACT-ONE] No video URL returned")
             return None
-        safe_download(out_url, output_path)
+        if safe_download(out_url, output_path) is None:
+            print("   [LIPSYNC-ACT-ONE] download failed")
+            return None
         print(f"   [LIPSYNC-ACT-ONE] success: {output_path}")
         return output_path
     except Exception as e:
@@ -760,7 +770,9 @@ def generate_rife_interpolation(
 
         out_url = result.get("video", {}).get("url")
         if out_url:
-            safe_download(out_url, output_path)
+            if safe_download(out_url, output_path) is None:
+                print("   [RIFE] download failed")
+                return None
             print(f"   [RIFE] Success: {output_path}")
             return output_path
         return None
@@ -814,7 +826,9 @@ def upscale_video_seedvr2(
 
         out_url = result.get("video", {}).get("url")
         if out_url:
-            safe_download(out_url, output_path)
+            if safe_download(out_url, output_path) is None:
+                print("   [UPSCALE] SeedVR2 download failed")
+                return None
             print(f"   [UPSCALE] SeedVR2 success: {output_path}")
             return output_path
         return None
@@ -893,7 +907,9 @@ def generate_transition_clip(
 
         out_url = result.get("video", {}).get("url")
         if out_url:
-            safe_download(out_url, output_path)
+            if safe_download(out_url, output_path) is None:
+                print("   [CHAIN] transition download failed")
+                return None
             print(f"   [CHAIN] Transition generated: {output_path}")
             return output_path
         return None
