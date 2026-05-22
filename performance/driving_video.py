@@ -14,7 +14,7 @@ Provider chain (try in order, fall through on failure):
 from __future__ import annotations
 
 import os
-from typing import Optional
+from typing import Optional, Tuple
 
 from config.settings import settings
 from performance._net import safe_download
@@ -249,7 +249,7 @@ def synth_driving_face_from_audio(
     engine: str = "auto",     # 'auto' | 'hedra' | 'sadtalker'
     shot_id: str = "",
     video_id: str = "",
-) -> Optional[str]:
+) -> Optional[Tuple[str, str]]:
     """Generate a driving face video from TTS audio + a still keyframe.
 
     Used as Mode B autopilot when no operator-uploaded driving video exists.
@@ -259,6 +259,10 @@ def synth_driving_face_from_audio(
       'auto'  → try Hedra first, fall back to SadTalker
       'hedra' → Hedra only
       'sadtalker' → SadTalker only
+
+    Returns:
+        (path, provider_name) tuple on success — provider_name is one of
+        {"hedra", "sadtalker"}. None on full failure.
     """
     if not (audio_path and os.path.exists(audio_path)):
         return None
@@ -268,13 +272,13 @@ def synth_driving_face_from_audio(
     if engine in ("auto", "hedra"):
         r = _synth_via_hedra(audio_path, keyframe_path, output_mp4, duration_s, shot_id, video_id)
         if r:
-            return r
+            return (r, "hedra")
         if engine == "hedra":
             return None
 
     if engine in ("auto", "sadtalker"):
         r = _synth_via_sadtalker(audio_path, keyframe_path, output_mp4, duration_s, shot_id, video_id)
         if r:
-            return r
+            return (r, "sadtalker")
 
     return None

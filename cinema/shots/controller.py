@@ -526,19 +526,22 @@ class ShotController:
         # --- 3. Driving video — Mode A (operator upload) wins, else Mode B synth ---
         driving = (shot.get("driving_video_path") or "").strip()
         source_mode = driving_video_source(shot)
+        # Initialize BEFORE the branch so Mode A (operator upload) doesn't NameError.
+        # Mode A reuses the operator's video → no synth → provider stays None.
+        driving_provider: Optional[str] = None
         if not driving and source_mode == "tts_auto" and audio_path:
             try:
                 from performance.driving_video import synth_driving_face_from_audio
                 temp_driving = self._take_output_path(shot_id, f"driving_{keyframe_take_id}", ".mp4")
-                synthesized = synth_driving_face_from_audio(
+                synth_result = synth_driving_face_from_audio(
                     audio_path=audio_path,
                     keyframe_path=source_image,
                     output_mp4=temp_driving,
                     duration_s=float(scene.get("duration_seconds", 5.0)),
                     shot_id=shot_id, video_id=str(project.get("id", "")),
                 )
-                if synthesized:
-                    driving = synthesized
+                if synth_result:
+                    driving, driving_provider = synth_result
             except Exception as e:
                 print(f"[PERFORMANCE] driving-video synth failed ({e}); engine may degrade")
 
@@ -555,6 +558,7 @@ class ShotController:
                 ),
                 "audio_path": audio_path,
                 "duration_s": float(scene.get("duration_seconds", 5.0)),
+                "driving_provider": driving_provider,  # "hedra" | "sadtalker" | "cache" | None
             },
         )
         perf_path = self._take_output_path(shot_id, take["id"], ".mp4")
