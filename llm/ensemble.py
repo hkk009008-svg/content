@@ -15,6 +15,26 @@ from typing import Any
 from config.settings import settings as env_settings   # aliased to avoid clash with the per-instance `settings: dict` ctor arg below
 
 
+def build_anthropic_system_blocks(text: str) -> list[dict[str, Any]]:
+    """Wrap a stable system prompt for Anthropic prompt caching.
+
+    Anthropic's prompt-caching API requires the system parameter to be a
+    list of content blocks; cache_control={"type": "ephemeral"} on the
+    first block opts the system content into the cache.
+
+    Callers MUST pass a stable string (no per-call interpolation) for
+    caching to actually hit. Per-shot data belongs in the user message,
+    not here.
+    """
+    return [
+        {
+            "type": "text",
+            "text": text,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
@@ -199,23 +219,6 @@ class LLMEnsemble:
             print(f"[LLMEnsemble] Generation failed for {model}: {exc}")
             return (model, None)
 
-    @staticmethod
-    def _system_blocks(text: str) -> list[dict]:
-        """Wrap a system prompt string in a cache_control-bearing content block list.
-
-        Anthropic's SDK accepts system as either a bare string or a list of
-        content blocks. The list form is required to attach cache_control, which
-        enables prompt caching on stable system blocks and reduces input-token
-        spend by ~70-80% on warm calls.
-        """
-        return [
-            {
-                "type": "text",
-                "text": text,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
-
     def _generate_anthropic(
         self,
         model: str,
@@ -227,7 +230,7 @@ class LLMEnsemble:
         kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": 4096,
-            "system": self._system_blocks(system_prompt),
+            "system": build_anthropic_system_blocks(system_prompt),
             "messages": [{"role": "user", "content": user_prompt}],
         }
         if tool_schema is not None:

@@ -20,6 +20,7 @@ import base64
 from typing import Optional, List, Dict
 from pipeline_context import PIPELINE_CONTEXT
 from config.settings import settings
+from llm.ensemble import build_anthropic_system_blocks
 class ChiefDirector:
     """
     Metacognitive AI overseer for the cinema production pipeline.
@@ -67,13 +68,7 @@ class ChiefDirector:
                 response = self.client.messages.create(
                     model="claude-sonnet-4-20250514",
                     max_tokens=4096,
-                    system=[
-                        {
-                            "type": "text",
-                            "text": system_prompt,
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    ],
+                    system=build_anthropic_system_blocks(system_prompt),
                     messages=[{"role": "user", "content": user_prompt}],
                 )
                 return response.content[0].text
