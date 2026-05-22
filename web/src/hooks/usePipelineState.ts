@@ -26,6 +26,8 @@ export function usePipelineState(projectId: string | null) {
   const [activeStage, setActiveStage] = useState<string | null>(null)
   const [isPaused, setIsPaused] = useState(false)
   const [failedShots, setFailedShots] = useState<string[]>([])
+  const [activeShotId, setActiveShotId] = useState<string | null>(null)
+  const [notesBuffer, setNotesBuffer] = useState<ProgressEvent[]>([])
 
   // Route incoming events to the right state buckets
   const processEvent = useCallback((event: ProgressEvent) => {
@@ -48,6 +50,14 @@ export function usePipelineState(projectId: string | null) {
     if (stage === 'SHOT_FAILED' && shot_id) {
       setFailedShots(prev => [...prev, shot_id])
     }
+
+    // Track most-recent active shot (non-failure events only)
+    if (shot_id && stage !== 'SHOT_FAILED') {
+      setActiveShotId(shot_id)
+    }
+
+    // Rolling notes buffer (last 20 events)
+    setNotesBuffer(prev => [event, ...prev].slice(0, 20))
 
     // Route director review events
     if (director_review) {
@@ -188,6 +198,8 @@ export function usePipelineState(projectId: string | null) {
     setActiveStage(null)
     setIsPaused(false)
     setFailedShots([])
+    setActiveShotId(null)
+    setNotesBuffer([])
     sse.start()
   }, [sse])
 
@@ -199,6 +211,8 @@ export function usePipelineState(projectId: string | null) {
     processEvent,
     isPaused,
     failedShots,
+    activeShotId,
+    notesBuffer,
     // Pipeline controls
     pause,
     resume,
