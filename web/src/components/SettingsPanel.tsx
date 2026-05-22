@@ -24,12 +24,12 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
   const s = project.global_settings as any
 
   const update = async (key: string, value: any) => {
-    await fetch(`${API}/projects/${project.id}`, {
+    const res = await fetch(`${API}/projects/${project.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ global_settings: { ...s, [key]: value } }),
     })
-    onRefresh()
+    if (res.ok) onRefresh()
   }
 
   return (

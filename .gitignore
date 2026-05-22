@@ -40,14 +40,20 @@ Thumbs.db
 # Build artifacts (compiled Swift binary lives at repo root)
 MacStudio
 dist/
+web/dist/
+
+# Node modules — must NEVER be tracked
+node_modules/
 
 # Local data directory (DBs, runtime caches)
 data/*
 !data/.gitkeep
 
-# Per-project runtime artifacts
-projects/*/temp/
-projects/*/exports/
+# Per-project runtime artifacts (entire runtime project trees are not source)
+projects/*
+!projects/.gitkeep
+domain/projects/*
+!domain/projects/.gitkeep
 
 # GitNexus index
 .gitnexus

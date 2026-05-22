@@ -33,8 +33,7 @@ export function SettingsSection({
 
   const toggle = () => {
     const next = !isOpen
-    if (isControlled) onToggle?.(next)
-    else setLocal(next)
+    if (!isControlled) setLocal(next)
     onToggle?.(next)
   }
 
