@@ -1615,8 +1615,9 @@ def api_cost_live(pid):
         from cost_tracker import CostTracker
         # Re-use the cached PipelineCore's tracker when available so we
         # share the same SQLite connection rather than opening a second one.
-        core = _running_cores.get(pid)
-        tracker = core.cost_tracker if core is not None else CostTracker()
+        with _cores_lock:
+            cached_core = _running_cores.get(pid)
+        tracker = cached_core.cost_tracker if cached_core else CostTracker()
         row = tracker.conn.execute(
             "SELECT SUM(cost_usd) AS total FROM cost_log WHERE video_id = ?",
             (pid,),
@@ -1624,7 +1625,8 @@ def api_cost_live(pid):
         total = round(float(row["total"] or 0.0), 4)
         return jsonify({"total_usd": total})
     except Exception as exc:
-        return jsonify({"error": f"Cost query failed: {exc}"}), 500
+        print(f"[cost-live] query failed for pid={pid}: {exc}")
+        return jsonify({"error": "Cost query failed"}), 500
 
 
 @app.route("/api/cleanup-all", methods=["POST"])
