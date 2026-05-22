@@ -25,30 +25,6 @@ export default {
           warn: '#e9c46a',
           fail: '#bf3737',
         },
-        /* Legacy `cinema.*` aliased to the new ivory/ink so existing
-           components don't break while you migrate. */
-        cinema: {
-          bg: '#0a0a0a',
-          'bg-deep': '#080808',
-          panel: '#141414',
-          'panel-hover': '#1c1c1c',
-          'panel-elevated': '#202020',
-          border: '#2a2a2a',
-          'border-subtle': '#1c1c1c',
-          accent: '#d4a85a',
-          accent2: '#e0bf7b',
-          'accent-glow': '#d4a85a33',
-          gold: '#d4a85a',
-          'gold-dim': '#a37e3e',
-          text: '#f0ebe1',
-          'text-secondary': '#d8d2c5',
-          muted: '#807872',
-          success: '#7fb069',
-          'success-dim': '#5a8a4a',
-          warning: '#e9c46a',
-          danger: '#bf3737',
-          'danger-dim': '#8a2828',
-        },
       },
       fontFamily: {
         display: ['Fraunces', 'Georgia', 'serif'],
@@ -59,6 +35,14 @@ export default {
         'tight-display': '-0.02em',
         'tight-body': '-0.01em',
         'wide-eyebrow': '0.26em',
+      },
+      fontSize: {
+        /* Editorial micro-scale — sub-Tailwind sizes for eyebrows, chips,
+           mono badges, and metadata. Replaces 400+ arbitrary text-[9-11px]
+           usages with semantic tokens. Default leading inherited. */
+        'eyebrow-sm': '9px',
+        'eyebrow':    '10px',
+        'eyebrow-lg': '11px',
       },
       backgroundImage: {
         'gradient-panel': 'linear-gradient(180deg, #141414 0%, #0a0a0a 100%)',

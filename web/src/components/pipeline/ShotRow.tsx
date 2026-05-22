@@ -19,9 +19,9 @@ interface Props {
 function getScoreBadge(score: number | null | undefined, label?: string) {
   if (score == null) return null
   const pct = Math.round(score * 100)
-  const color = pct >= 80 ? 'bg-cinema-success' : pct >= 60 ? 'bg-yellow-500' : 'bg-cinema-danger'
+  const color = pct >= 80 ? 'bg-editorial-ready' : pct >= 60 ? 'bg-yellow-500' : 'bg-editorial-curtain'
   return (
-    <span className={`${color} text-white text-[10px] font-bold px-1.5 py-0.5 rounded`}>
+    <span className={`${color} text-white text-eyebrow font-bold px-1.5 py-0.5 rounded`}>
       {label ? `${label} ` : ''}{pct}%
     </span>
   )
@@ -29,17 +29,17 @@ function getScoreBadge(score: number | null | undefined, label?: string) {
 
 function getStatusBadge(status: string | undefined) {
   const map: Record<string, { color: string; label: string }> = {
-    pending: { color: 'bg-cinema-muted/30', label: 'Pending' },
-    generating_image: { color: 'bg-cinema-accent animate-pulse', label: 'Generating...' },
+    pending: { color: 'bg-editorial-ivory-mute/30', label: 'Pending' },
+    generating_image: { color: 'bg-editorial-brass animate-pulse', label: 'Generating...' },
     image_review: { color: 'bg-yellow-500', label: 'Review' },
     generating_video: { color: 'bg-purple-500 animate-pulse', label: 'Video...' },
     post_processing: { color: 'bg-blue-500 animate-pulse', label: 'Processing...' },
-    complete: { color: 'bg-cinema-success', label: 'Done' },
-    failed: { color: 'bg-cinema-danger', label: 'Failed' },
+    complete: { color: 'bg-editorial-ready', label: 'Done' },
+    failed: { color: 'bg-editorial-curtain', label: 'Failed' },
   }
   const s = map[status || 'pending'] || map.pending
   return (
-    <span className={`${s.color} text-white text-[10px] px-1.5 py-0.5 rounded`}>
+    <span className={`${s.color} text-white text-eyebrow px-1.5 py-0.5 rounded`}>
       {s.label}
     </span>
   )
@@ -105,22 +105,22 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
   }
 
   return (
-    <div className={`flex items-start gap-3 px-4 py-3 border-b border-cinema-border/50 hover:bg-cinema-panel/50
-      ${status === 'generating_image' || status === 'generating_video' ? 'bg-cinema-accent/5' : ''}
-      ${isFailed ? 'bg-cinema-danger/5' : ''}
+    <div className={`flex items-start gap-3 px-4 py-3 border-b border-editorial-rule/50 hover:bg-editorial-ink-soft/50
+      ${status === 'generating_image' || status === 'generating_video' ? 'bg-editorial-brass/5' : ''}
+      ${isFailed ? 'bg-editorial-curtain/5' : ''}
     `}>
       {/* Shot number + status */}
       <div className="flex flex-col items-center gap-1 min-w-[40px]">
         <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold
-          ${status === 'complete' ? 'bg-cinema-success/20 text-cinema-success' :
-            isFailed ? 'bg-cinema-danger/20 text-cinema-danger' :
-            'bg-cinema-panel text-cinema-muted'}
+          ${status === 'complete' ? 'bg-editorial-ready/20 text-editorial-ready' :
+            isFailed ? 'bg-editorial-curtain/20 text-editorial-curtain' :
+            'bg-editorial-ink-soft text-editorial-ivory-mute'}
         `}>
           {shotIndex + 1}
         </div>
         {getStatusBadge(status)}
         {shotType && (
-          <span className="text-[9px] text-cinema-muted font-mono">{shotType}</span>
+          <span className="text-eyebrow-sm text-editorial-ivory-mute font-mono">{shotType}</span>
         )}
       </div>
 
@@ -131,22 +131,22 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
             {Object.entries(sections).map(([tag, text]) => (
               <div key={tag} className="flex gap-2 text-xs">
                 <span className={`${sectionColors[tag]} font-mono font-bold shrink-0`}>[{tag}]</span>
-                <span className="text-cinema-text/80 truncate">{text}</span>
+                <span className="text-editorial-ivory/80 truncate">{text}</span>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-xs text-cinema-muted truncate">{prompt.slice(0, 120)}...</p>
+          <p className="text-xs text-editorial-ivory-mute truncate">{prompt.slice(0, 120)}...</p>
         )}
 
         {/* Metadata badges */}
         <div className="flex gap-2 mt-1.5 flex-wrap">
-          <span className="text-[10px] text-cinema-muted bg-cinema-panel px-1.5 py-0.5 rounded">
+          <span className="text-eyebrow text-editorial-ivory-mute bg-editorial-ink-soft px-1.5 py-0.5 rounded">
             📷 {shot.camera}
           </span>
           {apiRegistry ? (
             <select
-              className="text-[10px] text-cinema-muted bg-cinema-panel px-1 py-0.5 rounded border-0 cursor-pointer hover:text-cinema-text focus:ring-1 focus:ring-cinema-accent"
+              className="text-eyebrow text-editorial-ivory-mute bg-editorial-ink-soft px-1 py-0.5 rounded border-0 cursor-pointer hover:text-editorial-ivory focus:ring-1 focus:ring-editorial-brass"
               value={shot.target_api || 'AUTO'}
               onChange={(e) => updateShotApi(e.target.value)}
               title={apiRegistry[shot.target_api]?.description || ''}
@@ -164,16 +164,16 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
               })}
             </select>
           ) : (
-            <span className="text-[10px] text-cinema-muted bg-cinema-panel px-1.5 py-0.5 rounded">
+            <span className="text-eyebrow text-editorial-ivory-mute bg-editorial-ink-soft px-1.5 py-0.5 rounded">
               {shot.target_api}
             </span>
           )}
           {shotTemplate && (
             <>
-              <span className="text-[10px] text-cinema-muted bg-cinema-panel px-1.5 py-0.5 rounded">
+              <span className="text-eyebrow text-editorial-ivory-mute bg-editorial-ink-soft px-1.5 py-0.5 rounded">
                 Best: {apiRegistry?.[shotTemplate.target_api]?.label || shotTemplate.target_api}
               </span>
-              <span className="text-[10px] text-cinema-muted bg-cinema-panel px-1.5 py-0.5 rounded">
+              <span className="text-eyebrow text-editorial-ivory-mute bg-editorial-ink-soft px-1.5 py-0.5 rounded">
                 CFG {shotTemplate.guidance} / {shotTemplate.steps} steps
               </span>
             </>
@@ -181,7 +181,7 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
         </div>
 
         {shotTemplate && (
-          <p className="mt-1 text-[10px] text-cinema-muted">
+          <p className="mt-1 text-eyebrow text-editorial-ivory-mute">
             {shotTemplate.description}
           </p>
         )}
@@ -197,7 +197,7 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
 
         {/* Failure reason */}
         {failureReason && isFailed && (
-          <p className="text-[10px] text-cinema-danger mt-1">
+          <p className="text-eyebrow text-editorial-curtain mt-1">
             Reason: {failureReason.replace(/_/g, ' ')}
           </p>
         )}
@@ -210,16 +210,16 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
             <img
               src={`/api/projects/${projectId}/file?path=${encodeURIComponent(imageUrl)}`}
               alt={`Shot ${shotIndex + 1}`}
-              className="w-[120px] h-[68px] object-cover rounded border border-cinema-border"
+              className="w-[120px] h-[68px] object-cover rounded border border-editorial-rule"
             />
             {getScoreBadge(identityScore)}
           </div>
         ) : (
-          <div className={`w-[120px] h-[68px] rounded border border-cinema-border flex items-center justify-center
-            ${status === 'generating_image' ? 'bg-cinema-accent/10 animate-pulse' :
-              isFailed ? 'bg-cinema-danger/10' : 'bg-cinema-panel'}
+          <div className={`w-[120px] h-[68px] rounded border border-editorial-rule flex items-center justify-center
+            ${status === 'generating_image' ? 'bg-editorial-brass/10 animate-pulse' :
+              isFailed ? 'bg-editorial-curtain/10' : 'bg-editorial-ink-soft'}
           `}>
-            <span className="text-cinema-muted text-xs">
+            <span className="text-editorial-ivory-mute text-xs">
               {status === 'generating_image' ? '⏳' : isFailed ? '✕' : '—'}
             </span>
           </div>
@@ -229,7 +229,7 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
         <div className="flex gap-2 mt-1">
           <button
             onClick={() => setEditingPrompt(true)}
-            className="text-[10px] text-cinema-accent hover:text-cinema-accent2"
+            className="text-eyebrow text-editorial-brass hover:text-editorial-brass"
           >
             ✎ Edit
           </button>
@@ -237,7 +237,7 @@ export default function ShotRow({ shot, shotState, shotIndex, sceneId, projectId
             <button
               onClick={handleRegenerate}
               disabled={regenerating}
-              className={`text-[10px] ${regenerating ? 'text-cinema-muted' : 'text-cinema-gold hover:text-cinema-gold-dim'}`}
+              className={`text-eyebrow ${regenerating ? 'text-editorial-ivory-mute' : 'text-editorial-brass hover:text-editorial-brass-deep'}`}
             >
               {regenerating ? '↻ Regen...' : '↻ Regen'}
             </button>

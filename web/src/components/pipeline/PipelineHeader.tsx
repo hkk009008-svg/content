@@ -43,7 +43,7 @@ export default function PipelineHeader({
       <div className="flex items-center gap-8 min-w-0">
         <button
           onClick={onBack}
-          className="font-mono text-[11px] text-editorial-ivory-mute tracking-wide-eyebrow
+          className="font-mono text-eyebrow-lg text-editorial-ivory-mute tracking-wide-eyebrow
                      uppercase hover:text-editorial-brass link-editorial whitespace-nowrap"
         >
           ← The Archive
@@ -56,13 +56,13 @@ export default function PipelineHeader({
           >
             {projectName}
           </span>
-          <span className="font-mono text-[10px] tracking-wide-eyebrow uppercase
+          <span className="font-mono text-eyebrow tracking-wide-eyebrow uppercase
                            text-editorial-ivory-mute whitespace-nowrap">
             {isPaused ? 'Held' : 'On Air'}
           </span>
           {failedShots.length > 0 && (
             <span
-              className="font-mono text-[10px] tracking-wide-eyebrow uppercase
+              className="font-mono text-eyebrow tracking-wide-eyebrow uppercase
                          text-editorial-curtain whitespace-nowrap"
               title={`${failedShots.length} shot(s) failed and were skipped`}
             >
@@ -75,7 +75,7 @@ export default function PipelineHeader({
       {/* Right — current stage, timer, action verbs */}
       <div className="flex items-center gap-6 flex-shrink-0">
         <div className="flex items-baseline gap-3">
-          <span className="font-mono text-[10px] tracking-wide-eyebrow uppercase
+          <span className="font-mono text-eyebrow tracking-wide-eyebrow uppercase
                            text-editorial-ivory-mute">
             Now
           </span>
@@ -94,7 +94,7 @@ export default function PipelineHeader({
           </span>
         </div>
 
-        <span className="font-mono text-[11px] text-editorial-ivory-soft tabular-nums tracking-wide-eyebrow">
+        <span className="font-mono text-eyebrow-lg text-editorial-ivory-soft tabular-nums tracking-wide-eyebrow">
           {pad2(mins)}:{pad2(secs)}
         </span>
 
@@ -103,7 +103,7 @@ export default function PipelineHeader({
         {isPaused ? (
           <button
             onClick={onResume}
-            className="px-5 py-2.5 font-mono text-[10px] tracking-wide-eyebrow uppercase
+            className="px-5 py-2.5 font-mono text-eyebrow tracking-wide-eyebrow uppercase
                        border border-editorial-brass text-editorial-brass
                        hover:bg-editorial-brass hover:text-editorial-ink transition-colors"
           >
@@ -112,7 +112,7 @@ export default function PipelineHeader({
         ) : (
           <button
             onClick={onPause}
-            className="px-5 py-2.5 font-mono text-[10px] tracking-wide-eyebrow uppercase
+            className="px-5 py-2.5 font-mono text-eyebrow tracking-wide-eyebrow uppercase
                        border border-editorial-rule-bright text-editorial-ivory-soft
                        hover:border-editorial-brass hover:text-editorial-brass transition-colors"
           >
@@ -122,7 +122,7 @@ export default function PipelineHeader({
 
         <button
           onClick={onCancel}
-          className="px-5 py-2.5 font-mono text-[10px] tracking-wide-eyebrow uppercase
+          className="px-5 py-2.5 font-mono text-eyebrow tracking-wide-eyebrow uppercase
                      border border-editorial-curtain text-editorial-curtain
                      hover:bg-editorial-curtain hover:text-editorial-ivory transition-colors"
         >

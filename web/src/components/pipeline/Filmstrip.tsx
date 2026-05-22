@@ -171,7 +171,7 @@ export default function Filmstrip({
       {/* Section label */}
       <div
         className="flex justify-between items-center pb-3 mb-4 border-b border-editorial-rule
-                   font-mono text-[10px] tracking-wide-eyebrow uppercase text-editorial-ivory-mute"
+                   font-mono text-eyebrow tracking-wide-eyebrow uppercase text-editorial-ivory-mute"
       >
         <span>Reels · All Shots</span>
         <span className="text-editorial-ivory-soft tabular-nums flex gap-3">
@@ -247,7 +247,7 @@ export default function Filmstrip({
                 {/* Shot number — top left */}
                 <span
                   className="absolute top-2 left-2 z-10 px-1.5 py-[3px]
-                             font-mono text-[9px] font-medium tracking-[0.14em]
+                             font-mono text-eyebrow-sm font-medium tracking-[0.14em]
                              text-editorial-ivory bg-black/70"
                 >
                   {pad2(frame.shotIndex)}
@@ -270,7 +270,7 @@ export default function Filmstrip({
                 <span
                   className={`absolute bottom-0 left-0 right-0 z-10
                               px-2.5 pt-[26px] pb-2.5
-                              font-display italic text-[11px] leading-snug
+                              font-display italic text-eyebrow-lg leading-snug
                               ${isPending ? 'text-editorial-ivory-faint' : 'text-editorial-ivory'}`}
                   style={{
                     fontVariationSettings: "'opsz' 14, 'SOFT' 60, 'wght' 380",
@@ -286,7 +286,7 @@ export default function Filmstrip({
         </div>
       </div>
 
-      <div className="font-mono text-[9px] tracking-wide-eyebrow uppercase
+      <div className="font-mono text-eyebrow-sm tracking-wide-eyebrow uppercase
                       text-editorial-ivory-faint mt-2 text-right">
         ← / → to scrub
       </div>

@@ -1,0 +1,29 @@
+{
+  "id": "89ab74030e5b",
+  "name": "CharTest",
+  "characters": [],
+  "locations": [],
+  "objects": [],
+  "scenes": [],
+  "global_settings": {
+    "aspect_ratio": "16:9",
+    "music_mood": "suspense",
+    "color_palette": "",
+    "master_seed": 535014,
+    "style_rules": {},
+    "default_video_api": "AUTO",
+    "budget_limit_usd": 0,
+    "cost_optimization": "quality_first",
+    "vbench_overall_threshold": 0.6,
+    "identity_strictness": 0.6,
+    "temporal_flicker_tolerance": 0.85,
+    "regression_sensitivity": 0.05,
+    "creative_llm": "auto",
+    "quality_judge_llm": "auto",
+    "competitive_generation": true,
+    "quality_cost_weight": 0.8,
+    "adaptive_pulid": true,
+    "coherence_check_enabled": true,
+    "color_drift_sensitivity": 0.3
+  }
+}

@@ -96,6 +96,20 @@ export default function App() {
 
   // --- PIPELINE MODE ---
   if (mode === 'pipeline' && project) {
+    const pipelineError =
+      latest?.stage === 'ERROR'
+        ? {
+            message: latest.failure_reason || latest.detail || 'The pipeline reported an error.',
+            hint: 'The director has stopped the run. You can restart from setup, or retry to resume.',
+            onRetry: handleGenerate,
+          }
+        : null
+
+    const pipelineLoadingLabel =
+      generating && !isStreaming && events.length === 0
+        ? 'Calling the projection room'
+        : null
+
     return (
       <PipelineLayout
         project={project}
@@ -108,6 +122,8 @@ export default function App() {
         isGenerating={generating || isStreaming}
         isPaused={isPaused}
         failedShots={failedShots}
+        pipelineError={pipelineError}
+        pipelineLoadingLabel={pipelineLoadingLabel}
         onBack={handleBackToSetup}
         onCancel={handleCancel}
         onPause={pausePipeline}

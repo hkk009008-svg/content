@@ -7,6 +7,13 @@ import AssemblyGate from './AssemblyGate'
 import ReviewStage from './ReviewStage'
 import GenerationPanel from '../GenerationPanel'
 import Filmstrip from './Filmstrip'
+import { ErrorState, LoadingState } from '../ui'
+
+export interface PipelineError {
+  message: string
+  hint?: string
+  onRetry?: () => void
+}
 
 interface Props {
   project: Project
@@ -33,6 +40,10 @@ interface Props {
   onCorrectShot: (shotId: string, action: string, params?: Record<string, any>, takeId?: string) => Promise<any>
   onDiagnoseShot: (shotId: string, takeId?: string) => Promise<any>
   onProceedToAssembly: () => Promise<any>
+  /** Optional system-level error to render in the execution board. */
+  pipelineError?: PipelineError | null
+  /** Optional system-level "awaiting backend" placeholder. */
+  pipelineLoadingLabel?: string | null
 }
 
 /* ─── Helpers ─────────────────────────────────────────────────── */
@@ -85,7 +96,7 @@ function Gauge({
   const safePercent = Math.max(0, Math.min(100, fillPercent))
   return (
     <div className="mb-7">
-      <div className="font-mono text-[9px] tracking-wide-eyebrow uppercase
+      <div className="font-mono text-eyebrow-sm tracking-wide-eyebrow uppercase
                       text-editorial-ivory-mute mb-2">
         {label}
       </div>
@@ -117,6 +128,7 @@ export default function PipelineLayout({
   onBack, onCancel, onPause, onResume, onApproveShotPlan, onRejectShotPlan,
   onGenerateKeyframe, onApproveKeyframe, onGenerateMotion, onApproveFinal,
   onRegenerateShot, onCorrectShot, onDiagnoseShot, onProceedToAssembly,
+  pipelineError, pipelineLoadingLabel,
 }: Props) {
   const isComplete = latest?.stage === 'COMPLETE' || latest?.stage === 'DONE'
 
@@ -184,7 +196,7 @@ export default function PipelineLayout({
 
       {/* ── Hero band — the editorial moment ────────────────────── */}
       <section className="px-12 pt-16 pb-12 border-b border-editorial-curtain relative">
-        <div className="font-mono text-[10px] tracking-wide-eyebrow uppercase text-editorial-curtain absolute top-6 left-12 z-10">
+        <div className="font-mono text-eyebrow tracking-wide-eyebrow uppercase text-editorial-curtain absolute top-6 left-12 z-10">
           {eyebrowLabel}
         </div>
 
@@ -217,7 +229,7 @@ export default function PipelineLayout({
             >
               {project.name}
             </h1>
-            <div className="font-mono text-[11px] tracking-wide-eyebrow uppercase text-editorial-ivory-mute flex flex-wrap items-center gap-x-5 gap-y-2">
+            <div className="font-mono text-eyebrow-lg tracking-wide-eyebrow uppercase text-editorial-ivory-mute flex flex-wrap items-center gap-x-5 gap-y-2">
               <span>{formatRuntime(totalRuntime)} Runtime</span>
               <span className="text-editorial-rule-bright">·</span>
               <span>{project.scenes.length} Scenes</span>
@@ -260,7 +272,19 @@ export default function PipelineLayout({
 
         {/* Execution board (center) */}
         <div className="flex-1 overflow-y-auto px-8 py-6 bg-editorial-ink">
-          {(['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'REVIEW'].includes(activeStage || '')) ||
+          {pipelineError ? (
+            <ErrorState
+              message={pipelineError.message}
+              hint={pipelineError.hint}
+              onRetry={pipelineError.onRetry}
+              onDismiss={onCancel}
+              dismissLabel="Back to setup"
+            />
+          ) : pipelineLoadingLabel ? (
+            <div className="py-24 flex justify-center">
+              <LoadingState label={pipelineLoadingLabel} size="lg" />
+            </div>
+          ) : (['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'REVIEW'].includes(activeStage || '')) ||
           (isPaused && ['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'REVIEW'].includes(activeStage || '')) ? (
             <ReviewStage
               project={project}
@@ -303,7 +327,7 @@ export default function PipelineLayout({
                   >
                     No scenes defined
                   </p>
-                  <p className="font-mono text-[11px] uppercase tracking-wide-eyebrow text-editorial-ivory-faint">
+                  <p className="font-mono text-eyebrow-lg uppercase tracking-wide-eyebrow text-editorial-ivory-faint">
                     Return to setup to compose the picture
                   </p>
                 </div>
@@ -319,7 +343,7 @@ export default function PipelineLayout({
           <div className="px-8 py-7">
             <div
               className="flex justify-between items-center pb-3 mb-5 border-b border-editorial-rule
-                         font-mono text-[10px] tracking-wide-eyebrow uppercase text-editorial-ivory-mute"
+                         font-mono text-eyebrow tracking-wide-eyebrow uppercase text-editorial-ivory-mute"
             >
               <span>Telemetry</span>
               <span className="text-editorial-ivory-soft">

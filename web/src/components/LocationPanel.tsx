@@ -70,66 +70,71 @@ export default function LocationPanel({ project, config, onRefresh }: Props) {
 
   return (
     <div className="p-4">
-      <button onClick={() => setExpanded(!expanded)} className="flex items-center justify-between w-full mb-3">
-        <h2 className="text-sm font-semibold text-cinema-muted uppercase tracking-wider">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        className="flex items-center justify-between w-full mb-3"
+      >
+        <h2 className="text-sm font-semibold text-editorial-ivory-mute uppercase tracking-wider">
           Locations ({project.locations.length})
         </h2>
-        <span className="text-cinema-muted text-xs">{expanded ? '[-]' : '[+]'}</span>
+        <span className="text-editorial-ivory-mute text-xs" aria-hidden>{expanded ? '[-]' : '[+]'}</span>
       </button>
 
       {expanded && (
         <>
           <div className="space-y-2 mb-3">
             {project.locations.map(l => (
-              <div key={l.id} className="bg-cinema-bg border border-cinema-border rounded-lg p-3 group">
+              <div key={l.id} className="bg-editorial-ink border border-editorial-rule rounded-lg p-3 group">
                 {editingId === l.id ? (
                   <div className="space-y-2">
                     <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
-                      className="w-full bg-cinema-panel border border-cinema-accent/50 rounded px-3 py-1.5 text-sm text-cinema-text focus:outline-none focus:border-cinema-accent" />
+                      className="w-full bg-editorial-ink-soft border border-editorial-brass/50 rounded px-3 py-1.5 text-sm text-editorial-ivory focus:outline-none focus:border-editorial-brass" />
                     <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={2}
-                      className="w-full bg-cinema-panel border border-cinema-border rounded px-3 py-1.5 text-sm text-cinema-text focus:outline-none focus:border-cinema-accent resize-none" />
+                      className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-3 py-1.5 text-sm text-editorial-ivory focus:outline-none focus:border-editorial-brass resize-none" />
                     <input type="text" value={form.lighting} onChange={e => setForm({ ...form, lighting: e.target.value })}
                       placeholder="Custom lighting (optional)"
-                      className="w-full bg-cinema-panel border border-cinema-border rounded px-3 py-1.5 text-xs text-cinema-text placeholder:text-cinema-muted focus:outline-none focus:border-cinema-accent" />
+                      className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-3 py-1.5 text-xs text-editorial-ivory placeholder:text-editorial-ivory-mute focus:outline-none focus:border-editorial-brass" />
                     <div className="grid grid-cols-2 gap-2">
                       <select value={form.time_of_day} onChange={e => setForm({ ...form, time_of_day: e.target.value })}
-                        className="bg-cinema-panel border border-cinema-border rounded px-2 py-1.5 text-xs text-cinema-text focus:outline-none">
+                        className="bg-editorial-ink-soft border border-editorial-rule rounded px-2 py-1.5 text-xs text-editorial-ivory focus:outline-none">
                         {timeOptions.map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
                       </select>
                       <select value={form.weather} onChange={e => setForm({ ...form, weather: e.target.value })}
-                        className="bg-cinema-panel border border-cinema-border rounded px-2 py-1.5 text-xs text-cinema-text focus:outline-none">
+                        className="bg-editorial-ink-soft border border-editorial-rule rounded px-2 py-1.5 text-xs text-editorial-ivory focus:outline-none">
                         {weatherOptions.map(w => <option key={w} value={w}>{w}</option>)}
                       </select>
                     </div>
                     {/* Existing reference images */}
                     {l.reference_images?.length > 0 && (
                       <div>
-                        <label className="text-[10px] text-cinema-muted block mb-1">Current references</label>
+                        <label className="text-eyebrow text-editorial-ivory-mute block mb-1">Current references</label>
                         <div className="flex gap-1.5 flex-wrap">
                           {l.reference_images.map((img: string, i: number) => (
                             <img key={i}
                               src={`${API}/projects/${project.id}/file?path=${encodeURIComponent(img)}`}
                               alt={`Ref ${i + 1}`}
-                              className="w-16 h-10 object-cover rounded border border-cinema-border" />
+                              className="w-16 h-10 object-cover rounded border border-editorial-rule" />
                           ))}
                         </div>
                       </div>
                     )}
                     {/* Upload reference images */}
                     <div>
-                      <label className="text-[10px] text-cinema-muted block mb-1">
+                      <label className="text-eyebrow text-editorial-ivory-mute block mb-1">
                         {l.reference_images?.length > 0 ? 'Add more reference photos' : 'Upload reference photos (optional)'}
                       </label>
                       <input type="file" accept="image/*" multiple
                         onChange={e => setEditFiles(e.target.files)}
-                        className="w-full text-[10px] text-cinema-muted file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-cinema-panel file:text-cinema-text file:text-[10px] file:cursor-pointer" />
+                        className="w-full text-eyebrow text-editorial-ivory-mute file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-editorial-ink-soft file:text-editorial-ivory file:text-eyebrow file:cursor-pointer" />
                     </div>
                     <div className="flex gap-2">
                       <button onClick={handleSaveEdit} disabled={submitting}
-                        className="flex-1 bg-cinema-success/80 hover:bg-cinema-success py-1.5 rounded text-white text-xs font-medium">
+                        className="flex-1 bg-editorial-ready/80 hover:bg-editorial-ready py-1.5 rounded text-white text-xs font-medium">
                         {submitting ? 'Saving...' : 'Save'}
                       </button>
-                      <button onClick={() => { setEditingId(null); setEditFiles(null) }} className="px-3 py-1.5 text-cinema-muted text-xs hover:text-cinema-text">Cancel</button>
+                      <button onClick={() => { setEditingId(null); setEditFiles(null) }} className="px-3 py-1.5 text-editorial-ivory-mute text-xs hover:text-editorial-ivory">Cancel</button>
                     </div>
                   </div>
                 ) : (
@@ -139,32 +144,32 @@ export default function LocationPanel({ project, config, onRefresh }: Props) {
                       <img
                         src={`${API}/projects/${project.id}/file?path=${encodeURIComponent(l.reference_images[0])}`}
                         alt={l.name}
-                        className="w-16 h-10 object-cover rounded border border-cinema-border shrink-0"
+                        className="w-16 h-10 object-cover rounded border border-editorial-rule shrink-0"
                       />
                     ) : (
-                      <div className="w-16 h-10 rounded border border-dashed border-cinema-border bg-cinema-panel flex items-center justify-center shrink-0">
-                        <span className="text-cinema-muted text-[10px]">No ref</span>
+                      <div className="w-16 h-10 rounded border border-dashed border-editorial-rule bg-editorial-ink-soft flex items-center justify-center shrink-0">
+                        <span className="text-editorial-ivory-mute text-eyebrow">No ref</span>
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-cinema-text text-sm">{l.name}</div>
-                      <div className="text-cinema-muted text-xs mt-0.5 line-clamp-2">{l.description}</div>
+                      <div className="font-medium text-editorial-ivory text-sm">{l.name}</div>
+                      <div className="text-editorial-ivory-mute text-xs mt-0.5 line-clamp-2">{l.description}</div>
                       <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                        <span className="text-[10px] bg-cinema-panel px-1.5 py-0.5 rounded text-cinema-muted">{l.time_of_day}</span>
+                        <span className="text-eyebrow bg-editorial-ink-soft px-1.5 py-0.5 rounded text-editorial-ivory-mute">{l.time_of_day}</span>
                         {l.weather !== 'clear' && (
-                          <span className="text-[10px] bg-blue-900/30 text-blue-400 px-1.5 py-0.5 rounded">{l.weather}</span>
+                          <span className="text-eyebrow bg-blue-900/30 text-blue-400 px-1.5 py-0.5 rounded">{l.weather}</span>
                         )}
                         {l.reference_images?.length > 0 && (
-                          <span className="text-[10px] bg-cinema-panel px-1.5 py-0.5 rounded text-cinema-muted">
+                          <span className="text-eyebrow bg-editorial-ink-soft px-1.5 py-0.5 rounded text-editorial-ivory-mute">
                             {l.reference_images.length} ref{l.reference_images.length > 1 ? 's' : ''}
                           </span>
                         )}
-                        <span className="text-[10px] bg-cinema-panel px-1.5 py-0.5 rounded text-cinema-muted">seed: {l.seed}</span>
+                        <span className="text-eyebrow bg-editorial-ink-soft px-1.5 py-0.5 rounded text-editorial-ivory-mute">seed: {l.seed}</span>
                       </div>
                     </div>
                     <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 shrink-0">
-                      <button onClick={() => startEdit(l)} className="text-cinema-accent hover:text-cinema-accent2 text-xs">Edit</button>
-                      <button onClick={() => handleDelete(l.id)} className="text-cinema-muted hover:text-cinema-danger text-xs">Remove</button>
+                      <button onClick={() => startEdit(l)} className="text-editorial-brass hover:text-editorial-brass text-xs">Edit</button>
+                      <button onClick={() => handleDelete(l.id)} className="text-editorial-ivory-mute hover:text-editorial-curtain text-xs">Remove</button>
                     </div>
                   </div>
                 )}
@@ -173,55 +178,55 @@ export default function LocationPanel({ project, config, onRefresh }: Props) {
           </div>
 
           {adding ? (
-            <div className="bg-cinema-bg border border-cinema-accent/30 rounded-lg p-3 space-y-2">
+            <div className="bg-editorial-ink border border-editorial-brass/30 rounded-lg p-3 space-y-2">
               <input
                 type="text" placeholder="Location name"
                 value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
-                className="w-full bg-cinema-panel border border-cinema-border rounded px-3 py-2 text-sm text-cinema-text placeholder:text-cinema-muted focus:outline-none focus:border-cinema-accent"
+                className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-3 py-2 text-sm text-editorial-ivory placeholder:text-editorial-ivory-mute focus:outline-none focus:border-editorial-brass"
               />
               <textarea
                 placeholder="Describe the environment in detail (architecture, furniture, atmosphere, colors...)"
                 value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
                 rows={3}
-                className="w-full bg-cinema-panel border border-cinema-border rounded px-3 py-2 text-sm text-cinema-text placeholder:text-cinema-muted focus:outline-none focus:border-cinema-accent resize-none"
+                className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-3 py-2 text-sm text-editorial-ivory placeholder:text-editorial-ivory-mute focus:outline-none focus:border-editorial-brass resize-none"
               />
               <input
                 type="text" placeholder="Custom lighting (optional, auto-generated from time of day)"
                 value={form.lighting} onChange={e => setForm({ ...form, lighting: e.target.value })}
-                className="w-full bg-cinema-panel border border-cinema-border rounded px-3 py-2 text-sm text-cinema-text placeholder:text-cinema-muted focus:outline-none focus:border-cinema-accent"
+                className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-3 py-2 text-sm text-editorial-ivory placeholder:text-editorial-ivory-mute focus:outline-none focus:border-editorial-brass"
               />
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-xs text-cinema-muted block mb-1">Time of Day</label>
+                  <label className="text-xs text-editorial-ivory-mute block mb-1">Time of Day</label>
                   <select value={form.time_of_day} onChange={e => setForm({ ...form, time_of_day: e.target.value })}
-                    className="w-full bg-cinema-panel border border-cinema-border rounded px-3 py-2 text-sm text-cinema-text focus:outline-none">
+                    className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-3 py-2 text-sm text-editorial-ivory focus:outline-none">
                     {timeOptions.map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs text-cinema-muted block mb-1">Weather</label>
+                  <label className="text-xs text-editorial-ivory-mute block mb-1">Weather</label>
                   <select value={form.weather} onChange={e => setForm({ ...form, weather: e.target.value })}
-                    className="w-full bg-cinema-panel border border-cinema-border rounded px-3 py-2 text-sm text-cinema-text focus:outline-none">
+                    className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-3 py-2 text-sm text-editorial-ivory focus:outline-none">
                     {weatherOptions.map(w => <option key={w} value={w}>{w}</option>)}
                   </select>
                 </div>
               </div>
               <div>
-                <label className="text-xs text-cinema-muted block mb-1">Reference photos (optional)</label>
+                <label className="text-xs text-editorial-ivory-mute block mb-1">Reference photos (optional)</label>
                 <input type="file" accept="image/*" multiple onChange={e => setFiles(e.target.files)}
-                  className="w-full text-xs text-cinema-muted file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:bg-cinema-panel file:text-cinema-text file:text-xs" />
+                  className="w-full text-xs text-editorial-ivory-mute file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:bg-editorial-ink-soft file:text-editorial-ivory file:text-xs" />
               </div>
               <div className="flex gap-2">
                 <button onClick={handleAdd} disabled={submitting || !form.name.trim()}
-                  className="flex-1 bg-cinema-accent hover:bg-cinema-accent2 disabled:opacity-40 py-2 rounded text-white text-sm font-medium">
+                  className="flex-1 bg-editorial-brass hover:bg-editorial-brass disabled:opacity-40 py-2 rounded text-white text-sm font-medium">
                   {submitting ? 'Creating...' : 'Add Location'}
                 </button>
-                <button onClick={() => setAdding(false)} className="px-4 py-2 text-cinema-muted text-sm hover:text-cinema-text">Cancel</button>
+                <button onClick={() => setAdding(false)} className="px-4 py-2 text-editorial-ivory-mute text-sm hover:text-editorial-ivory">Cancel</button>
               </div>
             </div>
           ) : (
             <button onClick={() => setAdding(true)}
-              className="w-full border border-dashed border-cinema-border hover:border-cinema-accent rounded-lg py-2 text-cinema-muted hover:text-cinema-accent text-sm transition-colors">
+              className="w-full border border-dashed border-editorial-rule hover:border-editorial-brass rounded-lg py-2 text-editorial-ivory-mute hover:text-editorial-brass text-sm transition-colors">
               + Add Location
             </button>
           )}

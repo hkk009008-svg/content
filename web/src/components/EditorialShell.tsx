@@ -28,6 +28,7 @@ import ScenePanel from './ScenePanel'
 import SettingsPanel from './SettingsPanel'
 import GenerationPanel from './GenerationPanel'
 import PreviewPanel from './PreviewPanel'
+import { Button, Eyebrow, buttonClassName } from './ui'
 
 interface EditorialShellProps {
   project: Project
@@ -55,17 +56,6 @@ const formatRuntime = (seconds: number): string => {
 
 /* ─── Sub-components ──────────────────────────────────────────── */
 
-/** Eyebrow — small, wide-tracked, mono. Used above big serif moments. */
-function Eyebrow({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div
-      className={`font-mono text-[10px] text-editorial-ivory-mute tracking-wide-eyebrow uppercase ${className}`}
-    >
-      {children}
-    </div>
-  )
-}
-
 /** Big editorial figure — a Fraunces numeral with a thin label beneath. */
 function Figure({
   value,
@@ -87,7 +77,7 @@ function Figure({
       >
         {typeof value === 'number' ? pad2(value) : value}
       </div>
-      <div className="font-mono text-[10px] text-editorial-ivory-mute tracking-wide-eyebrow uppercase">
+      <div className="font-mono text-eyebrow text-editorial-ivory-mute tracking-wide-eyebrow uppercase">
         {label}
       </div>
     </div>
@@ -112,12 +102,18 @@ function NowShowingMarquee({ latest }: { latest: ProgressEvent | null }) {
   ]
 
   return (
-    <div className="border-y border-editorial-curtain/40 bg-editorial-curtain/[0.04] overflow-hidden">
-      <div className="marquee-track py-2.5">
+    <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      aria-label={`Now showing — stage ${stage}, ${percent} percent${detail ? `, ${detail}` : ''}`}
+      className="border-y border-editorial-curtain/40 bg-editorial-curtain/[0.04] overflow-hidden"
+    >
+      <div className="marquee-track py-2.5" aria-hidden>
         {fragments.map((f, i) => (
           <span
             key={i}
-            className="font-mono text-[11px] text-editorial-curtain tracking-wide-eyebrow uppercase mx-12 flex items-center gap-3"
+            className="font-mono text-eyebrow-lg text-editorial-curtain tracking-wide-eyebrow uppercase mx-12 flex items-center gap-3"
           >
             <span className="inline-block w-1.5 h-1.5 bg-editorial-curtain rounded-full flicker" />
             {f}
@@ -246,11 +242,11 @@ export default function EditorialShell({
       <div className="px-10 pt-8 pb-6 flex items-center justify-between border-b border-editorial-rule">
         <button
           onClick={onBackToProjects}
-          className="font-mono text-[11px] text-editorial-ivory-mute tracking-wide-eyebrow uppercase hover:text-editorial-brass link-editorial"
+          className="font-mono text-eyebrow-lg text-editorial-ivory-mute tracking-wide-eyebrow uppercase hover:text-editorial-brass link-editorial"
         >
           ← The Archive
         </button>
-        <div className="font-mono text-[11px] text-editorial-ivory-mute tracking-wide-eyebrow uppercase flex items-center gap-3">
+        <div className="font-mono text-eyebrow-lg text-editorial-ivory-mute tracking-wide-eyebrow uppercase flex items-center gap-3">
           <span>Reel Nº</span>
           <span className="text-editorial-ivory">{reelNumber}</span>
           <span className="text-editorial-rule-bright">/</span>
@@ -358,7 +354,7 @@ export default function EditorialShell({
               The Programme
             </h2>
           </div>
-          <div className="font-mono text-[11px] text-editorial-ivory-mute tracking-wide-eyebrow uppercase">
+          <div className="font-mono text-eyebrow-lg text-editorial-ivory-mute tracking-wide-eyebrow uppercase">
             in playback order
           </div>
         </div>
@@ -384,37 +380,27 @@ export default function EditorialShell({
         <div className="flex items-center gap-4 flex-shrink-0">
           {!inFlight ? (
             <>
-              <button
+              <Button
+                variant="curtain"
+                size="lg"
                 onClick={onGenerate}
                 disabled={project.scenes.length === 0}
-                className="group relative px-8 py-4 font-mono text-[11px] tracking-wide-eyebrow uppercase
-                           bg-editorial-curtain text-editorial-ivory border border-editorial-curtain
-                           hover:bg-editorial-curtain-deep disabled:bg-editorial-ink-rise
-                           disabled:text-editorial-ivory-faint disabled:border-editorial-rule
-                           disabled:cursor-not-allowed transition-colors"
               >
-                <span className="relative z-10">Print this Reel →</span>
-              </button>
+                Print this Reel →
+              </Button>
               {project.scenes.length > 0 && (
                 <a
                   href={`${apiBase}/projects/${project.id}/export`}
-                  className="px-6 py-4 font-mono text-[11px] tracking-wide-eyebrow uppercase
-                             border border-editorial-rule text-editorial-ivory-soft
-                             hover:border-editorial-brass hover:text-editorial-brass transition-colors"
+                  className={buttonClassName({ variant: 'ivory-ghost', size: 'lg' })}
                 >
                   Download MP4
                 </a>
               )}
             </>
           ) : (
-            <button
-              onClick={onCancel}
-              className="px-8 py-4 font-mono text-[11px] tracking-wide-eyebrow uppercase
-                         border border-editorial-curtain text-editorial-curtain
-                         hover:bg-editorial-curtain hover:text-editorial-ivory transition-colors"
-            >
+            <Button variant="curtain-outline" size="lg" onClick={onCancel}>
               Strike the Print
-            </button>
+            </Button>
           )}
         </div>
       </section>
@@ -435,7 +421,7 @@ export default function EditorialShell({
               Cast, locations, sound &amp; settings
             </h2>
           </div>
-          <div className="font-mono text-[11px] text-editorial-ivory-mute tracking-wide-eyebrow uppercase">
+          <div className="font-mono text-eyebrow-lg text-editorial-ivory-mute tracking-wide-eyebrow uppercase">
             edit the script, then print
           </div>
         </div>
@@ -473,10 +459,10 @@ export default function EditorialShell({
 
       {/* ── Colophon ── footer credit, magazine-style ─────────── */}
       <footer className="px-10 py-8 border-t border-editorial-rule flex items-center justify-between">
-        <div className="font-mono text-[10px] text-editorial-ivory-mute tracking-wide-eyebrow uppercase">
+        <div className="font-mono text-eyebrow text-editorial-ivory-mute tracking-wide-eyebrow uppercase">
           Cinema Production Tool · No. {reelNumber} · A working print
         </div>
-        <div className="font-mono text-[10px] text-editorial-ivory-mute tracking-wide-eyebrow uppercase">
+        <div className="font-mono text-eyebrow text-editorial-ivory-mute tracking-wide-eyebrow uppercase">
           Set in Fraunces &amp; Be Vietnam Pro
         </div>
       </footer>

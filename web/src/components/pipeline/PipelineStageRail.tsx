@@ -23,19 +23,26 @@ export default function PipelineStageRail({ stages, activeStage }: Props) {
   const doneCount = stages.filter(s => s.status === 'complete').length
 
   return (
-    <aside className="w-72 px-7 py-8 bg-editorial-ink overflow-y-auto">
+    <aside
+      className="w-72 px-7 py-8 bg-editorial-ink overflow-y-auto"
+      aria-label="Production phases"
+    >
       {/* Section label — matches the mockup's .section-label pattern */}
       <div
+        id="stage-rail-heading"
         className="flex justify-between items-center pb-3 mb-2 border-b border-editorial-rule
-                   font-mono text-[10px] tracking-wide-eyebrow uppercase text-editorial-ivory-mute"
+                   font-mono text-eyebrow tracking-wide-eyebrow uppercase text-editorial-ivory-mute"
       >
         <span>Production Phases</span>
-        <span className="text-editorial-ivory-soft tabular-nums">
+        <span
+          className="text-editorial-ivory-soft tabular-nums"
+          aria-label={`${doneCount} of ${stages.length} phases complete`}
+        >
           {pad2(doneCount)} / {pad2(stages.length)}
         </span>
       </div>
 
-      <ol>
+      <ol aria-labelledby="stage-rail-heading">
         {stages.map((stage, i) => {
           const isActive = activeStage === stage.id
           const isDone = stage.status === 'complete'
@@ -70,6 +77,7 @@ export default function PipelineStageRail({ stages, activeStage }: Props) {
           return (
             <li
               key={stage.id}
+              aria-current={isActive ? 'step' : undefined}
               className="grid grid-cols-[28px_1fr_auto] gap-3.5 items-baseline
                          py-4 border-b border-editorial-rule
                          relative group"
@@ -113,7 +121,7 @@ export default function PipelineStageRail({ stages, activeStage }: Props) {
 
               {/* Status word — mono, wide-tracked, uppercase */}
               <span
-                className={`font-mono text-[9px] tracking-wide-eyebrow uppercase ${statusColor}`}
+                className={`font-mono text-eyebrow-sm tracking-wide-eyebrow uppercase ${statusColor}`}
               >
                 {STATUS_LABEL[stage.status] ?? stage.status}
               </span>
