@@ -598,19 +598,47 @@ class ShotController:
             return {"success": True, "skipped": True, "engine": engine,
                     "error": "engine returned no output"}
 
-        # --- 5. Persist the take + auto-approve on first success ---
+        # --- 5. Persist the take + identity-gate the auto-approve ---
         take["path"] = perf_path
+
+        # Resolve the character's face anchor for the gate. Multi-character shots
+        # anchor on the first listed character — operators can override via the
+        # PERFORMANCE_REVIEW gate. Uses the existing character_manager helper that
+        # already understands the project's character list shape.
+        face_anchor = ""
+        chars = shot.get("characters_in_frame", []) or []
+        if chars:
+            try:
+                face_anchor = get_reference_image(project, chars[0]) or ""
+            except Exception as e:
+                print(f"[PERFORMANCE] face_anchor lookup failed for {chars[0]}: {e}")
+                face_anchor = ""
+
+        from performance.identity_gate import validate_performance_take, DEFAULT_PERFORMANCE_FLOOR
+        arc_score = validate_performance_take(perf_path, face_anchor) if face_anchor else None
+        gate_passed = (arc_score is None) or (arc_score >= DEFAULT_PERFORMANCE_FLOOR)
 
         def _mut_success(_scene: dict, project_shot: dict):
             project_shot.setdefault("performance_takes", []).append(take)
-            # Auto-approve on first success; operator can override via PERFORMANCE_REVIEW gate
-            if not project_shot.get("approved_performance_take_id"):
+            # Auto-approve ONLY when the identity gate passed (or was inconclusive).
+            # A score below floor leaves approval to the operator via PERFORMANCE_REVIEW.
+            if gate_passed and not project_shot.get("approved_performance_take_id"):
                 project_shot["approved_performance_take_id"] = take["id"]
             project_shot["performance_engine"] = engine
+            # Stash the score for the review UI to surface.
+            take.setdefault("metadata", {})["identity_score"] = arc_score
             return MutationResult(take, save=True)
 
         stored_take = self._mutate_shot(shot_id, _mut_success)
         self._host._save_checkpoint()
+        if not gate_passed:
+            self.progress(
+                "PERFORMANCE_REVIEW_REQUIRED",
+                f"Shot {shot_id}: identity score {arc_score:.3f} below floor "
+                f"{DEFAULT_PERFORMANCE_FLOOR}; awaiting operator review",
+                -1, scene_id=scene_id, shot_id=shot_id, take_id=take["id"],
+                identity_score=arc_score,
+            )
         self.progress(
             "PERFORMANCE_READY",
             f"Performance ready for {shot_id}",
