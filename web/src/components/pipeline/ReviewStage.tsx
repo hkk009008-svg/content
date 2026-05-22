@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Project, ShotState, Scene, Shot, TakeRecord } from '../../types/project'
+import TakeStrip from '../console/TakeStrip'
 
 const API = '/api'
 
@@ -415,40 +416,13 @@ function ClipCard({
               </div>
             </div>
 
-            {/* Side-by-side preview: keyframe still on the left, performance clip on the right.
-                Only renders when there's something to show. */}
-            {(performanceVideoPath || drivingVideoPath) && (
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {drivingVideoPath ? (
-                  <div>
-                    <div className="text-eyebrow-lg uppercase text-editorial-ivory-mute mb-1">Driving reference</div>
-                    <video
-                      src={`${API}/projects/${projectId}/file?path=${encodeURIComponent(drivingVideoPath)}`}
-                      controls
-                      muted
-                      loop
-                      className="w-full rounded border border-editorial-rule bg-black"
-                    />
-                  </div>
-                ) : (
-                  <div className="text-xs text-editorial-ivory-mute">No driving reference (auto-synth path).</div>
-                )}
-                {performanceVideoPath ? (
-                  <div>
-                    <div className="text-eyebrow-lg uppercase text-editorial-ivory-mute mb-1">Captured performance</div>
-                    <video
-                      src={`${API}/projects/${projectId}/file?path=${encodeURIComponent(performanceVideoPath)}`}
-                      controls
-                      muted
-                      loop
-                      className="w-full rounded border border-editorial-rule bg-black"
-                    />
-                  </div>
-                ) : (
-                  <div className="text-xs text-editorial-ivory-mute self-center">Performance not yet captured.</div>
-                )}
-              </div>
-            )}
+            {/* Side-by-side preview: driving reference on the left, captured performance on the right.
+                Delegated to TakeStrip — also consumed by Monitor (A3). */}
+            <TakeStrip
+              performanceUrl={drivingVideoPath || null}
+              motionUrl={performanceVideoPath || null}
+              projectId={projectId}
+            />
 
             {/* Scores from the identity + motion gates */}
             {(performanceIdentity != null || motionFidelity != null) && (
