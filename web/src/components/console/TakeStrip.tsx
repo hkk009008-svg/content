@@ -1,30 +1,38 @@
 /**
- * TakeStrip — reusable 1-3 pane preview strip for take media.
+ * TakeStrip — reusable 1-4 pane preview strip for take media.
  *
  * Renders side-by-side labeled panes for any combination of:
  *   - a keyframe still (img)
- *   - a performance / driving-reference clip (video)
- *   - a motion / captured-performance clip (video)
+ *   - a driving-reference clip (video) — performance-capture input
+ *   - a captured-performance clip (video) — performance-capture output
+ *   - a motion render clip (video) — final cinema engine output
  *
  * Each pane is shown only when its URL prop is non-null/non-empty.
  * When no panes have content the component renders nothing.
  *
+ * Pane order (pipeline order): keyframe → driving → performance → motion
+ *
  * Used by:
- *   - ReviewStage (Performance Capture section)
- *   - Monitor (A3 — inline preview reel in Director's Console)
+ *   - ReviewStage (Performance Capture section: drivingUrl + performanceUrl)
+ *   - Monitor (A3 — inline preview reel in Director's Console: all 4 panes)
  */
 
 const API = '/api'
 
 export interface TakeStripProps {
   keyframeUrl?: string | null
+  /** Driving-reference video — input to the performance-capture stage */
+  drivingUrl?: string | null
+  /** Captured-performance video — output of the performance-capture stage */
   performanceUrl?: string | null
+  /** Motion render video — final cinema engine output */
   motionUrl?: string | null
   apiBase?: string
   projectId?: string | null
-  /** Override default labels. Defaults: KEYFRAME / PERFORMANCE / MOTION */
+  /** Override default labels. */
   labels?: {
     keyframe?: string
+    driving?: string
     performance?: string
     motion?: string
   }
@@ -32,6 +40,7 @@ export interface TakeStripProps {
 
 export default function TakeStrip({
   keyframeUrl,
+  drivingUrl,
   performanceUrl,
   motionUrl,
   apiBase = '',
@@ -39,7 +48,7 @@ export default function TakeStrip({
   labels,
 }: TakeStripProps) {
   const base = apiBase || API
-  const hasAny = Boolean(keyframeUrl || performanceUrl || motionUrl)
+  const hasAny = Boolean(keyframeUrl || drivingUrl || performanceUrl || motionUrl)
   if (!hasAny) return null
 
   const resolve = (path: string) =>
@@ -48,8 +57,9 @@ export default function TakeStrip({
       : path
 
   const keyframeLabel = labels?.keyframe ?? 'Keyframe'
-  const performanceLabel = labels?.performance ?? 'Driving reference'
-  const motionLabel = labels?.motion ?? 'Captured performance'
+  const drivingLabel = labels?.driving ?? 'Driving reference'
+  const performanceLabel = labels?.performance ?? 'Captured performance'
+  const motionLabel = labels?.motion ?? 'Motion render'
 
   return (
     <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -59,6 +69,19 @@ export default function TakeStrip({
           <img
             src={resolve(keyframeUrl)}
             className="w-full rounded border border-editorial-rule object-cover"
+          />
+        </div>
+      ) : null}
+
+      {drivingUrl ? (
+        <div>
+          <div className="text-eyebrow-lg uppercase text-editorial-ivory-mute mb-1">{drivingLabel}</div>
+          <video
+            src={resolve(drivingUrl)}
+            controls
+            muted
+            loop
+            className="w-full rounded border border-editorial-rule bg-black"
           />
         </div>
       ) : null}
@@ -74,9 +97,7 @@ export default function TakeStrip({
             className="w-full rounded border border-editorial-rule bg-black"
           />
         </div>
-      ) : (
-        <div className="text-xs text-editorial-ivory-mute">No driving reference (auto-synth path).</div>
-      )}
+      ) : null}
 
       {motionUrl ? (
         <div>
@@ -89,9 +110,7 @@ export default function TakeStrip({
             className="w-full rounded border border-editorial-rule bg-black"
           />
         </div>
-      ) : (
-        <div className="text-xs text-editorial-ivory-mute self-center">Performance not yet captured.</div>
-      )}
+      ) : null}
     </div>
   )
 }

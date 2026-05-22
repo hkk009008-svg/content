@@ -419,8 +419,8 @@ function ClipCard({
             {/* Side-by-side preview: driving reference on the left, captured performance on the right.
                 Delegated to TakeStrip — also consumed by Monitor (A3). */}
             <TakeStrip
-              performanceUrl={drivingVideoPath || null}
-              motionUrl={performanceVideoPath || null}
+              drivingUrl={drivingVideoPath || null}
+              performanceUrl={performanceVideoPath || null}
               projectId={projectId}
             />
 
