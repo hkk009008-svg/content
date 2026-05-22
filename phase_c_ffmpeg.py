@@ -272,7 +272,10 @@ def generate_ai_video(
             _sora_durations = {"action": 8, "wide": 8, "landscape": 8, "portrait": 4, "medium": 4}
             sora_duration = _sora_durations.get(shot_type, 4)
 
-            # Sora excels at cloth simulation and gravity — emphasize these
+            # Sora excels at cloth simulation and gravity — emphasize these.
+            # When a performance-capture driving clip exists, Sora uses it as
+            # input_reference (video conditioning) so the character's motion
+            # follows the real human performance.
             result = sora.generate_video(
                 image_path=image_path,
                 prompt=(
@@ -285,6 +288,7 @@ def generate_ai_video(
                 ),
                 output_path=output_mp4,
                 duration=sora_duration,
+                driving_video_path=driving_video_path,
             )
             if result:
                 return result
@@ -310,6 +314,7 @@ def generate_ai_video(
                 output_path=output_mp4,
                 reference_images=multi_angle_refs,
                 generate_audio=(shot_type == "landscape"),  # Native audio for environments
+                driving_video_path=driving_video_path,
             )
             if result:
                 return result

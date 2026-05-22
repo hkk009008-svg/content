@@ -284,8 +284,8 @@ export default function PipelineLayout({
             <div className="py-24 flex justify-center">
               <LoadingState label={pipelineLoadingLabel} size="lg" />
             </div>
-          ) : (['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'REVIEW'].includes(activeStage || '')) ||
-          (isPaused && ['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'REVIEW'].includes(activeStage || '')) ? (
+          ) : (['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'PERFORMANCE_REVIEW', 'REVIEW'].includes(activeStage || '')) ||
+          (isPaused && ['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'PERFORMANCE_REVIEW', 'REVIEW'].includes(activeStage || '')) ? (
             <ReviewStage
               project={project}
               activeStage={activeStage}

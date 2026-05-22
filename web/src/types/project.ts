@@ -58,6 +58,7 @@ export interface Shot {
   approved_performance_take_id?: string
   performance_engine?: 'ACT_ONE' | 'LIVE_PORTRAIT' | 'VIGGLE' | 'SKIP' | ''
   driving_video_path?: string
+  shot_type?: string
   action_context: string
   generated_image: string
   generated_video: string

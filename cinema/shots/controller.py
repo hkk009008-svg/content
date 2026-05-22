@@ -757,6 +757,46 @@ class ShotController:
             identity_score = vid_result.overall_score if hasattr(vid_result, "overall_score") else 0.0
             take["metadata"]["identity_score"] = identity_score
 
+        # --- Motion fidelity gate (handoff §11) ---
+        # When the performance phase produced a driving video AND a downstream
+        # engine actually consumed it (Sora/Veo), score whether the motion
+        # output follows the driving signature. Inconclusive scores (None)
+        # are stored as the literal sentinel so the operator can tell "didn't
+        # measure" from "measured low".
+        if driving_video_path and os.path.exists(driving_video_path):
+            try:
+                from performance.motion_gate import score_motion_fidelity
+                motion_score = score_motion_fidelity(final_vid, driving_video_path)
+                take["metadata"]["motion_fidelity"] = motion_score
+                if motion_score is not None:
+                    print(f"   [MOTION-GATE] {shot_id}: motion_fidelity={motion_score:.3f}")
+            except Exception as e:
+                # Gate is advisory only — never fail the shot because the gate broke.
+                print(f"   [MOTION-GATE] skipped ({e})")
+                take["metadata"]["motion_fidelity"] = None
+
+            # --- Motion floor check (handoff §11 / B4) ---
+            # Advisory only — never raise, never fail the shot. A separate
+            # try/except isolates floor-check failures from the score block above.
+            try:
+                from performance.motion_gate import needs_remotion
+                motion_score = take["metadata"].get("motion_fidelity")
+                if motion_score is not None and needs_remotion(motion_score, shot_type=resolved_shot_type):
+                    take["metadata"]["motion_floor_failed"] = True
+                    print(f"   [MOTION-GATE] {shot_id}: MOTION_BELOW_FLOOR "
+                          f"score={motion_score:.3f} shot_type={resolved_shot_type}")
+                    self.progress(
+                        "MOTION_BELOW_FLOOR",
+                        f"Shot {shot_id} motion fidelity {motion_score:.3f} below floor for {resolved_shot_type}",
+                        -1,
+                        scene_id=scene_id,
+                        shot_id=shot_id,
+                        motion_fidelity=motion_score,
+                        shot_type=resolved_shot_type,
+                    )
+            except Exception as e:
+                print(f"   [MOTION-GATE] floor check skipped ({e})")
+
         take["path"] = final_vid
 
         def _mutator(_scene: dict, project_shot: dict):

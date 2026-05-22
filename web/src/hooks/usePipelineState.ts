@@ -10,6 +10,8 @@ const PIPELINE_STAGES: PipelineStage[] = [
   { id: 'PLAN_REVIEW', label: 'Shot Plans', status: 'pending' },
   { id: 'KEYFRAME', label: 'Keyframes', status: 'pending' },
   { id: 'KEYFRAME_REVIEW', label: 'Keyframe Review', status: 'pending' },
+  { id: 'PERFORMANCE', label: 'Performance Capture', status: 'pending' },
+  { id: 'PERFORMANCE_REVIEW', label: 'Performance Review', status: 'pending' },
   { id: 'MOTION', label: 'Motion', status: 'pending' },
   { id: 'REVIEW', label: 'Final Review', status: 'pending' },
   { id: 'SCENE_PREVIEW', label: 'Scene Preview', status: 'pending' },
@@ -24,6 +26,8 @@ export function usePipelineState(projectId: string | null) {
   const [activeStage, setActiveStage] = useState<string | null>(null)
   const [isPaused, setIsPaused] = useState(false)
   const [failedShots, setFailedShots] = useState<string[]>([])
+  const [activeShotId, setActiveShotId] = useState<string | null>(null)
+  const [notesBuffer, setNotesBuffer] = useState<ProgressEvent[]>([])
 
   // Route incoming events to the right state buckets
   const processEvent = useCallback((event: ProgressEvent) => {
@@ -46,6 +50,14 @@ export function usePipelineState(projectId: string | null) {
     if (stage === 'SHOT_FAILED' && shot_id) {
       setFailedShots(prev => [...prev, shot_id])
     }
+
+    // Track most-recent active shot (non-failure events only)
+    if (shot_id && stage !== 'SHOT_FAILED') {
+      setActiveShotId(shot_id)
+    }
+
+    // Rolling notes buffer (last 20 events)
+    setNotesBuffer(prev => [event, ...prev].slice(0, 20))
 
     // Route director review events
     if (director_review) {
@@ -74,6 +86,8 @@ export function usePipelineState(projectId: string | null) {
         if (stage === 'PLAN_REVIEW') updated.status = 'plan_review'
         if (stage === 'KEYFRAME') updated.status = 'generating_image'
         if (stage === 'KEYFRAME_READY' || stage === 'KEYFRAME_REVIEW') updated.status = 'image_review'
+        if (stage === 'PERFORMANCE') updated.status = 'generating_performance' as any
+        if (stage === 'PERFORMANCE_READY' || stage === 'PERFORMANCE_REVIEW') updated.status = 'performance_review' as any
         if (stage === 'SHOT_FAILED') updated.status = 'failed'
         if (stage === 'MOTION') updated.status = 'generating_video'
         if (stage === 'MOTION_READY' || stage === 'REVIEW') updated.status = 'final_review'
@@ -184,6 +198,8 @@ export function usePipelineState(projectId: string | null) {
     setActiveStage(null)
     setIsPaused(false)
     setFailedShots([])
+    setActiveShotId(null)
+    setNotesBuffer([])
     sse.start()
   }, [sse])
 
@@ -195,6 +211,8 @@ export function usePipelineState(projectId: string | null) {
     processEvent,
     isPaused,
     failedShots,
+    activeShotId,
+    notesBuffer,
     // Pipeline controls
     pause,
     resume,

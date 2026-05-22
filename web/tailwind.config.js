@@ -25,11 +25,36 @@ export default {
           warn: '#e9c46a',
           fail: '#bf3737',
         },
+
+        // Director's Console — warm sepia palette (Slice C)
+        // Sourced directly from design/directors-console.html :root variables.
+        // Note: the plan sketch used cool-tinted approximations (#0D0B12, #15131C);
+        // the mockup is warm-tinted throughout — these are the actual values. (DIVERGENCE)
+        console: {
+          'bg':             '#0d0a08', // --bg: body background (warm near-black)
+          'bg-warm':        '#100c0a', // --bg-warm: viewport frame ring
+          'surface':        '#181310', // --surface: panels, frame thumbnails
+          'surface-2':      '#221c17', // --surface-2: cast avatar background
+          'ink':            '#efe6d5', // --ink: primary text (warm ivory)
+          'ink-dim':        '#a89c8a', // --ink-dim: secondary text
+          'ink-mute':       '#6b5f54', // --ink-mute: label / placeholder text
+          'ink-deep':       '#3f372e', // --ink-deep: dividers / deepest text
+          'accent':         '#c8312a', // --accent: arterial red (live/rec/active)
+          'accent-hover':   '#d63a33', // primary button hover
+          'gold':           '#c4a366', // --gold: brass cast indicator / done status
+          'rule':           '#2a241e', // --rule: default hairline rule
+          'rule-strong':    '#4a3f33', // --rule-strong: elevated rule / border
+        },
       },
       fontFamily: {
         display: ['Fraunces', 'Georgia', 'serif'],
         sans: ['"Be Vietnam Pro"', 'system-ui', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'monospace'],
+        // Director's Console — mono alias kept: `mono` has no Menlo fallback,
+        // console panels need metric-compatible fallback for tight number columns. (Slice C)
+        'console-mono': ['"JetBrains Mono"', 'Menlo', 'monospace'],
+        // console-display dropped: identical to `display` — use font-display instead.
+        // Plan sketch named 'Cormorant Garamond'; actual mockup uses 'Fraunces' (DIVERGENCE).
       },
       letterSpacing: {
         'tight-display': '-0.02em',
@@ -51,6 +76,21 @@ export default {
         'gradient-gold': 'linear-gradient(135deg, #d4a85a 0%, #e0bf7b 100%)',
         'gradient-card': 'linear-gradient(180deg, rgba(20,20,20,0.9) 0%, rgba(10,10,10,0.95) 100%)',
         'gradient-curtain': 'linear-gradient(180deg, #bf3737 0%, #8a2828 100%)',
+
+        // Director's Console — viewport render-fill (Slice C)
+        // Sourced from .viewport .render-fill in the mockup.
+        // Plan sketch proposed masthead/hero gradients that do not appear in the mockup (DIVERGENCE).
+        'console-render-fill':
+          'linear-gradient(135deg, #1a1612 0%, #14171b 100%)',
+        // Director's Console — frame label scrim
+        'console-frame-scrim':
+          'linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.6) 60%, transparent 100%)',
+        // Director's Console — phase hover accent wash
+        'console-phase-hover':
+          'linear-gradient(to right, transparent, rgba(196,163,102,0.04) 30%, transparent)',
+        // Director's Console — vignette overlay
+        'console-vignette':
+          'radial-gradient(ellipse 110% 90% at 50% 45%, transparent 40%, rgba(0,0,0,0.75) 100%)',
       },
       boxShadow: {
         'glow-accent': '0 0 0 1px rgba(212, 168, 90, 0.4), 0 0 30px rgba(212, 168, 90, 0.15)',
@@ -59,6 +99,18 @@ export default {
         'panel': '0 1px 0 0 #2a2a2a',
         'elevated': '0 24px 48px -16px rgba(0,0,0,0.6)',
         'edge': '0 1px 0 0 #2a2a2a, 0 -1px 0 0 #2a2a2a',
+
+        // Director's Console — viewport monitor frame ring (Slice C)
+        // Sourced from .viewport box-shadow in the mockup.
+        // Plan sketch had an inset panel shadow; mockup uses this ring instead (DIVERGENCE).
+        'console-viewport':
+          '0 0 0 6px #100c0a, 0 0 0 7px #4a3f33, 0 24px 60px rgba(0,0,0,0.5)',
+        // Director's Console — active filmstrip frame glow (accent red)
+        'console-frame-active':
+          '0 0 0 1px #c8312a, 0 0 28px rgba(200,49,42,0.35)',
+        // Director's Console — filmstrip well inset
+        'console-filmstrip-inset':
+          'inset 0 0 60px rgba(0,0,0,0.8)',
       },
       animation: {
         marquee: 'marquee 32s linear infinite',

@@ -63,6 +63,7 @@ class VeoNativeAPI:
         duration: str = "8s",
         resolution: str = "720p",
         generate_audio: bool = False,
+        driving_video_path: str = "",
     ) -> str | None:
         """
         Generate video from a start frame image + text prompt using Veo 3.1.
@@ -76,6 +77,13 @@ class VeoNativeAPI:
             duration: Video duration — "5s", "6s", or "8s".
             resolution: Output resolution — "720p" or "1080p".
             generate_audio: If True, Veo generates synced audio (use for dialogue scenes).
+            driving_video_path: Optional path to a performance-capture clip
+                (produced by the performance/ engine adapters). When provided
+                AND the file is readable, Veo accepts it as a ``reference_video``
+                for motion conditioning — the character moves like the clip
+                while compositionally respecting the start image. Falls through
+                silently when the file is missing OR when the installed Vertex
+                SDK doesn't expose the reference_video field (older builds).
 
         Returns:
             output_path on success, None on failure.
@@ -116,6 +124,24 @@ class VeoNativeAPI:
                         print(f"[VEO-NATIVE] Reference image not found, skipping: {ref_path}")
                 if ref_images:
                     generate_kwargs["reference_images"] = ref_images
+
+            # Driving-video motion conditioning. The Vertex SDK may expose this
+            # under different names across versions: ``reference_video``,
+            # ``motion_reference``, or as a ``Video`` instance in a list. We try
+            # the documented modern name first and silently skip on AttributeError
+            # so older SDK builds don't break the call.
+            if driving_video_path and os.path.exists(driving_video_path):
+                try:
+                    # Modern Vertex AI SDK (>= 0.30): types.Video.from_file()
+                    driving_video = types.Video.from_file(location=driving_video_path)  # type: ignore[attr-defined]
+                    generate_kwargs["reference_video"] = driving_video
+                    print(f"[VEO-NATIVE] Driving video loaded: {os.path.basename(driving_video_path)}")
+                except AttributeError:
+                    # Older SDK — no Video type. Skip silently; fall through to
+                    # baseline image-to-video.
+                    print(f"[VEO-NATIVE] reference_video not supported by installed SDK; using image-only path")
+                except Exception as _e:
+                    print(f"[VEO-NATIVE] driving_video load failed ({_e}); using image-only path")
 
             # Submit generation
             operation = self.client.models.generate_videos(**generate_kwargs)

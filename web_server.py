@@ -1603,6 +1603,32 @@ def api_disk_usage(pid):
     return jsonify(get_project_disk_usage(pid))
 
 
+@app.route("/api/projects/<pid>/cost-live", methods=["GET"])
+def api_cost_live(pid):
+    """Sum of cost_log entries for this video_id since pipeline start.
+
+    Returns total_usd rounded to 4 decimal places. Unknown video_id (no
+    rows) returns {"total_usd": 0.0} — not a 404 — because Telemetry
+    polls this before any cost entries exist.
+    """
+    try:
+        from cost_tracker import CostTracker
+        # Re-use the cached PipelineCore's tracker when available so we
+        # share the same SQLite connection rather than opening a second one.
+        with _cores_lock:
+            cached_core = _running_cores.get(pid)
+        tracker = cached_core.cost_tracker if cached_core else CostTracker()
+        row = tracker.conn.execute(
+            "SELECT SUM(cost_usd) AS total FROM cost_log WHERE video_id = ?",
+            (pid,),
+        ).fetchone()
+        total = round(float(row["total"] or 0.0), 4)
+        return jsonify({"total_usd": total})
+    except Exception as exc:
+        print(f"[cost-live] query failed for pid={pid}: {exc}")
+        return jsonify({"error": "Cost query failed"}), 500
+
+
 @app.route("/api/cleanup-all", methods=["POST"])
 def api_cleanup_all():
     """Clean up all projects."""

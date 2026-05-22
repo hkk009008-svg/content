@@ -4,6 +4,7 @@ import { usePipelineState } from './hooks/usePipelineState'
 import ProjectSelector from './components/ProjectSelector'
 import PipelineLayout from './components/pipeline/PipelineLayout'
 import EditorialShell from './components/EditorialShell'
+import DirectorsConsole from './components/DirectorsConsole'
 
 const API = '/api'
 
@@ -11,7 +12,9 @@ export default function App() {
   const [project, setProject] = useState<Project | null>(null)
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [generating, setGenerating] = useState(false)
-  const [mode, setMode] = useState<'setup' | 'pipeline'>('setup')
+  // 'console' is the new Director's Console route — design/directors-console.html
+  // brought into the running app as a stub shell. Future slices flesh out the regions.
+  const [mode, setMode] = useState<'setup' | 'pipeline' | 'console'>('setup')
 
   const {
     events, latest, isStreaming, start: startSSE, stop: stopSSE,
@@ -94,6 +97,13 @@ export default function App() {
     return <ProjectSelector onSelect={loadProject} />
   }
 
+  // --- DIRECTOR'S CONSOLE ---
+  // New route from design/directors-console.html. Stub shell — see component
+  // for region-level TODOs. Toggled via the masthead button in EditorialShell.
+  if (mode === 'console' && project) {
+    return <DirectorsConsole project={project} onBack={() => setMode('setup')} />
+  }
+
   // --- PIPELINE MODE ---
   if (mode === 'pipeline' && project) {
     const pipelineError =
@@ -158,6 +168,7 @@ export default function App() {
       onGenerate={handleGenerate}
       onCancel={handleCancel}
       onRefreshProject={refreshProject}
+      onOpenConsole={() => setMode('console')}
       apiBase={API}
     />
   )

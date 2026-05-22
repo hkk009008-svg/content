@@ -390,6 +390,33 @@ def get_max_quality_params(shot_type: str) -> Dict:
     return MAX_QUALITY_TEMPLATES.get(shot_type, MAX_QUALITY_TEMPLATES["medium"]).copy()
 
 
+# =============================================================================
+# MOTION-FIDELITY FLOORS — per-shot-type advisory thresholds
+# =============================================================================
+# Advisory only — never auto-fail a take per operator decision (handoff §3.4).
+# These values are used exclusively for logging, UI warnings, and diagnostics.
+# No gate, no hard reject, no automatic re-roll should reference this dict.
+#
+# TODO(calibrate): Placeholders below are starting points from plan §3.2.
+# They MUST be replaced with operator-calibrated values derived from a 20-shot
+# grading pass before these floors carry any production meaning.
+# See scripts/calibrate_motion_floor.py for the calibration workflow.
+MOTION_FIDELITY_FLOORS: Dict[str, Optional[float]] = {
+    "portrait":  0.42,
+    "medium":    0.55,
+    "wide":      0.65,
+    "action":    0.60,
+    "macro":     0.40,
+    "landscape": None,   # Motion capture doesn't apply to pure landscape shots
+}
+
+
+def get_motion_fidelity_floor(shot_type: str) -> Optional[float]:
+    """Return the motion-fidelity floor for a shot type, or None when motion
+    capture doesn't apply (landscapes)."""
+    return MOTION_FIDELITY_FLOORS.get(shot_type)
+
+
 def classify_shot_type(shot: dict) -> str:
     """
     Classify a shot into one of 5 types based on its prompt content
