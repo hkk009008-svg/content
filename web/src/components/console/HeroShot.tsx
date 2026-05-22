@@ -39,21 +39,21 @@ export default function HeroShot({
 
   if (!activeShotId || !shot) {
     return (
-      <section className="px-6 py-8 border-b border-editorial-rule flex items-center gap-6">
-        <div className="w-40 aspect-video rounded border border-editorial-rule bg-editorial-ink flex items-center justify-center text-xs text-editorial-ivory-mute">
+      <section className="px-6 py-8 border-b border-console-rule flex items-center gap-6">
+        <div className="w-40 aspect-video rounded border border-console-rule-strong bg-console-surface flex items-center justify-center text-xs text-console-ink-mute font-console-mono">
           no active shot
         </div>
         <div>
-          <div className="text-eyebrow-lg uppercase tracking-wider text-editorial-ivory-mute">Hero Shot</div>
-          <div className="mt-1 text-sm text-editorial-ivory-mute italic">Waiting for pipeline to start…</div>
+          <div className="text-eyebrow-lg uppercase tracking-wider text-console-ink-mute font-console-mono">Hero Shot</div>
+          <div className="mt-1 text-sm text-console-ink-dim italic font-display">Waiting for pipeline to start…</div>
         </div>
       </section>
     )
   }
 
   return (
-    <section className="px-6 py-6 border-b border-editorial-rule flex items-start gap-6">
-      <div className="shrink-0 w-48 aspect-video rounded border border-editorial-rule bg-editorial-ink overflow-hidden">
+    <section className="px-6 py-6 border-b border-console-rule flex items-start gap-6">
+      <div className="shrink-0 w-48 aspect-video rounded border border-console-rule-strong bg-console-surface overflow-hidden shadow-console-viewport">
         {videoUrl ? (
           <video
             src={resolveMedia(videoUrl)}
@@ -69,29 +69,29 @@ export default function HeroShot({
             alt={shot.prompt?.slice(0, 80)}
           />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-xs text-editorial-ivory-mute">
+          <div className="w-full h-full bg-console-render-fill flex items-center justify-center text-xs text-console-ink-mute font-console-mono">
             no take yet
           </div>
         )}
       </div>
       <div className="min-w-0">
-        <div className="text-eyebrow-lg uppercase tracking-wider text-editorial-ivory-mute">Hero Shot</div>
-        <div className="mt-1 text-base font-semibold text-editorial-brass truncate">
+        <div className="text-eyebrow-lg uppercase tracking-wider text-console-ink-mute font-console-mono">Hero Shot</div>
+        <div className="mt-1 text-base font-display text-console-gold truncate italic">
           {scene?.title || 'Untitled scene'}
         </div>
         {shot.camera && (
-          <div className="mt-1 text-xs text-editorial-ivory-mute">
-            <span className="uppercase tracking-wide">Camera</span>{' '}
-            <span className="font-mono">{shot.camera}</span>
+          <div className="mt-1 text-xs text-console-ink-dim font-console-mono">
+            <span className="uppercase tracking-wide text-console-ink-mute">Camera</span>{' '}
+            <span>{shot.camera}</span>
           </div>
         )}
         {scene?.dialogue && (
-          <div className="mt-1 text-xs text-editorial-ivory-mute">
-            <span className="uppercase tracking-wide">Cue</span>{' '}
-            <span className="italic">{scene.dialogue.slice(0, 100)}</span>
+          <div className="mt-1 text-xs text-console-ink-dim">
+            <span className="uppercase tracking-wide text-console-ink-mute font-console-mono">Cue</span>{' '}
+            <span className="italic font-display">{scene.dialogue.slice(0, 100)}</span>
           </div>
         )}
-        <div className="mt-2 text-xs text-editorial-ivory-mute line-clamp-2">{shot.prompt}</div>
+        <div className="mt-2 text-xs text-console-ink-dim line-clamp-2 font-display italic">{shot.prompt}</div>
       </div>
     </section>
   )

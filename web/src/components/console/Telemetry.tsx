@@ -54,44 +54,44 @@ export default function Telemetry({ project, shotStates, failedShots, isStreamin
   const maxBin = Math.max(1, ...bins)
 
   return (
-    <aside className="col-span-3 border-l border-editorial-rule px-4 py-6 bg-editorial-ink-soft/30">
-      <h2 className="text-eyebrow-lg uppercase tracking-wider text-editorial-ivory-mute mb-3">
+    <aside className="col-span-3 border-l border-console-rule px-4 py-6 bg-console-surface">
+      <h2 className="text-eyebrow-lg uppercase tracking-wider text-console-ink-mute mb-3 font-console-mono">
         Telemetry
       </h2>
       <dl className="space-y-4 text-xs">
         <div>
-          <dt className="text-editorial-ivory-mute uppercase text-eyebrow-lg">Shots</dt>
-          <dd className="mt-0.5 font-mono text-editorial-brass">
+          <dt className="text-console-ink-mute uppercase text-eyebrow-lg font-console-mono">Shots</dt>
+          <dd className="mt-0.5 font-console-mono text-console-ink">
             {totalShots}
             {failedShots.length > 0 && (
-              <span className="ml-2 text-editorial-curtain font-normal">({failedShots.length} failed)</span>
+              <span className="ml-2 text-console-accent font-normal">({failedShots.length} failed)</span>
             )}
           </dd>
         </div>
         <div>
-          <dt className="text-editorial-ivory-mute uppercase text-eyebrow-lg">Engine</dt>
-          <dd className="mt-0.5 font-mono text-editorial-brass">{currentEngine || '—'}</dd>
+          <dt className="text-console-ink-mute uppercase text-eyebrow-lg font-console-mono">Engine</dt>
+          <dd className="mt-0.5 font-console-mono text-console-gold">{currentEngine || '—'}</dd>
         </div>
         <div>
-          <dt className="text-editorial-ivory-mute uppercase text-eyebrow-lg mb-1">Identity scores</dt>
+          <dt className="text-console-ink-mute uppercase text-eyebrow-lg mb-1 font-console-mono">Identity scores</dt>
           <dd className="flex items-end gap-1 h-10">
             {bins.map((count, i) => (
               <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
                 <div
-                  className="w-full rounded-sm bg-editorial-brass/60"
+                  className="w-full rounded-sm bg-console-gold/60"
                   style={{ height: `${Math.round((count / maxBin) * 32) + 2}px` }}
                   title={`${SCORE_BINS[i]}: ${count}`}
                 />
               </div>
             ))}
           </dd>
-          <div className="flex justify-between text-editorial-ivory-mute mt-0.5">
+          <div className="flex justify-between text-console-ink-mute mt-0.5 font-console-mono">
             <span>0</span><span>1</span>
           </div>
         </div>
         <div>
-          <dt className="text-editorial-ivory-mute uppercase text-eyebrow-lg">Live cost</dt>
-          <dd className="mt-0.5 font-mono text-editorial-brass">
+          <dt className="text-console-ink-mute uppercase text-eyebrow-lg font-console-mono">Live cost</dt>
+          <dd className="mt-0.5 font-console-mono text-console-ink">
             {liveCost != null ? `$${liveCost.toFixed(4)}` : '—'}
           </dd>
         </div>

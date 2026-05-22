@@ -11,10 +11,10 @@ export interface FilmstripProps {
 const FILMSTRIP_WINDOW = 40
 
 function statusBadgeClass(status?: string): string {
-  if (!status) return 'bg-editorial-ivory-mute/20 text-editorial-ivory-mute'
-  if (status === 'complete') return 'bg-editorial-ready/20 text-editorial-ready'
-  if (status === 'failed') return 'bg-editorial-curtain/20 text-editorial-curtain'
-  return 'bg-editorial-brass/20 text-editorial-brass'
+  if (!status) return 'bg-console-ink-deep/40 text-console-ink-mute'
+  if (status === 'complete') return 'bg-console-gold/20 text-console-gold'
+  if (status === 'failed') return 'bg-console-accent/20 text-console-accent'
+  return 'bg-console-gold/20 text-console-gold'
 }
 
 function statusLabel(status?: string): string {
@@ -46,44 +46,54 @@ export default function Filmstrip({ project, apiBase = '', projectId, onShotClic
     project?.scenes?.find(s => s.shots?.some(sh => sh.id === shotId))?.title || ''
 
   return (
-    <section className="px-6 py-6 border-b border-editorial-rule">
-      <h2 className="text-eyebrow-lg uppercase tracking-wider text-editorial-ivory-mute mb-3">
+    <section className="px-6 py-6 border-b border-console-rule">
+      <h2 className="text-eyebrow-lg uppercase tracking-wider text-console-ink-mute mb-3 font-console-mono">
         Filmstrip
       </h2>
-      <div className="overflow-x-auto">
-        <div className="flex gap-2">
-          {visible.map((shot) => (
-            <button
-              key={shot.id}
-              onClick={() => onShotClick?.(shot.id)}
-              className="shrink-0 w-32 aspect-video rounded border border-editorial-rule bg-editorial-ink relative overflow-hidden cursor-pointer hover:border-editorial-brass/50 transition-colors"
-              title={shot.prompt?.slice(0, 80)}
-            >
-              {shot.generated_image ? (
-                <img
-                  src={resolveImg(shot.generated_image)}
-                  className="w-full h-full object-cover"
-                  alt=""
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-xs text-editorial-ivory-mute">
-                  no take
+      <div className="overflow-x-auto shadow-console-filmstrip-inset">
+        <div className="flex gap-2 bg-black py-4 px-2">
+          {visible.map((shot) => {
+            const isDone = shot.plan_status === 'approved'
+            const isFailed = shot.plan_status === 'rejected'
+            return (
+              <button
+                key={shot.id}
+                onClick={() => onShotClick?.(shot.id)}
+                className={`shrink-0 w-32 aspect-video rounded border bg-console-surface relative overflow-hidden cursor-pointer transition-all ${
+                  isFailed
+                    ? 'border-console-accent shadow-console-frame-active'
+                    : isDone
+                      ? 'border-console-gold/50 hover:border-console-gold'
+                      : 'border-transparent hover:border-console-gold/50'
+                }`}
+                title={shot.prompt?.slice(0, 80)}
+              >
+                {shot.generated_image ? (
+                  <img
+                    src={resolveImg(shot.generated_image)}
+                    className="w-full h-full object-cover"
+                    alt=""
+                  />
+                ) : (
+                  <div className="w-full h-full bg-console-render-fill flex items-center justify-center text-xs text-console-ink-mute font-console-mono">
+                    no take
+                  </div>
+                )}
+                <div className="absolute bottom-0 left-0 right-0 bg-console-frame-scrim px-1 py-0.5 flex items-center justify-between gap-1">
+                  <span className="text-eyebrow-lg text-console-ink truncate font-console-mono">
+                    {sceneTitle(shot.id).slice(0, 10)}
+                  </span>
+                  <span className={`text-eyebrow-lg rounded px-1 shrink-0 font-console-mono ${statusBadgeClass(isDone ? 'complete' : isFailed ? 'failed' : undefined)}`}>
+                    {statusLabel(isDone ? 'complete' : isFailed ? 'failed' : undefined)}
+                  </span>
                 </div>
-              )}
-              <div className="absolute bottom-0 left-0 right-0 bg-editorial-ink/80 px-1 py-0.5 flex items-center justify-between gap-1">
-                <span className="text-eyebrow-lg text-editorial-ivory-mute truncate">
-                  {sceneTitle(shot.id).slice(0, 10)}
-                </span>
-                <span className={`text-eyebrow-lg rounded px-1 shrink-0 ${statusBadgeClass(shot.plan_status === 'approved' ? 'complete' : undefined)}`}>
-                  {statusLabel(shot.plan_status === 'approved' ? 'complete' : shot.plan_status === 'rejected' ? 'failed' : undefined)}
-                </span>
-              </div>
-            </button>
-          ))}
+              </button>
+            )
+          })}
           {overflow > 0 && (
             <button
               onClick={() => setVisibleCount(v => v + FILMSTRIP_WINDOW)}
-              className="shrink-0 w-32 aspect-video rounded border border-editorial-rule bg-editorial-ink flex items-center justify-center text-xs text-editorial-ivory-mute hover:border-editorial-brass/50 transition-colors cursor-pointer"
+              className="shrink-0 w-32 aspect-video rounded border border-console-rule-strong bg-console-surface flex items-center justify-center text-xs text-console-ink-mute hover:border-console-gold/50 transition-colors cursor-pointer font-console-mono"
             >
               +{overflow} more
             </button>
