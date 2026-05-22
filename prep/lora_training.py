@@ -45,9 +45,25 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, asdict
 from typing import Optional
+
+
+def _safe_under(base: str, *parts: str) -> str:
+    """Join `parts` to `base` and assert the result is inside `base`.
+
+    Defense-in-depth against path traversal: char_id is server-generated today
+    via make_character (uuid4) but any future call site that passes user-supplied
+    components must not be able to escape the project tree via `..` segments.
+    Raises ValueError on traversal attempts so callers fail loud.
+    """
+    base_abs = os.path.abspath(base)
+    target = os.path.abspath(os.path.join(base, *parts))
+    if os.path.commonpath([base_abs, target]) != base_abs:
+        raise ValueError(f"path traversal blocked: {parts!r} escapes {base!r}")
+    return target
 
 
 DATASET_GUIDELINES = {
@@ -117,8 +133,11 @@ class LoraStatus:
 # ---------------------------------------------------------------------------
 
 def _character_lora_dir(project_dir: str, char_id: str) -> str:
-    """Standard layout: <project>/loras/<char_id>/{dataset/, output/, status.json}"""
-    return os.path.join(project_dir, "loras", char_id)
+    """Standard layout: <project>/loras/<char_id>/{dataset/, output/, status.json}.
+
+    Path-traversal-safe: rejects char_id values that escape the project tree.
+    """
+    return _safe_under(project_dir, "loras", char_id)
 
 
 def _generate_caption(char_name: str, traits: str, trigger: Optional[str]) -> str:
@@ -341,8 +360,10 @@ def _run_ai_toolkit(config_path: str, log_path: str) -> int:
     """Launch ai-toolkit subprocess. Returns the process exit code.
     Writes stdout+stderr to log_path so the UI can tail it.
     """
-    # ai-toolkit's typical invocation
-    cmd = ["python", "-m", "toolkit.run", config_path]
+    # ai-toolkit's typical invocation. Use sys.executable rather than ambient
+    # `python` so we hit the same interpreter the server is running under (avoids
+    # confusion in venvs with multiple installed Pythons).
+    cmd = [sys.executable, "-m", "toolkit.run", config_path]
     with open(log_path, "w") as logf:
         proc = subprocess.run(cmd, stdout=logf, stderr=subprocess.STDOUT, text=True)
         return proc.returncode
@@ -458,7 +479,14 @@ def train_character_lora(
 
     try:
         quality = validate_lora_quality(lora_path, character)
-        status.quality_score = quality
+        # Sentinel value means the validation path isn't implemented yet — keep
+        # quality_score as None so the UI shows "not validated" rather than a
+        # confusing -1.0. Once validate_lora_quality is real, this branch will
+        # also store legitimate failures (e.g., 0.0 = unrecognizable).
+        if quality == LORA_VALIDATION_SKIPPED:
+            status.quality_score = None
+        else:
+            status.quality_score = quality
     except Exception as e:
         # Validation failure is non-fatal — the LoRA still exists.
         print(f"[LoRA] validation skipped: {e}")
@@ -481,29 +509,28 @@ def train_character_lora(
 # Quality validation — uses ArcFace gate to score a few test generations
 # ---------------------------------------------------------------------------
 
-def validate_lora_quality(lora_path: str, character: dict) -> float:
-    """Score a trained LoRA by ArcFace similarity on test generations.
+LORA_VALIDATION_SKIPPED = -1.0  # Sentinel returned when validation isn't implemented yet.
 
-    The test:
+
+def validate_lora_quality(lora_path: str, character: dict) -> float:
+    """STUB — LoRA quality validation is not yet implemented.
+
+    Always returns LORA_VALIDATION_SKIPPED (-1.0). A real implementation would:
       1. Generate 4 reference shots with the LoRA + the character's trigger token.
       2. Score each against the character's canonical_reference via ArcFace.
-      3. Return mean ArcFace score.
+      3. Return mean ArcFace score on [0.0, 1.0].
 
-    Returns 0.0-1.0. Implementation requires the ComfyUI server to be reachable;
-    otherwise returns a sentinel (NaN equivalent: returns -1.0).
+    The stub is kept as a hook so:
+      - The caller (train_character_lora) has somewhere to call from when the
+        real implementation lands.
+      - The UI can render "validation skipped" today and "validation score: N"
+        tomorrow without API changes.
 
-    Right now this is a STUB — the integration depends on RunPod being up and
-    on the ComfyUI workflow JSON resolving the LoRA path. Full integration is
-    one more sprint; this hook lets the UI surface quality scores when they exist.
+    Callers should compare against LORA_VALIDATION_SKIPPED to detect the
+    not-implemented case (rather than treating any negative value as failure).
     """
-    # Stub: a real implementation would
-    #   - construct a ComfyUI workflow with LoraLoader(lora_path)
-    #   - generate test shots
-    #   - call face_validator_gate.score_candidate against canonical_reference
-    # Returning -1.0 signals "validation skipped" to the caller.
-    if not os.path.exists(lora_path):
-        return -1.0
-    return -1.0
+    print(f"[LoRA] validate_lora_quality is a stub; returning LORA_VALIDATION_SKIPPED for {os.path.basename(lora_path) if lora_path else '?'}")
+    return LORA_VALIDATION_SKIPPED
 
 
 # ---------------------------------------------------------------------------

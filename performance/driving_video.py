@@ -14,11 +14,20 @@ Provider chain (try in order, fall through on failure):
 from __future__ import annotations
 
 import os
-import time
-import urllib.request
-from typing import Optional
+from typing import Optional, Tuple
 
 from config.settings import settings
+from performance._net import safe_download
+from performance._poll import poll_task
+
+
+# Polling configuration — pulled to constants so timing is auditable and tunable
+# without rummaging through the body. Hedra typically returns within 60-120s;
+# SadTalker via ComfyUI is bursty, often longer.
+_HEDRA_POLL_TIMEOUT_S = 240
+_HEDRA_POLL_INTERVAL_S = 3
+_SADTALKER_POLL_TIMEOUT_S = 240
+_SADTALKER_POLL_INTERVAL_S = 2
 
 
 def _cost_log(provider: str, duration_s: float, shot_id: str, video_id: str) -> None:
@@ -65,8 +74,7 @@ def _synth_via_hedra(
                 with_logs=False,
             )
             video_url = result.get("video", {}).get("url")
-            if video_url:
-                urllib.request.urlretrieve(video_url, output_mp4)
+            if video_url and safe_download(video_url, output_mp4):
                 _cost_log("hedra", duration_s, shot_id, video_id)
                 print(f"   ✅ Hedra (FAL) driving face: {output_mp4}")
                 return output_mp4
@@ -96,25 +104,33 @@ def _synth_via_hedra(
         job_id = body.get("job_id") or body.get("id")
 
         if not out_url and job_id:
-            start = time.time()
-            while time.time() - start < 240:
+            def _get_status():
                 pr = requests.get(
                     f"https://api.hedra.com/v1/jobs/{job_id}",
                     headers={"Authorization": f"Bearer {api_key}"},
                     timeout=15,
                 )
-                if pr.ok:
-                    pb = pr.json()
-                    if (pb.get("status") or "").lower() in ("complete", "done", "succeeded"):
-                        out_url = pb.get("video_url") or pb.get("output_url")
-                        break
-                    if (pb.get("status") or "").lower() in ("failed", "error"):
-                        return None
-                time.sleep(3)
+                if not pr.ok:
+                    return {"status": "PENDING"}
+                pb = pr.json()
+                return {
+                    "status": (pb.get("status") or "").upper(),
+                    "video_url": pb.get("video_url") or pb.get("output_url"),
+                }
+
+            final = poll_task(
+                _get_status,
+                success_states={"COMPLETE", "DONE", "SUCCEEDED"},
+                terminal_states={"FAILED", "ERROR"},
+                interval_s=_HEDRA_POLL_INTERVAL_S,
+                timeout_s=_HEDRA_POLL_TIMEOUT_S,
+            )
+            out_url = final.get("video_url") if final else None
 
         if not out_url:
             return None
-        urllib.request.urlretrieve(out_url, output_mp4)
+        if not safe_download(out_url, output_mp4):
+            return None
         _cost_log("hedra", duration_s, shot_id, video_id)
         print(f"   ✅ Hedra (direct) driving face: {output_mp4}")
         return output_mp4
@@ -178,30 +194,46 @@ def _synth_via_sadtalker(
             return None
         prompt_id = qr.json().get("prompt_id")
 
-        start = time.time()
-        while time.time() - start < 240:
+        def _get_sadtalker_status():
             hr = requests.get(f"{server_url}/history/{prompt_id}", timeout=15)
-            if hr.ok and prompt_id in hr.json():
-                hist = hr.json()[prompt_id]
-                outputs = hist.get("outputs", {})
-                for _, nout in outputs.items():
-                    items = nout.get("gifs") or nout.get("videos") or []
-                    if items:
-                        item = items[0]
-                        view = (
-                            f"{server_url}/view"
-                            f"?filename={item.get('filename')}"
-                            f"&subfolder={item.get('subfolder', '')}"
-                            f"&type={item.get('type', 'output')}"
-                        )
-                        urllib.request.urlretrieve(view, output_mp4)
-                        _cost_log("sadtalker", duration_s, shot_id, video_id)
-                        print(f"   ✅ SadTalker driving face: {output_mp4}")
-                        return output_mp4
-                status = hist.get("status", {})
-                if status.get("status_str") == "error":
+            if not hr.ok or prompt_id not in hr.json():
+                return {"status": "PROCESSING"}
+            hist = hr.json()[prompt_id]
+            inner = hist.get("status", {})
+            if inner.get("status_str") == "error":
+                return {"status": "FAILED"}
+            if hist.get("outputs"):
+                return {"status": "SUCCEEDED", "outputs": hist["outputs"]}
+            return {"status": "PROCESSING"}
+
+        final = poll_task(
+            _get_sadtalker_status,
+            success_states={"SUCCEEDED"},
+            terminal_states={"FAILED"},
+            interval_s=_SADTALKER_POLL_INTERVAL_S,
+            timeout_s=_SADTALKER_POLL_TIMEOUT_S,
+        )
+        if not final:
+            return None
+
+        outputs = final["outputs"]
+        for _, nout in outputs.items():
+            items = nout.get("gifs") or nout.get("videos") or []
+            if items:
+                item = items[0]
+                view = (
+                    f"{server_url}/view"
+                    f"?filename={item.get('filename')}"
+                    f"&subfolder={item.get('subfolder', '')}"
+                    f"&type={item.get('type', 'output')}"
+                )
+                # ComfyUI pod is internal-trusted; allow http (RunPod often
+                # exposes the proxy URL without TLS).
+                if not safe_download(view, output_mp4, allow_http=True):
                     return None
-            time.sleep(2)
+                _cost_log("sadtalker", duration_s, shot_id, video_id)
+                print(f"   ✅ SadTalker driving face: {output_mp4}")
+                return output_mp4
         return None
     except Exception as e:
         print(f"   [DRIVING/SADTALKER] failed: {e}")
@@ -217,7 +249,7 @@ def synth_driving_face_from_audio(
     engine: str = "auto",     # 'auto' | 'hedra' | 'sadtalker'
     shot_id: str = "",
     video_id: str = "",
-) -> Optional[str]:
+) -> Optional[Tuple[str, str]]:
     """Generate a driving face video from TTS audio + a still keyframe.
 
     Used as Mode B autopilot when no operator-uploaded driving video exists.
@@ -227,22 +259,45 @@ def synth_driving_face_from_audio(
       'auto'  → try Hedra first, fall back to SadTalker
       'hedra' → Hedra only
       'sadtalker' → SadTalker only
+
+    Cache:
+      Results are cached by sha256(audio) + sha256(keyframe) + duration under
+      PERFORMANCE_CACHE_DIR (default: data/cache/driving/). On a cache hit the
+      function returns immediately with provider='cache' and skips all API calls,
+      avoiding repeat Hedra charges (~$0.05/shot) when inputs haven't changed.
+
+    Returns:
+        (path, provider_name) tuple on success — provider_name is one of
+        {"hedra", "sadtalker", "cache"}. None on full failure.
     """
     if not (audio_path and os.path.exists(audio_path)):
         return None
     if not (keyframe_path and os.path.exists(keyframe_path)):
         return None
 
+    # --- Content-hash cache check (MUST come AFTER existence guards above) ---
+    import shutil as _shutil
+    from performance._cache import driving_cache_key, lookup_cache, store_cache
+
+    key = driving_cache_key(audio_path, keyframe_path, duration_s)
+    cached = lookup_cache(key)
+    if cached:
+        _shutil.copyfile(cached, output_mp4)
+        print(f"   ✅ Driving-video cache hit: {cached}")
+        return (output_mp4, "cache")
+
     if engine in ("auto", "hedra"):
         r = _synth_via_hedra(audio_path, keyframe_path, output_mp4, duration_s, shot_id, video_id)
         if r:
-            return r
+            store_cache(key, output_mp4)
+            return (r, "hedra")
         if engine == "hedra":
             return None
 
     if engine in ("auto", "sadtalker"):
         r = _synth_via_sadtalker(audio_path, keyframe_path, output_mp4, duration_s, shot_id, video_id)
         if r:
-            return r
+            store_cache(key, output_mp4)
+            return (r, "sadtalker")
 
     return None

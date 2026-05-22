@@ -176,12 +176,19 @@ BILLING_PROVIDERS = {
 }
 
 
+# Precomputed reverse map for O(1) provider lookup. Built at module load from
+# BILLING_PROVIDERS — if you add a new (provider, keys) pair, this reflects it
+# automatically. Keep edits in BILLING_PROVIDERS, not here.
+_API_KEY_TO_PROVIDER = {
+    api_key: provider
+    for provider, keys in BILLING_PROVIDERS.items()
+    for api_key in keys
+}
+
+
 def provider_for(api_key: str) -> str:
     """Reverse lookup: API key → billing provider name. Returns 'UNKNOWN' if unmapped."""
-    for provider, keys in BILLING_PROVIDERS.items():
-        if api_key in keys:
-            return provider
-    return "UNKNOWN"
+    return _API_KEY_TO_PROVIDER.get(api_key, "UNKNOWN")
 
 
 def estimate_short_cost(

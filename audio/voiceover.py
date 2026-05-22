@@ -217,9 +217,15 @@ def generate_tts_routed(
 
     if language is None:
         language = getattr(settings, "language", "English") or "English"
+    # Covers the 12 languages claimed in GlobalSettings.language. Add new
+    # entries here when the project's language set grows — silently defaulting
+    # to "en" would route (e.g.) Korean dialogue to an English voice.
     lang_iso = {
-        "english": "en", "korean": "ko", "japanese": "ja", "mandarin": "zh",
-        "chinese": "zh", "spanish": "es", "french": "fr", "german": "de",
+        "english": "en", "korean": "ko", "japanese": "ja",
+        "mandarin": "zh", "chinese": "zh",
+        "spanish": "es", "french": "fr", "german": "de",
+        "italian": "it", "portuguese": "pt", "russian": "ru",
+        "hindi": "hi", "arabic": "ar",
     }.get(language.lower().strip(), "en")
 
     # Try the requested provider; fall through to ElevenLabs on failure

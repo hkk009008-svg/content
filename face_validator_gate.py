@@ -19,6 +19,7 @@ ArcFace alone, just with less discrimination on the aesthetic axis.
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -32,10 +33,17 @@ except Exception as _e_arc:
     _arc_import_error = str(_e_arc)
 
 
+# Lazy-loaded singleton — IdentityValidator pulls ArcFace weights into memory,
+# so instantiating it per candidate (N=8 × M shots) is wasteful. Cache + lock.
+_VALIDATOR_SINGLETON: Optional["IdentityValidator"] = None
+_VALIDATOR_LOCK = threading.Lock()
+
+
 # --- Aesthetic v2 (LAION CLIP+MLP scorer, lazy-loaded) ---------------------
 _AES_MODEL = None
 _AES_PROCESSOR = None
 _AES_TRIED_LOAD = False
+_AES_LOCK = threading.Lock()
 
 
 def _try_load_aesthetic_v2():
@@ -44,28 +52,32 @@ def _try_load_aesthetic_v2():
     Strategy: try the `simple-aesthetics-predictor` package first (cleanest API).
     Falls back to manual CLIP-L + MLP if that's not installed. Returns True on
     success, False on any failure (so callers know to skip aesthetic scoring).
+
+    Thread-safe: two concurrent shots could both reach _try_load before either
+    finishes; the lock serializes the import + model load.
     """
     global _AES_MODEL, _AES_PROCESSOR, _AES_TRIED_LOAD
-    if _AES_TRIED_LOAD:
-        return _AES_MODEL is not None
-    _AES_TRIED_LOAD = True
+    with _AES_LOCK:
+        if _AES_TRIED_LOAD:
+            return _AES_MODEL is not None
+        _AES_TRIED_LOAD = True
 
-    try:
-        from aesthetics_predictor import AestheticsPredictorV2Linear
-        from transformers import CLIPProcessor
-        _AES_MODEL = AestheticsPredictorV2Linear.from_pretrained(
-            "shunk031/aesthetics-predictor-v2-sac-logos-ava1-l14-linearMSE"
-        )
-        _AES_PROCESSOR = CLIPProcessor.from_pretrained(
-            "openai/clip-vit-large-patch14"
-        )
-        _AES_MODEL.train(False)
-        print("[FaceGate] Aesthetic v2 loaded (LAION SAC+LOGOS+AVA1 linearMSE)")
-        return True
-    except Exception as e:
-        print(f"[FaceGate] Aesthetic v2 unavailable ({e}). "
-              f"Composite scoring will use ArcFace only.")
-        return False
+        try:
+            from aesthetics_predictor import AestheticsPredictorV2Linear
+            from transformers import CLIPProcessor
+            _AES_MODEL = AestheticsPredictorV2Linear.from_pretrained(
+                "shunk031/aesthetics-predictor-v2-sac-logos-ava1-l14-linearMSE"
+            )
+            _AES_PROCESSOR = CLIPProcessor.from_pretrained(
+                "openai/clip-vit-large-patch14"
+            )
+            _AES_MODEL.train(False)
+            print("[FaceGate] Aesthetic v2 loaded (LAION SAC+LOGOS+AVA1 linearMSE)")
+            return True
+        except Exception as e:
+            print(f"[FaceGate] Aesthetic v2 unavailable ({e}). "
+                  f"Composite scoring will use ArcFace only.")
+            return False
 
 
 def _aesthetic_score(image_path: str) -> Optional[float]:
@@ -90,12 +102,34 @@ def _aesthetic_score(image_path: str) -> Optional[float]:
         return None
 
 
-def _arcface_score(image_path: str, reference_path: str) -> Optional[float]:
-    """ArcFace cosine similarity in [0, 1]. None on failure / no face."""
+def _get_validator() -> Optional["IdentityValidator"]:
+    """Return a cached IdentityValidator instance, or None if ArcFace is unavailable.
+
+    Instantiating IdentityValidator pulls ArcFace weights into memory; doing
+    that per-candidate would mean N=8 × M shots loads of the same weights.
+    The singleton + lock means we pay the load once per process.
+    """
     if not _ARC_AVAILABLE:
         return None
+    global _VALIDATOR_SINGLETON
+    if _VALIDATOR_SINGLETON is not None:
+        return _VALIDATOR_SINGLETON
+    with _VALIDATOR_LOCK:
+        if _VALIDATOR_SINGLETON is None:
+            try:
+                _VALIDATOR_SINGLETON = IdentityValidator(vision_fallback=validate_identity_vision)
+            except Exception as e:
+                print(f"[FaceGate] IdentityValidator init failed: {e}")
+                return None
+        return _VALIDATOR_SINGLETON
+
+
+def _arcface_score(image_path: str, reference_path: str) -> Optional[float]:
+    """ArcFace cosine similarity in [0, 1]. None on failure / no face."""
+    validator = _get_validator()
+    if validator is None:
+        return None
     try:
-        validator = IdentityValidator(vision_fallback=validate_identity_vision)
         result = validator.validate_image(image_path, reference_path, threshold=0.0)
         return float(result.overall_score)
     except Exception as e:
@@ -176,10 +210,10 @@ class HaltDecision:
 def should_halt(
     scores: List[CandidateScore],
     halt_threshold_composite: float = 0.92,
-    halt_threshold_arc: float = 0.85,  # retained for back-compat / logging
+    halt_threshold_arc: float = 0.85,    # informational — see docstring
     halt_min_n: int = 4,
     halt_max_n: int = 8,
-    has_character: bool = True,
+    has_character: bool = True,          # informational — see docstring
 ) -> HaltDecision:
     """Decide whether N=8 best-of generation can stop early.
 
@@ -197,8 +231,10 @@ def should_halt(
     "is the best of the batch good enough?"; regenerate = "is the best of
     the batch identity-acceptable?".
 
-    halt_threshold_arc is retained so callers can log/audit what arc bar was
-    expected, even though it's not enforced here.
+    Informational params (NOT enforced here; surfaced in the decision reason
+    so callers can log/audit what bars were expected without re-deriving them):
+      - halt_threshold_arc: the arc bar callers consider sufficient
+      - has_character: whether this shot was an identity-bearing shot
     """
     if not scores:
         return HaltDecision(halt=False, reason="no candidates yet")

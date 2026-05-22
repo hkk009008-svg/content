@@ -492,7 +492,7 @@ def api_update_character(pid, cid):
         os.makedirs(char_dir, exist_ok=True)
         for f in request.files.getlist("reference_images"):
             if f.filename:
-                safe_name = f.filename.replace("/", "_").replace("\\", "_")
+                safe_name = secure_filename(f.filename) or "file"
                 save_path = os.path.join(char_dir, safe_name)
                 f.save(save_path)
                 saved_paths.append(save_path)
@@ -556,7 +556,11 @@ def api_remove_character(pid, cid):
 # ---------------------------------------------------------------------------
 # Active jobs tracked in-memory; survives only for the lifetime of the server.
 # Status sidecar on disk (<project>/loras/<char>/status.json) is the source of truth.
+# The lock guards check-and-insert into _lora_training_threads to prevent the
+# TOCTOU race where two concurrent POSTs both pass the is_alive() check before
+# either starts a thread.
 _lora_training_threads: dict[str, threading.Thread] = {}
+_lora_training_lock = threading.Lock()
 
 
 @app.route("/api/projects/<pid>/characters/<cid>/train-lora", methods=["POST"])
@@ -581,8 +585,6 @@ def api_train_lora(pid, cid):
         }), 400
 
     key = f"{pid}:{cid}"
-    if key in _lora_training_threads and _lora_training_threads[key].is_alive():
-        return jsonify({"error": "Training already in progress for this character"}), 409
 
     try:
         from prep.lora_training import train_character_lora
@@ -607,11 +609,18 @@ def api_train_lora(pid, cid):
                 except Exception as me:
                     print(f"[LoRA] could not persist lora_path to settings: {me}")
         finally:
-            _lora_training_threads.pop(key, None)
+            with _lora_training_lock:
+                _lora_training_threads.pop(key, None)
 
-    t = threading.Thread(target=_runner, daemon=True, name=f"lora-train-{cid}")
-    _lora_training_threads[key] = t
-    t.start()
+    # Atomic check-and-insert: the lock serializes the existence check and the
+    # thread-start so two concurrent POSTs can't both pass the check.
+    with _lora_training_lock:
+        existing = _lora_training_threads.get(key)
+        if existing and existing.is_alive():
+            return jsonify({"error": "Training already in progress for this character"}), 409
+        t = threading.Thread(target=_runner, daemon=True, name=f"lora-train-{cid}")
+        _lora_training_threads[key] = t
+        t.start()
 
     return jsonify({"started": True, "char_id": cid, "background": True}), 202
 
@@ -716,7 +725,7 @@ def api_upload_style_board(pid):
     saved = []
     for f in images:
         if f.filename:
-            safe_name = f.filename.replace("/", "_").replace("\\", "_")
+            safe_name = secure_filename(f.filename) or "file"
             path = os.path.join(style_dir, safe_name)
             f.save(path)
             saved.append(path)
@@ -761,26 +770,16 @@ def api_add_object(pid):
     texture_anchor = data.get("texture_anchor", "")
     ip_weight = float(data.get("ip_adapter_weight", "0.85"))
 
-    # Save uploaded reference images (any number, ideally 4-8 from multiple angles)
-    image_paths = []
-    if not request.is_json:
-        images = request.files.getlist("reference_images")
-        project_dir = get_project_dir(pid)
-        obj_id_preview = f"obj_pending"
-        upload_dir = os.path.join(project_dir, "objects", obj_id_preview)
-        os.makedirs(upload_dir, exist_ok=True)
-        for img in images:
-            if img.filename:
-                fname = secure_filename(img.filename)
-                path = os.path.join(upload_dir, fname)
-                img.save(path)
-                image_paths.append(path)
-
+    # Create the object FIRST to claim a unique id, then save uploaded references
+    # into <project>/objects/<obj_id>/. The previous flow used a shared
+    # `obj_pending` staging dir which raced when two operators uploaded to the
+    # same project concurrently — second upload's files were lost to the first
+    # rename. Race-free now because every upload gets its own object dir.
     obj = make_object(
         name=name,
         description=description,
         brand=brand,
-        reference_images=image_paths,
+        reference_images=[],
         material_traits=material_traits,
         surface_type=surface_type,
         branding_constraints=branding_constraints,
@@ -788,22 +787,23 @@ def api_add_object(pid):
         texture_anchor=texture_anchor,
         ip_adapter_weight=ip_weight,
     )
-    # Set canonical reference to the first image if any uploaded
+
+    image_paths = []
+    if not request.is_json:
+        images = request.files.getlist("reference_images")
+        project_dir = get_project_dir(pid)
+        obj_dir = os.path.join(project_dir, "objects", obj["id"])
+        os.makedirs(obj_dir, exist_ok=True)
+        for img in images:
+            if img.filename:
+                fname = secure_filename(img.filename) or "file"
+                path = os.path.join(obj_dir, fname)
+                img.save(path)
+                image_paths.append(path)
+
     if image_paths:
+        obj["reference_images"] = image_paths
         obj["canonical_reference"] = image_paths[0]
-        # Rename the upload dir to the real object ID
-        try:
-            project_dir = get_project_dir(pid)
-            old_dir = os.path.join(project_dir, "objects", "obj_pending")
-            new_dir = os.path.join(project_dir, "objects", obj["id"])
-            if os.path.isdir(old_dir):
-                os.makedirs(os.path.dirname(new_dir), exist_ok=True)
-                os.rename(old_dir, new_dir)
-                # Rewrite paths
-                obj["reference_images"] = [p.replace(old_dir, new_dir) for p in obj["reference_images"]]
-                obj["canonical_reference"] = obj["canonical_reference"].replace(old_dir, new_dir)
-        except OSError as e:
-            print(f"[OBJECTS] could not rename upload dir: {e}")
 
     add_object(project, obj, timeout=HTTP_PROJECT_TIMEOUT)
     return jsonify(obj), 201
@@ -835,7 +835,7 @@ def api_update_object(pid, oid):
         os.makedirs(obj_dir, exist_ok=True)
         for f in request.files.getlist("reference_images"):
             if f.filename:
-                safe_name = f.filename.replace("/", "_").replace("\\", "_")
+                safe_name = secure_filename(f.filename) or "file"
                 save_path = os.path.join(obj_dir, safe_name)
                 f.save(save_path)
                 saved_paths.append(save_path)
@@ -952,7 +952,7 @@ def api_update_location(pid, lid):
         os.makedirs(loc_dir, exist_ok=True)
         for f in request.files.getlist("reference_images"):
             if f.filename:
-                safe_name = f.filename.replace("/", "_").replace("\\", "_")
+                safe_name = secure_filename(f.filename) or "file"
                 save_path = os.path.join(loc_dir, safe_name)
                 f.save(save_path)
                 saved_paths.append(save_path)

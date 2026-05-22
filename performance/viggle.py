@@ -13,11 +13,14 @@ Requires:
 from __future__ import annotations
 
 import os
-import time
-import urllib.request
 from typing import Optional
 
 from config.settings import settings
+from performance._net import safe_download
+from performance._poll import poll_task
+
+
+_POLL_INTERVAL_S = 3
 
 
 def _cost_log(shot_id: str = "", video_id: str = "") -> None:
@@ -66,10 +69,9 @@ def generate_viggle_performance(
         # Endpoint shape from Viggle's public API docs. Confirm at implement time —
         # they've changed naming a couple times between v1 and v2.
         url = "https://api.viggle.ai/v1/motion-transfer"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "multipart/form-data",
-        }
+        # NOTE: don't set Content-Type explicitly when using files= — requests
+        # generates the multipart boundary; setting it manually breaks the request.
+        auth_headers = {"Authorization": f"Bearer {api_key}"}
 
         with open(keyframe_path, "rb") as kf, open(driving_video_path, "rb") as dv:
             files = {
@@ -77,7 +79,7 @@ def generate_viggle_performance(
                 "motion_video": dv,
             }
             data = {"background": background_mode}
-            r = requests.post(url, headers={"Authorization": f"Bearer {api_key}"},
+            r = requests.post(url, headers=auth_headers,
                               files=files, data=data, timeout=120)
         if r.status_code not in (200, 201, 202):
             print(f"   [VIGGLE] HTTP {r.status_code}: {r.text[:200]}")
@@ -89,25 +91,33 @@ def generate_viggle_performance(
         job_id = body.get("job_id") or body.get("id")
 
         if not out_url and job_id:
-            start = time.time()
-            while time.time() - start < poll_timeout_s:
+            def _get_status():
                 pr = requests.get(
                     f"https://api.viggle.ai/v1/jobs/{job_id}",
-                    headers={"Authorization": f"Bearer {api_key}"},
+                    headers=auth_headers,
                     timeout=15,
                 )
-                if pr.ok:
-                    pb = pr.json()
-                    if (pb.get("status") or "").lower() in ("complete", "done", "succeeded"):
-                        out_url = pb.get("output_url") or pb.get("video_url")
-                        break
-                    if (pb.get("status") or "").lower() in ("failed", "error"):
-                        return None
-                time.sleep(3)
+                if not pr.ok:
+                    return {"status": "PENDING"}
+                pb = pr.json()
+                return {
+                    "status": (pb.get("status") or "").upper(),
+                    "output_url": pb.get("output_url") or pb.get("video_url"),
+                }
+
+            final = poll_task(
+                _get_status,
+                success_states={"COMPLETE", "DONE", "SUCCEEDED"},
+                terminal_states={"FAILED", "ERROR"},
+                interval_s=_POLL_INTERVAL_S,
+                timeout_s=poll_timeout_s,
+            )
+            out_url = final.get("output_url") if final else None
 
         if not out_url:
             return None
-        urllib.request.urlretrieve(out_url, output_mp4)
+        if not safe_download(out_url, output_mp4):
+            return None
         _cost_log(shot_id, video_id)
         print(f"   ✅ Viggle: {output_mp4}")
         return output_mp4
