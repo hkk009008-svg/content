@@ -155,3 +155,28 @@ def driving_video_source(shot: dict) -> str:
     if _has_dialogue(shot):
         return "tts_auto"
     return "none"
+
+
+def precondition_error(
+    engine: str,
+    audio_path: Optional[str],
+    driving_video_path: Optional[str],
+) -> Optional[str]:
+    """Return an error string if the engine's inputs are missing, else None.
+
+    Called from cinema/shots/controller.py before allocating a take so we
+    don't leave orphan take metadata when we know the dispatch will fail.
+
+    Rules:
+      - ACT_ONE requires audio_path. (It can optionally take a driving video
+        as reference, but it still uses audio for lip-sync timing.)
+      - LIVE_PORTRAIT and VIGGLE require a driving_video_path.
+      - SKIP has no preconditions.
+    """
+    if engine == ENGINE_ACT_ONE:
+        if not (audio_path or "").strip():
+            return "ACT_ONE requires audio_path; got empty"
+    if engine in (ENGINE_LIVE_PORTRAIT, ENGINE_VIGGLE):
+        if not (driving_video_path or "").strip():
+            return f"{engine} requires driving_video_path; got empty"
+    return None

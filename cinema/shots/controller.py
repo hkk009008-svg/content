@@ -506,6 +506,23 @@ class ShotController:
         except Exception as e:
             print(f"[PERFORMANCE] scene audio unavailable ({e}); engine={engine}")
 
+        # Hard precondition check — refuse to allocate a take when we know it'll
+        # fail in the adapter. Audio-less ACT_ONE silently mis-syncs; LIVE_PORTRAIT
+        # and VIGGLE fail to start at all.
+        from domain.performance import precondition_error
+        pre_err = precondition_error(engine, audio_path, shot.get("driving_video_path") or "")
+        if pre_err:
+            def _mut_pre_fail(_scene: dict, project_shot: dict):
+                project_shot["performance_engine"] = "SKIP"
+                return MutationResult(True, save=True)
+            self._mutate_shot(shot_id, _mut_pre_fail)
+            self.progress(
+                "PERFORMANCE_SKIPPED",
+                f"Shot {shot_id}: {engine} precondition failed: {pre_err}",
+                -1, scene_id=scene_id, shot_id=shot_id, performance_engine="SKIP",
+            )
+            return {"success": True, "skipped": True, "engine": engine, "error": pre_err}
+
         # --- 3. Driving video — Mode A (operator upload) wins, else Mode B synth ---
         driving = (shot.get("driving_video_path") or "").strip()
         source_mode = driving_video_source(shot)
