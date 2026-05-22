@@ -162,6 +162,18 @@ body::before {
 ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 0; }
 ::-webkit-scrollbar-thumb:hover { background: #d4a85a; }
 
+/* Filmstrip scrollbar — slim gold thumb, matches console.gold token */
+.filmstrip-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: theme('colors.console.gold') #000;
+}
+.filmstrip-scroll::-webkit-scrollbar { height: 4px; }
+.filmstrip-scroll::-webkit-scrollbar-track { background: #000; }
+.filmstrip-scroll::-webkit-scrollbar-thumb {
+  background: theme('colors.console.gold');
+  border-radius: 3px;
+}
+
 /* Form focus — single hairline underline, ivory glow */
 input:focus, textarea:focus, select:focus {
   outline: none;

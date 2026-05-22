@@ -50,7 +50,7 @@ export default function Filmstrip({ project, apiBase = '', projectId, onShotClic
       <h2 className="text-eyebrow-lg uppercase tracking-wider text-console-ink-mute mb-3 font-console-mono">
         Filmstrip
       </h2>
-      <div className="overflow-x-auto shadow-console-filmstrip-inset">
+      <div className="filmstrip-scroll overflow-x-auto shadow-console-filmstrip-inset">
         <div className="flex gap-2 bg-black py-4 px-2">
           {visible.map((shot) => {
             const isDone = shot.plan_status === 'approved'
