@@ -430,7 +430,7 @@ export default function EditorialShell({
             <Eyebrow className="mb-3">The Workshop</Eyebrow>
             <h2
               className="font-display text-editorial-ivory text-4xl"
-              style={{ fontVariationSettings: "'opsz' 60, 'wght' 350, 'SOFT' 20' " }}
+              style={{ fontVariationSettings: "'opsz' 60, 'wght' 350, 'SOFT' 20" }}
             >
               Cast, locations, sound &amp; settings
             </h2>

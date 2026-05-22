@@ -13,6 +13,8 @@ interface Props {
   onResume: () => void
 }
 
+const pad2 = (n: number) => n.toString().padStart(2, '0')
+
 export default function PipelineHeader({
   projectName, stages, activeStage, isPaused, failedShots,
   onBack, onCancel, onPause, onResume,
@@ -27,72 +29,104 @@ export default function PipelineHeader({
 
   const mins = Math.floor(elapsed / 60)
   const secs = elapsed % 60
-  const completedCount = stages.filter(s => s.status === 'complete').length
-  const currentLabel = isPaused ? 'Paused' : (stages.find(s => s.id === activeStage)?.label || 'Initializing...')
+  const currentLabel =
+    isPaused
+      ? 'Held'
+      : stages.find(s => s.id === activeStage)?.label ?? 'Standing by'
 
   return (
-    <div className="border-b border-cinema-border px-6 py-3 flex items-center justify-between bg-cinema-bg">
-      <div className="flex items-center gap-4">
-        <button onClick={onBack} className="text-cinema-muted hover:text-cinema-text text-sm">
-          &larr; Back to Setup
+    <div
+      className="px-10 py-4 flex items-center justify-between gap-6
+                 border-b border-editorial-rule bg-editorial-ink"
+    >
+      {/* Left — back link + project marker */}
+      <div className="flex items-center gap-8 min-w-0">
+        <button
+          onClick={onBack}
+          className="font-mono text-[11px] text-editorial-ivory-mute tracking-wide-eyebrow
+                     uppercase hover:text-editorial-brass link-editorial whitespace-nowrap"
+        >
+          ← The Archive
         </button>
-        <h1 className="text-lg font-semibold text-cinema-text">{projectName}</h1>
-        <span className={`text-xs px-2 py-1 rounded font-mono ${
-          isPaused ? 'text-cinema-warning bg-cinema-warning/10' : 'text-cinema-accent bg-cinema-accent/10'
-        }`}>
-          {isPaused ? 'PAUSED' : 'PIPELINE MODE'}
-        </span>
-        {failedShots.length > 0 && (
-          <span className="text-xs text-cinema-danger bg-cinema-danger/10 px-2 py-1 rounded font-mono">
-            {failedShots.length} SKIPPED
+
+        <div className="flex items-baseline gap-3 min-w-0">
+          <span
+            className="font-display text-editorial-ivory text-base truncate"
+            style={{ fontVariationSettings: "'opsz' 24, 'wght' 450, 'SOFT' 30" }}
+          >
+            {projectName}
           </span>
-        )}
+          <span className="font-mono text-[10px] tracking-wide-eyebrow uppercase
+                           text-editorial-ivory-mute whitespace-nowrap">
+            {isPaused ? 'Held' : 'On Air'}
+          </span>
+          {failedShots.length > 0 && (
+            <span
+              className="font-mono text-[10px] tracking-wide-eyebrow uppercase
+                         text-editorial-curtain whitespace-nowrap"
+              title={`${failedShots.length} shot(s) failed and were skipped`}
+            >
+              · {failedShots.length} Skipped
+            </span>
+          )}
+        </div>
       </div>
 
-      <div className="flex items-center gap-4">
-        {/* Mini stage progress */}
-        <div className="flex items-center gap-1">
-          {stages.map(s => (
-            <div
-              key={s.id}
-              className={`w-3 h-3 rounded-full transition-colors ${
-                s.status === 'complete' ? 'bg-cinema-success' :
-                s.status === 'running' ? (isPaused ? 'bg-cinema-warning' : 'bg-cinema-accent animate-pulse') :
-                'bg-cinema-muted/20'
-              }`}
-              title={s.label}
-            />
-          ))}
+      {/* Right — current stage, timer, action verbs */}
+      <div className="flex items-center gap-6 flex-shrink-0">
+        <div className="flex items-baseline gap-3">
+          <span className="font-mono text-[10px] tracking-wide-eyebrow uppercase
+                           text-editorial-ivory-mute">
+            Now
+          </span>
+          <span
+            className={`font-display text-base ${
+              isPaused ? 'text-editorial-brass' : 'text-editorial-ivory'
+            }`}
+            style={{
+              fontVariationSettings: isPaused
+                ? "'opsz' 24, 'SOFT' 80, 'WONK' 1, 'wght' 420"
+                : "'opsz' 24, 'wght' 420, 'SOFT' 30",
+              fontStyle: isPaused ? 'italic' : 'normal',
+            }}
+          >
+            {currentLabel}
+          </span>
         </div>
 
-        <span className="text-sm text-cinema-text">{currentLabel}</span>
-
-        <span className="text-xs text-cinema-muted font-mono">
-          {completedCount}/{stages.length} &middot; {mins}:{secs.toString().padStart(2, '0')}
+        <span className="font-mono text-[11px] text-editorial-ivory-soft tabular-nums tracking-wide-eyebrow">
+          {pad2(mins)}:{pad2(secs)}
         </span>
 
-        {/* Pause / Resume button */}
+        {/* Hairline buttons in editorial vocabulary —
+            flat squared rectangles, mono eyebrow text, no fills. */}
         {isPaused ? (
           <button
             onClick={onResume}
-            className="bg-cinema-success/80 hover:bg-cinema-success px-4 py-1.5 rounded text-white text-sm"
+            className="px-5 py-2.5 font-mono text-[10px] tracking-wide-eyebrow uppercase
+                       border border-editorial-brass text-editorial-brass
+                       hover:bg-editorial-brass hover:text-editorial-ink transition-colors"
           >
-            Resume
+            Resume Filming
           </button>
         ) : (
           <button
             onClick={onPause}
-            className="bg-cinema-warning/80 hover:bg-cinema-warning px-4 py-1.5 rounded text-black text-sm"
+            className="px-5 py-2.5 font-mono text-[10px] tracking-wide-eyebrow uppercase
+                       border border-editorial-rule-bright text-editorial-ivory-soft
+                       hover:border-editorial-brass hover:text-editorial-brass transition-colors"
           >
-            Pause
+            Hold the Print
           </button>
         )}
 
         <button
           onClick={onCancel}
-          className="bg-cinema-danger/80 hover:bg-cinema-danger px-4 py-1.5 rounded text-white text-sm"
+          className="px-5 py-2.5 font-mono text-[10px] tracking-wide-eyebrow uppercase
+                     border border-editorial-curtain text-editorial-curtain
+                     hover:bg-editorial-curtain hover:text-editorial-ivory transition-colors"
         >
-          Cancel
+          Strike the Print
         </button>
       </div>
     </div>

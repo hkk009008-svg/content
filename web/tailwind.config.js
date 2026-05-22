@@ -14,8 +14,8 @@ export default {
           'rule-bright': '#3a3a3a',
           ivory: '#f0ebe1',        // primary text — projection screen
           'ivory-soft': '#d8d2c5',
-          'ivory-mute': '#807872', // muted body
-          'ivory-faint': '#4a4540',
+          'ivory-mute': '#928a82', // muted body — WCAG AA on #0a0a0a (4.7:1)
+          'ivory-faint': '#6e6961', // disabled / placeholder — large-text AA (3.0:1)
           curtain: '#bf3737',      // single arterial red
           'curtain-deep': '#8a2828',
           brass: '#d4a85a',        // lamp / brass
@@ -58,7 +58,7 @@ export default {
       letterSpacing: {
         'tight-display': '-0.02em',
         'tight-body': '-0.01em',
-        'wide-eyebrow': '0.18em',
+        'wide-eyebrow': '0.26em',
       },
       backgroundImage: {
         'gradient-panel': 'linear-gradient(180deg, #141414 0%, #0a0a0a 100%)',
