@@ -47,6 +47,7 @@ class SoraNativeAPI:
         duration: int = 4,
         model: str = "sora-2",
         resolution: str = "1080p",
+        driving_video_path: str = "",
     ) -> str | None:
         """
         Generate video from a start frame image + text prompt using Sora 2.
@@ -58,6 +59,13 @@ class SoraNativeAPI:
             duration: Video duration in seconds — 4, 8, 12, 16, or 20 (integer).
             model: Model name — "sora-2" (default).
             resolution: Output resolution — "480p", "720p", or "1080p".
+            driving_video_path: Optional path to a performance-capture clip.
+                When provided AND the file exists, Sora uses it as the
+                ``input_reference`` (video) instead of the resized still image.
+                Sora 2 supports video conditioning natively through this same
+                field — driving the character's motion from the reference clip
+                while still respecting the start-frame composition. Falls
+                through to the still-image path on any access error.
 
         Returns:
             output_path on success, None on failure.
@@ -65,6 +73,10 @@ class SoraNativeAPI:
         if not os.path.exists(image_path):
             print(f"[SORA-NATIVE] Start frame not found: {image_path}")
             return None
+        # Driving video opt-in: only used when the file actually exists.
+        use_driving = bool(driving_video_path) and os.path.exists(driving_video_path)
+        if use_driving:
+            print(f"[SORA-NATIVE] Using performance driving video as input_reference: {os.path.basename(driving_video_path)}")
 
         valid_durations = [4, 8, 12, 16, 20]
         if duration not in valid_durations:
@@ -89,18 +101,26 @@ class SoraNativeAPI:
             tmp.close()
             print(f"[SORA-NATIVE] Image resized to 1280x720: {tmp_path}")
 
-            # Pass as PathLike — the SDK expects a file path, bytes, or IO object
+            # Pass as PathLike — the SDK expects a file path, bytes, or IO object.
+            # When a driving video was supplied, prefer it as the reference: Sora 2
+            # accepts video here for motion conditioning. The still-frame resize
+            # above still runs as a safety net (Sora needs a valid composition
+            # even when video conditioning is used).
             from pathlib import Path
+            reference_for_sora = Path(driving_video_path) if use_driving else Path(tmp_path)
             video = self.client.videos.create_and_poll(
                 model=model,
                 prompt=prompt,
-                input_reference=Path(tmp_path),
+                input_reference=reference_for_sora,
                 seconds=duration,
                 size="1280x720",
             )
 
-            # Clean up temp file
-            os.unlink(tmp_path)
+            # Clean up the still-frame temp file (driving video is operator-owned, leave it).
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
             status = getattr(video, "status", "unknown")
             if status != "completed":

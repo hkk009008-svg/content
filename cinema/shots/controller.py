@@ -757,6 +757,24 @@ class ShotController:
             identity_score = vid_result.overall_score if hasattr(vid_result, "overall_score") else 0.0
             take["metadata"]["identity_score"] = identity_score
 
+        # --- Motion fidelity gate (handoff §11) ---
+        # When the performance phase produced a driving video AND a downstream
+        # engine actually consumed it (Sora/Veo), score whether the motion
+        # output follows the driving signature. Inconclusive scores (None)
+        # are stored as the literal sentinel so the operator can tell "didn't
+        # measure" from "measured low".
+        if driving_video_path and os.path.exists(driving_video_path):
+            try:
+                from performance.motion_gate import score_motion_fidelity
+                motion_score = score_motion_fidelity(final_vid, driving_video_path)
+                take["metadata"]["motion_fidelity"] = motion_score
+                if motion_score is not None:
+                    print(f"   [MOTION-GATE] {shot_id}: motion_fidelity={motion_score:.3f}")
+            except Exception as e:
+                # Gate is advisory only — never fail the shot because the gate broke.
+                print(f"   [MOTION-GATE] skipped ({e})")
+                take["metadata"]["motion_fidelity"] = None
+
         take["path"] = final_vid
 
         def _mutator(_scene: dict, project_shot: dict):

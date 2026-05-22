@@ -142,7 +142,24 @@ function ClipCard({
     ? 'Shot Plan'
     : activeStage === 'KEYFRAME_REVIEW'
       ? 'Keyframe Review'
-      : 'Final Review'
+      : activeStage === 'PERFORMANCE_REVIEW'
+        ? 'Performance Review'
+        : 'Final Review'
+
+  // --- Performance takes: surface when stage is PERFORMANCE_REVIEW ---
+  // Mirrors the keyframe/final patterns above. When the performance phase
+  // produced a take, its video clip is what the operator approves.
+  const performanceTakes = (shot as any).performance_takes || []
+  const latestPerformanceTake = performanceTakes.length > 0
+    ? performanceTakes[performanceTakes.length - 1]
+    : null
+  const approvedPerformanceTakeId = (shot as any).approved_performance_take_id || latestPerformanceTake?.id || ''
+  const performanceEngine = (shot as any).performance_engine || ''
+  const drivingVideoPath = (shot as any).driving_video_path || ''
+  const performanceVideoPath = latestPerformanceTake?.path || ''
+  const performanceMetadata = latestPerformanceTake?.metadata || {}
+  const motionFidelity: number | null | undefined = performanceMetadata.motion_fidelity
+  const performanceIdentity: number | null | undefined = performanceMetadata.identity_score
 
   useEffect(() => {
     if (shot.approved_keyframe_take_id) {
@@ -344,6 +361,127 @@ function ClipCard({
             )}
           </section>
 
+          {/* Performance Capture section — visible across all review stages so
+              operator can monitor + replace the driving reference at any point.
+              Highlighted with a brass accent when PERFORMANCE_REVIEW is active. */}
+          <section className={`rounded border px-3 py-3 ${
+            activeStage === 'PERFORMANCE_REVIEW'
+              ? 'border-editorial-brass/60 bg-editorial-brass/5'
+              : 'border-editorial-rule bg-editorial-ink'
+          }`}>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-editorial-ivory-mute">
+                Performance Capture
+                {performanceEngine && performanceEngine !== 'SKIP' && (
+                  <span className="ml-2 rounded bg-editorial-brass/20 px-1.5 py-0.5 text-eyebrow-lg text-editorial-brass">
+                    {performanceEngine}
+                  </span>
+                )}
+                {performanceEngine === 'SKIP' && (
+                  <span className="ml-2 rounded bg-editorial-ink-soft px-1.5 py-0.5 text-eyebrow-lg text-editorial-ivory-mute">
+                    SKIP (wide / no characters)
+                  </span>
+                )}
+              </h3>
+              <div className="flex gap-2">
+                <label className="rounded border border-editorial-brass/50 px-2 py-1 text-eyebrow-lg text-editorial-brass hover:bg-editorial-brass/10 cursor-pointer">
+                  {drivingVideoPath ? '↻ Replace driving' : '+ Upload driving'}
+                  <input
+                    type="file"
+                    accept="video/*"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const f = e.target.files?.[0]
+                      if (!f) return
+                      const fd = new FormData()
+                      fd.append('driving_video', f)
+                      await fetch(`${API}/projects/${projectId}/shots/${shot.id}/upload-driving-video`, {
+                        method: 'POST', body: fd,
+                      })
+                    }}
+                  />
+                </label>
+                {approvedPerformanceTakeId && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm('Clear performance take? Next run will regenerate.')) return
+                      await fetch(`${API}/projects/${projectId}/shots/${shot.id}/performance`, { method: 'DELETE' })
+                    }}
+                    className="rounded border border-editorial-curtain/50 px-2 py-1 text-eyebrow-lg text-editorial-curtain hover:bg-editorial-curtain/10"
+                  >
+                    Re-record (clear)
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Side-by-side preview: keyframe still on the left, performance clip on the right.
+                Only renders when there's something to show. */}
+            {(performanceVideoPath || drivingVideoPath) && (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {drivingVideoPath ? (
+                  <div>
+                    <div className="text-eyebrow-lg uppercase text-editorial-ivory-mute mb-1">Driving reference</div>
+                    <video
+                      src={`${API}/projects/${projectId}/file?path=${encodeURIComponent(drivingVideoPath)}`}
+                      controls
+                      muted
+                      loop
+                      className="w-full rounded border border-editorial-rule bg-black"
+                    />
+                  </div>
+                ) : (
+                  <div className="text-xs text-editorial-ivory-mute">No driving reference (auto-synth path).</div>
+                )}
+                {performanceVideoPath ? (
+                  <div>
+                    <div className="text-eyebrow-lg uppercase text-editorial-ivory-mute mb-1">Captured performance</div>
+                    <video
+                      src={`${API}/projects/${projectId}/file?path=${encodeURIComponent(performanceVideoPath)}`}
+                      controls
+                      muted
+                      loop
+                      className="w-full rounded border border-editorial-rule bg-black"
+                    />
+                  </div>
+                ) : (
+                  <div className="text-xs text-editorial-ivory-mute self-center">Performance not yet captured.</div>
+                )}
+              </div>
+            )}
+
+            {/* Scores from the identity + motion gates */}
+            {(performanceIdentity != null || motionFidelity != null) && (
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded bg-editorial-ink-soft px-2 py-1.5">
+                  <div className="text-editorial-ivory-mute uppercase text-eyebrow-lg">Identity (ArcFace)</div>
+                  <div className="mt-0.5 font-mono">
+                    {typeof performanceIdentity === 'number'
+                      ? performanceIdentity.toFixed(3)
+                      : '—'}
+                  </div>
+                </div>
+                <div className="rounded bg-editorial-ink-soft px-2 py-1.5">
+                  <div className="text-editorial-ivory-mute uppercase text-eyebrow-lg">Motion fidelity</div>
+                  <div className="mt-0.5 font-mono">
+                    {typeof motionFidelity === 'number'
+                      ? motionFidelity.toFixed(3)
+                      : motionFidelity === null
+                        ? 'inconclusive'
+                        : '—'}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {performanceEngine === 'SKIP' && !performanceVideoPath && (
+              <p className="mt-3 text-xs text-editorial-ivory-mute italic">
+                Skipped: this shot doesn't benefit from performance capture (no characters or framing too wide).
+                Motion will use plain text-to-video.
+              </p>
+            )}
+          </section>
+
           <section className="rounded border border-editorial-rule bg-editorial-ink px-3 py-3">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-editorial-ivory-mute">Motion and Final Takes</h3>
@@ -463,7 +601,9 @@ export default function ReviewStage({
     ? 'Approve or reject shot plans before any keyframe generation starts.'
     : activeStage === 'KEYFRAME_REVIEW'
       ? 'Approve one keyframe per shot before motion generation starts.'
-      : 'Review motion and postprocess variants. Assembly only uses the approved final take for each shot.'
+      : activeStage === 'PERFORMANCE_REVIEW'
+        ? 'Review performance takes. Approve, re-record, or skip per shot. Approved drivers condition motion generation downstream.'
+        : 'Review motion and postprocess variants. Assembly only uses the approved final take for each shot.'
 
   const assemblyReady = allShots.length > 0 && allShots.every(({ shot }) => Boolean(shot.approved_final_take_id))
 

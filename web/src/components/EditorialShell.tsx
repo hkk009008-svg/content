@@ -41,6 +41,7 @@ interface EditorialShellProps {
   onGenerate: () => void
   onCancel: () => void
   onRefreshProject: () => Promise<void> | void
+  onOpenConsole?: () => void   // optional — opens DirectorsConsole when provided
   apiBase: string
 }
 
@@ -214,6 +215,7 @@ export default function EditorialShell({
   onGenerate,
   onCancel,
   onRefreshProject,
+  onOpenConsole,
   apiBase,
 }: EditorialShellProps) {
   const totalShots = useMemo(
@@ -240,12 +242,23 @@ export default function EditorialShell({
     <div className="min-h-screen bg-editorial-ink text-editorial-ivory">
       {/* ── Top bar ── back link + reel marker ─────────────────── */}
       <div className="px-10 pt-8 pb-6 flex items-center justify-between border-b border-editorial-rule">
-        <button
-          onClick={onBackToProjects}
-          className="font-mono text-eyebrow-lg text-editorial-ivory-mute tracking-wide-eyebrow uppercase hover:text-editorial-brass link-editorial"
-        >
-          ← The Archive
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={onBackToProjects}
+            className="font-mono text-eyebrow-lg text-editorial-ivory-mute tracking-wide-eyebrow uppercase hover:text-editorial-brass link-editorial"
+          >
+            ← The Archive
+          </button>
+          {onOpenConsole && (
+            <button
+              onClick={onOpenConsole}
+              className="font-mono text-eyebrow-lg text-editorial-brass tracking-wide-eyebrow uppercase hover:text-editorial-brass-deep link-editorial"
+              title="Open the Director's Console — early shell from the new design"
+            >
+              Director's Console →
+            </button>
+          )}
+        </div>
         <div className="font-mono text-eyebrow-lg text-editorial-ivory-mute tracking-wide-eyebrow uppercase flex items-center gap-3">
           <span>Reel Nº</span>
           <span className="text-editorial-ivory">{reelNumber}</span>
