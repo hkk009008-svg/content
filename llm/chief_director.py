@@ -315,49 +315,44 @@ When suggesting prompt_mutation for failures:
             "scene_context": scene_context[:200],
         }, indent=2)
 
-        diagnosis_system = f"""You are ChiefDirector evaluating a generation failure.
-Identity score: {identity_score:.3f} (threshold: {threshold})
-Identity passed: {identity_passed}
-Visual coherence: {"PASS" if coherent else "FAIL"}
-Mutation context: {mutation_context}
-
-PIPELINE KNOWLEDGE:
-- PuLID handles face-lock from reference photos (weight 0.0-1.0)
-- Identity validation uses DeepFace GhostFaceNet embeddings (cosine similarity)
-- Common false negatives: FACE_ANGLE_EXTREME (profile view), SMALL_FACE_REGION (wide shot)
-  → These are NOT identity failures — do NOT suggest face-related mutations for them
-- Coherence scoring: 40% color consistency + 30% lighting + 30% composition
-- img2img chaining uses denoise 0.30 for consecutive shots — lower = more consistent
-- If failure_reason is WRONG_PERSON, the reference images may be conflicting
-
-MUTATION RULES:
-If mutation_context is "identity_only":
-  → Add "facing camera directly" to [ACTION]
-  → Remove any accidental face/hair descriptions
-  → Suggest PuLID weight increase (+0.10)
-  → SHORTEN prompt to reduce model confusion
-  → Do NOT touch [SCENE] or [QUALITY]
-
-If mutation_context is "style_only":
-  → Tighten [SCENE] with specific color temperature and fill ratio
-  → Add "match previous shot palette" to [QUALITY]
-  → Suggest tightening denoise (img2img) to 0.25
-  → Do NOT touch [ACTION] or [OUTFIT]
-
-If mutation_context is "aggressive":
-  → Simplify ENTIRE prompt to under 80 words
-  → Keep only: shot type, environment, action, outfit material
-  → Remove all decorative adjectives
-  → Shorter prompts = more model compliance on retries
-
-Output JSON:
-{{
-  "decision": "RETRY" | "ACCEPT_LENIENT" | "FAIL",
-  "diagnosis": "Brief technical reason",
-  "prompt_mutation": "Specific rewrite instructions",
-  "mutation_level": 1 | 2 | 3,
-  "mutation_focus": "identity" | "style" | "both"
-}}"""
+        diagnosis_system = (
+            "You are ChiefDirector diagnosing a generation failure and deciding how to mutate the prompt. "
+            "The user message contains all diagnostic context (scores, thresholds, mutation_context). "
+            "Respond with valid JSON only — no prose, no markdown fences.\n\n"
+            "PIPELINE KNOWLEDGE:\n"
+            "- PuLID handles face-lock from reference photos (weight 0.0-1.0)\n"
+            "- Identity validation uses DeepFace GhostFaceNet embeddings (cosine similarity)\n"
+            "- Common false negatives: FACE_ANGLE_EXTREME (profile view), SMALL_FACE_REGION (wide shot)\n"
+            "  → These are NOT identity failures — do NOT suggest face-related mutations for them\n"
+            "- Coherence scoring: 40% color consistency + 30% lighting + 30% composition\n"
+            "- img2img chaining uses denoise 0.30 for consecutive shots — lower = more consistent\n"
+            "- If failure_reason is WRONG_PERSON, the reference images may be conflicting\n\n"
+            "MUTATION RULES:\n"
+            'If mutation_context is "identity_only":\n'
+            '  → Add "facing camera directly" to [ACTION]\n'
+            "  → Remove any accidental face/hair descriptions\n"
+            "  → Suggest PuLID weight increase (+0.10)\n"
+            "  → SHORTEN prompt to reduce model confusion\n"
+            "  → Do NOT touch [SCENE] or [QUALITY]\n\n"
+            'If mutation_context is "style_only":\n'
+            "  → Tighten [SCENE] with specific color temperature and fill ratio\n"
+            '  → Add "match previous shot palette" to [QUALITY]\n'
+            "  → Suggest tightening denoise (img2img) to 0.25\n"
+            "  → Do NOT touch [ACTION] or [OUTFIT]\n\n"
+            'If mutation_context is "aggressive":\n'
+            "  → Simplify ENTIRE prompt to under 80 words\n"
+            "  → Keep only: shot type, environment, action, outfit material\n"
+            "  → Remove all decorative adjectives\n"
+            "  → Shorter prompts = more model compliance on retries\n\n"
+            "Output JSON:\n"
+            '{\n'
+            '  "decision": "RETRY" | "ACCEPT_LENIENT" | "FAIL",\n'
+            '  "diagnosis": "Brief technical reason",\n'
+            '  "prompt_mutation": "Specific rewrite instructions",\n'
+            '  "mutation_level": 1 | 2 | 3,\n'
+            '  "mutation_focus": "identity" | "style" | "both"\n'
+            "}"
+        )
 
         raw = self._call_llm(diagnosis_system, eval_prompt)
 
