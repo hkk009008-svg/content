@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from typing import Optional
 
 from config.settings import settings
 from performance._net import safe_download
+from performance._poll import poll_task
 
 
 _POLL_INTERVAL_S = 2
@@ -117,37 +117,47 @@ def generate_live_portrait_performance(
         prompt_id = qr.json().get("prompt_id")
 
         # 4) Poll for completion
-        start = time.time()
-        while time.time() - start < poll_timeout_s:
+        def _get_status():
             hr = requests.get(f"{server_url}/history/{prompt_id}", timeout=15)
-            if hr.ok and prompt_id in hr.json():
-                hist = hr.json()[prompt_id]
-                outputs = hist.get("outputs", {})
-                # Find the first video output
-                for node_id, nout in outputs.items():
-                    if "gifs" in nout or "videos" in nout:
-                        items = nout.get("gifs") or nout.get("videos") or []
-                        if items:
-                            fname = items[0].get("filename")
-                            sub = items[0].get("subfolder", "")
-                            ftype = items[0].get("type", "output")
-                            view = (
-                                f"{server_url}/view"
-                                f"?filename={fname}&subfolder={sub}&type={ftype}"
-                            )
-                            # ComfyUI pod is internal-trusted; allow http.
-                            if not safe_download(view, output_mp4, allow_http=True):
-                                return None
-                            _cost_log(duration_s, shot_id, video_id)
-                            print(f"   ✅ LivePortrait: {output_mp4}")
-                            return output_mp4
-                status = hist.get("status", {})
-                if status.get("status_str") == "error":
-                    print(f"   [LIVE-PORTRAIT] error: {status.get('messages', [])[:200]}")
-                    return None
-            time.sleep(_POLL_INTERVAL_S)
+            if not hr.ok or prompt_id not in hr.json():
+                return {"status": "PROCESSING"}
+            hist = hr.json()[prompt_id]
+            inner = hist.get("status", {})
+            if inner.get("status_str") == "error":
+                return {"status": "FAILED", "messages": inner.get("messages", [])}
+            if hist.get("outputs"):
+                return {"status": "SUCCEEDED", "outputs": hist["outputs"]}
+            return {"status": "PROCESSING"}
 
-        print(f"   [LIVE-PORTRAIT] timed out after {poll_timeout_s}s")
+        final = poll_task(
+            _get_status,
+            success_states={"SUCCEEDED"},
+            terminal_states={"FAILED"},
+            interval_s=_POLL_INTERVAL_S,
+            timeout_s=poll_timeout_s,
+        )
+        if not final:
+            print(f"   [LIVE-PORTRAIT] timed out or failed")
+            return None
+
+        outputs = final["outputs"]
+        for node_id, nout in outputs.items():
+            if "gifs" in nout or "videos" in nout:
+                items = nout.get("gifs") or nout.get("videos") or []
+                if items:
+                    fname = items[0].get("filename")
+                    sub = items[0].get("subfolder", "")
+                    ftype = items[0].get("type", "output")
+                    view = (
+                        f"{server_url}/view"
+                        f"?filename={fname}&subfolder={sub}&type={ftype}"
+                    )
+                    # ComfyUI pod is internal-trusted; allow http.
+                    if not safe_download(view, output_mp4, allow_http=True):
+                        return None
+                    _cost_log(duration_s, shot_id, video_id)
+                    print(f"   ✅ LivePortrait: {output_mp4}")
+                    return output_mp4
         return None
     except Exception as e:
         print(f"   [LIVE-PORTRAIT] failed: {e}")
