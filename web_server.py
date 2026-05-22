@@ -31,12 +31,14 @@ from project_manager import (
     MutationResult, ProjectLockError, create_project, load_project, delete_project,
     list_projects, mutate_project,
     add_character, remove_character, add_location, remove_location,
+    add_object, remove_object, get_object,
     add_scene, update_scene, remove_scene, reorder_scenes,
-    make_character, make_location, make_scene, get_project_dir,
+    make_character, make_location, make_object, make_scene, get_project_dir,
 )
 from character_manager import create_character_with_images, VOICE_POOL
 from location_manager import create_location_with_images
 from scene_decomposer import decompose_scene, update_scene_shots, CAMERA_MOTIONS, VISUAL_EFFECTS, TARGET_APIS, API_REGISTRY, MUSIC_MOODS
+from domain.scene_decomposer import PURPOSE_TAGS, PURPOSE_API_RANKING, BILLING_PROVIDERS, estimate_short_cost
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
 from cinema_pipeline import CinemaPipeline
@@ -248,7 +250,112 @@ def get_config():
             {"value": "gemini-pro", "label": "Gemini 2.5 Pro"},
         ],
         "workflow_templates": WORKFLOW_TEMPLATES,
+        # Purpose-based API routing surface (consumed by SettingsPanel)
+        "purpose_tags": PURPOSE_TAGS,
+        "purpose_api_ranking": PURPOSE_API_RANKING,
+        # Billing attribution for cost estimator
+        "billing_providers": BILLING_PROVIDERS,
     })
+
+
+@app.route("/api/projects/<pid>/apply-language-defaults", methods=["POST"])
+@_project_lock_guard
+def api_apply_language_defaults(pid):
+    """Apply per-language optimized defaults to a project's global_settings.
+
+    Body (JSON):
+      { "language": "Korean", "overwrite_existing": false }
+
+    When overwrite_existing is False (default), only fields the user hasn't
+    customized are touched. The response includes the list of fields that
+    actually changed so the UI can show a diff.
+    """
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    data = request.json or {}
+    language = data.get("language") or project.get("global_settings", {}).get("language", "English")
+    overwrite = bool(data.get("overwrite_existing", False))
+
+    try:
+        from domain.language_defaults import (
+            merge_language_defaults_into_settings,
+            recommended_voices_for_language,
+            get_language_defaults,
+        )
+        from domain.character_manager import VOICE_POOL
+    except Exception as e:
+        return jsonify({"error": f"language_defaults unavailable: {e}"}), 500
+
+    changed_fields: list[str] = []
+
+    def _mutate(latest):
+        nonlocal changed_fields
+        settings = latest.setdefault("global_settings", {})
+        _, changed = merge_language_defaults_into_settings(settings, language, overwrite_existing=overwrite)
+        changed_fields = changed
+        return MutationResult(True, save=bool(changed))
+
+    mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT, snapshot=project)
+    recommended_voices = recommended_voices_for_language(language, VOICE_POOL)
+    return jsonify({
+        "language": language,
+        "changed_fields": changed_fields,
+        "applied_defaults": {k: get_language_defaults(language).get(k) for k in changed_fields},
+        "recommended_voices": recommended_voices,
+    })
+
+
+@app.route("/api/language-defaults/<language>", methods=["GET"])
+def api_get_language_defaults(language):
+    """Preview language defaults without applying. UI uses this for the
+    'Apply Korean defaults?' confirmation dialog."""
+    try:
+        from domain.language_defaults import get_language_defaults, recommended_voices_for_language
+        from domain.character_manager import VOICE_POOL
+    except Exception as e:
+        return jsonify({"error": f"language_defaults unavailable: {e}"}), 500
+    return jsonify({
+        "language": language,
+        "defaults": get_language_defaults(language),
+        "recommended_voices": recommended_voices_for_language(language, VOICE_POOL),
+    })
+
+
+@app.route("/api/cost-estimate", methods=["POST"])
+def api_cost_estimate():
+    """Live cost estimate. Body: { shot_count, has_dialogue, quality_tier, candidate_count, dialogue_shot_ratio }."""
+    data = request.json or {}
+    est = estimate_short_cost(
+        shot_count=int(data.get("shot_count", 60)),
+        has_dialogue=bool(data.get("has_dialogue", True)),
+        dialogue_shot_ratio=float(data.get("dialogue_shot_ratio", 0.5)),
+        quality_tier=str(data.get("quality_tier", "production")),
+        candidate_count=int(data.get("candidate_count", 1)),
+    )
+    return jsonify(est)
+
+
+@app.route("/api/optimize-shot-prompt", methods=["POST"])
+def api_optimize_shot_prompt():
+    """Translate raw user intent into a structured shot spec via prompt_optimizer.
+    Body: { user_input, characters[], location, global_settings, scene_context, has_dialogue }
+    """
+    data = request.json or {}
+    try:
+        from llm.prompt_optimizer import optimize_shot_prompt
+    except Exception as e:
+        return jsonify({"error": f"prompt_optimizer unavailable: {e}"}), 500
+    spec = optimize_shot_prompt(
+        user_input=data.get("user_input", ""),
+        characters=data.get("characters", []),
+        location=data.get("location", {}),
+        global_settings=data.get("global_settings", {}),
+        scene_context=data.get("scene_context", ""),
+        has_dialogue=bool(data.get("has_dialogue", False)),
+    )
+    return jsonify(spec)
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +545,344 @@ def api_remove_character(pid, cid):
     if remove_character(project, cid, timeout=HTTP_PROJECT_TIMEOUT):
         return jsonify({"deleted": True})
     return jsonify({"error": "Character not found"}), 404
+
+
+# ---------------------------------------------------------------------------
+# Objects (products / props for commercials)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# LoRA training (per-character) — triggers async training, exposes status.
+# ---------------------------------------------------------------------------
+# Active jobs tracked in-memory; survives only for the lifetime of the server.
+# Status sidecar on disk (<project>/loras/<char>/status.json) is the source of truth.
+_lora_training_threads: dict[str, threading.Thread] = {}
+
+
+@app.route("/api/projects/<pid>/characters/<cid>/train-lora", methods=["POST"])
+@_project_lock_guard
+def api_train_lora(pid, cid):
+    """Trigger LoRA training for a character. Runs in a background thread.
+    Body (JSON, optional): { config_overrides: {rank, alpha, steps, learning_rate, ...} }
+    """
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+    char = next((c for c in project.get("characters", []) if c["id"] == cid), None)
+    if not char:
+        return jsonify({"error": "Character not found"}), 404
+
+    if len(char.get("reference_images", []) or []) < 15:
+        return jsonify({
+            "error": "Insufficient reference images",
+            "needed": 15,
+            "have": len(char.get("reference_images", []) or []),
+            "guidance": "25-50 varied angles + lighting recommended for FLUX LoRA training",
+        }), 400
+
+    key = f"{pid}:{cid}"
+    if key in _lora_training_threads and _lora_training_threads[key].is_alive():
+        return jsonify({"error": "Training already in progress for this character"}), 409
+
+    try:
+        from prep.lora_training import train_character_lora
+    except Exception as e:
+        return jsonify({"error": f"prep.lora_training unavailable: {e}"}), 500
+
+    project_dir = get_project_dir(pid)
+    config_overrides = (request.json or {}).get("config_overrides") if request.is_json else None
+
+    def _runner():
+        try:
+            result = train_character_lora(project_dir, char, config_overrides=config_overrides)
+            # On success, register the LoRA path in project.global_settings.char_lora_paths
+            if result.get("success") and result.get("lora_path"):
+                def _mutate(latest):
+                    settings = latest.setdefault("global_settings", {})
+                    paths = settings.setdefault("char_lora_paths", {})
+                    paths[cid] = result["lora_path"]
+                    return MutationResult(True, save=True)
+                try:
+                    mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)
+                except Exception as me:
+                    print(f"[LoRA] could not persist lora_path to settings: {me}")
+        finally:
+            _lora_training_threads.pop(key, None)
+
+    t = threading.Thread(target=_runner, daemon=True, name=f"lora-train-{cid}")
+    _lora_training_threads[key] = t
+    t.start()
+
+    return jsonify({"started": True, "char_id": cid, "background": True}), 202
+
+
+@app.route("/api/projects/<pid>/characters/<cid>/lora-status", methods=["GET"])
+def api_lora_status(pid, cid):
+    """Poll training status. Returns idle when no training has ever run for this character."""
+    try:
+        from prep.lora_training import get_lora_status
+    except Exception as e:
+        return jsonify({"error": f"prep.lora_training unavailable: {e}"}), 500
+    project_dir = get_project_dir(pid)
+    return jsonify(get_lora_status(project_dir, cid))
+
+
+@app.route("/api/projects/<pid>/shots/<sid>/upload-driving-video", methods=["POST"])
+@_project_lock_guard
+def api_upload_driving_video(pid, sid):
+    """Operator upload of a driving video for a specific shot (Mode A).
+
+    Saves to <project>/performance_inputs/<scene_id>/<shot_id>/driving.mp4
+    and sets shot.driving_video_path. PerformanceCapturePhase will pick it
+    up automatically on the next run.
+    """
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    # Find scene_id for this shot — needed for the file path
+    scene_id = None
+    for scene in project.get("scenes", []):
+        if any(s.get("id") == sid for s in scene.get("shots", [])):
+            scene_id = scene["id"]
+            break
+    if not scene_id:
+        return jsonify({"error": "Shot not found in project"}), 404
+
+    file_obj = request.files.get("driving_video")
+    if not file_obj or not file_obj.filename:
+        return jsonify({"error": "No file uploaded under field 'driving_video'"}), 400
+
+    project_dir = get_project_dir(pid)
+    dest_dir = os.path.join(project_dir, "performance_inputs", scene_id, sid)
+    os.makedirs(dest_dir, exist_ok=True)
+    dest_path = os.path.join(dest_dir, "driving.mp4")
+    file_obj.save(dest_path)
+
+    def _mutate(latest):
+        for scn in latest.get("scenes", []):
+            for shot in scn.get("shots", []):
+                if shot.get("id") == sid:
+                    shot["driving_video_path"] = dest_path
+                    # Clear any prior auto-skip so the next run actually generates
+                    if shot.get("performance_engine", "").upper() == "SKIP":
+                        shot["performance_engine"] = ""
+                    return MutationResult(dest_path, save=True)
+        return MutationResult(None, save=False)
+
+    mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT, snapshot=project)
+    return jsonify({"uploaded": True, "path": dest_path}), 201
+
+
+@app.route("/api/projects/<pid>/shots/<sid>/performance", methods=["DELETE"])
+@_project_lock_guard
+def api_clear_performance(pid, sid):
+    """Operator clears a shot's performance take so the next run regenerates.
+    Used by the PERFORMANCE_REVIEW gate's "re-record" affordance.
+    """
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    def _mutate(latest):
+        for scn in latest.get("scenes", []):
+            for shot in scn.get("shots", []):
+                if shot.get("id") == sid:
+                    shot["approved_performance_take_id"] = ""
+                    shot["performance_engine"] = ""
+                    return MutationResult(True, save=True)
+        return MutationResult(None, save=False)
+
+    mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT, snapshot=project)
+    return jsonify({"cleared": True})
+
+
+@app.route("/api/projects/<pid>/style-board", methods=["POST"])
+@_project_lock_guard
+def api_upload_style_board(pid):
+    """Multi-image upload for the project style board. Drives FLUX Redux conditioning."""
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    images = request.files.getlist("references")
+    if not images:
+        return jsonify({"error": "No images uploaded under field 'references'"}), 400
+
+    project_dir = get_project_dir(pid)
+    style_dir = os.path.join(project_dir, "style_board")
+    os.makedirs(style_dir, exist_ok=True)
+
+    saved = []
+    for f in images:
+        if f.filename:
+            safe_name = f.filename.replace("/", "_").replace("\\", "_")
+            path = os.path.join(style_dir, safe_name)
+            f.save(path)
+            saved.append(path)
+
+    def _mutate(latest):
+        settings = latest.setdefault("global_settings", {})
+        refs = settings.setdefault("style_reference_paths", [])
+        for p in saved:
+            if p not in refs:
+                refs.append(p)
+        return refs
+
+    refs = mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)
+    return jsonify({"uploaded": len(saved), "total_refs": len(refs or [])}), 201
+
+
+@app.route("/api/projects/<pid>/objects", methods=["POST"])
+@_project_lock_guard
+def api_add_object(pid):
+    """Create a new product/prop object. Supports multipart for reference image upload."""
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    # Accept JSON or multipart form
+    if request.is_json:
+        data = request.json or {}
+    else:
+        data = request.form.to_dict()
+
+    name = data.get("name", "Unnamed Object")
+    description = data.get("description", "")
+    brand = data.get("brand", "")
+    material_traits = data.get("material_traits", "")
+    surface_type = data.get("surface_type", "matte")
+    branding_constraints = data.get("branding_constraints", "")
+    scale_reference = data.get("scale_reference", "")
+    texture_anchor = data.get("texture_anchor", "")
+    ip_weight = float(data.get("ip_adapter_weight", "0.85"))
+
+    # Save uploaded reference images (any number, ideally 4-8 from multiple angles)
+    image_paths = []
+    if not request.is_json:
+        images = request.files.getlist("reference_images")
+        project_dir = get_project_dir(pid)
+        obj_id_preview = f"obj_pending"
+        upload_dir = os.path.join(project_dir, "objects", obj_id_preview)
+        os.makedirs(upload_dir, exist_ok=True)
+        for img in images:
+            if img.filename:
+                fname = secure_filename(img.filename)
+                path = os.path.join(upload_dir, fname)
+                img.save(path)
+                image_paths.append(path)
+
+    obj = make_object(
+        name=name,
+        description=description,
+        brand=brand,
+        reference_images=image_paths,
+        material_traits=material_traits,
+        surface_type=surface_type,
+        branding_constraints=branding_constraints,
+        scale_reference=scale_reference,
+        texture_anchor=texture_anchor,
+        ip_adapter_weight=ip_weight,
+    )
+    # Set canonical reference to the first image if any uploaded
+    if image_paths:
+        obj["canonical_reference"] = image_paths[0]
+        # Rename the upload dir to the real object ID
+        try:
+            project_dir = get_project_dir(pid)
+            old_dir = os.path.join(project_dir, "objects", "obj_pending")
+            new_dir = os.path.join(project_dir, "objects", obj["id"])
+            if os.path.isdir(old_dir):
+                os.makedirs(os.path.dirname(new_dir), exist_ok=True)
+                os.rename(old_dir, new_dir)
+                # Rewrite paths
+                obj["reference_images"] = [p.replace(old_dir, new_dir) for p in obj["reference_images"]]
+                obj["canonical_reference"] = obj["canonical_reference"].replace(old_dir, new_dir)
+        except OSError as e:
+            print(f"[OBJECTS] could not rename upload dir: {e}")
+
+    add_object(project, obj, timeout=HTTP_PROJECT_TIMEOUT)
+    return jsonify(obj), 201
+
+
+@app.route("/api/projects/<pid>/objects/<oid>", methods=["PUT"])
+@_project_lock_guard
+def api_update_object(pid, oid):
+    """Update an object's fields. JSON or multipart (for adding more refs)."""
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    obj = get_object(project, oid)
+    if not obj:
+        return jsonify({"error": "Object not found"}), 404
+
+    data = request.json if request.is_json else request.form.to_dict()
+
+    # Handle additional reference image uploads
+    saved_paths = []
+    if not request.is_json and request.files.getlist("reference_images"):
+        project_dir = get_project_dir(pid)
+        obj_dir = os.path.join(project_dir, "objects", oid)
+        os.makedirs(obj_dir, exist_ok=True)
+        for f in request.files.getlist("reference_images"):
+            if f.filename:
+                safe_name = f.filename.replace("/", "_").replace("\\", "_")
+                save_path = os.path.join(obj_dir, safe_name)
+                f.save(save_path)
+                saved_paths.append(save_path)
+
+    def _mutate_project(latest_project: dict):
+        latest_obj = next(
+            (o for o in latest_project.get("objects", []) if o["id"] == oid),
+            None,
+        )
+        if not latest_obj:
+            return MutationResult(None, save=False)
+        for field in ["name", "description", "brand", "material_traits",
+                      "surface_type", "branding_constraints", "scale_reference",
+                      "texture_anchor"]:
+            if field in data:
+                latest_obj[field] = data[field]
+        if "ip_adapter_weight" in data:
+            latest_obj["ip_adapter_weight"] = float(data["ip_adapter_weight"])
+        if saved_paths:
+            refs = latest_obj.setdefault("reference_images", [])
+            for p in saved_paths:
+                if p not in refs:
+                    refs.append(p)
+            if not latest_obj.get("canonical_reference"):
+                latest_obj["canonical_reference"] = saved_paths[0]
+        return latest_obj
+
+    updated = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT, snapshot=project)
+    if not updated:
+        return jsonify({"error": "Object not found"}), 404
+    return jsonify({"updated": True, "object": updated})
+
+
+@app.route("/api/projects/<pid>/objects/<oid>", methods=["DELETE"])
+@_project_lock_guard
+def api_remove_object(pid, oid):
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    if remove_object(project, oid, timeout=HTTP_PROJECT_TIMEOUT):
+        return jsonify({"deleted": True})
+    return jsonify({"error": "Object not found"}), 404
 
 
 # ---------------------------------------------------------------------------
@@ -651,7 +1096,8 @@ def api_generate_dialogue(pid, sid):
         return jsonify({"error": "Scene not found"}), 404
 
     chars = [c for c in project["characters"] if c["id"] in scene.get("characters_present", [])]
-    lines = generate_dialogue(scene, chars, scene.get("mood", "neutral"))
+    lang = project.get("global_settings", {}).get("language", "English")
+    lines = generate_dialogue(scene, chars, scene.get("mood", "neutral"), language=lang)
     return jsonify({"dialogue_lines": lines})
 
 

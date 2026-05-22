@@ -306,6 +306,86 @@ class ShotController:
             take_id=take["id"],
         )
 
+        # --- MAX-TIER WIRE-UP ---
+        # Forward the project's quality_tier setting + per-character LoRA + style ref
+        # into generate_ai_broll. Backward-compatible: when quality_tier is unset or
+        # 'production', the kwargs default to None/'production' and behavior is
+        # identical to before.
+        quality_tier = settings.get("quality_tier", "production")
+        char_lora_paths = settings.get("char_lora_paths", {}) or {}
+        # Pick the LoRA for the primary character in this shot
+        primary_char_id = shot.get("primary_character") or (
+            shot.get("characters_in_frame", [""])[0] if shot.get("characters_in_frame") else ""
+        )
+        char_lora_path = char_lora_paths.get(primary_char_id) or None
+        style_refs = settings.get("style_reference_paths", []) or []
+        style_reference = style_refs[0] if style_refs else None
+
+        # --- PROMPT OPTIMIZER (highest quality lever) ---
+        # When enabled, run the shot prompt through the LLM-based optimizer which
+        # produces a cinematography-precise prompt + per-shot API recommendations +
+        # identity anchor + negative constraints. The result is cached on the shot
+        # (.optimizer_cache) so regen doesn't repeat the LLM call.
+        opt_enabled = settings.get("prompt_optimizer_enabled", False)
+        opt_spec = None
+        if opt_enabled:
+            cached = shot.get("optimizer_cache")
+            # Re-optimize when the source prompt changed OR no cache exists
+            if cached and cached.get("source_prompt") == full_prompt:
+                opt_spec = cached.get("spec")
+            else:
+                try:
+                    from llm.prompt_optimizer import optimize_shot_prompt
+                    chars_in_frame = shot.get("characters_in_frame", [])
+                    shot_chars = [c for c in project.get("characters", [])
+                                  if c.get("id") in chars_in_frame] or project.get("characters", [])
+                    objs_in_frame = shot.get("objects_in_frame", [])
+                    shot_objs = [o for o in project.get("objects", [])
+                                 if o.get("id") in objs_in_frame]
+                    location = next(
+                        (l for l in project.get("locations", [])
+                         if l.get("id") == scene.get("location_id")),
+                        {},
+                    )
+                    has_dialogue = bool(
+                        (scene.get("dialogue") or "").strip()
+                        or shot.get("dialogue")
+                    )
+                    opt_spec = optimize_shot_prompt(
+                        user_input=full_prompt,
+                        characters=shot_chars,
+                        objects=shot_objs,
+                        location=location,
+                        global_settings=settings,
+                        scene_context=f"Scene: {scene.get('title', '')}\nAction: {scene.get('action', '')[:300]}",
+                        has_dialogue=has_dialogue,
+                    )
+                    # Persist optimizer output for regen + telemetry
+                    def _stash_cache(_scene, project_shot):
+                        project_shot["optimizer_cache"] = {
+                            "source_prompt": full_prompt,
+                            "spec": opt_spec,
+                        }
+                        return MutationResult(opt_spec, save=True)
+                    self._mutate_shot(shot_id, _stash_cache)
+                except Exception as e:
+                    print(f"[KEYFRAME] prompt_optimizer skipped: {e}")
+                    opt_spec = None
+
+        # Apply optimizer outputs (when produced) to the call args
+        if opt_spec:
+            full_prompt = opt_spec.get("image_prompt") or full_prompt
+            identity_anchor_override = opt_spec.get("identity_anchor") or cc.get("identity_anchor", "")
+            negative_override = opt_spec.get("negative_constraints") or negative_prompt
+            # If the user hasn't pinned a target_api, take the optimizer's suggestion
+            if shot.get("target_api", "AUTO") == "AUTO":
+                suggested = opt_spec.get("suggested_video_api")
+                if suggested and suggested != "AUTO":
+                    take["metadata"]["target_api"] = suggested
+        else:
+            identity_anchor_override = cc.get("identity_anchor", "")
+            negative_override = negative_prompt or cc.get("negative_constraints") or shot.get("negative_constraints", "")
+
         result = generate_ai_broll(
             full_prompt,
             img_path,
@@ -314,9 +394,14 @@ class ShotController:
             init_image=cc.get("init_image") if cc.get("use_img2img") else None,
             denoise_strength=cc.get("denoise_strength", 1.0),
             multi_angle_refs=cc.get("multi_angle_refs", []),
-            identity_anchor=cc.get("identity_anchor", ""),
+            identity_anchor=identity_anchor_override,
             pulid_weight_override=cc.get("pulid_weight_override"),
-            negative_prompt=negative_prompt or cc.get("negative_constraints") or shot.get("negative_constraints", ""),
+            negative_prompt=negative_override,
+            quality_tier=quality_tier,
+            char_lora_path=char_lora_path,
+            style_reference=style_reference,
+            shot_hint={"prompt": full_prompt, "characters_in_frame": shot.get("characters_in_frame", []),
+                       "camera": shot.get("camera", "")},
         )
         if not result or not os.path.exists(img_path):
             return {"success": False, "error": "Image generation failed"}
@@ -361,6 +446,165 @@ class ShotController:
             "take": stored_take,
             "image": img_path,
             "identity_score": identity_score,
+        }
+
+    def generate_performance_take(self, scene_id: str, shot_id: str) -> dict:
+        """Per-shot performance capture (handoff §7).
+
+        Sits between keyframe review and motion render. Routes the shot to one
+        of {ACT_ONE, LIVE_PORTRAIT, VIGGLE, SKIP} via domain.performance.
+        SKIP is a happy-path no-op — motion_render falls through to text-to-video
+        without a driving reference.
+
+        Effect on the shot:
+          performance_takes:          appended-to (one take per call)
+          approved_performance_take_id: set on first success (operator can re-approve via gate)
+          performance_engine:         the engine string actually used (or "SKIP")
+        """
+        project = self._host._refresh_project_snapshot() or self.project
+        scene, shot, shot_index = self._find_shot(shot_id, project, scene_id)
+        if not scene or not shot:
+            return {"success": False, "error": "Shot not found"}
+        if shot.get("plan_status") != "approved":
+            return {"success": False, "error": "Shot plan must be approved before performance capture"}
+        keyframe_take_id = shot.get("approved_keyframe_take_id", "")
+        if not keyframe_take_id:
+            return {"success": False, "error": "Approved keyframe required before performance capture"}
+
+        # --- 1. Routing ---
+        from domain.performance import (
+            route_performance_engine, ENGINE_SKIP, driving_video_source,
+        )
+        engine = route_performance_engine(shot, scene)
+
+        if engine == ENGINE_SKIP:
+            # Happy-path no-op — record the skip on the shot so motion_render
+            # knows to fall through to text-to-video without a driving ref.
+            def _mut_skip(_scene: dict, project_shot: dict):
+                project_shot["performance_engine"] = "SKIP"
+                return MutationResult(True, save=True)
+            self._mutate_shot(shot_id, _mut_skip)
+            self.progress(
+                "PERFORMANCE_SKIPPED",
+                f"Shot {shot_id}: SKIP (wide/landscape or no characters)",
+                -1, scene_id=scene_id, shot_id=shot_id, performance_engine="SKIP",
+            )
+            return {"success": True, "skipped": True, "engine": "SKIP"}
+
+        # --- 2. Resolve assets ---
+        source_image = self._host._resolve_take_path(shot, keyframe_take_id)
+        if not source_image or not os.path.exists(source_image):
+            return {"success": False, "error": "Approved keyframe asset is missing"}
+
+        # Audio comes from the scene-level dialogue track (ensured upstream).
+        # We pass scene_id, not characters[], because ensure_scene_audio works
+        # off the scene's dialogue lines + character voices.
+        audio_path = ""
+        try:
+            audio_path = self._host._ensure_scene_audio(scene["id"]) or ""
+        except Exception as e:
+            print(f"[PERFORMANCE] scene audio unavailable ({e}); engine={engine}")
+
+        # --- 3. Driving video — Mode A (operator upload) wins, else Mode B synth ---
+        driving = (shot.get("driving_video_path") or "").strip()
+        source_mode = driving_video_source(shot)
+        if not driving and source_mode == "tts_auto" and audio_path:
+            try:
+                from performance.driving_video import synth_driving_face_from_audio
+                temp_driving = self._take_output_path(shot_id, f"driving_{keyframe_take_id}", ".mp4")
+                synthesized = synth_driving_face_from_audio(
+                    audio_path=audio_path,
+                    keyframe_path=source_image,
+                    output_mp4=temp_driving,
+                    duration_s=float(scene.get("duration_seconds", 5.0)),
+                    shot_id=shot_id, video_id=str(project.get("id", "")),
+                )
+                if synthesized:
+                    driving = synthesized
+            except Exception as e:
+                print(f"[PERFORMANCE] driving-video synth failed ({e}); engine may degrade")
+
+        # --- 4. Dispatch to the chosen engine ---
+        take = make_take(
+            "performance",
+            source_take_id=keyframe_take_id,
+            metadata={
+                "scene_id": scene_id,
+                "shot_id": shot_id,
+                "engine": engine,
+                "driving_source": "upload" if shot.get("driving_video_path") else (
+                    "tts_auto" if driving else "none"
+                ),
+                "audio_path": audio_path,
+                "duration_s": float(scene.get("duration_seconds", 5.0)),
+            },
+        )
+        perf_path = self._take_output_path(shot_id, take["id"], ".mp4")
+        self._host._runstate.update_progress_pointer(
+            "PERFORMANCE_CAPTURE", scene_id, shot_id,
+        ) if hasattr(self._host, "_runstate") and hasattr(self._host._runstate, "update_progress_pointer") else None
+        self.progress(
+            "PERFORMANCE",
+            f"Performance capture for {shot_id} via {engine}",
+            -1, scene_id=scene_id, shot_id=shot_id, take_id=take["id"],
+            performance_engine=engine,
+        )
+
+        try:
+            from performance._router import dispatch
+            result_path = dispatch(
+                engine,
+                keyframe_path=source_image,
+                audio_path=audio_path or None,
+                driving_video_path=driving or None,
+                output_mp4=perf_path,
+                duration_s=float(scene.get("duration_seconds", 5.0)),
+                shot_id=shot_id,
+                video_id=str(project.get("id", "")),
+            )
+        except Exception as e:
+            return {"success": False, "error": f"Performance dispatch raised: {e}"}
+
+        if not result_path or not os.path.exists(perf_path):
+            # Engine failed gracefully (returned None). Mark as SKIP so motion_render
+            # uses plain text-to-video — pipeline keeps moving.
+            def _mut_fail(_scene: dict, project_shot: dict):
+                project_shot["performance_engine"] = "SKIP"
+                return MutationResult(True, save=True)
+            self._mutate_shot(shot_id, _mut_fail)
+            self.progress(
+                "PERFORMANCE_SKIPPED",
+                f"Shot {shot_id}: {engine} produced no output; falling through to text-to-video",
+                -1, scene_id=scene_id, shot_id=shot_id, performance_engine="SKIP",
+            )
+            return {"success": True, "skipped": True, "engine": engine,
+                    "error": "engine returned no output"}
+
+        # --- 5. Persist the take + auto-approve on first success ---
+        take["path"] = perf_path
+
+        def _mut_success(_scene: dict, project_shot: dict):
+            project_shot.setdefault("performance_takes", []).append(take)
+            # Auto-approve on first success; operator can override via PERFORMANCE_REVIEW gate
+            if not project_shot.get("approved_performance_take_id"):
+                project_shot["approved_performance_take_id"] = take["id"]
+            project_shot["performance_engine"] = engine
+            return MutationResult(take, save=True)
+
+        stored_take = self._mutate_shot(shot_id, _mut_success)
+        self._host._save_checkpoint()
+        self.progress(
+            "PERFORMANCE_READY",
+            f"Performance ready for {shot_id}",
+            -1, scene_id=scene_id, shot_id=shot_id,
+            video_url=perf_path, take_id=take["id"], take_kind="performance",
+            performance_engine=engine,
+        )
+        return {
+            "success": True,
+            "take": stored_take,
+            "video": perf_path,
+            "engine": engine,
         }
 
     def generate_motion_take(self, scene_id: str, shot_id: str) -> dict:
@@ -421,6 +665,16 @@ class ShotController:
             take_id=take["id"],
         )
 
+        # Resolve performance-capture driving video (handoff §8). When the
+        # performance phase produced an approved take, surface its path here
+        # so generate_ai_video can pass it to native engines that accept a
+        # motion reference (Veo / Sora / Runway). Engines that don't accept
+        # one (Kling, LTX) fall through silently.
+        performance_take_id = shot.get("approved_performance_take_id", "")
+        driving_video_path = ""
+        if performance_take_id:
+            driving_video_path = self._host._resolve_take_path(shot, performance_take_id) or ""
+
         temp_vid = generate_ai_video(
             source_image,
             shot.get("camera", "zoom_in_slow"),
@@ -432,6 +686,7 @@ class ShotController:
             negative_prompt=shot.get("negative_constraints", ""),
             shot_type=resolved_shot_type,
             video_fallbacks=video_fallbacks,
+            driving_video_path=driving_video_path,
         )
         final_vid = temp_vid or vid_path
         if not final_vid or not os.path.exists(final_vid):

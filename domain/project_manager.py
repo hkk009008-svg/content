@@ -165,6 +165,41 @@ def make_character(
     }
 
 
+def make_object(
+    name: str,
+    description: str,
+    brand: str = "",
+    reference_images: Optional[List[str]] = None,
+    material_traits: str = "",
+    surface_type: str = "matte",          # matte | glossy | metallic | translucent | mixed
+    branding_constraints: str = "",
+    scale_reference: str = "",             # e.g. "fits in adult hand", "tabletop scale"
+    texture_anchor: str = "",              # critical visual: logo, badge, signature color
+    ip_adapter_weight: float = 0.85,
+) -> dict:
+    """Factory for ProductObject records — product/prop assets used in commercials.
+
+    Mirrors make_character/make_location so the pipeline treats objects as
+    first-class subjects with reference-image conditioning, identity anchors,
+    and per-shot routing.
+    """
+    return {
+        "id": f"obj_{new_id()}",
+        "name": name,
+        "brand": brand,
+        "description": description,
+        "reference_images": reference_images or [],
+        "canonical_reference": "",          # populated when user picks the hero ref
+        "material_traits": material_traits,
+        "surface_type": surface_type,
+        "branding_constraints": branding_constraints,
+        "scale_reference": scale_reference,
+        "texture_anchor": texture_anchor,
+        "ip_adapter_weight": ip_adapter_weight,
+        "embedding_cache": "",
+    }
+
+
 def make_location(
     name: str,
     description: str,
@@ -220,6 +255,8 @@ def make_shot(
     scene_foley: str = "",
     characters_in_frame: Optional[List[str]] = None,
     primary_character: str = "",
+    objects_in_frame: Optional[List[str]] = None,
+    primary_object: str = "",
     shot_id: str = "",
 ) -> dict:
     return {
@@ -231,6 +268,8 @@ def make_shot(
         "scene_foley": scene_foley,
         "characters_in_frame": characters_in_frame or [],
         "primary_character": primary_character,
+        "objects_in_frame": objects_in_frame or [],
+        "primary_object": primary_object,
         "action_context": "",
         "generated_image": "",
         "generated_video": "",
@@ -244,8 +283,14 @@ def make_shot(
         "approved_final_take_id": "",
         "diagnostics": [],
         "intent_notes": "",
-        "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy",
+        "negative_constraints": "blur, distort, deformed face, identity drift, off-model face, broken anatomy, off-brand product, deformed logo, mis-shaped product",
         "continuity_constraints": "",
+        "optimizer_cache": {},  # populated by prompt_optimizer when enabled
+        # --- Performance capture (handoff §4) ---
+        "performance_takes": [],            # list[take dict] — make_take(kind="performance", ...)
+        "approved_performance_take_id": "", # mirrors approved_keyframe_take_id
+        "performance_engine": "",           # "ACT_ONE" | "LIVE_PORTRAIT" | "VIGGLE" | "SKIP" | ""
+        "driving_video_path": "",           # operator-uploaded reference, Mode A
     }
 
 
@@ -255,6 +300,7 @@ def make_project(name: str) -> dict:
         "name": name,
         "characters": [],
         "locations": [],
+        "objects": [],
         "scenes": [],
         "global_settings": {
             "aspect_ratio": "16:9",
@@ -384,6 +430,8 @@ def normalize_shot_schema(
     keyframe_takes, keyframe_changed = _normalize_take_list(shot.get("keyframe_takes"), "keyframe")
     motion_takes, motion_changed = _normalize_take_list(shot.get("motion_takes"), "motion")
     postprocess_takes, postprocess_changed = _normalize_take_list(shot.get("postprocess_variants"), "postprocess")
+    # Performance takes — new in PERFORMANCE_CAPTURE_HANDOFF. Same normalize shape.
+    performance_takes, performance_changed = _normalize_take_list(shot.get("performance_takes"), "performance")
     if keyframe_changed or shot.get("keyframe_takes") is None:
         shot["keyframe_takes"] = keyframe_takes
         changed = True
@@ -399,6 +447,11 @@ def normalize_shot_schema(
         changed = True
     else:
         shot["postprocess_variants"] = postprocess_takes
+    if performance_changed or shot.get("performance_takes") is None:
+        shot["performance_takes"] = performance_takes
+        changed = True
+    else:
+        shot["performance_takes"] = performance_takes
 
     # Migrate legacy generated outputs into additive take history.
     if shot.get("generated_image") and not shot["keyframe_takes"]:
@@ -423,9 +476,16 @@ def normalize_shot_schema(
         "approved_keyframe_take_id",
         "approved_motion_take_id",
         "approved_final_take_id",
+        "approved_performance_take_id",   # new field, performance capture
     ):
         if approval_field not in shot:
             shot[approval_field] = ""
+            changed = True
+
+    # New string fields from the performance-capture handoff. Add only if missing.
+    for str_field in ("performance_engine", "driving_video_path"):
+        if str_field not in shot:
+            shot[str_field] = ""
             changed = True
 
     if not shot["approved_keyframe_take_id"] and shot["keyframe_takes"] and shot.get("approved") is True:
@@ -627,6 +687,39 @@ def get_character(project: dict, char_id: str) -> Optional[dict]:
     for c in project["characters"]:
         if c["id"] == char_id:
             return c
+    return None
+
+
+def add_object(project: dict, obj: dict, timeout: float = 10) -> dict:
+    """Add a product/prop object to the project. Mirrors add_character/add_location."""
+    pid = project["id"]
+
+    def _mutate(latest: dict):
+        latest.setdefault("objects", []).append(obj)
+        return obj
+
+    result = mutate_project(pid, _mutate, timeout=timeout, snapshot=project)
+    if result is None:
+        raise FileNotFoundError(f"Project '{pid}' not found")
+    return result
+
+
+def remove_object(project: dict, obj_id: str, timeout: float = 10) -> bool:
+    def _mutate(latest: dict):
+        latest.setdefault("objects", [])
+        before = len(latest["objects"])
+        latest["objects"] = [o for o in latest["objects"] if o["id"] != obj_id]
+        changed = len(latest["objects"]) < before
+        return MutationResult(changed, save=changed)
+
+    result = mutate_project(project["id"], _mutate, timeout=timeout, snapshot=project)
+    return bool(result)
+
+
+def get_object(project: dict, obj_id: str) -> Optional[dict]:
+    for o in project.get("objects", []):
+        if o["id"] == obj_id:
+            return o
     return None
 
 

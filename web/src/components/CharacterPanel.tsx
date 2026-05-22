@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Project, AppConfig } from '../types/project'
 
 const API = '/api'
@@ -9,6 +9,21 @@ interface Props {
   onRefresh: () => void
 }
 
+interface LoraStatus {
+  char_id: string
+  status: string
+  progress_percent: number
+  lora_path?: string | null
+  quality_score?: number | null
+  image_count?: number
+  error?: string | null
+  finished_at?: string | null
+  log_tail?: string | null
+}
+
+const MIN_LORA_IMAGES = 15
+const IDEAL_LORA_IMAGES = 25
+
 export default function CharacterPanel({ project, config, onRefresh }: Props) {
   const [expanded, setExpanded] = useState(true)
   const [adding, setAdding] = useState(false)
@@ -16,6 +31,49 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
   const [form, setForm] = useState({ name: '', description: '', voice_id: '', ip_adapter_weight: '0.85' })
   const [files, setFiles] = useState<FileList | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [loraStatuses, setLoraStatuses] = useState<Record<string, LoraStatus>>({})
+  const [trainingIds, setTrainingIds] = useState<Set<string>>(new Set())
+
+  // Poll LoRA statuses per character — every 5s while any training is active
+  useEffect(() => {
+    let cancelled = false
+    const fetchAll = async () => {
+      const updates: Record<string, LoraStatus> = {}
+      for (const c of project.characters) {
+        try {
+          const r = await fetch(`${API}/projects/${project.id}/characters/${c.id}/lora-status`)
+          if (r.ok) updates[c.id] = await r.json()
+        } catch { /* ignore */ }
+      }
+      if (!cancelled) setLoraStatuses(prev => ({ ...prev, ...updates }))
+    }
+    fetchAll()
+    const anyActive = Object.values(loraStatuses).some(s => s && (s.status === 'training' || s.status === 'preparing' || s.status === 'validating'))
+    if (anyActive || trainingIds.size > 0) {
+      const interval = setInterval(fetchAll, 5000)
+      return () => { cancelled = true; clearInterval(interval) }
+    }
+    return () => { cancelled = true }
+  }, [project.id, project.characters.length, trainingIds.size])
+
+  const triggerLoraTraining = async (cid: string) => {
+    const r = await fetch(`${API}/projects/${project.id}/characters/${cid}/train-lora`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    if (r.ok) {
+      setTrainingIds(prev => new Set(prev).add(cid))
+      // Optimistically mark status
+      setLoraStatuses(prev => ({
+        ...prev,
+        [cid]: { char_id: cid, status: 'preparing', progress_percent: 0 },
+      }))
+    } else {
+      const err = await r.json().catch(() => ({ error: 'Training failed to start' }))
+      alert(`Training failed to start: ${err.error || 'unknown error'}\n${err.have !== undefined ? `Have ${err.have} images, need ${err.needed}` : ''}`)
+    }
+  }
 
   const handleAdd = async () => {
     if (!form.name.trim()) return
@@ -207,6 +265,65 @@ export default function CharacterPanel({ project, config, onRefresh }: Props) {
                     </div>
                   </div>
                 )}
+
+                {/* LoRA training status / trigger — only in display mode */}
+                {editingId !== c.id && (() => {
+                  const refCount = c.reference_images?.length || 0
+                  const status = loraStatuses[c.id]
+                  const isActive = status && ['preparing', 'training', 'validating'].includes(status.status)
+                  const isDone = status && status.status === 'done' && status.lora_path
+                  const isFailed = status && status.status === 'failed'
+                  const enoughImages = refCount >= MIN_LORA_IMAGES
+                  return (
+                    <div className="mt-2 pt-2 border-t border-cinema-border-subtle">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+                          <span className="text-cinema-muted font-mono uppercase">LoRA:</span>
+                          {isDone && (
+                            <span className="text-cinema-success font-bold">✓ trained</span>
+                          )}
+                          {isActive && (
+                            <span className="text-cinema-accent animate-pulse">{status.status}…</span>
+                          )}
+                          {isFailed && (
+                            <span className="text-cinema-danger" title={status.error || 'unknown'}>✗ failed</span>
+                          )}
+                          {!status || status.status === 'idle' ? (
+                            <span className="text-cinema-muted">
+                              {enoughImages ? 'ready to train' : `${refCount}/${MIN_LORA_IMAGES} images`}
+                            </span>
+                          ) : null}
+                          {isDone && status.quality_score !== null && status.quality_score !== undefined && status.quality_score >= 0 && (
+                            <span className="text-cinema-muted">Q={status.quality_score.toFixed(2)}</span>
+                          )}
+                        </div>
+                        {!isActive && (
+                          <button
+                            onClick={() => triggerLoraTraining(c.id)}
+                            disabled={!enoughImages}
+                            title={!enoughImages
+                              ? `Need at least ${MIN_LORA_IMAGES} reference images (have ${refCount}). Recommend ${IDEAL_LORA_IMAGES}+ varied angles + lighting.`
+                              : isDone ? 'Re-train (overwrites existing LoRA)' : 'Train per-character LoRA (~30 min on RTX 4090)'}
+                            className={`text-[10px] px-2 py-0.5 rounded border ${
+                              enoughImages
+                                ? 'border-cinema-accent/40 text-cinema-accent hover:bg-cinema-accent/10'
+                                : 'border-cinema-border-subtle text-cinema-muted opacity-50 cursor-not-allowed'
+                            }`}>
+                            {isDone ? 'Re-train' : isFailed ? 'Retry' : 'Train LoRA'}
+                          </button>
+                        )}
+                      </div>
+                      {isFailed && status.error && (
+                        <p className="text-[9px] text-cinema-danger mt-1 line-clamp-2" title={status.error}>{status.error}</p>
+                      )}
+                      {isActive && status.image_count !== undefined && status.image_count > 0 && (
+                        <p className="text-[9px] text-cinema-muted mt-1">
+                          Training on {status.image_count} images. ~30 min on RTX 4090.
+                        </p>
+                      )}
+                    </div>
+                  )
+                })()}
               </div>
             ))}
           </div>

@@ -29,6 +29,117 @@ from audio._client import client
 from audio.voiceover import get_voice_direction
 
 
+def _try_dialogue_mode(
+    dialogue_lines: list,
+    characters: list,
+    output_filename: str,
+) -> Optional[str]:
+    """ElevenLabs v3 Dialogue Mode — single-call multi-speaker generation.
+
+    Uses ElevenLabs' dedicated dialogue endpoint which produces natural
+    turn-taking, prosody continuity across lines, and cross-talk hints —
+    far better than per-line concatenation when 2+ speakers are present.
+
+    Returns None on any failure (gated setting off, endpoint missing in
+    installed SDK version, API error). Caller falls through to the legacy
+    per-line loop, so quality never regresses.
+    """
+    # Gate: only run when explicitly enabled
+    try:
+        from config.settings import settings as _s
+        if not getattr(_s, "dialogue_mode_enabled", True):
+            return None
+    except Exception:
+        pass
+
+    # Need at least 2 distinct speakers for dialogue mode to make sense
+    distinct_speakers = {ln.get("character_id") for ln in dialogue_lines if ln.get("text", "").strip()}
+    if len(distinct_speakers) < 2:
+        return None
+
+    char_voices = {c["id"]: c.get("voice_id", "") for c in characters}
+
+    # Build the inputs payload — ordered list of {text, voice_id}
+    inputs = []
+    for ln in dialogue_lines:
+        text = ln.get("text", "").strip()
+        if not text:
+            continue
+        cid = ln.get("character_id", "")
+        voice_id = char_voices.get(cid, "")
+        if not voice_id:
+            # Can't run dialogue mode without explicit voices — bail to fallback
+            return None
+        inputs.append({"text": text, "voice_id": voice_id})
+
+    if len(inputs) < 2:
+        return None
+
+    print(f"🎙️ [DIALOGUE-MODE] Trying ElevenLabs v3 Dialogue Mode ({len(inputs)} turns)...")
+
+    # Defensively try the dialogue endpoint. SDK field names can drift across
+    # versions; we attempt the most likely names and fall through on any miss.
+    try:
+        # Preferred (eleven_v3 dialogue endpoint)
+        audio = client.text_to_dialogue.convert(
+            inputs=inputs,
+            model_id="eleven_v3",
+            output_format="mp3_44100_128",
+        )
+    except (AttributeError, TypeError):
+        # Older SDK shape — fall through to legacy per-line generation
+        print("   [DIALOGUE-MODE] text_to_dialogue endpoint not in installed SDK; using per-line path.")
+        return None
+    except Exception as e:
+        print(f"   [DIALOGUE-MODE] dialogue endpoint failed ({e}); using per-line path.")
+        return None
+
+    try:
+        save(audio, output_filename)
+    except Exception as e:
+        print(f"   [DIALOGUE-MODE] save failed: {e}")
+        return None
+
+    print(f"   ✅ Dialogue Mode output: {output_filename}")
+    return output_filename
+
+
+def _maybe_save_alignment(
+    audio_path: str,
+    transcript_hint: Optional[str] = None,
+    language: Optional[str] = None,
+) -> Optional[str]:
+    """Emit a .alignment.json sidecar next to the audio file when enabled.
+
+    Driven by `settings.forced_alignment_enabled`. Returns the JSON path on
+    success, None when disabled or alignment fails. Downstream consumers
+    (lipsync, SRT writer) load these sidecars when present.
+
+    language: project language name. When None, reads `settings.language`.
+    Critical for Korean/Japanese/Chinese — whisper drifts badly on these
+    languages without an explicit hint.
+    """
+    try:
+        from config.settings import settings as _s
+        if not getattr(_s, "forced_alignment_enabled", False):
+            return None
+        if language is None:
+            language = getattr(_s, "language", "English") or "English"
+    except Exception:
+        return None
+    try:
+        from audio.alignment import align_audio_to_text, save_alignment_json
+    except Exception:
+        return None
+    result = align_audio_to_text(audio_path, transcript_hint=transcript_hint, language=language)
+    if not result or not result.words:
+        return None
+    json_path = os.path.splitext(audio_path)[0] + ".alignment.json"
+    save_alignment_json(result, json_path)
+    print(f"   📐 Forced alignment ({result.provider}, {len(result.words)} words, lang={language}) → {json_path}")
+    return json_path
+
+
 def generate_dialogue_voiceover(
     dialogue_lines: list,
     characters: list,
@@ -37,18 +148,34 @@ def generate_dialogue_voiceover(
 ) -> Optional[str]:
     """
     Multi-character dialogue voiceover for cinema production.
-    Generates separate audio per character using their assigned voice_id,
-    then concatenates in dialogue order with pauses.
+
+    PATH 1 (preferred when enabled and 2+ speakers): ElevenLabs v3 Dialogue
+    Mode — single-call generation with natural turn-taking and prosody
+    continuity. Far better than per-line concat for conversation scenes.
+
+    PATH 2 (legacy / fallback): Generate separate audio per character using
+    their assigned voice_id, then concatenate in dialogue order with pauses.
+
+    Both paths emit an optional `.alignment.json` sidecar with word-level
+    timestamps when forced_alignment_enabled is set.
 
     Args:
         dialogue_lines: List of {character_id, text, delivery}
         characters: List of character dicts with 'id' and 'voice_id'
         output_filename: Output MP3 path
-        pause_between_lines: Silence between lines in seconds
+        pause_between_lines: Silence between lines in seconds (PATH 2 only)
 
     Returns:
         Path to assembled dialogue audio, or None on failure
     """
+    # PATH 1: try ElevenLabs Dialogue Mode first
+    dm_result = _try_dialogue_mode(dialogue_lines, characters, output_filename)
+    if dm_result:
+        transcript_hint = " ".join(ln.get("text", "").strip() for ln in dialogue_lines)
+        _maybe_save_alignment(dm_result, transcript_hint=transcript_hint)
+        return dm_result
+
+    # PATH 2: legacy per-line generation
     from elevenlabs import VoiceSettings
 
     char_voices = {c["id"]: c.get("voice_id", "") for c in characters}
@@ -135,6 +262,10 @@ def generate_dialogue_voiceover(
         for f in [concat_list, silence_file]:
             if os.path.exists(f):
                 os.remove(f)
+
+        # Optional sidecar — word-level timestamps for downstream lipsync precision
+        transcript_hint = " ".join(ln.get("text", "").strip() for ln in dialogue_lines)
+        _maybe_save_alignment(output_filename, transcript_hint=transcript_hint)
 
         return output_filename
 

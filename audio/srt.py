@@ -13,7 +13,7 @@ import path or migrate to `from audio.srt import generate_srt`.
 from __future__ import annotations
 
 
-def generate_srt(audio_path: str, srt_path: str) -> str:
+def generate_srt(audio_path: str, srt_path: str, language: str = "English") -> str:
     """Transcribe `audio_path` and write SRT captions to `srt_path`.
 
     Uses whisper's "base" model (small enough for fast CPU inference,
@@ -23,17 +23,35 @@ def generate_srt(audio_path: str, srt_path: str) -> str:
     Args:
         audio_path: path to the audio file to transcribe (.mp3, .wav, etc.)
         srt_path:   where to write the resulting SRT.
+        language:   target language name (English, Korean, Japanese, ...). Passed
+                    as a hint to whisper so transcription doesn't drift on
+                    non-English audio. Defaults to English to preserve old behavior.
 
     Returns:
         srt_path on success (for chaining).
     """
-    print(f"📝 [PHASE B] Transcribing audio back to precise SRT captions: {audio_path}")
+    print(f"📝 [PHASE B] Transcribing audio back to precise SRT captions: {audio_path} ({language})")
     import whisper
     import datetime
 
+    # Map our project language name to a whisper-recognized code/name.
+    # whisper accepts both ISO codes ('ko') and English names ('korean').
+    lang_map = {
+        "english": "english", "korean": "korean", "japanese": "japanese",
+        "mandarin": "chinese", "mandarin (simplified)": "chinese",
+        "spanish": "spanish", "french": "french", "german": "german",
+        "hindi": "hindi", "arabic": "arabic", "portuguese": "portuguese",
+        "italian": "italian", "russian": "russian",
+    }
+    whisper_lang = lang_map.get((language or "english").lower().strip(), None)
+
     # Use the base model for speed and accuracy
     model = whisper.load_model("base")
-    result = model.transcribe(audio_path)
+    # When language is unknown, leave whisper to auto-detect; otherwise pin it.
+    transcribe_kwargs = {}
+    if whisper_lang:
+        transcribe_kwargs["language"] = whisper_lang
+    result = model.transcribe(audio_path, **transcribe_kwargs)
 
     with open(srt_path, "w", encoding="utf-8") as f:
         for i, segment in enumerate(result["segments"], start=1):

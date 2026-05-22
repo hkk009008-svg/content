@@ -14,6 +14,7 @@ def generate_dialogue(
     characters: List[dict],
     mood: str = "neutral",
     style: str = "natural, cinematic",
+    language: str = "English",
 ) -> List[dict]:
     """
     Takes a scene's action description and generates dialogue lines
@@ -24,6 +25,9 @@ def generate_dialogue(
         characters: List of character dicts for characters in this scene
         mood: Emotional tone (melancholic, tense, hopeful, etc.)
         style: Dialogue style (natural, cinematic, poetic, etc.)
+        language: Target language for dialogue text (English, Korean, Japanese,
+                  Mandarin, Spanish, French, German, etc.). Delivery cues stay
+                  in English (they're directives for the TTS, not spoken text).
 
     Returns:
         List of dialogue line dicts: [{"character_id", "character_name", "text", "delivery"}]
@@ -43,6 +47,16 @@ def generate_dialogue(
             f"- {c['name']} (ID: {c['id']}): {c.get('description', 'no description')}"
         )
 
+    language_directive = ""
+    if language and language.lower() != "english":
+        language_directive = (
+            f"\n[CRITICAL LANGUAGE REQUIREMENT]:\n"
+            f"   - The 'text' field MUST be written in {language}, using {language}'s native script.\n"
+            f"   - Use natural, native-sounding {language} — idioms, cultural register, honorifics where appropriate.\n"
+            f"   - The 'delivery' field STAYS IN ENGLISH (e.g., 'whispered', 'firm') — it's a TTS directive, not spoken text.\n"
+            f"   - The 'character_name' field stays as the character's canonical name (don't translate names).\n"
+        )
+
     system_prompt = f"""You are a professional screenwriter for photorealistic cinema.
 Write natural, cinematic dialogue for the following scene.
 
@@ -57,7 +71,7 @@ Write natural, cinematic dialogue for the following scene.
 5. Style: {style}
 6. If only one character, they can have internal monologue or narration
 7. Output ONLY valid JSON array of line objects
-
+{language_directive}
 {PIPELINE_CONTEXT}
 
 JSON Schema per line:

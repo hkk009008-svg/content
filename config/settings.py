@@ -49,6 +49,13 @@ class Settings:
 
     # Audio / TTS
     elevenlabs_api_key: str
+    cartesia_api_key: str       # Sonic 2 — low-latency TTS, native Korean prosody
+    stability_api_key: str      # Stable Audio 2 — foley + music generation
+    suno_api_key: str           # Suno V5 — full song generation with vocals
+
+    # Performance capture (new phase — face/body retargeting for cinema dialogue)
+    viggle_api_key: str         # Viggle — full-body motion retargeting from operator-shot phone reference
+    hedra_api_key: str          # Hedra — audio-driven driving-face synth (Mode B autopilot)
 
     # Google Cloud (Veo, Vertex)
     google_cloud_project: str
@@ -81,6 +88,11 @@ class Settings:
             runwayml_api_secret=_env("RUNWAYML_API_SECRET"),
             seedance_api_key=_env("SEEDANCE_API_KEY"),
             elevenlabs_api_key=_env("ELEVENLABS_API_KEY"),
+            cartesia_api_key=_env("CARTESIA_API_KEY"),
+            stability_api_key=_env("STABILITY_API_KEY"),
+            suno_api_key=_env("SUNO_API_KEY"),
+            viggle_api_key=_env("VIGGLE_API_KEY"),
+            hedra_api_key=_env("HEDRA_API_KEY"),
             google_cloud_project=_env("GOOGLE_CLOUD_PROJECT"),
             google_cloud_location=_env("GOOGLE_CLOUD_LOCATION", "us-central1"),
             firecrawl_api_key=_env("FIRECRAWL_API_KEY"),

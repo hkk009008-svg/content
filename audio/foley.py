@@ -27,12 +27,103 @@ from typing import Optional
 from audio._client import client
 
 
+def generate_stable_audio_foley(
+    foley_description: str,
+    output_filename: str,
+    duration: float = 5.0,
+    steps: int = 50,
+    cfg_scale: float = 7.0,
+    seed: Optional[int] = None,
+) -> Optional[str]:
+    """Generate foley/SFX via Stability AI's Stable Audio 2.0.
+
+    Pros vs ElevenLabs text_to_sound_effects: longer max duration (up to 3 min
+    vs ElevenLabs' 22s), better at complex environmental layers (rain on
+    metal roof, distant traffic + foreground footsteps), supports audio-to-
+    audio remixing on the same endpoint.
+
+    Cons: requires paid Stability AI credits, slightly higher per-clip cost
+    than ElevenLabs SFX, no streaming.
+
+    Args:
+        foley_description: text prompt for the sound to generate
+        output_filename: where to save (audio/mp4 container by default)
+        duration: target seconds (Stable Audio supports up to 190s)
+        steps: diffusion sampling steps (30-100; 50 is sweet spot)
+        cfg_scale: classifier-free guidance (1-10; higher = stricter prompt)
+        seed: optional reproducibility seed
+
+    Returns the output path on success, None on failure.
+    """
+    import requests
+    from config.settings import settings
+
+    api_key = getattr(settings, "stability_api_key", "") or os.environ.get("STABILITY_API_KEY", "")
+    if not api_key:
+        print("   [STABLE-AUDIO] STABILITY_API_KEY not set; skipping")
+        return None
+
+    try:
+        url = "https://api.stability.ai/v2beta/audio/stable-audio-2/text-to-audio"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "audio/*",
+        }
+        # Stability uses multipart form for this endpoint
+        data = {
+            "prompt": foley_description,
+            "duration": str(min(int(duration), 190)),
+            "steps": str(steps),
+            "cfg_scale": str(cfg_scale),
+            "output_format": "mp3",
+        }
+        if seed is not None:
+            data["seed"] = str(seed)
+
+        r = requests.post(url, headers=headers, files={k: (None, v) for k, v in data.items()}, timeout=120)
+        if r.status_code != 200:
+            print(f"   [STABLE-AUDIO] HTTP {r.status_code}: {r.text[:200]}")
+            return None
+        with open(output_filename, "wb") as f:
+            f.write(r.content)
+        print(f"   ✅ Stable Audio 2 ({duration}s, cfg={cfg_scale}): {output_filename}")
+        return output_filename
+    except Exception as e:
+        print(f"   [STABLE-AUDIO] failed: {e}")
+        return None
+
+
 def generate_scene_foley(
     foley_description: str,
     output_filename: str,
     duration: float = 5.0,
+    provider: Optional[str] = None,
 ) -> Optional[str]:
-    """Generate a single foley sound effect for a specific shot."""
+    """Generate a single foley sound effect — routed to the configured provider.
+
+    Provider resolution:
+      1. explicit `provider` kwarg
+      2. settings.foley_provider (set via SettingsPanel)
+      3. ELEVENLABS_V3 (the legacy default)
+
+    STABLE_AUDIO_FOLEY is preferred for long environmental beds (rain, crowd,
+    machinery); ELEVENLABS_V3 is preferred for short specific impacts (glass
+    break, footsteps on gravel). Falls back to ElevenLabs on any failure.
+    """
+    if not provider:
+        try:
+            from config.settings import settings as _s
+            provider = getattr(_s, "foley_provider", None) or "ELEVENLABS_V3"
+        except Exception:
+            provider = "ELEVENLABS_V3"
+
+    if provider == "STABLE_AUDIO_FOLEY":
+        result = generate_stable_audio_foley(foley_description, output_filename, duration=duration)
+        if result:
+            return result
+        print("   [FOLEY] Stable Audio failed; falling back to ElevenLabs")
+
+    # ElevenLabs default + fallback path
     try:
         result = client.text_to_sound_effects.convert(
             text=foley_description,
@@ -45,7 +136,7 @@ def generate_scene_foley(
                     f.write(chunk)
         return output_filename
     except Exception as e:
-        print(f"   [FOLEY] Generation failed: {e}")
+        print(f"   [FOLEY] ElevenLabs fallback failed: {e}")
         return None
 
 

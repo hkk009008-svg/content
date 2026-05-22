@@ -140,6 +140,7 @@ def generate_ai_video(
     negative_prompt: str = None,
     shot_type: str = None,
     video_fallbacks: list = None,
+    driving_video_path: str = "",
 ) -> str:
     """
     Routes an image → video via smart shot-type-aware routing with native APIs.
@@ -152,6 +153,18 @@ def generate_ai_video(
     - Runway Gen-4 (style refs, turbo preview)
     - Smart routing: shot_type determines primary API
     - Fallback cascade per shot type from workflow_selector
+
+    v4 addition — driving_video_path:
+        Optional path to a performance-capture clip (output of Act-One /
+        LivePortrait / Viggle). When supplied, engines that accept a
+        reference video use it as motion guidance:
+          - Veo 3.1 native : reference-video mode
+          - Sora 2 native  : init_video parameter
+          - Runway Gen-4   : motion reference
+          - Kling, LTX     : ignored (no clean motion-reference input) —
+                             fall through silently to text-to-video baseline.
+        Empty string disables the feature — preserves existing behavior
+        for all callers that haven't been updated yet.
     """
     if attempted_apis is None:
         attempted_apis = set()

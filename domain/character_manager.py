@@ -70,6 +70,15 @@ VOICE_POOL = [
     # --- Narration / Specialty ---
     {"id": "2EiwWnXFnvU5JabPnv8n", "name": "Clyde", "style": "Warm storyteller, veteran narrator", "category": "narrator"},
     {"id": "onwK4e9ZLuTAKqWW03F9", "name": "Daniel", "style": "Authoritative British narrator", "category": "narrator"},
+    # --- Korean (한국어) — ElevenLabs Korean-native voices ---
+    # IDs verified from ElevenLabs voice library; all support eleven_v3 multilingual TTS.
+    # ElevenLabs v3 will speak Korean from ANY voice, but these are tuned for native Korean prosody.
+    {"id": "uyVNoMrnUku1dZyVEXwD", "name": "안나 (Anna)",   "style": "Warm Korean woman, natural conversational tone", "category": "korean_woman"},
+    {"id": "4JJwo477JUAx3HV0T7n7", "name": "지영 (Jiyoung)", "style": "Confident Korean woman, broadcast-ready",         "category": "korean_woman"},
+    {"id": "j9jfwdrw7BRfcR43Qohk", "name": "민지 (Minji)",   "style": "Young Korean woman, expressive",                 "category": "korean_woman"},
+    {"id": "1W00IGEmNmwmsDeYy7ag", "name": "준호 (Junho)",   "style": "Deep Korean man, authoritative narrator",        "category": "korean_man"},
+    {"id": "nbrxrAz3eYm9NgojrmFK", "name": "현우 (Hyunwoo)", "style": "Warm Korean man, friendly delivery",             "category": "korean_man"},
+    {"id": "PIIbCjI3IbR2cIVbZQjf", "name": "도윤 (Doyoon)",  "style": "Mature Korean man, dramatic",                    "category": "korean_man"},
     {"id": "N2lVS1w4EtoT3dr4eOWO", "name": "Callum", "style": "Intense, dramatic narrator", "category": "narrator"},
 ]
 

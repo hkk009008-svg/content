@@ -95,6 +95,163 @@ MUSIC_MASTERING_PRESETS = {
 # BGM generation
 # ---------------------------------------------------------------------------
 
+def _build_music_prompt(music_vibe: str) -> str:
+    """Producer-grade prompt for the given mood. Reused across Suno + FAL paths."""
+    vibe_prompts = {
+        "suspense": "70bpm D minor, slow deep sub-bass drones, distant reversed piano, ticking clock polyrhythm, cinematic brass stabs, Hans Zimmer tension, dark ambient thriller score.",
+        "thriller": "90bpm E minor, pulsing synth bass, staccato strings, heartbeat kick, rising tension builds, Trent Reznor atmosphere.",
+        "horror": "60bpm C minor, dissonant string clusters, music box detuned, deep sub-bass, whispered textures, Ari Aster dread.",
+        "noir": "75bpm Bb minor, smoky jazz saxophone, brushed drums, walking upright bass, rain-soaked city, 1940s detective.",
+        "dystopian": "85bpm F# minor, industrial metallic percussion, distorted analog synth drones, mechanical rhythms, Blade Runner 2049.",
+        "melancholic": "65bpm A minor, solo piano with sustain pedal, distant cello legato, vinyl crackle, gentle rain, Chopin meets Nils Frahm.",
+        "romantic": "72bpm D major, warm acoustic guitar fingerpicking, soft string quartet, golden hour, Richard Linklater film.",
+        "bittersweet": "68bpm G minor, solo violin, piano arpeggios, muted trumpet, autumn nostalgia, Wong Kar-wai mood.",
+        "grief": "55bpm C minor, slow cello solo, sparse piano with long reverb, silences, devastating, Schindler's List.",
+        "hopeful": "80bpm C major, rising piano, warm analog strings crescendo, gentle tambourine, sunrise, uplifting but restrained.",
+        "epic": "120bpm D minor, massive orchestral brass fanfare, taiko drums, choir chanting, sweeping strings, Lord of the Rings.",
+        "action": "130bpm E minor, driving electronic beats, distorted guitar, aggressive drums, Jason Bourne intensity.",
+        "triumphant": "100bpm Bb major, full orchestra fortissimo, French horns, snare roll crescendo, John Williams glory.",
+        "chase": "140bpm A minor, relentless hi-hat patterns, pulsing synth bass, rising pitch tension, Bourne Identity chase.",
+        "ethereal": "50bpm F major, shimmering pad synths, granular texture clouds, distant vocal oh, Brian Eno ambient.",
+        "dreamy": "60bpm Ab major, lo-fi tape warble, soft Rhodes piano, bedroom reverb, vinyl hiss, Tame Impala haze.",
+        "meditative": "45bpm D major, singing bowls, gentle drone, flowing water, bamboo flute, spa atmosphere.",
+        "cosmic": "55bpm whole tone, deep space synth pads, radio static textures, Interstellar organ, vast emptiness.",
+        "cyberpunk": "110bpm F minor, dark synthwave arpeggios, neon atmosphere, Moog bass, 80s retrofuturism.",
+        "corporate": "95bpm G major, clean minimalist synth pulses, subtle marimba, polished, Apple keynote.",
+        "gritty": "85bpm Eb minor, heavy industrial distorted bass, mechanical percussion, factory ambience, NIN documentary.",
+        "urban": "90bpm Cm, lo-fi hip hop beats, muted jazz samples, city rain, late night study session.",
+        "uplifting": "100bpm A major, bright acoustic guitar, clapping rhythm, indie film montage, Little Miss Sunshine.",
+        "jazz_noir": "80bpm Dm7, walking upright bass, brushed snare, smoky saxophone improvisation, Miles Davis Kind of Blue.",
+        "classical": "Andante E minor, string quartet, chamber music intimacy, Vivaldi elegance.",
+        "western": "75bpm Am, lone acoustic guitar, distant harmonica, desert wind, Ennio Morricone whistling.",
+        "electronic_minimal": "115bpm C minor, minimal techno pulse, evolving single note, Berlin club 4am, Richie Hawtin precision.",
+    }
+    return vibe_prompts.get(
+        music_vibe.lower(),
+        f"Cinematic ambient music, {music_vibe} mood, slow, atmospheric, film score quality, professional production.",
+    )
+
+
+def generate_suno_v5(
+    music_vibe: str,
+    output_filename: str,
+    duration: int = 60,
+    instrumental: bool = True,
+    custom_lyrics: str = "",
+    poll_timeout_s: int = 240,
+) -> bool:
+    """Generate a song via Suno V5 (the SOTA music model with vocals).
+
+    Requires SUNO_API_KEY in env. Uses Suno's REST API: POST /api/v1/songs to
+    enqueue, then poll GET /api/v1/songs/{id} until status == 'complete'.
+
+    Falls back to False on any error so the caller can route to FAL/ElevenLabs.
+
+    Args:
+        music_vibe:     mood key (see _build_music_prompt for the full list)
+        output_filename: where to save the .mp3 (Suno returns MP3)
+        duration:        target seconds (Suno V5 supports up to ~240s)
+        instrumental:    True for score work; False if you want sung vocals
+        custom_lyrics:   optional lyric override (Suno V5's killer feature)
+        poll_timeout_s:  give up after this many seconds of polling
+    """
+    import requests
+    import urllib.request
+
+    api_key = os.environ.get("SUNO_API_KEY") or os.environ.get("SUNO_TOKEN")
+    if not api_key:
+        print("   [SUNO V5] SUNO_API_KEY not set; skipping")
+        return False
+
+    base = os.environ.get("SUNO_API_BASE", "https://api.suno.ai/v1")
+    prompt = _build_music_prompt(music_vibe)
+
+    payload = {
+        "model_version": "chirp-v5",
+        "prompt": prompt,
+        "make_instrumental": instrumental,
+        "duration": min(duration, 240),
+        "tags": music_vibe,
+    }
+    if custom_lyrics:
+        payload["lyrics"] = custom_lyrics
+
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    try:
+        print(f"   [SUNO V5] Generating [{music_vibe.upper()}] (instrumental={instrumental})...")
+        r = requests.post(f"{base}/songs", json=payload, headers=headers, timeout=30)
+        r.raise_for_status()
+        body = r.json()
+        # Suno responses vary by endpoint variant — accept any of:
+        # { id, audio_url } | { song_id, output_url } | { task_id }
+        song_id = body.get("id") or body.get("song_id") or body.get("task_id")
+        audio_url = body.get("audio_url") or body.get("output_url")
+        if not song_id and not audio_url:
+            print(f"   [SUNO V5] Unrecognized response shape: {list(body.keys())}")
+            return False
+
+        # Poll for completion if we got a job id
+        start = time.time()
+        while not audio_url and song_id and (time.time() - start) < poll_timeout_s:
+            time.sleep(5)
+            sr = requests.get(f"{base}/songs/{song_id}", headers=headers, timeout=15)
+            if not sr.ok:
+                continue
+            sb = sr.json()
+            status = sb.get("status", "").lower()
+            if status in ("complete", "completed", "ready", "done"):
+                audio_url = sb.get("audio_url") or sb.get("output_url") or sb.get("url")
+                break
+            if status in ("failed", "error"):
+                print(f"   [SUNO V5] generation failed: {sb.get('error', 'unknown')}")
+                return False
+
+        if not audio_url:
+            print(f"   [SUNO V5] timed out after {poll_timeout_s}s")
+            return False
+
+        urllib.request.urlretrieve(audio_url, output_filename)
+        print(f"   ✅ Suno V5 song saved: {output_filename}")
+        return True
+    except requests.RequestException as e:
+        print(f"   [SUNO V5] HTTP error: {e}")
+        return False
+    except Exception as e:
+        print(f"   [SUNO V5] failed: {e}")
+        return False
+
+
+def generate_bgm(
+    music_vibe: str,
+    output_filename: str,
+    duration: int = 60,
+    prefer_provider: Optional[str] = None,
+    custom_lyrics: str = "",
+) -> bool:
+    """Smart router: Suno V5 → FAL Stable Audio. Returns True on success.
+
+    Reads settings.music_provider for the preferred engine; falls through to
+    FAL on any failure. Other paths can be wired here (ElevenLabs Music, etc.).
+    """
+    provider = prefer_provider
+    if not provider:
+        try:
+            from config.settings import settings as _s
+            provider = getattr(_s, "music_provider", None) or "AUTO"
+        except Exception:
+            provider = "AUTO"
+
+    if provider in ("SUNO_V5", "AUTO"):
+        if generate_suno_v5(music_vibe, output_filename, duration=duration, custom_lyrics=custom_lyrics):
+            return True
+        # Fall through to FAL on Suno failure
+
+    return generate_fal_bgm(music_vibe, output_filename, duration=duration)
+
+
+import time  # used by Suno polling — placed here to keep the import surface stable
+
 def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42):
     """Uses Fal.ai's text-to-audio engine to generate custom background music."""
     import urllib.request

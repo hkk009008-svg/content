@@ -27,6 +27,240 @@ from elevenlabs import save
 
 from audio._client import client
 from audio.music import generate_fal_bgm
+from config.settings import settings
+
+
+# ---------------------------------------------------------------------------
+# Alternate TTS providers — OpenAI gpt-4o-audio + Cartesia Sonic 2
+# ---------------------------------------------------------------------------
+# These slot in as drop-in replacements for generate_voiceover when the
+# project's `tts_provider` setting picks one of them. Each is defensive:
+# returns None on any failure so callers fall back to ElevenLabs gracefully.
+
+# OpenAI gpt-4o-audio voices (10 voices, multilingual including Korean)
+OPENAI_AUDIO_VOICES = {
+    "alloy":   "neutral, balanced — default narrator voice",
+    "ash":     "warm, conversational",
+    "ballad":  "expressive, dramatic — good for emotional dialogue",
+    "coral":   "bright, friendly woman",
+    "echo":    "deep, mature man",
+    "fable":   "story-telling, animated",
+    "onyx":    "deep, authoritative man",
+    "nova":    "young, energetic woman",
+    "sage":    "calm, thoughtful — narration",
+    "shimmer": "warm, soothing woman",
+}
+
+
+def generate_openai_audio(
+    text: str,
+    output_filename: str,
+    voice: str = "alloy",
+    audio_format: str = "mp3",
+    instructions: Optional[str] = None,
+) -> Optional[str]:
+    """Generate audio via OpenAI's gpt-4o-audio-preview model.
+
+    Pros vs ElevenLabs: more expressive on long-form prose, accepts plain
+    English instructions ("speak slowly, like reading bedtime stories") that
+    shape delivery. Multilingual including Korean.
+
+    Cons: only 10 fixed voices (no cloning), per-minute pricing higher than
+    ElevenLabs at scale.
+
+    Args:
+        text: dialogue line or narration to speak
+        output_filename: path to write audio (mp3 by default)
+        voice: one of OPENAI_AUDIO_VOICES keys
+        audio_format: 'mp3' | 'wav' | 'flac' | 'opus' | 'pcm16'
+        instructions: optional natural-language delivery directive (e.g.,
+            "whispered, urgent")
+
+    Returns the output path on success, None on failure.
+    """
+    import base64
+
+    api_key = settings.openai_api_key
+    if not api_key:
+        print("   [OPENAI-AUDIO] OPENAI_API_KEY not set; skipping")
+        return None
+
+    try:
+        import openai
+        oa = openai.OpenAI(api_key=api_key)
+
+        messages = []
+        if instructions:
+            messages.append({"role": "system", "content": instructions})
+        messages.append({"role": "user", "content": f"Please say exactly: {text}"})
+
+        response = oa.chat.completions.create(
+            model="gpt-4o-audio-preview",
+            modalities=["text", "audio"],
+            audio={"voice": voice, "format": audio_format},
+            messages=messages,
+        )
+
+        audio_b64 = response.choices[0].message.audio.data
+        audio_bytes = base64.b64decode(audio_b64)
+        with open(output_filename, "wb") as f:
+            f.write(audio_bytes)
+
+        print(f"   ✅ OpenAI gpt-4o-audio ({voice}): {output_filename}")
+        return output_filename
+    except Exception as e:
+        print(f"   [OPENAI-AUDIO] failed: {e}")
+        return None
+
+
+# Cartesia Sonic 2 voice IDs from their public library. Replace with your own
+# cloned voices for production.
+CARTESIA_DEFAULT_VOICES = {
+    "narrator_en":  "a0e99841-438c-4a64-b679-ae501e7d6091",
+    "narrator_ko":  "57e5dba7-44df-4d44-b85f-7c40c92e1e9e",  # Korean multilingual
+    "warm_female":  "79a125e8-cd45-4c13-8a67-188112f4dd22",
+    "deep_male":    "421b3369-f63f-4b03-8980-37a44df1d4e8",
+    "young_female": "f6141af3-5f94-418c-80ed-a45d450e7e2e",
+}
+
+
+def generate_cartesia(
+    text: str,
+    output_filename: str,
+    voice_id: str = CARTESIA_DEFAULT_VOICES["narrator_en"],
+    model_id: str = "sonic-2",
+    language: str = "en",
+    speed: str = "normal",
+) -> Optional[str]:
+    """Generate audio via Cartesia Sonic 2 — low-latency streaming TTS.
+
+    Pros: ~75ms time-to-first-byte (real-time during editing), native
+    multilingual including Korean, supports speed modifiers.
+
+    Cons: smaller voice library than ElevenLabs, no built-in cloning on the
+    free tier.
+
+    Args:
+        text: line to synthesize
+        output_filename: write target (mp3)
+        voice_id: Cartesia voice UUID
+        model_id: "sonic-2" (recommended) | "sonic" (legacy)
+        language: ISO 639-1 code — "en" | "ko" | "ja" | "zh" | etc.
+        speed: "slow" | "normal" | "fast"
+
+    Returns the output path on success, None on failure.
+    """
+    import requests
+
+    api_key = settings.cartesia_api_key
+    if not api_key:
+        print("   [CARTESIA] CARTESIA_API_KEY not set; skipping")
+        return None
+
+    try:
+        url = "https://api.cartesia.ai/tts/bytes"
+        headers = {
+            "X-API-Key": api_key,
+            "Cartesia-Version": "2024-11-13",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model_id": model_id,
+            "transcript": text,
+            "voice": {"mode": "id", "id": voice_id},
+            "output_format": {
+                "container": "mp3",
+                "sample_rate": 44100,
+                "bit_rate": 128000,
+            },
+            "language": language,
+        }
+        if speed in ("slow", "fast"):
+            payload["experimental_controls"] = {"speed": speed}
+
+        r = requests.post(url, json=payload, headers=headers, timeout=30)
+        if r.status_code != 200:
+            print(f"   [CARTESIA] HTTP {r.status_code}: {r.text[:200]}")
+            return None
+        with open(output_filename, "wb") as f:
+            f.write(r.content)
+        print(f"   ✅ Cartesia Sonic 2 ({language}): {output_filename}")
+        return output_filename
+    except Exception as e:
+        print(f"   [CARTESIA] failed: {e}")
+        return None
+
+
+def generate_tts_routed(
+    text: str,
+    output_filename: str,
+    voice_id: Optional[str] = None,
+    delivery: str = "natural",
+    language: Optional[str] = None,
+    provider: Optional[str] = None,
+) -> Optional[str]:
+    """TTS router — picks the engine based on settings.tts_provider (or override).
+
+    Order of resolution for provider:
+      1. explicit `provider` kwarg
+      2. settings.tts_provider (set via SettingsPanel)
+      3. ELEVENLABS_V3 (default)
+
+    Each provider falls through to ElevenLabs on failure so the pipeline
+    never blocks. Voice ID handling differs per provider:
+      - ELEVENLABS_V3:    ElevenLabs voice ID (default Adam)
+      - CARTESIA_SONIC_2: Cartesia voice UUID
+      - OPENAI_AUDIO:     one of OPENAI_AUDIO_VOICES keys ("alloy", "onyx", etc.)
+    """
+    if not provider:
+        provider = getattr(settings, "tts_provider", None) or "ELEVENLABS_V3"
+
+    if language is None:
+        language = getattr(settings, "language", "English") or "English"
+    lang_iso = {
+        "english": "en", "korean": "ko", "japanese": "ja", "mandarin": "zh",
+        "chinese": "zh", "spanish": "es", "french": "fr", "german": "de",
+    }.get(language.lower().strip(), "en")
+
+    # Try the requested provider; fall through to ElevenLabs on failure
+    if provider == "CARTESIA_SONIC_2":
+        cv = voice_id or (CARTESIA_DEFAULT_VOICES["narrator_ko"] if lang_iso == "ko"
+                          else CARTESIA_DEFAULT_VOICES["narrator_en"])
+        result = generate_cartesia(text, output_filename, voice_id=cv, language=lang_iso)
+        if result:
+            return result
+        print("   [TTS-ROUTER] Cartesia failed; falling back to ElevenLabs")
+
+    elif provider == "OPENAI_AUDIO":
+        ov = voice_id if voice_id in OPENAI_AUDIO_VOICES else "alloy"
+        result = generate_openai_audio(text, output_filename, voice=ov,
+                                        instructions=f"Speak with {delivery} delivery in {language}")
+        if result:
+            return result
+        print("   [TTS-ROUTER] OpenAI Audio failed; falling back to ElevenLabs")
+
+    # ELEVENLABS_V3 default + fallback path
+    try:
+        from elevenlabs import VoiceSettings
+        voice_profile = get_voice_direction(delivery)
+        directed = voice_profile["markup"](text) if voice_profile.get("markup") else text
+        audio = client.text_to_speech.convert(
+            voice_id=voice_id or "pNInz6obpgDQGcFmaJgB",  # Adam default
+            output_format="mp3_44100_128",
+            text=directed,
+            model_id="eleven_v3",
+            voice_settings=VoiceSettings(
+                stability=voice_profile["stability"],
+                similarity_boost=voice_profile["similarity"],
+                style=voice_profile["style"],
+                use_speaker_boost=voice_profile.get("speaker_boost", True),
+            ),
+        )
+        save(audio, output_filename)
+        return output_filename
+    except Exception as e:
+        print(f"   [TTS-ROUTER] ElevenLabs fallback also failed: {e}")
+        return None
 
 
 def generate_voiceover(ctx: dict) -> bool:

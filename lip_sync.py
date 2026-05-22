@@ -199,7 +199,51 @@ def lipsync_overlay(
     video_url = fal_client.upload_file(video_path)
     audio_url = fal_client.upload_file(audio_path)
 
-    # ATTEMPT 1: MuseTalk (best quality, cheapest)
+    # Gate setup for sync-validated escalation across overlay engines
+    import shutil as _shutil_overlay
+    overlay_gate_enabled, overlay_threshold = _sync_gate_settings()
+    overlay_candidates: list = []
+
+    def _overlay_gate_or_stash(engine_name: str) -> bool:
+        if not overlay_gate_enabled:
+            return True
+        score = validate_lipsync_quality(output_path, audio_path)
+        print(f"   [LIPSYNC-GATE] overlay/{engine_name} sync_score={score:.3f} (threshold {overlay_threshold:.2f})")
+        if score >= overlay_threshold:
+            return True
+        stash = f"{output_path}.{engine_name}.tmp"
+        try:
+            _shutil_overlay.copyfile(output_path, stash)
+            overlay_candidates.append((score, stash, engine_name))
+        except Exception as _e:
+            print(f"   [LIPSYNC-GATE] could not stash overlay/{engine_name}: {_e}")
+        return False
+
+    # ATTEMPT 0: sync.so v3 (Q=0.90, Sync Labs current best generalist)
+    # Handles motion + occlusion + side angles where MuseTalk often fails.
+    # Slightly more expensive but better baseline quality on hard inputs.
+    try:
+        print(f"   [LIPSYNC-OVERLAY] sync.so v3: best generalist...")
+        result = fal_client.subscribe(
+            "fal-ai/sync-lipsync/v3",
+            arguments={
+                "video_url": video_url,
+                "audio_url": audio_url,
+            },
+            with_logs=True,
+        )
+        out_url = result.get("video", {}).get("url")
+        if out_url:
+            urllib.request.urlretrieve(out_url, output_path)
+            if _overlay_gate_or_stash("syncSoV3"):
+                print(f"   [LIPSYNC-OVERLAY] sync.so v3 success: {output_path}")
+                return output_path
+    except Exception as e:
+        # sync.so v3 endpoint might be named differently or not yet on FAL.
+        # Falls through to MuseTalk silently — no user-visible regression.
+        print(f"   [LIPSYNC-OVERLAY] sync.so v3 failed: {e}")
+
+    # ATTEMPT 1: MuseTalk (mouth-only overlay, cheapest)
     try:
         print(f"   [LIPSYNC-OVERLAY] MuseTalk: mouth-only overlay...")
         result = fal_client.subscribe(
@@ -213,8 +257,9 @@ def lipsync_overlay(
         out_url = result.get("video", {}).get("url")
         if out_url:
             urllib.request.urlretrieve(out_url, output_path)
-            print(f"   [LIPSYNC-OVERLAY] MuseTalk success: {output_path}")
-            return output_path
+            if _overlay_gate_or_stash("MuseTalk"):
+                print(f"   [LIPSYNC-OVERLAY] MuseTalk success: {output_path}")
+                return output_path
     except Exception as e:
         print(f"   [LIPSYNC-OVERLAY] MuseTalk failed: {e}")
 
@@ -232,12 +277,13 @@ def lipsync_overlay(
         out_url = result.get("video", {}).get("url")
         if out_url:
             urllib.request.urlretrieve(out_url, output_path)
-            print(f"   [LIPSYNC-OVERLAY] LatentSync success: {output_path}")
-            return output_path
+            if _overlay_gate_or_stash("LatentSync"):
+                print(f"   [LIPSYNC-OVERLAY] LatentSync success: {output_path}")
+                return output_path
     except Exception as e:
         print(f"   [LIPSYNC-OVERLAY] LatentSync failed: {e}")
 
-    # ATTEMPT 3: Sync Lipsync v2 (premium, $3/min)
+    # ATTEMPT 3: Sync Lipsync v2 (premium fallback for hard cases)
     try:
         print(f"   [LIPSYNC-OVERLAY] Sync Lipsync v2 fallback (premium)...")
         result = fal_client.subscribe(
@@ -251,18 +297,128 @@ def lipsync_overlay(
         out_url = result.get("video", {}).get("url")
         if out_url:
             urllib.request.urlretrieve(out_url, output_path)
-            print(f"   [LIPSYNC-OVERLAY] Sync Lipsync v2 success: {output_path}")
-            return output_path
+            if _overlay_gate_or_stash("SyncV2"):
+                print(f"   [LIPSYNC-OVERLAY] Sync Lipsync v2 success: {output_path}")
+                return output_path
     except Exception as e:
         print(f"   [LIPSYNC-OVERLAY] Sync v2 failed: {e}")
+
+    # Best-of-failed recovery for overlay pipeline
+    if overlay_candidates:
+        overlay_candidates.sort(key=lambda c: c[0], reverse=True)
+        best_score, best_path, best_name = overlay_candidates[0]
+        print(f"   [LIPSYNC-GATE] No overlay engine cleared threshold {overlay_threshold:.2f}. "
+              f"Returning best-of-failed: {best_name} (score={best_score:.3f})")
+        try:
+            _shutil_overlay.copyfile(best_path, output_path)
+        except Exception as e:
+            print(f"   [LIPSYNC-GATE] could not restore best candidate: {e}")
+        for _, p, _ in overlay_candidates:
+            try:
+                if os.path.exists(p):
+                    os.unlink(p)
+            except Exception:
+                pass
+        return output_path
 
     print("   [LIPSYNC-OVERLAY] All overlay methods failed")
     return None
 
 
 # ─────────────────────────────────────────────────────────────
-# MODE 2: GENERATION (Omnihuman — full-body from still photo)
+# SYNC QUALITY VALIDATION (SyncNet gate)
 # ─────────────────────────────────────────────────────────────
+
+def validate_lipsync_quality(video_path: str, audio_path: Optional[str] = None) -> float:
+    """Score audio-visual sync confidence in [0, 1].
+
+    Provider chain (best-effort, all optional):
+      1. syncnet_python (open-source SyncNet) — true phoneme-level scoring.
+      2. Duration-match heuristic — catches GROSS sync failures (mismatched
+         clip lengths) but not subtle drift. Better than nothing.
+      3. Neutral 1.0 fallback so the gate is a no-op when no scorer is
+         installed. The pipeline never blocks on a missing dependency.
+
+    Returns:
+        float in [0, 1]. Higher = better sync. 1.0 = "perfect or unmeasurable".
+    """
+    if not video_path or not os.path.exists(video_path):
+        return 0.0
+
+    # Provider 1: syncnet_python (real phoneme-level SyncNet score)
+    try:
+        from SyncNetInstance import SyncNetInstance  # type: ignore
+        import torch  # noqa: F401 — syncnet_python requires torch
+        # Defer import; if package present but broken, fall through to heuristic
+        scorer = SyncNetInstance()
+        # syncnet_python's evaluate returns (offset, confidence, dists).
+        # Confidence is the metric we want.
+        _offset, conf, _dists = scorer.evaluate({}, video_path)
+        return max(0.0, min(1.0, float(conf) / 10.0))  # syncnet conf scale ~ 0-10
+    except Exception:
+        # ImportError, attribute error, or model checkpoint missing — skip
+        pass
+
+    # Provider 2: duration-match heuristic
+    try:
+        import subprocess
+        import json as _json
+
+        def _dur(p):
+            r = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", p],
+                capture_output=True, text=True, timeout=10,
+            )
+            return float(_json.loads(r.stdout).get("format", {}).get("duration", 0.0))
+
+        vd = _dur(video_path)
+        if vd <= 0:
+            return 1.0  # can't probe — neutral
+        ad = _dur(audio_path) if audio_path and os.path.exists(audio_path) else vd
+        diff_ratio = abs(vd - ad) / max(vd, ad, 0.1)
+        # Each 1% drift costs 5pts of sync confidence; 20% drift → 0
+        return max(0.0, 1.0 - diff_ratio * 5.0)
+    except Exception:
+        pass
+
+    # No scorer available — neutral
+    return 1.0
+
+
+def _sync_gate_settings() -> tuple:
+    """Read sync gate config from global settings. Returns (enabled, threshold)."""
+    try:
+        from config.settings import settings as _s
+        enabled = getattr(_s, "lipsync_quality_validation", True)
+        threshold = float(getattr(_s, "lipsync_validation_threshold", 0.65))
+    except Exception:
+        enabled, threshold = True, 0.65
+    return enabled, threshold
+
+
+# ─────────────────────────────────────────────────────────────
+# MODE 2: GENERATION (Hedra Character-3 → Omnihuman → Kling → Aurora)
+# ─────────────────────────────────────────────────────────────
+
+def _hedra_aspect_ratio_from_image(image_path: str) -> str:
+    """Map portrait aspect ratio to Hedra's accepted strings.
+    Hedra accepts: '16:9' | '9:16' | '1:1'. We pick the closest match
+    rather than failing on odd source ratios — Hedra crops gracefully.
+    """
+    try:
+        from PIL import Image
+        img = Image.open(image_path)
+        w, h = img.size
+        ratio = w / h
+    except Exception:
+        return "9:16"  # safest default for portraits
+
+    if ratio > 1.4:
+        return "16:9"
+    if ratio < 0.75:
+        return "9:16"
+    return "1:1"
+
 
 def lipsync_generation(
     character_image_path: str,
@@ -276,7 +432,7 @@ def lipsync_generation(
     Generates head movement, gestures, expressions correlated with speech.
     WARNING: This REPLACES any existing video — use only for dedicated dialogue shots.
 
-    Fallback chain: Kling Lip Sync → Omnihuman v1.5 → Creatify Aurora
+    Fallback chain: Hedra Character-3 → Kling Lip Sync → Omnihuman v1.5 → Creatify Aurora
     """
     if not FAL_AVAILABLE or not settings.fal_key:
         print("   [LIPSYNC-GEN] FAL not available")
@@ -294,7 +450,62 @@ def lipsync_generation(
     image_url = fal_client.upload_file(character_image_path)
     audio_url = fal_client.upload_file(audio_path)
 
-    # ATTEMPT 0: Kling native lip sync (cheapest at $0.014/sec, integrated motion)
+    # SyncNet gate — score each engine's output, fall through if below threshold.
+    # Track candidates so we can return the best-scored even if none clears the bar.
+    import shutil as _shutil
+    gate_enabled, gate_threshold = _sync_gate_settings()
+    candidates: list = []  # list of (score, stash_path, engine_name)
+
+    def _gate_or_stash(engine_name: str) -> bool:
+        """Called after a successful urlretrieve to output_path. Returns True if
+        this engine's output passes the SyncNet gate and the function should
+        return early. Returns False to fall through to the next engine; stashes
+        the failed candidate so we can pick the best-of-failed at the end.
+        """
+        if not gate_enabled:
+            return True
+        score = validate_lipsync_quality(output_path, audio_path)
+        print(f"   [LIPSYNC-GATE] {engine_name} sync_score={score:.3f} (threshold {gate_threshold:.2f})")
+        if score >= gate_threshold:
+            return True
+        # Stash this candidate before the next engine overwrites output_path
+        stash = f"{output_path}.{engine_name}.tmp"
+        try:
+            _shutil.copyfile(output_path, stash)
+            candidates.append((score, stash, engine_name))
+        except Exception as _e:
+            print(f"   [LIPSYNC-GATE] could not stash {engine_name}: {_e}")
+        return False
+
+    # ATTEMPT 0: Hedra Character-3 (Q=0.93, SOTA portrait talking head)
+    # Best emotional micro-expressions + head movement correlated with speech.
+    # Native full-body output, handles off-axis angles better than Omnihuman.
+    try:
+        aspect = _hedra_aspect_ratio_from_image(character_image_path)
+        print(f"   [LIPSYNC-GEN] Hedra Character-3 (aspect={aspect}, res={resolution})...")
+        result = fal_client.subscribe(
+            "fal-ai/hedra/character-3",
+            arguments={
+                "image_url": image_url,
+                "audio_url": audio_url,
+                "aspect_ratio": aspect,
+                "resolution": resolution,
+            },
+            with_logs=True,
+        )
+        video_url = result.get("video", {}).get("url")
+        if video_url:
+            urllib.request.urlretrieve(video_url, output_path)
+            if _gate_or_stash("Hedra"):
+                print(f"   [LIPSYNC-GEN] Hedra Character-3 success: {output_path}")
+                return output_path
+    except Exception as e:
+        # Graceful fallback — caller will try the next engine below.
+        # If the FAL endpoint name or field schema drifts, the cascade keeps the
+        # pipeline running on the legacy engines while we patch the integration.
+        print(f"   [LIPSYNC-GEN] Hedra Character-3 failed: {e}")
+
+    # ATTEMPT 1: Kling native lip sync (cheapest at $0.014/sec, integrated motion)
     try:
         print(f"   [LIPSYNC-GEN] Kling native lip sync...")
         result = fal_client.subscribe(
@@ -308,12 +519,13 @@ def lipsync_generation(
         video_url = result.get("video", {}).get("url")
         if video_url:
             urllib.request.urlretrieve(video_url, output_path)
-            print(f"   [LIPSYNC-GEN] Kling lip sync success: {output_path}")
-            return output_path
+            if _gate_or_stash("Kling"):
+                print(f"   [LIPSYNC-GEN] Kling lip sync success: {output_path}")
+                return output_path
     except Exception as e:
         print(f"   [LIPSYNC-GEN] Kling lip sync failed: {e}")
 
-    # ATTEMPT 1: Omnihuman v1.5 (best full-body quality)
+    # ATTEMPT 2: Omnihuman v1.5 (best full-body quality)
     try:
         print(f"   [LIPSYNC-GEN] Omnihuman v1.5: full-body talking video ({resolution})...")
         result = fal_client.subscribe(
@@ -330,12 +542,13 @@ def lipsync_generation(
         duration = result.get("duration", 0)
         if video_url:
             urllib.request.urlretrieve(video_url, output_path)
-            print(f"   [LIPSYNC-GEN] Omnihuman success: {output_path} ({duration:.1f}s)")
-            return output_path
+            if _gate_or_stash("Omnihuman"):
+                print(f"   [LIPSYNC-GEN] Omnihuman success: {output_path} ({duration:.1f}s)")
+                return output_path
     except Exception as e:
         print(f"   [LIPSYNC-GEN] Omnihuman failed: {e}")
 
-    # ATTEMPT 2: Creatify Aurora (studio-grade avatar)
+    # ATTEMPT 3: Creatify Aurora (studio-grade avatar)
     try:
         print(f"   [LIPSYNC-GEN] Creatify Aurora fallback...")
         result = fal_client.subscribe(
@@ -350,13 +563,104 @@ def lipsync_generation(
         video_url = result.get("video", {}).get("url")
         if video_url:
             urllib.request.urlretrieve(video_url, output_path)
-            print(f"   [LIPSYNC-GEN] Aurora success: {output_path}")
-            return output_path
+            if _gate_or_stash("Aurora"):
+                print(f"   [LIPSYNC-GEN] Aurora success: {output_path}")
+                return output_path
     except Exception as e:
         print(f"   [LIPSYNC-GEN] Aurora failed: {e}")
 
+    # SyncNet gate fallback: no engine cleared the threshold. Pick the highest-
+    # scored candidate from the stashed attempts. Better than returning None
+    # when we have *something* — the operator can review and decide.
+    if candidates:
+        candidates.sort(key=lambda c: c[0], reverse=True)
+        best_score, best_path, best_name = candidates[0]
+        print(f"   [LIPSYNC-GATE] No engine cleared threshold {gate_threshold:.2f}. "
+              f"Returning best-of-failed: {best_name} (score={best_score:.3f})")
+        try:
+            _shutil.copyfile(best_path, output_path)
+        except Exception as e:
+            print(f"   [LIPSYNC-GATE] could not restore best candidate: {e}")
+        # Clean up stash files
+        for _, p, _ in candidates:
+            try:
+                if os.path.exists(p):
+                    os.unlink(p)
+            except Exception:
+                pass
+        return output_path
+
     print("   [LIPSYNC-GEN] All generation methods failed")
     return None
+
+
+# ─────────────────────────────────────────────────────────────
+# MODE 3: PERFORMANCE TRANSFER (Runway Act-One)
+# ─────────────────────────────────────────────────────────────
+#
+# Different paradigm from MuseTalk/Hedra/Omnihuman: Act-One takes a DRIVER VIDEO
+# of someone performing the dialogue (acting, gestures, mouth shapes) and
+# transfers BOTH the lip sync AND the performance to the target character.
+# Quality ceiling is the highest in the registry (Q=0.91) for talking heads
+# because the AI doesn't have to invent the performance — it inherits one from
+# the driver video.
+#
+# Inputs differ from the audio-driven cascade — caller supplies a driver video
+# instead of an audio file. Wire into pipelines that have a director performance
+# captured on phone/webcam.
+
+def lipsync_act_one(
+    character_image_path: str,
+    driver_video_path: str,
+    output_path: str,
+    ratio: str = "16:9",
+) -> Optional[str]:
+    """Runway Act-One — performance transfer from driver video to character.
+
+    Args:
+        character_image_path: Target character portrait.
+        driver_video_path:    Performance capture (someone speaking the lines,
+                              acting the scene). Mouth shapes + facial micro-
+                              expressions get transferred to the character.
+        output_path:          Where to save the result.
+        ratio:                "16:9" | "9:16" | "1:1".
+
+    Returns the saved path or None on failure. Designed for hero shots where
+    a director has recorded a reference performance.
+    """
+    if not FAL_AVAILABLE or not settings.fal_key:
+        print("   [LIPSYNC-ACT-ONE] FAL not available")
+        return None
+    if not character_image_path or not os.path.exists(character_image_path):
+        print("   [LIPSYNC-ACT-ONE] Character image missing")
+        return None
+    if not driver_video_path or not os.path.exists(driver_video_path):
+        print("   [LIPSYNC-ACT-ONE] Driver video missing")
+        return None
+
+    try:
+        image_url = fal_client.upload_file(character_image_path)
+        driver_url = fal_client.upload_file(driver_video_path)
+        print(f"   [LIPSYNC-ACT-ONE] Runway Act-One (ratio={ratio})...")
+        result = fal_client.subscribe(
+            "fal-ai/runway/act-one",
+            arguments={
+                "character_image_url": image_url,
+                "driver_video_url": driver_url,
+                "aspect_ratio": ratio,
+            },
+            with_logs=True,
+        )
+        out_url = result.get("video", {}).get("url")
+        if not out_url:
+            print("   [LIPSYNC-ACT-ONE] No video URL returned")
+            return None
+        urllib.request.urlretrieve(out_url, output_path)
+        print(f"   [LIPSYNC-ACT-ONE] success: {output_path}")
+        return output_path
+    except Exception as e:
+        print(f"   [LIPSYNC-ACT-ONE] failed: {e}")
+        return None
 
 
 # ─────────────────────────────────────────────────────────────

@@ -85,6 +85,18 @@ class PipelineContext:
     # --- workspace ---
     downloaded_vids: list = field(default_factory=list)
 
+    # --- max-quality tier state ---
+    # Pre-VAE-decode latent of the previous shot, cached for LatentBlend in the
+    # max tier. Bytes (serialized torch tensor) or None. Only populated when
+    # generate_ai_broll(..., quality_tier="max") runs and the pod returns the
+    # latent. Production tier ignores this field.
+    prev_shot_latent: Optional[bytes] = None
+    # Per-character LoRA registry: character_id -> local path to .safetensors.
+    # Consumed by quality_max via the char_lora_path kwarg.
+    char_lora_paths: dict = field(default_factory=dict)
+    # Style reference board for FLUX Redux (max tier). List of local paths.
+    style_reference_paths: list = field(default_factory=list)
+
     # -----------------------------------------------------------------
     # dict-compat layer (so legacy `def f(ctx: dict)` keeps working)
     # -----------------------------------------------------------------

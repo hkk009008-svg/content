@@ -2,11 +2,15 @@
 Cinema Production Tool — Workflow Selector (Lightweight ComfyGPT)
 Automatically classifies shots by type and selects optimal workflow parameters.
 
-Instead of generating entire ComfyUI graphs from scratch (full ComfyGPT),
-this uses 5 pre-tuned parameter templates applied to the base Pulid.json.
+Two quality tiers:
+  - "production" (default): pre-tuned params for base pulid.json (5 templates)
+  - "max":                  full maxed stack for pulid_max.json (N=8 best-of,
+                            4-layer identity, 4-channel Union CN, Redux,
+                            multi-pass refinement, SUPIR upscale)
 
 Shot types: portrait, medium, wide, action, landscape
-Each type optimizes: PuLID weight, guidance, steps, denoise for maximum quality.
+Each type optimizes: PuLID weight, guidance, steps, denoise — and at max tier
+also: SLG/FreeU scales, CN channel strengths, DetailDaemon, halt rules.
 """
 
 import re
@@ -129,6 +133,263 @@ SHOT_TYPE_KEYWORDS = {
 }
 
 
+# =============================================================================
+# MAX-QUALITY TIER — for pulid_max.json (full maxed stack)
+# =============================================================================
+# Per-shot-type tuning for the max graph. Every shot type gets the SAME
+# generation budget (N=8) but the halt threshold and the conditioning mix
+# vary. Values here are deliberately bolder than the production tier — this
+# is the "ignore cost, max quality" path.
+MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
+    "portrait": {
+        "candidate_count": 8,
+        "candidate_batch": 4,
+        "halt_threshold_composite": 0.92,
+        "halt_threshold_arc": 0.85,
+        "halt_min_n": 4,
+        "regenerate_floor_arc": 0.82,
+        "pulid_weight": 0.85,
+        "pulid_start_at": 0.0,
+        "pulid_end_at": 0.90,
+        "lora_strength_model": 1.0,
+        "lora_strength_clip": 1.0,
+        "guidance": 3.5,
+        "ays_steps": 28,
+        "sampler": "dpmpp_3m_sde_gpu",
+        "scheduler_ays": True,
+        "pag_scale": 3.0,
+        "slg_scale": 2.5,
+        "slg_double_layers": "7,8,9",
+        "slg_single_layers": "10,11",
+        "freeu_b1": 1.3, "freeu_b2": 1.4, "freeu_s1": 0.9, "freeu_s2": 0.2,
+        "detail_daemon_amount": 0.5,
+        "diffdiff_enabled": True,
+        "cn_depth_strength": 0.40,
+        "cn_canny_strength": 0.15,
+        "cn_pose_strength": 0.35,
+        "cn_tile_strength": 0.25,
+        "redux_strength": "high",
+        "redux_end_at": 0.50,
+        "latent_blend_ratio": 0.15,
+        "hires_fix_enabled": True,
+        "hires_fix_scale": 1.5,
+        "hires_fix_denoise": 0.40,
+        "hires_fix_steps": 18,
+        "face_detailer_enabled": True,
+        "face_detailer_guide_size": 1024,
+        "face_detailer_denoise": 0.35,
+        "reactor_enabled": True,
+        "reactor_codeformer_weight": 0.5,
+        "supir_enabled": True,
+        "supir_steps": 50,
+        "supir_cfg_scale": 4.0,
+        "final_resolution": (3840, 2160),
+        "target_api": "KLING_NATIVE",
+        "video_fallbacks": ["RUNWAY_GEN4", "SORA_NATIVE", "VEO_NATIVE"],
+        "description": "MAX portrait — 4-layer identity, full CN+Redux, N=8 halt@0.92, all post-passes",
+    },
+    "medium": {
+        "candidate_count": 8,
+        "candidate_batch": 4,
+        "halt_threshold_composite": 0.90,
+        "halt_threshold_arc": 0.83,
+        "halt_min_n": 4,
+        "regenerate_floor_arc": 0.80,
+        "pulid_weight": 0.80,
+        "pulid_start_at": 0.0,
+        "pulid_end_at": 0.90,
+        "lora_strength_model": 1.0,
+        "lora_strength_clip": 1.0,
+        "guidance": 3.5,
+        "ays_steps": 28,
+        "sampler": "dpmpp_3m_sde_gpu",
+        "scheduler_ays": True,
+        "pag_scale": 3.0,
+        "slg_scale": 2.5,
+        "slg_double_layers": "7,8,9",
+        "slg_single_layers": "10,11",
+        "freeu_b1": 1.3, "freeu_b2": 1.4, "freeu_s1": 0.9, "freeu_s2": 0.2,
+        "detail_daemon_amount": 0.45,
+        "diffdiff_enabled": True,
+        "cn_depth_strength": 0.42,
+        "cn_canny_strength": 0.15,
+        "cn_pose_strength": 0.32,
+        "cn_tile_strength": 0.25,
+        "redux_strength": "high",
+        "redux_end_at": 0.50,
+        "latent_blend_ratio": 0.15,
+        "hires_fix_enabled": True,
+        "hires_fix_scale": 1.5,
+        "hires_fix_denoise": 0.40,
+        "hires_fix_steps": 18,
+        "face_detailer_enabled": True,
+        "face_detailer_guide_size": 1024,
+        "face_detailer_denoise": 0.35,
+        "reactor_enabled": True,
+        "reactor_codeformer_weight": 0.5,
+        "supir_enabled": True,
+        "supir_steps": 50,
+        "supir_cfg_scale": 4.0,
+        "final_resolution": (3840, 2160),
+        "target_api": "KLING_NATIVE",
+        "video_fallbacks": ["RUNWAY_GEN4", "SORA_NATIVE", "LTX"],
+        "description": "MAX medium — same identity stack, slightly relaxed thresholds",
+    },
+    "wide": {
+        "candidate_count": 8,
+        "candidate_batch": 4,
+        "halt_threshold_composite": 0.88,
+        "halt_threshold_arc": 0.78,
+        "halt_min_n": 4,
+        "regenerate_floor_arc": 0.72,
+        "pulid_weight": 0.65,
+        "pulid_start_at": 0.20,
+        "pulid_end_at": 0.85,
+        "lora_strength_model": 0.9,
+        "lora_strength_clip": 0.9,
+        "guidance": 3.5,
+        "ays_steps": 28,
+        "sampler": "dpmpp_3m_sde_gpu",
+        "scheduler_ays": True,
+        "pag_scale": 2.8,
+        "slg_scale": 2.5,
+        "slg_double_layers": "7,8,9",
+        "slg_single_layers": "10,11",
+        "freeu_b1": 1.3, "freeu_b2": 1.4, "freeu_s1": 0.9, "freeu_s2": 0.2,
+        "detail_daemon_amount": 0.5,
+        "diffdiff_enabled": True,
+        "cn_depth_strength": 0.50,
+        "cn_canny_strength": 0.18,
+        "cn_pose_strength": 0.25,
+        "cn_tile_strength": 0.30,
+        "redux_strength": "high",
+        "redux_end_at": 0.50,
+        "latent_blend_ratio": 0.18,
+        "hires_fix_enabled": True,
+        "hires_fix_scale": 1.5,
+        "hires_fix_denoise": 0.42,
+        "hires_fix_steps": 18,
+        "face_detailer_enabled": False,
+        "face_detailer_guide_size": 1024,
+        "face_detailer_denoise": 0.35,
+        "reactor_enabled": False,
+        "reactor_codeformer_weight": 0.5,
+        "supir_enabled": True,
+        "supir_steps": 50,
+        "supir_cfg_scale": 4.0,
+        "final_resolution": (3840, 2160),
+        "target_api": "LTX",
+        "video_fallbacks": ["VEO_NATIVE", "KLING_NATIVE", "RUNWAY_GEN4"],
+        "description": "MAX wide — face too small for FaceDetailer; CN spatial dominant",
+    },
+    "action": {
+        "candidate_count": 8,
+        "candidate_batch": 4,
+        "halt_threshold_composite": 0.88,
+        "halt_threshold_arc": 0.80,
+        "halt_min_n": 4,
+        "regenerate_floor_arc": 0.75,
+        "pulid_weight": 0.75,
+        "pulid_start_at": 0.0,
+        "pulid_end_at": 0.90,
+        "lora_strength_model": 1.0,
+        "lora_strength_clip": 1.0,
+        "guidance": 3.5,
+        "ays_steps": 28,
+        "sampler": "dpmpp_3m_sde_gpu",
+        "scheduler_ays": True,
+        "pag_scale": 2.5,
+        "slg_scale": 2.0,
+        "slg_double_layers": "7,8,9",
+        "slg_single_layers": "10,11",
+        "freeu_b1": 1.2, "freeu_b2": 1.3, "freeu_s1": 0.9, "freeu_s2": 0.2,
+        "detail_daemon_amount": 0.4,
+        "diffdiff_enabled": True,
+        "cn_depth_strength": 0.32,
+        "cn_canny_strength": 0.12,
+        "cn_pose_strength": 0.28,
+        "cn_tile_strength": 0.20,
+        "redux_strength": "medium",
+        "redux_end_at": 0.45,
+        "latent_blend_ratio": 0.12,
+        "hires_fix_enabled": True,
+        "hires_fix_scale": 1.5,
+        "hires_fix_denoise": 0.45,
+        "hires_fix_steps": 18,
+        "face_detailer_enabled": True,
+        "face_detailer_guide_size": 1024,
+        "face_detailer_denoise": 0.35,
+        "reactor_enabled": True,
+        "reactor_codeformer_weight": 0.4,
+        "supir_enabled": True,
+        "supir_steps": 50,
+        "supir_cfg_scale": 4.0,
+        "final_resolution": (3840, 2160),
+        "target_api": "SORA_NATIVE",
+        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "LTX"],
+        "description": "MAX action — softer guidance for motion, lower CN strength to allow movement",
+    },
+    "landscape": {
+        "candidate_count": 8,
+        "candidate_batch": 4,
+        "halt_threshold_composite": 0.90,
+        "halt_threshold_arc": 0.0,
+        "halt_min_n": 4,
+        "regenerate_floor_arc": 0.0,
+        "pulid_weight": 0.0,
+        "pulid_start_at": 0.0,
+        "pulid_end_at": 0.0,
+        "lora_strength_model": 0.0,
+        "lora_strength_clip": 0.0,
+        "guidance": 4.0,
+        "ays_steps": 30,
+        "sampler": "dpmpp_3m_sde_gpu",
+        "scheduler_ays": True,
+        "pag_scale": 3.5,
+        "slg_scale": 2.8,
+        "slg_double_layers": "7,8,9",
+        "slg_single_layers": "10,11",
+        "freeu_b1": 1.3, "freeu_b2": 1.4, "freeu_s1": 0.9, "freeu_s2": 0.2,
+        "detail_daemon_amount": 0.6,
+        "diffdiff_enabled": True,
+        "cn_depth_strength": 0.55,
+        "cn_canny_strength": 0.20,
+        "cn_pose_strength": 0.0,
+        "cn_tile_strength": 0.35,
+        "redux_strength": "high",
+        "redux_end_at": 0.55,
+        "latent_blend_ratio": 0.20,
+        "hires_fix_enabled": True,
+        "hires_fix_scale": 1.5,
+        "hires_fix_denoise": 0.45,
+        "hires_fix_steps": 20,
+        "face_detailer_enabled": False,
+        "face_detailer_guide_size": 1024,
+        "face_detailer_denoise": 0.35,
+        "reactor_enabled": False,
+        "reactor_codeformer_weight": 0.5,
+        "supir_enabled": True,
+        "supir_steps": 50,
+        "supir_cfg_scale": 4.0,
+        "final_resolution": (3840, 2160),
+        "target_api": "LTX",
+        "video_fallbacks": ["VEO_NATIVE", "KLING_NATIVE"],
+        "description": "MAX landscape — no identity stack, max CN + PAG + SLG for architecture/atmosphere",
+    },
+}
+
+
+def get_max_quality_params(shot_type: str) -> Dict:
+    """Return the maxed parameter template for a shot type.
+
+    Keys cover: candidate budget (N), halt thresholds, identity stack weights,
+    ControlNet channel strengths, guidance enhancers, post-pass toggles.
+    Consumed by quality_max.generate_ai_broll_max — not used in the production
+    tier path.
+    """
+    return MAX_QUALITY_TEMPLATES.get(shot_type, MAX_QUALITY_TEMPLATES["medium"]).copy()
+
+
 def classify_shot_type(shot: dict) -> str:
     """
     Classify a shot into one of 5 types based on its prompt content
@@ -168,8 +429,18 @@ def classify_shot_type(shot: dict) -> str:
     return "medium"
 
 
-def get_workflow_params(shot_type: str) -> Dict:
-    """Get the optimized workflow parameters for a shot type."""
+def get_workflow_params(shot_type: str, quality_tier: str = "production") -> Dict:
+    """Get the optimized workflow parameters for a shot type and quality tier.
+
+    Args:
+        shot_type: "portrait" | "medium" | "wide" | "action" | "landscape"
+        quality_tier: "production" (default, pulid.json) or "max" (pulid_max.json).
+            Existing callers pass shot_type only and get production behavior unchanged.
+
+    Returns: copy of the matching template dict (callers may mutate freely).
+    """
+    if quality_tier == "max":
+        return get_max_quality_params(shot_type)
     return WORKFLOW_TEMPLATES.get(shot_type, WORKFLOW_TEMPLATES["medium"]).copy()
 
 

@@ -333,23 +333,142 @@ export default function ScenePanel({ project, config, onRefresh }: Props) {
                         const shotType = classifyShotType(shot)
                         const template = getShotTemplate(shot, config)
                         const recommendedApi = template?.target_api || shot.target_api
+                        const objsInFrame = (shot as any).objects_in_frame || []
+                        // Live edit handler for target_api override
+                        const updateShotApi = async (newApi: string) => {
+                          const updatedShots = scene.shots.map(s =>
+                            s.id === shot.id ? { ...s, target_api: newApi } : s
+                          )
+                          await fetch(`${API}/projects/${project.id}/scenes/${scene.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ shots: updatedShots }),
+                          })
+                          onRefresh()
+                        }
+                        // Live edit handler for objects_in_frame
+                        const toggleObjectInFrame = async (oid: string) => {
+                          const next = objsInFrame.includes(oid)
+                            ? objsInFrame.filter((x: string) => x !== oid)
+                            : [...objsInFrame, oid]
+                          const updatedShots = scene.shots.map(s =>
+                            s.id === shot.id ? { ...s, objects_in_frame: next } : s
+                          )
+                          await fetch(`${API}/projects/${project.id}/scenes/${scene.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ shots: updatedShots }),
+                          })
+                          onRefresh()
+                        }
+                        // Filter APIs by modality=video + status live/beta (for the picker)
+                        const videoApiOptions = config?.api_registry
+                          ? Object.entries(config.api_registry).filter(
+                              ([, v]: any) => (v.modality === 'video' || v.category === 'smart') && (v.status || 'live') !== 'planned'
+                            )
+                          : []
                         return (
                           <div key={shot.id || si} className="rounded bg-cinema-panel px-2 py-1.5 text-[10px] text-cinema-muted">
                             <div className="flex gap-2">
                               <span className="font-mono text-cinema-accent">{si + 1}</span>
                               <span className="flex-1 line-clamp-1">{shot.prompt?.slice(0, 80)}...</span>
                               <span>{shot.camera}</span>
-                              <span>{shot.target_api}</span>
                             </div>
-                            <div className="mt-1 flex flex-wrap gap-2">
+                            <div className="mt-1 flex flex-wrap items-center gap-2">
                               <span className="rounded bg-cinema-bg px-1.5 py-0.5 text-[9px] uppercase text-cinema-accent">{shotType}</span>
                               {template && (
-                                <>
-                                  <span className="rounded bg-cinema-bg px-1.5 py-0.5 text-[9px]">Best API: {config?.api_registry?.[recommendedApi]?.label || recommendedApi}</span>
-                                  <span className="rounded bg-cinema-bg px-1.5 py-0.5 text-[9px]">CFG {template.guidance} / {template.steps} steps</span>
-                                </>
+                                <span className="rounded bg-cinema-bg px-1.5 py-0.5 text-[9px]">CFG {template.guidance} / {template.steps} steps</span>
+                              )}
+                              {/* Per-shot API override picker */}
+                              <select
+                                value={shot.target_api || 'AUTO'}
+                                onChange={e => updateShotApi(e.target.value)}
+                                className="rounded bg-cinema-bg border border-cinema-border-subtle px-1 py-0.5 text-[9px] text-cinema-text"
+                                title="Override target API for this shot">
+                                {videoApiOptions.map(([k, v]: any) => (
+                                  <option key={k} value={k}>
+                                    {v.label}{v.per_shot_cost ? ` ($${v.per_shot_cost.toFixed(2)})` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                              {shot.target_api && shot.target_api !== recommendedApi && (
+                                <span className="text-[9px] text-cinema-warning" title={`Best for ${shotType}: ${recommendedApi}`}>
+                                  ⚠ override
+                                </span>
                               )}
                             </div>
+                            {/* Performance capture status + driving video upload */}
+                            <div className="mt-1 flex flex-wrap items-center gap-1">
+                              <span className="text-[9px] text-cinema-muted">Performance:</span>
+                              {(() => {
+                                const eng = (shot as any).performance_engine || ''
+                                const approvedId = (shot as any).approved_performance_take_id || ''
+                                const drivingUploaded = !!((shot as any).driving_video_path)
+                                if (eng === 'SKIP') {
+                                  return <span className="text-[9px] text-cinema-muted italic">skipped (wide/no-dialogue)</span>
+                                }
+                                if (approvedId) {
+                                  return (
+                                    <>
+                                      <span className="text-[9px] text-cinema-success font-bold">✓ {eng || 'captured'}</span>
+                                      <button
+                                        onClick={async () => {
+                                          if (!confirm('Clear performance take? Next run will regenerate.')) return
+                                          await fetch(`${API}/projects/${project.id}/shots/${shot.id}/performance`, { method: 'DELETE' })
+                                          onRefresh()
+                                        }}
+                                        className="text-[9px] text-cinema-danger hover:underline">
+                                        clear
+                                      </button>
+                                    </>
+                                  )
+                                }
+                                return <span className="text-[9px] text-cinema-muted">{eng || 'pending'}</span>
+                              })()}
+                              {/* Driving video upload (Mode A) */}
+                              <label className="text-[9px] text-cinema-accent hover:text-cinema-accent2 cursor-pointer underline ml-2">
+                                {((shot as any).driving_video_path) ? '↻ replace driving' : '+ upload driving'}
+                                <input
+                                  type="file"
+                                  accept="video/*"
+                                  className="hidden"
+                                  onChange={async e => {
+                                    const f = e.target.files?.[0]
+                                    if (!f) return
+                                    const fd = new FormData()
+                                    fd.append('driving_video', f)
+                                    const r = await fetch(`${API}/projects/${project.id}/shots/${shot.id}/upload-driving-video`, {
+                                      method: 'POST', body: fd,
+                                    })
+                                    if (r.ok) onRefresh()
+                                    else alert('Upload failed')
+                                  }}
+                                />
+                              </label>
+                            </div>
+
+                            {/* Objects-in-frame editor */}
+                            {(((project as any).objects) || []).length > 0 && (
+                              <div className="mt-1 flex flex-wrap items-center gap-1">
+                                <span className="text-[9px] text-cinema-muted">Objects:</span>
+                                {((project as any).objects || []).map((o: any) => {
+                                  const inFrame = objsInFrame.includes(o.id)
+                                  return (
+                                    <button
+                                      key={o.id}
+                                      onClick={() => toggleObjectInFrame(o.id)}
+                                      className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${
+                                        inFrame
+                                          ? 'bg-cinema-accent/20 border-cinema-accent/50 text-cinema-accent'
+                                          : 'bg-cinema-bg border-cinema-border-subtle text-cinema-muted hover:border-cinema-accent/30'
+                                      }`}
+                                      title={o.brand ? `${o.brand} — ${o.description}` : o.description}>
+                                      {inFrame ? '✓ ' : ''}{o.name}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            )}
                           </div>
                         )
                       })}

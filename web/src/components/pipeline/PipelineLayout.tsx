@@ -34,6 +34,16 @@ interface Props {
   onProceedToAssembly: () => Promise<any>
 }
 
+/* ─── Helpers ─────────────────────────────────────────────────── */
+
+const pad2 = (n: number) => n.toString().padStart(2, '0')
+
+const formatRuntime = (seconds: number): string => {
+  const m = Math.floor(seconds / 60)
+  const s = Math.round(seconds % 60)
+  return `${m}:${pad2(s)}`
+}
+
 export default function PipelineLayout({
   project, events, latest, stages, activeStage,
   shotStates, directorReview, isGenerating, isPaused, failedShots,
@@ -43,13 +53,40 @@ export default function PipelineLayout({
 }: Props) {
   const isComplete = latest?.stage === 'COMPLETE' || latest?.stage === 'DONE'
 
-  // Compute quality summary from shot states
+  /* ── Computed: editorial figures (counter, runtime, scenes) ───── */
+  const totalShots = project.scenes.reduce(
+    (sum, s) => sum + (s.shots?.length ?? s.num_shots ?? 0),
+    0,
+  )
+  const completedShots = Array.from(shotStates.values()).filter(s =>
+    s.status === 'complete' || s.status === 'post_processing' || s.status === 'image_review',
+  ).length
+  const inProgressOffset = isGenerating && !isComplete && completedShots < totalShots ? 1 : 0
+  const currentShot = Math.min(totalShots, completedShots + inProgressOffset)
+  const totalRuntime = project.scenes.reduce((sum, s) => sum + (s.duration_seconds || 0), 0)
+
+  const eyebrowLabel = isComplete
+    ? 'Final Cut'
+    : isPaused
+    ? 'Held'
+    : isGenerating
+    ? 'Now Filming'
+    : 'Standing By'
+
+  /* ── Quality summary (logic preserved from prior implementation) */
   const shotArray = Array.from(shotStates.values())
   const identityScores = shotArray.filter(s => s.identity_score != null).map(s => s.identity_score!)
-  const avgIdentity = identityScores.length > 0 ? identityScores.reduce((a, b) => a + b, 0) / identityScores.length : null
+  const avgIdentity =
+    identityScores.length > 0
+      ? identityScores.reduce((a, b) => a + b, 0) / identityScores.length
+      : null
 
   return (
-    <div className="min-h-screen bg-cinema-bg flex flex-col">
+    <div className="min-h-screen bg-editorial-ink text-editorial-ivory flex flex-col font-sans">
+      {/* Top letterbox — only while the camera is rolling */}
+      {isGenerating && <div className="h-7 bg-black" aria-hidden />}
+
+      {/* Existing header — props unchanged */}
       <PipelineHeader
         projectName={project.name}
         stages={stages}
@@ -62,36 +99,134 @@ export default function PipelineLayout({
         onResume={onResume}
       />
 
-      {/* Quality summary bar */}
-      {identityScores.length > 0 && (
-        <div className="border-b border-cinema-border bg-cinema-panel/50 px-6 py-2 flex items-center gap-6">
-          <span className="text-xs text-cinema-muted uppercase tracking-wider">Quality</span>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-cinema-text">Avg Identity:</span>
-            <span className={`text-xs font-mono font-bold ${
-              avgIdentity! >= 0.70 ? 'text-cinema-success' :
-              avgIdentity! >= 0.55 ? 'text-cinema-warning' : 'text-cinema-danger'
-            }`}>
-              {Math.round(avgIdentity! * 100)}%
+      {/* ── Hero band — the editorial moment the pipeline was missing ── */}
+      <section className="px-12 pt-14 pb-10 border-b border-editorial-curtain relative">
+        <div className="font-mono text-[10px] tracking-wide-eyebrow uppercase text-editorial-curtain absolute top-6 left-12 z-10">
+          {eyebrowLabel}
+        </div>
+
+        <div className="grid grid-cols-[auto_1fr] gap-12 items-end">
+          {/* Massive shot counter — Fraunces variable with WONK axis */}
+          <div
+            className="font-display text-editorial-ivory leading-[0.78] tracking-tight-display ink-up"
+            style={{
+              fontSize: 'clamp(140px, 19vw, 320px)',
+              fontVariationSettings: '"opsz" 144, "WONK" 1, "wght" 320, "SOFT" 0',
+            }}
+          >
+            {pad2(currentShot)}
+            <span
+              className="text-[0.16em] text-editorial-ivory-mute align-super -ml-1"
+              style={{ fontVariationSettings: '"opsz" 24, "WONK" 0, "wght" 350' }}
+            >
+              /{pad2(totalShots)}
             </span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-cinema-text">Shots:</span>
-            <span className="text-xs font-mono text-cinema-success">{shotArray.filter(s => s.status === 'image_review' || s.status === 'complete' || s.status === 'post_processing').length} done</span>
+
+          {/* Title + production metadata */}
+          <div className="pb-6">
+            <h1
+              className="font-display italic text-editorial-ivory ink-up mb-5"
+              style={{
+                fontSize: 'clamp(36px, 5vw, 76px)',
+                fontVariationSettings: '"opsz" 96, "SOFT" 60, "wght" 380',
+                lineHeight: 0.95,
+                letterSpacing: '-0.02em',
+              }}
+            >
+              {project.name}
+            </h1>
+            <div className="font-mono text-[11px] tracking-wide-eyebrow uppercase text-editorial-ivory-mute flex flex-wrap items-center gap-x-5 gap-y-2">
+              <span>{formatRuntime(totalRuntime)} Runtime</span>
+              <span className="text-editorial-rule-bright">·</span>
+              <span>{project.scenes.length} Scenes</span>
+              <span className="text-editorial-rule-bright">·</span>
+              <span>{totalShots} Shots</span>
+              <span className="text-editorial-rule-bright">·</span>
+              <span>9:16 Vertical</span>
+              {isGenerating && !isPaused && (
+                <>
+                  <span className="text-editorial-rule-bright">·</span>
+                  <span className="text-editorial-curtain inline-flex items-center gap-2 flicker">
+                    <span className="w-1.5 h-1.5 rounded-full bg-editorial-curtain" />
+                    On Air
+                  </span>
+                </>
+              )}
+              {isPaused && (
+                <>
+                  <span className="text-editorial-rule-bright">·</span>
+                  <span className="text-editorial-brass inline-flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-editorial-brass" />
+                    Held
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Telemetry band — quality summary restyled, logic intact ── */}
+      {identityScores.length > 0 && (
+        <div className="border-b border-editorial-rule bg-editorial-ink-soft/40 px-12 py-4 flex items-center gap-10">
+          <span className="font-mono text-[10px] tracking-wide-eyebrow uppercase text-editorial-ivory-mute">
+            Telemetry
+          </span>
+
+          <div className="flex items-baseline gap-3">
+            <span className="font-mono text-[9px] uppercase text-editorial-ivory-mute tracking-wide-eyebrow">
+              Avg Identity
+            </span>
+            <span
+              className={`font-display tabular-nums text-2xl ${
+                avgIdentity! >= 0.7
+                  ? 'text-editorial-ready'
+                  : avgIdentity! >= 0.55
+                  ? 'text-editorial-warn'
+                  : 'text-editorial-fail'
+              }`}
+              style={{ fontVariationSettings: '"opsz" 24, "wght" 380' }}
+            >
+              {Math.round(avgIdentity! * 100)}
+              <span className="text-sm text-editorial-ivory-mute ml-1">%</span>
+            </span>
+          </div>
+
+          <div className="flex items-baseline gap-3">
+            <span className="font-mono text-[9px] uppercase text-editorial-ivory-mute tracking-wide-eyebrow">
+              Shots
+            </span>
+            <span className="font-mono text-xs text-editorial-ready">
+              {
+                shotArray.filter(
+                  s =>
+                    s.status === 'image_review' ||
+                    s.status === 'complete' ||
+                    s.status === 'post_processing',
+                ).length
+              } done
+            </span>
             {failedShots.length > 0 && (
-              <span className="text-xs font-mono text-cinema-danger">{failedShots.length} failed</span>
+              <span className="font-mono text-xs text-editorial-fail">
+                {failedShots.length} failed
+              </span>
             )}
           </div>
-          {/* Identity distribution mini-bars */}
-          <div className="flex items-center gap-0.5 ml-auto">
+
+          {/* Identity-distribution mini-bars — vertical, editorial palette */}
+          <div className="flex items-end gap-[2px] ml-auto h-7">
             {identityScores.map((score, i) => (
               <div
                 key={i}
-                className={`w-1.5 rounded-sm ${
-                  score >= 0.70 ? 'bg-cinema-success' :
-                  score >= 0.55 ? 'bg-cinema-warning' : 'bg-cinema-danger'
+                className={`w-[3px] ${
+                  score >= 0.7
+                    ? 'bg-editorial-ready'
+                    : score >= 0.55
+                    ? 'bg-editorial-warn'
+                    : 'bg-editorial-fail'
                 }`}
-                style={{ height: `${Math.max(4, score * 20)}px` }}
+                style={{ height: `${Math.max(4, score * 28)}px` }}
                 title={`Shot ${i + 1}: ${Math.round(score * 100)}%`}
               />
             ))}
@@ -99,14 +234,18 @@ export default function PipelineLayout({
         </div>
       )}
 
+      {/* ── Main grid — structural parity with prior layout ────────── */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Stage Rail */}
-        <PipelineStageRail stages={stages} activeStage={activeStage} />
+        {/* Stage rail (left) — border vocabulary updated */}
+        <div className="border-r border-editorial-rule">
+          <PipelineStageRail stages={stages} activeStage={activeStage} />
+        </div>
 
-        {/* Execution Board */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {(['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'REVIEW'].includes(activeStage || '')) || (isPaused && ['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'REVIEW'].includes(activeStage || '')) ? (
-            /* Director's Cut Review Stage */
+        {/* Execution board (center) */}
+        <div className="flex-1 overflow-y-auto px-8 py-6 bg-editorial-ink">
+          {(['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'REVIEW'].includes(activeStage || '')) ||
+          (isPaused && ['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'REVIEW'].includes(activeStage || '')) ? (
+            /* Director's Cut Review Stage — props unchanged */
             <ReviewStage
               project={project}
               activeStage={activeStage}
@@ -124,10 +263,8 @@ export default function PipelineLayout({
             />
           ) : (
             <>
-              {/* Director Review */}
               <DirectorReviewCard review={directorReview} />
 
-              {/* Scene Cards */}
               {project.scenes.length > 0 ? (
                 project.scenes.map(scene => (
                   <SceneExecutionCard
@@ -140,20 +277,30 @@ export default function PipelineLayout({
                   />
                 ))
               ) : (
-                <div className="text-center py-20 text-cinema-muted">
-                  <p className="text-lg">No scenes defined</p>
-                  <p className="text-sm mt-2">Go back to setup and add scenes first</p>
+                /* Empty state — editorial framing instead of generic copy */
+                <div className="text-center py-24">
+                  <p
+                    className="font-display italic text-editorial-ivory-mute mb-3"
+                    style={{
+                      fontSize: 'clamp(28px, 3vw, 44px)',
+                      fontVariationSettings: '"opsz" 48, "SOFT" 80, "WONK" 1',
+                    }}
+                  >
+                    No scenes defined
+                  </p>
+                  <p className="font-mono text-[11px] uppercase tracking-wide-eyebrow text-editorial-ivory-faint">
+                    Return to setup to compose the picture
+                  </p>
                 </div>
               )}
 
-              {/* Assembly Gate — shown on completion */}
               {isComplete && <AssemblyGate project={project} />}
             </>
           )}
         </div>
 
-        {/* Right: Event Log */}
-        <div className="w-72 border-l border-cinema-border overflow-y-auto">
+        {/* Right rail — Event log */}
+        <div className="w-80 border-l border-editorial-rule overflow-y-auto bg-editorial-ink-soft/30">
           <GenerationPanel
             project={project}
             events={events}
@@ -162,6 +309,9 @@ export default function PipelineLayout({
           />
         </div>
       </div>
+
+      {/* Bottom letterbox — closes the frame */}
+      {isGenerating && <div className="h-7 bg-black" aria-hidden />}
     </div>
   )
 }

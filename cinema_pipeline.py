@@ -40,6 +40,7 @@ from cinema.core import PipelineCore, build_pipeline_core
 from cinema.lifecycle import ThreadedLifecycle
 from cinema.phases.keyframe_render import KeyframeRenderPhase
 from cinema.phases.motion_render import MotionRenderPhase
+from cinema.phases.performance import PerformanceCapturePhase
 from cinema.runstate import RunState
 from cinema.shots.controller import ShotController
 from cinema.review.controller import ReviewController
@@ -263,6 +264,9 @@ class CinemaPipeline:
     def generate_keyframe_take(self, *args, **kwargs):
         return self._shot_ctrl.generate_keyframe_take(*args, **kwargs)
 
+    def generate_performance_take(self, *args, **kwargs):
+        return self._shot_ctrl.generate_performance_take(*args, **kwargs)
+
     def generate_motion_take(self, *args, **kwargs):
         return self._shot_ctrl.generate_motion_take(*args, **kwargs)
 
@@ -463,13 +467,17 @@ class CinemaPipeline:
 
         dialogue = scene.get("dialogue", "")
         action = scene.get("action", "")
+        # Pull project language from settings so dialogue is generated in the
+        # target language (Korean, Japanese, etc.). Default English when unset.
+        proj_settings = self.project.get("global_settings", {}) if hasattr(self, "project") else {}
+        lang = proj_settings.get("language", "English")
         if characters and not dialogue and action:
-            dialogue_lines = generate_dialogue(scene, characters, scene.get("mood", "neutral"))
+            dialogue_lines = generate_dialogue(scene, characters, scene.get("mood", "neutral"), language=lang)
         elif dialogue:
             if isinstance(dialogue, list):
                 dialogue_lines = dialogue
             else:
-                dialogue_lines = generate_dialogue(scene, characters, scene.get("mood", "neutral"))
+                dialogue_lines = generate_dialogue(scene, characters, scene.get("mood", "neutral"), language=lang)
         else:
             return None
 
@@ -730,12 +738,63 @@ class CinemaPipeline:
 
         project = self._refresh_project_snapshot() or self.project
 
+        # --- PERFORMANCE CAPTURE PHASE (handoff §10) ---
+        # Sits between KEYFRAME_REVIEW and motion render. Routes each shot to
+        # an engine (ACT_ONE / LIVE_PORTRAIT / VIGGLE) or SKIP. The autopilot
+        # path uses Mode B (TTS-driven driving face synth) when no operator
+        # upload is provided. Operator can override via PERFORMANCE_REVIEW gate.
+        def _on_performance_fail(scene_id: str, shot_id: str, error: str):
+            self.failed_shots.append(shot_id)
+            self.progress(
+                "SHOT_FAILED",
+                error or "Performance capture failed",
+                60,
+                scene_id=scene_id, shot_id=shot_id,
+            )
+
+        performance_result = PerformanceCapturePhase(
+            shot_generator=self,
+            project=project,
+            on_failure=_on_performance_fail,
+        ).run(ctx)
+        self.progress("PERFORMANCE_DONE", performance_result.message, 62)
+        if self.lifecycle.is_cancelled():
+            self.progress("CANCELLED", "Pipeline cancelled by user", 0)
+            return None
+
+        # PERFORMANCE_REVIEW gate — operator can preview each take, re-record
+        # (upload a new driving video), or skip. Gate is auto-skipped when
+        # every shot routed to SKIP (handoff §19 open question #4).
+        project = self._refresh_project_snapshot() or self.project
+        all_skipped = all(
+            (shot.get("performance_engine") or "").upper() == "SKIP"
+            or not shot.get("approved_keyframe_take_id")
+            for scene in project.get("scenes", [])
+            for shot in scene.get("shots", [])
+        )
+        if not all_skipped:
+            if not self._wait_for_gate(
+                "PERFORMANCE_REVIEW",
+                "Review performance takes — approve, re-record, or skip",
+                65,
+            ):
+                self.progress("CANCELLED", "Pipeline cancelled during performance review", 0)
+                return None
+            project = self._refresh_project_snapshot() or self.project
+        else:
+            self.progress(
+                "PERFORMANCE_SKIPPED_GATE",
+                "All shots routed to SKIP — skipping performance review gate",
+                65,
+            )
+
+        # --- MOTION RENDER PHASE (now downstream of performance capture) ---
         def _on_motion_fail(scene_id: str, shot_id: str, error: str):
             self.failed_shots.append(shot_id)
             self.progress(
                 "SHOT_FAILED",
                 error or "Motion generation failed",
-                70,
+                72,
                 scene_id=scene_id,
                 shot_id=shot_id,
             )

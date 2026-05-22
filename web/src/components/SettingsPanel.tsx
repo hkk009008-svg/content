@@ -12,7 +12,13 @@ interface Props {
 
 export default function SettingsPanel({ project, config, onRefresh }: Props) {
   const [expanded, setExpanded] = useState(true)
+  const [maxTierExpanded, setMaxTierExpanded] = useState(false)
+  const [costExpanded, setCostExpanded] = useState(false)
+  const [costEstimate, setCostEstimate] = useState<any>(null)
+  const [costShotCount, setCostShotCount] = useState(60)
+  const [costDialogueRatio, setCostDialogueRatio] = useState(0.5)
   const [audioExpanded, setAudioExpanded] = useState(false)
+  const [audioSyncExpanded, setAudioSyncExpanded] = useState(false)
   const [advancedExpanded, setAdvancedExpanded] = useState(false)
   const [postProcExpanded, setPostProcExpanded] = useState(false)
   const [apiEnginesExpanded, setApiEnginesExpanded] = useState(false)
@@ -22,6 +28,7 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
   const [diskUsage, setDiskUsage] = useState<Record<string, number> | null>(null)
   const [cleaning, setCleaning] = useState(false)
   const s = project.global_settings
+  const isMaxTier = ((s as any).quality_tier || 'production') === 'max'
 
   const update = async (key: string, value: any) => {
     await fetch(`${API}/projects/${project.id}`, {
@@ -72,6 +79,26 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
 
   useEffect(() => { loadDiskUsage() }, [project.id])
 
+  // Live cost estimate — recompute when relevant settings or sliders change
+  useEffect(() => {
+    if (!costExpanded) return
+    const body = {
+      shot_count: costShotCount,
+      has_dialogue: costDialogueRatio > 0,
+      dialogue_shot_ratio: costDialogueRatio,
+      quality_tier: isMaxTier ? "max" : "production",
+      candidate_count: isMaxTier ? ((s as any).max_candidate_count ?? 8) : 1,
+    }
+    fetch(`${API}/cost-estimate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(setCostEstimate)
+      .catch(() => setCostEstimate(null))
+  }, [costExpanded, costShotCount, costDialogueRatio, isMaxTier, (s as any).max_candidate_count])
+
   return (
     <div className="p-4">
       {/* Section: Production Settings */}
@@ -106,6 +133,74 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Project Language — drives dialogue text, TTS voice selection, transcription */}
+          <div>
+            <label className="text-[10px] text-cinema-text-secondary block mb-1.5 uppercase tracking-wider">Dialogue Language</label>
+            <select
+              value={(s as any).language || 'English'}
+              onChange={async e => {
+                const newLang = e.target.value
+                const currentLang = (s as any).language || 'English'
+                // Persist the language change first
+                await update('language', newLang)
+                // Offer to apply language-optimized defaults
+                if (newLang !== currentLang && newLang !== 'English') {
+                  const apply = confirm(
+                    `Apply ${newLang}-optimized defaults?\n\n` +
+                    `This will set the best TTS provider, lipsync engine priority, and validation thresholds for ${newLang} dialogue.\n\n` +
+                    `Your custom settings won't be overwritten — only unset fields get defaults.`
+                  )
+                  if (apply) {
+                    const r = await fetch(`${API}/projects/${project.id}/apply-language-defaults`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ language: newLang, overwrite_existing: false }),
+                    })
+                    if (r.ok) {
+                      const data = await r.json()
+                      if (data.changed_fields?.length) {
+                        console.log('Applied defaults:', data.changed_fields)
+                      }
+                      onRefresh()
+                    }
+                  }
+                }
+              }}
+              className="w-full bg-cinema-bg border border-cinema-border-subtle rounded-lg px-3 py-2 text-sm text-cinema-text">
+              <option value="English">English</option>
+              <option value="Korean">한국어 (Korean)</option>
+              <option value="Japanese">日本語 (Japanese)</option>
+              <option value="Mandarin">中文 (Mandarin)</option>
+              <option value="Spanish">Español (Spanish)</option>
+              <option value="French">Français (French)</option>
+              <option value="German">Deutsch (German)</option>
+              <option value="Hindi">हिन्दी (Hindi)</option>
+              <option value="Arabic">العربية (Arabic)</option>
+              <option value="Portuguese">Português (Portuguese)</option>
+              <option value="Italian">Italiano (Italian)</option>
+              <option value="Russian">Русский (Russian)</option>
+            </select>
+            <p className="text-[9px] text-cinema-muted mt-0.5">
+              Drives dialogue writer output, TTS voice selection, and Whisper/WhisperX transcription language. Image/video prompts stay in English (FLUX/Sora work best in English).
+            </p>
+            {/* Re-apply defaults button — for users who skipped the confirm or want to refresh */}
+            {(s as any).language && (s as any).language !== 'English' && (
+              <button
+                onClick={async () => {
+                  if (!confirm(`Re-apply ${(s as any).language} defaults? This will OVERWRITE any custom TTS/lipsync settings.`)) return
+                  const r = await fetch(`${API}/projects/${project.id}/apply-language-defaults`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ language: (s as any).language, overwrite_existing: true }),
+                  })
+                  if (r.ok) onRefresh()
+                }}
+                className="mt-1 text-[9px] text-cinema-accent hover:text-cinema-accent2 underline">
+                Re-apply {(s as any).language} defaults (overwrite custom settings)
+              </button>
+            )}
           </div>
 
           {/* Aspect Ratio */}
@@ -277,6 +372,341 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
         </div>
       )}
 
+      {/* Section: Max Quality Tier */}
+      <button onClick={() => setMaxTierExpanded(!maxTierExpanded)} className="flex items-center justify-between w-full mt-5 mb-3">
+        <h2 className="text-[11px] font-semibold uppercase tracking-widest flex items-center gap-2">
+          <span className={isMaxTier ? 'text-cinema-accent' : 'text-cinema-gold'}>Max Quality Tier</span>
+          {isMaxTier && <span className="text-[9px] font-mono bg-cinema-accent/20 text-cinema-accent px-1.5 py-0.5 rounded">ACTIVE</span>}
+        </h2>
+        <span className="text-cinema-muted text-xs">{maxTierExpanded ? '▾' : '▸'}</span>
+      </button>
+
+      {maxTierExpanded && (
+        <div className="space-y-4">
+          {/* TIER TOGGLE — master switch */}
+          <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg p-3">
+            <label className="text-[10px] text-cinema-text-secondary block mb-2 uppercase tracking-wider">Generation Pipeline</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => update('quality_tier', 'production')}
+                className={`rounded-lg px-3 py-2.5 text-left transition-all ${
+                  !isMaxTier
+                    ? 'bg-cinema-gold/10 border border-cinema-gold/40'
+                    : 'bg-cinema-panel border border-cinema-border-subtle opacity-60 hover:opacity-100'
+                }`}>
+                <div className="text-[11px] font-semibold text-cinema-text">Production</div>
+                <p className="text-[9px] text-cinema-muted mt-0.5 leading-tight">pulid.json — single-shot, ~30s/shot. Default for throughput.</p>
+              </button>
+              <button
+                onClick={() => update('quality_tier', 'max')}
+                className={`rounded-lg px-3 py-2.5 text-left transition-all ${
+                  isMaxTier
+                    ? 'bg-gradient-accent text-white shadow-glow-accent'
+                    : 'bg-cinema-panel border border-cinema-border-subtle opacity-60 hover:opacity-100'
+                }`}>
+                <div className={`text-[11px] font-semibold ${isMaxTier ? 'text-white' : 'text-cinema-text'}`}>Max Quality</div>
+                <p className={`text-[9px] mt-0.5 leading-tight ${isMaxTier ? 'text-white/80' : 'text-cinema-muted'}`}>
+                  pulid_max.json — N=8 best-of, ~6 min/shot. Identity ~95%+.
+                </p>
+              </button>
+            </div>
+            <p className="text-[9px] text-cinema-muted mt-2">
+              Max tier auto-falls-back to production if pulid_max.json or required pod nodes are unavailable.
+            </p>
+          </div>
+
+          {isMaxTier && (
+            <>
+              {/* Best-of-N candidate count */}
+              <div>
+                <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+                  <span className="font-mono">Best-of-N candidate budget</span>
+                  <span className="text-cinema-accent font-bold">{(s as any).max_candidate_count ?? 8}</span>
+                </div>
+                <input type="range" min={1} max={16} step={1}
+                  value={(s as any).max_candidate_count ?? 8}
+                  onChange={e => update('max_candidate_count', parseInt(e.target.value))}
+                  className="w-full accent-cinema-accent h-1" />
+                <p className="text-[9px] text-cinema-muted">Max candidates per shot. Adaptive halt stops earlier when threshold is met.</p>
+              </div>
+
+              {/* Candidate batch size */}
+              <div>
+                <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+                  <span className="font-mono">Candidate batch (halt check interval)</span>
+                  <span className="text-cinema-accent font-bold">{(s as any).max_candidate_batch ?? 4}</span>
+                </div>
+                <input type="range" min={1} max={8} step={1}
+                  value={(s as any).max_candidate_batch ?? 4}
+                  onChange={e => update('max_candidate_batch', parseInt(e.target.value))}
+                  className="w-full accent-cinema-accent h-1" />
+                <p className="text-[9px] text-cinema-muted">Generate this many, then score and check halt. Smaller batch = earlier exits possible.</p>
+              </div>
+
+              {/* Halt threshold composite */}
+              <div>
+                <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+                  <span className="font-mono">Halt threshold (composite)</span>
+                  <span className="text-cinema-accent font-bold">{((s as any).max_halt_threshold_composite ?? 0.92).toFixed(2)}</span>
+                </div>
+                <input type="range" min={0.70} max={1.00} step={0.01}
+                  value={(s as any).max_halt_threshold_composite ?? 0.92}
+                  onChange={e => update('max_halt_threshold_composite', parseFloat(e.target.value))}
+                  className="w-full accent-cinema-accent h-1" />
+                <p className="text-[9px] text-cinema-muted">When best candidate's composite score (0.6 × ArcFace + 0.4 × Aesthetic v2) crosses this, halt early.</p>
+              </div>
+
+              {/* Halt min N */}
+              <div>
+                <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+                  <span className="font-mono">Halt minimum N</span>
+                  <span className="text-cinema-accent font-bold">{(s as any).max_halt_min_n ?? 4}</span>
+                </div>
+                <input type="range" min={1} max={8} step={1}
+                  value={(s as any).max_halt_min_n ?? 4}
+                  onChange={e => update('max_halt_min_n', parseInt(e.target.value))}
+                  className="w-full accent-cinema-accent h-1" />
+                <p className="text-[9px] text-cinema-muted">Never halt before this many candidates exist, even if threshold met. Guards against single-good-seed luck.</p>
+              </div>
+
+              {/* Regenerate floor */}
+              <div>
+                <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+                  <span className="font-mono">Identity regenerate floor (ArcFace)</span>
+                  <span className="text-cinema-accent font-bold">{((s as any).max_regenerate_floor_arc ?? 0.82).toFixed(2)}</span>
+                </div>
+                <input type="range" min={0.50} max={1.00} step={0.01}
+                  value={(s as any).max_regenerate_floor_arc ?? 0.82}
+                  onChange={e => update('max_regenerate_floor_arc', parseFloat(e.target.value))}
+                  className="w-full accent-cinema-accent h-1" />
+                <p className="text-[9px] text-cinema-muted">After halt, if best ArcFace is below this, retry once with PuLID weight +0.15. Safety net for identity drift.</p>
+              </div>
+
+              {/* Halt rule */}
+              <div>
+                <label className="text-[10px] text-cinema-text-secondary block mb-1.5 uppercase tracking-wider">Halt Rule</label>
+                <div className="space-y-1">
+                  {[
+                    { value: 'composite_only', label: 'Composite-only', desc: 'Halt when composite ≥ threshold. Identity folded into composite. Current default.' },
+                    { value: 'conjunctive', label: 'Conjunctive (composite AND arc)', desc: 'Halt only when BOTH composite ≥ threshold AND ArcFace ≥ arc threshold.' },
+                    { value: 'budget_only', label: 'Budget-only', desc: 'Never halt early. Always run all N candidates, pick best.' },
+                  ].map(opt => (
+                    <label key={opt.value} className="flex items-start gap-2 rounded-lg border border-cinema-border-subtle bg-cinema-bg px-3 py-2 cursor-pointer hover:border-cinema-accent/30">
+                      <input type="radio" name="halt_rule"
+                        checked={((s as any).max_halt_rule || 'composite_only') === opt.value}
+                        onChange={() => update('max_halt_rule', opt.value)}
+                        className="mt-0.5 accent-cinema-accent" />
+                      <div>
+                        <span className="text-[10px] text-cinema-text font-medium">{opt.label}</span>
+                        <p className="text-[9px] text-cinema-muted leading-tight mt-0.5">{opt.desc}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Conjunctive: surface the secondary arc threshold */}
+              {((s as any).max_halt_rule === 'conjunctive') && (
+                <div>
+                  <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+                    <span className="font-mono">Halt threshold (ArcFace gate)</span>
+                    <span className="text-cinema-accent font-bold">{((s as any).max_halt_threshold_arc ?? 0.85).toFixed(2)}</span>
+                  </div>
+                  <input type="range" min={0.50} max={1.00} step={0.01}
+                    value={(s as any).max_halt_threshold_arc ?? 0.85}
+                    onChange={e => update('max_halt_threshold_arc', parseFloat(e.target.value))}
+                    className="w-full accent-cinema-accent h-1" />
+                  <p className="text-[9px] text-cinema-muted">Conjunctive rule only — best candidate's ArcFace must also clear this bar to halt.</p>
+                </div>
+              )}
+
+              {/* Character LoRA registry */}
+              <div>
+                <label className="text-[10px] text-cinema-text-secondary block mb-1.5 uppercase tracking-wider">Per-Character LoRAs</label>
+                <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg p-3 space-y-2">
+                  {project.characters.length === 0 ? (
+                    <p className="text-[10px] text-cinema-muted italic">No characters in project. Add characters first, then assign a LoRA per character.</p>
+                  ) : (
+                    project.characters.map((char) => {
+                      const loraMap = (s as any).char_lora_paths || {}
+                      const loraPath = loraMap[char.id] || ''
+                      return (
+                        <div key={char.id} className="flex items-center gap-2">
+                          <span className="text-[10px] text-cinema-text font-medium w-24 truncate" title={char.name}>{char.name}</span>
+                          <input type="text"
+                            value={loraPath}
+                            placeholder={`loras/${char.id}.safetensors`}
+                            onChange={e => update('char_lora_paths', { ...loraMap, [char.id]: e.target.value })}
+                            className="flex-1 bg-cinema-panel border border-cinema-border-subtle rounded px-2 py-1 text-[10px] text-cinema-text font-mono placeholder:text-cinema-muted/50" />
+                          {loraPath && (
+                            <button
+                              onClick={() => {
+                                const { [char.id]: _removed, ...rest } = loraMap
+                                update('char_lora_paths', rest)
+                              }}
+                              className="text-[10px] text-cinema-danger hover:text-cinema-danger/80 px-1.5"
+                              title="Clear">×</button>
+                          )}
+                        </div>
+                      )
+                    })
+                  )}
+                  <p className="text-[9px] text-cinema-muted mt-1 leading-tight">
+                    Train per-character via ai-toolkit/kohya-ss (rank 32, fp16, ~3000 steps). Path is relative to ComfyUI's models/loras/ on the pod.
+                  </p>
+                </div>
+              </div>
+
+              {/* Style reference paths */}
+              <div>
+                <label className="text-[10px] text-cinema-text-secondary block mb-1.5 uppercase tracking-wider">FLUX Redux Style Board</label>
+                <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg p-3 space-y-2">
+                  {((s as any).style_reference_paths || []).length === 0 ? (
+                    <p className="text-[10px] text-cinema-muted italic">No style references. The face anchor is used as fallback.</p>
+                  ) : (
+                    ((s as any).style_reference_paths || []).map((path: string, idx: number) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <input type="text"
+                          value={path}
+                          onChange={e => {
+                            const arr = [...((s as any).style_reference_paths || [])]
+                            arr[idx] = e.target.value
+                            update('style_reference_paths', arr)
+                          }}
+                          className="flex-1 bg-cinema-panel border border-cinema-border-subtle rounded px-2 py-1 text-[10px] text-cinema-text font-mono" />
+                        <button
+                          onClick={() => {
+                            const arr = ((s as any).style_reference_paths || []).filter((_: any, i: number) => i !== idx)
+                            update('style_reference_paths', arr)
+                          }}
+                          className="text-[10px] text-cinema-danger hover:text-cinema-danger/80 px-1.5">×</button>
+                      </div>
+                    ))
+                  )}
+                  <button
+                    onClick={() => {
+                      const arr = [...((s as any).style_reference_paths || []), '']
+                      update('style_reference_paths', arr)
+                    }}
+                    className="text-[10px] text-cinema-accent hover:text-cinema-accent/80 font-medium">+ Add reference</button>
+                  <p className="text-[9px] text-cinema-muted mt-1 leading-tight">
+                    8-15 hand-picked images defining cinematography, palette, atmosphere. Averaged via Redux for shot-to-shot style continuity.
+                  </p>
+                </div>
+              </div>
+
+              {/* Cost / time estimate */}
+              <div className="rounded-lg border border-cinema-accent/20 bg-cinema-accent/5 p-3">
+                <span className="text-[10px] text-cinema-accent font-mono font-bold uppercase">Estimated Cost</span>
+                <div className="mt-1.5 grid grid-cols-2 gap-2 text-[10px]">
+                  <div>
+                    <div className="text-cinema-muted">Per shot (avg)</div>
+                    <div className="text-cinema-text font-bold">~{Math.round(((s as any).max_candidate_count ?? 8) * 0.75)} min</div>
+                  </div>
+                  <div>
+                    <div className="text-cinema-muted">60-shot short</div>
+                    <div className="text-cinema-text font-bold">~{Math.round(((s as any).max_candidate_count ?? 8) * 0.75 * 60 / 60)} hrs</div>
+                  </div>
+                </div>
+                <p className="text-[9px] text-cinema-muted mt-1.5 leading-tight">
+                  Estimates assume RTX 6000 Ada (48GB) at fp16. Adaptive halt typically saves 30-50% on easy shots.
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Section: Cost Estimator (live) */}
+      <button onClick={() => setCostExpanded(!costExpanded)} className="flex items-center justify-between w-full mt-5 mb-3">
+        <h2 className="text-[11px] font-semibold uppercase tracking-widest flex items-center gap-2">
+          <span className="text-cinema-gold">Cost Estimator</span>
+          {costEstimate && (
+            <span className="text-[9px] font-mono bg-cinema-accent/20 text-cinema-accent px-1.5 py-0.5 rounded">
+              ${costEstimate.totals?.grand_total?.toFixed(2)}
+            </span>
+          )}
+        </h2>
+        <span className="text-cinema-muted text-xs">{costExpanded ? '▾' : '▸'}</span>
+      </button>
+
+      {costExpanded && (
+        <div className="space-y-4">
+          {/* Sliders */}
+          <div>
+            <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+              <span className="font-mono">Shot count</span>
+              <span className="text-cinema-accent font-bold">{costShotCount}</span>
+            </div>
+            <input type="range" min={5} max={120} step={5}
+              value={costShotCount}
+              onChange={e => setCostShotCount(parseInt(e.target.value))}
+              className="w-full accent-cinema-accent h-1" />
+          </div>
+          <div>
+            <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+              <span className="font-mono">Dialogue shot ratio</span>
+              <span className="text-cinema-accent font-bold">{(costDialogueRatio * 100).toFixed(0)}%</span>
+            </div>
+            <input type="range" min={0} max={1} step={0.05}
+              value={costDialogueRatio}
+              onChange={e => setCostDialogueRatio(parseFloat(e.target.value))}
+              className="w-full accent-cinema-accent h-1" />
+            <p className="text-[9px] text-cinema-muted">Fraction of shots with spoken dialogue (drives TTS + lipsync cost).</p>
+          </div>
+
+          {/* Breakdown */}
+          {costEstimate && (
+            <>
+              <div className="rounded-lg border border-cinema-accent/20 bg-cinema-accent/5 p-3">
+                <div className="text-[10px] text-cinema-muted uppercase tracking-wider mb-1">Total ({costEstimate.quality_tier})</div>
+                <div className="text-2xl font-bold text-cinema-accent">${costEstimate.totals?.grand_total?.toFixed(2)}</div>
+                <div className="text-[10px] text-cinema-muted mt-0.5">
+                  ${costEstimate.per_shot?.avg?.toFixed(3)}/shot avg · {costEstimate.shot_count} shots ({costEstimate.dialogue_shots} dialogue)
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg overflow-hidden">
+                <div className="text-[10px] text-cinema-text-secondary uppercase tracking-wider px-3 py-2 border-b border-cinema-border-subtle">By modality</div>
+                <table className="w-full text-[10px]">
+                  <tbody>
+                    {Object.entries(costEstimate.totals).filter(([k]) => k !== "grand_total").map(([k, v]: any) => (
+                      <tr key={k} className="border-b border-cinema-border-subtle/30 last:border-0">
+                        <td className="px-3 py-1.5 text-cinema-muted font-mono">{k.replace(/_/g, " ")}</td>
+                        <td className="px-3 py-1.5 text-right text-cinema-text font-mono">${v.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg overflow-hidden">
+                <div className="text-[10px] text-cinema-text-secondary uppercase tracking-wider px-3 py-2 border-b border-cinema-border-subtle">By billing provider</div>
+                <table className="w-full text-[10px]">
+                  <tbody>
+                    {Object.entries(costEstimate.by_provider).map(([k, v]: any) => (
+                      <tr key={k} className="border-b border-cinema-border-subtle/30 last:border-0">
+                        <td className="px-3 py-1.5 text-cinema-muted font-mono">{k}</td>
+                        <td className="px-3 py-1.5 text-right text-cinema-text font-mono">${v.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {costEstimate.notes && costEstimate.notes.length > 0 && (
+                <ul className="text-[9px] text-cinema-muted space-y-0.5 list-disc pl-4">
+                  {costEstimate.notes.map((n: string, i: number) => <li key={i}>{n}</li>)}
+                </ul>
+              )}
+            </>
+          )}
+          {!costEstimate && (
+            <p className="text-[10px] text-cinema-muted italic">Loading estimate…</p>
+          )}
+        </div>
+      )}
+
       {/* Section: Budget & Cost */}
       <button onClick={() => setBudgetExpanded(!budgetExpanded)} className="flex items-center justify-between w-full mt-5 mb-3">
         <h2 className="text-[11px] font-semibold text-cinema-gold uppercase tracking-widest">Budget & Cost</h2>
@@ -405,6 +835,223 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
               The dialogue writer auto-assigns delivery based on context.
             </p>
           </div>
+        </div>
+      )}
+
+      {/* Section: Audio & Video Sync */}
+      <button onClick={() => setAudioSyncExpanded(!audioSyncExpanded)} className="flex items-center justify-between w-full mt-5 mb-3">
+        <h2 className="text-[11px] font-semibold text-cinema-gold uppercase tracking-widest">Audio & Video Sync</h2>
+        <span className="text-cinema-muted text-xs">{audioSyncExpanded ? '▾' : '▸'}</span>
+      </button>
+
+      {audioSyncExpanded && (
+        <div className="space-y-4">
+          {/* TTS provider selector — pulled from API_REGISTRY tts modality */}
+          <div>
+            <label className="text-[10px] text-cinema-text-secondary block mb-1.5 uppercase tracking-wider">Dialogue TTS Provider</label>
+            <select
+              value={(s as any).tts_provider || 'ELEVENLABS_V3'}
+              onChange={e => update('tts_provider', e.target.value)}
+              className="w-full bg-cinema-bg border border-cinema-border-subtle rounded-lg px-3 py-2 text-sm text-cinema-text">
+              {config?.api_registry ? (
+                <>
+                  {(['live', 'beta', 'planned'] as const).map((st) => {
+                    const ttsApis = Object.entries(config.api_registry).filter(
+                      ([, v]: any) => v.modality === 'tts' && (v.status || 'live') === st
+                    )
+                    if (ttsApis.length === 0) return null
+                    return (
+                      <optgroup key={st} label={st === 'live' ? 'Live (production)' : st === 'beta' ? 'Beta (plumbed, untested)' : 'Planned (not yet wired)'}>
+                        {ttsApis.map(([key, info]: any) => (
+                          <option key={key} value={key} disabled={st === 'planned'}>
+                            {info.label} — Q{(info.quality_score ?? 0).toFixed(2)} · ~{info.latency_s}s · ${info.per_shot_cost?.toFixed(3)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )
+                  })}
+                </>
+              ) : (
+                <option value="ELEVENLABS_V3">ElevenLabs v3 (current)</option>
+              )}
+            </select>
+            <p className="text-[9px] text-cinema-muted mt-0.5">Active TTS engine for dialogue + narration. Quality / latency / cost shown per option.</p>
+          </div>
+
+          {/* Quality enhancer toggles */}
+          <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg p-2 space-y-2">
+            <span className="text-[10px] text-cinema-text font-mono uppercase">Dialogue Quality Enhancers</span>
+            {[
+              { k: 'dialogue_mode_enabled', label: 'ElevenLabs Dialogue Mode', desc: 'Route multi-line dialogue through dedicated endpoint — natural turn-taking + prosody continuity.', def: true },
+              { k: 'forced_alignment_enabled', label: 'Forced Alignment (WhisperX)', desc: 'Word-level timestamps + DTW correction. Lipsync accuracy ↑↑.', def: true },
+              { k: 'room_tone_matching', label: 'Room Tone Matching', desc: 'Apply scene-environment reverb/EQ to dialogue. Sells the location.', def: false },
+              { k: 'prosody_continuity', label: 'Prosody Continuity', desc: 'Smooth pitch/energy across dialogue turns — no abrupt voice resets.', def: true },
+            ].map(t => (
+              <div key={t.k} className="flex items-start gap-2">
+                <input type="checkbox"
+                  checked={(s as any)[t.k] !== undefined ? (s as any)[t.k] : t.def}
+                  onChange={e => update(t.k, e.target.checked)}
+                  className="mt-0.5 accent-cinema-accent" />
+                <div>
+                  <span className="text-[10px] text-cinema-text font-medium">{t.label}</span>
+                  <p className="text-[9px] text-cinema-muted leading-tight">{t.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Lipsync engine priority — ranked list with up/down */}
+          <div>
+            <label className="text-[10px] text-cinema-text-secondary block mb-1.5 uppercase tracking-wider">Lipsync Engine Priority</label>
+            <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg p-2 space-y-1">
+              {(() => {
+                const lipsyncDefault = ['HEDRA_C3', 'SYNC_SO_V3', 'MUSETALK', 'LATENTSYNC', 'OMNIHUMAN_V1_5', 'SYNC_V2']
+                const priority: string[] = (s as any).lipsync_engine_priority || lipsyncDefault
+                const setPriority = (next: string[]) => update('lipsync_engine_priority', next)
+                const move = (idx: number, dir: -1 | 1) => {
+                  const j = idx + dir
+                  if (j < 0 || j >= priority.length) return
+                  const next = [...priority]
+                  ;[next[idx], next[j]] = [next[j], next[idx]]
+                  setPriority(next)
+                }
+                return priority.map((key, idx) => {
+                  const info = (config?.api_registry as any)?.[key]
+                  return (
+                    <div key={key} className="flex items-center gap-2 bg-cinema-panel px-2 py-1.5 rounded border border-cinema-border-subtle">
+                      <span className="text-[10px] text-cinema-muted font-mono w-5">{idx + 1}.</span>
+                      <div className="flex-1">
+                        <span className="text-[10px] text-cinema-text font-medium">{info?.label || key}</span>
+                        {info && (
+                          <span className="ml-1.5 text-[9px] text-cinema-muted">
+                            Q{(info.quality_score ?? 0).toFixed(2)} · ${info.per_shot_cost?.toFixed(2)}
+                          </span>
+                        )}
+                      </div>
+                      <button onClick={() => move(idx, -1)} disabled={idx === 0}
+                        className="text-[10px] text-cinema-muted hover:text-cinema-accent disabled:opacity-30 px-1">↑</button>
+                      <button onClick={() => move(idx, 1)} disabled={idx === priority.length - 1}
+                        className="text-[10px] text-cinema-muted hover:text-cinema-accent disabled:opacity-30 px-1">↓</button>
+                    </div>
+                  )
+                })
+              })()}
+              <p className="text-[9px] text-cinema-muted mt-1">Tried in order. First available engine wins. Hedra Character-3 is current SOTA for portrait talking heads.</p>
+            </div>
+          </div>
+
+          {/* Lipsync validation gate */}
+          <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg p-2 space-y-2">
+            <div className="flex items-center gap-2">
+              <input type="checkbox"
+                checked={(s as any).lipsync_quality_validation !== false}
+                onChange={e => update('lipsync_quality_validation', e.target.checked)}
+                className="accent-cinema-accent" />
+              <div>
+                <span className="text-[10px] text-cinema-text font-medium">Lipsync Quality Gate (SyncNet)</span>
+                <p className="text-[9px] text-cinema-muted">Score lipsync output via SyncNet. Below threshold → escalate to next engine in priority list.</p>
+              </div>
+            </div>
+            {((s as any).lipsync_quality_validation !== false) && (
+              <div>
+                <div className="flex justify-between text-[9px] text-cinema-muted mb-0.5">
+                  <span className="font-mono">SyncNet confidence threshold</span>
+                  <span className="text-cinema-accent font-bold">{((s as any).lipsync_validation_threshold ?? 0.65).toFixed(2)}</span>
+                </div>
+                <input type="range" min={0.3} max={0.95} step={0.05}
+                  value={(s as any).lipsync_validation_threshold ?? 0.65}
+                  onChange={e => update('lipsync_validation_threshold', parseFloat(e.target.value))}
+                  className="w-full accent-cinema-accent h-1" />
+                <p className="text-[9px] text-cinema-muted">0.65 = "convincing in-context"; 0.85+ = "passes close-up scrutiny". Raise for hero shots, lower for B-roll.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Music + foley providers */}
+          <div className="grid grid-cols-1 gap-2">
+            <div>
+              <label className="text-[10px] text-cinema-text-secondary block mb-1.5 uppercase tracking-wider">Music Provider</label>
+              <select value={(s as any).music_provider || 'SUNO_V5'}
+                onChange={e => update('music_provider', e.target.value)}
+                className="w-full bg-cinema-bg border border-cinema-border-subtle rounded-lg px-3 py-1.5 text-[10px] text-cinema-text">
+                {config?.api_registry && Object.entries(config.api_registry)
+                  .filter(([, v]: any) => v.modality === 'music')
+                  .map(([k, v]: any) => (
+                    <option key={k} value={k} disabled={(v.status || 'live') === 'planned'}>
+                      {v.label} {v.status === 'planned' ? '[planned]' : v.status === 'beta' ? '[beta]' : ''}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-cinema-text-secondary block mb-1.5 uppercase tracking-wider">Foley / SFX Provider</label>
+              <select value={(s as any).foley_provider || 'STABLE_AUDIO_FOLEY'}
+                onChange={e => update('foley_provider', e.target.value)}
+                className="w-full bg-cinema-bg border border-cinema-border-subtle rounded-lg px-3 py-1.5 text-[10px] text-cinema-text">
+                {config?.api_registry && Object.entries(config.api_registry)
+                  .filter(([, v]: any) => v.modality === 'foley')
+                  .map(([k, v]: any) => (
+                    <option key={k} value={k} disabled={(v.status || 'live') === 'planned'}>
+                      {v.label} {v.status === 'planned' ? '[planned]' : v.status === 'beta' ? '[beta]' : ''}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Purpose-based API matrix */}
+          {(config as any)?.purpose_api_ranking && (config as any)?.purpose_tags && (
+            <div>
+              <label className="text-[10px] text-cinema-text-secondary block mb-1.5 uppercase tracking-wider">Purpose-Based Routing</label>
+              <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg overflow-hidden">
+                <table className="w-full text-[10px]">
+                  <tbody>
+                    {(config as any).purpose_tags.map((purpose: string) => {
+                      const ranking: string[] = (config as any).purpose_api_ranking[purpose] || []
+                      const override = ((s as any).purpose_overrides || {})[purpose]
+                      const liveCandidates = ranking.filter(k => {
+                        const info = (config?.api_registry as any)?.[k]
+                        return info && (info.status || 'live') !== 'planned'
+                      })
+                      const chosen = override || liveCandidates[0] || ranking[0]
+                      const chosenInfo = (config?.api_registry as any)?.[chosen]
+                      return (
+                        <tr key={purpose} className="border-b border-cinema-border-subtle/30 last:border-0">
+                          <td className="px-2 py-1.5 text-cinema-muted font-mono">{purpose.replace(/_/g, ' ')}</td>
+                          <td className="px-2 py-1.5">
+                            <select
+                              value={chosen}
+                              onChange={e => {
+                                const next = { ...((s as any).purpose_overrides || {}), [purpose]: e.target.value }
+                                if (!e.target.value) delete next[purpose]
+                                update('purpose_overrides', next)
+                              }}
+                              className="w-full bg-cinema-panel border border-cinema-border-subtle rounded px-1.5 py-0.5 text-[10px] text-cinema-text">
+                              {ranking.map((k: string) => {
+                                const info = (config?.api_registry as any)?.[k]
+                                if (!info) return null
+                                return (
+                                  <option key={k} value={k} disabled={(info.status || 'live') === 'planned'}>
+                                    {info.label} {info.status === 'planned' ? '[planned]' : info.status === 'beta' ? '[beta]' : ''}
+                                  </option>
+                                )
+                              })}
+                            </select>
+                          </td>
+                          <td className="px-2 py-1.5 text-right text-cinema-muted">
+                            {chosenInfo && (
+                              <span className="font-mono">Q{(chosenInfo.quality_score ?? 0).toFixed(2)} · ${chosenInfo.per_shot_cost?.toFixed(2)}</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[9px] text-cinema-muted mt-1">Per-purpose API picks. Defaults to the best available (live → beta → planned). Override per purpose to lock in a specific engine.</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -929,41 +1576,230 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
                 </div>
               </div>
 
-              {/* FreeU Note */}
-              <div className="flex items-center gap-2 bg-cinema-bg rounded-lg px-3 py-2 border border-cinema-border-subtle opacity-50">
-                <div className="w-2 h-2 rounded-full bg-cinema-muted" />
-                <div>
-                  <span className="text-[10px] text-cinema-muted font-medium">FreeU V2 — Not compatible with FLUX</span>
-                  <p className="text-[9px] text-cinema-muted">FreeU requires SD1.5/SDXL UNet architecture. PAG provides similar benefits for FLUX.</p>
-                </div>
-              </div>
-
-              {/* Sampler Selection */}
+              {/* Sampler Selection (production + max share this) */}
               <div>
                 <label className="text-[10px] text-cinema-muted block mb-0.5 font-mono">Sampler</label>
-                <select value={(s as any).comfyui_sampler || 'dpmpp_2m'}
+                <select value={(s as any).comfyui_sampler || (isMaxTier ? 'dpmpp_3m_sde_gpu' : 'dpmpp_2m')}
                   onChange={e => update('comfyui_sampler', e.target.value)}
                   className="w-full bg-cinema-bg border border-cinema-border-subtle rounded-lg px-3 py-1.5 text-[10px] text-cinema-text">
-                  <option value="dpmpp_2m">DPM++ 2M (recommended)</option>
+                  <option value="dpmpp_2m">DPM++ 2M (production default)</option>
                   <option value="euler">Euler (fast, lower quality)</option>
                   <option value="dpmpp_2m_sde">DPM++ 2M SDE (stochastic, creative)</option>
-                  <option value="dpmpp_3m_sde">DPM++ 3M SDE (highest quality, slow)</option>
+                  <option value="dpmpp_3m_sde">DPM++ 3M SDE (CPU)</option>
+                  <option value="dpmpp_3m_sde_gpu">DPM++ 3M SDE GPU (max-tier default, sharpest)</option>
                   <option value="uni_pc">UniPC (fast convergence)</option>
                 </select>
               </div>
 
-              {/* Steps */}
-              <div>
-                <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
-                  <span className="font-mono">Sampling steps</span>
-                  <span className="text-cinema-accent font-bold">{(s as any).comfyui_steps ?? 20}</span>
+              {/* Steps — production tier control */}
+              {!isMaxTier && (
+                <div>
+                  <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+                    <span className="font-mono">Sampling steps</span>
+                    <span className="text-cinema-accent font-bold">{(s as any).comfyui_steps ?? 20}</span>
+                  </div>
+                  <input type="range" min={10} max={40} step={1}
+                    value={(s as any).comfyui_steps ?? 20}
+                    onChange={e => update('comfyui_steps', parseInt(e.target.value))}
+                    className="w-full accent-cinema-accent h-1" />
+                  <p className="text-[9px] text-cinema-muted">Higher = more detail but slower. 20 is balanced, 25+ for portraits.</p>
                 </div>
-                <input type="range" min={10} max={40} step={1}
-                  value={(s as any).comfyui_steps ?? 20}
-                  onChange={e => update('comfyui_steps', parseInt(e.target.value))}
-                  className="w-full accent-cinema-accent h-1" />
-                <p className="text-[9px] text-cinema-muted">Higher = more detail but slower. 20 is balanced, 25+ for portraits</p>
-              </div>
+              )}
+
+              {/* ---------- MAX-TIER ONLY CONTROLS ---------- */}
+              {isMaxTier && (
+                <>
+                  <div className="rounded-lg border border-cinema-accent/20 bg-cinema-accent/5 px-3 py-2 mt-2">
+                    <span className="text-[10px] text-cinema-accent font-mono font-bold uppercase">Max-tier engine</span>
+                    <p className="text-[9px] text-cinema-muted mt-0.5">Controls below only apply when Quality Tier = Max.</p>
+                  </div>
+
+                  {/* AYS steps */}
+                  <div>
+                    <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+                      <span className="font-mono">AYS scheduler steps</span>
+                      <span className="text-cinema-accent font-bold">{(s as any).ays_steps ?? 28}</span>
+                    </div>
+                    <input type="range" min={15} max={40} step={1}
+                      value={(s as any).ays_steps ?? 28}
+                      onChange={e => update('ays_steps', parseInt(e.target.value))}
+                      className="w-full accent-cinema-accent h-1" />
+                    <p className="text-[9px] text-cinema-muted">Align Your Steps — NVIDIA-optimal sigma schedule for FLUX. 28 is the sweet spot.</p>
+                  </div>
+
+                  {/* SLG scale */}
+                  <div>
+                    <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+                      <span className="font-mono">SLG (Skip Layer Guidance)</span>
+                      <span className="text-cinema-accent font-bold">{((s as any).slg_scale ?? 2.5).toFixed(1)}</span>
+                    </div>
+                    <input type="range" min={0} max={5} step={0.1}
+                      value={(s as any).slg_scale ?? 2.5}
+                      onChange={e => update('slg_scale', parseFloat(e.target.value))}
+                      className="w-full accent-cinema-accent h-1" />
+                    <p className="text-[9px] text-cinema-muted">Skip-layer guidance on DiT layers 7-11. Single biggest realism toggle on FLUX. 0 = off.</p>
+                  </div>
+
+                  {/* DetailDaemon amount */}
+                  <div>
+                    <div className="flex justify-between text-[10px] text-cinema-muted mb-0.5">
+                      <span className="font-mono">DetailDaemon amount</span>
+                      <span className="text-cinema-accent font-bold">{((s as any).detail_daemon_amount ?? 0.5).toFixed(2)}</span>
+                    </div>
+                    <input type="range" min={0} max={1} step={0.05}
+                      value={(s as any).detail_daemon_amount ?? 0.5}
+                      onChange={e => update('detail_daemon_amount', parseFloat(e.target.value))}
+                      className="w-full accent-cinema-accent h-1" />
+                    <p className="text-[9px] text-cinema-muted">Mid-sampling sigma injection. Adds micro-texture (skin pores, fabric weave). 0 = off.</p>
+                  </div>
+
+                  {/* FreeU v2 — uses FLUX-compatible build in max stack */}
+                  <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg p-2 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-cinema-text font-mono">FreeU v2 (skip-connection amplify)</span>
+                      <span className="text-[9px] text-cinema-muted">FLUX-compatible build required on pod</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { k: 'freeu_b1', label: 'b1 (backbone 1)', def: 1.3, min: 1.0, max: 1.8 },
+                        { k: 'freeu_b2', label: 'b2 (backbone 2)', def: 1.4, min: 1.0, max: 1.8 },
+                        { k: 'freeu_s1', label: 's1 (skip 1)', def: 0.9, min: 0.0, max: 1.5 },
+                        { k: 'freeu_s2', label: 's2 (skip 2)', def: 0.2, min: 0.0, max: 1.5 },
+                      ].map((f) => (
+                        <div key={f.k}>
+                          <div className="flex justify-between text-[9px] text-cinema-muted mb-0.5">
+                            <span className="font-mono">{f.label}</span>
+                            <span className="text-cinema-accent font-bold">{(((s as any)[f.k] ?? f.def) as number).toFixed(2)}</span>
+                          </div>
+                          <input type="range" min={f.min} max={f.max} step={0.05}
+                            value={(s as any)[f.k] ?? f.def}
+                            onChange={e => update(f.k, parseFloat(e.target.value))}
+                            className="w-full accent-cinema-accent h-1" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 4-channel Union ControlNet */}
+                  <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg p-2 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-cinema-text font-mono">FLUX Union CN Pro — 4 channels</span>
+                      <span className="text-[9px] text-cinema-muted">total budget &lt; 1.2</span>
+                    </div>
+                    {[
+                      { k: 'controlnet_depth_strength', label: 'Depth (spatial anchor)', def: 0.40, max: 0.8 },
+                      { k: 'controlnet_canny_strength', label: 'Canny (edge coherence)', def: 0.15, max: 0.5 },
+                      { k: 'controlnet_pose_strength', label: 'Pose (DWPose, body+hand+face)', def: 0.35, max: 0.6 },
+                      { k: 'controlnet_tile_strength', label: 'Tile (texture preservation)', def: 0.25, max: 0.5 },
+                    ].map((c) => {
+                      const v = (s as any)[c.k] ?? c.def
+                      return (
+                        <div key={c.k}>
+                          <div className="flex justify-between text-[9px] text-cinema-muted mb-0.5">
+                            <span className="font-mono">{c.label}</span>
+                            <span className="text-cinema-accent font-bold">{(v as number).toFixed(2)}</span>
+                          </div>
+                          <input type="range" min={0} max={c.max} step={0.05}
+                            value={v}
+                            onChange={e => update(c.k, parseFloat(e.target.value))}
+                            className="w-full accent-cinema-accent h-1" />
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* Redux strength */}
+                  <div>
+                    <label className="text-[10px] text-cinema-muted block mb-0.5 font-mono">FLUX Redux style strength</label>
+                    <select value={(s as any).redux_strength || 'high'}
+                      onChange={e => update('redux_strength', e.target.value)}
+                      className="w-full bg-cinema-bg border border-cinema-border-subtle rounded-lg px-3 py-1.5 text-[10px] text-cinema-text">
+                      <option value="high">High — strong style lock from board</option>
+                      <option value="medium">Medium — balanced</option>
+                      <option value="low">Low — subtle influence</option>
+                    </select>
+                    <p className="text-[9px] text-cinema-muted mt-0.5">FLUX-native image conditioning. Replaces SDXL-era IP-Adapter on FLUX.</p>
+                  </div>
+
+                  {/* Hires fix toggle + denoise */}
+                  <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg p-2 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox"
+                        checked={(s as any).hires_fix_enabled !== false}
+                        onChange={e => update('hires_fix_enabled', e.target.checked)}
+                        className="accent-cinema-accent" />
+                      <div>
+                        <span className="text-[10px] text-cinema-text font-medium">Hires-fix (Pass 2)</span>
+                        <p className="text-[9px] text-cinema-muted">1.5× latent upscale + 2nd denoise pass. Adds detail ESRGAN can't fabricate.</p>
+                      </div>
+                    </div>
+                    {((s as any).hires_fix_enabled !== false) && (
+                      <div>
+                        <div className="flex justify-between text-[9px] text-cinema-muted mb-0.5">
+                          <span className="font-mono">Pass 2 denoise</span>
+                          <span className="text-cinema-accent font-bold">{((s as any).hires_fix_denoise ?? 0.40).toFixed(2)}</span>
+                        </div>
+                        <input type="range" min={0.2} max={0.6} step={0.05}
+                          value={(s as any).hires_fix_denoise ?? 0.40}
+                          onChange={e => update('hires_fix_denoise', parseFloat(e.target.value))}
+                          className="w-full accent-cinema-accent h-1" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* FaceDetailer */}
+                  <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg p-2 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox"
+                        checked={(s as any).face_detailer_enabled !== false}
+                        onChange={e => update('face_detailer_enabled', e.target.checked)}
+                        className="accent-cinema-accent" />
+                      <div>
+                        <span className="text-[10px] text-cinema-text font-medium">FaceDetailer (Impact Pack)</span>
+                        <p className="text-[9px] text-cinema-muted">Auto-detect face → re-denoise at guide size. Recognizable → convincing.</p>
+                      </div>
+                    </div>
+                    {((s as any).face_detailer_enabled !== false) && (
+                      <div>
+                        <label className="text-[9px] text-cinema-muted block mb-0.5 font-mono">Guide size</label>
+                        <select value={(s as any).face_detailer_guide_size ?? 1024}
+                          onChange={e => update('face_detailer_guide_size', parseInt(e.target.value))}
+                          className="w-full bg-cinema-panel border border-cinema-border-subtle rounded px-2 py-1 text-[10px] text-cinema-text">
+                          <option value={512}>512 — fast</option>
+                          <option value={1024}>1024 — recommended</option>
+                          <option value={2048}>2048 — slow, max detail</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* SUPIR upscale */}
+                  <div className="rounded-lg border border-cinema-border-subtle bg-cinema-bg p-2 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox"
+                        checked={(s as any).supir_enabled !== false}
+                        onChange={e => update('supir_enabled', e.target.checked)}
+                        className="accent-cinema-accent" />
+                      <div>
+                        <span className="text-[10px] text-cinema-text font-medium">SUPIR 4× upscale (replaces Real-ESRGAN)</span>
+                        <p className="text-[9px] text-cinema-muted">Photorealism-tuned restoration. 5-10× better than ESRGAN on faces. Adds ~35s/shot.</p>
+                      </div>
+                    </div>
+                    {((s as any).supir_enabled !== false) && (
+                      <div>
+                        <div className="flex justify-between text-[9px] text-cinema-muted mb-0.5">
+                          <span className="font-mono">SUPIR steps</span>
+                          <span className="text-cinema-accent font-bold">{(s as any).supir_steps ?? 50}</span>
+                        </div>
+                        <input type="range" min={20} max={100} step={5}
+                          value={(s as any).supir_steps ?? 50}
+                          onChange={e => update('supir_steps', parseInt(e.target.value))}
+                          className="w-full accent-cinema-accent h-1" />
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
 

@@ -65,14 +65,24 @@ class RunPodComfyUI:
 def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                        init_image=None, denoise_strength=1.0, characters=None,
                        multi_angle_refs=None, identity_anchor="",
-                       pulid_weight_override=None, negative_prompt=""):
+                       pulid_weight_override=None, negative_prompt="",
+                       quality_tier="production", char_lora_path=None,
+                       style_reference=None, shot_hint=None):
     """
     Generates a cinematic image with face-identity preservation.
 
-    v3 priority chain:
+    v3 priority chain (production tier, default):
     1. fal.ai FLUX Kontext (identity-preserving, no local GPU needed)
     2. ComfyUI + PuLID on RunPod (if models are available)
     3. fal.ai FLUX-Pro (no face-lock, last resort)
+
+    Quality tiers:
+        "production" (default) — pulid.json + parameter overrides, single-shot.
+                                 Preserves all existing caller behavior.
+        "max"                  — pulid_max.json + N=8 adaptive best-of with
+                                 ArcFace gate. Falls back to "production" if
+                                 quality_max module / pulid_max.json missing
+                                 or returns None.
 
     Args:
         prompt: Image generation prompt (enhanced by continuity engine)
@@ -82,7 +92,41 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         init_image: Previous shot image for img2img temporal chaining
         denoise_strength: 0.0-1.0, lower = more similar to init_image
         characters: List of character config dicts
+        quality_tier: "production" | "max" — selects the generation pipeline.
+        char_lora_path: (max tier only) Path to per-character LoRA .safetensors.
+        style_reference: (max tier only) Path to style-board reference image.
+        shot_hint: (max tier only) Pre-classified shot dict; bypasses re-classification.
     """
+    # --- MAX-TIER DISPATCH ---
+    # Try the maxed-quality path first; fall through to production on any failure
+    # so existing callers (production runs, tests) never break.
+    if quality_tier == "max":
+        try:
+            from quality_max import generate_ai_broll_max
+            result = generate_ai_broll_max(
+                prompt=prompt,
+                output_filename=output_filename,
+                seed=seed,
+                character_image=character_image,
+                init_image=init_image,
+                denoise_strength=denoise_strength,
+                characters=characters,
+                multi_angle_refs=multi_angle_refs,
+                identity_anchor=identity_anchor,
+                pulid_weight_override=pulid_weight_override,
+                negative_prompt=negative_prompt,
+                char_lora_path=char_lora_path,
+                style_reference=style_reference,
+                shot_hint=shot_hint,
+            )
+            if result:
+                return result
+            print("[generate_ai_broll] Max tier returned None — falling back to production tier.")
+        except ImportError as e:
+            print(f"[generate_ai_broll] quality_max unavailable ({e}) — production tier.")
+        except Exception as e:
+            print(f"[generate_ai_broll] Max tier raised ({e}) — production tier.")
+
     mode = "img2img" if init_image else "txt2img"
 
     # ----- Backend selection (PRIORITY order) -----

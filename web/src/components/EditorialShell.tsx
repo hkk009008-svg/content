@@ -23,6 +23,7 @@ import { useMemo } from 'react'
 import type { Project, AppConfig, ProgressEvent } from '../types/project'
 import CharacterPanel from './CharacterPanel'
 import LocationPanel from './LocationPanel'
+import ObjectPanel from './ObjectPanel'
 import ScenePanel from './ScenePanel'
 import SettingsPanel from './SettingsPanel'
 import GenerationPanel from './GenerationPanel'
@@ -445,6 +446,8 @@ export default function EditorialShell({
             <CharacterPanel project={project} config={config} onRefresh={onRefreshProject} />
             <div className="rule-hairline" />
             <LocationPanel project={project} config={config} onRefresh={onRefreshProject} />
+            <div className="rule-hairline" />
+            <ObjectPanel project={project} onRefresh={onRefreshProject} />
           </div>
 
           {/* Center: scenes (editing) */}
