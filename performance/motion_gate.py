@@ -199,10 +199,16 @@ def needs_remotion(
     if floor_override is not None:
         floor = floor_override
     elif shot_type:
+        # Lazy import — workflow_selector's transitive deps reach back into
+        # this package's score wiring; top-level import would risk a cycle.
         from workflow_selector import get_motion_fidelity_floor
         floor = get_motion_fidelity_floor(shot_type)
         if floor is None:
-            return False  # shot type opts out (landscape)
+            # None means motion-gate doesn't apply for this shot type
+            # (landscape today; also covers unknown/typo'd shot types — we'd
+            # rather not block on a typo than over-fail. Audit calibration
+            # data if unknowns become common).
+            return False
     else:
         floor = DEFAULT_MOTION_FLOOR
 
