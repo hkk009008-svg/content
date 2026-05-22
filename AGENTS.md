@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Content** (3016 symbols, 19567 relationships, 253 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Content** (3049 symbols, 19609 relationships, 256 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -99,3 +99,442 @@ To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+# About this document
+
+This file is the **agent-agnostic root** for AI coding tools working in this
+repo (Cursor, Aider, Copilot, Continue, Claude Code, etc.). The GitNexus
+block above is auto-managed and identical to the one in `CLAUDE.md`.
+Everything below is the agent-agnostic project guide — canonical project
+facts plus the discipline that ships clean code here.
+
+**Claude Code specifically:** `CLAUDE.md` is the Claude-specific companion.
+It mirrors this file's discipline section using Claude's actual tool
+syntax (`Agent` subagent dispatch, `subagent_type` values, prompt
+templates, `Skill` invocation, `TaskCreate`/`TaskUpdate`,
+`AskUserQuestion`, the `superpowers:subagent-driven-development` skill,
+etc.). Claude Code agents read **both** files; this one defines the
+principles, `CLAUDE.md` defines the mechanics.
+
+**Non-Claude agents:** read this file as your source of truth. Translate
+the principles ("fresh context per task", "two-stage review",
+"verify-before-acting") into your tool's analogous mechanisms (new chat
+session, manual diff review, `git grep` for verification, etc.).
+
+# Architecture Preamble
+
+This repo is an AI cinema/video generation pipeline. Topic → 60-second
+YouTube Short, end-to-end. Phase 6 of `refactor/architecture-cleanup`
+finished the audio-domain split; the layout below is the post-refactor
+state of the tree.
+
+## Two entry points
+
+- **`main.py:run_autonomous_pipeline`** — CLI, non-interactive. Uses
+  `cinema.pipeline.CinemaPipeline` (the new driver) for the 3 migrated
+  phases; legacy free-function calls for the others.
+- **`web_server.py`** → **`cinema_pipeline.CinemaPipeline`** — interactive
+  dashboard with pause/resume + SSE progress + operator review gates.
+  Still the legacy 1,526-line orchestrator; migration is documented at
+  `docs/CINEMA_PIPELINE_MIGRATION_DESIGN.md`.
+
+## Top-level package layout
+
+| Path | Owns |
+|------|------|
+| `cinema/` | Phase protocol + driver. `cinema/pipeline.py` is the iterator; `cinema/phases/*.py` are the 8 Phase wrappers. |
+| `audio/` | All audio domain: `_client.py`, `srt.py`, `music.py`, `effects.py`, `voiceover.py`, `dialogue.py`, `foley.py`. |
+| `llm/` | LLM domain: `ensemble.py`, `chief_director.py`, `blueprint_director.py`, `style_director.py`. |
+| `identity/` | Face/identity validation. `validator.py` was the Phase 3 cycle break (no longer pulls `phase_c_vision`). |
+| `performance/` | Performance-capture quality gates. `motion_gate.py` scores driving-vs-output optical-flow similarity; floors are per-shot-type via `workflow_selector.MOTION_FIDELITY_FLOORS` (advisory only). |
+| `config/` | `settings.py` (Settings dataclass + singleton) + `prompts/` markdown. |
+| `data/` | Runtime data (SQLite, gitignored). Per-project calibration JSON lives under `data/calibration/`. |
+| `docs/` | `REFACTOR_HANDOFF.md` is the operating manual for the refactor branch. `docs/superpowers/plans/*.md` are written plans for multi-task work. |
+| `scripts/` | Standalone operator CLIs (e.g., `calibrate_motion_floor.py`). Each script self-bootstraps `sys.path` from repo root. |
+| `tests/` | `tests/unit/` (pure logic) + `tests/integration/` (hit real APIs). **Run pytest via `.venv/bin/python -m pytest`, NOT system `python3`** (system python lacks pytest). |
+| `web/` | React/TypeScript frontend. `web/src/components/console/` is the Director's Console route; `web/src/components/pipeline/` is the legacy review-gate UI. The two routes have different palettes — `console-*` (warm sepia) vs `editorial-*` (cool ivory). |
+| (root) | Legacy modules pending migration: `cinema_pipeline.py`, `web_server.py`, plus per-shot loop deps (character/location/continuity managers, scene_decomposer, dialogue_writer — Phase 8 candidates) and the `phase_*_*.py` shims. |
+
+## Phase protocol contract
+
+Every phase class in `cinema/phases/*.py` satisfies:
+
+```python
+class Phase(Protocol):
+    name: str
+    def run(self, ctx: PipelineContext) -> PhaseResult: ...
+```
+
+`PipelineContext` (in `cinema/context.py`) is a dataclass that *also*
+implements the dict API (`__getitem__`, `__setitem__`, `get`, `update`,
+`keys`, `items`, `values`, `as_dict`) — so legacy `def f(ctx: dict)`
+functions keep working when passed a `PipelineContext`. This is the
+bridge that lets migration proceed incrementally.
+
+## Invariants (REFACTOR_HANDOFF.md §4)
+
+These are mechanically verified by the smoke block in §0 of the handoff:
+
+1. All `.py` files compile.
+2. `import identity.validator` does NOT pull `phase_c_vision`.
+3. `LLMEnsemble()` instantiates.
+4. The 8 Phase classes satisfy the `Phase` protocol.
+5. Every audio re-export is identity-equal (`audio.X.fn is phase_b_audio.fn`).
+6. `main.py` imports cleanly.
+7. `phase_b_audio.client` is an `ElevenLabs` instance (= `audio._client.client`).
+
+## When you change something
+
+Beyond the GitNexus checks at the top of this file, the refactor-branch
+workflow expects:
+
+- One commit per logical slice. Identity-check (`a is b`) for every
+  re-export. Run the §0 smoke block before declaring a slice done.
+- Don't combine concerns. A bug fix isn't a refactor isn't a feature.
+- See `docs/REFACTOR_HANDOFF.md` §6 for the canonical five-step slice
+  playbook (read → write → re-export → verify with identity check →
+  commit).
+- For multi-task work (≥5 sub-tasks or ≥800 LOC of total change), don't
+  implement everything in your current context — orchestrate via fresh
+  contexts. See "Multi-task orchestration" below.
+
+# Multi-task orchestration
+
+When you encounter a written plan (e.g., `docs/superpowers/plans/*.md`)
+with ≥5 sub-tasks, or you've drafted one with comparable scope, the
+discipline that ships clean code here is to ORCHESTRATE, not implement
+everything yourself.
+
+The mechanism: each task is handed to a **fresh context** with a curated
+prompt; the result comes back as a compact report; you review it; you move
+on. Your main context grows linearly with the number of tasks, not with
+the volume of work — which is what prevents quality degradation across
+long (1M / 2M+ token) sessions.
+
+**Claude Code:** see `CLAUDE.md` § "Working a Multi-Task Plan" for the
+tool-specific implementation (Agent subagent dispatch, prompt templates,
+`superpowers:subagent-driven-development` skill, TaskCreate tracking).
+Everything below is the universal principle set.
+
+## When to invoke
+
+| Signal | Action |
+|---|---|
+| Written plan with 5+ mostly-independent sub-tasks | Orchestrate via fresh contexts |
+| Single change OR tightly-coupled tasks | Stay in your current context |
+| Interactive exploration ("how does X work?") | Stay in your current context |
+
+## The per-task loop (sequential, never parallel)
+
+For each task:
+
+1. **Mark in_progress** in your task tracker.
+2. **Dispatch an implementer to a fresh context.** Whatever your tool's
+   mechanism is (Claude: `Agent` subagent; Cursor: new chat; Aider: new
+   session; manual: co-developer with a written ticket). Give them a
+   curated prompt — see "Prompt template" below.
+3. **Read the implementer's report.** Don't trust it blindly; their
+   self-review may be optimistic.
+4. **Dispatch a spec compliance reviewer to a fresh context.** Their job:
+   read the actual diff and compare to the spec line-by-line. They should
+   verify by reading code, not by trusting the report.
+5. If spec issues → fix loop (see "Delegation heuristics") → re-review.
+6. **Dispatch a code quality reviewer to a fresh context.** Strengths,
+   Issues (Critical / Important / Minor), Assessment. Pass the BASE_SHA
+   and HEAD_SHA so they can scope the diff cleanly.
+7. If quality issues → fix loop → re-review.
+8. **Mark completed.** Move to next task.
+
+After all tasks: run a final cross-cutting reviewer with the full
+baseline-to-HEAD diff, then merge / open PR / hand off.
+
+**Never dispatch multiple implementers in parallel** — they'd conflict on
+files. Reviewers in parallel are fine but rarely necessary.
+
+## Delegation heuristics — Lane A / B / C
+
+Three lanes for each unit of work. Match the lane to the task — wrong-lane
+choices either waste resources (Lane B for trivial fixes) or burn your
+main context (Lane A for big work that should be delegated).
+
+**Lane A — execute in your current context (manual edit / direct tool):**
+- File is **already loaded in your context** AND change is ≤5 LOC
+- Pure mechanical edit: rename, type alias, comment improvement, format fix
+- A reviewer flagged a 1-2 line fix with clear instructions and you can see the surrounding code
+- Test-data tweak (tighten a tolerance, swap a placeholder value)
+- Final polish after a fresh implementer's commit you just reviewed
+
+Cost: minimal. Risk: low — you can see what you're changing.
+
+**Lane B — fresh implementer in an isolated context:**
+- Change touches ≥3 files OR a domain you haven't read yet
+- ≥5 LOC of structural change (new function, new component, new module)
+- Design judgment needed (naming, abstraction, layout choice)
+- Multi-step task that benefits from fresh-eyes context
+- Anything where the implementer needs to discover state you don't yet have
+
+Cost: full task context in the fresh instance. Risk: low if the prompt is
+well-formed; high if it's "implement task X" with no context.
+
+**Lane C — read-only survey (search / grep, no writes):**
+- "Where is X defined?" / "Which files reference Y?" — open-ended search
+- Codebase exploration before deciding how to dispatch Lane B
+- Verifying a reviewer's claim before acting on it
+
+Cost: read-only, scoped. Use when you need findings, not a code change.
+
+**Decision tree:**
+1. Is this a 1-5 line mechanical change in a file you already understand? → **Lane A**
+2. Is this open-ended search across multiple files with no code change? → **Lane C**
+3. Everything else → **Lane B**
+4. Special case: if a reviewer's claim contradicts what you remember about
+   upstream behavior, do a quick **Lane C survey** before fixing. The
+   reviewer may be wrong.
+
+## Prompt template (for Lane B implementers)
+
+The fresh instance has no memory of your session. The prompt must let them
+act **cold**. A good implementer prompt is 80-150 lines and includes:
+
+```
+You are implementing Task <ID> from `<plan path>` (Slice <S>, sub-slice <ID>).
+Working dir: `<absolute>`. Branch: `<branch>`. Latest commit: `<sha>`.
+
+## Task Description (verbatim from plan §X.Y)
+
+<paste exact plan text — code blocks, tables, prose intact>
+
+## Critical Context
+
+- <what shipped before that this builds on>
+- <what's coming after that depends on this>
+- <any plan-vs-source divergences already discovered>
+
+## Where Exactly
+
+- File path: <absolute path>
+- Insertion point: <line ~N> after <existing landmark>
+- Surrounding pattern to match: <existing convention>
+
+## Project conventions you MUST follow
+
+Per `AGENTS.md` (or `CLAUDE.md` if you're Claude Code):
+1. Run impact analysis before editing existing symbols (GitNexus or grep fallback)
+2. Run scope check after edits — confirm only expected files changed
+3. <task-specific gotcha>
+
+## Verification
+
+1. `<command>` — expected: <result>
+2. `<command>` — expected: <result>
+
+## Before You Begin
+
+If you have questions about:
+- <ambiguity 1>
+- <ambiguity 2>
+
+**Ask before implementing.**
+
+## Your Job
+
+1-7. <numbered steps>
+
+## Report Format
+
+- Status: DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT
+- Impact findings (callers, risk) or grep-fallback equivalent
+- Files changed (paths only)
+- Verification command output
+- Commit SHA
+- Self-review findings
+```
+
+A **bad** implementer prompt is "implement task A1" — the fresh instance
+burns context discovering things you already know, and the report comes
+back vague.
+
+For spec and code-quality reviewer prompts, see `CLAUDE.md` §§ "Spec
+reviewer prompt template" and "Code quality reviewer prompt template" —
+the structure transfers directly to non-Claude tools.
+
+## Plan vs. source — the divergence rule
+
+Plans sketch values that may be stale by execution time:
+- Hex codes guessed before reading the actual mockup
+- Function names not aligned with the file's naming convention
+- Type fields that don't exist yet
+- Library APIs the plan author assumed exist
+
+**Standing instruction to every implementer:** "The plan's sketch is
+approximate. Where the plan matches the actual source / mockup / type /
+API, use the plan's value. Where they differ, use the actual value and
+report the divergence in your status report."
+
+This catches the plan being wrong without blocking on a re-spec.
+
+## Commit discipline for reviewability
+
+- **Baseline commit first.** If the working tree has uncommitted prep work
+  foundational to the plan, commit it as `chore(baseline): ...` BEFORE
+  dispatching any implementer. Otherwise each task's diff is polluted
+  with prep noise.
+- **One commit per task.** Don't amend across tasks. Reviewers need a
+  clean BASE_SHA..HEAD_SHA range.
+- **Fix commits are separate from feature commits.** When a reviewer
+  finds an issue, the fix is its own commit on top — don't `--amend`.
+  This preserves the audit trail.
+- **Commit message convention:** `<type>(<scope>): <subject>` plus a
+  short body explaining the *why* if non-obvious.
+
+## Context hygiene (the long-session rule)
+
+Quality degrades across very long contexts only if you let large bodies
+of text accumulate. Mitigate by:
+
+- **Don't read files >500 lines in your own context.** Dispatch a fresh
+  instance with the specific question.
+- **Don't re-read files you just edited.** Your tool should track state;
+  if the edit succeeded, trust it.
+- **Spot-check, don't re-verify.** If a reviewer says "spec compliant,"
+  trust it. If something feels off, do a targeted single-file read or
+  grep, not a full re-review.
+- **Summaries in your main context, full content in fresh instances.**
+  Each fresh instance digests 40-60k tokens of code and returns a
+  500-2000 token summary. That's the ~20× compression you're paying for.
+
+## Compaction signals and what to do
+
+When your tool summarizes/truncates older messages (compaction), watch for:
+
+- You start to forget file paths or commit SHAs you used earlier
+- Reviewer prompts feel harder to assemble because you can't recall the
+  implementer's exact claims
+- A system message mentions summarization or truncation
+- Token-count visibility (if shown) crosses ~70% of the context window
+
+**Respond by:**
+- **Commit pending work immediately.** Git is durable; chat is not.
+- **Record open decisions in your task tracker.** Task descriptions
+  persist across compactions.
+- **Dispatch fresh instances earlier than you normally would** — even
+  for borderline Lane-A work. The compact report survives compaction
+  better than scattered conversation.
+- **Don't re-read files to "refresh" your context.** You'll burn the
+  remaining budget faster.
+- **Surface state to the operator.** If you can't reliably complete the
+  remaining work, say so and let them decide whether to continue or
+  start a fresh session.
+
+## Quality vs. throughput watchpoints
+
+Moving fast through multi-task plans means some checks short-circuit.
+Specific risk patterns to guard against:
+
+| Watchpoint | What can slip through | Mitigation |
+|---|---|---|
+| **Concurrency in new code** | Missing locks around thread-shared state (SQLite, globals, `_*_lock` adjacent code) — spec review often misses these. | When the implementer touches thread-shared state, explicitly ask the code reviewer to check lock discipline. |
+| **Public-API semantic changes** | Refactors that change prop/parameter names can be visually correct but semantically wrong. | For interface refactors, the spec reviewer must verify call-site mappings are semantically correct, not just that output matches. |
+| **"Just X" with structural drift** | An implementer extends beyond a stated constraint (e.g., "only className strings" turns into local const extraction). | When an implementer deviates from a hard constraint, verify the deviation is purely additive and re-run touched tests. |
+| **Plan-vs-convention naming conflicts** | A field labeled one way in plan, differently in production code. Following plan literally creates a contract mismatch. | When plan and project convention conflict, surface the choice to the operator rather than defaulting either way. |
+| **Pre-existing failures masking new ones** | A flaky test failing throughout makes a new failure invisible. | Mark pre-existing failures `xfail` (or tighten tolerance) early in the branch so NEW failures stand out. |
+
+**Pattern:** the throughput optimization is "ship when the code quality
+reviewer says approve." The watchpoint is making sure the reviewer is
+*checking the right things*. A reviewer prompt that doesn't mention
+threading won't catch a missing lock — you have to tell them.
+
+## Failure modes and false positives
+
+Reviewers and tooling will sometimes be wrong. Recognizing the pattern
+prevents acting on bad input.
+
+**Reviewer false positives observed in practice:**
+
+1. **"Missing requirement" claims that contradict upstream behavior** —
+   The reviewer didn't trace upstream semantics (e.g., flagged "buffer
+   not capped" when the buffer is bounded at its source). **Mitigation:**
+   when a "missing requirement" claim contradicts the dispatch prompt's
+   stated upstream behavior, verify with a targeted grep before fixing.
+
+2. **Sequencing concerns based on nominal task order** — Reviewer assumed
+   the plan's nominal task order; your actual dispatch order may already
+   satisfy the concern. **Mitigation:** check your task tracker before
+   re-arranging work.
+
+3. **"Function X not found in module Y"** — Reviewer grepped the wrong
+   file. The function lived in a sibling module. **Mitigation:** if a
+   reviewer says "not found," double-check the scope you provided in
+   their prompt. The answer is often one file over.
+
+4. **Security warnings on instruction-following actions** — Automated
+   scanners can flag compliant behavior (e.g., the operator/system
+   prompt explicitly asks for behavior the scanner doesn't recognize).
+   **Mitigation:** if your action is clearly compliant with explicit
+   operator/system instructions, proceed and note the false positive.
+
+5. **Fresh instance "tool X not available"** — Fresh instances may have
+   a different tool environment than you do (different MCP servers,
+   different env vars, etc.). **Mitigation:** don't require fresh
+   instances to use tools you have; provide fallback instructions
+   (grep + file reading instead of MCP impact analysis) in their prompt.
+
+**Tool/environment failure modes:**
+
+6. **Edit tools that require Read first** — Many tools (including
+   Claude Code's `Edit`) require a `Read` on a file before edits.
+   **Mitigation:** always read (even a small window) before the first
+   edit on a file.
+
+7. **Wrong Python interpreter** — System `python3` may lack project
+   test deps; the project's venv has them. **Mitigation:** use the
+   project's binary explicitly: `.venv/bin/python -m pytest ...`.
+
+8. **Background-task completion notifications** — Async notifications
+   may appear in your conversation but are NOT operator input.
+   **Mitigation:** treat them as informational; don't confuse them with
+   operator acknowledgement of a pending question.
+
+**Detection pattern:** when a tool/reviewer/warning contradicts what you
+already know to be true, do a quick targeted verification (single read,
+single grep) before acting on the claim. A 5-second check prevents a
+wrong fix that itself needs reverting.
+
+## When NOT to orchestrate
+
+- **Single-step tasks.** Just do them.
+- **Tightly-coupled refactors** where each change depends on the
+  previous change's state in a way that prep-then-dispatch can't
+  capture cleanly.
+- **Interactive exploration** ("what does X do?"). Fresh-instance
+  overhead hurts here.
+- **Tasks needing constant operator feedback** — interactive sessions
+  fit better.
+
+# Coordinating with CLAUDE.md
+
+This file (`AGENTS.md`) and `CLAUDE.md` are sibling documents. They share
+the GitNexus block (auto-managed) and the Architecture Preamble. They
+diverge on tooling specifics:
+
+| Topic | This file (AGENTS.md) | CLAUDE.md |
+|---|---|---|
+| GitNexus rules | ✓ (canonical) | ✓ (canonical, identical) |
+| Architecture + invariants | ✓ (canonical) | ✓ (canonical, identical) |
+| Multi-task discipline | ✓ Universal principles | ✓ Same principles + Claude tool syntax |
+| Lane A/B/C heuristic | ✓ Universal | ✓ Same |
+| Prompt templates | ✓ Universal skeleton | ✓ Same + Claude-specific examples |
+| Tool syntax (`Agent`, `Skill`, `TaskCreate`) | — | ✓ Claude Code only |
+| `superpowers:*` skill invocation | — | ✓ Claude Code only |
+| `AskUserQuestion` discipline | — | ✓ Claude Code only |
+
+**If a Claude Code agent reads both files** and the guidance differs, the
+order of precedence is:
+1. The operator's explicit instructions (highest)
+2. `CLAUDE.md` Claude-specific extensions
+3. This file's universal principles
+4. The model's default behavior (lowest)
+
+**If a non-Claude agent reads only this file:** the universal principles
+above are complete and standalone. Apply them with your tool's analogous
+mechanisms. The `CLAUDE.md` references are optional reading.
