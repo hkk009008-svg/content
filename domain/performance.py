@@ -26,6 +26,11 @@ from __future__ import annotations
 
 from typing import Optional
 
+from domain.shot_types import (
+    SHOT_TYPE_LANDSCAPE, SHOT_TYPE_WIDE, SHOT_TYPE_ACTION,
+    FACE_READABLE_SHOTS, normalize_shot_type,
+)
+
 
 # Engine identifiers — strings rather than an Enum so the existing string-based
 # shot["performance_engine"] field doesn't need a separate serializer.
@@ -38,15 +43,13 @@ VALID_ENGINES = {ENGINE_ACT_ONE, ENGINE_LIVE_PORTRAIT, ENGINE_VIGGLE, ENGINE_SKI
 
 
 def _shot_type(shot: dict) -> str:
-    """Pull the shot type with a sensible default. Mirrors workflow_selector."""
-    # First check explicit field; fall back to classifying via the existing
-    # classifier so legacy projects without explicit shot_type still route.
+    """Pull the shot type with a sensible default. Normalized canonical form."""
     t = shot.get("shot_type") or shot.get("shot_class") or ""
     if t:
-        return t.lower()
+        return normalize_shot_type(t)
     try:
         from workflow_selector import classify_shot_type
-        return classify_shot_type(shot)
+        return normalize_shot_type(classify_shot_type(shot))
     except Exception:
         return ""
 
@@ -80,9 +83,9 @@ def should_capture(shot: dict, scene: Optional[dict] = None) -> bool:
     if not _has_characters(shot):
         return False
     st = _shot_type(shot)
-    if st in ("landscape",):
+    if st == SHOT_TYPE_LANDSCAPE:
         return False
-    if st == "wide" and not _has_dialogue(shot):
+    if st == SHOT_TYPE_WIDE and not _has_dialogue(shot):
         # Wide with characters but no dialogue — body is too small to retarget meaningfully
         return False
     return True
@@ -118,7 +121,7 @@ def route_performance_engine(shot: dict, scene: Optional[dict]) -> str:
     has_dlg = _has_dialogue(shot)
 
     # 2. ACT_ONE — dialogue + face-readable framing
-    if has_dlg and st in ("portrait", "medium", "close-up", "closeup", "close_up", "ecu"):
+    if has_dlg and st in FACE_READABLE_SHOTS:
         # Budget signal — if the project explicitly opted into the cheap path,
         # route to LivePortrait instead. This keeps the cheap path opt-in,
         # not a silent regression.
@@ -128,7 +131,7 @@ def route_performance_engine(shot: dict, scene: Optional[dict]) -> str:
         return ENGINE_ACT_ONE
 
     # 3. VIGGLE — action without dialogue, full-body motion
-    if not has_dlg and st in ("action",):
+    if not has_dlg and st == SHOT_TYPE_ACTION:
         return ENGINE_VIGGLE
 
     # 4. Dialogue in any other framing still benefits from ACT_ONE
