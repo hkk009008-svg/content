@@ -17,8 +17,6 @@
  *   - Monitor (A3 — inline preview reel in Director's Console: all 4 panes)
  */
 
-const API = '/api'
-
 export interface TakeStripProps {
   keyframeUrl?: string | null
   /** Driving-reference video — input to the performance-capture stage */
@@ -47,7 +45,7 @@ export default function TakeStrip({
   projectId,
   labels,
 }: TakeStripProps) {
-  const base = apiBase || API
+  const base = apiBase || '/api'
   const hasAny = Boolean(keyframeUrl || drivingUrl || performanceUrl || motionUrl)
   if (!hasAny) return null
 
