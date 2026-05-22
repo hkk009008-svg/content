@@ -14,11 +14,11 @@ Provider chain (try in order, fall through on failure):
 from __future__ import annotations
 
 import os
-import time
 from typing import Optional
 
 from config.settings import settings
 from performance._net import safe_download
+from performance._poll import poll_task
 
 
 # Polling configuration — pulled to constants so timing is auditable and tunable
@@ -104,21 +104,28 @@ def _synth_via_hedra(
         job_id = body.get("job_id") or body.get("id")
 
         if not out_url and job_id:
-            start = time.time()
-            while time.time() - start < _HEDRA_POLL_TIMEOUT_S:
+            def _get_status():
                 pr = requests.get(
                     f"https://api.hedra.com/v1/jobs/{job_id}",
                     headers={"Authorization": f"Bearer {api_key}"},
                     timeout=15,
                 )
-                if pr.ok:
-                    pb = pr.json()
-                    if (pb.get("status") or "").lower() in ("complete", "done", "succeeded"):
-                        out_url = pb.get("video_url") or pb.get("output_url")
-                        break
-                    if (pb.get("status") or "").lower() in ("failed", "error"):
-                        return None
-                time.sleep(_HEDRA_POLL_INTERVAL_S)
+                if not pr.ok:
+                    return {"status": "PENDING"}
+                pb = pr.json()
+                return {
+                    "status": (pb.get("status") or "").upper(),
+                    "video_url": pb.get("video_url") or pb.get("output_url"),
+                }
+
+            final = poll_task(
+                _get_status,
+                success_states={"COMPLETE", "DONE", "SUCCEEDED"},
+                terminal_states={"FAILED", "ERROR"},
+                interval_s=_HEDRA_POLL_INTERVAL_S,
+                timeout_s=_HEDRA_POLL_TIMEOUT_S,
+            )
+            out_url = final.get("video_url") if final else None
 
         if not out_url:
             return None
@@ -187,33 +194,46 @@ def _synth_via_sadtalker(
             return None
         prompt_id = qr.json().get("prompt_id")
 
-        start = time.time()
-        while time.time() - start < _SADTALKER_POLL_TIMEOUT_S:
+        def _get_sadtalker_status():
             hr = requests.get(f"{server_url}/history/{prompt_id}", timeout=15)
-            if hr.ok and prompt_id in hr.json():
-                hist = hr.json()[prompt_id]
-                outputs = hist.get("outputs", {})
-                for _, nout in outputs.items():
-                    items = nout.get("gifs") or nout.get("videos") or []
-                    if items:
-                        item = items[0]
-                        view = (
-                            f"{server_url}/view"
-                            f"?filename={item.get('filename')}"
-                            f"&subfolder={item.get('subfolder', '')}"
-                            f"&type={item.get('type', 'output')}"
-                        )
-                        # ComfyUI pod is internal-trusted; allow http (RunPod often
-                        # exposes the proxy URL without TLS).
-                        if not safe_download(view, output_mp4, allow_http=True):
-                            return None
-                        _cost_log("sadtalker", duration_s, shot_id, video_id)
-                        print(f"   ✅ SadTalker driving face: {output_mp4}")
-                        return output_mp4
-                status = hist.get("status", {})
-                if status.get("status_str") == "error":
+            if not hr.ok or prompt_id not in hr.json():
+                return {"status": "PROCESSING"}
+            hist = hr.json()[prompt_id]
+            inner = hist.get("status", {})
+            if inner.get("status_str") == "error":
+                return {"status": "FAILED"}
+            if hist.get("outputs"):
+                return {"status": "SUCCEEDED", "outputs": hist["outputs"]}
+            return {"status": "PROCESSING"}
+
+        final = poll_task(
+            _get_sadtalker_status,
+            success_states={"SUCCEEDED"},
+            terminal_states={"FAILED"},
+            interval_s=_SADTALKER_POLL_INTERVAL_S,
+            timeout_s=_SADTALKER_POLL_TIMEOUT_S,
+        )
+        if not final:
+            return None
+
+        outputs = final["outputs"]
+        for _, nout in outputs.items():
+            items = nout.get("gifs") or nout.get("videos") or []
+            if items:
+                item = items[0]
+                view = (
+                    f"{server_url}/view"
+                    f"?filename={item.get('filename')}"
+                    f"&subfolder={item.get('subfolder', '')}"
+                    f"&type={item.get('type', 'output')}"
+                )
+                # ComfyUI pod is internal-trusted; allow http (RunPod often
+                # exposes the proxy URL without TLS).
+                if not safe_download(view, output_mp4, allow_http=True):
                     return None
-            time.sleep(_SADTALKER_POLL_INTERVAL_S)
+                _cost_log("sadtalker", duration_s, shot_id, video_id)
+                print(f"   ✅ SadTalker driving face: {output_mp4}")
+                return output_mp4
         return None
     except Exception as e:
         print(f"   [DRIVING/SADTALKER] failed: {e}")
