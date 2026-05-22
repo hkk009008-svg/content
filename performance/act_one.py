@@ -16,11 +16,11 @@ the existing Runway Gen-4 integration).
 from __future__ import annotations
 
 import os
-import time
 from typing import Optional
 
 from config.settings import settings
 from performance._net import safe_download
+from performance._poll import poll_task
 
 
 _POLL_INTERVAL_S = 3
@@ -97,27 +97,34 @@ def generate_act_one_performance(
             "duration": int(round(duration_s)),
         }
         task = client.character_performance.create(**kwargs)
-        # Poll via SDK helper
-        start = time.time()
-        while time.time() - start < poll_timeout_s:
+
+        def _get_status_sdk():
             t = client.tasks.retrieve(id=task.id)
-            status = getattr(t, "status", "").upper()
-            if status in ("SUCCEEDED",):
-                out_url = (getattr(t, "output", None) or [None])[0]
-                if not out_url:
-                    print("   [ACT-ONE] SUCCEEDED but no output URL")
-                    return None
-                if not safe_download(out_url, output_mp4):
-                    return None
-                _cost_log("performance_capture", duration_s, shot_id, video_id)
-                print(f"   ✅ Act-One: {output_mp4}")
-                return output_mp4
-            if status in ("FAILED", "CANCELLED"):
-                print(f"   [ACT-ONE] task {status}: {getattr(t, 'failure', '?')}")
-                return None
-            time.sleep(_POLL_INTERVAL_S)
-        print(f"   [ACT-ONE] timed out after {poll_timeout_s}s")
-        return None
+            return {
+                "status": (getattr(t, "status", "") or "").upper(),
+                "output": getattr(t, "output", None),
+                "failure": getattr(t, "failure", None),
+            }
+
+        final = poll_task(
+            _get_status_sdk,
+            success_states={"SUCCEEDED"},
+            terminal_states={"FAILED", "CANCELLED"},
+            interval_s=_POLL_INTERVAL_S,
+            timeout_s=poll_timeout_s,
+        )
+        if final is None:
+            print(f"   [ACT-ONE] poll terminal or timed out")
+            return None
+        out_url = (final.get("output") or [None])[0]
+        if not out_url:
+            print("   [ACT-ONE] SUCCEEDED but no output URL")
+            return None
+        if not safe_download(out_url, output_mp4):
+            return None
+        _cost_log("performance_capture", duration_s, shot_id, video_id)
+        print(f"   ✅ Act-One: {output_mp4}")
+        return output_mp4
     except ImportError:
         # SDK not installed — fall through to raw REST
         return _raw_rest_call(api_key, keyframe_path, audio_path, output_mp4,
@@ -183,30 +190,37 @@ def _raw_rest_call(
         if not task_id:
             return None
 
-        # Poll
-        start = time.time()
-        while time.time() - start < poll_timeout_s:
+        def _get_status_rest():
             tr = requests.get(
                 f"https://api.dev.runwayml.com/v1/tasks/{task_id}",
                 headers={"Authorization": f"Bearer {api_key}", "X-Runway-Version": "2024-11-06"},
                 timeout=15,
             )
-            if tr.ok:
-                body = tr.json()
-                status = (body.get("status") or "").upper()
-                if status == "SUCCEEDED":
-                    out_url = (body.get("output") or [None])[0]
-                    if not out_url:
-                        return None
-                    if not safe_download(out_url, output_mp4):
-                        return None
-                    _cost_log("performance_capture", duration_s, shot_id, video_id)
-                    print(f"   ✅ Act-One (REST): {output_mp4}")
-                    return output_mp4
-                if status in ("FAILED", "CANCELLED"):
-                    return None
-            time.sleep(_POLL_INTERVAL_S)
-        return None
+            if not tr.ok:
+                return {"status": "PENDING"}
+            body = tr.json()
+            return {
+                "status": (body.get("status") or "").upper(),
+                "output": body.get("output"),
+            }
+
+        final = poll_task(
+            _get_status_rest,
+            success_states={"SUCCEEDED"},
+            terminal_states={"FAILED", "CANCELLED"},
+            interval_s=_POLL_INTERVAL_S,
+            timeout_s=poll_timeout_s,
+        )
+        if final is None:
+            return None
+        out_url = (final.get("output") or [None])[0]
+        if not out_url:
+            return None
+        if not safe_download(out_url, output_mp4):
+            return None
+        _cost_log("performance_capture", duration_s, shot_id, video_id)
+        print(f"   ✅ Act-One (REST): {output_mp4}")
+        return output_mp4
     except Exception as e:
         print(f"   [ACT-ONE/REST] failed: {e}")
         return None
