@@ -161,6 +161,7 @@ function ClipCard({
   const performanceMetadata = latestPerformanceTake?.metadata || {}
   const motionFidelity: number | null | undefined = performanceMetadata.motion_fidelity
   const performanceIdentity: number | null | undefined = performanceMetadata.identity_score
+  const resolvedShotType: string = (shot as any).shot_type || 'unknown'
 
   useEffect(() => {
     if (shot.approved_keyframe_take_id) {
@@ -426,26 +427,33 @@ function ClipCard({
 
             {/* Scores from the identity + motion gates */}
             {(performanceIdentity != null || motionFidelity != null) && (
-              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                <div className="rounded bg-editorial-ink-soft px-2 py-1.5">
-                  <div className="text-editorial-ivory-mute uppercase text-eyebrow-lg">Identity (ArcFace)</div>
-                  <div className="mt-0.5 font-mono">
-                    {typeof performanceIdentity === 'number'
-                      ? performanceIdentity.toFixed(3)
-                      : '—'}
-                  </div>
-                </div>
-                <div className="rounded bg-editorial-ink-soft px-2 py-1.5">
-                  <div className="text-editorial-ivory-mute uppercase text-eyebrow-lg">Motion fidelity</div>
-                  <div className="mt-0.5 font-mono">
-                    {typeof motionFidelity === 'number'
-                      ? motionFidelity.toFixed(3)
-                      : motionFidelity === null
-                        ? 'inconclusive'
+              <>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded bg-editorial-ink-soft px-2 py-1.5">
+                    <div className="text-editorial-ivory-mute uppercase text-eyebrow-lg">Identity (ArcFace)</div>
+                    <div className="mt-0.5 font-mono">
+                      {typeof performanceIdentity === 'number'
+                        ? performanceIdentity.toFixed(3)
                         : '—'}
+                    </div>
+                  </div>
+                  <div className="rounded bg-editorial-ink-soft px-2 py-1.5">
+                    <div className="text-editorial-ivory-mute uppercase text-eyebrow-lg">Motion fidelity</div>
+                    <div className="mt-0.5 font-mono">
+                      {typeof motionFidelity === 'number'
+                        ? motionFidelity.toFixed(3)
+                        : motionFidelity === null
+                          ? 'inconclusive'
+                          : '—'}
+                    </div>
                   </div>
                 </div>
-              </div>
+                {performanceMetadata.motion_floor_failed === true && (
+                  <span className="ml-2 rounded bg-editorial-curtain/20 px-1.5 py-0.5 text-eyebrow-lg text-editorial-curtain">
+                    below {resolvedShotType} floor
+                  </span>
+                )}
+              </>
             )}
 
             {performanceEngine === 'SKIP' && !performanceVideoPath && (
