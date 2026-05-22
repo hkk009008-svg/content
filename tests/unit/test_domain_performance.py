@@ -40,8 +40,6 @@ class TestSkipRules:
     def test_wide_no_dialogue_returns_skip(self):
         assert route_performance_engine(_shot(shot_type="wide", dialogue=""), None) == ENGINE_SKIP
 
-    def test_empty_shot_returns_skip(self):
-        assert route_performance_engine({"shot_type": "", "dialogue": ""}, None) == ENGINE_SKIP
 
 
 class TestActOneRouting:
@@ -55,6 +53,13 @@ class TestActOneRouting:
     def test_dialogue_in_other_framing_falls_through_to_act_one(self):
         # Rule 4 in route_performance_engine: dialogue in any framing → ACT_ONE
         assert route_performance_engine(_shot(shot_type="over_shoulder"), None) == ENGINE_ACT_ONE
+
+    def test_empty_shot_type_with_characters_falls_through(self):
+        # Empty shot_type with characters + dialogue hits rule 4 (dialogue → ACT_ONE),
+        # not SKIP. Lock this so future changes don't silently route empty types away.
+        assert route_performance_engine(
+            _shot(shot_type="", dialogue="hi"), None
+        ) == ENGINE_ACT_ONE
 
     def test_dialogue_as_list_routes_act_one(self):
         dlg = [{"text": "Hi"}, {"text": "There"}]
@@ -114,5 +119,6 @@ class TestDrivingVideoSource:
         assert driving_video_source(_shot()) == "tts_auto"
 
     def test_no_dialogue_no_action_is_none(self):
-        # No dialogue + non-action shot type → SKIP → "none"
+        # No dialogue + non-action + non-landscape shot type → rule 5 fall-through
+        # in route_performance_engine returns SKIP → driving_video_source returns "none"
         assert driving_video_source(_shot(dialogue="", shot_type="medium")) == "none"
