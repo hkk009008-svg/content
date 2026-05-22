@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Content** (3052 symbols, 18897 relationships, 251 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Content** (3016 symbols, 19567 relationships, 253 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -85,7 +85,7 @@ npx gitnexus analyze --embeddings
 
 To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.embeddings` field shows the count (0 means no embeddings). **Running analyze without `--embeddings` will delete any previously generated embeddings.**
 
-> Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.
+> Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`. **In long sessions, prefer `run_in_background: true` for the re-index so commits don't await the rebuild** — the index will be ready before the next slice needs it.
 
 ## CLI
 
@@ -125,10 +125,13 @@ state of the tree.
 | `audio/` | All audio domain: `_client.py`, `srt.py`, `music.py`, `effects.py`, `voiceover.py`, `dialogue.py`, `foley.py`. |
 | `llm/` | LLM domain: `ensemble.py`, `chief_director.py`, `blueprint_director.py`, `style_director.py`. |
 | `identity/` | Face/identity validation. `validator.py` was the Phase 3 cycle break (no longer pulls `phase_c_vision`). |
+| `performance/` | Performance-capture quality gates. `motion_gate.py` scores driving-vs-output optical-flow similarity; floors are per-shot-type via `workflow_selector.MOTION_FIDELITY_FLOORS` (advisory only). |
 | `config/` | `settings.py` (Settings dataclass + singleton) + `prompts/` markdown. |
-| `data/` | Runtime data (SQLite, gitignored). |
-| `docs/` | `REFACTOR_HANDOFF.md` is the operating manual for the refactor branch. |
-| `tests/` | `tests/unit/` (12 files, pure logic) + `tests/integration/` (3 files, hit real APIs). |
+| `data/` | Runtime data (SQLite, gitignored). Per-project calibration JSON lives under `data/calibration/`. |
+| `docs/` | `REFACTOR_HANDOFF.md` is the operating manual for the refactor branch. `docs/superpowers/plans/*.md` are written plans for multi-task work — see "Working a Multi-Task Plan" below. |
+| `scripts/` | Standalone operator CLIs (e.g., `calibrate_motion_floor.py`). Each script self-bootstraps `sys.path` from repo root. |
+| `tests/` | `tests/unit/` (pure logic) + `tests/integration/` (hit real APIs). **Run pytest via `.venv/bin/python -m pytest`, NOT system `python3`** (system python lacks pytest). |
+| `web/` | React/TypeScript frontend. `web/src/components/console/` is the Director's Console route; `web/src/components/pipeline/` is the legacy review-gate UI. The two routes have different palettes — `console-*` (warm sepia) vs `editorial-*` (cool ivory). |
 | (root) | Legacy modules pending migration: `cinema_pipeline.py`, `web_server.py`, plus per-shot loop deps (character/location/continuity managers, scene_decomposer, dialogue_writer — Phase 8 candidates) and the `phase_*_*.py` shims. |
 
 ## Phase protocol contract
@@ -168,3 +171,411 @@ Beyond the GitNexus checks above, the refactor-branch workflow expects:
 - Don't combine concerns. A bug fix isn't a refactor isn't a feature.
 - See REFACTOR_HANDOFF.md §6 for the canonical five-step slice playbook
   (read → write → re-export → verify with identity check → commit).
+- **For work beyond a single slice (≥5 sub-tasks or ≥800 LOC of total
+  change), don't implement in main context — orchestrate. See
+  "Working a Multi-Task Plan" below.**
+
+# Working a Multi-Task Plan
+
+When the user points you at a written plan (e.g., `docs/superpowers/plans/*.md`)
+with ≥5 sub-tasks, or you've drafted one yourself with comparable scope, you
+ORCHESTRATE — you do not implement directly. Main context holds the plan,
+TaskCreate state, and ~1-3k of summary per task; fresh subagents do the
+reading, writing, and verification.
+
+This is the mechanism that prevents quality degradation across long
+(1M / 2M+ token) sessions: each subagent starts at ~0 tokens with a curated
+self-contained prompt, returns a compact report, and disappears. Main context
+grows linearly with the number of tasks, not with the volume of work.
+
+## When to invoke
+
+| Signal | Action |
+|---|---|
+| User references a plan file under `docs/superpowers/plans/` | Invoke `superpowers:subagent-driven-development` skill (subagents available here) |
+| Plan has 5+ sub-tasks AND tasks are mostly independent | Same |
+| Task is a single change OR tasks are tightly coupled | Stay in main context; the orchestration overhead isn't worth it |
+| User is in an interactive exploration ("how does X work?") | Stay in main context; subagents hurt latency for Q&A |
+
+## The per-task loop (sequential, never parallel)
+
+For each task in the plan:
+
+1. `TaskUpdate({taskId: N, status: "in_progress"})`
+2. **Dispatch implementer** — `Agent({ subagent_type: "general-purpose", model: "sonnet", prompt: <curated, see template below> })`
+3. Read the report. If status is `DONE_WITH_CONCERNS` / `BLOCKED` / `NEEDS_CONTEXT`, address the concern before reviewing.
+4. **Dispatch spec compliance reviewer** — same subagent type. Reviewer reads the actual diff and compares to the spec line-by-line. Do NOT trust the implementer's self-report.
+5. If spec issues → fix loop (see "Delegation heuristics" below) → re-review.
+6. **Dispatch code quality reviewer** — `subagent_type: "superpowers:code-reviewer"`. Pass BASE_SHA, HEAD_SHA, what was implemented, plan reference.
+7. If quality issues → fix loop → re-review.
+8. `TaskUpdate({taskId: N, status: "completed"})` and move on.
+
+After all tasks: dispatch a final cross-cutting reviewer with BASE_SHA = the
+baseline commit and HEAD_SHA = current HEAD. Then invoke
+`superpowers:finishing-a-development-branch`.
+
+**Never dispatch multiple implementers in parallel** — they'd conflict on
+files. Reviewers in parallel are fine but rarely needed.
+
+## Delegation heuristics — Lane A / B / C
+
+Three lanes for each unit of work. Match the lane to the task — wrong-lane
+choices either waste tokens (lane B for trivial fixes) or burn main context
+(lane A for big work that should have been delegated).
+
+**Lane A — execute in main context (Edit / Bash directly):**
+- File is **already in your context** AND change is ≤5 LOC
+- Pure mechanical edit: rename, type alias, comment improvement, format fix
+- A reviewer flagged a 1-2 line fix with clear instructions and you can see the surrounding code
+- Test-data tweak (tighten a tolerance, swap a placeholder value)
+- Final polish after a fresh subagent's commit you just reviewed
+
+Costs: ~few hundred tokens. Risk: low — you can see what you're changing.
+
+**Lane B — fresh implementer subagent:**
+- Change touches ≥3 files OR a domain you haven't read yet
+- ≥5 LOC of structural change (new function, new component, new module)
+- Design judgment needed (naming, abstraction, layout choice)
+- Multi-step task that benefits from fresh-eyes context
+- Anything where the implementer needs to discover state you don't yet have
+
+Costs: ~40-60k tokens in the subagent's context, ~1-3k in yours.
+Risk: low if the prompt is well-formed; high if it's "implement task X" with no context.
+
+**Lane C — Explore / grep subagent (read-only survey):**
+- "Where is X defined?" / "Which files reference Y?" — open-ended search
+- Codebase exploration before deciding how to dispatch lane B
+- Verifying a reviewer claim before acting on it
+
+Costs: ~10-30k tokens. No write actions. Use when you need findings, not a code change.
+
+**Decision tree:**
+1. Is this a 1-5 line mechanical change in a file you already understand? → **Lane A**
+2. Is this open-ended search across multiple files with no code change? → **Lane C**
+3. Everything else → **Lane B**
+4. Special case: if a reviewer's claim contradicts what you remember about upstream behavior, do a quick **Lane C survey** (or single targeted `grep`/`Read`) before fixing. The reviewer may be wrong.
+
+## Implementer prompt template
+
+A good implementer prompt is 80-150 lines and lets the subagent act
+**cold** — they have no memory of this session. Skeleton:
+
+```
+You are implementing Task <ID> from `<plan path>` (Slice <S>, sub-slice <ID>).
+Working dir: `<absolute>`. Branch: `<branch>`. Latest commit: `<sha>`.
+
+## Task Description (verbatim from plan §X.Y)
+
+<paste exact plan text — code blocks, tables, prose intact>
+
+## Critical Context
+
+- <what shipped before that this builds on>
+- <what's coming after that depends on this>
+- <any plan-vs-source divergences already discovered>
+
+## Where Exactly
+
+- File path: <absolute path>
+- Insertion point: <line ~N> after <existing landmark>
+- Surrounding pattern to match: <existing convention>
+
+## Project conventions you MUST follow
+
+Per `/Users/.../CLAUDE.md`:
+1. Run `gitnexus_impact({target: "<symbol>", direction: "upstream"})` before editing existing symbols
+2. Run `gitnexus_detect_changes()` after edits — confirm scope is what you expect
+3. <task-specific gotcha>
+4. If GitNexus MCP isn't reachable in your environment, fall back to grep + file inspection.
+
+## Verification
+
+1. `<command>` — expected: <result>
+2. `<command>` — expected: <result>
+
+## Before You Begin
+
+If you have questions about:
+- <ambiguity 1>
+- <ambiguity 2>
+
+**Ask before implementing.**
+
+## Your Job
+
+1-7. <numbered steps>
+
+## When You're in Over Your Head
+
+If <X happens>, report BLOCKED with what you tried.
+
+## Report Format
+
+- Status: DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT
+- gitnexus_impact findings (callers, risk) or grep-fallback equivalent
+- Files changed (paths only)
+- Verification command output
+- Commit SHA
+- Self-review findings
+```
+
+A **bad** implementer prompt is "implement task A1" — they'll burn context
+discovering everything you already know, and the report will be vague.
+
+## Spec reviewer prompt template
+
+```
+You are reviewing whether Task <N>'s implementation matches its spec.
+**Do NOT trust the implementer's report** — read the actual code.
+
+## What Was Requested
+
+<paste exact requirements + numbered checklist of behaviors>
+
+## What Implementer Claims
+
+<list claims to be verified, including commit SHA>
+
+## Your Job
+
+1. `git show <SHA> -- <file>` — read the diff
+2. Verify each requirement above
+3. Look for: missing requirements, extra unrequested features, misunderstandings
+4. <task-specific verification commands>
+
+## Report
+
+- ✅ Spec compliant
+- ❌ Issues — list with file:line refs
+
+Under <N> words.
+```
+
+## Code quality reviewer prompt template
+
+```
+Code quality review for Task <N> (commit `<SHA>`).
+
+**WHAT_WAS_IMPLEMENTED:** <one-paragraph summary>
+**PLAN_OR_REQUIREMENTS:** <reference to plan section>
+**BASE_SHA:** `<sha>`
+**HEAD_SHA:** `<sha>`
+**DESCRIPTION:** <one-paragraph context>
+
+**Working directory:** `<absolute>`
+**Diff command:** `git diff <BASE>..<HEAD> -- <files>`
+
+In addition to standard concerns, check:
+- <task-specific concern 1> (e.g., concurrency if threading is involved)
+- <task-specific concern 2> (e.g., public API stability if refactor)
+
+Report: Strengths, Issues (Critical / Important / Minor), Assessment.
+Under <N> words.
+```
+
+## Plan vs. source — the divergence rule
+
+Plans sketch values that may be stale by execution time:
+- Hex codes guessed before reading the actual mockup
+- Function names not aligned with the file's naming convention
+  (e.g., plan said `motion_floor_for`; file convention is `get_*` prefix)
+- Type fields that don't exist yet
+- Library APIs the plan author assumed exist
+
+**Standing instruction to every implementer:** "The plan's sketch is
+approximate. Where the plan matches the actual source / mockup / type / API,
+use the plan's value. Where they differ, use the actual value and report
+the divergence in your status report."
+
+This is how to catch the plan being wrong without blocking on a re-spec.
+
+## Commit discipline for reviewability
+
+- **Baseline commit first.** If the working tree has uncommitted prep work
+  foundational to the plan (new files, modified types, prep methods),
+  commit it as `chore(baseline): ...` BEFORE dispatching any implementer.
+  Otherwise each task's diff is polluted with prep noise.
+- **One commit per task.** Don't amend across tasks. Reviewers need a clean
+  BASE_SHA..HEAD_SHA range.
+- **Fix commits are separate from feature commits.** When a reviewer finds
+  an issue, the fix is its own commit on top — don't `--amend`. This
+  preserves the audit trail showing what the reviewer caught.
+- **Commit message convention:** `<type>(<scope>): <subject>` plus a
+  short body explaining the *why* if non-obvious. End with the
+  `Co-Authored-By: Claude Opus 4.7 (1M context)` trailer that Claude Code
+  injects by default.
+
+## Context hygiene (the long-session rule)
+
+Quality degrades across very long contexts only if you let large bodies of
+text accumulate. Mitigate by:
+
+- **Don't `Read` files >500 lines in main context.** Dispatch a subagent
+  with the specific question.
+- **Don't re-`Read` files you just edited.** `Edit`/`Write` would have
+  errored if the change failed. The harness tracks state.
+- **Spot-check, don't re-verify.** If a reviewer says "spec compliant,"
+  trust it. If something feels off, do a targeted single-file `Read` or
+  `grep`, not a full re-review.
+- **Summaries in main, full content in subagents.** Each subagent
+  digests 40-60k tokens of code and returns a 500-2000 token summary.
+  That's the ~20× compression you're paying for.
+
+## Compaction signals and what to do
+
+The harness may compact (summarize) older messages when context gets
+long. A well-orchestrated session won't trigger this — main context stays
+linear in task count, not in work volume — but be ready.
+
+**Signals you're approaching compaction:**
+- You start to forget specific file paths or commit SHAs from earlier
+  in the session
+- Reviewer prompts feel harder to assemble because you can't recall the
+  implementer's exact claims
+- A `<system-reminder>` mentions summarization, truncation, or compaction
+- Token-count visibility (if shown) crosses ~70% of the model's window
+
+**What to do when sensed:**
+- **Commit pending work immediately.** Git is durable; chat is not. If
+  you've been holding a multi-file change in conversation, commit it.
+- **Record open decisions in TaskCreate.** Task descriptions persist
+  across compactions. Move "still to decide: X vs Y" into a task body.
+- **Dispatch a fresh subagent earlier than you normally would** — even
+  for borderline lane-A work. The subagent's compact report will survive
+  compaction better than scattered conversation text.
+- **Don't re-`Read` files to "refresh" your context.** You'll burn the
+  remaining budget faster. Trust git, TaskCreate, and the harness's
+  state tracking.
+- **Surface state to the user.** If you can't reliably complete the
+  remaining work, say so and let them decide whether to continue or
+  open a fresh session.
+
+## AskUserQuestion discipline
+
+Use `AskUserQuestion` for choices that:
+- Are cross-cutting (affect multiple tasks)
+- Set policy (e.g., advisory vs. auto-fail for a quality gate)
+- Are reversible only with effort (renaming a public API, picking a license)
+
+Don't ask for: which file a helper goes in, whether to use `const` or
+`function`, naming choices that the file's existing convention answers.
+Auto Mode says: make the reasonable call and keep going.
+
+## Background work
+
+`run_in_background: true` is for:
+- `npx gitnexus analyze --embeddings` after a batch of commits — index will
+  be ready before the next slice needs it.
+- Long verification (`pytest -v` on a large suite, `vite build`, `gh pr create`
+  on a slow network).
+- Anything where you have independent work to do meanwhile.
+
+**Don't** poll a background task you started — the harness notifies on
+completion automatically. Just continue with other work.
+
+## Pre-existing failures
+
+If a test fails on the baseline (not introduced by this branch), don't fix
+it inside a slice — it's scope creep. Track it explicitly in conversation.
+Surface it to the operator at `superpowers:finishing-a-development-branch`
+time so they decide: tighten tolerance, mark `xfail`, or ship as-is.
+
+**But:** mark it `xfail` (or tighten tolerance) early in the branch if
+possible, so a NEW failure stands out cleanly against a green-otherwise
+suite. A red baseline masks new red.
+
+## Quality vs. throughput watchpoints
+
+Moving fast through multi-task plans means some checks get short-circuited.
+Specific risk patterns to guard against:
+
+| Watchpoint | What can slip through | Mitigation |
+|---|---|---|
+| **Concurrency in new code** | A `_running_cores.get()` without `_cores_lock` slipped past spec review; only the code-quality reviewer caught it. SQLite + threading is the common source. | When the implementer touches anything thread-shared (`_*_lock` adjacent, SQLite connections, global state), explicitly ask the code reviewer to look for lock discipline. |
+| **Public-API semantic changes** | A refactor's prop/parameter names didn't match the data being passed; call-site labels happened to align by accident. | For refactors that change a public interface, the spec reviewer must verify call-site mappings are semantically correct, not just that visual/behavioral output matches. |
+| **"Just className changes" with structural drift** | An implementer extracted local consts inside a constraint that said "only className strings." Semantically identical, but a deviation from the hard constraint. | When an implementer deviates from a hard constraint, verify the deviation is purely additive and re-run any tests touching that code. |
+| **Plan-vs-convention naming conflicts** | A field labeled `engine` in plan was `target_api` in production code. Following plan literally creates a contract mismatch. | When plan and project convention conflict, surface the choice via `AskUserQuestion` rather than defaulting either way. |
+| **Pre-existing failures masking new ones** | A flaky test was failing throughout the implementation; a new bug causing the same failure mode would have been invisible. | Mark pre-existing failures `xfail` (or tighten tolerance) early in the branch — see "Pre-existing failures" above. |
+
+**Pattern:** the throughput optimization is "ship when the code quality
+reviewer says approve." The watchpoint is making sure the reviewer is
+*checking the right things*. A reviewer prompt that doesn't mention
+threading won't catch a missing lock — you have to tell them.
+
+## Failure modes and false positives observed
+
+Reviewers and tooling will sometimes be wrong. Recognizing the pattern
+prevents acting on bad input.
+
+### Reviewer false positives
+
+1. **"Buffer not capped / not newest-on-top" in a downstream consumer** —
+   Spec reviewer flagged two missing requirements in a render component.
+   Both were actually enforced upstream in the source hook
+   (`setBuffer(prev => [event, ...prev].slice(0, 20))` — bounded AND
+   prepended at the source). The reviewer didn't trace upstream
+   semantics. **Mitigation:** when a "missing requirement" claim
+   contradicts the dispatch prompt's stated upstream behavior, verify
+   with a targeted `grep` before fixing.
+
+2. **"Tests must land before X ships" — sequencing concern** — Reviewer
+   assumed the plan's nominal task order; the actual dispatch order
+   already satisfied the concern. **Mitigation:** reviewers don't know
+   your dispatch sequence. Their sequencing concerns may be pre-satisfied.
+   Read the concern, check `TaskList`, decide.
+
+3. **"Function X not found in module Y"** — Final cross-cutting reviewer
+   grepped the wrong file. The function lived in a sibling module.
+   **Mitigation:** if a reviewer says "not found," double-check the
+   scope you provided in their prompt. The answer is often one file over.
+
+4. **Security-warning "fabricated model identity"** — Harness flagged the
+   `Co-Authored-By:` trailer that the system prompt explicitly instructs
+   you to add. **Mitigation:** automated security warnings can be wrong
+   about instruction-following. If your action is clearly compliant with
+   explicit user/system instructions, proceed and note the false
+   positive in your response.
+
+5. **"GitNexus MCP not available" from a subagent** — Subagents have a
+   different MCP environment than the orchestrator. Several subagents
+   couldn't reach GitNexus and fell back to grep + file inspection.
+   **Mitigation:** don't require subagents to use GitNexus tools; tell
+   them in the prompt that grep + file reading is an acceptable fallback
+   for impact analysis when MCP isn't reachable.
+
+### Tool and environment failure modes
+
+6. **`Edit` requires `Read` first** — Trying to `Edit` a file the harness
+   hasn't seen returns `File has not been read yet`. **Mitigation:**
+   always `Read` (even a small offset+limit window) before the first
+   `Edit` on a file in a session.
+
+7. **System `python3` vs project `.venv/bin/python`** — Default `python3`
+   doesn't have project test deps (pytest, etc.); the project venv does.
+   **Mitigation:** for project-specific tooling (pytest, vite, npx,
+   anything not in the standard library), use the project's binary
+   explicitly: `.venv/bin/python -m pytest ...`, `npx ...` from the
+   right directory.
+
+8. **Background-task completion notifications mid-conversation** — The
+   harness fires `<system-reminder>` blocks when a background command
+   finishes. These are NOT user input. **Mitigation:** treat them as
+   informational; don't confuse them with user acknowledgement of a
+   pending question.
+
+### Detection pattern
+
+The common thread: **when a tool/reviewer/warning contradicts what you
+already know to be true, do a quick targeted verification (single
+`Read`, single `grep`) before acting on the claim.** A 5-second check
+prevents a wrong fix that itself needs to be reverted.
+
+## When NOT to use this pattern
+
+- **Single-step tasks.** Just do them in main context.
+- **Tightly-coupled refactors** where every change depends on the previous
+  change's state in a way that prep-then-dispatch can't capture cleanly.
+- **Interactive exploration** ("what does X do?"). Subagent overhead hurts
+  here.
+- **Tasks with constant operator feedback** — interactive sessions in main
+  context fit better.
