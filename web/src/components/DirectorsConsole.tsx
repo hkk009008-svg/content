@@ -1,10 +1,11 @@
 /**
- * DirectorsConsole — layout shell for the 7-region director's interface.
+ * DirectorsConsole — layout shell composing the 6 extracted regions plus
+ * an inline masthead.
  *
- * Layout: masthead → hero band → 3-column main (phases/monitor/telemetry)
- *         → filmstrip → notes
+ * Layout: masthead (inline) → hero band → 3-column main (phases/monitor/
+ *         telemetry) → filmstrip → notes
  *
- * Each region is a self-contained subcomponent from ./console/:
+ * The 6 region subcomponents live in ./console/:
  *   HeroShot, PhasesRail, Monitor, Telemetry, Filmstrip, Notes
  *
  * The masthead (project title, back button, active-stage label) stays as
