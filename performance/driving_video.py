@@ -260,18 +260,36 @@ def synth_driving_face_from_audio(
       'hedra' → Hedra only
       'sadtalker' → SadTalker only
 
+    Cache:
+      Results are cached by sha256(audio) + sha256(keyframe) + duration under
+      PERFORMANCE_CACHE_DIR (default: data/cache/driving/). On a cache hit the
+      function returns immediately with provider='cache' and skips all API calls,
+      avoiding repeat Hedra charges (~$0.05/shot) when inputs haven't changed.
+
     Returns:
         (path, provider_name) tuple on success — provider_name is one of
-        {"hedra", "sadtalker"}. None on full failure.
+        {"hedra", "sadtalker", "cache"}. None on full failure.
     """
     if not (audio_path and os.path.exists(audio_path)):
         return None
     if not (keyframe_path and os.path.exists(keyframe_path)):
         return None
 
+    # --- Content-hash cache check (MUST come AFTER existence guards above) ---
+    import shutil as _shutil
+    from performance._cache import driving_cache_key, lookup_cache, store_cache
+
+    key = driving_cache_key(audio_path, keyframe_path, duration_s)
+    cached = lookup_cache(key)
+    if cached:
+        _shutil.copyfile(cached, output_mp4)
+        print(f"   ✅ Driving-video cache hit: {cached}")
+        return (output_mp4, "cache")
+
     if engine in ("auto", "hedra"):
         r = _synth_via_hedra(audio_path, keyframe_path, output_mp4, duration_s, shot_id, video_id)
         if r:
+            store_cache(key, output_mp4)
             return (r, "hedra")
         if engine == "hedra":
             return None
@@ -279,6 +297,7 @@ def synth_driving_face_from_audio(
     if engine in ("auto", "sadtalker"):
         r = _synth_via_sadtalker(audio_path, keyframe_path, output_mp4, duration_s, shot_id, video_id)
         if r:
+            store_cache(key, output_mp4)
             return (r, "sadtalker")
 
     return None
