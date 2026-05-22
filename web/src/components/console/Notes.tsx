@@ -1,5 +1,5 @@
 import type { ProgressEvent } from '../../types/project'
-import { stageColors } from '../../lib/stageColors'
+import { consoleStageColors } from '../../lib/stageColors'
 
 export interface NotesProps {
   notesBuffer: ProgressEvent[]
@@ -25,7 +25,7 @@ export default function Notes({ notesBuffer }: NotesProps) {
         ) : (
           notesBuffer.map((e, i) => (
             <div key={`${e.stage}-${e.shot_id ?? ''}-${e.percent ?? ''}-${i}`} className="flex gap-2 font-console-mono text-xs">
-              <span className={`w-20 shrink-0 uppercase ${stageColors[e.stage] || 'text-console-ink-mute'}`}>
+              <span className={`w-20 shrink-0 uppercase ${consoleStageColors[e.stage] || 'text-console-ink-mute'}`}>
                 [{e.stage}]
               </span>
               <span className="text-console-ink-dim truncate">{e.detail}</span>

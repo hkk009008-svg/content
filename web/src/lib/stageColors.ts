@@ -31,3 +31,39 @@ export const stageColors: Record<string, string> = {
   PAUSED: 'text-editorial-warn',
   RESUMED: 'text-editorial-ready',
 }
+
+// Warm-sepia variant for the Director's Console surface.
+// Collapses the editorial palette's brass/ready/curtain/warn hues into the
+// console palette's two-tone gold (active/success) + accent (fail/warn) +
+// ink-mute (neutral/cancelled). The console palette has no separate warn
+// color, so RETRY/PAUSED/WARNING share the accent hue with errors.
+export const consoleStageColors: Record<string, string> = {
+  STYLE: 'text-console-ink-mute',
+  AUDIO: 'text-console-ink-mute',
+  SCENE: 'text-console-gold',
+  DECOMPOSE: 'text-console-ink-mute',
+  DIALOGUE: 'text-console-ink-mute',
+  GENERATE: 'text-console-ink-mute',
+  VIDEO: 'text-console-ink-mute',
+  VALIDATED: 'text-console-gold',
+  IDENTITY_FAIL: 'text-console-accent',
+  RETRY: 'text-console-accent',
+  ASSEMBLY: 'text-console-ink-mute',
+  COMPLETE: 'text-console-gold',
+  DONE: 'text-console-gold',
+  ERROR: 'text-console-accent',
+  CANCELLED: 'text-console-ink-mute',
+  WARNING: 'text-console-accent',
+  KEYFRAME: 'text-console-ink-mute',
+  KEYFRAME_READY: 'text-console-gold',
+  KEYFRAME_REVIEW: 'text-console-gold',
+  MOTION: 'text-console-ink-mute',
+  MOTION_READY: 'text-console-gold',
+  PERFORMANCE: 'text-console-ink-mute',
+  REVIEW: 'text-console-gold',
+  PLAN_REVIEW: 'text-console-ink-mute',
+  DIRECTOR: 'text-console-ink-mute',
+  SHOT_FAILED: 'text-console-accent',
+  PAUSED: 'text-console-accent',
+  RESUMED: 'text-console-gold',
+}
