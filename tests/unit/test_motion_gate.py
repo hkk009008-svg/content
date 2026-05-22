@@ -107,10 +107,41 @@ def test_needs_remotion_wide_below_floor_fails():
 
 
 def test_needs_remotion_landscape_always_passes():
-    """landscape opts out of motion-gate entirely — any score, even 0.0, returns False."""
+    """landscape opts out of motion-gate entirely — every score returns False."""
     from performance.motion_gate import needs_remotion
     assert needs_remotion(0.0, shot_type="landscape") is False
-    assert needs_remotion(0.0, shot_type="landscape") is False  # deterministic
+    assert needs_remotion(0.5, shot_type="landscape") is False
+    assert needs_remotion(1.0, shot_type="landscape") is False
+
+
+def test_needs_remotion_each_shot_type_uses_its_own_floor():
+    """Each non-opt-out shot type must consult its own floor — a single score
+    that's BELOW one floor and ABOVE another should give opposite verdicts.
+
+    portrait=0.42, macro=0.40, medium=0.55, action=0.60, wide=0.65 — a score
+    of 0.50 lands above portrait+macro and below medium+action+wide, which
+    lets one assertion per shot type confirm the lookup wired through to the
+    right entry in MOTION_FIDELITY_FLOORS rather than always returning the
+    default 0.50.
+    """
+    from performance.motion_gate import needs_remotion
+    # 0.50 is ABOVE these floors → no remotion
+    assert needs_remotion(0.50, shot_type="portrait") is False
+    assert needs_remotion(0.50, shot_type="macro") is False
+    # 0.50 is BELOW these floors → remotion required
+    assert needs_remotion(0.50, shot_type="medium") is True
+    assert needs_remotion(0.50, shot_type="action") is True
+    assert needs_remotion(0.50, shot_type="wide") is True
+
+
+def test_needs_remotion_default_floor_when_no_shot_type_or_override():
+    """Bare needs_remotion(score) falls through to DEFAULT_MOTION_FLOOR (0.50)
+    — the legacy single-floor behavior, preserved for back-compat callers
+    that haven't been updated to pass shot_type."""
+    from performance.motion_gate import needs_remotion
+    assert needs_remotion(0.30) is True   # below 0.50
+    assert needs_remotion(0.60) is False  # above 0.50
+    assert needs_remotion(0.50) is False  # ==floor doesn't trigger
 
 
 def test_needs_remotion_floor_override_beats_shot_type():
