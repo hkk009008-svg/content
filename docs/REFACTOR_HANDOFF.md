@@ -10,7 +10,9 @@
 > `vbench_evaluator.py`, `comfyui_workflow_gen.py`, `phase_c_assembly.assemble_final_video`,
 > and all related files were removed.
 >
-> **Canonical current state lives in `/HANDOFF.md` at repo root.** The
+> **Canonical current state lives in `/ARCHITECTURE.md` at repo root** (the
+> prior `HANDOFF.md` pointer was archived to `docs/archive/` on 2026-05-24
+> when ARCHITECTURE.md superseded the journal-shaped handoff). The
 > "Slice X" / "Phase 6" / "two orchestrators" framing in this doc is
 > historical context — useful to understand the refactor that produced
 > the cinema pipeline, NOT the current state. The invariants below

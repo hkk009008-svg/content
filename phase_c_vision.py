@@ -16,11 +16,11 @@ def _get_shared_validator():
     """Lazy-construct + return the process-wide IdentityValidator.
 
     Backward-compat alias for `identity.get_shared_validator()`. Kept under
-    the original name because the smoke block + CLAUDE.md / HANDOFF.md
-    invariants reference this exact symbol path
-    (`phase_c_vision._get_shared_validator`). Internally just delegates
-    to the consolidated factory so phase_c_vision, face_validator_gate,
-    and performance.identity_gate all return the same instance.
+    the original name because the §15 smoke block in ARCHITECTURE.md
+    references this exact symbol path (`phase_c_vision._get_shared_validator`).
+    Internally just delegates to the consolidated factory so phase_c_vision,
+    face_validator_gate, and performance.identity_gate all return the same
+    instance.
     """
     from identity import get_shared_validator
     return get_shared_validator()

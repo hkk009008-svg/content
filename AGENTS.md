@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Content** (2836 symbols, 17637 relationships, 239 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Content** (2935 symbols, 18387 relationships, 248 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -123,201 +123,57 @@ session, manual diff review, `git grep` for verification, etc.).
 
 # Session-start protocol (read me first)
 
-**This file, `CLAUDE.md`, `HANDOFF.md`, and the user's memory files
-drift from the actual code between sessions.** A few claims were wrong
-when written; more become wrong as commits land. Before doing any
-non-trivial work, verify the claims in this doc against the current
-source. If a claim is stale, **fix this file in the same change** that
-exposes the staleness — don't let a wrong claim survive your session.
+**Truth lives in `ARCHITECTURE.md` at the repo root.** This file (AGENTS.md)
+is the *process layer* — agent-agnostic principles (multi-task
+orchestration, session discipline) shared by all AI coding tools.
+`ARCHITECTURE.md` is the *truth layer* — verified facts about the pipeline,
+with file:line references and a §15 smoke test. When they disagree about
+facts, `ARCHITECTURE.md` wins.
+
+Both files drift from the actual code between sessions. Before doing any
+non-trivial work, verify against current source. If a claim is stale,
+**fix the relevant file in the same change** that exposes the staleness —
+don't let a wrong claim survive your session.
 
 Concrete protocol at session start (≤2 minutes):
 
-1. Run the smoke block from the "Invariants" section below. If it
-   fails, the doc is stale OR the working tree is broken — fix one or
-   the other before proceeding with the user's task.
-2. Spot-check "Single entry point" and "Top-level package layout":
-   `ls cinema/ cinema/phases/`, `grep -n "^from cinema.phases" cinema_pipeline.py`,
-   `wc -l cinema_pipeline.py web_server.py phase_c_ffmpeg.py`. Compare to
-   what this file claims.
-3. `git log --oneline -20` — if a recent commit touched a module
-   mentioned here, re-read that section against the new code.
-4. **If you find a stale claim:** edit this file first, in the same
-   commit (or a "docs:" prep commit right before) the user's task lands.
+1. Run the §15 smoke block in `ARCHITECTURE.md`. If it fails, the doc is
+   stale OR the working tree is broken — fix one or the other before
+   proceeding with the user's task.
+2. Skim `ARCHITECTURE.md` §2 component topology. Spot-check:
+   - `ls cinema/ cinema/phases/ cinema/review/ cinema/shots/`
+   - `wc -l cinema_pipeline.py web_server.py phase_c_ffmpeg.py`
+3. `git log --oneline -20` — if any commit touched a module documented in
+   `ARCHITECTURE.md` since it was last edited (the `*Last verified: ...*`
+   timestamp at the file footer), re-read that section against the new code.
+4. **If you find a stale claim:** edit `ARCHITECTURE.md` first, in the same
+   commit (or a `docs:` prep commit right before) the user's task lands.
    The user has stated this as a standing requirement.
 
 Trust the code; update the prose when it diverges.
 
-# Architecture Preamble
+# Architecture — see [ARCHITECTURE.md](ARCHITECTURE.md)
 
-Interactive AI cinema pipeline. **Pivot complete (2026-05-23):** the
-project was originally a YouTube Shorts generator (CLI entry `main.py`),
-pivoted to interactive cinema production with operator review gates.
-The CLI and all YouTube-era components are deleted — `main.py` no longer
-exists at the repo root. There is now **one entry point** to the
-production pipeline.
+The full architectural map of this codebase — entry point, orchestrator,
+phases, gates, story prep, image gen, video routing, performance/lipsync,
+identity, audio, LLMs, frontend, plus known bugs and dead code — lives in
+[`ARCHITECTURE.md`](ARCHITECTURE.md) at the repo root. Every claim there is
+cross-referenced to file:line and was verified against source on the date
+in the document's footer.
 
-> `HANDOFF.md` at the repo root is the session-journal companion. When
-> this Architecture Preamble and HANDOFF disagree, **this file wins**
-> — HANDOFF is journal-shaped (what changed last session), this file
-> is current-state-shaped (what's true now).
-
-## Single entry point
-
-- **`web_server.py`** (Flask + SSE, ~1647 LOC, no auth, wide-open CORS)
-  → **`cinema_pipeline.py:CinemaPipeline`** (~1004 LOC) — interactive
-  dashboard with pause/resume + SSE progress + four operator review
-  gates: **PLAN_REVIEW**, **KEYFRAME_REVIEW**, **PERFORMANCE_REVIEW**
-  (auto-skipped if all shots routed to SKIP), **REVIEW**.
-- The three Phase classes (`KeyframeRenderPhase`, `PerformanceCapturePhase`,
-  `MotionRenderPhase`) **live under `cinema/phases/`**, not inline in
-  `cinema_pipeline.py`. The orchestrator imports them at file top
-  (`cinema_pipeline.py:25-27`) and calls `phase.run(ctx)` directly. It
-  does NOT use the `cinema.pipeline` generic driver — that driver class
-  exists at `cinema/pipeline.py` but has **zero callers** today.
-- `CinemaPipeline.__init__` composes:
-  - **`PipelineCore`** (long-lived per-project deps: project dict,
-    continuity, director, cost_tracker, ensemble) — built via
-    `cinema.core.build_pipeline_core(pid)`.
-  - **`ThreadedLifecycle`** (cancel/pause/gate-wait/progress).
-  - **`RunState`** (per-run mutable: shot_results, scene_clips,
-    current_*, completed_scene_indices).
-  - **`ShotController`** (per-shot work — keyframe / performance /
-    motion / regenerate / diagnose / correct).
-  - **`ReviewController`** (gates + take approvals).
-  - **`CheckpointStore`** (atomic JSON resume).
-  The forwarder block marked `# GENERATED BEGIN/END` in `cinema_pipeline.py`
-  is autogenerated by `tools/gen_delegates.py` — don't edit by hand.
-
-## Top-level package layout
-
-| Path | Owns |
-|------|------|
-| `cinema/` | Orchestration substrate. `context.py` → `PipelineContext` + `get_project_setting`. `core.py` → `PipelineCore` + `build_pipeline_core(pid)`. `lifecycle.py` → `LifecycleService` protocol with `NullLifecycle` (CLI/tests) + `ThreadedLifecycle` (web). `runstate.py` → `RunState`. `checkpoint.py` → `CheckpointStore` atomic JSON resume. `services.py` → stateless helpers (`state_snapshot`, `checkpoint_info`) used by web endpoints to avoid spinning a full `CinemaPipeline`. `phases/base.py` → `Phase` protocol + `PhaseResult`. `phases/{keyframe_render,motion_render,performance}.py` → the three Phase implementations. `pipeline.py` → generic Phase iterator with **zero current callers**. `shots/controller.py` → `ShotController` (the per-shot workhorse, ~1198 LOC). `review/controller.py` → `ReviewController`. |
-| `audio/` | `_client.py`, `srt.py`, `music.py`, `effects.py`, `voiceover.py`, `dialogue.py`, `foley.py`, `alignment.py`. Pedalboard is a **hard dep** — `audio/effects.py` imports it unconditionally, no try/except guard. `audio/__init__.py` is a 23-line docstring with **no exports**; callers reach into submodules directly. |
-| `llm/` | `ensemble.py` (LLMEnsemble — **Anthropic + OpenAI only**, no Gemini in dispatch), `chief_director.py` (validates shot prompts → `APPROVED` / `REJECTED` / `MODIFIED`), `style_director.py` (GPT-4o only), `prompt_optimizer.py` (per-shot prompt + `suggested_video_api`), `negative_prompts.py`. |
-| `identity/` | `validator.py` (`IdentityValidator`) + `types.py`. Canonical singleton factory is `identity.get_shared_validator()` — `phase_c_vision._get_shared_validator()` is kept as a backward-compat alias and delegates to the same factory. `face_validator_gate.py` and `performance/identity_gate.py` also delegate, so all four access paths return the same instance: ArcFace weights load once per process and rolling-stats history accumulates signal from per-shot validations + N=8 best-of grading + performance-gate scoring (commit cc34870). |
-| `performance/` | `_router.py` (`dispatch(engine, ...)` with per-provider semaphores: ACT_ONE=1, LIVE_PORTRAIT=2, VIGGLE=1), engine adapters `act_one.py` / `live_portrait.py` / `viggle.py`, `driving_video.py` (Mode B autopilot — Hedra/SadTalker cascade), `motion_gate.py` (Farneback 12×12 flow histogram → cosine similarity — **advisory only**), `identity_gate.py`, plus `_cache.py` / `_net.py` / `_poll.py` helpers. |
-| `domain/` | Real domain modules: `project_manager.py` (filelock-protected JSON CRUD via `filelock.FileLock` on `project.lock`, default 10s timeout), `continuity_engine.py` (composes `CharacterContinuityTracker` + `LocationPersistence` + `PhysicsPromptEngineer` + `TemporalConsistencyManager`), `character_manager.py`, `location_manager.py`, `scene_decomposer.py`, `dialogue_writer.py`, `language_defaults.py` (per-language TTS/lipsync defaults for English / Korean / Japanese / Mandarin), `shot_types.py`, `performance.py` (engine routing helpers), `projects/` (per-project runtime storage, 12-hex IDs). Root-level `character_manager.py`, `continuity_engine.py`, `dialogue_writer.py`, `location_manager.py`, `project_manager.py`, `scene_decomposer.py` are ~400-byte `from domain.X import *` re-export shims. **Exception:** `pipeline_context.py` at root is NOT a shim — it loads `config/prompts/pipeline_context.md` into a `PIPELINE_CONTEXT` string consumed by LLM callers. |
-| `config/` | `settings.py` → frozen `@dataclass(frozen=True) Settings` with env-derived API keys + paths ONLY. **Never** read project UI knobs from here. `prompts/` holds markdown context strings. |
-| `data/` | Runtime data (SQLite cost-tracker DB, caches). Gitignored. |
-| `prep/` | Operator-side prep CLIs: `lora_training.py`, `topaz_upscale.py`. |
-| `docs/` | Older architecture docs. `HANDOFF.md` lives at the **repo root** (not under `docs/`). Older docs (`REFACTOR_HANDOFF.md`, `CINEMA_PIPELINE_MIGRATION_DESIGN.md`) describe pre-pivot or in-flight states — prefer this file. |
-| `scripts/` | `calibrate_motion_floor.py`, `setup_runpod.sh`, `verify_llm_caching.py`. Each Python script self-bootstraps `sys.path` from repo root. |
-| `tests/` | `tests/unit/` (pure logic, stub hosts) + `tests/integration/` (real APIs behind `@pytest.mark.e2e` + skipif on credentials). **Run pytest via `.venv/bin/python -m pytest`** (Python 3.13 venv required). |
-| `web/` | Vite + React + TypeScript. No router — `App.tsx` uses `useState<'setup'\|'pipeline'\|'console'>` to switch shells. `web/src/components/console/*` is the Director's Console (warm-sepia `console-*` Tailwind classes). `web/src/components/pipeline/*` is the review-gate UI (cool-ivory `editorial-*` classes). Two palettes strictly separated in `tailwind.config.js:9-47`. Settings sections in `web/src/components/settings/*.tsx` (10 sections). SSE consumed via `hooks/useSSE.ts` → `hooks/usePipelineState.ts`. |
-| (root) | `cinema_pipeline.py` (orchestrator), `web_server.py` (Flask/SSE, 59 routes), `phase_c_ffmpeg.py` (**the actual video router** — `generate_ai_video` dispatches to Kling/Sora/Veo/LTX/Runway/SEEDANCE — plus color grade + `two_pass_loudnorm` + stitch helpers), `phase_c_assembly.py` (image-only keyframe gen: `generate_ai_broll` + `RunPodComfyUI`), `phase_c_vision.py` (`_get_shared_validator()` singleton factory + DEPRECATED `validate_identity*` wrappers kept for backward compat), `workflow_selector.py` (5-template per-shot-type catalog + `MOTION_FIDELITY_FLOORS` + `classify_shot_type` keyword classifier), `quality_max.py` (max-tier image path: N=8 best-of, ArcFace+aesthetic halt, FreeU/SLG/DetailDaemon/SUPIR, 4K upscale), `lip_sync.py` (overlay cascade sync.so/MuseTalk/LatentSync + generation cascade Hedra/Kling/Omnihuman/Creatify), `face_validator_gate.py`, `cost_tracker.py`, `coherence_analyzer.py`, native API adapters `kling_native.py` / `sora_native.py` / `veo_native.py` / `ltx_native.py`. |
-
-## Video routing — the actual cascade
-
-- `workflow_selector.WORKFLOW_TEMPLATES` has **5 keys**: portrait / medium /
-  wide / action / landscape. Each declares `target_api` + ordered
-  `video_fallbacks`.
-- **SEEDANCE appears only in the `action` cascade** (last fallback). It is
-  NOT a general multi-character fallback. The cascade is keyword-driven
-  via `classify_shot_type`, not character-count-driven. Two-character
-  dialogue shots classify as `medium` and hit Kling → Runway → Sora →
-  LTX — never SEEDANCE.
-- When an operator pins `target_api` to a specific engine, `video_fallbacks`
-  becomes `None` and `phase_c_ffmpeg.py`'s built-in default cascade
-  applies: `["KLING_NATIVE","SORA_NATIVE","RUNWAY_GEN4","LTX","VEO_NATIVE","KLING_3_0","SORA_2","VEO","RUNWAY"]`.
-- `_VEO_QUOTA_EXHAUSTED` is a sticky module-global in `phase_c_ffmpeg.py`
-  — once VEO returns a 429, it short-circuits for the rest of the
-  process lifetime. No reset.
-- **Known small-bug catalog** (pre-existing, not session-fresh):
-  - `workflow_selector.get_adaptive_pulid_weight` has no `return` —
-    falls off the end, returns `None`. Callers expecting a float get None.
-  - `MOTION_FIDELITY_FLOORS["macro"]` is a phantom — `macro` is not a
-    shot type anywhere else. And no `close_up` entry despite being a
-    real shot type.
-  - `make_project()` defaults still seed `vbench_overall_threshold: 0.60`
-    though VBench routing was excised in commit `cda5022`.
-  - `domain/continuity_engine.py:415` and `domain/scene_decomposer.py:937`
-    import via the root-shim path (`from project_manager import ...`)
-    rather than the canonical `domain.project_manager` — works but
-    inconsistent.
-- **Known dead-code candidates** in `phase_c_ffmpeg.py` (no active callers):
-  `generate_ass_subtitles`, `execute_master_ffmpeg_assembly`,
-  `normalize_clip`, `probe_audio`. ~250 LOC total. All pre-pivot YouTube CLI.
-
-## Phase protocol contract
-
-Phase classes (in `cinema/phases/`) satisfy:
-
-```python
-class Phase(Protocol):
-    name: str
-    def run(self, ctx: PipelineContext) -> PhaseResult: ...
-```
-
-`PipelineContext` (in `cinema/context.py`) is a dataclass that *also*
-implements the dict API (`__getitem__`, `__setitem__`, `get`, `update`,
-`keys`, `items`, `values`, `as_dict`) — so legacy `def f(ctx: dict)`
-functions keep working when passed a `PipelineContext`.
-
-**Per-project UI settings** are populated by `cinema_pipeline.py` at
-`PipelineContext(global_settings=project.get("global_settings", {}))`
-construction. All consumers MUST use the helper:
-
-```python
-from cinema.context import get_project_setting
-value = get_project_setting(ctx, "knob_name", default)
-```
-
-`config.settings.Settings` is for env-derived API keys ONLY. Reading
-project-knob keys from it (the historical `getattr(settings, ...)`
-pattern) is a silent-failure bug — it returns `None` and the default
-always wins. This was fixed across 8 sites on 2026-05-23 and the last
-holdout (`audio/dialogue.py`'s `settings: dict` parameter) was migrated
-to `ctx: PipelineContext` in commit cc34870's follow-up — every
-per-project knob read in `audio/`, `llm/`, `performance/`, `cinema/`,
-and `quality_max.py` now flows through `get_project_setting(ctx, ...)`.
-
-## Invariants (verified by smoke test 2026-05-23)
-
-1. All `.py` files compile cleanly on Python 3.13.
-2. `import cinema_pipeline` succeeds without `TypeError`.
-3. `LLMEnsemble()` instantiates.
-4. `import identity.validator` does NOT pull `phase_c_vision` (lazy import
-   via `identity/__init__.py:make_validator`).
-5. `phase_c_vision._get_shared_validator()` returns the same instance
-   across calls (singleton, no lock — fine for the single-orchestrator
-   pipeline).
-6. `PipelineContext(global_settings={"tts_provider": "CARTESIA_SONIC_2"})`
-   + `get_project_setting(ctx, "tts_provider")` returns
-   `"CARTESIA_SONIC_2"`.
-7. `phase_c_assembly.generate_ai_broll` is importable.
-8. `cinema/pipeline.py:CinemaPipeline` (the generic driver class) has
-   zero callers in production code. The cinema_pipeline.py at repo root
-   has its own `CinemaPipeline` class that does NOT inherit from nor
-   use the generic driver.
-
-Smoke block:
-
-```bash
-.venv/bin/python -c "
-import cinema_pipeline
-from cinema.context import PipelineContext, get_project_setting
-from phase_c_vision import _get_shared_validator
-from phase_c_assembly import generate_ai_broll
-v1, v2 = _get_shared_validator(), _get_shared_validator()
-assert v1 is v2
-ctx = PipelineContext(global_settings={'tts_provider': 'CARTESIA_SONIC_2'})
-assert get_project_setting(ctx, 'tts_provider') == 'CARTESIA_SONIC_2'
-print('OK')
-"
-```
+Don't duplicate that content here. If you need to record something
+load-bearing about how a subsystem works, find or add the appropriate
+section in `ARCHITECTURE.md`.
 
 ## When you change something
 
-Beyond the GitNexus checks at the top of this file, the refactor-branch
-workflow expects:
+Beyond the GitNexus checks at the top of this file:
 
-- One commit per logical slice. Identity-check (`a is b`) for every
-  re-export. Run the §0 smoke block before declaring a slice done.
+- One commit per logical slice. Run the §15 smoke block in `ARCHITECTURE.md`
+  before declaring a slice done.
 - Don't combine concerns. A bug fix isn't a refactor isn't a feature.
-- See `docs/REFACTOR_HANDOFF.md` §6 for the canonical five-step slice
-  playbook (read → write → re-export → verify with identity check →
-  commit).
+- If your change touches a documented subsystem, update the relevant
+  section in `ARCHITECTURE.md` in the same PR.
 - For multi-task work (≥5 sub-tasks or ≥800 LOC of total change), don't
   implement everything in your current context — orchestrate via fresh
   contexts. See "Multi-task orchestration" below.

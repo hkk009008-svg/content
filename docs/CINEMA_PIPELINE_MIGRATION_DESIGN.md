@@ -7,9 +7,10 @@
 > were deleted entirely. The interactive `cinema_pipeline.py:CinemaPipeline`
 > is now the sole entry point. There is no longer a migration to do.
 >
-> **Canonical current architecture lives in `/HANDOFF.md` at repo root.**
-> Read this doc only for historical context on the design alternatives
-> considered before the pivot.
+> **Canonical current architecture lives in `/ARCHITECTURE.md` at repo root**
+> (the prior `HANDOFF.md` pointer was archived to `docs/archive/` on
+> 2026-05-24). Read this doc only for historical context on the design
+> alternatives considered before the pivot.
 
 ---
 
