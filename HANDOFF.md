@@ -1,15 +1,28 @@
 # Session Handoff — Content Cinema Pipeline
 
-**Last session:** 2026-05-23 — large refactor, audit, Python 3.13 migration, settings plumbing rewrite, dead-code purge, orphan UI knob sweep, P0/P1 silent-failure repair. **25 commits landed since the pivot.** Working tree is clean except `AGENTS.md` / `CLAUDE.md` (pre-session modifications, never touched this session).
+> **This file is a session journal — past session deltas and open work.**
+> For the **current state of the architecture**, read `CLAUDE.md` and
+> `AGENTS.md` (Architecture Preamble sections). When this journal and
+> those preambles disagree, **the preambles win** — they're maintained
+> as the canonical current-state docs.
+>
+> Standing requirement: every session must verify these docs against
+> code at start, and fix any stale claim in the same commit. See the
+> "Session-start protocol" section at the top of `CLAUDE.md` / `AGENTS.md`.
+
+**Last verified-current snapshot:** 2026-05-23 — independent re-audit
+read every entry-point + phase + controller + domain module from source,
+ran the smoke block, and reconciled the doc with reality. The pivot is
+complete; the codebase is stable; no in-flight work.
 
 ## TL;DR for the next session
 
 - Repo: `/Users/hyungkoookkim/Content`
-- **Single entry point**: `web_server.py` → `cinema_pipeline.py:CinemaPipeline` (interactive cinema pipeline with review gates + SSE)
+- **Single entry point**: `web_server.py` → `cinema_pipeline.py:CinemaPipeline` (interactive cinema pipeline with review gates + SSE). Phase classes live in `cinema/phases/{keyframe_render,motion_render,performance}.py` — NOT inline in `cinema_pipeline.py` (a previous version of this doc claimed inline; corrected 2026-05-23).
 - **CLI is gone.** `main.py`, `phase_a_generator.py`, `llm/blueprint_director.py`, `cinema/phases/{blueprint,generation,audio,assembly,vision}.py`, `prep/lut_generator.py`, `recover_assembly.py`, `test_assembly.py`, `vbench_evaluator.py`, `comfyui_workflow_gen.py` — all deleted. Don't recreate them.
 - **Python 3.13 required.** `pyproject.toml` declares `requires-python = ">=3.11"`. `requirements.txt` is direct-deps only (~40 lines); old frozen pins preserved in `requirements-lock-py39.txt` for reference.
-- **Settings architecture rebuilt.** Use `from cinema.context import get_project_setting; get_project_setting(ctx, key, default)` for all per-project UI knobs. **Never use `getattr(settings, X)` for project-knob keys** — `config.settings.Settings` carries env-derived API keys only. The plumbing for `ctx["global_settings"]` is in `cinema_pipeline.py:711` (constructor) and consumed by 9+ wired sites.
-- **IdentityValidator is a process singleton** via `phase_c_vision._get_shared_validator()`. Don't construct fresh instances; the singleton lets `validator.history` accumulate so `get_rolling_stats` → `workflow_selector.get_adaptive_pulid_weight` actually works.
+- **Settings architecture rebuilt.** Use `from cinema.context import get_project_setting; get_project_setting(ctx, key, default)` for all per-project UI knobs. **Never use `getattr(settings, X)` for project-knob keys** — `config.settings.Settings` carries env-derived API keys only. The plumbing for `ctx["global_settings"]` is in `cinema_pipeline.py` (constructor, around line 700) and consumed by 9+ wired sites. Known remaining exception: `audio/dialogue.py` reads `settings: dict` arg with raw `.get` (works, but inconsistent with the helper pattern).
+- **IdentityValidator is a process singleton** via `phase_c_vision._get_shared_validator()`. Don't construct fresh instances; the singleton lets `validator.history` accumulate so `get_rolling_stats` → `workflow_selector.get_adaptive_pulid_weight` actually works. NOTE: `face_validator_gate.py` and `performance/identity_gate.py` each maintain their OWN independent ArcFace singleton — three independent ArcFace loads is intentional but worth knowing.
 
 ## First thing to run
 
@@ -31,26 +44,33 @@ rm -rf .venv
 ## Architecture as of this handoff
 
 ```
-web_server.py                          ← Flask + SSE entry
-  └→ cinema_pipeline.py:CinemaPipeline ← orchestrator (~990 lines, was 1252)
-      ├→ cinema/phases/keyframe_render.py (KeyframeRenderPhase)
-      ├→ cinema/phases/performance.py     (PerformanceCapturePhase)
-      ├→ cinema/phases/motion_render.py   (MotionRenderPhase)
-      ├→ cinema/shots/controller.py       (per-shot work — most user knobs land here)
-      ├→ cinema/review/controller.py
-      └→ cinema/checkpoint.py
+web_server.py  (Flask + SSE, ~1647 LOC, 61 routes, no auth)
+  └→ cinema_pipeline.py:CinemaPipeline   ← orchestrator (~1004 LOC)
+      Composes:
+       ├ PipelineCore       (cinema/core.py — long-lived deps)
+       ├ ThreadedLifecycle  (cinema/lifecycle.py — cancel/pause/gates/progress)
+       ├ RunState           (cinema/runstate.py — per-run mutable state)
+       ├ ShotController     (cinema/shots/controller.py — per-shot work)
+       ├ ReviewController   (cinema/review/controller.py — gates + take approvals)
+       ├ CheckpointStore    (cinema/checkpoint.py — atomic JSON resume)
+      Invokes:
+       ├ KeyframeRenderPhase    (cinema/phases/keyframe_render.py)
+       ├ PerformanceCapturePhase(cinema/phases/performance.py)
+       └ MotionRenderPhase      (cinema/phases/motion_render.py)
 ```
 
 Shared infrastructure under `cinema/`:
 - `cinema/context.py` — `PipelineContext` dataclass + `get_project_setting(ctx, key, default)` helper
-- `cinema/pipeline.py` — generic Phase iterator (no current callers; forward-compatible primitive)
-- `cinema/phases/base.py` — Phase protocol + PhaseResult
-- `cinema/core.py` — `PipelineCore` (long-lived services per project; no longer includes vbench)
-- `cinema/lifecycle.py` — cancel / pause / progress
+- `cinema/services.py` — stateless `state_snapshot(pid)` / `checkpoint_info(pid)` helpers used by web endpoints to avoid spinning a full `CinemaPipeline` for read-only queries
+- `cinema/pipeline.py` — generic Phase iterator with **zero current callers**; preserved as a forward-compatible primitive. (The `CinemaPipeline` class IN THIS FILE is different from the orchestrator class at the repo root — the orchestrator at `cinema_pipeline.py` does NOT use this driver.)
+- `cinema/phases/base.py` — `Phase` protocol + `PhaseResult`
+- `cinema/core.py` — `PipelineCore` (long-lived services per project) + `build_pipeline_core(pid)` factory
+- `cinema/lifecycle.py` — `LifecycleService` protocol with `NullLifecycle` (CLI/tests) + `ThreadedLifecycle` (web)
 
 Domain: `audio/`, `llm/`, `identity/`, `performance/`, `domain/`, `prep/`, `config/`.
-Video router: `phase_c_ffmpeg.py:generate_ai_video` (cascade across Kling/Sora/Veo/LTX/Runway natives).
+Video router: `phase_c_ffmpeg.py:generate_ai_video` (cascade across Kling/Sora/Veo/LTX/Runway/SEEDANCE — SEEDANCE only in the `action` cascade, NOT a general multi-character fallback).
 Per-shot image gen: `phase_c_assembly.py:generate_ai_broll` (+ optional `quality_max.generate_ai_broll_max`).
+Lip sync: `lip_sync.py:generate_lip_sync_video` (overlay cascade sync.so/MuseTalk/LatentSync + generation cascade Hedra/Kling/Omnihuman/Creatify).
 
 ## What this session shipped (chronological)
 
