@@ -6,6 +6,7 @@ Orchestrates: scene decomposition → continuity enhancement → image gen → v
 → per-scene audio → per-scene assembly → global assembly → final export.
 """
 
+import logging
 import os
 import re
 import glob
@@ -29,6 +30,8 @@ from cinema.runstate import RunState
 from cinema.shots.controller import ShotController
 from cinema.review.controller import ReviewController
 from cinema.checkpoint import CheckpointStore
+
+logger = logging.getLogger(__name__)
 
 
 def _build_transition_prompt(from_mood: str, to_mood: str) -> str:
@@ -335,7 +338,17 @@ class CinemaPipeline:
                           scene_id: str = "", shot_id: str = "",
                           image_url: str = "", identity_score: float = -1,
                           director_review: dict = None, **kwargs):
-        print(f"[{percent:.0f}%] {stage}: {detail}")
+        logger.info(
+            "%s: %s",
+            stage,
+            detail,
+            extra={
+                "stage": stage,
+                "percent": percent,
+                "scene_id": scene_id,
+                "shot_id": shot_id,
+            },
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle — thin delegations to self.lifecycle (ThreadedLifecycle).
@@ -498,8 +511,8 @@ class CinemaPipeline:
                 if mastered and os.path.exists(mastered):
                     bgm_path = mastered
                     self.progress("AUDIO", "BGM mastered (cinema_master preset)", 6)
-            except Exception as e_master:
-                print(f"   [AUDIO] BGM mastering skipped (non-critical): {e_master}")
+            except Exception:
+                logger.exception("BGM mastering skipped (non-critical)")
         return bgm_path
 
     def _build_scene_packages(self, project: Optional[dict] = None) -> tuple[list[dict], list[str]]:
@@ -582,16 +595,27 @@ class CinemaPipeline:
             cleanup_result = cleanup_project(self.project["id"], aggressive=False)
             if cleanup_result["files_deleted"] > 0:
                 self.progress("CLEANUP", f"Cleaned {cleanup_result['files_deleted']} temp files ({cleanup_result['mb_freed']} MB)", 98)
-        except Exception as e:
-            print(f"   [CLEANUP] Auto-cleanup failed (non-fatal): {e}")
+        except Exception:
+            logger.exception("Auto-cleanup failed (non-fatal)")
 
         try:
             video_id = self.project.get("id", "unknown")
             cost_summary = self.cost_tracker.get_video_cost(video_id)
             if cost_summary.get("total_usd", 0) > 0:
-                print(f"\n   💰 [COST] Total: ${cost_summary['total_usd']:.2f} | LLM: ${cost_summary.get('llm_usd', 0):.2f} | API: ${cost_summary.get('api_usd', 0):.2f}")
-        except Exception as e_cost:
-            print(f"   [COST] Could not retrieve cost summary: {e_cost}")
+                logger.info(
+                    "Cost summary: total=$%.2f llm=$%.2f api=$%.2f",
+                    cost_summary["total_usd"],
+                    cost_summary.get("llm_usd", 0),
+                    cost_summary.get("api_usd", 0),
+                    extra={
+                        "video_id": video_id,
+                        "total_usd": cost_summary["total_usd"],
+                        "llm_usd": cost_summary.get("llm_usd", 0),
+                        "api_usd": cost_summary.get("api_usd", 0),
+                    },
+                )
+        except Exception:
+            logger.exception("Could not retrieve cost summary")
 
         self._clear_checkpoint()
         self.progress("COMPLETE", f"Video exported: {final_path}", 100)
@@ -670,8 +694,11 @@ class CinemaPipeline:
                 if use_competitive:
                     try:
                         shots = competitive_decompose_scene(scene, chars_in_scene, location, settings, style_rules)
-                    except Exception as e_cd:
-                        print(f"   [DECOMPOSE] Competitive decomposition failed ({e_cd}), falling back to standard")
+                    except Exception:
+                        logger.exception(
+                            "Competitive decomposition failed, falling back to standard",
+                            extra={"scene_id": scene_id},
+                        )
                         shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules)
                 else:
                     shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules)
@@ -681,9 +708,18 @@ class CinemaPipeline:
                 review = self.director.validate_shot_prompts(shots, scene)
                 if review.get("decision") == "MODIFIED":
                     shots = review.get("shots", shots)
-                    print(f"   [DIRECTOR] Shots modified — {len(review.get('violations', []))} violations corrected")
+                    logger.info(
+                        "Shots modified by chief director",
+                        extra={
+                            "scene_id": scene_id,
+                            "violations_count": len(review.get("violations", [])),
+                        },
+                    )
                 elif review.get("decision") == "REJECTED":
-                    print(f"   [DIRECTOR] Shots REJECTED — regenerating with corrections")
+                    logger.warning(
+                        "Shots REJECTED by chief director, regenerating with corrections",
+                        extra={"scene_id": scene_id},
+                    )
                     # Regenerate with stricter constraints
                     shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules)
 
@@ -840,7 +876,10 @@ class CinemaPipeline:
         normed = final_path.replace(".mp4", "_loud.mp4")
         if two_pass_loudnorm(final_path, normed):
             os.replace(normed, final_path)
-            print(f"   [LOUDNORM] Two-pass EBU R128 applied → {os.path.basename(final_path)}")
+            logger.info(
+                "Two-pass EBU R128 loudnorm applied",
+                extra={"final_path": os.path.basename(final_path)},
+            )
 
     def _assemble_final(self, scene_data: list, bgm_path: str, settings: dict) -> Optional[str]:
         """
@@ -861,13 +900,23 @@ class CinemaPipeline:
             for clip_path in clips:
                 if clip_path and os.path.exists(clip_path):
                     all_clips.append(clip_path)
-                    print(f"   [ASSEMBLY] S{si} clip: {os.path.basename(clip_path)}")
+                    logger.debug(
+                        "Assembly clip queued",
+                        extra={
+                            "scene_index": si,
+                            "scene_id": scene_id,
+                            "clip": os.path.basename(clip_path),
+                        },
+                    )
 
         if not all_clips:
-            print("   ⚠️ No clips to assemble")
+            logger.warning("No clips to assemble")
             return None
 
-        print(f"   [ASSEMBLY] {len(all_clips)} clips total")
+        logger.info(
+            "Assembling clips",
+            extra={"clip_count": len(all_clips)},
+        )
 
         # 2. Normalize clips: 1920x1080@30fps, PRESERVE audio, PRESERVE original duration
         all_normalized = []
@@ -886,8 +935,11 @@ class CinemaPipeline:
                 ]
                 subprocess.run(cmd, check=True, capture_output=True, timeout=60)
                 all_normalized.append(norm_path)
-            except Exception as e:
-                print(f"   [WARN] Normalize failed for {os.path.basename(clip_path)}: {e}")
+            except Exception:
+                logger.exception(
+                    "Normalize failed; using original clip as fallback",
+                    extra={"clip": os.path.basename(clip_path)},
+                )
                 all_normalized.append(clip_path)  # Use original as fallback
 
         # 3. Stitch with hard cuts using concat demuxer
@@ -905,9 +957,15 @@ class CinemaPipeline:
                 "-c", "copy",
                 stitched,
             ], check=True, capture_output=True, timeout=120)
-            print(f"   [ASSEMBLY] Stitched {len(all_normalized)} clips → {stitched}")
-        except Exception as e:
-            print(f"   ⚠️ Stitch failed: {e}")
+            logger.info(
+                "Stitched clips",
+                extra={
+                    "clip_count": len(all_normalized),
+                    "stitched_path": stitched,
+                },
+            )
+        except Exception:
+            logger.exception("Stitch failed")
             return None
 
         # 4. Color grading
@@ -928,9 +986,12 @@ class CinemaPipeline:
             graded = apply_color_grade(stitched, graded_path, preset=grade_preset)
             if graded:
                 stitched = graded
-                print(f"   [COLOR] Applied '{grade_preset}' color grade (mood: {mood})")
-        except Exception as e_cg:
-            print(f"   [COLOR] Color grading skipped: {e_cg}")
+                logger.info(
+                    "Applied color grade",
+                    extra={"grade_preset": grade_preset, "mood": mood},
+                )
+        except Exception:
+            logger.exception("Color grading skipped")
 
         # 5. Mix BGM under existing audio (dialogue clips already have voice baked in)
         # The stitched video already has audio from dialogue clips (Omnihuman/Veo).
@@ -952,19 +1013,30 @@ class CinemaPipeline:
                     final_output,
                 ]
                 subprocess.run(cmd, check=True, capture_output=True, timeout=120)
-                print(f"   ✅ Final cinema video with BGM: {final_output}")
+                logger.info(
+                    "Final cinema video assembled with BGM",
+                    extra={"final_output": final_output},
+                )
             else:
                 # No BGM — just copy stitched as final
                 import shutil
                 shutil.copy2(stitched, final_output)
-                print(f"   ✅ Final cinema video (no BGM): {final_output}")
+                logger.info(
+                    "Final cinema video assembled (no BGM)",
+                    extra={"final_output": final_output},
+                )
 
             self._apply_final_loudnorm(final_output)
             return final_output
 
         except subprocess.CalledProcessError as e:
             # BGM mix failed (maybe stitched has no audio) — try without voice mix
-            print(f"   [WARN] BGM mix failed ({e.stderr[-200:] if e.stderr else ''}), trying BGM-only...")
+            logger.warning(
+                "BGM mix failed, trying BGM-only fallback",
+                extra={
+                    "stderr_tail": (e.stderr[-200:] if e.stderr else ""),
+                },
+            )
             try:
                 cmd_fallback = [
                     "ffmpeg", "-y",
@@ -979,11 +1051,14 @@ class CinemaPipeline:
                     final_output,
                 ]
                 subprocess.run(cmd_fallback, check=True, capture_output=True, timeout=120)
-                print(f"   ✅ Final cinema video (BGM only, no dialogue audio): {final_output}")
+                logger.info(
+                    "Final cinema video assembled (BGM only, no dialogue audio)",
+                    extra={"final_output": final_output},
+                )
                 self._apply_final_loudnorm(final_output)
                 return final_output
-            except Exception as e2:
-                print(f"   ⚠️ All audio mixing failed: {e2}")
+            except Exception:
+                logger.exception("All audio mixing failed; using stitched video as-is")
                 import shutil
                 shutil.copy2(stitched, final_output)
                 self._apply_final_loudnorm(final_output)
@@ -1001,11 +1076,18 @@ def run_cinema_pipeline(project_id: str) -> Optional[str]:
 
 if __name__ == "__main__":
     import sys
+    from cinema.logging_config import setup_logging
+
+    setup_logging()
+
     if len(sys.argv) > 1:
         result = run_cinema_pipeline(sys.argv[1])
         if result:
-            print(f"\n✅ Cinema production complete: {result}")
+            logger.info(
+                "Cinema production complete",
+                extra={"final_path": result},
+            )
         else:
-            print("\n❌ Cinema production failed.")
+            logger.error("Cinema production failed")
     else:
-        print("Usage: python cinema_pipeline.py <project_id>")
+        logger.info("Usage: python cinema_pipeline.py <project_id>")

@@ -78,6 +78,7 @@ crash on import-time NameError when they execute.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
@@ -108,6 +109,8 @@ if TYPE_CHECKING:
     # TYPE_CHECKING keeps the local 3.9 verification path runnable.
     from cinema.core import PipelineCore
     from cinema.runstate import RunState
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -384,8 +387,11 @@ class ShotController:
                         }
                         return MutationResult(opt_spec, save=True)
                     self._mutate_shot(shot_id, _stash_cache)
-                except Exception as e:
-                    print(f"[KEYFRAME] prompt_optimizer skipped: {e}")
+                except Exception:
+                    logger.exception(
+                        "prompt_optimizer skipped",
+                        extra={"shot_id": shot_id},
+                    )
                     opt_spec = None
 
         # Apply optimizer outputs (when produced) to the call args
@@ -485,8 +491,11 @@ class ShotController:
                 shot_id=shot_id,
                 video_id=video_id,
             )
-        except Exception as _e:
-            print(f"   [COST] keyframe cost record skipped: {_e}")
+        except Exception:
+            logger.exception(
+                "keyframe cost record skipped",
+                extra={"shot_id": shot_id},
+            )
 
         self.progress(
             "KEYFRAME_READY",
@@ -560,8 +569,11 @@ class ShotController:
         audio_path = ""
         try:
             audio_path = self._host._ensure_scene_audio(scene["id"]) or ""
-        except Exception as e:
-            print(f"[PERFORMANCE] scene audio unavailable ({e}); engine={engine}")
+        except Exception:
+            logger.exception(
+                "scene audio unavailable",
+                extra={"scene_id": scene["id"], "engine": engine},
+            )
 
         # Hard precondition check — refuse to allocate a take when we know it'll
         # fail in the adapter. Audio-less ACT_ONE silently mis-syncs; LIVE_PORTRAIT
@@ -599,8 +611,11 @@ class ShotController:
                 )
                 if synth_result:
                     driving, driving_provider = synth_result
-            except Exception as e:
-                print(f"[PERFORMANCE] driving-video synth failed ({e}); engine may degrade")
+            except Exception:
+                logger.exception(
+                    "driving-video synth failed; engine may degrade",
+                    extra={"shot_id": shot_id, "engine": engine},
+                )
 
         # --- 4. Dispatch to the chosen engine ---
         take = make_take(
@@ -671,8 +686,11 @@ class ShotController:
         if chars:
             try:
                 face_anchor = get_reference_image(project, chars[0]) or ""
-            except Exception as e:
-                print(f"[PERFORMANCE] face_anchor lookup failed for {chars[0]}: {e}")
+            except Exception:
+                logger.exception(
+                    "face_anchor lookup failed",
+                    extra={"shot_id": shot_id, "character": chars[0]},
+                )
                 face_anchor = ""
 
         from performance.identity_gate import validate_performance_take, DEFAULT_PERFORMANCE_FLOOR
@@ -833,10 +851,19 @@ class ShotController:
                 motion_score = score_motion_fidelity(final_vid, driving_video_path)
                 take["metadata"]["motion_fidelity"] = motion_score
                 if motion_score is not None:
-                    print(f"   [MOTION-GATE] {shot_id}: motion_fidelity={motion_score:.3f}")
-            except Exception as e:
+                    logger.info(
+                        "motion fidelity scored",
+                        extra={
+                            "shot_id": shot_id,
+                            "motion_fidelity": round(motion_score, 3),
+                        },
+                    )
+            except Exception:
                 # Gate is advisory only — never fail the shot because the gate broke.
-                print(f"   [MOTION-GATE] skipped ({e})")
+                logger.exception(
+                    "motion-gate score skipped",
+                    extra={"shot_id": shot_id},
+                )
                 take["metadata"]["motion_fidelity"] = None
 
             # --- Motion floor check (handoff §11 / B4) ---
@@ -859,8 +886,14 @@ class ShotController:
                     below_floor = False
                 if below_floor:
                     take["metadata"]["motion_floor_failed"] = True
-                    print(f"   [MOTION-GATE] {shot_id}: MOTION_BELOW_FLOOR "
-                          f"score={motion_score:.3f} shot_type={resolved_shot_type}")
+                    logger.warning(
+                        "motion below floor",
+                        extra={
+                            "shot_id": shot_id,
+                            "motion_fidelity": round(motion_score, 3),
+                            "shot_type": resolved_shot_type,
+                        },
+                    )
                     self.progress(
                         "MOTION_BELOW_FLOOR",
                         f"Shot {shot_id} motion fidelity {motion_score:.3f} below floor for {resolved_shot_type}",
@@ -870,8 +903,11 @@ class ShotController:
                         motion_fidelity=motion_score,
                         shot_type=resolved_shot_type,
                     )
-            except Exception as e:
-                print(f"   [MOTION-GATE] floor check skipped ({e})")
+            except Exception:
+                logger.exception(
+                    "motion-gate floor check skipped",
+                    extra={"shot_id": shot_id},
+                )
 
         take["path"] = final_vid
 
@@ -900,8 +936,11 @@ class ShotController:
                 shot_id=shot_id,
                 video_id=video_id,
             )
-        except Exception as _e:
-            print(f"   [COST] motion cost record skipped: {_e}")
+        except Exception:
+            logger.exception(
+                "motion cost record skipped",
+                extra={"shot_id": shot_id},
+            )
 
         # Budget gate — pause the pipeline when in-process spend has crossed
         # the operator's budget_limit_usd cap.  Uses lifecycle.pause() so the
@@ -1260,7 +1299,10 @@ class ShotController:
             try:
                 stitch_modules(valid_clips, preview_path)
                 return preview_path
-            except Exception as e_stitch:
-                print(f"   [PREVIEW] Stitch failed, returning first clip: {e_stitch}")
+            except Exception:
+                logger.exception(
+                    "Preview stitch failed; returning first clip",
+                    extra={"scene_id": scene_id},
+                )
                 return valid_clips[0] if valid_clips else None
         return None
