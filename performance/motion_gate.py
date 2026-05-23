@@ -36,6 +36,8 @@ import os
 import tempfile
 from typing import Optional
 
+from config.settings import settings
+
 
 # Default suppression threshold — below this we recommend the operator reject.
 # Set conservatively. Real cinema review will surface 0.55 as "obvious", 0.75
@@ -43,8 +45,9 @@ from typing import Optional
 # like the reference at least in direction and amplitude, not exact timing".
 DEFAULT_MOTION_FLOOR = 0.50
 
-# Sampling defaults — tune via env var if needed.
-_NUM_SAMPLE_PAIRS = int(os.environ.get("MOTION_GATE_SAMPLES", "8"))
+# Sampling default — override via MOTION_GATE_SAMPLES (read once at startup
+# via config/settings.py, not per-call).
+_NUM_SAMPLE_PAIRS = settings.motion_gate_samples
 _FLOW_HIST_BINS = 12  # magnitude × direction → 12 bins each (144 total)
 
 

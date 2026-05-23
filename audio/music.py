@@ -155,13 +155,14 @@ def generate_suno_v5(
     """
     import requests
     import urllib.request
+    from config.settings import settings
 
-    api_key = os.environ.get("SUNO_API_KEY") or os.environ.get("SUNO_TOKEN")
+    api_key = settings.suno_api_key
     if not api_key:
         print("   [SUNO V5] SUNO_API_KEY not set; skipping")
         return False
 
-    base = os.environ.get("SUNO_API_BASE", "https://api.suno.ai/v1")
+    base = settings.suno_api_base
     prompt = _build_music_prompt(music_vibe)
 
     payload = {

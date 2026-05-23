@@ -17,9 +17,11 @@ import os
 import shutil
 from typing import Optional
 
+from config.settings import settings
+
 
 def _cache_dir() -> str:
-    return os.environ.get("PERFORMANCE_CACHE_DIR", "data/cache/driving")
+    return settings.performance_cache_dir
 
 
 def _sha256_file(path: str) -> str:

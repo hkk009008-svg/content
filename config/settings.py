@@ -52,6 +52,7 @@ class Settings:
     cartesia_api_key: str       # Sonic 2 — low-latency TTS, native Korean prosody
     stability_api_key: str      # Stable Audio 2 — foley + music generation
     suno_api_key: str           # Suno V5 — full song generation with vocals
+    suno_api_base: str          # Suno V5 endpoint (override for self-hosted / fork)
 
     # Performance capture (new phase — face/body retargeting for cinema dialogue)
     viggle_api_key: str         # Viggle — full-body motion retargeting from operator-shot phone reference
@@ -72,6 +73,10 @@ class Settings:
     # Paths
     project_root: Path
     experiments_db_path: str
+    performance_cache_dir: str   # SHA256-keyed driving-video cache (performance/_cache.py)
+
+    # Performance-capture tuning
+    motion_gate_samples: int     # #frame-pair samples for optical-flow scoring (performance/motion_gate.py)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -90,7 +95,10 @@ class Settings:
             elevenlabs_api_key=_env("ELEVENLABS_API_KEY"),
             cartesia_api_key=_env("CARTESIA_API_KEY"),
             stability_api_key=_env("STABILITY_API_KEY"),
-            suno_api_key=_env("SUNO_API_KEY"),
+            # SUNO_TOKEN is the legacy alias the music module used to read
+            # directly; preserve it here so the env contract is unchanged.
+            suno_api_key=_env("SUNO_API_KEY") or _env("SUNO_TOKEN"),
+            suno_api_base=_env("SUNO_API_BASE", "https://api.suno.ai/v1"),
             viggle_api_key=_env("VIGGLE_API_KEY"),
             hedra_api_key=_env("HEDRA_API_KEY"),
             google_cloud_project=_env("GOOGLE_CLOUD_PROJECT"),
@@ -101,6 +109,8 @@ class Settings:
             comfyui_server_url=_env("COMFYUI_SERVER_URL", "http://127.0.0.1:8188"),
             project_root=_PROJECT_ROOT,
             experiments_db_path=_env("EXPERIMENTS_DB_PATH", "data/experiments.db"),
+            performance_cache_dir=_env("PERFORMANCE_CACHE_DIR", "data/cache/driving"),
+            motion_gate_samples=int(_env("MOTION_GATE_SAMPLES", "8")),
         )
 
 
