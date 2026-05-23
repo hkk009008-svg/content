@@ -390,14 +390,20 @@ def validate_lipsync_quality(video_path: str, audio_path: Optional[str] = None) 
     return 1.0
 
 
-def _sync_gate_settings() -> tuple:
-    """Read sync gate config from global settings. Returns (enabled, threshold)."""
+def _sync_gate_settings(settings: Optional[dict] = None) -> tuple:
+    """Read sync gate config from per-project global settings.
+
+    Returns (enabled, threshold). When `settings` is None, defaults to
+    (True, 0.65) — same as before, but no longer pretends to read from the
+    env-derived `config.settings.Settings` (which never carried these keys).
+    Callers in cinema_pipeline can pass `self.project["global_settings"]`.
+    """
+    s = settings or {}
+    enabled = s.get("lipsync_quality_validation", True)
     try:
-        from config.settings import settings as _s
-        enabled = getattr(_s, "lipsync_quality_validation", True)
-        threshold = float(getattr(_s, "lipsync_validation_threshold", 0.65))
-    except Exception:
-        enabled, threshold = True, 0.65
+        threshold = float(s.get("lipsync_validation_threshold", 0.65))
+    except (TypeError, ValueError):
+        threshold = 0.65
     return enabled, threshold
 
 

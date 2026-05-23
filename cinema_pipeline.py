@@ -7,34 +7,18 @@ Orchestrates: scene decomposition → continuity enhancement → image gen → v
 """
 
 import os
-from typing import Optional, List
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
-import json
-import time
 import glob
 import random
 import subprocess
-from project_manager import MutationResult, load_project, mutate_project, make_take
-from character_manager import get_reference_image
-from location_manager import get_location_prompt, get_location_seed
-from scene_decomposer import decompose_scene, update_scene_shots
-from dialogue_writer import generate_dialogue, format_dialogue_for_voiceover
-from llm.style_director import generate_style_rules, style_rules_to_prompt_suffix
-from phase_c_assembly import generate_ai_broll
-from phase_c_ffmpeg import generate_ai_video, generate_kling_storyboard, normalize_clip, stitch_modules
-from phase_c_vision import (
-    validate_identity, validate_multi_identity, face_swap_video_frames
-)
+from typing import Optional, List
+
+from project_manager import load_project, mutate_project
+from scene_decomposer import decompose_scene, update_scene_shots, competitive_decompose_scene
+from dialogue_writer import generate_dialogue
+from llm.style_director import generate_style_rules
 from audio.dialogue import generate_dialogue_voiceover
 from audio.music import generate_fal_bgm
-from audio.foley import generate_scene_foley, generate_layered_foley
-from audio.srt import generate_srt
-from lip_sync import (
-    generate_lip_sync_video, generate_rife_interpolation,
-    extract_last_frame, generate_transition_clip,
-    upscale_video_seedvr2,
-)
 from cinema.context import PipelineContext
 from cinema.core import PipelineCore, build_pipeline_core
 from cinema.lifecycle import ThreadedLifecycle
@@ -45,7 +29,6 @@ from cinema.runstate import RunState
 from cinema.shots.controller import ShotController
 from cinema.review.controller import ReviewController
 from cinema.checkpoint import CheckpointStore
-from scene_decomposer import competitive_decompose_scene
 
 
 def _build_transition_prompt(from_mood: str, to_mood: str) -> str:
@@ -169,10 +152,6 @@ class CinemaPipeline:
     @property
     def director(self):
         return self._core.director
-
-    @property
-    def vbench(self):
-        return self._core.vbench
 
     @property
     def quality_tracker(self):
@@ -485,7 +464,15 @@ class CinemaPipeline:
             return None
 
         output_path = os.path.join(self.temp_dir, f"audio_{scene_id}.mp3")
-        result = generate_dialogue_voiceover(dialogue_lines, characters, output_path)
+        # Thread the project's UI settings so dialogue_mode_enabled,
+        # forced_alignment_enabled, and language are honored — without this
+        # the dialogue helpers fall back to their hard-coded defaults.
+        result = generate_dialogue_voiceover(
+            dialogue_lines,
+            characters,
+            output_path,
+            settings=self.project.get("global_settings", {}) if self.project else None,
+        )
         if result and os.path.exists(output_path):
             self.scene_audio[scene_id] = output_path
             self._save_checkpoint()
@@ -503,7 +490,8 @@ class CinemaPipeline:
             try:
                 from audio.music import master_music
                 mastered_path = os.path.join(self.temp_dir, f"bgm_{music_mood}_mastered.mp3")
-                mastered = master_music(bgm_path, mastered_path, preset="cinema_master")
+                _ms_preset = (self.project.get("global_settings", {}) if self.project else {}).get("music_mastering", "cinema_master")
+                mastered = master_music(bgm_path, mastered_path, preset=_ms_preset)
                 if mastered and os.path.exists(mastered):
                     bgm_path = mastered
                     self.progress("AUDIO", "BGM mastered (cinema_master preset)", 6)
@@ -708,9 +696,17 @@ class CinemaPipeline:
         # extracted into dedicated Phase classes so they can be invoked
         # independently from main.py or test code. Gates remain inline
         # because they're not phase-shaped (they wait on operator input).
-        ctx = PipelineContext(lifecycle=self.lifecycle)
-
+        # Thread per-project UI settings into ctx so audio/lipsync/etc. helpers
+        # can resolve user-tunable knobs via get_project_setting(ctx, key, default).
+        # Without this, every getattr(settings, knob) read at audio/voiceover.py,
+        # audio/foley.py, audio/music.py, audio/dialogue.py, lip_sync.py silently
+        # returns None and the user's UI choice is ignored.
         project = self._refresh_project_snapshot() or self.project
+        ctx = PipelineContext(
+            lifecycle=self.lifecycle,
+            global_settings=dict(project.get("global_settings", {})) if project else {},
+            language=(project.get("global_settings", {}) if project else {}).get("language", "English"),
+        )
 
         def _on_keyframe_fail(scene_id: str, shot_id: str, error: str):
             self.failed_shots.append(shot_id)
@@ -824,87 +820,6 @@ class CinemaPipeline:
             return assembly_result.get("final_path")
 
         self.progress("ERROR", assembly_result.get("error", "Final assembly failed"), 95)
-        return None
-
-    # ------------------------------------------------------------------
-    # POST-PROCESSING HELPERS
-    # ------------------------------------------------------------------
-
-    def _frame_interpolate(self, video_path: str, scene_id: str, shot_idx: int) -> Optional[str]:
-        """Frame interpolation using ffmpeg minterpolate filter (no external tools needed)."""
-        output = os.path.join(self.temp_dir, f"interp_{scene_id}_{shot_idx}.mp4")
-        try:
-            result = subprocess.run(
-                ["ffmpeg", "-y", "-i", video_path,
-                 "-vf", "minterpolate=fps=24:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1",
-                 "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-                 "-c:a", "copy",
-                 output],
-                capture_output=True, text=True, timeout=120,
-            )
-            if result.returncode == 0 and os.path.exists(output):
-                print(f"      ✅ Frame interpolation (24fps): {output}")
-                return output
-        except Exception as e:
-            print(f"      ⚠️ Frame interpolation skipped: {e}")
-        return None
-
-    def _upscale_video(self, video_path: str, scene_id: str, shot_idx: int) -> Optional[str]:
-        """Real-ESRGAN upscale on extracted frames for maximum photorealism."""
-        try:
-            from realesrgan import RealESRGANer
-            from basicsr.archs.rrdbnet_arch import RRDBNet
-            import cv2
-            import numpy as np
-
-            # Initialize upscaler (2x scale for speed, 4x available)
-            model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
-            upscaler = RealESRGANer(
-                scale=2, model_path=None, model=model, tile=400, tile_pad=10, pre_pad=0,
-                half=False,  # CPU mode on macOS
-            )
-
-            # Extract frames, upscale each, reassemble
-            cap = cv2.VideoCapture(video_path)
-            fps = cap.get(cv2.CAP_PROP_FPS) or 24
-            frames_dir = os.path.join(self.temp_dir, f"upscale_frames_{scene_id}_{shot_idx}")
-            os.makedirs(frames_dir, exist_ok=True)
-
-            frame_count = 0
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                output_frame, _ = upscaler.enhance(frame, outscale=2)
-                cv2.imwrite(os.path.join(frames_dir, f"frame_{frame_count:05d}.png"), output_frame)
-                frame_count += 1
-            cap.release()
-
-            if frame_count == 0:
-                return None
-
-            # Reassemble with ffmpeg
-            output = os.path.join(self.temp_dir, f"upscaled_{scene_id}_{shot_idx}.mp4")
-            subprocess.run(
-                ["ffmpeg", "-y", "-framerate", str(fps),
-                 "-i", os.path.join(frames_dir, "frame_%05d.png"),
-                 "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-                 "-pix_fmt", "yuv420p", output],
-                check=True, capture_output=True,
-            )
-
-            # Cleanup frames
-            import shutil
-            shutil.rmtree(frames_dir, ignore_errors=True)
-
-            if os.path.exists(output):
-                print(f"      ✅ Real-ESRGAN 2x upscale: {output}")
-                return output
-
-        except ImportError:
-            pass  # Real-ESRGAN not installed
-        except Exception as e:
-            print(f"      ⚠️ Upscale skipped: {e}")
         return None
 
     # ------------------------------------------------------------------
@@ -1054,24 +969,6 @@ class CinemaPipeline:
                 import shutil
                 shutil.copy2(stitched, final_output)
                 return final_output
-
-    # ------------------------------------------------------------------
-    # SCENE-LEVEL PREVIEW
-    # ------------------------------------------------------------------
-
-
-    # ------------------------------------------------------------------
-    # CLEANUP
-    # ------------------------------------------------------------------
-
-    def cleanup_temp(self):
-        """Remove all temporary files."""
-        for f in glob.glob(os.path.join(self.temp_dir, "*")):
-            try:
-                os.remove(f)
-            except OSError:
-                pass
-
 
 # ---------------------------------------------------------------------------
 # CLI entry point for testing

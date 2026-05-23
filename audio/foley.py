@@ -111,11 +111,10 @@ def generate_scene_foley(
     break, footsteps on gravel). Falls back to ElevenLabs on any failure.
     """
     if not provider:
-        try:
-            from config.settings import settings as _s
-            provider = getattr(_s, "foley_provider", None) or "ELEVENLABS_V3"
-        except Exception:
-            provider = "ELEVENLABS_V3"
+        # Caller (cinema_pipeline.py) should resolve foley_provider via
+        # get_project_setting(ctx, "foley_provider", "ELEVENLABS_V3") and pass
+        # it in. Defensive default here for direct/test callers.
+        provider = "ELEVENLABS_V3"
 
     if provider == "STABLE_AUDIO_FOLEY":
         result = generate_stable_audio_foley(foley_description, output_filename, duration=duration)

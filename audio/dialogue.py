@@ -33,6 +33,7 @@ def _try_dialogue_mode(
     dialogue_lines: list,
     characters: list,
     output_filename: str,
+    settings: Optional[dict] = None,
 ) -> Optional[str]:
     """ElevenLabs v3 Dialogue Mode — single-call multi-speaker generation.
 
@@ -43,14 +44,14 @@ def _try_dialogue_mode(
     Returns None on any failure (gated setting off, endpoint missing in
     installed SDK version, API error). Caller falls through to the legacy
     per-line loop, so quality never regresses.
+
+    `settings` is the per-project global_settings dict (from
+    `ctx["global_settings"]` or `project["global_settings"]`); when None,
+    the dialogue_mode_enabled gate defaults to True.
     """
     # Gate: only run when explicitly enabled
-    try:
-        from config.settings import settings as _s
-        if not getattr(_s, "dialogue_mode_enabled", True):
-            return None
-    except Exception:
-        pass
+    if not (settings or {}).get("dialogue_mode_enabled", True):
+        return None
 
     # Need at least 2 distinct speakers for dialogue mode to make sense
     distinct_speakers = {ln.get("character_id") for ln in dialogue_lines if ln.get("text", "").strip()}
@@ -108,25 +109,24 @@ def _maybe_save_alignment(
     audio_path: str,
     transcript_hint: Optional[str] = None,
     language: Optional[str] = None,
+    settings: Optional[dict] = None,
 ) -> Optional[str]:
     """Emit a .alignment.json sidecar next to the audio file when enabled.
 
-    Driven by `settings.forced_alignment_enabled`. Returns the JSON path on
-    success, None when disabled or alignment fails. Downstream consumers
-    (lipsync, SRT writer) load these sidecars when present.
+    Driven by `settings["forced_alignment_enabled"]` (from per-project
+    global_settings). Returns the JSON path on success, None when disabled
+    or alignment fails. Downstream consumers (lipsync, SRT writer) load
+    these sidecars when present.
 
-    language: project language name. When None, reads `settings.language`.
+    language: project language name. When None, reads `settings["language"]`.
     Critical for Korean/Japanese/Chinese — whisper drifts badly on these
     languages without an explicit hint.
     """
-    try:
-        from config.settings import settings as _s
-        if not getattr(_s, "forced_alignment_enabled", False):
-            return None
-        if language is None:
-            language = getattr(_s, "language", "English") or "English"
-    except Exception:
+    s = settings or {}
+    if not s.get("forced_alignment_enabled", False):
         return None
+    if language is None:
+        language = s.get("language", "English") or "English"
     try:
         from audio.alignment import align_audio_to_text, save_alignment_json
     except Exception:
@@ -145,6 +145,7 @@ def generate_dialogue_voiceover(
     characters: list,
     output_filename: str = "temp_dialogue_voiceover.mp3",
     pause_between_lines: float = 0.3,
+    settings: Optional[dict] = None,
 ) -> Optional[str]:
     """
     Multi-character dialogue voiceover for cinema production.
@@ -169,10 +170,10 @@ def generate_dialogue_voiceover(
         Path to assembled dialogue audio, or None on failure
     """
     # PATH 1: try ElevenLabs Dialogue Mode first
-    dm_result = _try_dialogue_mode(dialogue_lines, characters, output_filename)
+    dm_result = _try_dialogue_mode(dialogue_lines, characters, output_filename, settings=settings)
     if dm_result:
         transcript_hint = " ".join(ln.get("text", "").strip() for ln in dialogue_lines)
-        _maybe_save_alignment(dm_result, transcript_hint=transcript_hint)
+        _maybe_save_alignment(dm_result, transcript_hint=transcript_hint, settings=settings)
         return dm_result
 
     # PATH 2: legacy per-line generation
@@ -265,7 +266,7 @@ def generate_dialogue_voiceover(
 
         # Optional sidecar — word-level timestamps for downstream lipsync precision
         transcript_hint = " ".join(ln.get("text", "").strip() for ln in dialogue_lines)
-        _maybe_save_alignment(output_filename, transcript_hint=transcript_hint)
+        _maybe_save_alignment(output_filename, transcript_hint=transcript_hint, settings=settings)
 
         return output_filename
 

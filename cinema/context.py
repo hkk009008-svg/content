@@ -52,8 +52,16 @@ class PipelineContext:
     # --- core ---
     topic: str = ""
     language: str = "English"
-    youtube_video_id: Optional[str] = None
     master_image_seed: int = 0
+
+    # --- per-project UI settings ---
+    # Mirrors the React side's `project.global_settings` dict. Populated by
+    # the web entry point from the active Project; CLI runs leave it empty
+    # (defaults take over). All UI-tunable knobs (tts_provider, foley_provider,
+    # music_provider, lipsync_*, dialogue_mode_enabled, etc.) MUST be read
+    # via `get_project_setting(ctx, key, default)` from this dict — NOT via
+    # the frozen env-derived `config.settings.Settings` dataclass.
+    global_settings: dict = field(default_factory=dict)
 
     # --- lifecycle (cancel / pause / gate-wait / progress) ---
     # Default is the no-op NullLifecycle so phases can call
@@ -134,3 +142,36 @@ class PipelineContext:
     def as_dict(self) -> dict:
         """Snapshot of declared fields as a plain dict (asdict)."""
         return asdict(self)
+
+
+def get_project_setting(ctx, key: str, default=None):
+    """Read a per-project UI setting from the request context.
+
+    UI settings live in `project.global_settings` on the React side and are
+    threaded into the pipeline via `ctx["global_settings"]` (a plain dict).
+    This helper is the canonical read path for any user-tunable knob.
+
+    Do NOT use `config.settings.Settings` for these — that frozen dataclass
+    holds env-derived API keys + paths only, NOT per-project UI choices.
+    Reading the wrong source was the source of the multi-month
+    `tts_provider`-pattern bug where UI knobs silently did nothing.
+
+    Args:
+        ctx: PipelineContext, plain dict, or None. None-safe.
+        key: setting name (must match the React TS Project type's snake_case key)
+        default: value to return if key is missing or None.
+
+    Returns:
+        The setting value, or `default`.
+    """
+    if ctx is None:
+        return default
+    # PipelineContext exposes .get(); plain dicts have .get() too. Pass-through.
+    try:
+        gs = ctx.get("global_settings") if hasattr(ctx, "get") else None
+    except Exception:
+        return default
+    if not gs:
+        return default
+    v = gs.get(key)
+    return default if v is None else v
