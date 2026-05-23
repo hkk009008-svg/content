@@ -1,5 +1,15 @@
 # GitNexus Stability Report
 
+> **STATUS (2026-05-23):** The methodology below is still valid as a
+> framework for scoring structural change risk. The concrete blast-radius
+> numbers and hub-symbol lists in this doc were collected pre-pivot
+> (when the repo had two orchestrators and the YouTube CLI). After the
+> 2026-05-23 cleanup (~23 files deleted, settings architecture rewritten),
+> rerun `gitnexus analyze` to get fresh numbers. The hub structure has
+> shifted significantly — `phase_a_generator.py`, `llm/blueprint_director.py`,
+> `vbench_evaluator.py`, `comfyui_workflow_gen.py` are no longer in the
+> graph. **Canonical current architecture: `/HANDOFF.md`.**
+
 ## Purpose
 
 This document defines a repeatable GitNexus-based stability score for the `Content`

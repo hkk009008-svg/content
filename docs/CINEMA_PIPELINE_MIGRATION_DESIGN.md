@@ -1,5 +1,18 @@
 # Cinema Pipeline — Interactive Orchestrator Migration Design
 
+> **⚠️ SUPERSEDED — the "two orchestrators" problem this doc was designed
+> to solve was resolved by the 2026-05-23 pivot via deletion, not
+> migration.** The CLI orchestrator (`main.py:run_autonomous_pipeline`)
+> and its phase wrappers (`cinema/phases/{blueprint,generation,audio,assembly,vision}.py`)
+> were deleted entirely. The interactive `cinema_pipeline.py:CinemaPipeline`
+> is now the sole entry point. There is no longer a migration to do.
+>
+> **Canonical current architecture lives in `/HANDOFF.md` at repo root.**
+> Read this doc only for historical context on the design alternatives
+> considered before the pivot.
+
+---
+
 **Status:** design only. No code changes in this commit.
 **Predecessor:** REFACTOR_HANDOFF.md §13 tip 1 and §9.3 item 1 explicitly require a
 design doc before any migration of `cinema_pipeline.py` begins.

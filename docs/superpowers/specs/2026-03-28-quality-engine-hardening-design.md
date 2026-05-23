@@ -1,7 +1,36 @@
 # Sub-Project 1: Quality Engine Hardening
 
+> **POST-PIVOT STATUS (2026-05-23):** Spec is partially shipped, partially
+> still open.
+>
+> **Shipped this session (intersecting with Component A):**
+> - **IdentityValidator is now a process singleton** via
+>   `phase_c_vision._get_shared_validator()`. `validator.history` now
+>   accumulates across shots, so `get_rolling_stats(character_id)` and
+>   `workflow_selector.get_adaptive_pulid_weight` actually return real
+>   data instead of permanent-zeroes. This unblocks per-character
+>   adaptive PuLID weighting.
+> - **`identity_strictness` UI knob now wired** at
+>   `cinema/shots/controller.py:413` — overrides per-shot-type threshold
+>   project-wide.
+>
+> **Still open from Component A:**
+> - N-frame sampling (still 3 frames at 25/50/75%)
+> - Per-character score visibility in operator UI
+> - Diagnostic feedback to the regenerator
+>
+> **Still open from Components B (coherence) + C (motion):**
+> - Coherence has a UI consumer (`coherence_check_enabled`,
+>   `color_drift_sensitivity`, plus the new `coherence_threshold` wired
+>   this session at `controller.py:914`) but no visual validator
+>   beyond the basic histogram check
+> - Motion gate is advisory-only; per-shot-type floors in
+>   `MOTION_FIDELITY_FLOORS` are placeholder values awaiting calibration
+>
+> **Canonical current state: `/HANDOFF.md`.**
+
 **Date:** 2026-03-28
-**Status:** Draft
+**Status:** Draft (partially shipped — see banner above)
 **Scope:** Backend quality improvements — identity, coherence, motion
 
 ## Context

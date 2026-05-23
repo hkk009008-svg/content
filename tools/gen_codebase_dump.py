@@ -25,7 +25,7 @@ Includes
 ========
 
   *.py    all Python source
-  *.md    docs/, AGENTS.md, CLAUDE.md, RAILWAY_GUIDE.md
+  *.md    docs/, AGENTS.md, CLAUDE.md
   requirements*.txt
   .env.example
 """
@@ -94,7 +94,7 @@ def collect_files() -> dict[str, list[Path]]:
         "tier_phases": [],        # cinema/phases/
         "tier_legacy_root": [],   # phase_*.py, other root .py
         "tier_tests": [],         # tests/
-        "tier_docs": [],          # docs/, RAILWAY_GUIDE.md
+        "tier_docs": [],          # docs/
     }
     classified: set[Path] = set()
 
@@ -113,7 +113,7 @@ def collect_files() -> dict[str, list[Path]]:
             tiers["tier_phases"].append(path)
         elif parts[0] == "cinema":
             tiers["tier_arch_core"].append(path)
-        elif rel.name in {"cinema_pipeline.py", "main.py", "web_server.py", "web_services.py", "run_example.py", "cleanup.py"}:
+        elif rel.name in {"cinema_pipeline.py", "main.py", "web_server.py", "web_services.py", "cleanup.py"}:
             tiers["tier_arch_core"].append(path)
         elif parts[0] == "tools":
             tiers["tier_arch_tools"].append(path)
@@ -122,8 +122,6 @@ def collect_files() -> dict[str, list[Path]]:
         elif parts[0] == "tests":
             tiers["tier_tests"].append(path)
         elif parts[0] == "docs":
-            tiers["tier_docs"].append(path)
-        elif rel.name == "RAILWAY_GUIDE.md":
             tiers["tier_docs"].append(path)
         elif rel.name.startswith("phase_") and rel.suffix == ".py":
             tiers["tier_legacy_root"].append(path)
@@ -171,7 +169,7 @@ def emit_toc(out, tiers: dict[str, list[Path]], base: Path) -> None:
         "tier_domain": "Domain Modules (domain/, audio/, llm/, identity/, config/)",
         "tier_legacy_root": "Legacy Root Modules (phase_*.py + other root .py)",
         "tier_tests": "Tests (tests/unit/, tests/integration/)",
-        "tier_docs": "Documentation (docs/, RAILWAY_GUIDE.md)",
+        "tier_docs": "Documentation (docs/)",
     }
     out.write("## Table of Contents\n\n")
     for tier, paths in tiers.items():
@@ -251,7 +249,7 @@ def main() -> int:
             "tier_domain": "Domain Modules (domain/, audio/, llm/, identity/, config/)",
             "tier_legacy_root": "Legacy Root Modules (phase_*.py + other root .py)",
             "tier_tests": "Tests (tests/unit/, tests/integration/)",
-            "tier_docs": "Documentation (docs/, RAILWAY_GUIDE.md)",
+            "tier_docs": "Documentation (docs/)",
         }
         for tier, paths in tiers.items():
             if not paths:

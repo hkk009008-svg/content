@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Content** (3135 symbols, 20534 relationships, 264 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Content** (3200 symbols, 21078 relationships, 270 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -123,41 +123,45 @@ session, manual diff review, `git grep` for verification, etc.).
 
 # Architecture Preamble
 
-This repo is an AI cinema/video generation pipeline. Topic → 60-second
-YouTube Short, end-to-end. Phase 6 of `refactor/architecture-cleanup`
-finished the audio-domain split; the layout below is the post-refactor
-state of the tree.
+This repo is an interactive AI cinema pipeline. **Pivot complete (2026-05-23):**
+the project was originally a YouTube Shorts generator (`main.py` CLI), then
+pivoted to interactive cinema production with operator review gates. The
+CLI and all YouTube-era components are deleted. There is now **one entry
+point** to the production pipeline.
 
-## Two entry points
+> **For the current state, deferred work, and what NOT to break, see
+> `HANDOFF.md` at the repo root.** That doc is updated each session.
 
-- **`main.py:run_autonomous_pipeline`** — CLI, non-interactive. Uses
-  `cinema.pipeline.CinemaPipeline` (the new driver) for the 3 migrated
-  phases; legacy free-function calls for the others.
-- **`web_server.py`** → **`cinema_pipeline.CinemaPipeline`** — interactive
+## Single entry point
+
+- **`web_server.py`** → **`cinema_pipeline.py:CinemaPipeline`** — interactive
   dashboard with pause/resume + SSE progress + operator review gates.
-  Still the legacy 1,526-line orchestrator; migration is documented at
-  `docs/CINEMA_PIPELINE_MIGRATION_DESIGN.md`.
+  Defines its own phase classes inline (`KeyframeRenderPhase`,
+  `PerformanceCapturePhase`, `MotionRenderPhase`) and runs them directly,
+  not via the `cinema.pipeline` generic driver.
 
 ## Top-level package layout
 
 | Path | Owns |
 |------|------|
-| `cinema/` | Phase protocol + driver. `cinema/pipeline.py` is the iterator; `cinema/phases/*.py` are the 8 Phase wrappers. |
-| `audio/` | All audio domain: `_client.py`, `srt.py`, `music.py`, `effects.py`, `voiceover.py`, `dialogue.py`, `foley.py`. |
-| `llm/` | LLM domain: `ensemble.py`, `chief_director.py`, `blueprint_director.py`, `style_director.py`. |
-| `identity/` | Face/identity validation. `validator.py` was the Phase 3 cycle break (no longer pulls `phase_c_vision`). |
+| `cinema/` | Shared orchestration primitives. `cinema/context.py` is `PipelineContext` + `get_project_setting(ctx, key, default)` helper. `cinema/pipeline.py` is a generic Phase iterator (no current callers). `cinema/phases/base.py` is the Phase protocol. `cinema/shots/controller.py` is per-shot work. `cinema/core.py` is `PipelineCore` long-lived services. `cinema/lifecycle.py` is cancel/pause/progress. |
+| `audio/` | All audio domain: `_client.py`, `srt.py`, `music.py`, `effects.py`, `voiceover.py`, `dialogue.py`, `foley.py`, `alignment.py`. Pedalboard is a hard dep (no graceful fallback). |
+| `llm/` | LLM domain: `ensemble.py`, `chief_director.py`, `style_director.py`. (`blueprint_director.py` was deleted with the CLI.) |
+| `identity/` | Face/identity validation. `validator.py` is consumed via the **singleton factory** `phase_c_vision._get_shared_validator()` — never construct fresh validators. |
 | `performance/` | Performance-capture quality gates. `motion_gate.py` scores driving-vs-output optical-flow similarity; floors are per-shot-type via `workflow_selector.MOTION_FIDELITY_FLOORS` (advisory only). |
-| `config/` | `settings.py` (Settings dataclass + singleton) + `prompts/` markdown. |
+| `config/` | `settings.py` (frozen env-derived API keys ONLY — **never** a place for per-project UI knobs) + `prompts/` markdown. |
 | `data/` | Runtime data (SQLite, gitignored). Per-project calibration JSON lives under `data/calibration/`. |
-| `docs/` | `REFACTOR_HANDOFF.md` is the operating manual for the refactor branch. `docs/superpowers/plans/*.md` are written plans for multi-task work. |
+| `prep/` | Operator-side prep utilities: `lora_training.py`, `topaz_upscale.py`. |
+| `docs/` | Architecture + session-handoff docs. `HANDOFF.md` at repo root is the canonical current-state doc. Older docs (`REFACTOR_HANDOFF.md`, `CINEMA_PIPELINE_MIGRATION_DESIGN.md`) are pre-pivot — read with skepticism. |
 | `scripts/` | Standalone operator CLIs (e.g., `calibrate_motion_floor.py`). Each script self-bootstraps `sys.path` from repo root. |
-| `tests/` | `tests/unit/` (pure logic) + `tests/integration/` (hit real APIs). **Run pytest via `.venv/bin/python -m pytest`, NOT system `python3`** (system python lacks pytest). |
-| `web/` | React/TypeScript frontend. `web/src/components/console/` is the Director's Console route; `web/src/components/pipeline/` is the legacy review-gate UI. The two routes have different palettes — `console-*` (warm sepia) vs `editorial-*` (cool ivory). |
-| (root) | Legacy modules pending migration: `cinema_pipeline.py`, `web_server.py`, plus per-shot loop deps (character/location/continuity managers, scene_decomposer, dialogue_writer — Phase 8 candidates) and the `phase_*_*.py` shims. |
+| `tests/` | `tests/unit/` (pure logic) + `tests/integration/` (hit real APIs). **Run pytest via `.venv/bin/python -m pytest`** (Python 3.13 venv required). |
+| `web/` | React/TypeScript frontend. `web/src/components/console/` is the Director's Console route; `web/src/components/pipeline/` is the legacy review-gate UI. The two routes have different palettes — `console-*` (warm sepia) vs `editorial-*` (cool ivory). Settings sections in `web/src/components/settings/*.tsx`. |
+| (root) | `cinema_pipeline.py` (orchestrator), `web_server.py` (Flask/SSE), `phase_c_ffmpeg.py` (video router + ffmpeg helpers), `phase_c_assembly.py` (`generate_ai_broll` + `RunPodComfyUI` — only the per-shot image gen survives), `phase_c_vision.py` (deprecated `validate_*` wrappers + singleton factory), `workflow_selector.py` (per-shot-type templates), `quality_max.py` (max-tier path), `lip_sync.py`, plus character/location/continuity managers, `scene_decomposer`, `dialogue_writer`. |
 
 ## Phase protocol contract
 
-Every phase class in `cinema/phases/*.py` satisfies:
+Phase classes (whether in `cinema/phases/` or defined inline in
+`cinema_pipeline.py`) satisfy:
 
 ```python
 class Phase(Protocol):
@@ -168,20 +172,49 @@ class Phase(Protocol):
 `PipelineContext` (in `cinema/context.py`) is a dataclass that *also*
 implements the dict API (`__getitem__`, `__setitem__`, `get`, `update`,
 `keys`, `items`, `values`, `as_dict`) — so legacy `def f(ctx: dict)`
-functions keep working when passed a `PipelineContext`. This is the
-bridge that lets migration proceed incrementally.
+functions keep working when passed a `PipelineContext`.
 
-## Invariants (REFACTOR_HANDOFF.md §4)
+**Per-project UI settings** are populated by `cinema_pipeline.py` at
+`PipelineContext(global_settings=project.get("global_settings", {}))`
+construction. All consumers MUST use the helper:
 
-These are mechanically verified by the smoke block in §0 of the handoff:
+```python
+from cinema.context import get_project_setting
+value = get_project_setting(ctx, "knob_name", default)
+```
 
-1. All `.py` files compile.
-2. `import identity.validator` does NOT pull `phase_c_vision`.
+`config.settings.Settings` is for env-derived API keys ONLY. Reading
+project-knob keys from it (the historical `getattr(settings, ...)`
+pattern) is a silent-failure bug — it returns `None` and the default
+always wins. This was fixed across 8 sites on 2026-05-23.
+
+## Invariants (verified by smoke test)
+
+These hold as of the 2026-05-23 pivot:
+
+1. All `.py` files compile cleanly on Python 3.13.
+2. `import cinema_pipeline` succeeds without `TypeError` (was previously broken on Python 3.9 due to PEP 604 in `vbench_evaluator.py`, which has since been deleted).
 3. `LLMEnsemble()` instantiates.
-4. The 8 Phase classes satisfy the `Phase` protocol.
-5. Every audio re-export is identity-equal (`audio.X.fn is phase_b_audio.fn`).
-6. `main.py` imports cleanly.
-7. `phase_b_audio.client` is an `ElevenLabs` instance (= `audio._client.client`).
+4. `import identity.validator` does NOT pull `phase_c_vision`.
+5. `phase_c_vision._get_shared_validator()` returns the same instance across calls (singleton).
+6. `PipelineContext(global_settings={"tts_provider": "CARTESIA_SONIC_2"})` + `get_project_setting(ctx, "tts_provider")` returns `"CARTESIA_SONIC_2"` (settings plumbing works).
+7. `phase_c_assembly.generate_ai_broll` is importable (used by `cinema/shots/controller.py:88,390` + `quality_max.py`).
+
+Smoke block:
+
+```bash
+.venv/bin/python -c "
+import cinema_pipeline
+from cinema.context import PipelineContext, get_project_setting
+from phase_c_vision import _get_shared_validator
+from phase_c_assembly import generate_ai_broll
+v1, v2 = _get_shared_validator(), _get_shared_validator()
+assert v1 is v2
+ctx = PipelineContext(global_settings={'tts_provider': 'CARTESIA_SONIC_2'})
+assert get_project_setting(ctx, 'tts_provider') == 'CARTESIA_SONIC_2'
+print('OK')
+"
+```
 
 ## When you change something
 

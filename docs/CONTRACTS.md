@@ -1,11 +1,19 @@
 # V1 Pipeline Contracts
 
+> **STILL ACCURATE as of 2026-05-23.** The three contracts below survive
+> the pivot — they describe `cinema_pipeline.py` and friends, all of
+> which remain. The contracts predate the post-pivot settings rewrite,
+> so they don't mention `get_project_setting(ctx, key, default)`; that's
+> a fourth contract (added 2026-05-23): **per-project UI settings live
+> in `ctx["global_settings"]` and MUST be read via the helper, never
+> via `getattr(settings, X)` against the env-derived `Settings` singleton.**
+
 Behavioral contracts that aren't enforced by code but ARE relied on by
 the surrounding orchestration. Documented here so the next session
 inherits explicit invariants instead of having to derive them by
 reading commit history.
 
-Three contracts:
+Four contracts:
 
 1. **Phase Protocol** -- what `phase.run(ctx)` promises and what callers
    can assume about `PhaseResult.ok`.
@@ -14,9 +22,17 @@ Three contracts:
 3. **Take Versioning Lineage** -- how `take_id` + `source_take_id`
    reference structures the take graph, and what's invariant about
    traversal.
+4. **Per-Project Settings** (2026-05-23) -- UI knobs live in
+   `ctx["global_settings"]` (a dict copied from `project.global_settings`
+   by `cinema_pipeline.py` at PipelineContext construction). Consumers
+   MUST read via `cinema.context.get_project_setting(ctx, key, default)`.
+   The frozen `config.settings.Settings` dataclass is env-derived API
+   keys ONLY. Reading project knobs from it is the broken pattern that
+   caused the silent-feature-failure bug fixed in this session.
 
 The relevant code is in `cinema/phases/base.py`, `cinema/review/controller.py`,
-`domain/project_manager.py`, and `cinema/shots/controller.py`.
+`domain/project_manager.py`, `cinema/shots/controller.py`, and
+`cinema/context.py` (for the settings helper).
 
 ---
 

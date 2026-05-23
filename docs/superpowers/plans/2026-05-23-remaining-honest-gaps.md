@@ -1,5 +1,16 @@
 # Remaining Honest Gaps — Implementation Handoff
 
+> **POST-PIVOT STATUS (2026-05-23):** All 3 gaps in this plan are still
+> actionable. None of the files referenced here (`design/directors-console.html`,
+> `performance/motion_gate.py`, `workflow_selector.MOTION_FIDELITY_FLOORS`,
+> `hooks/usePipelineState`, Tailwind config) were deleted in the pivot.
+> Slice B (per-shot-type motion-floor calibration) intersects with the
+> `motion_quality_threshold` UI knob wired in this session
+> (`cinema/shots/controller.py:784` overrides the per-shot-type floor
+> when set) — calibration data should still drive the defaults in
+> `MOTION_FIDELITY_FLOORS`; the new UI knob lets the operator override
+> per project. **Canonical current state: `/HANDOFF.md`.**
+
 > **For agentic workers:** REQUIRED — use `superpowers:subagent-driven-development` (if subagents available) or `superpowers:executing-plans` to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close out the three remaining honest gaps from the post-`a8c6435` audit (excluding Runway Gen-4 driving consumption, deferred by operator decision).

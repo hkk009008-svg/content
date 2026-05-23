@@ -1,5 +1,19 @@
 # Quality Uplift — Phase 1 Implementation Plan
 
+> **POST-PIVOT STATUS (2026-05-23):** Phase 1 is still actionable. Both
+> slices' targets survive the pivot:
+> - Slice A (prompt caching): `llm/ensemble.py` + `llm/chief_director.py`
+>   both exist. **NB:** `llm/blueprint_director.py` was deleted with the
+>   CLI — exclude it from the caching survey.
+> - Slice B (negative prompts driven by validator failure reasons):
+>   `kling_native.py`, `sora_native.py`, `veo_native.py`, `identity/validator.py`
+>   all survive. The IdentityValidator is now a process singleton
+>   (`phase_c_vision._get_shared_validator()`) — Slice B's `history`
+>   reads will now actually accumulate state, which makes the
+>   feedback-driven negatives meaningful for the first time.
+>
+> **Canonical current state: `/HANDOFF.md`.**
+
 > **For agentic workers:** REQUIRED: Use `superpowers:subagent-driven-development` (if subagents available) or `superpowers:executing-plans` to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Land the two lowest-risk wins from the quality-uplift survey — Anthropic prompt caching (B.2) and validator-driven negative prompts (A.6) — while explicitly NOT shipping enforcing quality gates without calibration data.

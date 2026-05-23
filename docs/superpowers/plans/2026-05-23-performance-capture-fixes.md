@@ -1,5 +1,14 @@
 # Performance-Capture Subsystem Fixes — Implementation Plan
 
+> **POST-PIVOT STATUS (2026-05-23):** Plan is still actionable. `performance/`,
+> `domain/performance.py`, the four engine adapters, and `cinema/shots/controller.py`
+> all survived the pivot. **Note:** `cinema/shots/controller.py:452` line
+> number may have shifted by a few lines after this session's UI-knob
+> wires (identity_strictness, motion_quality_threshold, face_swap_enabled,
+> etc.) — grep for `generate_performance_take` to find the current
+> location. The 8 gaps + slice structure are unchanged.
+> **Canonical current state: `/HANDOFF.md`.**
+
 > **For agentic workers:** REQUIRED: Use `superpowers:subagent-driven-development` (if subagents available) or `superpowers:executing-plans` to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close the 8 gaps identified in the 2026-05-23 design evaluation of `performance/` + `domain/performance.py`, in shippable per-concern slices.

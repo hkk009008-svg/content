@@ -1,5 +1,30 @@
 # Cinema Pipeline — Architecture Refactor Handoff (Round 2)
 
+> **⚠️ PRE-PIVOT DOC — read with skepticism (updated 2026-05-23).**
+>
+> This document was written when the repo had TWO entry points
+> (`main.py` CLI + `web_server.py` interactive). On 2026-05-23 the CLI
+> was deleted entirely (YouTube generator legacy). The phase-wrappers in
+> `cinema/phases/{blueprint,generation,audio,assembly,vision}.py` were
+> CLI-only and are also gone. `phase_a_generator.py`, `llm/blueprint_director.py`,
+> `vbench_evaluator.py`, `comfyui_workflow_gen.py`, `phase_c_assembly.assemble_final_video`,
+> and all related files were removed.
+>
+> **Canonical current state lives in `/HANDOFF.md` at repo root.** The
+> "Slice X" / "Phase 6" / "two orchestrators" framing in this doc is
+> historical context — useful to understand the refactor that produced
+> the cinema pipeline, NOT the current state. The invariants below
+> (re-export identity checks, phase_b_audio shims) are no longer
+> meaningful — the audio refactor finished, the CLI is gone, and
+> `phase_b_audio` is no longer a thing.
+>
+> Sections still useful: the five-step slice playbook (§6), the
+> testing discipline (§7-8), the historical lessons. Skip §0-5 setup
+> instructions — venv has been recreated on Python 3.13 with a
+> direct-deps `requirements.txt`.
+
+---
+
 **Status:** V1.1 design-critique follow-up complete, 54 commits deep on branch `refactor/architecture-cleanup`.
 **As of:** end of V1.1 (this commit). V1 architectural completion + V1.1 design-critique-derived improvements shipped.
 **Last completed:** V1.1 final -- design-critique recommendations executed end-to-end. Shared `RunState` dataclass unifies all 9 run-state fields; host protocols are `@runtime_checkable`; CinemaPipeline delegate section is auto-generated via `tools/gen_delegates.py` (idempotent + --check mode); `tests/integration/test_cross_controller.py` formalizes the Lesson 8.17 behavioral-test template (catches the Slice-2 silent-regression class). Lessons renumbered to chronological order.

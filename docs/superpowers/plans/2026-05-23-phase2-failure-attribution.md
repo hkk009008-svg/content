@@ -1,5 +1,20 @@
 # Quality Uplift — Phase 2: Failure-Attribution Prerequisites
 
+> **⚠️ PARTIALLY SUPERSEDED BY PIVOT (2026-05-23):**
+> - **Slice D atomic-write target `main.py:281` is GONE** — `main.py` was
+>   deleted with the YouTube CLI. Re-survey the atomic-write sites in the
+>   post-pivot surface: `cinema_pipeline.py` (orchestrator), `cinema/checkpoint.py`,
+>   `cinema/shots/controller.py` (`_save_checkpoint` calls).
+> - **Slice B's `phase_c_assembly.py` 10 swallowed-exception sites** — the
+>   file shrank from ~711 lines to 558 (deleted `assemble_final_video`,
+>   `scale_to_widescreen`, `__main__`). Some swallowed-exception sites
+>   may have gone with it; the survey numbers need re-running.
+> - **Slices A + C** (typed errors in `domain/errors.py`, `atomic_write` in
+>   `domain/io_utils.py`) — still 100% applicable; the modules don't exist yet.
+>
+> **Canonical current state: `/HANDOFF.md`.** Re-do the swallowed-exception
+> grep before starting Slice B; the targets list is stale.
+
 > **For agentic workers:** REQUIRED: Use `superpowers:subagent-driven-development` (if subagents available) or `superpowers:executing-plans` to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace broad `except Exception` with typed errors AND make file writes atomic, so Phase 4's closed-loop gating has clean failure attribution to make retry/abort decisions on.
