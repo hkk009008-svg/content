@@ -20,6 +20,10 @@ import base64
 from typing import Optional, List, Dict
 from pipeline_context import PIPELINE_CONTEXT
 from config.settings import settings
+from llm.ensemble import build_anthropic_system_blocks
+from llm.negative_prompts import get_negative_prompt_for_failure
+
+
 class ChiefDirector:
     """
     Metacognitive AI overseer for the cinema production pipeline.
@@ -67,7 +71,7 @@ class ChiefDirector:
                 response = self.client.messages.create(
                     model="claude-sonnet-4-20250514",
                     max_tokens=4096,
-                    system=system_prompt,
+                    system=build_anthropic_system_blocks(system_prompt),
                     messages=[{"role": "user", "content": user_prompt}],
                 )
                 return response.content[0].text
@@ -279,17 +283,23 @@ When suggesting prompt_mutation for failures:
 
         # Build diagnostic context for the LLM
         diagnostics = {}
+        primary_reason_value: Optional[str] = None
         if identity_result is not None and hasattr(identity_result, "character_results"):
             for cid, cr in identity_result.character_results.items():
+                reason_value = cr.primary_failure_reason.value
                 diagnostics[cid] = {
                     "name": cr.character_name,
                     "best_similarity": round(cr.best_similarity, 3),
                     "mean_similarity": round(cr.mean_similarity, 3),
-                    "failure_reason": cr.primary_failure_reason.value,
+                    "failure_reason": reason_value,
                     "suggested_pulid_delta": cr.suggested_pulid_adjustment,
                     "frames_with_face": sum(1 for f in cr.frame_results if f.face_detected),
                     "total_frames_sampled": len(cr.frame_results),
                 }
+                # Capture the first failing character's reason for negative-prompt lookup.
+                # "passed" is the success sentinel — skip it; keep the first actual failure.
+                if primary_reason_value is None and reason_value != "passed":
+                    primary_reason_value = reason_value
 
         coherence_info = {}
         if coherence_result is not None:
@@ -315,54 +325,76 @@ When suggesting prompt_mutation for failures:
             "scene_context": scene_context[:200],
         }, indent=2)
 
-        diagnosis_system = f"""You are ChiefDirector evaluating a generation failure.
-Identity score: {identity_score:.3f} (threshold: {threshold})
-Identity passed: {identity_passed}
-Visual coherence: {"PASS" if coherent else "FAIL"}
-Mutation context: {mutation_context}
-
-PIPELINE KNOWLEDGE:
-- PuLID handles face-lock from reference photos (weight 0.0-1.0)
-- Identity validation uses DeepFace GhostFaceNet embeddings (cosine similarity)
-- Common false negatives: FACE_ANGLE_EXTREME (profile view), SMALL_FACE_REGION (wide shot)
-  → These are NOT identity failures — do NOT suggest face-related mutations for them
-- Coherence scoring: 40% color consistency + 30% lighting + 30% composition
-- img2img chaining uses denoise 0.30 for consecutive shots — lower = more consistent
-- If failure_reason is WRONG_PERSON, the reference images may be conflicting
-
-MUTATION RULES:
-If mutation_context is "identity_only":
-  → Add "facing camera directly" to [ACTION]
-  → Remove any accidental face/hair descriptions
-  → Suggest PuLID weight increase (+0.10)
-  → SHORTEN prompt to reduce model confusion
-  → Do NOT touch [SCENE] or [QUALITY]
-
-If mutation_context is "style_only":
-  → Tighten [SCENE] with specific color temperature and fill ratio
-  → Add "match previous shot palette" to [QUALITY]
-  → Suggest tightening denoise (img2img) to 0.25
-  → Do NOT touch [ACTION] or [OUTFIT]
-
-If mutation_context is "aggressive":
-  → Simplify ENTIRE prompt to under 80 words
-  → Keep only: shot type, environment, action, outfit material
-  → Remove all decorative adjectives
-  → Shorter prompts = more model compliance on retries
-
-Output JSON:
-{{
-  "decision": "RETRY" | "ACCEPT_LENIENT" | "FAIL",
-  "diagnosis": "Brief technical reason",
-  "prompt_mutation": "Specific rewrite instructions",
-  "mutation_level": 1 | 2 | 3,
-  "mutation_focus": "identity" | "style" | "both"
-}}"""
+        diagnosis_system = (
+            "You are ChiefDirector diagnosing a generation failure and deciding how to mutate the prompt. "
+            "The user message contains all diagnostic context (scores, thresholds, mutation_context). "
+            "Respond with valid JSON only — no prose, no markdown fences.\n\n"
+            "PIPELINE KNOWLEDGE:\n"
+            "- PuLID handles face-lock from reference photos (weight 0.0-1.0)\n"
+            "- Identity validation uses DeepFace GhostFaceNet embeddings (cosine similarity)\n"
+            "- Common false negatives: FACE_ANGLE_EXTREME (profile view), SMALL_FACE_REGION (wide shot)\n"
+            "  → These are NOT identity failures — do NOT suggest face-related mutations for them\n"
+            "- Coherence scoring: 40% color consistency + 30% lighting + 30% composition\n"
+            "- img2img chaining uses denoise 0.30 for consecutive shots — lower = more consistent\n"
+            "- If failure_reason is WRONG_PERSON, the reference images may be conflicting\n\n"
+            "MUTATION RULES:\n"
+            'If mutation_context is "identity_only":\n'
+            '  → Add "facing camera directly" to [ACTION]\n'
+            "  → Remove any accidental face/hair descriptions\n"
+            "  → Suggest PuLID weight increase (+0.10)\n"
+            "  → SHORTEN prompt to reduce model confusion\n"
+            "  → Do NOT touch [SCENE] or [QUALITY]\n\n"
+            'If mutation_context is "style_only":\n'
+            "  → Tighten [SCENE] with specific color temperature and fill ratio\n"
+            '  → Add "match previous shot palette" to [QUALITY]\n'
+            "  → Suggest tightening denoise (img2img) to 0.25\n"
+            "  → Do NOT touch [ACTION] or [OUTFIT]\n\n"
+            'If mutation_context is "aggressive":\n'
+            "  → Simplify ENTIRE prompt to under 80 words\n"
+            "  → Keep only: shot type, environment, action, outfit material\n"
+            "  → Remove all decorative adjectives\n"
+            "  → Shorter prompts = more model compliance on retries\n\n"
+            "Output JSON:\n"
+            '{\n'
+            '  "decision": "RETRY" | "ACCEPT_LENIENT" | "FAIL",\n'
+            '  "diagnosis": "Brief technical reason",\n'
+            '  "prompt_mutation": "Specific rewrite instructions",\n'
+            '  "mutation_level": 1 | 2 | 3,\n'
+            '  "mutation_focus": "identity" | "style" | "both"\n'
+            "}"
+        )
 
         raw = self._call_llm(diagnosis_system, eval_prompt)
 
         try:
             result = json.loads(raw)
+
+            # Append the negative-prompt hint to the LLM's mutation instructions.
+            # Opt-in: unknown reasons and "passed" return "" and are silently skipped.
+            # Note: primary_reason_value is the FIRST failing character's reason
+            # (see capture loop above). The mapping is scalar by design — if
+            # multiple characters fail with different reasons, only the first
+            # drives the negative prompt for this take.
+            negative_phrase = get_negative_prompt_for_failure(primary_reason_value)
+            if negative_phrase and result.get("prompt_mutation"):
+                result["prompt_mutation"] = (
+                    result["prompt_mutation"]
+                    + f"\nNegative prompt: {negative_phrase}"
+                )
+                phrase_display = negative_phrase[:60] + (
+                    "..." if len(negative_phrase) > 60 else ""
+                )
+                print(f"   [NEG-PROMPT] {primary_reason_value} → {phrase_display}")
+            elif negative_phrase:
+                # Phrase available but LLM returned no prompt_mutation to enrich
+                # (e.g., decision=ACCEPT_LENIENT). Visible-skip log so an operator
+                # debugging "why isn't the negative prompt being used?" can spot
+                # the path. Not an error — the LLM's decision wins.
+                print(
+                    f"   [NEG-PROMPT] skipped ({primary_reason_value}): "
+                    f"no prompt_mutation in LLM result"
+                )
+
             self.diagnostic_log.append({
                 "stage": "identity_evaluation",
                 "score": identity_score,

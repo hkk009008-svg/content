@@ -15,6 +15,26 @@ from typing import Any
 from config.settings import settings as env_settings   # aliased to avoid clash with the per-instance `settings: dict` ctor arg below
 
 
+def build_anthropic_system_blocks(text: str) -> list[dict[str, Any]]:
+    """Wrap a stable system prompt for Anthropic prompt caching.
+
+    Anthropic's prompt-caching API requires the system parameter to be a
+    list of content blocks; cache_control={"type": "ephemeral"} on the
+    first block opts the system content into the cache.
+
+    Callers MUST pass a stable string (no per-call interpolation) for
+    caching to actually hit. Per-shot data belongs in the user message,
+    not here.
+    """
+    return [
+        {
+            "type": "text",
+            "text": text,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
@@ -210,13 +230,23 @@ class LLMEnsemble:
         kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": 4096,
-            "system": system_prompt,
+            "system": build_anthropic_system_blocks(system_prompt),
             "messages": [{"role": "user", "content": user_prompt}],
         }
         if tool_schema is not None:
             kwargs["tools"] = [tool_schema]
 
         response = self.anthropic_client.messages.create(**kwargs)
+
+        if hasattr(response, "usage"):
+            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+            input_tokens = getattr(response.usage, "input_tokens", 0) or 0
+            if cache_read > 0 or cache_creation > 0:
+                print(
+                    f"   [LLM-CACHE] model={model} input={input_tokens} "
+                    f"cache_read={cache_read} cache_creation={cache_creation}"
+                )
 
         # Extract content -- prefer tool_use blocks when a schema was given.
         if tool_schema is not None:
