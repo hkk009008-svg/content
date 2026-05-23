@@ -178,8 +178,6 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "face_detailer_enabled": True,
         "face_detailer_guide_size": 1024,
         "face_detailer_denoise": 0.35,
-        "reactor_enabled": True,
-        "reactor_codeformer_weight": 0.5,
         "supir_enabled": True,
         "supir_steps": 50,
         "supir_cfg_scale": 4.0,
@@ -225,8 +223,6 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "face_detailer_enabled": True,
         "face_detailer_guide_size": 1024,
         "face_detailer_denoise": 0.35,
-        "reactor_enabled": True,
-        "reactor_codeformer_weight": 0.5,
         "supir_enabled": True,
         "supir_steps": 50,
         "supir_cfg_scale": 4.0,
@@ -272,8 +268,6 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "face_detailer_enabled": False,
         "face_detailer_guide_size": 1024,
         "face_detailer_denoise": 0.35,
-        "reactor_enabled": False,
-        "reactor_codeformer_weight": 0.5,
         "supir_enabled": True,
         "supir_steps": 50,
         "supir_cfg_scale": 4.0,
@@ -319,8 +313,6 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "face_detailer_enabled": True,
         "face_detailer_guide_size": 1024,
         "face_detailer_denoise": 0.35,
-        "reactor_enabled": True,
-        "reactor_codeformer_weight": 0.4,
         "supir_enabled": True,
         "supir_steps": 50,
         "supir_cfg_scale": 4.0,
@@ -366,8 +358,6 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "face_detailer_enabled": False,
         "face_detailer_guide_size": 1024,
         "face_detailer_denoise": 0.35,
-        "reactor_enabled": False,
-        "reactor_codeformer_weight": 0.5,
         "supir_enabled": True,
         "supir_steps": 50,
         "supir_cfg_scale": 4.0,
@@ -550,21 +540,6 @@ def get_adaptive_pulid_weight(
     if abs(delta) > 0.01:
         print(f"      [ADAPTIVE] PuLID weight for {character_id}: {base_weight} → {adapted:.2f} (delta={delta:+.2f})")
     return adapted
-
-
-def get_shot_workflow_summary(shot: dict) -> str:
-    """
-    Get a human-readable summary of the workflow selection for logging.
-    """
-    shot_type = classify_shot_type(shot)
-    params = get_workflow_params(shot_type)
-    return (
-        f"[WORKFLOW] {shot_type}: "
-        f"PuLID={params['pulid_weight']}, "
-        f"CFG={params['guidance']}, "
-        f"steps={params['steps']} "
-        f"({params['description']})"
-    )
 
 
 def get_optimal_api(

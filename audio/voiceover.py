@@ -213,10 +213,13 @@ def generate_tts_routed(
       - OPENAI_AUDIO:     one of OPENAI_AUDIO_VOICES keys ("alloy", "onyx", etc.)
     """
     if not provider:
-        provider = getattr(settings, "tts_provider", None) or "ELEVENLABS_V3"
+        # Defensive default — primary read of tts_provider now happens at the
+        # caller (generate_voiceover) via get_project_setting(ctx, ...). If a
+        # standalone caller forgets to pass `provider`, this defaults to EL.
+        provider = "ELEVENLABS_V3"
 
     if language is None:
-        language = getattr(settings, "language", "English") or "English"
+        language = "English"
     # Covers the 12 languages claimed in GlobalSettings.language. Add new
     # entries here when the project's language set grows — silently defaulting
     # to "en" would route (e.g.) Korean dialogue to an English voice.
@@ -306,24 +309,43 @@ def generate_voiceover(ctx: dict) -> bool:
     target_voice_id = chosen_actor["id"]
 
     try:
-        # Generate the audio using ElevenLabs API v2+ structure with Elite Emotional VoiceSettings
-        from elevenlabs import VoiceSettings
-        # For breathtaking narration, we want high style (emotion) but solid stability
-        audio = client.text_to_speech.convert(
-            voice_id=target_voice_id,
-            output_format="mp3_44100_128",
-            text=text_script,
-            model_id="eleven_v3",
-            voice_settings=VoiceSettings(
-                stability=0.55, # Slightly lower stability allows the AI actor to dramatically inflect
-                similarity_boost=0.85,
-                style=0.60, # Substantially boosted style constraint to force passionate, sweeping emotional delivery
-                use_speaker_boost=True
-            )
-        )
+        # Read the UI's tts_provider knob via the canonical helper —
+        # `config.settings.Settings` does NOT carry per-project UI choices.
+        from cinema.context import get_project_setting
+        provider = get_project_setting(ctx, "tts_provider", "ELEVENLABS_V3")
+        language = ctx.get("language") if hasattr(ctx, "get") else None
 
-        # Save the audio stream to a local file
-        save(audio, output_filename)
+        if provider != "ELEVENLABS_V3":
+            # Honor the UI's tts_provider knob (Cartesia, OpenAI Audio). voice_id
+            # is left None: target_voice_id above is an ElevenLabs ID, not portable
+            # across providers, so let the router pick its provider-specific default.
+            routed = generate_tts_routed(
+                text=text_script,
+                output_filename=output_filename,
+                voice_id=None,
+                delivery="dramatic_narration",
+                language=language,
+                provider=provider,
+            )
+            if not routed:
+                print(f"❌ TTS routing failed for provider={provider}")
+                return False
+        else:
+            # Default ElevenLabs path — keeps the tuned VoiceSettings for narration.
+            from elevenlabs import VoiceSettings
+            audio = client.text_to_speech.convert(
+                voice_id=target_voice_id,
+                output_format="mp3_44100_128",
+                text=text_script,
+                model_id="eleven_v3",
+                voice_settings=VoiceSettings(
+                    stability=0.55, # Slightly lower stability allows the AI actor to dramatically inflect
+                    similarity_boost=0.85,
+                    style=0.60, # Substantially boosted style constraint to force passionate, sweeping emotional delivery
+                    use_speaker_boost=True
+                )
+            )
+            save(audio, output_filename)
 
         # --- NEW: Strip leading and trailing silence to ensure perfect infinite loops ---
         import subprocess

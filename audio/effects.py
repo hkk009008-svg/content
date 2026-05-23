@@ -8,7 +8,6 @@ focused submodule. Sibling to ``audio/srt.py`` (slice 1),
 Contents
 ========
 
-- ``PEDALBOARD_AVAILABLE`` — boolean set by the optional pedalboard import.
 - ``VOICE_EFFECTS``        — FFmpeg-filter presets for stylized voice FX.
 - ``apply_au_plugin``      — load an installed macOS AU plugin headlessly.
 - ``apply_pedalboard_chain`` — apply a Pedalboard built-in effect chain.
@@ -18,26 +17,20 @@ Contents
 The legacy ``phase_b_audio`` module re-exports every name above so existing
 ``from phase_b_audio import apply_voice_effect`` style callers keep working.
 New code should import directly from ``audio.effects``.
+
+Pedalboard (Spotify's headless AU/VST3 plugin host) is a hard dependency
+pinned in requirements-frozen-py39.txt.
 """
 
 import os
 from typing import Optional
 
-# Check for Pedalboard (Spotify's headless AU/VST3 plugin host).
-# Imported eagerly so audio.music.master_music can switch off its lazy
-# fallback. If pedalboard is missing, all functions degrade to no-ops
-# returning the input path unchanged.
-try:
-    import pedalboard
-    from pedalboard import (
-        Pedalboard, Reverb, Compressor, Gain, Delay,
-        HighpassFilter, LowpassFilter, Chorus, Distortion,
-        load_plugin,
-    )
-    from pedalboard.io import AudioFile
-    PEDALBOARD_AVAILABLE = True
-except ImportError:
-    PEDALBOARD_AVAILABLE = False
+from pedalboard import (
+    Pedalboard, Reverb, Compressor, Gain, Delay,
+    HighpassFilter, LowpassFilter, Chorus, Distortion,
+    load_plugin,
+)
+from pedalboard.io import AudioFile
 
 
 VOICE_EFFECTS = {
@@ -119,10 +112,6 @@ def apply_au_plugin(
     Returns:
         Path to processed audio, or original on failure
     """
-    if not PEDALBOARD_AVAILABLE:
-        print(f"   [AU] Pedalboard not installed — pip install pedalboard")
-        return audio_path
-
     try:
         # Search for the plugin
         plugin_paths = [
@@ -192,9 +181,6 @@ def apply_pedalboard_chain(
                 {"type": "gain", "gain_db": 2},
             ]
     """
-    if not PEDALBOARD_AVAILABLE:
-        return audio_path
-
     if not effects:
         return audio_path
 
@@ -268,13 +254,13 @@ def apply_voice_effect(
     import subprocess
 
     # Priority 1: AU plugin (if specified)
-    if au_plugin and PEDALBOARD_AVAILABLE:
+    if au_plugin:
         result = apply_au_plugin(audio_path, output_path, au_plugin)
         if result != audio_path:
             return result
 
     # Priority 2: Pedalboard chain (if specified)
-    if pedalboard_chain and PEDALBOARD_AVAILABLE:
+    if pedalboard_chain:
         result = apply_pedalboard_chain(audio_path, output_path, pedalboard_chain)
         if result != audio_path:
             return result

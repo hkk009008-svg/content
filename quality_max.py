@@ -24,7 +24,7 @@ External deps assumed available on the pod (pruned if missing):
   - AlignYourStepsScheduler, DetailDaemonSamplerNode
   - LatentBlend, LatentUpscaleBy
   - DepthAnythingV2Preprocessor, DWPreprocessor, CannyEdgePreprocessor
-  - FaceDetailer (Impact Pack), ReActorFaceSwap (ReActor node)
+  - FaceDetailer (Impact Pack)
   - SUPIR_model_loader_v2 + SUPIR_first_stage + SUPIR_sample + SUPIR_decode
 """
 
@@ -388,20 +388,13 @@ def _inject_latent_source(workflow: dict, init_remote: Optional[str], params: di
 
 
 def _inject_post_passes(workflow: dict, params: dict, available: Set[str]):
-    """Toggle FaceDetailer, ReActor, SUPIR per shot-type policy + availability."""
+    """Toggle FaceDetailer, SUPIR per shot-type policy + availability."""
     # FaceDetailer
     if not params.get("face_detailer_enabled", True) or "FaceDetailer" not in available:
         _prune_node(workflow, "600", rewire_to=("902", 0) if "902" in workflow else ("8", 0))
     elif "600" in workflow:
         workflow["600"]["inputs"]["guide_size"] = params.get("face_detailer_guide_size", 1024)
         workflow["600"]["inputs"]["denoise"] = params.get("face_detailer_denoise", 0.35)
-
-    # ReActor
-    if not params.get("reactor_enabled", True) or "ReActorFaceSwap" not in available:
-        feed = ("600", 0) if "600" in workflow else (("902", 0) if "902" in workflow else ("8", 0))
-        _prune_node(workflow, "610", rewire_to=feed)
-    elif "610" in workflow:
-        workflow["610"]["inputs"]["codeformer_weight"] = params.get("reactor_codeformer_weight", 0.5)
 
     # SUPIR
     if not params.get("supir_enabled", True) or "SUPIR_model_loader_v2" not in available:

@@ -10,11 +10,10 @@ Two functions plus the mastering-presets dictionary, moved out of
 Cross-module dependencies
 =========================
 
-`master_music` uses three symbols from `audio.effects`:
+`master_music` uses two symbols from `audio.effects`:
 
   apply_au_plugin
   apply_pedalboard_chain
-  PEDALBOARD_AVAILABLE
 
 These were lazy-imported from `phase_b_audio` during slice 2 because
 the effects helpers still lived there and phase_b_audio re-exports
@@ -30,7 +29,6 @@ import os
 from audio.effects import (
     apply_au_plugin,
     apply_pedalboard_chain,
-    PEDALBOARD_AVAILABLE,
 )
 from typing import Optional
 
@@ -236,11 +234,10 @@ def generate_bgm(
     """
     provider = prefer_provider
     if not provider:
-        try:
-            from config.settings import settings as _s
-            provider = getattr(_s, "music_provider", None) or "AUTO"
-        except Exception:
-            provider = "AUTO"
+        # Caller should resolve music_provider via
+        # get_project_setting(ctx, "music_provider", "AUTO") and pass as
+        # prefer_provider. Defensive default here for direct/test callers.
+        provider = "AUTO"
 
     if provider in ("SUNO_V5", "AUTO"):
         if generate_suno_v5(music_vibe, output_filename, duration=duration, custom_lyrics=custom_lyrics):
@@ -360,7 +357,7 @@ def master_music(
         preset: Preset name from MUSIC_MASTERING_PRESETS
         au_plugin: Optional AU plugin name to apply instead of preset
     """
-    if au_plugin and PEDALBOARD_AVAILABLE:
+    if au_plugin:
         result = apply_au_plugin(audio_path, output_path, au_plugin)
         if result != audio_path:
             return result
@@ -371,7 +368,7 @@ def master_music(
     config = MUSIC_MASTERING_PRESETS[preset]
 
     # Try Pedalboard first (higher quality)
-    if PEDALBOARD_AVAILABLE and config.get("pedalboard"):
+    if config.get("pedalboard"):
         result = apply_pedalboard_chain(audio_path, output_path, config["pedalboard"])
         if result != audio_path:
             print(f"   [MASTER] Pedalboard: {preset} → {output_path}")
