@@ -1,6 +1,5 @@
 import pytest
 
-import workflow_selector
 from workflow_selector import (
     classify_shot_type,
     get_workflow_params,
@@ -366,6 +365,27 @@ class TestGetAdaptivePulidWeight:
             base_params={"pulid_weight": 0.80},
         )
         assert result == pytest.approx(0.80)
+
+    def test_face_angle_extreme_negative_delta_passes_through(self):
+        # FACE_ANGLE_EXTREME is asymmetric: `delta = min(delta, 0.0)`
+        # zeros POSITIVE deltas (don't boost PuLID for a problem it can't
+        # fix) but leaves NEGATIVE deltas alone (still allowed to relax
+        # PuLID when identity is over-performing). This guards that
+        # asymmetry against an accidental symmetric `delta = 0.0` rewrite.
+        validator = _StubStats(
+            {
+                "sample_count": 5,
+                "suggested_pulid_delta": -0.05,
+                "common_failure": FailureReason.FACE_ANGLE_EXTREME,
+            }
+        )
+        result = get_adaptive_pulid_weight(
+            "portrait",
+            "char_a",
+            validator,
+            base_params={"pulid_weight": 0.80},
+        )
+        assert result == pytest.approx(0.75)  # 0.80 + (-0.05)
 
     def test_small_face_region_zeros_delta(self):
         # SMALL_FACE_REGION zeros the delta entirely (positive OR negative)
