@@ -1,13 +1,7 @@
 """SRT caption-file writer.
 
-Transcribes a generated voiceover audio file back into precisely-timed
-SRT (SubRip) captions using OpenAI's whisper. Used during the upload
-phase to attach captions to the published YouTube video.
-
-Moved from phase_b_audio.py in Phase 6 slice 1 — function body
-unchanged. phase_b_audio.py re-exports `generate_srt` from here for
-backward compatibility; downstream callers can either keep the old
-import path or migrate to `from audio.srt import generate_srt`.
+Transcribes a voiceover audio file into precisely-timed SRT (SubRip)
+captions using OpenAI's local whisper model.
 """
 
 from __future__ import annotations
@@ -30,7 +24,7 @@ def generate_srt(audio_path: str, srt_path: str, language: str = "English") -> s
     Returns:
         srt_path on success (for chaining).
     """
-    print(f"📝 [PHASE B] Transcribing audio back to precise SRT captions: {audio_path} ({language})")
+    print(f"📝 [AUDIO] Transcribing audio back to precise SRT captions: {audio_path} ({language})")
     import whisper
     import datetime
 

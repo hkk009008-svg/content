@@ -44,7 +44,7 @@ rm -rf .venv
 ## Architecture as of this handoff
 
 ```
-web_server.py  (Flask + SSE, ~1647 LOC, 61 routes, no auth)
+web_server.py  (Flask + SSE, ~1647 LOC, 59 routes, no auth)
   └→ cinema_pipeline.py:CinemaPipeline   ← orchestrator (~1004 LOC)
       Composes:
        ├ PipelineCore       (cinema/core.py — long-lived deps)

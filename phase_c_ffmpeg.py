@@ -10,8 +10,9 @@ from config.settings import settings
 if TYPE_CHECKING:
     from cinema.context import PipelineContext
 
-# VEO removed from cascade — quota exhaustion made it unreliable
-# Keep the flag for backward compatibility but it's not used in the optimized cascade
+# VEO is still in the default cascade (see line ~99 below) but quota exhaustion
+# is sticky once tripped: any VEO 429 sets this flag for the rest of the process,
+# short-circuiting future VEO calls to try_next_api(). Reset requires a restart.
 _VEO_QUOTA_EXHAUSTED = False
 
 try:

@@ -50,10 +50,7 @@ API_REGISTRY = {
     "VEO":           {"label": "Veo (FAL Proxy)",      "category": "fal_proxy", "description": "Veo via FAL — 4 reference images", "modality": "video", "best_for": ["dialogue_close_up", "establishing_shot"], "per_shot_cost": 0.45, "quality_score": 0.83, "latency_s": 115, "status": "live"},
     "RUNWAY":        {"label": "Runway (FAL Proxy)",   "category": "fal_proxy", "description": "Runway via FAL — legacy fallback", "modality": "video", "best_for": ["style_locked_sequence"], "per_shot_cost": 0.32, "quality_score": 0.80, "latency_s": 80, "status": "live"},
 
-    # --- VIDEO — Frontier models added in this pass ---
-    "WAN_2_1":       {"label": "WAN 2.1 (Alibaba)",    "category": "fal_proxy", "description": "Alibaba's i2v model — strong identity preservation, 5s clips", "modality": "video", "best_for": ["dialogue_close_up", "static_portrait", "action_motion"], "per_shot_cost": 0.18, "quality_score": 0.83, "latency_s": 85, "status": "beta"},
-    "MOCHI_2":       {"label": "Mochi 2",              "category": "fal_proxy", "description": "Genmo Mochi v2 — physics-aware, open-weights, 5.4s @ 30fps", "modality": "video", "best_for": ["action_motion", "macro_detail"], "per_shot_cost": 0.22, "quality_score": 0.81, "latency_s": 95, "status": "beta"},
-    "HUNYUAN_I2V":   {"label": "Hunyuan Video I2V",    "category": "fal_proxy", "description": "Tencent — best open-weights i2v, 8s, photoreal motion", "modality": "video", "best_for": ["action_motion", "establishing_shot"], "per_shot_cost": 0.20, "quality_score": 0.84, "latency_s": 100, "status": "beta"},
+    # --- VIDEO — Future candidates (no dispatch wired yet) ---
     "COGVIDEOX_1_5": {"label": "CogVideoX 1.5-5B",     "category": "fal_proxy", "description": "Open-weights i2v, 6s @ 8fps, lightweight fallback", "modality": "video", "best_for": ["macro_detail", "establishing_shot"], "per_shot_cost": 0.10, "quality_score": 0.76, "latency_s": 70, "status": "planned"},
 
     # --- LIPSYNC / TALKING-HEAD ---
@@ -124,13 +121,13 @@ PURPOSE_TAGS = [
 # are ordered fallbacks. The orchestrator uses these when target_api='AUTO' or
 # when a per-purpose route is explicitly requested. Edit here, not in code.
 PURPOSE_API_RANKING = {
-    "dialogue_close_up":    ["HEDRA_C3", "KLING_NATIVE", "VEO_NATIVE", "SYNC_SO_V3", "WAN_2_1", "LATENTSYNC", "MUSETALK"],
+    "dialogue_close_up":    ["HEDRA_C3", "KLING_NATIVE", "VEO_NATIVE", "SYNC_SO_V3", "LATENTSYNC", "MUSETALK"],
     "talking_head_full":    ["HEDRA_C3", "RUNWAY_ACT_ONE", "OMNIHUMAN_V1_5", "VEO_NATIVE", "SYNC_SO_V3"],
-    "action_motion":        ["SORA_NATIVE", "SORA_2", "HUNYUAN_I2V", "MOCHI_2", "KLING_NATIVE", "RUNWAY_GEN4"],
-    "static_portrait":      ["KLING_NATIVE", "WAN_2_1", "RUNWAY_GEN4", "FLUX_DEV", "HIDREAM_I1"],
-    "establishing_shot":    ["LTX", "VEO_NATIVE", "HUNYUAN_I2V", "MOCHI_2", "WAN_2_1"],
-    "macro_detail":         ["MOCHI_2", "SORA_NATIVE", "LTX", "FLUX_DEV", "HIDREAM_I1"],
-    "style_locked_sequence":["RUNWAY_GEN4", "KLING_NATIVE", "VEO_NATIVE", "WAN_2_1"],
+    "action_motion":        ["SORA_NATIVE", "SORA_2", "KLING_NATIVE", "RUNWAY_GEN4"],
+    "static_portrait":      ["KLING_NATIVE", "RUNWAY_GEN4", "FLUX_DEV", "HIDREAM_I1"],
+    "establishing_shot":    ["LTX", "VEO_NATIVE"],
+    "macro_detail":         ["SORA_NATIVE", "LTX", "FLUX_DEV", "HIDREAM_I1"],
+    "style_locked_sequence":["RUNWAY_GEN4", "KLING_NATIVE", "VEO_NATIVE"],
     "narration":            ["ELEVENLABS_V3", "CARTESIA_SONIC_2", "OPENAI_AUDIO", "F5_TTS"],
     "music_score":          ["SUNO_V5", "ELEVENLABS_MUSIC", "STABLE_AUDIO_2"],
     "foley":                ["STABLE_AUDIO_FOLEY", "ADOBE_AUDIO_AI"],
@@ -143,9 +140,9 @@ PURPOSE_API_RANKING = {
     #   handle BOTH face and product (Kling Native is strongest here).
     # - product_reveal_motion is the most demanding — needs Sora's physics for
     #   light glints + smooth rotation. Mochi 2 is a close second.
-    "product_hero":             ["HIDREAM_I1", "FLUX_DEV", "MOCHI_2", "SORA_NATIVE", "SD3_5_LARGE", "LTX"],
-    "product_in_scene":         ["KLING_NATIVE", "VEO_NATIVE", "WAN_2_1", "RUNWAY_GEN4", "SORA_NATIVE"],
-    "product_reveal_motion":    ["SORA_NATIVE", "MOCHI_2", "HUNYUAN_I2V", "KLING_NATIVE", "RUNWAY_GEN4"],
+    "product_hero":             ["HIDREAM_I1", "FLUX_DEV", "SORA_NATIVE", "SD3_5_LARGE", "LTX"],
+    "product_in_scene":         ["KLING_NATIVE", "VEO_NATIVE", "RUNWAY_GEN4", "SORA_NATIVE"],
+    "product_reveal_motion":    ["SORA_NATIVE", "KLING_NATIVE", "RUNWAY_GEN4"],
 }
 
 
@@ -155,7 +152,7 @@ PURPOSE_API_RANKING = {
 # provider owns which API.
 BILLING_PROVIDERS = {
     "FAL_AI": [
-        "KLING_3_0", "SORA_2", "VEO", "RUNWAY", "WAN_2_1", "MOCHI_2", "HUNYUAN_I2V",
+        "KLING_3_0", "SORA_2", "VEO", "RUNWAY",
         "COGVIDEOX_1_5", "MUSETALK", "OMNIHUMAN_V1_5", "LATENTSYNC", "SYNC_V2",
         "SYNC_SO_V3", "HEDRA_C3", "KLING_LIPSYNC_2", "PIXVERSE_LS2", "RUNWAY_ACT_ONE",
         "SEEDVR2",
@@ -934,7 +931,7 @@ def update_scene_shots(
     timeout: float = 10,
 ) -> None:
     """Save decomposed shots back into the project's scene."""
-    from project_manager import MutationResult, mutate_project
+    from domain.project_manager import MutationResult, mutate_project
 
     def _mutate(latest_project: dict):
         for scene in latest_project["scenes"]:

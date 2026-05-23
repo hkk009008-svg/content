@@ -1,25 +1,17 @@
 """BGM generation + music mastering.
 
-Two functions plus the mastering-presets dictionary, moved out of
-`phase_b_audio.py` in Phase 6 slice 2:
+Providers wired:
+  - Suno V5 (full songs with vocals — generate_suno_v5)
+  - FAL Stable Audio (instrumental BGM — generate_fal_bgm, default)
 
-  generate_fal_bgm        -- Fal.ai stable-audio text-to-music generation
-  master_music            -- Pedalboard / FFmpeg mastering chain
+Plus the mastering chain:
+  master_music            -- Pedalboard / macOS AU / FFmpeg routing
   MUSIC_MASTERING_PRESETS -- preset dictionary used by master_music
+                             (cinema_master, lo_fi, epic_wide, intimate_acoustic,
+                              dark_ambient, none)
 
-Cross-module dependencies
-=========================
-
-`master_music` uses two symbols from `audio.effects`:
-
-  apply_au_plugin
-  apply_pedalboard_chain
-
-These were lazy-imported from `phase_b_audio` during slice 2 because
-the effects helpers still lived there and phase_b_audio re-exports
-audio.music's symbols (which would have caused a load-time cycle).
-Phase 6 slice 4 moved those helpers into `audio.effects`, so the
-import is now eager at module top — no cycle, no lazy fallback.
+Cross-module: `master_music` uses `apply_au_plugin` + `apply_pedalboard_chain`
+from `audio.effects` (eager import at module top).
 """
 
 from __future__ import annotations

@@ -1,9 +1,5 @@
 """Multi-character dialogue voiceover (ElevenLabs TTS + ffmpeg concat).
 
-Phase 6 slice 6 of the architecture refactor: extract the last
-function-with-a-body out of ``phase_b_audio.py``, leaving that module
-as a pure backward-compat re-export shim.
-
 Contents
 ========
 

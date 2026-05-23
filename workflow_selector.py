@@ -397,7 +397,7 @@ MOTION_FIDELITY_FLOORS: Dict[str, Optional[float]] = {
     "medium":    0.55,
     "wide":      0.65,
     "action":    0.60,
-    "macro":     0.40,
+    "close_up":  0.50,   # close_up is a real shot_type returned by classify_shot_type
     "landscape": None,   # Motion capture doesn't apply to pure landscape shots
 }
 

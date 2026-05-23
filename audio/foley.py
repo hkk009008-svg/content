@@ -1,22 +1,18 @@
-"""Foley sound-design generation (ElevenLabs text-to-sound-effects).
+"""Foley sound-design generation.
 
-Six functions moved out of `phase_b_audio.py` in Phase 6 slice 3:
+Two providers wired:
+  - Stability AI Stable Audio 2 (default, up to 190s)
+  - ElevenLabs text-to-sound-effects (22s cap)
 
-  generate_scene_foley         — single SFX via ElevenLabs (one shot, one sound)
+Public functions:
+  generate_scene_foley         — single SFX (one shot, one sound)
   generate_layered_foley       — 3-layer mix (ambience + action + texture)
-  _build_ambience_prompt       — pure: location/weather → ambience description
-  _build_action_prompt         — pure: action verb → action SFX description
-  _build_texture_prompt        — pure: mood/weather → atmospheric texture
-  generate_scene_foley_library — iterate all shots, write foley files into ctx
+  generate_scene_foley_library — iterate all shots, write foley into ctx
+  generate_stable_audio_foley  — Stability AI direct REST
 
-The shared ElevenLabs `client` is imported eagerly from `audio._client`
-(extracted out of phase_b_audio in Phase 6 slice 5). Slice 3 originally
-used a lazy `from phase_b_audio import client` to dodge a load-time
-cycle — that cycle is gone now that the client lives in its own module
-with no reverse dependencies.
-
-The three `_build_*_prompt` helpers are pure functions with no
-external deps — they're the lowest-coupling code in this module.
+The three `_build_*_prompt` helpers (ambience / action / texture) are
+pure functions — no external deps, the lowest-coupling code in the module.
+The shared ElevenLabs `client` is imported eagerly from `audio._client`.
 """
 
 from __future__ import annotations
@@ -58,7 +54,7 @@ def generate_stable_audio_foley(
     import requests
     from config.settings import settings
 
-    api_key = getattr(settings, "stability_api_key", "") or os.environ.get("STABILITY_API_KEY", "")
+    api_key = settings.stability_api_key
     if not api_key:
         print("   [STABLE-AUDIO] STABILITY_API_KEY not set; skipping")
         return None
@@ -320,7 +316,7 @@ def _build_texture_prompt(mood: str, weather: str, location: str) -> str:
 
 def generate_scene_foley_library(ctx: dict) -> bool:
     """Iterates through each cinematic shot and generates custom ambient Foley layer using ElevenLabs."""
-    print("\n🎧 [PHASE B] Generating Immersive Environmental Foley for each scene...")
+    print("\n🎧 [AUDIO] Generating Immersive Environmental Foley for each scene...")
     prompts = ctx.get("script_data", {}).get("ai_image_prompts", [])
     ctx["foley_audio_paths"] = []
 

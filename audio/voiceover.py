@@ -1,10 +1,5 @@
 """TTS narration, voice-direction profiles, and single-line audio.
 
-Phase 6 slice 5 of the architecture refactor: split the voiceover/narration
-TTS surface out of ``phase_b_audio.py`` into this focused submodule.
-Multi-character dialogue (``generate_dialogue_voiceover``) remains in
-``phase_b_audio.py`` and will move in slice 6.
-
 Contents
 ========
 
@@ -280,7 +275,7 @@ def generate_voiceover(ctx: dict) -> bool:
     music_vibe = ctx.get("music_vibe", "suspense")
     output_filename = "temp_voiceover.mp3"
 
-    print(f"\n🎙️ [PHASE B] Sending script to ElevenLabs (Mood: {music_vibe.upper()})...")
+    print(f"\n🎙️ [AUDIO] Sending script to ElevenLabs (Mood: {music_vibe.upper()})...")
 
     # Map the script's psychological mood to the perfect physical voice actor.
     # If the mood isn't in the map, fall back to a random pick from the
@@ -302,10 +297,10 @@ def generate_voiceover(ctx: dict) -> bool:
     import random
     if music_vibe in voice_profiles:
         chosen_actor = voice_profiles[music_vibe]
-        print(f"🎭 [PHASE B] Mood-matched Voice Actor: {chosen_actor['name']} (mood={music_vibe})")
+        print(f"🎭 [AUDIO] Mood-matched Voice Actor: {chosen_actor['name']} (mood={music_vibe})")
     else:
         chosen_actor = random.choice(breathtaking_voices)
-        print(f"🎭 [PHASE B] Unmapped mood {music_vibe!r} — random fallback: {chosen_actor['name']}")
+        print(f"🎭 [AUDIO] Unmapped mood {music_vibe!r} — random fallback: {chosen_actor['name']}")
     target_voice_id = chosen_actor["id"]
 
     try:
@@ -358,7 +353,7 @@ def generate_voiceover(ctx: dict) -> bool:
                 trimmed_file
             ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             os.replace(trimmed_file, output_filename)
-            print("✂️  [PHASE B] Silence trimmed from audio to guarantee infinite loop sync!")
+            print("✂️  [AUDIO] Silence trimmed from audio to guarantee infinite loop sync!")
         except Exception as e:
             print(f"⚠️ Warning: Failed to trim silence from TTS track. {e}")
 
@@ -375,11 +370,6 @@ def generate_voiceover(ctx: dict) -> bool:
     except Exception as e:
         print(f"❌ Error generating audio: {e}")
         return False
-
-# Optional: Run this file directly to test just the audio
-if __name__ == "__main__":
-    test_text = "McDonald's isn't a fast-food company; it's the most aggressive real estate empire on the planet."
-    generate_voiceover({"full_text": test_text, "music_vibe": "suspense"})
 
 # ─────────────────────────────────────────────────────────────
 # VOICE DIRECTION SYSTEM

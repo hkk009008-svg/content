@@ -1,25 +1,17 @@
-"""Cinema Pipeline — voice-effects / DSP helpers.
-
-Phase 6 slice 4 of the architecture refactor: extract the voice-effects
-processor out of the 932-line ``phase_b_audio.py`` god module into this
-focused submodule. Sibling to ``audio/srt.py`` (slice 1),
-``audio/music.py`` (slice 2), and ``audio/foley.py`` (slice 3).
+"""Voice-effects and DSP helpers.
 
 Contents
 ========
 
-- ``VOICE_EFFECTS``        — FFmpeg-filter presets for stylized voice FX.
-- ``apply_au_plugin``      — load an installed macOS AU plugin headlessly.
+- ``VOICE_EFFECTS``         — FFmpeg-filter presets for stylized voice FX.
+- ``apply_au_plugin``       — load an installed macOS AU plugin headlessly.
 - ``apply_pedalboard_chain`` — apply a Pedalboard built-in effect chain.
-- ``list_au_plugins``      — enumerate available AU plugins on this Mac.
-- ``apply_voice_effect``   — top-level voice-FX router (AU > Pedalboard > FFmpeg).
-
-The legacy ``phase_b_audio`` module re-exports every name above so existing
-``from phase_b_audio import apply_voice_effect`` style callers keep working.
-New code should import directly from ``audio.effects``.
+- ``list_au_plugins``       — enumerate available AU plugins on this Mac.
+- ``apply_voice_effect``    — top-level voice-FX router (AU > Pedalboard > FFmpeg).
 
 Pedalboard (Spotify's headless AU/VST3 plugin host) is a hard dependency
-pinned in requirements-frozen-py39.txt.
+pinned in requirements.txt. There is no graceful fallback if the import
+fails — installing the project pulls it in.
 """
 
 import os

@@ -412,7 +412,7 @@ class ContinuityEngine:
         # Shared identity validator with rolling history for adaptive PuLID
         # Pass cache_dir so embeddings persist to disk across pipeline runs
         from identity import make_validator
-        from project_manager import get_project_dir
+        from domain.project_manager import get_project_dir
         cache_dir = os.path.join(get_project_dir(project["id"]), "characters")
         self.identity_validator = make_validator(
             embedding_cache=self.character_tracker.embeddings,
