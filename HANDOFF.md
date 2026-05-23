@@ -113,33 +113,50 @@ Surfaced 40+ orphan UI knobs (the `tts_provider` pattern at scale), broken TTS f
 | `music_mastering` | `cinema_pipeline.py:493` — passes preset to `master_music` |
 | **React** Continuity Engine sliders | `web/src/components/settings/AdvancedSection.tsx:99-117` — controlled inputs + `onChange` (was uncontrolled — slider moved but never persisted) |
 
+### 9. UI ↔ backend audit, second pass (post-pivot)
+
+Cross-referenced every `update('<key>', ...)` in `web/src/components/settings/*.tsx` against every `get_project_setting`/`global_settings[]` read in Python.
+
+**Deleted UI for 15 still-orphan keys** (commit `25b5337`, partially repaired in `4859027`):
+* AudioSection: `narration_mode`, `narrator_voice`, `voice_effect`
+* AudioSyncSection: `room_tone_matching`, `prosody_continuity`, `music_provider`, `foley_provider`, `purpose_overrides` (plus the `PurposeMatrix` and `ProviderSelect` helpers)
+* AdvancedSection: `pag_scale`, `controlnet_depth_strength` (both use hardcoded shot-type defaults from `workflow_selector.py`, never UI), `ip_adapter_style_weight`, `comfyui_upscale`, `quality_cost_weight`
+* ProductionSection: `default_video_api`
+* BudgetSection: `cost_optimization` (section was deleted then re-created with just `budget_limit_usd`)
+* Also stripped from `domain/project_manager.py` defaults (commit `439dcab`) and `web/src/lib/guidance.ts` PRODUCTION_PRESETS
+
+**Restored 3 UI keys** wired by parallel commits during the audit window (commit `4859027`):
+* `budget_limit_usd` — wired in `cinema/core.py:102` (CostTracker gate) by commit `5445049`
+* `creative_llm` — wired in `llm/chief_director.py:85` (per-call model override) by commit `64d968d`
+* `adaptive_pulid` — wired in `domain/continuity_engine.py:511` (gate for `get_adaptive_pulid_weight`) by commit `75c470d`
+
+**Other settings work this session** (chronological):
+* `176033d` — validated the 7 max-tier halt knobs in `_MAX_TIER_KNOB_SCHEMA` (extended commit `37aea4f`'s ComfyControls validation)
+* `8a8b0a0` — dropped stale "wire up via get_project_setting" comments in `audio/music.py` and `audio/foley.py` that referenced the now-deleted UI keys
+
+**Process lesson:** the orphan grep was run ~14 minutes before the deletion commit, and three parallel commits landed in that window wiring up keys I was about to delete. Re-grep candidates against HEAD as the LAST step before any commit that deletes ≥5 keys/files/symbols. (Saved as memory: `feedback_re-verify-before-destructive-commits.md`.)
+
 ## OPEN WORK — prioritized
 
-### 🔴 1. Wire the remaining ~20 UI knobs (deferred to ctx-threading work)
+### 🔴 1. Wire the remaining UI knobs (mostly resolved)
 
-These all need either ctx threaded into a function that doesn't currently take it, OR a new helper function. They're real wires, just more invasive than the round-8 batch.
+Status: most rows CLOSED by post-pivot work — `ec8b1d9` (max-tier 21-knob bundle), `19be241` (video-cascade ctx + `api_engines` filter + `cascade_retry_limit`), `5445049` (`budget_limit_usd` via CostTracker), `64d968d` (`creative_llm`), `75c470d` (`adaptive_pulid`). The deletion sweep in Round 9 closed the rest by removing UI surface.
 
-#### Bundled — single Python signature change unblocks many
+Still open:
 
 | Function | Knobs unblocked | LOC est |
 |---|---|---|
-| `quality_max.generate_ai_broll_max(ctx, ...)` — add ctx param, overlay at line 506 | 14 MaxTierComfyControls (slg_scale, freeu_b1-s2, ays_steps, controlnet_canny/pose/tile_strength, redux_strength, hires_fix_enabled/denoise, face_detailer_enabled/guide_size, supir_enabled/steps) + 7 MaxQualityTier halt knobs (max_candidate_count, max_candidate_batch, max_halt_threshold_composite/arc, max_halt_min_n, max_regenerate_floor_arc, max_halt_rule) | 40-60 |
-| `phase_c_ffmpeg.generate_ai_video(ctx, ...)` — add ctx, filter cascade at line 194-198 | `api_engines` toggles (Kling/Sora/Veo/LTX/Runway on/off), `cascade_retry_limit`, `cost_optimization`, `quality_cost_weight` | 30-40 |
-| `workflow_selector.get_workflow_params(shot_type, settings=None)` — add settings, overlay | `flux_guidance`, `comfyui_sampler`, `comfyui_steps`, `comfyui_upscale` | 20 |
-| `cinema/shots/controller.py:816` (after `_save_checkpoint`) — pause loop check | `budget_limit_usd` | 10 |
-| `llm/chief_director._call_llm` — read ctx for model override | `creative_llm` | 10 |
-| `domain/continuity_engine.py:507` — gate `get_adaptive_pulid_weight` on setting | `adaptive_pulid` | 5 |
+| `workflow_selector.get_workflow_params(shot_type, settings=None)` — add settings, overlay | `flux_guidance`, `comfyui_sampler`, `comfyui_steps` | 20 |
 
-**Recommended order:** start with the 21-knob `quality_max` bundle since it has the biggest UI-surface payoff per LOC. Each invocation needs ctx threaded from `phase_c_assembly.py:90-93` upward — confirm the call chain first.
+(`comfyui_upscale`, `cost_optimization`, `quality_cost_weight` were UI orphans — removed in `25b5337`, so no longer on the wire-up list.)
 
-#### ASK USER before wiring
+#### ASK USER before wiring — RESOLVED
 
-| Knob | Question |
-|---|---|
-| `narration_mode`, `narrator_voice`, `voice_effect` | `generate_voiceover` is only called from its own `__main__` block. Either WIRE it into the cinema pipeline (would need a new call site in `cinema_pipeline.py` for narrator voiceover) or DELETE from UI. |
-| `purpose_overrides` | Needs `audio/voiceover.py` consumer that maps purpose → API rank. The override matrix exists in UI but no current consumer; needs `cinema/shots/controller.py` to look it up per shot purpose. |
-| `lipsync_engine_priority` | `lip_sync.recommend_lip_sync_mode` has zero production callers. Either wire the function in (replacing direct engine picks elsewhere) or delete both UI + function. |
-| `room_tone_matching`, `prosody_continuity` | Both require **new helpers** (per-scene reverb chain + ElevenLabs `previous_text` continuation handling), not just wire-ups. Real feature work. |
+Round 9 resolved every "ASK USER" item by deleting the UI control:
+* `narration_mode`, `narrator_voice`, `voice_effect` — deleted (`generate_voiceover` consumer was never wired into the cinema pipeline)
+* `purpose_overrides` — deleted (PurposeMatrix UI removed; per-purpose routing falls back to PURPOSE_API_RANKING)
+* `room_tone_matching`, `prosody_continuity` — deleted (require real feature work to implement)
+* `lipsync_engine_priority` — KEPT (still in UI; `lip_sync` consumers exist and the engine-priority list is read)
 
 ### 🟠 2. Re-add lost quality features to cinema pipeline (if desired)
 
@@ -155,7 +172,7 @@ These were added to `main.py` then deleted with the CLI:
 - **SEEDANCE branch unreachable** (`phase_c_ffmpeg.py:714`) — 200+ LOC of multi-character SEEDANCE integration. Never appears in any cascade. Either wire into `WORKFLOW_TEMPLATES` or delete.
 - **Native API methods dark**: `veo.generate_video_4k`, `veo.generate_video_with_frames`, `veo.generate_with_audio`, `ltx.generate_transition`, `ltx.generate_4k`, `generate_kling_storyboard`, `lip_sync.generate_transition_clip`, `recommend_lip_sync_mode`, `lipsync_act_one`. Decide per case.
 - **VBench-style quality routing** — `quality_tracker.log_shot_quality` has only test callers. `workflow_selector.get_optimal_api` + `get_dynamic_workflow` have zero production callers. Now that `vbench_evaluator.py` is gone, this whole adaptive-routing surface needs a decision: revive with a simpler scorer or delete the unreachable functions.
-- **Env vars sneaking past `config/settings.py`**: `audio/music.py:159,164` reads `SUNO_TOKEN` / `SUNO_API_BASE` directly via `os.environ`. Same in `performance/_cache.py:22` (`PERFORMANCE_CACHE_DIR`) and `performance/motion_gate.py:47` (`MOTION_GATE_SAMPLES`). Add to `Settings` dataclass for single-source-of-truth.
+- ~~**Env vars sneaking past `config/settings.py`**~~ — CLOSED by `9ecd572` (absorbed all 3 stray env-var reads into `config.Settings`).
 - **Dead web endpoints**: `web_server.py:340-358 /api/optimize-shot-prompt` (no frontend caller); `web_server.py:310-322 GET /api/language-defaults/<language>` (no frontend caller).
 
 ### 🟡 4. Commit hygiene
@@ -215,6 +232,7 @@ git commit -m "docs: update for post-pivot single-entry-point architecture"
 `/Users/hyungkoookkim/.claude/projects/-Users-hyungkoookkim-Content/memory/`:
 - `MEMORY.md` — index
 - `project_two_entry_points.md` — pivot from YouTube to cinema; CLI deletion record
+- `feedback_re-verify-before-destructive-commits.md` — re-grep candidates against HEAD as the last step before any commit that deletes ≥5 keys/files/symbols; long audit windows + parallel work = stale orphan lists
 
 ## Useful greps for the next session
 
