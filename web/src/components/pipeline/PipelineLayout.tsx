@@ -34,6 +34,7 @@ interface Props {
   onRejectShotPlan: (shotId: string, reason?: string) => Promise<any>
   onGenerateKeyframe: (shotId: string, positive?: string, negative?: string) => Promise<any>
   onApproveKeyframe: (shotId: string, takeId: string) => Promise<any>
+  onApprovePerformance: (shotId: string, takeId: string) => Promise<any>
   onGenerateMotion: (shotId: string) => Promise<any>
   onApproveFinal: (shotId: string, takeId: string) => Promise<any>
   onRegenerateShot: (shotId: string, positive?: string, negative?: string) => Promise<any>
@@ -130,7 +131,7 @@ export default function PipelineLayout({
   project, events, latest, stages, activeStage,
   shotStates, directorReview, isGenerating, isPaused, failedShots,
   onBack, onCancel, onPause, onResume, onApproveShotPlan, onRejectShotPlan,
-  onGenerateKeyframe, onApproveKeyframe, onGenerateMotion, onApproveFinal,
+  onGenerateKeyframe, onApproveKeyframe, onApprovePerformance, onGenerateMotion, onApproveFinal,
   onRegenerateShot, onRestartShot, onCorrectShot, onDiagnoseShot, onProceedToAssembly,
   pipelineError, pipelineLoadingLabel,
 }: Props) {
@@ -298,6 +299,7 @@ export default function PipelineLayout({
               onRejectPlan={onRejectShotPlan}
               onGenerateKeyframe={onGenerateKeyframe}
               onApproveKeyframe={onApproveKeyframe}
+              onApprovePerformance={onApprovePerformance}
               onGenerateMotion={onGenerateMotion}
               onApproveFinal={onApproveFinal}
               onCorrect={onCorrectShot}

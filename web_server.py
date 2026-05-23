@@ -1305,6 +1305,24 @@ def api_approve_keyframe_take(pid, shot_id, take_id):
     return jsonify(result), status
 
 
+@app.route("/api/projects/<pid>/shots/<shot_id>/performance/<take_id>/approve", methods=["POST"])
+@_project_lock_guard
+def api_approve_performance_take(pid, shot_id, take_id):
+    """Approve a performance take so the PERFORMANCE_REVIEW gate predicate opens.
+
+    Symmetric with the keyframe + final approve routes. The orchestrator's
+    _wait_for_gate("PERFORMANCE_REVIEW", ...) polls cinema/review/controller.py's
+    _gate_satisfied("PERFORMANCE_REVIEW", ...) every 500ms; this endpoint
+    persists the approval onto project.json so the predicate flips to True.
+    """
+    try:
+        result = _get_stage_pipeline(pid).approve_take(shot_id, take_id, "performance")
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
+    status = 200 if not result.get("error") else 409
+    return jsonify(result), status
+
+
 @app.route("/api/projects/<pid>/shots/<shot_id>/motion/generate", methods=["POST"])
 @_project_lock_guard
 def api_generate_motion(pid, shot_id):

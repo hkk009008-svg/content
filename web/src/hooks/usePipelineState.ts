@@ -173,6 +173,11 @@ export function usePipelineState(projectId: string | null) {
     return postJson(`/api/projects/${projectId}/shots/${shotId}/keyframes/${takeId}/approve`)
   }, [projectId, postJson])
 
+  const approvePerformance = useCallback(async (shotId: string, takeId: string) => {
+    if (!projectId) return null
+    return postJson(`/api/projects/${projectId}/shots/${shotId}/performance/${takeId}/approve`)
+  }, [projectId, postJson])
+
   const generateMotion = useCallback(async (shotId: string) => {
     if (!projectId) return null
     return postJson(`/api/projects/${projectId}/shots/${shotId}/motion/generate`)
@@ -228,6 +233,7 @@ export function usePipelineState(projectId: string | null) {
     rejectShotPlan,
     generateKeyframe,
     approveKeyframe,
+    approvePerformance,
     generateMotion,
     approveFinal,
     regenerateShot,

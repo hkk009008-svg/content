@@ -36,6 +36,7 @@ interface Props {
   onRejectPlan: (shotId: string, reason?: string) => Promise<any>
   onGenerateKeyframe: (shotId: string, positive?: string, negative?: string) => Promise<any>
   onApproveKeyframe: (shotId: string, takeId: string) => Promise<any>
+  onApprovePerformance: (shotId: string, takeId: string) => Promise<any>
   onGenerateMotion: (shotId: string) => Promise<any>
   onApproveFinal: (shotId: string, takeId: string) => Promise<any>
   onCorrect: (shotId: string, action: string, params?: Record<string, any>, takeId?: string) => Promise<any>
@@ -103,6 +104,7 @@ function ClipCard({
   onRejectPlan,
   onGenerateKeyframe,
   onApproveKeyframe,
+  onApprovePerformance,
   onGenerateMotion,
   onApproveFinal,
   onCorrect,
@@ -118,6 +120,7 @@ function ClipCard({
   onRejectPlan: Props['onRejectPlan']
   onGenerateKeyframe: Props['onGenerateKeyframe']
   onApproveKeyframe: Props['onApproveKeyframe']
+  onApprovePerformance: Props['onApprovePerformance']
   onGenerateMotion: Props['onGenerateMotion']
   onApproveFinal: Props['onApproveFinal']
   onCorrect: Props['onCorrect']
@@ -405,6 +408,15 @@ function ClipCard({
                     }}
                   />
                 </label>
+                {latestPerformanceTake && (shot as any).approved_performance_take_id !== latestPerformanceTake.id && (
+                  <button
+                    onClick={() => runAction('approve-performance', () => onApprovePerformance(shot.id, latestPerformanceTake.id))}
+                    disabled={loadingAction === 'approve-performance'}
+                    className="rounded border border-editorial-ready/50 px-2 py-1 text-eyebrow-lg text-editorial-ready hover:bg-editorial-ready/10 disabled:opacity-40"
+                  >
+                    {loadingAction === 'approve-performance' ? 'Approving…' : 'Approve'}
+                  </button>
+                )}
                 {approvedPerformanceTakeId && (
                   <button
                     onClick={async () => {
@@ -570,6 +582,7 @@ export default function ReviewStage({
   onRejectPlan,
   onGenerateKeyframe,
   onApproveKeyframe,
+  onApprovePerformance,
   onGenerateMotion,
   onApproveFinal,
   onCorrect,
@@ -624,6 +637,7 @@ export default function ReviewStage({
               onRejectPlan={onRejectPlan}
               onGenerateKeyframe={onGenerateKeyframe}
               onApproveKeyframe={onApproveKeyframe}
+              onApprovePerformance={onApprovePerformance}
               onGenerateMotion={onGenerateMotion}
               onApproveFinal={onApproveFinal}
               onCorrect={onCorrect}

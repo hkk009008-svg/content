@@ -182,7 +182,7 @@ for a state-read endpoint.
 |---|---|---|
 | PLAN_REVIEW | `POST /api/projects/<pid>/shots/<sid>/plan/approve` (and `/reject`) | `pipeline.approve_shot_plan(sid, approved=True)` |
 | KEYFRAME_REVIEW | `POST .../shots/<sid>/keyframes/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "keyframe")` |
-| PERFORMANCE_REVIEW | **no dedicated endpoint** | Operator edits/replaces driving video or deletes the performance take |
+| PERFORMANCE_REVIEW | `POST .../shots/<sid>/performance/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "performance")` |
 | REVIEW | `POST .../shots/<sid>/final/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "final")` |
 
 `_get_stage_pipeline(pid)` ([web_server.py:112-118](web_server.py:112)) returns
@@ -421,18 +421,19 @@ Implications:
 |---|---|
 | PLAN_REVIEW | all shots have `plan_status == "approved"` |
 | KEYFRAME_REVIEW | all shots have `approved_keyframe_take_id` |
+| PERFORMANCE_REVIEW | for every shot: `performance_engine == "SKIP"` OR no `approved_keyframe_take_id` OR `approved_performance_take_id` is set |
 | REVIEW | all shots have `approved_final_take_id` |
-| PERFORMANCE_REVIEW | **(no clause)** — falls through to `return False` |
 
-`PERFORMANCE_REVIEW` is currently a half-implemented gate. The orchestrator's
-call to `_wait_for_gate("PERFORMANCE_REVIEW", ...)` only returns when:
-- The pipeline is cancelled, OR
-- Every shot is SKIP or has an `approved_performance_take_id` (which the
-  orchestrator special-cases as the bypass condition at
-  [cinema_pipeline.py:767-788](cinema_pipeline.py:767))
+PERFORMANCE_REVIEW is symmetric with the other three gates as of 2026-05-24:
+the predicate at [cinema/review/controller.py:209-219](cinema/review/controller.py:209)
+covers all three satisfaction paths (SKIP routing, missing keyframe, explicit
+approval). The orchestrator's `all_skipped` short-circuit at
+[cinema_pipeline.py:767-788](cinema_pipeline.py:767) is now redundant for
+correctness but kept for the explicit `PERFORMANCE_SKIPPED_GATE` UX event.
 
-There is no `POST /performance/approve` endpoint. Operator unblocks by
-editing/replacing the driving video or deleting the performance take.
+Approve endpoint: `POST /api/projects/<pid>/shots/<sid>/performance/<take_id>/approve`
+→ `pipeline.approve_take(sid, take_id, "performance")` →
+sets `shot["approved_performance_take_id"]`.
 
 ### 6.2 Take approval mechanics
 
@@ -1149,11 +1150,11 @@ Returns 11 action callbacks (pause/resume + 4 gate approvals + 4 shot operations
 
 | Gate | UI location | Endpoint |
 |---|---|---|
-| PLAN_REVIEW | `ReviewStage.tsx:277` "Approve Plan" | `POST /api/projects/<pid>/shots/<sid>/plan/approve` |
-| KEYFRAME_REVIEW | `ReviewStage.tsx:322` per-take Approve | `POST .../keyframes/<take_id>/approve` |
-| PERFORMANCE_REVIEW | **no dedicated approve UI** — swap-driving-video upload + delete-take | (no endpoint) |
-| REVIEW | `ReviewStage.tsx:490` per-take Approve | `POST .../final/<take_id>/approve` |
-| Assembly | `ReviewStage.tsx:605` `onProceedToAssembly()` | `POST /api/projects/<pid>/assemble` |
+| PLAN_REVIEW | `ReviewStage.tsx` "Approve Plan" | `POST /api/projects/<pid>/shots/<sid>/plan/approve` |
+| KEYFRAME_REVIEW | `ReviewStage.tsx` per-take Approve | `POST .../keyframes/<take_id>/approve` |
+| PERFORMANCE_REVIEW | `ReviewStage.tsx` Performance Capture section, Approve button next to Re-record | `POST .../performance/<take_id>/approve` |
+| REVIEW | `ReviewStage.tsx` per-take Approve | `POST .../final/<take_id>/approve` |
+| Assembly | `ReviewStage.tsx` `onProceedToAssembly()` | `POST /api/projects/<pid>/assemble` |
 
 ### 14.6 Settings sections
 
@@ -1225,7 +1226,6 @@ print('OK')
 |---|---|---|
 | Medium | `threshold=0.0` reads pollute `success_rate` rolling stat — N=8 best-of and performance gate both call `validate_image(threshold=0.0)`, every read counts as `passed=True`. `mean_similarity` is still real signal; `success_rate`/`common_failure` are inflated. | `face_validator_gate.py:128`, `performance/identity_gate.py:61` |
 | Medium | `lipsync_validation_threshold` setting is dead — `_sync_gate_settings()` called without arguments in both overlay and generation paths, defaults `(True, 0.65)` always win. | `lip_sync.py:206, 467` |
-| Medium | PERFORMANCE_REVIEW gate is half-implemented — no `_gate_satisfied` predicate, no REST endpoint. Currently opens implicitly when all shots are SKIP or done. | `cinema/review/controller.py:201-212`, `web_server.py` |
 | Low | `ShotController.cost_tracker` AttributeError swallowed — `__init__` doesn't store it as a proxy; try/except blocks silently no-op cost tracking. | `cinema/shots/controller.py:466-475, 881-890` |
 | Low | `phase_c_vision.py:107-109` is dead code — `__main__` block calls nonexistent `validate_identity()`. | `phase_c_vision.py:107` |
 | Low | `_progress_queues[pid]` never cleaned up — survives across runs; minor memory leak per project. | `web_server.py:60` |

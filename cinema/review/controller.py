@@ -194,6 +194,7 @@ class ReviewController:
             "total_shots": total,
             "plans_approved": sum(1 for shot in shots if shot.get("plan_status") == "approved"),
             "keyframes_approved": sum(1 for shot in shots if shot.get("approved_keyframe_take_id")),
+            "performance_approved": sum(1 for shot in shots if shot.get("approved_performance_take_id")),
             "motions_generated": sum(1 for shot in shots if shot.get("motion_takes")),
             "finals_approved": sum(1 for shot in shots if shot.get("approved_final_take_id")),
         }
@@ -207,6 +208,18 @@ class ReviewController:
             return all(shot.get("plan_status") == "approved" for shot in shots)
         if gate == "KEYFRAME_REVIEW":
             return all(shot.get("approved_keyframe_take_id") for shot in shots)
+        if gate == "PERFORMANCE_REVIEW":
+            # A shot is satisfied for PERFORMANCE_REVIEW iff it doesn't need a
+            # performance (SKIP engine or no keyframe approved) OR the operator
+            # has explicitly approved a performance take. Mirrors the orchestrator's
+            # all_skipped bypass at cinema_pipeline.py:768-773, extended with the
+            # explicit-approval branch.
+            return all(
+                (shot.get("performance_engine") or "").upper() == "SKIP"
+                or not shot.get("approved_keyframe_take_id")
+                or shot.get("approved_performance_take_id")
+                for shot in shots
+            )
         if gate == "REVIEW":
             return all(shot.get("approved_final_take_id") for shot in shots)
         return False
@@ -303,6 +316,10 @@ class ReviewController:
                 if collection_name != "keyframe_takes":
                     return MutationResult({"error": "Take is not a keyframe"}, save=False)
                 shot["approved_keyframe_take_id"] = take_id
+            elif approval_kind == "performance":
+                if collection_name != "performance_takes":
+                    return MutationResult({"error": "Take is not a performance"}, save=False)
+                shot["approved_performance_take_id"] = take_id
             elif approval_kind == "final":
                 if collection_name == "keyframe_takes":
                     return MutationResult({"error": "Keyframes cannot be approved as final takes"}, save=False)

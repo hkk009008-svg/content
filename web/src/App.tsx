@@ -20,7 +20,7 @@ export default function App() {
     events, latest, isStreaming, start: startSSE, stop: stopSSE,
     stages, activeStage, shotStates, directorReview, processEvent,
     isPaused, failedShots, pause: pausePipeline, resume: resumePipeline,
-    approveShotPlan, rejectShotPlan, generateKeyframe, approveKeyframe, generateMotion, approveFinal,
+    approveShotPlan, rejectShotPlan, generateKeyframe, approveKeyframe, approvePerformance, generateMotion, approveFinal,
     regenerateShot, restartShot, correctShot, diagnoseShot, proceedToAssembly,
   } = usePipelineState(project?.id ?? null)
 
@@ -142,6 +142,7 @@ export default function App() {
         onRejectShotPlan={(shotId, reason) => withRefresh(() => rejectShotPlan(shotId, reason))}
         onGenerateKeyframe={(shotId, positive, negative) => withRefresh(() => generateKeyframe(shotId, positive, negative))}
         onApproveKeyframe={(shotId, takeId) => withRefresh(() => approveKeyframe(shotId, takeId))}
+        onApprovePerformance={(shotId, takeId) => withRefresh(() => approvePerformance(shotId, takeId))}
         onGenerateMotion={(shotId) => withRefresh(() => generateMotion(shotId))}
         onApproveFinal={(shotId, takeId) => withRefresh(() => approveFinal(shotId, takeId))}
         onRegenerateShot={(shotId, positive, negative) => withRefresh(() => regenerateShot(shotId, positive, negative))}
