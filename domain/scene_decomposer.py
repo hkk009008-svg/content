@@ -50,9 +50,6 @@ API_REGISTRY = {
     "VEO":           {"label": "Veo (FAL Proxy)",      "category": "fal_proxy", "description": "Veo via FAL — 4 reference images", "modality": "video", "best_for": ["dialogue_close_up", "establishing_shot"], "per_shot_cost": 0.45, "quality_score": 0.83, "latency_s": 115, "status": "live"},
     "RUNWAY":        {"label": "Runway (FAL Proxy)",   "category": "fal_proxy", "description": "Runway via FAL — legacy fallback", "modality": "video", "best_for": ["style_locked_sequence"], "per_shot_cost": 0.32, "quality_score": 0.80, "latency_s": 80, "status": "live"},
 
-    # --- VIDEO — Future candidates (no dispatch wired yet) ---
-    "COGVIDEOX_1_5": {"label": "CogVideoX 1.5-5B",     "category": "fal_proxy", "description": "Open-weights i2v, 6s @ 8fps, lightweight fallback", "modality": "video", "best_for": ["macro_detail", "establishing_shot"], "per_shot_cost": 0.10, "quality_score": 0.76, "latency_s": 70, "status": "planned"},
-
     # --- LIPSYNC / TALKING-HEAD ---
     "MUSETALK":      {"label": "MuseTalk v1.5",        "category": "lipsync",   "description": "Mouth-only overlay on existing video — preserves camera work. Cheap.", "modality": "lipsync", "best_for": ["dialogue_close_up", "talking_head_full"], "per_shot_cost": 0.03, "quality_score": 0.78, "latency_s": 30, "status": "live"},
     "OMNIHUMAN_V1_5":{"label": "Omnihuman v1.5",       "category": "lipsync",   "description": "ByteDance — full talking head from a still image + audio (60s max)", "modality": "lipsync", "best_for": ["talking_head_full"], "per_shot_cost": 0.45, "quality_score": 0.88, "latency_s": 120, "status": "live"},
@@ -153,7 +150,7 @@ PURPOSE_API_RANKING = {
 BILLING_PROVIDERS = {
     "FAL_AI": [
         "KLING_3_0", "SORA_2", "VEO", "RUNWAY",
-        "COGVIDEOX_1_5", "MUSETALK", "OMNIHUMAN_V1_5", "LATENTSYNC", "SYNC_V2",
+        "MUSETALK", "OMNIHUMAN_V1_5", "LATENTSYNC", "SYNC_V2",
         "SYNC_SO_V3", "HEDRA_C3", "KLING_LIPSYNC_2", "PIXVERSE_LS2", "RUNWAY_ACT_ONE",
         "SEEDVR2",
     ],
