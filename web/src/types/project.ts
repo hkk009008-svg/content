@@ -153,6 +153,7 @@ export interface GlobalSettings {
   max_halt_min_n?: number                   // 1-8, default 4
   max_regenerate_floor_arc?: number         // 0.5-1.0, default 0.82
   max_halt_rule?: HaltRule                  // composite_only (Option 2, current default), conjunctive, budget_only
+  max_quality_parallel_workers?: number     // 1-4, default 1 — per-batch candidate parallelism
   char_lora_paths?: Record<string, string>  // character_id -> LoRA .safetensors path
   style_reference_paths?: string[]          // FLUX Redux style board references
 

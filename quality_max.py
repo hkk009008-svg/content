@@ -30,6 +30,7 @@ External deps assumed available on the pod (pruned if missing):
 
 from __future__ import annotations
 
+import concurrent.futures
 import copy
 import hashlib
 import json
@@ -128,6 +129,12 @@ _MAX_TIER_KNOB_SCHEMA: Dict[str, Tuple] = {
     "max_halt_min_n":               ("numeric", int,   1,    8),
     "max_regenerate_floor_arc":     ("numeric", float, 0.50, 1.00),
     "max_halt_rule":                ("enum", "composite_only", "conjunctive", "budget_only"),
+    # Per-batch candidate parallelism (added 2026-05-24). Default 1 preserves
+    # the historic sequential behavior; up to 4 concurrent workers overlap the
+    # ComfyUI submit/poll/download cycle on the same pod. ComfyUI itself queues
+    # prompts, so on a single-GPU pod the model still runs one-at-a-time — the
+    # wall-clock win is from overlapping the wait + scoring phases.
+    "max_quality_parallel_workers": ("numeric", int,   1,    4),
 }
 
 
@@ -621,6 +628,7 @@ def generate_ai_broll_max(
             ("max_halt_min_n",               "halt_min_n"),
             ("max_regenerate_floor_arc",     "regenerate_floor_arc"),
             ("max_halt_rule",                "halt_rule"),
+            ("max_quality_parallel_workers", "parallel_workers"),
         ):
             override = get_project_setting(ctx, ui_key, None)
             if override is None:
@@ -734,26 +742,47 @@ def generate_ai_broll_max(
     scores: List[CandidateScore] = []
     candidate_paths: List[str] = []
     base_seed = seed if seed is not None else random.randint(1, 2**31 - 1)
+    # Step-3 (2026-05-24) per-batch parallelism. Default 1 = identical
+    # sequential behavior. Validation already clamped to [1, 4] in the overlay
+    # block above. ThreadPoolExecutor.map yields in submission order so the
+    # print + scores ordering stays stable across workers settings.
+    parallel_workers = max(1, min(4, int(params.get("parallel_workers", 1))))
+
+    def _run_candidate(task):
+        cand_index, cand_seed, cand_path, wf = task
+        saved = _run_one_candidate(comfy, wf, cand_path)
+        if not saved:
+            return None
+        cs = score_candidate(saved, character_image if has_character else None)
+        cs.seed = cand_seed
+        return (cand_index, cand_seed, saved, cs)
 
     while len(scores) < n_max:
         # Generate next batch (or remainder)
         remaining = n_max - len(scores)
         this_batch = min(batch, remaining)
+
+        # Pre-compute seeds + paths so parallel workers don't race on len(scores).
+        starting_index = len(scores)
+        tasks = []
         for i in range(this_batch):
-            cand_seed = base_seed + len(scores) * 1009  # deterministic spread
+            cand_index = starting_index + i
+            cand_seed = base_seed + cand_index * 1009  # deterministic spread
+            cand_path = f"{os.path.splitext(output_filename)[0]}_cand{cand_index}.jpg"
             wf = copy.deepcopy(workflow)
             if "25" in wf:
                 wf["25"]["inputs"]["noise_seed"] = cand_seed
-            cand_path = f"{os.path.splitext(output_filename)[0]}_cand{len(scores)}.jpg"
-            saved = _run_one_candidate(comfy, wf, cand_path)
-            if not saved:
-                continue
-            candidate_paths.append(saved)
-            cs = score_candidate(saved, character_image if has_character else None)
-            cs.seed = cand_seed
-            scores.append(cs)
-            print(f"[quality_max]   cand {len(scores)}/{n_max} seed={cand_seed} "
-                  f"arc={cs.arc_score:.3f} aes={cs.aesthetic_score:.3f} comp={cs.composite:.3f}")
+            tasks.append((cand_index, cand_seed, cand_path, wf))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_workers) as pool:
+            for result in pool.map(_run_candidate, tasks):
+                if result is None:
+                    continue
+                _idx, cand_seed, saved, cs = result
+                candidate_paths.append(saved)
+                scores.append(cs)
+                print(f"[quality_max]   cand {len(scores)}/{n_max} seed={cand_seed} "
+                      f"arc={cs.arc_score:.3f} aes={cs.aesthetic_score:.3f} comp={cs.composite:.3f}")
 
         decision = should_halt(
             scores,

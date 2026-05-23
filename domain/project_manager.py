@@ -316,6 +316,11 @@ def make_project(name: str) -> dict:
             "adaptive_pulid": True,
             "coherence_check_enabled": True,
             "color_drift_sensitivity": 0.3,
+            # Step-3 (2026-05-24): N=8 best-of per-batch parallelism. 1 = sequential
+            # (historic behavior); up to 4 = concurrent workers on the same RunPod
+            # pod, overlapping submit/poll/download cycles. ComfyUI still serializes
+            # GPU work per pod.
+            "max_quality_parallel_workers": 1,
         },
     }
 
