@@ -21,6 +21,12 @@ _homebrew_bin = "/opt/homebrew/bin"
 if _homebrew_bin not in os.environ.get("PATH", ""):
     os.environ["PATH"] = _homebrew_bin + ":" + os.environ.get("PATH", "")
 
+# Install structured JSON logging BEFORE any cinema_pipeline imports so
+# their module-level logger.getLogger() calls inherit the root config.
+from cinema.logging_config import setup_logging  # noqa: E402
+
+setup_logging()
+
 import json
 import threading
 import queue
