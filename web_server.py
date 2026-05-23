@@ -307,22 +307,6 @@ def api_apply_language_defaults(pid):
     })
 
 
-@app.route("/api/language-defaults/<language>", methods=["GET"])
-def api_get_language_defaults(language):
-    """Preview language defaults without applying. UI uses this for the
-    'Apply Korean defaults?' confirmation dialog."""
-    try:
-        from domain.language_defaults import get_language_defaults, recommended_voices_for_language
-        from domain.character_manager import VOICE_POOL
-    except Exception as e:
-        return jsonify({"error": f"language_defaults unavailable: {e}"}), 500
-    return jsonify({
-        "language": language,
-        "defaults": get_language_defaults(language),
-        "recommended_voices": recommended_voices_for_language(language, VOICE_POOL),
-    })
-
-
 @app.route("/api/cost-estimate", methods=["POST"])
 def api_cost_estimate():
     """Live cost estimate. Body: { shot_count, has_dialogue, quality_tier, candidate_count, dialogue_shot_ratio }."""
@@ -335,27 +319,6 @@ def api_cost_estimate():
         candidate_count=int(data.get("candidate_count", 1)),
     )
     return jsonify(est)
-
-
-@app.route("/api/optimize-shot-prompt", methods=["POST"])
-def api_optimize_shot_prompt():
-    """Translate raw user intent into a structured shot spec via prompt_optimizer.
-    Body: { user_input, characters[], location, global_settings, scene_context, has_dialogue }
-    """
-    data = request.json or {}
-    try:
-        from llm.prompt_optimizer import optimize_shot_prompt
-    except Exception as e:
-        return jsonify({"error": f"prompt_optimizer unavailable: {e}"}), 500
-    spec = optimize_shot_prompt(
-        user_input=data.get("user_input", ""),
-        characters=data.get("characters", []),
-        location=data.get("location", {}),
-        global_settings=data.get("global_settings", {}),
-        scene_context=data.get("scene_context", ""),
-        has_dialogue=bool(data.get("has_dialogue", False)),
-    )
-    return jsonify(spec)
 
 
 # ---------------------------------------------------------------------------
