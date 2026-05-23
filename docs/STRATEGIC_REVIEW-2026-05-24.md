@@ -188,6 +188,52 @@ After a 20-minute run.
 `DirectorsConsole`. ~30 LOC each, ~1 hour total. Should have happened
 already.
 
+#### P1-5 — Doc-claim verification tooling
+
+**Context.** ADR-013 (codified 2026-05-24 after this director shipped
+a load-bearing inventory error into this very strategic review)
+introduces three mechanical rules for verifying factual claims in
+docs: no inventory claim without producing command; scoped output
+stays scoped; pre-commit trip-wire on strategic docs. Those rules
+close most of the surface. Two structural gaps remain that need tooling.
+
+**Action.**
+
+1. **Doc-claim CI lint.** A script (`scripts/lint_doc_claims.py`)
+   that scans strategic docs (ARCHITECTURE.md, STRATEGIC_REVIEW-*.md,
+   HANDOFF-*.md, README.md, DECISIONS.md, OPERATIONS.md) for
+   inventory-shaped patterns ("N test files," "X LOC," "Y functions,"
+   "Z routes") and validates each against current code state. Wired
+   into the Session-1 CI workflow. A doc that says "N test files"
+   must reconcile against `ls tests/unit/ | wc -l`; a doc that says
+   "X.py is N lines" must reconcile against `wc -l X.py`. Mismatches
+   fail the CI job. Estimate: 1-2 sessions; start with a
+   pattern-based MVP, expand later.
+
+2. **Closing-verification subagent.** Before any
+   strategic-voice doc lands on `main`, dispatch a fresh subagent
+   whose only job is to read the committed file and falsify every
+   factual claim against current code. The subagent has no
+   conversation context — it walks the doc cold, runs verifying
+   commands for each claim, and reports MATCHES / DRIFT. ~5 minute
+   cost per doc commit; catches exactly the class of error that
+   ADR-013 was written for. Estimate: 1 session to write the
+   subagent prompt template + integrate into the doc-commit
+   workflow.
+
+**Why.** The 2026-05-24 inventory error (claiming "1 test file" when
+there were 24) survived into both STRATEGIC_REVIEW and HANDOFF
+because neither tool existed. The mechanical rules in ADR-013 are
+the *floor* — they make the failure visible to the author at commit
+time. This tooling is the *ceiling* — it catches the failures the
+author missed despite the rules. Both layers are needed; humans
+forget rules under writing-momentum.
+
+**Decision authority.** Engineering can build both unilaterally.
+Recommend pairing Tool 1 (doc-claim lint) with Session 1 (CI
+workflow) so it lands in the same `.github/workflows/ci.yml`. Tool 2
+(closing-verification subagent) can ride alongside or come later.
+
 ---
 
 ### P2 — Cost / efficiency

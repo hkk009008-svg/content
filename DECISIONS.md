@@ -320,6 +320,68 @@ Each entry is **dated and immutable** — supersession is tracked via the
 
 ---
 
+## ADR-013 — Verification discipline for factual claims
+
+- **Date:** 2026-05-24
+- **Status:** Accepted
+- **Context:** The new-director STRATEGIC_REVIEW (commit `af9bad2`) and the
+  derived operator HANDOFF (commit `0e66bed`) both contained a load-bearing
+  factual error: the claim that `tests/unit/` had "only one test file"
+  when there were 24. The error survived into the handoff because that
+  doc was written from the same anchored mental model without independent
+  verification, and inherited the false claim into specific session
+  instructions ("Create `tests/unit/test_workflow_selector.py`" and
+  "Create `tests/unit/test_cost_tracker.py`" — both files already existed).
+  Root-cause analysis identified five contributing factors:
+    1. Anchoring on the first observation (Bundle-C 3.5 touched
+       `test_project_persistence.py` early; that file became the mental
+       model of "the test suite").
+    2. Scope-narrow pytest output (`pytest tests/unit/test_project_persistence.py`)
+       reported as scope-wide unit suite state.
+    3. Confirmation bias on a narrative ("operational immaturity"
+       supported by "thin test coverage" → didn't push to falsify).
+    4. Session memory trusted over filesystem (`ls tests/unit/` is 200ms
+       and was never run).
+    5. Writing momentum override of sanity-check pauses (director-voice
+       authority created false confidence in the factual substrate).
+  Critically: the same authoring session produced the rule "Verify before
+  you assert" (HANDOFF principle #1) and broke it. The class of error is
+  fully preventable with mechanical rules.
+- **Decision:** Codify three mechanical rules in CLAUDE.md and AGENTS.md
+  under a new top-level "Verification discipline for factual claims"
+  section:
+  1. No inventory claim without verification output in the same change.
+  2. Scoped output stays scoped (no generalizing from a narrow command).
+  3. Pre-commit trip-wire on strategic / authority-voice docs (paste
+     verifying command output in the commit message).
+  Plus an honesty clause: when the verifying command cannot be run,
+  flag the claim as unverified explicitly. Never apply authority-voice
+  over an unverified factual claim.
+  The rule's scope: specific factual claims (counts, file presence,
+  function existence). Qualitative directional claims are out of scope —
+  judgment + uncertainty flagging suffice.
+- **Consequences:**
+  - +: Specific class of error (factual inventory claims unverified
+       against filesystem) becomes mechanically caught at author-time.
+  - +: Commit messages carry their own verification trail; future
+       directors can re-run the same commands to detect drift.
+  - +: Director-voice authority is now tied to verification effort,
+       which is the right alignment — authority earned by checking,
+       not asserted by tone.
+  - −: Slight friction on doc-writing flow (re-run command, paste
+       output). Cheap (seconds) but real.
+  - −: Doesn't catch bias-driven errors that survive verification
+       (e.g., confirmation bias on the framing of a question that is
+       then verified within its own framing). Tier-3 tooling
+       (doc-claim CI lint + closing-verification subagent) addresses
+       that level; tracked as P1-5 in STRATEGIC_REVIEW-2026-05-24.md.
+- **Cross-ref:** [CLAUDE.md](../CLAUDE.md) /
+  [AGENTS.md](../AGENTS.md) "Verification discipline for factual claims"
+  section. [STRATEGIC_REVIEW-2026-05-24.md](docs/STRATEGIC_REVIEW-2026-05-24.md)
+  P1-5 for the tooling follow-on.
+
+---
+
 *To add a new decision: copy the template below, increment the ADR
 number, fill in Context / Decision / Consequences, and append at the
 bottom. Do not edit prior entries — supersede via Status field instead.*
