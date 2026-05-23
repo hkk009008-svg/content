@@ -44,9 +44,9 @@ file-system-touching state (checkpoint round-trip), so the file
 runs without pytest fixtures.
 
 Run with:
-  pytest tests/integration/test_cross_controller.py -v
+  pytest tests/unit/test_cross_controller.py -v
   # OR (no pytest needed):
-  python tests/integration/test_cross_controller.py
+  python tests/unit/test_cross_controller.py
 """
 
 from __future__ import annotations
