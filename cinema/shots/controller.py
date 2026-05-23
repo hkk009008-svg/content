@@ -190,6 +190,20 @@ class ShotController:
         return self._core.continuity
 
     @property
+    def cost_tracker(self):
+        """Proxy to PipelineCore.cost_tracker.
+
+        Bundle-A 1.3 (2026-05-24): the cost-tracking call sites in
+        generate_keyframe_take / generate_motion_take previously did
+        `self.cost_tracker.record_api_call(...)` wrapped in
+        `try/except AttributeError` — `self.cost_tracker` didn't resolve
+        anywhere on the instance, so every call silently no-op'd. The
+        try/except is kept defensive but the attribute now actually
+        resolves through PipelineCore.
+        """
+        return self._core.cost_tracker
+
+    @property
     def progress(self):
         """Bound-method-shaped proxy so legacy self.progress(...) calls work."""
         return self._lifecycle.report_progress
@@ -1156,6 +1170,7 @@ class ShotController:
                         output_path=out_path,
                         existing_video_path=str(video_path),
                         mode=_settings.get("lip_sync_mode", "auto"),
+                        settings=_settings,
                     )
                     if result:
                         variant["path"] = result

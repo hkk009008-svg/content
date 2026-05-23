@@ -119,13 +119,26 @@ def _get_validator() -> Optional["IdentityValidator"]:
         return None
 
 
-def _arcface_score(image_path: str, reference_path: str) -> Optional[float]:
-    """ArcFace cosine similarity in [0, 1]. None on failure / no face."""
+def _arcface_score(
+    image_path: str,
+    reference_path: str,
+    threshold: float = 0.0,
+) -> Optional[float]:
+    """ArcFace cosine similarity in [0, 1]. None on failure / no face.
+
+    `threshold` is forwarded to `IdentityValidator.validate_image` so the
+    `passed=score >= threshold` flag on the rolling-history entry reflects
+    actual acceptance. Default 0.0 preserves the historical "always passed"
+    behavior for callers that haven't been updated yet; new callers should
+    pass the project's `identity_strictness` (or shot-type threshold) so
+    `get_rolling_stats(...).success_rate` becomes a meaningful signal for
+    `get_adaptive_pulid_weight`.
+    """
     validator = _get_validator()
     if validator is None:
         return None
     try:
-        result = validator.validate_image(image_path, reference_path, threshold=0.0)
+        result = validator.validate_image(image_path, reference_path, threshold=threshold)
         return float(result.overall_score)
     except Exception as e:
         print(f"[FaceGate] ArcFace failed for {os.path.basename(image_path)}: {e}")
@@ -156,6 +169,7 @@ def score_candidate(
     image_path: str,
     face_anchor: Optional[str],
     weights: Optional[dict] = None,
+    threshold: float = 0.0,
 ) -> CandidateScore:
     """Score a single candidate image against the face anchor.
 
@@ -164,6 +178,12 @@ def score_candidate(
         face_anchor: Path to reference face image. If None, ArcFace is skipped
             (landscape shots, no-character shots).
         weights: {"arc": float, "aesthetic": float}. Defaults to 0.6/0.4.
+        threshold: Pass-through to `_arcface_score` -> `IdentityValidator.
+            validate_image`. The `passed` flag on the resulting rolling-history
+            entry reflects whether the candidate met this bar. Default 0.0
+            preserves prior "always passed" behavior; callers should pass a
+            non-zero value (typically `identity_strictness`) so rolling-stats
+            `success_rate` becomes a meaningful signal.
 
     Returns CandidateScore with arc, aesthetic, and composite filled.
     Missing scores fall back to a neutral value (0.5) for the composite so
@@ -173,7 +193,7 @@ def score_candidate(
     score = CandidateScore(image_path=image_path, seed=-1)
 
     if face_anchor and os.path.exists(face_anchor):
-        arc = _arcface_score(image_path, face_anchor)
+        arc = _arcface_score(image_path, face_anchor, threshold=threshold)
         if arc is not None:
             score.arc_score = arc
             score.has_arc = True

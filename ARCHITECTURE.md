@@ -1232,9 +1232,6 @@ print('OK')
 
 | Severity | Issue | Location |
 |---|---|---|
-| Medium | `threshold=0.0` reads pollute `success_rate` rolling stat — N=8 best-of and performance gate both call `validate_image(threshold=0.0)`, every read counts as `passed=True`. `mean_similarity` is still real signal; `success_rate`/`common_failure` are inflated. | `face_validator_gate.py:128`, `performance/identity_gate.py:61` |
-| Medium | `lipsync_validation_threshold` setting is dead — `_sync_gate_settings()` called without arguments in both overlay and generation paths, defaults `(True, 0.65)` always win. | `lip_sync.py:206, 467` |
-| Low | `ShotController.cost_tracker` AttributeError swallowed — `__init__` doesn't store it as a proxy; try/except blocks silently no-op cost tracking. | `cinema/shots/controller.py:466-475, 881-890` |
 | Low | `phase_c_vision.py:107-109` is dead code — `__main__` block calls nonexistent `validate_identity()`. | `phase_c_vision.py:107` |
 | Low | `_progress_queues[pid]` never cleaned up — survives across runs; minor memory leak per project. | `web_server.py:60` |
 | Low | `audio/voiceover.py:generate_voiceover` writes `temp_voiceover.mp3` to cwd. Fine in practice (orchestrator overrides) but pollutes cwd for standalone callers. | `audio/voiceover.py:276` |

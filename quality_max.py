@@ -747,13 +747,27 @@ def generate_ai_broll_max(
     # block above. ThreadPoolExecutor.map yields in submission order so the
     # print + scores ordering stays stable across workers settings.
     parallel_workers = max(1, min(4, int(params.get("parallel_workers", 1))))
+    # Bundle-A 1.1 (2026-05-24): rolling-stats success_rate gate. Previously
+    # every candidate scored with threshold=0.0 -> validate_image marked it
+    # passed=True regardless of similarity, polluting the rolling history that
+    # feeds get_adaptive_pulid_weight. Pass the project's identity acceptance
+    # bar so passed=True means "would have been acceptable as the final shot".
+    if ctx is not None:
+        from cinema.context import get_project_setting  # local import shared above
+        identity_threshold = float(get_project_setting(ctx, "identity_strictness", 0.60))
+    else:
+        identity_threshold = 0.60
 
     def _run_candidate(task):
         cand_index, cand_seed, cand_path, wf = task
         saved = _run_one_candidate(comfy, wf, cand_path)
         if not saved:
             return None
-        cs = score_candidate(saved, character_image if has_character else None)
+        cs = score_candidate(
+            saved,
+            character_image if has_character else None,
+            threshold=identity_threshold,
+        )
         cs.seed = cand_seed
         return (cand_index, cand_seed, saved, cs)
 
@@ -815,7 +829,11 @@ def generate_ai_broll_max(
         retry_path = f"{os.path.splitext(output_filename)[0]}_retry.jpg"
         saved = _run_one_candidate(comfy, retry_wf, retry_path)
         if saved:
-            retry_score = score_candidate(saved, character_image if has_character else None)
+            retry_score = score_candidate(
+                saved,
+                character_image if has_character else None,
+                threshold=identity_threshold,
+            )
             retry_score.seed = retry_seed
             print(f"[quality_max]   retry seed={retry_seed} arc={retry_score.arc_score:.3f} "
                   f"comp={retry_score.composite:.3f}")

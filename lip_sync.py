@@ -176,6 +176,7 @@ def lipsync_overlay(
     video_path: str,
     audio_path: str,
     output_path: str,
+    settings: Optional[dict] = None,
 ) -> Optional[str]:
     """
     OVERLAY MODE: Apply lip sync to an EXISTING video using MuseTalk.
@@ -200,9 +201,12 @@ def lipsync_overlay(
     video_url = fal_client.upload_file(video_path)
     audio_url = fal_client.upload_file(audio_path)
 
-    # Gate setup for sync-validated escalation across overlay engines
+    # Gate setup for sync-validated escalation across overlay engines.
+    # Bundle-A 1.2 (2026-05-24): thread project settings through so
+    # `lipsync_validation_threshold` actually drives the gate (was previously
+    # ignored because _sync_gate_settings was called with no args).
     import shutil as _shutil_overlay
-    overlay_gate_enabled, overlay_threshold = _sync_gate_settings()
+    overlay_gate_enabled, overlay_threshold = _sync_gate_settings(settings)
     overlay_candidates: list = []
 
     def _overlay_gate_or_stash(engine_name: str) -> bool:
@@ -437,6 +441,7 @@ def lipsync_generation(
     output_path: str,
     resolution: str = "720p",
     turbo: bool = False,
+    settings: Optional[dict] = None,
 ) -> Optional[str]:
     """
     GENERATION MODE: Create a full-body talking video from a STILL IMAGE.
@@ -463,8 +468,10 @@ def lipsync_generation(
 
     # SyncNet gate — score each engine's output, fall through if below threshold.
     # Track candidates so we can return the best-scored even if none clears the bar.
+    # Bundle-A 1.2 (2026-05-24): thread project settings through so
+    # `lipsync_validation_threshold` is honored.
     import shutil as _shutil
-    gate_enabled, gate_threshold = _sync_gate_settings()
+    gate_enabled, gate_threshold = _sync_gate_settings(settings)
     candidates: list = []  # list of (score, stash_path, engine_name)
 
     def _gate_or_stash(engine_name: str) -> bool:
@@ -621,6 +628,7 @@ def generate_lip_sync_video(
     mode: str = "auto",
     resolution: str = "720p",
     turbo: bool = False,
+    settings: Optional[dict] = None,
 ) -> Optional[str]:
     """
     Smart lip sync router — selects the optimal mode based on inputs.
@@ -655,11 +663,11 @@ def generate_lip_sync_video(
     print(f"   [LIPSYNC] Mode: {selected_mode.upper()}")
 
     if selected_mode == "overlay" and existing_video_path:
-        return lipsync_overlay(existing_video_path, audio_path, output_path)
+        return lipsync_overlay(existing_video_path, audio_path, output_path, settings=settings)
     else:
         return lipsync_generation(
             character_image_path, audio_path, output_path,
-            resolution=resolution, turbo=turbo,
+            resolution=resolution, turbo=turbo, settings=settings,
         )
 def generate_rife_interpolation(
     video_path: str,

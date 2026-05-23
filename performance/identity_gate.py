@@ -52,13 +52,23 @@ def _get_validator() -> Optional["IdentityValidator"]:
         return None
 
 
-def _arcface_score(frame_path: str, anchor_path: str) -> Optional[float]:
-    """Score a single frame against the anchor. Wrapper around IdentityValidator."""
+def _arcface_score(
+    frame_path: str,
+    anchor_path: str,
+    threshold: float = 0.0,
+) -> Optional[float]:
+    """Score a single frame against the anchor. Wrapper around IdentityValidator.
+
+    `threshold` is forwarded to `validate_image` so the rolling-history entry's
+    `passed` flag reflects actual acceptance (success_rate stays meaningful).
+    Default 0.0 preserves prior behavior; `validate_performance_take` passes
+    its `floor` param as the threshold.
+    """
     v = _get_validator()
     if v is None:
         return None
     try:
-        result = v.validate_image(frame_path, anchor_path, threshold=0.0)
+        result = v.validate_image(frame_path, anchor_path, threshold=threshold)
         return float(result.overall_score)
     except Exception as e:
         print(f"[PerformanceGate] ArcFace score failed: {e}")
@@ -100,4 +110,8 @@ def validate_performance_take(
         frame_png = os.path.join(td, "sample.png")
         if not _extract_sample_frame(video_path, frame_png):
             return None
-        return _arcface_score(frame_png, face_anchor)
+        # Pass `floor` through to the scorer so the rolling-history `passed`
+        # flag reflects whether this take met the operator-set bar. The
+        # `floor` param was previously documented-but-ignored; now it drives
+        # success_rate honestly. (See ARCHITECTURE.md §16 #1.1.)
+        return _arcface_score(frame_png, face_anchor, threshold=floor)
