@@ -1,10 +1,13 @@
 """Schema-driven validation for MaxTier UI overlay values.
 
-Guards the overlay block in `quality_max.generate_ai_broll_max` against
+Guards the overlay blocks in `quality_max.generate_ai_broll_max` against
 out-of-range / wrong-type values arriving via `ctx.global_settings`.
 
-Bounds mirror the React sliders in
-`web/src/components/settings/AdvancedSection.tsx::MaxTierComfyControls`.
+Bounds mirror the React sliders in:
+  * `web/src/components/settings/AdvancedSection.tsx::MaxTierComfyControls`
+    (17 sampler / CN / post-pass knobs)
+  * `web/src/components/settings/MaxQualityTierSection.tsx`
+    (7 best-of-N halt knobs)
 """
 from __future__ import annotations
 
@@ -85,19 +88,44 @@ class TestBoolValidation:
         assert warning is not None
 
 
+class TestHaltKnobValidation:
+    """The 7 best-of-N halt knobs from MaxQualityTierSection.tsx."""
+
+    def test_max_candidate_count_clamps_above_max_and_preserves_int(self):
+        # UI slider stops at 16; JSON API could POST 999.
+        accepted, warning = _validate_overlay_value("max_candidate_count", 999)
+        assert accepted == 16
+        assert isinstance(accepted, int)
+        assert warning is not None and "above" in warning
+
+    def test_max_halt_rule_rejects_unknown_enum(self):
+        # Only the three documented rules are valid; everything else falls
+        # back to the template default so the halt loop doesn't go undefined.
+        accepted, warning = _validate_overlay_value("max_halt_rule", "always_halt")
+        assert accepted is None
+        assert warning is not None and "always_halt" in warning
+
+    def test_max_halt_threshold_arc_clamps_below_min(self):
+        # Arc floor is 0.50 (not 0.70 like composite): raw ArcFace lives lower
+        # than the composite score, so this looser bound is intentional.
+        accepted, warning = _validate_overlay_value("max_halt_threshold_arc", 0.10)
+        assert accepted == pytest.approx(0.50)
+        assert warning is not None and "below" in warning
+
+
 class TestUnschemadKey:
-    def test_halt_knob_passes_through_unchanged(self):
-        # max_* halt knobs are intentionally not in this schema (separate
-        # follow-up). Unknown keys should NOT be silently dropped.
-        accepted, warning = _validate_overlay_value("max_candidate_count", 99)
+    def test_unknown_key_passes_through_unchanged(self):
+        # A knob added to the overlay block before its schema entry lands
+        # should pass through, not be silently dropped.
+        accepted, warning = _validate_overlay_value("some_future_knob", 99)
         assert accepted == 99
         assert warning is None
 
 
 class TestSchemaCoverage:
-    """Lock down the 17 ComfyControls knobs the commit ec8b1d9 overlays."""
+    """Lock down the schema's coverage of both UI knob groups."""
 
-    EXPECTED_KEYS = {
+    COMFYCONTROLS_KEYS = {
         "slg_scale",
         "freeu_b1", "freeu_b2", "freeu_s1", "freeu_s2",
         "ays_steps",
@@ -111,5 +139,18 @@ class TestSchemaCoverage:
         "supir_enabled", "supir_steps",
     }
 
-    def test_schema_covers_all_17_comfycontrols(self):
-        assert set(_MAX_TIER_KNOB_SCHEMA.keys()) == self.EXPECTED_KEYS
+    HALT_KNOB_KEYS = {
+        "max_candidate_count",
+        "max_candidate_batch",
+        "max_halt_threshold_composite",
+        "max_halt_threshold_arc",
+        "max_halt_min_n",
+        "max_regenerate_floor_arc",
+        "max_halt_rule",
+    }
+
+    def test_schema_covers_comfycontrols_and_halt_knobs(self):
+        # 17 ComfyControls + 7 halt knobs = 24 total schemad keys.
+        assert set(_MAX_TIER_KNOB_SCHEMA.keys()) == (
+            self.COMFYCONTROLS_KEYS | self.HALT_KNOB_KEYS
+        )

@@ -81,8 +81,11 @@ _UPLOAD_CACHE_LOCK = threading.Lock()
 # ---------------------------------------------------------------------------
 # MaxTier UI overlay validation
 # ---------------------------------------------------------------------------
-# Bounds mirror the React sliders in
-# web/src/components/settings/AdvancedSection.tsx::MaxTierComfyControls.
+# Bounds mirror two React panels:
+#   * web/src/components/settings/AdvancedSection.tsx::MaxTierComfyControls
+#     (17 sampler / CN / post-pass knobs)
+#   * web/src/components/settings/MaxQualityTierSection.tsx
+#     (7 best-of-N halt knobs + the halt_rule radio group)
 # Keep in sync when UI ranges change. Out-of-range numeric values are clamped
 # (the UI can still send 99 via the JSON API even when the slider stops at 5);
 # unknown enum / wrong-type values are rejected so the template default wins,
@@ -114,6 +117,17 @@ _MAX_TIER_KNOB_SCHEMA: Dict[str, Tuple] = {
     "face_detailer_guide_size":  ("enum", 512, 1024, 2048),
     "supir_enabled":             ("bool",),
     "supir_steps":               ("numeric", int,   20,  100),
+    # Adaptive-halt knobs (MaxQualityTierSection.tsx). Arc threshold floors
+    # at 0.50 while composite floors at 0.70 because raw ArcFace scores live
+    # lower than composite (0.6·arc + 0.4·aesthetic) — the looser arc bound
+    # lets operators express identity-tolerant policies.
+    "max_candidate_count":          ("numeric", int,   1,    16),
+    "max_candidate_batch":          ("numeric", int,   1,    8),
+    "max_halt_threshold_composite": ("numeric", float, 0.70, 1.00),
+    "max_halt_threshold_arc":       ("numeric", float, 0.50, 1.00),
+    "max_halt_min_n":               ("numeric", int,   1,    8),
+    "max_regenerate_floor_arc":     ("numeric", float, 0.50, 1.00),
+    "max_halt_rule":                ("enum", "composite_only", "conjunctive", "budget_only"),
 }
 
 
@@ -126,8 +140,9 @@ def _validate_overlay_value(ui_key: str, value):
       * `warning` — human-readable string when the value was modified or
         rejected; `None` on clean pass-through.
 
-    Unknown `ui_key` passes through unchanged so unschemad knobs (e.g. the 7
-    `max_*` halt knobs, which have their own bounds upstream) still apply.
+    Unknown `ui_key` passes through unchanged so a knob added to the overlay
+    blocks before its schema entry lands still applies (rather than being
+    silently dropped).
     """
     schema = _MAX_TIER_KNOB_SCHEMA.get(ui_key)
     if schema is None:
@@ -593,6 +608,9 @@ def generate_ai_broll_max(
 
     # ---- Per-project UI overrides (from ctx.global_settings) ----
     # 7 MaxQualityTier halt knobs — override the shot-type defaults above.
+    # Same validation contract as the 17 ComfyControls below: clamp numeric
+    # out-of-range inputs, reject unknown enums/wrong types. The JSON API can
+    # send any value past the React slider bounds.
     if ctx is not None:
         from cinema.context import get_project_setting
         for ui_key, param_key in (
@@ -605,8 +623,13 @@ def generate_ai_broll_max(
             ("max_halt_rule",                "halt_rule"),
         ):
             override = get_project_setting(ctx, ui_key, None)
-            if override is not None:
-                params[param_key] = override
+            if override is None:
+                continue
+            accepted, warning = _validate_overlay_value(ui_key, override)
+            if warning:
+                print(f"[quality_max] UI overlay: {warning}")
+            if accepted is not None:
+                params[param_key] = accepted
 
         # 17 MaxTierComfyControls — overlay into params so the existing
         # _inject_sampling / _inject_conditioning / _inject_post_passes
