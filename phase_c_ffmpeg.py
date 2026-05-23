@@ -10,10 +10,22 @@ from config.settings import settings
 if TYPE_CHECKING:
     from cinema.context import PipelineContext
 
-# VEO is still in the default cascade (see line ~99 below) but quota exhaustion
-# is sticky once tripped: any VEO 429 sets this flag for the rest of the process,
-# short-circuiting future VEO calls to try_next_api(). Reset requires a restart.
-_VEO_QUOTA_EXHAUSTED = False
+# VEO is still in the default cascade (see line ~99 below). Quota exhaustion
+# carries a TTL-based cooldown rather than a permanent flag: any VEO 429 sets
+# _VEO_QUOTA_EXHAUSTED_UNTIL to (now + _VEO_QUOTA_TTL_S), and subsequent calls
+# short-circuit to try_next_api() until that timestamp passes. Set to 0 means
+# no active cooldown. Process restart also clears state (module-level reset).
+_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0
+_VEO_QUOTA_TTL_S: int = 1800  # 30 minutes — Google Veo quotas typically reset hourly
+
+
+def _veo_quota_blocked() -> bool:
+    """True if a recent VEO 429 means we should still cascade past VEO.
+
+    Auto-expires after _VEO_QUOTA_TTL_S seconds so the operator doesn't need
+    to restart the server to retry once Google's quota window rolls over.
+    """
+    return _VEO_QUOTA_EXHAUSTED_UNTIL > time.time()
 
 try:
     from runwayml import RunwayML, TaskFailedError
@@ -400,9 +412,10 @@ def generate_ai_video(
 
     elif target_api.upper() == "VEO":
         # Veo 3.1 reference-to-video via fal.ai — preserves subject from reference images
-        global _VEO_QUOTA_EXHAUSTED
-        if _VEO_QUOTA_EXHAUSTED:
-            print("   [VEO] Quota exhausted flag set. Cascading...")
+        global _VEO_QUOTA_EXHAUSTED_UNTIL
+        if _veo_quota_blocked():
+            remaining = int(_VEO_QUOTA_EXHAUSTED_UNTIL - time.time())
+            print(f"   [VEO] Quota cooldown active ({remaining}s remaining). Cascading...")
             return try_next_api()
 
         fal_key = settings.fal_key
@@ -462,8 +475,8 @@ def generate_ai_video(
             except Exception as e:
                 error_str = str(e).lower()
                 if "429" in error_str or "quota" in error_str or "exhausted" in error_str:
-                    _VEO_QUOTA_EXHAUSTED = True
-                    print("   [VEO] Quota exhausted — permanently flagged")
+                    _VEO_QUOTA_EXHAUSTED_UNTIL = time.time() + _VEO_QUOTA_TTL_S
+                    print(f"   [VEO] Quota exhausted — blocking VEO for {_VEO_QUOTA_TTL_S}s")
                 print(f"   [WARN] Veo 3.1 error: {e}")
                 return try_next_api()
         else:
