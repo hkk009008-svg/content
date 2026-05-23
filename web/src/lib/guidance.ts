@@ -36,6 +36,7 @@ export const PRODUCTION_PRESETS: ProductionPreset[] = [
     settings: {
       lip_sync_mode: 'auto',
       face_swap_enabled: true,
+      adaptive_pulid: true,
       identity_strictness: 0.7,
       coherence_check_enabled: true,
       color_grade_preset: 'desaturated',
@@ -49,6 +50,7 @@ export const PRODUCTION_PRESETS: ProductionPreset[] = [
     useWhen: 'Performance-heavy scenes, close reactions, dramatic reveals.',
     settings: {
       music_mood: 'melancholic',
+      adaptive_pulid: true,
       identity_strictness: 0.7,
       coherence_check_enabled: true,
       color_grade_preset: 'warm_cinema',
@@ -112,6 +114,7 @@ export const PRODUCTION_PRESETS: ProductionPreset[] = [
       face_detailer_enabled: true,
       face_detailer_guide_size: 1024,
       // Identity safety net stays tight
+      adaptive_pulid: true,
       identity_strictness: 0.85,
       coherence_check_enabled: true,
     },

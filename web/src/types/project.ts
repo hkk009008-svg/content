@@ -128,8 +128,14 @@ export interface GlobalSettings {
   // API Engines
   cascade_retry_limit?: number
   api_engines?: Record<string, ApiEngineConfig>
+  // V11: Budget gate (read by cinema/core.py via CostTracker)
+  budget_limit_usd?: number
   // V11: Quality Engine
   identity_strictness?: number
+  // V11: LLM model override (read by llm/chief_director.py per call)
+  creative_llm?: string
+  // V11: Adaptive PuLID gate (read by domain/continuity_engine.py)
+  adaptive_pulid?: boolean
   // V11: Workflow & Coherence
   coherence_check_enabled?: boolean
   color_drift_sensitivity?: number

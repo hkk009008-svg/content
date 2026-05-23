@@ -60,6 +60,36 @@ export function AdvancedSection({ s, config, project }: Props) {
         min={0.3} max={1.0} step={0.05} defaultValue={0.6}
         hint="Min scene coherence score (color+lighting+composition) to accept. Below = mutation retry." />
 
+      {/* LLM Preferences */}
+      <div>
+        <label className="text-eyebrow text-editorial-ivory-soft block mb-2 uppercase tracking-wider">LLM Preferences</label>
+        <div className="space-y-3">
+          {/* Creative LLM — read in llm/chief_director.py:_call_llm as a per-call model override */}
+          <div>
+            <label className="text-eyebrow text-editorial-ivory-mute block mb-0.5 font-mono">Creative LLM</label>
+            <select value={s.creative_llm || 'auto'}
+              onChange={e => update('creative_llm', e.target.value)}
+              className="w-full bg-editorial-ink border border-editorial-rule rounded-lg px-3 py-1.5 text-eyebrow text-editorial-ivory">
+              {(config as any)?.creative_llm_options?.map((opt: any) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              )) || (
+                <>
+                  <option value="auto">Auto (Router decides)</option>
+                  <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                  <option value="gpt-4o">GPT-4o</option>
+                </>
+              )}
+            </select>
+            <p className="text-eyebrow-sm text-editorial-ivory-mute">Per-call model override. Mismatched provider family falls back to the active client's default.</p>
+          </div>
+
+          {/* Adaptive PuLID — gated in domain/continuity_engine.py before get_adaptive_pulid_weight */}
+          <ToggleCard field="adaptive_pulid" label="Adaptive PuLID"
+            desc="Auto-adjust face-lock strength from rolling identity scores. Off = use shot-type defaults."
+            s={s} update={update} />
+        </div>
+      </div>
+
       {/* Continuity Parameters */}
       {config?.continuity_options && (
         <div>
@@ -342,6 +372,22 @@ function MaxTierComfyControls({ s, update }: { s: any; update: (k: string, v: an
         )}
       </div>
     </>
+  )
+}
+
+function ToggleCard({ field, label, desc, s, update }: { field: string; label: string; desc: string; s: any; update: (k: string, v: any) => void | Promise<void> }) {
+  return (
+    <div className="flex items-center gap-2 bg-editorial-ink rounded-lg px-3 py-2 border border-editorial-rule">
+      <input type="checkbox"
+        checked={s[field] !== false}
+        onChange={e => update(field, e.target.checked)}
+        aria-label={label}
+        className="accent-editorial-brass" />
+      <div>
+        <span className="text-eyebrow text-editorial-ivory font-medium">{label}</span>
+        <p className="text-eyebrow-sm text-editorial-ivory-mute">{desc}</p>
+      </div>
+    </div>
   )
 }
 
