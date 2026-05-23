@@ -228,7 +228,7 @@ class ShotController:
         return None, None, -1
 
     def _find_take(self, shot: dict, take_id: str) -> tuple[Optional[str], Optional[dict]]:
-        for collection_name in ("keyframe_takes", "motion_takes", "postprocess_variants"):
+        for collection_name in ("keyframe_takes", "performance_takes", "motion_takes", "postprocess_variants"):
             for take in shot.get(collection_name, []):
                 if take.get("id") == take_id:
                     return collection_name, take

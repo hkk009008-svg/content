@@ -908,30 +908,13 @@ def test_approve_take_keyframe_in_motion_takes_errors_not_keyframe():
 
 def test_approve_take_performance_in_performance_takes_sets_field():
     """Happy path: approving a performance-collection take with
-    kind=performance sets approved_performance_take_id.
-
-    NOTE (divergence): ShotController._find_take at
-    cinema/shots/controller.py:230-235 iterates ONLY
-    ('keyframe_takes', 'motion_takes', 'postprocess_variants') --
-    it OMITS 'performance_takes'. So today this test exercises the
-    'Take not found' fall-through: the controller's performance arm is
-    unreachable via the production code path. The test asserts the
-    actual current behavior so a future fix to _find_take (adding
-    performance_takes to the lookup tuple) will require updating this
-    assertion to the happy-path semantic implied by the test name.
-
-    See the spawned follow-up task for the underlying bug.
-    """
+    kind=performance sets approved_performance_take_id."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        host, _, _, _, patch_ctx = _make_richer_setup(tmpdir)
+        host, _, core, _, patch_ctx = _make_richer_setup(tmpdir)
         with patch_ctx:
             result = host._review_ctrl.approve_take("sh2", "tk_perf_2", "performance")
-            # Current (buggy) behavior: _find_take doesn't see performance_takes
-            assert result.get("error") == "Take not found", (
-                "If this assertion ever flips to 'Take is not a performance' "
-                "or success, _find_take has been fixed to include "
-                "performance_takes -- update the test to the happy-path."
-            )
+            assert "error" not in result, f"unexpected error: {result}"
+            assert core.project["scenes"][0]["shots"][1]["approved_performance_take_id"] == "tk_perf_2"
 
 
 def test_approve_take_performance_in_keyframe_takes_errors_not_performance():
