@@ -501,9 +501,14 @@ class ContinuityEngine:
         shot_type = classify_shot_type(shot)
         identity_threshold = get_threshold_for_shot(shot_type, mode="standard")
 
-        # Adaptive PuLID weight from rolling identity performance
+        # Adaptive PuLID weight from rolling identity performance.
+        # Gated by the ``adaptive_pulid`` per-project setting (default True).
+        # Setting adaptive_pulid: false disables the rolling-stats override;
+        # pulid_weight_override stays None and the static template weight from
+        # workflow_selector applies instead.
+        _settings = self.project.get("global_settings", {})
         pulid_weight_override = None
-        if primary_char:
+        if primary_char and _settings.get("adaptive_pulid", True):
             pulid_weight_override = get_adaptive_pulid_weight(
                 shot_type, primary_char, self.identity_validator
             )
