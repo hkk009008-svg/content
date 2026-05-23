@@ -149,8 +149,13 @@ class TestSchemaCoverage:
         "max_halt_rule",
     }
 
+    # ADR-010: parallelism knob for the N=8 best-of loop (commit 11c3e02).
+    PARALLEL_KNOB_KEYS = {
+        "max_quality_parallel_workers",
+    }
+
     def test_schema_covers_comfycontrols_and_halt_knobs(self):
-        # 17 ComfyControls + 7 halt knobs = 24 total schemad keys.
+        # 17 ComfyControls + 7 halt knobs + 1 parallelism knob = 25 total schemad keys.
         assert set(_MAX_TIER_KNOB_SCHEMA.keys()) == (
-            self.COMFYCONTROLS_KEYS | self.HALT_KNOB_KEYS
+            self.COMFYCONTROLS_KEYS | self.HALT_KNOB_KEYS | self.PARALLEL_KNOB_KEYS
         )

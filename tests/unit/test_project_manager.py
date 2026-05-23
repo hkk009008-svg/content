@@ -14,9 +14,16 @@ import project_manager
 
 @pytest.fixture(autouse=True)
 def tmp_projects_dir(monkeypatch):
-    """Point project_manager.PROJECTS_DIR to a fresh temp dir for every test."""
+    """Point PROJECTS_DIR to a fresh temp dir for every test.
+
+    `project_manager` at repo root is a re-export shim for
+    `domain.project_manager`. Functions resolve `PROJECTS_DIR` from their
+    defining module's namespace, so the patch MUST target the real symbol
+    in `domain.project_manager` — patching the shim's re-exported name is
+    a silent no-op and was the cause of 6 historical failures.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
-        monkeypatch.setattr(project_manager, "PROJECTS_DIR", tmpdir)
+        monkeypatch.setattr("domain.project_manager.PROJECTS_DIR", tmpdir)
         yield tmpdir
 
 
