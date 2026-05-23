@@ -230,15 +230,10 @@ def generate_bgm(
 ) -> bool:
     """Smart router: Suno V5 → FAL Stable Audio. Returns True on success.
 
-    Reads settings.music_provider for the preferred engine; falls through to
-    FAL on any failure. Other paths can be wired here (ElevenLabs Music, etc.).
+    Caller passes prefer_provider; "AUTO" tries Suno first, then falls through
+    to FAL on any failure.
     """
-    provider = prefer_provider
-    if not provider:
-        # Caller should resolve music_provider via
-        # get_project_setting(ctx, "music_provider", "AUTO") and pass as
-        # prefer_provider. Defensive default here for direct/test callers.
-        provider = "AUTO"
+    provider = prefer_provider or "AUTO"
 
     if provider in ("SUNO_V5", "AUTO"):
         if generate_suno_v5(music_vibe, output_filename, duration=duration, custom_lyrics=custom_lyrics):

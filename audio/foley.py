@@ -101,19 +101,11 @@ def generate_scene_foley(
 ) -> Optional[str]:
     """Generate a single foley sound effect — routed to the configured provider.
 
-    Provider resolution:
-      1. explicit `provider` kwarg
-      2. settings.foley_provider (set via SettingsPanel)
-      3. ELEVENLABS_V3 (the legacy default)
-
     STABLE_AUDIO_FOLEY is preferred for long environmental beds (rain, crowd,
     machinery); ELEVENLABS_V3 is preferred for short specific impacts (glass
     break, footsteps on gravel). Falls back to ElevenLabs on any failure.
     """
     if not provider:
-        # Caller (cinema_pipeline.py) should resolve foley_provider via
-        # get_project_setting(ctx, "foley_provider", "ELEVENLABS_V3") and pass
-        # it in. Defensive default here for direct/test callers.
         provider = "ELEVENLABS_V3"
 
     if provider == "STABLE_AUDIO_FOLEY":
