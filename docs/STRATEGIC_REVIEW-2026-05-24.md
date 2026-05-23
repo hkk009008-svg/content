@@ -423,6 +423,12 @@ These are not P-prioritized; they're cleanup-on-confidence calls.
 
 ## Roadmap (next 6 sessions if I'm running engineering)
 
+> **Per-session operator briefs with why + how + acceptance criteria
+> + pitfalls + commit shape live in
+> [HANDOFF-roadmap-2026-05-24.md](HANDOFF-roadmap-2026-05-24.md).**
+> The table below is the index; that file is the manual.
+
+
 | Session | Focus | Deliverable |
 |---|---|---|
 | 1 | **P0-2 CI** | `.github/workflows/ci.yml` running smoke + pytest + tsc on every push. |

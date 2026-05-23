@@ -18,6 +18,7 @@ This is a single-operator, single-machine tool. Not a multi-tenant SaaS.
 | Run it locally / set up env / troubleshoot | [OPERATIONS.md](OPERATIONS.md) |
 | See WHY the architecture is shaped this way (settled decisions) | [DECISIONS.md](DECISIONS.md) |
 | Strategic direction + open critique from current leadership | [docs/STRATEGIC_REVIEW-2026-05-24.md](docs/STRATEGIC_REVIEW-2026-05-24.md) |
+| Execute a session from the roadmap (operator manual) | [docs/HANDOFF-roadmap-2026-05-24.md](docs/HANDOFF-roadmap-2026-05-24.md) |
 | Work in this repo as Claude Code | [CLAUDE.md](CLAUDE.md) |
 | Work in this repo as another AI agent (Cursor, Aider, Copilot, Codex, …) | [AGENTS.md](AGENTS.md) |
 | See what was true at past handoff dates | [docs/archive/](docs/archive/) |
