@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Content** (2836 symbols, 17637 relationships, 239 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Content** (2909 symbols, 18530 relationships, 246 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -130,18 +130,21 @@ Concrete protocol at session start (≤2 minutes):
 
 Trust the code; update the prose when it diverges.
 
-# Architecture — see [ARCHITECTURE.md](ARCHITECTURE.md)
+# Repo doc map
 
-The full architectural map of this codebase — entry point, orchestrator,
-phases, gates, story prep, image gen, video routing, performance/lipsync,
-identity, audio, LLMs, frontend, plus known bugs and dead code — lives in
-[`ARCHITECTURE.md`](ARCHITECTURE.md) at the repo root. Every claim there is
-cross-referenced to file:line and was verified against source on the date
-in the document's footer.
+| Need to | Read |
+|---|---|
+| Get oriented (purpose + quick start) | [README.md](README.md) |
+| Understand the code (verified truth — what's where, what does what) | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Run / configure / troubleshoot | [OPERATIONS.md](OPERATIONS.md) |
+| See WHY the architecture is shaped this way (ADR log) | [DECISIONS.md](DECISIONS.md) |
+| Current leadership critique + forward direction | [docs/STRATEGIC_REVIEW-2026-05-24.md](docs/STRATEGIC_REVIEW-2026-05-24.md) |
+| Past handoffs (historical) | [docs/archive/](docs/archive/) |
 
-Don't duplicate that content here. If you need to record something
-load-bearing about how a subsystem works, find or add the appropriate
-section in `ARCHITECTURE.md`.
+Don't duplicate ARCHITECTURE.md content in this file. If you need to record
+something load-bearing about how a subsystem works, find or add the
+appropriate section in `ARCHITECTURE.md`. For decisions (with rationale),
+append to `DECISIONS.md` — never edit prior entries.
 
 ## When you change something
 

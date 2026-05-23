@@ -1274,5 +1274,47 @@ from them. Don't delete without grep.
 
 ---
 
-*Last verified: 2026-05-24 by parallel investigation across 11 subsystems.
-This file replaces the Architecture Preamble formerly in CLAUDE.md.*
+## 19. Glossary
+
+Domain terms used throughout this codebase. Most are defined in their
+section above; this is a flat lookup table for quick reference.
+
+| Term | Meaning |
+|---|---|
+| **HC1 IDENTITY_FIREWALL** | Hard constraint #1 in CineDecompose: LLM must never describe face/hair/skin/eye color. Identity comes from PuLID reference injection downstream. Violation = pipeline failure. |
+| **HC2 SCHEMA_LOCK** | Every shot prompt must contain exactly `[SHOT][SCENE][ACTION][OUTFIT][QUALITY]` in order. |
+| **HC3 LOCATION_LOCK / HC4 LIGHTING_LOCK / HC5 FACE_DIRECTION** | Same-scene shots use identical location + lighting; character must face the camera. |
+| **PuLID** | "Pure and Lightning ID Customization" — face-locking adapter for diffusion. Per-shot weight (`pulid_weight`) is adaptive via rolling-stats feedback (§11.5). |
+| **ArcFace** (loss) vs **GhostFaceNet** (model) | Identity validation uses DeepFace's GhostFaceNet model, trained with ArcFace loss. The codebase says "ArcFace" in many comments; the actual model is GhostFaceNet. |
+| **N=8 best-of** | Max-tier image generation strategy: produce up to 8 candidates with different seeds, score each via composite (0.6·ArcFace + 0.4·Aesthetic v2), halt early when threshold met. §8.3 |
+| **Composite score** | `0.6 × arc + 0.4 × aesthetic`. The selection metric for N=8 best-of. |
+| **FreeU** | Training-free U-Net feature rescaling (skip-connection + backbone). Improves detail. §8.3 |
+| **SLG** | Skip-Layer Guidance for Diffusion Transformers — amplifies detail by skipping specific layers in the guided path. §8.3 |
+| **DetailDaemon** | Sampler wrapper injecting controlled noise during denoising to surface micro-detail. §8.3 |
+| **SUPIR** | "Scaling Up Image Restoration" V2 — final post-pass quality lift, used before 4K downsample. §8.3 |
+| **Redux** | FLUX style-reference adapter — accepts image refs to lock style (separate from PuLID identity). §8.3 |
+| **Mode A vs Mode B** (performance) | Mode A: operator pre-uploads a driving video. Mode B: orchestrator synthesizes a driving video from TTS audio via Hedra → SadTalker cascade. §10.2-10.3 |
+| **Overlay vs Generation** (lipsync) | Overlay: take existing video + audio, lip-sync over the mouth (preserves cinematography). Generation: take still + audio, create talking-head from scratch. §10.6 |
+| **Predicate-poll** | Gate model where the worker thread polls disk-state every 500ms via a predicate function. State survives crashes + SSE disconnects. ADR-002, §6. |
+| **PipelineContext** (ctx) | Per-run dataclass that ALSO implements the dict API. Carries `global_settings`, lifecycle, audio paths. Use `get_project_setting(ctx, key, default)` for project knobs. ADR-003. |
+| **PipelineCore** | Long-lived per-project deps (project dict, continuity engine, chief director, cost tracker, LLM ensemble). Cached in `web_server._running_cores` so it survives across runs. §4.3 |
+| **RunState** | Per-run mutable bag (shot_results, scene_clips, current_*, etc.). Fresh per pipeline instance. §4.5 |
+| **CheckpointStore** | Atomic JSON resume file at `<project>/temp/pipeline_state.json`. Written via `tempfile + os.replace`. §4.6 |
+| **ChiefDirector** | LLM validator (Anthropic by default, OpenAI fallback). Pre-gen: returns APPROVED / REJECTED / MODIFIED for shot prompts. Post-gen: returns RETRY / ACCEPT_LENIENT / FAIL with mutation focus. §13.4 |
+| **StyleDirector** | GPT-4o only. Generates `style_rules` (cinematography, lighting, color, sound, photorealism, composition) once per project; injected into every decompose prompt. §13.5 |
+| **CineDecompose** | The system persona for scene decomposition: a strict cinematic shot decomposition engine with 8 hard constraints + 9 tripwires. The prompt is now in `_build_cinedecompose_system_prompt` (§7.4). |
+| **Cascade** | Ordered fallback chain. Video has a default 9-engine cascade; lipsync has 4-engine overlay + 4-engine generation; performance has Hedra/SadTalker; image gen has ComfyUI → FAL FLUX → schnell → Pollinations. |
+| **SyncNet** | Lipsync quality scorer (mouth-audio sync). Used as the gate threshold in `lip_sync.py` cascade decisions. Falls back to duration-match heuristic or neutral 1.0 if scorer not installed. |
+| **Take** | A single attempt at a stage's output. Each shot has `keyframe_takes[]`, `performance_takes[]`, `motion_takes[]`, `postprocess_variants[]` — operators approve one of each. |
+| **Postprocess variant** | A take derived from another take via `apply_correction` (face_swap, lip_sync, rife, upscale, color_grade, speed). Has `source_take_id` linking back to its parent. |
+| **Multi-angle refs** | 5 synthetic character ref images generated via FLUX Kontext MAX MULTI at character-creation time (`angle_45`, `angle_profile`, `angle_back`, `expression_smile`, `lighting_outdoor`). Used by Kling 3.0 elements array + PuLID for multi-view identity locking. |
+| **Identity anchor** | The canonical reference image for a character (one of `reference_images[]`, picked via DeepFace face-detection at creation time). Used as the threshold-anchor in all identity validations. |
+| **Identity strictness** | Per-project setting (default 0.60) that becomes the threshold for `validate_image` rolling-history `passed` flag. ADR-011. |
+| **Adaptive PuLID weight** | `workflow_selector.get_adaptive_pulid_weight(character_id)` returns a per-character PuLID weight adjustment based on `get_rolling_stats(character_id).success_rate`. ±0.10 in either direction. |
+| **Continuity engine** | `domain/continuity_engine.py` — composes CharacterContinuityTracker + LocationPersistence + PhysicsPromptEngineer + TemporalConsistencyManager. Output enriches each shot prompt with identity-anchored references, location continuity, physics constraints, and img2img chaining config. §7.5 |
+
+---
+
+*Last verified: 2026-05-24 by parallel investigation across 11 subsystems
++ subsequent point-fixes through 2026-05-24. Glossary section added by
+new-director Task 1.*

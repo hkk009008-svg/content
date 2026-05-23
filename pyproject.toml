@@ -3,7 +3,7 @@ name = "content-cinema-pipeline"
 description = "Interactive AI cinema pipeline — topic to 1–2 minute cinematic short with operator review gates, identity validation, and motion-quality scoring."
 requires-python = ">=3.11"
 dynamic = ["version", "dependencies"]
-readme = "AGENTS.md"
+readme = "README.md"
 
 # Pinned runtime deps live in requirements.txt. pyproject.toml here is
 # primarily for declaring the Python floor so a stale venv (e.g., 3.9) fails
