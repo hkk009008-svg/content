@@ -21,6 +21,7 @@ from typing import Optional, List, Dict
 from pipeline_context import PIPELINE_CONTEXT
 from config.settings import settings
 from llm.ensemble import build_anthropic_system_blocks
+from llm.negative_prompts import get_negative_prompt_for_failure
 class ChiefDirector:
     """
     Metacognitive AI overseer for the cinema production pipeline.
@@ -280,17 +281,23 @@ When suggesting prompt_mutation for failures:
 
         # Build diagnostic context for the LLM
         diagnostics = {}
+        primary_reason_value: Optional[str] = None
         if identity_result is not None and hasattr(identity_result, "character_results"):
             for cid, cr in identity_result.character_results.items():
+                reason_value = cr.primary_failure_reason.value
                 diagnostics[cid] = {
                     "name": cr.character_name,
                     "best_similarity": round(cr.best_similarity, 3),
                     "mean_similarity": round(cr.mean_similarity, 3),
-                    "failure_reason": cr.primary_failure_reason.value,
+                    "failure_reason": reason_value,
                     "suggested_pulid_delta": cr.suggested_pulid_adjustment,
                     "frames_with_face": sum(1 for f in cr.frame_results if f.face_detected),
                     "total_frames_sampled": len(cr.frame_results),
                 }
+                # Capture the first failing character's reason for negative-prompt lookup.
+                # "passed" is the success sentinel — skip it; keep the first actual failure.
+                if primary_reason_value is None and reason_value != "passed":
+                    primary_reason_value = reason_value
 
         coherence_info = {}
         if coherence_result is not None:
@@ -359,6 +366,17 @@ When suggesting prompt_mutation for failures:
 
         try:
             result = json.loads(raw)
+
+            # Append the negative-prompt hint to the LLM's mutation instructions.
+            # Opt-in: unknown reasons and "passed" return "" and are silently skipped.
+            negative_phrase = get_negative_prompt_for_failure(primary_reason_value)
+            if negative_phrase and result.get("prompt_mutation"):
+                result["prompt_mutation"] = (
+                    result["prompt_mutation"]
+                    + f"\nNegative prompt: {negative_phrase}"
+                )
+                print(f"   [NEG-PROMPT] {primary_reason_value} → {negative_phrase[:60]}...")
+
             self.diagnostic_log.append({
                 "stage": "identity_evaluation",
                 "score": identity_score,
