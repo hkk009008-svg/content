@@ -99,6 +99,13 @@ def build_pipeline_core(project_id: str) -> PipelineCore:
 
     settings = project.get("global_settings", {})
 
+    budget_usd = settings.get("budget_limit_usd")
+    if budget_usd is not None:
+        try:
+            budget_usd = float(budget_usd)
+        except (TypeError, ValueError):
+            budget_usd = None
+
     return PipelineCore(
         project=project,
         project_dir=project_dir,
@@ -107,6 +114,6 @@ def build_pipeline_core(project_id: str) -> PipelineCore:
         continuity=ContinuityEngine(project),
         director=ChiefDirector(project),
         quality_tracker=QualityTracker(),
-        cost_tracker=CostTracker(),
+        cost_tracker=CostTracker(budget_usd=budget_usd),
         ensemble=LLMEnsemble(settings=settings),
     )

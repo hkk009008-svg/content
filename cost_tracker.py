@@ -3,6 +3,27 @@ Cost tracking and budget governance system for the cinema pipeline.
 
 Tracks all LLM and API costs across providers, models, and operations.
 Provides budget checking, cost-per-second analysis, and spend summaries.
+
+Per-API generation cost estimates
+===================================
+
+``API_COST_USD`` maps API name (uppercase, matching ``generate_ai_video``
+and ``generate_ai_broll`` target names) to estimated USD per generation call.
+
+Estimates are conservative averages for typical 5-second 720p clips / 1024px
+stills. Actual costs vary by duration, resolution, and provider pricing changes.
+Operators should treat values as ±30% accurate and tune against their invoices.
+The ``record_api_call`` method uses this table; pass ``cost_usd`` explicitly
+to override any entry.
+
+Budget gate
+===========
+
+Construct ``CostTracker(budget_usd=N)`` to enable the soft cap. Call
+``would_exceed(api_name)`` before an API call and ``is_over_budget()``
+after to gate the pipeline. Both return False when ``budget_usd`` is None
+(no limit). ``spent_usd`` accumulates in-process only; SQLite is the
+durable store, but the budget gate uses the fast in-memory counter.
 """
 
 import sqlite3
@@ -10,6 +31,33 @@ import os
 import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from typing import Optional
+
+
+# ---------------------------------------------------------------------------
+# Per-API estimated USD cost per generation call.
+# Calibrate against your provider invoices; defaults are reasonable starting
+# points for typical 5-second 720p clips / 1024px stills.
+# ---------------------------------------------------------------------------
+
+API_COST_USD: dict[str, float] = {
+    # Video APIs (per ~5s clip)
+    "KLING_NATIVE":  0.50,
+    "KLING_3_0":     0.40,
+    "SORA_NATIVE":   0.80,
+    "SORA_2":        0.60,
+    "VEO_NATIVE":    0.30,
+    "VEO":           0.25,
+    "LTX":           0.10,
+    "RUNWAY_GEN4":   0.50,
+    "RUNWAY":        0.40,
+    # Image APIs (per still)
+    "FLUX_PULID":    0.05,
+    "FLUX_KONTEXT":  0.04,
+    "FLUX_PRO":      0.05,
+    "QUALITY_MAX":   0.40,   # N=8 best-of, ~8x base cost
+    "HIDREAM_I1":    0.06,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -79,8 +127,16 @@ class CostTracker:
     and produces spend summaries for the cinema pipeline.
     """
 
-    def __init__(self, db_path: str = "data/experiments.db"):
+    def __init__(
+        self,
+        db_path: str = "data/experiments.db",
+        budget_usd: Optional[float] = None,
+    ):
         self.db_path = db_path
+        self.budget_usd = budget_usd
+        # Fast in-process accumulator for the budget gate.  The SQLite
+        # store is the durable record; this counter is reset each process.
+        self.spent_usd: float = 0.0
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row
         self._create_table()
@@ -206,6 +262,79 @@ class CostTracker:
             shot_id=shot_id,
             video_id=video_id,
         )
+
+    def record_api_call(
+        self,
+        api_name: str,
+        cost_usd: Optional[float] = None,
+        operation: str = "",
+        shot_id: str = "",
+        video_id: str = "",
+    ) -> float:
+        """Record a generation API call against the budget.
+
+        Looks up ``api_name`` in ``API_COST_USD`` if ``cost_usd`` is not
+        supplied. Updates ``self.spent_usd`` (in-process accumulator) and
+        persists to SQLite.  Returns the cost recorded.
+
+        Only call on the *success* path — never for failed API attempts.
+        """
+        api_upper = api_name.upper()
+        if cost_usd is None:
+            cost_usd = API_COST_USD.get(api_upper, 0.0)
+            if cost_usd == 0.0 and api_upper not in API_COST_USD:
+                warnings.warn(
+                    f"[cost_tracker] Unknown API {api_name!r}; recording $0.00 cost. "
+                    f"Add it to API_COST_USD in cost_tracker.py for accurate budgeting.",
+                    stacklevel=2,
+                )
+
+        # Derive a human-readable provider name from the API key.
+        _provider_map = {
+            "KLING": "kling", "SORA": "openai", "VEO": "google",
+            "LTX": "ltx", "RUNWAY": "runway",
+            "FLUX": "fal", "QUALITY_MAX": "fal", "HIDREAM": "fal",
+        }
+        provider = "unknown"
+        for prefix, prov in _provider_map.items():
+            if api_upper.startswith(prefix):
+                provider = prov
+                break
+
+        op = operation or f"{api_upper.lower()}_generation"
+        self.log_api(
+            provider=provider,
+            model=api_upper,
+            operation=op,
+            cost_usd=cost_usd,
+            shot_id=shot_id,
+            video_id=video_id,
+        )
+        self.spent_usd += cost_usd
+        return cost_usd
+
+    # ------------------------------------------------------------------
+    # Budget gate
+    # ------------------------------------------------------------------
+
+    def would_exceed(self, api_name: str) -> bool:
+        """Pre-emptive check: would recording this call push us over budget?
+
+        Returns False when ``budget_usd`` is None (no limit).
+        """
+        if self.budget_usd is None:
+            return False
+        cost = API_COST_USD.get(api_name.upper(), 0.0)
+        return (self.spent_usd + cost) > self.budget_usd
+
+    def is_over_budget(self) -> bool:
+        """Post-fact check: has cumulative in-process spend exceeded the cap?
+
+        Returns False when ``budget_usd`` is None (no limit).
+        """
+        if self.budget_usd is None:
+            return False
+        return self.spent_usd > self.budget_usd
 
     # ------------------------------------------------------------------
     # Query helpers

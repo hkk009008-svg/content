@@ -456,6 +456,24 @@ class ShotController:
         }
         self._host._rebuild_review_clips()
         self._host._save_checkpoint()
+
+        # Record image generation cost.  The API name depends on which
+        # tier executed: max-tier uses QUALITY_MAX; production tier routes
+        # through FLUX_KONTEXT (Kontext fallback), FLUX_PULID (ComfyUI),
+        # or FLUX_PRO (last-resort).  We use quality_tier as the selector
+        # here — the actual backend branch is opaque from this level.
+        _image_api = "QUALITY_MAX" if quality_tier == "max" else "FLUX_KONTEXT"
+        try:
+            video_id = self.project.get("id", "")
+            self.cost_tracker.record_api_call(
+                _image_api,
+                operation="keyframe_generation",
+                shot_id=shot_id,
+                video_id=video_id,
+            )
+        except Exception as _e:
+            print(f"   [COST] keyframe cost record skipped: {_e}")
+
         self.progress(
             "KEYFRAME_READY",
             f"Keyframe ready for {shot_id}",
@@ -858,6 +876,37 @@ class ShotController:
         }
         self._host._rebuild_review_clips()
         self._host._save_checkpoint()
+
+        # Record video generation cost (success path only — after checkpoint).
+        try:
+            video_id = self.project.get("id", "")
+            self.cost_tracker.record_api_call(
+                target_api,
+                operation="motion_generation",
+                shot_id=shot_id,
+                video_id=video_id,
+            )
+        except Exception as _e:
+            print(f"   [COST] motion cost record skipped: {_e}")
+
+        # Budget gate — pause the pipeline when in-process spend has crossed
+        # the operator's budget_limit_usd cap.  Uses lifecycle.pause() so the
+        # operator can inspect the project and either raise the cap and resume
+        # or cancel the run.  The gate fires once per shot completion (after
+        # checkpoint) so all work done so far is safely persisted.
+        if self.cost_tracker.is_over_budget():
+            self.progress(
+                "BUDGET_EXCEEDED",
+                f"Spend ${self.cost_tracker.spent_usd:.2f} reached budget cap "
+                f"${self.cost_tracker.budget_usd:.2f}. Pausing.",
+                -1,
+                scene_id=scene_id,
+                shot_id=shot_id,
+                spent=self.cost_tracker.spent_usd,
+                budget=self.cost_tracker.budget_usd,
+            )
+            self._lifecycle.pause()
+
         self.progress(
             "MOTION_READY",
             f"Motion take ready for {shot_id}",
