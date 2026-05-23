@@ -826,6 +826,19 @@ class CinemaPipeline:
     # FINAL ASSEMBLY
     # ------------------------------------------------------------------
 
+    def _apply_final_loudnorm(self, final_path: str) -> None:
+        """Re-normalize final video audio in-place via two-pass EBU R128.
+
+        Single-pass loudnorm (used inside the BGM mix above) approximates to
+        ±1.5 LU of target; the two-pass measure-then-normalize converges to
+        ±0.1 LU. Audible on dialogue-heavy content. On failure the original
+        file is left untouched (two_pass_loudnorm returns False)."""
+        from phase_c_ffmpeg import two_pass_loudnorm
+        normed = final_path.replace(".mp4", "_loud.mp4")
+        if two_pass_loudnorm(final_path, normed):
+            os.replace(normed, final_path)
+            print(f"   [LOUDNORM] Two-pass EBU R128 applied → {os.path.basename(final_path)}")
+
     def _assemble_final(self, scene_data: list, bgm_path: str, settings: dict) -> Optional[str]:
         """
         Assembles all scene clips into the final video:
@@ -943,6 +956,7 @@ class CinemaPipeline:
                 shutil.copy2(stitched, final_output)
                 print(f"   ✅ Final cinema video (no BGM): {final_output}")
 
+            self._apply_final_loudnorm(final_output)
             return final_output
 
         except subprocess.CalledProcessError as e:
@@ -963,11 +977,13 @@ class CinemaPipeline:
                 ]
                 subprocess.run(cmd_fallback, check=True, capture_output=True, timeout=120)
                 print(f"   ✅ Final cinema video (BGM only, no dialogue audio): {final_output}")
+                self._apply_final_loudnorm(final_output)
                 return final_output
             except Exception as e2:
                 print(f"   ⚠️ All audio mixing failed: {e2}")
                 import shutil
                 shutil.copy2(stitched, final_output)
+                self._apply_final_loudnorm(final_output)
                 return final_output
 
 # ---------------------------------------------------------------------------
