@@ -32,6 +32,9 @@ NEGATIVE_PROMPT_BY_FAILURE_REASON: dict[str, str] = {
     "wrong_person": "wrong person, different face, identity drift, mismatched features",
     "poor_lighting": "harsh shadows, underexposed face, poorly lit subject, low-key lighting on face",
     "occlusion": "occluded face, partially hidden face, hand covering face, object blocking face",
+    # TODO: add "multiple_faces_ambiguous" here once identity/validator.py
+    # starts emitting it (currently defined in the enum but never assigned —
+    # see B.0 audit in docs/superpowers/plans/2026-05-23-quality-uplift.md).
 }
 
 

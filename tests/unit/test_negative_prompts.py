@@ -79,3 +79,18 @@ def test_none_returns_empty():
     assert result == "", (
         f"None must return empty (no prior failure); got: {result!r}"
     )
+
+
+def test_mapping_keys_match_live_failure_reason_enum():
+    """Every key in NEGATIVE_PROMPT_BY_FAILURE_REASON must be a real FailureReason
+    .value string. If identity/types.py renames a value, this test catches the
+    stale key before it silently becomes an unreachable opt-in entry."""
+    from llm.negative_prompts import NEGATIVE_PROMPT_BY_FAILURE_REASON
+    from identity.types import FailureReason
+
+    live_values = {r.value for r in FailureReason}
+    stale_keys = set(NEGATIVE_PROMPT_BY_FAILURE_REASON.keys()) - live_values
+    assert not stale_keys, (
+        f"these mapping keys are no longer valid FailureReason values: {stale_keys}. "
+        f"Either rename them to match identity/types.FailureReason or delete them."
+    )
