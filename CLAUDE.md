@@ -248,11 +248,11 @@ value = get_project_setting(ctx, "knob_name", default)
 `config.settings.Settings` is for env-derived API keys ONLY. Reading
 project-knob keys from it (the historical `getattr(settings, ...)`
 pattern) is a silent-failure bug — it returns `None` and the default
-always wins. This was fixed across 8 sites on 2026-05-23. **Known
-remaining exception:** `audio/dialogue.py:143-149` takes a `settings: dict`
-arg and reads with raw `.get` (works because callers pass
-`project["global_settings"]` as a plain dict, but inconsistent with the
-helper pattern).
+always wins. This was fixed across 8 sites on 2026-05-23 and the last
+holdout (`audio/dialogue.py`'s `settings: dict` parameter) was migrated
+to `ctx: PipelineContext` in commit cc34870's follow-up — every
+per-project knob read in `audio/`, `llm/`, `performance/`, `cinema/`,
+and `quality_max.py` now flows through `get_project_setting(ctx, ...)`.
 
 ## Invariants (verified by smoke test 2026-05-23)
 

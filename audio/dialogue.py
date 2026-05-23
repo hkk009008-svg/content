@@ -17,19 +17,23 @@ This module is a leaf consumer: nothing in ``audio/*`` imports it.
 """
 
 import os
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from elevenlabs import save
 
 from audio._client import client
 from audio.voiceover import get_voice_direction
+from cinema.context import get_project_setting
+
+if TYPE_CHECKING:
+    from cinema.context import PipelineContext
 
 
 def _try_dialogue_mode(
     dialogue_lines: list,
     characters: list,
     output_filename: str,
-    settings: Optional[dict] = None,
+    ctx: "Optional[PipelineContext]" = None,
 ) -> Optional[str]:
     """ElevenLabs v3 Dialogue Mode — single-call multi-speaker generation.
 
@@ -41,12 +45,11 @@ def _try_dialogue_mode(
     installed SDK version, API error). Caller falls through to the legacy
     per-line loop, so quality never regresses.
 
-    `settings` is the per-project global_settings dict (from
-    `ctx["global_settings"]` or `project["global_settings"]`); when None,
+    `ctx` is the PipelineContext carrying `global_settings`. When None,
     the dialogue_mode_enabled gate defaults to True.
     """
     # Gate: only run when explicitly enabled
-    if not (settings or {}).get("dialogue_mode_enabled", True):
+    if not get_project_setting(ctx, "dialogue_mode_enabled", True):
         return None
 
     # Need at least 2 distinct speakers for dialogue mode to make sense
@@ -105,24 +108,23 @@ def _maybe_save_alignment(
     audio_path: str,
     transcript_hint: Optional[str] = None,
     language: Optional[str] = None,
-    settings: Optional[dict] = None,
+    ctx: "Optional[PipelineContext]" = None,
 ) -> Optional[str]:
     """Emit a .alignment.json sidecar next to the audio file when enabled.
 
-    Driven by `settings["forced_alignment_enabled"]` (from per-project
-    global_settings). Returns the JSON path on success, None when disabled
-    or alignment fails. Downstream consumers (lipsync, SRT writer) load
+    Driven by `forced_alignment_enabled` in the per-project global_settings
+    on `ctx`. Returns the JSON path on success, None when disabled or
+    alignment fails. Downstream consumers (lipsync, SRT writer) load
     these sidecars when present.
 
-    language: project language name. When None, reads `settings["language"]`.
-    Critical for Korean/Japanese/Chinese — whisper drifts badly on these
-    languages without an explicit hint.
+    language: project language name. When None, reads from ctx's
+    `language` setting. Critical for Korean/Japanese/Chinese — whisper
+    drifts badly on these languages without an explicit hint.
     """
-    s = settings or {}
-    if not s.get("forced_alignment_enabled", False):
+    if not get_project_setting(ctx, "forced_alignment_enabled", False):
         return None
     if language is None:
-        language = s.get("language", "English") or "English"
+        language = get_project_setting(ctx, "language", "English") or "English"
     try:
         from audio.alignment import align_audio_to_text, save_alignment_json
     except Exception:
@@ -141,7 +143,7 @@ def generate_dialogue_voiceover(
     characters: list,
     output_filename: str = "temp_dialogue_voiceover.mp3",
     pause_between_lines: float = 0.3,
-    settings: Optional[dict] = None,
+    ctx: "Optional[PipelineContext]" = None,
 ) -> Optional[str]:
     """
     Multi-character dialogue voiceover for cinema production.
@@ -166,10 +168,10 @@ def generate_dialogue_voiceover(
         Path to assembled dialogue audio, or None on failure
     """
     # PATH 1: try ElevenLabs Dialogue Mode first
-    dm_result = _try_dialogue_mode(dialogue_lines, characters, output_filename, settings=settings)
+    dm_result = _try_dialogue_mode(dialogue_lines, characters, output_filename, ctx=ctx)
     if dm_result:
         transcript_hint = " ".join(ln.get("text", "").strip() for ln in dialogue_lines)
-        _maybe_save_alignment(dm_result, transcript_hint=transcript_hint, settings=settings)
+        _maybe_save_alignment(dm_result, transcript_hint=transcript_hint, ctx=ctx)
         return dm_result
 
     # PATH 2: legacy per-line generation
@@ -262,7 +264,7 @@ def generate_dialogue_voiceover(
 
         # Optional sidecar — word-level timestamps for downstream lipsync precision
         transcript_hint = " ".join(ln.get("text", "").strip() for ln in dialogue_lines)
-        _maybe_save_alignment(output_filename, transcript_hint=transcript_hint, settings=settings)
+        _maybe_save_alignment(output_filename, transcript_hint=transcript_hint, ctx=ctx)
 
         return output_filename
 

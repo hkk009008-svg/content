@@ -463,14 +463,18 @@ class CinemaPipeline:
             return None
 
         output_path = os.path.join(self.temp_dir, f"audio_{scene_id}.mp3")
-        # Thread the project's UI settings so dialogue_mode_enabled,
-        # forced_alignment_enabled, and language are honored — without this
-        # the dialogue helpers fall back to their hard-coded defaults.
+        # Thread the project's UI settings via PipelineContext so
+        # dialogue_mode_enabled, forced_alignment_enabled, and language
+        # are honored via get_project_setting — without this the dialogue
+        # helpers fall back to their hard-coded defaults.
+        dialogue_ctx = PipelineContext(
+            global_settings=dict(self.project.get("global_settings", {})) if self.project else {},
+        )
         result = generate_dialogue_voiceover(
             dialogue_lines,
             characters,
             output_path,
-            settings=self.project.get("global_settings", {}) if self.project else None,
+            ctx=dialogue_ctx,
         )
         if result and os.path.exists(output_path):
             self.scene_audio[scene_id] = output_path
