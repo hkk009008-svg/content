@@ -369,13 +369,29 @@ When suggesting prompt_mutation for failures:
 
             # Append the negative-prompt hint to the LLM's mutation instructions.
             # Opt-in: unknown reasons and "passed" return "" and are silently skipped.
+            # Note: primary_reason_value is the FIRST failing character's reason
+            # (see capture loop above). The mapping is scalar by design — if
+            # multiple characters fail with different reasons, only the first
+            # drives the negative prompt for this take.
             negative_phrase = get_negative_prompt_for_failure(primary_reason_value)
             if negative_phrase and result.get("prompt_mutation"):
                 result["prompt_mutation"] = (
                     result["prompt_mutation"]
                     + f"\nNegative prompt: {negative_phrase}"
                 )
-                print(f"   [NEG-PROMPT] {primary_reason_value} → {negative_phrase[:60]}...")
+                phrase_display = negative_phrase[:60] + (
+                    "..." if len(negative_phrase) > 60 else ""
+                )
+                print(f"   [NEG-PROMPT] {primary_reason_value} → {phrase_display}")
+            elif negative_phrase:
+                # Phrase available but LLM returned no prompt_mutation to enrich
+                # (e.g., decision=ACCEPT_LENIENT). Visible-skip log so an operator
+                # debugging "why isn't the negative prompt being used?" can spot
+                # the path. Not an error — the LLM's decision wins.
+                print(
+                    f"   [NEG-PROMPT] skipped ({primary_reason_value}): "
+                    f"no prompt_mutation in LLM result"
+                )
 
             self.diagnostic_log.append({
                 "stage": "identity_evaluation",
