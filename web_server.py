@@ -1238,33 +1238,6 @@ def api_serve_file(pid):
     return send_file(real_path, mimetype=mimetype)
 
 
-@app.route("/api/projects/<pid>/shots/<shot_id>/approve", methods=["POST"])
-@_project_lock_guard
-def api_approve_shot(pid, shot_id):
-    """Compatibility route: approve the shot plan."""
-    try:
-        result = _get_stage_pipeline(pid).approve_shot_plan(shot_id, approved=True)
-    except ValueError:
-        return jsonify({"error": "Project not found"}), 404
-    if result.get("error"):
-        return jsonify(result), 404
-    return jsonify({"approved": True, **result})
-
-
-@app.route("/api/projects/<pid>/shots/<shot_id>/reject", methods=["POST"])
-@_project_lock_guard
-def api_reject_shot(pid, shot_id):
-    """Compatibility route: reject the shot plan."""
-    reason = request.json.get("reason", "") if request.is_json else ""
-    try:
-        result = _get_stage_pipeline(pid).approve_shot_plan(shot_id, approved=False, reason=reason)
-    except ValueError:
-        return jsonify({"error": "Project not found"}), 404
-    if result.get("error"):
-        return jsonify(result), 404
-    return jsonify({"rejected": True, **result})
-
-
 @app.route("/api/projects/<pid>/shots/<shot_id>/plan/approve", methods=["POST"])
 @_project_lock_guard
 def api_approve_shot_plan(pid, shot_id):
