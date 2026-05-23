@@ -82,7 +82,9 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "ip_adapter_weight": 0.25, # Light style transfer — don't constrain action
         "denoise_default": 0.40,
         "target_api": "SORA_NATIVE",    # Best motion physics, body momentum, cloth sim
-        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "LTX"],
+        # SEEDANCE last — its multi-reference (up to 9 images) is the only
+        # cascade member that handles multi-character action shots well.
+        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "LTX", "SEEDANCE"],
         "description": "Action/movement — motion-stable, 20 steps, DPM++ 2M + PAG",
     },
     "landscape": {
@@ -318,7 +320,8 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "supir_cfg_scale": 4.0,
         "final_resolution": (3840, 2160),
         "target_api": "SORA_NATIVE",
-        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "LTX"],
+        # SEEDANCE last — multi-reference fallback for multi-character action.
+        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "LTX", "SEEDANCE"],
         "description": "MAX action — softer guidance for motion, lower CN strength to allow movement",
     },
     "landscape": {
