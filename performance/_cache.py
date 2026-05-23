@@ -21,7 +21,10 @@ from config.settings import settings
 
 
 def _cache_dir() -> str:
-    return settings.performance_cache_dir
+    # Read env at call time so test fixtures can override via monkeypatch;
+    # Settings.performance_cache_dir is the documented default + single
+    # source of truth for the field's existence.
+    return os.environ.get("PERFORMANCE_CACHE_DIR", settings.performance_cache_dir)
 
 
 def _sha256_file(path: str) -> str:
