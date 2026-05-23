@@ -88,7 +88,7 @@ from character_manager import get_reference_image
 from cinema.context import PipelineContext
 from phase_c_assembly import generate_ai_broll
 from phase_c_ffmpeg import generate_ai_video, stitch_modules
-from phase_c_vision import validate_identity, face_swap_video_frames
+from phase_c_vision import face_swap_video_frames
 from lip_sync import (
     generate_lip_sync_video,
     generate_rife_interpolation,
@@ -417,15 +417,27 @@ class ShotController:
 
         identity_score = 0.0
         if primary_ref:
-            from phase_c_vision import validate_identity_image
+            from phase_c_vision import _get_shared_validator
             # Project-wide `identity_strictness` setting overrides the per-shot
             # `identity_threshold` so the operator can raise/lower the bar
             # without touching every shot. Falls back to the per-shot value.
             strictness = settings.get("identity_strictness")
             threshold = strictness if strictness is not None else cc.get("identity_threshold", 0.70)
-            img_sim = validate_identity_image(img_path, primary_ref, threshold=threshold)
-            identity_score = img_sim.get("similarity", 0.0)
+            id_result = _get_shared_validator().validate_image(
+                img_path, primary_ref,
+                character_id=primary_char_id,
+                threshold=threshold,
+            )
+            identity_score = id_result.overall_score
             take["metadata"]["identity_score"] = identity_score
+            # Surface rich diagnostics from the singleton — the deprecated
+            # validate_identity_image wrapper discarded these. Retry logic +
+            # operator-facing review can read failure cause and a suggested
+            # PuLID weight delta from the take metadata.
+            char_diag = id_result.character_results.get(primary_char_id)
+            if char_diag and not id_result.passed:
+                take["metadata"]["identity_failure_reason"] = char_diag.primary_failure_reason.value
+                take["metadata"]["suggested_pulid_adjustment"] = char_diag.suggested_pulid_adjustment
 
         take["path"] = img_path
 
@@ -909,12 +921,23 @@ class ShotController:
         if chars and image_path and os.path.exists(str(image_path)):
             primary_ref = get_reference_image(self.project, chars[0])
             if primary_ref:
-                from phase_c_vision import validate_identity_image
-                id_result = validate_identity_image(str(image_path), primary_ref)
-                result["scores"]["identity"] = id_result.get("similarity", 0)
-                if not id_result.get("passed", True):
-                    result["recommendations"].append({"tool": "face_swap", "reason": "Low identity score"})
-                    result["recommendations"].append({"tool": "regenerate", "reason": "Regenerate with strengthened identity"})
+                from phase_c_vision import _get_shared_validator
+                id_result = _get_shared_validator().validate_image(
+                    str(image_path), primary_ref, character_id=chars[0]
+                )
+                result["scores"]["identity"] = id_result.overall_score
+                if not id_result.passed:
+                    # Specific failure mode + recommended PuLID delta replace
+                    # the previous generic "Low identity score" string.
+                    char_diag = id_result.character_results.get(chars[0])
+                    failure_label = char_diag.primary_failure_reason.value if char_diag else "low_identity"
+                    delta = char_diag.suggested_pulid_adjustment if char_diag else 0.0
+                    result["recommendations"].append(
+                        {"tool": "face_swap", "reason": f"Identity gate failed ({failure_label})"}
+                    )
+                    result["recommendations"].append(
+                        {"tool": "regenerate", "reason": f"Regenerate with PuLID weight +{delta:.2f}"}
+                    )
 
         # Motion quality
         if video_path and os.path.exists(str(video_path)):
