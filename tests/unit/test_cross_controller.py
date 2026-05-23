@@ -459,8 +459,8 @@ def _project_on_disk(tmpdir: str, project: dict):
         json.dump(project, f)
 
     original = dpm.PROJECTS_DIR
-    dpm.PROJECTS_DIR = fake_root
     try:
+        dpm.PROJECTS_DIR = fake_root
         yield project_file
     finally:
         dpm.PROJECTS_DIR = original
@@ -763,6 +763,10 @@ def test_gate_satisfied_performance_all_approved():
                 if not shot.get("approved_keyframe_take_id"):
                     continue
                 if not shot.get("approved_performance_take_id"):
+                    # Defensive fallback: _richer_project always seeds at least
+                    # one performance_take for non-SKIP shots in the current
+                    # fixture, but the `else` branch keeps the test robust
+                    # against a future fixture variant that omits one.
                     shot["approved_performance_take_id"] = (
                         shot["performance_takes"][0]["id"]
                         if shot["performance_takes"]
@@ -850,6 +854,9 @@ def test_gate_satisfied_unknown_gate_returns_false():
     with tempfile.TemporaryDirectory() as tmpdir:
         host, _, _, _, patch_ctx = _make_richer_setup(tmpdir)
         with patch_ctx:
+            # "KEYFRAME_RVEIEW" is a deliberate misspelling — DO NOT "fix" it.
+            # The test verifies that any gate name not in the recognized set
+            # hits the default fall-through branch (returns False).
             assert host._review_ctrl._gate_satisfied("KEYFRAME_RVEIEW") is False
             assert host._review_ctrl._gate_satisfied("") is False
             assert host._review_ctrl._gate_satisfied("MOTION") is False
@@ -877,11 +884,12 @@ def test_approve_take_keyframe_in_keyframe_takes_sets_field():
     sets shot.approved_keyframe_take_id and reports success."""
     with tempfile.TemporaryDirectory() as tmpdir:
         host, _, core, _, patch_ctx = _make_richer_setup(tmpdir)
-        with patch_ctx:
+        # Capture the seeded path from the context manager — single source
+        # of layout truth lives in _project_on_disk, not duplicated here.
+        with patch_ctx as project_file:
             # Reset sh1's keyframe approval so we can verify the write
             core.project["scenes"][0]["shots"][0]["approved_keyframe_take_id"] = ""
             # ALSO clear on disk so mutate_project's load reads cleared state
-            project_file = os.path.join(tmpdir, "projects", "richer_project", "project.json")
             with open(project_file, "r", encoding="utf-8") as f:
                 disk = json.load(f)
             disk["scenes"][0]["shots"][0]["approved_keyframe_take_id"] = ""
