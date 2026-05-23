@@ -163,46 +163,6 @@ export function ProductionSection({ s, config, project, update, onRefresh }: Pro
         </div>
       </div>
 
-      {/* Default Video API */}
-      <div>
-        <label className={LABEL_CLS}>Default Video API</label>
-        <select
-          value={s.default_video_api || 'AUTO'}
-          onChange={(e) => update('default_video_api', e.target.value)}
-          className={INPUT_CLS}
-        >
-          {config?.api_registry ? (
-            <>
-              {Object.entries(config.api_registry).filter(([, v]) => v.category === 'smart').length > 0 && (
-                <optgroup label="Smart">
-                  {Object.entries(config.api_registry).filter(([, v]) => v.category === 'smart').map(([key, info]) => (
-                    <option key={key} value={key}>{info.label} — {info.description}</option>
-                  ))}
-                </optgroup>
-              )}
-              <optgroup label="Native APIs">
-                {Object.entries(config.api_registry).filter(([, v]) => v.category === 'native').map(([key, info]) => (
-                  <option key={key} value={key}>{info.label} — {info.description}</option>
-                ))}
-              </optgroup>
-              <optgroup label="FAL Proxy">
-                {Object.entries(config.api_registry).filter(([, v]) => v.category === 'fal_proxy').map(([key, info]) => (
-                  <option key={key} value={key}>{info.label} — {info.description}</option>
-                ))}
-              </optgroup>
-            </>
-          ) : (
-            <>
-              <option value="AUTO">Auto (Smart Routing)</option>
-              <option value="KLING_NATIVE">Kling 3.0 Native</option>
-              <option value="SORA_NATIVE">Sora 2 Native</option>
-              <option value="VEO_NATIVE">Veo 3.1 Native</option>
-            </>
-          )}
-        </select>
-        <p className={HINT_CLS}>Per-shot overrides take precedence. Auto picks best API per shot type.</p>
-      </div>
-
       {/* Workflow Templates info */}
       {config?.workflow_templates && (
         <div className={CARD_CLS}>

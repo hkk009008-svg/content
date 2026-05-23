@@ -111,17 +111,9 @@ export interface GlobalSettings {
   music_mood: string
   color_palette: string
   style_rules: Record<string, string>
-  default_video_api: string
   // Audio
-  narration_mode?: string
-  narrator_voice?: string
-  voice_effect?: string
   music_mastering?: string
   // ComfyUI (production tier)
-  pag_scale?: number
-  controlnet_depth_strength?: number
-  ip_adapter_style_weight?: number
-  comfyui_upscale?: boolean
   comfyui_sampler?: string
   comfyui_steps?: number
   flux_guidance?: number
@@ -136,16 +128,9 @@ export interface GlobalSettings {
   // API Engines
   cascade_retry_limit?: number
   api_engines?: Record<string, ApiEngineConfig>
-  // V11: Budget & Cost
-  budget_limit_usd?: number
-  cost_optimization?: string
   // V11: Quality Engine
   identity_strictness?: number
-  // V11: LLM Preferences
-  creative_llm?: string
   // V11: Workflow & Coherence
-  quality_cost_weight?: number
-  adaptive_pulid?: boolean
   coherence_check_enabled?: boolean
   color_drift_sensitivity?: number
 
@@ -193,18 +178,10 @@ export interface GlobalSettings {
   tts_provider?: string                     // API key, e.g. "ELEVENLABS_V3", "CARTESIA_SONIC_2"
   dialogue_mode_enabled?: boolean           // route multi-line dialogue through ELEVENLABS_DIALOGUE
   forced_alignment_enabled?: boolean        // WhisperX word-level alignment + DTW correction
-  room_tone_matching?: boolean              // apply scene-environment reverb to dialogue
-  prosody_continuity?: boolean              // smooth pitch/energy across dialogue turns
   // Lipsync engine priority — drag-rank in UI; first available wins.
   lipsync_engine_priority?: string[]        // e.g. ["HEDRA_C3", "SYNC_SO_V3", "MUSETALK", "OMNIHUMAN_V1_5"]
   lipsync_quality_validation?: boolean      // SyncNet score gate after each lipsync
   lipsync_validation_threshold?: number     // 0.0-1.0, default 0.65
-
-  // Music + foley provider preferences
-  music_provider?: string                   // "SUNO_V5" | "ELEVENLABS_MUSIC" | "STABLE_AUDIO_2"
-  foley_provider?: string                   // "STABLE_AUDIO_FOLEY" | "ADOBE_AUDIO_AI"
-  // Per-purpose API overrides (optional — fall back to PURPOSE_API_RANKING if unset)
-  purpose_overrides?: Partial<Record<PurposeTag, string>>
 }
 
 export type ApiModality = 'video' | 'image' | 'lipsync' | 'tts' | 'music' | 'foley' | 'upscale'

@@ -306,17 +306,6 @@ export default function EditorialShell({
           style={{ animationDelay: '180ms' }}
         >
           <div>
-            <Eyebrow>Direction</Eyebrow>
-            <div
-              className="font-display text-editorial-ivory text-2xl mt-2"
-              style={{ fontVariationSettings: "'opsz' 24, 'wght' 400, 'SOFT' 30" }}
-            >
-              {config?.creative_llm_options?.find(
-                (o) => o.value === project.global_settings?.creative_llm,
-              )?.label || 'Auto'}
-            </div>
-          </div>
-          <div>
             <Eyebrow>Palette</Eyebrow>
             <div
               className="font-display text-editorial-ivory text-2xl mt-2 capitalize"

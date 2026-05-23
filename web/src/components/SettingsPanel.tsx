@@ -3,7 +3,6 @@ import {
   ProductionSection,
   MaxQualityTierSection,
   CostEstimatorSection,
-  BudgetSection,
   AudioSection,
   AudioSyncSection,
   PostProcessingSection,
@@ -37,7 +36,6 @@ export default function SettingsPanel({ project, config, onRefresh }: Props) {
       <ProductionSection s={s} config={config} project={project} update={update} onRefresh={onRefresh} />
       <MaxQualityTierSection s={s} project={project} update={update} />
       <CostEstimatorSection s={s} />
-      <BudgetSection s={s} config={config} update={update} />
       <AudioSection s={s} update={update} />
       <AudioSyncSection s={s} config={config} update={update} />
       <PostProcessingSection s={s} update={update} />

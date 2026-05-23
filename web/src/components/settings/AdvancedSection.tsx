@@ -60,41 +60,6 @@ export function AdvancedSection({ s, config, project }: Props) {
         min={0.3} max={1.0} step={0.05} defaultValue={0.6}
         hint="Min scene coherence score (color+lighting+composition) to accept. Below = mutation retry." />
 
-      {/* LLM Preferences */}
-      <div>
-        <label className="text-eyebrow text-editorial-ivory-soft block mb-2 uppercase tracking-wider">LLM Preferences</label>
-        <div className="space-y-3">
-          {/* Creative LLM */}
-          <div>
-            <label className="text-eyebrow text-editorial-ivory-mute block mb-0.5 font-mono">Creative LLM</label>
-            <select value={s.creative_llm || 'auto'}
-              onChange={e => update('creative_llm', e.target.value)}
-              className="w-full bg-editorial-ink border border-editorial-rule rounded-lg px-3 py-1.5 text-eyebrow text-editorial-ivory">
-              {(config as any)?.creative_llm_options?.map((opt: any) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              )) || (
-                <>
-                  <option value="auto">Auto (Router decides)</option>
-                  <option value="claude-sonnet">Claude Sonnet 4</option>
-                  <option value="gpt-4o">GPT-4o</option>
-                </>
-              )}
-            </select>
-            <p className="text-eyebrow-sm text-editorial-ivory-mute">Primary model for scripts, scene descriptions, prompts.</p>
-          </div>
-
-          {/* Quality vs Cost Weight */}
-          <Slider label="Quality ↔ Cost weight" field="quality_cost_weight" s={s} update={update}
-            min={0.5} max={1.0} step={0.05} defaultValue={0.8}
-            hint="API selection bias. 0.5 = equal weight. 1.0 = quality only. Affects which API is chosen per shot." />
-
-          {/* Adaptive PuLID Toggle */}
-          <ToggleCard field="adaptive_pulid" label="Adaptive PuLID"
-            desc="Auto-adjust face-lock strength based on rolling identity scores."
-            s={s} update={update} />
-        </div>
-      </div>
-
       {/* Continuity Parameters */}
       {config?.continuity_options && (
         <div>
@@ -130,22 +95,6 @@ export function AdvancedSection({ s, config, project }: Props) {
       <div>
         <label className="text-eyebrow text-editorial-ivory-soft block mb-2 uppercase tracking-wider">ComfyUI Engine</label>
         <div className="space-y-3">
-          <Slider label="PAG detail enhancement" field="pag_scale" s={s} update={update}
-            min={0} max={5} step={0.5} defaultValue={3.0}
-            hint="Sharpens fine detail (skin pores, fabric) without oversaturating. 0=off, 3=default, 5=max" />
-
-          <Slider label="ControlNet depth lock" field="controlnet_depth_strength" s={s} update={update}
-            min={0} max={0.8} step={0.05} defaultValue={0.35}
-            hint="Spatial consistency between shots. Higher = stricter layout lock. 0=off" />
-
-          <Slider label="IP-Adapter style transfer" field="ip_adapter_style_weight" s={s} update={update}
-            min={0} max={0.6} step={0.05} defaultValue={0.30}
-            hint="Visual style consistency (color grade, atmosphere) from previous shot. 0=off" />
-
-          <ToggleCard field="comfyui_upscale" label="On-GPU 4x Upscale (Real-ESRGAN)"
-            desc="Upscale on RunPod GPU instead of FAL API. Output: 2688x1536"
-            s={s} update={update} />
-
           {/* Sampler */}
           <div>
             <label className="text-eyebrow text-editorial-ivory-mute block mb-0.5 font-mono">Sampler</label>
@@ -269,14 +218,13 @@ function MaxTierComfyControls({ s, update }: { s: any; update: (k: string, v: an
         </div>
       </div>
 
-      {/* 4-channel Union ControlNet */}
+      {/* 3-channel Union ControlNet (depth lives in workflow_selector shot-type defaults, not UI) */}
       <div className="rounded-lg border border-editorial-rule bg-editorial-ink p-2 space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-eyebrow text-editorial-ivory font-mono">FLUX Union CN Pro — 4 channels</span>
+          <span className="text-eyebrow text-editorial-ivory font-mono">FLUX Union CN Pro — 3 channels</span>
           <span className="text-eyebrow-sm text-editorial-ivory-mute">total budget &lt; 1.2</span>
         </div>
         {[
-          { k: 'controlnet_depth_strength', label: 'Depth (spatial anchor)', def: 0.40, max: 0.8 },
           { k: 'controlnet_canny_strength', label: 'Canny (edge coherence)', def: 0.15, max: 0.5 },
           { k: 'controlnet_pose_strength', label: 'Pose (DWPose, body+hand+face)', def: 0.35, max: 0.6 },
           { k: 'controlnet_tile_strength', label: 'Tile (texture preservation)', def: 0.25, max: 0.5 },
@@ -394,22 +342,6 @@ function MaxTierComfyControls({ s, update }: { s: any; update: (k: string, v: an
         )}
       </div>
     </>
-  )
-}
-
-function ToggleCard({ field, label, desc, s, update }: { field: string; label: string; desc: string; s: any; update: (k: string, v: any) => void | Promise<void> }) {
-  return (
-    <div className="flex items-center gap-2 bg-editorial-ink rounded-lg px-3 py-2 border border-editorial-rule">
-      <input type="checkbox"
-        checked={s[field] !== false}
-        onChange={e => update(field, e.target.checked)}
-        aria-label={label}
-        className="accent-editorial-brass" />
-      <div>
-        <span className="text-eyebrow text-editorial-ivory font-medium">{label}</span>
-        <p className="text-eyebrow-sm text-editorial-ivory-mute">{desc}</p>
-      </div>
-    </div>
   )
 }
 

@@ -13,74 +13,8 @@ const LABEL_CLS =
   'text-eyebrow text-editorial-ivory-soft block mb-1.5 uppercase tracking-wider'
 
 export function AudioSection({ s, update }: Props) {
-  const narrationOn = s.narration_mode && s.narration_mode !== 'none'
-
   return (
     <SettingsSection title="Audio & Voice">
-      <div>
-        <label className={LABEL_CLS}>Narration Mode</label>
-        <select
-          value={s.narration_mode || 'none'}
-          onChange={e => update('narration_mode', e.target.value)}
-          className={INPUT_CLS}
-        >
-          <option value="none">No Narration — characters speak their dialogue</option>
-          <option value="omniscient">Omniscient Narrator — voiceover above the action</option>
-          <option value="character_vo">Character Voiceover — inner monologue</option>
-          <option value="documentary">Documentary — neutral informative narrator</option>
-        </select>
-      </div>
-
-      {narrationOn && (
-        <div>
-          <label className={LABEL_CLS}>Narrator Voice</label>
-          <select
-            value={s.narrator_voice || 'auto'}
-            onChange={e => update('narrator_voice', e.target.value)}
-            className={INPUT_CLS}
-          >
-            <option value="auto">Auto — matches scene mood</option>
-            <option value="Daniel">Daniel — Authoritative British</option>
-            <option value="Callum">Callum — Intense, dramatic</option>
-            <option value="Adam">Adam — Deep, commanding</option>
-            <option value="Patrick">Patrick — Wise, elder</option>
-            <option value="Clyde">Clyde — Warm storyteller</option>
-            <option value="Charlotte">Charlotte — Warm British woman</option>
-            <option value="Rachel">Rachel — Gentle female</option>
-          </select>
-        </div>
-      )}
-
-      <div>
-        <label className={LABEL_CLS}>Voice Effect</label>
-        <select
-          value={s.voice_effect || 'none'}
-          onChange={e => update('voice_effect', e.target.value)}
-          className={INPUT_CLS}
-        >
-          <optgroup label="Clean">
-            <option value="none">None — clean, unprocessed</option>
-            <option value="warm_broadcast">Warm Broadcast — polished, compressed</option>
-          </optgroup>
-          <optgroup label="Cinematic">
-            <option value="cinema_reverb">Cinema Reverb — large room echo</option>
-            <option value="intimate_room">Intimate Room — small, close</option>
-            <option value="cathedral">Cathedral — massive reverb</option>
-            <option value="epic_narrator">Epic Narrator — booming, present</option>
-            <option value="vintage_film">Vintage Film — old film bandwidth</option>
-          </optgroup>
-          <optgroup label="Special">
-            <option value="telephone">Telephone — bandpass phone call</option>
-            <option value="radio">Radio — compressed broadcast</option>
-            <option value="megaphone">Megaphone — harsh, distorted</option>
-            <option value="underwater">Underwater — muffled, submerged</option>
-            <option value="dream_sequence">Dream Sequence — ethereal, slowed</option>
-            <option value="robot">Robot — pitch shifted, chorus</option>
-            <option value="whisper_intimate">Whisper Enhance — breathy, close</option>
-          </optgroup>
-        </select>
-      </div>
-
       <div>
         <label className={LABEL_CLS}>Music Mastering</label>
         <select

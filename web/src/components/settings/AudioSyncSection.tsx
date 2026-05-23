@@ -48,8 +48,6 @@ export function AudioSyncSection({ s, config, update }: Props) {
         {[
           { k: 'dialogue_mode_enabled', label: 'ElevenLabs Dialogue Mode', desc: 'Route multi-line dialogue through dedicated endpoint — natural turn-taking + prosody continuity.', def: true },
           { k: 'forced_alignment_enabled', label: 'Forced Alignment (WhisperX)', desc: 'Word-level timestamps + DTW correction. Lipsync accuracy ↑↑.', def: true },
-          { k: 'room_tone_matching', label: 'Room Tone Matching', desc: 'Apply scene-environment reverb/EQ to dialogue. Sells the location.', def: false },
-          { k: 'prosody_continuity', label: 'Prosody Continuity', desc: 'Smooth pitch/energy across dialogue turns — no abrupt voice resets.', def: true },
         ].map(t => (
           <div key={t.k} className="flex items-start gap-2">
             <input type="checkbox"
@@ -101,18 +99,6 @@ export function AudioSyncSection({ s, config, update }: Props) {
         )}
       </div>
 
-      {/* Music + foley providers */}
-      <div className="grid grid-cols-1 gap-2">
-        <ProviderSelect label="Music Provider" field="music_provider" modality="music" defaultValue="SUNO_V5"
-          s={s} config={config} update={update} />
-        <ProviderSelect label="Foley / SFX Provider" field="foley_provider" modality="foley" defaultValue="STABLE_AUDIO_FOLEY"
-          s={s} config={config} update={update} />
-      </div>
-
-      {/* Purpose-based API matrix */}
-      {(config as any)?.purpose_api_ranking && (config as any)?.purpose_tags && (
-        <PurposeMatrix s={s} config={config} update={update} />
-      )}
     </SettingsSection>
   )
 }
@@ -154,77 +140,3 @@ function LipsyncPriorityList({ s, config, update }: { s: any; config: AppConfig 
   )
 }
 
-function ProviderSelect({ label, field, modality, defaultValue, s, config, update }: { label: string; field: string; modality: string; defaultValue: string; s: any; config: AppConfig | null; update: (k: string, v: any) => void | Promise<void> }) {
-  return (
-    <div>
-      <label className="text-eyebrow text-editorial-ivory-soft block mb-1.5 uppercase tracking-wider">{label}</label>
-      <select value={s[field] || defaultValue}
-        onChange={e => update(field, e.target.value)}
-        className="w-full bg-editorial-ink border border-editorial-rule rounded-lg px-3 py-1.5 text-eyebrow text-editorial-ivory">
-        {config?.api_registry && Object.entries(config.api_registry)
-          .filter(([, v]: any) => v.modality === modality)
-          .map(([k, v]: any) => (
-            <option key={k} value={k} disabled={(v.status || 'live') === 'planned'}>
-              {v.label} {v.status === 'planned' ? '[planned]' : v.status === 'beta' ? '[beta]' : ''}
-            </option>
-          ))}
-      </select>
-    </div>
-  )
-}
-
-function PurposeMatrix({ s, config, update }: { s: any; config: AppConfig | null; update: (k: string, v: any) => void | Promise<void> }) {
-  return (
-    <div>
-      <label className="text-eyebrow text-editorial-ivory-soft block mb-1.5 uppercase tracking-wider">Purpose-Based Routing</label>
-      <div className="rounded-lg border border-editorial-rule bg-editorial-ink overflow-hidden">
-        <table className="w-full text-eyebrow">
-          <tbody>
-            {(config as any).purpose_tags.map((purpose: string) => {
-              const ranking: string[] = (config as any).purpose_api_ranking[purpose] || []
-              const override = (s.purpose_overrides || {})[purpose]
-              const liveCandidates = ranking.filter(k => {
-                const info = (config?.api_registry as any)?.[k]
-                return info && (info.status || 'live') !== 'planned'
-              })
-              const chosen = override || liveCandidates[0] || ranking[0]
-              const chosenInfo = (config?.api_registry as any)?.[chosen]
-              return (
-                <tr key={purpose} className="border-b border-editorial-rule/30 last:border-0">
-                  <td className="px-2 py-1.5 text-editorial-ivory-mute font-mono">{purpose.replace(/_/g, ' ')}</td>
-                  <td className="px-2 py-1.5">
-                    <select
-                      value={chosen}
-                      aria-label={`API for ${purpose}`}
-                      onChange={e => {
-                        const next = { ...(s.purpose_overrides || {}), [purpose]: e.target.value }
-                        if (!e.target.value) delete next[purpose]
-                        update('purpose_overrides', next)
-                      }}
-                      className="w-full bg-editorial-ink-soft border border-editorial-rule rounded px-1.5 py-0.5 text-eyebrow text-editorial-ivory">
-                      {ranking.map((k: string) => {
-                        const info = (config?.api_registry as any)?.[k]
-                        if (!info) return null
-                        return (
-                          <option key={k} value={k} disabled={(info.status || 'live') === 'planned'}>
-                            {info.label} {info.status === 'planned' ? '[planned]' : info.status === 'beta' ? '[beta]' : ''}
-                          </option>
-                        )
-                      })}
-                    </select>
-                  </td>
-                  <td className="px-2 py-1.5 text-right text-editorial-ivory-mute">
-                    {chosenInfo && (
-                      <span className="font-mono">Q{(chosenInfo.quality_score ?? 0).toFixed(2)} · ${chosenInfo.per_shot_cost?.toFixed(2)}</span>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-eyebrow-sm text-editorial-ivory-mute mt-1">Per-purpose API picks. Defaults to the best available (live → beta → planned). Override per purpose to lock in a specific engine.</p>
-    </div>
-  )
-}

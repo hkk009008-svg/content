@@ -34,10 +34,8 @@ export const PRODUCTION_PRESETS: ProductionPreset[] = [
     summary: 'Best when faces, mouth shapes, and line delivery matter more than spectacle.',
     useWhen: 'Conversation, testimony, interview, confrontation.',
     settings: {
-      default_video_api: 'KLING_NATIVE',
       lip_sync_mode: 'auto',
       face_swap_enabled: true,
-      adaptive_pulid: true,
       identity_strictness: 0.7,
       coherence_check_enabled: true,
       color_grade_preset: 'desaturated',
@@ -50,13 +48,10 @@ export const PRODUCTION_PRESETS: ProductionPreset[] = [
     summary: 'Optimized for emotional beats, clean faces, and continuity across coverage.',
     useWhen: 'Performance-heavy scenes, close reactions, dramatic reveals.',
     settings: {
-      default_video_api: 'AUTO',
       music_mood: 'melancholic',
-      adaptive_pulid: true,
       identity_strictness: 0.7,
       coherence_check_enabled: true,
       color_grade_preset: 'warm_cinema',
-      quality_cost_weight: 0.9,
     },
   },
   {
@@ -65,11 +60,9 @@ export const PRODUCTION_PRESETS: ProductionPreset[] = [
     summary: 'Prioritizes motion physics, smoother movement, and stronger motion gates.',
     useWhen: 'Chase, impact, stunts, aggressive camera movement.',
     settings: {
-      default_video_api: 'SORA_NATIVE',
       music_mood: 'action',
       motion_quality_threshold: 0.55,
       color_grade_preset: 'high_contrast',
-      quality_cost_weight: 0.85,
     },
   },
   {
@@ -78,12 +71,10 @@ export const PRODUCTION_PRESETS: ProductionPreset[] = [
     summary: 'Use for environment-first footage where atmosphere and scale matter more than facial fidelity.',
     useWhen: 'Establishers, skylines, travel shots, empty spaces, mood footage.',
     settings: {
-      default_video_api: 'LTX',
       music_mood: 'ethereal',
       color_grade_preset: 'golden_hour',
       coherence_check_enabled: true,
       identity_strictness: 0.5,
-      quality_cost_weight: 0.75,
     },
   },
   {
@@ -102,14 +93,12 @@ export const PRODUCTION_PRESETS: ProductionPreset[] = [
       max_halt_rule: 'composite_only',
       // Engine extensions
       flux_guidance: 3.5,
-      pag_scale: 3.0,
       slg_scale: 2.5,
       freeu_b1: 1.3,
       freeu_b2: 1.4,
       freeu_s1: 0.9,
       freeu_s2: 0.2,
       detail_daemon_amount: 0.5,
-      controlnet_depth_strength: 0.40,
       controlnet_canny_strength: 0.15,
       controlnet_pose_strength: 0.35,
       controlnet_tile_strength: 0.25,
@@ -123,11 +112,8 @@ export const PRODUCTION_PRESETS: ProductionPreset[] = [
       face_detailer_enabled: true,
       face_detailer_guide_size: 1024,
       // Identity safety net stays tight
-      adaptive_pulid: true,
       identity_strictness: 0.85,
       coherence_check_enabled: true,
-      // No budget cap — hero stack
-      cost_optimization: 'quality_first',
     },
   },
 ]
