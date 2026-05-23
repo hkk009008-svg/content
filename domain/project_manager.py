@@ -308,10 +308,7 @@ def make_project(name: str) -> dict:
             "color_palette": "",
             "master_seed": random.randint(100000, 999999),
             "style_rules": {},
-            "default_video_api": "AUTO",
-            # V11 defaults
             "budget_limit_usd": 0,
-            "cost_optimization": "quality_first",
             "vbench_overall_threshold": 0.60,
             "identity_strictness": 0.60,
             "temporal_flicker_tolerance": 0.85,
@@ -319,7 +316,6 @@ def make_project(name: str) -> dict:
             "creative_llm": "auto",
             "quality_judge_llm": "auto",
             "competitive_generation": True,
-            "quality_cost_weight": 0.8,
             "adaptive_pulid": True,
             "coherence_check_enabled": True,
             "color_drift_sensitivity": 0.3,
