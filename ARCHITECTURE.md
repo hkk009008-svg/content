@@ -1235,7 +1235,6 @@ print('OK')
 | Low | `phase_c_vision.py:107-109` is dead code — `__main__` block calls nonexistent `validate_identity()`. | `phase_c_vision.py:107` |
 | Low | `_progress_queues[pid]` never cleaned up — survives across runs; minor memory leak per project. | `web_server.py:60` |
 | Low | `audio/voiceover.py:generate_voiceover` writes `temp_voiceover.mp3` to cwd. Fine in practice (orchestrator overrides) but pollutes cwd for standalone callers. | `audio/voiceover.py:276` |
-| Cosmetic | `CineDecompose` system prompt duplicated 150 LOC verbatim between `decompose_scene` and `competitive_decompose_scene`. | `domain/scene_decomposer.py:413-489 vs 675-751` |
 | Cosmetic | BGM duration hard-coded to 47s with no comment. | `cinema_pipeline.py:490` |
 | Cosmetic | `web/src/components/console/TakeStrip.tsx` uses both palettes (lines 66, 69, 76, 82, 89). | `web/src/components/console/TakeStrip.tsx` |
 | Cosmetic | `generate_voiceover` signature is `ctx: dict` not `ctx: PipelineContext` — mixed-mode (uses both dict-API and `get_project_setting`). Works because `PipelineContext` implements dict API. | `audio/voiceover.py:270` |

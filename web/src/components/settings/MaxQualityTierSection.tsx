@@ -116,6 +116,42 @@ export function MaxQualityTierSection({ s, project, update }: Props) {
               hint="Conjunctive rule only — best candidate's ArcFace must also clear this bar to halt." />
           )}
 
+          {/* Per-batch parallel workers (Bundle B 2.1, 2026-05-24).
+              Three discrete choices fit the operator mental model — sequential
+              today, opt-in 2x or 4x when the pod can handle the concurrency.
+              ComfyUI still serializes GPU work; the win is overlapping
+              submit/poll/download/score with the next candidate's generation. */}
+          <div>
+            <label className="text-eyebrow text-editorial-ivory-soft block mb-1.5 uppercase tracking-wider">
+              Per-batch parallelism
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: 1, label: 'Sequential', desc: 'One candidate at a time. Default. Lowest pod load.' },
+                { value: 2, label: '2 workers', desc: 'Overlap I/O + scoring with next generation. ~1.6× faster.' },
+                { value: 4, label: '4 workers', desc: 'Aggressive overlap. ~3.9× faster on light scoring. Watch pod memory.' },
+              ].map(opt => {
+                const current = s.max_quality_parallel_workers ?? 1
+                const active = current === opt.value
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => update('max_quality_parallel_workers', opt.value)}
+                    aria-pressed={active}
+                    className={`rounded-lg px-2.5 py-2 text-left transition-all ${
+                      active
+                        ? 'bg-editorial-brass/10 border border-editorial-brass/40'
+                        : 'bg-editorial-ink-soft border border-editorial-rule opacity-60 hover:opacity-100'
+                    }`}>
+                    <div className="text-eyebrow-lg font-semibold text-editorial-ivory">{opt.label}</div>
+                    <p className="text-eyebrow-sm text-editorial-ivory-mute mt-0.5 leading-tight">{opt.desc}</p>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
           {/* Character LoRA registry */}
           <div>
             <label className="text-eyebrow text-editorial-ivory-soft block mb-1.5 uppercase tracking-wider">Per-Character LoRAs</label>

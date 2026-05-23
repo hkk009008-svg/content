@@ -153,13 +153,13 @@ function ClipCard({
   // --- Performance takes: surface when stage is PERFORMANCE_REVIEW ---
   // Mirrors the keyframe/final patterns above. When the performance phase
   // produced a take, its video clip is what the operator approves.
-  const performanceTakes = (shot as any).performance_takes || []
+  const performanceTakes = shot.performance_takes || []
   const latestPerformanceTake = performanceTakes.length > 0
     ? performanceTakes[performanceTakes.length - 1]
     : null
-  const approvedPerformanceTakeId = (shot as any).approved_performance_take_id || latestPerformanceTake?.id || ''
-  const performanceEngine = (shot as any).performance_engine || ''
-  const drivingVideoPath = (shot as any).driving_video_path || ''
+  const approvedPerformanceTakeId = shot.approved_performance_take_id || latestPerformanceTake?.id || ''
+  const performanceEngine = shot.performance_engine || ''
+  const drivingVideoPath = shot.driving_video_path || ''
   const performanceVideoPath = latestPerformanceTake?.path || ''
   const performanceMetadata = latestPerformanceTake?.metadata || {}
   const motionFidelity: number | null | undefined = performanceMetadata.motion_fidelity
@@ -408,7 +408,7 @@ function ClipCard({
                     }}
                   />
                 </label>
-                {latestPerformanceTake && (shot as any).approved_performance_take_id !== latestPerformanceTake.id && (
+                {latestPerformanceTake && shot.approved_performance_take_id !== latestPerformanceTake.id && (
                   <button
                     onClick={() => runAction('approve-performance', () => onApprovePerformance(shot.id, latestPerformanceTake.id))}
                     disabled={loadingAction === 'approve-performance'}

@@ -338,79 +338,31 @@ MUSIC_MOODS = [
 ]
 
 
-def decompose_scene(
-    scene: dict,
-    characters: List[dict],
-    location: dict,
+def _build_cinedecompose_system_prompt(
+    target_shots: int,
+    char_descriptions: list,
+    loc_description: str,
+    loc_lighting: str,
+    loc_time: str,
+    loc_weather: str,
+    style_ctx: str,
+    research_ctx: str,
     global_settings: dict,
-    style_rules: Optional[dict] = None,
-) -> List[dict]:
+) -> str:
+    """Build the CineDecompose v1.0 system prompt.
+
+    Bundle-B 2.3 (2026-05-24): extracted to a single source of truth.
+    Previously this 75-line f-string template was duplicated verbatim in
+    `decompose_scene` and `competitive_decompose_scene` (~150 LOC of
+    drift hazard). HC1-HC5, the schema, the example, and the tripwires
+    are now defined here once — both callers render with the same prompt.
+
+    The template is a single triple-quoted f-string so editing any one
+    constraint or rule lands consistently across both call paths. To add
+    a new variable, extend this signature; both call sites already pass
+    the same locals.
     """
-    Takes a user-defined scene and produces 2-5 shot breakdowns via GPT-4o.
-    Each shot includes: image prompt, camera motion, visual effect, target API,
-    foley description, and character/position metadata.
-
-    Args:
-        scene: The Scene dict from the project
-        characters: List of CharacterRecord dicts for characters in this scene
-        location: The LocationRecord dict for this scene's location
-        global_settings: Project global settings (aspect ratio, color palette, etc.)
-        style_rules: Optional cinematography/color rules from style_director
-
-    Returns:
-        List of shot dicts ready for continuity enhancement and image generation.
-    """
-    import openai
-
-    api_key = settings.openai_api_key
-    if not api_key:
-        print("❌ OPENAI_API_KEY not set. Cannot decompose scene.")
-        return _fallback_decompose(scene, characters, location)
-
-    client = openai.OpenAI(api_key=api_key)
-
-    # Build character descriptions for the prompt
-    char_descriptions = []
-    char_id_map = {}
-    for c in characters:
-        char_descriptions.append(
-            f"- {c['name']} (ID: {c['id']}): {c.get('physical_traits', c.get('description', ''))}"
-        )
-        char_id_map[c["name"].lower()] = c["id"]
-
-    # Build location context
-    loc_description = location.get("description", "an unspecified location")
-    loc_lighting = location.get("lighting", "natural lighting")
-    loc_time = location.get("time_of_day", "day")
-    loc_weather = location.get("weather", "clear")
-
-    # Style rules context
-    style_ctx = ""
-    if style_rules:
-        style_ctx = f"""
-[STYLE CONSTRAINTS]:
-- Cinematography: {style_rules.get('cinematography_rules', 'cinematic, photorealistic')}
-- Color Grading: {style_rules.get('color_grading_palette', global_settings.get('color_palette', 'natural cinematic'))}
-- Mood: {style_rules.get('director_vision', scene.get('mood', 'neutral'))}
-"""
-
-    # Research-enhanced context — Tavily searches for real cinematography techniques
-    research_ctx = ""
-    try:
-        from research_engine import research_cinematography
-        mood = scene.get("mood", "cinematic")
-        action = scene.get("action", "")
-        reference = research_cinematography(mood, loc_description, action)
-        if reference:
-            research_ctx = f"\n{reference}\n"
-    except (ImportError, RuntimeError) as e:
-        pass  # Research is optional — never blocks generation
-
-    # Target shot count based on duration
-    duration = scene.get("duration_seconds", 5)
-    target_shots = max(2, min(5, int(duration / 2.5)))
-
-    system_prompt = f"""<SYSTEM_PERSONA>
+    return f"""<SYSTEM_PERSONA>
 You are "CineDecompose v1.0". You operate as a strict cinematic shot decomposition engine.
 Your singular purpose is to decompose scenes into exactly {target_shots} technically precise shot descriptions.
 You follow the OUTPUT_SCHEMA with zero deviation. You do not improvise, embellish, or add unrequested content.
@@ -487,6 +439,91 @@ R6. In [OUTFIT], describe ONLY clothing and accessories — NEVER hair, face, bo
 {PIPELINE_CONTEXT}
 
 Output ONLY a valid JSON array of shot objects. No markdown wrapping. No explanation."""
+
+
+def decompose_scene(
+    scene: dict,
+    characters: List[dict],
+    location: dict,
+    global_settings: dict,
+    style_rules: Optional[dict] = None,
+) -> List[dict]:
+    """
+    Takes a user-defined scene and produces 2-5 shot breakdowns via GPT-4o.
+    Each shot includes: image prompt, camera motion, visual effect, target API,
+    foley description, and character/position metadata.
+
+    Args:
+        scene: The Scene dict from the project
+        characters: List of CharacterRecord dicts for characters in this scene
+        location: The LocationRecord dict for this scene's location
+        global_settings: Project global settings (aspect ratio, color palette, etc.)
+        style_rules: Optional cinematography/color rules from style_director
+
+    Returns:
+        List of shot dicts ready for continuity enhancement and image generation.
+    """
+    import openai
+
+    api_key = settings.openai_api_key
+    if not api_key:
+        print("❌ OPENAI_API_KEY not set. Cannot decompose scene.")
+        return _fallback_decompose(scene, characters, location)
+
+    client = openai.OpenAI(api_key=api_key)
+
+    # Build character descriptions for the prompt
+    char_descriptions = []
+    char_id_map = {}
+    for c in characters:
+        char_descriptions.append(
+            f"- {c['name']} (ID: {c['id']}): {c.get('physical_traits', c.get('description', ''))}"
+        )
+        char_id_map[c["name"].lower()] = c["id"]
+
+    # Build location context
+    loc_description = location.get("description", "an unspecified location")
+    loc_lighting = location.get("lighting", "natural lighting")
+    loc_time = location.get("time_of_day", "day")
+    loc_weather = location.get("weather", "clear")
+
+    # Style rules context
+    style_ctx = ""
+    if style_rules:
+        style_ctx = f"""
+[STYLE CONSTRAINTS]:
+- Cinematography: {style_rules.get('cinematography_rules', 'cinematic, photorealistic')}
+- Color Grading: {style_rules.get('color_grading_palette', global_settings.get('color_palette', 'natural cinematic'))}
+- Mood: {style_rules.get('director_vision', scene.get('mood', 'neutral'))}
+"""
+
+    # Research-enhanced context — Tavily searches for real cinematography techniques
+    research_ctx = ""
+    try:
+        from research_engine import research_cinematography
+        mood = scene.get("mood", "cinematic")
+        action = scene.get("action", "")
+        reference = research_cinematography(mood, loc_description, action)
+        if reference:
+            research_ctx = f"\n{reference}\n"
+    except (ImportError, RuntimeError) as e:
+        pass  # Research is optional — never blocks generation
+
+    # Target shot count based on duration
+    duration = scene.get("duration_seconds", 5)
+    target_shots = max(2, min(5, int(duration / 2.5)))
+
+    system_prompt = _build_cinedecompose_system_prompt(
+        target_shots=target_shots,
+        char_descriptions=char_descriptions,
+        loc_description=loc_description,
+        loc_lighting=loc_lighting,
+        loc_time=loc_time,
+        loc_weather=loc_weather,
+        style_ctx=style_ctx,
+        research_ctx=research_ctx,
+        global_settings=global_settings,
+    )
 
     shot_schema = {
         "type": "array",
@@ -670,85 +707,19 @@ def competitive_decompose_scene(
     target_shots = max(2, min(5, int(duration / 2.5)))
 
     # ------------------------------------------------------------------
-    # 6. Build system prompt (same template as decompose_scene)
+    # 6. Build system prompt (shared with decompose_scene)
     # ------------------------------------------------------------------
-    system_prompt = f"""<SYSTEM_PERSONA>
-You are "CineDecompose v1.0". You operate as a strict cinematic shot decomposition engine.
-Your singular purpose is to decompose scenes into exactly {target_shots} technically precise shot descriptions.
-You follow the OUTPUT_SCHEMA with zero deviation. You do not improvise, embellish, or add unrequested content.
-TONE: Strictly technical. Zero creative flourish. Output structured data only.
-</SYSTEM_PERSONA>
-
-<HARD_CONSTRAINTS>
-HC1-IDENTITY_FIREWALL: You MUST NEVER describe any character's face, hair color, hair style,
-    glasses, skin tone, eye color, facial structure, age appearance, or body shape.
-    The face-locking system handles identity from a reference photo.
-    If you describe the face, it CONFLICTS with the face-lock and produces a DIFFERENT PERSON.
-    VIOLATION OF HC1 = PIPELINE FAILURE.
-
-HC2-SCHEMA_LOCK: Every shot prompt MUST contain exactly these 5 labeled sections in order:
-    [SHOT] [SCENE] [ACTION] [OUTFIT] [QUALITY]. No other sections. No unlabeled text.
-
-HC3-LOCATION_LOCK: The [SCENE] section MUST describe the SAME location across all shots.
-    Use identical environment details. Only camera angle and framing change between shots.
-
-HC4-LIGHTING_LOCK: Light direction, color temperature, and intensity MUST be identical
-    across all shots in this scene. Specify once, repeat verbatim.
-
-HC5-FACE_DIRECTION: Every [ACTION] MUST include the character facing the camera.
-    Use: "facing the camera", "looking toward the camera", "three-quarter view toward camera".
-    NEVER: "turning away", "looking down", "silhouette", "back to camera".
-</HARD_CONSTRAINTS>
-
-<TRIPWIRES>
-Before outputting, verify:
-[T1] Does ANY prompt contain words describing face/hair/skin/glasses/eyes? → REMOVE THEM.
-[T2] Does every prompt contain all 5 sections [SHOT][SCENE][ACTION][OUTFIT][QUALITY]? → If not, ADD missing sections.
-[T3] Is the location description identical across all shots? → If not, UNIFY.
-[T4] Is the lighting description identical across all shots? → If not, UNIFY.
-</TRIPWIRES>
-
-<OUTPUT_SCHEMA>
-Each shot prompt follows this exact structure:
-
-"[SHOT] {{shot type}}, {{focal length}} lens, {{depth of field}}, {{camera height and angle}}.
-[SCENE] {{environment description}}, {{weather}}, {{lighting: direction, color temp, fill ratio}}, {{atmospheric depth cue: haze, dust, volumetric light}}.
-[ACTION] The character {{physical action}}, {{camera-facing direction}}, {{interaction with props/environment}}, {{weight and physicality of movement}}.
-[OUTFIT] {{clothing items, fabric texture, fit — NO hair, face, or body description}}.
-[QUALITY] Photorealistic, visible skin pores and subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, volumetric atmospheric lighting, micro-detail in fabric weave and material texture, no AI artifacts, no smooth plastic skin, no over-saturated colors."
-</OUTPUT_SCHEMA>
-
-<EXAMPLE>
-"[SHOT] Medium shot, 85mm f/1.4 lens, shallow depth of field, camera at eye level slightly below subject. [SCENE] A snow-covered park with bare oak trees lining a path, overcast sky, soft diffused natural light at 4500K, fill ratio 1:3 from camera-left, faint breath vapor in cold air. [ACTION] The character walks toward the camera along the snow-covered path with natural gait weight, golden retriever on a leash in right hand, looking directly at the camera with a gentle expression. [OUTFIT] Red wool peacoat with visible fabric texture over cream turtleneck knit, dark fitted jeans, black leather ankle boots with slight wear. [QUALITY] Photorealistic, visible skin pores and subsurface scattering, shallow depth of field with circular bokeh, natural film grain ISO 400, volumetric cold-air haze, micro-detail in wool weave, no AI artifacts, no smooth plastic skin."
-</EXAMPLE>
-
-<SCENE_DATA>
-[CHARACTERS IN THIS SCENE]:
-{chr(10).join(char_descriptions)}
-(NOTE: Character names are for reference ONLY. Do NOT describe their physical appearance.)
-
-[LOCATION]:
-{loc_description}
-Lighting: {loc_lighting}
-Time of day: {loc_time}
-Weather: {loc_weather}
-
-{style_ctx}
-{research_ctx}
-</SCENE_DATA>
-
-<ADDITIONAL_RULES>
-R1. Shots follow physical logic — characters do not teleport between shots.
-R2. Camera angles are physically achievable and cinematic.
-R3. Every shot specifies environmental Foley sound effects in scene_foley field.
-R4. Aspect ratio: {global_settings.get('aspect_ratio', '16:9')} widescreen.
-R5. Set target_api intelligently using the API EXPERTISE below. Do NOT default to "AUTO" — pick the best API for each shot.
-R6. In [OUTFIT], describe ONLY clothing and accessories — NEVER hair, face, body, or physical traits.
-</ADDITIONAL_RULES>
-
-{PIPELINE_CONTEXT}
-
-Output ONLY a valid JSON array of shot objects. No markdown wrapping. No explanation."""
+    system_prompt = _build_cinedecompose_system_prompt(
+        target_shots=target_shots,
+        char_descriptions=char_descriptions,
+        loc_description=loc_description,
+        loc_lighting=loc_lighting,
+        loc_time=loc_time,
+        loc_weather=loc_weather,
+        style_ctx=style_ctx,
+        research_ctx=research_ctx,
+        global_settings=global_settings,
+    )
 
     shot_schema = {
         "type": "array",
