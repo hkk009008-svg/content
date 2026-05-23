@@ -85,6 +85,7 @@ from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 from project_manager import MutationResult, mutate_project, make_take
 from llm.style_director import style_rules_to_prompt_suffix
 from character_manager import get_reference_image
+from cinema.context import PipelineContext
 from phase_c_assembly import generate_ai_broll
 from phase_c_ffmpeg import generate_ai_video, stitch_modules
 from phase_c_vision import validate_identity, face_swap_video_frames
@@ -387,6 +388,12 @@ class ShotController:
             identity_anchor_override = cc.get("identity_anchor", "")
             negative_override = negative_prompt or cc.get("negative_constraints") or shot.get("negative_constraints", "")
 
+        # Build a lightweight PipelineContext so max-tier UI knobs
+        # (MaxTierComfyControls + halt overrides) flow through to
+        # generate_ai_broll_max.  settings is a plain dict; wrapping it in
+        # PipelineContext lets get_project_setting() read it correctly.
+        ctx = PipelineContext(global_settings=settings)
+
         result = generate_ai_broll(
             full_prompt,
             img_path,
@@ -403,6 +410,7 @@ class ShotController:
             style_reference=style_reference,
             shot_hint={"prompt": full_prompt, "characters_in_frame": shot.get("characters_in_frame", []),
                        "camera": shot.get("camera", "")},
+            ctx=ctx,
         )
         if not result or not os.path.exists(img_path):
             return {"success": False, "error": "Image generation failed"}

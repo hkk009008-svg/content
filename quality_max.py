@@ -38,7 +38,10 @@ import random
 import shutil
 import threading
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+
+if TYPE_CHECKING:
+    from cinema.context import PipelineContext
 
 import requests
 
@@ -480,6 +483,7 @@ def generate_ai_broll_max(
     char_lora_path: Optional[str] = None,
     style_reference: Optional[str] = None,
     shot_hint: Optional[dict] = None,
+    ctx: Optional["PipelineContext"] = None,
 ) -> Optional[str]:
     """N=8 adaptive best-of generation. Returns saved path or None.
 
@@ -504,6 +508,55 @@ def generate_ai_broll_max(
     }
     shot_type = classify_shot_type(shot_info)
     params = get_max_quality_params(shot_type)
+
+    # ---- Per-project UI overrides (from ctx.global_settings) ----
+    # 7 MaxQualityTier halt knobs — override the shot-type defaults above.
+    if ctx is not None:
+        from cinema.context import get_project_setting
+        for ui_key, param_key in (
+            ("max_candidate_count",          "candidate_count"),
+            ("max_candidate_batch",          "candidate_batch"),
+            ("max_halt_threshold_composite", "halt_threshold_composite"),
+            ("max_halt_threshold_arc",       "halt_threshold_arc"),
+            ("max_halt_min_n",               "halt_min_n"),
+            ("max_regenerate_floor_arc",     "regenerate_floor_arc"),
+            ("max_halt_rule",                "halt_rule"),
+        ):
+            override = get_project_setting(ctx, ui_key, None)
+            if override is not None:
+                params[param_key] = override
+
+        # 16 MaxTierComfyControls — overlay into params so the existing
+        # _inject_sampling / _inject_conditioning / _inject_post_passes
+        # helpers pick them up automatically.  UI key → params key mapping:
+        for ui_key, param_key in (
+            # Sampling / guidance controls
+            ("slg_scale",                "slg_scale"),
+            ("freeu_b1",                 "freeu_b1"),
+            ("freeu_b2",                 "freeu_b2"),
+            ("freeu_s1",                 "freeu_s1"),
+            ("freeu_s2",                 "freeu_s2"),
+            ("ays_steps",                "ays_steps"),
+            ("detail_daemon_amount",     "detail_daemon_amount"),
+            # ControlNet channel strengths (UI name differs from params key)
+            ("controlnet_canny_strength", "cn_canny_strength"),
+            ("controlnet_pose_strength",  "cn_pose_strength"),
+            ("controlnet_tile_strength",  "cn_tile_strength"),
+            # Redux style reference strength
+            ("redux_strength",           "redux_strength"),
+            # Hires-fix pass
+            ("hires_fix_enabled",        "hires_fix_enabled"),
+            ("hires_fix_denoise",        "hires_fix_denoise"),
+            # FaceDetailer
+            ("face_detailer_enabled",    "face_detailer_enabled"),
+            ("face_detailer_guide_size", "face_detailer_guide_size"),
+            # SUPIR upscaler
+            ("supir_enabled",            "supir_enabled"),
+            ("supir_steps",              "supir_steps"),
+        ):
+            override = get_project_setting(ctx, ui_key, None)
+            if override is not None:
+                params[param_key] = override
 
     # Apply adaptive PuLID weight override (from continuity feedback loop)
     if pulid_weight_override is not None:
