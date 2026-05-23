@@ -30,6 +30,21 @@ def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
 
+def _parse_cors_origins(raw: str) -> tuple[str, ...]:
+    """Parse WEB_CORS_ORIGINS env into a tuple of origin patterns.
+
+    Empty / unset → safe localhost-only default. To intentionally allow
+    every origin (the pre-2026-05-23 wide-open behavior), set
+    WEB_CORS_ORIGINS=*. To allow LAN access, set the env to a
+    comma-separated list including the LAN IP, e.g.
+    ``WEB_CORS_ORIGINS=http://localhost:8080,http://192.168.1.50:8080``.
+    """
+    if not raw.strip():
+        return ("http://localhost:8080", "http://localhost:5173")
+    parsed = tuple(origin.strip() for origin in raw.split(",") if origin.strip())
+    return parsed or ("http://localhost:8080", "http://localhost:5173")
+
+
 @dataclass(frozen=True)
 class Settings:
     # LLM providers
@@ -78,6 +93,10 @@ class Settings:
     # Performance-capture tuning
     motion_gate_samples: int     # #frame-pair samples for optical-flow scoring (performance/motion_gate.py)
 
+    # Web server — bind address + CORS allowlist
+    web_bind_host: str                  # default 127.0.0.1 (loopback only). Set WEB_BIND_HOST=0.0.0.0 to expose on LAN.
+    web_cors_origins: tuple[str, ...]   # default localhost dev origins. Set WEB_CORS_ORIGINS=* for wide-open (pre-hardening default).
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
@@ -111,6 +130,8 @@ class Settings:
             experiments_db_path=_env("EXPERIMENTS_DB_PATH", "data/experiments.db"),
             performance_cache_dir=_env("PERFORMANCE_CACHE_DIR", "data/cache/driving"),
             motion_gate_samples=int(_env("MOTION_GATE_SAMPLES", "8")),
+            web_bind_host=_env("WEB_BIND_HOST", "127.0.0.1"),
+            web_cors_origins=_parse_cors_origins(_env("WEB_CORS_ORIGINS", "")),
         )
 
 

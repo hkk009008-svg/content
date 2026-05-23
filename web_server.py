@@ -46,9 +46,15 @@ from cinema.core import PipelineCore, build_pipeline_core
 from cinema.services import state_snapshot, checkpoint_info
 from workflow_selector import WORKFLOW_TEMPLATES
 from web_services import make_progress_callback
+from config.settings import settings as env_settings
 
 app = Flask(__name__, static_folder="web/dist", static_url_path="")
-CORS(app)
+# CORS allowlist comes from settings.web_cors_origins. Default is
+# localhost-only ("http://localhost:8080" + "http://localhost:5173" for
+# Vite dev). To opt back into the pre-hardening wide-open behavior,
+# set WEB_CORS_ORIGINS=* in .env. Bound by env to support LAN/multi-device
+# use cases via WEB_CORS_ORIGINS=http://localhost:8080,http://<lan-ip>:8080.
+CORS(app, origins=list(env_settings.web_cors_origins))
 
 # SSE progress queues per project
 _progress_queues: dict[str, queue.Queue] = {}
@@ -1637,9 +1643,32 @@ def api_preview_scene(pid, sid):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    bind_host = env_settings.web_bind_host
+    cors_origins = env_settings.web_cors_origins
+    lan_note = (
+        "  ⚠ Bound to 0.0.0.0 — reachable from any device on this network. "
+        "Set WEB_BIND_HOST=127.0.0.1 to limit to this machine.\n"
+        if bind_host == "0.0.0.0"
+        else ""
+    )
+    cors_note = (
+        "  ⚠ CORS=* (wide open) — any origin can call the API. "
+        "Unset WEB_CORS_ORIGINS to restore localhost-only default.\n"
+        if cors_origins == ("*",)
+        else ""
+    )
+
     print("\n" + "=" * 60)
     print("🎬 CINEMA PRODUCTION TOOL — Web Server")
     print("=" * 60)
-    print("Open http://localhost:8080 in your browser")
+    print(f"Open http://localhost:8080 in your browser")
+    print(f"  bind:  {bind_host}:8080")
+    print(f"  CORS:  {', '.join(cors_origins)}")
+    if lan_note or cors_note:
+        print()
+        if lan_note:
+            print(lan_note, end="")
+        if cors_note:
+            print(cors_note, end="")
     print("=" * 60 + "\n")
-    app.run(host="0.0.0.0", port=8080, debug=False, use_reloader=False)
+    app.run(host=bind_host, port=8080, debug=False, use_reloader=False)
