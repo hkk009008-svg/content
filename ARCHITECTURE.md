@@ -932,13 +932,11 @@ Consumer: `workflow_selector.get_adaptive_pulid_weight` reads
 | File | Role | Provider(s) |
 |---|---|---|
 | `audio/_client.py` | Shared ElevenLabs SDK singleton | ElevenLabs |
-| `audio/voiceover.py` | Narrator TTS + TTS router + voice-direction profiles | ElevenLabs v3, Cartesia Sonic-2, OpenAI gpt-4o-audio |
+| `audio/voiceover.py` | VOICE_DIRECTIONS dict + delivery-style resolver (lookup only — TTS-generation functions were removed 2026-05-24, see §17) | n/a (data + pure-Python lookup) |
 | `audio/dialogue.py` | Multi-character dialogue TTS | ElevenLabs v3 (dialogue endpoint, then per-line fallback) |
 | `audio/music.py` | BGM + mastering | FAL Stable Audio (default), Suno V5 (optional) |
-| `audio/foley.py` | SFX layers | ElevenLabs `text_to_sound_effects`, Stability AI Stable Audio 2 |
 | `audio/effects.py` | Voice/music DSP | Pedalboard (hard dep), macOS AU, FFmpeg |
 | `audio/alignment.py` | Forced alignment | WhisperX > Whisper word_timestamps |
-| `audio/srt.py` | Caption file | Whisper base |
 
 `audio/__init__.py` is a 20-line docstring with **no exports** — callers reach
 into submodules directly.
@@ -971,11 +969,13 @@ Only these imports leave `audio/`:
 |---|---|---|
 | `cinema_pipeline.py` | `audio.dialogue.generate_dialogue_voiceover` | top-level |
 | `cinema_pipeline.py` | `audio.music.generate_fal_bgm`, `audio.music.master_music` (lazy) | inside `_ensure_bgm` |
-| `web_server.py` | `audio.voiceover.VOICE_DIRECTIONS` | for UI dropdown |
+| `audio/dialogue.py` | `audio.voiceover.get_voice_direction` | for delivery → voice-params lookup |
+| `web_server.py` | `audio.voiceover.VOICE_DIRECTIONS` | for UI delivery-style dropdown |
 
-**Currently dormant:** `audio.voiceover.generate_voiceover`,
+The dormant TTS functions previously listed here (`generate_voiceover`,
 `generate_narration`, `generate_single_line_audio`, `audio.foley.*`,
-`audio.srt.generate_srt`. Reachable code, no live callers.
+`audio.srt.generate_srt`) were deleted on 2026-05-24 (Bundle-D 4.3).
+What remains is the live surface only.
 
 ### 12.5 BGM duration is hard-coded to 47s
 
@@ -1234,7 +1234,6 @@ print('OK')
 
 | Severity | Issue | Location |
 |---|---|---|
-| Low | `audio/voiceover.py:generate_voiceover` writes `temp_voiceover.mp3` to cwd. Fine in practice (orchestrator overrides) but pollutes cwd for standalone callers. Pending deletion in Bundle D (zero live callers). | `audio/voiceover.py:276` |
 | Low | 3 pre-existing test failures in `tests/unit/test_project_persistence.py` marked `@unittest.skip`. Mock setup hasn't caught up with `project_manager`/`character_manager`/`location_manager` refactors. Mock-only updates, not behavior changes. | `tests/unit/test_project_persistence.py:139,197,221` |
 | Cosmetic | BGM duration hard-coded to 47s with no comment. | `cinema_pipeline.py:490` |
 
@@ -1243,9 +1242,6 @@ print('OK')
 ## 17. Dead code & cleanup candidates
 
 - **`main.py`** — already deleted. Root-shim docstrings still mention it.
-- **`audio/voiceover.py:generate_voiceover`, `generate_narration`, `generate_single_line_audio`** — orphaned post-pivot. No live callers.
-- **`audio/foley.py:*` (all)** — orphaned. Reachable code, zero live callers.
-- **`audio/srt.py:generate_srt`** — orphaned.
 - **Root-level orphans worth investigating:** `cleanup.py`, `reporter.py`, `research_engine.py`, `web_research.py`, `web_services.py`, `coherence_analyzer.py`. Status unverified.
 
 `research_engine.py` and `web_research.py` are actually load-bearing —

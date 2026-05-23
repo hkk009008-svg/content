@@ -52,7 +52,6 @@ class Settings:
     openai_api_key: str
     gemini_api_key: str
     google_api_key: str
-    mistral_api_key: str
 
     # Video generation APIs
     kling_access_key: str
@@ -104,7 +103,6 @@ class Settings:
             openai_api_key=_env("OPENAI_API_KEY"),
             gemini_api_key=_env("GEMINI_API_KEY"),
             google_api_key=_env("GOOGLE_API_KEY"),
-            mistral_api_key=_env("MISTRAL_API_KEY"),
             kling_access_key=_env("KLING_ACCESS_KEY"),
             kling_secret_key=_env("KLING_SECRET_KEY"),
             fal_key=_env("FAL_KEY"),
