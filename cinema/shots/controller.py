@@ -388,8 +388,11 @@ class ShotController:
                         return MutationResult(opt_spec, save=True)
                     self._mutate_shot(shot_id, _stash_cache)
                 except Exception:
-                    logger.exception(
+                    # Optimizer is best-effort enrichment; fall back to the
+                    # base prompt at WARNING (not ERROR) — the shot still runs.
+                    logger.warning(
                         "prompt_optimizer skipped",
+                        exc_info=True,
                         extra={"shot_id": shot_id},
                     )
                     opt_spec = None
@@ -492,8 +495,10 @@ class ShotController:
                 video_id=video_id,
             )
         except Exception:
-            logger.exception(
+            # Cost tracking is best-effort; the keyframe itself succeeded.
+            logger.warning(
                 "keyframe cost record skipped",
+                exc_info=True,
                 extra={"shot_id": shot_id},
             )
 
@@ -570,8 +575,11 @@ class ShotController:
         try:
             audio_path = self._host._ensure_scene_audio(scene["id"]) or ""
         except Exception:
-            logger.exception(
+            # Scene audio is advisory for several performance engines;
+            # downstream code handles missing audio gracefully.
+            logger.warning(
                 "scene audio unavailable",
+                exc_info=True,
                 extra={"scene_id": scene["id"], "engine": engine},
             )
 
@@ -860,8 +868,9 @@ class ShotController:
                     )
             except Exception:
                 # Gate is advisory only — never fail the shot because the gate broke.
-                logger.exception(
+                logger.warning(
                     "motion-gate score skipped",
+                    exc_info=True,
                     extra={"shot_id": shot_id},
                 )
                 take["metadata"]["motion_fidelity"] = None
@@ -904,8 +913,11 @@ class ShotController:
                         shot_type=resolved_shot_type,
                     )
             except Exception:
-                logger.exception(
+                # Floor check is advisory — keep WARNING to match the score
+                # block above; never raise for an advisory gate failure.
+                logger.warning(
                     "motion-gate floor check skipped",
+                    exc_info=True,
                     extra={"shot_id": shot_id},
                 )
 
@@ -937,8 +949,11 @@ class ShotController:
                 video_id=video_id,
             )
         except Exception:
-            logger.exception(
+            # Same as keyframe-cost: best-effort tracking; the motion take
+            # itself succeeded.
+            logger.warning(
                 "motion cost record skipped",
+                exc_info=True,
                 extra={"shot_id": shot_id},
             )
 

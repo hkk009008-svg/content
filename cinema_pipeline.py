@@ -338,17 +338,28 @@ class CinemaPipeline:
                           scene_id: str = "", shot_id: str = "",
                           image_url: str = "", identity_score: float = -1,
                           director_review: dict = None, **kwargs):
-        logger.info(
-            "%s: %s",
-            stage,
-            detail,
-            extra={
-                "stage": stage,
-                "percent": percent,
-                "scene_id": scene_id,
-                "shot_id": shot_id,
-            },
-        )
+        # DEBUG severity so non-SSE callers (CLI, tests) don't double-log
+        # when an adjacent explicit logger.info/warning has already
+        # emitted the same event. The SSE path replaces this default at
+        # runtime with the queue callback, so SSE consumers are
+        # unaffected. Preserves all caller-provided context in `extra`
+        # (previously image_url / identity_score / director_review /
+        # **kwargs were silently dropped).
+        extra = {
+            "stage": stage,
+            "percent": percent,
+            "scene_id": scene_id,
+            "shot_id": shot_id,
+            "detail": detail,
+        }
+        if image_url:
+            extra["image_url"] = image_url
+        if identity_score != -1:
+            extra["identity_score"] = identity_score
+        if director_review:
+            extra["director_review"] = director_review
+        extra.update({k: v for k, v in kwargs.items() if v is not None})
+        logger.debug("progress", extra=extra)
 
     # ------------------------------------------------------------------
     # Lifecycle — thin delegations to self.lifecycle (ThreadedLifecycle).
@@ -512,7 +523,9 @@ class CinemaPipeline:
                     bgm_path = mastered
                     self.progress("AUDIO", "BGM mastered (cinema_master preset)", 6)
             except Exception:
-                logger.exception("BGM mastering skipped (non-critical)")
+                # Non-critical: BGM mix degrades gracefully; emit at WARNING
+                # so log monitors that alert on ERROR don't false-positive.
+                logger.warning("BGM mastering skipped (non-critical)", exc_info=True)
         return bgm_path
 
     def _build_scene_packages(self, project: Optional[dict] = None) -> tuple[list[dict], list[str]]:
@@ -596,7 +609,8 @@ class CinemaPipeline:
             if cleanup_result["files_deleted"] > 0:
                 self.progress("CLEANUP", f"Cleaned {cleanup_result['files_deleted']} temp files ({cleanup_result['mb_freed']} MB)", 98)
         except Exception:
-            logger.exception("Auto-cleanup failed (non-fatal)")
+            # Non-fatal: cleanup is best-effort; emit at WARNING.
+            logger.warning("Auto-cleanup failed (non-fatal)", exc_info=True)
 
         try:
             video_id = self.project.get("id", "unknown")
@@ -615,7 +629,8 @@ class CinemaPipeline:
                     },
                 )
         except Exception:
-            logger.exception("Could not retrieve cost summary")
+            # Reporting-only failure; emit at WARNING (the run itself succeeded).
+            logger.warning("Could not retrieve cost summary", exc_info=True)
 
         self._clear_checkpoint()
         self.progress("COMPLETE", f"Video exported: {final_path}", 100)
@@ -1034,7 +1049,10 @@ class CinemaPipeline:
             logger.warning(
                 "BGM mix failed, trying BGM-only fallback",
                 extra={
-                    "stderr_tail": (e.stderr[-200:] if e.stderr else ""),
+                    "stderr_tail": (
+                        e.stderr.decode("utf-8", errors="replace")[-200:]
+                        if e.stderr else ""
+                    ),
                 },
             )
             try:
@@ -1089,5 +1107,7 @@ if __name__ == "__main__":
             )
         else:
             logger.error("Cinema production failed")
+            sys.exit(1)
     else:
-        logger.info("Usage: python cinema_pipeline.py <project_id>")
+        logger.error("Usage: python cinema_pipeline.py <project_id>")
+        sys.exit(2)
