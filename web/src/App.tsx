@@ -21,7 +21,7 @@ export default function App() {
     stages, activeStage, shotStates, directorReview, processEvent,
     isPaused, failedShots, pause: pausePipeline, resume: resumePipeline,
     approveShotPlan, rejectShotPlan, generateKeyframe, approveKeyframe, generateMotion, approveFinal,
-    regenerateShot, correctShot, diagnoseShot, proceedToAssembly,
+    regenerateShot, restartShot, correctShot, diagnoseShot, proceedToAssembly,
   } = usePipelineState(project?.id ?? null)
 
   // Load config on mount
@@ -145,6 +145,7 @@ export default function App() {
         onGenerateMotion={(shotId) => withRefresh(() => generateMotion(shotId))}
         onApproveFinal={(shotId, takeId) => withRefresh(() => approveFinal(shotId, takeId))}
         onRegenerateShot={(shotId, positive, negative) => withRefresh(() => regenerateShot(shotId, positive, negative))}
+        onRestartShot={(shotId, positive, negative) => withRefresh(() => restartShot(shotId, positive, negative))}
         onCorrectShot={(shotId, action, params, takeId) => withRefresh(() => correctShot(shotId, action, params, takeId))}
         onDiagnoseShot={(shotId, takeId) => diagnoseShot(shotId, takeId)}
         onProceedToAssembly={() => withRefresh(() => proceedToAssembly())}

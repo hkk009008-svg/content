@@ -37,6 +37,10 @@ interface Props {
   onGenerateMotion: (shotId: string) => Promise<any>
   onApproveFinal: (shotId: string, takeId: string) => Promise<any>
   onRegenerateShot: (shotId: string, positive?: string, negative?: string) => Promise<any>
+  /** "Full restart" for a shot — clear every approval, regenerate the keyframe.
+   *  Wired into ReviewStage's `onRegenerate` button. Distinct from onRegenerateShot
+   *  (legacy "advance to next stage" semantics used by SceneExecutionCard). */
+  onRestartShot: (shotId: string, positive?: string, negative?: string) => Promise<any>
   onCorrectShot: (shotId: string, action: string, params?: Record<string, any>, takeId?: string) => Promise<any>
   onDiagnoseShot: (shotId: string, takeId?: string) => Promise<any>
   onProceedToAssembly: () => Promise<any>
@@ -127,7 +131,7 @@ export default function PipelineLayout({
   shotStates, directorReview, isGenerating, isPaused, failedShots,
   onBack, onCancel, onPause, onResume, onApproveShotPlan, onRejectShotPlan,
   onGenerateKeyframe, onApproveKeyframe, onGenerateMotion, onApproveFinal,
-  onRegenerateShot, onCorrectShot, onDiagnoseShot, onProceedToAssembly,
+  onRegenerateShot, onRestartShot, onCorrectShot, onDiagnoseShot, onProceedToAssembly,
   pipelineError, pipelineLoadingLabel,
 }: Props) {
   const isComplete = latest?.stage === 'COMPLETE' || latest?.stage === 'DONE'
@@ -298,7 +302,7 @@ export default function PipelineLayout({
               onApproveFinal={onApproveFinal}
               onCorrect={onCorrectShot}
               onDiagnose={onDiagnoseShot}
-              onRegenerate={onRegenerateShot}
+              onRegenerate={onRestartShot}
               onProceedToAssembly={onProceedToAssembly}
             />
           ) : (

@@ -211,7 +211,9 @@ function ClipCard({
   }
 
   const handleRegenerate = async () => {
-    await runAction('regenerate', () => onGenerateKeyframe(shot.id, positivePrompt, negativePrompt))
+    // Full restart: clear every downstream approval and regenerate the keyframe
+    // with the (possibly edited) prompt. See ShotController.restart_shot.
+    await runAction('regenerate', () => onRegenerate(shot.id, positivePrompt, negativePrompt))
     setShowRegenForm(false)
   }
 

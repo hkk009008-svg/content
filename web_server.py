@@ -1431,6 +1431,45 @@ def api_pipeline_state(pid):
     return jsonify(state_snapshot(pid))
 
 
+@app.route("/api/projects/<pid>/shots/<shot_id>/restart", methods=["POST"])
+@_project_lock_guard
+def api_restart_shot(pid, shot_id):
+    """Full restart for a shot: clear every downstream approval, regenerate
+    the keyframe. Take history is preserved; only approval pointers are reset.
+    Pairs with the UI's 'Regenerate' button (vs 'Generate another keyframe'
+    which adds a candidate take into the existing array). Optional body:
+    {positive_prompt, negative_prompt} — if positive_prompt is set, it
+    replaces the shot's stored prompt before regeneration."""
+    pipeline = _running_pipelines.get(pid)
+    payload = request.json if request.is_json else {}
+    positive_prompt = (payload or {}).get("positive_prompt")
+    negative_prompt = (payload or {}).get("negative_prompt")
+
+    def _resolve_scene_id(project: dict):
+        for scene in project["scenes"]:
+            for shot in scene.get("shots", []):
+                if shot.get("id") == shot_id:
+                    return MutationResult(scene["id"], save=False)
+        return MutationResult(False, save=False)
+
+    scene_id = mutate_project(pid, _resolve_scene_id, timeout=HTTP_PROJECT_TIMEOUT)
+    if scene_id is None:
+        return jsonify({"error": "Project not found"}), 404
+    if scene_id is False:
+        return jsonify({"error": "Shot not found"}), 404
+
+    if pipeline:
+        result = pipeline.restart_shot(scene_id, shot_id, positive_prompt, negative_prompt)
+        return jsonify(result)
+
+    try:
+        temp_pipeline = CinemaPipeline(pid, core=_get_or_build_core(pid), progress_callback=_make_progress_cb(pid))
+        result = temp_pipeline.restart_shot(scene_id, shot_id, positive_prompt, negative_prompt)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route("/api/projects/<pid>/shots/<shot_id>/regenerate", methods=["POST"])
 @_project_lock_guard
 def api_regenerate_shot(pid, shot_id):

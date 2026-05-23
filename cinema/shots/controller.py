@@ -935,6 +935,59 @@ class ShotController:
             return self.generate_motion_take(scene_id, shot_id)
         return self.generate_keyframe_take(scene_id, shot_id)
 
+    def restart_shot(
+        self,
+        scene_id: str,
+        shot_id: str,
+        positive_prompt: Optional[str] = None,
+        negative_prompt: Optional[str] = None,
+    ) -> dict:
+        """Full restart: clear every downstream approval and regenerate the keyframe.
+
+        Pairs with the UI's "Regenerate" action (vs "Generate another keyframe"
+        which adds a candidate take into the existing array). Take history
+        (keyframe_takes / performance_takes / motion_takes / postprocess_variants)
+        is PRESERVED so the operator can still look back at prior attempts —
+        only the approval pointers are reset.
+
+        Reset fields:
+          approved_keyframe_take_id
+          approved_performance_take_id
+          approved_motion_take_id
+          approved_final_take_id
+          performance_engine  (re-routed by generate_performance_take next time)
+
+        plan_status is intentionally NOT touched — restart regenerates from
+        the same approved plan rather than re-running the plan-review gate.
+
+        positive_prompt, when provided, replaces the shot's stored prompt so
+        the next keyframe generation uses the edited text. negative_prompt is
+        threaded into generate_keyframe_take but not persisted on the shot
+        (matches the legacy regenerate behavior).
+        """
+        def _mutator(_scene: dict, shot: dict):
+            shot["approved_keyframe_take_id"] = ""
+            shot["approved_performance_take_id"] = ""
+            shot["approved_motion_take_id"] = ""
+            shot["approved_final_take_id"] = ""
+            if "performance_engine" in shot:
+                shot["performance_engine"] = ""
+            if positive_prompt:
+                shot["prompt"] = positive_prompt
+            return MutationResult(
+                {"shot_id": shot_id, "restarted": True}, save=True,
+            )
+
+        result = self._mutate_shot(shot_id, _mutator)
+        if not result:
+            return {"success": False, "error": "Shot not found"}
+        return self.generate_keyframe_take(
+            scene_id,
+            shot_id,
+            positive_prompt=positive_prompt,
+            negative_prompt=negative_prompt,
+        )
+
     def diagnose_clip(self, shot_id: str, take_id: str = "") -> dict:
         """
         Run all quality analyzers on a clip and return scores + recommendations.

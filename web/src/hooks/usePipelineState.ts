@@ -160,6 +160,14 @@ export function usePipelineState(projectId: string | null) {
     return postJson(`/api/projects/${projectId}/shots/${shotId}/keyframes/generate`, body)
   }, [projectId, postJson])
 
+  const restartShot = useCallback(async (shotId: string, positivePrompt?: string, negativePrompt?: string) => {
+    if (!projectId) return null
+    const body: Record<string, any> = {}
+    if (positivePrompt) body.positive_prompt = positivePrompt
+    if (negativePrompt) body.negative_prompt = negativePrompt
+    return postJson(`/api/projects/${projectId}/shots/${shotId}/restart`, body)
+  }, [projectId, postJson])
+
   const approveKeyframe = useCallback(async (shotId: string, takeId: string) => {
     if (!projectId) return null
     return postJson(`/api/projects/${projectId}/shots/${shotId}/keyframes/${takeId}/approve`)
@@ -223,6 +231,7 @@ export function usePipelineState(projectId: string | null) {
     generateMotion,
     approveFinal,
     regenerateShot,
+    restartShot,
     correctShot,
     diagnoseShot,
     proceedToAssembly,

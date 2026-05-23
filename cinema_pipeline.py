@@ -248,6 +248,9 @@ class CinemaPipeline:
     def regenerate_shot(self, *args, **kwargs):
         return self._shot_ctrl.regenerate_shot(*args, **kwargs)
 
+    def restart_shot(self, *args, **kwargs):
+        return self._shot_ctrl.restart_shot(*args, **kwargs)
+
     def diagnose_clip(self, *args, **kwargs):
         return self._shot_ctrl.diagnose_clip(*args, **kwargs)
 
