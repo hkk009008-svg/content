@@ -15,7 +15,6 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
-import threading
 from typing import Optional
 
 # Use the public IdentityValidator (not face_validator_gate._arcface_score —
@@ -27,29 +26,30 @@ try:
 except Exception:
     _ID_VALIDATOR_AVAILABLE = False
 
-_VALIDATOR: Optional["IdentityValidator"] = None
-_VALIDATOR_LOCK = threading.Lock()
-
-
 # Threshold below which auto-approval is suppressed. Set conservatively —
 # 0.7 is the IdentityValidator default "looks like the same person" floor.
 DEFAULT_PERFORMANCE_FLOOR = 0.70
 
 
 def _get_validator() -> Optional["IdentityValidator"]:
-    global _VALIDATOR
+    """Return the process-singleton IdentityValidator, or None on init failure.
+
+    Delegates to identity.get_shared_validator so the performance gate
+    shares state with phase_c_vision and face_validator_gate. Behavior
+    change vs the previous per-module singleton: the shared instance
+    now has the LLM vision_fallback wired (it was None here before),
+    so an ArcFace-ambiguous frame may trigger a small LLM call inside
+    validate_image. Cost impact is minimal — the fallback only fires
+    on actually-ambiguous frames.
+    """
     if not _ID_VALIDATOR_AVAILABLE:
         return None
-    if _VALIDATOR is not None:
-        return _VALIDATOR
-    with _VALIDATOR_LOCK:
-        if _VALIDATOR is None:
-            try:
-                _VALIDATOR = IdentityValidator()
-            except Exception as e:
-                print(f"[PerformanceGate] IdentityValidator init failed: {e}")
-                return None
-        return _VALIDATOR
+    try:
+        from identity import get_shared_validator
+        return get_shared_validator()
+    except Exception as e:
+        print(f"[PerformanceGate] IdentityValidator init failed: {e}")
+        return None
 
 
 def _arcface_score(frame_path: str, anchor_path: str) -> Optional[float]:

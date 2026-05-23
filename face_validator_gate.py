@@ -33,10 +33,9 @@ except Exception as _e_arc:
     _arc_import_error = str(_e_arc)
 
 
-# Lazy-loaded singleton — IdentityValidator pulls ArcFace weights into memory,
-# so instantiating it per candidate (N=8 × M shots) is wasteful. Cache + lock.
-_VALIDATOR_SINGLETON: Optional["IdentityValidator"] = None
-_VALIDATOR_LOCK = threading.Lock()
+# IdentityValidator is now a process-singleton wired via
+# identity.get_shared_validator (see identity/__init__.py). No local cache
+# needed — the factory handles thread-safety + lazy load.
 
 
 # --- Aesthetic v2 (LAION CLIP+MLP scorer, lazy-loaded) ---------------------
@@ -103,25 +102,21 @@ def _aesthetic_score(image_path: str) -> Optional[float]:
 
 
 def _get_validator() -> Optional["IdentityValidator"]:
-    """Return a cached IdentityValidator instance, or None if ArcFace is unavailable.
+    """Return the process-singleton IdentityValidator, or None if ArcFace unavailable.
 
-    Instantiating IdentityValidator pulls ArcFace weights into memory; doing
-    that per-candidate would mean N=8 × M shots loads of the same weights.
-    The singleton + lock means we pay the load once per process.
+    Delegates to identity.get_shared_validator so this gate and the other
+    two identity consumers (phase_c_vision, performance.identity_gate)
+    share one instance: ArcFace weights load once, and rolling-stats
+    history accumulates signal from all three contexts.
     """
     if not _ARC_AVAILABLE:
         return None
-    global _VALIDATOR_SINGLETON
-    if _VALIDATOR_SINGLETON is not None:
-        return _VALIDATOR_SINGLETON
-    with _VALIDATOR_LOCK:
-        if _VALIDATOR_SINGLETON is None:
-            try:
-                _VALIDATOR_SINGLETON = IdentityValidator(vision_fallback=validate_identity_vision)
-            except Exception as e:
-                print(f"[FaceGate] IdentityValidator init failed: {e}")
-                return None
-        return _VALIDATOR_SINGLETON
+    try:
+        from identity import get_shared_validator
+        return get_shared_validator()
+    except Exception as e:
+        print(f"[FaceGate] IdentityValidator init failed: {e}")
+        return None
 
 
 def _arcface_score(image_path: str, reference_path: str) -> Optional[float]:

@@ -12,24 +12,18 @@ except ImportError:
     print("⚠️ [VISION WARNING] DeepFace/Tensorflow unavailable via PIP. Identity validation loop bypassed.")
 
 
-# Shared IdentityValidator for the 3 deprecated wrappers below
-# (validate_identity, validate_identity_image, validate_multi_identity).
-# Each wrapper used to construct a fresh validator per call, which kept
-# `validator.history` permanently empty — silently disabling
-# `IdentityValidator.get_rolling_stats` and the
-# `workflow_selector.get_adaptive_pulid_weight` feedback loop that depends
-# on it (the adaptive PuLID weighting was a no-op as a result). Sharing
-# one instance lets history accumulate across shots.
-_shared_validator = None
-
-
 def _get_shared_validator():
-    """Lazy-construct + return the process-wide IdentityValidator."""
-    global _shared_validator
-    if _shared_validator is None:
-        from identity.validator import IdentityValidator
-        _shared_validator = IdentityValidator(vision_fallback=validate_identity_vision)
-    return _shared_validator
+    """Lazy-construct + return the process-wide IdentityValidator.
+
+    Backward-compat alias for `identity.get_shared_validator()`. Kept under
+    the original name because the smoke block + CLAUDE.md / HANDOFF.md
+    invariants reference this exact symbol path
+    (`phase_c_vision._get_shared_validator`). Internally just delegates
+    to the consolidated factory so phase_c_vision, face_validator_gate,
+    and performance.identity_gate all return the same instance.
+    """
+    from identity import get_shared_validator
+    return get_shared_validator()
 
 
 def get_middle_frame(video_path, output_image_path):
