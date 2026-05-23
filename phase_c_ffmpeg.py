@@ -554,13 +554,17 @@ def generate_ai_video(
             print("   [WARN] FAL_KEY missing for Kling. Cascading...")
             return try_next_api()
 
-    elif target_api.upper() == "COMFY_UI":
-        # Headless ComfyUI execution via Fal.ai Serverless Endpoint
+    elif target_api.upper() == "FAL_SVD":
+        # Stable Video Diffusion via Fal.ai serverless endpoint (fal-ai/fast-svd).
+        # Previously named "COMFY_UI" — misleading because this branch does NOT
+        # talk to ComfyUI; it calls the FAL fast-SVD endpoint directly. Renamed
+        # for accuracy. Operator override key in shot.target_api should now be
+        # "FAL_SVD".
         fal_key = settings.fal_key
         if fal_key and FAL_AVAILABLE:
             try:
-                print(f"   ↳ Generating precise surgical frame via Headless COMFY_UI API...")
-                
+                print(f"   ↳ Generating frame via FAL fast-SVD endpoint...")
+
                 # IP-Adapter Injection Simulation:
                 ref_img_url = ""
                 if character_id and os.path.exists("characters.json"):
@@ -587,7 +591,6 @@ def generate_ai_video(
                     print(f"   [ERROR] fal_client.upload_file missing for base image ({image_path}): {e}")
                     return try_next_api()
 
-                # Standard serverless call simulating a ComfyUI execution backbone
                 result = fal_client.subscribe(
                     "fal-ai/fast-svd",
                     arguments={
@@ -596,7 +599,7 @@ def generate_ai_video(
                         "cond_aug": 0.02
                     }
                 )
-                
+
                 video_url = result.get("video", {}).get("url")
                 if video_url:
                     import urllib.request
@@ -604,7 +607,7 @@ def generate_ai_video(
                     return output_mp4
                 return try_next_api()
             except Exception as e:
-                print(f"   ⚠️ COMFY_UI Serverless Error: {e}")
+                print(f"   ⚠️ FAL_SVD Serverless Error: {e}")
                 print("   ⚠️ Re-routing gracefully...")
                 return try_next_api()
         else:
