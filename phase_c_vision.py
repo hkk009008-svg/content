@@ -104,10 +104,6 @@ def face_swap_video_frames(video_path, reference_image, output_path):
     return None
 
 
-if __name__ == "__main__":
-    valid = validate_identity("temp_vid_0.mp4", "the_strategist")
-    print(f"Structural Identity Lock Valid: {valid}")
-
 def quality_control_image(image_path: str, prompt_text: str = "") -> bool:
     """
     Validates structural integrity of a generated latent frame using GPT-4o Vision.

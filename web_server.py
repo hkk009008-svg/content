@@ -1174,6 +1174,11 @@ def api_generate(pid):
         finally:
             _running_pipelines.pop(pid, None)
             q.put(None)  # Signal end of stream
+            # Bundle-C 3.2 (2026-05-24): release the queue so we don't grow
+            # _progress_queues unboundedly across runs. Drop only this run's
+            # queue; if another /generate raced and replaced the entry, leave it.
+            if _progress_queues.get(pid) is q:
+                _progress_queues.pop(pid, None)
 
     thread = threading.Thread(target=run_pipeline, daemon=True)
     thread.start()

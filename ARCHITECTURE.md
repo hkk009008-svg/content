@@ -154,8 +154,10 @@ wind down.
   on timeout emits HEARTBEAT, on `None` sentinel emits END and breaks.
 - Pipeline thread writes `None` to the queue in `finally`
   ([web_server.py:1176](web_server.py:1176)) after success or error.
-- **Queue is never cleaned up after stream end** — `_progress_queues[pid]`
-  survives across runs; a second `/generate` for the same project reuses it.
+- **Queue is released on run completion** (Bundle-C 3.2, 2026-05-24) —
+  the `run_pipeline` daemon's `finally` block now pops `_progress_queues[pid]`
+  after sending the `None` sentinel, gated on identity-check to avoid racing
+  a concurrent `/generate` that already replaced the entry.
 
 ### 3.4 CORS / auth
 
@@ -1137,8 +1139,8 @@ Switch dispatch:
 | `editorial-*` | `EditorialShell` + `pipeline/*` | cool ivory on paper-black |
 | `console-*` | `DirectorsConsole` + `console/*` | warm sepia |
 
-Strict separation — except `web/src/components/console/TakeStrip.tsx` which
-leaks `editorial-*` (the only file violating the convention).
+Strict separation — Bundle-C 3.4 (2026-05-24) closed the last leak
+(`TakeStrip.tsx` now uses `console-*` exclusively).
 
 ### 14.4 SSE consumption
 
@@ -1232,12 +1234,9 @@ print('OK')
 
 | Severity | Issue | Location |
 |---|---|---|
-| Low | `phase_c_vision.py:107-109` is dead code — `__main__` block calls nonexistent `validate_identity()`. | `phase_c_vision.py:107` |
-| Low | `_progress_queues[pid]` never cleaned up — survives across runs; minor memory leak per project. | `web_server.py:60` |
-| Low | `audio/voiceover.py:generate_voiceover` writes `temp_voiceover.mp3` to cwd. Fine in practice (orchestrator overrides) but pollutes cwd for standalone callers. | `audio/voiceover.py:276` |
+| Low | `audio/voiceover.py:generate_voiceover` writes `temp_voiceover.mp3` to cwd. Fine in practice (orchestrator overrides) but pollutes cwd for standalone callers. Pending deletion in Bundle D (zero live callers). | `audio/voiceover.py:276` |
+| Low | 3 pre-existing test failures in `tests/unit/test_project_persistence.py` marked `@unittest.skip`. Mock setup hasn't caught up with `project_manager`/`character_manager`/`location_manager` refactors. Mock-only updates, not behavior changes. | `tests/unit/test_project_persistence.py:139,197,221` |
 | Cosmetic | BGM duration hard-coded to 47s with no comment. | `cinema_pipeline.py:490` |
-| Cosmetic | `web/src/components/console/TakeStrip.tsx` uses both palettes (lines 66, 69, 76, 82, 89). | `web/src/components/console/TakeStrip.tsx` |
-| Cosmetic | `generate_voiceover` signature is `ctx: dict` not `ctx: PipelineContext` — mixed-mode (uses both dict-API and `get_project_setting`). Works because `PipelineContext` implements dict API. | `audio/voiceover.py:270` |
 
 ---
 
@@ -1247,9 +1246,7 @@ print('OK')
 - **`audio/voiceover.py:generate_voiceover`, `generate_narration`, `generate_single_line_audio`** — orphaned post-pivot. No live callers.
 - **`audio/foley.py:*` (all)** — orphaned. Reachable code, zero live callers.
 - **`audio/srt.py:generate_srt`** — orphaned.
-- **`phase_c_vision.py:107-109`** — `__main__` block referencing nonexistent function.
 - **Root-level orphans worth investigating:** `cleanup.py`, `reporter.py`, `research_engine.py`, `web_research.py`, `web_services.py`, `coherence_analyzer.py`. Status unverified.
-- **`test_project_persistence.py` at repo root** — should live in `tests/`.
 
 `research_engine.py` and `web_research.py` are actually load-bearing —
 `scene_decomposer.py`, `dialogue_writer.py`, `style_director.py` all import

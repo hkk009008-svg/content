@@ -63,49 +63,49 @@ export default function TakeStrip({
     <div className="mt-3 grid gap-2 sm:grid-cols-2">
       {keyframeUrl ? (
         <div>
-          <div className="text-eyebrow-lg uppercase text-editorial-ivory-mute mb-1">{keyframeLabel}</div>
+          <div className="text-eyebrow-lg uppercase text-console-ink-dim mb-1">{keyframeLabel}</div>
           <img
             src={resolve(keyframeUrl)}
-            className="w-full rounded border border-editorial-rule object-cover"
+            className="w-full rounded border border-console-rule object-cover"
           />
         </div>
       ) : null}
 
       {drivingUrl ? (
         <div>
-          <div className="text-eyebrow-lg uppercase text-editorial-ivory-mute mb-1">{drivingLabel}</div>
+          <div className="text-eyebrow-lg uppercase text-console-ink-dim mb-1">{drivingLabel}</div>
           <video
             src={resolve(drivingUrl)}
             controls
             muted
             loop
-            className="w-full rounded border border-editorial-rule bg-black"
+            className="w-full rounded border border-console-rule bg-black"
           />
         </div>
       ) : null}
 
       {performanceUrl ? (
         <div>
-          <div className="text-eyebrow-lg uppercase text-editorial-ivory-mute mb-1">{performanceLabel}</div>
+          <div className="text-eyebrow-lg uppercase text-console-ink-dim mb-1">{performanceLabel}</div>
           <video
             src={resolve(performanceUrl)}
             controls
             muted
             loop
-            className="w-full rounded border border-editorial-rule bg-black"
+            className="w-full rounded border border-console-rule bg-black"
           />
         </div>
       ) : null}
 
       {motionUrl ? (
         <div>
-          <div className="text-eyebrow-lg uppercase text-editorial-ivory-mute mb-1">{motionLabel}</div>
+          <div className="text-eyebrow-lg uppercase text-console-ink-dim mb-1">{motionLabel}</div>
           <video
             src={resolve(motionUrl)}
             controls
             muted
             loop
-            className="w-full rounded border border-editorial-rule bg-black"
+            className="w-full rounded border border-console-rule bg-black"
           />
         </div>
       ) : null}
