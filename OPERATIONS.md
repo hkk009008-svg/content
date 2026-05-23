@@ -292,7 +292,10 @@ print('OK')
 .venv/bin/python -m pytest tests/unit/ -q
 ```
 
-Expected: 6 pass, 3 skipped (3 documented pre-existing mock-drift failures).
+Expected: **478 pass, 3 skipped, 0 failed** (baseline as of 2026-05-24).
+The 3 skips are documented `@unittest.skip` in
+`test_project_persistence.py:139,197,221` — mock setup hasn't caught up
+with `project_manager`/`character_manager`/`location_manager` refactors.
 
 ### TypeScript
 

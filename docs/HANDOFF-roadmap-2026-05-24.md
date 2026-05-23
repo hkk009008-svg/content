@@ -272,10 +272,13 @@ That's why it's Session 1.
    - `pytest tests/unit/ --tb=short -q` — note the `tests/unit/` path,
      not just `tests/`. Integration tests (`tests/integration/`)
      require credentials and must NOT run in CI.
-   - Acceptance: 6 pass + 3 skip is the current correct outcome
-     (matches the 3 pre-existing failures in
-     `test_project_persistence.py` documented as `@unittest.skip`).
-     If the count is different, your session uncovered something.
+   - Acceptance: **478 pass + 3 skip + 0 fail** is the current
+     baseline (post `fix(tests):` baseline-hygiene commit, 2026-05-24).
+     The 3 skips are documented `@unittest.skip` in
+     `test_project_persistence.py:139,197,221`. If your CI run shows
+     a different count, your session uncovered something — investigate
+     before proceeding. Sessions 2 / 3 / 5 will grow this count as
+     they extend existing test files.
 4. **TSC job:**
    - `actions/setup-node@v4` with `node-version: '20'` and `cache: 'npm'`.
    - `cache-dependency-path: web/package-lock.json`.
@@ -351,283 +354,393 @@ and **do not start Session 2** — that's a separate assignment.
 
 ---
 
-## SESSION 2 — P0-1.1: ReviewController unit tests
+## SESSION 2 — P0-1.1: ReviewController coverage via test_cross_controller.py extension
 
-**Why this matters.** `cinema/review/controller.py` carries the gate
-predicates that decide when the pipeline can advance. PERFORMANCE_REVIEW
-was just wired up (commit `b4dc37b`); the verification was a Python
-script in conversation, not a test. That means the next refactor of the
-gate machinery has no safety net.
+**Status reframe (2026-05-24).** Original brief said "Create
+`tests/unit/test_review_controller.py`". Audit revealed that
+`tests/unit/test_cross_controller.py` already exists (10 passing tests
+covering cross-controller wiring + `_candidate_take` 1 of 4 branches +
+`_gate_satisfied` 5 of 13 cases partially). Creating a parallel file
+would split coverage and lose the existing wiring tests that protect
+Slice 2 regression. Reframed: **extend test_cross_controller.py in
+place.**
 
-Beyond the new gate: this file owns `approve_take` (the take-approval
-state machine, three approval kinds, source_take_id chain walking for
-postprocess variants) and `_project_gate_status` (which the UI consumes
-for live progress). All untested.
+**Why this matters.** `cinema/review/controller.py` (349 LOC) carries
+the gate predicates that decide when the pipeline can advance.
+PERFORMANCE_REVIEW was just wired up (commit `b4dc37b`) with ad-hoc
+test verification. Audited gaps: `approve_take` (all 10 branches),
+`_project_gate_status` (2 cases), the PERFORMANCE_REVIEW gate
+satisfaction predicate (5 branches), `_candidate_take` 3 of 4 branches,
+and `_resolve_motion_source` visited-set protection are entirely
+untested. The existing 10 tests in `test_cross_controller.py` are
+load-bearing for the V1.1 #1 cross-controller wiring contract — you
+must NOT break them.
 
 **Pre-work:**
 
 1. Read [cinema/review/controller.py](../cinema/review/controller.py)
-   end-to-end. 333 LOC; readable in 10 minutes.
-2. Read [ARCHITECTURE.md §6](../ARCHITECTURE.md#6-gate-mechanism--predicate-poll)
-   for the gate model context.
-3. Read [tests/unit/test_project_persistence.py](../tests/unit/test_project_persistence.py)
-   for the existing test style. Match it (unittest.TestCase + the
-   tempfile-per-test pattern). Don't introduce pytest fixtures unless
-   you have a strong reason.
+   end-to-end. 349 LOC.
+2. Read [tests/unit/test_cross_controller.py](../tests/unit/test_cross_controller.py)
+   end-to-end. **You are extending this file, not creating a new one.**
+   Conventions to preserve:
+   - **Plain functions, no pytest classes.**
+   - `_make_setup()` helper builds fixtures per test (tmpdir per test).
+   - `WiredHost` is the test seam against `ShotController._mutate_shot`.
+   - `_TESTS` registry at the bottom — every new test name MUST be added
+     so the standalone runner (`python tests/unit/test_cross_controller.py`)
+     still works.
+3. Read [ARCHITECTURE.md §6](../ARCHITECTURE.md#6-gate-mechanism--predicate-poll)
+   for the gate model.
+4. Run baseline: `.venv/bin/python -m pytest tests/unit/test_cross_controller.py -v`
+   → expect 10 pass / 0 fail.
 
 **Scope:**
 
 | IN | OUT |
 |---|---|
-| `_gate_satisfied(gate, project)` × 4 gates × ≥3 cases each | Integration with real ShotController |
-| `approve_take(shot_id, take_id, approval_kind)` × 3 kinds | Integration with `_wait_for_gate` loop |
+| `_gate_satisfied(gate, project)` × 4 gates × ≥3 cases each (full branch coverage of the predicate) | Integration with real ShotController (already covered) |
+| `approve_take(shot_id, take_id, approval_kind)` × 3 kinds + error cases (10 branches) | Integration with `_wait_for_gate` loop (already covered) |
 | `_project_gate_status` counts (all 5 fields) | Integration with `lifecycle.wait_for_gate` (lifecycle has its own test seam) |
-| `_candidate_take` resolution (4 cases) | `proceed_to_assembly` flow (e2e territory) |
-| `_resolve_motion_source` chain walking for final approval | `_rebuild_review_clips` (separate concern) |
+| `_candidate_take` — the 3 of 4 cases not yet covered | `proceed_to_assembly` (e2e territory) |
+| `_resolve_motion_source` chain walking + visited-set protection (synthetic loop) | `_rebuild_review_clips` (already covered) |
+| Fixture extension: add `_richer_project()` helper with `performance_takes` + `postprocess_variants` chain | Do NOT mutate existing `_sample_project()` (would break existing tests) |
 
-**Approach (specific):**
+**Approach:**
 
-1. Create `tests/unit/test_review_controller.py`.
-2. Use the StubHost pattern from the session above:
-   ```python
-   class StubHost:
-       def __init__(self):
-           self.find_take_returns = None  # tests override
-           self.mutate_shot_calls = []     # for assertions
-       def _refresh_project_snapshot(self, timeout=10):
-           return None
-       def _find_take(self, shot, take_id):
-           return self.find_take_returns or (None, None)
-       def _mutate_shot(self, shot_id, mutator, timeout=10):
-           # Tests provide a shot dict via setUp; mutator runs on it
-           return mutator({}, self.shot_state).value
-       def resume(self):
-           self.resume_called = True
-   ```
-3. Use `PipelineCore.__new__(PipelineCore)` to construct a core without
-   going through `build_pipeline_core` (no disk I/O).
-4. **Test cases (minimum set):**
-
-   **`_gate_satisfied`:**
-   - `gate=PLAN_REVIEW` × empty project → False
-   - `gate=PLAN_REVIEW` × all `plan_status=approved` → True
-   - `gate=PLAN_REVIEW` × one not approved → False
-   - `gate=KEYFRAME_REVIEW` × all have `approved_keyframe_take_id` → True
-   - `gate=KEYFRAME_REVIEW` × one missing → False
-   - `gate=PERFORMANCE_REVIEW` × empty → False (no shots)
-   - `gate=PERFORMANCE_REVIEW` × all SKIP → True
-   - `gate=PERFORMANCE_REVIEW` × all approved → True
-   - `gate=PERFORMANCE_REVIEW` × mix (SKIP + approved + no-keyframe) → True
-   - `gate=PERFORMANCE_REVIEW` × one needs but unapproved → False
-   - `gate=REVIEW` × all `approved_final_take_id` → True
-   - `gate=REVIEW` × one missing → False
-   - `gate=UNKNOWN_NAME` → False (default branch)
-
-   **`approve_take`:**
-   - `approval_kind=keyframe` × take in `keyframe_takes` → sets `approved_keyframe_take_id`
-   - `approval_kind=keyframe` × take in `motion_takes` → error "not a keyframe"
-   - `approval_kind=performance` × take in `performance_takes` → sets `approved_performance_take_id`
-   - `approval_kind=performance` × take in `keyframe_takes` → error "not a performance"
-   - `approval_kind=final` × take in `motion_takes` → sets BOTH `approved_motion_take_id` AND `approved_final_take_id`
-   - `approval_kind=final` × take in `postprocess_variants` with valid `source_take_id` chain → walks back, sets motion + final
-   - `approval_kind=final` × take in `keyframe_takes` → error "keyframes cannot be approved as final"
-   - `approval_kind=unknown` → error "unsupported approval kind"
-   - shot_id not found → error "Shot not found"
-   - take_id not found → error "Take not found"
-
-   **`_project_gate_status`:**
-   - All 5 counts present and correct for a known fixture
-   - Empty project → all zero
-
-5. Run with: `.venv/bin/python -m pytest tests/unit/test_review_controller.py -v`
+1. **Add `_richer_project()` helper** alongside `_sample_project()`.
+   Keep `_sample_project()` unchanged. The richer fixture should have:
+   - 2 scenes × 2-3 shots
+   - One shot with `performance_takes` array
+   - One shot with `postprocess_variants` chain (motion → postprocess
+     → postprocess pointing back to motion via `source_take_id`)
+   - One shot with `approved_keyframe_take_id` (for PERFORMANCE_REVIEW
+     gate predicate)
+   - One shot with `performance_engine="SKIP"` (PERFORMANCE_REVIEW
+     skip-routing path)
+2. **Verify** `WiredHost._mutate_shot` persistence semantics before
+   writing `approve_take` tests. Read [cinema/shots/controller.py](../cinema/shots/controller.py)
+   `_mutate_shot` — if it persists to disk via `mutate_project`, the
+   new tests need tempdir isolation; if the WiredHost stub keeps state
+   in memory only, no cleanup needed.
+3. **Add the 26 new test functions** enumerated in the commit body
+   below. Each follows the `def test_X():` convention. **Each must be
+   appended to the `_TESTS` registry** at the bottom of the file.
+4. **Do not import `cinema_pipeline`** — the existing tests prove
+   ReviewController is composable independently (ADR-009).
+5. Run: `.venv/bin/python -m pytest tests/unit/test_cross_controller.py -v`
+   and the standalone runner: `.venv/bin/python tests/unit/test_cross_controller.py`
 
 **Acceptance criteria:**
 
-- [ ] ≥20 test cases, all passing
-- [ ] Every branch of `_gate_satisfied` exercised
-- [ ] Every branch of `approve_take`'s mutator exercised
-- [ ] Postprocess-variant `source_take_id` chain walk is tested with a
-      multi-hop chain (variant → variant → motion)
+- [ ] ≥36 test cases (10 existing + ≥26 new), all passing
+- [ ] Every branch of `_gate_satisfied` exercised (13 cases)
+- [ ] Every branch of `approve_take` exercised (10 cases)
+- [ ] Postprocess-variant `source_take_id` chain walk tested with both
+      a valid multi-hop chain AND a synthetic loop (visited-set
+      protection — no hang)
+- [ ] `_project_gate_status` 5 counts verified for richer fixture AND
+      empty project
+- [ ] `_candidate_take` 4 branches all covered
+- [ ] Standalone runner still works (`python tests/unit/test_cross_controller.py`)
 - [ ] Runs in < 5 seconds
-- [ ] CI from Session 1 picks up the new tests and goes green
+- [ ] Whole-suite CI (Session 1) stays green: `pytest tests/unit/ -q` →
+      ≥497 pass / 3 skip / 0 fail
 
 **Pitfalls:**
 
-- **`_find_take` is on the HOST**, not on ReviewController. Your
-  StubHost must implement it correctly. Note the return shape:
+- **`_find_take` is on the HOST**, not on ReviewController. `WiredHost`
+  already provides this; new tests can extend the host stub's
+  `find_take_returns` if needed. Return shape:
   `(collection_name: Optional[str], take: Optional[dict])`.
 - **`_mutate_shot` returns the mutator's `MutationResult.value`**, not
   the dict. Read [cinema/review/controller.py:280](../cinema/review/controller.py)
   to see the pattern.
-- **`approval_kind="performance"` is the new branch** from
-  commit `b4dc37b`. Make sure your test covers the validation that the
-  take must live in `performance_takes`, not just any collection.
-- **The chain walk in `_resolve_motion_source`** has visited-set
-  protection against infinite loops. Test that too (synthetic loop in
-  source_take_id pointers should not hang).
-- **Don't import `cinema_pipeline`** in the test. ReviewController is
-  composable independently per [ADR-009](../DECISIONS.md). Importing
-  the orchestrator drags in heavy deps and defeats the test seam.
+- **`approval_kind="performance"` is the new branch** from commit
+  `b4dc37b`. Verify the take MUST live in `performance_takes`, not just
+  any collection.
+- **Chain walk visited-set protection.** Build a synthetic loop
+  (variant A → variant B → variant A). The `_resolve_motion_source`
+  call must return without hanging; `approved_motion_take_id` must NOT
+  be set.
+- **Convention enforcement:** plain functions, no pytest classes, no
+  conftest fixtures. Adding pytest classes or conftest would break the
+  standalone runner the file docstring promises.
 
 **Verification:**
 
 ```bash
-.venv/bin/python -m pytest tests/unit/test_review_controller.py -v
-# Expect: ≥20 tests, all passing, < 5 seconds.
+.venv/bin/python -m pytest tests/unit/test_cross_controller.py -v
+# Expect: ≥36 tests, all passing, < 5 seconds.
 
-# Also check CI:
-git push origin <branch>
-# Session 1's CI runs the full tests/unit/ — should still be green.
+.venv/bin/python tests/unit/test_cross_controller.py
+# Standalone runner: all green.
+
+.venv/bin/python -m pytest tests/unit/ -q
+# Whole-suite check: ≥497 pass / 3 skip / 0 fail.
 ```
 
 **Commit shape:**
 
 ```
-test(review): unit tests for _gate_satisfied + approve_take + status
+test(review): cover approve_take + gate_satisfied + chain walk branches
 
-22 test cases covering every branch of the gate predicate (incl. the
-new PERFORMANCE_REVIEW clause from b4dc37b) and approve_take's three
-approval_kind branches incl. the source_take_id chain walk for
-postprocess variants.
+Extends tests/unit/test_cross_controller.py with 26 new test functions
+covering previously uncovered branches of cinema/review/controller.py:
 
-StubHost pattern (no disk I/O, no real lifecycle); PipelineCore
-constructed via __new__ to avoid build_pipeline_core's heavy deps.
-Matches the existing tests/unit/ style (unittest.TestCase).
+  _gate_satisfied (10 new):
+    - empty project across all 4 gates
+    - PLAN_REVIEW all-approved / one-unapproved
+    - PERFORMANCE_REVIEW 5 branches (empty, all-SKIP, all-approved,
+      mixed, one-needs-but-unapproved)
+    - REVIEW all-approved
+    - UNKNOWN gate default-False
 
-Verified: 22 pass in 0.8s; CI green.
+  approve_take (10 new):
+    - keyframe in keyframe_takes (sets field)
+    - keyframe in motion_takes (error: not a keyframe)
+    - performance in performance_takes (sets field)
+    - performance in keyframe_takes (error: not a performance)
+    - final in motion_takes (sets motion + final)
+    - final in postprocess_variants (walks chain → motion + final)
+    - final in keyframe_takes (error)
+    - unknown approval_kind (error)
+    - unknown shot_id (Shot not found)
+    - unknown take_id (Take not found)
+
+  _project_gate_status (2 new):
+    - all 5 counts for richer fixture
+    - empty project → all zero
+
+  _candidate_take (3 new):
+    - returns approved_final_take when set
+    - falls through to postprocess_variants
+    - falls through to keyframe when no motion
+
+  _resolve_motion_source (1 new):
+    - visited-set breaks synthetic loop (no hang)
+
+Convention: plain functions, no pytest classes; _TESTS registry
+extended. Standalone runner still works. Existing 10 wiring tests
+untouched. New _richer_project() fixture; _sample_project() unchanged.
+
+Verified: 36+ pass in <5s; standalone runner OK; whole-suite
+≥497 pass / 3 skip / 0 fail; §15 smoke OK; Session 1 CI green.
 ```
 
 **Estimated effort:** 2-3 hours.
 
-**Decision authority:** Lane A on test structure. Escalate before:
-- Adding pytest fixtures or `conftest.py` (the existing style is
-  unittest.TestCase — match it).
-- Modifying anything in `cinema/review/controller.py` itself except
-  comments. If your tests reveal a bug, document it in Findings and
-  STOP — director decides whether to fix in this session or a follow-up.
+**Decision authority:** Lane A on test structure within existing
+conventions. Escalate before:
+- Converting plain-functions to pytest classes (breaks standalone runner).
+- Modifying `cinema/review/controller.py` itself except comments. If
+  tests reveal a bug, document in Findings and STOP — director decides
+  whether to fix in this session or follow-up.
+- Adding conftest fixtures.
 
-**If you finish early:** Audit `_rebuild_review_clips` and add a few
-tests for it. Don't add tests for `proceed_to_assembly` — that needs
-real lifecycle setup and belongs in a separate session.
+**If you finish early:** Audit `_rebuild_review_clips` for edge cases
+beyond what `test_review_rebuild_review_clips_full_chain` covers.
+Don't add tests for `proceed_to_assembly` — needs real lifecycle setup,
+belongs in a separate session.
 
 ---
 
-## SESSION 3 — P0-1.2: workflow_selector unit tests
+## SESSION 3 — P0-1.2: workflow_selector coverage via test_workflow_selector.py extension
+
+**Status reframe (2026-05-24).** Original brief said "Create
+`tests/unit/test_workflow_selector.py`". File already exists at 145
+LOC with 34 passing tests covering shape + defaults + ranges. Audited
+gap: only **4 of 48 keyword-routes are tested (8%)**, and
+`get_adaptive_pulid_weight` + `MOTION_FIDELITY_FLOORS` subset check are
+entirely untested. Reframed: **extend in place.**
 
 **Why this matters.** `workflow_selector.classify_shot_type` is the
 keyword-driven router that decides which video API cascade a shot will
 hit. A typo in `SHOT_TYPE_KEYWORDS` silently changes routing for every
-shot matching that keyword. `WORKFLOW_TEMPLATES` MUST have exactly 5
-keys aligned with `MOTION_FIDELITY_FLOORS` and `domain/shot_types.py` —
-drift between these is a real risk during refactors.
-
-The strategic review flagged this as P0-1.2 because the cost of a
-silent routing bug is hours of wrong-engine generations (Sora when you
-wanted Kling) before an operator notices.
+shot matching that keyword — Sora when you wanted Kling. The cost of a
+silent routing bug is hours of wrong-engine generations before an
+operator notices. Existing tests verify the API surface; gaps are in
+the keyword matrix and the adaptive feedback loop.
 
 **Pre-work:**
 
 1. Read [workflow_selector.py](../workflow_selector.py) — focus on
-   `WORKFLOW_TEMPLATES`, `SHOT_TYPE_KEYWORDS`, `classify_shot_type`,
-   `get_adaptive_pulid_weight`, and `MOTION_FIDELITY_FLOORS`.
-2. Read [domain/shot_types.py](../domain/shot_types.py) for the
-   canonical shot type set and `normalize_shot_type`.
-3. Read [ARCHITECTURE.md §9](../ARCHITECTURE.md#9-video-routing--5-templates--11-engines)
+   `WORKFLOW_TEMPLATES` (5 keys), `SHOT_TYPE_KEYWORDS` (48 keywords
+   across 5 buckets), `classify_shot_type`, `get_adaptive_pulid_weight`,
+   `MOTION_FIDELITY_FLOORS`.
+2. Read [tests/unit/test_workflow_selector.py](../tests/unit/test_workflow_selector.py)
+   end-to-end. **You are extending this file.** Conventions:
+   - Class-based grouping (`TestClassifyShotType`, etc.)
+   - `pytest.mark.parametrize` for cross-product coverage
+   - No conftest fixtures
+   - `pytest.approx` for float comparisons
+3. Read [domain/shot_types.py](../domain/shot_types.py) for the
+   canonical shot-type set. **Important:** no `SHOT_TYPES` literal
+   exists — the canonical set must be assembled from the 6
+   `SHOT_TYPE_*` constants:
+   ```python
+   from domain.shot_types import (
+       SHOT_TYPE_CLOSE, SHOT_TYPE_PORTRAIT, SHOT_TYPE_MEDIUM,
+       SHOT_TYPE_WIDE, SHOT_TYPE_LANDSCAPE, SHOT_TYPE_ACTION,
+   )
+   CANONICAL = {SHOT_TYPE_CLOSE, SHOT_TYPE_PORTRAIT, SHOT_TYPE_MEDIUM,
+                SHOT_TYPE_WIDE, SHOT_TYPE_LANDSCAPE, SHOT_TYPE_ACTION}
+   ```
+4. Read [ARCHITECTURE.md §9](../ARCHITECTURE.md#9-video-routing--5-templates--11-engines)
    for the routing context.
+5. Run baseline: `.venv/bin/python -m pytest tests/unit/test_workflow_selector.py -v`
+   → expect 34 pass / 0 fail.
 
 **Scope:**
 
 | IN | OUT |
 |---|---|
-| `classify_shot_type` × every keyword in `SHOT_TYPE_KEYWORDS` | `MAX_QUALITY_TEMPLATES` tests (separate session) |
-| `classify_shot_type` × empty `characters_in_frame` → landscape | `get_max_quality_params` (separate session) |
-| `classify_shot_type` × no matching keyword → medium (default) | `_validate_overlay_value` (already partly tested via Step 3 smoke) |
-| `classify_shot_type` priority — `[SHOT]` section before full prompt | `_swap_to_hidream` (max-tier territory) |
-| `WORKFLOW_TEMPLATES` shape (5 keys, valid target_api + fallbacks) | Anything in `quality_max.py` |
-| `MOTION_FIDELITY_FLOORS` keys ⊆ `domain/shot_types.py` canonical set | |
-| `get_adaptive_pulid_weight` × multiple rolling-stats scenarios | |
+| `classify_shot_type` × every keyword in `SHOT_TYPE_KEYWORDS` (48 cases, parametrized) | `MAX_QUALITY_TEMPLATES` tests (separate session) |
+| `classify_shot_type` × `[SHOT]`-section-wins-over-full-prompt explicit case | `get_max_quality_params` (separate session) |
+| `WORKFLOW_TEMPLATES` shape: exactly 5 keys + valid `target_api` per entry + non-empty `video_fallbacks` of valid api strings | `_swap_to_hidream` (max-tier territory) |
+| `MOTION_FIDELITY_FLOORS` keys ⊆ canonical shot types (subset check, not equality) | Anything in `quality_max.py` |
+| `get_adaptive_pulid_weight` × 4 boost paths + clamp + face-failure suppression | |
 
 **Approach:**
 
-1. Create `tests/unit/test_workflow_selector.py`.
-2. Parametrize the keyword tests. For each keyword in
-   `SHOT_TYPE_KEYWORDS[shot_type]`, build a shot dict where the
-   keyword appears in `prompt` and assert `classify_shot_type` returns
-   `shot_type`.
-3. For the `[SHOT]`-section priority: build a shot with `[SHOT]
-   tracking dolly...` in prompt — verify it returns `action` (matched
-   by [SHOT] section) even if a later keyword would match a different
-   bucket.
-4. For `get_adaptive_pulid_weight`: build a stub IdentityValidator
-   exposing `get_rolling_stats(character_id, window=10) -> dict`. Test
-   the four boost paths:
-   - No samples → returns base_weight unchanged
-   - success<0.5 → +0.10
-   - success<0.8 → +0.05
-   - perfect AND mean>0.80 → -0.05
-   - clamped to [0.0, 1.0]
-5. For `WORKFLOW_TEMPLATES`: assert keys exactly = `{portrait, medium,
-   wide, action, landscape}`; for each, assert `target_api` is in
-   `TARGET_APIS` (or `None`), `video_fallbacks` is a list of valid
-   engine strings or `None`.
-6. For `MOTION_FIDELITY_FLOORS`: assert `set(FLOORS.keys()) <= set(domain.shot_types.SHOT_TYPES)` — this catches the kind of drift the strategic review documented.
+1. **`TestClassifyShotTypeKeywords`** (single parametrized test, 48 cases):
+   ```python
+   @pytest.mark.parametrize(
+       "kw,expected_bucket",
+       [(kw, b) for b, kws in workflow_selector.SHOT_TYPE_KEYWORDS.items() for kw in kws],
+   )
+   def test_keyword_routes_to_bucket(self, kw, expected_bucket):
+       # NB: for landscape keywords, pass characters_in_frame=["c1"]
+       #     so the no-characters short-circuit doesn't pre-empt the keyword check.
+       shot = {"prompt": f"a {kw} of something", "camera": "",
+               "characters_in_frame": ["c1"]}
+       assert workflow_selector.classify_shot_type(shot) == expected_bucket
+   ```
+
+2. **`TestClassifyShotTypePriority`** (1 test) — assert `[SHOT]`
+   section wins when full prompt has a conflicting keyword:
+   ```python
+   def test_shot_section_wins_over_full_prompt(self):
+       shot = {"prompt": "[SHOT] portrait headshot [SCENE] wide angle landscape vista",
+               "camera": "", "characters_in_frame": ["c1"]}
+       assert workflow_selector.classify_shot_type(shot) == "portrait"
+   ```
+
+3. **`TestWorkflowTemplatesShape`** (3 tests):
+   - `test_exactly_five_shot_types` — `set(WORKFLOW_TEMPLATES.keys()) == {"portrait","medium","wide","action","landscape"}`
+   - `test_target_api_is_valid` (parametrized) — `target_api ∈ {"KLING_NATIVE","LTX","SORA_NATIVE","RUNWAY_GEN4","VEO_NATIVE","KLING_3_0","SEEDANCE"}`
+   - `test_video_fallbacks_nonempty_and_valid` (parametrized) — list, each entry in the valid api set
+
+4. **`TestMotionFidelityFloors`** (2 tests):
+   - `test_keys_subset_of_canonical_shot_types` — `set(MOTION_FIDELITY_FLOORS.keys()) <= CANONICAL`
+   - `test_landscape_floor_is_none` — explicit `None` assertion (sentinel)
+
+5. **`TestGetAdaptivePulidWeight`** (8 tests) — stub validator with
+   controlled `get_rolling_stats` and `common_failure`:
+   - `test_returns_base_when_validator_none`
+   - `test_no_samples_returns_base` (`sample_count=0`)
+   - `test_failure_boost_plus_010` (delta=+0.10)
+   - `test_near_pass_boost_plus_005` (delta=+0.05)
+   - `test_overperform_reduces_minus_005` (delta=-0.05)
+   - `test_clamped_to_unit_interval` (both upper and lower clamp)
+   - `test_face_angle_extreme_zeros_positive_delta`
+   - `test_small_face_region_zeros_delta`
 
 **Acceptance criteria:**
 
-- [ ] ≥30 test cases (every keyword × one shot per keyword + edge cases)
-- [ ] All keyword routes verified
-- [ ] `WORKFLOW_TEMPLATES` shape locked
-- [ ] `MOTION_FIDELITY_FLOORS` alignment with `domain/shot_types.py` enforced
-- [ ] `get_adaptive_pulid_weight` covered for all four boost paths + clamping
+- [ ] ≥97 test cases (34 existing + ≥63 new), all passing
+- [ ] All 48 `SHOT_TYPE_KEYWORDS` routes verified
+- [ ] `WORKFLOW_TEMPLATES` shape locked (5 keys exact + `target_api` + `video_fallbacks` valid)
+- [ ] `MOTION_FIDELITY_FLOORS` subset check enforced (not equality — `close_up` is canonical but unreachable from this function)
+- [ ] `get_adaptive_pulid_weight` covered for 4 boost paths + clamping + face-failure suppression
+- [ ] `[SHOT]`-section-wins priority explicit
 - [ ] Runs in < 3 seconds
-- [ ] Session 1's CI green
+- [ ] Whole-suite CI green: `pytest tests/unit/ -q` → ≥560 pass / 3 skip / 0 fail (post-Session-2 + this session)
 
 **Pitfalls:**
 
 - **"macro" is a portrait keyword**, not a shot type. Test that a shot
-  with "macro" in the prompt routes to `portrait`, NOT to any imaginary
-  "macro" bucket.
+  with "macro" routes to `portrait`, NOT to any "macro" bucket.
 - **`MOTION_FIDELITY_FLOORS` has `close_up`** but `classify_shot_type`
-  never returns `close_up`. That's intentional — `normalize_shot_type`
-  in `domain/shot_types.py` handles `close_up` as an alias. Your alignment
-  test should subset-check, not equality-check.
+  never returns `close_up`. Subset check, not equality — `close_up`
+  is canonical (via `normalize_shot_type`) but unreachable from this
+  function.
 - **`classify_shot_type` searches case-insensitively** via lowercased
-  match. Don't rely on case for your test inputs.
+  match. Don't rely on case for test inputs.
 - **First-match-wins in keyword order.** A prompt with multiple
   matching keywords routes to the FIRST shot type declared in
-  `SHOT_TYPE_KEYWORDS`. Test order sensitivity.
+  `SHOT_TYPE_KEYWORDS` (dict insertion order = portrait → action →
+  wide → landscape → medium).
 - **Empty `characters_in_frame` always returns landscape**, regardless
-  of prompt. That's the special-case early return.
+  of prompt. For landscape-keyword tests, pass non-empty characters.
+- **No `domain.shot_types.SHOT_TYPES` literal exists** — assemble the
+  canonical set from the 6 `SHOT_TYPE_*` constants. Add a comment
+  pointing at `domain/shot_types.py` for future readers.
+- **Dead imports in test file:** lines 1 `import sys, os` are unused.
+  Optional cleanup while extending.
 
 **Verification:**
 
 ```bash
 .venv/bin/python -m pytest tests/unit/test_workflow_selector.py -v
-# Expect ≥30 tests, all passing, < 3s
+# Expect ≥97 tests, all passing, < 3s.
+
+.venv/bin/python -m pytest tests/unit/ -q
+# Whole-suite: ≥560 pass / 3 skip / 0 fail.
 ```
 
 **Commit shape:**
 
 ```
-test(workflow_selector): keyword routing + template shape + floor alignment
+test(workflow_selector): cover 48 keyword routes + adaptive weight + floors
 
-35 cases covering every keyword in SHOT_TYPE_KEYWORDS routing to its
-correct shot_type, plus the [SHOT]-section-first priority, plus
-empty-characters → landscape, plus get_adaptive_pulid_weight's four
-adjustment paths and clamping.
+Extends tests/unit/test_workflow_selector.py from 34 to ~97 cases:
 
-Also locks the WORKFLOW_TEMPLATES shape (5 keys exact) and the
-MOTION_FIDELITY_FLOORS ⊆ domain.shot_types.SHOT_TYPES subset
-invariant — refactors that drift these now fail fast in CI.
+  TestClassifyShotTypeKeywords (1 parametrized × 48):
+    Every entry in SHOT_TYPE_KEYWORDS routes to its declared bucket.
+    Landscape keywords pass characters_in_frame to bypass the
+    no-characters short-circuit.
 
-Verified: 35 pass in 0.4s; CI green.
+  TestClassifyShotTypePriority (1):
+    [SHOT] section wins over conflicting keyword in full prompt.
+
+  TestWorkflowTemplatesShape (3):
+    - exactly 5 keys: portrait, medium, wide, action, landscape
+    - target_api validity (parametrized × 5)
+    - video_fallbacks non-empty + valid api strings (parametrized × 5)
+
+  TestMotionFidelityFloors (2):
+    - keys ⊆ canonical shot types (assembled from domain.shot_types
+      constants — no SHOT_TYPES literal exists)
+    - landscape floor is None (sentinel)
+
+  TestGetAdaptivePulidWeight (8):
+    - validator None → base
+    - no_samples → base
+    - failure_boost +0.10
+    - near_pass_boost +0.05
+    - overperform -0.05
+    - clamp to [0.0, 1.0] (both bounds)
+    - face_angle_extreme zeros positive delta
+    - small_face_region zeros delta
+
+The subset check on MOTION_FIDELITY_FLOORS catches the kind of drift
+the strategic review documented (close_up is a canonical key but
+unreachable from classify_shot_type — must be subset, not equality).
+
+Existing 34 tests unchanged. Convention: class-based grouping +
+pytest.mark.parametrize, no conftest. Dead `import sys, os` removed.
+
+Verified: ≥97 pass in <3s; whole-suite ≥560 pass / 3 skip / 0 fail;
+CI green.
 ```
 
 **Estimated effort:** 2 hours.
 
-**Decision authority:** Lane A on test structure. Escalate before:
-modifying `workflow_selector.py` itself; changing `SHOT_TYPE_KEYWORDS`
-ordering or values; touching `domain/shot_types.py`.
+**Decision authority:** Lane A on test structure within existing
+conventions. Escalate before:
+- Modifying `workflow_selector.py` itself.
+- Changing `SHOT_TYPE_KEYWORDS` ordering or values.
+- Touching `domain/shot_types.py`.
 
 **If you finish early:** Spot-check `_VEO_QUOTA_EXHAUSTED_UNTIL`
 behavior in `phase_c_ffmpeg.py:22-28` — write a 5-test mini-suite for
@@ -824,136 +937,209 @@ is 117 LOC).
 
 ---
 
-## SESSION 5 — P0-3: Cost-tracking + try/except audit
+## SESSION 5 — P0-3: record_api_call coverage + silent-except sweep
+
+**Status reframe (2026-05-24).** Original brief said "Add
+`tests/unit/test_cost_tracker.py` with at least 5 tests" and implied a
+large silent-except cleanup. File already exists at 458 LOC with 33
+passing tests — but **none directly test `record_api_call`** (the
+explicit Session 5 demand). And the silent-except sweep audit found
+only **2 instances repo-wide** (vs the implied "many"). Reframe scope:
+smaller and more focused.
 
 **Why this matters.** Bundle-A 1.3 (commit `491af65`) fixed a silent
 `AttributeError` in `ShotController.cost_tracker` that had been
-swallowing cost-tracking writes. Cost data was being silently dropped.
-The PATTERN that hid the bug (`try/except AttributeError: pass`) is
-unacceptable as a codebase convention — every instance is a potential
-hidden bug.
+swallowing cost-tracking writes. `record_api_call` is the ONLY way cost
+data enters the SQLite DB — if it silently broke again, the operator
+would notice only when the budget gate fails to fire or summary stays
+at $0. The budget gate (`would_exceed`, `is_over_budget`, `spent_usd`
+accumulator) is also entirely untested.
 
-The strategic review flagged this as P0-3 because cost is the operator's
-real-money concern, and invisible cost-tracking gaps mean we can't
-diagnose budget overruns when they happen.
+**Positive findings worth carrying forward:**
+
+- `cost_tracker.py` itself has **zero** silent-except patterns. Every
+  error path emits `warnings.warn` + visible banner — the silent-$0.00
+  bug is explicitly called out in the module docstring.
+- Repo-wide silent-except count is **2**. The "pattern that needs
+  auditing" was largely already cleaned up.
 
 **Pre-work:**
 
-1. Enumerate every silent-except in the codebase:
+1. Read [cost_tracker.py](../cost_tracker.py) end-to-end (518 LOC).
+   Focus on `CostTracker.__init__`, `record_api_call`, `log_llm`,
+   `_default_cost`, `_pricing_for`, `would_exceed`, `is_over_budget`,
+   `spent_usd`.
+2. Read [tests/unit/test_cost_tracker.py](../tests/unit/test_cost_tracker.py)
+   in full (458 LOC). Conventions:
+   - `db_path` fixture uses `tempfile.NamedTemporaryFile(delete=False)`
+     for isolated SQLite per test (Windows-safe pattern with manual
+     unlink in teardown).
+   - `pytest.approx` for float comparisons.
+   - Substring-match for `get_summary` formatted output.
+3. Run baseline: `.venv/bin/python -m pytest tests/unit/test_cost_tracker.py -v`
+   → expect 33 pass / 0 fail.
+4. Enumerate the 2 silent-except instances:
    ```bash
-   grep -rn "except.*:\s*pass" --include="*.py" . | grep -v "/.claude/" | grep -v "__pycache__"
+   grep -rn "except.*:\s*pass" --include="*.py" /Users/hyungkoookkim/Content \
+     | grep -v "/.claude/" | grep -v "__pycache__" | grep -v "/.venv/" \
+     | grep -v "/node_modules/"
    ```
-2. Categorize each hit:
-   - **Defensive (acceptable)**: catching ImportError for optional packages, catching specific expected errors with intent.
-   - **Hiding bugs (unacceptable)**: catching broad exceptions to "keep going" — these need explicit handling.
-3. Audit every `record_api_call` call site:
-   ```bash
-   grep -rn "record_api_call\|cost_tracker\." --include="*.py" .
-   ```
+   Categorize each: ACCEPTABLE (intentional — document with comment)
+   or REPLACE (explicit `except SpecificError:` or
+   `except Exception as e: warnings.warn(...)`).
 
 **Scope:**
 
 | IN | OUT |
 |---|---|
-| Every `try/except: pass` decided ACCEPTABLE or REPLACED | Refactor of `cost_tracker.py` itself |
-| Every `record_api_call` site verified reachable | New cost-tracking sites (separate session) |
-| `cost_tracker.py` test for the basic record + retrieve cycle | UI changes for cost display |
-| OPERATIONS.md §10 (cost table) updated with current measured numbers if available | Cost reporting/aggregation features |
+| `TestRecordAPICall` × ~6 cases | Refactor of `cost_tracker.py` itself |
+| `TestBudgetGate` × ~5 cases | UI changes for cost display |
+| 2 silent-except instances: triage + replace where appropriate | Cost reporting/aggregation features |
+| `record_api_call` call-site audit (manual grep + trace; document live sites) | New cost-tracking sites (separate session) |
+| OPERATIONS.md §10 (cost table) updated with measured numbers if available | Refactor of `warnings.warn` → `logger.warning` (Session 4's job, not yours) |
 
 **Approach:**
 
-1. **For each silent-except, two-pass triage.**
-   - Pass 1: Categorize (10-20 minutes). Don't fix yet — just decide
-     ACCEPTABLE / NEEDS_FIX for each. Surface the count in your
-     status report.
-   - Pass 2: Fix the NEEDS_FIX cases. Each becomes one of:
-     - `except Exception as e: logger.warning(f"<context>: {e}")` (best-effort
-       operation, e.g., cost tracking)
-     - `except SpecificError: <real handling>` (the exception was load-bearing)
-     - Remove the try/except entirely (the exception can't actually happen)
-2. **Cost-tracker audit:**
-   - For each `record_api_call` site, verify:
-     - The call would succeed if `self.cost_tracker` is a real instance.
-     - The error path (if any) doesn't silently drop data.
-     - The arguments are correct (api_name, cost_usd, latency_ms, etc.).
-   - Add a basic unit test for `CostTracker.record_api_call` → in-memory query → totals add up.
+1. **Extend test_cost_tracker.py:**
+
+   **`TestRecordAPICall`** (~6 tests):
+   - `test_record_api_call_known_api_uses_table` — `record_api_call("KLING_NATIVE")` returns 0.50, persists row with `cost_usd=0.50`, `provider="kling"`
+   - `test_record_api_call_explicit_override` — `cost_usd=0.99` overrides table
+   - `test_record_api_call_unknown_warns_and_zero` — `pytest.warns(UserWarning)`, recorded cost is 0.0
+   - `test_record_api_call_updates_spent_usd` — accumulator starts at 0, two $0.50 calls → `tracker.spent_usd == 1.00`
+   - `test_record_api_call_provider_derivation` — parametrize:
+     SORA_2→openai, VEO→google, FLUX_PULID→fal, RUNWAY_GEN4→runway,
+     unknown prefix→"unknown"
+   - `test_record_api_call_returns_cost` — return value equals what
+     was recorded
+
+   **`TestBudgetGate`** (~5 tests):
+   - `test_would_exceed_with_no_budget_returns_false` — `budget_usd=None`
+   - `test_would_exceed_under_budget` — budget=1.00, spent=0.30,
+     would_exceed("KLING_NATIVE") (0.50) → False
+   - `test_would_exceed_over_budget` — budget=1.00, spent=0.80,
+     would_exceed("KLING_NATIVE") (0.50) → True
+   - `test_is_over_budget_no_cap` — `budget_usd=None` → False
+   - `test_is_over_budget_post_record` — record calls until accumulator
+     exceeds, assert True
+
+2. **Silent-except triage (2 instances):**
+   For each, decide ACCEPTABLE (document with comment + cite reason)
+   or REPLACE (`except SpecificError:` + explicit handling OR
+   `except Exception as e: warnings.warn(f"<context>: {e}")`). If
+   unsure, surface in Findings — don't change behavior beyond
+   surfacing.
+
+3. **`record_api_call` call-site audit:**
+   ```bash
+   grep -rn "record_api_call\|cost_tracker\." --include="*.py" /Users/hyungkoookkim/Content \
+     | grep -v "__pycache__" | grep -v "/.venv/"
+   ```
+   For each site, verify:
+   - Reachable (not dead code)
+   - Error path (if any) doesn't silently drop data
+   - Arguments correct (api_name, cost_usd, latency_ms, etc.)
+   - Document live sites in commit body or Findings.
 
 **Acceptance criteria:**
 
-- [ ] All `try/except: pass` audited (count + decision documented in
-      status report)
-- [ ] All NEEDS_FIX cases either replaced with explicit handling or
-      moved to "Findings" with a director note
-- [ ] All `record_api_call` sites verified live (manually traced)
-- [ ] `tests/unit/test_cost_tracker.py` exists with at least 5 tests
+- [ ] `tests/unit/test_cost_tracker.py` has ≥44 tests (33 existing +
+      ≥11 new), all passing
+- [ ] `record_api_call` directly covered (table lookup, explicit
+      override, unknown warns, accumulator updates, provider
+      derivation, return value)
+- [ ] Budget gate covered (`would_exceed`, `is_over_budget`)
+- [ ] 2 silent-except instances triaged (count + decision documented)
+- [ ] All `record_api_call` call sites traced and documented in
+      commit body
 - [ ] §15 smoke still passes; CI green
-- [ ] A test run of `web_server.py` with a real project shows
-      non-empty `SELECT * FROM api_calls` in the SQLite DB
+- [ ] Whole-suite: `pytest tests/unit/ -q` → ≥571 pass / 3 skip / 0 fail
 
 **Pitfalls:**
 
 - **`try/except ImportError: pass` for optional deps** is acceptable
-  (e.g., `try: from optional_pkg import X; X_AVAILABLE = True; except
+  (`try: from optional_pkg import X; X_AVAILABLE = True; except
   ImportError: X_AVAILABLE = False`) — don't replace these.
 - **`try/except Exception: pass` inside a polling loop** might be
   legitimate (transient network errors that should be retried). Read
   the surrounding context before changing.
-- **Don't break the test in
-  `tests/unit/test_project_persistence.py`** — its 3 skipped tests are
-  documented separately. Your audit should not touch them.
-- **`cost_tracker.py` may have its own internal try/except patterns.**
-  Audit it too; it's the load-bearing module.
-- **SQLite write contention.** If your test runs in parallel with a
-  real server, you can hit lock errors. Use a tempdir for test DBs.
+- **`cost_tracker.py` already uses `warnings.warn` discipline.** Don't
+  replace with `logger.warning` in this session — Session 4
+  (structured logging) is the right place for that transition.
+- **`db_path` fixture uses `NamedTemporaryFile(delete=False)`.** New
+  tests must use this fixture (or compatible tempdir) — never the
+  default DB path, which would write to the real `EXPERIMENTS_DB_PATH`.
+- **The 33 existing tests must keep passing unchanged.**
 
 **Verification:**
 
 ```bash
-# 1. Audit count
-grep -rn "except.*:\s*pass" --include="*.py" . | grep -v "/.claude/" | grep -v "__pycache__" | wc -l
-# Before: <N>. After your changes: <M>. M should be ≤ N, every remaining is documented as ACCEPTABLE.
-
-# 2. Cost test:
 .venv/bin/python -m pytest tests/unit/test_cost_tracker.py -v
+# Expect ≥44 pass / 0 fail.
 
-# 3. Manual smoke:
+grep -rn "except.*:\s*pass" --include="*.py" /Users/hyungkoookkim/Content \
+  | grep -v "/.claude/" | grep -v "__pycache__" | grep -v "/.venv/" \
+  | grep -v "/node_modules/"
+# Should be 0-2 instances; any remaining must have ACCEPTABLE comment.
+
 .venv/bin/python -c "
 from cost_tracker import CostTracker
-ct = CostTracker(budget_usd=10.0)
-ct.record_api_call('test_api', cost_usd=0.05, latency_ms=100)
-# inspect DB
+import tempfile
+with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+    ct = CostTracker(budget_usd=10.0, db_path=f.name)
+    ct.record_api_call('KLING_NATIVE')
+    assert ct.spent_usd > 0
+    print('OK')
 "
 ```
 
 **Commit shape:**
 
 ```
-fix(cost): audit silent-except patterns + verify record_api_call sites
+fix(cost): cover record_api_call + budget gate + sweep silent-excepts
 
-Found <N> try/except:pass instances. Categorization:
-  <X> ACCEPTABLE — optional import guards, idiomatic in this codebase
-  <Y> REPLACED with explicit logger.warning/exception (this commit)
-  <Z> moved to Findings for director review (out of scope for fix)
+Extends tests/unit/test_cost_tracker.py from 33 to ~44 tests:
 
-Every record_api_call site traced and verified reachable via
-cost_tracker proxy (Bundle-A 1.3 set this up). Added
-tests/unit/test_cost_tracker.py with 7 tests covering record + query
-+ aggregation.
+  TestRecordAPICall (6):
+    - known_api_uses_table
+    - explicit_override
+    - unknown_warns_and_zero (pytest.warns(UserWarning))
+    - updates_spent_usd accumulator
+    - provider_derivation (sora→openai, veo→google, flux→fal,
+      runway→runway, unknown→unknown)
+    - returns_cost matches recorded
 
-Verified: 7/7 cost tests pass; smoke OK; CI green.
+  TestBudgetGate (5):
+    - would_exceed: no_budget / under / over
+    - is_over_budget: no_cap / post_record
 
-Side finding: <anything noteworthy>.
+Silent-except sweep: <N> instances found repo-wide. Triage:
+  <X> ACCEPTABLE — optional import guards / transient retry loops
+  <Y> REPLACED with explicit handling (this commit)
+
+record_api_call call sites traced: <list>. All reachable via
+cost_tracker proxy (Bundle-A 1.3 set this up); no silently-dropped
+writes.
+
+Positive: cost_tracker.py itself has zero silent-except patterns —
+the strategic review's implied "many instances" was overstated. The
+repo-wide sweep is tiny because the pattern was largely already
+cleaned up.
+
+Verified: ≥44/44 cost tests pass; whole-suite ≥571 pass / 3 skip / 0
+fail; smoke OK; CI green.
 ```
 
-**Estimated effort:** 3 hours.
+**Estimated effort:** 1.5 hours (was 3 — most work already done).
 
 **Decision authority:** Lane A on categorization of individual
 try/except patterns. Escalate when ambiguous or when the fix would
 change behavior beyond logging.
 
 **If you finish early:** Audit one of the deferred subsystems (audio/,
-performance/, llm/) — same triage pattern, same fix shape. Get the
-codebase to "no silent excepts anywhere."
+performance/, llm/) — same triage pattern. With repo-wide
+silent-except count this low, you may finish a full repo sweep in
+one extra hour.
 
 ---
 

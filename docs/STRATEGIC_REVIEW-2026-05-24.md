@@ -44,32 +44,52 @@ because the next set of changes shouldn't break them.
 
 ### P0 — Ship-blocking risks
 
-#### P0-1 — Test coverage is dangerously thin
+#### P0-1 — Test coverage is uneven, with two real load-bearing gaps
 
-**Current state:** One unit test file (`tests/unit/test_project_persistence.py`,
-9 tests, 3 documented pre-existing failures, 6 passing). Integration tests
-exist but require real API credentials. **`cinema/shots/controller.py`
-(1251 LOC) has zero unit tests.** `cinema/review/controller.py` has zero.
-`workflow_selector.classify_shot_type` (load-bearing for video routing)
-has zero. `quality_max.py`'s N=8 halt logic has zero.
+**Director-correction (2026-05-24):** My initial draft of this section
+claimed "only one test file at unit level" and "zero unit tests" for
+several modules. That was wrong — I trusted session memory of one
+file's pytest output instead of running `ls tests/unit/`. I committed
+the exact failure mode this handoff is written to prevent. Ownership:
+mine. What follows is the audited reality.
 
-This is a pipeline that orchestrates $10–30 per project run. A refactor
-that breaks `_gate_satisfied` could cost weeks of stuck operator runs.
-The Bundle A `threshold=0.0` ML-signal bug went undetected for an
-unknown duration because there was no test exercising the rolling-stats
-contract.
+**Current state (verified):** `tests/unit/` contains 24 test files.
+Baseline is **478 pass / 3 skip / 0 fail** after the `fix(tests):`
+baseline-hygiene commit. The 3 skips are documented `@unittest.skip`
+in `test_project_persistence.py` (mock drift, not behavior bugs).
 
-**Action:** Invest one focused session per critical module in unit tests:
+**Audited status of the original priority list:**
 
-| Priority | Module | Why |
+| Pri | Module | Audited status | Action |
+|---|---|---|---|
+| 1 | `cinema/review/controller.py` (`approve_take`, `_gate_satisfied`, `_project_gate_status`, `_resolve_motion_source` chain walk) | `test_cross_controller.py` (10 tests, all green) covers cross-controller wiring + `_candidate_take` 1 of 4 branches + `_gate_satisfied` 5 of 13 cases partially. **`approve_take` (all 10 branches), `_project_gate_status` (2 cases), the PERFORMANCE_REVIEW gate predicate (5 branches), and `_resolve_motion_source` visited-set protection are entirely untested.** | **EXTEND** `test_cross_controller.py` in place (preserve plain-functions + `_TESTS` registry convention). ~26 new tests. HANDOFF Session 2 reframed Create → Audit+Extend. |
+| 2 | `workflow_selector.classify_shot_type` + `WORKFLOW_TEMPLATES` + `MOTION_FIDELITY_FLOORS` + `get_adaptive_pulid_weight` | `test_workflow_selector.py` (34 tests, all green) covers shape + defaults + ranges + **4 of 48 keywords (8%)**. `get_adaptive_pulid_weight` and `MOTION_FIDELITY_FLOORS` subset check entirely untested. | **EXTEND** with ~63 new cases (parametrized 48-keyword sweep + 4 boost paths + subset check + target_api validity). HANDOFF Session 3 reframed. |
+| 3 | `face_validator_gate.should_halt` + `score_candidate` + `needs_regenerate` | **Strategic review claim correct — uncovered.** Cross-grep across all of `tests/` returns zero hits for any of the three functions. `test_quality_max_overlay.py` tests adjacent territory (overlay schema validation), not the halt rule. | **NEW FILE** `tests/unit/test_face_validator_gate.py` with ~22 cases (`should_halt` 9 cases, `score_candidate` 8 cases, `needs_regenerate` 5 cases). **Not currently in the 6-session plan** — this is the strongest follow-up candidate after the 6 sessions land. |
+| 4 | `domain.scene_decomposer._coerce_to_valid_keys` + schema validation | Not audited in this pass. | Audit before next strategic-review cycle. |
+| 5 | `lip_sync._sync_gate_settings` + cascade decision logic | Not audited in this pass. | Audit before next strategic-review cycle. |
+
+**Additional gap surfaced during audit (not in original priority list):**
+
+| Module | Audited status | Action |
 |---|---|---|
-| 1 | `cinema/review/controller.py` | Gate predicates + approve_take state machine. Recent change (PERFORMANCE_REVIEW wire) had ad-hoc test verification only. |
-| 2 | `workflow_selector.classify_shot_type` + `WORKFLOW_TEMPLATES` | Load-bearing for video routing. Currently zero tests. |
-| 3 | `face_validator_gate.should_halt` + `score_candidate` + `needs_regenerate` | N=8 best-of decision logic. Pure-Python, easy to test, high impact. |
-| 4 | `domain.scene_decomposer._coerce_to_valid_keys` + schema validation | LLM output sanitization. Currently relies on never-fail-path defensive coding. |
-| 5 | `lip_sync._sync_gate_settings` + cascade decision logic | Just fixed a settings-not-threaded bug (Bundle A 1.2). Tests would have caught it. |
+| `cost_tracker.CostTracker.record_api_call` + budget gate (`would_exceed`, `is_over_budget`, `spent_usd` accumulator) | `test_cost_tracker.py` exists at 458 LOC with 33 passing tests — but `record_api_call` itself is **never directly tested**; existing tests cover `log_llm`, `get_summary`, pricing tables instead. Budget gate entirely untested. | **EXTEND** with ~11 cases (`TestRecordAPICall` + `TestBudgetGate`). HANDOFF Session 5 reframed (silent-except sweep also turned out tiny — 2 instances repo-wide vs the implied "many"). |
 
-**Target:** Each P0-1 sub-task = one PR, ≤200 LOC of tests, runs in CI.
+**Positive findings worth recording:**
+
+- `cost_tracker.py` has **zero** silent-except patterns. Repo-wide
+  silent-except count is **2** (vs the "many" the original P0-3 review
+  implied). The pattern that hid the Bundle-A 1.3 cost-tracker bug is
+  largely already cleaned up.
+- All 4 audited test files use SQLite tempdirs / monkeypatching cleanly;
+  no write-contention risk.
+- Existing tests follow consistent conventions (`pytest.approx` for
+  floats, parametrized cross-products, descriptive class names) — a
+  scaffold worth preserving and extending rather than re-inventing.
+
+**Target:** Reframed Sessions 2 + 3 + 5 (Audit+Extend) close the
+highest-leverage gaps without duplicating existing coverage. Priority 3
+(`face_validator_gate`) is the largest remaining single uncovered gap
+and should be the first follow-up after the 6 sessions land.
 
 #### P0-2 — No CI / no automated verification
 
