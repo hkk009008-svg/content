@@ -85,6 +85,17 @@ class LLMEnsemble:
             api_key=env_settings.openai_api_key,
         )
 
+        # Gemini is optional — only construct the client when a key is
+        # configured. The judge_map below references "gemini-pro" which
+        # selects this branch; without a key the judge dispatch raises
+        # at call time rather than silently falling through to OpenAI.
+        gemini_key = env_settings.gemini_api_key or env_settings.google_api_key
+        if gemini_key:
+            from google import genai  # google-genai SDK, already in env via veo_native
+            self.gemini_client = genai.Client(api_key=gemini_key)
+        else:
+            self.gemini_client = None
+
         # Apply settings overrides
         self.competitive_enabled = True
         self.judge_model_override: str | None = None
@@ -210,6 +221,10 @@ class LLMEnsemble:
                 return self._generate_openai(
                     model, system_prompt, user_prompt, json_mode,
                 )
+            elif model.startswith("gemini"):
+                return self._generate_gemini(
+                    model, system_prompt, user_prompt, json_mode,
+                )
             else:
                 # Unknown provider -- attempt OpenAI-compatible call.
                 return self._generate_openai(
@@ -282,6 +297,37 @@ class LLMEnsemble:
         content = response.choices[0].message.content
         return (model, content)
 
+    def _generate_gemini(
+        self,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        json_mode: bool = False,
+    ) -> tuple[str, Any]:
+        """Call the Google Gemini generateContent API.
+
+        Matches the OpenAI/Anthropic helpers' return shape: ``(model, text)``.
+        Uses the new google-genai SDK (genai.Client) — same one used by
+        veo_native.py and phase_c_vision.validate_scene_coherence_vision.
+        """
+        if self.gemini_client is None:
+            raise RuntimeError(
+                "Gemini judge requested but no GEMINI_API_KEY / GOOGLE_API_KEY configured"
+            )
+
+        from google.genai import types
+
+        config_kwargs: dict[str, Any] = {"system_instruction": system_prompt}
+        if json_mode:
+            config_kwargs["response_mime_type"] = "application/json"
+
+        response = self.gemini_client.models.generate_content(
+            model=model,
+            contents=user_prompt,
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+        return (model, response.text)
+
     # ------------------------------------------------------------------
     # Judging
     # ------------------------------------------------------------------
@@ -341,6 +387,13 @@ class LLMEnsemble:
                     judge_model,
                     "You are an impartial quality judge. Respond only with valid JSON.",
                     judge_user_prompt,
+                )
+            elif judge_model.startswith("gemini"):
+                _, raw = self._generate_gemini(
+                    judge_model,
+                    "You are an impartial quality judge. Respond only with valid JSON.",
+                    judge_user_prompt,
+                    json_mode=True,
                 )
             else:
                 _, raw = self._generate_openai(
