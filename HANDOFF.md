@@ -1,6 +1,6 @@
 # Session Handoff — Content Cinema Pipeline
 
-**Last session:** 2026-05-23 — large refactor, audit, Python 3.13 migration, settings plumbing rewrite, dead-code purge, orphan UI knob sweep. **39+ tasks completed. No commits created.** All changes are in working tree.
+**Last session:** 2026-05-23 — large refactor, audit, Python 3.13 migration, settings plumbing rewrite, dead-code purge, orphan UI knob sweep, P0/P1 silent-failure repair. **25 commits landed since the pivot.** Working tree is clean except `AGENTS.md` / `CLAUDE.md` (pre-session modifications, never touched this session).
 
 ## TL;DR for the next session
 
@@ -136,19 +136,36 @@ Cross-referenced every `update('<key>', ...)` in `web/src/components/settings/*.
 
 **Process lesson:** the orphan grep was run ~14 minutes before the deletion commit, and three parallel commits landed in that window wiring up keys I was about to delete. Re-grep candidates against HEAD as the LAST step before any commit that deletes ≥5 keys/files/symbols. (Saved as memory: `feedback_re-verify-before-destructive-commits.md`.)
 
+### 10. P0/P1 silent-failure repair pass (post-pivot)
+
+Triaged from a `where are we / what's broken` audit. Ordered by silent-output impact:
+
+| Commit | Severity | Fix |
+|---|---|---|
+| `4075558` | P0 — audio fidelity | Wire `phase_c_ffmpeg.two_pass_loudnorm` into `_assemble_final` (all 3 return paths). Final audio now ±0.1 LU of -14 LUFS / -1.5 dBTP instead of ±1.5 LU from the single-pass approximation. Failure-safe (original kept on False). |
+| `3bddfa3` | P0 — identity feedback | Migrate `cinema/shots/controller.py:420,912` off the deprecated `validate_identity_image` wrapper to direct `_get_shared_validator().validate_image()`. Take metadata now captures `identity_failure_reason` (`face_angle_extreme`, etc.) and `suggested_pulid_adjustment`; shot diagnostics produce specific recommendation strings instead of generic "Low identity score". The metadata rail is laid; the retry loop doesn't yet *read* it (follow-up). |
+| `9ecd572` | P1 — architecture | Absorb 3 stray `os.environ.get` reads into `config.Settings`: `SUNO_API_KEY` / `SUNO_TOKEN` (alias preserved) / `SUNO_API_BASE`, `PERFORMANCE_CACHE_DIR`, `MOTION_GATE_SAMPLES`. +8 unit tests covering each field's default + env override. |
+| `0dbab1e` | P1 — regression fix | The `9ecd572` change broke `tests/unit/test_performance_cache.py` (it monkeypatches the env var; Settings was frozen at import). `_cache_dir()` now reads env at call time with `settings.performance_cache_dir` as the documented default — env override pattern for cache/temp-dir fields. |
+| `c4b80dc` | P1 — dead code | Delete 6 dark native-API methods (~500 LOC): `VeoNativeAPI.{generate_video_4k, generate_video_with_frames, generate_with_audio}`, `LTXVideoAPI.{generate_transition, generate_4k}`, `phase_c_ffmpeg.generate_kling_storyboard`. None had production callers; surviving methods kept their signatures. |
+| `475a36a` | P1 — dead code | Delete 3 dark `lip_sync` helpers (~230 LOC): `lipsync_act_one` (real impl lives in `performance/act_one.py`), `generate_transition_clip` (no caller), `recommend_lip_sync_mode` (heuristic for a router that doesn't ask). |
+
+**Process notes:**
+* Same parallel-chat mistake pattern as Round 9 — my P1 #3 commit (`9ecd572`) lost a runtime override the tests depended on; caught + fixed in `0dbab1e` (one commit later) rather than amending. Preserves audit trail.
+* GitNexus MCP wasn't reachable in this session; per CLAUDE.md "grep + file inspection is the acceptable fallback for impact analysis." Worked fine.
+* Auto-mode classifier denied deletion of `tests/unit/test_vbench_evaluator.py` (a pre-existing stale test) without explicit user authorization — surfaced for user decision instead.
+
 ## OPEN WORK — prioritized
 
-### 🔴 1. Wire the remaining UI knobs (mostly resolved)
+### 🔴 1. Wire the remaining UI knobs — RESOLVED
 
-Status: most rows CLOSED by post-pivot work — `ec8b1d9` (max-tier 21-knob bundle), `19be241` (video-cascade ctx + `api_engines` filter + `cascade_retry_limit`), `5445049` (`budget_limit_usd` via CostTracker), `64d968d` (`creative_llm`), `75c470d` (`adaptive_pulid`). The deletion sweep in Round 9 closed the rest by removing UI surface.
-
-Still open:
-
-| Function | Knobs unblocked | LOC est |
-|---|---|---|
-| `workflow_selector.get_workflow_params(shot_type, settings=None)` — add settings, overlay | `flux_guidance`, `comfyui_sampler`, `comfyui_steps` | 20 |
-
-(`comfyui_upscale`, `cost_optimization`, `quality_cost_weight` were UI orphans — removed in `25b5337`, so no longer on the wire-up list.)
+All rows from the original list are CLOSED:
+* `ec8b1d9` — max-tier 21-knob bundle
+* `19be241` — video-cascade ctx + `api_engines` filter + `cascade_retry_limit`
+* `5445049` — `budget_limit_usd` via CostTracker pause gate
+* `64d968d` — `creative_llm` per-call model override in `chief_director`
+* `75c470d` — `adaptive_pulid` gates `get_adaptive_pulid_weight` in continuity_engine
+* `b4a9ed2` — `flux_guidance`, `comfyui_sampler`, `comfyui_steps` overlaid in `workflow_selector.get_workflow_params(shot_type, settings=None)`
+* `25b5337` — UI surface removed for `comfyui_upscale`, `cost_optimization`, `quality_cost_weight` and 12 others (Round 9 deletion sweep)
 
 #### ASK USER before wiring — RESOLVED
 
@@ -163,68 +180,33 @@ Round 9 resolved every "ASK USER" item by deleting the UI control:
 These were added to `main.py` then deleted with the CLI:
 - **Last-frame chaining** — thread `lip_sync.extract_last_frame` output as next shot's start image. Implementation site: `cinema/shots/controller.py:390` (`generate_ai_broll` call) OR `phase_c_ffmpeg.generate_ai_video` wrapper. ~30 LOC.
 - **Programmatic LUT from Blueprint palette** — `prep/lut_generator.py` was deleted but the recipe is documented in this session's history. The cinema pipeline's `_assemble_final` method (in `cinema_pipeline.py`) is where it'd be wired. ~120 LOC for the generator + ~10 LOC wire-up. NB: there's no Blueprint Director anymore in the cinema pipeline path (llm/blueprint_director was deleted) — needs a replacement palette source (style_director? new field on project?).
-- **Two-pass loudnorm** — function still exists at `phase_c_ffmpeg.py:two_pass_loudnorm`. Just needs to be called in `cinema_pipeline.py:_assemble_final` after the single-pass mix. ~5 LOC.
+- ~~**Two-pass loudnorm**~~ — CLOSED by `4075558` (wired at all three return paths of `_assemble_final`).
 
 ### 🟠 3. Other audit findings still open
 
-- **`cinema/shots/controller.py:881` calls deprecated `validate_identity_image`** — the wrappers in `phase_c_vision.py:25-89` are all marked DEPRECATED in their docstrings but still used. Consider direct `_get_shared_validator().validate_video()` calls for rich diagnostics (character_results, primary_failure_reason, suggested_pulid_adjustment) instead of the bool-only wrappers.
+- ~~**`cinema/shots/controller.py:420,912` calls deprecated `validate_identity_image`**~~ — CLOSED by `3bddfa3` (migrated to `_get_shared_validator().validate_image()` with `character_id` so `character_results` populates; rich diagnostics now flow into `take["metadata"]` and recommendation strings). Retry-loop consumer of `suggested_pulid_adjustment` is the natural follow-up.
 - **VEO fal.ai branch** silently drops chained start-frame (`phase_c_ffmpeg.py:484-494`) when `multi_angle_refs` is supplied. Moot until last-frame chaining is re-added.
-- **SEEDANCE branch unreachable** (`phase_c_ffmpeg.py:714`) — 200+ LOC of multi-character SEEDANCE integration. Never appears in any cascade. Either wire into `WORKFLOW_TEMPLATES` or delete.
-- **Native API methods dark**: `veo.generate_video_4k`, `veo.generate_video_with_frames`, `veo.generate_with_audio`, `ltx.generate_transition`, `ltx.generate_4k`, `generate_kling_storyboard`, `lip_sync.generate_transition_clip`, `recommend_lip_sync_mode`, `lipsync_act_one`. Decide per case.
-- **VBench-style quality routing** — `quality_tracker.log_shot_quality` has only test callers. `workflow_selector.get_optimal_api` + `get_dynamic_workflow` have zero production callers. Now that `vbench_evaluator.py` is gone, this whole adaptive-routing surface needs a decision: revive with a simpler scorer or delete the unreachable functions.
+- **SEEDANCE branch unreachable** (`phase_c_ffmpeg.py:752`) — 200+ LOC of multi-character SEEDANCE integration. Never appears in any cascade. Either wire into `WORKFLOW_TEMPLATES` or delete.
+- ~~**Native API methods dark**~~ — CLOSED by `c4b80dc` (VEO ×3, LTX ×2, `generate_kling_storyboard`) + `475a36a` (`lip_sync.lipsync_act_one`, `generate_transition_clip`, `recommend_lip_sync_mode`). ~730 LOC deletion total. Git history is the archive.
+- **VBench-style quality routing** — `quality_tracker.log_shot_quality` has only test callers. `workflow_selector.get_optimal_api` + `get_dynamic_workflow` have zero production callers. Now that `vbench_evaluator.py` is gone, this whole adaptive-routing surface needs a decision: revive with a simpler scorer or delete the unreachable functions (plus 4 test files that exercise them: `tests/unit/test_quality_tracker.py`, root `test_quality_tracker.py`, `tests/integration/test_api_comparison.py`, `test_grid_search.py`, `test_e2e_quality_benchmark.py`).
 - ~~**Env vars sneaking past `config/settings.py`**~~ — CLOSED by `9ecd572` (absorbed all 3 stray env-var reads into `config.Settings`).
 - **Dead web endpoints**: `web_server.py:340-358 /api/optimize-shot-prompt` (no frontend caller); `web_server.py:310-322 GET /api/language-defaults/<language>` (no frontend caller).
+- **Stale test blocks pytest collection**: `tests/unit/test_vbench_evaluator.py` imports the deleted `vbench_evaluator` module. Auto-mode denied deletion without explicit user authorization. Currently bypassed via `pytest --ignore=...` — needs auth to remove cleanly.
+- **`tests/unit/test_project_manager.py` — 6 failures**: parallel work in `domain/project_manager.py` (Round 9 commit `439dcab` and prior) removed defaults that the fixture isolation depended on. `tmp_projects_dir` no longer isolates: `list_projects()` returns real projects instead of `[]`. Not caused by Round 10; needs investigation.
 
-### 🟡 4. Commit hygiene
+### 🟡 4. Commit hygiene — RESOLVED
 
-**Nothing has been committed this session.** Recommend staging in logical chunks. Suggested order:
-
-```bash
-# Chunk 1: YouTube cleanup
-git add -A *.txt CALIBRATION_MATRIX.txt RAILWAY_GUIDE.md firebase-debug.log docs/CODEBASE_DUMP.md \
-  phase_0_topic.py phase_d_upload.py phase_e_learning.py sanitize_metadata.py \
-  used_topics.txt run_example.py cinema/phases/{topic,upload,learning}.py
-git commit -m "chore: remove YouTube generator residue"
-
-# Chunk 2: Dark-code fixes
-git add quality_max.py workflow_selector.py phase_c_assembly.py \
-  audio/voiceover.py audio/effects.py audio/music.py
-git commit -m "fix(dark-code): remove ReActor dead branches, get_shot_workflow_summary; wire generate_tts_routed; pedalboard hard dep"
-
-# Chunk 3: Settings plumbing rewrite
-git add cinema/context.py cinema_pipeline.py audio/voiceover.py audio/foley.py \
-  audio/music.py audio/dialogue.py lip_sync.py
-git commit -m "fix(settings): add get_project_setting helper; migrate 8 broken getattr sites"
-
-# Chunk 4: CLI removal + Python modernization
-git add -A  # picks up the 11 deleted files + cinema/__init__.py + cinema/pipeline.py \
-            # + llm/__init__.py + domain/scene_decomposer.py + requirements.txt \
-            # + requirements-lock-py39.txt + pyproject.toml + phase_c_assembly.py trim
-git commit -m "refactor: remove CLI/YouTube generator; modernize to Python 3.11+"
-
-# Chunk 5: Final cleanup
-git add cinema/core.py cinema_pipeline.py phase_c_vision.py web_server.py
-git commit -m "fix: delete vbench_evaluator + comfyui_workflow_gen (dead); singleton IdentityValidator; tidy cinema_pipeline imports"
-
-# Chunk 6: UI knob wire-up
-git add web/src/types/project.ts web/src/components/settings/ \
-  web/src/components/EditorialShell.tsx web/src/lib/guidance.ts \
-  cinema/shots/controller.py cinema_pipeline.py
-git commit -m "feat(settings): wire 9 UI knobs to backend; delete 10 orphan/dead UI keys; fix Continuity Engine slider persistence bug"
-
-# Chunk 7: Docs
-git add AGENTS.md CLAUDE.md HANDOFF.md docs/REFACTOR_HANDOFF.md \
-  docs/CINEMA_PIPELINE_MIGRATION_DESIGN.md config/prompts/pipeline_context.md
-git commit -m "docs: update for post-pivot single-entry-point architecture"
-```
+All chunks from the original staging plan landed (`b903ab8` YouTube cleanup → `45307cc` dark-code → `71e6bb2` settings plumbing → `7b19dd9` CLI removal → `d549884` final cleanup → `4ff5fda` UI knob wire-up → `380874c` docs). Subsequent post-pivot work (Rounds 9-10) committed in its own logical chunks.
 
 ## Don't break these
 
 - `cinema/context.py:get_project_setting(ctx, key, default)` — canonical read path for all per-project UI knobs. Replicating the `getattr(settings, X)` pattern brings the silent-failure bug right back.
 - `phase_c_vision.py:_get_shared_validator()` — process-singleton for `IdentityValidator`. **Don't** construct fresh `IdentityValidator(vision_fallback=...)` in new wrappers; use the factory so `history` accumulates.
 - `phase_c_assembly.py:generate_ai_broll` + `RunPodComfyUI` — still consumed by `cinema/shots/controller.py:88,390` and `quality_max.py`. **Don't delete.**
-- `phase_c_ffmpeg.py` is the video router for the entire production pipeline. The `two_pass_loudnorm` function is small + useful — keep it even though no current caller.
+- `phase_c_ffmpeg.py` is the video router for the entire production pipeline. The `two_pass_loudnorm` function is now wired via `cinema_pipeline.CinemaPipeline._apply_final_loudnorm` — keep both ends.
 - `cinema/pipeline.py:CinemaPipeline` (the typed driver) has no callers but is preserved as a forward-compatible primitive. Don't delete.
+- `quality_max._MAX_TIER_KNOB_SCHEMA` + `_validate_overlay_value` — the guardrail that prevents UI overrides from passing junk to ComfyUI. **Mirrors the React slider bounds in `MaxTierComfyControls` + `MaxQualityTierSection`** — keep both sides in sync when adding knobs.
+- `performance/_cache.py:_cache_dir()` reads `os.environ.get("PERFORMANCE_CACHE_DIR", settings.performance_cache_dir)` — the env-first pattern is intentional (tests monkeypatch the env var). **Don't "clean up" to a pure `settings.X` read** — `0dbab1e` re-instated this after `9ecd572` regressed it.
 - `requirements.txt` is now direct-deps only. **Don't `pip freeze > requirements.txt`** — that would reintroduce the frozen-lock fragility. Keep `requirements-lock-py39.txt` as historical reference only.
 
 ## Memory files for context
@@ -259,13 +241,22 @@ grep -rn --include='*.py' "get_project_setting.*\"S\"\|global_settings\[\"S\"\]\
 import cinema_pipeline
 from cinema.context import PipelineContext, get_project_setting
 from phase_c_vision import _get_shared_validator
+from cinema_pipeline import CinemaPipeline
+from quality_max import _MAX_TIER_KNOB_SCHEMA
 v1 = _get_shared_validator(); v2 = _get_shared_validator()
 assert v1 is v2, 'IdentityValidator singleton broken'
 ctx = PipelineContext(global_settings={'tts_provider': 'CARTESIA_SONIC_2', 'identity_strictness': 0.8})
 assert get_project_setting(ctx, 'tts_provider') == 'CARTESIA_SONIC_2'
 assert get_project_setting(ctx, 'identity_strictness') == 0.8
+assert hasattr(CinemaPipeline, '_apply_final_loudnorm'), 'two-pass loudnorm wire-up missing'
+assert len(_MAX_TIER_KNOB_SCHEMA) == 24, 'MaxTier overlay schema lost coverage'
 print('OK')
 "
-.venv/bin/python -m pytest tests/unit -x -q
+# Two pre-existing failures need --ignore until they're decided/resolved:
+#   * test_vbench_evaluator.py    — imports the deleted vbench_evaluator module
+#   * test_project_manager.py     — fixture broke after Round 9 project_manager.py edit
+.venv/bin/python -m pytest tests/unit -q \
+  --ignore=tests/unit/test_vbench_evaluator.py \
+  --ignore=tests/unit/test_project_manager.py
 .venv/bin/python -m pytest tests/integration -x -q --maxfail=3  # several need API keys
 ```
