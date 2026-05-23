@@ -5,12 +5,13 @@ we test that our outgoing requests opt into caching correctly. If
 cache_control disappears from the system block in a future refactor,
 this test catches it.
 
-Covers the call sites in llm/ensemble.py:
-  - _generate_anthropic (called by _generate_single with a claude-* model)
-  - _judge (also calls _generate_anthropic with a literal system string)
+Covers all three production Anthropic call sites:
+  - llm/ensemble.py:_generate_anthropic (via _generate_single with claude-* model)
+  - llm/ensemble.py:_judge (also calls _generate_anthropic with literal system)
+  - llm/chief_director.py:_call_llm (uses build_anthropic_system_blocks directly)
 
-Task A.3 will make these tests pass by converting the bare string system
-parameter to a list of content blocks with cache_control={'type': 'ephemeral'}.
+Post-A.3 follow-up: the chief_director test was added after the cross-cutting
+review flagged that the third call site was unprotected by tests.
 """
 
 from __future__ import annotations
@@ -94,6 +95,67 @@ def test_ensemble_system_block_has_cache_control():
     )
     # Verify the text content survived the wrap (guards against A.3 accidentally
     # stripping text while converting to the list-of-blocks structure).
+    assert first_block.get("text"), "first system block must have non-empty text"
+    assert isinstance(first_block["text"], str), (
+        f"first system block text must be str; got {type(first_block['text']).__name__}"
+    )
+
+
+def test_chief_director_system_block_has_cache_control():
+    """ChiefDirector._call_llm must also pass cache_control on the system block.
+
+    This is the third Anthropic call site in the codebase. It uses
+    build_anthropic_system_blocks() directly (rather than routing through
+    LLMEnsemble), so a regression here wouldn't be caught by the two
+    ensemble-targeted tests above.
+
+    Mock strategy: same `patch("anthropic.Anthropic", autospec=True)` as the
+    ensemble tests, PLUS we patch `llm.chief_director.settings` so the lazy
+    `_init_client` sees a truthy `anthropic_api_key` and constructs the mock
+    client. Without that, _init_client returns None and _call_llm silently
+    returns "" before reaching messages.create.
+    """
+    with patch("anthropic.Anthropic", autospec=True) as mock_anthropic_cls, \
+         patch("llm.chief_director.settings") as mock_settings:
+        mock_settings.anthropic_api_key = "fake-test-key"
+        mock_settings.openai_api_key = None  # force the anthropic branch
+
+        fake_anthropic_client = MagicMock()
+        fake_anthropic_client.messages.create.return_value = _make_fake_response()
+        mock_anthropic_cls.return_value = fake_anthropic_client
+
+        from llm.chief_director import ChiefDirector
+        cd = ChiefDirector(project={"id": "test"})
+        cd._call_llm("You are ChiefDirector evaluating.", "user prompt here")
+
+    assert fake_anthropic_client.messages.create.called, (
+        "messages.create was never called — check that the anthropic_api_key "
+        "patch made _init_client return a client"
+    )
+
+    call_kwargs = fake_anthropic_client.messages.create.call_args.kwargs
+    system_block = call_kwargs.get("system")
+
+    assert isinstance(system_block, list), (
+        f"chief_director system must be a list of content blocks; "
+        f"got {type(system_block).__name__!r}: {system_block!r}"
+    )
+    assert len(system_block) >= 1, "system block list must not be empty"
+
+    first_block = system_block[0]
+    assert first_block.get("type") == "text", (
+        f"first system block must be type=text; got {first_block!r}"
+    )
+    assert "cache_control" in first_block, (
+        f"chief_director system block missing cache_control; "
+        f"got keys {list(first_block.keys())}"
+    )
+    # Check only the type semantic — Anthropic may extend cache_control with
+    # additional fields (e.g. ttl) and we must not break on those additions.
+    assert first_block["cache_control"].get("type") == "ephemeral", (
+        f"cache_control type must be 'ephemeral'; got {first_block['cache_control']!r}"
+    )
+    # Verify the text content survived the wrap.
     assert first_block.get("text"), "first system block must have non-empty text"
     assert isinstance(first_block["text"], str), (
         f"first system block text must be str; got {type(first_block['text']).__name__}"
