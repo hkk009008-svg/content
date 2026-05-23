@@ -83,31 +83,6 @@ export function AdvancedSection({ s, config, project }: Props) {
             <p className="text-eyebrow-sm text-editorial-ivory-mute">Primary model for scripts, scene descriptions, prompts.</p>
           </div>
 
-          {/* Quality Judge */}
-          <div>
-            <label className="text-eyebrow text-editorial-ivory-mute block mb-0.5 font-mono">Quality Judge</label>
-            <select value={s.quality_judge_llm || 'auto'}
-              onChange={e => update('quality_judge_llm', e.target.value)}
-              className="w-full bg-editorial-ink border border-editorial-rule rounded-lg px-3 py-1.5 text-eyebrow text-editorial-ivory">
-              {(config as any)?.quality_judge_options?.map((opt: any) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              )) || (
-                <>
-                  <option value="auto">Auto (Best available)</option>
-                  <option value="claude-opus">Claude Opus 4</option>
-                  <option value="gpt-4o">GPT-4o</option>
-                  <option value="gemini-pro">Gemini 2.5 Pro</option>
-                </>
-              )}
-            </select>
-            <p className="text-eyebrow-sm text-editorial-ivory-mute">Model for ensemble judging and quality evaluation.</p>
-          </div>
-
-          {/* Competitive Generation Toggle */}
-          <ToggleCard field="competitive_generation" label="Competitive Generation"
-            desc="Generate with 2 LLMs, judge picks best. Better quality, 2x LLM cost."
-            s={s} update={update} />
-
           {/* Quality vs Cost Weight */}
           <Slider label="Quality ↔ Cost weight" field="quality_cost_weight" s={s} update={update}
             min={0.5} max={1.0} step={0.05} defaultValue={0.8}
@@ -120,33 +95,33 @@ export function AdvancedSection({ s, config, project }: Props) {
         </div>
       </div>
 
-      {/* Master Seed */}
-      <div>
-        <label className="text-eyebrow text-editorial-ivory-soft block mb-1.5 uppercase tracking-wider">Master Seed</label>
-        <input type="number" value={s.master_seed}
-          onChange={e => update('master_seed', parseInt(e.target.value))}
-          aria-label="Master seed"
-          className="w-full bg-editorial-ink border border-editorial-rule rounded-lg px-3 py-2 text-sm text-editorial-ivory font-mono" />
-        <p className="text-eyebrow-sm text-editorial-ivory-mute mt-0.5">Locked across all shots for reproducibility</p>
-      </div>
-
       {/* Continuity Parameters */}
       {config?.continuity_options && (
         <div>
           <label className="text-eyebrow text-editorial-ivory-soft block mb-2 uppercase tracking-wider">Continuity Engine</label>
           <div className="space-y-3">
-            {Object.entries(config.continuity_options).map(([key, opt]) => (
-              <div key={key}>
-                <div className="flex justify-between text-eyebrow text-editorial-ivory-mute mb-0.5">
-                  <span className="font-mono">{key.replace(/_/g, ' ')}</span>
-                  <span className="text-editorial-brass font-bold">{opt.default}</span>
+            {Object.entries(config.continuity_options).map(([key, opt]) => {
+              // Controlled input: read current value from project settings,
+              // fall back to server-supplied default. Earlier version used
+              // defaultValue= which made the input uncontrolled and silently
+              // discarded operator changes — the slider moved but nothing
+              // persisted.
+              const value = s[key] ?? opt.default
+              return (
+                <div key={key}>
+                  <div className="flex justify-between text-eyebrow text-editorial-ivory-mute mb-0.5">
+                    <span className="font-mono">{key.replace(/_/g, ' ')}</span>
+                    <span className="text-editorial-brass font-bold">{typeof value === 'number' ? value.toFixed(2) : value}</span>
+                  </div>
+                  <input type="range" min={opt.min} max={opt.max} step={0.05}
+                    value={value}
+                    onChange={e => update(key, parseFloat(e.target.value))}
+                    aria-label={key.replace(/_/g, ' ')}
+                    className="w-full accent-editorial-brass h-1" />
+                  <p className="text-eyebrow-sm text-editorial-ivory-mute">{opt.description}</p>
                 </div>
-                <input type="range" min={opt.min} max={opt.max} step={0.05} defaultValue={opt.default}
-                  aria-label={key.replace(/_/g, ' ')}
-                  className="w-full accent-editorial-brass h-1" />
-                <p className="text-eyebrow-sm text-editorial-ivory-mute">{opt.description}</p>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}

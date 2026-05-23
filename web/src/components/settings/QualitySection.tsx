@@ -44,20 +44,9 @@ export function QualitySection({ s, update }: Props) {
   return (
     <SettingsSection title="Quality Engine">
       <p className="text-eyebrow-sm text-editorial-ivory-mute">
-        VBench-2.0 quality thresholds. Shots scoring below these thresholds trigger regeneration or post-processing fixes.
+        Per-shot identity validation strictness. Below this score, the shot is flagged for face-swap correction.
       </p>
 
-      <SliderRow
-        label="VBench acceptance threshold"
-        field="vbench_overall_threshold"
-        s={s}
-        update={update}
-        min={0}
-        max={1}
-        step={0.05}
-        defaultValue={0.6}
-        hint="Min overall quality score to accept a shot. Below = auto-regenerate."
-      />
       <SliderRow
         label="Identity strictness"
         field="identity_strictness"
@@ -68,28 +57,6 @@ export function QualitySection({ s, update }: Props) {
         step={0.05}
         defaultValue={0.6}
         hint="Below this score → recommends face-swap. Higher = stricter face matching."
-      />
-      <SliderRow
-        label="Temporal flicker tolerance"
-        field="temporal_flicker_tolerance"
-        s={s}
-        update={update}
-        min={0}
-        max={1}
-        step={0.05}
-        defaultValue={0.85}
-        hint="Below this → triggers RIFE interpolation. Lower = more permissive."
-      />
-      <SliderRow
-        label="Regression sensitivity"
-        field="regression_sensitivity"
-        s={s}
-        update={update}
-        min={0.01}
-        max={0.2}
-        step={0.01}
-        defaultValue={0.05}
-        hint="Quality drop (%) vs baseline before flagging regression. 0.05 = 5% drop triggers alert."
       />
     </SettingsSection>
   )

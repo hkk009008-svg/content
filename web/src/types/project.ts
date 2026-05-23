@@ -110,7 +110,6 @@ export interface GlobalSettings {
   language?: string           // Project dialogue language. English | Korean | Japanese | Mandarin | Spanish | French | German | Hindi | Arabic | Portuguese | Italian | Russian
   music_mood: string
   color_palette: string
-  master_seed: number
   style_rules: Record<string, string>
   default_video_api: string
   // Audio
@@ -130,10 +129,6 @@ export interface GlobalSettings {
   color_grade_preset?: string
   lip_sync_mode?: string
   face_swap_enabled?: boolean
-  reactor_enabled?: boolean
-  codeformer_weight?: number
-  rife_enabled?: boolean
-  video_upscale_enabled?: boolean
   motion_quality_threshold?: number
   // Quality
   identity_retry_max?: number
@@ -144,15 +139,10 @@ export interface GlobalSettings {
   // V11: Budget & Cost
   budget_limit_usd?: number
   cost_optimization?: string
-  // V11: Quality Engine (VBench)
-  vbench_overall_threshold?: number
+  // V11: Quality Engine
   identity_strictness?: number
-  temporal_flicker_tolerance?: number
-  regression_sensitivity?: number
   // V11: LLM Preferences
   creative_llm?: string
-  quality_judge_llm?: string
-  competitive_generation?: boolean
   // V11: Workflow & Coherence
   quality_cost_weight?: number
   adaptive_pulid?: boolean
@@ -307,8 +297,6 @@ export interface MaxQualityTemplate {
   face_detailer_enabled: boolean
   face_detailer_guide_size: number
   face_detailer_denoise: number
-  reactor_enabled: boolean
-  reactor_codeformer_weight: number
   supir_enabled: boolean
   supir_steps: number
   supir_cfg_scale: number

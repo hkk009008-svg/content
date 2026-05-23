@@ -410,7 +410,12 @@ class ShotController:
         identity_score = 0.0
         if primary_ref:
             from phase_c_vision import validate_identity_image
-            img_sim = validate_identity_image(img_path, primary_ref, threshold=cc.get("identity_threshold", 0.70))
+            # Project-wide `identity_strictness` setting overrides the per-shot
+            # `identity_threshold` so the operator can raise/lower the bar
+            # without touching every shot. Falls back to the per-shot value.
+            strictness = settings.get("identity_strictness")
+            threshold = strictness if strictness is not None else cc.get("identity_threshold", 0.70)
+            img_sim = validate_identity_image(img_path, primary_ref, threshold=threshold)
             identity_score = img_sim.get("similarity", 0.0)
             take["metadata"]["identity_score"] = identity_score
 
@@ -659,6 +664,7 @@ class ShotController:
 
     def generate_motion_take(self, scene_id: str, shot_id: str) -> dict:
         project = self._host._refresh_project_snapshot() or self.project
+        settings = project.get("global_settings", {})
         scene, shot, shot_index = self._find_shot(shot_id, project, scene_id)
         if not scene or not shot:
             return {"success": False, "error": "Shot not found"}
@@ -752,7 +758,7 @@ class ShotController:
                 shot_type=resolved_shot_type,
                 mode="standard",
                 attempt=0,
-                max_attempts=1,
+                max_attempts=settings.get("identity_retry_max", 3),
             )
             identity_score = vid_result.overall_score if hasattr(vid_result, "overall_score") else 0.0
             take["metadata"]["identity_score"] = identity_score
@@ -781,7 +787,19 @@ class ShotController:
             try:
                 from performance.motion_gate import needs_remotion
                 motion_score = take["metadata"].get("motion_fidelity")
-                if motion_score is not None and needs_remotion(motion_score, shot_type=resolved_shot_type):
+                # Per-project `motion_quality_threshold` UI knob overrides the
+                # per-shot-type floor in MOTION_FIDELITY_FLOORS. When set, the
+                # comparison is strict scalar; when unset, defer to needs_remotion.
+                floor_override = settings.get("motion_quality_threshold")
+                if motion_score is not None:
+                    below_floor = (
+                        motion_score < floor_override
+                        if floor_override is not None
+                        else needs_remotion(motion_score, shot_type=resolved_shot_type)
+                    )
+                else:
+                    below_floor = False
+                if below_floor:
                     take["metadata"]["motion_floor_failed"] = True
                     print(f"   [MOTION-GATE] {shot_id}: MOTION_BELOW_FLOOR "
                           f"score={motion_score:.3f} shot_type={resolved_shot_type}")
@@ -912,6 +930,11 @@ class ShotController:
                     _drift_threshold = _diag_settings.get("color_drift_sensitivity", 0.3)
                     if coh.color_drift > _drift_threshold:
                         result["recommendations"].append({"tool": "color_grade", "reason": "Color palette drift detected"})
+                    # Per-project `coherence_threshold` triggers a regenerate
+                    # recommendation when the overall coherence score is too low.
+                    _coherence_floor = _diag_settings.get("coherence_threshold", 0.6)
+                    if coh.overall_coherence_score < _coherence_floor:
+                        result["recommendations"].append({"tool": "regenerate", "reason": "Low coherence vs previous shot"})
 
         self._record_diagnostic(shot_id, {
             "created_at": time.time(),
@@ -969,6 +992,12 @@ class ShotController:
             out_path = self._take_output_path(shot_id, variant["id"], ".mp4")
 
             if action == "face_swap":
+                # face_swap_enabled UI knob acts as a hard gate. When disabled,
+                # the operator action no-ops with a clear reason so the
+                # frontend can surface "face-swap is off in project settings".
+                _settings = self.project.get("global_settings", {})
+                if not _settings.get("face_swap_enabled", True):
+                    return {"success": False, "error": "face_swap disabled in project settings"}
                 chars = scene.get("characters_present", [])
                 primary_ref = get_reference_image(self.project, chars[0]) if chars else None
                 if video_path and primary_ref:
@@ -981,12 +1010,13 @@ class ShotController:
                 primary_ref = get_reference_image(self.project, chars[0]) if chars else None
                 audio_path = self._host._ensure_scene_audio(scene, [c for c in self.project["characters"] if c["id"] in chars])
                 if video_path and primary_ref and audio_path:
+                    _settings = self.project.get("global_settings", {})
                     result = generate_lip_sync_video(
                         character_image_path=primary_ref,
                         audio_path=audio_path,
                         output_path=out_path,
                         existing_video_path=str(video_path),
-                        mode="auto",
+                        mode=_settings.get("lip_sync_mode", "auto"),
                     )
                     if result:
                         variant["path"] = result
@@ -1005,7 +1035,10 @@ class ShotController:
 
             elif action == "color_grade":
                 from phase_c_ffmpeg import apply_color_grade
-                preset = params.get("preset", "warm_cinema")
+                # Resolution order: explicit `params.preset` > project's
+                # `color_grade_preset` UI knob > "warm_cinema" default.
+                _settings = self.project.get("global_settings", {})
+                preset = params.get("preset") or _settings.get("color_grade_preset", "warm_cinema")
                 lut_path = params.get("lut_path")
                 if video_path:
                     result = apply_color_grade(str(video_path), out_path, preset=preset, lut_path=lut_path)

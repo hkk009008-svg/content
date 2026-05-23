@@ -37,22 +37,8 @@ export function PostProcessingSection({ s, update }: Props) {
         </select>
       </div>
 
-      {/* Toggle Row: Face Swap + ReActor */}
-      <div className="grid grid-cols-2 gap-2">
-        <ToggleCard field="face_swap_enabled" label="Face Swap" desc="FAL PixVerse post-video" s={s} update={update} />
-        <ToggleCard field="reactor_enabled" label="ReActor" desc="ComfyUI face refine" s={s} update={update} />
-      </div>
-
-      {/* CodeFormer Fidelity */}
-      <Slider label="CodeFormer fidelity" field="codeformer_weight" s={s} update={update}
-        min={0} max={1} step={0.1} defaultValue={0.7}
-        hint="0 = max quality (smooth), 1 = max fidelity (sharp). Used by ReActor." />
-
-      {/* Toggle Row: RIFE + Upscale */}
-      <div className="grid grid-cols-2 gap-2">
-        <ToggleCard field="rife_enabled" label="RIFE Interpolation" desc="30→60fps smoothing" s={s} update={update} />
-        <ToggleCard field="video_upscale_enabled" label="SeedVR2 Upscale" desc="Cloud video upscale" s={s} update={update} />
-      </div>
+      {/* Face Swap toggle (FAL PixVerse post-video) */}
+      <ToggleCard field="face_swap_enabled" label="Face Swap" desc="FAL PixVerse post-video" s={s} update={update} />
 
       {/* Motion Quality Gate */}
       <Slider label="Motion quality gate" field="motion_quality_threshold" s={s} update={update}

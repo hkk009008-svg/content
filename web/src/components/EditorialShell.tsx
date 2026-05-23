@@ -325,12 +325,6 @@ export default function EditorialShell({
               {project.global_settings?.color_palette?.replace(/_/g, ' ') || '—'}
             </div>
           </div>
-          <div>
-            <Eyebrow>Seed</Eyebrow>
-            <div className="font-mono text-editorial-ivory text-base mt-2 tabular-nums">
-              {project.global_settings?.master_seed?.toString().padStart(6, '0') || '——————'}
-            </div>
-          </div>
         </aside>
       </section>
 
