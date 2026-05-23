@@ -569,4 +569,5 @@ def get_adaptive_pulid_weight(
     adapted = max(0.0, min(1.0, base_weight + delta))
     if abs(delta) > 0.01:
         print(f"      [ADAPTIVE] PuLID weight for {character_id}: {base_weight} → {adapted:.2f} (delta={delta:+.2f})")
+    return adapted
 
