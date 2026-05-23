@@ -1633,24 +1633,6 @@ def api_preview_scene(pid, sid):
 
 
 # ---------------------------------------------------------------------------
-# Uploaded files serving
-# ---------------------------------------------------------------------------
-
-@app.route("/api/files/<path:filepath>")
-def serve_project_file(filepath):
-    """Serve files from the projects directory (character images, etc.)."""
-    base = os.path.realpath(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects")
-    )
-    real_path = os.path.realpath(os.path.join(base, filepath))
-    if not real_path.startswith(base + os.sep) and real_path != base:
-        return jsonify({"error": "Access denied"}), 403
-    if os.path.exists(real_path) and os.path.isfile(real_path):
-        return send_file(real_path)
-    return jsonify({"error": "File not found"}), 404
-
-
-# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
