@@ -1,0 +1,132 @@
+# Per HANDOFF Session 1 (P0-2). Three independent jobs run in parallel; all
+# must pass for the workflow to succeed. Mirrors the three local checks
+# documented in ARCHITECTURE.md §15 + OPERATIONS.md §7. Concurrency cancels
+# older runs on the same branch (saves minutes on rapid pushes).
+#
+# Scope intentionally NOT included (per Session 1 brief):
+#   - Linting (ruff, eslint)
+#   - Deployment workflows
+#   - Auto-publish, releases, changelogs
+#   - Code coverage reporting
+#   - Matrix builds
+#
+# Baseline as of 2026-05-24:
+#   - pytest tests/unit/: 478 pass / 3 skip / 0 fail
+#   - tsc --noEmit: silent exit
+#   - §15 smoke: OK
+#
+# Security review (per .claude security_reminder_hook):
+#   - No untrusted-input interpolation in `run:` blocks.
+#   - Only `${{ github.workflow }}` + `${{ github.ref }}` in `concurrency:`
+#     group key, which is the canonical GitHub pattern; ref is not used in
+#     any shell command.
+#   - No reference to github.event.*, github.head_ref, or commit messages.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: ARCHITECTURE.md §15 smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      # DeepFace lazy-downloads GhostFaceNet weights (~700MB) on first
+      # validator construction. Cache them across runs so first run is slow
+      # but subsequent runs are fast.
+      - name: Cache DeepFace weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.deepface
+          key: deepface-weights-v1
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run §15 singleton + ctx-plumbing invariants
+        # If this block changes, mirror it in ARCHITECTURE.md §15 and
+        # docs/HANDOFF-roadmap-2026-05-24.md Session 1 pre-work.
+        run: |
+          python << 'PYEOF'
+          import cinema_pipeline
+          from cinema.context import PipelineContext, get_project_setting
+          from phase_c_vision import _get_shared_validator
+          from phase_c_assembly import generate_ai_broll
+          from identity import get_shared_validator
+          from face_validator_gate import _get_validator as fvg_get
+          from performance.identity_gate import _get_validator as pig_get
+          a, b = _get_shared_validator(), _get_shared_validator()
+          c, d = get_shared_validator(), fvg_get()
+          e = pig_get()
+          assert a is b is c is d is e, 'singleton broken'
+          ctx = PipelineContext(global_settings={'tts_provider': 'CARTESIA_SONIC_2'})
+          assert get_project_setting(ctx, 'tts_provider') == 'CARTESIA_SONIC_2'
+          print('OK')
+          PYEOF
+
+  pytest-unit:
+    name: pytest tests/unit/
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Cache DeepFace weights
+        uses: actions/cache@v4
+        with:
+          path: ~/.deepface
+          key: deepface-weights-v1
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pytest tests/unit/
+        # tests/integration/ requires real cloud credentials and must NOT run
+        # in CI. Unit suite baseline 2026-05-24: 478 pass / 3 skip / 0 fail.
+        # If your PR changes this count, the diff or the brief explains why.
+        run: pytest tests/unit/ --tb=short -q
+
+  tsc:
+    name: TypeScript --noEmit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install npm deps
+        working-directory: web
+        run: npm ci
+
+      - name: TypeScript noEmit check
+        working-directory: web
+        run: npx tsc --noEmit

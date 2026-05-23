@@ -83,5 +83,10 @@ The post-pivot codebase is stable and shipping. There is no active migration.
 Strategic direction and open work are tracked in
 [docs/STRATEGIC_REVIEW-2026-05-24.md](docs/STRATEGIC_REVIEW-2026-05-24.md).
 
+**CI:** Three independent jobs run on every push to `main` and every pull
+request — `ARCHITECTURE.md §15` singleton/ctx smoke, `pytest tests/unit/`,
+and `tsc --noEmit`. All must pass. See [.github/workflows/ci.yml](.github/workflows/ci.yml).
+Baseline 2026-05-24: 478 pass / 3 skip / 0 fail.
+
 Last architecture verification: see the `*Last verified: ...*` footer in
 [ARCHITECTURE.md](ARCHITECTURE.md).
