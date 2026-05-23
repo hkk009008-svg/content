@@ -18,14 +18,14 @@ export default function ShotApprovalControls({ shot, shotId, projectId, onAction
 
   const handleApprove = async () => {
     setLoading(true)
-    await fetch(`/api/projects/${projectId}/shots/${shotId}/approve`, { method: 'POST' })
+    await fetch(`/api/projects/${projectId}/shots/${shotId}/plan/approve`, { method: 'POST' })
     setLoading(false)
     onAction()
   }
 
   const handleReject = async () => {
     setLoading(true)
-    await fetch(`/api/projects/${projectId}/shots/${shotId}/reject`, {
+    await fetch(`/api/projects/${projectId}/shots/${shotId}/plan/reject`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason }),
