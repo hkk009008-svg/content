@@ -78,6 +78,88 @@ _NODE_AVAILABILITY_LOCK = threading.Lock()
 _UPLOAD_CACHE_LOCK = threading.Lock()
 
 
+# ---------------------------------------------------------------------------
+# MaxTier UI overlay validation
+# ---------------------------------------------------------------------------
+# Bounds mirror the React sliders in
+# web/src/components/settings/AdvancedSection.tsx::MaxTierComfyControls.
+# Keep in sync when UI ranges change. Out-of-range numeric values are clamped
+# (the UI can still send 99 via the JSON API even when the slider stops at 5);
+# unknown enum / wrong-type values are rejected so the template default wins,
+# rather than passing junk to ComfyUI where it would either silently corrupt
+# the image or surface as a server error the max-tier fall-through masks.
+#
+# Schema entry forms:
+#   ("numeric", type, min, max)
+#   ("enum", *allowed_values)
+#   ("bool",)
+_MAX_TIER_KNOB_SCHEMA: Dict[str, Tuple] = {
+    # Sampling / guidance
+    "slg_scale":                 ("numeric", float, 0.0, 5.0),
+    "freeu_b1":                  ("numeric", float, 1.0, 1.8),
+    "freeu_b2":                  ("numeric", float, 1.0, 1.8),
+    "freeu_s1":                  ("numeric", float, 0.0, 1.5),
+    "freeu_s2":                  ("numeric", float, 0.0, 1.5),
+    "ays_steps":                 ("numeric", int,   15,  40),
+    "detail_daemon_amount":      ("numeric", float, 0.0, 1.0),
+    # ControlNet channel strengths (UI key — overlay re-maps to cn_*_strength)
+    "controlnet_canny_strength": ("numeric", float, 0.0, 0.5),
+    "controlnet_pose_strength":  ("numeric", float, 0.0, 0.6),
+    "controlnet_tile_strength":  ("numeric", float, 0.0, 0.5),
+    # Redux + Hires fix + FaceDetailer + SUPIR
+    "redux_strength":            ("enum", "high", "medium", "low"),
+    "hires_fix_enabled":         ("bool",),
+    "hires_fix_denoise":         ("numeric", float, 0.2, 0.6),
+    "face_detailer_enabled":     ("bool",),
+    "face_detailer_guide_size":  ("enum", 512, 1024, 2048),
+    "supir_enabled":             ("bool",),
+    "supir_steps":               ("numeric", int,   20,  100),
+}
+
+
+def _validate_overlay_value(ui_key: str, value):
+    """Validate a UI overlay value against `_MAX_TIER_KNOB_SCHEMA`.
+
+    Returns `(accepted, warning)`:
+      * `accepted` — value to write into `params` (possibly clamped). `None`
+        means skip the override (template default wins).
+      * `warning` — human-readable string when the value was modified or
+        rejected; `None` on clean pass-through.
+
+    Unknown `ui_key` passes through unchanged so unschemad knobs (e.g. the 7
+    `max_*` halt knobs, which have their own bounds upstream) still apply.
+    """
+    schema = _MAX_TIER_KNOB_SCHEMA.get(ui_key)
+    if schema is None:
+        return value, None
+    kind = schema[0]
+    if kind == "numeric":
+        _, typ, lo, hi = schema
+        # bool is a subclass of int; reject explicitly so freeu_b1=True
+        # doesn't silently coerce to 1.0.
+        if isinstance(value, bool):
+            return None, f"{ui_key}={value!r} is bool, expected {typ.__name__}; skipped"
+        try:
+            v = typ(value)
+        except (TypeError, ValueError):
+            return None, f"{ui_key}={value!r} not coercible to {typ.__name__}; skipped"
+        if v < lo:
+            return typ(lo), f"{ui_key}={value} below min {lo}; clamped to {lo}"
+        if v > hi:
+            return typ(hi), f"{ui_key}={value} above max {hi}; clamped to {hi}"
+        return v, None
+    if kind == "enum":
+        allowed = schema[1:]
+        if value in allowed:
+            return value, None
+        return None, f"{ui_key}={value!r} not in {list(allowed)}; skipped"
+    if kind == "bool":
+        if isinstance(value, bool):
+            return value, None
+        return None, f"{ui_key}={value!r} not bool; skipped"
+    return value, None  # unreachable for current schema shapes
+
+
 def _load_max_workflow() -> dict:
     """Load pulid_max.json once and deep-copy on each access."""
     global _MAX_WORKFLOW_CACHED
@@ -526,9 +608,12 @@ def generate_ai_broll_max(
             if override is not None:
                 params[param_key] = override
 
-        # 16 MaxTierComfyControls — overlay into params so the existing
+        # 17 MaxTierComfyControls — overlay into params so the existing
         # _inject_sampling / _inject_conditioning / _inject_post_passes
-        # helpers pick them up automatically.  UI key → params key mapping:
+        # helpers pick them up automatically.  UI key → params key mapping.
+        # Values are passed through _validate_overlay_value to clamp numeric
+        # out-of-range inputs and reject unknown enums/wrong types — the JSON
+        # API can send any value past the React slider bounds.
         for ui_key, param_key in (
             # Sampling / guidance controls
             ("slg_scale",                "slg_scale"),
@@ -555,8 +640,13 @@ def generate_ai_broll_max(
             ("supir_steps",              "supir_steps"),
         ):
             override = get_project_setting(ctx, ui_key, None)
-            if override is not None:
-                params[param_key] = override
+            if override is None:
+                continue
+            accepted, warning = _validate_overlay_value(ui_key, override)
+            if warning:
+                print(f"[quality_max] UI overlay: {warning}")
+            if accepted is not None:
+                params[param_key] = accepted
 
     # Apply adaptive PuLID weight override (from continuity feedback loop)
     if pulid_weight_override is not None:
