@@ -446,19 +446,47 @@ def classify_shot_type(shot: dict) -> str:
     return "medium"
 
 
-def get_workflow_params(shot_type: str, quality_tier: str = "production") -> Dict:
+def get_workflow_params(
+    shot_type: str,
+    quality_tier: str = "production",
+    settings: Optional[dict] = None,
+) -> Dict:
     """Get the optimized workflow parameters for a shot type and quality tier.
 
     Args:
         shot_type: "portrait" | "medium" | "wide" | "action" | "landscape"
         quality_tier: "production" (default, pulid.json) or "max" (pulid_max.json).
             Existing callers pass shot_type only and get production behavior unchanged.
+        settings: Optional project settings dict (ctx.global_settings or equivalent).
+            When provided, overlays the 4 per-project UI knobs onto the returned params:
+              flux_guidance    → guidance   (float)
+              comfyui_sampler  → sampler    (str)
+              comfyui_steps    → steps      (int)
+              comfyui_upscale  → (skipped — no "upscale" key in production templates)
 
     Returns: copy of the matching template dict (callers may mutate freely).
     """
     if quality_tier == "max":
         return get_max_quality_params(shot_type)
-    return WORKFLOW_TEMPLATES.get(shot_type, WORKFLOW_TEMPLATES["medium"]).copy()
+    params = WORKFLOW_TEMPLATES.get(shot_type, WORKFLOW_TEMPLATES["medium"]).copy()
+
+    if settings:
+        # Per-project UI overrides — overlay only EXISTING param-dict keys.
+        # Note: comfyui_upscale is intentionally omitted; no "upscale" key exists
+        # in WORKFLOW_TEMPLATES, so we don't invent one here.
+        flux_guidance = settings.get("flux_guidance")
+        if flux_guidance is not None and isinstance(flux_guidance, (int, float)):
+            params["guidance"] = float(flux_guidance)
+
+        comfyui_sampler = settings.get("comfyui_sampler")
+        if comfyui_sampler is not None and isinstance(comfyui_sampler, str):
+            params["sampler"] = comfyui_sampler
+
+        comfyui_steps = settings.get("comfyui_steps")
+        if comfyui_steps is not None and isinstance(comfyui_steps, (int, float)):
+            params["steps"] = int(comfyui_steps)
+
+    return params
 
 
 def apply_workflow_params(workflow: dict, params: Dict) -> dict:
@@ -505,6 +533,7 @@ def get_adaptive_pulid_weight(
     character_id: str,
     identity_validator,
     base_params: Dict = None,
+    settings: Optional[dict] = None,
 ) -> float:
     """
     Compute adaptive PuLID weight based on rolling identity performance.
@@ -515,7 +544,7 @@ def get_adaptive_pulid_weight(
     - Smart: doesn't boost PuLID for FACE_ANGLE_EXTREME or SMALL_FACE_REGION
     """
     if base_params is None:
-        base_params = get_workflow_params(shot_type)
+        base_params = get_workflow_params(shot_type, settings=settings)
 
     base_weight = base_params.get("pulid_weight", 0.9)
 
@@ -651,6 +680,7 @@ def get_dynamic_workflow(
     character_ids: Optional[List[str]] = None,
     budget_remaining: Optional[float] = None,
     quality_cost_weight: float = 0.8,
+    settings: Optional[dict] = None,
 ) -> Dict:
     """
     Build a workflow parameter dict that merges static template params
@@ -661,13 +691,15 @@ def get_dynamic_workflow(
         shot_type: One of "portrait", "medium", "wide", "action", "landscape".
         character_ids: Optional list of character IDs — influences API ranking.
         budget_remaining: Optional remaining budget ($) — filters expensive APIs.
+        settings: Optional project settings dict — passed through to get_workflow_params
+            for UI knob overlays (flux_guidance, comfyui_sampler, comfyui_steps).
 
     Returns:
         Full workflow params dict with target_api and video_fallbacks updated
         from quality data, all other params from the static template.
     """
-    # Start with the static template
-    params = get_workflow_params(shot_type)
+    # Start with the static template (with optional settings overlay)
+    params = get_workflow_params(shot_type, settings=settings)
 
     # Get quality-ranked APIs
     ranked = get_optimal_api(shot_type, character_ids, budget_remaining, quality_cost_weight)

@@ -157,7 +157,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             # Build a minimal shot dict for classification
             shot_info = {"prompt": prompt, "characters_in_frame": ["char"] if character_image else []}
             shot_type = classify_shot_type(shot_info)
-            wf_params = get_workflow_params(shot_type)
+            wf_params = get_workflow_params(shot_type, settings=ctx.global_settings if ctx else None)
             workflow = apply_workflow_params(workflow, wf_params)
 
             # Apply adaptive PuLID weight override from continuity engine feedback loop
