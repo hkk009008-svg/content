@@ -1250,3 +1250,98 @@ def adjust_speed(video_path: str, output_path: str, factor: float = 1.0) -> str:
     except Exception as e:
         print(f"      [SPEED] Adjustment failed: {e}")
         return None
+
+
+def two_pass_loudnorm(
+    input_video_path: str,
+    output_video_path: str,
+    target_i: float = -14.0,
+    target_lra: float = 11.0,
+    target_tp: float = -1.5,
+) -> bool:
+    """Re-normalize a finished video with two-pass EBU R128 loudnorm.
+
+    The first pass measures actual integrated loudness, true peak, and
+    loudness range; the second pass feeds those measurements back into
+    loudnorm so it normalizes precisely instead of approximating in a
+    single pass. The result is ±0.1 LU of target instead of ±1.5 LU.
+
+    The video stream is copied (no re-encode), only audio is re-encoded.
+
+    Defaults: -14 LUFS / 11 LU / -1.5 dBTP — YouTube/Netflix standard.
+
+    Returns True if output_video_path was written, False on any failure
+    (caller should keep the original input on False).
+    """
+    import re
+
+    if not os.path.exists(input_video_path):
+        return False
+
+    # ---- Pass 1: measure ----
+    measure_cmd = [
+        "ffmpeg", "-hide_banner", "-nostats", "-y",
+        "-i", input_video_path,
+        "-af", f"loudnorm=I={target_i}:LRA={target_lra}:TP={target_tp}:print_format=json",
+        "-f", "null", "-",
+    ]
+    try:
+        result = subprocess.run(measure_cmd, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        print("   [LOUDNORM-2PASS] Measurement pass timed out")
+        return False
+
+    stderr = result.stderr or ""
+    # ffmpeg prints the loudnorm JSON near the end of stderr; grab the last
+    # {...} block that contains "input_i". Non-greedy + DOTALL.
+    matches = re.findall(r'\{[^{}]*?"input_i"[^{}]*?\}', stderr, flags=re.DOTALL)
+    if not matches:
+        print("   [LOUDNORM-2PASS] No measurement JSON in ffmpeg output — skipping 2nd pass")
+        return False
+
+    try:
+        measured = json.loads(matches[-1])
+        # Required keys: input_i, input_tp, input_lra, input_thresh, target_offset
+        required = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
+        if not all(k in measured for k in required):
+            print(f"   [LOUDNORM-2PASS] Measurement JSON missing keys: {set(required) - set(measured)}")
+            return False
+    except json.JSONDecodeError as e:
+        print(f"   [LOUDNORM-2PASS] JSON parse failed: {e}")
+        return False
+
+    # ---- Pass 2: normalize with measured values ----
+    af = (
+        f"loudnorm=I={target_i}:LRA={target_lra}:TP={target_tp}:"
+        f"measured_I={measured['input_i']}:"
+        f"measured_TP={measured['input_tp']}:"
+        f"measured_LRA={measured['input_lra']}:"
+        f"measured_thresh={measured['input_thresh']}:"
+        f"offset={measured['target_offset']}:"
+        f"linear=true:print_format=summary"
+    )
+    norm_cmd = [
+        "ffmpeg", "-hide_banner", "-nostats", "-y",
+        "-i", input_video_path,
+        "-af", af,
+        "-c:v", "copy",
+        "-c:a", "aac", "-b:a", "192k",
+        output_video_path,
+    ]
+    try:
+        norm = subprocess.run(norm_cmd, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        print("   [LOUDNORM-2PASS] Normalization pass timed out")
+        return False
+
+    if norm.returncode != 0 or not os.path.exists(output_video_path):
+        # Surface the tail of ffmpeg's error so failures are diagnosable
+        tail = (norm.stderr or "").strip().splitlines()[-3:]
+        print(f"   [LOUDNORM-2PASS] Normalization failed: {' | '.join(tail)}")
+        return False
+
+    print(
+        f"   🔊 [LOUDNORM-2PASS] Precise normalization: "
+        f"measured I={measured['input_i']} → target I={target_i}"
+    )
+    return True

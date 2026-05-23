@@ -1,0 +1,28 @@
+[project]
+name = "content-cinema-pipeline"
+description = "Interactive AI cinema pipeline — topic to 1–2 minute cinematic short with operator review gates, identity validation, and motion-quality scoring."
+requires-python = ">=3.11"
+dynamic = ["version", "dependencies"]
+readme = "AGENTS.md"
+
+# Pinned runtime deps live in requirements.txt. pyproject.toml here is
+# primarily for declaring the Python floor so a stale venv (e.g., 3.9) fails
+# fast with a clear ImportError instead of mysterious `unsupported operand
+# type(s) for |: 'type' and 'NoneType'` errors inside vbench_evaluator,
+# ltx_native, kling_native, etc. — all of which use PEP 604 `X | None`
+# union syntax that requires Python 3.10+.
+#
+# To bootstrap on macOS:
+#   brew install python@3.13
+#   /opt/homebrew/bin/python3.13 -m venv .venv
+#   .venv/bin/pip install --upgrade pip
+#   .venv/bin/pip install -r requirements.txt
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# This repo is run-from-source, not installable. The metadata above exists
+# only to pin the Python floor and document venv recreation steps.
+py-modules = []

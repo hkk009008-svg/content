@@ -1,14 +1,10 @@
 """CinemaPipeline — the thin driver over a list of Phase instances.
 
-End-game of Phase 5: this driver replaces the 1,526-line
-`cinema_pipeline.py` god module's orchestration logic for non-interactive
-pipeline runs (the `main.py:run_autonomous_pipeline` path).
-
-The legacy `cinema_pipeline.CinemaPipeline` class (used by
-`web_server.py` for interactive sessions) remains in place — that
-orchestration path includes operator review gates, pause/resume control,
-and per-shot progress streaming that don't fit the simple iterate-phases
-model. Migrating it is a separate concern, post-Phase-5.
+A generic phase iterator. The interactive cinema pipeline
+(`cinema_pipeline.CinemaPipeline`) defines its own Phase classes
+(KeyframeRenderPhase, MotionRenderPhase, PerformanceCapturePhase) and
+runs them directly; this driver is available for any caller that wants
+a typed list-of-phases executor with progress reporting.
 
 Design
 ======
@@ -32,23 +28,6 @@ What the driver does NOT do
   * Side effects on PipelineContext beyond what phases do.
   * Per-shot inner loops — those aren't phases. The caller interleaves
     driver runs with non-phase code as needed.
-
-Example
-=======
-
-    from cinema.context import PipelineContext
-    from cinema.pipeline import CinemaPipeline
-    from cinema.phases.blueprint import BlueprintPhase
-    from cinema.phases.generation import GenerationPhase
-
-    ctx = PipelineContext(topic="...", language="English")
-    result = CinemaPipeline(
-        phases=[BlueprintPhase(), GenerationPhase()],
-        ctx=ctx,
-    ).run()
-    if not result.ok:
-        print(f"failed at {result.failed_phase}: {result.failed_message}")
-        return
 """
 
 from __future__ import annotations

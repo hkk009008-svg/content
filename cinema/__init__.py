@@ -1,16 +1,16 @@
 """Cinema Pipeline — orchestration package.
 
-This package is the future home for the pipeline orchestrator and its
-Phase classes. Phase 5 of the architecture refactor introduces it
-incrementally — the legacy `cinema_pipeline.py` god module is migrated
-phase-by-phase into `cinema/phases/`.
+Shared orchestration primitives for the interactive cinema pipeline
+(driven from `web_server.py` → `cinema_pipeline.py`).
 
-Current contents:
-  cinema.context           — PipelineContext (typed replacement for `ctx: dict`)
-  cinema.phases.base       — Phase protocol + PhaseResult
-  cinema.phases.generation — GenerationPhase (POC; wraps phase_a_generator)
+Contents:
+  cinema.context     — PipelineContext (typed shared state) + get_project_setting helper
+  cinema.pipeline    — generic driver that iterates a list of Phase instances
+  cinema.phases.base — Phase protocol + PhaseResult
+  cinema.shots       — per-shot generation controller
+  cinema.lifecycle   — cancel / pause / progress service
 
-Future expansion (each lands in its own commit):
-  cinema.phases.topic, .blueprint, .audio, .assembly, .vision, .upload, .learning
-  cinema.pipeline          — thin driver that iterates a list of Phase instances
+The legacy `cinema_pipeline.CinemaPipeline` god class defines its own
+Phase classes (KeyframeRenderPhase, MotionRenderPhase, PerformanceCapturePhase)
+inline rather than via this package's `phases/` directory.
 """

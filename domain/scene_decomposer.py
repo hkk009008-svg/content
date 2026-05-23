@@ -12,14 +12,14 @@ from llm.ensemble import LLMEnsemble
 from pipeline_context import PIPELINE_CONTEXT
 from domain.project_manager import make_shot
 from config.settings import settings
-# Camera motion options — reused from phase_a_generator.py line 155
+# Camera motion options — canonical list used by per-shot generation.
 CAMERA_MOTIONS = [
     "zoom_in_slow", "zoom_out_slow", "zoom_in_fast",
     "pan_right", "pan_left", "pan_up_crane", "pan_down",
     "static_drone", "dolly_in_rapid",
 ]
 
-# Visual effects — reused from phase_a_generator.py line 161
+# Visual effects — FFMPEG post-production filters available per shot.
 VISUAL_EFFECTS = [
     "gritty_contrast", "cinematic_glow", "cyberpunk_glitch",
     "dreamy_blur", "documentary_neutral",

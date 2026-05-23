@@ -1,0 +1,70 @@
+# Direct dependencies for the Content cinema pipeline.
+#
+# This file lists ONLY packages we directly import. Pip resolves the
+# transitive dependency graph cleanly on each install, picking versions
+# compatible with the active Python interpreter.
+#
+# Why not a `pip freeze` lock?  Frozen requirements pin every transitive
+# dep including ancient ones that don't build on newer Python (basicsr,
+# numba 0.60, scipy 1.13, etc.). The full frozen snapshot at the time of
+# the Python 3.13 migration is preserved in requirements-lock-py39.txt
+# for reference, but it is NOT the installed contract.
+#
+# Python: 3.11+ required (PEP 604 union syntax used throughout).
+
+# --- LLM clients ---
+anthropic>=0.40
+openai>=1.50
+google-genai>=1.0
+
+# --- Audio: TTS + mastering + foley + transcription ---
+elevenlabs>=2.0
+pedalboard>=0.9
+openai-whisper>=20240930
+
+# --- Video generation API clients ---
+fal_client>=0.5
+runwayml>=4.0
+
+# --- Identity validation (face recognition for shot continuity) ---
+deepface>=0.0.93
+opencv-python>=4.10
+Pillow>=11.0
+numpy>=1.26,<3
+torch>=2.5
+torchvision>=0.20
+# tf-keras: TF 2.16+ defaults to Keras 3, but deepface/retinaface still call
+# the TF 2.x Keras API. tf-keras provides the standalone backport. Without
+# this, importing deepface raises:
+#   ValueError: You have tensorflow X and this requires tf-keras package.
+tf-keras>=2.16
+
+# --- Web research (tavily + firecrawl, used by web_research / research_engine) ---
+tavily-python>=0.5
+firecrawl-py>=2.0
+
+# --- Web server (Flask dashboard + SSE) ---
+Flask>=3.0
+flask-cors>=4.0
+werkzeug>=3.0
+gunicorn>=22.0
+
+# --- Auth, signing, files ---
+PyJWT>=2.8
+filelock>=3.15
+python-dotenv>=1.0
+cryptography>=42.0
+
+# --- HTTP + general ---
+requests>=2.31
+httpx>=0.27
+
+# --- Google Cloud (Vertex AI, GCS) ---
+google-api-core>=2.24
+google-api-python-client>=2.140
+google-auth>=2.30
+google-auth-httplib2>=0.2
+google-cloud-storage>=2.18
+
+# --- Testing (dev) ---
+pytest>=8.0
