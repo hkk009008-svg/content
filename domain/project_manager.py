@@ -309,7 +309,6 @@ def make_project(name: str) -> dict:
             "master_seed": random.randint(100000, 999999),
             "style_rules": {},
             "budget_limit_usd": 0,
-            "vbench_overall_threshold": 0.60,
             "identity_strictness": 0.60,
             "temporal_flicker_tolerance": 0.85,
             "regression_sensitivity": 0.05,
@@ -522,6 +521,14 @@ def normalize_project_schema(project: Optional[dict]) -> bool:
     if not isinstance(settings, dict):
         project["global_settings"] = {}
         settings = project["global_settings"]
+        changed = True
+
+    # One-time schema migration: drop legacy VBench-routing key that was
+    # excised in commit cda5022. Older project.json files on disk still
+    # carry this from the pre-pivot make_project default — strip it so
+    # files converge to the current schema on next save.
+    if "vbench_overall_threshold" in settings:
+        settings.pop("vbench_overall_threshold", None)
         changed = True
 
     seen_shot_ids: set[str] = set()
