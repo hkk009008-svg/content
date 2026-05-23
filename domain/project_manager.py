@@ -310,8 +310,6 @@ def make_project(name: str) -> dict:
             "style_rules": {},
             "budget_limit_usd": 0,
             "identity_strictness": 0.60,
-            "temporal_flicker_tolerance": 0.85,
-            "regression_sensitivity": 0.05,
             "creative_llm": "auto",
             "quality_judge_llm": "auto",
             "competitive_generation": True,
@@ -523,13 +521,18 @@ def normalize_project_schema(project: Optional[dict]) -> bool:
         settings = project["global_settings"]
         changed = True
 
-    # One-time schema migration: drop legacy VBench-routing key that was
-    # excised in commit cda5022. Older project.json files on disk still
-    # carry this from the pre-pivot make_project default — strip it so
-    # files converge to the current schema on next save.
-    if "vbench_overall_threshold" in settings:
-        settings.pop("vbench_overall_threshold", None)
-        changed = True
+    # One-time schema migration: drop legacy VBench-pipeline keys that
+    # were excised in commit cda5022. Older project.json files on disk
+    # still carry these from the pre-pivot make_project default — strip
+    # them so files converge to the current schema on next save.
+    for legacy_key in (
+        "vbench_overall_threshold",       # 9a917b2
+        "temporal_flicker_tolerance",     # this commit
+        "regression_sensitivity",         # this commit
+    ):
+        if legacy_key in settings:
+            settings.pop(legacy_key, None)
+            changed = True
 
     seen_shot_ids: set[str] = set()
     for scene_index, scene in enumerate(project["scenes"]):
