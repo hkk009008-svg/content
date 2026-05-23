@@ -64,16 +64,6 @@ def cost_tracker(db_path):
     tracker.close()
 
 
-@pytest.fixture
-def quality_tracker():
-    """A QualityTracker backed by an in-memory SQLite database."""
-    from quality_tracker import QualityTracker
-
-    tracker = QualityTracker(db_path=":memory:")
-    yield tracker
-    tracker.close()
-
-
 # ---------------------------------------------------------------------------
 # Synthetic frame fixtures for signal-level tests
 # ---------------------------------------------------------------------------

@@ -154,10 +154,6 @@ class CinemaPipeline:
         return self._core.director
 
     @property
-    def quality_tracker(self):
-        return self._core.quality_tracker
-
-    @property
     def cost_tracker(self):
         return self._core.cost_tracker
 

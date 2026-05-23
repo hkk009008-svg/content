@@ -99,7 +99,6 @@ class FakeCore:
         self.continuity = None
         self.director = None
         self.vbench = None
-        self.quality_tracker = None
         self.cost_tracker = None
         self.ensemble = None
 

@@ -17,7 +17,6 @@ What lives in PipelineCore (long-lived, one per project)
   export_dir   str         — final outputs
   continuity   ContinuityEngine
   director     ChiefDirector
-  quality_tracker QualityTracker
   cost_tracker CostTracker
   ensemble     LLMEnsemble
 
@@ -52,7 +51,6 @@ from domain.project_manager import load_project, get_project_dir
 from llm.chief_director import ChiefDirector
 from llm.ensemble import LLMEnsemble
 from domain.continuity_engine import ContinuityEngine
-from quality_tracker import QualityTracker
 from cost_tracker import CostTracker
 
 if TYPE_CHECKING:
@@ -70,7 +68,6 @@ class PipelineCore:
     export_dir: str
     continuity: ContinuityEngine
     director: ChiefDirector
-    quality_tracker: QualityTracker
     cost_tracker: CostTracker
     ensemble: LLMEnsemble
 
@@ -113,7 +110,6 @@ def build_pipeline_core(project_id: str) -> PipelineCore:
         export_dir=export_dir,
         continuity=ContinuityEngine(project),
         director=ChiefDirector(project),
-        quality_tracker=QualityTracker(),
         cost_tracker=CostTracker(budget_usd=budget_usd),
         ensemble=LLMEnsemble(settings=settings),
     )

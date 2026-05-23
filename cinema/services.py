@@ -6,7 +6,7 @@ Slices A-E reorganized the god module into focused mixins +
 LifecycleService, this module exposes per-endpoint helpers that read
 project state directly without going through CinemaPipeline's
 constructor (which initializes ContinuityEngine, ChiefDirector,
-LLMEnsemble, VBenchEvaluator, QualityTracker, CostTracker — all heavy
+LLMEnsemble, CostTracker — all heavy
 and unnecessary for read-only endpoints).
 
 Currently exposes two helpers; both used by web_server.py to replace
