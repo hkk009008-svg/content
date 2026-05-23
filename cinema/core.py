@@ -17,7 +17,6 @@ What lives in PipelineCore (long-lived, one per project)
   export_dir   str         — final outputs
   continuity   ContinuityEngine
   director     ChiefDirector
-  vbench       VBenchEvaluator
   quality_tracker QualityTracker
   cost_tracker CostTracker
   ensemble     LLMEnsemble
@@ -53,7 +52,6 @@ from domain.project_manager import load_project, get_project_dir
 from llm.chief_director import ChiefDirector
 from llm.ensemble import LLMEnsemble
 from domain.continuity_engine import ContinuityEngine
-from vbench_evaluator import VBenchEvaluator
 from quality_tracker import QualityTracker
 from cost_tracker import CostTracker
 
@@ -72,7 +70,6 @@ class PipelineCore:
     export_dir: str
     continuity: ContinuityEngine
     director: ChiefDirector
-    vbench: VBenchEvaluator
     quality_tracker: QualityTracker
     cost_tracker: CostTracker
     ensemble: LLMEnsemble
@@ -109,10 +106,6 @@ def build_pipeline_core(project_id: str) -> PipelineCore:
         export_dir=export_dir,
         continuity=ContinuityEngine(project),
         director=ChiefDirector(project),
-        vbench=VBenchEvaluator(
-            flicker_threshold=settings.get("temporal_flicker_tolerance", 0.85),
-            regression_tolerance=settings.get("regression_sensitivity", 0.05),
-        ),
         quality_tracker=QualityTracker(),
         cost_tracker=CostTracker(),
         ensemble=LLMEnsemble(settings=settings),

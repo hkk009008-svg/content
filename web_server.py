@@ -55,7 +55,7 @@ _progress_queues: dict[str, queue.Queue] = {}
 _running_pipelines: dict[str, CinemaPipeline] = {}
 
 # PipelineCore cache (Slice 3b Phase 1c). Caches the heavy long-lived
-# services (ContinuityEngine, ChiefDirector, LLMEnsemble, VBenchEvaluator,
+# services (ContinuityEngine, ChiefDirector, LLMEnsemble,
 # QualityTracker, CostTracker) per project_id so that per-endpoint
 # CinemaPipeline construction doesn't re-instantiate them on every
 # request. Lifetime: until process restart. Not invalidated on

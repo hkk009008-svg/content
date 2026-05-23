@@ -11,6 +11,27 @@ except ImportError:
     VISION_AVAILABLE = False
     print("⚠️ [VISION WARNING] DeepFace/Tensorflow unavailable via PIP. Identity validation loop bypassed.")
 
+
+# Shared IdentityValidator for the 3 deprecated wrappers below
+# (validate_identity, validate_identity_image, validate_multi_identity).
+# Each wrapper used to construct a fresh validator per call, which kept
+# `validator.history` permanently empty — silently disabling
+# `IdentityValidator.get_rolling_stats` and the
+# `workflow_selector.get_adaptive_pulid_weight` feedback loop that depends
+# on it (the adaptive PuLID weighting was a no-op as a result). Sharing
+# one instance lets history accumulate across shots.
+_shared_validator = None
+
+
+def _get_shared_validator():
+    """Lazy-construct + return the process-wide IdentityValidator."""
+    global _shared_validator
+    if _shared_validator is None:
+        from identity.validator import IdentityValidator
+        _shared_validator = IdentityValidator(vision_fallback=validate_identity_vision)
+    return _shared_validator
+
+
 def get_middle_frame(video_path, output_image_path):
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -44,8 +65,7 @@ def validate_identity(video_path, character_id, threshold=0.60):
     if not os.path.exists(ref_img):
         return True
 
-    from identity.validator import IdentityValidator
-    validator = IdentityValidator(vision_fallback=validate_identity_vision)
+    validator = _get_shared_validator()
     result = validator.validate_video(
         video_path,
         [{"id": character_id, "reference_image": ref_img, "name": character_id}],
@@ -63,8 +83,7 @@ def validate_identity_image(image_path: str, reference_path: str, threshold: flo
     if not os.path.exists(image_path) or not os.path.exists(reference_path):
         return {"passed": True, "similarity": 0.0}
 
-    from identity.validator import IdentityValidator
-    validator = IdentityValidator(vision_fallback=validate_identity_vision)
+    validator = _get_shared_validator()
     result = validator.validate_image(image_path, reference_path, threshold=threshold)
     return {"passed": result.passed, "similarity": result.overall_score}
 
@@ -77,8 +96,7 @@ def validate_multi_identity(video_path, character_configs: list, threshold=0.55)
     if not character_configs:
         return {"passed": True, "results": {}}
 
-    from identity.validator import IdentityValidator
-    validator = IdentityValidator(vision_fallback=validate_identity_vision)
+    validator = _get_shared_validator()
     result = validator.validate_video(video_path, character_configs, threshold=threshold)
     return {
         "passed": result.passed,

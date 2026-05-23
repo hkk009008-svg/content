@@ -3,7 +3,7 @@ quality_tracker.py -- Quality tracking and regression detection for the cinema p
 
 Stores per-shot quality metrics in SQLite (experiments.db) and provides
 baseline computation, regression alerts, API leaderboards, and cost summaries
-that feed into phase_e_learning.py calibration and workflow_selector routing.
+that feed into workflow_selector routing.
 """
 
 import sqlite3
@@ -462,7 +462,7 @@ class QualityTracker:
 
     def get_batch_quality_summary(self, window: int = 50) -> str:
         """Return a human-readable summary of the last *window* shots
-        suitable for feeding into phase_e_learning.py calibration."""
+        suitable for feeding into workflow_selector calibration."""
 
         # -- Per-API averages over the window --
         sql_api = """
