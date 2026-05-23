@@ -22,6 +22,8 @@ from pipeline_context import PIPELINE_CONTEXT
 from config.settings import settings
 from llm.ensemble import build_anthropic_system_blocks
 from llm.negative_prompts import get_negative_prompt_for_failure
+
+
 class ChiefDirector:
     """
     Metacognitive AI overseer for the cinema production pipeline.
