@@ -739,6 +739,11 @@ class ShotController:
         if performance_take_id:
             driving_video_path = self._host._resolve_take_path(shot, performance_take_id) or ""
 
+        # Build a lightweight PipelineContext so UI knobs (api_engines filter,
+        # cascade_retry_limit) flow through to generate_ai_video. Same pattern
+        # as the generate_ai_broll call site above (line ~395).
+        motion_ctx = PipelineContext(global_settings=settings)
+
         temp_vid = generate_ai_video(
             source_image,
             shot.get("camera", "zoom_in_slow"),
@@ -751,6 +756,7 @@ class ShotController:
             shot_type=resolved_shot_type,
             video_fallbacks=video_fallbacks,
             driving_video_path=driving_video_path,
+            ctx=motion_ctx,
         )
         final_vid = temp_vid or vid_path
         if not final_vid or not os.path.exists(final_vid):

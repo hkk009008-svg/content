@@ -1,8 +1,14 @@
+from __future__ import annotations
+
 import os
 import time
 import json
 import subprocess
+from typing import TYPE_CHECKING, Optional
 from config.settings import settings
+
+if TYPE_CHECKING:
+    from cinema.context import PipelineContext
 
 # VEO removed from cascade — quota exhaustion made it unreliable
 # Keep the flag for backward compatibility but it's not used in the optimized cascade
@@ -141,6 +147,7 @@ def generate_ai_video(
     shot_type: str = None,
     video_fallbacks: list = None,
     driving_video_path: str = "",
+    ctx: Optional["PipelineContext"] = None,
 ) -> str:
     """
     Routes an image → video via smart shot-type-aware routing with native APIs.
@@ -200,6 +207,17 @@ def generate_ai_video(
                 "LTX", "VEO_NATIVE", "KLING_3_0", "SORA_2", "VEO", "RUNWAY",
             ]
 
+        # Filter cascade to engines the operator has enabled.
+        # Missing key → treat as enabled (permissive). Explicit enabled:False → drop.
+        if ctx is not None:
+            from cinema.context import get_project_setting
+            _api_engines = get_project_setting(ctx, "api_engines", None)
+            if isinstance(_api_engines, dict):
+                fallback_list = [
+                    api for api in fallback_list
+                    if _api_engines.get(api, {}).get("enabled", True) is not False
+                ]
+
         for api in fallback_list:
             if api not in attempted_apis:
                 print(f"   [CASCADE] -> {api}")
@@ -207,11 +225,18 @@ def generate_ai_video(
                     image_path, camera_motion, api, output_mp4, pacing,
                     character_id, attempted_apis, multi_angle_refs,
                     shot_type=shot_type, video_fallbacks=video_fallbacks,
+                    ctx=ctx,
                 )
 
         # All APIs failed — try the cascade once more after a quota cooldown.
-        # Counts: initial pass + 1 retry = 2 total attempts.
+        # Counts: initial pass + 1 retry = 2 total attempts. Operator may raise
+        # this limit via the cascade_retry_limit UI knob.
         MAX_CASCADE_RETRIES = 1
+        if ctx is not None:
+            from cinema.context import get_project_setting
+            _override = get_project_setting(ctx, "cascade_retry_limit", None)
+            if isinstance(_override, int) and _override >= 0:
+                MAX_CASCADE_RETRIES = _override
         if _cascade_retries >= MAX_CASCADE_RETRIES:
             print(f"   [WARN] All video APIs exhausted after {MAX_CASCADE_RETRIES} retry pass(es).")
             return None
@@ -225,7 +250,20 @@ def generate_ai_video(
             image_path, camera_motion, first_api, output_mp4, pacing,
             character_id, set(), multi_angle_refs, _cascade_retries=_cascade_retries + 1,
             shot_type=shot_type, video_fallbacks=video_fallbacks,
+            ctx=ctx,
         )
+
+    # If the operator has disabled this engine via api_engines, skip straight to
+    # the cascade. This check is placed after try_next_api() is defined so it can
+    # call it immediately. Respects operator intent: "if I disabled engine X,
+    # don't use X even when explicitly targeted."
+    if ctx is not None:
+        from cinema.context import get_project_setting
+        _api_engines = get_project_setting(ctx, "api_engines", None)
+        if isinstance(_api_engines, dict):
+            if _api_engines.get(target_api.upper(), {}).get("enabled", True) is False:
+                print(f"   [VIDEO] {target_api.upper()} disabled by api_engines — delegating to cascade")
+                return try_next_api()
 
     # ═══════════════════════════════════════════════════════════════
     # NATIVE API HANDLERS (priority — direct, no proxy, lower cost)
