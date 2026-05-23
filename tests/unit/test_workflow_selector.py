@@ -1,13 +1,37 @@
-import sys, os
-
 import pytest
+
+import workflow_selector
 from workflow_selector import (
     classify_shot_type,
     get_workflow_params,
     apply_workflow_params,
     WORKFLOW_TEMPLATES,
     SHOT_TYPE_KEYWORDS,
+    MOTION_FIDELITY_FLOORS,
+    get_adaptive_pulid_weight,
 )
+from domain.shot_types import (
+    SHOT_TYPE_CLOSE,
+    SHOT_TYPE_PORTRAIT,
+    SHOT_TYPE_MEDIUM,
+    SHOT_TYPE_WIDE,
+    SHOT_TYPE_LANDSCAPE,
+    SHOT_TYPE_ACTION,
+)
+from identity.types import FailureReason
+
+
+# Valid target_api / video_fallback values accepted by the cinema pipeline.
+# Sourced from WORKFLOW_TEMPLATES + handoff §3.3 valid-api list.
+_VALID_APIS = {
+    "KLING_NATIVE",
+    "LTX",
+    "SORA_NATIVE",
+    "RUNWAY_GEN4",
+    "VEO_NATIVE",
+    "KLING_3_0",
+    "SEEDANCE",
+}
 
 
 # --- classify_shot_type ---
@@ -143,3 +167,219 @@ class TestParameterBounds:
     def test_steps_range(self, shot_type):
         s = WORKFLOW_TEMPLATES[shot_type]["steps"]
         assert 10 <= s <= 50, f"{shot_type} steps={s} out of [10,50]"
+
+
+# --- Full keyword sweep ---------------------------------------------------
+
+
+class TestClassifyShotTypeKeywords:
+    """Every entry in SHOT_TYPE_KEYWORDS must route to its declared bucket."""
+
+    @pytest.mark.parametrize(
+        "kw,expected_bucket",
+        [(kw, b) for b, kws in SHOT_TYPE_KEYWORDS.items() for kw in kws],
+    )
+    def test_keyword_routes_to_bucket(self, kw, expected_bucket):
+        # Landscape keywords still need characters_in_frame so the
+        # no-character short-circuit doesn't pre-empt the keyword check.
+        shot = {
+            "prompt": f"a {kw} of something",
+            "camera": "",
+            "characters_in_frame": ["c1"],
+        }
+        assert classify_shot_type(shot) == expected_bucket, (
+            f"keyword '{kw}' (declared in {expected_bucket}) routed elsewhere"
+        )
+
+
+# --- Shot-section priority over full prompt -------------------------------
+
+
+class TestClassifyShotTypePriority:
+    def test_shot_section_wins_over_full_prompt(self):
+        """[SHOT] section wins when full prompt contains a conflicting keyword."""
+        shot = {
+            "prompt": "[SHOT] portrait headshot [SCENE] wide angle landscape vista",
+            "camera": "",
+            "characters_in_frame": ["c1"],
+        }
+        assert classify_shot_type(shot) == "portrait"
+
+
+# --- WORKFLOW_TEMPLATES structural shape ----------------------------------
+
+
+class TestWorkflowTemplatesShape:
+    EXPECTED_KEYS = {"portrait", "medium", "wide", "action", "landscape"}
+
+    def test_exactly_five_shot_types(self):
+        assert set(WORKFLOW_TEMPLATES.keys()) == self.EXPECTED_KEYS
+
+    @pytest.mark.parametrize("shot_type", WORKFLOW_TEMPLATES.keys())
+    def test_target_api_is_valid(self, shot_type):
+        target = WORKFLOW_TEMPLATES[shot_type]["target_api"]
+        assert target in _VALID_APIS, (
+            f"{shot_type} target_api={target!r} not in valid API set"
+        )
+
+    @pytest.mark.parametrize("shot_type", WORKFLOW_TEMPLATES.keys())
+    def test_video_fallbacks_nonempty_and_valid(self, shot_type):
+        fallbacks = WORKFLOW_TEMPLATES[shot_type]["video_fallbacks"]
+        assert isinstance(fallbacks, list) and len(fallbacks) > 0, (
+            f"{shot_type} video_fallbacks must be a non-empty list"
+        )
+        for api in fallbacks:
+            assert api in _VALID_APIS, (
+                f"{shot_type} video_fallback {api!r} not in valid API set"
+            )
+
+
+# --- MOTION_FIDELITY_FLOORS keys and sentinels ----------------------------
+
+
+class TestMotionFidelityFloors:
+    CANONICAL = {
+        SHOT_TYPE_CLOSE,
+        SHOT_TYPE_PORTRAIT,
+        SHOT_TYPE_MEDIUM,
+        SHOT_TYPE_WIDE,
+        SHOT_TYPE_LANDSCAPE,
+        SHOT_TYPE_ACTION,
+    }
+
+    def test_keys_subset_of_canonical_shot_types(self):
+        assert set(MOTION_FIDELITY_FLOORS.keys()) <= self.CANONICAL, (
+            "MOTION_FIDELITY_FLOORS has key(s) outside the canonical "
+            "domain.shot_types set"
+        )
+
+    def test_landscape_floor_is_none(self):
+        # Sentinel: None means "motion capture doesn't apply" for pure
+        # landscape shots (no characters to retarget).
+        assert MOTION_FIDELITY_FLOORS["landscape"] is None
+
+
+# --- get_adaptive_pulid_weight --------------------------------------------
+
+
+class _StubStats:
+    """Minimal validator stub: returns a fixed rolling-stats dict."""
+
+    def __init__(self, stats: dict):
+        self._stats = stats
+
+    def get_rolling_stats(self, character_id: str) -> dict:  # noqa: ARG002
+        return self._stats
+
+
+class TestGetAdaptivePulidWeight:
+    """Cover all 4 boost paths + clamp + face-failure suppression."""
+
+    def test_returns_base_when_validator_none(self):
+        # portrait base is 1.0 (matches WORKFLOW_TEMPLATES["portrait"])
+        result = get_adaptive_pulid_weight("portrait", "char_a", None)
+        assert result == pytest.approx(1.0)
+
+    def test_no_samples_returns_base(self):
+        validator = _StubStats({"sample_count": 0})
+        # medium base is 0.9
+        result = get_adaptive_pulid_weight("medium", "char_a", validator)
+        assert result == pytest.approx(0.9)
+
+    def test_failure_boost_plus_010(self):
+        validator = _StubStats(
+            {
+                "sample_count": 5,
+                "suggested_pulid_delta": 0.10,
+                "common_failure": None,
+            }
+        )
+        # medium base 0.9 + 0.10 → 1.0 (also exactly hits the upper clamp)
+        result = get_adaptive_pulid_weight("medium", "char_a", validator)
+        assert result == pytest.approx(1.0)
+
+    def test_near_pass_boost_plus_005(self):
+        validator = _StubStats(
+            {
+                "sample_count": 5,
+                "suggested_pulid_delta": 0.05,
+                "common_failure": None,
+            }
+        )
+        # action base 0.8 + 0.05 → 0.85
+        result = get_adaptive_pulid_weight("action", "char_a", validator)
+        assert result == pytest.approx(0.85)
+
+    def test_overperform_reduces_minus_005(self):
+        validator = _StubStats(
+            {
+                "sample_count": 5,
+                "suggested_pulid_delta": -0.05,
+                "common_failure": None,
+            }
+        )
+        # action base 0.8 + (-0.05) → 0.75
+        result = get_adaptive_pulid_weight("action", "char_a", validator)
+        assert result == pytest.approx(0.75)
+
+    def test_clamped_to_unit_interval(self):
+        # Upper clamp: explicit base_params with weight 0.95, delta +0.10 → 1.0
+        validator_hi = _StubStats(
+            {
+                "sample_count": 5,
+                "suggested_pulid_delta": 0.10,
+                "common_failure": None,
+            }
+        )
+        hi = get_adaptive_pulid_weight(
+            "portrait", "char_a", validator_hi, base_params={"pulid_weight": 0.95}
+        )
+        assert hi == pytest.approx(1.0)
+
+        # Lower clamp: base_params weight 0.05, delta -0.20 → 0.0
+        validator_lo = _StubStats(
+            {
+                "sample_count": 5,
+                "suggested_pulid_delta": -0.20,
+                "common_failure": None,
+            }
+        )
+        lo = get_adaptive_pulid_weight(
+            "portrait", "char_a", validator_lo, base_params={"pulid_weight": 0.05}
+        )
+        assert lo == pytest.approx(0.0)
+
+    def test_face_angle_extreme_zeros_positive_delta(self):
+        # delta=+0.10 must be suppressed to 0 → adapted == base
+        validator = _StubStats(
+            {
+                "sample_count": 5,
+                "suggested_pulid_delta": 0.10,
+                "common_failure": FailureReason.FACE_ANGLE_EXTREME,
+            }
+        )
+        # portrait base 1.0; suppression keeps it at 1.0
+        result = get_adaptive_pulid_weight(
+            "portrait",
+            "char_a",
+            validator,
+            base_params={"pulid_weight": 0.80},
+        )
+        assert result == pytest.approx(0.80)
+
+    def test_small_face_region_zeros_delta(self):
+        # SMALL_FACE_REGION zeros the delta entirely (positive OR negative)
+        validator = _StubStats(
+            {
+                "sample_count": 5,
+                "suggested_pulid_delta": 0.10,
+                "common_failure": FailureReason.SMALL_FACE_REGION,
+            }
+        )
+        result = get_adaptive_pulid_weight(
+            "wide",
+            "char_a",
+            validator,
+            base_params={"pulid_weight": 0.65},
+        )
+        assert result == pytest.approx(0.65)
