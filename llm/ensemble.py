@@ -238,6 +238,16 @@ class LLMEnsemble:
 
         response = self.anthropic_client.messages.create(**kwargs)
 
+        if hasattr(response, "usage"):
+            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+            input_tokens = getattr(response.usage, "input_tokens", 0) or 0
+            if cache_read > 0 or cache_creation > 0:
+                print(
+                    f"   [LLM-CACHE] model={model} input={input_tokens} "
+                    f"cache_read={cache_read} cache_creation={cache_creation}"
+                )
+
         # Extract content -- prefer tool_use blocks when a schema was given.
         if tool_schema is not None:
             for block in response.content:
