@@ -107,68 +107,6 @@ class LTXVideoAPI:
                 camera_motion=camera_motion,
             )
 
-    def generate_transition(
-        self,
-        start_frame_path: str,
-        end_frame_path: str,
-        prompt: str,
-        output_path: str,
-        duration: int = 4,
-    ) -> str | None:
-        """
-        LTX keyframe interpolation: smooth transition from start to end frame.
-        Returns output_path on success, None on failure.
-        """
-        if not self.mode:
-            print("[LTX-TRANSITION] Skipped — no API key configured")
-            return None
-
-        num_frames = duration * 24
-        print(f"[LTX-TRANSITION] Generating {duration}s transition ({num_frames} frames)")
-        print(f"[LTX-TRANSITION] Prompt: {prompt[:80]}...")
-
-        if self.mode == "native":
-            return self._native_transition(
-                start_frame_path=start_frame_path,
-                end_frame_path=end_frame_path,
-                prompt=prompt,
-                output_path=output_path,
-                num_frames=num_frames,
-            )
-        else:
-            return self._fal_transition(
-                start_frame_path=start_frame_path,
-                end_frame_path=end_frame_path,
-                prompt=prompt,
-                output_path=output_path,
-                num_frames=num_frames,
-            )
-
-    def generate_4k(
-        self,
-        image_path: str,
-        prompt: str,
-        output_path: str,
-        duration: int = 4,
-    ) -> str | None:
-        """
-        Generate a 4K video — best for wide/landscape shots.
-        Returns output_path on success, None on failure.
-        """
-        print(f"[LTX-4K] Forcing 4K resolution for landscape shot")
-        return self.generate_video(
-            image_path=image_path,
-            prompt=prompt,
-            output_path=output_path,
-            duration=duration,
-            resolution="4K",
-            camera_motion=None,
-        )
-
-    # ------------------------------------------------------------------
-    # FAL.ai proxy implementation
-    # ------------------------------------------------------------------
-
     def _upload_to_fal(self, file_path: str) -> str:
         """Upload a local file to FAL and return the hosted URL."""
         return fal_client.upload_file(file_path)

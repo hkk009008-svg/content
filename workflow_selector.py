@@ -102,8 +102,8 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "description": "Pure landscape — no PuLID, 25 steps, max detail + PAG",
     },
     # NOTE: "dialogue" is not a ComfyUI image-gen template — dialogue shots use
-    # portrait/medium templates for image generation, then the pipeline routes to
-    # Veo 3.1 native lipsync for video generation (generate_with_audio).
+    # portrait/medium templates for image generation, then the pipeline routes
+    # to a video API with native lipsync.
     # The video generation cascade for dialogue: VEO_NATIVE → Kling Lip Sync → Omnihuman.
     # Assembly uses HARD CUTS only — no AI-generated transition clips.
 }
