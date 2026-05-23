@@ -3,7 +3,9 @@
 **From:** Director (incoming, 2026-05-24)
 **To:** Operators (engineering sessions / AI agents executing the roadmap)
 **Source plan:** [docs/STRATEGIC_REVIEW-2026-05-24.md](STRATEGIC_REVIEW-2026-05-24.md)
-**Status:** Active — execute in order unless you're told otherwise
+**Status:** Active — Sessions 1–4 shipped (audited green per
+[docs/HANDOFF-director-transplant-2026-05-24.md](HANDOFF-director-transplant-2026-05-24.md));
+Sessions 5–6 pending. Execute in order unless you're told otherwise.
 
 This document is the manual. It tells you **what** to do, **why** it
 matters, **how** to do it well, and **what done looks like**. Read the
@@ -114,6 +116,7 @@ What you can decide on your own vs. what needs escalation.
 | Splitting your one task into two commits | ✅ | |
 | Choice of mock library (unittest.mock vs. pytest mocks) | ✅ | |
 | Cache key naming, lock placement (when adding to existing pattern) | ✅ | |
+| Contained 1-line bug fix in adjacent code, atomic commit, full audit of all callers documented in commit body | ✅ (precedent: `37c9350` — `_find_take` `performance_takes` fix; commit body audited 4 callers before shipping) | |
 | Adding a NEW public API surface | | ❌ Escalate |
 | Removing or renaming an EXISTING public API | | ❌ Escalate |
 | Changing the dependency graph (new pip/npm packages) | | ❌ Escalate |
