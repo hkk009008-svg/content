@@ -53,10 +53,24 @@ file's pytest output instead of running `ls tests/unit/`. I committed
 the exact failure mode this handoff is written to prevent. Ownership:
 mine. What follows is the audited reality.
 
-**Current state (verified):** `tests/unit/` contains 24 test files.
-Baseline is **478 pass / 3 skip / 0 fail** after the `fix(tests):`
-baseline-hygiene commit. The 3 skips are documented `@unittest.skip`
-in `test_project_persistence.py` (mock drift, not behavior bugs).
+**Current state (verified 2026-05-24):** `tests/unit/` contains 24
+test files. Baseline is **478 pass / 3 skip / 0 fail** after the
+`fix(tests):` baseline-hygiene commit. The 3 skips are documented
+`@unittest.skip` in `test_project_persistence.py` (mock drift, not
+behavior bugs). Repo-wide silent-except count is 2.
+
+Verifying commands (per [CLAUDE.md / AGENTS.md "Verification discipline"](../CLAUDE.md) Rule 1):
+
+```bash
+$ ls tests/unit/test_*.py | wc -l
+24
+$ .venv/bin/python -m pytest tests/unit/ -q | tail -1
+478 passed, 3 skipped, 11 warnings, 10 subtests passed in 25.05s
+$ grep -rn "except.*:\s*pass" --include="*.py" /Users/hyungkoookkim/Content \
+    | grep -v "/.claude/" | grep -v "__pycache__" | grep -v "/.venv/" \
+    | grep -v "/node_modules/" | wc -l
+2
+```
 
 **Audited status of the original priority list:**
 

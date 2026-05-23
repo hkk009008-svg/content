@@ -273,10 +273,11 @@ That's why it's Session 1.
      not just `tests/`. Integration tests (`tests/integration/`)
      require credentials and must NOT run in CI.
    - Acceptance: **478 pass + 3 skip + 0 fail** is the current
-     baseline (post `fix(tests):` baseline-hygiene commit, 2026-05-24).
-     The 3 skips are documented `@unittest.skip` in
-     `test_project_persistence.py:139,197,221`. If your CI run shows
-     a different count, your session uncovered something — investigate
+     baseline, verified via `$ .venv/bin/python -m pytest tests/unit/ -q`
+     on 2026-05-24 (post `fix(tests):` baseline-hygiene commit). The 3
+     skips are documented `@unittest.skip` in
+     `test_project_persistence.py:139,197,221`. If your CI run shows a
+     different count, your session uncovered something — investigate
      before proceeding. Sessions 2 / 3 / 5 will grow this count as
      they extend existing test files.
 4. **TSC job:**
