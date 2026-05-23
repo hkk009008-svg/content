@@ -269,22 +269,12 @@ For max (`pulid_max.json`) — adds:
 ### §15 smoke (run at every session start)
 
 ```bash
-.venv/bin/python -c "
-import cinema_pipeline
-from cinema.context import PipelineContext, get_project_setting
-from phase_c_vision import _get_shared_validator
-from phase_c_assembly import generate_ai_broll
-from identity import get_shared_validator
-from face_validator_gate import _get_validator as fvg
-from performance.identity_gate import _get_validator as pig
-a, b = _get_shared_validator(), _get_shared_validator()
-c, d, e = get_shared_validator(), fvg(), pig()
-assert a is b is c is d is e, 'singleton broken'
-ctx = PipelineContext(global_settings={'tts_provider': 'CARTESIA_SONIC_2'})
-assert get_project_setting(ctx, 'tts_provider') == 'CARTESIA_SONIC_2'
-print('OK')
-"
+.venv/bin/python scripts/ci_smoke.py
 ```
+
+Single source of truth: [scripts/ci_smoke.py](scripts/ci_smoke.py).
+Spec: [ARCHITECTURE.md §15](ARCHITECTURE.md#15-invariants--smoke-test).
+Exit 0 = invariants hold.
 
 ### Unit tests
 

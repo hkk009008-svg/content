@@ -1209,24 +1209,22 @@ codebase is broken OR this file is stale.
 
 ### Smoke test
 
+Single source of truth: [scripts/ci_smoke.py](scripts/ci_smoke.py). Run:
+
 ```bash
-.venv/bin/python -c "
-import cinema_pipeline
-from cinema.context import PipelineContext, get_project_setting
-from phase_c_vision import _get_shared_validator
-from phase_c_assembly import generate_ai_broll
-from identity import get_shared_validator
-from face_validator_gate import _get_validator as fvg_get
-from performance.identity_gate import _get_validator as pig_get
-a, b = _get_shared_validator(), _get_shared_validator()
-c, d = get_shared_validator(), fvg_get()
-e = pig_get()
-assert a is b is c is d is e, 'singleton broken'
-ctx = PipelineContext(global_settings={'tts_provider': 'CARTESIA_SONIC_2'})
-assert get_project_setting(ctx, 'tts_provider') == 'CARTESIA_SONIC_2'
-print('OK')
-"
+.venv/bin/python scripts/ci_smoke.py
 ```
+
+The script verifies the runtime-executable subset of the invariants above
+(§15.2, §15.5, §15.6, §15.7, §15.8). Invariants §15.1 (all `.py` compile),
+§15.3 (`LLMEnsemble()` instantiates), §15.4 (lazy import isolation), and
+§15.9 (zero callers of `cinema/pipeline.py:CinemaPipeline`) are static or
+test-suite checks; see the script's module docstring for the split
+rationale. Exit 0 = invariants hold; exit 1 = drift.
+
+This script is also the smoke job's command in
+[.github/workflows/ci.yml](.github/workflows/ci.yml). If you change the
+script, the local check + CI move together.
 
 ---
 

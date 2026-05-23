@@ -230,10 +230,13 @@ That's why it's Session 1.
    it does, audit before adding.
 2. Run all three local checks manually and capture output:
    ```bash
-   .venv/bin/python -c "<paste ARCHITECTURE.md §15 smoke block>"
+   .venv/bin/python scripts/ci_smoke.py
    .venv/bin/python -m pytest tests/unit/ --tb=no -q
    cd web && npx tsc --noEmit && cd ..
    ```
+   The smoke script is the single source of truth for the §15 invariants
+   (see [scripts/ci_smoke.py](../scripts/ci_smoke.py)). CI runs the same
+   script — they cannot drift.
    All three must pass locally before you touch CI. If any fails, the
    problem is the codebase, not the CI — fix the underlying issue first
    (likely a stale smoke claim or a regression a previous session
