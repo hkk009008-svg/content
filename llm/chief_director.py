@@ -62,22 +62,59 @@ class ChiefDirector:
         return None
 
     def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
-        """Call the LLM with the Chief Director system prompt."""
+        """Call the LLM with the Chief Director system prompt.
+
+        Respects the ``creative_llm`` per-project UI knob. When set, the
+        override replaces the default model for the active provider. If the
+        override names a model from a *different* provider family (e.g. a
+        ``gpt-*`` model while the active client is Anthropic), a warning is
+        printed and the default model is used — no provider switch is
+        attempted mid-call.
+
+        Provider family detection:
+          ``claude-*``             → anthropic
+          ``gpt-*`` / ``o1-*`` / ``o3-*`` / ``o4-*`` → openai
+        """
         if not self.client:
             return ""
 
+        # Read the creative_llm override from project global_settings.
+        override: Optional[str] = None
+        if self.project:
+            _gs = self.project.get("global_settings", {})
+            override = _gs.get("creative_llm") or None
+
         try:
             if self.provider == "anthropic":
+                model_id = "claude-sonnet-4-20250514"
+                if override:
+                    if override.startswith("claude-"):
+                        model_id = override
+                    else:
+                        print(
+                            f"   [DIRECTOR] creative_llm={override!r} doesn't match "
+                            f"Anthropic provider; using default {model_id}"
+                        )
                 response = self.client.messages.create(
-                    model="claude-sonnet-4-20250514",
+                    model=model_id,
                     max_tokens=4096,
                     system=build_anthropic_system_blocks(system_prompt),
                     messages=[{"role": "user", "content": user_prompt}],
                 )
                 return response.content[0].text
             else:
+                model_id = "gpt-4o"
+                if override:
+                    _openai_prefixes = ("gpt-", "o1-", "o3-", "o4-")
+                    if any(override.startswith(p) for p in _openai_prefixes):
+                        model_id = override
+                    else:
+                        print(
+                            f"   [DIRECTOR] creative_llm={override!r} doesn't match "
+                            f"OpenAI provider; using default {model_id}"
+                        )
                 response = self.client.chat.completions.create(
-                    model="gpt-4o",
+                    model=model_id,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
