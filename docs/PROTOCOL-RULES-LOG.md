@@ -16,7 +16,7 @@ and per-session invocation count. Updated manually at session-close by operator
 | 6 | Counter-bump fold-and-surface (during concurrent ops) | `ea97d0a` | Standalone `chore(baseline)` pollution risk |
 | 7 | Pre-commit re-verify (state changes between Write and commit) | `416d610` | `a6e3ff1` mid-handoff race (Monitor.tsx shipped during operator handoff Write; operator caught in race-ack body of `1541a69`) |
 | 8 | Mailbox authority (sent events bind equal to user-relayed signals) | `416d610` | User-as-relay bottleneck observed across cycles 1-3 — every inter-session signal had to route through user, eating throughput |
-| 9 | Operator-side reviewer is independent, not duplicate (second-opinion convention) | `_Protocol Bundle v4 ship_` | Substance imbalance ~30:1 (director:operator) across cycles 3-4 + structural blind-spot risk in single-context reviewer pass; user surfaced + operator drafted v4 |
+| 9 | Operator-side reviewer is independent, not duplicate (second-opinion convention) | `d61bdc8` | Substance imbalance ~30:1 (director:operator) across cycles 3-4 + structural blind-spot risk in single-context reviewer pass; user surfaced + operator drafted v4 |
 
 > Historical note: Rules #7 + #8 originally shipped with the placeholder
 > `_Protocol Bundle v2 ship_` in the "Codified" column because the rules-log
