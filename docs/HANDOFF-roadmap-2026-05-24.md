@@ -1992,3 +1992,284 @@ Commit 2: `test(web): cover concurrent api_generate + _ensure_progress_queue rac
 
 **If you finish early:** Add a test using `threading.Barrier(N>=4)` to maximize concurrency under maximum pressure (4+ threads racing on `api_generate`). Also: explore a property-based test using `hypothesis` to vary inter-thread delays via `time.sleep` jitter. These pre-stage a "torture test" suite for any future concurrency work.
 
+## SESSION 11 — P4-3 (backend): auto-approve veto rules + state integration
+
+**Why this matters.** The P4-3 product-design pass (`e8b5ebc` / [docs/PRODUCT-DESIGN-P4-3-auto-approve.md](PRODUCT-DESIGN-P4-3-auto-approve.md)) framed the 4-gate review-fatigue problem and surfaced 5 load-bearing decisions. The user confirmed **all defaults** (recommendation column). This brief implements **the backend** — the veto rules, per-gate config, ShotState integration, and unit tests. **Session 12** (forthcoming brief) will add the frontend pieces (AutoApproveBadge, PostRunSummary modal, rejection-with-reason modal). **Session 13** (optional) calibrates default thresholds against real project data.
+
+**Decisions confirmed (read product doc for the trade-off analysis):**
+1. **Signal aggregation:** veto-list — auto-approve UNLESS ANY veto rule fires
+2. **Per-gate independence:** 4 independent config sections, one per gate
+3. **Default state:** conservative-on — auto-approve enabled with high thresholds, operator can loosen
+4. **Audit trail:** inline tag + post-run summary (frontend = Session 12)
+5. **Failure recovery:** reason capture with skip (frontend = Session 12)
+
+**Scope reframe (split-session brief).** Session 11 is BACKEND ONLY. The data + integration land here; the UI surfaces them in Session 12. The backend must produce the data Session 12 will consume (`auto_approved: bool` per gate on ShotState, `auto_approve_reason: list[str]` for the inline tag, audit-log entries for the post-run summary). **Don't** start frontend work in this session even if you finish early — the AutoApproveBadge component is the natural starting point for Session 12, not a "spare time" task here.
+
+**Pre-work:**
+
+1. Read [docs/PRODUCT-DESIGN-P4-3-auto-approve.md](PRODUCT-DESIGN-P4-3-auto-approve.md) in full — the canonical product spec.
+2. Read [cinema/lifecycle.py](../cinema/lifecycle.py) to find where the 4 gates live (`should_halt`-style logic). Trace which functions decide gate outcomes today.
+3. Read [face_validator_gate.py](../face_validator_gate.py) — its `should_halt` shape is the closest existing analogue to what `auto_approve.check_gate` will do.
+4. Read [cinema/review/](../cinema/review/) — `ReviewController` and any per-gate decision code.
+5. Read [domain/models.py](../domain/models.py) (the Session 8 Pydantic models). The new `auto_approve` field on `Project.global_settings` and the per-gate `auto_approved` fields on `Shot` must coexist with the schema. **Don't** add them as typed Pydantic fields in this session — let them pass through via `extra="allow"`. Typing them is Session 10 (P1-3 part 2) work.
+6. Baseline: `.venv/bin/python -m pytest tests/unit/ --tb=no -q | tail -1` → expect `636 passed, 3 skipped, 0 failed` (post-Session-9 baseline at HEAD `f8b2aef`).
+
+**Scope:**
+
+| IN | OUT |
+|---|---|
+| NEW `cinema/auto_approve.py` module with `AutoApproveConfig` (per-gate config dataclass) + `VetoRule` (named predicate) + `AutoApproveDecision` (result with `auto_approved: bool` + `vetoes: list[str]`) + `check_gate(gate, *, shot_state, project, takes, config)` function | Frontend AutoApproveBadge component (Session 12) |
+| `project.json` `global_settings.auto_approve` section with 4 sub-sections (plan/image/motion/final), each with the default thresholds | Frontend PostRunSummary modal (Session 12) |
+| Per-gate `auto_approved: bool` fields on shot state — added via `extra="allow"` on the existing Pydantic `Shot` model (don't touch the model declaration) | Frontend rejection-with-reason modal (Session 12) |
+| Per-shot `auto_approve_audit: list[dict]` append-only log capturing every check decision (for Session 12's summary modal) | Threshold calibration session (Session 13) |
+| Integration into `ReviewController` (or wherever the gate decisions happen) — call `check_gate` BEFORE the manual review surface; if `auto_approved=True`, skip the manual surface and record the audit entry | Typing `auto_approve` config in `domain/models.py` (Session 10 — P1-3 part 2 work) |
+| NEW `tests/unit/test_auto_approve.py` with ≥15 tests covering each gate's veto rules, the integration, and the audit-log append | Adding a `CINEMA_AUTO_APPROVE=off` env-flag (defer to Session 13 — let operator toggle via project settings only for now) |
+
+**Approach:**
+
+1. **Module skeleton (`cinema/auto_approve.py`, ~150 LOC):**
+
+   ```python
+   """P4-3 auto-approve heuristics.
+
+   See docs/PRODUCT-DESIGN-P4-3-auto-approve.md for the design.
+   Decisions: veto-list (Decision 1) + independent per gate (Decision 2)
+   + conservative-on defaults (Decision 3).
+   """
+   from dataclasses import dataclass, field
+   from typing import Callable, Literal
+   import logging
+   logger = logging.getLogger(__name__)
+
+   Gate = Literal["plan", "image", "motion", "final"]
+
+   @dataclass(frozen=True)
+   class VetoRule:
+       """A single named veto rule. Returns True if the rule fires (= veto)."""
+       name: str
+       predicate: Callable[[dict], bool]  # called with the gate's context dict
+       reason_template: str               # human-readable "why" for audit log
+
+   @dataclass
+   class AutoApproveDecision:
+       auto_approved: bool
+       vetoes: list[str] = field(default_factory=list)  # human-readable reason(s)
+       rule_names: list[str] = field(default_factory=list)  # for audit
+
+   @dataclass
+   class AutoApproveConfig:
+       enabled: bool = True   # decision 3: conservative-on default
+       # Per-gate thresholds (read from project.json.global_settings.auto_approve.{gate})
+       plan_require_approved: bool = True       # veto if decision != APPROVED
+       plan_reject_on_violations: bool = True   # veto if violations[]
+       image_min_composite: float = 0.97
+       image_veto_on_fallback: bool = True
+       image_max_spent_multiplier: float = 1.5  # veto if spent_usd > 1.5 * per_shot_budget
+       motion_min_identity: float = 0.85
+       motion_min_motion_score: float = 0.7
+       motion_veto_on_fallback: bool = True
+       final_min_lipsync: float = 0.8
+       final_require_human_if_upstream_auto: bool = True
+
+       @classmethod
+       def from_project(cls, project: dict) -> "AutoApproveConfig":
+           settings = (project.get("global_settings") or {}).get("auto_approve") or {}
+           # Merge with defaults; unknown sub-keys silently ignored
+           return cls(...)  # implementation detail
+
+   def _rules_for_plan(config: AutoApproveConfig) -> list[VetoRule]: ...
+   def _rules_for_image(config: AutoApproveConfig) -> list[VetoRule]: ...
+   def _rules_for_motion(config: AutoApproveConfig) -> list[VetoRule]: ...
+   def _rules_for_final(config: AutoApproveConfig) -> list[VetoRule]: ...
+
+   def check_gate(
+       gate: Gate,
+       *,
+       shot_state: dict,
+       project: dict,
+       takes: list[dict],
+       config: AutoApproveConfig | None = None,
+   ) -> AutoApproveDecision:
+       """Evaluate auto-approve veto rules for ``gate``.
+
+       Returns auto_approved=False (with vetoes populated) if ANY rule
+       fires. Returns auto_approved=True with empty vetoes if all rules
+       pass AND config.enabled.
+
+       If config.enabled is False, returns auto_approved=False with
+       vetoes=["disabled"] (operator opted out).
+       """
+       if config is None:
+           config = AutoApproveConfig.from_project(project)
+       if not config.enabled:
+           return AutoApproveDecision(auto_approved=False, vetoes=["disabled"], rule_names=["disabled"])
+
+       rules = {
+           "plan": _rules_for_plan,
+           "image": _rules_for_image,
+           "motion": _rules_for_motion,
+           "final": _rules_for_final,
+       }[gate](config)
+
+       ctx = {"shot_state": shot_state, "project": project, "takes": takes}
+       vetoes = []
+       rule_names = []
+       for r in rules:
+           if r.predicate(ctx):
+               vetoes.append(r.reason_template.format(**_resolve_ctx_values(ctx)))
+               rule_names.append(r.name)
+
+       return AutoApproveDecision(
+           auto_approved=(len(vetoes) == 0),
+           vetoes=vetoes,
+           rule_names=rule_names,
+       )
+   ```
+
+   The `_resolve_ctx_values` helper extracts named fields from `ctx` for the `reason_template.format(...)` call (e.g., `"composite below threshold ({composite:.3f} < {threshold:.2f})"`).
+
+2. **Default rules per gate** (in `_rules_for_*` functions):
+
+   ```python
+   def _rules_for_plan(config):
+       rules = []
+       if config.plan_require_approved:
+           rules.append(VetoRule(
+               name="plan_decision_not_approved",
+               predicate=lambda ctx: (ctx["shot_state"].get("director_review") or {}).get("decision") != "APPROVED",
+               reason_template="ChiefDirector decision was not APPROVED",
+           ))
+       if config.plan_reject_on_violations:
+           rules.append(VetoRule(
+               name="plan_has_violations",
+               predicate=lambda ctx: len((ctx["shot_state"].get("director_review") or {}).get("violations") or []) > 0,
+               reason_template="ChiefDirector flagged {violation_count} violation(s)",
+           ))
+       return rules
+
+   def _rules_for_image(config):
+       # Build similar rules for: min_composite, veto_on_fallback,
+       # max_spent_multiplier
+       ...
+
+   # _rules_for_motion: min_identity, min_motion_score, veto_on_fallback
+   # _rules_for_final: min_lipsync, require_human_if_upstream_auto
+   ```
+
+3. **Config defaults in `project.json` schema (no Pydantic change in Session 11):**
+
+   When a new project is created, `global_settings.auto_approve` should be auto-populated with the defaults. Add a one-line write in `domain/project_manager.py:create_project` (or wherever the default project shape is materialized):
+
+   ```python
+   project["global_settings"]["auto_approve"] = AutoApproveConfig().to_dict()
+   ```
+
+   Where `to_dict()` is added to `AutoApproveConfig` as a sibling of `from_project`.
+
+   **Do NOT** add `auto_approve` to the `GlobalSettings` Pydantic model in `domain/models.py`. It rides through via `extra="allow"`. Typing it is Session 10's job (P1-3 part 2 — caller refactor + strict mode).
+
+4. **State integration — where to hook.** Find the existing gate-decision code (likely in `cinema/review/controller.py` or `cinema/lifecycle.py`). For each gate, BEFORE the existing manual-review surface:
+
+   ```python
+   from cinema.auto_approve import check_gate, AutoApproveConfig
+
+   def review_image_gate(self, shot_state, takes):
+       decision = check_gate("image", shot_state=shot_state, project=self.project,
+                             takes=takes, config=self._auto_approve_config)
+       # Append to audit log regardless of decision (Session 12 reads this)
+       shot_state.setdefault("auto_approve_audit", []).append({
+           "gate": "image",
+           "auto_approved": decision.auto_approved,
+           "vetoes": decision.vetoes,
+           "rule_names": decision.rule_names,
+           "timestamp": datetime.now(timezone.utc).isoformat(),
+       })
+       if decision.auto_approved:
+           # Mark the gate as approved without surfacing to operator
+           shot_state["image_auto_approved"] = True
+           logger.info("auto_approved", extra={"gate": "image", "shot_id": shot_state["id"]})
+           return GateDecision.APPROVED  # or whatever the existing API is
+       # Otherwise fall through to existing manual-review path
+       return self._surface_to_operator(...)
+   ```
+
+   Mirror for plan/motion/final.
+
+5. **Tests** — NEW `tests/unit/test_auto_approve.py` with ≥15 tests:
+
+   - `TestVetoRules` (~6 tests, one per major rule): minimal context that triggers the rule + minimal context that doesn't, asserts presence/absence in `vetoes`.
+   - `TestCheckGatePerGate` (~4 tests, one per gate): full minimal shot_state + project + takes; assert auto_approved=True with empty vetoes (the happy path).
+   - `TestConfigFromProject` (~2 tests): default config from empty project; custom config from project with partial overrides.
+   - `TestDisabledShortCircuit` (~1 test): config.enabled=False returns auto_approved=False with `vetoes=["disabled"]`.
+   - `TestAuditAppend` (~2 tests): integration with `ReviewController` (mock the surface_to_operator path); assert audit entry shape; assert audit entries accumulate across gates.
+
+   Use the existing `face_validator_gate` test patterns as templates for shot_state shape. Use `Project` Pydantic model for project fixture construction.
+
+**Acceptance criteria:**
+
+- [ ] `cinema/auto_approve.py` exists with `AutoApproveConfig`, `VetoRule`, `AutoApproveDecision` dataclasses + `check_gate` function + `_rules_for_*` helpers (one per gate)
+- [ ] `AutoApproveConfig.from_project(project)` reads from `global_settings.auto_approve` with defaults
+- [ ] `AutoApproveConfig.to_dict()` writes the dict shape consumed by `from_project`
+- [ ] `domain/project_manager.py:create_project` (or equivalent) writes the default config into new projects
+- [ ] `ReviewController` (or equivalent gate decision code) calls `check_gate` before the manual-review surface for each gate
+- [ ] Per-gate `<gate>_auto_approved: True` set on shot_state when auto-approved (e.g., `image_auto_approved`)
+- [ ] `auto_approve_audit` list on shot_state captures every check decision (gate + vetoes + rule_names + timestamp)
+- [ ] `tests/unit/test_auto_approve.py` with ≥15 tests
+- [ ] `pytest tests/unit/` whole-suite: ≥651 pass / 3 skip / 0 fail (636 baseline + ≥15 new)
+- [ ] §15 smoke still passes
+- [ ] Scope: ONLY `cinema/auto_approve.py` (new), `cinema/<existing gate decision file>.py` (modified), `domain/project_manager.py` (one-line addition in create_project), `tests/unit/test_auto_approve.py` (new). No frontend changes.
+
+**Pitfalls:**
+
+- **DON'T change existing gate semantics.** Auto-approve is an OVERLAY on top of the existing flow. If `config.enabled=False` (or all vetoes fire), the existing manual-review path runs unchanged. Verify by reading the gate decision code BEFORE making changes — the auto-approve check is a NEW first-step, not a replacement.
+- **DON'T add `auto_approve` as a typed Pydantic field in `domain/models.py`.** Session 10 (P1-3 part 2) handles typed `domain/*` access. For now, `extra="allow"` lets `auto_approve` ride through unchanged.
+- **DON'T fail-closed.** If the auto-approve module raises an exception (config parse error, predicate crash, etc.), the existing manual-review path MUST still run. Wrap the `check_gate` call in `try/except Exception` with a warn-log (mirror the `_validate_project` belt-and-suspenders pattern from `domain/project_manager.py:594-624`).
+- **DON'T tune thresholds in this session.** The defaults in `AutoApproveConfig` are the product doc's starting point. Session 13 calibrates against real operator data.
+- **DON'T pre-stage Session 12 work.** No AutoApproveBadge component, no PostRunSummary modal, no rejection-with-reason. The brief explicitly forbids frontend work to keep the slice reviewable.
+- **DON'T add a `CINEMA_AUTO_APPROVE=off` env flag.** Operator toggles via `global_settings.auto_approve.enabled` in `project.json` only for now. Env flag is Session 13 scope.
+- **Audit log shape is contract for Session 12.** Don't change the audit dict shape (gate / auto_approved / vetoes / rule_names / timestamp) without explicit Session 12 brief revision — the frontend PostRunSummary modal will read this shape.
+
+**Verification:**
+
+```bash
+# 1. New tests pass in isolation
+.venv/bin/python -m pytest tests/unit/test_auto_approve.py -v 2>&1 | tail -25
+# Expected: ≥15 pass / 0 fail
+
+# 2. Whole-suite (no regression)
+.venv/bin/python -m pytest tests/unit/ --tb=no -q 2>&1 | tail -3
+# Expected: ≥651 pass / 3 skip / 0 fail
+
+# 3. §15 smoke
+.venv/bin/python /Users/hyungkoookkim/Content/scripts/ci_smoke.py
+# Expected: OK
+
+# 4. Existing gate flow not broken
+# (Spot-check by running the broader test suite — already covered by #2)
+
+# 5. Scope check
+git diff --stat HEAD~2..HEAD
+# Expected: 4 files: cinema/auto_approve.py (NEW), cinema/<gate file>.py,
+#           domain/project_manager.py, tests/unit/test_auto_approve.py (NEW)
+```
+
+**Commit shape (split into 2):**
+
+Commit 1: `feat(cinema): auto-approve veto rules + per-gate config + ShotState integration`
+  - `cinema/auto_approve.py` (new), `cinema/<gate file>.py` (modified), `domain/project_manager.py` (one-line)
+  - Body: cite the product doc + this brief; cite the 5 "all defaults" decisions; explain the warn-on-failure / fall-back-to-manual contract; list the gate-file integration site(s) by file:line
+
+Commit 2: `test(cinema): cover auto-approve veto rules + per-gate integration`
+  - `tests/unit/test_auto_approve.py` (new)
+  - Body: reference commit #1's SHA; list test classes + their coverage
+
+**Estimated effort:** M — ~2 hours implementer subagent. Bulk is rule enumeration (4 gates × 2-3 rules each) + careful integration with the existing gate decision code (the read-find-integrate phase is the unknown).
+
+**Decision authority:** Lane A on dataclass field naming, rule naming, reason_template wording, which gate-decision file to integrate with (locate the right callsite; the brief lists candidates but doesn't pin it). Escalate when:
+
+- The existing gate decision code is structured such that the auto-approve check would change MORE than the 1-2 integration points the brief anticipates (e.g., would require refactoring `ReviewController` substantially). Surface the structural challenge with your proposed minimal-change alternative.
+- A default threshold from the product doc seems implausibly tight/loose against real `projects/*/project.json` data (e.g., `composite >= 0.97` would auto-approve 0% of historical takes — clearly wrong). Surface the data, don't unilaterally change the default; the user calibrates in Session 13.
+- A new field on shot_state collides with an existing field (e.g., `image_auto_approved` is already used). Pick a non-colliding name and report.
+
+**If you finish early:** Add a `cinema/auto_approve.py` helper `summarize_audit(shot_state) -> dict` that aggregates the per-gate audit entries into a Session-12-ready summary shape (auto-approved gates count, total vetoes, per-rule fire counts). Pre-stages Session 12's PostRunSummary modal without committing to its UI shape.
+

@@ -23,33 +23,30 @@
 > are either product-blocked (P4-3), brief-ready (Session 9), or
 > brief-blocked (Session 10).
 
-1. **P4-3 four-gate review fatigue — auto-approve heuristics** — the
-   most operator-visible UX gap remaining. With Session 5 capturing
-   `spent_usd` per-shot and `record_api_call` traces, we now have the
-   data to design "auto-approve when confidence is high" thresholds.
-   Effort: L (1-2 product-design sessions + 1 impl session).
-   **Blocking input needed**: which confidence signals matter most
-   to the operator? `quality_score`? `identity_score`? cost-budget?
-   composite? This is a product conversation worth having before
-   any impl session.
+1. **Session 11 — P4-3 (backend): auto-approve veto rules + state
+   integration** — implements the backend half of P4-3 per the product
+   doc (`docs/PRODUCT-DESIGN-P4-3-auto-approve.md`, `e8b5ebc`) with all
+   5 "all defaults" decisions confirmed. New `cinema/auto_approve.py`
+   module + per-gate config + ReviewController integration + ≥15
+   backend tests. **Brief shipped** at
+   `docs/HANDOFF-roadmap-2026-05-24.md` §SESSION 11. Effort: M (~2 hr
+   implementer subagent). Ready to dispatch. Splits into Session 12
+   (frontend) + Session 13 (threshold calibration); placeholders below.
 
-2. **Session 9 — P3-1 concurrency hardening** — race elimination for
-   the two unguarded module-globals identified in the P3-1 audit
-   (`docs/AUDIT-P3-1-concurrency-2026-05-24.md`, commit `e164505`).
-   Adds `_pipelines_lock` + `_PIPELINE_PENDING` sentinel + reader-site
-   updates + ≥5 thread-stress tests. **Brief shipped** at
-   `docs/HANDOFF-roadmap-2026-05-24.md` §SESSION 9. Effort: S
-   (~60–90 min implementer subagent). Ready to dispatch.
-
-3. **Session 10 — P1-3 part 2 (caller refactor + strict mode)** —
-   was Session 9 before the P3-1 audit findings promoted concurrency
-   hardening ahead of it. Caller refactor to typed accessors
-   (replace `project["scenes"][i]["shots"][j]["target_api"]` with
+2. **Session 10 — P1-3 part 2 (caller refactor + strict mode)** —
+   caller refactor to typed accessors (replace
+   `project["scenes"][i]["shots"][j]["target_api"]` with
    `project.scenes[i].shots[j].target_api`) + `CINEMA_STRICT_SCHEMA=1`
    env flag for production-strict mode, building on Session 8's
    `domain/models.py`. Effort: L (2-3 sessions; brief should sequence
-   module-by-module). **Brief not yet written** — author after
-   Session 9 closes.
+   module-by-module). **Brief not yet written.**
+
+3. **Session 12 — P4-3 (frontend): AutoApproveBadge + PostRunSummary
+   + rejection-with-reason** — consumes Session 11's audit-log shape.
+   Adds the inline-tag UI on takes, the post-run summary modal, and
+   the rejection modal with optional reason field. Effort: M (~2 hr
+   implementer subagent). **Brief not yet written; dispatch after
+   Session 11 closes.**
 
 **Honorable mentions** (S-to-M, opportunistic single sessions):
 - **P1-2 Pipeline orchestrator extraction** — `cinema_pipeline.py` is
