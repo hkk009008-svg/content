@@ -2467,7 +2467,7 @@ Commit 2: `test(schema): cover strict-mode env flag + migrated caller regression
 **Scope reframe (single session).** Session 12 is backend-only. Frontend display of motion auto-approve outcomes (badge, summary modal) is Session 13's scope. Session 12 ships: env-flag parsing, conditional `_gate_map` extension, motion mutator branch, ADR-014, tests. No frontend work, no changes to v1 default behavior.
 
 **Decisions (no user input needed):**
-- Env flag name: `CINEMA_AUTO_APPROVE_MOTION`. Truthy values: `"1"`, `"true"`, `"TRUE"`, `"yes"` (same parsing as `CINEMA_STRICT_SCHEMA`).
+- Env flag name: `CINEMA_AUTO_APPROVE_MOTION`. Truthy values: `"1"`, `"true"`, `"yes"` (case-insensitive — `"TRUE"`, `"True"`, `"Yes"`, etc. all accepted via `.lower()`). **Note**: this is broader than Session 10's `CINEMA_STRICT_SCHEMA` parsing, which used a literal-case tuple `("1", "true", "TRUE", "yes")` and silently rejects `"True"` (Python's `str(True)` form). Session 10's code-quality reviewer flagged this as a papercut; Session 12 tightens proactively. If a future cleanup unifies the two parsers, prefer Session 12's `.lower()` form.
 - Default: off. v1 behavior preserved when flag is unset.
 - Helper lives in `cinema/auto_approve.py` as a module-level function `is_motion_gate_enabled()`, not in `cinema/review/controller.py`. Reason: keeps env-parse logic co-located with the auto-approve rules; testable via direct monkeypatch without instantiating the controller.
 - Best-motion-take pick order: `motion_fidelity` (primary, what the existing `_best_take_motion_score` reads) → `motion_score` (fallback) → `identity_score` (tiebreak). When all takes tie at 0.0, pick first by list order.
@@ -2507,13 +2507,15 @@ Commit 2: `test(schema): cover strict-mode env flag + migrated caller regression
        """True if CINEMA_AUTO_APPROVE_MOTION env var is set to a truthy value.
 
        Off by default per ADR-014 (motion-gate as opt-in production escalation).
-       Mirrors Session 10's CINEMA_STRICT_SCHEMA pattern. Operators opt in once
+       Inspired by Session 10's CINEMA_STRICT_SCHEMA pattern but parses
+       case-insensitively (.lower()) to accept "True", "YES", etc. — closes
+       a papercut S10's code-reviewer flagged. Operators opt in once
        confident motion rules are well-calibrated against their content.
        """
        import os
-       return os.environ.get("CINEMA_AUTO_APPROVE_MOTION", "").strip() in (
-           "1", "true", "TRUE", "yes"
-       )
+       return os.environ.get("CINEMA_AUTO_APPROVE_MOTION", "").strip().lower() in {
+           "1", "true", "yes"
+       }
    ```
 
    Add `is_motion_gate_enabled` to the module's `__all__` (or to the explicit re-exports if the module uses them — check the file's existing pattern).
@@ -2644,8 +2646,8 @@ Commit 2: `test(schema): cover strict-mode env flag + migrated caller regression
 
    - `TestMotionGateFlag` class:
      - `test_is_motion_gate_enabled_default_off`: no env var → returns False
-     - `test_is_motion_gate_enabled_truthy_values`: "1", "true", "TRUE", "yes" → True
-     - `test_is_motion_gate_enabled_falsy_values`: "", "0", "false", "no" → False
+     - `test_is_motion_gate_enabled_truthy_values`: parametrize over `"1"`, `"true"`, `"TRUE"`, `"True"`, `"yes"`, `"YES"`, `"Yes"`, `"  1  "` (whitespace) → all True (case-insensitive + whitespace-tolerant)
+     - `test_is_motion_gate_enabled_falsy_values`: `""`, `"0"`, `"false"`, `"False"`, `"no"`, `"NO"`, `"random"` → all False
    - `TestMotionGateIntegration` class (extending the `TestRunAutoApprovePass` pattern from line 469):
      - `test_motion_gate_off_by_default_skips_performance_review`: PERFORMANCE_REVIEW with no env flag → early return; no audit entry, no `motion_auto_approved` flag
      - `test_motion_gate_on_approves_high_scores`: with `monkeypatch.setenv("CINEMA_AUTO_APPROVE_MOTION", "1")` + a high-scoring motion take → shot gets `approved_motion_take_id` set + `motion_auto_approved=True` + audit entry

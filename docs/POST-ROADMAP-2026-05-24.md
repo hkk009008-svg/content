@@ -16,37 +16,48 @@
 
 ## TL;DR — top 3 for next director (in priority order)
 
-> **Cycle 3 update (2026-05-24, late):** Sessions 7, 8, the Monitor.tsx
-> cascade wiring, the P3-1 concurrency audit, and the Session 9 brief
-> (P3-1 hardening) all shipped this cycle; they're in the "What
-> shipped" matrix below. Picks rotated once more — the remaining top-3
-> are either product-blocked (P4-3), brief-ready (Session 9), or
-> brief-blocked (Session 10).
+> **Cycle 4 update (2026-05-25):** Sessions 9, 10, 11 all SHIPPED
+> this cycle (concurrency hardening, P1-3 first migration template +
+> strict-mode flag, P4-3 backend auto-approve + v1.1 minors). Plus
+> Session 12 brief (motion-gate wiring backend) authored; the
+> motion-gate product question was resolved as the feature-flag
+> default-off pattern (mirrors S10's `CINEMA_STRICT_SCHEMA`). Picks
+> rotate again — the remaining top-3 are mostly brief-ready (S12)
+> or brief-blocked (S13 frontend), plus one architecture-docs gap.
+>
+> **Cycle 3 update (2026-05-24, late, historical):** Sessions 7, 8,
+> Monitor.tsx wiring, P3-1 audit, Session 9 brief — all shipped.
+> Recorded in the "What shipped" matrix below.
 
-1. **Session 11 — P4-3 (backend): auto-approve veto rules + state
-   integration** — implements the backend half of P4-3 per the product
-   doc (`docs/PRODUCT-DESIGN-P4-3-auto-approve.md`, `e8b5ebc`) with all
-   5 "all defaults" decisions confirmed. New `cinema/auto_approve.py`
-   module + per-gate config + ReviewController integration + ≥15
-   backend tests. **Brief shipped** at
-   `docs/HANDOFF-roadmap-2026-05-24.md` §SESSION 11. Effort: M (~2 hr
-   implementer subagent). Ready to dispatch. Splits into Session 12
-   (frontend) + Session 13 (threshold calibration); placeholders below.
+1. **Session 12 — motion-gate auto-approve as opt-in env flag
+   (CINEMA_AUTO_APPROVE_MOTION)** — wires `cinema/auto_approve.py`'s
+   already-built motion rule builders to production via opt-in env
+   flag (default off). Helper `is_motion_gate_enabled()` + conditional
+   `_gate_map["PERFORMANCE_REVIEW"] = "motion"` in
+   `cinema/review/controller.py` + motion mutator branch + ADR-014 +
+   ≥4 tests. Brief shipped at `docs/HANDOFF-roadmap-2026-05-24.md`
+   §SESSION 12 (`3373ff0`/`4e70db7` pre-amend). Effort: S-to-M (~45-75
+   min). **Ready to dispatch.** Lane B Sonnet.
 
-2. **Session 10 — P1-3 part 2 (caller refactor + strict mode)** —
-   caller refactor to typed accessors (replace
-   `project["scenes"][i]["shots"][j]["target_api"]` with
-   `project.scenes[i].shots[j].target_api`) + `CINEMA_STRICT_SCHEMA=1`
-   env flag for production-strict mode, building on Session 8's
-   `domain/models.py`. Effort: L (2-3 sessions; brief should sequence
-   module-by-module). **Brief not yet written.**
+2. **Session 13 — P4-3 frontend (AutoApproveBadge + PostRunSummary +
+   rejection-with-reason)** — was originally scoped as Session 12 in
+   cycle 3; renumbered to make room for the motion-gate backend
+   wiring. Consumes Session 11's audit-log shape + Session 12's motion
+   entries (when flag-on). Effort: M (~2 hr). **Brief not yet written.**
+   Author after Session 12 closes — implementer needs S12's audit-log
+   keys to display correctly.
 
-3. **Session 12 — P4-3 (frontend): AutoApproveBadge + PostRunSummary
-   + rejection-with-reason** — consumes Session 11's audit-log shape.
-   Adds the inline-tag UI on takes, the post-run summary modal, and
-   the rejection modal with optional reason field. Effort: M (~2 hr
-   implementer subagent). **Brief not yet written; dispatch after
-   Session 11 closes.**
+3. **ARCHITECTURE.md backfill — Pydantic boundary + opt-in escalation
+   pattern** — discovered during cycle 4 orientation: ARCHITECTURE.md
+   §7 documents `project_manager.py` defaults but not (a) Session 8's
+   `_validate_project` Pydantic boundary, (b) Session 10's
+   `CINEMA_STRICT_SCHEMA` escalation, (c) Session 12's
+   `CINEMA_AUTO_APPROVE_MOTION` escalation (when it lands). The
+   escalation pattern is now a recognized convention — should be
+   documented in the truth file. ~50 LOC. **Lane A in main context**
+   (director docs work, not implementer dispatch). Author before or
+   shortly after Session 12 ships so motion-flag gets an
+   architectural home.
 
 **Honorable mentions** (S-to-M, opportunistic single sessions):
 - **P1-2 Pipeline orchestrator extraction** — `cinema_pipeline.py` is
@@ -80,6 +91,11 @@ Full commit ledger:
 | — | ADR-013 Verification discipline (Tier-1) | `ed33035` |
 | — | Director-operator concurrent-operation protocol | `ad6cb4f` |
 | — | State-assertion + race-ack + counter-bump rules | `ea97d0a` |
+| 9 | P3-1 concurrency hardening (`_running_pipelines` + `_progress_queues`) | `bfa60bf`, `a97573e`, `f8b2aef`, `e164505` (audit) |
+| 10 | P1-3 part 2 — `CINEMA_STRICT_SCHEMA` env flag + first caller migration | `5f2fe0b`, `ef98629`, `ec607ed` (chore fix) |
+| 11 | P4-3 backend — auto-approve veto rules + per-gate config + ShotState integration | `d6fd3e1`, `ad526c3`, `42df2ac` (v1.1 minors), `e8b5ebc` (product doc) |
+| — | Protocol Bundle v2 substrate (STATE.md + rules log + mailbox + Rules #7/#8) | `416d610`, `5e0329d` (v2.1) |
+| — | Protocol Bundle v3 hardening (G auth precedence + F freshness + H audit) | `3340d1f` |
 
 Plus `chore(baseline)` counter syncs + multiple `docs(handoff)`
 commits during the two transplants (director: `eceb9a2`; operator:
@@ -103,25 +119,28 @@ snapshot was taken and were already counted in the 574.
 | P0-3 Cost-tracker + silent-except sweep | SHIPPED | done | Session 5; silent-except count was 2 (test cleanup, ACCEPTABLE) |
 | P1-1 Observability (print → logger) | SHIPPED | done | Session 4; 36 prints in 2 files converted |
 | P1-2 Pipeline orchestrator monolithic | OPEN | important-deferred | `cinema_pipeline.py` still ~1011 LOC; refactor liability, not bug |
-| P1-3 Project JSON no schema validation | PARTIAL | follow-up | Cycle 3 / Session 8 shipped boundary validation (warn-only); caller refactor + strict mode = Session 9+ |
+| P1-3 Project JSON no schema validation | PARTIAL | follow-up | Cycle 3 / Session 8 shipped boundary validation (warn-only); Cycle 4 / Session 10 shipped strict-mode env flag + first caller migration template; remaining: domain/* migrations module-by-module (Sessions 14+) |
 | P1-4 Frontend error boundaries | SHIPPED | done | Session 6 commit 1 |
 | P1-5 Doc-claim verification tooling | OPEN | important-deferred | ADR-013 rules shipped; `scripts/lint_doc_claims.py` did NOT |
 | P2-1 `competitive_generation=True` default | OPEN | important-deferred | One-line default flip + UI label; product call is the blocker |
 | P2-2 RunPod pod idle billing | OPEN | low-priority | Manual stop already documented in OPERATIONS.md §10 |
 | P2-3 Lipsync cascade silent fallthrough | SHIPPED | done | Session 6 commit 2 (cascade_metadata field) |
-| P3-1 Concurrency hygiene | OPEN | important-deferred | Unaudited module-globals (`_running_pipelines`, `_progress_queues`) |
+| P3-1 Concurrency hygiene | SHIPPED | done | Cycle 4 / Session 9 closed both race surfaces flagged by P3-1 audit (`bfa60bf` + lock-discipline tests in `a97573e`) |
 | P3-2 `_default_progress` in pipeline | PARTIAL | low-priority | Session 4 converted to `logger.debug` but method not deleted |
 | P3-3 scene_decomposer duplicate validators | OPEN | low-priority | Single-pass audit, ~1 session tidy |
 | P3-4 Root-level Python files unclear purpose | OPEN | low-priority | Grep-and-delete + 3 ARCHITECTURE.md entries |
 | P4-1 Vendor sprawl | OPEN | low-priority | Product decision, not engineering |
 | P4-2 Single-process architecture | NOT-DOING | drop | Explicit per STRATEGIC_REVIEW line 534 |
-| P4-3 4-gate review fatigue | OPEN | important-deferred | Most operator-visible UX gap remaining |
+| P4-3 4-gate review fatigue | PARTIAL | follow-up | Cycle 4 / Session 11 shipped backend (auto-approve veto rules + per-gate config + ShotState integration); Session 12 brief shipped (motion-gate wiring backend); Session 13 frontend (badge + summary + rejection modal) brief-blocked |
 | P4-4 No A/B testing | OPEN | low-priority | Needs operator volume data first |
 | P4-5 Director's Console underdeveloped | PARTIAL | important-deferred | Session 6 added cascade badges to `ReviewStage`; Console still missing |
 
-**Score:** 7 of 21 P-items shipped (P0-1.1, P0-1.2, P0-2, P0-3, P1-1, P1-4,
-P2-3), 3 partial (P3-2, P4-5, P1-3 — cycle 3 added P1-3 boundary slice),
-1 explicit not-doing (P4-2), 10 open. All P0 items closed.
+**Score (cycle 4 close):** 8 of 21 P-items shipped (P0-1.1, P0-1.2, P0-2,
+P0-3, P1-1, P1-4, P2-3, **P3-1 NEW**), 4 partial (P3-2, P4-5, P1-3 part-2
+template shipped, **P4-3 backend shipped**), 1 explicit not-doing (P4-2),
+8 open. All P0 closed; only P1-2 + P1-5 + P2-1 + P3-3 + P3-4 + P4-1 + P4-4
++ P4-5-console-only remain unstarted. Cycle 4 delta: +1 shipped (P3-1)
+and +1 promoted-to-partial (P4-3 backend).
 
 ---
 
@@ -133,6 +152,10 @@ P2-3), 3 partial (P3-2, P4-5, P1-3 — cycle 3 added P1-3 boundary slice),
 | `cost_tracker.record_api_call` coverage gap | **RESOLVED** by Session 5 (`bdeeee5`) | — |
 | `face_validator_gate` × 3 functions uncovered | **RESOLVED** by Session 7 (`06109b5` + `d8bf650`) | — |
 | `project.json` no schema validation at load/save boundary | **RESOLVED** by Session 8 (`ceb0a32` + `f9b0aff` + `66b06c8`) | Caller refactor + strict mode = Session 9+ |
+| `_running_pipelines` / `_progress_queues` race surfaces | **RESOLVED** by Session 9 (`bfa60bf` + `a97573e` + `f8b2aef`) | — |
+| `CINEMA_STRICT_SCHEMA` env flag + first caller migration | **RESOLVED** by Session 10 (`5f2fe0b` + `ef98629` + `ec607ed` chore) | Migration template ready; future sessions migrate domain/* module-by-module |
+| Motion-gate dead code (rules tested but unreachable in production) | **RESOLVED** by user product decision 2026-05-25: feature-flag pattern (`CINEMA_AUTO_APPROVE_MOTION` default off); Session 12 brief shipped, dispatch pending | Brief: `docs/HANDOFF-roadmap-2026-05-24.md` §SESSION 12 |
+| ARCHITECTURE.md gap: Pydantic boundary + opt-in escalation pattern | OPEN | important — discovered cycle 4 orientation; Sessions 8/10/12 escalations live but undocumented in truth file |
 | `scene_decomposer` + `lip_sync` coverage gaps | OPEN | important-deferred — audit before scoping new test files |
 | Session 6: `Monitor.tsx` wiring gap | **RESOLVED** by `a6e3ff1` (cycle 3 director-claimed) | — |
 | Session 6: ErrorBoundary per-shell palette | OPEN | low-priority — cosmetic (editorial-curtain inside console shell) |
@@ -142,35 +165,53 @@ P2-3), 3 partial (P3-2, P4-5, P1-3 — cycle 3 added P1-3 boundary slice),
 
 ## Recommendation for next director
 
-After cycle 3 closes (Sessions 7 + 8 + Monitor.tsx wiring + the P3-1
-concurrency audit + Session 9 brief + 3-rule discipline expansion),
-the project has **closed every Tier-1 pickup that didn't need a
-product conversation, a follow-on brief, or an external decision**.
-The 3 highest-leverage picks for next director sit at a step change
-in investment level:
+**Cycle 4 close (2026-05-25):** Sessions 9, 10, 11 all SHIPPED;
+Session 12 brief authored. P3-1 fully closed; P1-3 has its first
+migration template + strict-mode flag; P4-3 backend done with
+auto-approve veto rules + ShotState integration + per-gate config.
+The motion-gate product question was resolved (feature-flag pattern).
+The remaining P4-3 work is the frontend (Session 13) + Session 12
+implementer dispatch for motion-gate backend wiring.
 
-1. **P4-3 review fatigue / auto-approve heuristics** — highest-impact
-   UX gap remaining; **product-blocked** on which confidence signals
-   to threshold against (`quality_score`, `identity_score`, cost
-   budget, composite?). Session 5's telemetry is the data foundation;
-   the next director should surface the product question rather than
-   guess at thresholds.
-2. **Session 9 — P3-1 concurrency hardening** — brief shipped at
-   `docs/HANDOFF-roadmap-2026-05-24.md` §SESSION 9; closes the two
-   race surfaces flagged by the P3-1 audit. **Ready to dispatch** —
-   Lane B subagent, ~60-90 min.
-3. **Session 10 — P1-3 part 2 (caller refactor + strict mode)** —
-   brief-blocked. Author a Session 8-shaped brief sequencing
-   `domain/*` callers module-by-module, then dispatch.
+Cycle 5 director's top picks:
 
-Below those, **P1-2 (orchestrator extraction)** and **P2-1
-(competitive_generation default)** remain S-to-M opportunistic
-honorable-mentions. They are not urgent.
+1. **Session 12 implementer dispatch** (motion-gate backend) —
+   brief-ready at `docs/HANDOFF-roadmap-2026-05-24.md` §SESSION 12.
+   Lane B Sonnet, ~45-75 min. Closes the documented v1 carve-out via
+   opt-in env flag (`CINEMA_AUTO_APPROVE_MOTION`). The escalation
+   pattern is now formalized — second instance after S10's
+   `CINEMA_STRICT_SCHEMA`.
 
-**P4 except P4-3 is correctly deferred or not-doing.** Do not
-re-litigate P4-2 (microservices) — STRATEGIC_REVIEW line 534 settled
-it. P4-4 (A/B testing) becomes worth doing only after 6+ months of
-operator volume data exists.
+2. **Session 13 brief (P4-3 frontend) + dispatch** — brief-blocked
+   on Session 12 closing. Once S12 lands, author the frontend brief
+   covering `AutoApproveBadge`, `PostRunSummary` modal, and
+   rejection-with-reason modal. Consumes S11's audit-log shape +
+   S12's motion entries. Effort: M (~2 hr). After S13 ships, P4-3
+   converts from PARTIAL to fully SHIPPED.
+
+3. **ARCHITECTURE.md backfill** — Lane A director docs work in main
+   context. ~50 LOC §7.x subsection covering: Session 8's Pydantic
+   boundary at `_validate_project`, the warn-only contract, the
+   `CINEMA_STRICT_SCHEMA` + `CINEMA_AUTO_APPROVE_MOTION` opt-in
+   escalation pattern as project convention, and the boundary
+   between typed-attribute access (post-S10) and dict access
+   (pre-migration sites). Land before or alongside Session 12 ship
+   so motion-flag gets an architectural home.
+
+Below those:
+
+- **P1-3 part 3+** (additional `domain/*` caller migrations) — uses
+  S10's template; ~1-2 sessions per module. Opportunistic, not urgent.
+- **P1-2 orchestrator extraction** — `cinema_pipeline.py` still
+  ~1113 LOC (up from 1011 at cycle 3; net +102 from S10/S11 changes).
+  S-to-M opportunistic refactor.
+- **P2-1 `competitive_generation=True` default** — one-line flip;
+  product call still the blocker.
+
+**Still deferred / not-doing (unchanged):** P1-5 doc-claim lint tool,
+P2-2 RunPod idle billing, P3-3 + P3-4 + P4-1, P4-2 (explicitly
+not-doing), P4-4 (needs volume data). Re-read the "Score" section
+above for the count.
 
 ---
 
