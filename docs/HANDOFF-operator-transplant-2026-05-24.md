@@ -31,10 +31,22 @@
 # 0. Cold-read STATE.md (machine truth, auto-maintained by hook after
 #    each commit — see Protocol Bundle v2). NEW first step.
 cat STATE.md
-# Compare STATE.md's "Updated" timestamp to current `git log -1 --format=%cI`.
-# If STATE.md is fresh (Updated within seconds of HEAD's commit time):
-#   trust its HEAD / branch / working-tree / smoke / pytest / mailbox fields
-#   and SKIP step 1 below for verification.
+
+# 0a. STATE.md freshness check (per Protocol Bundle v3 §F).
+#     Closes the silent-hook-failure mode where STATE.md drifts from
+#     reality and both agents trust a lie. v2.1 (`5e0329d`) was a regex
+#     bug in the hook that demonstrated this failure mode is real.
+STATE_FRESHNESS_SECONDS=5   # Slack accounts for hook execution time;
+                            # widen if hook becomes heavier; see v3 §F R-F1.
+STATE_TS=$(grep -oE 'Updated:.*\(' STATE.md | grep -oE '[0-9-]+T[0-9:]+Z')
+HEAD_TS=$(git log -1 --format='%cI' HEAD | sed 's/[+-][0-9:]*$/Z/')
+# If STATE.md's Updated timestamp is within $STATE_FRESHNESS_SECONDS of HEAD:
+#   trust STATE.md fields (HEAD, branch, tree, smoke, pytest, mailbox)
+#   skip step 1's manual verification
+# If outside window OR STATE.md missing OR timestamp parse fails:
+#   STATE.md is stale or unreliable; run step 1 manually for ground truth
+#   AND surface to user: "STATE.md staleness detected; falling back to manual verify"
+#
 # If STATE.md is stale OR the hook isn't registered in YOUR
 # .claude/settings.local.json (per-clone setup; see coordination/README.md):
 #   re-run step 1 manually for ground truth.

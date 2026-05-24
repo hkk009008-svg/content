@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Content** (3828 symbols, 22631 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Content** (3853 symbols, 22688 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -801,6 +801,37 @@ The role then processes the queue with full Tier-1 authority. This is
 a **one-time-per-session signal**, not a per-event gate. Steady-state
 events during the session require no user-surface — Tier-1 throughput
 preserved.
+
+**Authority precedence (full).** User direct instructions > git
+commits (durable record of what happened) > mailbox `sent/` events
+(filesystem-true claims about coordination) > STATE.md fields
+(hook-derived snapshot; informational against the above) > default
+behavior.
+
+Practical implications:
+
+- When STATE.md and `git rev-parse HEAD` disagree on HEAD SHA → git
+  wins. STATE.md is stale; re-verify.
+- When STATE.md `unread mailbox` count and `ls coordination/mailbox/sent/`
+  disagree → filesystem wins. STATE.md is stale; re-verify.
+- When a mailbox event claims a commit landed (e.g., "I dispatched
+  Session 9 implementer") but `git log` shows no matching commit
+  within ~5 minutes of the event's timestamp → git wins. Mailbox
+  claim is a *promise*; git is the *record*. The 5-minute window is
+  a heuristic anchor; for in-flight work known to take longer (e.g.,
+  overnight runs), the sender should explicitly note expected
+  duration in the mailbox event's body.
+- Conflicts between user instruction and any artifact are resolved
+  per the existing CLAUDE.md "Instruction Priority" — user wins.
+
+**Clarification on "user direct instructions".** "User direct
+instructions" means literal user-typed-in-chat messages or other
+channels the platform identifies as user input. Operator-authored or
+director-authored mailbox events are mailbox-tier authority, not
+user-tier — even though operator/director may be invoking the user's
+stated wishes. When in doubt, the role of the SENDER (user vs.
+operator vs. director) is what determines tier, not the CONTENT or
+intent.
 
 ## Git is the tiebreaker
 

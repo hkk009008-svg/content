@@ -27,6 +27,21 @@ and per-session invocation count. Updated manually at session-close by operator
 
 ## Invocation log
 
+**Note on plateau interpretation (per Protocol Bundle v3 §Minor):** Rule
+emergence rate is measured per-regime. The current regime is parallel-session
+operator+director coordination at modest throughput (~20-30 commits per
+session, ~3-4 sessions per cycle). Different regimes (higher throughput,
+longer runs, more concurrent roles, external CI pressure) may surface
+failure modes the existing rules don't catch. **Plateau in this regime ≠
+convergence in all regimes.** Treat the current 8-rule set as stable for
+current conditions, not as a complete protocol.
+
+## Infrastructure audits
+
+| Audit | Scope | Findings doc | Commit |
+|---|---|---|---|
+| Hook script (v2.1 baseline) | `.claude/hooks/update-state.sh` vs v2 §A as amended by v2.1 | [docs/AUDIT-hook-script-v2-2026-05-24.md](AUDIT-hook-script-v2-2026-05-24.md) | _Protocol Bundle v3 ship_ |
+
 ### Session 2026-05-24-cycle-3 (this conversation)
 
 Retrospective count of rule invocations during cycle 3 (the conversation that
