@@ -20,11 +20,14 @@ from cinema.auto_approve import (
     AutoApproveDecision,
     VetoRule,
     check_gate,
+    pick_best_take_by_composite,
+    pick_best_take_for_final,
     summarize_audit,
     _rules_for_plan,
     _rules_for_image,
     _rules_for_motion,
     _rules_for_final,
+    _best_take_lipsync,
 )
 
 
@@ -524,3 +527,94 @@ class TestAuditAppend:
         audit = updated_shot["auto_approve_audit"][0]
         assert audit["gate"] == "plan"
         assert audit["auto_approved"] is True
+
+
+# ---------------------------------------------------------------------------
+# TestV11Fixes — regression tests for Session 11 code-review findings.
+#
+# Three bugs fixed in the v1.1 chore commit:
+#   1. _best_take_lipsync returned FIRST take's score instead of MAX.
+#   2. Controller picked keyframe_takes[-1] for the image gate, ignoring the
+#      veto rule's "best = max(composite)" semantics — could approve a worse
+#      take than the rule evaluated.
+#   3. Controller picked final_candidates[-1] for the final gate, ignoring
+#      fallback status — could approve a fallback take when non-fallback
+#      options existed.
+# ---------------------------------------------------------------------------
+
+
+class TestV11Fixes:
+    """Regression tests for Session 11 review's "best-take semantics" fixes."""
+
+    def test_best_take_lipsync_returns_max_not_first(self):
+        """Bug: returned FIRST take's score; expected MAX across takes."""
+        takes = [
+            {"id": "t1", "metadata": {"lipsync_score": 0.7}},
+            {"id": "t2", "metadata": {"lipsync_score": 0.95}},
+        ]
+        # Old (buggy) behavior: returned 0.7 (first take). With threshold 0.8
+        # the rule would VETO despite t2 being well above threshold.
+        # Fixed behavior: returns 0.95 (max), rule PASSES.
+        assert _best_take_lipsync(takes) == pytest.approx(0.95)
+
+    def test_best_take_lipsync_no_score_defaults_to_one(self):
+        """N/A behavior preserved: shots with no dialogue (no lipsync score) → 1.0."""
+        takes = [
+            {"id": "t1", "metadata": {}},
+            {"id": "t2", "metadata": {"other_score": 0.5}},  # unrelated metric
+        ]
+        assert _best_take_lipsync(takes) == pytest.approx(1.0)
+
+    def test_pick_best_take_by_composite_picks_highest_score(self):
+        """Image gate: helper should pick the take with max composite, not last."""
+        takes = [
+            {"id": "t_low", "metadata": {"composite": 0.85}},
+            {"id": "t_high", "metadata": {"composite": 0.99}},
+            {"id": "t_mid", "metadata": {"composite": 0.92}},  # last by position
+        ]
+        # Old (buggy) controller: keyframe_takes[-1] → t_mid (0.92).
+        # Fixed helper: t_high (0.99).
+        best = pick_best_take_by_composite(takes)
+        assert best is not None
+        assert best["id"] == "t_high"
+
+    def test_pick_best_take_by_composite_falls_back_to_last_when_no_score(self):
+        """When no take carries a composite metric, return the most recent."""
+        takes = [
+            {"id": "t1", "metadata": {}},
+            {"id": "t2", "metadata": {}},
+        ]
+        best = pick_best_take_by_composite(takes)
+        assert best is not None
+        assert best["id"] == "t2"  # fallback to last
+        assert pick_best_take_by_composite([]) is None
+
+    def test_pick_best_take_for_final_prefers_non_fallback(self):
+        """Final gate: non-fallback takes preferred over fallback even if
+        fallback has higher composite — the audit log should say "approved
+        without fallback" when possible."""
+        candidates = [
+            {"id": "fallback_hi", "metadata": {"composite": 0.95},
+             "cascade_metadata": {"fallback": True}},
+            {"id": "primary_lo", "metadata": {"composite": 0.88},
+             "cascade_metadata": {"fallback": False}},
+        ]
+        best = pick_best_take_for_final(candidates)
+        assert best is not None
+        assert best["id"] == "primary_lo", (
+            "non-fallback take must win even with lower composite"
+        )
+
+    def test_pick_best_take_for_final_all_fallback_picks_best_anyway(self):
+        """When ALL candidates are fallback, return the best by composite
+        (graceful degradation; the upstream non-fallback veto would have
+        prevented this gate from auto-approving in the first place)."""
+        candidates = [
+            {"id": "fb_lo", "metadata": {"composite": 0.82},
+             "cascade_metadata": {"fallback": True}},
+            {"id": "fb_hi", "metadata": {"composite": 0.91},
+             "cascade_metadata": {"fallback": True}},
+        ]
+        best = pick_best_take_for_final(candidates)
+        assert best is not None
+        assert best["id"] == "fb_hi"

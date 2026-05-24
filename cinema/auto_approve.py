@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Callable, Literal
+from typing import Callable, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -354,16 +354,82 @@ def _best_take_lipsync(takes: list[dict]) -> float:
     """Return the highest lipsync_score across all takes, or 1.0 if none present.
 
     1.0 default: when lipsync wasn't computed (shot has no dialogue) the
-    gate should not veto on this rule.  The predicate only fires when the
-    score IS present and below threshold.
+    gate should not veto on this rule.  The predicate only fires when at
+    least one take has a score AND the max score is below threshold.
+
+    Fixed v1.1 (Session 11 review): was returning the FIRST take's score
+    instead of the MAX, inconsistent with _best_take_composite / _identity
+    / _motion_score pattern. A shot with takes
+    [lipsync_score=0.7, lipsync_score=0.95] would veto despite an
+    acceptable take being present.
     """
+    best = 0.0
+    any_present = False
     for take in takes:
         metadata = take.get("metadata") or {}
         score = metadata.get("lipsync_score")
         if score is not None:
-            return float(score)
-    # No lipsync score present — treat as "not applicable", don't veto.
-    return 1.0
+            any_present = True
+            try:
+                best = max(best, float(score))
+            except (TypeError, ValueError):
+                continue
+    return best if any_present else 1.0
+
+
+def pick_best_take_by_composite(takes: list[dict]) -> Optional[dict]:
+    """Return the take with the highest composite score, falling back to the
+    most recent take if no take carries a composite metric.
+
+    Mirrors `_best_take_composite`'s scoring (used by the image veto rule)
+    so the controller selects the SAME take the rule evaluated. Without
+    this helper the controller picked `keyframe_takes[-1]`, which could
+    mark a worse take as approved when the latest-by-position differed
+    from the highest-by-score.
+
+    Returns None if takes is empty.
+    """
+    if not takes:
+        return None
+    best_take = None
+    best_score = -1.0
+    for take in takes:
+        metadata = take.get("metadata") or {}
+        score = metadata.get("composite")
+        if score is None:
+            continue
+        try:
+            s = float(score)
+        except (TypeError, ValueError):
+            continue
+        if s > best_score:
+            best_score = s
+            best_take = take
+    return best_take if best_take is not None else takes[-1]
+
+
+def pick_best_take_for_final(candidates: list[dict]) -> Optional[dict]:
+    """Return the best take for the final gate from a candidate pool (typically
+    postprocess_variants + motion_takes).
+
+    Strategy:
+      1. Prefer non-fallback takes (`cascade_metadata.fallback != True`)
+         when any exist — the audit log will say "approved without
+         fallback" which is the stronger signal.
+      2. Within the chosen pool, pick by composite score (max), else by
+         recency (last in list).
+
+    Returns None if candidates is empty.
+    """
+    if not candidates:
+        return None
+    non_fallback = []
+    for take in candidates:
+        cascade = take.get("cascade_metadata") or {}
+        if not (isinstance(cascade, dict) and cascade.get("fallback") is True):
+            non_fallback.append(take)
+    pool = non_fallback if non_fallback else candidates
+    return pick_best_take_by_composite(pool)
 
 
 def _any_take_has_fallback(takes: list[dict]) -> bool:

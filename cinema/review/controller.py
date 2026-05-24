@@ -70,7 +70,13 @@ from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 from project_manager import MutationResult, mutate_project
 
-from cinema.auto_approve import AutoApproveConfig, AutoApproveDecision, check_gate
+from cinema.auto_approve import (
+    AutoApproveConfig,
+    AutoApproveDecision,
+    check_gate,
+    pick_best_take_by_composite,
+    pick_best_take_for_final,
+)
 from cinema.lifecycle import LifecycleService
 
 _aa_logger = logging.getLogger(__name__ + ".auto_approve")
@@ -335,9 +341,15 @@ class ReviewController:
                             self._host._mutate_shot(shot_id, _plan_mutator)
 
                         elif aa_gate == "image":
-                            best_take_id = (
-                                shot.get("keyframe_takes") or [{}]
-                            )[-1].get("id", "") if shot.get("keyframe_takes") else ""
+                            # v1.1 fix (Session 11 review): pick the take with
+                            # the highest composite score (matches the image
+                            # veto rule's "best = max(composite)" semantics).
+                            # Was: keyframe_takes[-1] — could mark a worse take
+                            # as approved when latest-by-position ≠ best-by-score.
+                            best_take = pick_best_take_by_composite(
+                                shot.get("keyframe_takes") or []
+                            )
+                            best_take_id = (best_take or {}).get("id", "")
                             if best_take_id:
                                 def _img_mutator(
                                     _scene_ignored, s,
@@ -355,12 +367,15 @@ class ReviewController:
                                 self._host._mutate_shot(shot_id, _img_mutator)
 
                         elif aa_gate == "final":
-                            # Pick the most recently generated postprocess or
-                            # motion take as the approved final take.
+                            # v1.1 fix (Session 11 review): prefer non-fallback
+                            # takes, then pick by max composite. Was: simply
+                            # final_candidates[-1] — could approve a fallback
+                            # take when non-fallback options existed, or pick
+                            # a low-composite take over a higher one.
                             final_candidates = (
                                 shot.get("postprocess_variants") or []
                             ) + (shot.get("motion_takes") or [])
-                            best_final = final_candidates[-1] if final_candidates else None
+                            best_final = pick_best_take_for_final(final_candidates)
                             best_final_id = (best_final or {}).get("id", "")
                             if best_final_id:
                                 # Resolve motion source for approved_motion_take_id.
