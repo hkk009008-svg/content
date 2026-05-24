@@ -12,16 +12,14 @@
 
 ## TL;DR (60 seconds)
 
-- **Original 6-session roadmap CLOSED.** Sessions 7 (face_validator_gate test coverage, P0-1 Pri 3) and 8 (Pydantic schema on project.json, P1-3 PARTIAL) also SHIPPED. Pytest **629 passed / 3 skipped / 0 failed** (was 590 at roadmap close: +23 from S7, +16 from S8 incl. minors).
-- **9 commits pushed during this session.** Branch is up-to-date with `origin/main` at HEAD `5c4a7c9`. Director shipped + pushed at the cycle-3-POST-ROADMAP-refresh moment.
-- **Multi-agent coordination protocol codified AND extended:**
-  - `ad6cb4f` introduced `# Director-Operator Concurrent Operation` (role partition + signaling + git tiebreaker + offline + adjacent-useful).
-  - `ea97d0a` added 3 more rules (state-asserting writes precondition, race-acknowledging commit bodies, counter-bump fold-and-surface during concurrent ops) — operator drafted, director shipped per the carve-out from `ad6cb4f`.
-- **Cycle-2 director transplant exists** (`60001d9`) — director hit context limit, then continued past the transplant to ship Sessions 7-8 minors + discipline edits + POST-ROADMAP refresh. Cycle-3 director picks up at `5c4a7c9`.
-- **Cycle-3 next-session candidates** (POST-ROADMAP top-3, priority order):
-  1. **Monitor.tsx cascadeMetadata wiring** (~5 LOC quick-claim, Lane A; operator-claimable)
-  2. **P4-3 four-gate review fatigue / auto-approve** (cycle-2 director's recommended top non-Tier-1 surface)
-  3. **Session 9** — caller refactor + strict-mode env flag building on Session 8's `domain/models.py`
+- **Original 6-session roadmap CLOSED + Sessions 7, 8, 9, 11 SHIPPED.** Session 7 (face_validator_gate, P0-1 Pri 3), 8 (Pydantic schema, P1-3 PARTIAL), 9 (P3-1 concurrency hardening), 11 (P4-3 backend auto-approve + v1.1 minors). Plus Monitor.tsx cascadeMetadata wiring (`a6e3ff1`, POST-ROADMAP top-3 #1 quick-claim), P3-1 audit (`e164505`), Session 10 brief shipped (`cefde42`, implementer pending). Pytest **664 passed / 3 skipped / 0 failed** (was 590 at roadmap close: +74 across S7-S11).
+- **Protocol Bundle v2 SHIPPED** (`416d610` + `5e0329d` v2.1 fix). New infrastructure: STATE.md (cold-start oracle, hook-maintained), `docs/PROTOCOL-RULES-LOG.md`, `coordination/mailbox/`, Rules #7 (pre-commit re-verify) + #8 (mailbox authority). Closes the v1-observed races (a6e3ff1 mid-handoff Monitor.tsx land; stale handoff TL;DR; user-as-relay bottleneck).
+- **Protocol Bundle v3 SHIPPED** (`3340d1f feat(protocol): ship Protocol Bundle v3 (G auth precedence + F freshness + H audit + minor)`). All 3 main + 1 minor landed: **G** (authority hierarchy extension w/ 5-min mailbox window + user-tier clarification, Rule #8 extended), **F** (STATE.md freshness check on cold-start, this doc's section 0a), **H** (hook script audit deliverable at `docs/AUDIT-hook-script-v2-2026-05-24.md`), **Minor** (PROTOCOL-RULES-LOG per-regime caveat). Proposal cycle: `749341b` proposal, `26a0842` REPLY, `ec1e64e` revision, `3340d1f` ship.
+- **Branch state at this refresh:** HEAD `3340d1f`; v3 ship folded counter bumps AND director's PROTOCOL-RULES-LOG pre-impl AND §F cold-start update (this doc). Working tree was clean post-v3-ship; this refresh adds operator-handoff content updates only (TL;DR / ledger / what's-pending).
+- **Cycle-3 immediate queue post-v3:**
+  1. **Session 10 dispatch** — brief at `cefde42`; implementer pending; director-owned dispatch
+  2. **POST-ROADMAP re-refresh** — needed to surface cycle-4 picks (last refresh `64c7571` predates Sessions 9, 11, v2 ship, v3 ship)
+  3. **PROTOCOL-RULES-LOG SHA update** — v3 ship's `_Protocol Bundle v3 ship_` placeholder rows (likely Rules 9, 10 if any, and Infrastructure Audits entry) need updating to `3340d1f` per the chicken-and-egg pattern from the v2 ship+update cycle
 
 ---
 
@@ -191,27 +189,75 @@ Operator + DIRECTOR (multiple cycles) interleaved. The director made periodic co
 | `60001d9` | docs(handoff) | **DIRECTOR** (cycle 2) | Cycle-2 director context-transplant doc |
 | `ea97d0a` | docs(discipline) | operator drafted, **DIRECTOR** shipped (with refinement) | 3 more discipline rules: state-asserting writes precondition, race-acknowledging commit bodies, counter-bump fold-and-surface during concurrent ops |
 | `5c4a7c9` | docs(roadmap) | **DIRECTOR** | POST-ROADMAP refresh for post-cycle-3 picks (Monitor.tsx promoted to #1; P4-3 added as #2; Session 9 framed as #3) |
-| THIS COMMIT | docs(handoff) | operator | Refresh this transplant doc for post-cycle-3 pickup |
+| `1541a69` | docs(handoff) | operator | First operator-transplant refresh for post-cycle-3 state (folded ad6cb4f counter bump; race-acked a6e3ff1 mid-write) |
+| `a6e3ff1` | feat(monitor) | **DIRECTOR** | Wire cascadeMetadata into live-run TakeStrip (POST-ROADMAP top-3 #1 quick-claim, shipped by director not operator) |
+| `64c7571` | docs(roadmap) | **DIRECTOR** | POST-ROADMAP rotation post-Monitor (top-3 picks rotated) |
+| `e164505` | docs(audit) | **DIRECTOR** | P3-1 concurrency audit — 2 unguarded globals in web_server.py |
 
-**Total: 9 commits PUSHED through `5c4a7c9` + this commit's worth (+1 unpushed until next push event).** Branch was 0 ahead at this Write's start; will be 1 ahead after this commit.
+### Session 9 — P3-1 concurrency hardening (post-audit follow-on)
+
+| SHA | Type | By | Summary |
+|---|---|---|---|
+| `607348d` | docs(roadmap) | **DIRECTOR** | Session 9 brief — P3-1 concurrency hardening |
+| `bfa60bf` | feat(web) | **DIRECTOR**'s implementer subagent | Close `_running_pipelines` / `_progress_queues` race surfaces in web_server.py |
+| `a97573e` | test(web) | **DIRECTOR**'s implementer subagent | Cover concurrent api_generate + _ensure_progress_queue race |
+| `e8b5ebc` | docs(product) | **DIRECTOR** | Surface P4-3 auto-approve design questions |
+| `f8b2aef` | chore(web) | **DIRECTOR** | Session 9 code-review minors |
+| `7c92f2f` | docs(roadmap) | **DIRECTOR** | Session 11 brief — P4-3 backend auto-approve |
+
+### Protocol Bundle v2 ship + v2.1 fix
+
+| SHA | Type | By | Summary |
+|---|---|---|---|
+| `c6a8f22` | docs(reply) | **DIRECTOR** | REPLY to operator's v2 proposal with R1/R3/R5 refinements + C2/C4 clarifications |
+| `1b3f6f8` | docs(proposal) | operator | Revise v2 proposal per REPLY (5 targeted edits to drafts) |
+| `416d610` | feat(protocol) | **DIRECTOR** | **Ship Protocol Bundle v2**: STATE.md + PROTOCOL-RULES-LOG.md + Rules #7/#8 + coordination/mailbox/ scaffold + hook script |
+| `5e0329d` | chore(protocol) | **DIRECTOR** | Bundle v2.1 — pytest regex fix + KNOWN LIMITATION header per C2 + inline comment per C4 |
+| `3e57ddf` | docs(rules-log) | operator | Update Rules #7/#8 codification SHAs to 416d610 (placeholder→actual); first Rule #7 dogfood invocation |
+
+### Session 11 — P4-3 backend auto-approve
+
+| SHA | Type | By | Summary |
+|---|---|---|---|
+| `cefde42` | docs(roadmap) | **DIRECTOR** | Session 10 brief — P1-3 part 2 strict mode + first caller migration (implementer pending; held for separate dispatch) |
+| `d6fd3e1` | feat(cinema) | **DIRECTOR**'s implementer subagent | Auto-approve veto rules + per-gate config + ShotState integration (new cinema/auto_approve.py) |
+| `ad526c3` | test(cinema) | **DIRECTOR**'s implementer subagent | Cover auto-approve veto rules + per-gate integration (new tests/unit/test_auto_approve.py) |
+| `42df2ac` | chore(cinema) | **DIRECTOR** | Session 11 v1.1 — best-take semantics consistency (+5 tests → 664 pytest baseline) |
+
+### Protocol Bundle v3 proposal cycle (pending ship)
+
+| SHA | Type | By | Summary |
+|---|---|---|---|
+| `749341b` | docs(proposal) | operator | Draft v3 proposal — G (authority hierarchy), F (STATE.md freshness check), H (hook script audit) |
+| `26a0842` | docs(reply) | **DIRECTOR** | REPLY to v3 proposal with R-G1 (5-min window), R-F1 (named constant), R-H1 (v2.1 baseline), C-G1 (user-tier clarification) |
+| `ec1e64e` | docs(proposal) | operator | Revise v3 proposal per REPLY (5 targeted edits; 4th Rule #7 dogfood; no drift caught) |
+| `3340d1f` | feat(protocol) | **DIRECTOR** | **Ship Protocol Bundle v3**: G (Rule #8 extended) + F (STATE.md freshness check in cold-start) + H (hook script audit doc) + Minor (PROTOCOL-RULES-LOG per-regime caveat). Folded held counter bumps + director's pre-impl edits from working tree. |
+| THIS COMMIT | docs(handoff) | operator | Refresh operator-transplant doc for post-v3-ship state. Race-ack: v3 shipped during this refresh write (Rule #7 caught the drift in pre-commit re-verify); re-edited TL;DR + ledger + what's-pending to reflect SHIPPED, not pending. |
+
+**Total: ~30 commits since `5c4a7c9` (last handoff refresh). Branch ahead-count varies with push events; check `git rev-list --count origin/main..HEAD`.**
 
 ---
 
-## What's pending after Sessions 7-8 closure
+## What's pending after Sessions 7-11 + Protocol Bundle v2 ship
 
-The original 6-session roadmap + Sessions 7-8 are all CLOSED. The canonical "what's next" doc is `docs/POST-ROADMAP-2026-05-24.md` (`5c4a7c9`) — refreshed for cycle-3 with updated priorities.
+Sessions 1, 2, 3, 4, 5, 6, 7, 8, 9, 11 all SHIPPED. Session 10 brief shipped (`cefde42`) but implementer not yet dispatched (held for separate Session 10 dispatch by director).
+
+Protocol Bundle v2 SHIPPED (`416d610` + `5e0329d` v2.1). Protocol Bundle v3 SHIPPED (`3340d1f`) — proposal cycle: `749341b` → REPLY `26a0842` → revision `ec1e64e` → ship `3340d1f`. v3 ship folded all working-tree pre-impl edits + held counter bumps.
+
+The canonical "what's next" doc is still `docs/POST-ROADMAP-2026-05-24.md` (last refreshed at `64c7571` post-Monitor; will need re-refresh post-Session-11 + post-v3-ship to surface cycle-4 picks).
 
 This operator handoff covers **HOW** (execution-discipline patterns, accumulated lore). POST-ROADMAP covers **WHAT**.
 
-Cycle-3 top picks per the refreshed POST-ROADMAP:
-1. **Monitor.tsx cascadeMetadata wiring** (~5 LOC, Lane A; operator-claimable). useMemo lookup in `project.scenes[].shots[].takes[]` by `activeState?.take_id` to pull cascade_metadata from the matching TakeRecord. Data is already on the props; no backend touch needed.
-2. **P4-3 four-gate review fatigue / auto-approve.** Director's strategic call.
-3. **Session 9** — caller refactor + strict-mode env flag building on Session 8's `domain/models.py` (P1-3 PARTIAL → COMPLETE).
+Cycle-3 immediate queue post-v3-ship:
+1. **Session 10 dispatch** — brief at `cefde42`; implementer pending. Director-owned dispatch.
+2. **POST-ROADMAP re-refresh** — needed to surface cycle-4 picks (last refresh `64c7571` predates Sessions 9, 11, v2 ship, v3 ship).
+3. **PROTOCOL-RULES-LOG SHA update** — operator chore; update any v3-ship placeholder rows (Infrastructure Audits, possibly Rules 9/10) from `_Protocol Bundle v3 ship_` to `3340d1f` per the chicken-and-egg pattern established post-v2.
 
 Open items at this transplant:
 
-- **Push status** — clean at `5c4a7c9`; if Session 9 / Monitor.tsx / P4-3 land subsequently, will need another push authorization from user.
-- **Next-session dispatch** — director-owned (cycle-3 instance). Monitor.tsx is operator-quick-claim if director hands it off.
+- **Push status** — recent pushes have happened; ahead-count varies. Check `git rev-list --count origin/main..HEAD` for exact unpushed.
+- **v3 PROTOCOL-RULES-LOG SHA placeholder update** — operator chore; cheap follow-up after v3 ship lands (mirrors `3e57ddf`'s post-v2 SHA update for Rules #7/#8).
+- **Next-session dispatch beyond Session 10** — director-owned. No operator-quick-claim candidates currently surfaced (POST-ROADMAP needs re-refresh first).
 
 ---
 
