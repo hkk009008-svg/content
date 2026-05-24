@@ -1136,16 +1136,35 @@ def api_decompose_scene(pid, sid):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
-    scene = next((s for s in project["scenes"] if s["id"] == sid), None)
-    if not scene:
+    # P1-3 part 3 migration (second canonical example): scene lookup +
+    # characters filter + location lookup via typed access. Same template
+    # as Session 10's api_generate_dialogue migration (web_server.py:1106);
+    # see docs/MIGRATION-PATTERN-pydantic-caller.md for the full recipe.
+    #
+    # `settings` and `style_rules` (mid-level dict access on global_settings)
+    # remain on raw dict per template's "migrate top-level scene/character
+    # /location access only" choice — global_settings has its own future
+    # migration session, not bundled here.
+    project_typed = Project.model_validate(project)
+    scene_typed = next((s for s in project_typed.scenes if s.id == sid), None)
+    if scene_typed is None:
         return jsonify({"error": "Scene not found"}), 404
 
-    chars = [c for c in project["characters"] if c["id"] in scene.get("characters_present", [])]
-    location = next((l for l in project["locations"] if l["id"] == scene.get("location_id")), {})
+    chars = [c for c in project_typed.characters if c.id in scene_typed.characters_present]
+    location_typed = next(
+        (l for l in project_typed.locations if l.id == scene_typed.location_id),
+        None,
+    )
     settings = project.get("global_settings", {})
     style_rules = settings.get("style_rules", {})
 
-    shots = decompose_scene(scene, chars, location, settings, style_rules)
+    shots = decompose_scene(
+        scene_typed.model_dump(),
+        [c.model_dump() for c in chars],
+        location_typed.model_dump() if location_typed else {},
+        settings,
+        style_rules,
+    )
     update_scene_shots(project, sid, shots, timeout=HTTP_PROJECT_TIMEOUT)
 
     return jsonify({"shots": shots})

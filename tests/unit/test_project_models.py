@@ -581,6 +581,53 @@ class TestMigratedCaller:
         assert (p_empty.scenes[0].mood or "neutral") == "neutral"
         assert (p_explicit.scenes[0].mood or "neutral") == "tense"
 
+    def test_decompose_scene_location_lookup_matches_dict_path(self):
+        """P1-3 part 3 regression: api_decompose_scene's location-lookup migration
+        returns semantically identical results to the old dict-access path."""
+        raw = self._make_project_dict()
+        # Augment with locations + location_id on the scene (decompose's input shape)
+        raw["locations"] = [
+            {"id": "loc_a", "name": "Forest"},
+            {"id": "loc_b", "name": "Cave"},
+        ]
+        raw["scenes"][0]["location_id"] = "loc_a"
+
+        # Old dict path
+        scene_d = raw["scenes"][0]
+        loc_dict = next((l for l in raw["locations"] if l["id"] == scene_d.get("location_id")), {})
+
+        # New typed path (mirrors api_decompose_scene's migration)
+        p = Project.model_validate(raw)
+        scene_t = next((s for s in p.scenes if s.id == "scene_001"), None)
+        loc_typed = next(
+            (l for l in p.locations if l.id == scene_t.location_id),
+            None,
+        )
+
+        assert loc_dict["id"] == loc_typed.id == "loc_a"
+        assert loc_dict["name"] == loc_typed.name == "Forest"
+
+    def test_decompose_scene_missing_location_returns_falsy(self):
+        """P1-3 part 3 regression: when location_id doesn't match, both paths
+        produce falsy/None — the call site falls back to {} via model_dump or
+        empty literal."""
+        raw = self._make_project_dict()
+        raw["locations"] = [{"id": "loc_other", "name": "Other"}]
+        raw["scenes"][0]["location_id"] = "loc_missing"
+
+        scene_d = raw["scenes"][0]
+        loc_dict = next((l for l in raw["locations"] if l["id"] == scene_d.get("location_id")), {})
+        assert loc_dict == {}  # old path's default
+
+        p = Project.model_validate(raw)
+        scene_t = next((s for s in p.scenes if s.id == "scene_001"), None)
+        loc_typed = next(
+            (l for l in p.locations if l.id == scene_t.location_id),
+            None,
+        )
+        assert loc_typed is None  # new path's "None instead of {}" is migration-doc gotcha
+        # Call site handles via `location_typed.model_dump() if location_typed else {}`
+
     def test_missing_scene_returns_none(self):
         """Looking up a non-existent sid on typed scenes returns None,
         matching the old dict-access path's behavior."""
