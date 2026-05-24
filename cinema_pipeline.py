@@ -1030,7 +1030,7 @@ class CinemaPipeline:
                 subprocess.run(cmd, check=True, capture_output=True, timeout=120)
                 logger.info(
                     "Final cinema video assembled with BGM",
-                    extra={"final_output": final_output},
+                    extra={"final_path": final_output},
                 )
             else:
                 # No BGM — just copy stitched as final
@@ -1038,7 +1038,7 @@ class CinemaPipeline:
                 shutil.copy2(stitched, final_output)
                 logger.info(
                     "Final cinema video assembled (no BGM)",
-                    extra={"final_output": final_output},
+                    extra={"final_path": final_output},
                 )
 
             self._apply_final_loudnorm(final_output)
@@ -1071,7 +1071,7 @@ class CinemaPipeline:
                 subprocess.run(cmd_fallback, check=True, capture_output=True, timeout=120)
                 logger.info(
                     "Final cinema video assembled (BGM only, no dialogue audio)",
-                    extra={"final_output": final_output},
+                    extra={"final_path": final_output},
                 )
                 self._apply_final_loudnorm(final_output)
                 return final_output

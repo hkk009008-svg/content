@@ -14,8 +14,10 @@ Design notes:
 - Default level is INFO. Operators bump verbosity with the
   `CINEMA_LOG_LEVEL` env var (e.g. `CINEMA_LOG_LEVEL=DEBUG`).
 - Noisy third-party libraries (DeepFace, tensorflow, matplotlib, PIL,
-  urllib3) are pinned at WARNING so the operator log isn't drowned by
-  library chatter. They keep their own levels if Set later.
+  urllib3) are pinned at WARNING during ``setup_logging()`` so the
+  operator log isn't drowned by library chatter. An explicit
+  ``logging.getLogger("<lib>").setLevel(...)`` call later in the
+  process will override this pin (Python ``setLevel`` is last-write-wins).
 - Exceptions inside an `except` block use `logger.exception(...)` which
   auto-captures the traceback. The JSON formatter embeds the formatted
   traceback under the `exc_info` field.
