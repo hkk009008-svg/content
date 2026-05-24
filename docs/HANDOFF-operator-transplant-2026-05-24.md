@@ -9,10 +9,10 @@
 
 ## TL;DR (60 seconds)
 
-- **Sessions 1–4 SHIPPED** (director-confirmed in [aa1e748](#commit-ledger))
-- **Sessions 5 + 6 pending**
-- Baseline at transplant: **574 pass / 3 skip / 0 fail**, smoke OK, working tree clean
-- Last commit: `c0b1ed0` (Session 4 deferred MINORs)
+- **Sessions 1–5 SHIPPED** (Sessions 1–4 by operator; Session 5 by director in `bdeeee5` as a parallel commit right after this handoff first landed)
+- **Session 6 PENDING** (frontend resilience + cascade visibility)
+- Baseline at transplant: **590 pass / 3 skip / 0 fail**, smoke OK, working tree clean
+- Last commit: `bdeeee5` (Session 5 director ship — `fix(cost): cover record_api_call + budget gate + sweep silent-excepts`)
 - 35 commits ahead of `origin/main`, **not yet pushed** (director hasn't directed)
 - The reframed Sessions 2/3/5 + the 4 doc-correction commits ARE the reason `tests/unit/` is now 504→574 pass (up from 471 at session start)
 
@@ -102,11 +102,19 @@ Operator commits + DIRECTOR parallel commits interleaved. The director made peri
 
 ## What's pending: Sessions 5 + 6
 
-### Session 5 — P0-3 cost-tracking + silent-except sweep (REFRAMED)
+### ~~Session 5~~ — SHIPPED by director in `bdeeee5`
 
-**Source:** docs/HANDOFF-roadmap-2026-05-24.md SESSION 5 (rewritten in `0cdef13`)
+The director picked up Session 5 in parallel while this handoff was being
+written. `bdeeee5 fix(cost): cover record_api_call + budget gate + sweep
+silent-excepts` extends `tests/unit/test_cost_tracker.py` from 33 to 49
+tests (+16) covering exactly the audited gaps from the reframed brief:
+`TestRecordAPICall` (table lookup, explicit override, unknown-warns-zero,
+spent_usd accumulator, parametrized 6-way provider derivation,
+return-value-matches-recorded) + `TestBudgetGate` + the 2-instance
+silent-except sweep. Whole-suite is now **590 / 3 / 0** (was 574).
 
-Scope summary:
+Original reframed brief (kept here as historical context for the
+discovery rationale):
 - `tests/unit/test_cost_tracker.py` already exists at 458 LOC with 33 passing tests — but **none directly test `record_api_call`** (the explicit Session 5 demand). Budget gate (`would_exceed`, `is_over_budget`, `spent_usd`) also untested.
 - Add `TestRecordAPICall` (~6 tests) + `TestBudgetGate` (~5 tests) → target ≥44 tests
 - Silent-except sweep: only **2 instances repo-wide** (the implied "many" was overstated). Triage each: ACCEPTABLE (document) or REPLACE (`except SpecificError:` or `except Exception as e: warnings.warn(...)`)
