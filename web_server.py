@@ -44,6 +44,7 @@ from project_manager import (
 from character_manager import create_character_with_images, VOICE_POOL
 from location_manager import create_location_with_images
 from scene_decomposer import decompose_scene, update_scene_shots, CAMERA_MOTIONS, VISUAL_EFFECTS, TARGET_APIS, API_REGISTRY, MUSIC_MOODS
+from domain.models import Project
 from domain.scene_decomposer import PURPOSE_TAGS, PURPOSE_API_RANKING, BILLING_PROVIDERS, estimate_short_cost
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
@@ -1103,8 +1104,12 @@ def api_generate_dialogue(pid, sid):
     # access used scene.get("characters_present", []) and scene.get("mood",
     # "neutral").  We handle the mood default at call site with `or "neutral"`
     # to preserve identical semantics without changing the Pydantic model.
-    from domain.models import Project as _Project
-    project_typed = _Project.model_validate(project)
+    #
+    # Note: `global_settings` access at line below remains on raw dict by
+    # design — only scene/character access was migrated in this template
+    # commit. Future sessions migrate global_settings + the rest of the
+    # project surface; see the MIGRATION-PATTERN doc's "WHEN" section.
+    project_typed = Project.model_validate(project)
     scene = next((s for s in project_typed.scenes if s.id == sid), None)
     if not scene:
         return jsonify({"error": "Scene not found"}), 404
