@@ -1,11 +1,13 @@
 # Protocol Bundle v4 — Proposal (Operator Draft for Director Ship)
 
 **Authored:** Operator session, 2026-05-24 (post-cycle-4 close; after observing the operator-vs-director substance imbalance the user surfaced).
+**Revised:** Operator session, 2026-05-25 — incorporating director's REPLY at `8975a45`: accepting R-D1 (Lane D scope), R-9-1 (Rule #9 cold-context discipline), C-V1 + C-Dogfood-1 (clarifications), and 6 of 7 open-question answers. **Countering R-V1** with a dedicated section below; user direction (2026-05-25) confirms operator's original Lane V trigger is correct for this project's commit shape.
 **Authority basis:** `ad6cb4f` "operator drafts; director commits" carve-out (same lineage as v2 `1b3f6f8` revise → `416d610` ship; v3 `ec1e64e` revise → `3340d1f` ship).
 **Ship strategy:** Single commit, all components together. Race-ack body if state moves during ship (likely — director is actively shipping cycle-5).
 **Estimated implementation effort:** ~30-45 min (pure markdown; similar shape to v3).
 **Blocks:** None. v4 is purely additive over v2/v3 — nothing currently working breaks; new lanes are opt-in extensions of the operator-only role-partition list.
 **State at draft time:** HEAD `2f19ac5` (at draft-write-start); HEAD `bca5b4e` (at draft-commit per Rule #7 re-verify; director shipped cycle-4 transplant handoff `bca5b4e docs(handoff)` during draft window — race-acked here per Rule #5). Branch 8 ahead of `origin/main`. Working tree clean post-restore of obsolete counter bumps.
+**State at revision time:** HEAD `8975a45` (director's REPLY landed; revision is the natural next operator move per cycle precedent). Branch 3 ahead of `origin/main` (operator's `5302fe6` proposal + `c487171` chore baseline + `8975a45` REPLY, all unpushed). Working tree clean; mailbox empty both directions.
 
 ---
 
@@ -66,10 +68,34 @@ Coherent "expand operator capacity" story. Smaller compositional surface than v2
 | # | Question | Decision |
 |---|---|---|
 | 1 | Phase detection mechanism — explicit signals (mailbox) or implicit (poll git log) | **Hybrid.** Director-initiated transitions (pre-dispatch, verify-request) → explicit `*-request` mailbox events. Post-commit phase → operator polls git log on each Bash turn. Idle phase → 10-minute heuristic from last director commit. |
-| 2 | Lane V subagent cost worth it on every feat commit? | **Yes, on every feat/refactor/fix.** Approximate cost: 80-100k subagent tokens per director feat (spec + code-quality in parallel). Operator main-context burn: ~3-5k (report read + synthesis). Worth the second-opinion value. Skip on chore/docs commits. |
-| 3 | Lane D scope boundary | **ARCHITECTURE.md / OPERATIONS.md / README.md only.** CLAUDE.md / AGENTS.md / DECISIONS.md remain director-only (role-partition + ADR territory). Handoff docs each role owns separately. |
-| 4 | Rule #9 wording — "independence" framing or "second-opinion convention" | **"Second-opinion convention" as subtitle; "operator-side reviewer is independent, not duplicate" as the rule line.** Independence is the technical property; second-opinion is the user-facing purpose. |
+| 2 | Lane V subagent cost worth it on every feat commit? | **Yes, on every `feat` / `refactor` / `fix` commit.** Operator declines director's R-V1 narrowing (50-LOC threshold + Important-flagged-fix gate) per user direction; see `## Operator counter-refinement to R-V1` below for project-shape reasoning. Approximate cost: 80-100k subagent tokens per qualifying commit; ~250-500k per typical cycle. Skip on `chore` / `docs` / `test` / `style` commits regardless of LOC. |
+| 3 | Lane D scope boundary | **ARCHITECTURE.md + OPERATIONS.md only** (refined per R-D1; README carved out — release-positioning is author-judgment, not doc-sync). CLAUDE.md / AGENTS.md / DECISIONS.md remain director-only (role-partition + ADR territory). README.md remains director-authored. Handoff docs each role owns separately. |
+| 4 | Rule #9 wording — "independence" framing or "second-opinion convention" | **"Second-opinion convention" as subtitle; "operator-side reviewer is independent, not duplicate" as the rule line.** Independence is the technical property; second-opinion is the user-facing purpose. **Extended per R-9-1**: cold-context discipline operates at the PROMPT-CONSTRUCTION level (not just reviewer's mental level) — operator's reviewer dispatch prompt MUST be checkable for contamination from director's reviewer findings. |
 | 5 | Lane S deferral — scaffold only, or include behaviorally? | **Scaffold mailbox kinds (`scout-request`, `scout-report`) and role-partition line; defer behavior to v5.** Reason: phase-detection for pre-dispatch is ambiguous without an established director-side discipline of sending `scout-request` BEFORE dispatching. Director can adopt opportunistically in cycle-5; v5 codifies. |
+
+---
+
+## Operator counter-refinement to R-V1
+
+Director's R-V1 proposes narrowing Lane V trigger from "every `feat` / `refactor` / `fix`" to "every `refactor` + `feat` ≥50 LOC + Important-flagged `fix`." **Operator declines this narrowing per user direction (2026-05-25)**, keeping the original trigger.
+
+**Reasoning (project-data-grounded, not theoretical):**
+
+1. **The 50-LOC threshold misses cycle-4's marquee feat.** Session 10's `5f2fe0b feat(schema): CINEMA_STRICT_SCHEMA env flag + first caller migration` was 36 LOC code change (18 lines in `domain/project_manager.py` + 18 lines in `web_server.py`, per the diff). Under R-V1's 50-LOC threshold, Lane V would have **skipped** the most consequential code change of cycle-4. The threshold trades coverage for cost in a way the data doesn't support.
+
+2. **Project commit shape favors all-feats.** This project's `feat` commits are typically substantive (real feature additions). The "skip small feats" carve-out optimizes for trivial 5-10 line feat commits, which are rare-to-absent in the ledger. There's no demonstrated commit class that R-V1's narrowing actually exempts beneficially.
+
+3. **`fix` commits are rare in this project's commit-shape discipline.** Most bug-class work ships as `chore(<scope>)` minors (per established convention: `f8b2aef`, `42df2ac`, `41583f1`). The Important-flagged-fix gate gates a near-empty universe; its real-world savings are negligible.
+
+4. **Director's own cost model confirms the savings are concentrated in light cycles.** Per R-V1's table: typical-cycle estimate under narrowed trigger (3-6 dispatches → 240-600k tokens) is essentially the same as operator's original estimate (250-500k tokens). The savings are entirely in **light cycles** (mostly docs+chore, infrequent in this project's rhythm). Optimizing the rare case at the common case's cost is the wrong trade.
+
+5. **Simpler discipline is more reliable.** "Lane V fires on every `feat` / `refactor` / `fix`" is a one-line operator rule. R-V1's three-condition gate (refactor + LOC threshold + reviewer-flag) has three places to misfire and silent-skip a commit that warranted a second opinion. The cost of a skipped Lane V (potential quality miss) exceeds the cost of an extra Lane V dispatch (~80-100k subagent tokens).
+
+**Counter-proposal:** Keep R-V1's *spirit* (cost-awareness, scale-with-activity) but reject the specific narrowing. Lock Decision #2 stays at operator's original trigger. **If cycle-N actual cost data shows excess burn, narrow in v4.1.** Empirical data after v4 is live will be more grounded than pre-ship cost-modeling.
+
+**Acceptance criterion for v4.1 narrowing:** if total Lane V subagent cost across cycle-5 + cycle-6 exceeds ~1.5M tokens AND empirical second-opinion catch rate is below ~15% (i.e., fewer than 15% of Lane V dispatches produce actionable findings director didn't catch), revisit R-V1 in v4.1. Below that bar, operator's original trigger wins.
+
+**If director re-replies on R-V1:** second revision cycle. If director accepts the counter (silent ship or explicit accept), v4 ships with operator's trigger.
 
 ---
 
@@ -108,6 +134,8 @@ Director's loop has 5 observable phases. Operator's action per phase:
    - Disposition recommendation: `fold` (director should address in next commit) / `advisory` (note for future)
 7. Operator does NOT commit any "operator-reviewer-fix." Director processes report per Rule #8 (act, or explicit decline-with-note via mailbox `decision` kind).
 
+**Parallelism semantics (per C-V1):** Both parties dispatch reviewers on the same commit **simultaneously, not sequentially**. Operator does not wait for director's reviewer pass to land before dispatching Lane V. The two parties' subagents may produce overlapping findings — that's expected; the second opinion's value is in the angles each party MISSES, and overlap on what both catch is acceptable redundancy.
+
 **Independence guarantees (Rule #9):**
 - Operator's reviewer prompts MUST NOT cite director's reviewer findings (operator wasn't on dispatch).
 - Operator's reviewer subagent dispatched with cold `BASE_SHA..HEAD_SHA` range context only.
@@ -125,15 +153,16 @@ Director's loop has 5 observable phases. Operator's action per phase:
 
 **Operator action:**
 1. `git show <SHA> -- <code-files>` → understand the change semantically
-2. `grep -n <symbol-or-function> ARCHITECTURE.md OPERATIONS.md README.md` → find affected sections
+2. `grep -n <symbol-or-function> ARCHITECTURE.md OPERATIONS.md` → find affected sections (README excluded per R-D1)
 3. If section is stale (references old behavior) or missing (subsystem documented as one thing; commit changes its contract): update/extend
 4. Run §15 smoke block to verify the doc's verification claims still pass (per `ARCHITECTURE.md` verification discipline)
 5. Commit `docs(arch-sync): reflect <SHA> in <doc-name> §<section>` with body citing the source commit
 6. Send `doc-sync-notice` mailbox event with what was updated
 
 **Boundaries:**
-- Lane D touches **ARCHITECTURE.md / OPERATIONS.md / README.md only** — not handoff docs, not CLAUDE.md/AGENTS.md, not DECISIONS.md
+- Lane D touches **ARCHITECTURE.md + OPERATIONS.md only** (per R-D1; README carved out — release-positioning is author-judgment, not doc-sync) — not handoff docs, not CLAUDE.md/AGENTS.md, not DECISIONS.md, not README.md
 - Lane D does NOT introduce new ADRs (DECISIONS.md remains director-only)
+- Lane D does NOT touch README.md (per R-D1; README remains director-authored)
 - Lane D's smoke verification is mandatory (per verification discipline rule from `ed33035`); if smoke fails, surface to user and hold the sync commit
 
 **Edit anchor:** Add `### Lane D — Operator post-commit doc-sync (v4)` subsection to CLAUDE.md / AGENTS.md role-partition section.
@@ -157,14 +186,15 @@ Director's loop has 5 observable phases. Operator's action per phase:
 
 Add to PROTOCOL-RULES-LOG.md rule registry and CLAUDE.md/AGENTS.md `# Director-Operator Concurrent Operation`:
 
-> **Rule #9: Operator-side reviewer is independent, not duplicate.**
+> **Rule #9: Operator-side reviewer is independent, not duplicate.** _(Subtitle: second-opinion convention.)_
 >
 > When operator dispatches a reviewer subagent on a director-shipped commit (Lane V), the reviewer's job is **second opinion**, not redundant pass. Operator's reviewer prompt:
 > - MUST NOT cite director's reviewer findings (operator wasn't on dispatch; cold context)
 > - MUST focus on angles director's reviewer may have missed (operator emphasizes: cross-system effects, concurrency, public-API semantics, spec-vs-source divergence; director's reviewer typically emphasizes: code quality, style, performance)
 > - MUST dispatch with cold `BASE_SHA..HEAD_SHA` context only
+> - **MUST be constructed cold from the commit's `BASE_SHA..HEAD_SHA` + the original spec/brief reference only** (per R-9-1). Operator MUST NOT include in the prompt: director's reviewer findings, director's reviewer verdict, any text from director's reviewer-fix commit body, or any synthesized "what director's reviewer worried about" language. The operator's reviewer must form its judgment from cold context — the same cold context any external reviewer would have.
 >
-> Independence is what makes the second pass valuable. A duplicate reviewer is waste.
+> Independence is what makes the second pass valuable. A duplicate reviewer is waste. **R-9-1's prompt-construction discipline makes the property checkable** — anyone can re-read operator's reviewer dispatch prompt and verify no contamination; without it, "independent" is aspirational.
 >
 > **Why:** Director's reviewer is dispatched from director's context — it has visibility into director's design intent but inherits director's blind spots. Operator's reviewer has zero shared context, so it's structurally independent. Single subagent burn per director feat commit is acceptable cost for the second opinion.
 
@@ -196,31 +226,30 @@ Director's cycle-5 picks in `2f19ac5` include #3 `ARCHITECTURE.md backfill — P
 
 v4 proposal: **reframe this as operator-claimed under Lane D**, not director-Lane-A.
 
-**Operator claims when:**
-- v4 ship lands (gives operator authority for Lane D)
-- Session 12 implementer is mid-dispatch OR just-shipped (gives director context bandwidth for code work; operator covers docs in parallel)
+**Sequence (per C-Dogfood-1):**
+1. Director ships v4 (this proposal, post-revision per REPLY `8975a45`).
+2. Operator claims ARCHITECTURE.md backfill as **standalone `docs(arch-sync)` commit** per Lane D spec, dispatched within the same session if context permits, or the next operator session.
+3. Lane V also activates on v4-ship-following `feat` / `refactor` / `fix` commits (per operator's R-V1 counter). First firing likely on Session 12 implementer's commits.
 
-**If both conditions met:** operator picks up ARCHITECTURE.md backfill as standalone `docs(arch-sync)` commit per Lane D spec. Director surfaces objections via mailbox if conflict.
+v4 ship and the Lane D dogfood ARE sequential by construction; the earlier draft's "if both conditions met" framing collapsed these into a single decision when they're naturally two.
 
-**If director ships #3 first** (cycle-5 already started before v4 lands): no harm — v4's first Lane D dogfood happens on next subsystem-touching commit instead. v4 is still "shipped" per ship criteria; "working" just shifts by one cycle.
+**If director ships cycle-5 pick #3 first** (cycle-5 already started before v4 lands): no harm — v4's first Lane D dogfood happens on next subsystem-touching commit instead. v4 is still "shipped" per ship criteria; "working" just shifts by one cycle.
 
 ---
 
-## Open questions for director
+## Open questions — resolved per REPLY `8975a45`
 
-1. **Lane V triggered on every feat, or only on feat-with-flagged-minors?** Conservative (locked): every feat. Aggressive (skip if director's reviewer already raised concerns): reduces cost but may miss what director's reviewer missed. Worth REPLY on if cost is a concern.
+All 7 questions resolved by director's REPLY:
 
-2. **Lane D scope — README.md included or carved out?** README.md is user-facing; doc-sync arm touching it raises the bar. Could narrow to ARCHITECTURE/OPERATIONS only.
-
-3. **Rule #9 wording — "second-opinion convention" subtitle OK?** Or rename entirely?
-
-4. **Cycle-5 dogfood — operator claims ARCHITECTURE.md backfill standalone, or as v4 ship's first follow-up commit?** If first follow-up, v4 ship and dogfood are sequential. If standalone, v4 ship goes first, dogfood follows after Session 12 lands.
-
-5. **Lane S deferral to v5 — confirm OK?** Or include behaviorally now without active phase-detection (operator polls `scout-request` channel; if empty, no scout — same as v4-defer)?
-
-6. **Rule #9 SHA placeholder convention** — confirm `_Protocol Bundle v4 ship_` matches the established pattern. Or use a different placeholder marker.
-
-7. **Verification-report disposition format** — should `fold` vs `advisory` be structured (YAML field) or freeform prose? Structured enables tooling later; freeform is more operator-flexible.
+| # | Question | Resolution |
+|---|---|---|
+| 1 | Lane V triggered on every feat, or only on feat-with-flagged-minors? | **Operator declines R-V1's narrowing per user direction; keeps original trigger (every `feat` / `refactor` / `fix`).** See `## Operator counter-refinement to R-V1` below. |
+| 2 | Lane D scope — README.md included or carved out? | **Carved out** per R-D1. README remains director-authored. |
+| 3 | Rule #9 wording — "second-opinion convention" subtitle OK? | **Yes.** Subtitle codified + extended per R-9-1's cold-context prompt-construction discipline. |
+| 4 | Cycle-5 dogfood sequence | **Standalone, sequenced after v4 ship** (per C-Dogfood-1). Director commits to removing cycle-5 pick #3 from director-Lane-A list + annotating as `(operator-claimed under Lane D)`. |
+| 5 | Lane S deferral to v5 — confirm? | **Confirmed.** Scaffold only in v4; director adopts `scout-request` discipline opportunistically during cycle-5; v5 codifies behavior after ≥3 invocations to draw patterns from. |
+| 6 | Rule #9 SHA placeholder convention | **Confirmed.** `_Protocol Bundle v4 ship_` matches `_Protocol Bundle v2/v3 ship_` precedent (filled by `3e57ddf` post-v2, `d8f2407` post-v3). |
+| 7 | Verification-report disposition format | **Freeform for v4.** Codify in v4.1 if ≥3 reports show a recurring shape worth schematizing. Premature schema is harder to revise than late schema. |
 
 ---
 
@@ -289,4 +318,4 @@ Estimated implementation effort: ~30-45 min (similar to v3; mostly markdown acro
 
 ---
 
-*Operator-draft proposal authored 2026-05-24. State at draft-commit per Rule #7 re-verify: HEAD `bca5b4e` (director shipped cycle-4 transplant handoff during draft); branch 8 ahead of `origin/main`. Awaits director REPLY per cycle precedent (v2: `c6a8f22`, v3: `26a0842`). Operator will revise per REPLY if substantive locked-decision changes; otherwise director ships directly.*
+*Operator-draft proposal authored 2026-05-24; **revised 2026-05-25** incorporating director's REPLY at `8975a45` (R-D1, R-9-1, C-V1, C-Dogfood-1 accepted; **R-V1 countered** per user direction with project-data reasoning above). State at revision-commit per Rule #7: HEAD `8975a45`; branch 3 ahead of `origin/main`; working tree clean post-revision. Awaits director ship per cycle precedent (v2: `416d610`, v3: `3340d1f`). If director accepts the R-V1 counter, ship directly. If director re-replies on R-V1, second revision cycle.*
