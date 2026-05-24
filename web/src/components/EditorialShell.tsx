@@ -232,17 +232,30 @@ export default function EditorialShell({
   // Tracks the last DONE event ID so a re-render on the same event doesn't re-open.
   const [showPostRunSummary, setShowPostRunSummary] = useState(false)
   const lastDoneEventRef = useRef<string | null>(null)
+  // Monotonic run counter — bumps on each transition out of DONE (a new run
+  // started). Included in the dedup key so two successful runs with the same
+  // file path don't collide. Per cycle-6 Lane V F2 fix.
+  const runCounterRef = useRef(0)
+  const lastStageRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (latest?.stage === 'DONE') {
-      // Deduplicate: fingerprint is stable per run because `detail` is set
-      // once at pipeline completion (web_server.py:1227, from
-      // pipeline.generate() return value — typically the assembled file
-      // path, or "Failed" on partial failure). Both forms are stable
-      // within a run, so the same fingerprint will block re-render
-      // triggers without blocking legitimately-new DONE events from a
-      // subsequent run (which would produce a different file path).
-      const eventKey = `${latest.stage}::${latest.percent}::${latest.detail}`
+    if (!latest) return
+
+    // New-run detector: transitioning OUT of DONE means a fresh run is
+    // starting. Bump the counter so the dedup fingerprint changes for the
+    // next DONE event even if its (stage, percent, detail) tuple is
+    // identical to the prior run.
+    if (lastStageRef.current === 'DONE' && latest.stage !== 'DONE') {
+      runCounterRef.current += 1
+    }
+    lastStageRef.current = latest.stage ?? null
+
+    if (latest.stage === 'DONE') {
+      // Deduplicate: fingerprint includes the run counter (bumps each time
+      // a new run begins), so SSE re-broadcasts of the same DONE event
+      // within one run are blocked, but the same (stage, percent, detail)
+      // tuple from a subsequent run is allowed through.
+      const eventKey = `${runCounterRef.current}::${latest.stage}::${latest.percent}::${latest.detail}`
       if (lastDoneEventRef.current !== eventKey) {
         lastDoneEventRef.current = eventKey
         setShowPostRunSummary(true)

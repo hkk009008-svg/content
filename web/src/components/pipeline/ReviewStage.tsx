@@ -648,6 +648,7 @@ function ClipCard({
           auto-approved until the next poll cycle, lying about shot state). */}
       {rejectAutoApproveGate && (
         <RejectAutoApproveModal
+          projectId={projectId}
           shotId={shot.id}
           gate={rejectAutoApproveGate}
           isOpen={true}

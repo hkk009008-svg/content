@@ -289,6 +289,7 @@ export function PostRunSummary({
       {/* Nested reject modal */}
       {rejectTarget && (
         <RejectAutoApproveModal
+          projectId={project.id}
           shotId={rejectTarget.shotId}
           gate={rejectTarget.gate}
           isOpen={true}

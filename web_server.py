@@ -1445,9 +1445,9 @@ def api_approve_final_take(pid, shot_id, take_id):
     return jsonify(result), status
 
 
-@app.route("/api/shots/<shot_id>/reject-auto-approve", methods=["POST"])
+@app.route("/api/projects/<pid>/shots/<shot_id>/reject-auto-approve", methods=["POST"])
 @_project_lock_guard
-def api_reject_auto_approve(shot_id):
+def api_reject_auto_approve(pid, shot_id):
     """Override an auto-approve decision for a specific gate on a shot.
 
     Body (JSON): { "gate": "plan"|"image"|"motion"|"final", "reason": "<free text>" }
@@ -1457,16 +1457,12 @@ def api_reject_auto_approve(shot_id):
     <gate>_auto_approved flag. No separate storage — the audit log IS the
     persistence layer (per S13 brief §Decisions).
 
-    Route does not include /projects/<pid>/ because the frontend may not
-    have the pid available at rejection time (PostRunSummary iterates
-    shots across all projects). The shot_id is globally unique within a
-    single server instance and we scan all projects to locate it.
-
-    @_project_lock_guard still applies here even though no pid is in the
-    route: inner mutate_project() calls can raise ProjectLockError and the
-    decorator translates that into a clean 503 for the client. The guard's
-    docblock refers to pid-scoped locking; that wording is from earlier
-    endpoints — the catch-and-translate behavior is general.
+    Route includes /projects/<pid>/ per cycle-6 Lane V F1 finding
+    (shot_id is `shot_{scene}_{i}` and collides across projects with
+    matching layouts; pid-less scan-all-projects design could mutate
+    the wrong project or 423 on unrelated lock contention). Mirrors the
+    existing `_mutate_shot`-style endpoints (api_update_shot_prompt,
+    api_approve_final_take, etc.).
     """
     if not request.is_json:
         return jsonify({"error": "JSON body required"}), 400
@@ -1499,16 +1495,11 @@ def api_reject_auto_approve(shot_id):
                     return MutationResult({"shot_id": shot_id, "gate": gate}, save=True)
         return MutationResult(False, save=False)
 
-    # Scan all projects to locate the shot (shot_id is unique within a run).
-    for proj_meta in list_projects():
-        pid = proj_meta.get("id") or proj_meta.get("project_id")
-        if not pid:
-            continue
-        result = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
-        if result is None:
-            continue  # project not found or lock timeout
-        if result:
-            return jsonify({"status": "ok", "shot_id": shot_id, "gate": gate})
+    result = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
+    if result is None:
+        return jsonify({"error": "Project not found"}), 404
+    if result:
+        return jsonify({"status": "ok", "shot_id": shot_id, "gate": gate})
 
     return jsonify({"error": "Shot not found"}), 404
 

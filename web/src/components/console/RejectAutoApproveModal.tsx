@@ -1,9 +1,14 @@
 /**
  * RejectAutoApproveModal — required-reason form for overriding an auto-approve decision.
  *
- * On submit: POSTs to POST /api/shots/<shotId>/reject-auto-approve with {gate, reason}.
- * Backend records the rejection as an audit entry with auto_approved=false,
- * rule_names=["user_override"], vetoes=[reason] — no separate storage required.
+ * On submit: POSTs to POST /api/projects/<projectId>/shots/<shotId>/reject-auto-approve
+ * with {gate, reason}. Backend records the rejection as an audit entry with
+ * auto_approved=false, rule_names=["user_override"], vetoes=[reason] — no separate
+ * storage required.
+ *
+ * Route includes projectId per cycle-6 Lane V F1 fix: shot_id alone is not globally
+ * unique (deterministic `shot_{scene}_{i}` collides across projects); pid-scoped
+ * route mirrors the rest of the shot-mutation API surface.
  *
  * Submit is disabled until the reason textarea is non-empty.
  *
@@ -14,6 +19,7 @@
 import { useState } from 'react'
 
 interface Props {
+  projectId: string
   shotId: string
   gate: 'plan' | 'image' | 'motion' | 'final'
   isOpen: boolean
@@ -31,6 +37,7 @@ const GATE_LABELS: Record<string, string> = {
 }
 
 export function RejectAutoApproveModal({
+  projectId,
   shotId,
   gate,
   isOpen,
@@ -50,7 +57,7 @@ export function RejectAutoApproveModal({
     setSubmitting(true)
     setError(null)
     try {
-      const res = await fetch(`${apiBase}/shots/${shotId}/reject-auto-approve`, {
+      const res = await fetch(`${apiBase}/projects/${projectId}/shots/${shotId}/reject-auto-approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ gate, reason: trimmed }),

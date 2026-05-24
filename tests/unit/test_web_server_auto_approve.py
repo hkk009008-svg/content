@@ -67,16 +67,19 @@ def _make_project(shot_id: str = "shot-abc", gate_approved: bool = True) -> dict
 # Test helpers
 # ---------------------------------------------------------------------------
 
-def _post(client, shot_id: str, body: dict | None, content_type: str = "application/json"):
-    """POST to the reject-auto-approve endpoint."""
+def _post(client, shot_id: str, body: dict | None, content_type: str = "application/json", pid: str = "proj-test"):
+    """POST to the reject-auto-approve endpoint.
+
+    Per cycle-6 Lane V F1 fix: route now includes /projects/<pid>/.
+    """
     if body is None:
         return client.post(
-            f"/api/shots/{shot_id}/reject-auto-approve",
+            f"/api/projects/{pid}/shots/{shot_id}/reject-auto-approve",
             content_type="text/plain",
             data="not json",
         )
     return client.post(
-        f"/api/shots/{shot_id}/reject-auto-approve",
+        f"/api/projects/{pid}/shots/{shot_id}/reject-auto-approve",
         content_type=content_type,
         data=json.dumps(body),
     )
@@ -98,10 +101,7 @@ def test_reject_auto_approve_happy_path(client):
         mutate_calls.append({"pid": pid, "result": result})
         return result
 
-    with (
-        patch("web_server.list_projects", return_value=[{"id": "proj-test"}]),
-        patch("web_server.mutate_project", side_effect=fake_mutate),
-    ):
+    with patch("web_server.mutate_project", side_effect=fake_mutate):
         resp = _post(client, "shot-happy", {"gate": "plan", "reason": "Colours are off"})
 
     assert resp.status_code == 200, resp.data
@@ -109,6 +109,9 @@ def test_reject_auto_approve_happy_path(client):
     assert data["status"] == "ok"
     assert data["shot_id"] == "shot-happy"
     assert data["gate"] == "plan"
+
+    # Verify mutate_project was called with the route's pid (cycle-6 F1 fix).
+    assert mutate_calls[0]["pid"] == "proj-test"
 
     # Verify the mutation was applied: flag cleared, audit entry appended.
     shot = project["scenes"][0]["shots"][0]
@@ -164,16 +167,28 @@ def test_reject_auto_approve_non_json_body(client):
 # ---------------------------------------------------------------------------
 
 def test_reject_auto_approve_shot_not_found(client):
-    """No project contains the given shot_id → 404."""
-    # real mutate_project returns result.value (False) when the mutator returns
-    # MutationResult(False, save=False); mock the same contract so the endpoint
-    # sees falsy result and continues scanning → exhausts all projects → 404.
-    with (
-        patch("web_server.list_projects", return_value=[{"id": "proj-test"}]),
-        patch("web_server.mutate_project", return_value=False),
-    ):
+    """Shot not found in the named project → 404 "Shot not found"."""
+    # Per cycle-6 F1 fix, mutate_project returns the mutator's value directly
+    # (no list_projects scan). When the shot isn't in the project, the mutator
+    # returns MutationResult(False, save=False); real mutate_project surfaces
+    # that as falsy → endpoint returns 404 "Shot not found".
+    with patch("web_server.mutate_project", return_value=False):
         resp = _post(client, "shot-missing", {"gate": "final", "reason": "wrong take approved"})
 
     assert resp.status_code == 404
     data = resp.get_json()
     assert data["error"] == "Shot not found"
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — Project not found → 404 "Project not found" (cycle-6 F1 NEW path)
+# ---------------------------------------------------------------------------
+
+def test_reject_auto_approve_project_not_found(client):
+    """Unknown pid → mutate_project returns None → 404 "Project not found"."""
+    with patch("web_server.mutate_project", return_value=None):
+        resp = _post(client, "shot-xyz", {"gate": "plan", "reason": "test"}, pid="proj-missing")
+
+    assert resp.status_code == 404
+    data = resp.get_json()
+    assert data["error"] == "Project not found"
