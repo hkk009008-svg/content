@@ -42,6 +42,18 @@ export interface ProductObject {
   embedding_cache: string
 }
 
+/** Auto-approve audit entry written by cinema/auto_approve.py (Session 11).
+ *  One entry per gate per check; accumulates across gates on the same shot.
+ *  All consumers MUST use optional chaining — entries are absent on shots
+ *  produced before Session 11. */
+export interface AutoApproveAuditEntry {
+  gate: 'plan' | 'image' | 'motion' | 'final'
+  auto_approved: boolean
+  vetoes: string[]
+  rule_names: string[]
+  timestamp: string  // ISO 8601
+}
+
 export interface Shot {
   id: string
   prompt: string
@@ -74,6 +86,14 @@ export interface Shot {
   intent_notes: string
   negative_constraints: string
   continuity_constraints: string
+  // Auto-approve fields — all optional for backward compat with pre-S11 projects.
+  // S11 sets <gate>_auto_approved=true when the gate passed without operator review.
+  // S12 adds motion_auto_approved when CINEMA_AUTO_APPROVE_MOTION=1 was set during the run.
+  plan_auto_approved?: boolean
+  image_auto_approved?: boolean
+  motion_auto_approved?: boolean   // present only when CINEMA_AUTO_APPROVE_MOTION=1
+  final_auto_approved?: boolean
+  auto_approve_audit?: AutoApproveAuditEntry[]
 }
 
 export interface Scene {
