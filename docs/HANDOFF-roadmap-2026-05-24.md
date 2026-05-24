@@ -3,9 +3,11 @@
 **From:** Director (incoming, 2026-05-24)
 **To:** Operators (engineering sessions / AI agents executing the roadmap)
 **Source plan:** [docs/STRATEGIC_REVIEW-2026-05-24.md](STRATEGIC_REVIEW-2026-05-24.md)
-**Status:** Active — Sessions 1–4 shipped (audited green per
-[docs/HANDOFF-director-transplant-2026-05-24.md](HANDOFF-director-transplant-2026-05-24.md));
-Sessions 5–6 pending. Execute in order unless you're told otherwise.
+**Status:** Active — original 6-session roadmap CLOSED (Sessions 1–6
+shipped + audited per
+[docs/POST-ROADMAP-2026-05-24.md](POST-ROADMAP-2026-05-24.md));
+**Session 7 ACTIVE** (P0-1 Pri 3 carry-forward — `face_validator_gate`
+test coverage; see appendix at end of this file).
 
 This document is the manual. It tells you **what** to do, **why** it
 matters, **how** to do it well, and **what done looks like**. Read the
@@ -1394,3 +1396,231 @@ Execute. Verify. Report. Move.
 
 Signed,
 The Director, 2026-05-24
+
+---
+
+# Appendix: Sessions added post-original-roadmap
+
+The original 6 sessions closed; the strategic reassessment
+([POST-ROADMAP-2026-05-24.md](POST-ROADMAP-2026-05-24.md)) surfaced 3
+top-priority carry-forwards. The first one is dispatched as Session 7
+below. Future sessions land here as the next-director cycle continues.
+
+---
+
+## SESSION 7 — P0-1 Pri 3: face_validator_gate test coverage
+
+**Why this matters.** The three functions in
+[face_validator_gate.py](../face_validator_gate.py) — `score_candidate`,
+`should_halt`, `needs_regenerate` — gate the
+halt-vs-regenerate-vs-approve decision for every shot in N=8 best-of
+generation. **Zero direct tests today** (verified via
+`find tests -name "test_face*"` → empty). When this gate misbehaves
+silently, the operator sees "approved" takes that actually failed the
+identity bar — exactly the class of silent failure Sessions 1–6 worked
+to eliminate elsewhere. STRATEGIC_REVIEW §P0-1 Pri 3 and POST-ROADMAP
+TL;DR both name this as the strongest follow-up.
+
+**Status reframe (2026-05-24, post-original-roadmap).** Unlike
+Sessions 2/3/5 (extend in place), this is **create**: there is no
+`tests/unit/test_face_validator_gate.py` yet. Match the file
+conventions of `tests/unit/test_cost_tracker.py` (class-grouped tests,
+`pytest.approx` for floats, no fixture sharing beyond conftest).
+
+**Pre-work:**
+
+1. Read [face_validator_gate.py](../face_validator_gate.py) end-to-end
+   (304 LOC). Note the 3 target functions + the supporting dataclasses
+   (`CandidateScore` L153, `HaltDecision` L218) and helper module
+   internals (`_arcface_score` L122, `_aesthetic_score` L82) that you
+   will mock — not test.
+2. Read [tests/unit/test_cost_tracker.py](../tests/unit/test_cost_tracker.py)
+   in full (~570 LOC after Session 5). Conventions to match:
+   class-grouped tests, top-of-file imports (no inline `from X import Y`
+   inside tests), `pytest.approx` on every float, `pytest.warns(UserWarning)`
+   in a context manager for warning paths, parametrize for truth tables.
+3. Read [tests/conftest.py](../tests/conftest.py) for the
+   `_project_root_on_path` autouse fixture (auto-imports work) — no
+   new fixtures needed for this session; face_validator_gate has no DB.
+4. Baseline: `.venv/bin/python -m pytest tests/unit/ -q | tail -1`
+   → expect `590 passed, 3 skipped, 0 failed` (this is the
+   post-Session-6 baseline at HEAD `2662812`).
+
+**Scope:**
+
+| IN | OUT |
+|---|---|
+| `TestScoreCandidate` × ~7 cases | Refactor of `face_validator_gate.py` itself |
+| `TestShouldHalt` × ~6 cases | Tests for `_try_load_aesthetic_v2` (model-loading; covered by integration) |
+| `TestNeedsRegenerate` × ~4 cases | Tests for `_get_validator` singleton (covered by §15.6) |
+| `TestSelectBest` × ~2 cases (bonus 5-line surface) | `_arcface_score` / `_aesthetic_score` internals (mocked, not tested) |
+| Mocking via `monkeypatch.setattr` on the module's helpers | Real ArcFace / aesthetic model loads (slow; GPU-required) |
+
+**Approach:**
+
+Create `tests/unit/test_face_validator_gate.py` with 4 classes:
+
+**`TestScoreCandidate` (~7 tests):**
+
+- `test_score_candidate_no_face_anchor_skips_arc` — `face_anchor=None`
+  → `has_arc=False`, composite uses aesthetic only (with 0.5 arc fallback)
+- `test_score_candidate_missing_anchor_path_skips_arc` — `face_anchor="/nonexistent"`
+  → same outcome (the `os.path.exists` guard at L195)
+- `test_score_candidate_valid_anchor_populates_arc` — monkeypatch
+  `_arcface_score` to return 0.8 → `has_arc=True`, `arc_score=0.8`
+- `test_score_candidate_aesthetic_none_falls_back` — monkeypatch
+  `_aesthetic_score` to return None → `has_aesthetic=False`, composite
+  uses 0.5 for aesthetic contribution
+- `test_score_candidate_both_helpers_none_neutral_composite` — mock both
+  to None + face_anchor=None → composite == 0.5 (pure neutral)
+- `test_score_candidate_default_weights_blend` — mock arc=1.0,
+  aesthetic=0.0 → composite == 0.6 (DEFAULT_WEIGHTS["arc"])
+- `test_score_candidate_custom_weights_blend` — parametrize ≥3 weight
+  combos to verify `w["arc"]*arc + w["aesthetic"]*aes` math holds
+
+**`TestShouldHalt` (~6 tests):**
+
+- `test_should_halt_empty_scores` — `[]` → `HaltDecision(halt=False,
+  reason="no candidates yet", best=None)`
+- `test_should_halt_budget_exhausted` — `n >= halt_max_n` (default 8) →
+  `halt=True` regardless of composite (reason includes "budget exhausted")
+- `test_should_halt_below_min_n` — `n=3 < halt_min_n=4` → `halt=False`,
+  `best` populated (highest composite)
+- `test_should_halt_composite_met` — `n=4`, best.composite=0.95 ≥ 0.92
+  → `halt=True`, reason mentions composite + threshold values
+- `test_should_halt_composite_below_threshold` — `n=4`,
+  best.composite=0.80 < 0.92 → `halt=False`, reason mentions composite below
+- `test_should_halt_reason_format` — verify reason string contains the
+  numeric values (`composite=`, `n=`) so audit logs are queryable
+
+**`TestNeedsRegenerate` (~4 tests):**
+
+The 4-case truth table from `face_validator_gate.py:289-304`:
+
+- `test_needs_regenerate_no_character_returns_false` — `has_character=False`
+  → False (landscape/no-face shots short-circuit)
+- `test_needs_regenerate_no_arc_returns_false` — `has_character=True`,
+  `best.has_arc=False` → False (arc skipped; can't judge identity)
+- `test_needs_regenerate_arc_below_floor` — `has_character=True`,
+  `arc_score=0.40 < floor=0.55` → True (PuLID-boost regenerate)
+- `test_needs_regenerate_arc_above_floor` — `has_character=True`,
+  `arc_score=0.70 >= floor=0.55` → False (identity acceptable)
+
+**`TestSelectBest` (~2 tests):**
+
+- `test_select_best_empty_returns_none` — `[]` → None
+- `test_select_best_highest_composite_wins` — 3+ candidates with
+  varied composites → returns the highest (parametrize a few vectors)
+
+**Mocking pattern:**
+
+```python
+def test_score_candidate_valid_anchor_populates_arc(monkeypatch, tmp_path):
+    fake_anchor = tmp_path / "anchor.jpg"
+    fake_anchor.write_bytes(b"fake")
+    monkeypatch.setattr(
+        "face_validator_gate._arcface_score",
+        lambda img, anchor, threshold=0.0: 0.8,
+    )
+    monkeypatch.setattr(
+        "face_validator_gate._aesthetic_score",
+        lambda img: 0.7,
+    )
+    score = score_candidate("/fake/image.jpg", str(fake_anchor))
+    assert score.has_arc is True
+    assert score.arc_score == pytest.approx(0.8)
+    assert score.has_aesthetic is True
+    assert score.aesthetic_score == pytest.approx(0.7)
+    assert score.composite == pytest.approx(0.6 * 0.8 + 0.4 * 0.7)
+```
+
+**Acceptance criteria:**
+
+- [ ] `tests/unit/test_face_validator_gate.py` exists with ≥19 tests
+      (7 + 6 + 4 + 2), all passing
+- [ ] All 4 classes present (`TestScoreCandidate`, `TestShouldHalt`,
+      `TestNeedsRegenerate`, `TestSelectBest`)
+- [ ] All `_arcface_score` / `_aesthetic_score` references use
+      `monkeypatch.setattr` (no real model loads in unit tests)
+- [ ] `pytest.approx` on every float assertion
+- [ ] §15 smoke still passes
+- [ ] Whole-suite: `pytest tests/unit/ -q` → ≥609 pass / 3 skip / 0 fail
+      (590 baseline + ≥19 new)
+
+**Pitfalls:**
+
+- **Do NOT load the real aesthetic v2 model.** It's slow + may fail
+  without GPU. Mock `_aesthetic_score` at the call site.
+- **Do NOT load the real `IdentityValidator`.** Mock `_arcface_score`
+  (it wraps `_get_validator().validate_image`).
+- **Do NOT test `_try_load_aesthetic_v2`** — it's a module-loader
+  with environment dependencies. Cover via integration tests later
+  if needed.
+- **Composite math precision:** the formula is exact arithmetic
+  (`w["arc"]*arc + w["aesthetic"]*aes`); `pytest.approx` is for
+  floating-point safety, not algorithmic fuzziness.
+- **`HaltDecision.reason` is an audit string.** Don't lock the
+  test to exact wording; check substrings (`"composite="`, `"n="`)
+  so future reason-string improvements don't break tests.
+- **The `select_best` helper is only 5 lines** — light coverage is
+  fine; don't pad with redundant cases.
+
+**Verification:**
+
+```bash
+.venv/bin/python -m pytest tests/unit/test_face_validator_gate.py -v
+# Expect ≥19 pass / 0 fail
+
+.venv/bin/python -m pytest tests/unit/ --tb=no -q | tail -1
+# Expect ≥609 passed, 3 skipped, 0 failed
+
+.venv/bin/python scripts/ci_smoke.py
+# Expect OK
+```
+
+**Commit shape:**
+
+```
+test(face_validator): cover score_candidate + should_halt + needs_regenerate
+
+New tests/unit/test_face_validator_gate.py with 4 classes (~19 tests):
+
+  TestScoreCandidate (7): face_anchor None/missing/valid, aesthetic
+    None fallback, both-missing neutral, default + custom weights
+    composite math
+  TestShouldHalt (6): empty, budget exhausted, below min_n, composite
+    met, composite below, reason-string format
+  TestNeedsRegenerate (4): 4-case truth table — no-character, no-arc,
+    arc below floor, arc above floor
+  TestSelectBest (2): empty → None, highest-composite winner
+
+Mocking: monkeypatch _arcface_score + _aesthetic_score on the
+face_validator_gate module. Pure unit tests; no real model loads.
+
+Closes P0-1 Pri 3 carry-forward documented in df04142 POST-ROADMAP
+TL;DR #1.
+
+Verified:
+  pytest tests/unit/test_face_validator_gate.py -v → 19+ pass
+  pytest tests/unit/ -q | tail -1 → ≥609 pass / 3 skip / 0 fail
+  scripts/ci_smoke.py → OK
+```
+
+**Estimated effort:** 1.5–2 hours (clean spec, pure unit tests with
+simple `monkeypatch` mocking; no DB, no async, no fixture design).
+
+**Decision authority:** Lane A on test naming, parametrize-vs-separate,
+mock-helper organization. Escalate when:
+
+- You discover a fourth uncovered function in `face_validator_gate.py`
+  that seems load-bearing (the spec covers 3 + `select_best`).
+- A docstring claim in `face_validator_gate.py` contradicts what the
+  code actually does (per Rule-1 — fix the doc in the same commit OR
+  surface the divergence in your report).
+
+**If you finish early:** Audit
+[performance/identity_gate.py](../performance/identity_gate.py) for
+similar coverage gaps — it's the parallel surface for performance
+takes and uses the same `IdentityValidator` singleton. Same shape of
+brief; same effort range.
+
