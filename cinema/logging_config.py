@@ -19,6 +19,28 @@ Design notes:
 - Exceptions inside an `except` block use `logger.exception(...)` which
   auto-captures the traceback. The JSON formatter embeds the formatted
   traceback under the `exc_info` field.
+
+Caller-field convention (semantic distinctions worth knowing):
+- ``shot_id`` / ``scene_id``: pipeline-assigned IDs, stable for the life
+  of a project. Use these as the primary filter for "tell me what
+  happened to shot X" log queries.
+- ``stitched_path``: concatenated scene clips, BGM/voice not yet mixed.
+  Emitted from ``_assemble_final``'s pre-mix stage.
+- ``final_output``: post-BGM-mix output file. Emitted by the ffmpeg
+  subprocess.run path inside ``_assemble_final``.
+- ``final_path``: post-loudnorm, user-facing artifact. The value
+  returned from ``CinemaPipeline.generate()``.
+- ``stderr_tail``: last 200 chars of a subprocess's stderr. Decoded
+  via ``bytes.decode("utf-8", errors="replace")`` so JSON consumers
+  never see a ``b'...'`` repr in the stream.
+- ``percent`` / ``stage`` / ``detail``: SSE-progress trail emitted by
+  ``_default_progress``. The SSE callback path replaces this with the
+  queue callback at runtime; logging is DEBUG-only so non-SSE callers
+  don't double-emit when an adjacent explicit log already fired.
+
+New fields are welcome — just avoid names colliding with
+``_RESERVED_LOGRECORD_KEYS`` (those silently get dropped from the JSON
+output by the formatter).
 """
 
 from __future__ import annotations
