@@ -24,6 +24,25 @@ export default function Monitor({
     [activeShotId, shotStates]
   )
 
+  // Resolve cascade_metadata for the live take so TakeStrip can render the
+  // fallback / engine badge in the live-run console (Session 6 wired this
+  // into ReviewStage; this closes the deferred Monitor-side gap).
+  const cascadeMetadata = useMemo(() => {
+    const takeId = activeState?.take_id
+    if (!activeShotId || !takeId) return null
+    const shot = project.scenes
+      .flatMap((s) => s.shots)
+      .find((s) => s.id === activeShotId)
+    if (!shot) return null
+    const take = [
+      ...(shot.keyframe_takes ?? []),
+      ...(shot.motion_takes ?? []),
+      ...(shot.performance_takes ?? []),
+      ...(shot.postprocess_variants ?? []),
+    ].find((t) => t.id === takeId)
+    return take?.cascade_metadata ?? null
+  }, [activeShotId, activeState?.take_id, project.scenes])
+
   const keyframeUrl = activeState?.generated_image ?? null
   const videoUrl = activeState?.generated_video ?? null
 
@@ -46,6 +65,7 @@ export default function Monitor({
             motionUrl={motionUrl}
             apiBase={apiBase}
             projectId={projectId}
+            cascadeMetadata={cascadeMetadata}
           />
         </div>
       ) : (
