@@ -1425,6 +1425,70 @@ def api_approve_final_take(pid, shot_id, take_id):
     return jsonify(result), status
 
 
+@app.route("/api/shots/<shot_id>/reject-auto-approve", methods=["POST"])
+@_project_lock_guard
+def api_reject_auto_approve(shot_id):
+    """Override an auto-approve decision for a specific gate on a shot.
+
+    Body (JSON): { "gate": "plan"|"image"|"motion"|"final", "reason": "<free text>" }
+
+    Records the rejection as an audit entry with auto_approved=False,
+    rule_names=["user_override"], vetoes=[reason], and clears the
+    <gate>_auto_approved flag. No separate storage — the audit log IS the
+    persistence layer (per S13 brief §Decisions).
+
+    Route does not include /projects/<pid>/ because the frontend may not
+    have the pid available at rejection time (PostRunSummary iterates
+    shots across all projects). The shot_id is globally unique within a
+    single server instance and we scan all projects to locate it.
+    """
+    if not request.is_json:
+        return jsonify({"error": "JSON body required"}), 400
+
+    data = request.get_json() or {}
+    gate = data.get("gate")
+    reason = (data.get("reason") or "").strip()
+
+    valid_gates = {"plan", "image", "motion", "final"}
+    if gate not in valid_gates:
+        return jsonify({"error": "invalid gate"}), 400
+    if not reason:
+        return jsonify({"error": "reason required"}), 400
+
+    from datetime import datetime, timezone
+
+    audit_entry = {
+        "gate": gate,
+        "auto_approved": False,
+        "vetoes": [reason],
+        "rule_names": ["user_override"],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    flag_key = f"{gate}_auto_approved"
+
+    def _mutate_project(project: dict):
+        for scene in project.get("scenes", []):
+            for shot in scene.get("shots", []):
+                if shot.get("id") == shot_id:
+                    shot.setdefault("auto_approve_audit", []).append(audit_entry)
+                    shot[flag_key] = False
+                    return MutationResult({"shot_id": shot_id, "gate": gate}, save=True)
+        return MutationResult(False, save=False)
+
+    # Scan all projects to locate the shot (shot_id is unique within a run).
+    for proj_meta in list_projects():
+        pid = proj_meta.get("id") or proj_meta.get("project_id")
+        if not pid:
+            continue
+        result = mutate_project(pid, _mutate_project, timeout=HTTP_PROJECT_TIMEOUT)
+        if result is None:
+            continue  # project not found or lock timeout
+        if result:
+            return jsonify({"status": "ok", "shot_id": shot_id, "gate": gate})
+
+    return jsonify({"error": "Shot not found"}), 404
+
+
 @app.route("/api/projects/<pid>/shots/<shot_id>/prompt", methods=["PUT"])
 @_project_lock_guard
 def api_update_shot_prompt(pid, shot_id):

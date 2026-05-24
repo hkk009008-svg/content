@@ -19,7 +19,7 @@
  *   │  [ Existing 3-col panel grid ] — kept intact                │
  *   └─────────────────────────────────────────────────────────────┘
  */
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Project, AppConfig, ProgressEvent } from '../types/project'
 import CharacterPanel from './CharacterPanel'
 import LocationPanel from './LocationPanel'
@@ -29,6 +29,7 @@ import SettingsPanel from './SettingsPanel'
 import GenerationPanel from './GenerationPanel'
 import PreviewPanel from './PreviewPanel'
 import { Button, Eyebrow, buttonClassName } from './ui'
+import PostRunSummary from './console/PostRunSummary'
 
 interface EditorialShellProps {
   project: Project
@@ -226,6 +227,22 @@ export default function EditorialShell({
     () => project.scenes.reduce((acc, s) => acc + (s.duration_seconds || 0), 0),
     [project.scenes],
   )
+
+  // PostRunSummary modal state — opens automatically when pipeline stage === DONE.
+  // Tracks the last DONE event ID so a re-render on the same event doesn't re-open.
+  const [showPostRunSummary, setShowPostRunSummary] = useState(false)
+  const lastDoneEventRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (latest?.stage === 'DONE') {
+      // Deduplicate: use timestamp + percent as a stable event fingerprint
+      const eventKey = `${latest.stage}::${latest.percent}::${latest.detail}`
+      if (lastDoneEventRef.current !== eventKey) {
+        lastDoneEventRef.current = eventKey
+        setShowPostRunSummary(true)
+      }
+    }
+  }, [latest])
 
   // Project ID becomes the "FILM Nº" — short, monotype, gives the
   // editorial chrome a unique identifier per project.
@@ -469,10 +486,30 @@ export default function EditorialShell({
         <div className="font-mono text-eyebrow text-editorial-ivory-mute tracking-wide-eyebrow uppercase">
           Cinema Production Tool · No. {reelNumber} · A working print
         </div>
-        <div className="font-mono text-eyebrow text-editorial-ivory-mute tracking-wide-eyebrow uppercase">
-          Set in Fraunces &amp; Be Vietnam Pro
+        <div className="flex items-center gap-6">
+          {/* Re-open PostRunSummary if the user dismissed it */}
+          {lastDoneEventRef.current && !showPostRunSummary && (
+            <button
+              onClick={() => setShowPostRunSummary(true)}
+              className="font-mono text-eyebrow text-editorial-brass tracking-wide-eyebrow uppercase hover:text-editorial-brass-deep"
+            >
+              Auto-Approve Summary →
+            </button>
+          )}
+          <div className="font-mono text-eyebrow text-editorial-ivory-mute tracking-wide-eyebrow uppercase">
+            Set in Fraunces &amp; Be Vietnam Pro
+          </div>
         </div>
       </footer>
+
+      {/* PostRunSummary modal — triggered by pipeline DONE SSE event */}
+      <PostRunSummary
+        project={project}
+        isOpen={showPostRunSummary}
+        onClose={() => setShowPostRunSummary(false)}
+        onRejectSuccess={onRefreshProject}
+        apiBase={apiBase}
+      />
     </div>
   )
 }

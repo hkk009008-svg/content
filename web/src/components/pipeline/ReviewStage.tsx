@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Project, ShotState, Scene, Shot, TakeRecord } from '../../types/project'
 import TakeStrip from '../console/TakeStrip'
+import AutoApproveBadge from '../console/AutoApproveBadge'
+import RejectAutoApproveModal from '../console/RejectAutoApproveModal'
 
 const API = '/api'
 
@@ -161,6 +163,9 @@ function ClipCard({
   const [negativePrompt, setNegativePrompt] = useState(shot.negative_constraints || '')
   const [showRegenForm, setShowRegenForm] = useState(false)
   const [rejectReason, setRejectReason] = useState(shot.plan_rejection_reason || '')
+  const [rejectAutoApproveGate, setRejectAutoApproveGate] = useState<'plan' | 'image' | 'motion' | 'final' | null>(null)
+
+  const audit = shot.auto_approve_audit || []
   const [selectedKeyframeTakeId, setSelectedKeyframeTakeId] = useState(shot.approved_keyframe_take_id || lastTake(shot.keyframe_takes || [])?.id || '')
   const [selectedFinalTakeId, setSelectedFinalTakeId] = useState(shot.approved_final_take_id || lastTake(shot.postprocess_variants || [])?.id || lastTake(shot.motion_takes || [])?.id || '')
 
@@ -328,6 +333,13 @@ function ClipCard({
               <span className="rounded bg-editorial-ink-soft px-2 py-1">{shot.target_api}</span>
               {shot.continuity_constraints && <span className="rounded bg-editorial-ink-soft px-2 py-1">{shot.continuity_constraints}</span>}
             </div>
+            {shot.plan_auto_approved && (
+              <AutoApproveBadge
+                gate="plan"
+                audit={audit}
+                onReject={() => setRejectAutoApproveGate('plan')}
+              />
+            )}
             <input
               value={rejectReason}
               onChange={(event) => setRejectReason(event.target.value)}
@@ -359,6 +371,13 @@ function ClipCard({
               </div>
             ) : (
               <div className="mt-3 text-xs text-editorial-ivory-mute">No keyframe takes yet.</div>
+            )}
+            {shot.image_auto_approved && (
+              <AutoApproveBadge
+                gate="image"
+                audit={audit}
+                onReject={() => setRejectAutoApproveGate('image')}
+              />
             )}
 
             {showRegenForm ? (
@@ -537,6 +556,20 @@ function ClipCard({
             ) : (
               <div className="mt-3 text-xs text-editorial-ivory-mute">No motion or postprocess takes yet.</div>
             )}
+            {shot.motion_auto_approved && (
+              <AutoApproveBadge
+                gate="motion"
+                audit={audit}
+                onReject={() => setRejectAutoApproveGate('motion')}
+              />
+            )}
+            {shot.final_auto_approved && (
+              <AutoApproveBadge
+                gate="final"
+                audit={audit}
+                onReject={() => setRejectAutoApproveGate('final')}
+              />
+            )}
 
             <div className="mt-3 flex flex-wrap gap-2">
               {[
@@ -602,6 +635,17 @@ function ClipCard({
           </section>
         </div>
       </div>
+
+      {/* Auto-approve rejection modal — opened by badge Reject affordance */}
+      {rejectAutoApproveGate && (
+        <RejectAutoApproveModal
+          shotId={shot.id}
+          gate={rejectAutoApproveGate}
+          isOpen={true}
+          onClose={() => setRejectAutoApproveGate(null)}
+          onSubmit={() => setRejectAutoApproveGate(null)}
+        />
+      )}
     </div>
   )
 }
