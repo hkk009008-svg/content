@@ -1,25 +1,44 @@
-# Operator Handoff — Context Transplant 2026-05-24 (POST-CYCLE-3)
+# Operator Handoff — Context Transplant 2026-05-25 (POST-V5-SHIP / CYCLE-6 CLOSE)
 
-**From:** Operator (this conversation, context still has runway)
-**To:** Next operator instance, fresh chat
+**From:** Operator-seat (this conversation, post-v5-ship refresh)
+**To:** Next operator-seat instance, fresh chat
 **Companion docs:**
-- [POST-ROADMAP-2026-05-24.md](POST-ROADMAP-2026-05-24.md) (`5c4a7c9` — refreshed for cycle-3 picks; canonical "what's next")
-- [HANDOFF-director-transplant-2026-05-24-cycle2.md](HANDOFF-director-transplant-2026-05-24-cycle2.md) (`60001d9` — director's transplant pickup if you're director-role)
-- [HANDOFF-director-transplant-2026-05-24.md](HANDOFF-director-transplant-2026-05-24.md) (cycle 1 — historical)
-- [HANDOFF-roadmap-2026-05-24.md](HANDOFF-roadmap-2026-05-24.md) (original 6-session roadmap CLOSED; Sessions 7-8 briefs as appendices)
+- [POST-ROADMAP-2026-05-24.md](POST-ROADMAP-2026-05-24.md) (`d4b398b` — last cycle-6 rotation; will need post-v5 refresh by director-seat)
+- [HANDOFF-director-transplant-2026-05-25-cycle6.md](HANDOFF-director-transplant-2026-05-25-cycle6.md) (`<pending-commit>` — director-seat cycle-6 close, post-v5-ship; **most recent director-seat pickup, read this first if director-seat**)
+- [HANDOFF-director-transplant-2026-05-25-cycle5.md](HANDOFF-director-transplant-2026-05-25-cycle5.md) (`9aac767` — cycle-5 historical; predates v5 ship by ~30 min)
+- [HANDOFF-director-transplant-2026-05-24-cycle3.md](HANDOFF-director-transplant-2026-05-24-cycle3.md) (cycle-3 historical)
+- [HANDOFF-director-transplant-2026-05-24-cycle2.md](HANDOFF-director-transplant-2026-05-24-cycle2.md) (cycle-2 historical)
+- [HANDOFF-roadmap-2026-05-24.md](HANDOFF-roadmap-2026-05-24.md) (Sessions 7-14 briefs as appendices; Session 14 P1-3 part 3 most recent)
+- [PROPOSAL-protocol-bundle-v5-2026-05-25.md](PROPOSAL-protocol-bundle-v5-2026-05-25.md) (`d66690f` — v5 shipped; read for the "two seats of one team" reframe rationale + structural-user-critique preserved inline)
+- [CLAUDE.md](../CLAUDE.md) `# Director-Operator Concurrent Operation` — full protocol including Rules #1-#11 + v5 two-seat reframe + D/E/B/M/S sections
 
 ---
 
 ## TL;DR (60 seconds)
 
-- **Original 6-session roadmap CLOSED + Sessions 7, 8, 9, 11 SHIPPED.** Session 7 (face_validator_gate, P0-1 Pri 3), 8 (Pydantic schema, P1-3 PARTIAL), 9 (P3-1 concurrency hardening), 11 (P4-3 backend auto-approve + v1.1 minors). Plus Monitor.tsx cascadeMetadata wiring (`a6e3ff1`, POST-ROADMAP top-3 #1 quick-claim), P3-1 audit (`e164505`), Session 10 brief shipped (`cefde42`, implementer pending). Pytest **664 passed / 3 skipped / 0 failed** (was 590 at roadmap close: +74 across S7-S11).
-- **Protocol Bundle v2 SHIPPED** (`416d610` + `5e0329d` v2.1 fix). New infrastructure: STATE.md (cold-start oracle, hook-maintained), `docs/PROTOCOL-RULES-LOG.md`, `coordination/mailbox/`, Rules #7 (pre-commit re-verify) + #8 (mailbox authority). Closes the v1-observed races (a6e3ff1 mid-handoff Monitor.tsx land; stale handoff TL;DR; user-as-relay bottleneck).
-- **Protocol Bundle v3 SHIPPED** (`3340d1f feat(protocol): ship Protocol Bundle v3 (G auth precedence + F freshness + H audit + minor)`). All 3 main + 1 minor landed: **G** (authority hierarchy extension w/ 5-min mailbox window + user-tier clarification, Rule #8 extended), **F** (STATE.md freshness check on cold-start, this doc's section 0a), **H** (hook script audit deliverable at `docs/AUDIT-hook-script-v2-2026-05-24.md`), **Minor** (PROTOCOL-RULES-LOG per-regime caveat). Proposal cycle: `749341b` proposal, `26a0842` REPLY, `ec1e64e` revision, `3340d1f` ship.
-- **Branch state at this refresh:** HEAD `3340d1f`; v3 ship folded counter bumps AND director's PROTOCOL-RULES-LOG pre-impl AND §F cold-start update (this doc). Working tree was clean post-v3-ship; this refresh adds operator-handoff content updates only (TL;DR / ledger / what's-pending).
-- **Cycle-3 immediate queue post-v3:**
-  1. **Session 10 dispatch** — brief at `cefde42`; implementer pending; director-owned dispatch
-  2. **POST-ROADMAP re-refresh** — needed to surface cycle-4 picks (last refresh `64c7571` predates Sessions 9, 11, v2 ship, v3 ship)
-  3. **PROTOCOL-RULES-LOG SHA update** — v3 ship's `_Protocol Bundle v3 ship_` placeholder rows (likely Rules 9, 10 if any, and Infrastructure Audits entry) need updating to `3340d1f` per the chicken-and-egg pattern from the v2 ship+update cycle
+- **Original 6-session roadmap CLOSED + Sessions 7-14 ALL SHIPPED.** Including S12 motion-gate opt-in (`2a25c2d` + `fefea5d` minor), S13 P4-3 frontend (`2fb44d1` AutoApproveBadge + PostRunSummary + RejectAutoApproveModal + reject endpoint, `f7d7a19` chore-minors), and S14 P1-3 part 3 (`e1b72ca` api_decompose_scene migration). Pytest **711 passed / 3 skipped / 0 failed** (was 590 at roadmap close: +121 across S7-S14). Smoke: OK.
+
+- **Protocol Bundles v2/v3/v4/v4.1/v5 ALL SHIPPED.** Substrate fully built out:
+  - **v2** (`416d610`) + **v2.1** fix (`5e0329d`): STATE.md cold-start oracle, PROTOCOL-RULES-LOG.md, `coordination/mailbox/` infrastructure, Rules #7 (pre-commit re-verify) + #8 (mailbox authority)
+  - **v3** (`3340d1f`): Authority hierarchy precedence (G, Rule #8 extended), STATE.md freshness check (F, cold-start §0a), hook script audit (H, deliverable at `docs/AUDIT-hook-script-v2-2026-05-24.md`)
+  - **v4** (`d61bdc8`): Lanes V (post-commit independent verification) + D (post-commit doc-sync) + S (pre-dispatch scout — scaffolded v4, ACTIVE v5+) + Rule #9 (operator-side reviewer is independent; second-opinion convention; R-9-1 cold-context prompt discipline) + Phase taxonomy
+  - **v4.1** (`509db7c`): Lane V coalescing rule (CC-1, operator MAY combine tightly-coupled commits ≤5 into single dispatch) + spec-reviewer hallucination mitigation (CC-2, verify-existence-before-asserting prompt rule)
+  - **v5** (`d66690f`): **TWO SEATS OF ONE TEAM reframe** + Rule #10 (joint-team mode; both seats equal-in-specialization, user-as-principal) + Rule #11 (codification bias check; per-rule beneficiary flagging + non-beneficiary REPLY veto) + D (disagreement protocol with 2-cycle limit then user-escalation) + E (emergency handling with 4-criteria gate: production / security / active-bleed / external-time-pressure) + B (`docs/BACKLOG.md` shared workspace) + M (`memory-candidate` mailbox kind) + Lane S activation + Sh (codify implementer dispatch as director-seat-default, not Shared)
+
+- **First v4-era Lane V dogfood SHIPPED its first novel finding into the codebase**: operator's S13 Lane V dispatch (`coordination/mailbox/archive/2026-05-24T17-24-52Z-operator-to-director-verification-report.md`) caught F1 CRITICAL multi-project routing bug + F2 SSE re-run dedupe collapse; director shipped `9e24323 fix(web): address S13 Lane V F1 (CRITICAL) + F2 — pid-scoped reject route + monotonic-run dedup` in response. End-to-end validation of v4's value proposition. Cumulative v4.1 telemetry across 2 dispatches: ~409k subagent tokens; 3 novel + 2 validation findings; well below v4.1 narrowing threshold.
+
+- **First v4-era Lane D dogfood SHIPPED**: ARCHITECTURE.md §7.7 backfill (Pydantic boundary + opt-in escalation pattern, ~89 LOC) shipped as operator-claimed `1e29610 docs(arch-sync)`.
+
+- **User-level structural critique on role partition** (preserved in v5 proposal §"Why v5: the user critique"): user surfaced 7 specific concerns (Shared-is-large, director-load asymmetry, memory-write latency, operator-drafts-blind, missing-verification-accountability, codification meta-bias, missing-emergency-backlog-disagreement-protocols). v5 components map 1:1 to those concerns. R11 retroactive beneficiary analysis (4 both / 1 user / 3 operator-seat / 0 director-seat across Rules 1-9) empirically disproved the meta-bias hypothesis.
+
+- **Branch state at this refresh:** HEAD `d66690f` (v5 ship); branch **0 ahead of `origin/main`** — director pushed everything through v5 ship including operator's `1e29610` Lane D commit. Working tree has held counter bumps (`M AGENTS.md`, `M CLAUDE.md`) from director's session reindex after v5's substantive doc additions — disposition is operator's natural-next-commit (per Rule #6).
+
+- **Cycle-6 close immediate operator queue:**
+  1. **Rules #10 + #11 SHA placeholder fill-ins** — both rows currently `_Protocol Bundle v5 ship_` → `d66690f`. Mirror of `3e57ddf` post-v2, `d8f2407` post-v3, `d90036b` post-v4. Chicken-and-egg operator follow-up.
+  2. **v4.1 SHA placeholder also pending**: `_Protocol Bundle v4.1 ship_` → `509db7c` (carried over from v4.1 ship; never filled).
+  3. **PROPOSAL-v5 footer** has `_Protocol Bundle v5 ship_` placeholder → `d66690f`.
+  4. **Counter bumps in WT** — fold into the SHA fill-in commit per Rule #6 (operator's natural-next-commit pattern).
+  5. **Session 14 (`e1b72ca`) Lane V dispatch pending** — feat commit qualifies under operator's R-V1-countered trigger. ~175k subagent tokens; advances cumulative v4.1 telemetry to 3 dispatches.
 
 ---
 
@@ -238,7 +257,76 @@ Operator + DIRECTOR (multiple cycles) interleaved. The director made periodic co
 
 ---
 
-## What's pending after Sessions 7-11 + Protocol Bundle v2 ship
+## What's pending after Sessions 7-14 + v2/v3/v4/v4.1/v5 ship (cycle-6 close)
+
+Sessions 1-14 all SHIPPED. Protocol Bundles v2/v3/v4/v4.1/v5 all SHIPPED.
+
+**Operator-seat post-v5-ship chores** (cycle-6 close → cycle-7 setup):
+
+1. **SHA placeholder fill-ins** (one operator commit per chicken-and-egg precedent — mirrors of `3e57ddf` post-v2, `d8f2407` post-v3, `d90036b` post-v4):
+   - `docs/PROTOCOL-RULES-LOG.md` Rule #10 row: `_Protocol Bundle v5 ship_` → `d66690f`
+   - `docs/PROTOCOL-RULES-LOG.md` Rule #11 row: `_Protocol Bundle v5 ship_` → `d66690f`
+   - `docs/PROTOCOL-RULES-LOG.md` v4.1 ship marker: `_Protocol Bundle v4.1 ship_` → `509db7c` (carried over from v4.1 ship; never filled)
+   - `docs/PROPOSAL-protocol-bundle-v5-2026-05-25.md` footer: `_Protocol Bundle v5 ship_` → `d66690f`
+
+2. **Counter bump disposition (Rule #6)**: held in WT (`M AGENTS.md`, `M CLAUDE.md`) from director's session reindex post-v5-ship. Fold into the SHA fill-in commit OR ship as standalone `chore(baseline)`. Lean: fold (operator's natural-next-commit pattern; matches `d8f2407` post-v3 model).
+
+3. **Session 14 (`e1b72ca`) Lane V dispatch**: `feat(schema): P1-3 part 3 — migrate api_decompose_scene to Project.model_validate` qualifies under operator's R-V1-countered trigger (every `feat` / `refactor` / `fix`). Cumulative v4.1 telemetry would advance from 2 → 3 dispatches.
+
+4. **POST-ROADMAP refresh post-v5-ship** — last rotation `d4b398b` (P4-3 SHIPPED) predates v5 ship. Director-seat task per role partition.
+
+5. **v5 dogfood opportunities** (next operator session):
+   - First `scout-request` mailbox event (Lane S activation; opt-in per director-seat)
+   - First `memory-candidate` mailbox event (v5 M)
+   - First BACKLOG.md item (if operator-seat surfaces during cycle-7)
+   - First R11 beneficiary check on a new v5.1+ proposal candidate
+   - First v5 §E emergency handling invocation (hopefully never; but the protocol exists)
+
+Push state: HEAD `d66690f` is at `origin/main`. Nothing unpushed unless operator commits the SHA fill-ins post-handoff.
+
+---
+
+### Cycles 5-6 commit ledger (append to historical Phase 0 + cycles 1-3 above)
+
+#### Cycle 5 — Protocol Bundle v4 propose/REPLY/revise/ship + Session 12 + Session 13 brief
+
+| SHA | Type | By | Summary |
+|---|---|---|---|
+| `5302fe6` (post-amend) | docs(proposal) | operator | v4 proposal initial draft |
+| `c487171` | chore(baseline) | operator | Post-v4-proposal reindex chore |
+| `8975a45` | docs(reply) | director | v4 REPLY with R-V1 (Lane V narrowing), R-D1 (README carve-out), R-9-1 (cold-context discipline), C-V1 + C-Dogfood-1 |
+| `4fdcc01` | docs(proposal) | operator | v4 revision per REPLY with **operator counter-refinement to R-V1** (first cross-seat counter precedent) |
+| `d61bdc8` | feat(protocol) | director | **Ship v4** — Lanes V/D/S scaffold + Rule #9 + Phase taxonomy |
+| `7da49ed` | docs(rules-log) | operator | Rule #9 SHA placeholder fill (chicken-and-egg) |
+| `2a25c2d` | feat(cinema) | director's implementer | Session 12 motion-gate opt-in (CINEMA_AUTO_APPROVE_MOTION) |
+| `771bbf7` | test(cinema) | director's implementer | Session 12 tests (+21) |
+| `fefea5d` | chore(cinema) | director | Session 12 code-review minor (top-level os import) |
+| `2fef5ef` | docs(roadmap) | director | Session 13 brief — P4-3 frontend |
+| `9aac767` | docs(handoff) | director | Cycle-5 transplant handoff (first to mention "first Lane V dogfood") |
+
+#### Cycle 6 — Session 13 ship + Session 14 + Protocol Bundles v4.1 + v5
+
+| SHA | Type | By | Summary |
+|---|---|---|---|
+| `029dbf9` | feat(types) | director's implementer | Session 13 TypeScript types mirror |
+| `2fb44d1` | feat(web) | director's implementer | Session 13 P4-3 frontend (858 LOC: AutoApproveBadge + PostRunSummary + RejectAutoApproveModal + reject endpoint) |
+| (operator dispatch) | Lane V #2 | operator | Combined Lane V on `9aac767..2fb44d1` — 1 CRITICAL (F1 multi-project) + 2 Important findings; archived at `mailbox/archive/2026-05-24T17-24-52Z-operator-to-director-verification-report.md` |
+| `f7d7a19` | chore(web) | director | Session 13 code-review chore-minors |
+| `d4b398b` | docs(roadmap) | director | POST-ROADMAP rotate for cycle-6 close (P4-3 SHIPPED) |
+| `1e29610` | docs(arch-sync) | operator | **First Lane D dogfood** — ARCHITECTURE.md §7.7 backfill (+89 LOC, Pydantic boundary + escalation pattern) |
+| `e1b72ca` | feat(schema) | director's implementer | Session 14 P1-3 part 3 (api_decompose_scene migration) |
+| `9e24323` | fix(web) | director | **Director acted on operator's Lane V findings**: pid-scoped reject route + monotonic-run dedup (resolves F1 + F2) |
+| `509db7c` | chore(protocol) | director | **Protocol Bundle v4.1** — CC-1 Lane V coalescing + CC-2 spec-reviewer hallucination mitigation |
+| `2e06fe1` | docs(proposal) | operator | v5 proposal draft ("two seats of one team" reframe; responds to user-level structural critique) |
+| `642250d` | docs(reply) | director | v5 REPLY with R-E-1 (emergency criteria) + C-D-1 (counting clarification); 8/8 open questions aligned with operator's lean |
+| `8a4148a` | docs(proposal) | operator | v5 revision per REPLY (zero counter-refinements; cleanest cycle to date) |
+| `d66690f` | feat(protocol) | director | **Ship v5** — two-seat reframe + Rules #10/#11 + D/E/B/M/S/Sh; cycle-6 close |
+
+(For Cycle 3 ledger entries, see historical section below; cycle 4 was operator's Lane D + S13 Lane V dispatches above.)
+
+---
+
+## (Original historical "What's pending" section follows — preserved for cycle-3-era context but superseded by post-v5-ship queue above)
 
 Sessions 1, 2, 3, 4, 5, 6, 7, 8, 9, 11 all SHIPPED. Session 10 brief shipped (`cefde42`) but implementer not yet dispatched (held for separate Session 10 dispatch by director).
 
@@ -419,4 +507,4 @@ Subagent dispatch saved an estimated 7-10 hours across Sessions 2-8.
 
 ---
 
-*Operator handoff refreshed at HEAD `5c4a7c9` (will be `+1` after this commit lands; may be `+N` if director continued shipping during this write). Sessions 1-8 + post-roadmap closure SHIPPED; cycle-3 picks framed in POST-ROADMAP-2026-05-24.md. Read the cold-start checklist above, run `git log --oneline -5` before pre-locating any shared-task work AND before any state-asserting write (per ea97d0a rule #1), then wait for director dispatch or hand-off.*
+*Operator-seat handoff refreshed at HEAD `d66690f` (v5 ship; cycle-6 close). Branch 0 ahead of `origin/main` (push fully caught up). Sessions 1-14 + Protocol Bundles v2/v3/v4/v4.1/v5 ALL SHIPPED. Per v5 §P1 ("two seats of one team"), this is operator-seat's handoff to the next operator-seat instance; director-seat picks up from `HANDOFF-director-transplant-2026-05-25-cycle6.md` (post-v5-ship cycle-6 close; **race-acked per Rule #5: director-seat authored their cycle-6 handoff during this operator-seat handoff's Write window — both refresh files are post-v5-ship; cycle-5 director handoff is now historical**). Cold-start checklist above is fully v3 §F freshness-check compliant. Run `git log --oneline -5` before any pre-locating on shared-task work AND before any state-asserting write (Rule #4); immediately before commit, re-run + check mailbox (Rule #7). User-direction overrides agent discretion at any point (Rule #8 authority precedence + v5 P1 user-as-principal). Welcome to one-team mode.*
