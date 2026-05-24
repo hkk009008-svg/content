@@ -218,7 +218,8 @@ class TestProject:
     def test_full_real_project_round_trip(self):
         """Load the real 70940580b872 fixture; validate; dump; assert no loss."""
         path = os.path.abspath(REAL_PROJECT_JSON)
-        assert os.path.exists(path), f"Fixture not found: {path}"
+        if not os.path.exists(path):
+            pytest.skip(f"Real project fixture not present: {path}")
         with open(path, encoding="utf-8") as f:
             raw = json.load(f)
 
@@ -233,11 +234,21 @@ class TestProject:
         assert model_scene.id == raw_scene["id"]
         assert len(model_scene.shots) == len(raw_scene["shots"])
 
-        # Round-trip: dump back to dict and re-validate
+        # Round-trip: dump back to dict, re-validate, compare structurally.
+        # Length-only checks would miss silent content loss; compare id
+        # collections at each level to prove no fields dropped.
         dumped = p.model_dump()
         p2 = Project.model_validate(dumped)
         assert p2.id == p.id
-        assert len(p2.scenes[0].shots) == len(p.scenes[0].shots)
+        assert p2.name == p.name
+        assert [s.id for s in p2.scenes] == [s.id for s in p.scenes]
+        assert [c.id for c in p2.characters] == [c.id for c in p.characters]
+        assert [l.id for l in p2.locations] == [l.id for l in p.locations]
+        # Deepest check: take ids in the first shot survive the cycle AND
+        # match the raw JSON (proves model_validate didn't drop them either).
+        raw_first_shot = raw["scenes"][0]["shots"][0]
+        raw_keyframe_take_ids = [t["id"] for t in raw_first_shot.get("keyframe_takes", [])]
+        assert [t.id for t in p2.scenes[0].shots[0].keyframe_takes] == raw_keyframe_take_ids
 
     def test_nested_validation_error_pinpoints_path(self):
         """A bad take kind deep in nested shots → ValidationError names the path."""
@@ -336,3 +347,27 @@ class TestBoundaryValidation:
         # The key assertion: no exception was raised above.
         # Under extra="allow" on Project, unknown top-level fields don't warn.
         # This is correct permissive behavior per the brief.
+
+    def test_validate_project_catches_non_validation_error(self, monkeypatch, caplog):
+        """Non-ValidationError exceptions must NOT propagate from _validate_project.
+
+        The brief's "warn-only" contract is broader than ValidationError.
+        A TypeError / RecursionError / etc from a malformed dict must be
+        caught and logged, not raised into save_project / load_project
+        callers (web_server.py, cinema_pipeline.py).
+        """
+
+        def boom(*args, **kwargs):
+            raise TypeError("simulated non-ValidationError crash")
+
+        monkeypatch.setattr(
+            "domain.project_manager.Project.model_validate", boom
+        )
+
+        # Must not raise — that's the warn-only contract.
+        with caplog.at_level(logging.WARNING, logger="domain.project_manager"):
+            _pm._validate_project({"id": "proj_crash"}, "test_context")
+
+        crash_logs = [r for r in caplog.records if "crashed" in r.message]
+        assert len(crash_logs) >= 1
+        assert crash_logs[0].context == "test_context"

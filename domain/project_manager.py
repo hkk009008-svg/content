@@ -612,6 +612,20 @@ def _validate_project(project: dict, context: str) -> None:
                 "errors": e.errors()[:5],  # cap at 5 to keep log size bounded
             },
         )
+    except Exception as e:
+        # Belt-and-suspenders: the brief's "warn-only" contract is broader
+        # than ValidationError. A TypeError / RecursionError / etc from a
+        # malformed dict must NEVER propagate into save_project or
+        # load_project — those callers (web_server.py, cinema_pipeline.py)
+        # would crash on what's supposed to be a passive safety net.
+        logger.warning(
+            "project schema validation crashed (non-ValidationError)",
+            extra={
+                "context": context,
+                "project_id": project.get("id") if isinstance(project, dict) else None,
+                "error": repr(e),
+            },
+        )
 
 
 def save_project(project: dict, timeout: float = 10) -> None:
