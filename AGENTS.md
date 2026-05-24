@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Content** (4167 symbols, 23482 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Content** (4165 symbols, 23371 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -823,6 +823,39 @@ director's reviewer pass to land before dispatching Lane V. The two
 parties' subagents may produce overlapping findings — that's
 expected; the second opinion's value is in the angles each party
 MISSES, and overlap on what both catch is acceptable redundancy.
+
+**Coalescing (v4.1, CC-1).** Strict per-commit Lane V trigger remains
+the default. **Operator MAY coalesce Lane V dispatches into a single
+range-review** when (a) the commit range is small (≤5 commits), (b)
+the commits are tightly coupled (same brief / same session / shared
+contract surface), AND (c) reviewing in isolation would lose
+cross-system context. Coalescing is operator discretion; when
+applied, the `verification-report` event's `related-commits` field
+lists all covered SHAs, and the prompt's `BASE_SHA..HEAD_SHA` covers
+the full range.
+
+**Spec-reviewer prompt discipline (v4.1, CC-2).** The general-purpose
+spec reviewer has been observed (2 dispatches, 2 hallucinations) to
+make confident "X exists" / "X is required" claims that don't
+survive grep verification. Mitigation: operator's spec-reviewer
+prompt MUST include an explicit "verify before asserting existence"
+instruction:
+
+> "Before claiming any symbol, prop, import, or section exists in
+> the code: run grep / Read on the actual file to verify. If your
+> claim can be falsified by `git show <SHA> -- <file>` or `grep
+> -n <symbol> <file>`, run that verification command yourself BEFORE
+> including the claim in your report."
+
+Without this discipline, hallucinated existence claims pass through
+to director's main context as CRITICAL findings that director must
+independently disprove. With it, the hallucination is contained
+inside the subagent.
+
+If hallucinations persist after CC-2 codification (≥1 more in
+cycle-7+ Lane V dispatches), v4.2 should consider CC-2 options 2
+(third lightweight verifier pass) or 3 (different subagent type
+for spec review).
 
 ## Git is the tiebreaker
 

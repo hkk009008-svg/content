@@ -28,6 +28,39 @@ and per-session invocation count. Updated manually at session-close by operator
 > same pattern** — ships with `_Protocol Bundle v4 ship_` placeholder;
 > operator updates to actual SHA in follow-up commit.
 
+## Protocol Bundle v4.1 — Lane V refinements (cycle 6)
+
+Codified during cycle 6 in response to operator's S13 Lane V
+verification-report (`coordination/mailbox/archive/2026-05-24T17-24-52Z-operator-to-director-verification-report.md`) §v4.1 candidate
+clarifications. Two operator-surfaced refinements shipped as v4.1
+(mirrors v2.1's pytest-regex-fix shape):
+
+**CC-1 — Lane V coalescing rule.** Operator MAY coalesce per-commit
+Lane V dispatches into a single range-review when commits are small
+(≤5), tightly coupled (same brief / shared contract surface), and
+isolation-review would lose cross-system context. Strict per-commit
+trigger remains the default; coalescing is operator discretion.
+Empirical basis: S13's `feat(types)` + `feat(web)` commits were
+correctly coalesced into one Lane V dispatch covering
+`029dbf9..2fb44d1`; the cross-system review caught F1 CRITICAL that
+isolation review of either commit alone would have missed.
+
+**CC-2 — Spec-reviewer hallucination mitigation.** General-purpose
+spec reviewer observed (2/2 dispatches) to make confident
+"X exists" / "X is required" claims that didn't survive grep
+verification (dispatch #1: "module already imports os at top-level";
+dispatch #2: "ReviewStage requires onRefreshProject Prop"). Both
+hallucinated. v4.1 codifies: operator's spec-reviewer prompt MUST
+include explicit "verify before asserting existence" instruction
+requiring grep / Read verification of any symbol/prop/import claim
+before inclusion in the report. If hallucinations persist after
+CC-2 codification (≥1 more in cycle-7+ Lane V dispatches), v4.2
+should consider operator's CC-2 options 2 (third lightweight
+verifier subagent) or 3 (different subagent type for spec review).
+
+v4.1 ship SHA: `_Protocol Bundle v4.1 ship_` (this commit; operator
+updates at next session-close per chicken-and-egg pattern).
+
 ## Invocation log
 
 **Note on plateau interpretation (per Protocol Bundle v3 §Minor):** Rule
