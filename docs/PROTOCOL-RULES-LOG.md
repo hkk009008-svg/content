@@ -14,14 +14,16 @@ and per-session invocation count. Updated manually at session-close by operator
 | 4 | State-asserting writes precondition (`git log -5` before Write) | `ea97d0a` | Stale handoff doc race (`843c102` pre-write) |
 | 5 | Race-acknowledging commit body (name what shifted during work) | `ea97d0a` | Same |
 | 6 | Counter-bump fold-and-surface (during concurrent ops) | `ea97d0a` | Standalone `chore(baseline)` pollution risk |
-| 7 | Pre-commit re-verify (state changes between Write and commit) | _Protocol Bundle v2 ship_ | `a6e3ff1` mid-handoff race (Monitor.tsx shipped during operator handoff Write; operator caught in race-ack body of `1541a69`) |
-| 8 | Mailbox authority (sent events bind equal to user-relayed signals) | _Protocol Bundle v2 ship_ | User-as-relay bottleneck observed across cycles 1-3 — every inter-session signal had to route through user, eating throughput |
+| 7 | Pre-commit re-verify (state changes between Write and commit) | `416d610` | `a6e3ff1` mid-handoff race (Monitor.tsx shipped during operator handoff Write; operator caught in race-ack body of `1541a69`) |
+| 8 | Mailbox authority (sent events bind equal to user-relayed signals) | `416d610` | User-as-relay bottleneck observed across cycles 1-3 — every inter-session signal had to route through user, eating throughput |
 
-> The "Codified" column for Rules #7 + #8 says "_Protocol Bundle v2 ship_"
-> rather than a specific SHA because the rules-log file is part of the same
-> ship commit that codifies them. Once the ship lands, update both rows to
-> the commit's SHA at session-close. The cycle-4 director or operator will
-> see this note and update.
+> Historical note: Rules #7 + #8 originally shipped with the placeholder
+> `_Protocol Bundle v2 ship_` in the "Codified" column because the rules-log
+> file was part of the same ship commit that codified them (chicken-and-egg —
+> the file couldn't reference its own enclosing commit SHA pre-commit).
+> Resolved in cycle 4 (this session): operator updated both rows to `416d610`
+> after the ship landed. Pattern for future self-referencing rule additions:
+> ship with placeholder, update at next session-close.
 
 ## Invocation log
 
