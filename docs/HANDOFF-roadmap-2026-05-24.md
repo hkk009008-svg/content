@@ -3,11 +3,12 @@
 **From:** Director (incoming, 2026-05-24)
 **To:** Operators (engineering sessions / AI agents executing the roadmap)
 **Source plan:** [docs/STRATEGIC_REVIEW-2026-05-24.md](STRATEGIC_REVIEW-2026-05-24.md)
-**Status:** Active — original 6-session roadmap CLOSED (Sessions 1–6
-shipped + audited per
-[docs/POST-ROADMAP-2026-05-24.md](POST-ROADMAP-2026-05-24.md));
-**Session 7 ACTIVE** (P0-1 Pri 3 carry-forward — `face_validator_gate`
-test coverage; see appendix at end of this file).
+**Status:** Active — original 6-session roadmap CLOSED + Session 7
+(P0-1 Pri 3 `face_validator_gate` coverage) CLOSED. **Session 8 ACTIVE**
+(P1-3 carry-forward — Pydantic schema on `project.json`, load/save
+boundary; see appendix at end of this file). See
+[docs/POST-ROADMAP-2026-05-24.md](POST-ROADMAP-2026-05-24.md) for the
+post-original-roadmap reassessment + next-director picks.
 
 This document is the manual. It tells you **what** to do, **why** it
 matters, **how** to do it well, and **what done looks like**. Read the
@@ -1623,4 +1624,164 @@ mock-helper organization. Escalate when:
 similar coverage gaps — it's the parallel surface for performance
 takes and uses the same `IdentityValidator` singleton. Same shape of
 brief; same effort range.
+
+---
+
+## SESSION 8 — P1-3: Pydantic schema on `project.json` (load/save boundary)
+
+**Why this matters.** Mutations on the raw project dict (`project["scenes"][i]["shots"][j]["target_api"] = "..."`) silently break gate predicates when a typo lands. A misspelled key is a no-op write; a misspelled lookup returns None and short-circuits. This was the silent-failure surface STRATEGIC_REVIEW P1-3 named the highest-leverage reliability change remaining. POST-ROADMAP TL;DR #2 (after `face_validator_gate` coverage) puts this second in the pickup order.
+
+**Scope reframe (2026-05-24).** Original P1-3 implied 2-3 sessions touching every `domain/` caller (typed accessor methods, etc.). This brief scopes to **session 1 of that arc: load/save boundary validation only**. Existing call sites keep getting `dict` back from `load_project` / `mutate_project`. Pydantic runs at the boundary, validates, then converts back to dict for in-memory use. Caller refactor (typed accessors) is **deferred to Session 9+**.
+
+**Dependency note (escalation pre-authorized).** `pydantic` is NOT in `requirements.txt` today (verified via `grep -rn "from pydantic" --include="*.py" /Users/hyungkoookkim/Content` → empty). Adding a pip dependency is normally an escalate item per the decision-authority matrix. **The strategic review pre-authorized this addition** in §P1-3 ("Use Pydantic for project.json schema validation"); cite that line in the requirements.txt change's commit body.
+
+**Pre-work:**
+
+1. Read [domain/project_manager.py](../domain/project_manager.py) lines
+   585–650 — the three boundary functions (`save_project` L588,
+   `load_project` L599, `mutate_project` L610) and the existing
+   `normalize_project_schema` they call.
+2. Read [domain/scene_decomposer.py](../domain/scene_decomposer.py) to
+   see what shape `shots` arrive in from generation (some fields are
+   optional / absent on fresh shots, populated as the pipeline runs).
+3. Sample at least one real project.json — start with
+   [projects/70940580b872/project.json](../projects/70940580b872/project.json)
+   (133 LOC; 1 scene, 2 shots, includes generated_image + generated_video
+   + take records). If more sample data exists in `projects/`, sample
+   2-3 more to cover field-presence variability.
+4. Baseline: `.venv/bin/python -m pytest tests/unit/ -q | tail -1`
+   → expect `613 passed, 3 skipped, 0 failed` (Session 7 baseline at
+   HEAD `d8bf650`).
+
+**Scope:**
+
+| IN | OUT |
+|---|---|
+| Add `pydantic>=2.0` to `requirements.txt` (cite STRATEGIC_REVIEW P1-3 pre-auth) | Refactor of `domain/*` callers to use typed accessors |
+| Create `domain/models.py` with the model hierarchy | Replace `normalize_project_schema` (pydantic VALIDATES alongside, doesn't replace) |
+| Top-level: `Project` model wrapping `Character`, `Location`, `Scene`, `Shot`, `TakeRecord` | Strict mode for production (start permissive — `extra="allow"`, log warnings on unknown fields) |
+| Validation hook in `save_project` (before write) + `load_project` (after `normalize_project_schema`) | Refactor of `mutate_project`'s internal `_save_project_unlocked` path (it's covered transitively via `save_project`) |
+| Round-trip test: `load → mutate → save → load` preserves all known fields + unknown-field warnings on real project.json fixtures | Web frontend type sync (deferred) |
+| `tests/unit/test_project_models.py` with ≥15 tests | New top-level `Project.from_dict` / `to_dict` callsite migration in production code |
+
+**Approach:**
+
+1. **Dependency:** `pydantic>=2.0,<3` added to `requirements.txt` under a new `# --- Data validation ---` section. Cite STRATEGIC_REVIEW P1-3 in the section comment so a future grep `grep -B2 pydantic requirements.txt` shows the rationale inline.
+
+2. **Models (`domain/models.py`, ~150 LOC):**
+
+   - `TakeRecord(BaseModel)`: `id: str`, `kind: Literal["keyframe", "motion", "performance", "postprocess"]`, `path: str`, `source_take_id: str = ""`, `status: str`, `created_at: str` (ISO-8601 string; don't coerce to datetime — JSON round-trip stays clean), `metadata: dict = {}`, `cascade_metadata: Optional[CascadeMetadata] = None` (the Session 6 field).
+   - `CascadeMetadata(BaseModel)`: `engine: str`, `score: Optional[float] = None`, `threshold: Optional[float] = None`, `fallback: Optional[bool] = None`, `attempts: Optional[List[str]] = None` (mirrors `web/src/types/project.ts`).
+   - `Shot(BaseModel)`: id, prompt, camera, visual_effect, target_api, scene_foley, characters_in_frame (list), primary_character, action_context, generated_image, generated_video, plan_status, plan_rejection_reason, keyframe_takes (List[TakeRecord]), approved_keyframe_take_id, motion_takes (List[TakeRecord]), approved_motion_take_id, postprocess_variants (List[TakeRecord]), approved_final_take_id, performance_takes (List[TakeRecord]) — the field whose absence triggered `_find_take` to short-circuit pre-Session-2; this MUST be in the model with default `[]`, performance_take_id field included — diagnostics (list of dict), intent_notes, negative_constraints, continuity_constraints. **Every field defaults to `""` / `[]` / `None` so partial/early shots validate.**
+   - `Scene(BaseModel)`: id, order, title, location_id, characters_present (list), action, dialogue, mood, camera_direction, duration_seconds (float), num_shots (int), shots (List[Shot]).
+   - `Character(BaseModel)`: id, name, description, voice_id, reference_image (str = ""). Inspect actual JSON; field set may be slightly different.
+   - `Location(BaseModel)`: id, name, description, reference_image (str = ""). Same — verify against actual JSON.
+   - `Project(BaseModel)`: id, name, characters (List[Character]), locations (List[Location]), scenes (List[Scene]). Optional top-level fields (settings, etc.) inherit from `model_config = ConfigDict(extra="allow")` so the model doesn't fail on fields we haven't enumerated yet.
+
+3. **Boundary integration (~30 LOC change in `domain/project_manager.py`):**
+
+   ```python
+   from domain.models import Project
+   import logging
+   logger = logging.getLogger(__name__)
+   
+   def _validate_project(project: dict, context: str) -> None:
+       """Pydantic validation pass; logs warnings on unknown fields but
+       does NOT fail the operation (start permissive — operators can
+       tighten later via a CINEMA_STRICT_SCHEMA env flag in a follow-up)."""
+       try:
+           Project.model_validate(project)
+       except ValidationError as e:
+           logger.warning(
+               "project schema validation failed",
+               extra={"context": context, "project_id": project.get("id"),
+                      "errors": e.errors()[:5]},  # first 5 to keep log size bounded
+           )
+   
+   # In save_project (L588) — call before write
+   # In load_project (L599) — call after normalize_project_schema runs
+   ```
+
+   Strict mode is **out of scope** for this session. The brief intentionally starts permissive (warn-only) so the rollout doesn't break existing projects that have field drift. Strict mode + an env flag = Session 9 scope.
+
+4. **Test file `tests/unit/test_project_models.py` (~15 tests):**
+
+   - `TestTakeRecord` (3): minimal valid take, optional cascade_metadata round-trip, kind Literal enforcement (`kind="banana"` → ValidationError).
+   - `TestShot` (4): minimal valid shot (only `id` + `prompt`), `performance_takes` defaults to `[]` (the field whose absence caused the Session-2 P0 bug), full-shape shot validates, extra unknown field logged-not-failed under `extra="allow"`.
+   - `TestScene` (2): minimal scene, `shots` list of `Shot` validates.
+   - `TestProject` (3): minimal project, full real-project round-trip (load `projects/70940580b872/project.json`, validate, dump, assert no data loss for known fields), nested validation cascades (bad take_kind in deeply nested shot → ValidationError pinpoints the path).
+   - `TestBoundaryValidation` (3): `save_project` calls `_validate_project` (use `monkeypatch` to spy), `load_project` calls `_validate_project` (same pattern), validation warning logged but operation completes when project has unknown top-level field.
+
+**Acceptance criteria:**
+
+- [ ] `pydantic>=2.0,<3` in `requirements.txt` with section comment citing STRATEGIC_REVIEW P1-3
+- [ ] `domain/models.py` exists with the 6 listed `BaseModel` classes
+- [ ] `domain/project_manager.py` calls `_validate_project` at both `save_project` and `load_project`; `mutate_project` is covered transitively via `save_project`
+- [ ] All existing `domain/*` callers continue to work unchanged (they still receive `dict`)
+- [ ] `tests/unit/test_project_models.py` exists with ≥15 tests
+- [ ] Validation is **warn-only** (no production raise); unknown top-level fields don't fail load
+- [ ] Round-trip preserves all fields for at least 1 real project.json fixture
+- [ ] §15 smoke still passes
+- [ ] Whole-suite: ≥628 pass / 3 skip / 0 fail (613 baseline + ≥15 new)
+- [ ] `pip install -r requirements.txt` succeeds in the project venv (no version conflicts with anthropic / google-genai / openai)
+
+**Pitfalls:**
+
+- **Don't fail on unknown fields.** Real project.json files have organic drift — settings dicts, ad-hoc UI scratchpad fields, deprecated keys waiting on cleanup. Permissive mode (`extra="allow"`) means a new field in the JSON is logged, not raised. Strict mode + env flag is Session 9.
+- **`created_at` stays a string.** Don't coerce to `datetime` — JSON round-trips need the exact same string back, and `datetime.utcnow().isoformat() + "Z"` (the production format at `project_manager.py:126,864`) produces a non-standard suffix that `datetime.fromisoformat` doesn't parse on all Python versions. String type is the safe contract.
+- **`performance_takes` MUST be in the `Shot` model with default `[]`.** This is the field whose absence caused the Session-2 P0 bug at `cinema/shots/controller.py:_find_take`. The Pydantic model is the natural place to make its presence non-optional going forward.
+- **`metadata: dict = {}`** is a Python gotcha — the default empty dict is shared across instances. Use `Field(default_factory=dict)` instead.
+- **DON'T touch `normalize_project_schema`.** It runs first at load time and shapes the project for backward compat (renames old fields, supplies defaults). Pydantic VALIDATES after normalize runs; the two coexist. Replacing normalize is Session 9 work.
+- **DON'T refactor any `domain/*` caller.** Callers still see `dict` — pydantic is a boundary safety net, not a typed-accessor migration. That's Session 9+.
+- **`pip install` may fail on an old venv.** If anthropic/google-genai have hard pins on an older pydantic v1, you'll hit a version conflict. If so, report BLOCKED with the conflicting versions — director will decide whether to bump those deps or to pin `pydantic<3,!=1.x` more carefully.
+
+**Verification:**
+
+```bash
+# 1. New tests pass in isolation
+.venv/bin/python -m pytest tests/unit/test_project_models.py -v 2>&1 | tail -20
+# Expected: ≥15 pass / 0 fail
+
+# 2. Whole-suite (no regression)
+.venv/bin/python -m pytest tests/unit/ --tb=no -q 2>&1 | tail -3
+# Expected: ≥628 pass / 3 skip / 0 fail
+
+# 3. §15 smoke
+.venv/bin/python /Users/hyungkoookkim/Content/scripts/ci_smoke.py
+# Expected: OK
+
+# 4. Round-trip a real project (functional smoke)
+.venv/bin/python -c "
+from domain.project_manager import load_project
+p = load_project('70940580b872')
+assert p is not None
+print('OK — load + auto-validate succeeded; check logs for any warnings')
+"
+
+# 5. Scope check
+git diff --stat HEAD
+# Expected: requirements.txt, domain/models.py (new),
+#           domain/project_manager.py, tests/unit/test_project_models.py
+```
+
+**Commit shape (split into 2):**
+
+Commit 1: `feat(schema): add Pydantic models + boundary validation for project.json`
+  - requirements.txt + domain/models.py + domain/project_manager.py changes
+  - Cite STRATEGIC_REVIEW P1-3 in body as dependency-add pre-authorization
+  - Explicit "warn-only by design" note + Session 9 forward-pointer for strict mode
+
+Commit 2: `test(schema): cover project.json model validation + boundary integration`
+  - tests/unit/test_project_models.py
+  - Reference the new models commit's SHA in body
+
+**Estimated effort:** 3-4 hours. Bulk is in field enumeration (~30 fields across 5 models) + write-careful tests. Boundary integration is ~30 LOC. The dependency-add gate is what makes this an L-effort item conceptually, not the code volume.
+
+**Decision authority:** Lane A on model field naming (match existing dict keys exactly), validator vs. field_validator choice in Pydantic v2, test naming. Escalate when:
+
+- You hit a version conflict on `pip install -r requirements.txt`. Don't bump other deps unilaterally.
+- A field in real project.json has a shape the brief doesn't enumerate (e.g., a `settings: dict` with structured contents). Add to the model with permissive shape (`dict` or `Optional[SomeSubModel]`) and note in your report; director will decide whether Session 9 hardens it.
+- You discover `normalize_project_schema` performs validation that would conflict with Pydantic's view of reality. Don't try to reconcile in this session — surface in the report.
+
+**If you finish early:** Add `CINEMA_STRICT_SCHEMA=1` env flag support to `_validate_project` (raise instead of warn). Don't enable it by default. This pre-stages Session 9.
 
