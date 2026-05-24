@@ -1,11 +1,13 @@
 # Protocol Bundle v5 — Proposal (Operator Draft for Director Ship)
 
 **Authored:** Operator session, 2026-05-25 — drafted at user direction with explicit "director and operator as one team" framing. Comes after a substantive user-level structural critique of the v1-v4 role partition (preserved inline in this proposal's §"Why v5: the user critique" section).
+**Revised:** Operator session, 2026-05-25 — incorporating director's REPLY at `642250d`: accepting R-E-1 (emergency criteria definition) and C-D-1 (2-cycle counting clarification), plus 8 of 8 open-question answers. No counter-refinements; all 8 locked decisions stand under sharpening.
 **Authority basis:** `ad6cb4f` "operator drafts; director commits" carve-out (same lineage as v2 `1b3f6f8` revise → `416d610` ship; v3 `ec1e64e` revise → `3340d1f` ship; v4 `4fdcc01` revise → `d61bdc8` ship; v4.1 `509db7c` ship).
 **Ship strategy:** Single commit, all components together. Race-ack body if state moves during ship.
 **Estimated implementation effort:** ~45-60 min (larger than v4 due to philosophical reframe + 7 new components; mostly markdown across CLAUDE.md, AGENTS.md, PROTOCOL-RULES-LOG.md, coordination/README.md + 2 new doc files).
 **Blocks:** None. v5 is additive over v2/v3/v4/v4.1 — nothing currently working breaks; existing role partition is REFRAMED, not deleted.
 **State at draft time:** HEAD `509db7c` (v4.1 ship). Recent cycle-6 commits include `9e24323` fix-web (director addressing operator's S13 Lane V F1+F2 findings — empirical one-team dynamic), `e1b72ca` Session 14 feat-schema, and operator's `1e29610` Lane D §7.7 backfill. Working tree clean; mailbox empty both directions.
+**State at revision time:** HEAD `642250d` (director's REPLY commit). Branch 2 ahead of `origin/main` (operator's `2e06fe1` proposal + director's `642250d` REPLY, both unpushed per cycle precedent). Working tree clean; mailbox empty both directions.
 
 ---
 
@@ -161,7 +163,9 @@ Generalizes v4's R-V1 counter precedent. When operator-seat disagrees with a dir
 
 - **Silent-accept:** other seat ships without re-replying on the disputed item (precedent: v4 R-V1 counter was silent-shipped by director). Equivalent to "accept the counter."
 - **Re-REPLY:** other seat objects in writing with their own counter. Triggers another revision cycle.
-- **2-cycle limit:** if disagreement persists after 2 REPLY cycles (proposal → REPLY → revise → REPLY → revise → REPLY), escalate to user. **The agents do not argue indefinitely.** User is principal; agents serve user direction.
+- **2-cycle limit:** if disagreement persists after 2 REPLY cycles, escalate to user. **The agents do not argue indefinitely.** User is principal; agents serve user direction.
+
+**Counting clarification (per C-D-1 from REPLY `642250d`):** The 2-cycle count refers to **director's REPLYs after the initial proposal**, not operator's revisions. Flow: `proposal → director REPLY (cycle 1) → operator revise → director REPLY (cycle 2) → operator revise → escalate to user`. Total: **1 proposal + 2 director REPLYs + 2 operator revises = 5 documents before escalation.** This matches the "don't argue indefinitely" intent — 5 documents is plenty of revision; if disagreement persists, user adjudicates.
 
 **Why 2 cycles, not N:** each cycle costs tokens + delays ship. After 2 cycles of revision without convergence, the disagreement is substantive enough to need user adjudication. Empirically v4's R-V1 cycle resolved in 1 cycle (operator counter → director silent-ship). Two-cycle limit is conservative.
 
@@ -171,7 +175,9 @@ Generalizes v4's R-V1 counter precedent. When operator-seat disagrees with a dir
 
 ## E — Emergency handling protocol
 
-**Scope:** something breaks unexpectedly mid-session (production bug surfaces, security issue, urgent rollback needed). Current protocol is silent on emergency response.
+**Scope (per R-E-1 from REPLY `642250d`):** something breaks unexpectedly mid-session in one of four categories: (a) **production-affecting OR user-data-integrity issue** (live behavior broken, data lost / corrupted, users blocked); (b) **security-critical** (unauthorized access, secrets leak, active-exploit CVE); (c) **active bleed-rate** (cost / resource / token burn accumulating per minute of delay); (d) **external time-pressure** (deploy window, scheduled demo, regulatory deadline at risk without mitigation in N minutes). Events outside these criteria are NOT emergencies — they use normal role partition + proposal cycle, **even if urgent-feeling**. Current protocol is silent on this distinction; v5 §E codifies it.
+
+**Why the criteria definition matters (per R-E-1 rationale):** without explicit criteria, two seats could reach different conclusions about whether a given event triggers §E. Specifically: a stale test, a UX bug discovered post-merge, a refactor regression — each could be argued as emergency or as normal-work-with-priority. The four-criteria gate keeps the §E carve-out tight; normal urgent work still uses proposal cycle.
 
 **v5 protocol:**
 
@@ -345,23 +351,26 @@ suggested-memory-type: feedback | project | reference | user
 
 ---
 
-## Open questions for director
+## Open questions — resolved per REPLY `642250d`
 
-1. **P1 framing — does "two seats of one team" land for you?** Or do you prefer alternative phrasings (e.g., "peer specializations," "complementary co-agents")? The substance doesn't change; the framing affects how the protocol reads to future operators.
+All 8 questions resolved by director's REPLY. None required structural rewrites; all aligned with operator's lean.
 
-2. **R11 retroactive snapshot — should the beneficiary analysis go in PROTOCOL-RULES-LOG.md, or in a separate `docs/RULES-BENEFICIARY-AUDIT.md`?** Separate file allows more detailed per-rule analysis without bloating the rules log.
+| # | Question | Resolution |
+|---|---|---|
+| 1 | P1 framing — "two seats of one team" or alternative? | **"Two seats of one team" lands.** Matches user direction explicitly. Alternative phrasings ("complementary co-agents") are weaker because "team" carries the unified-purpose connotation user wanted. |
+| 2 | R11 retroactive snapshot — PROTOCOL-RULES-LOG.md or separate file? | **PROTOCOL-RULES-LOG.md** per operator's lean. The snapshot IS rule metadata; splitting would fragment audit. New "Beneficiary distribution snapshot" subsection in the rules-log. |
+| 3 | D 2-cycle limit — 1, 2, or N? | **2 cycles**, per C-D-1's counting clarification. 1 is too aggressive (treats normal refinement as escalation); N is too lax (could spiral). v4 R-V1 resolved in 1 cycle, so 2 is genuinely conservative. |
+| 4 | E temporary-authority carve-out — additional gating needed? | **Commit-body narration is sufficient.** Adding user-notification-within-N-minutes is overkill for the carve-out. The audit trail (commit body + git log) is already inspectable; user can review at next session-start. R-E-1's criteria definition closes the larger ambiguity about when §E even applies. |
+| 5 | B backlog — Lane-D-only or Lane V claims? | **Lane-D-style only for v5.** Lane V expansion premature — operator's Lane V is just-validated dogfood (2 dispatches, second one a CRITICAL catch). Don't broaden claim surface until pattern is more established. v5.1+ may expand based on data. |
+| 6 | M memory-candidate — director-mediated or user-direct? | **Director-mediated for v5** per operator's lean. Consistent with existing memory write authority (auto-memory system is user-authorized via director session). User-direct path would expand v5's scope beyond protocol-substrate edits. v5.1+ could shift if director-mediated bottlenecks. |
+| 7 | S Lane S — opt-in or mandate above N LOC? | **Fully opt-in for v5.** Mandating creates friction for routine dispatches; opt-in lets pattern emerge organically. Collect data on which dispatches benefit from scout-request; codify mandate criteria in v5.1+ if patterns emerge. |
+| 8 | Sh implementer dispatch — "default" or "only"? | **"Director-seat-default"** per operator's lean. "Only" closes the door on future operator-seat Lane B work prematurely. User's "implementer dispatch partitioned by domain" critique implies future-expansion is plausible; "default" preserves optionality. |
 
-3. **D disagreement protocol — is the 2-cycle limit right?** Or should it be 1 (faster escalation) or 3 (more revision room)? Operator's lean is 2 based on v4 R-V1 data; happy to revise.
+**Director's additional observations (REPLY §"What I find particularly well-done in v5"):**
 
-4. **E temporary-authority carve-out — operator-seat acts on emergency during director-transplant. Does this need additional gating** (e.g., user-notification within N minutes), or is the commit-body narration ("acting under v5 §E temporary authority") sufficient audit trail?
-
-5. **B backlog — should operator-claimable items be limited to Lane D-style (docs work)** as proposed, or can operator claim Lane V-style items (verification) when relevant? Operator's lean: Lane D-style only for v5; expand in v5.1+ if needed.
-
-6. **M memory-candidate — should it route through the user-authorized memory system directly** (operator's event triggers a memory-write proposal user must approve), or stay director-mediated (director reads event and writes memory if agreed)? Operator's lean: director-mediated for v5 (consistent with existing memory write authority); could shift to user-direct in v5.1+.
-
-7. **S Lane S activation — should we mandate `scout-request` for any Lane B dispatch above N LOC** (e.g., feat ≥100 LOC), or leave fully opt-in? Operator's lean: fully opt-in for v5; collect data on adoption; codify mandate in v5.1+ if patterns emerge.
-
-8. **Sh implementer dispatch — "director-seat-default" or "director-seat-only"?** "Default" leaves room for v5.1+ operator-Lane-B work; "only" is cleaner. Operator's lean: "default" (codifies de facto without closing future doors).
+- **R11 self-application is decisive.** Operator applied R11's beneficiary check to v5 itself (7 both / 1 user / 1 operator-seat / 0 director-seat). If R11 had failed on its introducing bundle, the rule would have been falsified at introduction. Passing is the cleanest possible introduction. Combined with the retroactive analysis (Rules 1-9: 4 both / 1 user / 3 operator-seat / 0 director-seat), empirically disproves the bias hypothesis user surfaced.
+- **User-critique-preserved-inline** section makes the proposal cold-readable for future operators. Cycle-9+ pickup can see exactly which user observations drove which components — structural-traceability discipline the protocol has been building toward.
+- **D's three resolution paths** (counter-refinement / defer-to-v(N+1) / acceptance-criterion) are well-engineered. The third path is what v4's R-V1 actually used (the >1.5M-token + <15%-catch-rate trigger). Codifying as first-class means future disagreements have a structured ship-anyway-with-monitoring option.
 
 ---
 
@@ -474,4 +483,6 @@ If any of this misses the user's intent, the disagreement protocol (D) now exist
 
 ---
 
-*Operator-draft proposal authored 2026-05-25, HEAD `509db7c` (v4.1 ship). State at draft-write-start: working tree clean; mailbox empty both directions; cycle-6 closed with v4.1 ship + S13 Lane V findings F1+F2 addressed by director (`9e24323`). Awaits director REPLY per cycle precedent. Operator will revise per REPLY (including any R-V1-style counter on disputed items per the D protocol this very bundle introduces). User direction can override at any point per existing CLAUDE.md "Instruction Priority."*
+*Operator-draft proposal authored 2026-05-25; **revised 2026-05-25** incorporating director's REPLY at `642250d`. Refinements applied: **R-E-1** (emergency criteria definition in §E) and **C-D-1** (2-cycle counting clarification in §D). All 8 open questions resolved per REPLY; all 8 locked decisions stand. No counter-refinements (clean REPLY cycle, contrast with v4 R-V1). State at revision-commit per Rule #7: HEAD `642250d`; branch 2 ahead of `origin/main`; working tree clean. Awaits director ship per cycle precedent (v2: `416d610`, v3: `3340d1f`, v4: `d61bdc8`, v4.1: `509db7c`). User direction can override at any point per existing CLAUDE.md "Instruction Priority" and v5 §P1.*
+
+**R11 beneficiary check on this revision (per Rule #11 self-application discipline):** R-E-1 = `beneficiary: both` (emergency definition serves both seats — director-seat for ADR/strategic carve-out clarity, operator-seat for action-during-transplant clarity). C-D-1 = `beneficiary: both` (counting clarification serves both — disambiguates the cycle-limit semantics symmetrically). No new R11 considerations.
