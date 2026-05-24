@@ -2458,3 +2458,276 @@ Commit 2: `test(schema): cover strict-mode env flag + migrated caller regression
 
 **If you finish early:** Add ONE more migration target as a "second canonical example" (showing the default-translation pattern in a more complex setting). Keep the diff small. This pre-stages Sessions 12+.
 
+---
+
+## SESSION 12 — Motion-gate wiring (backend): opt-in CINEMA_AUTO_APPROVE_MOTION env flag
+
+**Why this matters.** Session 11 (`d6fd3e1` / `ad526c3`) shipped per-gate auto-approve infrastructure including motion-rule builders (`_rules_for_motion` in `cinema/auto_approve.py:235`), but `cinema/review/controller.py:264-268`'s `_gate_map` deliberately omits `PERFORMANCE_REVIEW → "motion"` — the controller docstring at `:261` explicitly says *"PERFORMANCE_REVIEW has no auto-approve path in v1"*. Result: motion rules are unit-tested (3 rules + 1 gate-level test in `tests/unit/test_auto_approve.py:195+`) but **dead in production**. Director surfaced this to user 2026-05-25; user chose the **feature-flag default-off pattern** (mirrors Session 10's `CINEMA_STRICT_SCHEMA`). Session 12 wires motion-gate via opt-in env flag, formalizing the **opt-in escalation pattern** that's now appeared twice in this codebase.
+
+**Scope reframe (single session).** Session 12 is backend-only. Frontend display of motion auto-approve outcomes (badge, summary modal) is Session 13's scope. Session 12 ships: env-flag parsing, conditional `_gate_map` extension, motion mutator branch, ADR-014, tests. No frontend work, no changes to v1 default behavior.
+
+**Decisions (no user input needed):**
+- Env flag name: `CINEMA_AUTO_APPROVE_MOTION`. Truthy values: `"1"`, `"true"`, `"TRUE"`, `"yes"` (same parsing as `CINEMA_STRICT_SCHEMA`).
+- Default: off. v1 behavior preserved when flag is unset.
+- Helper lives in `cinema/auto_approve.py` as a module-level function `is_motion_gate_enabled()`, not in `cinema/review/controller.py`. Reason: keeps env-parse logic co-located with the auto-approve rules; testable via direct monkeypatch without instantiating the controller.
+- Best-motion-take pick order: `motion_fidelity` (primary, what the existing `_best_take_motion_score` reads) → `motion_score` (fallback) → `identity_score` (tiebreak). When all takes tie at 0.0, pick first by list order.
+- Audit entry is **always recorded** (approved + vetoed paths), matching the existing plan/image/final pattern at `controller.py:412-420`.
+- Skip-if-already-approved check on `approved_motion_take_id` field (consistent with `approved_keyframe_take_id`, `approved_final_take_id`).
+
+**Pre-work:**
+
+1. Read [docs/HANDOFF-roadmap-2026-05-24.md](HANDOFF-roadmap-2026-05-24.md) §SESSION 11 (lines ~1850-2050) — Session 11 shipped the auto-approve infrastructure; Session 12 extends it.
+2. Read [cinema/auto_approve.py](../cinema/auto_approve.py) lines 235-280 (motion rule builders) + lines 500-520 (`_builders` registry where motion is already wired into `check_gate`).
+3. Read [cinema/review/controller.py](../cinema/review/controller.py) lines 240-430 — the full `_run_auto_approve_pass` you'll modify. Pay specific attention to:
+   - Lines 257-262: docstring (update to reflect new opt-in path)
+   - Lines 264-271: `_gate_map` + early return (this is where the env-flag check goes)
+   - Lines 277-302: skip-if-approved + takes-list construction (add motion branches)
+   - Lines 321-407: mutator if/elif (add motion mutator branch after final)
+4. Read [tests/unit/test_auto_approve.py](../tests/unit/test_auto_approve.py) lines 469-529 — the existing `test_review_controller_run_auto_approve_pass_plan_gate` integration test. Your new motion tests follow this exact pattern with `StubHost`.
+5. Baseline: `.venv/bin/python -m pytest tests/unit/ --tb=no -q | tail -1` → expect ≥664 pass / 3 skip / 0 fail (higher if Session 10 has shipped — Session 10 should have shipped before you start; if it hasn't, surface to director).
+
+**Scope:**
+
+| IN | OUT |
+|---|---|
+| `is_motion_gate_enabled()` helper in `cinema/auto_approve.py` (~8 LOC) | Removing the v1 carve-out from default behavior |
+| Conditional `_gate_map["PERFORMANCE_REVIEW"] = "motion"` in controller when flag enabled (~3 LOC) | Changing the public API of `check_gate` (motion already registered there) |
+| Motion skip-if-approved + takes-list construction (~6 LOC) | Frontend changes (Session 13's scope) |
+| Motion mutator branch in `_run_auto_approve_pass` (~25 LOC) | Modifying existing motion rule logic in `_rules_for_motion` |
+| Docstring update at controller line 257-262 | Renaming `approved_motion_take_id` or `motion_auto_approved` fields |
+| `DECISIONS.md` ADR-014 (~30 LOC) | Wiring motion gate through ShotState publishing (out of v1 scope) |
+| ≥4 new tests in `tests/unit/test_auto_approve.py` | Integration tests against real `cinema_pipeline.py` flows |
+
+**Approach:**
+
+1. **Env-flag helper in `cinema/auto_approve.py`** (~8 LOC, append near the existing module-level imports/helpers):
+
+   ```python
+   def is_motion_gate_enabled() -> bool:
+       """True if CINEMA_AUTO_APPROVE_MOTION env var is set to a truthy value.
+
+       Off by default per ADR-014 (motion-gate as opt-in production escalation).
+       Mirrors Session 10's CINEMA_STRICT_SCHEMA pattern. Operators opt in once
+       confident motion rules are well-calibrated against their content.
+       """
+       import os
+       return os.environ.get("CINEMA_AUTO_APPROVE_MOTION", "").strip() in (
+           "1", "true", "TRUE", "yes"
+       )
+   ```
+
+   Add `is_motion_gate_enabled` to the module's `__all__` (or to the explicit re-exports if the module uses them — check the file's existing pattern).
+
+2. **Conditional `_gate_map` in `cinema/review/controller.py`** (~5 LOC at line 264):
+
+   ```python
+   from cinema.auto_approve import is_motion_gate_enabled   # add to existing import block
+   ...
+   _gate_map = {
+       "PLAN_REVIEW": "plan",
+       "KEYFRAME_REVIEW": "image",
+       "REVIEW": "final",
+   }
+   if is_motion_gate_enabled():
+       _gate_map["PERFORMANCE_REVIEW"] = "motion"
+   ```
+
+3. **Docstring update at `controller.py:257-262`:**
+
+   ```python
+   Gate → audit key mapping:
+     PLAN_REVIEW        → gate arg "plan"
+     KEYFRAME_REVIEW    → gate arg "image"
+     REVIEW             → gate arg "final"
+     PERFORMANCE_REVIEW → gate arg "motion" (OPT-IN: set CINEMA_AUTO_APPROVE_MOTION=1)
+   ```
+
+   Remove the `(PERFORMANCE_REVIEW has no auto-approve path in v1)` sentence.
+
+4. **Skip-if-approved + takes-list construction** at lines 280-302:
+
+   Add to existing if-chain (around line 285):
+   ```python
+   if aa_gate == "motion" and shot.get("approved_motion_take_id"):
+       continue
+   ```
+
+   Add to existing elif-chain (around line 300):
+   ```python
+   elif aa_gate == "motion":
+       takes = [
+           t for t in (shot.get("motion_takes") or [])
+           if isinstance(t, dict)
+       ]
+   ```
+
+5. **Motion mutator branch** at line 407 (after the `final` branch, before the `else: # Vetoed` branch):
+
+   ```python
+   elif aa_gate == "motion":
+       # Pick best motion take by motion_fidelity → motion_score → identity_score.
+       # Matches the rules' threshold semantics: rules check max scores; the
+       # mutator approves whichever take has those scores.
+       motion_takes = [
+           t for t in (shot.get("motion_takes") or [])
+           if isinstance(t, dict)
+       ]
+
+       def _motion_score_tuple(t):
+           meta = t.get("metadata", {}) if isinstance(t.get("metadata"), dict) else {}
+           return (
+               meta.get("motion_fidelity") or meta.get("motion_score") or 0.0,
+               meta.get("identity_score") or 0.0,
+           )
+
+       best_motion = (
+           max(motion_takes, key=_motion_score_tuple) if motion_takes else None
+       )
+       best_motion_id = (best_motion or {}).get("id", "")
+
+       if best_motion_id:
+           def _motion_mutator(
+               _scene_ignored, s,
+               _mtid=best_motion_id,
+               _entry=audit_entry,
+               _key=flag_key,
+           ):
+               s["approved_motion_take_id"] = _mtid
+               s.setdefault("auto_approve_audit", []).append(_entry)
+               s[_key] = True
+               return MutationResult(
+                   {"shot_id": s["id"], "approved_motion_take_id": _mtid},
+                   save=True,
+               )
+           self._host._mutate_shot(shot_id, _motion_mutator)
+   ```
+
+6. **`DECISIONS.md` ADR-014** (NEW; ~30 LOC). Format MUST match existing ADRs (ADR-010 through ADR-013 for shape). Outline:
+
+   ```markdown
+   ## ADR-014 — Motion-gate auto-approve as opt-in env flag (CINEMA_AUTO_APPROVE_MOTION)
+
+   **Status:** Accepted (2026-05-25)
+
+   **Context:** Session 11 shipped per-gate auto-approve infrastructure including
+   motion-rule builders (3 veto rules: identity/score/cascade-fallback). However,
+   `cinema/review/controller.py`'s `_gate_map` omitted `PERFORMANCE_REVIEW → "motion"`,
+   with a docstring carve-out: "PERFORMANCE_REVIEW has no auto-approve path in v1."
+   Result: motion rules were unit-tested but dead in production. Session 11's spec
+   reviewer flagged the divergence between tested and reachable behavior.
+
+   **Decision:** Wire motion-gate as an opt-in env flag (`CINEMA_AUTO_APPROVE_MOTION=1`),
+   default off. Mirrors Session 10's `CINEMA_STRICT_SCHEMA` pattern — an opt-in
+   escalation that lets operators promote tested behavior to production at their
+   discretion without changing v1 defaults.
+
+   **Consequences:**
+   - v1 default behavior is preserved (motion auto-approve remains off unless the
+     env flag is explicitly set).
+   - Operators can enable motion auto-approve in production when they've validated
+     the rules' thresholds against their content.
+   - The "opt-in escalation pattern" is now formalized (used twice: CINEMA_STRICT_SCHEMA,
+     CINEMA_AUTO_APPROVE_MOTION). Future gates that ship tested-but-dead code follow
+     this pattern by default.
+   - Frontend (Session 13's scope) must handle motion entries in the audit log
+     gracefully when the flag is on, but treat their absence as the v1 default.
+
+   **Alternatives considered:**
+   - Wire on by default: rejected — too risky without calibration data on real content.
+   - Mark motion as test-only-for-v1: rejected — wastes the working infrastructure
+     and orphans the code over time.
+
+   **Tracking:** Session 12 implementation; commit refs filled in at ship time.
+   ```
+
+7. **Tests** (extend `tests/unit/test_auto_approve.py`; ≥4 new):
+
+   - `TestMotionGateFlag` class:
+     - `test_is_motion_gate_enabled_default_off`: no env var → returns False
+     - `test_is_motion_gate_enabled_truthy_values`: "1", "true", "TRUE", "yes" → True
+     - `test_is_motion_gate_enabled_falsy_values`: "", "0", "false", "no" → False
+   - `TestMotionGateIntegration` class (extending the `TestRunAutoApprovePass` pattern from line 469):
+     - `test_motion_gate_off_by_default_skips_performance_review`: PERFORMANCE_REVIEW with no env flag → early return; no audit entry, no `motion_auto_approved` flag
+     - `test_motion_gate_on_approves_high_scores`: with `monkeypatch.setenv("CINEMA_AUTO_APPROVE_MOTION", "1")` + a high-scoring motion take → shot gets `approved_motion_take_id` set + `motion_auto_approved=True` + audit entry
+     - `test_motion_gate_on_vetoes_low_identity`: flag set + a low-identity motion take → audit entry with veto, no `motion_auto_approved` flag, no `approved_motion_take_id`
+     - `test_motion_mutator_picks_best_take_by_motion_fidelity`: flag set + two motion takes (one with higher motion_fidelity, one with higher identity_score) → mutator picks by motion_fidelity (primary key)
+
+**Acceptance criteria:**
+
+- [ ] `is_motion_gate_enabled()` helper in `cinema/auto_approve.py`; parses `CINEMA_AUTO_APPROVE_MOTION` env var per same convention as `CINEMA_STRICT_SCHEMA`
+- [ ] Conditional `_gate_map["PERFORMANCE_REVIEW"] = "motion"` extension in `_run_auto_approve_pass`
+- [ ] Skip-if-approved branch for `approved_motion_take_id`
+- [ ] Takes-list construction branch for `motion_takes`
+- [ ] Motion mutator branch picks best take by `motion_fidelity → motion_score → identity_score`
+- [ ] Docstring at `controller.py:257-262` updated to reflect opt-in motion path
+- [ ] `DECISIONS.md` ADR-014 exists, follows the existing ADR format
+- [ ] ≥4 new tests covering helper + 3 integration scenarios (off-default, on-approve, on-veto)
+- [ ] `pytest tests/unit/` whole-suite: ≥668 pass / 3 skip / 0 fail (664 + ≥4 new; adjust if S10 has shipped)
+- [ ] §15 smoke passes
+- [ ] Manual verification: `CINEMA_AUTO_APPROVE_MOTION=1 .venv/bin/python -c "from cinema.auto_approve import is_motion_gate_enabled; print(is_motion_gate_enabled())"` prints `True`; without the env var, prints `False`
+- [ ] Scope: changes only in `cinema/auto_approve.py`, `cinema/review/controller.py`, `DECISIONS.md`, `tests/unit/test_auto_approve.py`
+
+**Pitfalls:**
+
+- **DON'T enable `CINEMA_AUTO_APPROVE_MOTION` in tests by default.** Use `monkeypatch.setenv` per-test. Otherwise any test that constructs a `ReviewController` and triggers PERFORMANCE_REVIEW starts running motion rules unexpectedly.
+- **DON'T mutate `_rules_for_motion` or related rule logic.** The rules are correct; the wiring is what was missing.
+- **DON'T change the `_builders` registry** in `cinema/auto_approve.py:506` — motion is already registered there. The gap was at the controller layer.
+- **DON'T pick the best motion take by composite_score.** Motion takes don't have a composite_score in the way keyframe takes do. Use `motion_fidelity` as primary, `motion_score` as fallback. The existing `_best_take_motion_score` helper does this same fallback.
+- **DON'T add an `else` clause for unknown `aa_gate` values in the mutator branch.** The current code falls through silently for unknown gates; keep that behavior. If `aa_gate` is somehow `"motion"` but the env flag is off (shouldn't happen, but belt-and-suspenders), the existing `if aa_gate is None: return` at line 270 won't catch it. Acceptable — the env-flag-driven `_gate_map` extension is the only way `aa_gate` becomes `"motion"`.
+- **DO use the existing `StubHost` pattern** from `test_review_controller_run_auto_approve_pass_plan_gate` (line 469) for your integration tests. Same shape: build project, instantiate controller, call `_run_auto_approve_pass("PERFORMANCE_REVIEW")` with monkeypatched env, assert mutations.
+- **Rule #7 pre-commit re-verify** (standing protocol): immediately before each `git commit`, run `git log --oneline -5` AND `find coordination/mailbox/sent -type f -name '*.md' | wc -l`. Race-ack per Rule #5 if state moved.
+
+**Verification:**
+
+```bash
+# 1. New tests pass
+.venv/bin/python -m pytest tests/unit/test_auto_approve.py -v 2>&1 | tail -40
+# Expected: all original tests pass + ≥4 new
+
+# 2. Whole-suite no regression
+.venv/bin/python -m pytest tests/unit/ --tb=no -q 2>&1 | tail -3
+# Expected: ≥668 pass / 3 skip / 0 fail (or higher depending on S10's ship)
+
+# 3. §15 smoke
+.venv/bin/python scripts/ci_smoke.py
+# Expected: OK
+
+# 4. Default-off behavior (flag unset)
+.venv/bin/python -c "
+from cinema.auto_approve import is_motion_gate_enabled
+print('flag off:', is_motion_gate_enabled())
+"
+# Expected: flag off: False
+
+# 5. Flag-on behavior
+CINEMA_AUTO_APPROVE_MOTION=1 .venv/bin/python -c "
+from cinema.auto_approve import is_motion_gate_enabled
+print('flag on:', is_motion_gate_enabled())
+"
+# Expected: flag on: True
+
+# 6. Scope check
+git diff --stat <baseline>..HEAD
+# Expected: 4 files: cinema/auto_approve.py, cinema/review/controller.py, DECISIONS.md, tests/unit/test_auto_approve.py
+```
+
+**Commit shape (split into 2):**
+
+Commit 1: `feat(cinema): motion-gate auto-approve as opt-in CINEMA_AUTO_APPROVE_MOTION flag`
+  - `cinema/auto_approve.py` (helper), `cinema/review/controller.py` (gate-map + mutator + docstring), `DECISIONS.md` (ADR-014)
+  - Body: cite Session 11 audit + this brief; explain opt-in default-off rationale; note the parallel to S10's CINEMA_STRICT_SCHEMA pattern; reference ADR-014
+
+Commit 2: `test(cinema): cover motion-gate env flag + integration paths`
+  - `tests/unit/test_auto_approve.py` (extended)
+  - Body: reference commit 1's SHA; list new test classes/methods + their coverage
+
+**Estimated effort:** S-to-M — ~45-75 min implementer subagent. Bulk is the integration tests (each needs StubHost setup + monkeypatched env + assertion of audit + mutation state).
+
+**Decision authority:** Lane A on naming (test class names, helper docstring wording), best-take tiebreak order if `motion_fidelity` is missing on all takes (default: list order; acceptable to pick differently if reasoned about). Escalate when:
+
+- The existing `pick_best_take_*` family in `cinema/auto_approve.py` already has a motion-specific helper you didn't notice. (It shouldn't — but if so, use it instead of inlining `_motion_score_tuple`.)
+- The motion mutator reveals a missing field on existing project fixtures (e.g., `motion_takes` doesn't exist on shots that haven't been through performance phase). Document; surface in DONE_WITH_CONCERNS.
+- The integration tests reveal that `_run_auto_approve_pass("PERFORMANCE_REVIEW")` is reached before the lifecycle's PERFORMANCE_REVIEW gate fires (timing concern). Document; surface — may indicate a broader pipeline-ordering issue beyond this session.
+
+**If you finish early:** Add a one-line `_aa_logger.info("auto_approve: motion gate ENABLED via env flag")` log message at the top of `_run_auto_approve_pass` when `is_motion_gate_enabled()` is True. Helps operators verify the flag is active in production logs. Keep it gated on `aa_gate == "motion"` so it only logs once per PERFORMANCE_REVIEW invocation, not on every gate pass.
+
