@@ -99,6 +99,8 @@ Full commit ledger:
 | 9 | P3-1 concurrency hardening (`_running_pipelines` + `_progress_queues`) | `bfa60bf`, `a97573e`, `f8b2aef`, `e164505` (audit) |
 | 10 | P1-3 part 2 — `CINEMA_STRICT_SCHEMA` env flag + first caller migration | `5f2fe0b`, `ef98629`, `ec607ed` (chore fix) |
 | 11 | P4-3 backend — auto-approve veto rules + per-gate config + ShotState integration | `d6fd3e1`, `ad526c3`, `42df2ac` (v1.1 minors), `e8b5ebc` (product doc) |
+| 12 | P4-3 motion-gate opt-in (CINEMA_AUTO_APPROVE_MOTION env flag) | `2a25c2d`, `771bbf7`, `fefea5d` (chore) |
+| 13 | P4-3 frontend — AutoApproveBadge + PostRunSummary + RejectAutoApproveModal + reject endpoint | `029dbf9`, `2fb44d1`, `47e5818` (chore) |
 | — | Protocol Bundle v2 substrate (STATE.md + rules log + mailbox + Rules #7/#8) | `416d610`, `5e0329d` (v2.1) |
 | — | Protocol Bundle v3 hardening (G auth precedence + F freshness + H audit) | `3340d1f` |
 
@@ -136,16 +138,16 @@ snapshot was taken and were already counted in the 574.
 | P3-4 Root-level Python files unclear purpose | OPEN | low-priority | Grep-and-delete + 3 ARCHITECTURE.md entries |
 | P4-1 Vendor sprawl | OPEN | low-priority | Product decision, not engineering |
 | P4-2 Single-process architecture | NOT-DOING | drop | Explicit per STRATEGIC_REVIEW line 534 |
-| P4-3 4-gate review fatigue | PARTIAL | follow-up | Cycle 4 / Session 11 shipped backend (auto-approve veto rules + per-gate config + ShotState integration); Session 12 brief shipped (motion-gate wiring backend); Session 13 frontend (badge + summary + rejection modal) brief-blocked |
+| P4-3 4-gate review fatigue | SHIPPED | done | Cycle 4 / S11 shipped backend + Cycle 5 / S12 shipped motion-gate opt-in + Cycle 6 / S13 shipped frontend (AutoApproveBadge + PostRunSummary + RejectAutoApproveModal + reject endpoint). All 4 P4-3 surfaces (backend rules + motion-gate flag + frontend display + rejection-with-reason flow) operational. |
 | P4-4 No A/B testing | OPEN | low-priority | Needs operator volume data first |
 | P4-5 Director's Console underdeveloped | PARTIAL | important-deferred | Session 6 added cascade badges to `ReviewStage`; Console still missing |
 
-**Score (cycle 4 close):** 8 of 21 P-items shipped (P0-1.1, P0-1.2, P0-2,
-P0-3, P1-1, P1-4, P2-3, **P3-1 NEW**), 4 partial (P3-2, P4-5, P1-3 part-2
-template shipped, **P4-3 backend shipped**), 1 explicit not-doing (P4-2),
-8 open. All P0 closed; only P1-2 + P1-5 + P2-1 + P3-3 + P3-4 + P4-1 + P4-4
-+ P4-5-console-only remain unstarted. Cycle 4 delta: +1 shipped (P3-1)
-and +1 promoted-to-partial (P4-3 backend).
+**Score (cycle 6 close):** 9 of 21 P-items shipped (P0-1.1, P0-1.2, P0-2,
+P0-3, P1-1, P1-4, P2-3, P3-1, **P4-3 NEW**), 3 partial (P3-2, P4-5,
+P1-3 part-2 template shipped — additional callers pending), 1 explicit
+not-doing (P4-2), 8 open. All P0 closed; only P1-2 + P1-5 + P2-1 +
+P3-3 + P3-4 + P4-1 + P4-4 + P4-5-console-only remain unstarted.
+Cycle-6 delta: +1 shipped (P4-3 promoted from PARTIAL via S13 frontend).
 
 ---
 
