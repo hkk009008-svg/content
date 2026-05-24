@@ -235,7 +235,13 @@ export default function EditorialShell({
 
   useEffect(() => {
     if (latest?.stage === 'DONE') {
-      // Deduplicate: use timestamp + percent as a stable event fingerprint
+      // Deduplicate: fingerprint is stable per run because `detail` is set
+      // once at pipeline completion (web_server.py:1227, from
+      // pipeline.generate() return value — typically the assembled file
+      // path, or "Failed" on partial failure). Both forms are stable
+      // within a run, so the same fingerprint will block re-render
+      // triggers without blocking legitimately-new DONE events from a
+      // subsequent run (which would produce a different file path).
       const eventKey = `${latest.stage}::${latest.percent}::${latest.detail}`
       if (lastDoneEventRef.current !== eventKey) {
         lastDoneEventRef.current = eventKey

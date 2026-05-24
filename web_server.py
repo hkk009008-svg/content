@@ -30,6 +30,7 @@ setup_logging()
 import json
 import threading
 import queue
+from datetime import datetime, timezone
 from flask import Flask, request, jsonify, send_from_directory, Response, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -1441,6 +1442,12 @@ def api_reject_auto_approve(shot_id):
     have the pid available at rejection time (PostRunSummary iterates
     shots across all projects). The shot_id is globally unique within a
     single server instance and we scan all projects to locate it.
+
+    @_project_lock_guard still applies here even though no pid is in the
+    route: inner mutate_project() calls can raise ProjectLockError and the
+    decorator translates that into a clean 503 for the client. The guard's
+    docblock refers to pid-scoped locking; that wording is from earlier
+    endpoints — the catch-and-translate behavior is general.
     """
     if not request.is_json:
         return jsonify({"error": "JSON body required"}), 400
@@ -1454,8 +1461,6 @@ def api_reject_auto_approve(shot_id):
         return jsonify({"error": "invalid gate"}), 400
     if not reason:
         return jsonify({"error": "reason required"}), 400
-
-    from datetime import datetime, timezone
 
     audit_entry = {
         "gate": gate,

@@ -152,6 +152,7 @@ export default function App() {
           onCorrectShot={(shotId, action, params, takeId) => withRefresh(() => correctShot(shotId, action, params, takeId))}
           onDiagnoseShot={(shotId, takeId) => diagnoseShot(shotId, takeId)}
           onProceedToAssembly={() => withRefresh(() => proceedToAssembly())}
+          onRefreshProject={refreshProject}
         />
       </ErrorBoundary>
     )

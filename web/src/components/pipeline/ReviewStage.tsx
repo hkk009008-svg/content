@@ -45,6 +45,10 @@ interface Props {
   onDiagnose: (shotId: string, takeId?: string) => Promise<any>
   onRegenerate: (shotId: string, positive?: string, negative?: string) => Promise<any>
   onProceedToAssembly: () => Promise<any>
+  /** Refresh project state from the server. Called after a successful
+   *  auto-approve rejection so the badge clears without waiting for the
+   *  next poll cycle (per S13 code-review fix). */
+  onRefreshProject: () => Promise<void> | void
 }
 
 function findTake(takes: TakeRecord[], takeId: string) {
@@ -139,6 +143,7 @@ function ClipCard({
   onCorrect,
   onDiagnose,
   onRegenerate,
+  onRefreshProject,
 }: {
   shot: Shot
   scene: Scene
@@ -155,6 +160,7 @@ function ClipCard({
   onCorrect: Props['onCorrect']
   onDiagnose: Props['onDiagnose']
   onRegenerate: Props['onRegenerate']
+  onRefreshProject: Props['onRefreshProject']
 }) {
   const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null)
   const [diagnosing, setDiagnosing] = useState(false)
@@ -636,14 +642,20 @@ function ClipCard({
         </div>
       </div>
 
-      {/* Auto-approve rejection modal — opened by badge Reject affordance */}
+      {/* Auto-approve rejection modal — opened by badge Reject affordance.
+          onSubmit refreshes the project so the badge clears immediately —
+          per S13 code-review fix (without this, the badge keeps showing
+          auto-approved until the next poll cycle, lying about shot state). */}
       {rejectAutoApproveGate && (
         <RejectAutoApproveModal
           shotId={shot.id}
           gate={rejectAutoApproveGate}
           isOpen={true}
           onClose={() => setRejectAutoApproveGate(null)}
-          onSubmit={() => setRejectAutoApproveGate(null)}
+          onSubmit={() => {
+            setRejectAutoApproveGate(null)
+            void onRefreshProject()
+          }}
         />
       )}
     </div>
@@ -665,6 +677,7 @@ export default function ReviewStage({
   onDiagnose,
   onRegenerate,
   onProceedToAssembly,
+  onRefreshProject,
 }: Props) {
   const allShots: { shot: Shot; scene: Scene }[] = []
   for (const scene of project.scenes) {
@@ -719,6 +732,7 @@ export default function ReviewStage({
               onCorrect={onCorrect}
               onDiagnose={onDiagnose}
               onRegenerate={onRegenerate}
+              onRefreshProject={onRefreshProject}
             />
           ))}
         </div>

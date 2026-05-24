@@ -45,6 +45,10 @@ interface Props {
   onCorrectShot: (shotId: string, action: string, params?: Record<string, any>, takeId?: string) => Promise<any>
   onDiagnoseShot: (shotId: string, takeId?: string) => Promise<any>
   onProceedToAssembly: () => Promise<any>
+  /** Refresh the project from the server (rehydrate state). Used by
+   *  ReviewStage's auto-approve rejection flow to clear the badge once
+   *  the server has dropped the `<gate>_auto_approved` flag. */
+  onRefreshProject: () => Promise<void> | void
   /** Optional system-level error to render in the execution board. */
   pipelineError?: PipelineError | null
   /** Optional system-level "awaiting backend" placeholder. */
@@ -133,6 +137,7 @@ export default function PipelineLayout({
   onBack, onCancel, onPause, onResume, onApproveShotPlan, onRejectShotPlan,
   onGenerateKeyframe, onApproveKeyframe, onApprovePerformance, onGenerateMotion, onApproveFinal,
   onRegenerateShot, onRestartShot, onCorrectShot, onDiagnoseShot, onProceedToAssembly,
+  onRefreshProject,
   pipelineError, pipelineLoadingLabel,
 }: Props) {
   const isComplete = latest?.stage === 'COMPLETE' || latest?.stage === 'DONE'
@@ -306,6 +311,7 @@ export default function PipelineLayout({
               onDiagnose={onDiagnoseShot}
               onRegenerate={onRestartShot}
               onProceedToAssembly={onProceedToAssembly}
+              onRefreshProject={onRefreshProject}
             />
           ) : (
             <>
