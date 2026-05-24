@@ -54,10 +54,15 @@
    `CINEMA_STRICT_SCHEMA` escalation, (c) Session 12's
    `CINEMA_AUTO_APPROVE_MOTION` escalation (when it lands). The
    escalation pattern is now a recognized convention — should be
-   documented in the truth file. ~50 LOC. **Lane A in main context**
-   (director docs work, not implementer dispatch). Author before or
-   shortly after Session 12 ships so motion-flag gets an
-   architectural home.
+   documented in the truth file. ~50 LOC. **OPERATOR-CLAIMED under
+   Protocol Bundle v4 Lane D** (post-v4 ship; see
+   `docs/REPLY-protocol-bundle-v4-director.md` §"Director's
+   commitment alongside v4 ship" #1, and `docs/PROPOSAL-protocol-
+   bundle-v4-2026-05-24.md` §"Dogfood claim — cycle-5 pick #3 as
+   first Lane D invocation"). Operator picks this up as standalone
+   `docs(arch-sync)` commit after v4 ships. If director ships
+   cycle-5 first before operator claims, the dogfood shifts to the
+   next subsystem-touching commit — no harm.
 
 **Honorable mentions** (S-to-M, opportunistic single sessions):
 - **P1-2 Pipeline orchestrator extraction** — `cinema_pipeline.py` is
@@ -155,7 +160,7 @@ and +1 promoted-to-partial (P4-3 backend).
 | `_running_pipelines` / `_progress_queues` race surfaces | **RESOLVED** by Session 9 (`bfa60bf` + `a97573e` + `f8b2aef`) | — |
 | `CINEMA_STRICT_SCHEMA` env flag + first caller migration | **RESOLVED** by Session 10 (`5f2fe0b` + `ef98629` + `ec607ed` chore) | Migration template ready; future sessions migrate domain/* module-by-module |
 | Motion-gate dead code (rules tested but unreachable in production) | **RESOLVED** by user product decision 2026-05-25: feature-flag pattern (`CINEMA_AUTO_APPROVE_MOTION` default off); Session 12 brief shipped, dispatch pending | Brief: `docs/HANDOFF-roadmap-2026-05-24.md` §SESSION 12 |
-| ARCHITECTURE.md gap: Pydantic boundary + opt-in escalation pattern | OPEN | important — discovered cycle 4 orientation; Sessions 8/10/12 escalations live but undocumented in truth file |
+| ARCHITECTURE.md gap: Pydantic boundary + opt-in escalation pattern | OPERATOR-CLAIMED (Lane D) | important — discovered cycle 4 orientation; Sessions 8/10/12 escalations live but undocumented in truth file. Reframed under Protocol Bundle v4 Lane D as operator-claimed; operator commits as standalone `docs(arch-sync)` after v4 ships. |
 | `scene_decomposer` + `lip_sync` coverage gaps | OPEN | important-deferred — audit before scoping new test files |
 | Session 6: `Monitor.tsx` wiring gap | **RESOLVED** by `a6e3ff1` (cycle 3 director-claimed) | — |
 | Session 6: ErrorBoundary per-shell palette | OPEN | low-priority — cosmetic (editorial-curtain inside console shell) |

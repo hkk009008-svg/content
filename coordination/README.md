@@ -54,12 +54,43 @@ during the session require no user-surface — Tier-1 throughput preserved.
 ---
 from: operator
 to: director
-kind: dispatch-claim | findings | decision | query | status | fold-notice
+kind: dispatch-claim | findings | decision | query | status | fold-notice |
+      verify-request | verification-report | doc-sync-notice |
+      scout-request | scout-report
 related-commits: <sha>, <sha>
 related-rules: <rule numbers, if any>
 ---
 
 <free prose body — the message itself>
+```
+
+**Kind enum (v4 update):**
+
+- **v2 (original):** `dispatch-claim` | `findings` | `decision` | `query` |
+  `status` | `fold-notice`
+- **v4 additions:** `verify-request` | `verification-report` |
+  `doc-sync-notice` (Lanes V + D active) | `scout-request` |
+  `scout-report` (Lane S scaffolded, active in v5+)
+
+`verification-report` event format (per Rule #9 Lane V):
+
+```markdown
+---
+from: operator
+to: director
+kind: verification-report
+related-commits: <SHA being reviewed>
+related-rules: 9
+---
+
+**Status:** ✅ clean / ⚠️ minor / ❌ critical
+**Disposition:** fold / advisory
+
+**Findings:**
+- <file:line> — <finding>
+- ...
+
+<optional narrative body>
 ```
 
 **Filename convention:** `<UTC-ISO-timestamp>-<from>-to-<to>-<kind>.md`.

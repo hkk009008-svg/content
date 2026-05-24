@@ -16,14 +16,17 @@ and per-session invocation count. Updated manually at session-close by operator
 | 6 | Counter-bump fold-and-surface (during concurrent ops) | `ea97d0a` | Standalone `chore(baseline)` pollution risk |
 | 7 | Pre-commit re-verify (state changes between Write and commit) | `416d610` | `a6e3ff1` mid-handoff race (Monitor.tsx shipped during operator handoff Write; operator caught in race-ack body of `1541a69`) |
 | 8 | Mailbox authority (sent events bind equal to user-relayed signals) | `416d610` | User-as-relay bottleneck observed across cycles 1-3 — every inter-session signal had to route through user, eating throughput |
+| 9 | Operator-side reviewer is independent, not duplicate (second-opinion convention) | `_Protocol Bundle v4 ship_` | Substance imbalance ~30:1 (director:operator) across cycles 3-4 + structural blind-spot risk in single-context reviewer pass; user surfaced + operator drafted v4 |
 
 > Historical note: Rules #7 + #8 originally shipped with the placeholder
 > `_Protocol Bundle v2 ship_` in the "Codified" column because the rules-log
 > file was part of the same ship commit that codified them (chicken-and-egg —
 > the file couldn't reference its own enclosing commit SHA pre-commit).
-> Resolved in cycle 4 (this session): operator updated both rows to `416d610`
-> after the ship landed. Pattern for future self-referencing rule additions:
-> ship with placeholder, update at next session-close.
+> Resolved in cycle 4: operator updated both rows to `416d610` after the
+> ship landed. Pattern for future self-referencing rule additions: ship
+> with placeholder, update at next session-close. **Rule #9 follows the
+> same pattern** — ships with `_Protocol Bundle v4 ship_` placeholder;
+> operator updates to actual SHA in follow-up commit.
 
 ## Invocation log
 

@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Content** (4005 symbols, 22876 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Content** (4017 symbols, 22893 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -674,6 +674,30 @@ of running both is roughly zero.
   test run)
 - Updating the operator transplant handoff
   (`docs/HANDOFF-operator-transplant-*.md`)
+- **Lane V — Post-commit independent verification** (Protocol Bundle
+  v4). On any director commit of type `feat` / `refactor` / `fix`,
+  operator dispatches spec + code-quality reviewer subagents in
+  parallel with director's reviewers (NOT sequential), then sends a
+  `verification-report` mailbox event with status (✅ clean / ⚠️ minor /
+  ❌ critical) + file:line refs + disposition (`fold` / `advisory`).
+  Operator does NOT commit reviewer-fixes; director processes the
+  report per Rule #8. Skip on `chore` / `docs` / `test` / `style`.
+  Independence enforced by Rule #9.
+- **Lane D — Post-commit doc-sync** (Protocol Bundle v4). On any
+  director commit modifying code under `cinema/`, `domain/`,
+  `web_server.py`, or `cinema_pipeline.py`, operator updates affected
+  sections of `ARCHITECTURE.md` and `OPERATIONS.md` (README.md
+  carved out — release-positioning is author-judgment), commits as
+  `docs(arch-sync): reflect <SHA> in <doc> §<section>`, and sends a
+  `doc-sync-notice` mailbox event. Lane D MUST run §15 smoke
+  verification before committing (per ADR-013 verification
+  discipline). Lane D does NOT introduce new ADRs (`DECISIONS.md`
+  stays director-only).
+- **Lane S — Pre-dispatch scout** (Protocol Bundle v4 scaffold;
+  active in v5+). Mailbox kinds `scout-request` / `scout-report`
+  reserved; behavior not active in v4. Director adopts
+  `scout-request` discipline opportunistically during cycle-5+ to
+  generate usage data; v5 codifies behavior after ≥3 invocations.
 
 **Shared (either may drive — see signaling rules below):**
 
@@ -833,6 +857,49 @@ stated wishes. When in doubt, the role of the SENDER (user vs.
 operator vs. director) is what determines tier, not the CONTENT or
 intent.
 
+## Independent reviewer convention (Rule #9)
+
+**Rule #9: Operator-side reviewer is independent, not duplicate.**
+*(Subtitle: second-opinion convention.)*
+
+When operator dispatches a reviewer subagent on a director-shipped
+commit (Lane V), the reviewer's job is **second opinion**, not
+redundant pass. Operator's reviewer prompt:
+
+- MUST NOT cite director's reviewer findings (operator wasn't on
+  dispatch; cold context)
+- MUST focus on angles director's reviewer may have missed (operator
+  emphasizes: cross-system effects, concurrency, public-API
+  semantics, spec-vs-source divergence; director's reviewer typically
+  emphasizes: code quality, style, performance)
+- MUST dispatch with cold `BASE_SHA..HEAD_SHA` context only
+- MUST be constructed cold from the commit's `BASE_SHA..HEAD_SHA` +
+  the original spec/brief reference only. Operator MUST NOT include
+  in the prompt: director's reviewer findings, director's reviewer
+  verdict, any text from director's reviewer-fix commit body, or any
+  synthesized "what director's reviewer worried about" language. The
+  operator's reviewer must form its judgment from cold context — the
+  same cold context any external reviewer would have.
+
+Independence is what makes the second pass valuable. A duplicate
+reviewer is waste. The prompt-construction discipline makes the
+property checkable — anyone can re-read operator's reviewer dispatch
+prompt and verify no contamination; without it, "independent" is
+aspirational.
+
+**Why:** Director's reviewer is dispatched from director's context —
+it has visibility into director's design intent but inherits
+director's blind spots. Operator's reviewer has zero shared context,
+so it's structurally independent. Single subagent burn per director
+feat commit is acceptable cost for the second opinion.
+
+**Parallelism:** Both parties dispatch reviewers on the same commit
+**simultaneously, not sequentially**. Operator does not wait for
+director's reviewer pass to land before dispatching Lane V. The two
+parties' subagents may produce overlapping findings — that's
+expected; the second opinion's value is in the angles each party
+MISSES, and overlap on what both catch is acceptable redundancy.
+
 ## Git is the tiebreaker
 
 If both parties accidentally dispatch the same subagent (announcement
@@ -855,6 +922,33 @@ The handoff doc is how the next instance of either role learns:
 - What the absent party shipped in the meantime
 - What's open and which role owns each open item
 - Any new precedents that emerged
+
+## Phase taxonomy (Protocol Bundle v4)
+
+Director's loop has 5 observable phases. Operator's action per phase
+is specified below. Detection is hybrid: explicit `*-request` mailbox
+events for director-initiated transitions; implicit git-log poll for
+post-commit phase; 10-minute idle heuristic from last director
+commit.
+
+| Director phase | Detection signal | Operator action | Phase exit signal |
+|---|---|---|---|
+| **Pre-dispatch** | `scout-request` mailbox event OR director's in-chat "Dispatching X" narration | **Lane S** (v5+): read-only survey; send `scout-report`. v4: ignore. | Director's subagent commit lands |
+| **Subagent active** | Dispatch-claim event seen; WT has uncommitted changes director-attributed | **Silent.** No `.py` writes; hold counter bumps. | Director's commit lands |
+| **Post-commit (feat / refactor / fix)** | New commit by director (Author: `hkk009008-svg`), type matches | **Lane V**: dispatch spec + code-quality reviewer subagents in parallel; send `verification-report` | Director's reviewer-fix commit OR new feat OR 10-min idle |
+| **Post-commit (subsystem touch)** | New commit by director, touches `cinema/` / `domain/` / `web_server.py` / `cinema_pipeline.py` | **Lane D**: update ARCHITECTURE.md / OPERATIONS.md (README carved out); commit `docs(arch-sync)`; send `doc-sync-notice` | Commit landed |
+| **Post-commit (chore / docs / test / style)** | New commit by director, type matches | **Ignore.** No Lane V / D action. | Next commit |
+| **Idle (no signal N min)** | No phase signal for N=10 minutes after last director commit | Standby OR work on pre-listed operator-claimable backlog | New commit OR direct user instruction |
+
+**Fallback when STATE.md is stale (per Rule #8 §F):** if phase
+detection via STATE.md disagrees with filesystem (e.g., `git log -5`
+shows a commit STATE.md doesn't reflect), trust the filesystem.
+Phase determination is filesystem-authoritative.
+
+**Default to inaction.** If operator can't confidently identify the
+phase (ambiguous commit type, unclear scope, partial WT state),
+treat as Idle and stand by. Better to miss a Lane V dispatch than
+to dispatch on the wrong phase.
 
 ## Adjacent-useful work when you can't claim the loop
 
