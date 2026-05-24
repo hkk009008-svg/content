@@ -15,6 +15,18 @@
 # they `git show` after the hook fires. Historical commits are NEVER
 # touched; only the just-made one.
 #
+# KNOWN LIMITATION (v2.1): STATE.md's HEAD field is one SHA stale
+# immediately after a commit. The script captures HEAD_SHA BEFORE the
+# amend, writes STATE.md with that SHA, then amends — which changes
+# HEAD. STATE.md inside the new commit therefore references the
+# pre-amend SHA. Cold-starters should verify with `git rev-parse HEAD`
+# if the exact SHA matters; the other fields (smoke / pytest / mailbox)
+# are post-amend-accurate because they're computed from commit BODY
+# content + mailbox file state, which don't depend on the amend.
+# Fixing this cleanly requires double-amend (gen → amend → regen with
+# new SHA → amend again) which costs an extra amend per commit; we
+# accept the stale-by-one for simplicity.
+#
 # This hook is configured to fire on PostToolUse:Bash via
 # .claude/settings.local.json. Because that matcher fires on EVERY Bash
 # tool call (not only git commits), the script's first responsibility is
@@ -66,8 +78,13 @@ else
   SMOKE_RESULT="unknown (not in commit body; re-run manually)"
 fi
 
-# Pytest count from latest commit body (regex)
-PYTEST_LINE=$(git log -1 --format='%B' HEAD | grep -Eo '[0-9]+ passed[^,]*, [0-9]+ skipped[^,]*, [0-9]+ failed' | head -1 || true)
+# Pytest count from latest commit body (regex).
+# v2.1 fix: original regex required "Z failed" in the match, but pytest
+# omits "0 failed" in the success case (e.g., "636 passed, 3 skipped,
+# 11 warnings, 10 subtests passed"). Made the failed-count match
+# optional. Still tolerates the historical "X passed, Y skipped, Z failed"
+# format.
+PYTEST_LINE=$(git log -1 --format='%B' HEAD | grep -Eo '[0-9]+ passed, [0-9]+ skipped(, [0-9]+ failed)?' | head -1 || true)
 [ -z "$PYTEST_LINE" ] && PYTEST_LINE="(not in commit body; re-run manually for ground truth)"
 
 # Mailbox unread counts

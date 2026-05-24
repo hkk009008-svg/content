@@ -72,6 +72,25 @@ Manual for v1. Operator-only task: periodically move events older than ~N
 sessions from `sent/` to `archive/`. Stale-event surfacing automation
 deferred to v2 if it becomes painful.
 
+## Known limitations (v2.1)
+
+**STATE.md HEAD field is one SHA stale immediately after a commit.** The
+hook captures `HEAD_SHA` BEFORE the `git commit --amend` that folds
+STATE.md into the commit; the amend changes HEAD, but STATE.md inside the
+new commit references the pre-amend SHA. Other STATE.md fields (smoke,
+pytest, mailbox unread, working tree, branch ahead/behind) are post-amend-
+accurate because they don't depend on the amend.
+
+**For cold-starters:** Trust STATE.md's smoke / pytest / mailbox / tree
+fields. For exact current HEAD, verify with `git rev-parse HEAD`. The
+HEAD field in STATE.md is the previous (pre-amend) version of the
+current commit.
+
+**Fixing cleanly** requires a double-amend (gen → amend → regen with new
+SHA → amend again). Costs an extra amend per commit. The v2.1 fix-up
+accepts the stale-by-one as the simpler default; revisit if it causes
+real confusion in practice.
+
 ## Per-clone setup
 
 The hook that auto-maintains `STATE.md` (and thus the `unread mailbox` field)
