@@ -456,3 +456,113 @@ class TestGetSummaryWithData:
         assert "API Calls:" in summary
         # No LLM calls, so no efficiency metrics section
         assert "Avg cost per LLM call" not in summary
+
+
+# ===================================================================
+# 13. record_api_call() — table lookup, override, unknown, accumulator,
+#                         provider derivation, return value
+# ===================================================================
+
+
+class TestRecordAPICall:
+    def test_record_api_call_known_api_uses_table(self, cost_tracker):
+        """Known api_name pulls cost from API_COST_USD table."""
+        from cost_tracker import API_COST_USD
+
+        cost = cost_tracker.record_api_call("SORA_2")
+        assert cost == pytest.approx(API_COST_USD["SORA_2"])
+
+    def test_record_api_call_explicit_override(self, cost_tracker):
+        """Explicit cost_usd wins over the table lookup."""
+        cost = cost_tracker.record_api_call("SORA_2", cost_usd=0.99)
+        assert cost == pytest.approx(0.99)
+
+    def test_record_api_call_unknown_warns_and_zero(self, cost_tracker):
+        """Unknown API emits UserWarning and records $0.00 cost."""
+        with pytest.warns(UserWarning, match="Unknown API"):
+            cost = cost_tracker.record_api_call("TOTALLY_UNKNOWN_API_XYZ")
+        assert cost == pytest.approx(0.0)
+
+    def test_record_api_call_updates_spent_usd(self, cost_tracker):
+        """spent_usd accumulator reflects each recorded call."""
+        from cost_tracker import API_COST_USD
+
+        assert cost_tracker.spent_usd == pytest.approx(0.0)
+        cost_tracker.record_api_call("VEO")
+        cost_tracker.record_api_call("FLUX_PRO")
+        expected = API_COST_USD["VEO"] + API_COST_USD["FLUX_PRO"]
+        assert cost_tracker.spent_usd == pytest.approx(expected)
+
+    @pytest.mark.parametrize("api_name,expected_provider", [
+        ("SORA_2", "openai"),
+        ("VEO", "google"),
+        ("FLUX_PULID", "fal"),
+        ("RUNWAY_GEN4", "runway"),
+        ("KLING_3_0", "kling"),
+        ("TOTALLY_UNKNOWN_API_XYZ", "unknown"),
+    ])
+    def test_record_api_call_provider_derivation(self, cost_tracker, api_name, expected_provider):
+        """Provider is derived from api_name prefix via the internal map."""
+        if expected_provider == "unknown":
+            with pytest.warns(UserWarning):
+                cost_tracker.record_api_call(api_name)
+        else:
+            cost_tracker.record_api_call(api_name)
+        row = cost_tracker.conn.execute(
+            "SELECT provider FROM cost_log ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert row["provider"] == expected_provider
+
+    def test_record_api_call_returns_cost(self, cost_tracker):
+        """Return value equals the cost actually recorded."""
+        returned = cost_tracker.record_api_call("FLUX_KONTEXT", cost_usd=0.04)
+        assert returned == pytest.approx(0.04)
+        row = cost_tracker.conn.execute(
+            "SELECT cost_usd FROM cost_log ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert row["cost_usd"] == pytest.approx(0.04)
+
+
+# ===================================================================
+# 14. Budget gate — would_exceed() and is_over_budget()
+# ===================================================================
+
+
+class TestBudgetGate:
+    def test_would_exceed_with_no_budget_returns_false(self, db_path):
+        """Without a budget cap, would_exceed always returns False."""
+        tracker = CostTracker(db_path=db_path, budget_usd=None)
+        assert tracker.would_exceed("SORA_2") is False
+        tracker.close()
+
+    def test_would_exceed_under_budget(self, db_path):
+        """Returns False when spending 0.50 more is within a $1.00 cap (already at 0.30)."""
+        tracker = CostTracker(db_path=db_path, budget_usd=1.00)
+        tracker.spent_usd = 0.30
+        # would_exceed looks up the table cost; 0.30 + API_COST_USD["LTX"]=0.10 < 1.00
+        assert tracker.would_exceed("LTX") is False
+        tracker.close()
+
+    def test_would_exceed_over_budget(self, db_path):
+        """Returns True when one more call would push spent past the cap."""
+        tracker = CostTracker(db_path=db_path, budget_usd=1.00)
+        tracker.spent_usd = 0.80
+        # 0.80 + SORA_2=0.60 > 1.00
+        assert tracker.would_exceed("SORA_2") is True
+        tracker.close()
+
+    def test_is_over_budget_no_cap(self, db_path):
+        """Without a budget cap, is_over_budget always returns False."""
+        tracker = CostTracker(db_path=db_path, budget_usd=None)
+        tracker.record_api_call("SORA_2")
+        tracker.record_api_call("RUNWAY_GEN4")
+        assert tracker.is_over_budget() is False
+        tracker.close()
+
+    def test_is_over_budget_post_record(self, db_path):
+        """After recording enough calls to exceed the cap, is_over_budget returns True."""
+        tracker = CostTracker(db_path=db_path, budget_usd=0.50)
+        # SORA_2=0.60 alone exceeds 0.50
+        tracker.record_api_call("SORA_2")
+        assert tracker.is_over_budget() is True
+        tracker.close()
