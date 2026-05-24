@@ -1093,13 +1093,25 @@ def api_generate_dialogue(pid, sid):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
-    scene = next((s for s in project["scenes"] if s["id"] == sid), None)
+    # P1-3 migration template (Session 10): validate to Pydantic at the
+    # function boundary, then access via attributes.  Future call sites
+    # follow this pattern (Sessions 12+).  See
+    # docs/MIGRATION-PATTERN-pydantic-caller.md for the full recipe.
+    #
+    # Default-translation note: Scene.characters_present and Scene.mood both
+    # default to [] and "" respectively in the Pydantic model; the prior dict
+    # access used scene.get("characters_present", []) and scene.get("mood",
+    # "neutral").  We handle the mood default at call site with `or "neutral"`
+    # to preserve identical semantics without changing the Pydantic model.
+    from domain.models import Project as _Project
+    project_typed = _Project.model_validate(project)
+    scene = next((s for s in project_typed.scenes if s.id == sid), None)
     if not scene:
         return jsonify({"error": "Scene not found"}), 404
 
-    chars = [c for c in project["characters"] if c["id"] in scene.get("characters_present", [])]
+    chars = [c for c in project_typed.characters if c.id in scene.characters_present]
     lang = project.get("global_settings", {}).get("language", "English")
-    lines = generate_dialogue(scene, chars, scene.get("mood", "neutral"), language=lang)
+    lines = generate_dialogue(scene.model_dump(), [c.model_dump() for c in chars], scene.mood or "neutral", language=lang)
     return jsonify({"dialogue_lines": lines})
 
 

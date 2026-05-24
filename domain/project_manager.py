@@ -597,18 +597,26 @@ def create_project(name: str) -> dict:
 
 
 def _validate_project(project: dict, context: str) -> None:
-    """Pydantic validation pass; logs warnings on schema drift but does NOT
-    fail the operation — permissive mode per brief design (start with
-    extra='allow', warn-only).  Session 9 may add a CINEMA_STRICT_SCHEMA
-    env flag to raise instead of warn.
+    """Pydantic validation pass.
+
+    Warn-only by default (Session 8 contract). Set CINEMA_STRICT_SCHEMA=1
+    (or "true" / "yes" / "TRUE") in the environment to raise ValidationError
+    instead of warning.  This is the Session 10 P1-3 part 2 escalation path:
+    operators can opt in to strict validation in production once confident no
+    warnings are firing.
 
     Args:
         project: Raw project dict (after normalize_project_schema on load).
         context: Human-readable label for log messages (e.g. "save_project").
     """
+    strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
+        "1", "true", "TRUE", "yes"
+    )
     try:
         Project.model_validate(project)
     except ValidationError as e:
+        if strict:
+            raise  # let it propagate; save_project / load_project callers crash
         logger.warning(
             "project schema validation failed",
             extra={
@@ -618,6 +626,8 @@ def _validate_project(project: dict, context: str) -> None:
             },
         )
     except Exception as e:
+        if strict:
+            raise  # belt-and-suspenders strict propagation
         # Belt-and-suspenders: the brief's "warn-only" contract is broader
         # than ValidationError. A TypeError / RecursionError / etc from a
         # malformed dict must NEVER propagate into save_project or
