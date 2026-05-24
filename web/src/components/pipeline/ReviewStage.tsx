@@ -60,6 +60,32 @@ function formatScore(value?: number) {
   return <span className={`text-xs font-mono ${color}`}>{pct}%</span>
 }
 
+function CascadeBadge({ meta }: { meta: TakeRecord['cascade_metadata'] }) {
+  if (!meta) return null
+  const scoreColor = meta.score != null && meta.threshold != null
+    ? meta.score >= meta.threshold
+      ? 'text-editorial-ready'
+      : 'text-editorial-warn'
+    : null
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1">
+      <span className="rounded bg-editorial-ink-soft px-1.5 py-0.5 text-eyebrow text-editorial-ivory-mute">
+        via {meta.engine}
+      </span>
+      {scoreColor && meta.score != null && (
+        <span className={`font-mono text-eyebrow ${scoreColor}`}>
+          {meta.score.toFixed(3)}
+        </span>
+      )}
+      {meta.fallback && (
+        <span className="rounded bg-editorial-curtain/20 px-1.5 py-0.5 text-eyebrow text-editorial-curtain">
+          ⚠ FALLBACK
+        </span>
+      )}
+    </div>
+  )
+}
+
 function renderTakeButton({
   take,
   active,
@@ -81,6 +107,7 @@ function renderTakeButton({
           {approved && <span className="text-eyebrow text-editorial-ready">Approved</span>}
         </div>
         <div className="mt-1 text-eyebrow text-editorial-ivory-mute font-mono break-all">{take.id}</div>
+        <CascadeBadge meta={take.cascade_metadata} />
       </button>
       {!approved && (
         <button
@@ -268,6 +295,11 @@ function ClipCard({
               <span className="text-editorial-ivory-mute">Motion</span>
               {formatScore(diagnosis?.scores?.motion ?? latestDiagnostic?.scores?.motion)}
             </div>
+            {selectedFinal?.cascade_metadata && (
+              <div className="mt-2 border-t border-editorial-rule pt-2">
+                <CascadeBadge meta={selectedFinal.cascade_metadata} />
+              </div>
+            )}
           </div>
         </div>
 

@@ -814,6 +814,7 @@ class ShotController:
         # as the generate_ai_broll call site above (line ~395).
         motion_ctx = PipelineContext(global_settings=settings)
 
+        _video_cascade: dict = {}
         temp_vid = generate_ai_video(
             source_image,
             shot.get("camera", "zoom_in_slow"),
@@ -827,10 +828,13 @@ class ShotController:
             video_fallbacks=video_fallbacks,
             driving_video_path=driving_video_path,
             ctx=motion_ctx,
+            _cascade_out=_video_cascade,
         )
         final_vid = temp_vid or vid_path
         if not final_vid or not os.path.exists(final_vid):
             return {"success": False, "error": "Video generation failed"}
+        if "cascade_metadata" in _video_cascade:
+            take["cascade_metadata"] = _video_cascade["cascade_metadata"]
 
         identity_score = 0.0
         primary_ref = cc.get("primary_reference")
@@ -1218,6 +1222,7 @@ class ShotController:
                 audio_path = self._host._ensure_scene_audio(scene, [c for c in self.project["characters"] if c["id"] in chars])
                 if video_path and primary_ref and audio_path:
                     _settings = self.project.get("global_settings", {})
+                    _lipsync_cascade: dict = {}
                     result = generate_lip_sync_video(
                         character_image_path=primary_ref,
                         audio_path=audio_path,
@@ -1225,9 +1230,13 @@ class ShotController:
                         existing_video_path=str(video_path),
                         mode=_settings.get("lip_sync_mode", "auto"),
                         settings=_settings,
+                        _cascade_out=_lipsync_cascade,
                     )
                     if result:
                         variant["path"] = result
+                        if "cascade_metadata" in _lipsync_cascade:
+                            variant.setdefault("metadata", {})
+                            variant["cascade_metadata"] = _lipsync_cascade["cascade_metadata"]
 
             elif action == "rife":
                 if video_path:

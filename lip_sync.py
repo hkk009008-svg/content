@@ -177,6 +177,7 @@ def lipsync_overlay(
     audio_path: str,
     output_path: str,
     settings: Optional[dict] = None,
+    _cascade_out: Optional[dict] = None,
 ) -> Optional[str]:
     """
     OVERLAY MODE: Apply lip sync to an EXISTING video using MuseTalk.
@@ -184,6 +185,10 @@ def lipsync_overlay(
     lighting, and composition from the original video.
 
     Fallback chain: MuseTalk → LatentSync → Sync Lipsync v2
+
+    _cascade_out: optional mutable dict — if provided, caller receives
+        cascade_metadata written into it on return (both success and fallback).
+        Key: "cascade_metadata" → {engine, score?, threshold?, fallback, attempts}
     """
     if not FAL_AVAILABLE or not settings.fal_key:
         print("   [LIPSYNC-OVERLAY] FAL not available")
@@ -208,13 +213,30 @@ def lipsync_overlay(
     import shutil as _shutil_overlay
     overlay_gate_enabled, overlay_threshold = _sync_gate_settings(settings)
     overlay_candidates: list = []
+    overlay_attempts: list = []  # track engine names tried in order (Session 6 P2-3)
 
     def _overlay_gate_or_stash(engine_name: str) -> bool:
+        overlay_attempts.append(engine_name)
         if not overlay_gate_enabled:
+            if _cascade_out is not None:
+                _cascade_out["cascade_metadata"] = {
+                    "engine": engine_name,
+                    "fallback": False,
+                    "attempts": list(overlay_attempts),
+                }
             return True
         score = validate_lipsync_quality(output_path, audio_path)
         print(f"   [LIPSYNC-GATE] overlay/{engine_name} sync_score={score:.3f} (threshold {overlay_threshold:.2f})")
         if score >= overlay_threshold:
+            # Gate passed — write cascade_metadata for the winning engine
+            if _cascade_out is not None:
+                _cascade_out["cascade_metadata"] = {
+                    "engine": engine_name,
+                    "score": round(score, 4),
+                    "threshold": overlay_threshold,
+                    "fallback": False,
+                    "attempts": list(overlay_attempts),
+                }
             return True
         stash = f"{output_path}.{engine_name}.tmp"
         try:
@@ -328,6 +350,14 @@ def lipsync_overlay(
                     os.unlink(p)
             except Exception:
                 pass
+        if _cascade_out is not None:
+            _cascade_out["cascade_metadata"] = {
+                "engine": best_name,
+                "score": round(best_score, 4),
+                "threshold": overlay_threshold,
+                "fallback": True,
+                "attempts": list(overlay_attempts),
+            }
         return output_path
 
     print("   [LIPSYNC-OVERLAY] All overlay methods failed")
@@ -442,6 +472,7 @@ def lipsync_generation(
     resolution: str = "720p",
     turbo: bool = False,
     settings: Optional[dict] = None,
+    _cascade_out: Optional[dict] = None,
 ) -> Optional[str]:
     """
     GENERATION MODE: Create a full-body talking video from a STILL IMAGE.
@@ -449,6 +480,10 @@ def lipsync_generation(
     WARNING: This REPLACES any existing video — use only for dedicated dialogue shots.
 
     Fallback chain: Hedra Character-3 → Kling Lip Sync → Omnihuman v1.5 → Creatify Aurora
+
+    _cascade_out: optional mutable dict — if provided, caller receives
+        cascade_metadata written into it on return (both success and fallback).
+        Key: "cascade_metadata" → {engine, score?, threshold?, fallback, attempts}
     """
     if not FAL_AVAILABLE or not settings.fal_key:
         print("   [LIPSYNC-GEN] FAL not available")
@@ -473,6 +508,7 @@ def lipsync_generation(
     import shutil as _shutil
     gate_enabled, gate_threshold = _sync_gate_settings(settings)
     candidates: list = []  # list of (score, stash_path, engine_name)
+    gen_attempts: list = []  # track engine names tried in order (Session 6 P2-3)
 
     def _gate_or_stash(engine_name: str) -> bool:
         """Called after a successful urlretrieve to output_path. Returns True if
@@ -480,11 +516,26 @@ def lipsync_generation(
         return early. Returns False to fall through to the next engine; stashes
         the failed candidate so we can pick the best-of-failed at the end.
         """
+        gen_attempts.append(engine_name)
         if not gate_enabled:
+            if _cascade_out is not None:
+                _cascade_out["cascade_metadata"] = {
+                    "engine": engine_name,
+                    "fallback": False,
+                    "attempts": list(gen_attempts),
+                }
             return True
         score = validate_lipsync_quality(output_path, audio_path)
         print(f"   [LIPSYNC-GATE] {engine_name} sync_score={score:.3f} (threshold {gate_threshold:.2f})")
         if score >= gate_threshold:
+            if _cascade_out is not None:
+                _cascade_out["cascade_metadata"] = {
+                    "engine": engine_name,
+                    "score": round(score, 4),
+                    "threshold": gate_threshold,
+                    "fallback": False,
+                    "attempts": list(gen_attempts),
+                }
             return True
         # Stash this candidate before the next engine overwrites output_path
         stash = f"{output_path}.{engine_name}.tmp"
@@ -610,6 +661,14 @@ def lipsync_generation(
                     os.unlink(p)
             except Exception:
                 pass
+        if _cascade_out is not None:
+            _cascade_out["cascade_metadata"] = {
+                "engine": best_name,
+                "score": round(best_score, 4),
+                "threshold": gate_threshold,
+                "fallback": True,
+                "attempts": list(gen_attempts),
+            }
         return output_path
 
     print("   [LIPSYNC-GEN] All generation methods failed")
@@ -629,6 +688,7 @@ def generate_lip_sync_video(
     resolution: str = "720p",
     turbo: bool = False,
     settings: Optional[dict] = None,
+    _cascade_out: Optional[dict] = None,
 ) -> Optional[str]:
     """
     Smart lip sync router — selects the optimal mode based on inputs.
@@ -641,6 +701,7 @@ def generate_lip_sync_video(
         mode: "auto" | "overlay" | "generation"
         resolution: "720p" or "1080p"
         turbo: Faster but lower quality
+        _cascade_out: optional mutable dict — receives cascade_metadata on return.
 
     Auto-selection logic:
     - If existing_video_path is provided → OVERLAY (preserve the cinematic video)
@@ -663,11 +724,13 @@ def generate_lip_sync_video(
     print(f"   [LIPSYNC] Mode: {selected_mode.upper()}")
 
     if selected_mode == "overlay" and existing_video_path:
-        return lipsync_overlay(existing_video_path, audio_path, output_path, settings=settings)
+        return lipsync_overlay(existing_video_path, audio_path, output_path,
+                               settings=settings, _cascade_out=_cascade_out)
     else:
         return lipsync_generation(
             character_image_path, audio_path, output_path,
             resolution=resolution, turbo=turbo, settings=settings,
+            _cascade_out=_cascade_out,
         )
 def generate_rife_interpolation(
     video_path: str,

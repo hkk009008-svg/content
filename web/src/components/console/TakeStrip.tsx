@@ -17,6 +17,15 @@
  *   - Monitor (A3 — inline preview reel in Director's Console: all 4 panes)
  */
 
+/** Cascade decision metadata — mirrors TakeRecord.cascade_metadata (Session 6 P2-3). */
+interface CascadeMetadata {
+  engine: string
+  score?: number
+  threshold?: number
+  fallback?: boolean
+  attempts?: string[]
+}
+
 export interface TakeStripProps {
   keyframeUrl?: string | null
   /** Driving-reference video — input to the performance-capture stage */
@@ -34,6 +43,9 @@ export interface TakeStripProps {
     performance?: string
     motion?: string
   }
+  /** Optional cascade metadata — renders "via {engine}" chip + FALLBACK badge
+   *  below the motion pane using console-* palette only. */
+  cascadeMetadata?: CascadeMetadata | null
 }
 
 export default function TakeStrip({
@@ -44,6 +56,7 @@ export default function TakeStrip({
   apiBase = '',
   projectId,
   labels,
+  cascadeMetadata,
 }: TakeStripProps) {
   const base = apiBase || '/api'
   const hasAny = Boolean(keyframeUrl || drivingUrl || performanceUrl || motionUrl)
@@ -107,6 +120,27 @@ export default function TakeStrip({
             loop
             className="w-full rounded border border-console-rule bg-black"
           />
+          {cascadeMetadata && (
+            <div className="mt-1 flex flex-wrap items-center gap-1">
+              <span className="rounded bg-console-surface-2 px-1.5 py-0.5 text-eyebrow text-console-ink-dim">
+                via {cascadeMetadata.engine}
+              </span>
+              {cascadeMetadata.score != null && cascadeMetadata.threshold != null && (
+                <span className={`font-mono text-eyebrow ${
+                  cascadeMetadata.score >= cascadeMetadata.threshold
+                    ? 'text-console-gold'
+                    : 'text-console-ink-dim'
+                }`}>
+                  {cascadeMetadata.score.toFixed(3)}
+                </span>
+              )}
+              {cascadeMetadata.fallback && (
+                <span className="rounded bg-console-accent/20 px-1.5 py-0.5 text-eyebrow text-console-accent">
+                  ⚠ FALLBACK
+                </span>
+              )}
+            </div>
+          )}
         </div>
       ) : null}
     </div>

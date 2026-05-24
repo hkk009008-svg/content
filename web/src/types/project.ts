@@ -308,6 +308,16 @@ export interface TakeRecord {
   status?: string
   created_at?: string
   metadata?: Record<string, any>
+  /** Cascade decision metadata — added Session 6 (P2-3).
+   *  Optional: absent on takes produced before this field existed.
+   *  Consumers MUST use optional chaining: take.cascade_metadata?.engine */
+  cascade_metadata?: {
+    engine: string        // which engine actually produced this take
+    score?: number        // quality gate score (SyncNet for lipsync, not used for video)
+    threshold?: number    // the gate bar that was checked
+    fallback?: boolean    // true if restored from stash after no engine cleared threshold
+    attempts?: string[]   // engines tried in order, oldest first (includes the winning engine)
+  }
 }
 
 export interface ShotDiagnostic {

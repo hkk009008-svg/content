@@ -55,6 +55,7 @@ def generate_ai_video(
     video_fallbacks: list = None,
     driving_video_path: str = "",
     ctx: Optional["PipelineContext"] = None,
+    _cascade_out: Optional[dict] = None,
 ) -> str:
     """
     Routes an image → video via smart shot-type-aware routing with native APIs.
@@ -83,6 +84,17 @@ def generate_ai_video(
     if attempted_apis is None:
         attempted_apis = set()
     attempted_apis.add(target_api.upper())
+
+    def _record_video_cascade(winning_engine: str) -> None:
+        """Write cascade_metadata into _cascade_out when this engine succeeds.
+        attempted_apis reflects all engines tried so far (shared mutable set).
+        Called before each engine's successful return — Session 6 P2-3.
+        """
+        if _cascade_out is not None:
+            _cascade_out["cascade_metadata"] = {
+                "engine": winning_engine,
+                "attempts": sorted(attempted_apis),
+            }
 
     # Shot-type-aware negative prompt — tailored to what each shot type actually suffers from
     if negative_prompt is None:
@@ -132,7 +144,7 @@ def generate_ai_video(
                     image_path, camera_motion, api, output_mp4, pacing,
                     character_id, attempted_apis, multi_angle_refs,
                     shot_type=shot_type, video_fallbacks=video_fallbacks,
-                    ctx=ctx,
+                    ctx=ctx, _cascade_out=_cascade_out,
                 )
 
         # All APIs failed — try the cascade once more after a quota cooldown.
@@ -157,7 +169,7 @@ def generate_ai_video(
             image_path, camera_motion, first_api, output_mp4, pacing,
             character_id, set(), multi_angle_refs, _cascade_retries=_cascade_retries + 1,
             shot_type=shot_type, video_fallbacks=video_fallbacks,
-            ctx=ctx,
+            ctx=ctx, _cascade_out=_cascade_out,
         )
 
     # If the operator has disabled this engine via api_engines, skip straight to
@@ -199,6 +211,7 @@ def generate_ai_video(
                 mode="pro",
             )
             if result:
+                _record_video_cascade(target_api.upper())
                 return result
             return try_next_api()
         except Exception as e:
@@ -236,6 +249,7 @@ def generate_ai_video(
                 driving_video_path=driving_video_path,
             )
             if result:
+                _record_video_cascade(target_api.upper())
                 return result
             return try_next_api()
         except Exception as e:
@@ -262,6 +276,7 @@ def generate_ai_video(
                 driving_video_path=driving_video_path,
             )
             if result:
+                _record_video_cascade(target_api.upper())
                 return result
             return try_next_api()
         except Exception as e:
@@ -300,6 +315,7 @@ def generate_ai_video(
                 resolution=ltx_resolution,
             )
             if result:
+                _record_video_cascade(target_api.upper())
                 return result
             return try_next_api()
         except Exception as e:
@@ -347,6 +363,7 @@ def generate_ai_video(
                 video_url = task.output[0] if isinstance(task.output, list) else task.output
                 urllib.request.urlretrieve(video_url, output_mp4)
                 print(f"   [RUNWAY-GEN4] Success: {output_mp4}")
+                _record_video_cascade(target_api.upper())
                 return output_mp4
 
             print(f"   [WARN] Runway Gen-4 {task.status}")
@@ -399,6 +416,7 @@ def generate_ai_video(
                 if video_url:
                     urllib.request.urlretrieve(video_url, output_mp4)
                     print(f"   [SORA2] Success: {output_mp4}")
+                    _record_video_cascade(target_api.upper())
                     return output_mp4
 
                 return try_next_api()
@@ -468,6 +486,7 @@ def generate_ai_video(
                 if video_url:
                     urllib.request.urlretrieve(video_url, output_mp4)
                     print(f"   [VEO] Success: {output_mp4}")
+                    _record_video_cascade(target_api.upper())
                     return output_mp4
 
                 return try_next_api()
@@ -553,6 +572,7 @@ def generate_ai_video(
                     if video_url:
                         urllib.request.urlretrieve(video_url, output_mp4)
                         print(f"   [KLING] Success: {output_mp4}")
+                        _record_video_cascade(target_api.upper())
                         return output_mp4
 
                     print(f"   [WARN] Kling returned no video URL")
@@ -618,6 +638,7 @@ def generate_ai_video(
                 if video_url:
                     import urllib.request
                     urllib.request.urlretrieve(video_url, output_mp4)
+                    _record_video_cascade(target_api.upper())
                     return output_mp4
                 return try_next_api()
             except Exception as e:
@@ -652,6 +673,7 @@ def generate_ai_video(
                 final_video_url = completed_task.output[0]
                 import urllib.request
                 urllib.request.urlretrieve(final_video_url, output_mp4)
+                _record_video_cascade(target_api.upper())
                 return output_mp4
             except Exception as e:
                 print(f"   ⚠️ Runway API Error: {e}")
@@ -719,6 +741,7 @@ def generate_ai_video(
                             import urllib.request
                             urllib.request.urlretrieve(video_url, output_mp4)
                             print(f"   ✅ Seedance video downloaded: {output_mp4}")
+                            _record_video_cascade(target_api.upper())
                             return output_mp4
                         break
                     elif status in ("failed", "error"):
