@@ -19,6 +19,7 @@ from typing import Any, Callable, Optional, List, Dict
 from filelock import FileLock, Timeout
 from pydantic import ValidationError
 
+from cinema.auto_approve import AutoApproveConfig
 from domain.models import Project
 
 logger = logging.getLogger(__name__)
@@ -327,6 +328,10 @@ def make_project(name: str) -> dict:
             # pod, overlapping submit/poll/download cycles. ComfyUI still serializes
             # GPU work per pod.
             "max_quality_parallel_workers": 1,
+            # P4-3 (Session 11): auto-approve veto rules config. Conservative-on
+            # defaults; operator tunes via project settings. Typed schema is
+            # Session 10 (P1-3 part 2) work — rides through extra="allow" for now.
+            "auto_approve": AutoApproveConfig().to_dict(),
         },
     }
 

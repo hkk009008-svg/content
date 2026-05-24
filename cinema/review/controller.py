@@ -64,11 +64,16 @@ for the behavior-change rationale.
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 from project_manager import MutationResult, mutate_project
 
+from cinema.auto_approve import AutoApproveConfig, AutoApproveDecision, check_gate
 from cinema.lifecycle import LifecycleService
+
+_aa_logger = logging.getLogger(__name__ + ".auto_approve")
 
 if TYPE_CHECKING:
     # See Pattern L in REFACTOR_HANDOFF.md section 7 -- avoid pulling
@@ -224,6 +229,198 @@ class ReviewController:
             return all(shot.get("approved_final_take_id") for shot in shots)
         return False
 
+    # ------------------------------------------------------------------
+    # Auto-approve integration (P4-3, Session 11)
+    # ------------------------------------------------------------------
+
+    def _run_auto_approve_pass(self, gate: str) -> None:
+        """Run auto-approve checks for all shots that haven't yet passed this
+        gate, and pre-approve qualifying shots before the operator poll loop.
+
+        Contract:
+        - Called BEFORE ``_lifecycle.wait_for_gate`` so pre-approved shots
+          satisfy the gate predicate on the first poll.
+        - NEVER raises: all exceptions are caught and logged; the gate
+          falls through to manual review in the worst case (belt-and-
+          suspenders pattern matching ``_validate_project``).
+        - Appends to ``shot["auto_approve_audit"]`` for every shot checked,
+          regardless of outcome (Session 12 reads this list).
+        - Sets ``shot["<gate>_auto_approved"] = True`` only when
+          ``decision.auto_approved`` is True.
+
+        Gate → audit key mapping:
+          PLAN_REVIEW     → gate arg "plan"
+          KEYFRAME_REVIEW → gate arg "image"
+          REVIEW          → gate arg "final"
+          (PERFORMANCE_REVIEW has no auto-approve path in v1)
+        """
+        # Map pipeline gate names to auto_approve gate keys.
+        _gate_map = {
+            "PLAN_REVIEW": "plan",
+            "KEYFRAME_REVIEW": "image",
+            "REVIEW": "final",
+        }
+        aa_gate = _gate_map.get(gate)
+        if aa_gate is None:
+            return  # PERFORMANCE_REVIEW not in scope for v1
+
+        try:
+            project = self._host._refresh_project_snapshot() or self.project
+            config = AutoApproveConfig.from_project(project)
+
+            for _scene, _shot_index, shot in self._all_shots(project):
+                try:
+                    # Skip if gate already satisfied for this shot.
+                    if aa_gate == "plan" and shot.get("plan_status") == "approved":
+                        continue
+                    if aa_gate == "image" and shot.get("approved_keyframe_take_id"):
+                        continue
+                    if aa_gate == "final" and shot.get("approved_final_take_id"):
+                        continue
+
+                    # Build takes list for the relevant gate.
+                    if aa_gate == "plan":
+                        takes: list[dict] = []
+                    elif aa_gate == "image":
+                        takes = [
+                            t for t in (shot.get("keyframe_takes") or [])
+                            if isinstance(t, dict)
+                        ]
+                    elif aa_gate == "final":
+                        takes = [
+                            t for t in (shot.get("postprocess_variants") or [])
+                                   + (shot.get("motion_takes") or [])
+                            if isinstance(t, dict)
+                        ]
+                    else:
+                        takes = []
+
+                    decision: AutoApproveDecision = check_gate(
+                        aa_gate,
+                        shot_state=shot,
+                        project=project,
+                        takes=takes,
+                        config=config,
+                    )
+
+                    # Append audit entry (always — Session 12 reads these).
+                    audit_entry = {
+                        "gate": aa_gate,
+                        "auto_approved": decision.auto_approved,
+                        "vetoes": decision.vetoes,
+                        "rule_names": decision.rule_names,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+
+                    if decision.auto_approved:
+                        shot_id = shot.get("id", "unknown")
+                        flag_key = f"{aa_gate}_auto_approved"
+                        _aa_logger.info(
+                            "auto_approve: gate=%r shot=%r — approved",
+                            aa_gate,
+                            shot_id,
+                        )
+
+                        # Mutate the shot to mark it approved.
+                        if aa_gate == "plan":
+                            def _plan_mutator(_scene_ignored, s, _entry=audit_entry, _key=flag_key):
+                                s["plan_status"] = "approved"
+                                s["plan_rejection_reason"] = ""
+                                s.setdefault("auto_approve_audit", []).append(_entry)
+                                s[_key] = True
+                                return MutationResult(
+                                    {"shot_id": s["id"], "plan_status": "approved"},
+                                    save=True,
+                                )
+                            self._host._mutate_shot(shot_id, _plan_mutator)
+
+                        elif aa_gate == "image":
+                            best_take_id = (
+                                shot.get("keyframe_takes") or [{}]
+                            )[-1].get("id", "") if shot.get("keyframe_takes") else ""
+                            if best_take_id:
+                                def _img_mutator(
+                                    _scene_ignored, s,
+                                    _tid=best_take_id,
+                                    _entry=audit_entry,
+                                    _key=flag_key,
+                                ):
+                                    s["approved_keyframe_take_id"] = _tid
+                                    s.setdefault("auto_approve_audit", []).append(_entry)
+                                    s[_key] = True
+                                    return MutationResult(
+                                        {"shot_id": s["id"], "approved_keyframe_take_id": _tid},
+                                        save=True,
+                                    )
+                                self._host._mutate_shot(shot_id, _img_mutator)
+
+                        elif aa_gate == "final":
+                            # Pick the most recently generated postprocess or
+                            # motion take as the approved final take.
+                            final_candidates = (
+                                shot.get("postprocess_variants") or []
+                            ) + (shot.get("motion_takes") or [])
+                            best_final = final_candidates[-1] if final_candidates else None
+                            best_final_id = (best_final or {}).get("id", "")
+                            if best_final_id:
+                                # Resolve motion source for approved_motion_take_id.
+                                motion_take_id = ""
+                                for mt in reversed(shot.get("motion_takes") or []):
+                                    if isinstance(mt, dict) and mt.get("id"):
+                                        motion_take_id = mt["id"]
+                                        break
+
+                                def _final_mutator(
+                                    _scene_ignored, s,
+                                    _ftid=best_final_id,
+                                    _mtid=motion_take_id,
+                                    _entry=audit_entry,
+                                    _key=flag_key,
+                                ):
+                                    if _mtid:
+                                        s["approved_motion_take_id"] = _mtid
+                                    s["approved_final_take_id"] = _ftid
+                                    s.setdefault("auto_approve_audit", []).append(_entry)
+                                    s[_key] = True
+                                    return MutationResult(
+                                        {
+                                            "shot_id": s["id"],
+                                            "approved_final_take_id": _ftid,
+                                        },
+                                        save=True,
+                                    )
+                                self._host._mutate_shot(shot_id, _final_mutator)
+                    else:
+                        # Vetoed: still append audit entry to shot (no approval).
+                        shot_id = shot.get("id", "unknown")
+
+                        def _audit_only_mutator(
+                            _scene_ignored, s, _entry=audit_entry
+                        ):
+                            s.setdefault("auto_approve_audit", []).append(_entry)
+                            return MutationResult(
+                                {"shot_id": s["id"], "auto_approve_audit_appended": True},
+                                save=True,
+                            )
+                        self._host._mutate_shot(shot_id, _audit_only_mutator)
+
+                except Exception as shot_exc:
+                    _aa_logger.warning(
+                        "auto_approve: error processing shot %r at gate %r: %r",
+                        shot.get("id"),
+                        aa_gate,
+                        shot_exc,
+                    )
+                    # Continue with remaining shots.
+
+        except Exception as exc:
+            _aa_logger.warning(
+                "auto_approve: _run_auto_approve_pass failed (gate=%r): %r — "
+                "falling through to manual review",
+                gate,
+                exc,
+            )
+
     def _wait_for_gate(self, gate: str, detail: str, percent: float) -> bool:
         """Block until the named gate is satisfied (or run cancelled).
 
@@ -242,9 +439,17 @@ class ReviewController:
         site in the generate() loop -- this method just removes the
         coupling between gate state and pause state. Gates no longer
         force a pause.
+
+        P4-3 (Session 11): auto-approve pass runs before the poll loop.
+        Qualifying shots are pre-approved; the gate may be satisfied
+        immediately without operator input. If the pass errors, it is
+        silently skipped and normal manual review proceeds.
         """
         self._runstate.current_stage = gate
         self.progress(gate, detail, percent)
+
+        # P4-3: attempt to pre-approve shots before waiting for operator.
+        self._run_auto_approve_pass(gate)
 
         def predicate() -> bool:
             project = self._host._refresh_project_snapshot() or self.project
