@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Content** (3217 symbols, 20718 relationships, 273 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Content** (3306 symbols, 21050 relationships, 281 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -561,6 +561,100 @@ wrong fix that itself needs reverting.
   overhead hurts here.
 - **Tasks needing constant operator feedback** — interactive sessions
   fit better.
+
+# Director-Operator Concurrent Operation
+
+This project runs two parallel agent sessions by design:
+
+- **Director** — strategic driver. Authors briefs, decides what ships
+  next, reframes scope, codifies precedents, owns push-to-origin and
+  post-roadmap reassessment.
+- **Operator** — execution driver. Runs the per-session loop above
+  (implementer + reviewers + fix loops + commits), produces closing
+  reports, surfaces findings.
+
+They share a working tree and commit history. Friction arises not on
+commits (git serializes those) but on **planning and dispatch overlap** —
+both parties reaching for the same shared task at the same time. The
+rules below partition work and define a signaling protocol so the cost
+of running both is roughly zero.
+
+## Role partition
+
+**Director-only (never claimed by operator):**
+
+- Strategic direction — what session ships next, scope reframes
+- Brief authoring and revision (`docs/HANDOFF-roadmap-*.md`)
+- Post-roadmap reassessment against `docs/STRATEGIC_REVIEW-*.md`
+- Push-to-origin decisions
+- ADR authoring (`DECISIONS.md`)
+- Codifying new precedents into discipline rules (`CLAUDE.md` / this
+  file) — operator may draft; director commits.
+- Memory writes (project memory index + memory files) — same
+  draft-then-handoff shape; memories shape future sessions of both
+  roles, so the curation call is director's.
+
+**Operator-only (never claimed by director):**
+
+- Counter-bump dispositions (the auto-generated GitNexus-block edits at
+  the top of `CLAUDE.md` / this file) — folded into the nearest
+  relevant code commit or shipped as `chore(baseline)`.
+- Trust-but-verify reads after each commit
+- Updating the operator transplant handoff
+  (`docs/HANDOFF-operator-transplant-*.md`)
+
+**Shared (either may drive — see signaling rules):**
+
+- Implementer dispatch for a new session
+- Spec reviewer + code-quality reviewer dispatch
+- Verification gates (smoke / pytest / tsc)
+- Applying review IMPORTANTs **and minors** — `chore(test)` /
+  `chore(ui)` / `chore` commits folding review feedback are claimed
+  by whoever announces first
+- Closing-report drafting
+
+## Signaling: narrate before acting on shared tasks
+
+Whoever is active first claims a shared task by **stating the action in
+conversation before doing it**:
+
+> "Dispatching Session 6 implementer (foreground)."
+> "Dispatching parallel reviewers (spec + code-quality) on `d516d2a..b25da2e`."
+
+The other party, on seeing the announcement:
+
+- Does not duplicate the claimed action.
+- May pre-stage complementary work without committing (locate fixes,
+  draft prompts, validate type shapes, prepare closing reports).
+- Reports back what they observed and what they're standing by for.
+
+## Git is the tiebreaker
+
+If both parties accidentally dispatch the same subagent, the first
+commit to land wins. The other's subagent output is discarded. Cost:
+one wasted subagent context.
+
+Before acting on any shared task, run `git log --oneline -3` first.
+A commit that already addresses the task means the task is closed;
+do not duplicate.
+
+## When the other party is offline
+
+If a session ends (context limit, end-of-day, explicit handoff), the
+remaining party takes the full loop unilaterally. No signaling needed
+until the next session of the absent role picks up via handoff doc.
+
+## Adjacent-useful work when you can't claim the loop
+
+Pre-locate fixes for flagged divergences. Survey carry-forward items
+to prep the post-roadmap reassessment. Validate data shapes the
+implementer assumed. Draft closing-report skeleton. Spot stale doc
+claims and queue corrections.
+
+Do NOT edit code while the other party's subagent is mid-edit on the
+same files, nor commit doc updates that contradict in-flight work,
+nor dispatch a duplicate reviewer, nor run `pytest` against a dirty
+working tree mid-implementation.
 
 # Coordinating with CLAUDE.md
 

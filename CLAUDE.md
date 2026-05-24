@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Content** (3217 symbols, 20718 relationships, 273 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Content** (3306 symbols, 21050 relationships, 281 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -631,3 +631,121 @@ prevents a wrong fix that itself needs to be reverted.
   here.
 - **Tasks with constant operator feedback** — interactive sessions in main
   context fit better.
+
+# Director-Operator Concurrent Operation
+
+This project runs two parallel Claude sessions by design:
+
+- **Director** — strategic driver. Authors briefs, decides what ships
+  next, reframes scope, codifies precedents, owns push-to-origin and
+  post-roadmap reassessment.
+- **Operator** — execution driver. Runs the per-session loop above
+  (implementer + reviewers + fix loops + commits), produces closing
+  reports, surfaces findings.
+
+They share a working tree and commit history. Friction arises not on
+commits (git serializes those) but on **planning and dispatch overlap** —
+both parties reaching for the same shared task at the same time. The
+rules below partition work and define a signaling protocol so the cost
+of running both is roughly zero.
+
+## Role partition
+
+**Director-only (never claimed by operator):**
+
+- Strategic direction — what session ships next, scope reframes
+- Brief authoring and revision (`docs/HANDOFF-roadmap-*.md`)
+- Post-roadmap reassessment against `docs/STRATEGIC_REVIEW-*.md`
+- Push-to-origin decisions
+- ADR authoring (`DECISIONS.md`)
+- Codifying new precedents into discipline rules (this file / `AGENTS.md`)
+  — operator may draft; director commits. This rule was drafted by
+  operator and shipped by director, the canonical example.
+- Memory writes (`MEMORY.md` index + `memory/*.md` files) — same
+  draft-then-handoff shape; memories shape future sessions of both
+  roles, so the curation call is director's.
+
+**Operator-only (never claimed by director):**
+
+- Counter-bump dispositions (the auto-generated GitNexus-block edits at
+  the top of this file / `AGENTS.md`) — folded into the nearest
+  relevant code commit or shipped as `chore(baseline)`.
+- Trust-but-verify reads after each commit (`git show --stat`, brief
+  test run)
+- Updating the operator transplant handoff
+  (`docs/HANDOFF-operator-transplant-*.md`)
+
+**Shared (either may drive — see signaling rules below):**
+
+- Implementer dispatch for a new session (Lane B `Agent` call)
+- Spec reviewer + code-quality reviewer dispatch
+- Verification gates (smoke / pytest / tsc)
+- Applying review IMPORTANTs **and minors** — `chore(test)` /
+  `chore(ui)` / `chore` commits folding review feedback are claimed
+  by whoever announces first (see signaling rules)
+- Closing-report drafting
+
+## Signaling: narrate before acting on shared tasks
+
+Whoever is active first claims a shared task by **stating the action in
+conversation before doing it**:
+
+> "Dispatching Session 6 implementer (Lane B, foreground)."
+> "Dispatching parallel reviewers (spec + code-quality) on `d516d2a..b25da2e`."
+> "Applying spec-reviewer fix to phase_c_ffmpeg.py:50,85,86,90,96,170."
+
+The other party, on seeing the announcement:
+
+- **Does not duplicate** the claimed action.
+- **May pre-stage** complementary work without committing: locate fixes,
+  draft prompts, validate type shapes, prepare closing reports.
+- **Reports back** what they observed and what they're standing by for.
+
+This is the protocol that's been working in practice; this section
+promotes it from informal habit to explicit rule.
+
+## Git is the tiebreaker
+
+If both parties accidentally dispatch the same subagent (announcement
+race), the first commit to land wins. The other's subagent output is
+discarded — cost: one wasted ~50k-token subagent context. Acceptable
+worst case.
+
+Before acting on any shared task, **run `git log --oneline -3` first.**
+A commit that already addresses the task means the task is closed; do
+not duplicate.
+
+## When the other party is offline
+
+If a session ends (context limit, end-of-day, explicit handoff), the
+remaining party takes the full loop unilaterally. No signaling needed
+until the next session of the absent role picks up via handoff doc.
+
+The handoff doc is how the next instance of either role learns:
+
+- What the absent party shipped in the meantime
+- What's open and which role owns each open item
+- Any new precedents that emerged
+
+## Adjacent-useful work when you can't claim the loop
+
+When the other party owns the active task, useful work in parallel
+includes:
+
+- **Pre-locate fixes** for divergences the implementer flagged (find
+  file:line, draft the edit, hold for review verdict)
+- **Survey carry-forward items** (STRATEGIC_REVIEW priorities not in
+  current scope) to prep the post-roadmap reassessment
+- **Validate data shapes** the implementer assumed (e.g., does this
+  field actually exist on the relevant interface?)
+- **Draft closing-report skeleton** so it's ready when the loop closes
+- **Spot stale doc claims** and queue corrections for next docs commit
+
+Do NOT:
+
+- Edit code while the other party's subagent is mid-edit on the same
+  files
+- Commit doc updates that contradict in-flight subagent work
+- Dispatch a duplicate reviewer or implementer
+- Run `pytest` against a dirty working tree mid-implementation
+  (results don't reflect either landed or final state)
