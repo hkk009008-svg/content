@@ -2733,3 +2733,226 @@ Commit 2: `test(cinema): cover motion-gate env flag + integration paths`
 
 **If you finish early:** Add a one-line `_aa_logger.info("auto_approve: motion gate ENABLED via env flag")` log message at the top of `_run_auto_approve_pass` when `is_motion_gate_enabled()` is True. Helps operators verify the flag is active in production logs. Keep it gated on `aa_gate == "motion"` so it only logs once per PERFORMANCE_REVIEW invocation, not on every gate pass.
 
+---
+
+## SESSION 13 — P4-3 (frontend): AutoApproveBadge + PostRunSummary + rejection-with-reason
+
+**Why this matters.** Sessions 11 + 12 shipped the auto-approve backend (per-gate veto rules + ShotState integration + opt-in motion-gate flag). Each director-shipped commit now writes audit entries to `shot["auto_approve_audit"]` and sets `shot["<gate>_auto_approved"]` flags. But the **frontend has no idea any of this exists**: `web/src/types/project.ts` doesn't declare the new fields; `ReviewStage.tsx` renders takes with no awareness of whether they were auto-approved or vetoed; there's no run-completion summary surface; there's no rejection-with-reason flow when a user wants to override an auto-approve decision.
+
+Session 13 ships the frontend half of P4-3: TypeScript type sync + 3 new React components (`AutoApproveBadge`, `PostRunSummary`, `RejectAutoApproveModal`) + wire-in points in `ReviewStage.tsx` and the run-completion surface. After S13, P4-3 converts from PARTIAL to fully SHIPPED.
+
+**Scope reframe (single session).** S13 is frontend-only — no backend changes. The audit-log shape was locked by S11 (`{gate, auto_approved, vetoes, rule_names, timestamp}`); motion entries appear when `CINEMA_AUTO_APPROVE_MOTION=1` (per S12 / ADR-014). Frontend MUST handle motion entries gracefully (display when present, absent-OK for v1 default).
+
+**Decisions (no user input needed):**
+- Frontend tests: project has no frontend test framework set up (no vitest/jest/playwright config). Verification is `npx tsc --noEmit` (type check) + manual browser smoke on a project with auto-approve audit entries. This matches the Session 6 + Monitor.tsx wiring (`a6e3ff1`) convention.
+- AutoApproveBadge follows the existing `CascadeBadge` pattern at `web/src/components/pipeline/ReviewStage.tsx:63`. Same shape: small inline badge with semantic color + tooltip on hover.
+- PostRunSummary modal is triggered by an SSE event the pipeline already emits at run-completion. Implementer surveys for the existing event name (likely `pipeline_done` or `run_complete`); modal opens automatically + can be dismissed.
+- Rejection modal opens via click on AutoApproveBadge's "Reject" affordance. Required: free-text reason. Posts to a NEW backend endpoint `POST /api/shots/<shot_id>/reject-auto-approve` (~10 LOC backend addition in `web_server.py` — yes, that's a small backend slice; flagged as IN scope below).
+- TypeScript type additions go directly in `web/src/types/project.ts` as `AutoApproveAuditEntry` interface + 5 new optional fields on `Shot`. All optional to handle projects that predate S11.
+
+**Pre-work:**
+
+1. Read [docs/HANDOFF-roadmap-2026-05-24.md](HANDOFF-roadmap-2026-05-24.md) §SESSION 11 (the auto-approve backend) + §SESSION 12 (motion-gate flag) — these define the audit-log shape and behavior you're consuming.
+2. Read [web/src/components/pipeline/ReviewStage.tsx:55-95](../web/src/components/pipeline/ReviewStage.tsx) — `formatScore` + `CascadeBadge` are the pattern templates for `AutoApproveBadge`.
+3. Read [web/src/types/project.ts:45-77](../web/src/types/project.ts) — the existing `Shot` interface. You're adding fields, not restructuring.
+4. Read [cinema/auto_approve.py:235-280](../cinema/auto_approve.py) — motion rule names (`motion_identity_below_threshold`, `motion_score_below_threshold`, `motion_cascade_fallback`). Frontend may display these in the badge's tooltip.
+5. Read [cinema/review/controller.py:240-470](../cinema/review/controller.py) — the audit entry construction (line 320-326) shows exactly what frontend receives.
+6. Search for the SSE event emitted at pipeline-run completion: `grep -rn "pipeline_done\|run_complete\|run_finished" web_server.py cinema_pipeline.py`. Pick the right event name for PostRunSummary's trigger.
+7. Baseline: `cd web && npx tsc --noEmit 2>&1 | tail -3` → expect 0 errors at HEAD. Browser smoke: `npm run dev` + open a project, navigate to ReviewStage — should render without errors at HEAD.
+
+**Scope:**
+
+| IN | OUT |
+|---|---|
+| `AutoApproveAuditEntry` interface + 5 new optional fields on `Shot` in `web/src/types/project.ts` | Changing the public API of any backend endpoint other than the new reject-with-reason endpoint |
+| `AutoApproveBadge` component (NEW, `web/src/components/console/AutoApproveBadge.tsx`) | Refactoring `CascadeBadge` (its shape stays as-is; AutoApproveBadge mirrors but doesn't share code) |
+| `PostRunSummary` modal (NEW, `web/src/components/console/PostRunSummary.tsx`) | Auto-loading the modal on page open; trigger is the SSE run-completion event only |
+| `RejectAutoApproveModal` component (NEW, `web/src/components/console/RejectAutoApproveModal.tsx`) | Rejection of NON-auto-approved takes (existing manual-rejection flow is out of scope) |
+| Wire-in points in `ReviewStage.tsx` (badge next to auto-approved takes) | Refactoring `ReviewStage.tsx`'s take-rendering logic |
+| Wire-in point in `EditorialShell.tsx` or `DirectorsConsole.tsx` for the post-run modal trigger | Adding new SSE event types (use the existing run-completion event) |
+| `POST /api/shots/<shot_id>/reject-auto-approve` endpoint in `web_server.py` (~15 LOC) — records the rejection reason + clears the `<gate>_auto_approved` flag + appends a new audit entry with `auto_approved: false` and `rule_names: ["user_override"]` | Persisting rejection reasons to a separate table/file (just store in the audit log as a `user_override` rule entry) |
+| Backend test for the new endpoint (~30 LOC in `tests/unit/test_web_server_concurrency.py` or a new `test_web_server_auto_approve.py`) | Frontend test coverage (no framework set up; defer to operator's Lane V verification + manual smoke) |
+
+**Approach:**
+
+1. **TypeScript types** (`web/src/types/project.ts`, ~15 LOC near line 77):
+
+   ```typescript
+   export interface AutoApproveAuditEntry {
+     gate: 'plan' | 'image' | 'motion' | 'final'
+     auto_approved: boolean
+     vetoes: string[]
+     rule_names: string[]
+     timestamp: string  // ISO 8601
+   }
+
+   export interface Shot {
+     // ... existing fields ...
+     plan_auto_approved?: boolean
+     image_auto_approved?: boolean
+     motion_auto_approved?: boolean   // present only when CINEMA_AUTO_APPROVE_MOTION=1
+     final_auto_approved?: boolean
+     auto_approve_audit?: AutoApproveAuditEntry[]
+   }
+   ```
+
+2. **AutoApproveBadge component** (`web/src/components/console/AutoApproveBadge.tsx`, ~60 LOC). Mirror `CascadeBadge`'s shape:
+
+   ```typescript
+   import { AutoApproveAuditEntry } from '../../types/project'
+
+   interface Props {
+     gate: 'plan' | 'image' | 'motion' | 'final'
+     audit: AutoApproveAuditEntry[]
+     onReject?: () => void   // opens RejectAutoApproveModal when clicked
+   }
+
+   export function AutoApproveBadge({ gate, audit, onReject }: Props) {
+     const entry = audit.find(e => e.gate === gate && e.auto_approved)
+     if (!entry) return null
+     // Render: small green badge "✓ auto-approved" + hover tooltip showing rule_names
+     // + optional Reject button (when onReject provided)
+   }
+   ```
+
+   Color semantic: `text-editorial-ready` on success; `text-editorial-warn` on vetoed (when displayed for transparency). Match the existing palette in `ReviewStage.tsx`.
+
+3. **RejectAutoApproveModal component** (`web/src/components/console/RejectAutoApproveModal.tsx`, ~80 LOC):
+   - Props: `shotId: string`, `gate: 'plan' | 'image' | 'motion' | 'final'`, `isOpen: boolean`, `onClose: () => void`, `onSubmit: (reason: string) => void`
+   - Required field: `<textarea>` for reason; submit disabled until non-empty
+   - On submit: POST to `/api/shots/<shotId>/reject-auto-approve` with `{gate, reason}`; on success, close modal
+   - Follow the existing modal patterns in `EditorialShell.tsx` or `SettingsPanel.tsx` for the styling
+
+4. **PostRunSummary modal** (`web/src/components/console/PostRunSummary.tsx`, ~120 LOC):
+   - Props: `project: Project`, `isOpen: boolean`, `onClose: () => void`
+   - Aggregates `auto_approve_audit` across all shots in `project.scenes[*].shots[*]`
+   - Displays: per-gate counts (`plan`: N approved / M vetoed, etc.), top 5 firing rules across all shots, list of all auto-approved takes with thumbnails (if available)
+   - Each auto-approved take row has a "Reject" button → opens `RejectAutoApproveModal`
+   - Trigger: subscribe to the pipeline-completion SSE event in the parent component (likely `EditorialShell.tsx`); set `isOpen=true` when received
+
+5. **ReviewStage wire-in** (`web/src/components/pipeline/ReviewStage.tsx`, ~10 LOC of additions):
+   - Where each take is rendered (look for `renderTakeButton` at line 89+), add an `AutoApproveBadge` next to the take when:
+     - `shot.<gate>_auto_approved` is true AND the take's `id` matches `shot.approved_<gate>_take_id`
+   - Pass `audit={shot.auto_approve_audit || []}` and the current gate
+
+6. **EditorialShell / DirectorsConsole wire-in** (~15 LOC):
+   - Subscribe to the pipeline-completion SSE event
+   - On event: open `PostRunSummary` modal with the current project state
+   - Modal is dismissable but lives in the parent's state so user can reopen via a button if needed
+
+7. **Backend reject-with-reason endpoint** (`web_server.py`, ~20 LOC + 1 test):
+
+   ```python
+   @app.post("/api/shots/<shot_id>/reject-auto-approve")
+   def api_reject_auto_approve(shot_id):
+       data = request.get_json() or {}
+       gate = data.get("gate")
+       reason = (data.get("reason") or "").strip()
+       if gate not in {"plan", "image", "motion", "final"}:
+           return jsonify({"error": "invalid gate"}), 400
+       if not reason:
+           return jsonify({"error": "reason required"}), 400
+       # Mutate shot: clear <gate>_auto_approved flag, append audit entry
+       # with auto_approved=False, rule_names=["user_override"], vetoes=[reason]
+       # ... (use existing _mutate_shot pattern from cinema/review/controller.py)
+       return jsonify({"status": "ok"})
+   ```
+
+   Test: covers happy path (valid gate + reason → 200) + 2 error paths (invalid gate → 400, missing reason → 400). Use the existing test fixture pattern from `tests/unit/test_web_server_concurrency.py`.
+
+**Acceptance criteria:**
+
+- [ ] `AutoApproveAuditEntry` interface + 5 optional fields added to `Shot` in `web/src/types/project.ts`
+- [ ] `AutoApproveBadge.tsx` exists and renders for auto-approved takes; mirrors `CascadeBadge` style; supports optional `onReject` prop
+- [ ] `RejectAutoApproveModal.tsx` exists; required reason field; POSTs to the new endpoint
+- [ ] `PostRunSummary.tsx` exists; aggregates audit across shots; per-gate counts + top rules + reject buttons
+- [ ] `ReviewStage.tsx` shows AutoApproveBadge next to auto-approved takes (one per gate per shot)
+- [ ] `EditorialShell.tsx` (or `DirectorsConsole.tsx`) subscribes to the pipeline-completion SSE event + opens PostRunSummary
+- [ ] `POST /api/shots/<shot_id>/reject-auto-approve` endpoint in `web_server.py`; validates gate + reason; mutates shot state
+- [ ] Backend test for the endpoint: ≥3 cases (happy + invalid gate + missing reason); pytest still passes (≥706 total)
+- [ ] `npx tsc --noEmit` (in `web/`): 0 errors
+- [ ] `.venv/bin/python scripts/ci_smoke.py`: OK
+- [ ] Manual smoke: start `npm run dev`; open a project that has S11+S12 audit entries; verify badge renders + reject flow works
+- [ ] Motion entries display correctly when `CINEMA_AUTO_APPROVE_MOTION=1` was set during the run; absent silently when flag was off
+
+**Pitfalls:**
+
+- **DON'T add `motion` to the gate union as required.** It's opt-in per S12; the optional field + `audit.find` filter handle this naturally. Don't make motion display gates required-render in `PostRunSummary` summary section — they should only appear when there's at least one motion audit entry.
+- **DON'T change the audit-log shape.** Backend's `{gate, auto_approved, vetoes, rule_names, timestamp}` is locked from S11. If you discover a frontend need that requires backend changes, surface in DONE_WITH_CONCERNS — do NOT touch `cinema/review/controller.py:312-318`.
+- **DON'T add a frontend test framework.** Project convention is `tsc` + manual smoke. Adding vitest is scope creep + a separate decision.
+- **DON'T persist rejection reasons separately.** The `auto_approve_audit` array IS the persistence layer. Rejection commits an audit entry with `auto_approved: false`, `rule_names: ["user_override"]`, `vetoes: [reason]`. Frontend reads back from the same array on next render.
+- **DO match the existing palette** (`editorial-ready` / `editorial-warn` / `editorial-curtain` Tailwind classes). The project has a tight design system; don't introduce new colors.
+- **DO use the existing `_mutate_shot` pattern in `web_server.py`** — find an example (`api_reject_shot` or similar) and mirror the locking + mutation shape. Don't reinvent.
+- **Rule #7 pre-commit re-verify** (standing protocol): immediately before each `git commit`, run `git log --oneline -5` AND `find coordination/mailbox/sent -type f -name '*.md' | wc -l`. Race-ack per Rule #5 if state moved.
+- **Protocol Bundle v4 is now live.** Operator may dispatch Lane V reviewers in parallel with director's after your `feat` commits. You don't coordinate — your job is just to ship per the brief and report. Lane V is invisible from your subagent context.
+
+**Verification:**
+
+```bash
+# 1. TypeScript compiles cleanly
+cd /Users/hyungkoookkim/Content/web && npx tsc --noEmit 2>&1 | tail -5
+# Expected: 0 errors
+
+# 2. Backend tests still pass
+.venv/bin/python -m pytest tests/unit/ --tb=no -q 2>&1 | tail -3
+# Expected: ≥706 pass / 3 skip / 0 fail (703 baseline + ≥3 new endpoint tests)
+
+# 3. §15 smoke
+.venv/bin/python /Users/hyungkoookkim/Content/scripts/ci_smoke.py
+# Expected: OK
+
+# 4. Backend endpoint manual test (after starting web server)
+curl -X POST http://localhost:5001/api/shots/<some-shot-id>/reject-auto-approve \
+  -H 'Content-Type: application/json' \
+  -d '{"gate": "plan", "reason": "test rejection"}'
+# Expected: 200 {"status": "ok"}
+
+curl -X POST http://localhost:5001/api/shots/<some-shot-id>/reject-auto-approve \
+  -H 'Content-Type: application/json' \
+  -d '{"gate": "invalid", "reason": "test"}'
+# Expected: 400 {"error": "invalid gate"}
+
+# 5. Browser smoke (manual)
+cd /Users/hyungkoookkim/Content/web && npm run dev
+# Open localhost:5173, load a project with auto-approve audit entries,
+# navigate to ReviewStage, verify:
+#   - Auto-approved takes show the badge
+#   - Hovering the badge shows the rule names tooltip
+#   - Reject button opens the modal
+#   - Submitting the modal sends the POST + clears the badge
+#   - PostRunSummary modal opens on run completion + lists all decisions
+
+# 6. Scope check
+git diff --stat HEAD~<N>..HEAD
+# Expected files (~7):
+#   - web/src/types/project.ts
+#   - web/src/components/console/AutoApproveBadge.tsx (NEW)
+#   - web/src/components/console/PostRunSummary.tsx (NEW)
+#   - web/src/components/console/RejectAutoApproveModal.tsx (NEW)
+#   - web/src/components/pipeline/ReviewStage.tsx
+#   - web/src/components/EditorialShell.tsx (or DirectorsConsole.tsx — whichever owns SSE event subscription)
+#   - web_server.py (+ test file)
+```
+
+**Commit shape (split into 3):**
+
+Commit 1: `feat(types): mirror S11+S12 auto-approve fields in TypeScript`
+  - `web/src/types/project.ts`
+  - Body: cite S11 (`d6fd3e1`) + S12 (`2a25c2d`) for the field shapes; note all new fields are optional for backward compat with pre-S11 project files
+
+Commit 2: `feat(web): AutoApproveBadge + PostRunSummary + RejectAutoApproveModal + reject endpoint`
+  - All 3 new components + `ReviewStage.tsx` wire-in + `EditorialShell.tsx` (or wherever) wire-in + `web_server.py` endpoint + endpoint test
+  - Body: explain consumption of S11 audit-log shape; note motion-gate visibility is opt-in via S12's flag; reference this brief by line numbers
+
+Commit 3 (optional): `chore(web): manual-smoke notes for S13`
+  - Optional. Only if you discover something worth documenting that's not a code change. E.g., a quirk in how the SSE event fires on project reload.
+
+**Estimated effort:** M-to-L — ~75-120 min implementer subagent. Bulk is the 3 new React components (~260 LOC total) + backend endpoint + smoke setup. TypeScript strict mode means types are precise upfront.
+
+**Decision authority:** Lane A on component prop naming, modal styling within the existing palette, audit entry display order (chronological vs grouped-by-gate). Escalate when:
+
+- The pipeline-completion SSE event has multiple candidates (`pipeline_done` vs `run_complete` vs `phase_complete`). Pick the one fired AFTER all gates have run their final pass; if ambiguous, surface for product decision.
+- A take has multiple audit entries for the same gate (e.g., re-runs). Display the most recent (highest timestamp) in the badge; older entries appear in PostRunSummary's full log view.
+- The frontend reveals a backend data shape issue (e.g., `auto_approve_audit` is sometimes a string instead of array, indicating serialization bug). Surface — do NOT auto-coerce; this is a backend bug.
+
+**If you finish early:** Add a `<AutoApproveBadge>` story to the existing component playground if one exists (`web/src/playground/` or similar). If not, skip — don't introduce a playground for one badge.
