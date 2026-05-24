@@ -371,3 +371,220 @@ class TestBoundaryValidation:
         crash_logs = [r for r in caplog.records if "crashed" in r.message]
         assert len(crash_logs) >= 1
         assert crash_logs[0].context == "test_context"
+
+
+# ---------------------------------------------------------------------------
+# TestStrictModeOff  (Session 10 — CINEMA_STRICT_SCHEMA not set)
+# ---------------------------------------------------------------------------
+
+
+class TestStrictModeOff:
+    """Default (warn-only) behavior is preserved when env flag is absent."""
+
+    def test_validation_error_warns_not_raises_by_default(self, monkeypatch, caplog):
+        """Without CINEMA_STRICT_SCHEMA set, ValidationError logs a warning and
+        does NOT propagate — the Session 8 contract must remain intact."""
+        monkeypatch.delenv("CINEMA_STRICT_SCHEMA", raising=False)
+        # A take with an invalid kind will bubble up through Project.model_validate
+        # as a nested ValidationError.
+        bad_project = {
+            "id": "proj_warn",
+            "scenes": [
+                {
+                    "id": "scene_x",
+                    "shots": [{"id": "shot_x", "keyframe_takes": [{"id": "t1", "kind": "INVALID"}]}],
+                }
+            ],
+        }
+        with caplog.at_level(logging.WARNING, logger="domain.project_manager"):
+            # Must NOT raise — warn-only contract.
+            _pm._validate_project(bad_project, "test_warn_only")
+
+        warn_logs = [r for r in caplog.records if "validation failed" in r.message]
+        assert len(warn_logs) >= 1
+
+
+# ---------------------------------------------------------------------------
+# TestStrictModeOn  (Session 10 — CINEMA_STRICT_SCHEMA=1)
+# ---------------------------------------------------------------------------
+
+
+class TestStrictModeOn:
+    """With CINEMA_STRICT_SCHEMA set, validation failures RAISE not warn."""
+
+    def test_validation_error_raises_when_strict(self, monkeypatch):
+        """ValidationError propagates when CINEMA_STRICT_SCHEMA=1."""
+        monkeypatch.setenv("CINEMA_STRICT_SCHEMA", "1")
+        bad_project = {
+            "id": "proj_strict",
+            "scenes": [
+                {
+                    "id": "scene_x",
+                    "shots": [{"id": "shot_x", "keyframe_takes": [{"id": "t1", "kind": "BAD"}]}],
+                }
+            ],
+        }
+        with pytest.raises(ValidationError):
+            _pm._validate_project(bad_project, "strict_test")
+
+    def test_non_validation_error_raises_when_strict(self, monkeypatch):
+        """Non-ValidationError (TypeError etc.) also propagates under strict mode
+        (belt-and-suspenders strict)."""
+        monkeypatch.setenv("CINEMA_STRICT_SCHEMA", "1")
+
+        def boom(*args, **kwargs):
+            raise TypeError("simulated crash under strict mode")
+
+        monkeypatch.setattr("domain.project_manager.Project.model_validate", boom)
+        with pytest.raises(TypeError, match="simulated crash under strict mode"):
+            _pm._validate_project({"id": "proj_boom"}, "strict_crash_test")
+
+    def test_unsetting_env_reverts_to_warn_only(self, monkeypatch, caplog):
+        """Clearing CINEMA_STRICT_SCHEMA after setting it restores warn-only."""
+        monkeypatch.setenv("CINEMA_STRICT_SCHEMA", "1")
+        monkeypatch.delenv("CINEMA_STRICT_SCHEMA")
+        bad_project = {
+            "id": "proj_revert",
+            "scenes": [
+                {
+                    "id": "scene_x",
+                    "shots": [{"id": "shot_x", "keyframe_takes": [{"id": "t1", "kind": "BAD"}]}],
+                }
+            ],
+        }
+        # After unsetting, must not raise again.
+        with caplog.at_level(logging.WARNING, logger="domain.project_manager"):
+            _pm._validate_project(bad_project, "reverted_warn")
+        warn_logs = [r for r in caplog.records if "validation failed" in r.message]
+        assert len(warn_logs) >= 1
+
+
+# ---------------------------------------------------------------------------
+# TestEnvFlagParsing  (Session 10 — accepted values for CINEMA_STRICT_SCHEMA)
+# ---------------------------------------------------------------------------
+
+
+class TestEnvFlagParsing:
+    """Verify all documented strict-truthy and non-strict values are handled."""
+
+    @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes"])
+    def test_truthy_values_raise(self, monkeypatch, value):
+        """Each documented truthy value activates strict mode (raises)."""
+        monkeypatch.setenv("CINEMA_STRICT_SCHEMA", value)
+        bad = {
+            "id": "proj_parse",
+            "scenes": [
+                {
+                    "id": "sc",
+                    "shots": [{"id": "sh", "keyframe_takes": [{"id": "t", "kind": "NOPE"}]}],
+                }
+            ],
+        }
+        with pytest.raises(ValidationError):
+            _pm._validate_project(bad, f"parse_strict_{value}")
+
+    @pytest.mark.parametrize("value", ["0", "", "false", "False", "no", "NO"])
+    def test_falsy_values_warn_not_raise(self, monkeypatch, caplog, value):
+        """Non-truthy values keep warn-only behavior."""
+        monkeypatch.setenv("CINEMA_STRICT_SCHEMA", value)
+        bad = {
+            "id": "proj_parse_falsy",
+            "scenes": [
+                {
+                    "id": "sc",
+                    "shots": [{"id": "sh", "keyframe_takes": [{"id": "t", "kind": "NOPE"}]}],
+                }
+            ],
+        }
+        with caplog.at_level(logging.WARNING, logger="domain.project_manager"):
+            _pm._validate_project(bad, f"parse_warn_{value}")
+        # Must not raise; warning must be logged.
+        warn_logs = [r for r in caplog.records if "validation failed" in r.message]
+        assert len(warn_logs) >= 1
+
+
+# ---------------------------------------------------------------------------
+# TestMigratedCaller  (Session 10 — regression for api_generate_dialogue)
+# ---------------------------------------------------------------------------
+
+
+class TestMigratedCaller:
+    """Behavioral regression tests for the web_server.api_generate_dialogue
+    migration (web_server.py:1096, Session 10 canonical target).
+
+    These tests verify the migrated code path returns semantically identical
+    results to the old dict-access path without importing Flask or wiring the
+    full HTTP stack.  We test the data-preparation logic that the migration
+    changed: scene lookup + chars filter + mood default-translation.
+    """
+
+    def _make_project_dict(self, scene_id="scene_001", mood="", char_ids=None):
+        """Build a minimal project dict matching the migration target's input shape."""
+        char_ids = char_ids or ["char_a", "char_b"]
+        return {
+            "id": "proj_migrated",
+            "name": "Migration Test",
+            "characters": [
+                {"id": "char_a", "name": "Alice"},
+                {"id": "char_b", "name": "Bob"},
+                {"id": "char_c", "name": "Carol"},  # NOT in scene
+            ],
+            "scenes": [
+                {
+                    "id": scene_id,
+                    "title": "Opening Scene",
+                    "mood": mood,
+                    "characters_present": char_ids,
+                    "shots": [],
+                }
+            ],
+        }
+
+    def test_typed_scene_lookup_matches_dict_lookup(self):
+        """Project.model_validate → scene.id lookup returns same scene as dict access."""
+        raw = self._make_project_dict()
+        # Old dict path
+        scene_dict = next((s for s in raw["scenes"] if s["id"] == "scene_001"), None)
+        # New typed path
+        p = Project.model_validate(raw)
+        scene_typed = next((s for s in p.scenes if s.id == "scene_001"), None)
+
+        assert scene_dict is not None
+        assert scene_typed is not None
+        assert scene_typed.id == scene_dict["id"]
+        assert scene_typed.title == scene_dict["title"]
+
+    def test_chars_filter_matches_dict_filter(self):
+        """Typed characters_present filter selects same chars as dict .get() path."""
+        raw = self._make_project_dict(char_ids=["char_a"])
+        # Old dict path
+        scene_d = raw["scenes"][0]
+        chars_dict = [c for c in raw["characters"] if c["id"] in scene_d.get("characters_present", [])]
+        # New typed path
+        p = Project.model_validate(raw)
+        scene_t = p.scenes[0]
+        chars_typed = [c for c in p.characters if c.id in scene_t.characters_present]
+
+        assert len(chars_typed) == len(chars_dict) == 1
+        assert chars_typed[0].id == chars_dict[0]["id"]
+
+    def test_mood_default_translation(self):
+        """Empty mood string translates to 'neutral' via `or` at call site,
+        matching the old .get('mood', 'neutral') semantics."""
+        raw_empty_mood = self._make_project_dict(mood="")
+        raw_explicit_mood = self._make_project_dict(mood="tense")
+
+        p_empty = Project.model_validate(raw_empty_mood)
+        p_explicit = Project.model_validate(raw_explicit_mood)
+
+        # Migration uses `scene.mood or "neutral"` — verify the translation
+        assert (p_empty.scenes[0].mood or "neutral") == "neutral"
+        assert (p_explicit.scenes[0].mood or "neutral") == "tense"
+
+    def test_missing_scene_returns_none(self):
+        """Looking up a non-existent sid on typed scenes returns None,
+        matching the old dict-access path's behavior."""
+        raw = self._make_project_dict()
+        p = Project.model_validate(raw)
+        result = next((s for s in p.scenes if s.id == "does_not_exist"), None)
+        assert result is None
