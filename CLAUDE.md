@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Content** (3343 symbols, 21329 relationships, 284 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Content** (3357 symbols, 21389 relationships, 285 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -703,6 +703,47 @@ The other party, on seeing the announcement:
 
 This is the protocol that's been working in practice; this section
 promotes it from informal habit to explicit rule.
+
+## State-asserting writes: gate on `git log --oneline -5`
+
+The `git log --oneline -5` precondition also applies to **any write
+that makes a claim about current state** — handoff docs, status
+reports, commit bodies naming HEAD or branch counts. Operator-only
+tasks (like updating the transplant handoff) don't race on
+*ownership*, but the *content* races on currency: the other party
+may have shipped between your Write and your commit.
+
+Rule: immediately before any state-asserting Write or Edit, run
+`git log --oneline -5` and use that just-observed state in the
+content. If state moves between Write and commit, re-edit and use
+a race-acknowledging commit body (see next subsection).
+
+## Race-acknowledging commit bodies
+
+When state moves during your work, **name the shift in the commit
+body**: what was true at write-start, what's true now, why you
+committed anyway. Lets readers recalibrate without git archaeology.
+
+Already emergent practice — `843c102` for the state-moved-during-
+write pattern; `d8bf650` for the role-deferral-named pattern (both
+are forms of acknowledging what shifted around this commit). This
+codifies the convention so the next instance of either role doesn't
+independently re-invent it.
+
+## Counter-bump dispositions during concurrent operation
+
+The "fold counter bumps into the nearest relevant commit" rule (in
+the multi-task discipline section above) avoids trailing
+`chore(baseline):` commits when not isolated. **During active
+concurrent operation**, the right move is **fold-and-surface**: hold
+the counter bump for the other party's next natural commit (their
+session minors chore, next code commit) rather than racing with a
+standalone `chore(baseline)`. Announce the held delta in conversation
+("4-line counter bump held for director's next commit") so the other
+party can fold it.
+
+Standalone `chore(baseline)` remains correct only when the bump truly
+is isolated (no other work in flight).
 
 ## Git is the tiebreaker
 
