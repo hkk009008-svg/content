@@ -2,3 +2,4 @@ export { Button, buttonClassName, type ButtonVariant, type ButtonSize } from './
 export { Eyebrow } from './Eyebrow'
 export { LoadingState } from './LoadingState'
 export { ErrorState } from './ErrorState'
+export { ErrorBoundary } from './ErrorBoundary'

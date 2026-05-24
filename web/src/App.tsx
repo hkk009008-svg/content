@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Project, AppConfig } from './types/project'
 import { usePipelineState } from './hooks/usePipelineState'
+import { ErrorBoundary } from './components/ui'
 import ProjectSelector from './components/ProjectSelector'
 import PipelineLayout from './components/pipeline/PipelineLayout'
 import EditorialShell from './components/EditorialShell'
@@ -101,7 +102,7 @@ export default function App() {
   // New route from design/directors-console.html. Stub shell — see component
   // for region-level TODOs. Toggled via the masthead button in EditorialShell.
   if (mode === 'console' && project) {
-    return <DirectorsConsole project={project} onBack={() => setMode('setup')} />
+    return <ErrorBoundary><DirectorsConsole project={project} onBack={() => setMode('setup')} /></ErrorBoundary>
   }
 
   // --- PIPELINE MODE ---
@@ -121,36 +122,38 @@ export default function App() {
         : null
 
     return (
-      <PipelineLayout
-        project={project}
-        events={events}
-        latest={latest}
-        stages={stages}
-        activeStage={activeStage}
-        shotStates={shotStates}
-        directorReview={directorReview}
-        isGenerating={generating || isStreaming}
-        isPaused={isPaused}
-        failedShots={failedShots}
-        pipelineError={pipelineError}
-        pipelineLoadingLabel={pipelineLoadingLabel}
-        onBack={handleBackToSetup}
-        onCancel={handleCancel}
-        onPause={pausePipeline}
-        onResume={resumePipeline}
-        onApproveShotPlan={(shotId) => withRefresh(() => approveShotPlan(shotId))}
-        onRejectShotPlan={(shotId, reason) => withRefresh(() => rejectShotPlan(shotId, reason))}
-        onGenerateKeyframe={(shotId, positive, negative) => withRefresh(() => generateKeyframe(shotId, positive, negative))}
-        onApproveKeyframe={(shotId, takeId) => withRefresh(() => approveKeyframe(shotId, takeId))}
-        onApprovePerformance={(shotId, takeId) => withRefresh(() => approvePerformance(shotId, takeId))}
-        onGenerateMotion={(shotId) => withRefresh(() => generateMotion(shotId))}
-        onApproveFinal={(shotId, takeId) => withRefresh(() => approveFinal(shotId, takeId))}
-        onRegenerateShot={(shotId, positive, negative) => withRefresh(() => regenerateShot(shotId, positive, negative))}
-        onRestartShot={(shotId, positive, negative) => withRefresh(() => restartShot(shotId, positive, negative))}
-        onCorrectShot={(shotId, action, params, takeId) => withRefresh(() => correctShot(shotId, action, params, takeId))}
-        onDiagnoseShot={(shotId, takeId) => diagnoseShot(shotId, takeId)}
-        onProceedToAssembly={() => withRefresh(() => proceedToAssembly())}
-      />
+      <ErrorBoundary>
+        <PipelineLayout
+          project={project}
+          events={events}
+          latest={latest}
+          stages={stages}
+          activeStage={activeStage}
+          shotStates={shotStates}
+          directorReview={directorReview}
+          isGenerating={generating || isStreaming}
+          isPaused={isPaused}
+          failedShots={failedShots}
+          pipelineError={pipelineError}
+          pipelineLoadingLabel={pipelineLoadingLabel}
+          onBack={handleBackToSetup}
+          onCancel={handleCancel}
+          onPause={pausePipeline}
+          onResume={resumePipeline}
+          onApproveShotPlan={(shotId) => withRefresh(() => approveShotPlan(shotId))}
+          onRejectShotPlan={(shotId, reason) => withRefresh(() => rejectShotPlan(shotId, reason))}
+          onGenerateKeyframe={(shotId, positive, negative) => withRefresh(() => generateKeyframe(shotId, positive, negative))}
+          onApproveKeyframe={(shotId, takeId) => withRefresh(() => approveKeyframe(shotId, takeId))}
+          onApprovePerformance={(shotId, takeId) => withRefresh(() => approvePerformance(shotId, takeId))}
+          onGenerateMotion={(shotId) => withRefresh(() => generateMotion(shotId))}
+          onApproveFinal={(shotId, takeId) => withRefresh(() => approveFinal(shotId, takeId))}
+          onRegenerateShot={(shotId, positive, negative) => withRefresh(() => regenerateShot(shotId, positive, negative))}
+          onRestartShot={(shotId, positive, negative) => withRefresh(() => restartShot(shotId, positive, negative))}
+          onCorrectShot={(shotId, action, params, takeId) => withRefresh(() => correctShot(shotId, action, params, takeId))}
+          onDiagnoseShot={(shotId, takeId) => diagnoseShot(shotId, takeId)}
+          onProceedToAssembly={() => withRefresh(() => proceedToAssembly())}
+        />
+      </ErrorBoundary>
     )
   }
 
@@ -159,19 +162,21 @@ export default function App() {
   // sheet, action bar) and embeds the existing functional panels in its
   // workshop section so SSE wiring + project-mutate flows are unchanged.
   return (
-    <EditorialShell
-      project={project}
-      config={config}
-      events={events}
-      latest={latest}
-      isStreaming={isStreaming}
-      generating={generating}
-      onBackToProjects={() => setProject(null)}
-      onGenerate={handleGenerate}
-      onCancel={handleCancel}
-      onRefreshProject={refreshProject}
-      onOpenConsole={() => setMode('console')}
-      apiBase={API}
-    />
+    <ErrorBoundary>
+      <EditorialShell
+        project={project}
+        config={config}
+        events={events}
+        latest={latest}
+        isStreaming={isStreaming}
+        generating={generating}
+        onBackToProjects={() => setProject(null)}
+        onGenerate={handleGenerate}
+        onCancel={handleCancel}
+        onRefreshProject={refreshProject}
+        onOpenConsole={() => setMode('console')}
+        apiBase={API}
+      />
+    </ErrorBoundary>
   )
 }
