@@ -27,7 +27,7 @@ export class ErrorBoundary extends Component<Props, State> {
         <div className="editorial-curtain p-6 text-editorial-ivory">
           <h2 className="text-lg font-semibold mb-2">Something broke.</h2>
           <pre className="text-eyebrow font-mono whitespace-pre-wrap break-all">
-            {String(this.state.error)}
+            {this.state.error?.message ?? this.state.error?.toString() ?? 'Unknown error'}
           </pre>
           <button
             onClick={() => window.location.reload()}

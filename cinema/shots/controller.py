@@ -1235,7 +1235,6 @@ class ShotController:
                     if result:
                         variant["path"] = result
                         if "cascade_metadata" in _lipsync_cascade:
-                            variant.setdefault("metadata", {})
                             variant["cascade_metadata"] = _lipsync_cascade["cascade_metadata"]
 
             elif action == "rife":

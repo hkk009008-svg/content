@@ -47,7 +47,7 @@ def generate_ai_video(
     output_mp4: str,
     pacing: str = "moderate",
     character_id: str = None,
-    attempted_apis: set = None,
+    attempted_apis: list = None,
     multi_angle_refs: list = None,
     _cascade_retries: int = 0,
     negative_prompt: str = None,
@@ -82,18 +82,21 @@ def generate_ai_video(
         for all callers that haven't been updated yet.
     """
     if attempted_apis is None:
-        attempted_apis = set()
-    attempted_apis.add(target_api.upper())
+        attempted_apis = []
+    _api_upper = target_api.upper()
+    if _api_upper not in attempted_apis:
+        attempted_apis.append(_api_upper)
 
     def _record_video_cascade(winning_engine: str) -> None:
         """Write cascade_metadata into _cascade_out when this engine succeeds.
-        attempted_apis reflects all engines tried so far (shared mutable set).
-        Called before each engine's successful return — Session 6 P2-3.
+        attempted_apis reflects all engines tried so far in chronological order
+        (oldest first; deduped on append). Called before each engine's
+        successful return — Session 6 P2-3.
         """
         if _cascade_out is not None:
             _cascade_out["cascade_metadata"] = {
                 "engine": winning_engine,
-                "attempts": sorted(attempted_apis),
+                "attempts": list(attempted_apis),
             }
 
     # Shot-type-aware negative prompt — tailored to what each shot type actually suffers from
@@ -167,7 +170,7 @@ def generate_ai_video(
         first_api = (video_fallbacks or ["KLING_NATIVE"])[0]
         return generate_ai_video(
             image_path, camera_motion, first_api, output_mp4, pacing,
-            character_id, set(), multi_angle_refs, _cascade_retries=_cascade_retries + 1,
+            character_id, [], multi_angle_refs, _cascade_retries=_cascade_retries + 1,
             shot_type=shot_type, video_fallbacks=video_fallbacks,
             ctx=ctx, _cascade_out=_cascade_out,
         )
