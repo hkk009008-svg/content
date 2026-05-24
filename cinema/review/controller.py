@@ -74,6 +74,7 @@ from cinema.auto_approve import (
     AutoApproveConfig,
     AutoApproveDecision,
     check_gate,
+    is_motion_gate_enabled,
     pick_best_take_by_composite,
     pick_best_take_for_final,
 )
@@ -255,10 +256,10 @@ class ReviewController:
           ``decision.auto_approved`` is True.
 
         Gate → audit key mapping:
-          PLAN_REVIEW     → gate arg "plan"
-          KEYFRAME_REVIEW → gate arg "image"
-          REVIEW          → gate arg "final"
-          (PERFORMANCE_REVIEW has no auto-approve path in v1)
+          PLAN_REVIEW        → gate arg "plan"
+          KEYFRAME_REVIEW    → gate arg "image"
+          REVIEW             → gate arg "final"
+          PERFORMANCE_REVIEW → gate arg "motion" (OPT-IN: set CINEMA_AUTO_APPROVE_MOTION=1)
         """
         # Map pipeline gate names to auto_approve gate keys.
         _gate_map = {
@@ -266,9 +267,11 @@ class ReviewController:
             "KEYFRAME_REVIEW": "image",
             "REVIEW": "final",
         }
+        if is_motion_gate_enabled():
+            _gate_map["PERFORMANCE_REVIEW"] = "motion"
         aa_gate = _gate_map.get(gate)
         if aa_gate is None:
-            return  # PERFORMANCE_REVIEW not in scope for v1
+            return
 
         try:
             project = self._host._refresh_project_snapshot() or self.project
@@ -283,6 +286,8 @@ class ReviewController:
                         continue
                     if aa_gate == "final" and shot.get("approved_final_take_id"):
                         continue
+                    if aa_gate == "motion" and shot.get("approved_motion_take_id"):
+                        continue
 
                     # Build takes list for the relevant gate.
                     if aa_gate == "plan":
@@ -296,6 +301,11 @@ class ReviewController:
                         takes = [
                             t for t in (shot.get("postprocess_variants") or [])
                                    + (shot.get("motion_takes") or [])
+                            if isinstance(t, dict)
+                        ]
+                    elif aa_gate == "motion":
+                        takes = [
+                            t for t in (shot.get("motion_takes") or [])
                             if isinstance(t, dict)
                         ]
                     else:
@@ -405,6 +415,44 @@ class ReviewController:
                                         save=True,
                                     )
                                 self._host._mutate_shot(shot_id, _final_mutator)
+
+                        elif aa_gate == "motion":
+                            # Pick best motion take by motion_fidelity → motion_score →
+                            # identity_score (primary: what motion rules threshold on;
+                            # fallback: motion_score; tiebreak: identity_score).
+                            motion_takes = [
+                                t for t in (shot.get("motion_takes") or [])
+                                if isinstance(t, dict)
+                            ]
+
+                            def _motion_score_tuple(t):
+                                meta = t.get("metadata") if isinstance(t.get("metadata"), dict) else {}
+                                return (
+                                    meta.get("motion_fidelity") or meta.get("motion_score") or 0.0,
+                                    meta.get("identity_score") or 0.0,
+                                )
+
+                            best_motion = (
+                                max(motion_takes, key=_motion_score_tuple) if motion_takes else None
+                            )
+                            best_motion_id = (best_motion or {}).get("id", "")
+
+                            if best_motion_id:
+                                def _motion_mutator(
+                                    _scene_ignored, s,
+                                    _mtid=best_motion_id,
+                                    _entry=audit_entry,
+                                    _key=flag_key,
+                                ):
+                                    s["approved_motion_take_id"] = _mtid
+                                    s.setdefault("auto_approve_audit", []).append(_entry)
+                                    s[_key] = True
+                                    return MutationResult(
+                                        {"shot_id": s["id"], "approved_motion_take_id": _mtid},
+                                        save=True,
+                                    )
+                                self._host._mutate_shot(shot_id, _motion_mutator)
+
                     else:
                         # Vetoed: still append audit entry to shot (no approval).
                         shot_id = shot.get("id", "unknown")

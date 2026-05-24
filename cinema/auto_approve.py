@@ -468,6 +468,21 @@ def _any_upstream_gate_auto_approved(shot_state: dict) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def is_motion_gate_enabled() -> bool:
+    """Return True if CINEMA_AUTO_APPROVE_MOTION env var is set to a truthy value.
+
+    Off by default per ADR-014 (motion-gate as opt-in production escalation).
+    Mirrors Session 10's CINEMA_STRICT_SCHEMA pattern but parses
+    case-insensitively via .lower() to accept "True", "YES", etc. — closes
+    a papercut that S10's code-quality reviewer flagged. Operators opt in once
+    confident motion rules are well-calibrated against their content.
+    """
+    import os
+    return os.environ.get("CINEMA_AUTO_APPROVE_MOTION", "").strip().lower() in {
+        "1", "true", "yes"
+    }
+
+
 def check_gate(
     gate: Gate,
     *,

@@ -382,6 +382,48 @@ Each entry is **dated and immutable** — supersession is tracked via the
 
 ---
 
+## ADR-014 — Motion-gate auto-approve as opt-in env flag (CINEMA_AUTO_APPROVE_MOTION)
+
+- **Date:** 2026-05-25
+- **Status:** Accepted
+- **Context:** Session 11 (`d6fd3e1` / `ad526c3`) shipped per-gate auto-approve
+  infrastructure including motion-rule builders (`_rules_for_motion` in
+  `cinema/auto_approve.py`) with 3 veto rules: identity threshold, motion-score
+  threshold, and cascade-fallback veto. However, `cinema/review/controller.py`'s
+  `_gate_map` deliberately omitted `PERFORMANCE_REVIEW → "motion"`, with a docstring
+  carve-out: *"PERFORMANCE_REVIEW has no auto-approve path in v1."* Result: motion
+  rules were unit-tested but dead in production. Session 11's spec reviewer flagged
+  the divergence between tested and reachable behavior. Director surfaced this to
+  user 2026-05-25; user chose the feature-flag default-off pattern.
+- **Decision:** Wire motion-gate as an opt-in env flag (`CINEMA_AUTO_APPROVE_MOTION=1`),
+  default off. Mirrors Session 10's `CINEMA_STRICT_SCHEMA` pattern — an opt-in
+  escalation that lets operators promote tested behavior to production at their
+  discretion without changing v1 defaults. The helper `is_motion_gate_enabled()` lives
+  in `cinema/auto_approve.py` (co-located with the rules; directly testable without
+  instantiating the controller). Parser uses `.strip().lower()` to accept `"True"`,
+  `"YES"`, etc. — closes the case-sensitivity papercut that S10's code-quality reviewer
+  flagged on `CINEMA_STRICT_SCHEMA`. The "opt-in escalation pattern" is now formalized
+  (used twice: `CINEMA_STRICT_SCHEMA`, `CINEMA_AUTO_APPROVE_MOTION`); future gates that
+  ship tested-but-dead code follow this pattern by default.
+- **Consequences:**
+  - v1 default behavior is preserved (motion auto-approve remains off unless env flag
+    is explicitly set).
+  - Operators can enable motion auto-approve in production when they have validated
+    the rules' thresholds against their content.
+  - Frontend (Session 13's scope) must handle motion entries in the audit log
+    gracefully when the flag is on, but treat their absence as the v1 default.
+  - The `.lower()` parse form is preferred over S10's literal-case tuple for future
+    env-flag helpers; a future cleanup may unify the two parsers.
+- **Alternatives considered:**
+  - Wire on by default: rejected — too risky without calibration data on real content.
+  - Mark motion as test-only-for-v1: rejected — wastes the working infrastructure
+    and risks orphaning the code over time.
+- **Tracking:** Session 12 implementation; commit refs filled in at ship time.
+- **Cross-ref:** `cinema/auto_approve.py::is_motion_gate_enabled`,
+  `cinema/review/controller.py::_run_auto_approve_pass`.
+
+---
+
 *To add a new decision: copy the template below, increment the ADR
 number, fill in Context / Decision / Consequences, and append at the
 bottom. Do not edit prior entries — supersede via Status field instead.*
