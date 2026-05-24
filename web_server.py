@@ -1213,14 +1213,22 @@ def api_generate(pid):
             traceback.print_exc()
             q.put({"stage": "ERROR", "detail": str(e), "percent": 0})
         finally:
+            # Session 9 review fix: cleanup of BOTH dicts under the same
+            # lock that _ensure_progress_queue takes. Since both surfaces
+            # now share _pipelines_lock, leaving queue-cleanup unguarded
+            # re-opens the race the lock was added to close (a concurrent
+            # _ensure_progress_queue could see the queue mid-pop and return
+            # a popped reference).
             with _pipelines_lock:
                 _running_pipelines.pop(pid, None)
-            q.put(None)  # Signal end of stream
-            # Bundle-C 3.2 (2026-05-24): release the queue so we don't grow
-            # _progress_queues unboundedly across runs. Drop only this run's
-            # queue; if another /generate raced and replaced the entry, leave it.
-            if _progress_queues.get(pid) is q:
-                _progress_queues.pop(pid, None)
+                # Bundle-C 3.2 (2026-05-24): release the queue so we don't
+                # grow _progress_queues unboundedly across runs. Drop only
+                # this run's queue; if another /generate raced and replaced
+                # the entry, leave it. The `is q` identity check is preserved
+                # — it correctly does nothing if a replacement landed.
+                if _progress_queues.get(pid) is q:
+                    _progress_queues.pop(pid, None)
+            q.put(None)  # Signal end of stream (intentionally outside the lock — q.put doesn't touch shared dicts)
 
     thread = threading.Thread(target=run_pipeline, daemon=True)
     thread.start()
