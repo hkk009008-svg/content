@@ -39,10 +39,11 @@ class TestScoreCandidate:
         assert score.composite == pytest.approx(0.6 * 0.8 + 0.4 * 0.7)
 
     def test_composite_formula_matches_default_weights(self, monkeypatch, tmp_path):
-        """Composite = w['arc']*arc + w['aesthetic']*aes with DEFAULT_WEIGHTS."""
+        """Canonical boundary case: arc=1.0, aes=0.0 → composite == DEFAULT_WEIGHTS['arc'] (0.6)
+        — exact arithmetic; makes the weight contribution unambiguous."""
         fake_anchor = tmp_path / "anchor.jpg"
         fake_anchor.write_bytes(b"fake")
-        arc, aes = 0.9, 0.3
+        arc, aes = 1.0, 0.0
         monkeypatch.setattr(
             "face_validator_gate._arcface_score",
             lambda img, anchor, threshold=0.0: arc,
@@ -52,8 +53,18 @@ class TestScoreCandidate:
             lambda img: aes,
         )
         score = score_candidate("/fake/image.jpg", str(fake_anchor))
-        expected = DEFAULT_WEIGHTS["arc"] * arc + DEFAULT_WEIGHTS["aesthetic"] * aes
-        assert score.composite == pytest.approx(expected)
+        assert score.composite == pytest.approx(DEFAULT_WEIGHTS["arc"])  # 0.6
+        # Symmetry check: the inverse boundary
+        monkeypatch.setattr(
+            "face_validator_gate._arcface_score",
+            lambda img, anchor, threshold=0.0: 0.0,
+        )
+        monkeypatch.setattr(
+            "face_validator_gate._aesthetic_score",
+            lambda img: 1.0,
+        )
+        score2 = score_candidate("/fake/image.jpg", str(fake_anchor))
+        assert score2.composite == pytest.approx(DEFAULT_WEIGHTS["aesthetic"])  # 0.4
 
     def test_arc_none_uses_neutral_0_5_in_composite(self, monkeypatch, tmp_path):
         """When ArcFace returns None, composite arc contribution is neutral 0.5."""
@@ -91,6 +102,25 @@ class TestScoreCandidate:
         expected = DEFAULT_WEIGHTS["arc"] * arc + DEFAULT_WEIGHTS["aesthetic"] * 0.5
         assert score.composite == pytest.approx(expected)
 
+    def test_both_helpers_none_neutral_composite(self, monkeypatch):
+        """face_anchor=None + aesthetic=None → composite uses 0.5 for both → 0.5 (pure neutral).
+
+        Spec item 5 — guards against a future regression where a single
+        unmocked path leaks the wrong default into composite arithmetic.
+        """
+        monkeypatch.setattr(
+            "face_validator_gate._aesthetic_score",
+            lambda img: None,
+        )
+        score = score_candidate("/fake/image.jpg", None)
+        assert score.has_arc is False
+        assert score.has_aesthetic is False
+        # Formula match (both contribs at 0.5)
+        expected = DEFAULT_WEIGHTS["arc"] * 0.5 + DEFAULT_WEIGHTS["aesthetic"] * 0.5
+        assert score.composite == pytest.approx(expected)
+        # Direct anchor: pure neutral 0.5 (0.6*0.5 + 0.4*0.5 = 0.5)
+        assert score.composite == pytest.approx(0.5)
+
     def test_no_anchor_skips_arc(self, monkeypatch):
         """face_anchor=None: ArcFace is never called; has_arc remains False."""
         called = []
@@ -122,11 +152,20 @@ class TestScoreCandidate:
         assert not called
         assert score.has_arc is False
 
-    def test_custom_weights_applied(self, monkeypatch, tmp_path):
-        """Custom weights dict overrides DEFAULT_WEIGHTS in composite calculation."""
+    @pytest.mark.parametrize(
+        "weights,arc,aes",
+        [
+            ({"arc": 0.5, "aesthetic": 0.5}, 0.8, 0.6),  # equal weights
+            ({"arc": 0.8, "aesthetic": 0.2}, 0.6, 0.9),  # arc-heavy
+            ({"arc": 0.2, "aesthetic": 0.8}, 0.4, 0.5),  # aesthetic-heavy
+            ({"arc": 1.0, "aesthetic": 0.0}, 0.7, 0.9),  # arc-only
+        ],
+    )
+    def test_custom_weights_applied(self, monkeypatch, tmp_path, weights, arc, aes):
+        """Custom weights dict overrides DEFAULT_WEIGHTS — parametrized across
+        4 combos covering equal / arc-heavy / aesthetic-heavy / arc-only."""
         fake_anchor = tmp_path / "anchor.jpg"
         fake_anchor.write_bytes(b"fake")
-        arc, aes = 0.8, 0.6
         monkeypatch.setattr(
             "face_validator_gate._arcface_score",
             lambda img, anchor, threshold=0.0: arc,
@@ -135,9 +174,8 @@ class TestScoreCandidate:
             "face_validator_gate._aesthetic_score",
             lambda img: aes,
         )
-        custom = {"arc": 0.5, "aesthetic": 0.5}
-        score = score_candidate("/fake/image.jpg", str(fake_anchor), weights=custom)
-        expected = 0.5 * arc + 0.5 * aes
+        score = score_candidate("/fake/image.jpg", str(fake_anchor), weights=weights)
+        expected = weights["arc"] * arc + weights["aesthetic"] * aes
         assert score.composite == pytest.approx(expected)
 
 
@@ -187,10 +225,13 @@ class TestShouldHalt:
             halt_max_n=8,
         )
         assert decision.halt is True
+        assert decision.best is not None
+        assert decision.best.composite == pytest.approx(0.95)
         assert "composite=" in decision.reason
 
     def test_threshold_not_met_continues(self):
-        """n >= halt_min_n but best.composite < halt_threshold_composite → halt=False."""
+        """n >= halt_min_n but best.composite < halt_threshold_composite → halt=False.
+        decision.best is still populated (only the empty-scores guard returns None)."""
         scores = [_make_score(0.80), _make_score(0.75), _make_score(0.70), _make_score(0.65)]
         decision = should_halt(
             scores,
@@ -199,6 +240,8 @@ class TestShouldHalt:
             halt_max_n=8,
         )
         assert decision.halt is False
+        assert decision.best is not None
+        assert decision.best.composite == pytest.approx(0.80)
 
     def test_best_returned_in_decision(self):
         """should_halt returns the highest-composite candidate as decision.best."""
@@ -221,14 +264,26 @@ class TestShouldHalt:
 
 class TestNeedsRegenerate:
     def test_non_character_shot_never_regenerates(self):
-        """has_character=False → always False regardless of arc score."""
-        best = CandidateScore(
+        """has_character=False → always False regardless of arc score.
+
+        Tests both pathological-low and clearly-passing arc to harden the
+        "regardless of arc" claim — the early-return at face_validator_gate.py:300
+        short-circuits before any arc comparison.
+        """
+        best_low = CandidateScore(
             image_path="/fake/img.jpg",
             seed=0,
             arc_score=0.0,
             has_arc=True,
         )
-        assert needs_regenerate(best, regenerate_floor_arc=0.5, has_character=False) is False
+        assert needs_regenerate(best_low, regenerate_floor_arc=0.5, has_character=False) is False
+        best_high = CandidateScore(
+            image_path="/fake/img.jpg",
+            seed=0,
+            arc_score=0.9,
+            has_arc=True,
+        )
+        assert needs_regenerate(best_high, regenerate_floor_arc=0.5, has_character=False) is False
 
     def test_no_arc_no_regenerate(self):
         """has_arc=False → False; no arc measurement means no identity gate."""
@@ -251,14 +306,27 @@ class TestNeedsRegenerate:
         assert needs_regenerate(best, regenerate_floor_arc=0.5, has_character=True) is True
 
     def test_arc_at_or_above_floor_no_regenerate(self):
-        """arc_score >= regenerate_floor_arc → False."""
-        best = CandidateScore(
+        """arc_score >= regenerate_floor_arc → False.
+
+        Tests both the boundary (exact equality — strict '<' at line 304)
+        and a clearly-above case to document intent.
+        """
+        # Boundary: arc == floor → False (strict '<' in source)
+        best_at = CandidateScore(
             image_path="/fake/img.jpg",
             seed=0,
             arc_score=0.5,
             has_arc=True,
         )
-        assert needs_regenerate(best, regenerate_floor_arc=0.5, has_character=True) is False
+        assert needs_regenerate(best_at, regenerate_floor_arc=0.5, has_character=True) is False
+        # Clearly above floor → False
+        best_high = CandidateScore(
+            image_path="/fake/img.jpg",
+            seed=0,
+            arc_score=0.9,
+            has_arc=True,
+        )
+        assert needs_regenerate(best_high, regenerate_floor_arc=0.5, has_character=True) is False
 
 
 # ===================================================================
