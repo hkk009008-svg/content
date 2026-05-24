@@ -16,48 +16,49 @@
 
 ## TL;DR — top 3 for next director (in priority order)
 
-> **Cycle 3 update (2026-05-24):** Session 7 (face_validator_gate
-> coverage) and Session 8 (Pydantic boundary validation) both shipped;
-> they're now in the "What shipped" matrix below. The picks here have
-> rotated forward — pick #1 is the Lane A quick win, picks #2–3 are
-> the next deeper investments.
+> **Cycle 3 update (2026-05-24):** Sessions 7, 8, and the Monitor.tsx
+> cascade wiring all shipped this cycle; they're now in the "What
+> shipped" matrix below. Picks rotated again — the top-3 is now the
+> next layer of work that requires either a product call (P4-3) or a
+> deeper engineering investment (Session 9 follow-up, P3-1).
 
-1. **`Monitor.tsx` cascadeMetadata wiring (Session 6 deferred)** —
-   `TakeStrip` accepts `cascadeMetadata` (`b25da2e`) but
-   `Monitor.tsx:43` never populates it. The fallback badge renders in
-   `ReviewStage` but NOT in the live-run console — exactly where the
-   operator most needs the warning. Effort: S (~5 LOC if
-   `ShotState.take_id` resolves cleanly against `keyframe_takes` /
-   `motion_takes` / `performance_takes`). **Operator-claimable Lane A;**
-   director should hand off rather than dispatch unless operator
-   declines.
-
-2. **P4-3 four-gate review fatigue — auto-approve heuristics** — the
+1. **P4-3 four-gate review fatigue — auto-approve heuristics** — the
    most operator-visible UX gap remaining. With Session 5 capturing
    `spent_usd` per-shot and `record_api_call` traces, we now have the
    data to design "auto-approve when confidence is high" thresholds.
-   Effort: L (1-2 product-design sessions + 1 impl session). This is
-   the new top non-Tier-1 pick per cycle-2 director's POST-ROADMAP
-   recommendation.
+   Effort: L (1-2 product-design sessions + 1 impl session).
+   **Blocking input needed**: which confidence signals matter most
+   to the operator? `quality_score`? `identity_score`? cost-budget?
+   composite? This is a product conversation worth having before
+   any impl session.
 
-3. **Session 9 follow-up to Session 8 (P1-3 part 2)** — caller
+2. **Session 9 follow-up to Session 8 (P1-3 part 2)** — caller
    refactor to typed accessors (replace `project["scenes"][i]["shots"]
    [j]["target_api"]` with `project.scenes[i].shots[j].target_api`)
    + `CINEMA_STRICT_SCHEMA=1` env flag for production-strict mode.
    Effort: L (2-3 sessions; brief should sequence module-by-module).
    Session 8's `domain/models.py` is the foundation; this turns the
-   warn-only safety net into a real type contract.
+   warn-only safety net into a real type contract. **Brief is not
+   yet written** — needed before dispatch.
+
+3. **P3-1 Concurrency hygiene** — audit the module-globals
+   (`_running_pipelines`, `_progress_queues`, `_cores_lock`) for
+   thread-safety. The Session 5 reviewer caught one missing lock; the
+   rest is unaudited. Promoted from honorable-mention to Tier 1 #3
+   because it's the highest-risk remaining safety gap (silent races
+   in production could corrupt project state). Effort: M (1 audit
+   session + 1 fix session if issues surface).
 
 **Honorable mentions** (S-to-M, opportunistic single sessions):
-- **P3-1 Concurrency hygiene** — audit module-globals
-  (`_running_pipelines`, `_progress_queues`, `_cores_lock`) for thread-
-  safety. The Session 5 reviewer caught one missing lock; the rest is
-  unaudited.
 - **P1-2 Pipeline orchestrator extraction** — `cinema_pipeline.py` is
   ~1011 LOC; would benefit from phase-by-phase extraction. Refactor
   liability, not a bug.
 - **P2-1 `competitive_generation=True` default flip** — one-line
   change; the product call is the blocker, not the code.
+- **`datetime.utcnow()` deprecation** at `domain/project_manager.py:
+  126,864` — mechanical 2-line swap to `datetime.now(timezone.utc)`.
+- **`scene_decomposer` + `lip_sync` coverage gaps** — audit before
+  scoping new test files; may overlap with P3-3 (duplicate validators).
 
 ---
 
@@ -76,6 +77,7 @@ Full commit ledger:
 | 6 | P1-4 + P2-3 Frontend + cascade visibility | `d516d2a`, `b25da2e`, `c6eaefb` |
 | 7 | P0-1 Pri 3 face_validator_gate coverage | `06109b5`, `d8bf650` |
 | 8 | P1-3 (part 1 / boundary) Pydantic on `project.json` | `ceb0a32`, `f9b0aff`, `66b06c8` |
+| — | Monitor.tsx cascade wiring (Session 6 deferred) | `a6e3ff1` |
 | — | ADR-013 Verification discipline (Tier-1) | `ed33035` |
 | — | Director-operator concurrent-operation protocol | `ad6cb4f` |
 | — | State-assertion + race-ack + counter-bump rules | `ea97d0a` |
@@ -133,7 +135,7 @@ P2-3), 3 partial (P3-2, P4-5, P1-3 — cycle 3 added P1-3 boundary slice),
 | `face_validator_gate` × 3 functions uncovered | **RESOLVED** by Session 7 (`06109b5` + `d8bf650`) | — |
 | `project.json` no schema validation at load/save boundary | **RESOLVED** by Session 8 (`ceb0a32` + `f9b0aff` + `66b06c8`) | Caller refactor + strict mode = Session 9+ |
 | `scene_decomposer` + `lip_sync` coverage gaps | OPEN | important-deferred — audit before scoping new test files |
-| Session 6: `Monitor.tsx` wiring gap | OPEN | important-deferred (see TL;DR; ~5 LOC) |
+| Session 6: `Monitor.tsx` wiring gap | **RESOLVED** by `a6e3ff1` (cycle 3 director-claimed) | — |
 | Session 6: ErrorBoundary per-shell palette | OPEN | low-priority — cosmetic (editorial-curtain inside console shell) |
 | Session 6: ErrorBoundary `componentStack` telemetry | OPEN | low-priority — needs `POST /api/client-error` endpoint |
 
@@ -141,31 +143,34 @@ P2-3), 3 partial (P3-2, P4-5, P1-3 — cycle 3 added P1-3 boundary slice),
 
 ## Recommendation for next director
 
-After cycle 3 closes (Sessions 7 + 8 + the 3-rule discipline expansion),
-the project's **observable safety surface is now matched by load-
-bearing test coverage** at the critical halt/regenerate/approve fork
-(Session 7) and at the project-JSON load/save boundary (Session 8).
-The 3 highest-leverage picks for next director sit above the rest:
+After cycle 3 closes (Sessions 7 + 8 + Monitor.tsx wiring + 3-rule
+discipline expansion), the project has **closed every Tier-1 pickup
+that didn't need a product conversation or a follow-on brief**. The 3
+highest-leverage picks for next director sit at a step change in
+investment level — they're either product-blocked, brief-blocked, or
+audit-shaped:
 
-1. **Monitor.tsx cascadeMetadata wiring** — Lane A quick win that
-   delivers Session 6's promised visibility in the place it most
-   matters (live runs, not post-hoc review). Operator-claimable; if
-   operator hasn't picked up by next director session, claim director-
-   side.
-2. **P4-3 review fatigue / auto-approve heuristics** — highest-impact
-   UX gap remaining. Session 5's per-shot cost telemetry
-   (`spent_usd`, `record_api_call`) is now the data foundation for
-   auto-approve thresholds. This is the next product conversation
-   worth having.
-3. **Session 9 (P1-3 part 2)** — caller refactor to typed accessors
+1. **P4-3 review fatigue / auto-approve heuristics** — highest-impact
+   UX gap remaining; **product-blocked** on which confidence signals
+   to threshold against (`quality_score`, `identity_score`, cost
+   budget, composite?). Session 5's telemetry is the data foundation;
+   the next director should surface the product question rather than
+   guess at thresholds.
+2. **Session 9 (P1-3 part 2)** — caller refactor to typed accessors
    + `CINEMA_STRICT_SCHEMA=1` env flag, building on Session 8's
-   `domain/models.py`. Turns the warn-only safety net into a real
-   type contract.
+   `domain/models.py`. **Brief-blocked**: needs a Session 8-shaped
+   brief authored before any implementer dispatch. Module sequencing
+   (which `domain/*` caller goes first) is the load-bearing decision.
+3. **P3-1 concurrency hygiene** — audit `_running_pipelines`,
+   `_progress_queues`, `_cores_lock` for thread-safety holes. The
+   Session 5 reviewer caught one missing lock; the rest is unaudited.
+   **Audit-shaped**: needs investigation first, then surgical fixes.
+   Promoted from honorable-mention to Tier 1 because it's the
+   highest-risk remaining safety gap.
 
-Below those, **P3-1 (concurrency audit)**, **P1-2 (orchestrator
-extraction)**, and **P2-1 (competitive_generation default)** are
-S-to-M effort and can be sequenced opportunistically into single
-sessions when an operator has bandwidth. They are not urgent.
+Below those, **P1-2 (orchestrator extraction)** and **P2-1
+(competitive_generation default)** remain S-to-M opportunistic
+honorable-mentions. They are not urgent.
 
 **P4 except P4-3 is correctly deferred or not-doing.** Do not
 re-litigate P4-2 (microservices) — STRATEGIC_REVIEW line 534 settled
@@ -193,7 +198,7 @@ operator volume data exists.
 
 ---
 
-*Verified at HEAD `66b06c8` (2026-05-24, post-cycle-3 close):
+*Verified at HEAD `a6e3ff1` (2026-05-24, post-Monitor-wiring):
 `pytest tests/unit/ -q | tail -1` → `629 passed, 3 skipped, 11 warnings,
-10 subtests passed`; `scripts/ci_smoke.py` → `OK`. tsc not re-run this
-cycle (no web changes since `c6eaefb`).*
+10 subtests passed`; `scripts/ci_smoke.py` → `OK`; `(cd web && npx tsc
+--noEmit)` → exit 0.*
