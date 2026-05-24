@@ -634,24 +634,52 @@ prevents a wrong fix that itself needs to be reverted.
 
 # Director-Operator Concurrent Operation
 
-This project runs two parallel Claude sessions by design:
+This project runs two parallel Claude sessions by design.
 
-- **Director** — strategic driver. Authors briefs, decides what ships
-  next, reframes scope, codifies precedents, owns push-to-origin and
-  post-roadmap reassessment.
-- **Operator** — execution driver. Runs the per-session loop above
-  (implementer + reviewers + fix loops + commits), produces closing
-  reports, surfaces findings.
+## Two-seat team model (Protocol Bundle v5)
+
+**Director-seat** and **operator-seat** are two seats of one team,
+with different specializations. Both serve the user-principal.
+Neither is senior to the other; specialization is cognitive-load
+distribution, not hierarchy.
+
+| Seat | Specializes in | Why this seat? |
+|---|---|---|
+| **Director-seat** | Strategic synthesis: brief authoring, ADR composition, push decisions, post-roadmap reassessment, cross-cycle planning, codifying discipline | Strategic work requires synthesizing cross-cycle context; director's session preserves cycle-spanning state |
+| **Operator-seat** | Operational verification: post-commit Lane V reviewer dispatch, Lane D doc-sync, transplant-handoff refresh, counter-bump dispositions, mailbox event authoring | Operational work requires cold-context independence (Rule #9); operator's session is naturally orthogonal to director's |
+
+Both seats are equal in authority within their specialization. Within
+Lane V/D/S, operator-seat acts unilaterally (mailbox events bind
+director per Rule #8). Within strategic work (briefs, ADRs, push),
+director-seat acts unilaterally (operator-seat acknowledges via
+mailbox or commit body). Cross-cutting decisions (protocol changes
+themselves, role-partition adjustments) go through the proposal cycle.
+
+**User is the principal.** Both seats serve the user; neither is the
+boss of the other. When agents disagree, escalate to user (per the
+Disagreement protocol below). When user direction is given, it
+overrides any agent's discretion (per the existing "Instruction
+Priority" hierarchy: user > git > mailbox > STATE.md > default).
+
+The labels below ("Strategic-seat-default," "Operational-seat-default,"
+"Cross-cutting (proposal cycle)") replace the prior v1-v4 labels
+("Director-only," "Operator-only," "Shared"). The lane assignments are
+unchanged; only the framing is reworded to remove the implicit
+senior/junior asymmetry. v5's empirical motivation: the v1-v4
+partition implied senior/junior; operator-seat's verification work
+(S13 Lane V's F1 CRITICAL finding) directly influenced director-seat's
+fix (`9e24323`). The team dynamic was already real; v5 codifies the
+framing.
 
 They share a working tree and commit history. Friction arises not on
 commits (git serializes those) but on **planning and dispatch overlap** —
-both parties reaching for the same shared task at the same time. The
+both seats reaching for the same shared task at the same time. The
 rules below partition work and define a signaling protocol so the cost
 of running both is roughly zero.
 
 ## Role partition
 
-**Director-only (never claimed by operator):**
+**Strategic-seat-default** (director-seat unless explicitly handed off):
 
 - Strategic direction — what session ships next, scope reframes
 - Brief authoring and revision (`docs/HANDOFF-roadmap-*.md`)
@@ -659,13 +687,18 @@ of running both is roughly zero.
 - Push-to-origin decisions
 - ADR authoring (`DECISIONS.md`)
 - Codifying new precedents into discipline rules (this file / `AGENTS.md`)
-  — operator may draft; director commits. This rule was drafted by
-  operator and shipped by director, the canonical example.
+  — operator-seat may draft; director-seat commits. This rule was
+  drafted by operator-seat and shipped by director-seat, the canonical
+  example. v5's R11 beneficiary check (see below) applies to all new
+  rule codification.
 - Memory writes (`MEMORY.md` index + `memory/*.md` files) — same
   draft-then-handoff shape; memories shape future sessions of both
-  roles, so the curation call is director's.
+  seats, so the curation call is director-seat's. v5's `memory-candidate`
+  mailbox kind lets operator-seat surface memory-worthy observations
+  without latency (director-seat reads via Rule #8 awareness gate at
+  next session-start, writes or declines via `decision` mailbox event).
 
-**Operator-only (never claimed by director):**
+**Operational-seat-default** (operator-seat unless explicitly handed off):
 
 - Counter-bump dispositions (the auto-generated GitNexus-block edits at
   the top of this file / `AGENTS.md`) — folded into the nearest
@@ -693,21 +726,39 @@ of running both is roughly zero.
   verification before committing (per ADR-013 verification
   discipline). Lane D does NOT introduce new ADRs (`DECISIONS.md`
   stays director-only).
-- **Lane S — Pre-dispatch scout** (Protocol Bundle v4 scaffold;
-  active in v5+). Mailbox kinds `scout-request` / `scout-report`
-  reserved; behavior not active in v4. Director adopts
-  `scout-request` discipline opportunistically during cycle-5+ to
-  generate usage data; v5 codifies behavior after ≥3 invocations.
+- **Lane S — Pre-dispatch scout** (Protocol Bundle v5; was scaffolded
+  in v4). Trigger: director-seat sends `scout-request` mailbox event
+  BEFORE dispatching an implementer subagent (Lane B), naming target
+  files / symbols / modules + brief reference + specific intel needed
+  (convention conflicts, gotchas, plan-vs-source divergences). Operator
+  conducts Lane C-style read-only survey of the named targets, sends
+  `scout-report` event with findings; director-seat pastes relevant
+  intel into the implementer prompt. Effort target: ~10-20 min
+  operator-context-burn per scout (pure read, no subagent dispatch).
+  Opt-in: director-seat chooses when to send `scout-request`; v5
+  doesn't mandate scout for any specific commit type.
 
-**Shared (either may drive — see signaling rules below):**
+**Strategic-seat-default (Lane B):**
 
-- Implementer dispatch for a new session (Lane B `Agent` call)
-- Spec reviewer + code-quality reviewer dispatch
+- **Implementer dispatch for a new session (Lane B `Agent` call)** —
+  director-seat dispatches; operator-seat does not. Empirically true
+  in 12+ sessions across cycles 1-6 (the v1-v4 "Shared" label was a
+  practice-vs-spec divergence v5 closes per the Sh codification).
+  Future v5.1+ may open Lane B to operator-seat for small domain-
+  partitioned work; "default" leaves that door open.
+
+**Cross-cutting (either may drive — see signaling rules below):**
+
+- Spec reviewer + code-quality reviewer dispatch (both seats run their
+  own — director-seat dispatches director's reviewers; operator-seat
+  dispatches Lane V's reviewers; per Rule #9 they operate cold-context
+  independently)
 - Verification gates (smoke / pytest / tsc)
 - Applying review IMPORTANTs **and minors** — `chore(test)` /
   `chore(ui)` / `chore` commits folding review feedback are claimed
   by whoever announces first (see signaling rules)
-- Closing-report drafting
+- Closing-report drafting (partitioned by document: director-transplant
+  vs operator-transplant — each seat owns their own)
 
 ## Signaling: narrate before acting on shared tasks
 
@@ -938,6 +989,167 @@ If hallucinations persist after CC-2 codification (e.g., ≥1 more in
 cycle-7+ Lane V dispatches), v4.2 should consider operator's CC-2
 options 2 (third lightweight verifier pass) or 3 (different subagent
 type for spec review).
+
+## Joint-team mode (Rule #10)
+
+**Rule #10: Joint-team mode.** *(Subtitle: co-agent mode.)*
+
+Director-seat and operator-seat are two seats of one team. Both serve
+the user-principal. Neither is senior to the other; specialization is
+cognitive-load distribution, not hierarchy.
+
+**Practical implications:**
+
+- Within their specialization lane, each seat acts unilaterally (no
+  cross-seat approval needed for in-lane work).
+- Cross-cutting decisions (protocol changes, role-partition
+  adjustments) go through the proposal cycle (operator drafts;
+  director ships; cycle precedent: v2 / v3 / v4 / v4.1 / v5).
+- When agents disagree on a cross-cutting decision after 2 REPLY
+  cycles, escalate to the user (per the Disagreement protocol below).
+- When user direction is given, it overrides agent discretion (per
+  the existing "Instruction Priority" hierarchy: user > git >
+  mailbox > STATE.md > default).
+- Both seats use the same commit-body etiquette + Rule #7 pre-commit
+  re-verify + Rule #5 race-ack — these are TEAM disciplines, not
+  seat-specific.
+
+**Why this matters:** the v1-v4 partition implied senior/junior
+asymmetry (director codified rules; operator drafted then waited).
+Empirically, operator-seat's verification work (Lane V S13 finding
+F1 CRITICAL, dispatch `029dbf9..2fb44d1`) directly influenced
+director-seat's fix (`9e24323`). The team dynamic was already real;
+v5 codifies the framing so the discipline articulates the equality
+that practice already exhibits.
+
+## Codification bias check (Rule #11)
+
+**Rule #11: Codification bias check.** When proposing a new rule
+(in any protocol bundle), the codifier MUST flag the rule's
+**primary beneficiary** in the proposal frontmatter:
+
+- `beneficiary: director-seat` — rule primarily reduces director-seat's
+  friction or expands director-seat's authority
+- `beneficiary: operator-seat` — rule primarily reduces operator-seat's
+  friction or expands operator-seat's authority
+- `beneficiary: both` — rule is symmetric (e.g., Rule #2 signaling
+  applies to both seats)
+- `beneficiary: user` — rule primarily benefits the user-principal
+  (e.g., Rule #8 mailbox authority closes user-as-relay bottleneck)
+
+**REPLY-cycle implication:** if `beneficiary` is asymmetric
+(director-seat or operator-seat alone), the OTHER seat has explicit
+veto in the REPLY cycle. If the non-beneficiary seat declines to
+consent, the rule is downgraded to "advisory" status or revised
+until both seats consent.
+
+**Why this matters:** user surfaced a "director codifies rules that
+bind themselves" concern as v5 motivation. The retroactive analysis
+(Rules 1-9: 4 both / 1 user / 3 operator-seat / 0 director-seat) does
+not bear out the bias hypothesis; codification has been operator-
+friendly because operator-seat surfaces races (they're in the
+operational layer where races occur). R11 makes future codification
+EXPLICITLY assessable per-rule + auditable over time. The full
+retroactive snapshot lives in `docs/PROTOCOL-RULES-LOG.md`.
+
+## Disagreement protocol (v5)
+
+Generalizes v4's R-V1 counter precedent. When operator-seat disagrees
+with a director REPLY refinement (or vice versa), the disagreeing seat:
+
+1. **States the disagreement explicitly** in the next-cycle revision
+   with reasoning (operator: v4 §"Operator counter-refinement to R-V1"
+   was the precedent; director: equivalent section in next REPLY).
+2. **Provides project-data-grounded evidence** (the R-V1 counter cited
+   Session 10's 36-LOC feat as data; ungrounded "I don't like it" is
+   not sufficient).
+3. **Proposes one of three resolutions:**
+   - **Counter-refinement** — adjust the disputed item per the data
+   - **Defer to v(N+1)** — ship without the disputed item; revisit
+     with more data
+   - **Acceptance criterion** — ship with disputed item but log a
+     measurable criterion for revisiting (R-V1's "if cost >1.5M
+     tokens AND catch rate <15%" model)
+
+**Resolution paths:**
+
+- **Silent-accept:** other seat ships without re-replying on the
+  disputed item (precedent: v4 R-V1 counter was silent-shipped by
+  director). Equivalent to "accept the counter."
+- **Re-REPLY:** other seat objects in writing with their own counter.
+  Triggers another revision cycle.
+- **2-cycle limit:** if disagreement persists after 2 REPLY cycles,
+  escalate to user. **The agents do not argue indefinitely.** User
+  is principal; agents serve user direction.
+
+**Counting clarification (per v5 §C-D-1):** The 2-cycle count refers
+to **director's REPLYs after the initial proposal**, not operator's
+revisions. Flow: `proposal → director REPLY (cycle 1) → operator
+revise → director REPLY (cycle 2) → operator revise → escalate to
+user`. Total: 1 proposal + 2 director REPLYs + 2 operator revises =
+5 documents before escalation. 5 documents is plenty of revision; if
+disagreement persists, user adjudicates.
+
+**Why 2 cycles, not N:** each cycle costs tokens + delays ship.
+Empirically v4's R-V1 cycle resolved in 1 cycle (operator counter →
+director silent-ship); v5 had 0 counters (cleanest cycle to date).
+Two-cycle limit is conservative; gives room for genuine refinement
+without enabling deadlock.
+
+## Emergency handling protocol (v5)
+
+**Scope (per v5 §R-E-1).** Something breaks unexpectedly mid-session
+in one of four categories:
+
+1. **Production-affecting OR user-data-integrity issue** — live behavior
+   is broken, data is being lost / corrupted, or users are observably
+   blocked. NOT: a regression caught in CI that hasn't shipped.
+2. **Security-critical** — unauthorized access, secrets leak, dependency
+   CVE with active exploit. NOT: hardening opportunities or theoretical
+   concerns.
+3. **Active bleed-rate** — cost / resource / token burn is accumulating
+   with each minute of delay (e.g., runaway subagent loop, infinite
+   retry, GPU lease bleeding). NOT: one-time waste already incurred.
+4. **External time-pressure** — an external deadline (deploy window,
+   scheduled demo, regulatory) is at risk WITHOUT mitigation in N
+   minutes.
+
+Events outside these four are NOT emergencies — they use normal role
+partition + proposal cycle, **even if urgent-feeling**. The four-
+criteria gate keeps the §E carve-out tight; normal urgent work uses
+the proposal cycle.
+
+**v5 protocol:**
+
+1. **First-noticer claims initial response.** Whichever seat observes
+   the emergency narrates in chat (Rule #2) AND sends a `dispatch-claim`
+   mailbox event with `urgency: emergency` flag. This signals the
+   other seat to defer.
+
+2. **Triage discipline: stop-the-bleed first.** The responding seat
+   focuses on minimal-viable mitigation (revert, hotfix, feature-flag-
+   off) rather than full root-cause analysis. Attribution and learnings
+   happen post-incident.
+
+3. **Cross-seat-temporary-authority during transplant:** if the
+   normally-authoritative seat is in transplant or context-exhausted,
+   the other seat has TEMPORARY authority on emergency response.
+   The temporary seat:
+   - Acts on emergency (commit + push if needed for stop-the-bleed)
+   - Explicitly notes "acting under v5 §E temporary authority" in
+     commit body
+   - Defers all non-emergency decisions until normal seat returns
+
+4. **Post-incident review.** Within 1 session of emergency resolution:
+   - Whichever seat handled the emergency writes an incident note in
+     `docs/INCIDENT-LOG.md`
+   - Both seats review for protocol gaps that allowed the emergency
+   - If protocol gap surfaces, draft rule for next bundle's REPLY cycle
+
+**Why this matters:** emergencies don't honor cycle boundaries. The
+protocol must allow either seat to act without waiting for the other.
+The temporary-authority carve-out prevents transplant cycles from
+blocking critical response.
 
 ## Git is the tiebreaker
 

@@ -64,13 +64,18 @@ related-rules: <rule numbers, if any>
 <free prose body — the message itself>
 ```
 
-**Kind enum (v4 update):**
+**Kind enum (v5 update):**
 
 - **v2 (original):** `dispatch-claim` | `findings` | `decision` | `query` |
   `status` | `fold-notice`
 - **v4 additions:** `verify-request` | `verification-report` |
   `doc-sync-notice` (Lanes V + D active) | `scout-request` |
-  `scout-report` (Lane S scaffolded, active in v5+)
+  `scout-report` (Lane S scaffolded in v4, **active in v5**)
+- **v5 addition:** `memory-candidate` — operator-seat surfaces
+  memory-worthy observations (recurring failure modes, tool quirks,
+  project-specific gotchas) for director-seat to write or decline
+  via `decision`. Closes the latency on operator-observed memory
+  candidates without changing memory write authority.
 
 `verification-report` event format (per Rule #9 Lane V):
 

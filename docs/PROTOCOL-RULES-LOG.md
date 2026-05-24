@@ -17,6 +17,8 @@ and per-session invocation count. Updated manually at session-close by operator
 | 7 | Pre-commit re-verify (state changes between Write and commit) | `416d610` | `a6e3ff1` mid-handoff race (Monitor.tsx shipped during operator handoff Write; operator caught in race-ack body of `1541a69`) |
 | 8 | Mailbox authority (sent events bind equal to user-relayed signals) | `416d610` | User-as-relay bottleneck observed across cycles 1-3 — every inter-session signal had to route through user, eating throughput |
 | 9 | Operator-side reviewer is independent, not duplicate (second-opinion convention) | `d61bdc8` | Substance imbalance ~30:1 (director:operator) across cycles 3-4 + structural blind-spot risk in single-context reviewer pass; user surfaced + operator drafted v4 |
+| 10 | Joint-team mode (two seats of one team; co-agent mode) | `_Protocol Bundle v5 ship_` | User surfaced "director codifies rules that bind themselves" + asymmetry-as-hierarchy concerns; v5 reframes role partition as specialization, not hierarchy |
+| 11 | Codification bias check (per-rule beneficiary flagging + non-beneficiary veto) | `_Protocol Bundle v5 ship_` | User surfaced "director-only memory writes" + "codification meta-bias" concerns; R11 makes future codification per-rule auditable |
 
 > Historical note: Rules #7 + #8 originally shipped with the placeholder
 > `_Protocol Bundle v2 ship_` in the "Codified" column because the rules-log
@@ -60,6 +62,48 @@ verifier subagent) or 3 (different subagent type for spec review).
 
 v4.1 ship SHA: `_Protocol Bundle v4.1 ship_` (this commit; operator
 updates at next session-close per chicken-and-egg pattern).
+
+## Beneficiary distribution snapshot (Rule #11)
+
+Per Rule #11 (codification bias check), every existing rule and every
+future rule should have its primary beneficiary flagged. Retroactive
+analysis for Rules 1-11, performed during v5 ship:
+
+| Rule | Primary beneficiary | Reasoning |
+|---|---|---|
+| 1 (Role partition) | both | partitions work for both seats |
+| 2 (Signaling) | both | both narrate |
+| 3 (Git tiebreaker) | both | resolves races for both |
+| 4 (State-asserting writes precondition) | operator-seat | catches stale handoff writes (operator-only territory pre-v5) |
+| 5 (Race-acknowledging commit body) | both | both write commits |
+| 6 (Counter-bump fold-and-surface) | operator-seat | counter bumps are operational |
+| 7 (Pre-commit re-verify) | both | both commit |
+| 8 (Mailbox authority) | user | closes user-as-relay bottleneck for both seats |
+| 9 (Operator-side reviewer is independent) | operator-seat | enables Lane V |
+| 10 (Joint-team mode) | both | discipline for both seats |
+| 11 (Codification bias check) | user | reduces bias; serves principal's interest |
+
+**Distribution snapshot (cycle-6 close, post-v5 ship):**
+- `both`: 5 (Rules 1, 2, 3, 5, 7, 10) — symmetric disciplines
+- `user`: 2 (Rules 8, 11) — close gaps in user-supervision
+- `operator-seat`: 3 (Rules 4, 6, 9) — operational layer where races occur
+- `director-seat`: 0 — no rules primarily benefit director-seat alone
+
+**Observed pattern (5+2+3+0):** codification has been operator-
+friendly (operator-seat surfaces races they encounter in the
+operational layer) and user-supervisory (mailbox-authority + bias-
+check close coordination gaps the user-as-relay model couldn't
+handle). The bias hypothesis the user surfaced (director codifies
+rules favoring themselves) is empirically not borne out.
+
+**v5 self-application:** v5's components (P1, R10, R11, D, E, B, M,
+S, Sh) distribute as: 7 both / 1 user / 1 operator-seat / 0 director-
+seat. v5 passes its own R11 check at introduction — strongest
+possible introduction for a meta-rule.
+
+**Future bundles MUST update this snapshot** when adding new rules.
+Asymmetric-beneficiary rules require explicit non-beneficiary consent
+per Rule #11's veto path.
 
 ## Invocation log
 
