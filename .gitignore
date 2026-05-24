@@ -60,3 +60,6 @@ domain/projects/*
 
 # Claude subagent worktrees (created at runtime, not source)
 .claude/worktrees/
+
+# State-update hook marker (per-clone runtime state, not source)
+.claude/hooks/.last-state-head

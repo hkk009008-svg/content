@@ -254,7 +254,7 @@ All five files (+ updated CLAUDE.md, AGENTS.md, settings) staged + committed in 
 | `.claude/hooks/update-state.sh` | Hook script | manual | Edit if hook logic changes |
 | `.claude/settings.local.json` (updated) | Hook registration | manual | Edit when adding/removing hooks |
 | `docs/PROTOCOL-RULES-LOG.md` | Append-only log | operator/director | Manual at session-close |
-| `CLAUDE.md` + `AGENTS.md` (Rule #4 extended + Rule #8 added) | Binding discipline | director (operator may draft) | Edit on rule changes |
+| `CLAUDE.md` + `AGENTS.md` (Rule #7 added + Rule #8 added) | Binding discipline | director (operator may draft) | Edit on rule changes |
 | `coordination/README.md` | Protocol description for mailbox | manual | Edit when mailbox protocol changes |
 | `coordination/mailbox/sent/` | Authoritative event store | both roles | Per-event writes (Tier-1 auto-send) |
 | `coordination/mailbox/seen/{role}.txt` | Per-role consumed marker | each role | Updated after polling consumed events |

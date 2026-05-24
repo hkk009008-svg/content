@@ -1,0 +1,62 @@
+# Protocol Rules — Emergence + Invocation Log
+
+Tracks each codified rule's introduction (codification SHA + race that triggered it)
+and per-session invocation count. Updated manually at session-close by operator
+(or director, whoever wraps the session).
+
+## Rule registry
+
+| # | Rule | Codified | Race that triggered |
+|---|---|---|---|
+| 1 | Role partition (director-only / operator-only / shared) | `ad6cb4f` | Session 6 phase_c pre-locate race |
+| 2 | Signaling narration (announce shared-task intent in chat) | `ad6cb4f` | Same race |
+| 3 | Git tiebreaker (first commit to land wins) | `ad6cb4f` | Hypothetical; documented preemptively |
+| 4 | State-asserting writes precondition (`git log -5` before Write) | `ea97d0a` | Stale handoff doc race (`843c102` pre-write) |
+| 5 | Race-acknowledging commit body (name what shifted during work) | `ea97d0a` | Same |
+| 6 | Counter-bump fold-and-surface (during concurrent ops) | `ea97d0a` | Standalone `chore(baseline)` pollution risk |
+| 7 | Pre-commit re-verify (state changes between Write and commit) | _Protocol Bundle v2 ship_ | `a6e3ff1` mid-handoff race (Monitor.tsx shipped during operator handoff Write; operator caught in race-ack body of `1541a69`) |
+| 8 | Mailbox authority (sent events bind equal to user-relayed signals) | _Protocol Bundle v2 ship_ | User-as-relay bottleneck observed across cycles 1-3 — every inter-session signal had to route through user, eating throughput |
+
+> The "Codified" column for Rules #7 + #8 says "_Protocol Bundle v2 ship_"
+> rather than a specific SHA because the rules-log file is part of the same
+> ship commit that codifies them. Once the ship lands, update both rows to
+> the commit's SHA at session-close. The cycle-4 director or operator will
+> see this note and update.
+
+## Invocation log
+
+### Session 2026-05-24-cycle-3 (this conversation)
+
+Retrospective count of rule invocations during cycle 3 (the conversation that
+shipped Sessions 7, 8, 9, Monitor.tsx wiring, P3-1 audit, P4-3 product design
++ Session 11 brief, plus the bundle ship itself).
+
+| Rule | Invocations | Notes |
+|---|---|---|
+| 1 | 8+ | Role partition consciously consulted every shared-task decision (dispatch, reviewer, minors-chore, push-decision) |
+| 2 | 4 | Director narrated dispatches ("Dispatching Session 8/9 implementer..."); operator narrated handoff-doc-write claim |
+| 3 | 0 | No dispatch races landed |
+| 4 | 6 | Pre-Write `git log -5` performed before each state-asserting commit (P4-3 doc, POST-ROADMAP refresh, S11 brief, etc.) |
+| 5 | 3+ | `843c102`, `1541a69` (operator), `64c7571` (director); see also operator's `1b3f6f8` proposal revision |
+| 6 | 4+ | Counter-bump held + folded into 4+ different commits (`ea97d0a`, `1541a69` operator-fold, etc.) |
+| 7 | n/a | New rule, not yet invocable (codified in same ship that introduces it) |
+| 8 | n/a | New rule, not yet invocable (`coordination/mailbox/` exists post-ship but no events yet) |
+
+(Future sessions append new tables.)
+
+## Retirement criteria
+
+A rule unused for 5 consecutive sessions → flagged for review.
+If still unused after 3 more sessions → retired (moved to "## Retired rules"
+section below with retirement-SHA + reason).
+
+## Retired rules
+
+_None yet. As rules retire, append here with retirement-SHA + reason._
+
+## Phase 2 (deferred)
+
+Auto-detection of rule invocations via grep on commit-body keywords. Wait
+until manual logging accumulates ~3-5 sessions of data so we know which
+phrases are reliable signals. Goal: hook into the same PostToolUse pipeline
+that maintains STATE.md, increment per-rule counters on commit.

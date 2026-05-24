@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Content** (3495 symbols, 21858 relationships, 298 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Content** (3658 symbols, 22229 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -744,6 +744,63 @@ party can fold it.
 
 Standalone `chore(baseline)` remains correct only when the bump truly
 is isolated (no other work in flight).
+
+## Pre-commit re-verify (Rule #7)
+
+Rule #4 above (`## State-asserting writes: gate on \`git log --oneline -5\``)
+requires `git log --oneline -5` *before* a state-asserting Write/Edit
+(pre-Write gate). Rule #7 is the matching *pre-commit* gate. Together
+they close the hole where state can move between your Write and your
+commit — observed in `a6e3ff1` (Monitor.tsx shipped during operator's
+handoff Write; operator caught the drift in their race-ack body).
+
+Immediately before `git commit` for any state-asserting commit, run
+`git log --oneline -5` AND read `coordination/mailbox/sent/` for events
+newer than your Write-start time. Compare to the pre-Write check (Rule
+#4). If observed HEAD or unread mailbox events changed:
+
+- **Drift below your concern threshold** (counter bump, unrelated
+  commit, informational mailbox event): commit normally; mention
+  "rebased mentally on `<new HEAD>`" in body.
+- **Drift that contradicts your content** (HEAD shipped something your
+  doc says is pending; mailbox event invalidates your assertion):
+  re-edit affected sections + race-ack body per Rule #5.
+- **Drift that makes your work redundant** (your fix was just shipped
+  by other party; mailbox dispatch claimed your work): abort the
+  commit; surface the duplicate to user.
+
+Cross-reference: see Rule #4 (`## State-asserting writes`) for the
+pre-Write gate. The two rules pair to close the Write-and-commit hole
+but are separately invocable, measurable, and retire-able.
+
+## Mailbox events have authority equal to user-relayed signals (Rule #8)
+
+A sent mailbox event (file in `coordination/mailbox/sent/`) obligates
+the receiving role to act per its content. Ignoring or deferring a sent
+mailbox event requires the same justification as ignoring a direct user
+instruction.
+
+**Authority conflict resolution:** User direct instructions override
+mailbox events; mailbox events override default behavior. (Mirrors and
+extends the existing CLAUDE.md "Instruction Priority" hierarchy.)
+
+**v1 is Tier-1 auto-send** (no user-approval gate on sends). User
+remains supervisor via retroactive audit of
+`coordination/mailbox/sent/`. If a sent event should not have been
+sent, user signals via direct instruction (which by the above priority
+overrides the mailbox event).
+
+**Session-bootstrap awareness gate.** On session start, if `STATE.md`'s
+`unread mailbox` field shows N ≥ 1 events for your role, you MUST
+surface the count to the user in your first user-facing turn BEFORE
+processing events:
+
+> "Mailbox has N unread event(s) for {role}; processing now per Rule #8."
+
+The role then processes the queue with full Tier-1 authority. This is
+a **one-time-per-session signal**, not a per-event gate. Steady-state
+events during the session require no user-surface — Tier-1 throughput
+preserved.
 
 ## Git is the tiebreaker
 

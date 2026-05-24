@@ -28,32 +28,57 @@
 ## How to resume (cold-start checklist for next operator)
 
 ```bash
-# 1. Verify baseline
+# 0. Cold-read STATE.md (machine truth, auto-maintained by hook after
+#    each commit — see Protocol Bundle v2). NEW first step.
+cat STATE.md
+# Compare STATE.md's "Updated" timestamp to current `git log -1 --format=%cI`.
+# If STATE.md is fresh (Updated within seconds of HEAD's commit time):
+#   trust its HEAD / branch / working-tree / smoke / pytest / mailbox fields
+#   and SKIP step 1 below for verification.
+# If STATE.md is stale OR the hook isn't registered in YOUR
+# .claude/settings.local.json (per-clone setup; see coordination/README.md):
+#   re-run step 1 manually for ground truth.
+#
+# IMPORTANT (Rule #8 session-bootstrap awareness gate): If STATE.md's
+# `unread mailbox` field shows N ≥ 1 events for your role, surface to user
+# in your FIRST user-facing turn BEFORE processing events:
+#   "Mailbox has N unread event(s) for {role}; processing now per Rule #8."
+
+# 1. Verify baseline (only when STATE.md is stale or missing)
 .venv/bin/python scripts/ci_smoke.py            # expect: OK
 .venv/bin/python -m pytest tests/unit/ -q | tail -1
-# expect: 629 passed, 3 skipped, 0 failed (or higher if a new session shipped tests)
+# expect: whatever STATE.md / latest commit body claimed, or higher if a
+# new session shipped tests
 
-# 2. Verify branch state
+# 2. Verify branch state (if STATE.md is stale)
 git status                                       # expect: clean (or counter bumps in flight)
-git log --oneline -3                             # expect: 5c4a7c9 at top (or higher if a new session shipped commits)
-git rev-list --count origin/main..HEAD           # expect: 0 (just pushed) — or 1-2+ if director shipped further
+git log --oneline -3                             # expect: latest top
+git rev-list --count origin/main..HEAD           # expect: 0 (just pushed) — or N if director shipped further
 
 # 3. Read in this order
-#    a. ARCHITECTURE.md §15 smoke (run it again if you skipped step 1)
-#    b. THIS FILE (you're reading it)
-#    c. docs/POST-ROADMAP-2026-05-24.md (5c4a7c9 — refreshed cycle-3 picks)
-#    d. docs/HANDOFF-director-transplant-2026-05-24-cycle2.md (60001d9 — director's pickup if you're director-role)
-#    e. CLAUDE.md "# Director-Operator Concurrent Operation" — full protocol including 3 added rules from ea97d0a (READ FIRST before any shared-task action)
-#    f. CLAUDE.md "Working a Multi-Task Plan" + "Verification discipline" — mandatory
-#    g. AGENTS.md mirror of (e) and (f) for non-Claude tools
-#    h. docs/STRATEGIC_REVIEW-2026-05-24.md (P-priority ledger; most items now dispositioned in POST-ROADMAP)
-#    i. docs/HANDOFF-director-transplant-2026-05-24.md (cycle 1 — historical only)
+#    a. STATE.md (you already did this in step 0)
+#    b. coordination/mailbox/sent/ — process any unread events for your
+#       role; update coordination/mailbox/seen/{director,operator}.txt
+#       to the latest consumed timestamp
+#    c. ARCHITECTURE.md §15 smoke (run it again if STATE.md said FAIL or unknown)
+#    d. THIS FILE (you're reading it)
+#    e. docs/POST-ROADMAP-2026-05-24.md (refreshed cycle-3 picks)
+#    f. docs/HANDOFF-director-transplant-2026-05-24-cycle2.md (director's pickup if you're director-role)
+#    g. CLAUDE.md "# Director-Operator Concurrent Operation" — full protocol including the 8 rules (Rules 1-6 from ad6cb4f + ea97d0a; Rules 7-8 from Protocol Bundle v2 ship)
+#    h. docs/PROTOCOL-RULES-LOG.md — rule emergence + invocation tracker
+#    i. CLAUDE.md "Working a Multi-Task Plan" + "Verification discipline" — mandatory
+#    j. AGENTS.md mirror of (g) and (i) for non-Claude tools
+#    k. docs/STRATEGIC_REVIEW-2026-05-24.md (P-priority ledger; most items now dispositioned in POST-ROADMAP)
+#    l. docs/HANDOFF-director-transplant-2026-05-24.md (cycle 1 — historical only)
 
 # 4. If no director dispatch yet, do NOT pre-stage work on shared tasks
-#    without running `git log --oneline -5` first.
-#    See operator memory: feedback_pre-locate-after-git-log.md.
+#    without running `git log --oneline -5` first (Rule #4).
 #    Also: state-asserting writes (handoff docs, status reports, commit bodies
-#    naming HEAD/branch counts) gate on the same precondition per ea97d0a rule #1.
+#    naming HEAD/branch counts) gate on the same precondition (Rule #4).
+#    AND: immediately before `git commit`, re-run `git log --oneline -5` AND
+#    check `coordination/mailbox/sent/` for new events (Rule #7 pre-commit
+#    re-verify).
+#    See operator memory: feedback_pre-locate-after-git-log.md.
 ```
 
 ---
