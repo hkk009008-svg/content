@@ -1,11 +1,12 @@
 # Protocol Bundle v3 — Proposal (Operator Draft for Director Ship)
 
 **Authored:** Operator session, 2026-05-24 (post-v2 ship + post-reviewer-pressure-test).
+**Revised:** Operator session, 2026-05-24 — incorporating director's REPLY at `26a0842` (R-G1 5-min mailbox window, R-F1 named freshness constant, R-H1 v2.1-amended audit baseline, C-G1 user-tier clarification). All 4 locked decisions stand under refinements.
 **Authority basis:** `ad6cb4f` "operator drafts; director commits" carve-out.
 **Ship strategy:** Single commit, all 3 changes together, race-ack body if state moves during ship.
-**Estimated implementation effort:** ~30-45 min (smaller surface than v2; mostly prose + one cold-start checklist edit + one audit pass).
+**Estimated implementation effort:** ~45 min (per director's path A recommendation; R-H1's broader audit baseline adds ~5 min vs original estimate).
 **Blocks:** None. Bundle is purely additive over v2; nothing currently working breaks.
-**State at draft time:** HEAD `ad526c3` (Session 11 P4-3 test); director just shipped 3 commits during operator's reviewer-engagement response; working tree has held counter bumps in AGENTS.md + CLAUDE.md (fold into ship per Rule #6).
+**State at revision time:** HEAD `26a0842` (REPLY committed); 6 commits ahead of `origin/main`; working tree has held counter bumps in AGENTS.md + CLAUDE.md (fold into ship per Rule #6).
 
 ---
 
@@ -41,9 +42,9 @@ Smaller compositional surface than v2, but real. Shipping together gives a coher
 
 | # | Question | Decision |
 |---|---|---|
-| 1 | Authority precedence: user > mailbox > git > STATE.md > default? | **Recommend:** user direct instructions > git commits (durable record) > mailbox sent/ (filesystem truth) > STATE.md (hook-cached) > default. STATE.md is **derived** from git + mailbox; never authoritative against either when they disagree. |
-| 2 | Freshness check threshold — how stale is "stale"? | **Recommend:** STATE.md's `Updated` timestamp must be within **5 seconds** of HEAD's commit time (`git log -1 --format='%cI HEAD'`). Slack accounts for hook execution time. If outside window, cold-start falls back to manual verification per the existing cold-start checklist. |
-| 3 | Hook audit scope: full script line-by-line OR spec compliance only? | **Recommend:** spec compliance only. Verify each acceptance criterion from v2 §A is met by the actual script. Don't bikeshed the bash. Output to `docs/AUDIT-hook-script-v2-2026-05-24.md` for traceability. |
+| 1 | Authority precedence: user > mailbox > git > STATE.md > default? | **REFINED per REPLY R-G1 + C-G1:** user direct instructions (literal user-typed-in-chat, NOT operator/director-via-mailbox) > git commits (durable record) > mailbox sent/ (filesystem truth, with 5-min window for promise-vs-record reconciliation) > STATE.md (hook-cached) > default. STATE.md is **derived** from git + mailbox; never authoritative against either when they disagree. |
+| 2 | Freshness check threshold — how stale is "stale"? | **REFINED per REPLY R-F1:** 5 seconds (unchanged value), but named as `STATE_FRESHNESS_SECONDS` constant in the checklist insert (single edit point for future tweaks). Slack accounts for hook execution time. If outside window, cold-start falls back to manual verification per the existing cold-start checklist. |
+| 3 | Hook audit scope: full script line-by-line OR spec compliance only? | **REFINED per REPLY R-H1:** spec compliance only, with baseline = **v2 §A as amended by v2.1 (`5e0329d`)**. Verify each acceptance criterion against the v2.1-amended spec (not raw v2 §A — which would false-positive pass or fail on v2.1's changes). Don't bikeshed the bash. Output to `docs/AUDIT-hook-script-v2-2026-05-24.md` for traceability. |
 | 4 | PROTOCOL-RULES-LOG per-regime note: prose or table caveat? | **Recommend:** prose note at the top of the Invocation log section, ~3 lines. Says: "Plateau is per-regime. Different regimes (higher throughput, longer runs, more roles) may surface new failure modes the existing rules don't cover. Convergence here ≠ convergence everywhere." |
 
 ---
@@ -61,8 +62,10 @@ Smaller compositional surface than v2, but real. Shipping together gives a coher
 > **Practical implications:**
 > - When STATE.md and `git rev-parse HEAD` disagree on HEAD SHA → git wins. STATE.md is stale; re-verify.
 > - When STATE.md `unread mailbox` count and `ls coordination/mailbox/sent/` disagree → filesystem wins. STATE.md is stale; re-verify.
-> - When a mailbox event claims a commit landed (e.g., "I dispatched Session 9 implementer") but `git log` shows no matching commit within a reasonable window → git wins. Mailbox claim is a *promise*; git is the *record*.
+> - When a mailbox event claims a commit landed (e.g., "I dispatched Session 9 implementer") but `git log` shows no matching commit **within ~5 minutes of the event's timestamp** → git wins. Mailbox claim is a *promise*; git is the *record*. **The 5-minute window is a heuristic anchor; for in-flight work known to take longer (e.g., overnight runs), the sender should explicitly note expected duration in the mailbox event's body.**
 > - Conflicts between user instruction and any artifact are resolved per the existing CLAUDE.md "Instruction Priority" — user wins.
+>
+> **Clarification on "user direct instructions" (per REPLY C-G1):** "User direct instructions" means literal user-typed-in-chat messages or other channels the platform identifies as user input. **Operator-authored or director-authored mailbox events are mailbox-tier authority, not user-tier — even though operator/director may be invoking the user's stated wishes.** When in doubt, the role of the SENDER (user vs. operator vs. director) is what determines tier, not the CONTENT or intent.
 
 **Edit anchor:** Add as new bullet block at the end of Rule #8's `## Mailbox events have authority` subsection in CLAUDE.md + AGENTS.md (after the existing session-bootstrap awareness gate sub-clause).
 
@@ -77,9 +80,11 @@ Smaller compositional surface than v2, but real. Shipping together gives a coher
 ```bash
 # 0a. Cold-read STATE.md and check freshness
 cat STATE.md
+STATE_FRESHNESS_SECONDS=5   # Slack accounts for hook execution time;
+                            # widen if hook becomes heavier; see v3 §F R-F1.
 STATE_TS=$(grep -oE 'Updated:.*\(' STATE.md | grep -oE '[0-9-]+T[0-9:]+Z')
 HEAD_TS=$(git log -1 --format='%cI' HEAD | sed 's/[+-][0-9:]*$/Z/')
-# If STATE.md's Updated timestamp is within 5 seconds of HEAD's commit time:
+# If STATE.md's Updated timestamp is within $STATE_FRESHNESS_SECONDS of HEAD:
 #   trust STATE.md fields (HEAD, branch, tree, smoke, pytest, mailbox)
 #   skip step 1's manual verification
 # If outside window OR STATE.md missing OR timestamp parse fails:
@@ -95,17 +100,30 @@ HEAD_TS=$(git log -1 --format='%cI' HEAD | sed 's/[+-][0-9:]*$/Z/')
 
 **Problem:** The hook (`.claude/hooks/update-state.sh`) is 5535 bytes and load-bearing. Nobody in current cycles has audited it against the v2 proposal spec. The "stale-by-one" issue I assumed in earlier analysis turned out NOT to be the actual behavior — STATE.md is now SHA-accurate, meaning the hook does something more sophisticated than the proposal described. We don't know exactly what, which means we can't reason about its other failure modes.
 
-**Refinement:** Operator (or director) does a one-pass spec-compliance audit of the hook script. Verify each acceptance criterion from v2 §A:
+**Refinement (per REPLY R-H1):** Operator (or director) does a one-pass spec-compliance audit of the hook script. **Baseline = v2 §A as amended by v2.1 (`5e0329d`).** v2.1 modified the hook after v2 §A was written (pytest regex fix, KNOWN LIMITATION header block, REPLY C4 inline comments). Auditing against raw v2 §A would false-positive pass or fail on v2.1's changes; auditing against v2.1-amended spec is the correct baseline.
+
+Verify each acceptance criterion against the v2.1-amended spec:
 
 - Reads HEAD SHA, branch ahead/behind, working tree state ✓?
 - Extracts smoke from latest commit body (per R1) ✓?
-- Extracts pytest from latest commit body ✓?
+- Extracts pytest from latest commit body **(per v2.1 regex fix — `Z failed` made optional)** ✓?
 - Counts unread mailbox events for each role ✓?
 - Writes STATE.md atomically with `--amend --no-edit` ✓?
 - Skips if STATE.md already in staged set (loop prevention) ✓?
-- Documents `--amend` SHA-change cost (per C2) ✓?
-- Uses `git add STATE.md` not `git add .` (per C4) ✓?
+- Documents `--amend` SHA-change cost **(per v2.1 header KNOWN LIMITATION block per REPLY C2)** ✓?
+- Uses `git add STATE.md` not `git add .` **(per v2.1 inline comment per REPLY C4)** ✓?
 - Tolerates missing `origin/main` (fresh clone, detached HEAD) ✓?
+
+The audit doc should explicitly reference both baselines:
+
+```markdown
+# Hook Script Audit — v2.1 baseline
+
+**Baseline:** v2 §A specification (`416d610` / docs/PROPOSAL-protocol-bundle-v2-2026-05-24.md §A)
++ v2.1 modifications (`5e0329d` / chore(protocol): Protocol Bundle v2.1 — pytest regex fix + stale-by-one doc).
+
+**Reconciles against:** `.claude/hooks/update-state.sh` at HEAD <commit-SHA-at-audit-time>.
+```
 
 **Deliverable:** `docs/AUDIT-hook-script-v2-2026-05-24.md` with:
 - Each criterion + pass/fail/notes
