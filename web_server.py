@@ -66,6 +66,14 @@ CORS(app, origins=list(env_settings.web_cors_origins))
 _progress_queues: dict[str, queue.Queue] = {}
 _running_pipelines: dict[str, CinemaPipeline] = {}
 
+# Guards _running_pipelines and _progress_queues. The construct-window
+# sentinel (_PIPELINE_PENDING) lets us reserve a slot atomically while
+# the heavy CinemaPipeline constructor runs WITHOUT holding the lock.
+# Mirrors the _cores_lock / _lora_training_lock pattern (Session 5 fix
+# and LoRA training). Audit ref: docs/AUDIT-P3-1-concurrency-2026-05-24.md
+_pipelines_lock = threading.Lock()
+_PIPELINE_PENDING = object()  # sentinel — readers must skip this
+
 # PipelineCore cache (Slice 3b Phase 1c). Caches the heavy long-lived
 # services (ContinuityEngine, ChiefDirector, LLMEnsemble,
 # QualityTracker, CostTracker) per project_id so that per-endpoint
@@ -94,12 +102,30 @@ def _get_or_build_core(pid: str) -> PipelineCore:
         return core
 
 
+def _get_running_pipeline(pid: str):
+    """Return the active CinemaPipeline for pid, or None if absent /
+    still mid-construction (sentinel). Callers should treat None as
+    "no generation in progress" — the sentinel state is brief (only
+    during CinemaPipeline.__init__) but visible to readers.
+
+    This is the single safe reader for _running_pipelines. All endpoint
+    code that needs the pipeline object MUST use this helper — never call
+    _running_pipelines.get(pid) directly, since object() is truthy and
+    would crash with AttributeError on any method call.
+    """
+    pipeline = _running_pipelines.get(pid)
+    if pipeline is None or pipeline is _PIPELINE_PENDING:
+        return None
+    return pipeline
+
+
 def _ensure_progress_queue(pid: str) -> queue.Queue:
-    q = _progress_queues.get(pid)
-    if q is None:
-        q = queue.Queue()
-        _progress_queues[pid] = q
-    return q
+    with _pipelines_lock:
+        q = _progress_queues.get(pid)
+        if q is None:
+            q = queue.Queue()
+            _progress_queues[pid] = q
+        return q
 
 
 def _make_progress_cb(pid: str, q: queue.Queue | None = None):
@@ -116,11 +142,12 @@ def _make_progress_cb(pid: str, q: queue.Queue | None = None):
 
 
 def _get_stage_pipeline(pid: str) -> CinemaPipeline:
-    pipeline = _running_pipelines.get(pid)
+    pipeline = _get_running_pipeline(pid)  # returns None during sentinel window
     if pipeline:
         return pipeline
     # Build a per-request CinemaPipeline that shares the cached core --
     # amortizes the heavy service construction across endpoint calls.
+    # Also reached during the _PIPELINE_PENDING window (treat like absent).
     return CinemaPipeline(pid, core=_get_or_build_core(pid), progress_callback=_make_progress_cb(pid))
 
 
@@ -1158,10 +1185,17 @@ def api_generate(pid):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
-    if pid in _running_pipelines:
-        return jsonify({"error": "Generation already in progress"}), 409
+    # Atomic check-then-reserve under the lock. _PIPELINE_PENDING acts as
+    # "busy" to other readers while CinemaPipeline.__init__ runs WITHOUT
+    # holding the lock (ctor takes 100ms–2s; holding the lock would
+    # serialize all /generate calls globally).
+    # Audit ref: docs/AUDIT-P3-1-concurrency-2026-05-24.md Finding #1
+    with _pipelines_lock:
+        if pid in _running_pipelines:
+            return jsonify({"error": "Generation already in progress"}), 409
+        _running_pipelines[pid] = _PIPELINE_PENDING
 
-    # Create progress queue for SSE
+    # Create progress queue for SSE (lock released before this call)
     q = _ensure_progress_queue(pid)
     progress_cb = _make_progress_cb(pid, q)
 
@@ -1170,7 +1204,8 @@ def api_generate(pid):
     def run_pipeline():
         try:
             pipeline = CinemaPipeline(pid, core=_get_or_build_core(pid), progress_callback=progress_cb)
-            _running_pipelines[pid] = pipeline
+            with _pipelines_lock:
+                _running_pipelines[pid] = pipeline  # replace sentinel with real pipeline
             result = pipeline.generate(resume=resume)
             q.put({"stage": "DONE", "detail": result or "Failed", "percent": 100})
         except Exception as e:
@@ -1178,7 +1213,8 @@ def api_generate(pid):
             traceback.print_exc()
             q.put({"stage": "ERROR", "detail": str(e), "percent": 0})
         finally:
-            _running_pipelines.pop(pid, None)
+            with _pipelines_lock:
+                _running_pipelines.pop(pid, None)
             q.put(None)  # Signal end of stream
             # Bundle-C 3.2 (2026-05-24): release the queue so we don't grow
             # _progress_queues unboundedly across runs. Drop only this run's
@@ -1227,7 +1263,7 @@ def api_stream(pid):
 
 @app.route("/api/projects/<pid>/cancel", methods=["POST"])
 def api_cancel(pid):
-    pipeline = _running_pipelines.get(pid)
+    pipeline = _get_running_pipeline(pid)
     if pipeline:
         pipeline.cancel()
         return jsonify({"cancelled": True})
@@ -1435,7 +1471,7 @@ def api_update_shot(pid, shot_id):
 @app.route("/api/projects/<pid>/pause", methods=["POST"])
 def api_pause(pid):
     """Pause the running pipeline at the next checkpoint."""
-    pipeline = _running_pipelines.get(pid)
+    pipeline = _get_running_pipeline(pid)
     if pipeline:
         pipeline.pause()
         return jsonify({"paused": True})
@@ -1445,7 +1481,7 @@ def api_pause(pid):
 @app.route("/api/projects/<pid>/resume", methods=["POST"])
 def api_resume(pid):
     """Resume a paused pipeline."""
-    pipeline = _running_pipelines.get(pid)
+    pipeline = _get_running_pipeline(pid)
     if pipeline:
         pipeline.resume()
         return jsonify({"resumed": True})
@@ -1455,7 +1491,7 @@ def api_resume(pid):
 @app.route("/api/projects/<pid>/pipeline-state")
 def api_pipeline_state(pid):
     """Get current pipeline execution state."""
-    pipeline = _running_pipelines.get(pid)
+    pipeline = _get_running_pipeline(pid)
     if pipeline:
         return jsonify(pipeline.get_state())
     project = load_project(pid)
@@ -1475,7 +1511,7 @@ def api_restart_shot(pid, shot_id):
     which adds a candidate take into the existing array). Optional body:
     {positive_prompt, negative_prompt} — if positive_prompt is set, it
     replaces the shot's stored prompt before regeneration."""
-    pipeline = _running_pipelines.get(pid)
+    pipeline = _get_running_pipeline(pid)
     payload = request.json if request.is_json else {}
     positive_prompt = (payload or {}).get("positive_prompt")
     negative_prompt = (payload or {}).get("negative_prompt")
@@ -1509,7 +1545,7 @@ def api_restart_shot(pid, shot_id):
 @_project_lock_guard
 def api_regenerate_shot(pid, shot_id):
     """Regenerate a single shot. Supports positive_prompt and negative_prompt."""
-    pipeline = _running_pipelines.get(pid)
+    pipeline = _get_running_pipeline(pid)
     new_prompt = request.json.get("positive_prompt") if request.is_json else None
 
     def _mutate_project(project: dict):
@@ -1575,7 +1611,7 @@ def api_diagnose_shot(pid, shot_id):
 @app.route("/api/projects/<pid>/proceed-assembly", methods=["POST"])
 def api_proceed_assembly(pid):
     """Assemble only from approved final takes, or resume the paused batch wrapper."""
-    pipeline = _running_pipelines.get(pid)
+    pipeline = _get_running_pipeline(pid)
     if not pipeline:
         try:
             result = CinemaPipeline(pid, core=_get_or_build_core(pid), progress_callback=_make_progress_cb(pid)).assemble_approved_takes()
