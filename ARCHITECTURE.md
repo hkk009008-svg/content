@@ -558,6 +558,95 @@ shims (verified by `wc -c`):
 string consumed by `domain/scene_decomposer.py`, `domain/dialogue_writer.py`,
 `llm/style_director.py`, `llm/chief_director.py`.
 
+### 7.7 Validation & opt-in escalation patterns
+
+Two cross-cutting conventions emerged across Sessions 8, 10, and 12 that shape
+how `project_manager.py` and the review pipeline handle schema validation and
+feature gating. Both follow a "default-off, ship-the-infrastructure-now,
+operator-opts-in-later" shape.
+
+#### 7.7.1 Pydantic schema boundary (Session 8 — `ceb0a32` + `f9b0aff`)
+
+[domain/models.py](domain/models.py) defines a Pydantic v2 `Project` model
+([:131](domain/models.py:131)) mirroring the project.json structure
+(scenes, characters, locations, shots, takes, settings). The boundary is
+enforced via `_validate_project()` at
+[domain/project_manager.py:599](domain/project_manager.py:599), called on
+both save and load paths through `project_manager.py`.
+
+**Default contract is warn-only.** Any `ValidationError` (or even
+non-Validation exceptions) is logged and swallowed; the operation proceeds
+with the raw dict. This permissive default was chosen so existing pre-S8
+project files don't crash the pipeline mid-run.
+
+The model uses `extra="allow"` so unknown fields don't trigger errors — trades
+strict-shape enforcement for forward/backward compatibility.
+
+#### 7.7.2 Opt-in escalation pattern (Sessions 10, 12)
+
+Two env flags formalize an "opt-in production escalation" convention.
+
+**`CINEMA_STRICT_SCHEMA`** (Session 10 — `5f2fe0b`). When set, `_validate_project()`
+re-raises `ValidationError` instead of warning, letting callers crash hard
+rather than persist invalid schema. Parser at
+[domain/project_manager.py:612](domain/project_manager.py:612):
+
+```python
+strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
+    "1", "true", "TRUE", "yes",
+)
+```
+
+Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
+other mixed-case truthy values. First caller migration:
+`api_generate_dialogue` at [web_server.py:1093](web_server.py:1093) — uses the
+canonical migration recipe at
+[docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
+
+**`CINEMA_AUTO_APPROVE_MOTION`** (Session 12 — `2a25c2d`). When set,
+`cinema/review/controller.py`'s `_gate_map` is extended with
+`"PERFORMANCE_REVIEW" → "motion"`, wiring the motion-gate auto-approve
+rules (themselves shipped tested-but-dead in Session 11) into production.
+Helper at [cinema/auto_approve.py:472](cinema/auto_approve.py:472); conditional
+at [cinema/review/controller.py:270-271](cinema/review/controller.py:270).
+Parser at [cinema/auto_approve.py:481](cinema/auto_approve.py:481):
+
+```python
+return os.environ.get("CINEMA_AUTO_APPROVE_MOTION", "").strip().lower() in {
+    "1", "true", "yes",
+}
+```
+
+`.strip().lower()` form — case-insensitive + whitespace-tolerant. Accepts
+`"True"`, `"YES"`, `"  1  "`, etc. Deliberately broader than
+`CINEMA_STRICT_SCHEMA`'s parser; a future cleanup unifying the two should
+prefer Session 12's form ([docs/HANDOFF-roadmap-2026-05-24.md:2470](docs/HANDOFF-roadmap-2026-05-24.md)
+documents the divergence).
+
+**Why opt-in over default-on:** Both gates ship tested behavior behind a flag
+so v1 defaults don't shift under existing deployments. Operators promote them
+to production after validating against their content (calibration data for
+motion thresholds; schema-stable project files for strict mode). See
+[DECISIONS.md ADR-014](DECISIONS.md) for the motion-gate decision record; the
+same rationale applies to `CINEMA_STRICT_SCHEMA`.
+
+#### 7.7.3 Convention for future escalation flags
+
+New opt-in escalation flags should:
+
+- **Default off.** Ship tested behavior behind the flag; never silently change
+  v1 default behavior.
+- **Parse `.strip().lower() in {"1", "true", "yes"}`** (per S12's broader form,
+  per the divergence resolution above).
+- **Co-locate the helper with the feature it gates** — not at a central
+  feature-flag registry. Operators opt-in per-feature; the helper lives where
+  the feature lives.
+- **Document via ADR in `DECISIONS.md`** mirroring ADR-014's shape (Context →
+  Decision → Consequences → Alternatives → Tracking).
+
+This pattern has now appeared twice (S10 + S12); third+ instances reuse the
+template rather than reinventing.
+
 ---
 
 ## 8. Image generation — production + max-tier N=8
