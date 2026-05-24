@@ -7,7 +7,7 @@ import tempfile
 import pytest
 
 
-from cost_tracker import CostEntry, CostTracker, PRICING, _detect_provider
+from cost_tracker import API_COST_USD, CostEntry, CostTracker, PRICING, _detect_provider
 
 
 # ===================================================================
@@ -467,8 +467,6 @@ class TestGetSummaryWithData:
 class TestRecordAPICall:
     def test_record_api_call_known_api_uses_table(self, cost_tracker):
         """Known api_name pulls cost from API_COST_USD table."""
-        from cost_tracker import API_COST_USD
-
         cost = cost_tracker.record_api_call("SORA_2")
         assert cost == pytest.approx(API_COST_USD["SORA_2"])
 
@@ -482,11 +480,12 @@ class TestRecordAPICall:
         with pytest.warns(UserWarning, match="Unknown API"):
             cost = cost_tracker.record_api_call("TOTALLY_UNKNOWN_API_XYZ")
         assert cost == pytest.approx(0.0)
+        # Accumulator must not move on the zero-cost path — the budget
+        # gate would otherwise drift on every unknown-API call.
+        assert cost_tracker.spent_usd == pytest.approx(0.0)
 
     def test_record_api_call_updates_spent_usd(self, cost_tracker):
         """spent_usd accumulator reflects each recorded call."""
-        from cost_tracker import API_COST_USD
-
         assert cost_tracker.spent_usd == pytest.approx(0.0)
         cost_tracker.record_api_call("VEO")
         cost_tracker.record_api_call("FLUX_PRO")
@@ -536,18 +535,21 @@ class TestBudgetGate:
         tracker.close()
 
     def test_would_exceed_under_budget(self, db_path):
-        """Returns False when spending 0.50 more is within a $1.00 cap (already at 0.30)."""
+        """Returns False when one more LTX call stays within a $1.00 cap."""
         tracker = CostTracker(db_path=db_path, budget_usd=1.00)
         tracker.spent_usd = 0.30
-        # would_exceed looks up the table cost; 0.30 + API_COST_USD["LTX"]=0.10 < 1.00
+        # Lock the invariant so a future tariff change for LTX breaks
+        # the precondition (test author updates) instead of silently
+        # rendering the assertion vacuous.
+        assert tracker.spent_usd + API_COST_USD["LTX"] < tracker.budget_usd
         assert tracker.would_exceed("LTX") is False
         tracker.close()
 
     def test_would_exceed_over_budget(self, db_path):
-        """Returns True when one more call would push spent past the cap."""
+        """Returns True when one more SORA_2 call would push spent past the cap."""
         tracker = CostTracker(db_path=db_path, budget_usd=1.00)
         tracker.spent_usd = 0.80
-        # 0.80 + SORA_2=0.60 > 1.00
+        assert tracker.spent_usd + API_COST_USD["SORA_2"] > tracker.budget_usd
         assert tracker.would_exceed("SORA_2") is True
         tracker.close()
 
@@ -562,7 +564,7 @@ class TestBudgetGate:
     def test_is_over_budget_post_record(self, db_path):
         """After recording enough calls to exceed the cap, is_over_budget returns True."""
         tracker = CostTracker(db_path=db_path, budget_usd=0.50)
-        # SORA_2=0.60 alone exceeds 0.50
+        assert API_COST_USD["SORA_2"] > tracker.budget_usd  # one call exceeds cap
         tracker.record_api_call("SORA_2")
         assert tracker.is_over_budget() is True
         tracker.close()
