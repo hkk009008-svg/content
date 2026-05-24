@@ -618,3 +618,211 @@ class TestV11Fixes:
         best = pick_best_take_for_final(candidates)
         assert best is not None
         assert best["id"] == "fb_hi"
+
+
+# ---------------------------------------------------------------------------
+# TestMotionGateFlag — unit tests for the is_motion_gate_enabled() helper.
+# ---------------------------------------------------------------------------
+
+
+class TestMotionGateFlag:
+    """Tests for cinema.auto_approve.is_motion_gate_enabled()."""
+
+    def test_is_motion_gate_enabled_default_off(self, monkeypatch):
+        """No env var set → helper returns False (v1 default preserved)."""
+        from cinema.auto_approve import is_motion_gate_enabled
+
+        monkeypatch.delenv("CINEMA_AUTO_APPROVE_MOTION", raising=False)
+        assert is_motion_gate_enabled() is False
+
+    @pytest.mark.parametrize(
+        "value",
+        ["1", "true", "TRUE", "True", "yes", "YES", "Yes", "  1  "],
+    )
+    def test_is_motion_gate_enabled_truthy_values(self, monkeypatch, value):
+        """All documented truthy forms (case-insensitive, whitespace-tolerant)
+        must return True — closes the case-sensitivity papercut S10's code
+        reviewer flagged on CINEMA_STRICT_SCHEMA."""
+        from cinema.auto_approve import is_motion_gate_enabled
+
+        monkeypatch.setenv("CINEMA_AUTO_APPROVE_MOTION", value)
+        assert is_motion_gate_enabled() is True, (
+            f"expected True for env value {value!r}"
+        )
+
+    @pytest.mark.parametrize(
+        "value",
+        ["", "0", "false", "False", "no", "NO", "random", "off"],
+    )
+    def test_is_motion_gate_enabled_falsy_values(self, monkeypatch, value):
+        """Non-truthy env values (including empty string) → False."""
+        from cinema.auto_approve import is_motion_gate_enabled
+
+        monkeypatch.setenv("CINEMA_AUTO_APPROVE_MOTION", value)
+        assert is_motion_gate_enabled() is False, (
+            f"expected False for env value {value!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestMotionGateIntegration — controller integration tests.
+#
+# Each test follows the StubHost pattern from
+# test_review_controller_run_auto_approve_pass_plan_gate (line 469):
+#   build project → instantiate controller → call _run_auto_approve_pass
+#   with monkeypatched env → assert mutations.
+# ---------------------------------------------------------------------------
+
+
+class TestMotionGateIntegration:
+    """Integration tests for motion gate wiring through ReviewController."""
+
+    def _make_ctrl_and_project(self, motion_takes=None, extra_shot_fields=None):
+        """Shared helper: returns (ctrl, project, mutations_list) ready to call
+        _run_auto_approve_pass("PERFORMANCE_REVIEW") on."""
+        from cinema.review.controller import ReviewController
+        from cinema.lifecycle import NullLifecycle
+        from cinema.runstate import RunState
+
+        shot = _make_shot(
+            motion_takes=motion_takes if motion_takes is not None else [],
+            **(extra_shot_fields or {}),
+        )
+        project = _make_project()
+        project["scenes"] = [{"id": "scene_001", "shots": [shot]}]
+
+        mutations: list[dict] = []
+
+        class StubHost:
+            def _refresh_project_snapshot(self, timeout=10):
+                return project
+
+            def _find_take(self, s, take_id):
+                for coll in ("keyframe_takes", "motion_takes", "postprocess_variants"):
+                    for t in (s.get(coll) or []):
+                        if t.get("id") == take_id:
+                            return coll, t
+                return None, None
+
+            def _mutate_shot(self, shot_id, mutator, timeout=10):
+                for scene in project.get("scenes", []):
+                    for s in scene.get("shots", []):
+                        if s.get("id") == shot_id:
+                            result = mutator(scene, s)
+                            mutations.append({"shot_id": shot_id, "result": result})
+                            return result.value if result else None
+                return None
+
+            def resume(self):
+                pass
+
+        core = MagicMock()
+        core.project = project
+        lifecycle = NullLifecycle()
+        runstate = RunState()
+        host = StubHost()
+        ctrl = ReviewController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
+        return ctrl, project, mutations
+
+    def test_motion_gate_off_by_default_skips_performance_review(self, monkeypatch):
+        """With flag unset, PERFORMANCE_REVIEW → early return; no mutation, no audit."""
+        monkeypatch.delenv("CINEMA_AUTO_APPROVE_MOTION", raising=False)
+
+        take = _make_motion_take(identity_score=0.95, motion_score=0.90)
+        ctrl, project, mutations = self._make_ctrl_and_project(motion_takes=[take])
+
+        ctrl._run_auto_approve_pass("PERFORMANCE_REVIEW")
+
+        shot = project["scenes"][0]["shots"][0]
+        assert shot.get("approved_motion_take_id") is None, (
+            "flag off: approved_motion_take_id must not be set"
+        )
+        assert shot.get("motion_auto_approved") is None, (
+            "flag off: motion_auto_approved must not be set"
+        )
+        assert shot.get("auto_approve_audit", []) == [], (
+            "flag off: no audit entry expected"
+        )
+        assert mutations == [], "flag off: no mutations expected"
+
+    def test_motion_gate_on_approves_high_scoring_take(self, monkeypatch):
+        """With flag set + high-scoring take → approved_motion_take_id set,
+        motion_auto_approved=True, audit entry appended."""
+        monkeypatch.setenv("CINEMA_AUTO_APPROVE_MOTION", "1")
+
+        # identity=0.95 > 0.85 threshold, motion_fidelity=0.85 > 0.7 threshold,
+        # fallback=False → all 3 veto rules pass.
+        take = _make_motion_take(identity_score=0.95, motion_score=0.85)
+        ctrl, project, mutations = self._make_ctrl_and_project(motion_takes=[take])
+
+        ctrl._run_auto_approve_pass("PERFORMANCE_REVIEW")
+
+        shot = project["scenes"][0]["shots"][0]
+        assert shot.get("approved_motion_take_id") == take["id"], (
+            "approved_motion_take_id should be set to the best take's id"
+        )
+        assert shot.get("motion_auto_approved") is True
+        audit = shot.get("auto_approve_audit", [])
+        assert len(audit) == 1
+        assert audit[0]["gate"] == "motion"
+        assert audit[0]["auto_approved"] is True
+
+    def test_motion_gate_on_vetoes_low_identity(self, monkeypatch):
+        """Flag set + identity below threshold → vetoed; no approved_motion_take_id;
+        audit entry recorded with auto_approved=False."""
+        monkeypatch.setenv("CINEMA_AUTO_APPROVE_MOTION", "1")
+
+        # identity=0.60 < 0.85 default threshold → motion_identity_below_threshold fires.
+        take = _make_motion_take(identity_score=0.60, motion_score=0.85)
+        ctrl, project, mutations = self._make_ctrl_and_project(motion_takes=[take])
+
+        ctrl._run_auto_approve_pass("PERFORMANCE_REVIEW")
+
+        shot = project["scenes"][0]["shots"][0]
+        assert shot.get("approved_motion_take_id") is None, (
+            "vetoed: approved_motion_take_id must not be set"
+        )
+        assert shot.get("motion_auto_approved") is None, (
+            "vetoed: motion_auto_approved must not be set"
+        )
+        audit = shot.get("auto_approve_audit", [])
+        assert len(audit) == 1
+        assert audit[0]["gate"] == "motion"
+        assert audit[0]["auto_approved"] is False
+        assert any("identity" in r for r in audit[0].get("vetoes", [])), (
+            "veto reason should mention identity"
+        )
+
+    def test_motion_mutator_picks_best_take_by_motion_fidelity(self, monkeypatch):
+        """When two takes exist, mutator picks by motion_fidelity (primary key),
+        not identity_score or list order."""
+        monkeypatch.setenv("CINEMA_AUTO_APPROVE_MOTION", "1")
+
+        # take_a: higher motion_fidelity, lower identity_score.
+        # take_b: lower motion_fidelity, higher identity_score.
+        # mutator MUST pick take_a (motion_fidelity is primary).
+        take_a = {
+            "id": "take_a",
+            "kind": "motion",
+            "path": "/tmp/a.mp4",
+            "metadata": {"motion_fidelity": 0.92, "identity_score": 0.87},
+            "cascade_metadata": {"fallback": False},
+        }
+        take_b = {
+            "id": "take_b",
+            "kind": "motion",
+            "path": "/tmp/b.mp4",
+            "metadata": {"motion_fidelity": 0.75, "identity_score": 0.96},
+            "cascade_metadata": {"fallback": False},
+        }
+        ctrl, project, mutations = self._make_ctrl_and_project(
+            motion_takes=[take_a, take_b]
+        )
+
+        ctrl._run_auto_approve_pass("PERFORMANCE_REVIEW")
+
+        shot = project["scenes"][0]["shots"][0]
+        assert shot.get("approved_motion_take_id") == "take_a", (
+            "mutator must pick take_a (higher motion_fidelity=0.92 > 0.75), "
+            f"got: {shot.get('approved_motion_take_id')!r}"
+        )
