@@ -1783,5 +1783,212 @@ Commit 2: `test(schema): cover project.json model validation + boundary integrat
 - A field in real project.json has a shape the brief doesn't enumerate (e.g., a `settings: dict` with structured contents). Add to the model with permissive shape (`dict` or `Optional[SomeSubModel]`) and note in your report; director will decide whether Session 9 hardens it.
 - You discover `normalize_project_schema` performs validation that would conflict with Pydantic's view of reality. Don't try to reconcile in this session — surface in the report.
 
-**If you finish early:** Add `CINEMA_STRICT_SCHEMA=1` env flag support to `_validate_project` (raise instead of warn). Don't enable it by default. This pre-stages Session 9.
+**If you finish early:** Add `CINEMA_STRICT_SCHEMA=1` env flag support to `_validate_project` (raise instead of warn). Don't enable it by default. This pre-stages **Session 10** (P1-3 part 2 — caller refactor + strict mode; the strict-mode env flag was moved to Session 10 when Session 9 was reassigned to concurrency hardening on 2026-05-24).
+
+## SESSION 9 — P3-1: Concurrency hardening (race elimination on `web_server.py` module globals)
+
+**Why this matters.** The P3-1 concurrency audit (`e164505` / [docs/AUDIT-P3-1-concurrency-2026-05-24.md](AUDIT-P3-1-concurrency-2026-05-24.md)) identified two real race surfaces in `web_server.py`:
+
+1. **CRITICAL** — `_running_pipelines` check-then-write race in `api_generate` (L1161–1173). Two concurrent `POST /api/projects/{pid}/generate` calls on the same `pid` both pass the busy-check, both spawn background threads, both run the heavy `CinemaPipeline(...)` constructor (100ms–2s), both write to `_running_pipelines[pid]`. Loser is orphaned but still running — duplicate GPU spend, racing `project.json` writes (the per-project file-lock in `domain/project_manager.py` serializes the disk write but the two pipelines' in-memory state diverges), cost duplication via paid APIs.
+2. **MODERATE** — `_progress_queues` check-then-set race in `_ensure_progress_queue` (L97–102). Two concurrent callers both see `None`, both create queues, second wins. First queue is orphaned with a thread writing to it; SSE consumers reading `_progress_queues.get(pid)` get the second queue. Lost progress events, memory leak.
+
+This brief closes both with the same lock-and-sentinel pattern already in production for `_running_cores` / `_cores_lock` (Session 5 fix) and `_lora_training_threads` / `_lora_training_lock`. **Read [docs/AUDIT-P3-1-concurrency-2026-05-24.md](AUDIT-P3-1-concurrency-2026-05-24.md) before this brief — it's the spec; this is the implementation plan.**
+
+**Scope reframe (2026-05-24).** Audit Finding #3 (`CinemaPipeline.cancel/pause/resume` thread-safety under shutdown) is **OUT OF SCOPE**. If your new lock discipline incidentally exposes a `CinemaPipeline.*` race during testing, surface it in the report but do NOT fix in this session — Finding #3 is a separate audit slice.
+
+**Pre-work:**
+
+1. Read [docs/AUDIT-P3-1-concurrency-2026-05-24.md](AUDIT-P3-1-concurrency-2026-05-24.md) in full — it is the spec.
+2. Read [web_server.py](../web_server.py) lines 60–200 — module globals + accessor helpers (`_get_or_build_core`, `_ensure_progress_queue`, `_make_progress_cb`, `_get_stage_pipeline`, `_reject_if_project_busy`).
+3. Read [web_server.py](../web_server.py) lines 1155–1235 — `api_generate`, `api_stream`, `api_cancel`. The bulk of the rewrite lives here.
+4. Read [web_server.py](../web_server.py) lines 530–600 — the `_lora_training_lock` pattern. This is your template; mirror its shape.
+5. Locate all reader sites that do `_running_pipelines.get(pid)` followed by `pipeline.<method>`. Grep:
+   ```bash
+   grep -n "_running_pipelines.get\|_running_pipelines\[\|pid in _running_pipelines" web_server.py
+   ```
+   Expected: ~9 sites total (L119, L160, L1161, L1173, L1181, L1230, L1438, L1448, L1458, L1478, L1512, L1578 from the audit).
+6. Baseline: `.venv/bin/python -m pytest tests/unit/ --tb=no -q | tail -1` → expect `629 passed, 3 skipped, 0 failed` (post-audit baseline at HEAD `e164505`).
+
+**Scope:**
+
+| IN | OUT |
+|---|---|
+| Add `_pipelines_lock = threading.Lock()` (module-level near L77) | Refactor `_cores_lock` / `_running_cores` (already correct per Session 5) |
+| Add sentinel constant `_PIPELINE_PENDING = object()` | `CinemaPipeline.cancel` / `.pause` / `.resume` thread-safety (Finding #3 — separate audit) |
+| Wrap check-then-reserve + replace + pop in `api_generate` with `_pipelines_lock` | Frontend button-debounce (out of Python scope) |
+| Wrap `_ensure_progress_queue` check-then-set with `_pipelines_lock` (reuse — same critical-section domain) | SSE client-side race handling |
+| Update ALL reader sites to recognize the sentinel (`_PIPELINE_PENDING`) — via a `_get_running_pipeline` helper | Renaming `_running_pipelines` or other public-shape changes |
+| NEW `tests/unit/test_web_server_concurrency.py` with ≥5 tests using `threading.Thread` + `threading.Event` | Replacing the `_progress_queues` identity-check `is q` at L1186 (microscopic race window; acceptable as-is) |
+
+**Approach:**
+
+1. **Add the lock + sentinel** in `web_server.py` near the existing `_cores_lock` declaration (~L77):
+
+   ```python
+   # Guards _running_pipelines and _progress_queues. The construct-window
+   # sentinel (_PIPELINE_PENDING) lets us reserve a slot atomically while
+   # the heavy CinemaPipeline constructor runs WITHOUT holding the lock.
+   _pipelines_lock = threading.Lock()
+   _PIPELINE_PENDING = object()  # sentinel — readers must skip this
+   ```
+
+2. **Add a reader helper** so callsites don't all need to repeat the sentinel check:
+
+   ```python
+   def _get_running_pipeline(pid: str) -> Optional[CinemaPipeline]:
+       """Return the active CinemaPipeline for pid, or None if absent /
+       still mid-construction (sentinel). Callers should treat None as
+       "no generation in progress" — the sentinel state is brief (only
+       during CinemaPipeline.__init__) but visible."""
+       pipeline = _running_pipelines.get(pid)
+       if pipeline is None or pipeline is _PIPELINE_PENDING:
+           return None
+       return pipeline
+   ```
+
+3. **Rewrite `api_generate` (L1155–1192).** Reserve the slot under the lock (atomic check-then-set with the sentinel), then RELEASE the lock before the heavy constructor. The background thread re-acquires the lock to replace the sentinel with the real pipeline (or pop on failure):
+
+   ```python
+   @app.route("/api/projects/<pid>/generate", methods=["POST"])
+   def api_generate(pid):
+       project = load_project(pid)
+       if not project:
+           return jsonify({"error": "Project not found"}), 404
+
+       # Atomic reserve. _PIPELINE_PENDING acts as "busy" to other readers
+       # while CinemaPipeline.__init__ runs without holding the lock.
+       with _pipelines_lock:
+           if pid in _running_pipelines:
+               return jsonify({"error": "Generation already in progress"}), 409
+           _running_pipelines[pid] = _PIPELINE_PENDING
+
+       q = _ensure_progress_queue(pid)
+       progress_cb = _make_progress_cb(pid, q)
+       resume = request.json.get("resume", False) if request.is_json else False
+
+       def run_pipeline():
+           try:
+               pipeline = CinemaPipeline(pid, core=_get_or_build_core(pid),
+                                          progress_callback=progress_cb)
+               with _pipelines_lock:
+                   _running_pipelines[pid] = pipeline  # replace sentinel
+               result = pipeline.generate(resume=resume)
+               q.put({"stage": "DONE", "detail": result or "Failed", "percent": 100})
+           except Exception as e:
+               import traceback
+               traceback.print_exc()
+               q.put({"stage": "ERROR", "detail": str(e), "percent": 0})
+           finally:
+               with _pipelines_lock:
+                   _running_pipelines.pop(pid, None)
+               q.put(None)
+               # Identity-check guard against pop-after-replace remains as-is.
+               if _progress_queues.get(pid) is q:
+                   _progress_queues.pop(pid, None)
+
+       thread = threading.Thread(target=run_pipeline, daemon=True)
+       thread.start()
+       return jsonify({"started": True, "resume": resume,
+                       "message": "Generation started. Connect to /api/projects/<pid>/stream for progress."})
+   ```
+
+4. **Rewrite `_ensure_progress_queue` (L97–102)** — reuse `_pipelines_lock` (no need for a second lock; the two surfaces share a lifecycle):
+
+   ```python
+   def _ensure_progress_queue(pid: str) -> queue.Queue:
+       with _pipelines_lock:
+           q = _progress_queues.get(pid)
+           if q is None:
+               q = queue.Queue()
+               _progress_queues[pid] = q
+           return q
+   ```
+
+5. **Update reader sites** to use `_get_running_pipeline(pid)` instead of `_running_pipelines.get(pid)`:
+   - L1230 (`api_cancel`)
+   - L1438, L1448, L1458, L1478, L1512, L1578 (the various status/control endpoints)
+   - L119 (`_get_stage_pipeline`) — careful: this currently has a fallback to construct a new CinemaPipeline if `_running_pipelines.get(pid)` is None. The sentinel state should also trigger the fallback (the constructor will use the cached core; it doesn't write to `_running_pipelines`). Verify the semantics.
+   - L160 (`_reject_if_project_busy`) — this uses `pid in _running_pipelines` to detect busy state. With the sentinel, "pid in" still returns True during the construct window, which is the CORRECT behavior (the project IS busy, just not yet fully spun up). No change needed at L160.
+   - L1161 — replaced by the new lock-protected check in (3).
+
+6. **Tests** — NEW `tests/unit/test_web_server_concurrency.py`, ≥5 tests:
+
+   - `test_concurrent_generate_only_one_wins` — spin 2 threads that POST `/api/projects/{pid}/generate` for the same `pid` simultaneously (use `threading.Barrier(2)` to maximize overlap). Assert exactly one returns 200, one returns 409. Patch `CinemaPipeline` with a fake that has a slow `__init__` (10–50ms) so the race window is observable.
+   - `test_pending_sentinel_visible_during_construction` — patch `CinemaPipeline.__init__` to block on a `threading.Event`. Call `/api/projects/{pid}/generate`. Before releasing the event, read `web_server._running_pipelines[pid]` directly and assert it `is web_server._PIPELINE_PENDING`. Then release; assert the dict now holds the real fake pipeline.
+   - `test_pending_sentinel_replaced_by_real_pipeline` — sequential, no race. After full POST + background completion, `_running_pipelines.get(pid)` should be the fake pipeline (not the sentinel, not None).
+   - `test_reader_handles_sentinel_gracefully` — directly populate `_running_pipelines[pid] = _PIPELINE_PENDING`. Call `/api/projects/{pid}/cancel`. Assert 404 (not 500).
+   - `test_concurrent_ensure_progress_queue_returns_same_queue` — spin 2 threads calling `_ensure_progress_queue(pid)`. Assert both return the same `queue.Queue` instance.
+
+   Use Flask's `app.test_client()` for HTTP-level tests. Use `monkeypatch` (or `unittest.mock.patch`) to replace `CinemaPipeline` with a thin fake exposing `cancel()`, `generate()` returning quickly. Use `threading.Barrier` / `threading.Event` for deterministic-race tests.
+
+**Acceptance criteria:**
+
+- [ ] `_pipelines_lock = threading.Lock()` declared at module level in `web_server.py` near the existing `_cores_lock`
+- [ ] `_PIPELINE_PENDING = object()` sentinel declared
+- [ ] `_get_running_pipeline(pid)` helper added
+- [ ] `api_generate` (L1155–1192) wraps check-then-reserve in `_pipelines_lock`; releases the lock before the constructor; the background fn re-acquires for the replace + pop
+- [ ] `_ensure_progress_queue` wraps check-then-set in `_pipelines_lock`
+- [ ] All reader sites identified in pre-work step 5 updated to use `_get_running_pipeline`
+- [ ] `tests/unit/test_web_server_concurrency.py` exists with ≥5 tests
+- [ ] `pytest tests/unit/` whole-suite: ≥634 pass / 3 skip / 0 fail (629 baseline + ≥5 new)
+- [ ] §15 smoke still passes
+- [ ] `git diff --stat HEAD~2..HEAD` shows changes ONLY in `web_server.py` and `tests/unit/test_web_server_concurrency.py`
+- [ ] No new `threading.Lock()` declared other than `_pipelines_lock` (reuse, don't proliferate)
+
+**Pitfalls:**
+
+- **DO NOT hold `_pipelines_lock` across `CinemaPipeline(...)` construction.** The constructor takes hundreds of milliseconds to seconds; holding the lock would serialize all `/generate` calls globally. The sentinel pattern exists precisely to release the lock during construction. If a reviewer suggests "just hold the lock through construction," reject — that's a worse design.
+- **DO NOT skip updating reader sites.** Readers that do `pipeline = _running_pipelines.get(pid); if pipeline:` will treat the sentinel as truthy (`object()` is truthy) and then call `.cancel()` on a bare `object`, crashing with `AttributeError`. All ~7 reader sites must use the new helper.
+- **DO NOT deadlock by nesting `_pipelines_lock` and `_cores_lock`.** They guard different surfaces and must never be acquired together. Verify by grep: there should be ZERO occurrences of one inside the other.
+- **`_progress_queues.pop(pid)` in the finally block doesn't need to be inside `_pipelines_lock`.** Single `dict.pop` is atomic under CPython GIL, and the identity-check `_progress_queues.get(pid) is q` prevents pop-after-replace. Adding the lock there would be overkill noise.
+- **Don't change `_get_stage_pipeline` (L118–124) more than necessary.** It currently has a constructor-fallback path. The sentinel state should ALSO trigger the fallback (treat sentinel like absent). One-line change to the early-return condition.
+- **Test isolation matters.** Each test must clear `_running_pipelines` and `_progress_queues` in setup/teardown (use a `pytest` fixture). Otherwise tests leak state into each other.
+- **Flask threading.** Flask's `test_client` runs handlers synchronously by default; for the race tests, you'll need to actually spawn threads that call `client.post(...)` concurrently. The Flask app itself is thread-safe under WSGI.
+
+**Verification:**
+
+```bash
+# 1. New tests pass in isolation
+.venv/bin/python -m pytest tests/unit/test_web_server_concurrency.py -v 2>&1 | tail -25
+# Expected: ≥5 pass / 0 fail
+
+# 2. Whole-suite (no regression)
+.venv/bin/python -m pytest tests/unit/ --tb=no -q 2>&1 | tail -3
+# Expected: ≥634 pass / 3 skip / 0 fail
+
+# 3. §15 smoke
+.venv/bin/python /Users/hyungkoookkim/Content/scripts/ci_smoke.py
+# Expected: OK
+
+# 4. No new locks proliferated
+grep -c "threading\.Lock()\|threading\.RLock()" web_server.py
+# Expected: 3 (was 2: _cores_lock + _lora_training_lock; +1 for _pipelines_lock)
+
+# 5. Scope check
+git diff --stat HEAD~2..HEAD
+# Expected: ONLY web_server.py + tests/unit/test_web_server_concurrency.py
+```
+
+**Commit shape (split into 2):**
+
+Commit 1: `feat(web): close _running_pipelines / _progress_queues race surfaces`
+  - `web_server.py` changes (lock + sentinel + helper + api_generate rewrite + reader updates + _ensure_progress_queue wrap)
+  - Cite `docs/AUDIT-P3-1-concurrency-2026-05-24.md` (audit `e164505`) as the pre-authorization
+  - Note the sentinel-pattern rationale (avoid holding lock across heavy ctor)
+  - List all updated reader sites in the body
+
+Commit 2: `test(web): cover concurrent api_generate + _ensure_progress_queue race`
+  - `tests/unit/test_web_server_concurrency.py`
+  - Reference commit #1's SHA in body
+  - List the 5+ test names + their race scenarios
+
+**Estimated effort:** S — 60–90 min implementer subagent. Bulk is reader-site updates (~7 call sites) + writing thread-stress tests with deterministic-race fixtures.
+
+**Decision authority:** Lane A on test fixture style (which methods to fake on `CinemaPipeline`, `Barrier` vs `Event` choice), lock-acquire timing within `run_pipeline`. Escalate when:
+
+- A reader site has unusual logic that makes the sentinel check awkward (e.g., it calls multiple pipeline methods sequentially and the sentinel could appear between calls). Surface the site + your proposed handling.
+- Flask `test_client` has trouble with threading (it does sometimes block on its own threadlocal state). Fall back to direct-function-call tests bypassing HTTP, but report the limitation.
+- You discover a deadlock during `tests/unit/`: investigate the lock-ordering BEFORE proposing a fix. The brief asserts no nesting between `_pipelines_lock` and `_cores_lock`; if you find one, that's a real issue worth surfacing.
+
+**If you finish early:** Add a test using `threading.Barrier(N>=4)` to maximize concurrency under maximum pressure (4+ threads racing on `api_generate`). Also: explore a property-based test using `hypothesis` to vary inter-thread delays via `time.sleep` jitter. These pre-stage a "torture test" suite for any future concurrency work.
 

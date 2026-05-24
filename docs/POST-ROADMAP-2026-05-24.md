@@ -16,11 +16,12 @@
 
 ## TL;DR — top 3 for next director (in priority order)
 
-> **Cycle 3 update (2026-05-24):** Sessions 7, 8, and the Monitor.tsx
-> cascade wiring all shipped this cycle; they're now in the "What
-> shipped" matrix below. Picks rotated again — the top-3 is now the
-> next layer of work that requires either a product call (P4-3) or a
-> deeper engineering investment (Session 9 follow-up, P3-1).
+> **Cycle 3 update (2026-05-24, late):** Sessions 7, 8, the Monitor.tsx
+> cascade wiring, the P3-1 concurrency audit, and the Session 9 brief
+> (P3-1 hardening) all shipped this cycle; they're in the "What
+> shipped" matrix below. Picks rotated once more — the remaining top-3
+> are either product-blocked (P4-3), brief-ready (Session 9), or
+> brief-blocked (Session 10).
 
 1. **P4-3 four-gate review fatigue — auto-approve heuristics** — the
    most operator-visible UX gap remaining. With Session 5 capturing
@@ -32,22 +33,23 @@
    composite? This is a product conversation worth having before
    any impl session.
 
-2. **Session 9 follow-up to Session 8 (P1-3 part 2)** — caller
-   refactor to typed accessors (replace `project["scenes"][i]["shots"]
-   [j]["target_api"]` with `project.scenes[i].shots[j].target_api`)
-   + `CINEMA_STRICT_SCHEMA=1` env flag for production-strict mode.
-   Effort: L (2-3 sessions; brief should sequence module-by-module).
-   Session 8's `domain/models.py` is the foundation; this turns the
-   warn-only safety net into a real type contract. **Brief is not
-   yet written** — needed before dispatch.
+2. **Session 9 — P3-1 concurrency hardening** — race elimination for
+   the two unguarded module-globals identified in the P3-1 audit
+   (`docs/AUDIT-P3-1-concurrency-2026-05-24.md`, commit `e164505`).
+   Adds `_pipelines_lock` + `_PIPELINE_PENDING` sentinel + reader-site
+   updates + ≥5 thread-stress tests. **Brief shipped** at
+   `docs/HANDOFF-roadmap-2026-05-24.md` §SESSION 9. Effort: S
+   (~60–90 min implementer subagent). Ready to dispatch.
 
-3. **P3-1 Concurrency hygiene** — audit the module-globals
-   (`_running_pipelines`, `_progress_queues`, `_cores_lock`) for
-   thread-safety. The Session 5 reviewer caught one missing lock; the
-   rest is unaudited. Promoted from honorable-mention to Tier 1 #3
-   because it's the highest-risk remaining safety gap (silent races
-   in production could corrupt project state). Effort: M (1 audit
-   session + 1 fix session if issues surface).
+3. **Session 10 — P1-3 part 2 (caller refactor + strict mode)** —
+   was Session 9 before the P3-1 audit findings promoted concurrency
+   hardening ahead of it. Caller refactor to typed accessors
+   (replace `project["scenes"][i]["shots"][j]["target_api"]` with
+   `project.scenes[i].shots[j].target_api`) + `CINEMA_STRICT_SCHEMA=1`
+   env flag for production-strict mode, building on Session 8's
+   `domain/models.py`. Effort: L (2-3 sessions; brief should sequence
+   module-by-module). **Brief not yet written** — author after
+   Session 9 closes.
 
 **Honorable mentions** (S-to-M, opportunistic single sessions):
 - **P1-2 Pipeline orchestrator extraction** — `cinema_pipeline.py` is
@@ -143,12 +145,12 @@ P2-3), 3 partial (P3-2, P4-5, P1-3 — cycle 3 added P1-3 boundary slice),
 
 ## Recommendation for next director
 
-After cycle 3 closes (Sessions 7 + 8 + Monitor.tsx wiring + 3-rule
-discipline expansion), the project has **closed every Tier-1 pickup
-that didn't need a product conversation or a follow-on brief**. The 3
-highest-leverage picks for next director sit at a step change in
-investment level — they're either product-blocked, brief-blocked, or
-audit-shaped:
+After cycle 3 closes (Sessions 7 + 8 + Monitor.tsx wiring + the P3-1
+concurrency audit + Session 9 brief + 3-rule discipline expansion),
+the project has **closed every Tier-1 pickup that didn't need a
+product conversation, a follow-on brief, or an external decision**.
+The 3 highest-leverage picks for next director sit at a step change
+in investment level:
 
 1. **P4-3 review fatigue / auto-approve heuristics** — highest-impact
    UX gap remaining; **product-blocked** on which confidence signals
@@ -156,17 +158,13 @@ audit-shaped:
    budget, composite?). Session 5's telemetry is the data foundation;
    the next director should surface the product question rather than
    guess at thresholds.
-2. **Session 9 (P1-3 part 2)** — caller refactor to typed accessors
-   + `CINEMA_STRICT_SCHEMA=1` env flag, building on Session 8's
-   `domain/models.py`. **Brief-blocked**: needs a Session 8-shaped
-   brief authored before any implementer dispatch. Module sequencing
-   (which `domain/*` caller goes first) is the load-bearing decision.
-3. **P3-1 concurrency hygiene** — audit `_running_pipelines`,
-   `_progress_queues`, `_cores_lock` for thread-safety holes. The
-   Session 5 reviewer caught one missing lock; the rest is unaudited.
-   **Audit-shaped**: needs investigation first, then surgical fixes.
-   Promoted from honorable-mention to Tier 1 because it's the
-   highest-risk remaining safety gap.
+2. **Session 9 — P3-1 concurrency hardening** — brief shipped at
+   `docs/HANDOFF-roadmap-2026-05-24.md` §SESSION 9; closes the two
+   race surfaces flagged by the P3-1 audit. **Ready to dispatch** —
+   Lane B subagent, ~60-90 min.
+3. **Session 10 — P1-3 part 2 (caller refactor + strict mode)** —
+   brief-blocked. Author a Session 8-shaped brief sequencing
+   `domain/*` callers module-by-module, then dispatch.
 
 Below those, **P1-2 (orchestrator extraction)** and **P2-1
 (competitive_generation default)** remain S-to-M opportunistic
