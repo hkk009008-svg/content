@@ -2273,3 +2273,188 @@ Commit 2: `test(cinema): cover auto-approve veto rules + per-gate integration`
 
 **If you finish early:** Add a `cinema/auto_approve.py` helper `summarize_audit(shot_state) -> dict` that aggregates the per-gate audit entries into a Session-12-ready summary shape (auto-approved gates count, total vetoes, per-rule fire counts). Pre-stages Session 12's PostRunSummary modal without committing to its UI shape.
 
+## SESSION 10 — P1-3 part 2 (first migration): strict-mode env flag + one canonical caller as template
+
+**Why this matters.** Session 8 (`ceb0a32` / `f9b0aff`) shipped Pydantic models + boundary validation in **warn-only** mode. The product-design question is: *when does the project want validation to actually halt operations vs. just log a warning?* Session 10 ships the env flag (`CINEMA_STRICT_SCHEMA=1`) that flips warn → raise, PLUS migrates ONE canonical caller from `project["scenes"][i]["shots"][j]["target_api"]`-style dict access to typed `project.scenes[i].shots[j].target_api` access. The migration target serves as the **template** for Sessions 12+ to follow (the full `domain/*` arc is 2-3 sub-sessions per POST-ROADMAP).
+
+**Scope reframe (split-session brief).** Session 10 is the FIRST of 2-3 sub-sessions in the P1-3 follow-up arc. Sessions 12+ migrate additional callers (likely module-by-module: `cinema/lifecycle.py`, `cinema/shots/controller.py`, etc.). This brief deliberately picks just ONE migration target — the implementer chooses based on their survey, but the target MUST be small (≤30 LOC), read-only or trivially-write-back, and demonstrative of the migration pattern. The goal is to **establish the template**, not to migrate everything.
+
+**Decisions (no user input needed):**
+- Strict mode is off by default. The env flag opts in. Existing projects + production all keep warn-only semantics until operators explicitly flip it.
+- Migration target is implementer's pick from the candidate list below. Whichever has the cleanest semantics (defaults match between dict.get and Pydantic).
+- The migration uses `Project.model_validate(project_dict)` at the function boundary, then attribute access throughout. Save-back is `project_typed.model_dump()` ONLY if mutation is needed.
+
+**Pre-work:**
+
+1. Read [docs/HANDOFF-roadmap-2026-05-24.md](HANDOFF-roadmap-2026-05-24.md) §SESSION 8 (lines 1630–1788) — the Pydantic boundary spec; Session 10 builds on it.
+2. Read [domain/models.py](../domain/models.py) — the 7 Pydantic models from Session 8 (`Project`, `Scene`, `Shot`, `TakeRecord`, `CascadeMetadata`, `Character`, `Location`).
+3. Read [domain/project_manager.py](../domain/project_manager.py) lines 585–650 — the `_validate_project` boundary; you'll modify this for the env flag.
+4. Survey candidate migration targets via:
+   ```bash
+   grep -n 'shot\["target_api"\]\|shot\.get("target_api"\|project\["scenes"\]\|scene\["shots"\]' \
+       --include="*.py" -r /Users/hyungkoookkim/Content/ | grep -v ".venv\|.git\|tests/"
+   ```
+   Pick ONE small, read-only or trivially-write-back caller. Good candidates (from prior survey):
+   - `web_server.py:1096` and `:1121` — `scene = next((s for s in project["scenes"] if s["id"] == sid), None)` — pure read, scene lookup
+   - `web_server.py:1421` — `for scene in project["scenes"]: for shot in scene.get("shots", [])` — iteration + write-back (more complex)
+   - `cinema/review/controller.py:268` — `"target_api": shot.get("target_api", "AUTO")` — read with default; demonstrates the dict-default vs Pydantic-default translation
+   - `cinema/shots/controller.py:406` — `if shot.get("target_api", "AUTO") == "AUTO":` — predicate; demonstrates default-value migration
+   - `cinema/shots/controller.py:1303` — `scene = next((s for s in project["scenes"] if s["id"] == scene_id), None)` — scene lookup; pure read
+
+   **Recommended target: `web_server.py:1096` or `:1121`** — both are pure scene lookups inside endpoint handlers, no write-back, and the migration is mechanically simple. The endpoint handlers are also production-hot, so the migration demonstrates real value.
+5. Baseline: `.venv/bin/python -m pytest tests/unit/ --tb=no -q | tail -1` → expect 636+ pass / 3 skip / 0 fail (the count varies depending on whether Sessions 11+ have shipped by your start time).
+
+**Scope:**
+
+| IN | OUT |
+|---|---|
+| `CINEMA_STRICT_SCHEMA=1` env flag in `_validate_project` (raise instead of warn when set) | Migrating ALL `domain/*` callers (Sessions 12+) |
+| Default off; existing callers unaffected | Changing the public signature of `load_project` / `save_project` (still return `dict`) |
+| ONE canonical caller migrated to typed access (from the candidate list above; implementer picks) | Removing the warn-only path entirely (still the default behavior) |
+| Migration pattern documented inline in the migrated code via a comment block referencing this brief | Frontend type sync (TypeScript already mirrors via `web/src/types/project.ts`; out of scope) |
+| New tests covering: (a) env flag off (warn-only); (b) env flag on (raise); (c) the migrated caller's behavior unchanged | Removing or repurposing the existing `normalize_project_schema` function |
+| Pattern doc in `docs/MIGRATION-PATTERN-pydantic-caller.md` (NEW; ~50 LOC) — the canonical recipe Sessions 12+ follow | Re-running the Session 8 boundary tests with strict mode on (the env flag is for production use, not for the test suite) |
+
+**Approach:**
+
+1. **Env flag in `_validate_project`** (`domain/project_manager.py`, ~10 LOC change):
+
+   ```python
+   import os
+   # ... existing code ...
+   def _validate_project(project: dict, context: str) -> None:
+       """Pydantic validation pass.
+
+       Warn-only by default (Session 8 contract). Set CINEMA_STRICT_SCHEMA=1
+       in the environment to raise ValidationError instead of warning.
+       This is the Session 10 P1-3 part 2 escalation path: operators can
+       opt in to strict validation in production once confident no warnings
+       are firing.
+       """
+       strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in ("1", "true", "TRUE", "yes")
+       try:
+           Project.model_validate(project)
+       except ValidationError as e:
+           if strict:
+               raise   # let it propagate; save_project / load_project callers crash
+           logger.warning(...)   # existing warn-only path unchanged
+       except Exception as e:
+           if strict:
+               raise   # belt-and-suspenders strict propagation
+           logger.warning(...)   # existing non-ValidationError warn unchanged
+   ```
+
+   The `try/except` structure is preserved; the only addition is the `if strict: raise` branches.
+
+2. **Pick the migration target** (~15 LOC change in one file, e.g., `web_server.py:1096`):
+
+   Before:
+   ```python
+   scene = next((s for s in project["scenes"] if s["id"] == sid), None)
+   if scene is None:
+       return jsonify({"error": "Scene not found"}), 404
+   # ... use scene["title"], scene["shots"], etc.
+   ```
+
+   After:
+   ```python
+   # P1-3 migration template (Session 10): validate to Pydantic at the
+   # function boundary, then access via attributes. Future call sites
+   # follow this pattern (Sessions 12+). See docs/MIGRATION-PATTERN-
+   # pydantic-caller.md for the recipe.
+   from domain.models import Project
+   project_typed = Project.model_validate(project)
+   scene = next((s for s in project_typed.scenes if s.id == sid), None)
+   if scene is None:
+       return jsonify({"error": "Scene not found"}), 404
+   # ... use scene.title, scene.shots, etc.
+   ```
+
+   Choose the migration target carefully: defaults matter. If the dict version used `.get("foo", "AUTO")`, the migrated version needs equivalent handling (Pydantic's default for `target_api` is `""`, not `"AUTO"`). Handle the mismatch with `scene.target_api or "AUTO"` or by adjusting the Pydantic model's default. **Document the default-translation decision in the migration-pattern doc.**
+
+3. **Migration pattern doc** (`docs/MIGRATION-PATTERN-pydantic-caller.md`, NEW, ~50 LOC):
+   - Title: "P1-3 caller migration pattern (Pydantic-typed access)"
+   - Three sections: WHEN to migrate, HOW to migrate, GOTCHAS (default-value translation, write-back via model_dump, performance impact of model_validate on every call)
+   - Reference Session 10's specific migration target as the canonical example
+
+4. **Tests** (extend `tests/unit/test_project_models.py` from Session 8; ~5 new tests):
+   - `TestStrictModeOff`: existing default behavior is unchanged (warn-only); validation errors logged not raised.
+   - `TestStrictModeOn` (3 tests): with `monkeypatch.setenv("CINEMA_STRICT_SCHEMA", "1")`:
+     - ValidationError raised (not logged) on schema mismatch
+     - Non-ValidationError (TypeError, etc.) ALSO raised (belt-and-suspenders strict)
+     - Off/on cycle: setting to "" or unsetting reverts to warn-only
+   - `TestEnvFlagParsing`: "1", "true", "yes" → strict; "0", "", "false", missing → warn (test the parsing logic)
+   - `TestMigratedCaller`: behavioral regression test for the picked migration target. Mock the dict input; assert the migrated code path returns the same result as the old dict-access path would have.
+
+**Acceptance criteria:**
+
+- [ ] `CINEMA_STRICT_SCHEMA` env flag honored in `_validate_project`; raises on validation failures when set, warns when unset
+- [ ] One canonical caller migrated to `Project.model_validate(...)` + attribute access (implementer's pick from the candidate list)
+- [ ] Migration site has an inline comment block citing Session 10 + the migration-pattern doc
+- [ ] `docs/MIGRATION-PATTERN-pydantic-caller.md` exists with WHEN / HOW / GOTCHAS sections + the canonical example
+- [ ] ≥5 new tests in `tests/unit/test_project_models.py` covering env flag (off/on) + migrated caller regression
+- [ ] `pytest tests/unit/` whole-suite: ≥641 pass / 3 skip / 0 fail (636 baseline + ≥5 new; adjust if Sessions 11+ shipped before you start)
+- [ ] §15 smoke still passes
+- [ ] Scope: changes only in `domain/project_manager.py`, `<migration-target-file>.py`, `docs/MIGRATION-PATTERN-pydantic-caller.md` (new), `tests/unit/test_project_models.py`
+
+**Pitfalls:**
+
+- **DON'T enable `CINEMA_STRICT_SCHEMA` in tests by default.** The env flag is for opt-in production strict mode. Tests should explicitly set it via `monkeypatch.setenv` when testing strict mode, and unset (or `monkeypatch.delenv`) for warn-only tests. Otherwise tests start raising on any minor schema drift in fixtures.
+- **DON'T migrate more than ONE caller.** The template-setting is the goal; the migration arc is Sessions 12+. Picking a second caller doubles the diff and dilutes the demonstration.
+- **DON'T change the Pydantic model defaults.** If your migration target uses `.get("foo", "AUTO")` and Pydantic gives `""`, handle the mismatch in the call site (`x.target_api or "AUTO"`). Changing the model default ripples to every caller of `Project`.
+- **DON'T touch `load_project` / `save_project` return types.** They still return `dict` for backward compat. The migration is at the CALLER level, not at the boundary. Boundary type changes are a future-session decision after enough callers are migrated.
+- **DON'T remove the warn-only path.** It's the default. The env flag opts in to strict; the default behavior is preserved indefinitely until product calls for a cutover.
+- **DO document the default-translation choice in the migration-pattern doc.** Future Sessions 12+ need to know how to handle `.get(default)` vs Pydantic-default. Either consistent "use the dict default at the call site" or "tighten the Pydantic model" — pick one and document.
+- **Rule #7 pre-commit re-verify** (new since Session 9): immediately before each `git commit`, run `git log --oneline -5` AND `find coordination/mailbox/sent -type f -name '*.md' | wc -l`. If state moved, race-ack per Rule #5.
+
+**Verification:**
+
+```bash
+# 1. New tests pass
+.venv/bin/python -m pytest tests/unit/test_project_models.py -v 2>&1 | tail -30
+# Expected: all original Session 8 tests still pass + ≥5 new
+
+# 2. Whole-suite (no regression)
+.venv/bin/python -m pytest tests/unit/ --tb=no -q 2>&1 | tail -3
+# Expected: ≥641 pass / 3 skip / 0 fail (or higher depending on parallel session ships)
+
+# 3. §15 smoke
+.venv/bin/python /Users/hyungkoookkim/Content/scripts/ci_smoke.py
+# Expected: OK
+
+# 4. Strict mode manual verification
+CINEMA_STRICT_SCHEMA=1 .venv/bin/python -c "
+from domain.project_manager import _validate_project
+try:
+    _validate_project({'id': None}, 'manual-test')  # None id should fail validation
+    print('UNEXPECTED: did not raise')
+except Exception as e:
+    print(f'OK — raised: {type(e).__name__}')
+"
+# Expected: OK — raised: ValidationError (or similar)
+
+# 5. Scope check
+git diff --stat HEAD~2..HEAD
+# Expected: 4 files (project_manager.py, migration-target file, MIGRATION-PATTERN doc, test_project_models.py)
+```
+
+**Commit shape (split into 2):**
+
+Commit 1: `feat(schema): CINEMA_STRICT_SCHEMA env flag + first caller migration`
+  - `domain/project_manager.py` (env-flag branch), `<migration-target>.py` (caller migration), `docs/MIGRATION-PATTERN-pydantic-caller.md` (NEW)
+  - Body: cite Session 8 + Session 10 brief; name the migration target; explain default-translation choice; paste impact-analysis findings; mention strict-mode is opt-in production-only
+
+Commit 2: `test(schema): cover strict-mode env flag + migrated caller regression`
+  - `tests/unit/test_project_models.py` (extended)
+  - Body: reference commit 1's SHA; list new test classes/methods + their coverage
+
+**Estimated effort:** M — ~60-90 min implementer subagent. Bulk is the migration-pattern doc + careful test setup (env-flag monkeypatching).
+
+**Decision authority:** Lane A on the migration target pick (any from the candidate list works), default-translation choice (call-site `or` vs. Pydantic-default adjustment — call-site `or` recommended), test naming. Escalate when:
+
+- The candidate list's targets all turn out to have write-back complications. Pick a different file by grep; surface in DONE_WITH_CONCERNS.
+- The migration reveals a Pydantic model bug from Session 8 (e.g., missing field, wrong type). Document; ship a `chore(schema)` fix.
+- The strict mode reveals existing validation failures in real `projects/*/project.json` fixtures. **Important**: do NOT change Pydantic model definitions to "fix" those — they may be legitimate schema drift the warn-only path was tolerating. Surface in DONE_WITH_CONCERNS for product decision.
+
+**If you finish early:** Add ONE more migration target as a "second canonical example" (showing the default-translation pattern in a more complex setting). Keep the diff small. This pre-stages Sessions 12+.
+
