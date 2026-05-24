@@ -40,7 +40,7 @@ current conditions, not as a complete protocol.
 
 | Audit | Scope | Findings doc | Commit |
 |---|---|---|---|
-| Hook script (v2.1 baseline) | `.claude/hooks/update-state.sh` vs v2 §A as amended by v2.1 | [docs/AUDIT-hook-script-v2-2026-05-24.md](AUDIT-hook-script-v2-2026-05-24.md) | _Protocol Bundle v3 ship_ |
+| Hook script (v2.1 baseline) | `.claude/hooks/update-state.sh` vs v2 §A as amended by v2.1 | [docs/AUDIT-hook-script-v2-2026-05-24.md](AUDIT-hook-script-v2-2026-05-24.md) | `3340d1f` |
 
 ### Session 2026-05-24-cycle-3 (this conversation)
 
