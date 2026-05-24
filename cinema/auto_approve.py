@@ -23,6 +23,7 @@ Integration contract for Session 12:
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Callable, Literal, Optional
 
@@ -477,7 +478,6 @@ def is_motion_gate_enabled() -> bool:
     a papercut that S10's code-quality reviewer flagged. Operators opt in once
     confident motion rules are well-calibrated against their content.
     """
-    import os
     return os.environ.get("CINEMA_AUTO_APPROVE_MOTION", "").strip().lower() in {
         "1", "true", "yes"
     }
