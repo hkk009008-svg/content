@@ -6,6 +6,7 @@ Projects are stored as JSON files under projects/<project_id>/.
 
 import os
 import json
+import logging
 import uuid
 import random
 import shutil
@@ -16,6 +17,11 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Callable, Optional, List, Dict
 
 from filelock import FileLock, Timeout
+from pydantic import ValidationError
+
+from domain.models import Project
+
+logger = logging.getLogger(__name__)
 
 PROJECTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects")
 
@@ -585,6 +591,29 @@ def create_project(name: str) -> dict:
     return project
 
 
+def _validate_project(project: dict, context: str) -> None:
+    """Pydantic validation pass; logs warnings on schema drift but does NOT
+    fail the operation — permissive mode per brief design (start with
+    extra='allow', warn-only).  Session 9 may add a CINEMA_STRICT_SCHEMA
+    env flag to raise instead of warn.
+
+    Args:
+        project: Raw project dict (after normalize_project_schema on load).
+        context: Human-readable label for log messages (e.g. "save_project").
+    """
+    try:
+        Project.model_validate(project)
+    except ValidationError as e:
+        logger.warning(
+            "project schema validation failed",
+            extra={
+                "context": context,
+                "project_id": project.get("id"),
+                "errors": e.errors()[:5],  # cap at 5 to keep log size bounded
+            },
+        )
+
+
 def save_project(project: dict, timeout: float = 10) -> None:
     """
     Atomically save project JSON.
@@ -592,6 +621,7 @@ def save_project(project: dict, timeout: float = 10) -> None:
     half-written files if the process crashes mid-write.
     Uses per-project file lock to prevent concurrent-write corruption.
     """
+    _validate_project(project, "save_project")
     with _acquire_project_lock(project["id"], timeout):
         _save_project_unlocked(project)
 
@@ -604,6 +634,7 @@ def load_project(project_id: str, timeout: float = 10) -> Optional[dict]:
             return None
         if normalize_project_schema(project):
             _save_project_unlocked(project)
+        _validate_project(project, "load_project")
         return project
 
 

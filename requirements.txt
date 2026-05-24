@@ -66,5 +66,10 @@ google-auth>=2.30
 google-auth-httplib2>=0.2
 google-cloud-storage>=2.18
 
+# --- Data validation ---
+# Added 2026-05-24 per STRATEGIC_REVIEW §P1-3 (schema validation
+# on project.json boundary).
+pydantic>=2.0,<3
+
 # --- Testing (dev) ---
 pytest>=8.0
