@@ -35,6 +35,30 @@ class CascadeMetadata(BaseModel):
     attempts: Optional[List[str]] = None
 
 
+class DirectorialIntent(BaseModel):
+    """S15 substrate: operator-supplied directorial intent for take regeneration.
+
+    Created when the operator iterates on a take via the directorial iteration
+    loop (gate-review surface, S17+) or the screening stage (post-assembly
+    surface, S20). The intent is translated into a revised prompt + parameter
+    overrides + anchor refs by ``llm.director.CinemaDirector.translate_intent``
+    before the actual regeneration runs.
+
+    Distinct from ``source_take_id`` on TakeRecord (which tracks postprocess
+    derivation chains): ``parent_take_id`` on a regenerated TakeRecord tracks
+    the directorial-iteration history. The two are orthogonal — an iteration
+    of a postprocess variant could carry both.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    prose: str                                   # Always present; the freeform note
+    verb: Optional[str] = None                   # Optional structured verb (S18+ DSL)
+    params: dict = Field(default_factory=dict)   # Verb-specific structured params
+    refs: List[dict] = Field(default_factory=list)  # Anchor refs (shot/take IDs)
+    target_stage: Literal["keyframe", "performance", "motion"] = "keyframe"
+
+
 class TakeRecord(BaseModel):
     """A single generation attempt (keyframe / motion / performance / postprocess)."""
 
@@ -48,6 +72,11 @@ class TakeRecord(BaseModel):
     created_at: str = ""  # ISO-8601 string; keep as str for JSON round-trip safety
     metadata: dict = Field(default_factory=dict)
     cascade_metadata: Optional[CascadeMetadata] = None
+    # S15 substrate — directorial iteration provenance (all optional, backward-compat).
+    # See DirectorialIntent docstring for the orthogonality vs source_take_id.
+    parent_take_id: Optional[str] = None
+    intent: Optional[DirectorialIntent] = None
+    revised_prompt: Optional[str] = None
 
 
 class Shot(BaseModel):
