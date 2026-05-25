@@ -47,7 +47,24 @@ interface ScreenResponse {
   success: boolean
   assembled_mp4_path: string
   timeline_manifest: ScreenManifestEntry[]
+  /** S21: shots iterated since the last assembly. Drives the
+   *  "Re-assemble (N dirty)" label + suggests when to click. */
+  needs_reassembly?: string[]
+  /** S21: estimated re-assembly wall-clock seconds (~5-90s for typical
+   *  projects per Q5 measurement). Shown in the confirm dialog. */
+  cost_estimate_seconds?: number
   error?: string
+}
+
+interface ReassembleResponse {
+  success: boolean
+  new_assembled_path: string
+  regenerated_shots: string[]
+  cost_estimate_seconds: number
+  skipped: boolean
+  note?: string
+  error?: string
+  code?: string
 }
 
 interface Props {
@@ -62,6 +79,11 @@ interface Props {
     params?: Record<string, unknown>,
   ) => Promise<any>
   onRefreshProject?: () => Promise<void> | void
+  /** S21 (cycle-9 Surface B): re-assembly trigger. Optional — when absent,
+   *  the "Re-assemble" button stays disabled (back-compat with S20 callers
+   *  that don't yet pass it). When present, the button is enabled when
+   *  ``needs_reassembly`` is non-empty (the dirty-tracking signal). */
+  onReassemble?: (onlyIfChanged: boolean) => Promise<any>
 }
 
 /* ── Helpers ────────────────────────────────────────────────────── */
@@ -352,6 +374,7 @@ export default function ScreeningStage({
   onApproveFinal,
   onIterate,
   onRefreshProject,
+  onReassemble,
 }: Props) {
   const [data, setData] = useState<ScreenResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -359,6 +382,9 @@ export default function ScreeningStage({
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null)
   const [videoDuration, setVideoDuration] = useState<number>(0)
   const [approving, setApproving] = useState(false)
+  const [reassembling, setReassembling] = useState(false)
+  const [reassembleError, setReassembleError] = useState<string | null>(null)
+  const [videoCacheBust, setVideoCacheBust] = useState<number>(0)
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
   // ── Manifest fetch ──────────────────────────────────────────
@@ -434,6 +460,56 @@ export default function ScreeningStage({
     }
   }, [approving, onApproveFinal])
 
+  // ── S21: Re-assemble cut ─────────────────────────────────────
+  // Dirty-shot count + cost preview come from the /assemble/screen
+  // response (S21 extends it with `needs_reassembly` + `cost_estimate_seconds`).
+  // Button is enabled iff onReassemble is wired AND at least one shot is dirty.
+  const dirtyShots = data?.needs_reassembly ?? []
+  const costEstimate = data?.cost_estimate_seconds ?? 0
+  const canReassemble = !!onReassemble && dirtyShots.length > 0
+
+  const handleReassemble = useCallback(async () => {
+    if (!onReassemble || reassembling) return
+    setReassembleError(null)
+    const dirtyCount = data?.needs_reassembly?.length ?? 0
+    const cost = data?.cost_estimate_seconds ?? 0
+    const costLabel = cost > 60
+      ? `~${Math.round(cost / 60)} min`
+      : `~${Math.round(cost)}s`
+    const advisory = cost > 60 ? ' (this may take a while)' : ''
+    const confirmed = window.confirm(
+      `Re-assemble the cut? ${dirtyCount} shot${dirtyCount === 1 ? '' : 's'} dirty. Estimated time: ${costLabel}${advisory}.`,
+    )
+    if (!confirmed) return
+    setReassembling(true)
+    try {
+      const result = (await onReassemble(true)) as ReassembleResponse | null
+      if (!result || !result.success) {
+        setReassembleError(
+          result?.error || 'Re-assembly failed. Check server logs.',
+        )
+        return
+      }
+      if (result.skipped) {
+        // Nothing to re-assemble; refresh manifest in case state drifted.
+        await fetchManifest()
+        return
+      }
+      // Successful re-assembly: refetch manifest (which now reflects
+      // cleared needs_reassembly) AND force the <video> element to
+      // reload the new mp4 (the file path is identical -- final_cinema.mp4 --
+      // so a cache-bust query param is the simplest way to break the cache).
+      setVideoCacheBust(Date.now())
+      await fetchManifest()
+    } catch (err) {
+      setReassembleError(
+        err instanceof Error ? err.message : 'Network error during re-assembly.',
+      )
+    } finally {
+      setReassembling(false)
+    }
+  }, [onReassemble, reassembling, data, fetchManifest])
+
   const selectedManifestEntry = useMemo(() => {
     if (!data || !selectedShotId) return null
     return data.timeline_manifest.find((e) => e.shot_id === selectedShotId) ?? null
@@ -484,9 +560,12 @@ export default function ScreeningStage({
   // Build the file-server URL for the assembled mp4. The /file endpoint
   // security-checks containment within the project directory, so passing
   // the absolute path returned by /assemble/screen is correct.
+  // S21: append a cache-bust query param after a successful re-assembly
+  // so the <video> element reloads (final_cinema.mp4 has been overwritten
+  // in place; browser would otherwise serve the stale cached version).
   const videoSrc = `/api/projects/${project.id}/file?path=${encodeURIComponent(
     data.assembled_mp4_path,
-  )}`
+  )}${videoCacheBust ? `&v=${videoCacheBust}` : ''}`
 
   return (
     <div className="grid grid-cols-[1fr_360px] gap-0 -mx-8 -my-6 min-h-0 h-full">
@@ -535,6 +614,15 @@ export default function ScreeningStage({
           onSelect={handleSelectMarker}
         />
 
+        {/* S21 reassemble error banner (above toolbar) */}
+        {reassembleError && (
+          <div className="px-12 pt-3" role="alert">
+            <div className="rounded border border-editorial-curtain/40 bg-editorial-curtain/10 px-4 py-2 text-xs text-editorial-curtain">
+              Re-assembly failed: {reassembleError}
+            </div>
+          </div>
+        )}
+
         {/* Bottom toolbar */}
         <div className="px-12 py-6 mt-auto border-t border-editorial-rule flex items-center justify-between gap-4 flex-wrap">
           <div className="font-mono text-eyebrow uppercase tracking-wide-eyebrow text-editorial-ivory-mute">
@@ -543,6 +631,14 @@ export default function ScreeningStage({
               <>
                 {' · '}
                 <span className="text-editorial-ivory">selected {selectedShot.id}</span>
+              </>
+            )}
+            {dirtyShots.length > 0 && (
+              <>
+                {' · '}
+                <span className="text-editorial-brass">
+                  {dirtyShots.length} shot{dirtyShots.length === 1 ? '' : 's'} dirty — re-assemble suggested
+                </span>
               </>
             )}
           </div>
@@ -558,12 +654,33 @@ export default function ScreeningStage({
             </button>
             <button
               type="button"
-              disabled
-              title="Available in S21"
-              aria-label="Re-assemble — available in S21"
-              className="rounded border border-editorial-rule px-3 py-2 text-xs text-editorial-ivory-faint cursor-not-allowed"
+              onClick={handleReassemble}
+              disabled={!canReassemble || reassembling}
+              title={
+                !onReassemble
+                  ? 'Re-assemble not wired'
+                  : dirtyShots.length === 0
+                  ? 'No shots dirty -- assembled cut is current'
+                  : reassembling
+                  ? 'Re-assembly in progress...'
+                  : `Re-assemble cut (${dirtyShots.length} shot${dirtyShots.length === 1 ? '' : 's'} dirty, ~${Math.round(costEstimate)}s)`
+              }
+              aria-label={
+                canReassemble
+                  ? `Re-assemble cut, ${dirtyShots.length} shots dirty, estimated ${Math.round(costEstimate)} seconds`
+                  : 'Re-assemble disabled — no shots dirty'
+              }
+              className={
+                canReassemble && !reassembling
+                  ? 'rounded border border-editorial-rule px-3 py-2 text-xs text-editorial-ivory hover:bg-editorial-ink-rise'
+                  : 'rounded border border-editorial-rule px-3 py-2 text-xs text-editorial-ivory-faint cursor-not-allowed'
+              }
             >
-              Re-assemble
+              {reassembling
+                ? 'Re-assembling…'
+                : dirtyShots.length > 0
+                ? `Re-assemble (${dirtyShots.length} dirty)`
+                : 'Re-assemble'}
             </button>
             <button
               type="button"

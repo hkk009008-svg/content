@@ -65,6 +65,21 @@ logger = logging.getLogger(__name__)
 SCREENING_STAGE_NAME = "SCREENING"
 SCREENING_APPROVED_KEY = "screening_approved"
 
+# S21 (cycle-9 Surface B): operator iterates a shot DURING screening,
+# producing a new approved take. The assembled mp4 on disk no longer
+# matches the project's current approved takes. The shot_id goes into
+# ``project[NEEDS_REASSEMBLY_KEY]`` (a JSON-friendly list of shot_ids)
+# so the operator-facing "Re-assemble" button can show how many shots
+# are dirty + the re-assemble endpoint can short-circuit when nothing
+# changed. Cleared atomically when re-assemble runs successfully.
+#
+# Field lives at the project's top level via ConfigDict(extra="allow")
+# (domain/models.py:167) -- no Pydantic field added, matching the
+# screening_approved precedent. Stored as a list (not a set) because
+# JSON has no set primitive; helpers below preserve set semantics
+# (idempotent add, no duplicates).
+NEEDS_REASSEMBLY_KEY = "needs_reassembly"
+
 
 def _screening_stage_enabled() -> bool:
     """Feature flag: CINEMA_SCREENING_STAGE=1|true|yes enables S19+ screening stage.
@@ -262,3 +277,195 @@ def mark_screening_approved(project_id: str) -> dict:
         # signalling pattern used by the web_server endpoints.
         raise ValueError(f"Project '{project_id}' not found")
     return result
+
+
+# ---------------------------------------------------------------------------
+# S21 (cycle-9 Surface B): dirty-shot tracking + re-assembly cost estimation
+# ---------------------------------------------------------------------------
+
+
+def get_needs_reassembly(project: dict) -> list[str]:
+    """Return the list of shot_ids that have been iterated during SCREENING.
+
+    Reads ``project[NEEDS_REASSEMBLY_KEY]`` defensively: a missing key,
+    a None value, or any non-list value returns an empty list. Order is
+    preserved (insertion order) -- callers that need stable iteration
+    can rely on it; callers that need set semantics should convert.
+    """
+    if not isinstance(project, dict):
+        return []
+    raw = project.get(NEEDS_REASSEMBLY_KEY) or []
+    if not isinstance(raw, list):
+        return []
+    # Defensive: filter to str entries only (corrupted JSON could
+    # round-trip as something else)
+    return [s for s in raw if isinstance(s, str)]
+
+
+def mark_shot_needs_reassembly(project_id: str, shot_id: str) -> dict:
+    """Atomically add ``shot_id`` to ``project.needs_reassembly``.
+
+    Called from ``ShotController.regenerate_with_intent`` after a
+    successful iterate that fires DURING SCREENING. Idempotent: re-
+    adding the same shot_id is a no-op (no duplicates).
+
+    Returns a small result dict with the post-mutation list. Returns
+    ``{"success": False, "error": "..."}`` if the project doesn't
+    exist (the controller swallows this since dirty-tracking is best-
+    effort -- the operator can re-iterate to retry).
+
+    Import is lazy (mirrors mark_screening_approved) so this module
+    stays import-safe under cold-flag probes.
+    """
+    if not shot_id:
+        return {"success": False, "error": "shot_id is empty"}
+
+    from project_manager import MutationResult, mutate_project
+
+    def _mutator(latest_project: dict):
+        current = latest_project.get(NEEDS_REASSEMBLY_KEY) or []
+        if not isinstance(current, list):
+            current = []
+        # Idempotent add: preserve insertion order, dedupe via set membership.
+        if shot_id not in current:
+            current.append(shot_id)
+        latest_project[NEEDS_REASSEMBLY_KEY] = current
+        return MutationResult(
+            {"success": True, "needs_reassembly": list(current)},
+            save=True,
+        )
+
+    result = mutate_project(project_id, _mutator)
+    if result is None:
+        return {"success": False, "error": f"Project '{project_id}' not found"}
+    return result
+
+
+def clear_needs_reassembly(project_id: str) -> dict:
+    """Atomically clear ``project.needs_reassembly``.
+
+    Called from the re-assemble endpoint after a successful re-stitch.
+    Idempotent: clearing an empty list is fine (no-op shape, but the
+    mutate still runs to ensure persistence is consistent with the
+    just-written assembled mp4). Returns a small result dict.
+
+    Raises ``ValueError`` if the project doesn't exist (caller surfaces
+    as 404).
+    """
+    from project_manager import MutationResult, mutate_project
+
+    def _mutator(latest_project: dict):
+        latest_project[NEEDS_REASSEMBLY_KEY] = []
+        return MutationResult(
+            {"success": True, "needs_reassembly": []},
+            save=True,
+        )
+
+    result = mutate_project(project_id, _mutator)
+    if result is None:
+        raise ValueError(f"Project '{project_id}' not found")
+    return result
+
+
+# S21 cost-estimate heuristic constants. Derived from the Q5 measurement
+# spike (see commit body) -- synthetic _assemble_final timing at N=5/30/60
+# stub mp4s produced a roughly-linear cost curve on (a) per-clip normalize
+# (per-shot ffmpeg fork + libx264 encode) and (b) total-output-duration
+# stages (stitch + grade + bgm + loudnorm). For real production projects
+# at avg 5s/shot, multiply the duration-bound stages by ~5x. These constants
+# err generous (operator sees "it'll be slower than this if we're wrong").
+#
+# Per-clip cost (libx264 encode + ffmpeg fork): ~0.1s/clip baseline,
+#   amortized by source-clip duration. For real shots at 5s avg:
+#   ~0.5s/clip normalize.
+# Total-output-duration cost: ~0.07x of source duration for stitch+grade+bgm
+#   combined; loudnorm adds another ~0.02x. Combined factor: ~0.09x.
+#
+# Formula: cost_s ~= shot_count * 0.5 + total_duration_s * 0.09
+# Floor: 5s (single-shot project has fixed setup overhead).
+_REASSEMBLY_PER_SHOT_OVERHEAD_S = 0.5
+_REASSEMBLY_DURATION_FACTOR = 0.09
+_REASSEMBLY_FLOOR_S = 5.0
+
+
+def estimate_reassembly_cost(project: dict) -> dict:
+    """Estimate the wall-clock cost of a full re-assembly in seconds.
+
+    Cost model derived from the Q5 measurement spike (S21 commit body):
+    decomposes into per-shot overhead (ffmpeg fork + libx264 encode for
+    normalize) + a duration-bound factor for the stitch/grade/bgm/loudnorm
+    stages. The constants are conservative (real time should usually beat
+    the estimate).
+
+    Returns ``{seconds: float, breakdown: {...}, shot_count: int,
+    total_source_duration_s: float}``. The breakdown dict surfaces the
+    per-stage estimate so the UI can show a tooltip ("normalize: 30s,
+    encode pass: 45s, loudnorm: 10s") without re-doing the math.
+
+    Defensive: an empty project / no scenes returns ``{seconds: floor,
+    ...}`` -- the floor catches "operator clicks re-assemble before
+    anything is assembled," which is itself a no-op but should still
+    estimate as small (not 0, not negative).
+    """
+    if not isinstance(project, dict):
+        return {
+            "seconds": _REASSEMBLY_FLOOR_S,
+            "shot_count": 0,
+            "total_source_duration_s": 0.0,
+            "breakdown": {
+                "normalize_s": 0.0,
+                "duration_bound_s": 0.0,
+                "floor_s": _REASSEMBLY_FLOOR_S,
+            },
+        }
+
+    shot_count = 0
+    total_duration_s = 0.0
+    scenes = project.get("scenes") or []
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            continue
+        scene_fallback = 5.0
+        raw = scene.get("duration_seconds")
+        if raw is not None:
+            try:
+                scene_fallback = float(raw)
+            except (TypeError, ValueError):
+                scene_fallback = 5.0
+        for shot in scene.get("shots", []) or []:
+            if not isinstance(shot, dict):
+                continue
+            if not shot.get("approved_final_take_id"):
+                continue
+            shot_count += 1
+            # Find approved take to read its duration_s; fall back to scene.
+            approved_id = shot.get("approved_final_take_id", "")
+            take_dur = scene_fallback
+            for coll_name in (
+                "postprocess_variants", "motion_takes",
+                "performance_takes", "keyframe_takes",
+            ):
+                for take in shot.get(coll_name, []) or []:
+                    if isinstance(take, dict) and take.get("id") == approved_id:
+                        take_dur = _take_duration_seconds(take, scene_fallback)
+                        break
+                else:
+                    continue
+                break
+            total_duration_s += take_dur
+
+    normalize_s = shot_count * _REASSEMBLY_PER_SHOT_OVERHEAD_S
+    duration_bound_s = total_duration_s * _REASSEMBLY_DURATION_FACTOR
+    raw_total = normalize_s + duration_bound_s
+    seconds = max(_REASSEMBLY_FLOOR_S, raw_total)
+
+    return {
+        "seconds": round(seconds, 2),
+        "shot_count": shot_count,
+        "total_source_duration_s": round(total_duration_s, 2),
+        "breakdown": {
+            "normalize_s": round(normalize_s, 2),
+            "duration_bound_s": round(duration_bound_s, 2),
+            "floor_s": _REASSEMBLY_FLOOR_S,
+        },
+    }

@@ -193,6 +193,16 @@ class TestAssembleScreenEndpoint:
                 "shot_id", "scene_id", "start_s", "end_s",
                 "approved_take_id", "take_count",
             }
+        # S21: the screen response includes the dirty-shots list +
+        # cost estimate so the UI can render the "Re-assemble (N dirty,
+        # ~Ms)" button without a second round-trip.
+        assert "needs_reassembly" in body
+        assert body["needs_reassembly"] == []  # this fixture has no dirty shots
+        assert "cost_estimate_seconds" in body
+        assert isinstance(body["cost_estimate_seconds"], (int, float))
+        # 2 shots × 3s each: 2×0.5 + 6×0.09 = 1+0.54 = 1.54, but the
+        # floor 5.0 catches small projects. Sanity check: at least the floor.
+        assert body["cost_estimate_seconds"] >= 5.0
 
 
 # ---------------------------------------------------------------------------

@@ -69,6 +69,13 @@ interface Props {
    *  the SCREENING stage is active (i.e. CINEMA_SCREENING_STAGE was on
    *  at pipeline-start time). Forwarded into ScreeningStage. */
   onApproveFinalCut?: () => Promise<void>
+  /** S21 (cycle-9 Surface B): operator triggers a full re-assembly of
+   *  the cut after iterating shots during SCREENING. Forwarded into
+   *  ScreeningStage. Caller (App.tsx) maps to ``reassembleProject(only_if_changed)``
+   *  on the hook; returns the endpoint's JSON shape:
+   *    { success, new_assembled_path, regenerated_shots, cost_estimate_seconds, skipped }
+   *  (typed ``any`` here since the consuming component owns the shape). */
+  onReassemble?: (onlyIfChanged: boolean) => Promise<any>
   /** Optional system-level error to render in the execution board. */
   pipelineError?: PipelineError | null
   /** Optional system-level "awaiting backend" placeholder. */
@@ -157,7 +164,7 @@ export default function PipelineLayout({
   onBack, onCancel, onPause, onResume, onApproveShotPlan, onRejectShotPlan,
   onGenerateKeyframe, onApproveKeyframe, onApprovePerformance, onGenerateMotion, onApproveFinal,
   onRegenerateShot, onRestartShot, onCorrectShot, onDiagnoseShot, onProceedToAssembly,
-  onRefreshProject, onIterate, onApproveFinalCut,
+  onRefreshProject, onIterate, onApproveFinalCut, onReassemble,
   pipelineError, pipelineLoadingLabel,
 }: Props) {
   const isComplete = latest?.stage === 'COMPLETE' || latest?.stage === 'DONE'
@@ -320,6 +327,7 @@ export default function PipelineLayout({
               onApproveFinal={onApproveFinalCut}
               onIterate={onIterate}
               onRefreshProject={onRefreshProject}
+              onReassemble={onReassemble}
             />
           ) : (['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'PERFORMANCE_REVIEW', 'REVIEW'].includes(activeStage || '')) ||
           (isPaused && ['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'PERFORMANCE_REVIEW', 'REVIEW'].includes(activeStage || '')) ? (

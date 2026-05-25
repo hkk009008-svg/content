@@ -25,13 +25,18 @@ from unittest.mock import patch
 import pytest
 
 from cinema.screening import (
+    NEEDS_REASSEMBLY_KEY,
     SCREENING_APPROVED_KEY,
     SCREENING_STAGE_NAME,
     _build_timeline_manifest,
     _screening_stage_enabled,
     _take_duration_seconds,
+    clear_needs_reassembly,
+    estimate_reassembly_cost,
+    get_needs_reassembly,
     is_screening_approved,
     mark_screening_approved,
+    mark_shot_needs_reassembly,
 )
 
 
@@ -466,3 +471,239 @@ def test_stage_name_constant():
 
 def test_approved_key_constant():
     assert SCREENING_APPROVED_KEY == "screening_approved"
+
+
+def test_needs_reassembly_key_constant():
+    assert NEEDS_REASSEMBLY_KEY == "needs_reassembly"
+
+
+# ---------------------------------------------------------------------------
+# S21 (cycle-9 Surface B): needs_reassembly accessors + mutators
+# ---------------------------------------------------------------------------
+
+
+class TestGetNeedsReassembly:
+    """get_needs_reassembly reads the field defensively."""
+
+    def test_empty_project_returns_empty_list(self):
+        assert get_needs_reassembly({}) == []
+
+    def test_missing_key_returns_empty_list(self):
+        assert get_needs_reassembly({"id": "p1"}) == []
+
+    def test_explicit_empty_list(self):
+        assert get_needs_reassembly({NEEDS_REASSEMBLY_KEY: []}) == []
+
+    def test_populated_list_returned_in_order(self):
+        project = {NEEDS_REASSEMBLY_KEY: ["shot_1_0", "shot_1_1", "shot_2_0"]}
+        assert get_needs_reassembly(project) == ["shot_1_0", "shot_1_1", "shot_2_0"]
+
+    def test_non_list_value_returns_empty(self):
+        # Defensive: a corrupted project.json round-trip could land here.
+        assert get_needs_reassembly({NEEDS_REASSEMBLY_KEY: "not-a-list"}) == []
+        assert get_needs_reassembly({NEEDS_REASSEMBLY_KEY: 42}) == []
+        assert get_needs_reassembly({NEEDS_REASSEMBLY_KEY: None}) == []
+
+    def test_non_dict_project_returns_empty(self):
+        assert get_needs_reassembly(None) == []  # type: ignore[arg-type]
+        assert get_needs_reassembly("not-a-project") == []  # type: ignore[arg-type]
+
+    def test_filters_non_string_entries(self):
+        # Mixed garbage shouldn't poison the list.
+        project = {NEEDS_REASSEMBLY_KEY: ["shot_a", 42, None, "shot_b", {"k": "v"}]}
+        assert get_needs_reassembly(project) == ["shot_a", "shot_b"]
+
+
+class TestMarkShotNeedsReassembly:
+    """mark_shot_needs_reassembly idempotently adds a shot_id."""
+
+    def test_adds_to_empty_list(self):
+        project_state: dict = {"id": "p1"}
+
+        def fake_mutate(pid, mutator_fn, timeout=10, snapshot=None):
+            result = mutator_fn(project_state)
+            from project_manager import MutationResult
+            if isinstance(result, MutationResult):
+                return result.value
+            return result
+
+        with patch("project_manager.mutate_project", side_effect=fake_mutate):
+            result = mark_shot_needs_reassembly("p1", "shot_1_0")
+
+        assert result["success"] is True
+        assert result["needs_reassembly"] == ["shot_1_0"]
+        assert project_state[NEEDS_REASSEMBLY_KEY] == ["shot_1_0"]
+
+    def test_idempotent_add_same_shot(self):
+        project_state: dict = {"id": "p1", NEEDS_REASSEMBLY_KEY: ["shot_1_0"]}
+
+        def fake_mutate(pid, mutator_fn, timeout=10, snapshot=None):
+            result = mutator_fn(project_state)
+            from project_manager import MutationResult
+            if isinstance(result, MutationResult):
+                return result.value
+            return result
+
+        with patch("project_manager.mutate_project", side_effect=fake_mutate):
+            result = mark_shot_needs_reassembly("p1", "shot_1_0")
+
+        # Re-adding the same shot is a no-op — no duplicates.
+        assert result["needs_reassembly"] == ["shot_1_0"]
+        assert project_state[NEEDS_REASSEMBLY_KEY] == ["shot_1_0"]
+
+    def test_appends_new_shot_preserving_order(self):
+        project_state: dict = {"id": "p1", NEEDS_REASSEMBLY_KEY: ["shot_1_0", "shot_2_0"]}
+
+        def fake_mutate(pid, mutator_fn, timeout=10, snapshot=None):
+            result = mutator_fn(project_state)
+            from project_manager import MutationResult
+            if isinstance(result, MutationResult):
+                return result.value
+            return result
+
+        with patch("project_manager.mutate_project", side_effect=fake_mutate):
+            mark_shot_needs_reassembly("p1", "shot_3_0")
+
+        # Insertion order preserved.
+        assert project_state[NEEDS_REASSEMBLY_KEY] == ["shot_1_0", "shot_2_0", "shot_3_0"]
+
+    def test_empty_shot_id_returns_failure(self):
+        # Defensive: don't write empty strings into the dirty list.
+        result = mark_shot_needs_reassembly("p1", "")
+        assert result["success"] is False
+
+    def test_corrupted_field_replaced(self):
+        # If the field is corrupted (not a list), the mutator resets it.
+        project_state: dict = {"id": "p1", NEEDS_REASSEMBLY_KEY: "not-a-list"}
+
+        def fake_mutate(pid, mutator_fn, timeout=10, snapshot=None):
+            result = mutator_fn(project_state)
+            from project_manager import MutationResult
+            if isinstance(result, MutationResult):
+                return result.value
+            return result
+
+        with patch("project_manager.mutate_project", side_effect=fake_mutate):
+            mark_shot_needs_reassembly("p1", "shot_1_0")
+
+        assert project_state[NEEDS_REASSEMBLY_KEY] == ["shot_1_0"]
+
+    def test_project_not_found_returns_failure_not_raise(self):
+        # mark_shot_needs_reassembly is best-effort -- it returns failure
+        # instead of raising so iterate's controller can swallow it without
+        # disturbing the iteration response shape.
+        with patch("project_manager.mutate_project", return_value=None):
+            result = mark_shot_needs_reassembly("missing-pid", "shot_1_0")
+        assert result["success"] is False
+        assert "not found" in result["error"]
+
+
+class TestClearNeedsReassembly:
+    """clear_needs_reassembly empties the list."""
+
+    def test_clears_populated_list(self):
+        project_state: dict = {"id": "p1", NEEDS_REASSEMBLY_KEY: ["shot_a", "shot_b"]}
+
+        def fake_mutate(pid, mutator_fn, timeout=10, snapshot=None):
+            result = mutator_fn(project_state)
+            from project_manager import MutationResult
+            if isinstance(result, MutationResult):
+                return result.value
+            return result
+
+        with patch("project_manager.mutate_project", side_effect=fake_mutate):
+            result = clear_needs_reassembly("p1")
+
+        assert result["success"] is True
+        assert result["needs_reassembly"] == []
+        assert project_state[NEEDS_REASSEMBLY_KEY] == []
+
+    def test_clears_already_empty_list_idempotent(self):
+        project_state: dict = {"id": "p1", NEEDS_REASSEMBLY_KEY: []}
+
+        def fake_mutate(pid, mutator_fn, timeout=10, snapshot=None):
+            result = mutator_fn(project_state)
+            from project_manager import MutationResult
+            if isinstance(result, MutationResult):
+                return result.value
+            return result
+
+        with patch("project_manager.mutate_project", side_effect=fake_mutate):
+            clear_needs_reassembly("p1")
+
+        assert project_state[NEEDS_REASSEMBLY_KEY] == []
+
+    def test_raises_when_project_missing(self):
+        with patch("project_manager.mutate_project", return_value=None):
+            with pytest.raises(ValueError, match="not found"):
+                clear_needs_reassembly("missing-pid")
+
+
+class TestEstimateReassemblyCost:
+    """estimate_reassembly_cost returns reasonable values for known shapes."""
+
+    def test_empty_project_returns_floor(self):
+        result = estimate_reassembly_cost({})
+        # Floor (5s) catches single-shot/empty cases.
+        assert result["seconds"] == 5.0
+        assert result["shot_count"] == 0
+        assert result["total_source_duration_s"] == 0.0
+
+    def test_non_dict_returns_floor(self):
+        result = estimate_reassembly_cost(None)  # type: ignore[arg-type]
+        assert result["seconds"] == 5.0
+        assert "breakdown" in result
+
+    def test_breakdown_includes_normalize_and_duration_bound(self):
+        result = estimate_reassembly_cost({})
+        breakdown = result["breakdown"]
+        assert "normalize_s" in breakdown
+        assert "duration_bound_s" in breakdown
+        assert "floor_s" in breakdown
+
+    def test_30_shot_project_scales_linearly(self):
+        # 30 shots × 5s each. Expected: 30 * 0.5 (normalize) + 150 * 0.09 (duration)
+        # = 15 + 13.5 = 28.5s. Well within the "ship full rerun" budget.
+        shots = []
+        for i in range(30):
+            shots.append({
+                "id": f"shot_1_{i}",
+                "approved_final_take_id": f"take_{i}",
+                "motion_takes": [
+                    {"id": f"take_{i}", "kind": "motion",
+                     "metadata": {"duration_s": 5.0}},
+                ],
+            })
+        project = {"scenes": [{"id": "s1", "shots": shots, "duration_seconds": 5.0}]}
+        result = estimate_reassembly_cost(project)
+        assert result["shot_count"] == 30
+        assert result["total_source_duration_s"] == 150.0
+        # 15 + 13.5 = 28.5
+        assert 28.0 <= result["seconds"] <= 29.0
+
+    def test_unapproved_shots_excluded(self):
+        # Shots without approved_final_take_id don't count toward cost.
+        shots = [
+            {"id": "shot_a", "approved_final_take_id": "take_a",
+             "motion_takes": [{"id": "take_a", "kind": "motion",
+                               "metadata": {"duration_s": 5.0}}]},
+            {"id": "shot_b", "approved_final_take_id": ""},  # not approved
+        ]
+        project = {"scenes": [{"id": "s1", "shots": shots, "duration_seconds": 5.0}]}
+        result = estimate_reassembly_cost(project)
+        assert result["shot_count"] == 1
+        assert result["total_source_duration_s"] == 5.0
+
+    def test_duration_falls_back_to_scene_then_default(self):
+        # Take has no duration_s metadata; scene has duration_seconds=4.0.
+        shots = [
+            {"id": "shot_a", "approved_final_take_id": "take_a",
+             "motion_takes": [{"id": "take_a", "kind": "motion"}]},
+        ]
+        project = {"scenes": [{"id": "s1", "shots": shots, "duration_seconds": 4.0}]}
+        result = estimate_reassembly_cost(project)
+        assert result["total_source_duration_s"] == 4.0
+
+    def test_seconds_is_a_float(self):
+        result = estimate_reassembly_cost({})
+        assert isinstance(result["seconds"], float)

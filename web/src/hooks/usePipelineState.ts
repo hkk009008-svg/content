@@ -267,6 +267,28 @@ export function usePipelineState(projectId: string | null) {
     return res.json()
   }, [projectId])
 
+  /** S21 (cycle-9 Surface B): re-assemble the cut from current approved takes.
+   *  POSTs to /api/projects/<pid>/assemble/re-assemble with
+   *  ``{only_if_changed: bool}``. Returns the JSON response shape:
+   *    { success, new_assembled_path, regenerated_shots, cost_estimate_seconds, skipped }
+   *
+   *  Mirrors approveScreening's no-op-when-projectId-null contract. The
+   *  endpoint is feature-flagged behind CINEMA_SCREENING_STAGE; 404 surfaces
+   *  in the JSON for the caller to render.
+   *
+   *  ``onlyIfChanged=true`` (default) is the operator-facing button's normal
+   *  click — short-circuits when nothing changed. ``false`` is reserved for
+   *  a "force re-assemble" power-user override (not wired into UI for v1). */
+  const reassembleProject = useCallback(async (onlyIfChanged: boolean = true) => {
+    if (!projectId) return null
+    const res = await fetch(`/api/projects/${projectId}/assemble/re-assemble`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ only_if_changed: onlyIfChanged }),
+    })
+    return res.json()
+  }, [projectId])
+
   // Enhanced start that also processes events
   const start = useCallback(() => {
     setShotStates(new Map())
@@ -307,6 +329,7 @@ export function usePipelineState(projectId: string | null) {
     proceedToAssembly,
     iterateTake,
     approveScreening,
+    reassembleProject,
     // Pass-through from useSSE
     events: sse.events,
     latest: sse.latest,

@@ -87,6 +87,21 @@ _running_cores: dict[str, PipelineCore] = {}
 _cores_lock = threading.Lock()
 HTTP_PROJECT_TIMEOUT = 2.0
 
+# S21 (cycle-9 Surface B): re-assembly busy tracking.
+# The re-assembly endpoint runs a heavyweight ffmpeg pipeline
+# (normalize + stitch + grade + bgm + loudnorm). Two concurrent
+# re-assemblies on the same project would clobber final_cinema.mp4.
+# But we CANNOT use _reject_if_project_busy because re-assembly runs
+# WHILE the pipeline is gate-waiting in SCREENING -- the pipeline
+# IS in _running_pipelines (it's the SCREENING-waiter), so busy-fencing
+# would deadlock the operator (cannot re-assemble while the screening
+# gate is open, but the gate is open precisely so the operator can
+# re-assemble). Mirrors the same fence-bypass reasoning at
+# api_screening_approve. Re-entrancy is the actual concern; this
+# narrower in-flight set + its own lock handles it.
+_reassembly_in_flight: set[str] = set()
+_reassembly_lock = threading.Lock()
+
 
 def _get_or_build_core(pid: str) -> PipelineCore:
     """Return a cached PipelineCore for ``pid``, building one if absent.
@@ -1903,10 +1918,22 @@ def api_assemble_screen(pid):
     # lands on a phantom shot whose mp4 was deleted between assembly and
     # screening. Post code-quality review of cycle-9 S19.
     manifest = _build_timeline_manifest(project, verify_files=True)
+
+    # S21 (cycle-9 Surface B): surface dirty-shot tracking + re-assembly
+    # cost preview alongside the manifest so the operator's "Re-assemble"
+    # button can render its label ("Re-assemble (3 shots dirty)") + tooltip
+    # ("~45s estimated") without a second round-trip. Tightly coupled to
+    # the manifest itself -- both describe "what would be in the next cut."
+    from cinema.screening import (
+        get_needs_reassembly,
+        estimate_reassembly_cost,
+    )
     return jsonify({
         "success": True,
         "assembled_mp4_path": assembled_path,
         "timeline_manifest": manifest,
+        "needs_reassembly": get_needs_reassembly(project),
+        "cost_estimate_seconds": estimate_reassembly_cost(project)["seconds"],
     }), 200
 
 
@@ -1966,6 +1993,143 @@ def api_screening_approve(pid):
             pass
 
     return jsonify(result), 200
+
+
+@app.route("/api/projects/<pid>/assemble/re-assemble", methods=["POST"])
+@_project_lock_guard
+def api_assemble_reassemble(pid):
+    """S21: re-run the final-assembly pipeline against current approved takes.
+
+    The operator iterated one or more shots during SCREENING, producing
+    new takes. The assembled mp4 on disk is now stale relative to the
+    project's current approved_final_take_id values. This endpoint
+    re-runs ``assemble_approved_takes()`` so the operator can preview
+    the updated cut before approving the final.
+
+    Body (JSON, optional):
+        {"only_if_changed": bool}
+            -- when True (default), short-circuits to a no-op when
+               ``project.needs_reassembly`` is empty. When False,
+               always re-runs. Useful for an "Re-assemble (force)"
+               override in case the operator suspects the dirty-tracking
+               was missed (e.g. the implementer's best-effort dirty-set
+               write swallowed an exception).
+
+    Feature-flagged behind CINEMA_SCREENING_STAGE=1|true|yes.
+    Returns 404 when the flag is off.
+
+    Response (success): 200 + {
+        "success": true,
+        "new_assembled_path": "<absolute_path>",
+        "regenerated_shots": [shot_id, ...],   # the shots that were dirty
+        "cost_estimate_seconds": float,         # the pre-run estimate
+        "skipped": bool                         # True iff short-circuited
+    }
+    Response (feature off): 404
+    Response (project not found): 404
+    Response (re-assembly already in flight for this project): 409 reassembly_busy
+    Response (no approved takes / assembly error): 409
+
+    Busy-fence: bypasses ``_reject_if_project_busy`` (the SCREENING gate
+    occupies _running_pipelines; busy-fencing would deadlock the operator).
+    Instead, a narrower module-level ``_reassembly_in_flight`` set guards
+    against re-entrant re-assembly on the same project. The heavyweight
+    ffmpeg work runs OUTSIDE that lock; the lock only guards the
+    "in-flight?" set membership check + add.
+    """
+    from cinema.screening import (
+        _screening_stage_enabled,
+        clear_needs_reassembly,
+        estimate_reassembly_cost,
+        get_needs_reassembly,
+    )
+
+    if not _screening_stage_enabled():
+        return jsonify({"error": "Screening stage not enabled (set CINEMA_SCREENING_STAGE=1)"}), 404
+
+    # See module-level _reassembly_in_flight comment for why we don't
+    # call _reject_if_project_busy here. Re-entrancy is the actual concern.
+    with _reassembly_lock:
+        if pid in _reassembly_in_flight:
+            return jsonify({
+                "code": "reassembly_busy",
+                "retryable": True,
+                "error": f"Project '{pid}' has a re-assembly in flight. Retry shortly.",
+            }), 409
+        _reassembly_in_flight.add(pid)
+
+    try:
+        data = request.get_json(silent=True) or {}
+        only_if_changed = bool(data.get("only_if_changed", True))
+
+        project = load_project(pid)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        dirty_shots = get_needs_reassembly(project)
+        cost_estimate = estimate_reassembly_cost(project)["seconds"]
+
+        # Short-circuit: only_if_changed=true AND no dirty shots -> nothing to do.
+        # The operator's UI suppresses the button in this state; the endpoint
+        # double-checks so a stale-cached UI doesn't trigger a spurious rerun.
+        if only_if_changed and not dirty_shots:
+            return jsonify({
+                "success": True,
+                "new_assembled_path": "",
+                "regenerated_shots": [],
+                "cost_estimate_seconds": cost_estimate,
+                "skipped": True,
+                "note": "no dirty shots; assembled mp4 is current",
+            }), 200
+
+        # Run the full re-assembly. Q5 measurement (S21 spike) showed full
+        # re-rerun completes in well under 60s for a 30-shot project at
+        # avg 5s/shot (~45s real-world); ~90s for 60 shots. Delta-render
+        # was considered (skip-loudnorm preview) but the grade pass
+        # dominates the cost curve and skipping it would degrade the
+        # preview's fidelity. See commit body for the measurement.
+        try:
+            pipeline = CinemaPipeline(
+                pid,
+                core=_get_or_build_core(pid),
+                progress_callback=_make_progress_cb(pid),
+            )
+            assembly_result = pipeline.assemble_approved_takes()
+        except ValueError:
+            return jsonify({"error": "Project not found"}), 404
+
+        if not assembly_result.get("success"):
+            return jsonify({
+                "success": False,
+                "error": assembly_result.get("error", "Re-assembly failed"),
+                "regenerated_shots": dirty_shots,
+                "cost_estimate_seconds": cost_estimate,
+            }), 409
+
+        # Clear dirty-tracking AFTER successful re-assembly. If we cleared
+        # before and the assembly failed, the operator would have to manually
+        # re-iterate the shots to repopulate the dirty list -- bad UX.
+        try:
+            clear_needs_reassembly(pid)
+        except ValueError:
+            # Race: project deleted between assemble + clear. Best-effort;
+            # the assembled mp4 still exists, so the operator's preview
+            # still works.
+            logger.warning(
+                "Failed to clear needs_reassembly after successful re-assembly",
+                extra={"pid": pid},
+            )
+
+        return jsonify({
+            "success": True,
+            "new_assembled_path": assembly_result.get("final_path", ""),
+            "regenerated_shots": dirty_shots,
+            "cost_estimate_seconds": cost_estimate,
+            "skipped": False,
+        }), 200
+    finally:
+        with _reassembly_lock:
+            _reassembly_in_flight.discard(pid)
 
 
 # ---------------------------------------------------------------------------

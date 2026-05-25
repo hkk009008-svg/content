@@ -342,3 +342,161 @@ class TestRegenerateWithIntentHappyPath:
         assert "shot_kf_only" in approved_ids
         assert "shot_motion_only" in approved_ids
         assert "shot_iter_target" in approved_ids
+
+
+# ---------------------------------------------------------------------------
+# S21 (cycle-9 Surface B): dirty-shot tracking during SCREENING
+# ---------------------------------------------------------------------------
+
+
+class TestRegenerateWithIntentDirtyTracking:
+    """When iterate fires DURING SCREENING, regenerate_with_intent must add
+    the shot_id to project.needs_reassembly via mark_shot_needs_reassembly.
+
+    Per S21 brief: dirty-tracking is the signal the re-assemble endpoint
+    uses to short-circuit on `only_if_changed=true`. The insertion site is
+    inside regenerate_with_intent (after the successful generate_*_take
+    call), gated on the live runstate.current_stage == "SCREENING".
+    """
+
+    def _build_controller(self, project: dict, current_stage: str = ""):
+        """Build a ShotController whose runstate has the given current_stage."""
+        from cinema.shots.controller import ShotController
+
+        host = MagicMock()
+        host._refresh_project_snapshot.return_value = project
+        host._rebuild_review_clips.return_value = None
+        host._save_checkpoint.return_value = None
+        host._resolve_take_path.return_value = "/fake/path.jpg"
+
+        lifecycle = MagicMock()
+        runstate = MagicMock()
+        runstate.shot_results = {}
+        runstate.current_stage = current_stage  # critical for S21 trigger
+
+        core = MagicMock()
+        core.project = project
+        core.project_dir = "/tmp/fake_project"
+        core.continuity = MagicMock()
+        mock_cost_tracker = MagicMock()
+        mock_cost_tracker.is_over_budget.return_value = False
+        core.cost_tracker = mock_cost_tracker
+
+        return ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
+
+    def test_iterate_during_screening_marks_shot_dirty(self):
+        """current_stage == 'SCREENING' + successful iterate -> mark_shot_needs_reassembly called."""
+        project = _make_minimal_project()
+        ctrl = self._build_controller(project, current_stage="SCREENING")
+        intent = _make_intent()
+
+        expected_take = {"id": "take_new", "kind": "keyframe", "parent_take_id": "take_parent"}
+        ctrl.generate_keyframe_take = MagicMock(
+            return_value={"success": True, "take": expected_take}
+        )
+        ctrl._mutate_shot = MagicMock(return_value=expected_take)
+
+        with patch("llm.director.intent_translator", return_value={
+            "revised_prompt": "x", "params_delta": {}, "anchor_refs": [],
+        }), patch("cinema.screening.mark_shot_needs_reassembly") as mock_mark:
+            ctrl.regenerate_with_intent(
+                "scene_1", "shot_1_0", "take_parent", intent,
+                project_id="proj_test",
+            )
+
+        mock_mark.assert_called_once_with("proj_test", "shot_1_0")
+
+    def test_iterate_outside_screening_does_not_mark_dirty(self):
+        """current_stage != 'SCREENING' -> mark_shot_needs_reassembly NOT called."""
+        project = _make_minimal_project()
+        ctrl = self._build_controller(project, current_stage="KEYFRAME_REVIEW")
+        intent = _make_intent()
+
+        expected_take = {"id": "take_new", "kind": "keyframe"}
+        ctrl.generate_keyframe_take = MagicMock(
+            return_value={"success": True, "take": expected_take}
+        )
+        ctrl._mutate_shot = MagicMock(return_value=expected_take)
+
+        with patch("llm.director.intent_translator", return_value={
+            "revised_prompt": "x", "params_delta": {}, "anchor_refs": [],
+        }), patch("cinema.screening.mark_shot_needs_reassembly") as mock_mark:
+            ctrl.regenerate_with_intent(
+                "scene_1", "shot_1_0", "take_parent", intent,
+                project_id="proj_test",
+            )
+
+        mock_mark.assert_not_called()
+
+    def test_iterate_failure_does_not_mark_dirty(self):
+        """A FAILED iterate (success=False) must NOT mark the shot dirty —
+        otherwise the operator's re-assemble would skip a take that was
+        never actually changed."""
+        project = _make_minimal_project()
+        ctrl = self._build_controller(project, current_stage="SCREENING")
+        intent = _make_intent()
+
+        ctrl.generate_keyframe_take = MagicMock(
+            return_value={"success": False, "error": "downstream failure"}
+        )
+
+        with patch("llm.director.intent_translator", return_value={
+            "revised_prompt": "x", "params_delta": {}, "anchor_refs": [],
+        }), patch("cinema.screening.mark_shot_needs_reassembly") as mock_mark:
+            ctrl.regenerate_with_intent(
+                "scene_1", "shot_1_0", "take_parent", intent,
+                project_id="proj_test",
+            )
+
+        mock_mark.assert_not_called()
+
+    def test_iterate_without_project_id_skips_dirty_tracking(self):
+        """project_id='' (no scope) -> dirty-tracking is a no-op.
+        This is the legacy call path; without project_id we can't safely
+        mutate any project's needs_reassembly list."""
+        project = _make_minimal_project()
+        ctrl = self._build_controller(project, current_stage="SCREENING")
+        intent = _make_intent()
+
+        expected_take = {"id": "take_new", "kind": "keyframe"}
+        ctrl.generate_keyframe_take = MagicMock(
+            return_value={"success": True, "take": expected_take}
+        )
+        ctrl._mutate_shot = MagicMock(return_value=expected_take)
+
+        with patch("llm.director.intent_translator", return_value={
+            "revised_prompt": "x", "params_delta": {}, "anchor_refs": [],
+        }), patch("cinema.screening.mark_shot_needs_reassembly") as mock_mark:
+            ctrl.regenerate_with_intent(
+                "scene_1", "shot_1_0", "take_parent", intent,
+                # project_id defaults to "" — legacy callers
+            )
+
+        mock_mark.assert_not_called()
+
+    def test_dirty_tracking_failure_does_not_break_iterate(self):
+        """If mark_shot_needs_reassembly raises (e.g. project file
+        evaporated mid-iterate), the iterate response must still surface
+        success=True with the new take. Best-effort semantics."""
+        project = _make_minimal_project()
+        ctrl = self._build_controller(project, current_stage="SCREENING")
+        intent = _make_intent()
+
+        expected_take = {"id": "take_new", "kind": "keyframe"}
+        ctrl.generate_keyframe_take = MagicMock(
+            return_value={"success": True, "take": expected_take}
+        )
+        ctrl._mutate_shot = MagicMock(return_value=expected_take)
+
+        with patch("llm.director.intent_translator", return_value={
+            "revised_prompt": "x", "params_delta": {}, "anchor_refs": [],
+        }), patch("cinema.screening.mark_shot_needs_reassembly",
+                  side_effect=RuntimeError("simulated mutate failure")):
+            result = ctrl.regenerate_with_intent(
+                "scene_1", "shot_1_0", "take_parent", intent,
+                project_id="proj_test",
+            )
+
+        # iterate succeeded -- the dirty-tracking failure is swallowed.
+        assert result["success"] is True
+        assert result["take"]["id"] == "take_new"

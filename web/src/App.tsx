@@ -23,7 +23,7 @@ export default function App() {
     isPaused, failedShots, pause: pausePipeline, resume: resumePipeline,
     approveShotPlan, rejectShotPlan, generateKeyframe, approveKeyframe, approvePerformance, generateMotion, approveFinal,
     regenerateShot, restartShot, correctShot, diagnoseShot, proceedToAssembly, iterateTake,
-    approveScreening,
+    approveScreening, reassembleProject,
   } = usePipelineState(project?.id ?? null)
 
   // Load config on mount
@@ -160,6 +160,7 @@ export default function App() {
           onApproveFinalCut={async () => {
             await withRefresh(() => approveScreening())
           }}
+          onReassemble={(onlyIfChanged) => reassembleProject(onlyIfChanged)}
         />
       </ErrorBoundary>
     )

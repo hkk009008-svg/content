@@ -1257,6 +1257,44 @@ class ShotController:
                     return MutationResult(None, save=False)
                 self._mutate_shot(shot_id, _stash_delta)
 
+        # S21 (cycle-9 Surface B): dirty-shot tracking for re-assembly.
+        # When iterate fires DURING SCREENING (the post-ASSEMBLY operator-driven
+        # preview-and-iterate phase), the assembled mp4 on disk no longer matches
+        # the project's current approved takes. Add shot_id to the project's
+        # ``needs_reassembly`` list so the operator-facing "Re-assemble" button
+        # can short-circuit on `only_if_changed=true` when nothing changed AND
+        # so the UI can show "N shots dirty -- re-assemble suggested."
+        #
+        # SCREENING detection via live runstate is the right signal here: the
+        # iterate endpoint runs synchronously on the same Python process that
+        # owns the gate-waiting pipeline, so `self._runstate.current_stage`
+        # reflects the pipeline's actual phase. A None / absent runstate
+        # (controller built fresh by `_get_stage_pipeline` when no pipeline is
+        # running) signals "no SCREENING in flight" -- dirty-tracking is moot.
+        #
+        # Lazy import preserves the no-screening-flag cold-start property
+        # (cinema.screening is only loaded when the screening path actually fires).
+        if result.get("success") and project_id:
+            try:
+                in_screening = (
+                    getattr(self._runstate, "current_stage", "") == "SCREENING"
+                )
+            except AttributeError:
+                in_screening = False
+            if in_screening:
+                try:
+                    from cinema.screening import mark_shot_needs_reassembly
+                    mark_shot_needs_reassembly(project_id, shot_id)
+                except Exception:
+                    # Best-effort: dirty-tracking failure must NOT mask
+                    # iteration success. Log at debug; the operator will
+                    # re-trigger if the next re-assemble call short-circuits
+                    # incorrectly (only_if_changed semantics are advisory).
+                    logger.debug(
+                        "S21 dirty-tracking failed for shot_id=%s",
+                        shot_id, exc_info=True,
+                    )
+
         return result
 
     def diagnose_clip(self, shot_id: str, take_id: str = "") -> dict:
