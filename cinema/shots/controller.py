@@ -486,6 +486,9 @@ class ShotController:
             take["intent"] = intent_override.model_dump()
         if revised_prompt:
             take["revised_prompt"] = revised_prompt
+            # Stub placeholders — actual values are populated by
+            # regenerate_with_intent's second-mutate pass (S18 will collapse
+            # this when verbs consume params_delta inside the generator).
             take["metadata"].setdefault("params_delta", {})
             take["metadata"].setdefault("anchor_refs", [])
 
@@ -725,6 +728,9 @@ class ShotController:
             take["intent"] = intent_override.model_dump()
         if revised_prompt:
             take["revised_prompt"] = revised_prompt
+            # Stub placeholders — actual values are populated by
+            # regenerate_with_intent's second-mutate pass (S18 will collapse
+            # this when verbs consume params_delta inside the generator).
             take["metadata"].setdefault("params_delta", {})
             take["metadata"].setdefault("anchor_refs", [])
 
@@ -985,6 +991,9 @@ class ShotController:
             take["intent"] = intent_override.model_dump()
         if revised_prompt:
             take["revised_prompt"] = revised_prompt
+            # Stub placeholders — actual values are populated by
+            # regenerate_with_intent's second-mutate pass (S18 will collapse
+            # this when verbs consume params_delta inside the generator).
             take["metadata"].setdefault("params_delta", {})
             take["metadata"].setdefault("anchor_refs", [])
 
@@ -1216,6 +1225,18 @@ class ShotController:
             return {"success": False, "error": f"Unknown target_stage: {target_stage}"}
 
         # Stash params_delta + anchor_refs into the new take's metadata via mutation.
+        #
+        # Two-round-trip note (S16; will collapse in S18 when verbs consume
+        # params_delta during generation): this is the SECOND `_mutate_shot`
+        # call. The generator's own mutator (above) already released its
+        # filelock by the time we re-acquire here. The target take is found
+        # by ID (never by position), so we cannot corrupt the wrong take.
+        # The narrow gap: if a concurrent pipeline phase auto-approves a take
+        # between the two mutates, we may write `params_delta`/`anchor_refs`
+        # onto a take that has already been superseded. Worst case is a stale
+        # metadata key — not data loss. Acceptable for S16 because S18 makes
+        # this collapse to a single mutate when params_delta is consumed
+        # inside the generator.
         if result.get("success") and (params_delta or anchor_refs):
             new_take = result.get("take") or {}
             new_take_id = new_take.get("id") if isinstance(new_take, dict) else ""

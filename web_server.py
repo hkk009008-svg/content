@@ -1494,6 +1494,14 @@ def api_iterate_take(pid, sid, take_id):
     if not _directorial_iteration_enabled():
         return jsonify({"error": "Directorial iteration not enabled (set CINEMA_DIRECTORIAL_ITERATION=1)"}), 404
 
+    # Mirror every other mutating endpoint's project-busy fence: an iterate
+    # call dispatches a long-running LLM + generator pipeline, which must not
+    # race a concurrent pipeline worker on the same project. Both reviewers
+    # (spec + code-quality) flagged this absence as the S16 release blocker.
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
     if not request.is_json:
         return jsonify({"error": "JSON body required"}), 400
 

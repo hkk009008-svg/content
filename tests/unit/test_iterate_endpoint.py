@@ -171,3 +171,77 @@ class TestRegenerateWithIntentHappyPath:
 
         assert result["success"] is False
         assert "not found" in result["error"].lower()
+
+    def test_performance_iteration_calls_generate_performance_take(self):
+        """intent.target_stage='performance' → generate_performance_take called with intent kwargs.
+
+        Per code-quality reviewer M-3: covers the performance routing path that was
+        absent from the original happy-path test (which only exercised keyframe).
+        """
+        project = _make_minimal_project()
+        ctrl = self._build_controller(project)
+        intent = _make_intent(prose="soften the line delivery", target_stage="performance")
+
+        mock_translated = {
+            "revised_prompt": "Subtler emotional delivery",
+            "params_delta": {"warmth": 0.3},
+            "anchor_refs": [],
+        }
+        expected_take = {"id": "take_perf_new", "kind": "performance", "parent_take_id": "take_parent"}
+        ctrl.generate_performance_take = MagicMock(
+            return_value={"success": True, "take": expected_take}
+        )
+        # Stub _mutate_shot so the second-trip metadata stash doesn't blow up
+        # against the MagicMock host (controller-level test isolation).
+        ctrl._mutate_shot = MagicMock(return_value=expected_take)
+
+        with patch("llm.director.intent_translator", return_value=mock_translated):
+            result = ctrl.regenerate_with_intent(
+                "scene_1", "shot_1_0", "take_parent", intent
+            )
+
+        assert result["success"] is True
+
+        ctrl.generate_performance_take.assert_called_once()
+        call_kwargs = ctrl.generate_performance_take.call_args
+        assert call_kwargs.kwargs.get("intent_override") is intent
+        assert call_kwargs.kwargs.get("parent_take_id") == "take_parent"
+        assert call_kwargs.kwargs.get("revised_prompt") == "Subtler emotional delivery"
+        # generate_performance_take does NOT take positive_prompt (signature is
+        # (scene_id, shot_id) plus the keyword-only iteration kwargs); verify
+        # we didn't accidentally pass one.
+        assert "positive_prompt" not in call_kwargs.kwargs
+
+    def test_motion_iteration_calls_generate_motion_take(self):
+        """intent.target_stage='motion' → generate_motion_take called with intent kwargs.
+
+        Per code-quality reviewer M-3: covers the motion routing path.
+        """
+        project = _make_minimal_project()
+        ctrl = self._build_controller(project)
+        intent = _make_intent(prose="add a subtle dolly-in", target_stage="motion")
+
+        mock_translated = {
+            "revised_prompt": "Slow dolly-in toward protagonist",
+            "params_delta": {"camera_speed": 0.4},
+            "anchor_refs": [],
+        }
+        expected_take = {"id": "take_motion_new", "kind": "motion", "parent_take_id": "take_parent"}
+        ctrl.generate_motion_take = MagicMock(
+            return_value={"success": True, "take": expected_take}
+        )
+        ctrl._mutate_shot = MagicMock(return_value=expected_take)
+
+        with patch("llm.director.intent_translator", return_value=mock_translated):
+            result = ctrl.regenerate_with_intent(
+                "scene_1", "shot_1_0", "take_parent", intent
+            )
+
+        assert result["success"] is True
+
+        ctrl.generate_motion_take.assert_called_once()
+        call_kwargs = ctrl.generate_motion_take.call_args
+        assert call_kwargs.kwargs.get("intent_override") is intent
+        assert call_kwargs.kwargs.get("parent_take_id") == "take_parent"
+        assert call_kwargs.kwargs.get("revised_prompt") == "Slow dolly-in toward protagonist"
+        assert "positive_prompt" not in call_kwargs.kwargs
