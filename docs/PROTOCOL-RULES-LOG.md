@@ -17,8 +17,8 @@ and per-session invocation count. Updated manually at session-close by operator
 | 7 | Pre-commit re-verify (state changes between Write and commit) | `416d610` | `a6e3ff1` mid-handoff race (Monitor.tsx shipped during operator handoff Write; operator caught in race-ack body of `1541a69`) |
 | 8 | Mailbox authority (sent events bind equal to user-relayed signals) | `416d610` | User-as-relay bottleneck observed across cycles 1-3 — every inter-session signal had to route through user, eating throughput |
 | 9 | Operator-side reviewer is independent, not duplicate (second-opinion convention) | `d61bdc8` | Substance imbalance ~30:1 (director:operator) across cycles 3-4 + structural blind-spot risk in single-context reviewer pass; user surfaced + operator drafted v4 |
-| 10 | Joint-team mode (two seats of one team; co-agent mode) | `_Protocol Bundle v5 ship_` | User surfaced "director codifies rules that bind themselves" + asymmetry-as-hierarchy concerns; v5 reframes role partition as specialization, not hierarchy |
-| 11 | Codification bias check (per-rule beneficiary flagging + non-beneficiary veto) | `_Protocol Bundle v5 ship_` | User surfaced "director-only memory writes" + "codification meta-bias" concerns; R11 makes future codification per-rule auditable |
+| 10 | Joint-team mode (two seats of one team; co-agent mode) | `d66690f` | User surfaced "director codifies rules that bind themselves" + asymmetry-as-hierarchy concerns; v5 reframes role partition as specialization, not hierarchy |
+| 11 | Codification bias check (per-rule beneficiary flagging + non-beneficiary veto) | `d66690f` | User surfaced "director-only memory writes" + "codification meta-bias" concerns; R11 makes future codification per-rule auditable |
 
 > Historical note: Rules #7 + #8 originally shipped with the placeholder
 > `_Protocol Bundle v2 ship_` in the "Codified" column because the rules-log
@@ -60,8 +60,8 @@ CC-2 codification (≥1 more in cycle-7+ Lane V dispatches), v4.2
 should consider operator's CC-2 options 2 (third lightweight
 verifier subagent) or 3 (different subagent type for spec review).
 
-v4.1 ship SHA: `_Protocol Bundle v4.1 ship_` (this commit; operator
-updates at next session-close per chicken-and-egg pattern).
+v4.1 ship SHA: `509db7c` (filled post-ship by operator per chicken-and-egg
+pattern; mirrors `3e57ddf` v2 / `d8f2407` v3 / `d90036b` v4).
 
 ## Beneficiary distribution snapshot (Rule #11)
 
