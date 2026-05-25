@@ -1285,11 +1285,15 @@ class ShotController:
                 try:
                     from cinema.screening import mark_shot_needs_reassembly
                     mark_shot_needs_reassembly(project_id, shot_id)
-                except Exception:
+                except (ImportError, ValueError, RuntimeError):
                     # Best-effort: dirty-tracking failure must NOT mask
                     # iteration success. Log at debug; the operator will
                     # re-trigger if the next re-assemble call short-circuits
                     # incorrectly (only_if_changed semantics are advisory).
+                    # (S21 reviewer Minor #3 fold) Narrowed from a bare
+                    # ``except Exception:`` so KeyboardInterrupt / SystemExit
+                    # / unexpected runtime bugs surface instead of being
+                    # silently swallowed.
                     logger.debug(
                         "S21 dirty-tracking failed for shot_id=%s",
                         shot_id, exc_info=True,

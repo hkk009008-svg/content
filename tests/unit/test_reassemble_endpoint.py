@@ -9,18 +9,23 @@ Test matrix:
 1. Returns 404 when CINEMA_SCREENING_STAGE flag is OFF.
 2. Returns 404 when project doesn't exist.
 3. Returns 200 + skipped=true when only_if_changed=true AND no dirty
-   shots; CinemaPipeline.assemble_approved_takes is NOT called.
+   shots; CinemaPipeline._assemble_approved_takes_core is NOT called.
 4. Returns 200 + skipped=false + regenerated_shots populated when
-   only_if_changed=true AND dirty shots exist; assemble_approved_takes
-   IS called; needs_reassembly is cleared on success.
+   only_if_changed=true AND dirty shots exist;
+   _assemble_approved_takes_core IS called; needs_reassembly is
+   cleared on success.
 5. Returns 200 + always runs when only_if_changed=false even with no
    dirty shots.
 6. Returns 409 reassembly_busy when a re-assembly is already in flight
    for the same project (re-entrancy guard).
 7. Does NOT busy-fence on _running_pipelines (mirrors /screening/approve;
    re-assembly runs WHILE the pipeline waits at the SCREENING gate).
-8. needs_reassembly is NOT cleared when assemble_approved_takes fails
-   (so the operator can retry without re-iterating the same shots).
+8. needs_reassembly is NOT cleared when _assemble_approved_takes_core
+   fails (so the operator can retry without re-iterating the same shots).
+9. Integration regression (Critical #1 from S21 code-quality review):
+   with flag ON and operator NOT yet approved, the endpoint must
+   return in bounded time -- proves the SCREENING gate-wait is NOT
+   in the re-assembly path.
 
 Uses Flask test_client() with patched CinemaPipeline / project_manager
 so no real ffmpeg / filesystem mp4 work is required.
@@ -176,9 +181,9 @@ class TestDirtyShotsTriggerReassembly:
         new_path = "/fake/exports/final_cinema.mp4"
 
         # Patch CinemaPipeline so we can verify it was constructed +
-        # assemble_approved_takes() was called.
+        # _assemble_approved_takes_core() was called.
         mock_pipeline_inst = MagicMock()
-        mock_pipeline_inst.assemble_approved_takes.return_value = {
+        mock_pipeline_inst._assemble_approved_takes_core.return_value = {
             "success": True, "final_path": new_path,
         }
         clear_called: dict[str, bool] = {"called": False}
@@ -203,7 +208,7 @@ class TestDirtyShotsTriggerReassembly:
         assert body["new_assembled_path"] == new_path
         assert body["regenerated_shots"] == ["shot_1_0", "shot_1_1"]
         assert "cost_estimate_seconds" in body
-        mock_pipeline_inst.assemble_approved_takes.assert_called_once()
+        mock_pipeline_inst._assemble_approved_takes_core.assert_called_once()
         # Dirty-tracking is cleared after successful reassembly.
         assert clear_called["called"] is True
 
@@ -211,7 +216,7 @@ class TestDirtyShotsTriggerReassembly:
         # Empty dirty list, but only_if_changed=false forces a full rerun.
         project = _make_project(dirty=[])
         mock_pipeline_inst = MagicMock()
-        mock_pipeline_inst.assemble_approved_takes.return_value = {
+        mock_pipeline_inst._assemble_approved_takes_core.return_value = {
             "success": True, "final_path": "/fake/final.mp4",
         }
         with patch("web_server.load_project", return_value=project), \
@@ -227,7 +232,7 @@ class TestDirtyShotsTriggerReassembly:
         body = resp.get_json()
         assert body["skipped"] is False
         assert body["regenerated_shots"] == []  # nothing was dirty, but we still ran
-        mock_pipeline_inst.assemble_approved_takes.assert_called_once()
+        mock_pipeline_inst._assemble_approved_takes_core.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -237,12 +242,12 @@ class TestDirtyShotsTriggerReassembly:
 
 class TestReassemblyFailure:
     def test_failed_assembly_returns_409_and_preserves_dirty(self, client, flag_on):
-        # When assemble_approved_takes returns success=False, the endpoint
-        # must NOT clear needs_reassembly -- the operator should be able to
-        # retry without re-iterating the same shots.
+        # When _assemble_approved_takes_core returns success=False, the
+        # endpoint must NOT clear needs_reassembly -- the operator should
+        # be able to retry without re-iterating the same shots.
         project = _make_project(dirty=["shot_1_0"])
         mock_pipeline_inst = MagicMock()
-        mock_pipeline_inst.assemble_approved_takes.return_value = {
+        mock_pipeline_inst._assemble_approved_takes_core.return_value = {
             "success": False, "error": "Approved take files are missing for: shot_xyz",
         }
         clear_called: dict[str, bool] = {"called": False}
@@ -305,7 +310,7 @@ class TestReassemblyInFlightGuard:
         from web_server import _reassembly_in_flight
         project = _make_project(dirty=["shot_1_0"])
         mock_pipeline_inst = MagicMock()
-        mock_pipeline_inst.assemble_approved_takes.return_value = {
+        mock_pipeline_inst._assemble_approved_takes_core.return_value = {
             "success": True, "final_path": "/fake/final.mp4",
         }
         with patch("web_server.load_project", return_value=project), \
@@ -324,7 +329,7 @@ class TestReassemblyInFlightGuard:
         from web_server import _reassembly_in_flight
         project = _make_project(dirty=["shot_1_0"])
         mock_pipeline_inst = MagicMock()
-        mock_pipeline_inst.assemble_approved_takes.return_value = {
+        mock_pipeline_inst._assemble_approved_takes_core.return_value = {
             "success": False, "error": "missing files",
         }
         with patch("web_server.load_project", return_value=project), \
@@ -352,7 +357,7 @@ class TestDoesNotBusyFence:
         try:
             project = _make_project(pid=pid, dirty=["shot_1_0"])
             mock_pipeline_inst = MagicMock()
-            mock_pipeline_inst.assemble_approved_takes.return_value = {
+            mock_pipeline_inst._assemble_approved_takes_core.return_value = {
                 "success": True, "final_path": "/fake/final.mp4",
             }
             with patch("web_server.load_project", return_value=project), \
@@ -372,7 +377,7 @@ class TestDoesNotBusyFence:
         assert resp.status_code == 200, resp.data
         body = resp.get_json()
         assert body["success"] is True
-        mock_pipeline_inst.assemble_approved_takes.assert_called_once()
+        mock_pipeline_inst._assemble_approved_takes_core.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -384,7 +389,7 @@ class TestResponseShape:
     def test_success_response_has_all_expected_keys(self, client, flag_on):
         project = _make_project(dirty=["shot_1_0"])
         mock_pipeline_inst = MagicMock()
-        mock_pipeline_inst.assemble_approved_takes.return_value = {
+        mock_pipeline_inst._assemble_approved_takes_core.return_value = {
             "success": True, "final_path": "/fake/final.mp4",
         }
         with patch("web_server.load_project", return_value=project), \
@@ -419,3 +424,108 @@ class TestResponseShape:
             assert key in body, f"Missing key '{key}' in skipped response"
         assert body["skipped"] is True
         assert body["new_assembled_path"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Critical #1 deadlock-regression test (S21 code-quality review fix)
+# ---------------------------------------------------------------------------
+
+
+class TestNoScreeningGateDeadlock:
+    """Integration regression for Critical #1 (S21 code-quality review).
+
+    The S21 implementer's 13 endpoint tests all mocked
+    ``CinemaPipeline.assemble_approved_takes`` entirely, so the real
+    orchestrator code never ran -- which is what let the SCREENING
+    gate-wait deadlock slip through. This test mocks ONLY at the heavy
+    boundaries (``_assemble_final`` to avoid real ffmpeg,
+    ``_build_scene_packages`` to avoid filesystem mp4 lookups, etc.) so
+    the real ``_assemble_approved_takes_core`` runs end-to-end.
+
+    Pass criterion: with CINEMA_SCREENING_STAGE on and operator NOT
+    yet approved (the exact condition under which the operator clicks
+    "Re-assemble"), the endpoint completes within a few hundred ms.
+    If anyone reintroduces ``assemble_approved_takes`` here, this test
+    will hang on ``lifecycle.wait_for_gate`` and fail via the join
+    timeout.
+    """
+
+    def test_reassemble_completes_within_bounded_time_with_flag_on(
+        self, flag_on, tmp_path,
+    ):
+        import threading
+        import time
+
+        project = _make_project(dirty=["shot_1_0"])
+
+        # Fake "produced" mp4 so the existence check at the tail of
+        # _assemble_approved_takes_core passes.
+        fake_mp4 = tmp_path / "fake_assembled.mp4"
+        fake_mp4.write_bytes(b"\x00" * 16)
+
+        # Mocks chosen to exercise the REAL orchestrator while skipping
+        # ffmpeg + filesystem snapshot work. _gate_satisfied=True bypasses
+        # the REVIEW-missing path; _build_scene_packages returns an empty
+        # ([], []) tuple so the preview loop is a no-op; _assemble_final
+        # returns a path to the fake mp4.
+        #
+        # Note: this test owns its own ``app.test_client()`` instead of
+        # using the shared ``client`` fixture. Flask's test_client context
+        # is bound to the thread that opens it; this test runs the
+        # request in a worker thread (so a deadlock manifests as
+        # t.is_alive() rather than hanging the entire pytest run), and
+        # the matched-thread open/close avoids a teardown LookupError
+        # on the app context var.
+        with patch("cinema_pipeline.CinemaPipeline._assemble_final",
+                   return_value=str(fake_mp4)), \
+             patch("cinema_pipeline.CinemaPipeline._build_scene_packages",
+                   return_value=([], [])), \
+             patch("cinema_pipeline.CinemaPipeline._refresh_project_snapshot",
+                   return_value=project), \
+             patch("cinema_pipeline.CinemaPipeline._gate_satisfied",
+                   return_value=True), \
+             patch("cinema_pipeline.CinemaPipeline._ensure_bgm",
+                   return_value=""), \
+             patch("web_server._get_or_build_core", return_value=MagicMock()), \
+             patch("web_server.load_project", return_value=project), \
+             patch("cinema.screening.clear_needs_reassembly",
+                   return_value={"success": True}):
+            # Run the endpoint call in a background thread so a deadlock
+            # manifests as t.is_alive() after the join timeout rather
+            # than hanging this test forever.
+            result_holder: dict = {"resp": None, "elapsed": 0.0, "exc": None}
+            started_at = time.monotonic()
+
+            def call_endpoint():
+                try:
+                    with app.test_client() as c:
+                        result_holder["resp"] = c.post(
+                            f"/api/projects/{project['id']}/assemble/re-assemble",
+                            json={"only_if_changed": False},
+                        )
+                except Exception as exc:
+                    result_holder["exc"] = exc
+                finally:
+                    result_holder["elapsed"] = time.monotonic() - started_at
+
+            t = threading.Thread(target=call_endpoint, daemon=True)
+            t.start()
+            # 3s join timeout: full real-world re-rerun targets <60s but
+            # this test's mock surface skips all heavy work, so the
+            # endpoint should return in well under 1s. 3s gives ample
+            # headroom while keeping a deadlock visibly broken (the
+            # SCREENING gate's default poll_interval is 0.5s and it
+            # would loop indefinitely without an approval signal).
+            t.join(timeout=3.0)
+
+            assert not t.is_alive(), (
+                "Reassemble endpoint hung past 3.0s -- the SCREENING "
+                "gate-wait is in the path. See Critical #1 from S21 "
+                "code-quality review."
+            )
+            assert result_holder["exc"] is None, \
+                f"Endpoint raised: {result_holder['exc']!r}"
+            assert result_holder["resp"] is not None
+            assert result_holder["resp"].status_code == 200, \
+                result_holder["resp"].data
+            assert result_holder["elapsed"] < 3.0

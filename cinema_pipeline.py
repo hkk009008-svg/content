@@ -573,7 +573,42 @@ class CinemaPipeline:
 
 
 
-    def assemble_approved_takes(self) -> dict:
+    def _assemble_approved_takes_core(self) -> dict:
+        """Re-stitch the final cut from current approved takes (S21 helper).
+
+        Encapsulates steps 1-5 of the full assembly path:
+            1. refresh project snapshot
+            2. REVIEW-gate check (all approved_final_take_id populated)
+            3. build per-scene packages (verify approved take mp4s exist)
+            4. per-scene preview generation
+            5. _assemble_final -> final_path
+
+        Returns the same shape as ``assemble_approved_takes`` on the success
+        path (``{"success": True, "final_path": str}``) and on the failure
+        paths (``{"success": False, "error": str}``), but DOES NOT run:
+            6. the SCREENING gate-wait (S19)
+            7. cleanup_project
+            8. cost summary
+            9. _clear_checkpoint + COMPLETE progress
+
+        Those steps are appropriate for a *fresh* full-pipeline run that
+        terminates on operator approval. For the S21 re-assemble path
+        (operator iterating DURING SCREENING), they would:
+            - SCREENING gate-wait: DEADLOCK the Flask request thread.
+              The operator is iterating BEFORE approving; the gate
+              predicate ``is_screening_approved`` is False by design,
+              and the request thread's fresh pipeline is not the one
+              ``/screening/approve`` would ``signal_gate`` on. Closes
+              S21 code-quality review Critical #1.
+            - cleanup_project: remove temp files that further iterations
+              may still need.
+            - _clear_checkpoint + COMPLETE: would prematurely tear down
+              the original pipeline's checkpoint and emit a misleading
+              "COMPLETE" progress event mid-screening.
+
+        Idempotent — safe to call repeatedly on the same project state;
+        each call produces a fresh ``final_cinema.mp4`` rewrite.
+        """
         project = self._refresh_project_snapshot() or self.project
         if not self._gate_satisfied("REVIEW", project):
             missing = [
@@ -605,6 +640,27 @@ class CinemaPipeline:
         final_path = self._assemble_final(scene_data, bgm_path, settings)
         if not final_path or not os.path.exists(final_path):
             return {"success": False, "error": "Final assembly failed"}
+
+        return {"success": True, "final_path": final_path}
+
+    def assemble_approved_takes(self) -> dict:
+        """Full-pipeline assembly path: core re-stitch + SCREENING gate + cleanup.
+
+        The observable contract for existing callers (``generate`` and
+        ``api_proceed_assembly``) is unchanged: a successful call ends
+        with ``COMPLETE`` progress at 100% and returns
+        ``{"success": True, "final_path": <path>}``. Failures short-
+        circuit identically to pre-S21 behaviour.
+
+        The S21 re-assemble endpoint deliberately calls
+        ``_assemble_approved_takes_core`` instead, bypassing the
+        SCREENING gate-wait + cleanup + cost summary tail (see docstring
+        on the core helper for the deadlock rationale).
+        """
+        core_result = self._assemble_approved_takes_core()
+        if not core_result.get("success"):
+            return core_result
+        final_path = core_result["final_path"]
 
         # S19 Surface B (cycle-9): SCREENING gate.
         # Behind CINEMA_SCREENING_STAGE flag. When ON, after the assembled mp4

@@ -286,6 +286,13 @@ export function usePipelineState(projectId: string | null) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ only_if_changed: onlyIfChanged }),
     })
+    // (S21 reviewer Minor #5 fold) Guard against a non-JSON 500/timeout
+    // surface (proxy 504, HTML error page from a misconfigured route).
+    // Returning a JSON-shaped object lets the UI render the error inline
+    // instead of crashing on res.json() parse failure.
+    if (!res.ok) {
+      return { success: false, error: res.statusText || `HTTP ${res.status}` }
+    }
     return res.json()
   }, [projectId])
 

@@ -368,12 +368,27 @@ def clear_needs_reassembly(project_id: str) -> dict:
 
 
 # S21 cost-estimate heuristic constants. Derived from the Q5 measurement
-# spike (see commit body) -- synthetic _assemble_final timing at N=5/30/60
-# stub mp4s produced a roughly-linear cost curve on (a) per-clip normalize
-# (per-shot ffmpeg fork + libx264 encode) and (b) total-output-duration
-# stages (stitch + grade + bgm + loudnorm). For real production projects
-# at avg 5s/shot, multiply the duration-bound stages by ~5x. These constants
-# err generous (operator sees "it'll be slower than this if we're wrong").
+# spike (see commit body of S21 -- commit 4075f8e) -- synthetic
+# _assemble_final timing at N=5/30/60 stub mp4s produced a roughly-linear
+# cost curve on (a) per-clip normalize (per-shot ffmpeg fork + libx264
+# encode) and (b) total-output-duration stages (stitch + grade + bgm +
+# loudnorm). For real production projects at avg 5s/shot, multiply the
+# duration-bound stages by ~5x. These constants err generous (operator
+# sees "it'll be slower than this if we're wrong").
+#
+# (S21 reviewer Minor #6 fold) Pasting the raw Q5 measurement table here
+# so the constants stay auditable in 12 months without ``git log`` archaeology:
+#
+#   Synthetic _assemble_final timing (Macbook M-series, ffmpeg 8.1).
+#   1s clips at 640x360 -> 1920x1080@30fps:
+#     N    norm  stitch  grade   bgm  loudnorm   total
+#     5    0.49   0.02   0.72   0.09     0.22    1.54s
+#    30    2.92   0.05   3.89   0.44     0.95    8.25s
+#    60    5.98   0.08   8.41   0.87     1.86   17.21s
+#
+#   Real-world projection for 60 shots * 5s avg (300s source):
+#     normalize ~30s, grade ~45s, loudnorm ~10s, total ~90s.
+#   Typical 30-shot project: ~45s, well within the 60s operator target.
 #
 # Per-clip cost (libx264 encode + ffmpeg fork): ~0.1s/clip baseline,
 #   amortized by source-clip duration. For real shots at 5s avg:

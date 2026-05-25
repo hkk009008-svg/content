@@ -1900,11 +1900,11 @@ def api_assemble_screen(pid):
     # construction here (rather than reading it off the running pipeline,
     # which may be None for a project whose pipeline already terminated)
     # so the endpoint is a pure read against on-disk state.
-    try:
-        from domain.project_manager import get_project_dir
-    except ImportError:
-        # Backward-compat shim path:
-        from project_manager import get_project_dir
+    # (Lane V #7 H3 fold) The previous try/except ImportError shim was
+    # dead defensive cruft: ``project_manager.py`` is a 9-line re-export
+    # of ``domain.project_manager``, so the canonical import resolves
+    # unconditionally.
+    from domain.project_manager import get_project_dir
     export_dir = os.path.join(get_project_dir(pid), "exports")
     assembled_path = os.path.join(export_dir, "final_cinema.mp4")
     if not os.path.exists(assembled_path):
@@ -2094,7 +2094,16 @@ def api_assemble_reassemble(pid):
                 core=_get_or_build_core(pid),
                 progress_callback=_make_progress_cb(pid),
             )
-            assembly_result = pipeline.assemble_approved_takes()
+            # S21 Critical #1 fix: call the helper that runs steps 1-5
+            # only (REVIEW gate + scene_packages + previews + _assemble_final).
+            # The public ``assemble_approved_takes`` would tail with the
+            # SCREENING gate-wait, which would deadlock the Flask request
+            # thread: the operator iterating during SCREENING has NOT
+            # approved yet (that's the whole point of re-assemble), and
+            # ``/screening/approve`` signals only the ORIGINAL running
+            # pipeline's lifecycle, not this fresh one. See the docstring
+            # on ``_assemble_approved_takes_core`` for the full rationale.
+            assembly_result = pipeline._assemble_approved_takes_core()
         except ValueError:
             return jsonify({"error": "Project not found"}), 404
 

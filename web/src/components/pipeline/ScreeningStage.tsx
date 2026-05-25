@@ -436,12 +436,13 @@ export default function ScreeningStage({
   // ── Marker click handler: select + seek ─────────────────────
   const handleSelectMarker = useCallback((entry: ScreenManifestEntry) => {
     setSelectedShotId(entry.shot_id)
+    // (Lane V #7 H6 fold) Upstream guard via Number.isFinite makes the
+    // seek safe by construction; the previous empty try/catch swallowed
+    // every error class — including bugs we'd want to see. NaN/Infinity
+    // from a malformed manifest is the only realistic failure mode here.
+    if (!Number.isFinite(entry.start_s)) return
     if (videoRef.current) {
-      try {
-        videoRef.current.currentTime = entry.start_s
-      } catch {
-        /* ignore seek errors (e.g. metadata not loaded yet) */
-      }
+      videoRef.current.currentTime = entry.start_s
     }
   }, [])
 
@@ -646,8 +647,8 @@ export default function ScreeningStage({
             <button
               type="button"
               disabled
-              title="Available in S21"
-              aria-label="Compare with previous cut — available in S21"
+              title="Available in S22+"
+              aria-label="Compare with previous cut — available in S22+"
               className="rounded border border-editorial-rule px-3 py-2 text-xs text-editorial-ivory-faint cursor-not-allowed"
             >
               Compare with previous cut
