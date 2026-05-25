@@ -1,5 +1,5 @@
 """
-tests/unit/test_director.py — CinemaDirector v1.0 substrate tests (S15).
+tests/unit/test_director.py — CinemaDirector v1.0 substrate tests (S15) + verb DSL (S18).
 
 Covers llm/director.py — the operator-driven creative iteration translator
 distinct from ChiefDirector's pre-gen HC1-HC8 enforcement.
@@ -7,6 +7,11 @@ distinct from ChiefDirector's pre-gen HC1-HC8 enforcement.
 Per S15 acceptance (director-seat REPLY,
 coordination/mailbox/archive/2026-05-25T14-56-42Z-director-to-operator-decision.md):
 - 2 unit tests: happy-path + structured-output parse failure → graceful fallback
+
+Per S18: 5 additional tests cover the verb DSL prefix-injection path and the
+unknown-verb fallback contract. Tests assert on the user_prompt forwarded to
+_call_llm (we mock the LLM call itself) so verb wiring is checked without
+requiring API keys.
 
 Tests monkey-patch ``_log_root`` to a tmp_path so they don't pollute
 ``data/intent_log/`` on CI / local runs.
@@ -141,3 +146,164 @@ class TestCinemaDirectorParseFailureFallback:
         assert entry["note"].startswith("parse_error:")
         # Raw LLM response captured for post-mortem debugging
         assert "not json" in entry["raw_llm_response"]
+
+
+# ─── S18: verb DSL prefix-injection tests ───────────────────────────────
+
+def _captured_user_prompt(director: CinemaDirector) -> str:
+    """Pull the user-prompt string forwarded to the mocked Anthropic client.
+
+    Mirrors the Anthropic call signature used in CinemaDirector._call_llm:
+    ``client.messages.create(messages=[{role: user, content: <prompt>}], ...)``
+    """
+    call_kwargs = director.client.messages.create.call_args.kwargs
+    messages = call_kwargs["messages"]
+    assert len(messages) == 1
+    assert messages[0]["role"] == "user"
+    return messages[0]["content"]
+
+
+def _canned_response() -> str:
+    """A well-formed canned response — verb tests focus on the user prompt,
+    not on the LLM's output schema (which the S15 happy-path test covers)."""
+    return json.dumps({
+        "revised_prompt": "translated",
+        "params_delta": {},
+        "anchor_refs": [],
+        "reasoning": "verb test",
+    })
+
+
+class TestCinemaDirectorVerbDSL:
+    """S18: structured verb DSL — verb-specific user-prompt prefix injection."""
+
+    def test_tighten_framing_injects_verb_prefix_with_degree(self, tmp_path):
+        """verb=tighten_framing with degree=moderate → user_prompt carries the verb block."""
+        director = _make_director_with_mock_client(_canned_response(), tmp_path)
+        intent = DirectorialIntent(
+            prose="closer in on the face",
+            verb="tighten_framing",
+            params={"degree": "moderate"},
+            target_stage="keyframe",
+        )
+        result = director.translate_intent(
+            intent,
+            {"id": "take_abc", "kind": "keyframe", "prompt": "wide shot of character"},
+            {"id": "scene_001", "approved_shots": []},
+        )
+        # Result still parses cleanly (verb routing doesn't break parsing).
+        assert result["revised_prompt"] == "translated"
+
+        prompt = _captured_user_prompt(director)
+        assert 'verb="tighten_framing"' in prompt
+        assert "moderate" in prompt
+        # The verb prefix sits BEFORE the JSON payload (per-call injection,
+        # not system-prompt append — preserves cache surface for freeform).
+        assert prompt.index("<VERB_GUIDANCE") < prompt.index('"task":')
+
+    def test_match_shot_with_valid_ref_pulls_reference_attributes(self, tmp_path):
+        """verb=match_shot with ref_shot_id in approved_shots → ref summary embedded in prefix."""
+        director = _make_director_with_mock_client(_canned_response(), tmp_path)
+        intent = DirectorialIntent(
+            prose="match the lighting from the earlier shot",
+            verb="match_shot",
+            params={"ref_shot_id": "shot_1_2", "attributes": ["lighting", "mood"]},
+            target_stage="keyframe",
+        )
+        scene_context = {
+            "id": "scene_001",
+            "approved_shots": [
+                {
+                    "id": "shot_1_2",
+                    "prompt": "moody warm-amber close-up under tungsten",
+                    "camera": "close-up",
+                    "continuity_constraints": "warm-amber tungsten",
+                    "visual_effect": "",
+                }
+            ],
+        }
+        director.translate_intent(
+            intent,
+            {"id": "take_abc", "kind": "keyframe", "prompt": "neutral mid-shot"},
+            scene_context,
+        )
+        prompt = _captured_user_prompt(director)
+        assert 'verb="match_shot"' in prompt
+        assert "shot_1_2" in prompt
+        assert "lighting" in prompt and "mood" in prompt
+        # Reference shot's attribute language flowed into the prefix
+        assert "warm-amber" in prompt
+        # status="ref_not_found" must NOT be set — the ref was found
+        assert "ref_not_found" not in prompt
+
+    def test_match_shot_with_missing_ref_emits_ref_not_found_marker(self, tmp_path):
+        """verb=match_shot with ref_shot_id NOT in approved_shots → graceful degrade prefix."""
+        director = _make_director_with_mock_client(_canned_response(), tmp_path)
+        intent = DirectorialIntent(
+            prose="match a shot we never approved",
+            verb="match_shot",
+            params={"ref_shot_id": "shot_NONEXISTENT", "attributes": ["lighting"]},
+            target_stage="keyframe",
+        )
+        scene_context = {
+            "id": "scene_001",
+            "approved_shots": [{"id": "shot_other_id", "prompt": "..."}],
+        }
+        result = director.translate_intent(
+            intent,
+            {"id": "take_abc", "kind": "keyframe", "prompt": "mid-shot"},
+            scene_context,
+        )
+        # Still returns the three-key shape — graceful degrade, not raise
+        assert "revised_prompt" in result
+
+        prompt = _captured_user_prompt(director)
+        assert 'verb="match_shot"' in prompt
+        assert "ref_not_found" in prompt
+        assert "shot_NONEXISTENT" in prompt
+        # Do NOT invent matching details — the LLM must be told to fall back to prose
+        assert "do not invent" in prompt.lower()
+
+    def test_shift_emotion_injects_direction_and_target(self, tmp_path):
+        """verb=shift_emotion with direction+target → prefix carries both axes."""
+        director = _make_director_with_mock_client(_canned_response(), tmp_path)
+        intent = DirectorialIntent(
+            prose="more intensity in this moment",
+            verb="shift_emotion",
+            params={"direction": "intensify", "target": "noticeable"},
+            target_stage="performance",
+        )
+        director.translate_intent(
+            intent,
+            {"id": "take_abc", "kind": "performance", "prompt": "neutral expression"},
+            {"id": "scene_001", "approved_shots": []},
+        )
+        prompt = _captured_user_prompt(director)
+        assert 'verb="shift_emotion"' in prompt
+        assert "intensify" in prompt
+        assert "noticeable" in prompt
+        # Direction-specific axis hint flowed in (intensify → sharper)
+        assert "sharper" in prompt or "more intense" in prompt
+
+    def test_unknown_verb_falls_back_to_freeform_with_no_prefix(self, tmp_path, capsys):
+        """verb='alien_verb' → log line emitted, no <VERB_GUIDANCE> block in prompt."""
+        director = _make_director_with_mock_client(_canned_response(), tmp_path)
+        intent = DirectorialIntent(
+            prose="just regular freeform prose",
+            verb="alien_verb",  # not in KNOWN_VERBS
+            params={"foo": "bar"},
+            target_stage="keyframe",
+        )
+        result = director.translate_intent(
+            intent,
+            {"id": "take_abc", "kind": "keyframe", "prompt": "x"},
+            {"id": "scene_001", "approved_shots": []},
+        )
+        assert "revised_prompt" in result
+
+        prompt = _captured_user_prompt(director)
+        # No verb block injected — falls back to freeform user prompt
+        assert "<VERB_GUIDANCE" not in prompt
+        # The fallback path emitted the unknown-verb log line
+        captured = capsys.readouterr()
+        assert "unknown verb 'alien_verb'" in captured.out

@@ -50,11 +50,23 @@ interface Props {
    *  auto-approve rejection so the badge clears without waiting for the
    *  next poll cycle (per S13 code-review fix). */
   onRefreshProject: () => Promise<void> | void
-  /** S17: directorial iteration. Optional — callers without the
+  /** S17 + S18: directorial iteration. Optional — callers without the
    *  CINEMA_DIRECTORIAL_ITERATION flag simply omit this prop; the
    *  Iterate button is hidden when it's absent.
-   *  Sends `{ prose, target_stage: "keyframe" }` to the iterate endpoint. */
-  onIterate?: (shotId: string, takeId: string, prose: string) => Promise<any>
+   *
+   *  S18 extends the signature with `targetStage` (one of keyframe /
+   *  performance / motion — matched to which review gate the panel was
+   *  opened from) plus optional structured `verb`+`params` for the verb
+   *  DSL. When `targetStage` is omitted, the endpoint defaults to keyframe
+   *  for S17 back-compat. */
+  onIterate?: (
+    shotId: string,
+    takeId: string,
+    prose: string,
+    targetStage?: 'keyframe' | 'performance' | 'motion',
+    verb?: string,
+    params?: Record<string, unknown>,
+  ) => Promise<any>
 }
 
 function findTake(takes: TakeRecord[], takeId: string) {
@@ -110,11 +122,19 @@ function TakeCard({
   take: TakeRecord
   active: boolean
   approved: boolean
-  /** S17: show the Iterate button only at KEYFRAME_REVIEW when onIterate is wired. */
+  /** S17: show the Iterate button only at KEYFRAME_REVIEW / REVIEW when onIterate is wired.
+   *  S18 extends usage to the REVIEW gate; PERFORMANCE_REVIEW uses an inline iterate
+   *  button next to the Approve button (renders IterationPanel below) rather than per-card. */
   showIterateButton: boolean
   onSelect: () => void
   onApprove: () => void
-  onIterate?: (takeId: string, prose: string) => Promise<any>
+  /** S18: onIterate signature carries the optional verb DSL params through. */
+  onIterate?: (
+    takeId: string,
+    prose: string,
+    verb?: string,
+    params?: Record<string, unknown>,
+  ) => Promise<any>
 }) {
   const [iterating, setIterating] = useState(false)
 
@@ -147,11 +167,11 @@ function TakeCard({
           )}
         </div>
       )}
-      {/* S17: inline iteration drawer — KEYFRAME_REVIEW + CINEMA_DIRECTORIAL_ITERATION only */}
+      {/* S17 + S18: inline iteration drawer — KEYFRAME_REVIEW + REVIEW + CINEMA_DIRECTORIAL_ITERATION only */}
       {iterating && onIterate && (
         <IterationPanel
-          onSubmit={async (prose) => {
-            const result = await onIterate(take.id, prose)
+          onSubmit={async (prose, verb, params) => {
+            const result = await onIterate(take.id, prose, verb, params)
             // Close panel on non-error result
             if (!result?.error) {
               setIterating(false)
@@ -210,6 +230,9 @@ function ClipCard({
   const [showRegenForm, setShowRegenForm] = useState(false)
   const [rejectReason, setRejectReason] = useState(shot.plan_rejection_reason || '')
   const [rejectAutoApproveGate, setRejectAutoApproveGate] = useState<'plan' | 'image' | 'motion' | 'final' | null>(null)
+  /** S18: Performance-card iteration toggle. Inline drawer below the
+   *  side-by-side preview, mirroring TakeCard's iteration UX shape. */
+  const [iteratingPerformance, setIteratingPerformance] = useState(false)
 
   const audit = shot.auto_approve_audit || []
   const [selectedKeyframeTakeId, setSelectedKeyframeTakeId] = useState(shot.approved_keyframe_take_id || lastTake(shot.keyframe_takes || [])?.id || '')
@@ -416,7 +439,9 @@ function ClipCard({
                     showIterateButton={activeStage === 'KEYFRAME_REVIEW' && Boolean(onIterate)}
                     onSelect={() => setSelectedKeyframeTakeId(take.id)}
                     onApprove={() => runAction(`approve-${take.id}`, () => onApproveKeyframe(shot.id, take.id))}
-                    onIterate={onIterate ? (takeId, prose) => onIterate(shot.id, takeId, prose) : undefined}
+                    onIterate={onIterate ? (takeId, prose, verb, params) =>
+                      onIterate(shot.id, takeId, prose, 'keyframe', verb, params)
+                    : undefined}
                   />
                 ))}
               </div>
@@ -530,6 +555,22 @@ function ClipCard({
                     Re-record (clear)
                   </button>
                 )}
+                {/* S18: PERFORMANCE_REVIEW gate exposes Iterate when there's a take to iterate from.
+                    Inline-rendered inside the Performance Capture section because performance takes
+                    don't use TakeCard (Lane V #5 noted the PerformanceCard absence — this is the
+                    matching wiring without adding a new card abstraction). */}
+                {activeStage === 'PERFORMANCE_REVIEW'
+                  && onIterate
+                  && latestPerformanceTake
+                  && !iteratingPerformance && (
+                  <button
+                    onClick={() => setIteratingPerformance(true)}
+                    className="rounded border border-editorial-brass/50 px-2 py-1 text-eyebrow-lg text-editorial-brass hover:bg-editorial-brass/10"
+                    title="Open directorial iteration panel to generate a new performance take"
+                  >
+                    Iterate
+                  </button>
+                )}
               </div>
             </div>
 
@@ -540,6 +581,21 @@ function ClipCard({
               performanceUrl={performanceVideoPath || null}
               projectId={projectId}
             />
+
+            {/* S18: inline iteration drawer for PERFORMANCE_REVIEW. target_stage='performance' routes
+                regenerate_with_intent → generate_performance_take per cinema/shots/controller.py:1202. */}
+            {iteratingPerformance && onIterate && latestPerformanceTake && (
+              <IterationPanel
+                onSubmit={async (prose, verb, params) => {
+                  const result = await onIterate(
+                    shot.id, latestPerformanceTake.id, prose, 'performance', verb, params,
+                  )
+                  if (!result?.error) setIteratingPerformance(false)
+                  return result
+                }}
+                onCancel={() => setIteratingPerformance(false)}
+              />
+            )}
 
             {/* Scores from the identity + motion gates */}
             {(performanceIdentity != null || motionFidelity != null) && (
@@ -602,9 +658,20 @@ function ClipCard({
                     take={take}
                     active={selectedFinal?.id === take.id}
                     approved={shot.approved_final_take_id === take.id}
-                    showIterateButton={false}
+                    /* S18: REVIEW gate now exposes Iterate for motion takes too.
+                       Postprocess-variant takes (kind != 'motion') stay non-iterable
+                       — they're derivative of an approved motion take, not a
+                       regeneration target. */
+                    showIterateButton={
+                      activeStage === 'REVIEW'
+                      && Boolean(onIterate)
+                      && take.kind === 'motion'
+                    }
                     onSelect={() => setSelectedFinalTakeId(take.id)}
                     onApprove={() => runAction(`approve-${take.id}`, () => onApproveFinal(shot.id, take.id))}
+                    onIterate={onIterate ? (takeId, prose, verb, params) =>
+                      onIterate(shot.id, takeId, prose, 'motion', verb, params)
+                    : undefined}
                   />
                 ))}
               </div>

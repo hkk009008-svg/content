@@ -203,20 +203,44 @@ export function usePipelineState(projectId: string | null) {
     return postJson(`/api/projects/${projectId}/assemble`)
   }, [projectId, postJson])
 
-  /** S17: directorial iteration — POST flat body `{ prose, target_stage }` to
-   *  the iterate endpoint. On success the new take is included in the response
+  /** S17 + S18: directorial iteration — POST flat body `{ prose, target_stage, verb?, params? }`
+   *  to the iterate endpoint. On success the new take is included in the response
    *  body as `{ success: true, take: {...} }`. The caller is responsible for
-   *  refreshing the project so the new take appears in the keyframe list.
+   *  refreshing the project so the new take appears in the relevant take list.
    *  On 404 (CINEMA_DIRECTORIAL_ITERATION flag off), surface the error JSON
    *  rather than throwing so the IterationPanel can show an inline message.
    *  Returns `null` as the no-op contract when projectId is unset (called
-   *  before a project is loaded); callers treat null as "did not run." */
-  const iterateTake = useCallback(async (shotId: string, takeId: string, prose: string) => {
+   *  before a project is loaded); callers treat null as "did not run."
+   *
+   *  S18: `targetStage` defaults to 'keyframe' for back-compat with S17 callers
+   *  (the KEYFRAME_REVIEW wiring still works without changes). `verb`+`params`
+   *  are optional structured-iteration extensions; when omitted, the endpoint
+   *  treats the call as freeform (the original S17 path).
+   *
+   *  Server endpoint accepts both nested `{intent: {...}}` and flat shapes per
+   *  the F1 accept-both decision (operator Lane V #4, 2026-05-25T15-49-12Z);
+   *  we send the flat shape to stay aligned with the existing 16 endpoint
+   *  tests. The `verb`/`params` keys travel cleanly through DirectorialIntent
+   *  validation because verb is Optional[str] and params is dict — no schema
+   *  migration required for new verbs. */
+  const iterateTake = useCallback(async (
+    shotId: string,
+    takeId: string,
+    prose: string,
+    targetStage: 'keyframe' | 'performance' | 'motion' = 'keyframe',
+    verb?: string,
+    params?: Record<string, unknown>,
+  ) => {
     if (!projectId) return null
+    const body: Record<string, unknown> = { prose, target_stage: targetStage }
+    if (verb) {
+      body.verb = verb
+      body.params = params ?? {}
+    }
     const res = await fetch(`/api/projects/${projectId}/shots/${shotId}/takes/${takeId}/iterate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prose, target_stage: 'keyframe' }),
+      body: JSON.stringify(body),
     })
     return res.json()
   }, [projectId])

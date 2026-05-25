@@ -22,6 +22,15 @@ ChiefDirector (see proposal §Q2 + director-seat REPLY).
 Per-call JSONL log written to ``data/intent_log/{project_id}/<ts>.jsonl``
 so cycle-9+ verb DSL design (S18) can be data-driven rather than
 guess-driven. Log write failures are non-fatal.
+
+S18 verb DSL (active): three structured verbs activate the
+``DirectorialIntent.verb`` field — ``tighten_framing`` /
+``match_shot`` / ``shift_emotion``. Verb guidance is injected as a
+per-call user-prompt prefix (NOT a SYSTEM_PROMPT appendix) so the
+cached system block stays stable across freeform vs. verb calls. The
+``verb`` field remains ``Optional[str]`` with NO Pydantic Literal —
+unknown verbs degrade gracefully to freeform with a log line, which
+lets future verbs land without a schema migration.
 """
 
 from __future__ import annotations
@@ -72,6 +81,110 @@ Output VALID JSON ONLY. No markdown fences, no prose, no explanation outside the
 - Empty params_delta is ALWAYS valid — only include keys the intent demands.
 - If the operator's prose is structural ("retake from scratch", "ignore the previous"), revised_prompt may be fully new; otherwise keep the spine.
 </TRANSLATION_GUIDANCE>"""
+
+
+# S18 verb DSL — three structured verbs the operator can select instead of
+# pure freeform. Each verb takes shape-validated params and produces a
+# per-call user-prompt prefix that biases the LLM's translation. Unknown
+# verbs (string set but not in this map) fall back to freeform with a
+# log line — by design no Pydantic Literal on intent.verb.
+#
+# Wording-engineering note: the framing-tightening percentages below are
+# starting heuristics, not measured calibration. The whole point of the
+# per-call intent_log JSONL is so cycle-9+ can re-tune from real usage.
+KNOWN_VERBS = frozenset({"tighten_framing", "match_shot", "shift_emotion"})
+
+
+def _build_verb_prefix(verb: Optional[str], params: dict, scene_context: dict) -> str:
+    """Return a per-call user-prompt prefix for a known structured verb.
+
+    Returns an empty string when verb is None (freeform path) or when verb
+    is set but unknown — the unknown-verb fallback also emits a log line at
+    the call site so operators see the degradation.
+
+    The prefix is wrapped in a clearly-delimited block so the LLM knows
+    the verb guidance is operator-driven structured intent (higher priority
+    than freeform prose interpretation).
+    """
+    if not verb or verb not in KNOWN_VERBS:
+        return ""
+
+    p = params or {}
+
+    if verb == "tighten_framing":
+        degree = str(p.get("degree", "moderate")).lower()
+        pct_map = {"subtle": "~10%", "moderate": "~25%", "strong": "~40%"}
+        pct = pct_map.get(degree, "~25%")
+        return (
+            "<VERB_GUIDANCE verb=\"tighten_framing\">\n"
+            f"Operator selected the TIGHTEN_FRAMING verb (degree: {degree}, ~{pct} tighter).\n"
+            "Reduce the subject's size in frame by the indicated amount. Adjust the "
+            "prompt's framing/camera language (push in, tighter shot, closer crop) without "
+            "changing subject, action, lighting, or mood. Preserve all other prompt structure.\n"
+            "</VERB_GUIDANCE>\n\n"
+        )
+
+    if verb == "match_shot":
+        ref_shot_id = str(p.get("ref_shot_id", "")).strip()
+        attributes = p.get("attributes") or []
+        if not isinstance(attributes, list):
+            attributes = []
+        attr_list = ", ".join(str(a) for a in attributes if a) or "lighting, mood, composition"
+
+        # Look up ref_shot_id in approved_shots; if missing, degrade to freeform-style guidance.
+        approved = scene_context.get("approved_shots") or []
+        ref = next(
+            (s for s in approved if isinstance(s, dict) and s.get("id") == ref_shot_id),
+            None,
+        )
+        if ref is None:
+            return (
+                "<VERB_GUIDANCE verb=\"match_shot\" status=\"ref_not_found\">\n"
+                f"Operator selected MATCH_SHOT verb against ref_shot_id={ref_shot_id!r} "
+                f"and attributes=[{attr_list}], but that shot is not in this scene's "
+                "approved_shots. Fall back to the operator's prose; do not invent matching "
+                "details. Note in revised_prompt that the match reference was unavailable.\n"
+                "</VERB_GUIDANCE>\n\n"
+            )
+
+        # Pull the ref shot's relevant fragments for the LLM to mirror.
+        ref_summary = {
+            "id": ref.get("id", ""),
+            "prompt": ref.get("prompt", "")[:600],  # cap for prompt length
+            "camera": ref.get("camera", ""),
+            "continuity_constraints": ref.get("continuity_constraints", ""),
+            "visual_effect": ref.get("visual_effect", ""),
+        }
+        return (
+            "<VERB_GUIDANCE verb=\"match_shot\">\n"
+            f"Operator selected MATCH_SHOT verb to align this take with ref_shot_id={ref_shot_id!r} "
+            f"on attributes: {attr_list}.\n"
+            "Pull the listed attribute language from the reference shot below into the "
+            "revised_prompt. Preserve THIS shot's subject, action, and identity — only the "
+            "named attributes (lighting / mood / composition) should be mirrored.\n"
+            f"<REFERENCE_SHOT>{json.dumps(ref_summary, indent=2)}</REFERENCE_SHOT>\n"
+            "</VERB_GUIDANCE>\n\n"
+        )
+
+    if verb == "shift_emotion":
+        direction = str(p.get("direction", "soften")).lower()
+        target = str(p.get("target", "subtle")).lower()
+        axis_hint = (
+            "warmer light, softer expression, gentler beat" if direction == "soften"
+            else "sharper light, more intense expression, harder beat"
+        )
+        magnitude_hint = "a small calibrated shift" if target == "subtle" else "a clearly visible shift"
+        return (
+            "<VERB_GUIDANCE verb=\"shift_emotion\">\n"
+            f"Operator selected SHIFT_EMOTION verb (direction: {direction}, target: {target}).\n"
+            f"Apply {magnitude_hint} toward {direction} — {axis_hint}. Adjust performance + "
+            "lighting cues in the prompt accordingly. Keep subject, action, framing, and camera "
+            "unchanged. Note any params_delta knobs that would support the tonal shift (e.g. "
+            "denoise_strength for keyframe).\n"
+            "</VERB_GUIDANCE>\n\n"
+        )
+
+    return ""  # unreachable — guarded by KNOWN_VERBS check above
 
 
 class CinemaDirector:
@@ -176,13 +289,24 @@ class CinemaDirector:
         ``intent`` may be a ``DirectorialIntent`` Pydantic model or a
         dict with the same shape.
         """
+        # S18: verb DSL. Extract verb + params for prefix injection. If the
+        # verb is set but unknown (not in KNOWN_VERBS), log + treat as
+        # freeform so future verbs land without breaking existing calls.
+        intent_dict = _intent_to_dict(intent)
+        verb = intent_dict.get("verb") or None
+        params = intent_dict.get("params") or {}
+        if verb is not None and verb not in KNOWN_VERBS:
+            print(f"   [CINEMA-DIRECTOR] unknown verb '{verb}'; falling back to freeform")
+            verb = None  # de-route to freeform path
+        verb_prefix = _build_verb_prefix(verb, params, scene_context)
+
         user_payload = {
             "task": "TRANSLATE_DIRECTORIAL_INTENT",
-            "intent": _intent_to_dict(intent),
+            "intent": intent_dict,
             "current_take_context": take_context,
             "scene_context": scene_context,
         }
-        user_prompt = json.dumps(user_payload, indent=2)
+        user_prompt = verb_prefix + json.dumps(user_payload, indent=2)
 
         raw = self._call_llm(user_prompt)
 

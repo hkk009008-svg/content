@@ -49,9 +49,20 @@ interface Props {
    *  ReviewStage's auto-approve rejection flow to clear the badge once
    *  the server has dropped the `<gate>_auto_approved` flag. */
   onRefreshProject: () => Promise<void> | void
-  /** S17: directorial iteration. Optional — only passed when
-   *  CINEMA_DIRECTORIAL_ITERATION is enabled. Forwarded to ReviewStage. */
-  onIterate?: (shotId: string, takeId: string, prose: string) => Promise<any>
+  /** S17 + S18: directorial iteration. Optional — only passed when
+   *  CINEMA_DIRECTORIAL_ITERATION is enabled. Forwarded to ReviewStage.
+   *  S18 extends the signature with `targetStage` (KEYFRAME_REVIEW →
+   *  'keyframe', PERFORMANCE_REVIEW → 'performance', REVIEW → 'motion')
+   *  plus an optional structured `verb` + `params` for the verb DSL.
+   *  Defaults preserve S17 freeform behaviour. */
+  onIterate?: (
+    shotId: string,
+    takeId: string,
+    prose: string,
+    targetStage?: 'keyframe' | 'performance' | 'motion',
+    verb?: string,
+    params?: Record<string, unknown>,
+  ) => Promise<any>
   /** Optional system-level error to render in the execution board. */
   pipelineError?: PipelineError | null
   /** Optional system-level "awaiting backend" placeholder. */

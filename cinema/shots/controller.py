@@ -1170,9 +1170,17 @@ class ShotController:
             "id": scene_id,
             "title": scene.get("title", ""),
             "action": scene.get("action", ""),
+            # S18 F2 fold (operator Lane V #4 verification-report 2026-05-25T15-37-08Z):
+            # original S16 filter checked only approved_keyframe/motion, missing the
+            # performance gate. Asymmetric naming (per domain/models.py:108-110): keyframe
+            # + motion use `approved_*_take_id`, performance uses bare `performance_take_id`.
+            # S18 `match_shot` verb looks up ref_shot_id against this list, so missing
+            # performance-approved shots would silently demote match_shot to freeform.
             "approved_shots": [
                 s for s in scene.get("shots", [])
-                if s.get("approved_keyframe_take_id") or s.get("approved_motion_take_id")
+                if s.get("approved_keyframe_take_id")
+                or s.get("approved_motion_take_id")
+                or s.get("performance_take_id")
             ],
         }
 

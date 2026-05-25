@@ -153,7 +153,9 @@ export default function App() {
           onDiagnoseShot={(shotId, takeId) => diagnoseShot(shotId, takeId)}
           onProceedToAssembly={() => withRefresh(() => proceedToAssembly())}
           onRefreshProject={refreshProject}
-          onIterate={(shotId, takeId, prose) => withRefresh(() => iterateTake(shotId, takeId, prose))}
+          onIterate={(shotId, takeId, prose, targetStage, verb, params) =>
+            withRefresh(() => iterateTake(shotId, takeId, prose, targetStage, verb, params))
+          }
         />
       </ErrorBoundary>
     )
