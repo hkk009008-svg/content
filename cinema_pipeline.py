@@ -606,6 +606,37 @@ class CinemaPipeline:
         if not final_path or not os.path.exists(final_path):
             return {"success": False, "error": "Final assembly failed"}
 
+        # S19 Surface B (cycle-9): SCREENING gate.
+        # Behind CINEMA_SCREENING_STAGE flag. When ON, after the assembled mp4
+        # exists the pipeline enters SCREENING and polls `project.screening_approved`
+        # until the operator signals proceed via POST /api/projects/<pid>/screening/approve.
+        # When OFF (default), pipeline goes ASSEMBLY -> CLEANUP -> COMPLETE as before --
+        # zero behaviour change for v1 users.
+        # Director-seat REPLY Q4 endorsed gate-predicate parity with the existing four
+        # review gates (PLAN_REVIEW / KEYFRAME_REVIEW / PERFORMANCE_REVIEW / REVIEW);
+        # SCREENING uses the same wait_for_gate(name, predicate) machinery.
+        from cinema.screening import (
+            SCREENING_STAGE_NAME,
+            _screening_stage_enabled,
+            is_screening_approved,
+        )
+        if _screening_stage_enabled():
+            self.current_stage = SCREENING_STAGE_NAME
+            self.progress(SCREENING_STAGE_NAME, "Awaiting operator screening approval...", 95)
+
+            def _screening_predicate() -> bool:
+                fresh = self._refresh_project_snapshot() or self.project
+                return is_screening_approved(fresh)
+
+            opened = self.lifecycle.wait_for_gate(
+                SCREENING_STAGE_NAME, _screening_predicate,
+            )
+            if not opened:
+                # wait_for_gate returns False only when the run was cancelled.
+                self.progress("CANCELLED", "Pipeline cancelled during screening", 0)
+                return {"success": False, "error": "Cancelled during screening"}
+            self.progress(SCREENING_STAGE_NAME, "Operator approved final cut", 99)
+
         try:
             from cleanup import cleanup_project
             cleanup_result = cleanup_project(self.project["id"], aggressive=False)

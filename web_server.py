@@ -1838,6 +1838,133 @@ def api_proceed_assembly(pid):
 
 
 # ---------------------------------------------------------------------------
+# S19 (cycle-9 Surface B): SCREENING stage endpoints
+# ---------------------------------------------------------------------------
+
+@app.route("/api/projects/<pid>/assemble/screen", methods=["POST"])
+@_project_lock_guard
+def api_assemble_screen(pid):
+    """S19: read-only fetch of the assembled mp4 + per-shot timeline manifest.
+
+    Feature-flagged behind CINEMA_SCREENING_STAGE=1|true|yes.
+    Returns 404 when the flag is off (mirrors §7.7.3 endpoint-level gate
+    convention shared with the directorial-iteration endpoint).
+
+    Route is pid-scoped per cycle-6 Lane V F1 convention -- no list_projects
+    scan; the pid travels through the URL and is the only project the
+    endpoint touches.
+
+    Response (success): 200 + {
+        "success": true,
+        "assembled_mp4_path": "<absolute_path_to_final_cinema.mp4>",
+        "timeline_manifest": [{shot_id, scene_id, start_s, end_s,
+                               approved_take_id, take_count}, ...],
+    }
+    Response (feature off): 404 + {"error": "..."}
+    Response (project not found): 404 + {"error": "Project not found"}
+    Response (assembled mp4 missing): 409 + {"error": "..."} -- the operator
+        called /screen before assembly finished (or after the cinema dir
+        was cleaned up).
+    Response (project busy with active generation): 409 + project_busy.
+    """
+    from cinema.screening import _screening_stage_enabled, _build_timeline_manifest
+
+    if not _screening_stage_enabled():
+        return jsonify({"error": "Screening stage not enabled (set CINEMA_SCREENING_STAGE=1)"}), 404
+
+    busy_response = _reject_if_project_busy(pid)
+    if busy_response:
+        return busy_response
+
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    # The assembled mp4 lives at <project_export_dir>/final_cinema.mp4 per
+    # _assemble_final at cinema_pipeline.py:911. We mirror the same path
+    # construction here (rather than reading it off the running pipeline,
+    # which may be None for a project whose pipeline already terminated)
+    # so the endpoint is a pure read against on-disk state.
+    try:
+        from domain.project_manager import get_project_dir
+    except ImportError:
+        # Backward-compat shim path:
+        from project_manager import get_project_dir
+    export_dir = os.path.join(get_project_dir(pid), "exports")
+    assembled_path = os.path.join(export_dir, "final_cinema.mp4")
+    if not os.path.exists(assembled_path):
+        return jsonify({
+            "success": False,
+            "error": f"Assembled video not found at {assembled_path}. Run /assemble first.",
+        }), 409
+
+    manifest = _build_timeline_manifest(project)
+    return jsonify({
+        "success": True,
+        "assembled_mp4_path": assembled_path,
+        "timeline_manifest": manifest,
+    }), 200
+
+
+@app.route("/api/projects/<pid>/screening/approve", methods=["POST"])
+@_project_lock_guard
+def api_screening_approve(pid):
+    """S19: operator signals "approve final cut" -- sets the SCREENING gate flag.
+
+    Sets ``project.screening_approved = True`` on disk via mutate_project,
+    then nudges the lifecycle's per-gate event so any pipeline that's
+    polling at SCREENING wakes up promptly (instead of waiting out the
+    next poll_interval tick).
+
+    Feature-flagged behind CINEMA_SCREENING_STAGE=1|true|yes.
+    Returns 404 when the flag is off.
+
+    Response (success): 200 + {"success": true, "screening_approved": true}
+    Response (feature off): 404
+    Response (project not found): 404
+    Response (project busy retry-conflict): 409 project_busy
+    """
+    from cinema.screening import (
+        SCREENING_STAGE_NAME,
+        _screening_stage_enabled,
+        mark_screening_approved,
+    )
+
+    if not _screening_stage_enabled():
+        return jsonify({"error": "Screening stage not enabled (set CINEMA_SCREENING_STAGE=1)"}), 404
+
+    # NOTE: we deliberately do NOT call _reject_if_project_busy here.
+    # /screening/approve is the operator's exit-signal for the gate the
+    # busy pipeline is waiting on -- refusing it on "project_busy" would
+    # deadlock the pipeline (it can never approve, because it's busy
+    # waiting for approval). The mutation itself is atomic via
+    # mutate_project's per-project file lock, which is the right
+    # serialisation primitive here.
+
+    try:
+        result = mark_screening_approved(pid)
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
+
+    # Wake any pipeline that's polling the SCREENING gate so it picks up
+    # the flag-flip on this iteration rather than the next poll tick.
+    # Best-effort: a project with no live pipeline (operator approved
+    # before pipeline reached SCREENING, or after it already proceeded)
+    # is a silent no-op here.
+    pipeline = _get_running_pipeline(pid)
+    if pipeline is not None:
+        try:
+            pipeline.lifecycle.signal_gate(SCREENING_STAGE_NAME)
+        except AttributeError:
+            # NullLifecycle / older lifecycle implementations may not
+            # expose signal_gate. Polling-only fallback still works --
+            # the predicate will pick up the flag on the next poll.
+            pass
+
+    return jsonify(result), 200
+
+
+# ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
 

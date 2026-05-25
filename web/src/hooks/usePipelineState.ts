@@ -16,6 +16,13 @@ const PIPELINE_STAGES: PipelineStage[] = [
   { id: 'REVIEW', label: 'Final Review', status: 'pending' },
   { id: 'SCENE_PREVIEW', label: 'Scene Preview', status: 'pending' },
   { id: 'ASSEMBLY', label: 'Final Assembly', status: 'pending' },
+  // S19 Surface B (cycle-9): SCREENING is a 14th stage inserted AFTER ASSEMBLY.
+  // Visible unconditionally in the stage list; the BACKEND `CINEMA_SCREENING_STAGE`
+  // env flag controls whether the pipeline actually emits SCREENING stage events.
+  // When the flag is off the pipeline goes ASSEMBLY → COMPLETE as before and this
+  // stage simply remains in 'pending' status (no behaviour change for v1 users).
+  // S20 will add the per-stage UI card.
+  { id: 'SCREENING', label: 'Screening', status: 'pending' },
 ]
 
 export function usePipelineState(projectId: string | null) {
