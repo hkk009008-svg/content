@@ -48,17 +48,18 @@
    NEVER been touched by a real operator in a browser. All
    correctness gates are static (`npx tsc --noEmit` + `npm run build`
    + 840-841 pytest pass — see Carry-forward §"environment-sensitive
-   flake" for the 1-test gap) — UX correctness is unverified. Likely
-   shapes:
-   (a) operator-claimable playthrough + report (Lane V-adjacent;
-   operator opens both flags, runs a small project end-to-end,
-   reports findings via mailbox), OR (b) director-dispatch Lane B
-   writeup of a validation protocol with concrete acceptance criteria
-   per surface. Outcome of either path: a decision on whether to
-   flip `CINEMA_DIRECTORIAL_ITERATION` and/or `CINEMA_SCREENING_STAGE`
-   to default-on. **This is the highest-value cycle-10 work** —
-   without operator validation, cycles 8-9 stay locked behind flags
-   and the engineering investment doesn't translate to user value.
+   flake" for the 1-test gap) — UX correctness is unverified.
+   **Brief authored cycle-10 by director:
+   [docs/BRIEF-operator-validation-2026-05-26.md](BRIEF-operator-validation-2026-05-26.md)**
+   (pre-validation checklist + Surface A 3-gate × 4-verb playthrough
+   + Surface B SCREENING + re-assembly playthrough + reporting format
+   + 90-120 min total time budget). Operator-claimable as Lane V-adjacent;
+   findings report goes to director via `verification-report` mailbox
+   event. Outcome: a flag-flip recommendation for user-decision on
+   `CINEMA_DIRECTORIAL_ITERATION` and/or `CINEMA_SCREENING_STAGE`.
+   **This is the highest-value cycle-10 work** — without operator
+   validation, cycles 8-9 stay locked behind flags and the
+   engineering investment doesn't translate to user value.
 
 2. **P1-3 resumption — domain/ caller migrations using the S10
    template** — handoff says "Parts 1-6 shipped"; remaining
