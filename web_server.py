@@ -943,8 +943,17 @@ def api_update_location(pid, lid):
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
-    loc = next((l for l in project["locations"] if l["id"] == lid), None)
-    if not loc:
+
+    # P1-3 part 5 migration (fourth canonical example): single-entity
+    # existence check at endpoint boundary in a MUTATING endpoint. The
+    # write-back inside `_mutate_project` (passed to `mutate_project()`
+    # below) operates on its own dict snapshot (`latest_project`) and
+    # stays on raw dict access by design — only the outer-scope existence
+    # check was migrated. Same template as Sessions 10 / P1-3 parts 3 / 4;
+    # see docs/MIGRATION-PATTERN-pydantic-caller.md for the full recipe.
+    project_typed = Project.model_validate(project)
+    loc_typed = next((l for l in project_typed.locations if l.id == lid), None)
+    if not loc_typed:
         return jsonify({"error": "Location not found"}), 404
 
     data = request.json if request.is_json else request.form.to_dict()

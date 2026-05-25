@@ -686,13 +686,51 @@ class TestMigratedCaller:
         assert scene_t is not None
         assert scene_t.shots == []  # new path's default_factory=list — no divergence
 
+    def test_update_location_existence_check_matches_dict_path(self):
+        """P1-3 part 5 regression: api_update_location's outer-scope location
+        existence check via typed access produces the same hit result as the
+        old dict-access path. The endpoint uses this lookup to gate the
+        404-vs-mutation branch; only the outer check was migrated (the
+        inner _mutate_project callback continues to operate on its own raw
+        dict snapshot, latest_project)."""
+        raw = self._make_project_dict()
+        raw["locations"] = [
+            {"id": "loc_alpha", "name": "Beach"},
+            {"id": "loc_beta", "name": "Mountain"},
+        ]
+
+        # Old dict path: existence check via next(...) + truthy test
+        loc_dict = next((l for l in raw["locations"] if l["id"] == "loc_alpha"), None)
+        assert loc_dict is not None
+
+        # New typed path (mirrors api_update_location's migration)
+        p = Project.model_validate(raw)
+        loc_typed = next((l for l in p.locations if l.id == "loc_alpha"), None)
+        assert loc_typed is not None
+        assert loc_typed.id == loc_dict["id"]
+        assert loc_typed.name == loc_dict["name"]
+
+    def test_update_location_missing_location_existence_check_returns_falsy(self):
+        """P1-3 part 5 regression: when the requested lid doesn't match any
+        location, both paths return None — the migrated existence check
+        correctly fires the 404 return."""
+        raw = self._make_project_dict()
+        raw["locations"] = [{"id": "loc_other", "name": "Other"}]
+
+        loc_dict = next((l for l in raw["locations"] if l["id"] == "loc_missing"), None)
+        assert loc_dict is None
+
+        p = Project.model_validate(raw)
+        loc_typed = next((l for l in p.locations if l.id == "loc_missing"), None)
+        assert loc_typed is None
+
     # ------------------------------------------------------------------
     # Template-level unhappy-path tests (BACKLOG.md B-001; addresses
     # operator-seat Lane V #3 F2 advisory; see docs/MIGRATION-PATTERN-
     # pydantic-caller.md §"Unhappy-path test recipe" for the full why).
     #
     # These cover the contract set by Project.model_validate() itself —
-    # ALL P1-3 migrations (S10 + parts 3 + 4 + future part N) inherit
+    # ALL P1-3 migrations (S10 + parts 3 + 4 + 5 + future part N) inherit
     # the protection without per-migration test duplication.
     # ------------------------------------------------------------------
 
