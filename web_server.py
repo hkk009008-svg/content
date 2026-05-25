@@ -1138,7 +1138,7 @@ def api_decompose_scene(pid, sid):
 
     # P1-3 part 3 migration (second canonical example): scene lookup +
     # characters filter + location lookup via typed access. Same template
-    # as Session 10's api_generate_dialogue migration (web_server.py:1106);
+    # as Session 10's api_generate_dialogue migration (web_server.py:1113);
     # see docs/MIGRATION-PATTERN-pydantic-caller.md for the full recipe.
     #
     # `settings` and `style_rules` (mid-level dict access on global_settings)
