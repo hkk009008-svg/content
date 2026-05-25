@@ -17,13 +17,12 @@ import { useState } from 'react'
  */
 
 interface Props {
-  shotId: string
-  takeId: string
+  /** Receives the trimmed prose; shotId + takeId are bound by the caller's closure. */
   onSubmit: (prose: string) => Promise<any>
   onCancel: () => void
 }
 
-export default function IterationPanel({ shotId: _shotId, takeId: _takeId, onSubmit, onCancel }: Props) {
+export default function IterationPanel({ onSubmit, onCancel }: Props) {
   const [prose, setProse] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -35,15 +34,16 @@ export default function IterationPanel({ shotId: _shotId, takeId: _takeId, onSub
     setError(null)
     try {
       const result = await onSubmit(trimmed)
-      // onSubmit resolves on success; the parent re-renders with new take data.
-      // Check for explicit error shapes returned by the endpoint.
+      // onSubmit resolves on success; the parent typically closes this panel
+      // via state update (unmount). Check for explicit error shapes returned
+      // by the endpoint (e.g. 404 with {error: "..."} when feature flag is off).
       if (result?.error) {
         setError(result.error)
-        setSubmitting(false)
       }
-      // On success the parent closes this panel via state update; no explicit
-      // close needed here — but if onSubmit resolves without triggering a
-      // close, guard against hanging in submitting state.
+      // Always clear submitting, even on success — guards against the parent
+      // keeping the panel mounted (e.g. an "iterate again" flow). If the parent
+      // unmounts, this setState is a no-op.
+      setSubmitting(false)
     } catch {
       setError('Something went wrong. Please try again.')
       setSubmitting(false)
@@ -64,6 +64,7 @@ export default function IterationPanel({ shotId: _shotId, takeId: _takeId, onSub
         rows={3}
         placeholder="e.g. tighten the framing on the face, warmer lighting, less motion blur…"
         disabled={submitting}
+        aria-label="Directorial iteration prose"
         className="w-full rounded border border-editorial-rule bg-editorial-ink px-2 py-1.5 text-xs text-editorial-ivory placeholder-editorial-ivory-mute disabled:opacity-60"
       />
       {error && (

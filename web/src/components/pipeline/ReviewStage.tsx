@@ -150,8 +150,6 @@ function TakeCard({
       {/* S17: inline iteration drawer — KEYFRAME_REVIEW + CINEMA_DIRECTORIAL_ITERATION only */}
       {iterating && onIterate && (
         <IterationPanel
-          shotId={''}
-          takeId={take.id}
           onSubmit={async (prose) => {
             const result = await onIterate(take.id, prose)
             // Close panel on non-error result
