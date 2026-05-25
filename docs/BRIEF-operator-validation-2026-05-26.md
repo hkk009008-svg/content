@@ -8,10 +8,18 @@
 > Surface A (`CINEMA_DIRECTORIAL_ITERATION`, cycles 8-9 / S15-S18)
 > and Surface B (`CINEMA_SCREENING_STAGE`, cycle 9 / S19-S21) are
 > functionally complete behind feature flags. Static gates pass
-> (`tsc --noEmit` + `npm run build` + 840-841 pytest pass). **Neither
+> (`tsc --noEmit` + `npm run build` + 852-853 pytest pass — see
+> §"Pre-validation checklist" for the flake exception). **Neither
 > surface has been driven by a real operator in a browser.** This
 > protocol exists so operator-seat (or user) can run a structured
 > playthrough, report findings, and unblock the flag-flip decision.
+>
+> **Pre-flight note (cycle-10 update):** Lane V #8 caught a release
+> blocker (I1) before this brief's first execution: iterate-during-gate-wait
+> was busy-fenced unconditionally, making Surface B's iterate-from-screening
+> flow unreachable AND breaking Surface A iterate at all review gates.
+> Fixed at `9e9b008` (cycle-10 director); validation now exercises the
+> FIXED substrate. Static gates re-verified post-fix.
 
 ---
 
@@ -32,7 +40,8 @@ Before starting the playthrough, verify:
 ```bash
 # 1. Latest origin/main checked out
 git status -sb                # main...origin/main, clean
-git log --oneline -3          # 8f8190e cycle-10 banner refresh on top
+git log --oneline -3          # 9e9b008 I1+I2+I3 fix on top (cycle-10);
+                              # earlier: 345c6e3 Lane V #8 REPLY, b6bb76c H4
 
 # 2. Static gates pass
 .venv/bin/python scripts/ci_smoke.py   # OK
@@ -41,8 +50,11 @@ git log --oneline -3          # 8f8190e cycle-10 banner refresh on top
 
 # 3. Backend deps fresh
 .venv/bin/python -m pytest tests/unit/ --tb=no -q | tail -2
-# Expected: 840-841 pass, 0-1 environment-sensitive flake
-# (test_four_concurrent_generate_only_one_wins; see POST-ROADMAP)
+# Expected: 852-853 pass, 0-1 environment-sensitive flake
+# (test_four_concurrent_generate_only_one_wins — concurrency-race
+# test sensitive to CPU scheduling; see POST-ROADMAP carry-forward
+# §"environment-sensitive flake" for full triage. Baseline was 840-841
+# pre-cycle-10; +12 tests for Lane V #8 I1+I3 coverage at 9e9b008.)
 
 # 4. Web dev server reachable
 (cd web && npm run dev)       # starts on http://localhost:5173 (or similar)
