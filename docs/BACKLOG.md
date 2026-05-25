@@ -28,8 +28,7 @@ once data accumulates.
 
 | ID | Surfaced by | Date | Description | Suggested seat | Priority hint |
 |---|---|---|---|---|---|
-
-_(Empty — B-001 graduated to Recently completed.)_
+| B-002 | director-seat (cycle-7 F1 cite-fix push attempt; force-with-lease recovery at `6e1deb0`) | 2026-05-25 | **Fix `.claude/hooks/update-state.sh` to amend ONLY when an actual new commit landed via `git commit`, NOT on every HEAD change.** Current behavior: the marker-vs-HEAD check (`CURRENT != LAST`) treats `git reset`, `git checkout`, `git pull --rebase`, and other HEAD-moving operations as "new commit happened" and amends accordingly. This re-amends already-pushed commits (rewriting their SHAs from origin's view) and produces non-fast-forward divergence on the next push attempt. Recovery requires force-with-lease (see cycle-7 `6e1deb0` body for the recovery pattern). **Suggested fix:** inspect `git reflog -1 --format=%gs` for the reflog message — if it starts with `commit: ` or `commit (initial): `, proceed with amend; if it starts with `reset:`, `checkout:`, `rebase:`, `pull:`, etc., skip. Alternative: stash current marker before HEAD-moving ops and restore after. Estimate: ~30-45 min Lane A in main context (script edit + test by intentionally triggering each operation type + verifying no spurious amend). | director-seat (tooling work) OR operator-seat (Lane D-style hooks work) | medium-high — actively blocks rapid commit+push workflows; cycle-7 hit this twice and needed force-with-lease recovery. Worth fixing before any next director-seat session that ships multiple consecutive commits |
 
 ---
 
