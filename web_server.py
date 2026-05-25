@@ -1512,6 +1512,8 @@ def api_iterate_take(pid, shot_id, take_id):
     # key holding the DirectorialIntent fields, unwrap; otherwise treat
     # the body itself as the intent. Forward-compat with no breaking
     # change to the 16 existing tests (which all use the flat shape).
+    # Precedence (G1): nested wins when both nested `intent` AND flat
+    # fields are present — the rare ambiguous case routes to nested.
     payload = data.get("intent", data) if isinstance(data, dict) and isinstance(data.get("intent"), dict) else data
     try:
         intent = DirectorialIntent.model_validate(payload)

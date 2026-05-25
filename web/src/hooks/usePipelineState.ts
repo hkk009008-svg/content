@@ -208,7 +208,9 @@ export function usePipelineState(projectId: string | null) {
    *  body as `{ success: true, take: {...} }`. The caller is responsible for
    *  refreshing the project so the new take appears in the keyframe list.
    *  On 404 (CINEMA_DIRECTORIAL_ITERATION flag off), surface the error JSON
-   *  rather than throwing so the IterationPanel can show an inline message. */
+   *  rather than throwing so the IterationPanel can show an inline message.
+   *  Returns `null` as the no-op contract when projectId is unset (called
+   *  before a project is loaded); callers treat null as "did not run." */
   const iterateTake = useCallback(async (shotId: string, takeId: string, prose: string) => {
     if (!projectId) return null
     const res = await fetch(`/api/projects/${projectId}/shots/${shotId}/takes/${takeId}/iterate`, {
