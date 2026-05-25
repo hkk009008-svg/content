@@ -653,12 +653,19 @@ def api_upload_driving_video(pid, sid):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
-    # Find scene_id for this shot — needed for the file path
-    scene_id = None
-    for scene in project.get("scenes", []):
-        if any(s.get("id") == sid for s in scene.get("shots", [])):
-            scene_id = scene["id"]
-            break
+    # P1-3 part 6 migration (fifth canonical example): cross-scene nested
+    # shot lookup returning the parent scene_id. New shape vs prior parts:
+    # iterates project.scenes and inside each scene's typed shots to find
+    # the one whose id matches `sid`. The outer scope only needs the parent
+    # scene_id (a string); shot/scene typed objects are intentionally
+    # discarded. The inner `_mutate` callback below operates on its own
+    # `latest` dict snapshot via mutate_project() — only the outer lookup
+    # was migrated. See docs/MIGRATION-PATTERN-pydantic-caller.md.
+    project_typed = Project.model_validate(project)
+    scene_id = next(
+        (s.id for s in project_typed.scenes if any(sh.id == sid for sh in s.shots)),
+        None,
+    )
     if not scene_id:
         return jsonify({"error": "Shot not found in project"}), 404
 

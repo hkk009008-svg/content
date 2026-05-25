@@ -724,14 +724,73 @@ class TestMigratedCaller:
         loc_typed = next((l for l in p.locations if l.id == "loc_missing"), None)
         assert loc_typed is None
 
+    def test_upload_driving_video_cross_scene_shot_lookup_matches_dict_path(self):
+        """P1-3 part 6 regression: api_upload_driving_video's cross-scene
+        nested shot lookup returns the same parent scene_id via typed
+        access as via the old dict-iteration path. Target shot is placed in
+        a NON-first scene to make sure the lookup actually scans across
+        scenes (rather than passing accidentally because the first scene
+        matches)."""
+        raw = self._make_project_dict()
+        # Add a second scene that holds the target shot. Make scenes[0] empty.
+        raw["scenes"][0]["shots"] = []
+        raw["scenes"].append({
+            "id": "scene_002",
+            "title": "Second",
+            "characters_present": [],
+            "shots": [
+                {"id": "shot_001", "approved_final_take_id": ""},
+                {"id": "shot_target", "approved_final_take_id": ""},
+            ],
+        })
+        sid = "shot_target"
+
+        # Old dict path: iterate scenes, find the one containing the shot
+        dict_scene_id = None
+        for scene in raw.get("scenes", []):
+            if any(s.get("id") == sid for s in scene.get("shots", [])):
+                dict_scene_id = scene["id"]
+                break
+
+        # New typed path (mirrors api_upload_driving_video's migration)
+        p = Project.model_validate(raw)
+        typed_scene_id = next(
+            (s.id for s in p.scenes if any(sh.id == sid for sh in s.shots)),
+            None,
+        )
+
+        assert dict_scene_id == typed_scene_id == "scene_002"
+
+    def test_upload_driving_video_missing_shot_returns_none(self):
+        """P1-3 part 6 regression: when the requested sid doesn't match any
+        shot in any scene, both paths return None — the migrated
+        cross-scene lookup correctly fires the 404 return."""
+        raw = self._make_project_dict()
+        raw["scenes"][0]["shots"] = [{"id": "shot_only", "approved_final_take_id": ""}]
+        sid = "shot_does_not_exist"
+
+        dict_scene_id = None
+        for scene in raw.get("scenes", []):
+            if any(s.get("id") == sid for s in scene.get("shots", [])):
+                dict_scene_id = scene["id"]
+                break
+        assert dict_scene_id is None
+
+        p = Project.model_validate(raw)
+        typed_scene_id = next(
+            (s.id for s in p.scenes if any(sh.id == sid for sh in s.shots)),
+            None,
+        )
+        assert typed_scene_id is None
+
     # ------------------------------------------------------------------
     # Template-level unhappy-path tests (BACKLOG.md B-001; addresses
     # operator-seat Lane V #3 F2 advisory; see docs/MIGRATION-PATTERN-
     # pydantic-caller.md §"Unhappy-path test recipe" for the full why).
     #
     # These cover the contract set by Project.model_validate() itself —
-    # ALL P1-3 migrations (S10 + parts 3 + 4 + 5 + future part N) inherit
-    # the protection without per-migration test duplication.
+    # ALL P1-3 migrations (S10 + parts 3 + 4 + 5 + 6 + future part N)
+    # inherit the protection without per-migration test duplication.
     # ------------------------------------------------------------------
 
     def test_project_model_validate_raises_on_missing_id(self):
