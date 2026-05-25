@@ -1,7 +1,7 @@
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **Content** (4234 symbols, 23439 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **Content** (4257 symbols, 23470 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -339,6 +339,8 @@ Per `/Users/.../CLAUDE.md`:
 2. Run `gitnexus_detect_changes()` after edits — confirm scope is what you expect
 3. <task-specific gotcha>
 4. If GitNexus MCP isn't reachable in your environment, fall back to grep + file inspection.
+5. **Brief-pattern reference adherence.** When the brief says "mirror pattern X at file:line" or "use the existing _foo_-style endpoint," verify the FULL shape of X — signature, route path, scope parameters, error handling, lock guards — not just the called function. Brief-pattern references are implicit specs; silent deviations cascade. If the named helper doesn't exist (e.g., brief says `_mutate_shot` but the actual pattern uses `mutate_project`) or the wording is ambiguous, report the divergence in your status BEFORE implementing.
+6. **pid-scope check on new endpoints.** When adding/touching an HTTP endpoint operating on a project-scoped resource (shots, scenes, locations, characters), verify the route takes `<pid>` explicitly. Do NOT scan via `list_projects()` to find a matching resource — IDs can collide across projects (e.g., `shot_id` follows `shot_{scene}_{i}` and matches across projects with matching scene/index layouts). Inspect at least one similar existing endpoint in the same file (e.g., `api_update_shot_prompt`) to confirm the route shape and scoping.
 
 ## Verification
 
@@ -367,12 +369,43 @@ If <X happens>, report BLOCKED with what you tried.
 - gitnexus_impact findings (callers, risk) or grep-fallback equivalent
 - Files changed (paths only)
 - Verification command output
-- Commit SHA
+- Commit SHA — capture from `git log --oneline -3` AFTER post-commit hook activity settles (typically ~3-5 seconds after `git commit` returns). The project's post-commit hook amends `STATE.md`, so the SHA from `git commit` stdout may be stale by one. Use the SHA `git log` reports after the hook completes.
 - Self-review findings
 ```
 
 A **bad** implementer prompt is "implement task A1" — they'll burn context
 discovering everything you already know, and the report will be vague.
+
+## Hardening notes — provenance for the implementer-template additions
+
+Items 5-6 in "Project conventions you MUST follow" and the Commit SHA
+capture guidance in "Report Format" are hardened in from cycle-5 + cycle-6
+failure modes. Carry them forward in future dispatches; if you trim the
+template, do NOT trim these:
+
+- **Item 5 (brief-pattern adherence)** — S13 implementer interpreted the
+  brief's `_mutate_shot` pattern reference as "use `mutate_project`"
+  without inheriting the route shape (pid-scoping, single-project
+  mutation). Operator-seat's Lane V caught **F1 CRITICAL** post-commit:
+  multi-project `shot_id` collision via the `list_projects()`-scan
+  fallback. Fix shipped at `9e24323` (`fix(web): address S13 Lane V F1
+  (CRITICAL) + F2 — pid-scoped reject route + monotonic-run dedup`). The
+  brief named a non-existent helper, but the pattern's shape was still
+  recoverable by inspecting the cited `api_update_shot_prompt`
+  endpoint — that's the inspection step item 5 codifies.
+- **Item 6 (pid-scope check)** — same F1 CRITICAL root cause, codified
+  as a standing project convention so the next implementer catches the
+  failure mode at design time, not via Lane V post-commit. Cost
+  comparison: design-time check is ~1 grep; post-commit Lane V catch
+  cost ~234k tokens (cycle-6 dispatch) + the F1 fix commit's
+  developer-time. Front-load is cheap.
+- **Commit SHA capture** — cycle-5 dispatch surfaced that implementer-
+  reported SHAs were sometimes 1 commit stale because the project's
+  `.claude/hooks/update-state.sh` post-commit hook amends `STATE.md`
+  and the original commit SHA from `git commit` stdout no longer
+  matches HEAD. Capturing from `git log --oneline -3` after the hook
+  settles is the reliable source. Already deployed ad-hoc in cycle-5
+  S12 and cycle-6 S13 prompts; this codification makes it inherited.
 
 ## Spec reviewer prompt template
 
