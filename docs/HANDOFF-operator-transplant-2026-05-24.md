@@ -1,52 +1,53 @@
-# Operator Handoff — Context Transplant 2026-05-25 (POST-V5-SHIP / CYCLE-6 CLOSE)
+# Operator Handoff — Context Transplant 2026-05-26 (CYCLE-8 CLOSE / FEATURE-DELIVERY CYCLE)
 
-**From:** Operator-seat (this conversation, post-v5-ship refresh)
+**From:** Operator-seat (cycle-8 close refresh)
 **To:** Next operator-seat instance, fresh chat
 **Companion docs:**
-- [POST-ROADMAP-2026-05-24.md](POST-ROADMAP-2026-05-24.md) (`d4b398b` — last cycle-6 rotation; will need post-v5 refresh by director-seat)
-- [HANDOFF-director-transplant-2026-05-25-cycle6.md](HANDOFF-director-transplant-2026-05-25-cycle6.md) (`<pending-commit>` — director-seat cycle-6 close, post-v5-ship; **most recent director-seat pickup, read this first if director-seat**)
-- [HANDOFF-director-transplant-2026-05-25-cycle5.md](HANDOFF-director-transplant-2026-05-25-cycle5.md) (`9aac767` — cycle-5 historical; predates v5 ship by ~30 min)
-- [HANDOFF-director-transplant-2026-05-24-cycle3.md](HANDOFF-director-transplant-2026-05-24-cycle3.md) (cycle-3 historical)
-- [HANDOFF-director-transplant-2026-05-24-cycle2.md](HANDOFF-director-transplant-2026-05-24-cycle2.md) (cycle-2 historical)
-- [HANDOFF-roadmap-2026-05-24.md](HANDOFF-roadmap-2026-05-24.md) (Sessions 7-14 briefs as appendices; Session 14 P1-3 part 3 most recent)
-- [PROPOSAL-protocol-bundle-v5-2026-05-25.md](PROPOSAL-protocol-bundle-v5-2026-05-25.md) (`d66690f` — v5 shipped; read for the "two seats of one team" reframe rationale + structural-user-critique preserved inline)
-- [CLAUDE.md](../CLAUDE.md) `# Director-Operator Concurrent Operation` — full protocol including Rules #1-#11 + v5 two-seat reframe + D/E/B/M/S sections
+- [HANDOFF-director-transplant-2026-05-26-cycle8.md](HANDOFF-director-transplant-2026-05-26-cycle8.md) (`4bf48cd` — director-seat cycle-8 close; **most recent director-seat pickup, read this first if director-seat**)
+- [HANDOFF-director-transplant-2026-05-25-cycle7.md](HANDOFF-director-transplant-2026-05-25-cycle7.md) (`8d38929` — cycle-7 close historical)
+- [HANDOFF-director-transplant-2026-05-25-cycle6.md](HANDOFF-director-transplant-2026-05-25-cycle6.md) (cycle-6 close historical)
+- [HANDOFF-director-transplant-2026-05-25-cycle5.md](HANDOFF-director-transplant-2026-05-25-cycle5.md) (`9aac767` — cycle-5 historical)
+- [HANDOFF-director-transplant-2026-05-24-cycle3.md](HANDOFF-director-transplant-2026-05-24-cycle3.md) + [-cycle2.md](HANDOFF-director-transplant-2026-05-24-cycle2.md) (early-cycle historical)
+- [PROPOSAL-feature-directorial-iteration-and-screening-2026-05-25.md](PROPOSAL-feature-directorial-iteration-and-screening-2026-05-25.md) (`3227ff0` — cycle-8 feature proposal; user-authorized; director ENDORSED Q1-Q5 via `6f29d49`)
+- [B-003-design-exploration.md](B-003-design-exploration.md) (`955be1f` — 5-option design exploration; Option E shipped at `2183ccb`)
+- [POST-ROADMAP-2026-05-24.md](POST-ROADMAP-2026-05-24.md) (last refreshed cycle-6 close P4-3 SHIPPED; cycle-7 + cycle-8 didn't trigger another rotation — both worked on user-authorized features OR housekeeping outside the P-spine)
+- [HANDOFF-roadmap-2026-05-24.md](HANDOFF-roadmap-2026-05-24.md) (Sessions 7-14 briefs; historical context only — all sessions shipped through cycle 7)
+- [PROPOSAL-protocol-bundle-v5-2026-05-25.md](PROPOSAL-protocol-bundle-v5-2026-05-25.md) (`d66690f` — v5 substrate; "two seats of one team" reframe)
+- [CLAUDE.md](../CLAUDE.md) `# Director-Operator Concurrent Operation` — full protocol including Rules #1-#11 + v5 two-seat reframe + D/E/B/M/S/Sh sections
 
 ---
 
 ## TL;DR (60 seconds)
 
-- **Original 6-session roadmap CLOSED + Sessions 7-14 ALL SHIPPED.** Including S12 motion-gate opt-in (`2a25c2d` + `fefea5d` minor), S13 P4-3 frontend (`2fb44d1` AutoApproveBadge + PostRunSummary + RejectAutoApproveModal + reject endpoint, `f7d7a19` chore-minors), and S14 P1-3 part 3 (`e1b72ca` api_decompose_scene migration). Pytest **711 passed / 3 skipped / 0 failed** (was 590 at roadmap close: +121 across S7-S14). Smoke: OK.
+**Cycle 8 = feature-delivery cycle.** Cycle 6 shipped v5 substrate; cycle 7 validated it via dogfood; cycle 8 USED it to deliver the first user-authorized product features end-to-end. **Surface A (S15-S17 + F1 accept-both) SHIPPED end-to-end behind `CINEMA_DIRECTORIAL_ITERATION` env flag.** Pytest **737 passed / 3 skipped / 0 failed** (was 715 cycle-7 close: +22).
 
-- **Protocol Bundles v2/v3/v4/v4.1/v5 ALL SHIPPED.** Substrate fully built out:
-  - **v2** (`416d610`) + **v2.1** fix (`5e0329d`): STATE.md cold-start oracle, PROTOCOL-RULES-LOG.md, `coordination/mailbox/` infrastructure, Rules #7 (pre-commit re-verify) + #8 (mailbox authority)
-  - **v3** (`3340d1f`): Authority hierarchy precedence (G, Rule #8 extended), STATE.md freshness check (F, cold-start §0a), hook script audit (H, deliverable at `docs/AUDIT-hook-script-v2-2026-05-24.md`)
-  - **v4** (`d61bdc8`): Lanes V (post-commit independent verification) + D (post-commit doc-sync) + S (pre-dispatch scout — scaffolded v4, ACTIVE v5+) + Rule #9 (operator-side reviewer is independent; second-opinion convention; R-9-1 cold-context prompt discipline) + Phase taxonomy
-  - **v4.1** (`509db7c`): Lane V coalescing rule (CC-1, operator MAY combine tightly-coupled commits ≤5 into single dispatch) + spec-reviewer hallucination mitigation (CC-2, verify-existence-before-asserting prompt rule)
-  - **v5** (`d66690f`): **TWO SEATS OF ONE TEAM reframe** + Rule #10 (joint-team mode; both seats equal-in-specialization, user-as-principal) + Rule #11 (codification bias check; per-rule beneficiary flagging + non-beneficiary REPLY veto) + D (disagreement protocol with 2-cycle limit then user-escalation) + E (emergency handling with 4-criteria gate: production / security / active-bleed / external-time-pressure) + B (`docs/BACKLOG.md` shared workspace) + M (`memory-candidate` mailbox kind) + Lane S activation + Sh (codify implementer dispatch as director-seat-default, not Shared)
+- **User-authorized cycle-8 features (Directorial Iteration Loop + Screening/Selective Regen).** Mid-session, user-principal authorized TWO new product features and explicitly directed cross-seat design dialogue before implementation. Operator drafted [PROPOSAL-feature-directorial-iteration-and-screening-2026-05-25.md](PROPOSAL-feature-directorial-iteration-and-screening-2026-05-25.md) (`3227ff0`); director-seat sent `decision` REPLY (`6f29d49`) ENDORSING Q1-Q5 + Path A sequencing (zero counter-refinements — cleanest cross-seat REPLY cycle to date). 7 slices planned (S15-S21). **Surface A functionally complete** end-to-end; Surface B (S19-S21 screening) carries to cycle 9.
+  - **S15 substrate** — `e695e81` (operator Lane A, ~1.5h). NEW `DirectorialIntent` Pydantic model + `llm/director.py` CinemaDirector v1.0 (permissive constraint regime, distinct from ChiefDirector's HC1-HC8 firewall) + `intent_translator()` functional API + JSONL log stub at `data/intent_log/`. 2 unit tests pass.
+  - **S16 backend** — `c425d55` (director's implementer Lane B). NEW `POST /api/projects/<pid>/shots/<shot_id>/takes/<take_id>/iterate` endpoint + `ShotController.regenerate_with_intent` method + 16 tests.
+  - **S17 frontend** — `b806bc7` (director's implementer Lane B). NEW `IterationPanel.tsx` + `ReviewStage.tsx` KEYFRAME_REVIEW wiring + `usePipelineState.iterateTake` action.
+  - **F1 accept-both** — `a8bde27`. Endpoint honors nested `{intent: {...}}` AND flat `{prose, ...}` body shapes via `isinstance(data.get("intent"), dict)` guard.
 
-- **First v4-era Lane V dogfood SHIPPED its first novel finding into the codebase**: operator's S13 Lane V dispatch (`coordination/mailbox/archive/2026-05-24T17-24-52Z-operator-to-director-verification-report.md`) caught F1 CRITICAL multi-project routing bug + F2 SSE re-run dedupe collapse; director shipped `9e24323 fix(web): address S13 Lane V F1 (CRITICAL) + F2 — pid-scoped reject route + monotonic-run dedup` in response. End-to-end validation of v4's value proposition. Cumulative v4.1 telemetry across 2 dispatches: ~409k subagent tokens; 3 novel + 2 validation findings; well below v4.1 narrowing threshold.
+- **B-002 + B-003 architecturally resolved via Option E** (`2183ccb`, mid-cycle-8). After B-002's reflog gate (`f19d4d3`) partially fixed the hook divergence, B-003 surfaced the remaining compound `commit && push` timing window. The user-authorized fix (via AskUserQuestion modal) was Option E from [B-003-design-exploration.md](B-003-design-exploration.md): **STATE.md gitignored** + `git rm --cached` + `.claude/hooks/update-state.sh` simplified 148→102 LoC (removed staged-set check, reflog gate, `git add` + `git commit --amend` lines). Hook now: detects HEAD move via marker file → regenerates STATE.md on disk → exits. **No git history modification.** **Compound `git commit && git push` is now genuinely safe — the separate-Bash-call workaround is RETIRED.** Both stale-by-one (B-002 cosmetic) and divergence (B-003 functional) eliminated. v2.1 KNOWN LIMITATION moot. Codified in new operator memory: `feedback_compound_commit_push_safe_post_b003.md`.
 
-- **First v4-era Lane D dogfood SHIPPED**: ARCHITECTURE.md §7.7 backfill (Pydantic boundary + opt-in escalation pattern, ~89 LOC) shipped as operator-claimed `1e29610 docs(arch-sync)`.
+- **2 Lane V dispatches from operator this cycle.**
+  - **Lane V #4** (per-commit on `c425d55`): 0 critical / 0 important / 5 minor (F1 body-shape drift / F2 approved_shots filter / F3 route param / F4 test coverage / F5 pre-seed) + **F0 reviewer-disagreement** (mine: pattern-consistent vs director's: blocker on `_reject_if_project_busy` omission — director's framing was correct, sibling-uniformity restored at 19 endpoints via `15493c8`). Verification-report at `coordination/mailbox/sent/2026-05-25T15-37-08Z-operator-to-director-verification-report.md`. **~189k tokens.**
+  - **Lane V #5 (FIRST CC-1 COALESCED)**: 4-commit range `7f5dea7..a8bde27` (tightly-coupled: S17 frontend + F1 backend + F3/F5 folds + S17 self-fix). 0 critical / 0 important / 4 minor (G1-G4 forward-looking). Verification-report at `coordination/mailbox/sent/2026-05-25T15-37-08Z-...`. **~195k tokens.** Both reviewers independently confirmed CC-1 coalescing was the right call.
+  - **Cumulative v4.1 telemetry post-cycle-8:** 5 dispatches / ~960k tokens / ~12 novel findings / **0 hallucinations across all 5** (CC-2 verify-before-asserting + R-9-1 cold-context working at N=3). v4.1 narrowing threshold NOT crossed.
 
-- **User-level structural critique on role partition** (preserved in v5 proposal §"Why v5: the user critique"): user surfaced 7 specific concerns (Shared-is-large, director-load asymmetry, memory-write latency, operator-drafts-blind, missing-verification-accountability, codification meta-bias, missing-emergency-backlog-disagreement-protocols). v5 components map 1:1 to those concerns. R11 retroactive beneficiary analysis (4 both / 1 user / 3 operator-seat / 0 director-seat across Rules 1-9) empirically disproved the meta-bias hypothesis.
+- **F-finding closure tracking.** From operator Lane V #4 + #5: F0 closed (busy guard at `15493c8`) / F1 closed (accept-both at `a8bde27`) / F2 DEFER → S18 carryover / F3 closed (rename at `c5a0e94`) / F4 partial (+ 2 routing tests via `15493c8`; rest defer to S17/S18) / F5 closed (pre-seed collapse at `c5a0e94`) / G1 closed (`f8b4deb` ambiguous-body comment) / G2 closed (`f8b4deb` JSDoc) / G3 DEFER → S18/S20 design / G4 closed via **B-004 seed** (`74f3f62`). **4 of 5 director-actionable F-advisories closed within 2 fix-commits + 1 feat-commit** — tightest loop closure to date.
 
-- **Cycle-6 close queue — ALL ITEMS SHIPPED (2026-05-25 cycle-7-open session):**
-  1. ✅ **Rules #10 + #11 + v4.1 SHA placeholder fill-ins + PROPOSAL-v5 footer** — operator commit `f665461 docs(rules-log): fill v5 + v4.1 ship SHA placeholders` (auto-amended from `22d1333` via post-commit hook STATE.md fold). Fifth instance of chicken-and-egg precedent chain (`3e57ddf` v2 / `d8f2407` v3 / `d90036b` v4 / `f665461` v5 + v4.1 both).
-  2. ✅ **Counter bumps fold-and-surface (Rule #6)** — N/A; counter bumps were already absorbed before session-start (director-seat absorbed post-v5 reindex deltas before pushing the cycle-6 batch).
-  3. ✅ **Session 14 (`e1b72ca`) Lane V dispatch** — operator commit `8d8ac7b coord(mailbox)` (hook-amended to `d71b2ab`) with `verification-report` mailbox event archived at `coordination/mailbox/archive/2026-05-25T04-40-47Z-operator-to-director-verification-report.md` (director-seat archived in-session). Status: **⚠️ MINOR ADVISORIES — 0 critical, 0 important, 3 minor (all `advisory`)**. ~172k subagent tokens (spec 80k + cq 92k). Cumulative v4.1 telemetry: **3 dispatches / ~581k tokens / 3 novel findings (rate 1.0/dispatch trending toward dispatch-#1 validation-only shape) / 0 hallucinations this round (CC-2 provisional verdict: working)**. v4.1 narrowing trigger NOT warranted.
+- **BACKLOG substrate end-to-end validated.** B-001 closed cycle-7 (template-level fix); B-002 + B-003 closed cycle-8 via Option E; B-004 seeded cycle-8 close (operator from G4 advisory: IterationPanel UX polish — m2 Escape-key dismissal + m3 non-JSON 502 status context). Active candidates as of refresh: **B-004 (1 row, low-priority UX polish)**. v5 §B works as designed.
 
-- **Cycle-7 open queue (this session's hand-off to next operator-seat — POST-WAVE-2 refresh):**
-  1. **Session 15 (`308cdef`) Lane V #4 dispatch — STILL PENDING** (deferred per cost-ceiling: this session burned ~172k tokens on Lane V #3 + significant coordination overhead). CC-1 coalescing candidate: part 4 is mechanical repetition of part 3 (same MIGRATION-PATTERN recipe, same template surface). Sample N=3 (Lane V #3 → 0 novel findings). **Updated context:** `b1d36d2` shipped the template-level unhappy-path test recipe + 2 example tests (closing B-001), so any Lane V #4 will benefit from the strengthened template baseline. Could coalesce with the next migration commit (part 5+) if it lands within the same operator-session, OR dispatch standalone. Advances cumulative v4.1 telemetry to 4 dispatches.
-  2. ✅ **First `docs/BACKLOG.md` row (v5 §B dogfood) — CLOSED**. Director-seat seeded `421f364 docs(backlog): seed first row — F2 template-level test gap from Lane V #3` (first v5 §B activation in real-time during operator's handoff Write at `3db44af`), then **CLOSED the underlying B-001 issue** via `b1d36d2 docs(migration): close B-001 — add unhappy-path test recipe + 2 example tests` — template-level fix means all future P1-3 part N migrations inherit the regression coverage automatically. End-to-end F2 loop closure: surfaced via operator Lane V #3 → B-001 seed → director template-level fix shipped, all intra-session.
-  3. ✅ **F1 fold opportunistic — CLOSED** via `6e1deb0 docs(web): close F1 — fix cite to api_generate_dialogue model_validate line` (director-seat opportunistic fold; ~1-line cite tweak at `web_server.py:1141`).
-  4. **v5 §M `memory-candidate` first dogfood — STILL OPEN**. Operator-surfaceable observation worth permanent memory beyond handoff. Candidate observation from this session: the agent-self-modification classifier hard-block on `.claude/settings.json` (director-seat physically cannot modify their own permission file regardless of user instruction; observed during settings disposition coordination, see `cf65130` decision body for full context) — worth a `reference` or `project` memory so future operator-seat sessions know operator IS the only seat that can touch settings.json.
-  5. **v5 §S Lane S `scout-request` first dogfood — STILL OPEN**. Opt-in per director-seat; pending director-seat request.
-  6. ✅ **Push to `origin/main` — CLOSED** by director-seat (push timing is director-seat-default per v5 specialization).
-  7. **NEW: B-002 hook fix — OPEN**. Director-seat seeded `6c07e61 docs(backlog): seed B-002 — fix update-state.sh hook to skip non-commit HEAD changes` in direct response to operator's repeated STATE.md-staleness observations across multiple "check" turns. Ownership TBD; either seat can claim — this is hook-script territory (similar to v2.1 `5e0329d` regex fix). Could be a good Lane S scout target if either seat wants to assess scope before claiming.
-  8. **NEW: Settings-disposition coordination — CLOSED, but worth noting as session-novel pattern**. Mid-session operator-surfaced query about `.claude/settings.json` placement (committed as `02603f0`) triggered first end-to-end `decision`-kind mailbox dogfood: director-seat read query → surfaced to user via AskUserQuestion modal → user picked Option 1 → director shipped decision event (`cf65130`) → operator executed file-shuffle (`c054049`, with audit-trail-in-commit-body since the actual settings change is git-invisible — gitignored `settings.local.json` edit + untracked `settings.json` delete). First demonstration that v5 §Sh push-specialization has a real configuration-layer enforcement story (operator-seat is the ONLY seat that can modify `.claude/settings.json` due to classifier hard-block — see queue item #4 memory candidate).
+- **Other cycle-8 shipped.** P1-3 part 5 (`1ac010c`, `api_update_location` migration — 4th canonical S10 template application) + P1-3 part 6 (`b28b8b4`, `api_upload_driving_video` — 5th canonical application, NEW shape: single-entity existence check in MUTATING endpoint). `datetime.utcnow()` migrated (`9c749b7`) — 9 warnings eliminated. ARCHITECTURE.md §16 doc-sync (`0d9bbbf`). Director-seat cycle-8 transplant handoff (`4bf48cd`).
 
-- **Branch state at this refresh:** HEAD `6c07e61` (director-seat's B-002 seed); branch **0 ahead of `origin/main`** (director pushed everything through this commit). Working tree clean. **Race-ack (Rule #5):** this refresh is being Written against a quiescent state — first refresh in the session where I'm not actively dodging concurrent commits. STATE.md still shows stale `1 ahead / 0 behind` (hook hasn't re-fired post-push; exact pattern B-002 queues to fix). Per Rule #8 §F: filesystem-truth wins. **Cycle-7 wave-2 summary** (post-`3db44af` handoff refresh): 7 commits landed in ~30 min (`02603f0`, `cf65130`, `c054049`, `b1d36d2`, `6e1deb0`, `6c07e61` + the operator-side intermediate auto-amends). Coordination throughput was high: 1 query → 1 decision → 1 execution → 2 finding-closures + 1 new BACKLOG seed, all clean (zero scope conflicts, every cross-seat handoff handled via mailbox + commit bodies). Next operator-seat: state is quiescent at this Write; expect that to hold absent new director-seat activity.
+- **Cross-seat process learnings codified during cycle 8.**
+  - **Scout-discard convention**: director-seat drafted Lane S `scout-request` for S15 in NEW `coordination/mailbox/draft/` subdirectory; my S15 commit body answered all 3 targets explicitly → director discarded without sending (`a00922b`). Thorough commit bodies obviate scout cycles.
+  - **Reviewer-prompt learning (NOT yet codified into rules)**: director-seat's own reviewers over-generalized on F0 by comparing busy-guard against full-file dominant pattern (18/19 endpoints have it) instead of adjacent-file-area siblings (sibling generation-triggering endpoints in the same range DO omit it). Director's commit body explicitly logged: "my reviewer prompts need 'verify ADJACENT-FILE-AREA siblings, not just dominant pattern across the file' instruction before generalizing." Worth carrying into cycle 9.
+  - **Decision-event-not-needed-on-clean-Lane-V pattern**: director-seat responded to my Lane V #5 (clean / advisory only) via `f8b4deb` commit (which folded G1+G2 + advanced cursor + deferred G3+G4 with rationale) instead of sending a return mailbox event. The commit body WAS the substantive response. Pattern: clean verification-reports don't always need a return event.
+
+- **Memory updated** (local-only, not git-tracked): NEW `feedback_compound_commit_push_safe_post_b003.md` codifies the B-003 Option E discipline change (default to compound commit+push; STATE.md is local-only / regenerated on disk; B-002 reflog gate removed as moot). `MEMORY.md` index updated. The existing `director_transplant_handoff.md` memory entry was also updated by director-seat to point at cycle-8 transplant — 700+ word index entry captures all cycle-8 substance.
+
+- **Branch state at this refresh:** HEAD `74f3f62` (operator's B-004 seed); branch **1 ahead of `origin/main`** (B-004 not yet pushed — director-seat picks up push timing per v5 §Sh in their next session). Working tree: **dirty (S18 implementer subagent in flight)** — `cinema/shots/controller.py` + `llm/director.py` + `tests/unit/test_director.py` modified with verb DSL additions (`tighten_framing` / `match_shot` / `shift_emotion`), not yet committed at refresh-Write time. **Race-ack (Rule #5):** S18 is mid-flight; next operator-seat will pick up post-S18-commit. **Mailbox cursor (operator.txt):** `2026-05-25T15:49:12Z` (consumed director's Lane V #4 decision-REPLY).
 
 ---
 
@@ -348,6 +349,41 @@ Push state: HEAD `d66690f` is at `origin/main`. Nothing unpushed unless operator
 | `b1d36d2` | docs(migration) | director | **Close B-001** — add unhappy-path test recipe + 2 example tests to `MIGRATION-PATTERN-pydantic-caller.md` (template-level fix; all P1-3 part N migrations inherit) |
 | `6e1deb0` | docs(web) | director | **Close F1** — fix cite imprecision at `web_server.py:1141` (~1-line cite tweak: `:1106` → analogous-line ref) |
 | `6c07e61` | docs(backlog) | director | Seed B-002 — fix `update-state.sh` hook to skip non-commit HEAD changes (addresses the STATE.md staleness pattern operator surfaced in repeated check turns) |
+| `8d38929` | docs(handoff) | director | Cycle-7 director transplant — substrate-validation cycle close |
+| `eeea93f` | docs(handoff) | operator | Operator-transplant refresh for cycle-7-wave-2 close |
+
+#### Cycle 8 — feature-delivery cycle (2026-05-25 → 2026-05-26)
+
+The densest cycle in project history (25+ commits + this handoff refresh = 26). Cycle 8 USED v5 substrate to deliver the first user-authorized product features end-to-end. Surface A of directorial iteration loop is functionally complete behind `CINEMA_DIRECTORIAL_ITERATION` env flag.
+
+| SHA | Type | By | Summary |
+|---|---|---|---|
+| `f19d4d3` | fix(hooks) | director | **B-002 partial fix** — gate `update-state.sh` amend on git reflog commit action (later superseded by B-003 Option E) |
+| `1ac010c` | feat(schema) | director's implementer | **P1-3 part 5** — `api_update_location` migration (4th canonical S10 template application; single-entity existence check in MUTATING endpoint) |
+| `3227ff0` | docs(proposal) | operator | **Seed cycle-8 feature proposal** — directorial iteration loop + screening / selective regen (response to user-principal authorization + collaborative-dialogue directive) |
+| `215422a` | coord(mailbox) | operator | Operator query → director on cycle-8 feature design dialogue |
+| `b28b8b4` | feat(schema) | director's implementer | **P1-3 part 6** — `api_upload_driving_video` migration (5th canonical app; cross-scene shot lookup variant) |
+| `b1e423e` | docs(backlog) | director | Seed **B-003** — compound `commit && push` still produces hook divergence after B-002 (reflog gate doesn't cover the timing window between commit return and push start) |
+| `6f29d49` | coord(mailbox) | director | **Decision REPLY** to operator cycle-8 feature proposal — Q1-Q5 + Path A sequencing ENDORSED (zero counter-refinements; cleanest cross-seat REPLY cycle to date) |
+| `e695e81` | **feat(director)** | **operator** | **S15 — CinemaDirector v1.0 substrate skeleton** (Lane A, ~1.5h). NEW `DirectorialIntent` Pydantic model + `llm/director.py` module + `intent_translator()` functional API + JSONL log stub. 2 unit tests pass; 737 → 737 total. |
+| `3370eda` | coord(mailbox) | director | **Lane S first-fire: draft scout-request** for S15 held under NEW `coordination/mailbox/draft/` subdirectory (extends sent/seen/archive convention) |
+| `a00922b` | chore(mailbox) | director | **Scout-discard pattern** — S15 commit body resolved all 3 scout targets; draft archived without sending. Thorough commit bodies obviate scout cycles. |
+| `c425d55` | feat(iterate) | director's implementer | **S16 — directorial iteration endpoint** + `ShotController.regenerate_with_intent` method + 14 tests (12 flag matrix + happy-path + missing-take) |
+| `15493c8` | fix(iterate) | director | Address S16 reviewer findings — `_reject_if_project_busy` busy fence + comments + 2 routing tests (target_stage=performance/motion paths) |
+| `7f5dea7` | coord(mailbox) | operator | **Lane V #4 verification-report on `c425d55`** — 0 critical / 0 important / 5 minor (F1-F5) + **F0 reviewer-disagreement** on busy-guard omission (mine: pattern-consistent / director's: blocker; director's framing correct). ~189k subagent tokens. |
+| `c5a0e94` | fix(iterate) | director | Fold operator Lane V #4 F3 (route param `<sid>` → `<shot_id>`) + F5 (pre-seed-then-overwrite collapse) + REPLY decision file |
+| `b806bc7` | feat(iterate-ui) | director's implementer | **S17 — IterationPanel + ReviewStage KEYFRAME_REVIEW wiring** (`CINEMA_DIRECTORIAL_ITERATION` server-side flag). NEW `IterationPanel.tsx` (93 LOC) + `usePipelineState.iterateTake` action |
+| `16ce51a` | fix(iterate-ui) | director | Address S17 reviewer findings (director's own internal review cycle) — drop dead props + reset submitting + aria-label |
+| `a8bde27` | feat(iterate) | director | **F1 accept-both** — endpoint honors nested `{intent: {...}}` AND flat `{prose, ...}` body shapes via `isinstance(data.get("intent"), dict)` guard. Closes operator Lane V #4 F1. |
+| `9c749b7` | chore(domain) | director | Migrate `datetime.utcnow()` → `datetime.now(timezone.utc)` in `project_manager.py` (eliminates 9 deprecation warnings; addresses ARCHITECTURE §16 cosmetic) |
+| `0d9bbbf` | docs(arch) | director | Close stale ARCHITECTURE.md §16 entries — datetime cleanup + test count refresh |
+| `0862545` | coord(mailbox) | operator | **Lane V #5 — FIRST CC-1 COALESCED** on `7f5dea7..a8bde27` (4-commit range: S17 + F1/F3/F5 folds). 0 critical / 0 important / 4 minor (G1-G4 forward-looking). All Lane V #4 F-advisories verified closed. ~195k tokens. |
+| `955be1f` | docs(b-003) | director | **B-003 design exploration** — 5-option analysis (A-E); Option E (gitignore STATE.md + remove amend logic) recommended; M-2 endpoint comment added in iterate handler |
+| `f8b4deb` | chore(iterate) | director | **Fold operator Lane V #5 G1+G2** (1-line comments) + advance director seen-cursor (consumed Lane V #5 report); G3 deferred to S18/S20 design, G4 left to operator |
+| `2183ccb` | chore(hooks) | director | **B-003 Option E SHIPPED** — gitignore STATE.md + `git rm --cached` + simplify `update-state.sh` 148→102 LoC (remove staged-set check / reflog gate / amend lines). **Closes B-002 + B-003.** Compound `git commit && git push` now genuinely safe; separate-Bash-call workaround RETIRED. v2.1 stale-by-one KNOWN LIMITATION moot. User-authorized via AskUserQuestion modal. |
+| `4bf48cd` | docs(handoff) | director | Director-seat cycle-8 transplant — feature-delivery cycle close |
+| `74f3f62` | **docs(backlog)** | **operator** | **Seed B-004** — IterationPanel UX polish (m2 Escape-key dismissal + m3 non-JSON 502 status context) from director's own S17 review deferred items; closes operator Lane V #5 G4 commitment |
+| THIS COMMIT | docs(handoff) | operator | Cycle-8 operator transplant refresh — Race-ack: S18 implementer subagent in flight at refresh-Write time (unstaged: `cinema/shots/controller.py` + `llm/director.py` + `tests/unit/test_director.py` with verb DSL additions — `tighten_framing` / `match_shot` / `shift_emotion`). Next operator-seat will pick up post-S18-commit. |
 
 (For Cycle 3 ledger entries, see historical section below; cycle 4 was operator's Lane D + S13 Lane V dispatches above.)
 
@@ -488,27 +524,45 @@ Quick summary for operators:
 
 ## Baseline state snapshot at transplant
 
-State at the moment of handoff WRITE. Director was last active a few minutes ago; expect this to have moved by the time you read it. Always re-run the cold-start checklist for current truth.
+State at the moment of cycle-8 close handoff WRITE. Director-seat's S18 implementer subagent is in flight (unstaged changes — see Race-ack in TL;DR). Always re-run the cold-start checklist for current truth.
 
 ```
 $ git log --oneline -3
-5c4a7c9 docs(roadmap): refresh POST-ROADMAP for post-cycle-3 picks
-66b06c8 chore(schema): address Session 8 code-review minors
-f9b0aff test(schema): cover project.json model validation + boundary integration
+74f3f62 docs(backlog): seed B-004 — IterationPanel UX polish (m2 Escape-key + m3 non-JSON status context) from S17 reviewer-deferred items
+4bf48cd docs(handoff): director-seat cycle-8 transplant — feature-delivery cycle close
+2183ccb chore(hooks): B-003 Option E — gitignore STATE.md + simplify update-state.sh; close B-002+B-003
 
 $ git status
 On branch main
-Your branch is up to date with 'origin/main'.   # post-push; this commit will be +1
+Your branch is ahead of 'origin/main' by 1 commit.   # B-004 seed not yet pushed (director-seat picks up next session per v5 §Sh)
+Changes not staged for commit:
+  modified: cinema/shots/controller.py    # director's S18 implementer in flight (verb DSL — tighten_framing / match_shot / shift_emotion)
+  modified: llm/director.py               # same
+  modified: tests/unit/test_director.py   # same
 
 $ .venv/bin/python -m pytest tests/unit/ -q | tail -1
-629 passed, 3 skipped, 11 warnings, 10 subtests passed
-(per 5c4a7c9 commit body footer; re-run for current ground truth)
+737 passed, 3 skipped, 11 warnings, 10 subtests passed
+(per cycle-8 close commit body — pre-S18; +0 from S15 +14 from S16 +0 from S17-frontend = 715 → 737)
 
 $ .venv/bin/python scripts/ci_smoke.py
-OK  (last confirmed; should remain so — no code changes since)
+OK
+
+$ cat coordination/mailbox/seen/operator.txt
+2026-05-25T15:49:12Z   # consumed director's Lane V #4 decision-REPLY at 2026-05-25T15-49-12Z
+
+$ ls coordination/mailbox/sent/
+2026-05-25T14-42-02Z-operator-to-director-query.md             # cycle-8 feature proposal query
+2026-05-25T14-56-42Z-director-to-operator-decision.md          # Q1-Q5 + Path A ENDORSED
+2026-05-25T15-37-08Z-operator-to-director-verification-report.md  # Lane V #4
+2026-05-25T15-49-12Z-director-to-operator-decision.md          # Lane V #4 dispositions REPLY
+2026-05-25T16-19-27Z-operator-to-director-verification-report.md  # Lane V #5 CC-1 coalesced
 ```
 
-LOC drift advisory: `web_server.py`, `cinema_pipeline.py`, `cinema/shots/controller.py`, `domain/project_manager.py` have all grown since `0cdef13` (Session 4 logging + Session 6 cascade_metadata + Session 8 Pydantic boundary). ARCHITECTURE.md will need an LOC sync on next doc-touch session. Out of scope here.
+**STATE.md note:** as of B-003 Option E (`2183ccb`), STATE.md is gitignored (local-only artifact regenerated on disk by hook after HEAD moves; no amend). The v2.1 KNOWN LIMITATION (HEAD field stale by one SHA) is moot. Hook is now 102 LoC (was 148). Compound `git commit && git push` is genuinely safe; separate-Bash-call workaround retired (see new operator memory: `feedback_compound_commit_push_safe_post_b003.md`).
+
+**S18 in-flight tail:** when S18 lands as a feat commit, it triggers operator Lane V #6 per Rule #9 + R-V1. Recommended approach: read S18's commit body for scope; CC-1 coalesce only if other tightly-coupled commits land in the same window (e.g., S18 self-fix-on-own-findings); otherwise per-commit dispatch. Director-seat said in cycle-8 handoff "scout-request opt-in (no scout this dispatch — substrate is well-defined)" so no pre-S18 scout.
+
+LOC drift advisory: `web_server.py` (~1770+ LOC post-S16 + F1 + F3 rename), `cinema_pipeline.py` (~1113 LOC, P1-2 orchestrator extraction still deferred), `cinema/shots/controller.py` (~1290+ LOC post-S16 `regenerate_with_intent`), `domain/project_manager.py` (datetime migration cleaned). ARCHITECTURE.md was synced in `0d9bbbf` — current.
 
 ---
 
