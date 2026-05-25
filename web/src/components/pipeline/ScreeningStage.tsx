@@ -87,9 +87,8 @@ const formatTimecode = (seconds: number): string => {
 const targetStageForTake = (
   take: TakeRecord,
 ): 'keyframe' | 'performance' | 'motion' => {
-  const kind = take.kind as string
-  if (kind === 'keyframe') return 'keyframe'
-  if (kind === 'performance') return 'performance'
+  if (take.kind === 'keyframe') return 'keyframe'
+  if (take.kind === 'performance') return 'performance'
   return 'motion'
 }
 
@@ -552,6 +551,7 @@ export default function ScreeningStage({
               type="button"
               disabled
               title="Available in S21"
+              aria-label="Compare with previous cut — available in S21"
               className="rounded border border-editorial-rule px-3 py-2 text-xs text-editorial-ivory-faint cursor-not-allowed"
             >
               Compare with previous cut
@@ -560,6 +560,7 @@ export default function ScreeningStage({
               type="button"
               disabled
               title="Available in S21"
+              aria-label="Re-assemble — available in S21"
               className="rounded border border-editorial-rule px-3 py-2 text-xs text-editorial-ivory-faint cursor-not-allowed"
             >
               Re-assemble

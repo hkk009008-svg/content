@@ -322,7 +322,7 @@ export interface Project {
 
 export interface TakeRecord {
   id: string
-  kind: 'keyframe' | 'motion' | 'postprocess'
+  kind: 'keyframe' | 'motion' | 'performance' | 'postprocess'
   path: string
   source_take_id?: string
   status?: string
