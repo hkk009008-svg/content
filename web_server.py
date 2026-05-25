@@ -1461,9 +1461,9 @@ def api_approve_final_take(pid, shot_id, take_id):
     return jsonify(result), status
 
 
-@app.route("/api/projects/<pid>/shots/<sid>/takes/<take_id>/iterate", methods=["POST"])
+@app.route("/api/projects/<pid>/shots/<shot_id>/takes/<take_id>/iterate", methods=["POST"])
 @_project_lock_guard
-def api_iterate_take(pid, sid, take_id):
+def api_iterate_take(pid, shot_id, take_id):
     """S16: directorial iteration endpoint.
 
     Accepts an operator's directorial intent (DirectorialIntent JSON body),
@@ -1517,7 +1517,7 @@ def api_iterate_take(pid, sid, take_id):
 
     project_typed = Project.model_validate(project)
     scene_id = next(
-        (s.id for s in project_typed.scenes if any(sh.id == sid for sh in s.shots)),
+        (s.id for s in project_typed.scenes if any(sh.id == shot_id for sh in s.shots)),
         None,
     )
     if not scene_id:
@@ -1526,7 +1526,7 @@ def api_iterate_take(pid, sid, take_id):
     try:
         result = _get_stage_pipeline(pid).regenerate_with_intent(
             scene_id,
-            sid,
+            shot_id,
             take_id,
             intent,
             project_id=pid,

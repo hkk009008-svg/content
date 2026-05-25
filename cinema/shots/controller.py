@@ -486,11 +486,9 @@ class ShotController:
             take["intent"] = intent_override.model_dump()
         if revised_prompt:
             take["revised_prompt"] = revised_prompt
-            # Stub placeholders — actual values are populated by
-            # regenerate_with_intent's second-mutate pass (S18 will collapse
-            # this when verbs consume params_delta inside the generator).
-            take["metadata"].setdefault("params_delta", {})
-            take["metadata"].setdefault("anchor_refs", [])
+            # params_delta + anchor_refs are populated post-generation by
+            # regenerate_with_intent's _stash_delta mutator (single source of
+            # truth — pre-seed removed per operator Lane V #4 F5).
 
         def _mutator(_scene: dict, project_shot: dict):
             project_shot.setdefault("keyframe_takes", []).append(take)
@@ -728,11 +726,9 @@ class ShotController:
             take["intent"] = intent_override.model_dump()
         if revised_prompt:
             take["revised_prompt"] = revised_prompt
-            # Stub placeholders — actual values are populated by
-            # regenerate_with_intent's second-mutate pass (S18 will collapse
-            # this when verbs consume params_delta inside the generator).
-            take["metadata"].setdefault("params_delta", {})
-            take["metadata"].setdefault("anchor_refs", [])
+            # params_delta + anchor_refs are populated post-generation by
+            # regenerate_with_intent's _stash_delta mutator (single source of
+            # truth — pre-seed removed per operator Lane V #4 F5).
 
         # Resolve the character's face anchor for the gate. Multi-character shots
         # anchor on the first listed character — operators can override via the
@@ -991,11 +987,9 @@ class ShotController:
             take["intent"] = intent_override.model_dump()
         if revised_prompt:
             take["revised_prompt"] = revised_prompt
-            # Stub placeholders — actual values are populated by
-            # regenerate_with_intent's second-mutate pass (S18 will collapse
-            # this when verbs consume params_delta inside the generator).
-            take["metadata"].setdefault("params_delta", {})
-            take["metadata"].setdefault("anchor_refs", [])
+            # params_delta + anchor_refs are populated post-generation by
+            # regenerate_with_intent's _stash_delta mutator (single source of
+            # truth — pre-seed removed per operator Lane V #4 F5).
 
         def _mutator(_scene: dict, project_shot: dict):
             project_shot.setdefault("motion_takes", []).append(take)
