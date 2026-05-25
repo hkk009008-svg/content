@@ -5,6 +5,7 @@ import SceneExecutionCard from './SceneExecutionCard'
 import DirectorReviewCard from './DirectorReviewCard'
 import AssemblyGate from './AssemblyGate'
 import ReviewStage from './ReviewStage'
+import ScreeningStage from './ScreeningStage'
 import GenerationPanel from '../GenerationPanel'
 import Filmstrip from './Filmstrip'
 import { ErrorState, LoadingState } from '../ui'
@@ -63,6 +64,11 @@ interface Props {
     verb?: string,
     params?: Record<string, unknown>,
   ) => Promise<any>
+  /** S20 (cycle-9 Surface B): operator approves the screened cut.
+   *  POSTs to /api/projects/<pid>/screening/approve. Only invoked when
+   *  the SCREENING stage is active (i.e. CINEMA_SCREENING_STAGE was on
+   *  at pipeline-start time). Forwarded into ScreeningStage. */
+  onApproveFinalCut?: () => Promise<void>
   /** Optional system-level error to render in the execution board. */
   pipelineError?: PipelineError | null
   /** Optional system-level "awaiting backend" placeholder. */
@@ -151,7 +157,7 @@ export default function PipelineLayout({
   onBack, onCancel, onPause, onResume, onApproveShotPlan, onRejectShotPlan,
   onGenerateKeyframe, onApproveKeyframe, onApprovePerformance, onGenerateMotion, onApproveFinal,
   onRegenerateShot, onRestartShot, onCorrectShot, onDiagnoseShot, onProceedToAssembly,
-  onRefreshProject, onIterate,
+  onRefreshProject, onIterate, onApproveFinalCut,
   pipelineError, pipelineLoadingLabel,
 }: Props) {
   const isComplete = latest?.stage === 'COMPLETE' || latest?.stage === 'DONE'
@@ -308,6 +314,13 @@ export default function PipelineLayout({
             <div className="py-24 flex justify-center">
               <LoadingState label={pipelineLoadingLabel} size="lg" />
             </div>
+          ) : activeStage === 'SCREENING' && onApproveFinalCut ? (
+            <ScreeningStage
+              project={project}
+              onApproveFinal={onApproveFinalCut}
+              onIterate={onIterate}
+              onRefreshProject={onRefreshProject}
+            />
           ) : (['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'PERFORMANCE_REVIEW', 'REVIEW'].includes(activeStage || '')) ||
           (isPaused && ['PLAN_REVIEW', 'KEYFRAME_REVIEW', 'PERFORMANCE_REVIEW', 'REVIEW'].includes(activeStage || '')) ? (
             <ReviewStage

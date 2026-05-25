@@ -252,6 +252,21 @@ export function usePipelineState(projectId: string | null) {
     return res.json()
   }, [projectId])
 
+  /** S20 (cycle-9 Surface B): operator approves the screened cut.
+   *  POSTs to /api/projects/<pid>/screening/approve. The endpoint is
+   *  feature-flagged behind CINEMA_SCREENING_STAGE; a 404 surfaces here
+   *  as a JSON error rather than throwing, so the caller can render the
+   *  inline error. Returns null when projectId is unset (same no-op
+   *  contract as iterateTake). */
+  const approveScreening = useCallback(async () => {
+    if (!projectId) return null
+    const res = await fetch(`/api/projects/${projectId}/screening/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    return res.json()
+  }, [projectId])
+
   // Enhanced start that also processes events
   const start = useCallback(() => {
     setShotStates(new Map())
@@ -291,6 +306,7 @@ export function usePipelineState(projectId: string | null) {
     diagnoseShot,
     proceedToAssembly,
     iterateTake,
+    approveScreening,
     // Pass-through from useSSE
     events: sse.events,
     latest: sse.latest,

@@ -23,6 +23,7 @@ export default function App() {
     isPaused, failedShots, pause: pausePipeline, resume: resumePipeline,
     approveShotPlan, rejectShotPlan, generateKeyframe, approveKeyframe, approvePerformance, generateMotion, approveFinal,
     regenerateShot, restartShot, correctShot, diagnoseShot, proceedToAssembly, iterateTake,
+    approveScreening,
   } = usePipelineState(project?.id ?? null)
 
   // Load config on mount
@@ -156,6 +157,9 @@ export default function App() {
           onIterate={(shotId, takeId, prose, targetStage, verb, params) =>
             withRefresh(() => iterateTake(shotId, takeId, prose, targetStage, verb, params))
           }
+          onApproveFinalCut={async () => {
+            await withRefresh(() => approveScreening())
+          }}
         />
       </ErrorBoundary>
     )
