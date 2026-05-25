@@ -1319,8 +1319,8 @@ script, the local check + CI move together.
 
 ## 16. Known bugs & latent issues
 
-> Test suite state (verified 2026-05-24 post baseline-hygiene commit):
-> **478 pass / 3 skip / 0 fail** in `tests/unit/`. The 3 skips below are
+> Test suite state (verified 2026-05-26 post cycle-8 datetime cleanup):
+> **737 pass / 3 skip / 0 fail** in `tests/unit/`. The 3 skips below are
 > the only known stragglers. Run `.venv/bin/python -m pytest tests/unit/ -q`
 > to verify.
 
@@ -1328,7 +1328,7 @@ script, the local check + CI move together.
 |---|---|---|
 | Low | 3 documented `@unittest.skip` tests in `test_project_persistence.py`. Mock setup hasn't caught up with `project_manager`/`character_manager`/`location_manager` refactors. Mock-only updates, not behavior changes. | `tests/unit/test_project_persistence.py:139,197,221` |
 | Cosmetic | BGM duration hard-coded to 47s with no comment. | `cinema_pipeline.py:490` |
-| Cosmetic | `datetime.utcnow()` deprecation warnings on Python 3.13 (two call sites). Migration to `datetime.now(datetime.UTC)` is trivial when next touched. | `domain/project_manager.py:126,864` |
+| ~~Cosmetic~~ Resolved 2026-05-26 (`9c749b7`) | ~~`datetime.utcnow()` deprecation warnings — migrated to `datetime.now(timezone.utc)` with `.replace("+00:00", "Z")` to preserve existing project.json timestamp suffix shape.~~ | ~~`domain/project_manager.py:133,924`~~ |
 
 ---
 
