@@ -245,3 +245,100 @@ class TestRegenerateWithIntentHappyPath:
         assert call_kwargs.kwargs.get("parent_take_id") == "take_parent"
         assert call_kwargs.kwargs.get("revised_prompt") == "Slow dolly-in toward protagonist"
         assert "positive_prompt" not in call_kwargs.kwargs
+
+    def test_approved_shots_includes_all_three_approval_kinds(self):
+        """Lane V #6 F1 regression: scene_context["approved_shots"] must include
+        shots approved via keyframe, motion, OR performance gates.
+
+        The S18 F2 fold expanded the filter to performance-approved shots, but
+        Lane V #6 caught that the implementation checked `performance_take_id`
+        (a Pydantic default, never written) instead of `approved_performance_take_id`
+        (the actual runtime field). This test locks the F2 fold semantic — if a
+        future change reverts to the wrong field name, the `match_shot` verb's
+        cross-shot reference pool silently shrinks. See:
+          - cinema/shots/controller.py:1179-1186 (the filter)
+          - coordination/mailbox/sent/2026-05-25T18-20-57Z-operator-to-director-verification-report.md (F1)
+        """
+        project = {
+            "id": "proj_f4",
+            "scenes": [
+                {
+                    "id": "scene_1",
+                    "title": "Mixed approvals",
+                    "action": "Several shots with different approval kinds.",
+                    "shots": [
+                        # Shot A — performance-only approved (the F1 target case)
+                        {
+                            "id": "shot_perf_only",
+                            "prompt": "Performance shot",
+                            "approved_performance_take_id": "take_perf_approved",
+                            "performance_takes": [
+                                {"id": "take_perf_approved", "kind": "performance"}
+                            ],
+                        },
+                        # Shot B — keyframe-only approved
+                        {
+                            "id": "shot_kf_only",
+                            "prompt": "Keyframe shot",
+                            "approved_keyframe_take_id": "take_kf_approved",
+                            "keyframe_takes": [
+                                {"id": "take_kf_approved", "kind": "keyframe"}
+                            ],
+                        },
+                        # Shot C — motion-only approved
+                        {
+                            "id": "shot_motion_only",
+                            "prompt": "Motion shot",
+                            "approved_motion_take_id": "take_motion_approved",
+                            "motion_takes": [
+                                {"id": "take_motion_approved", "kind": "motion"}
+                            ],
+                        },
+                        # Shot D — the iteration target (also keyframe-approved
+                        # so it has a parent take to iterate from)
+                        {
+                            "id": "shot_iter_target",
+                            "prompt": "Iteration target",
+                            "approved_keyframe_take_id": "take_iter_parent",
+                            "keyframe_takes": [
+                                {
+                                    "id": "take_iter_parent",
+                                    "kind": "keyframe",
+                                    "metadata": {"prompt": "Iteration target"},
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ],
+            "global_settings": {},
+        }
+        ctrl = self._build_controller(project)
+        intent = _make_intent(prose="match shot_perf_only", target_stage="keyframe")
+        ctrl.generate_keyframe_take = MagicMock(
+            return_value={"success": True, "take": {"id": "take_new", "kind": "keyframe"}}
+        )
+        ctrl._mutate_shot = MagicMock()
+
+        captured = {}
+
+        def _capture_scene_context(intent_arg, take_context, scene_context, *, project=None):
+            captured["scene_context"] = scene_context
+            return {"revised_prompt": "x", "params_delta": {}, "anchor_refs": []}
+
+        with patch("llm.director.intent_translator", side_effect=_capture_scene_context):
+            ctrl.regenerate_with_intent(
+                "scene_1", "shot_iter_target", "take_iter_parent", intent
+            )
+
+        approved_ids = {s["id"] for s in captured["scene_context"]["approved_shots"]}
+        # All three approval kinds must be represented. The iteration target
+        # itself is also keyframe-approved so it appears too — 4 shots total.
+        assert "shot_perf_only" in approved_ids, (
+            "F1 regression: performance-only-approved shot missing from approved_shots — "
+            "check that the filter uses `approved_performance_take_id`, not bare "
+            "`performance_take_id` (which is never written to runtime shot dicts)."
+        )
+        assert "shot_kf_only" in approved_ids
+        assert "shot_motion_only" in approved_ids
+        assert "shot_iter_target" in approved_ids

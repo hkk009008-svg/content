@@ -307,3 +307,7 @@ class TestCinemaDirectorVerbDSL:
         # The fallback path emitted the unknown-verb log line
         captured = capsys.readouterr()
         assert "unknown verb 'alien_verb'" in captured.out
+        # Lane V #6 F3 lock: the unknown verb is ALSO stripped from the LLM's
+        # view of `intent` so the payload doesn't carry an orphan verb key
+        # without an accompanying VERB_GUIDANCE block.
+        assert "alien_verb" not in prompt

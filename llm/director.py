@@ -117,7 +117,7 @@ def _build_verb_prefix(verb: Optional[str], params: dict, scene_context: dict) -
         pct = pct_map.get(degree, "~25%")
         return (
             "<VERB_GUIDANCE verb=\"tighten_framing\">\n"
-            f"Operator selected the TIGHTEN_FRAMING verb (degree: {degree}, ~{pct} tighter).\n"
+            f"Operator selected the TIGHTEN_FRAMING verb (degree: {degree}, {pct} tighter).\n"
             "Reduce the subject's size in frame by the indicated amount. Adjust the "
             "prompt's framing/camera language (push in, tighter shot, closer crop) without "
             "changing subject, action, lighting, or mood. Preserve all other prompt structure.\n"
@@ -298,6 +298,10 @@ class CinemaDirector:
         if verb is not None and verb not in KNOWN_VERBS:
             print(f"   [CINEMA-DIRECTOR] unknown verb '{verb}'; falling back to freeform")
             verb = None  # de-route to freeform path
+            # Lane V #6 F3: also strip from the serialized payload so the LLM's
+            # view of `intent` matches the prefix builder's view (no orphan
+            # `"verb": "alien_verb"` key without an accompanying VERB_GUIDANCE).
+            intent_dict.pop("verb", None)
         verb_prefix = _build_verb_prefix(verb, params, scene_context)
 
         user_payload = {

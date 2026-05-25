@@ -1170,17 +1170,21 @@ class ShotController:
             "id": scene_id,
             "title": scene.get("title", ""),
             "action": scene.get("action", ""),
-            # S18 F2 fold (operator Lane V #4 verification-report 2026-05-25T15-37-08Z):
-            # original S16 filter checked only approved_keyframe/motion, missing the
-            # performance gate. Asymmetric naming (per domain/models.py:108-110): keyframe
-            # + motion use `approved_*_take_id`, performance uses bare `performance_take_id`.
-            # S18 `match_shot` verb looks up ref_shot_id against this list, so missing
-            # performance-approved shots would silently demote match_shot to freeform.
+            # S18 F2 fold (operator Lane V #4 verification-report 2026-05-25T15-37-08Z),
+            # corrected post Lane V #6 (2026-05-25T18-20-57Z F1): original S16 filter
+            # checked only approved_keyframe/motion, missing the performance gate. All
+            # three runtime fields use the `approved_*_take_id` shape on shot dicts
+            # (production writes at controller.py:758, review/controller.py:590,
+            # web_server.py:711). The bare `performance_take_id` field exists only as
+            # a Pydantic default in domain/models.py — never written to runtime shot
+            # dicts. S18 `match_shot` verb looks up ref_shot_id against this list, so
+            # missing performance-approved shots would silently demote match_shot to
+            # freeform with a `ref_not_found` marker.
             "approved_shots": [
                 s for s in scene.get("shots", [])
                 if s.get("approved_keyframe_take_id")
                 or s.get("approved_motion_take_id")
-                or s.get("performance_take_id")
+                or s.get("approved_performance_take_id")
             ],
         }
 
