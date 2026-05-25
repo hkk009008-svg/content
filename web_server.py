@@ -1522,6 +1522,12 @@ def api_iterate_take(pid, shot_id, take_id):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
+    # Cross-scene shot lookup via typed access (P1-3 part 6 pattern at b28b8b4).
+    # Semantically equivalent to `scene, _ = _locate_shot(project, shot_id);
+    # scene_id = scene["id"]` used by api_generate_motion / api_approve_final_take,
+    # but the typed form preserves the Project.model_validate validation boundary
+    # for CINEMA_STRICT_SCHEMA mode. Operator Lane V #4 M-2 flagged the
+    # divergence; intentional — sibling consistency would lose validation.
     project_typed = Project.model_validate(project)
     scene_id = next(
         (s.id for s in project_typed.scenes if any(sh.id == shot_id for sh in s.shots)),
