@@ -1506,8 +1506,15 @@ def api_iterate_take(pid, shot_id, take_id):
         return jsonify({"error": "JSON body required"}), 400
 
     data = request.get_json() or {}
+    # F1 accept-both (operator Lane V #4, decision 2026-05-25T15-49-12Z):
+    # spec sketched nested `{intent: {prose, ...}}`, impl shipped flat
+    # `{prose, ...}`. Accept either shape — if the body has an `intent`
+    # key holding the DirectorialIntent fields, unwrap; otherwise treat
+    # the body itself as the intent. Forward-compat with no breaking
+    # change to the 16 existing tests (which all use the flat shape).
+    payload = data.get("intent", data) if isinstance(data, dict) and isinstance(data.get("intent"), dict) else data
     try:
-        intent = DirectorialIntent.model_validate(data)
+        intent = DirectorialIntent.model_validate(payload)
     except Exception as exc:
         return jsonify({"error": f"Invalid intent body: {exc}"}), 400
 
