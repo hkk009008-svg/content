@@ -500,3 +500,155 @@ class TestRegenerateWithIntentDirtyTracking:
         # iterate succeeded -- the dirty-tracking failure is swallowed.
         assert result["success"] is True
         assert result["take"]["id"] == "take_new"
+
+
+# ---------------------------------------------------------------------------
+# Iterate endpoint gate-bypass (Lane V #8 I1)
+# ---------------------------------------------------------------------------
+#
+# Existing tests above call regenerate_with_intent DIRECTLY on the
+# controller — they do NOT exercise the Flask endpoint with
+# _running_pipelines[pid] populated. This left a coverage gap that
+# operator's Lane V #8 caught: the endpoint busy-fenced unconditionally
+# even when the pipeline was parked at a review-gate stage, rendering
+# Surface B's iterate-during-screening flow unreachable.
+#
+# These tests exercise the endpoint with the inject_pipeline fixture from
+# tests/conftest.py to simulate "pipeline at gate X". Verifies the
+# gate-aware bypass introduced via _reject_if_project_busy_outside_gate.
+
+
+@pytest.fixture()
+def iterate_client():
+    """Flask test client with testing mode enabled for iterate-endpoint tests."""
+    from web_server import app
+    app.config["TESTING"] = True
+    with app.test_client() as c:
+        yield c
+
+
+@pytest.fixture()
+def iterate_flag_on():
+    """CINEMA_DIRECTORIAL_ITERATION=1 for the duration of the test."""
+    with patch.dict(os.environ, {"CINEMA_DIRECTORIAL_ITERATION": "1"}):
+        yield
+
+
+class TestIterateEndpointGateBypass:
+    """Lane V #8 I1: api_iterate_take must allow iterate-during-gate-wait.
+
+    The pipeline holds _running_pipelines[pid] for the entire gate wait
+    (lifecycle.wait_for_gate at cinema/lifecycle.py:172-188 is a polling
+    Event.wait loop). Without _reject_if_project_busy_outside_gate, every
+    iterate during a gate returns 409 project_busy — breaking the entire
+    Surface A + Surface B workflow.
+    """
+
+    def _post_iterate(self, client, pid, shot_id="shot_1_0", take_id="take_parent"):
+        return client.post(
+            f"/api/projects/{pid}/shots/{shot_id}/takes/{take_id}/iterate",
+            json={"prose": "tighten the framing", "target_stage": "keyframe"},
+        )
+
+    def _mock_pipeline_at_stage(self, stage: str) -> MagicMock:
+        """Build a fake pipeline whose current_stage attribute is `stage`."""
+        pipeline = MagicMock()
+        pipeline.current_stage = stage
+        return pipeline
+
+    def test_iterate_during_screening_endpoint_with_running_pipeline(
+        self, iterate_client, iterate_flag_on, inject_pipeline,
+    ):
+        """Pipeline parked at SCREENING — endpoint MUST allow iterate
+        through (not 409). This is the headline I1 scenario: Surface B's
+        iterate-from-screening flow.
+        """
+        pid = "proj-iterate-during-screening"
+        project = _make_minimal_project()
+        project["id"] = pid
+
+        inject_pipeline(pid, self._mock_pipeline_at_stage("SCREENING"))
+
+        mock_stage_pipeline = MagicMock()
+        mock_stage_pipeline.regenerate_with_intent.return_value = {
+            "success": True, "take": {"id": "take_new", "kind": "keyframe"},
+        }
+        with patch("web_server.load_project", return_value=project), \
+             patch("web_server._get_stage_pipeline", return_value=mock_stage_pipeline):
+            resp = self._post_iterate(iterate_client, pid)
+
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code} body={resp.get_json()}"
+        body = resp.get_json()
+        assert body["success"] is True
+
+    @pytest.mark.parametrize("gate_stage", [
+        "PLAN_REVIEW", "KEYFRAME_REVIEW", "PERFORMANCE_REVIEW", "REVIEW",
+    ])
+    def test_iterate_during_review_gates_with_running_pipeline(
+        self, iterate_client, iterate_flag_on, inject_pipeline, gate_stage,
+    ):
+        """All Surface A review gates (PLAN_REVIEW, KEYFRAME_REVIEW,
+        PERFORMANCE_REVIEW, REVIEW) must allow iterate through. Without
+        I1's gate-aware bypass, Surface A iterate has been broken at any
+        gate since S16 — undetected because no E2E test exercised the
+        endpoint with a parked pipeline.
+        """
+        pid = f"proj-iterate-during-{gate_stage.lower()}"
+        project = _make_minimal_project()
+        project["id"] = pid
+
+        inject_pipeline(pid, self._mock_pipeline_at_stage(gate_stage))
+
+        mock_stage_pipeline = MagicMock()
+        mock_stage_pipeline.regenerate_with_intent.return_value = {
+            "success": True, "take": {"id": "take_new", "kind": "keyframe"},
+        }
+        with patch("web_server.load_project", return_value=project), \
+             patch("web_server._get_stage_pipeline", return_value=mock_stage_pipeline):
+            resp = self._post_iterate(iterate_client, pid)
+
+        assert resp.status_code == 200, (
+            f"Expected 200 for gate {gate_stage}, got {resp.status_code} "
+            f"body={resp.get_json()}"
+        )
+
+    def test_iterate_during_non_gate_stage_still_busy_fences(
+        self, iterate_client, iterate_flag_on, inject_pipeline,
+    ):
+        """Pipeline actively running (NOT at a gate) — endpoint MUST
+        still 409. The original S16 busy-fence reasoning ("iterate must
+        not race a concurrent active worker") still applies for non-gate
+        stages.
+        """
+        pid = "proj-iterate-mid-render"
+        # SCENE_PREVIEW is an active stage (cinema_pipeline.py:630), not in _GATE_STAGES.
+        inject_pipeline(pid, self._mock_pipeline_at_stage("SCENE_PREVIEW"))
+
+        # No need to patch load_project — the busy-fence rejects before
+        # any project lookup.
+        resp = self._post_iterate(iterate_client, pid)
+
+        assert resp.status_code == 409
+        body = resp.get_json()
+        assert body["code"] == "project_busy"
+
+    def test_iterate_with_no_running_pipeline_proceeds_normally(
+        self, iterate_client, iterate_flag_on,
+    ):
+        """No pipeline running — endpoint MUST allow iterate through
+        (cold-start case). Regression guard: the gate-aware variant must
+        not falsely 409 when _running_pipelines is empty for the pid.
+        """
+        pid = "proj-iterate-cold"
+        project = _make_minimal_project()
+        project["id"] = pid
+
+        mock_stage_pipeline = MagicMock()
+        mock_stage_pipeline.regenerate_with_intent.return_value = {
+            "success": True, "take": {"id": "take_new", "kind": "keyframe"},
+        }
+        with patch("web_server.load_project", return_value=project), \
+             patch("web_server._get_stage_pipeline", return_value=mock_stage_pipeline):
+            resp = self._post_iterate(iterate_client, pid)
+
+        assert resp.status_code == 200

@@ -639,6 +639,120 @@ class TestClearNeedsReassembly:
                 clear_needs_reassembly("missing-pid")
 
 
+class TestClearNeedsReassemblyOnlyShots:
+    """Lane V #8 I3: when only_shots is provided, clear must set-diff
+    rather than wipe — preserves concurrent iterations that arrive
+    during the re-assemble window (now reachable once I1's gate-bypass
+    lets iterate-during-screening through).
+    """
+
+    def _fake_mutate_runner(self, project_state):
+        """Helper that runs the mutator against project_state in-place and
+        returns the MutationResult value (mirrors mutate_project contract)."""
+        from project_manager import MutationResult
+
+        def _runner(pid, mutator_fn, timeout=10, snapshot=None):
+            result = mutator_fn(project_state)
+            if isinstance(result, MutationResult):
+                return result.value
+            return result
+        return _runner
+
+    def test_clear_with_only_shots_preserves_others(self):
+        """The dirty list contains [a, b, c]. The caller snapshots [a, b]
+        before re-assembly. Mid-re-assembly an iterate adds [d]. Post-clear
+        with only_shots=[a, b] should yield needs_reassembly == [c, d] —
+        [c] was already dirty + not in the snapshot; [d] is the new entry.
+        """
+        project_state: dict = {
+            "id": "p1",
+            NEEDS_REASSEMBLY_KEY: ["shot_a", "shot_b", "shot_c", "shot_d"],
+        }
+
+        with patch("project_manager.mutate_project",
+                   side_effect=self._fake_mutate_runner(project_state)):
+            result = clear_needs_reassembly("p1", only_shots=["shot_a", "shot_b"])
+
+        assert result["success"] is True
+        assert result["needs_reassembly"] == ["shot_c", "shot_d"]
+        assert result["cleared"] == ["shot_a", "shot_b"]
+        assert project_state[NEEDS_REASSEMBLY_KEY] == ["shot_c", "shot_d"]
+
+    def test_clear_with_only_shots_no_overlap_is_noop(self):
+        """only_shots doesn't intersect current — nothing cleared, nothing
+        changed."""
+        project_state: dict = {
+            "id": "p1",
+            NEEDS_REASSEMBLY_KEY: ["shot_x", "shot_y"],
+        }
+
+        with patch("project_manager.mutate_project",
+                   side_effect=self._fake_mutate_runner(project_state)):
+            result = clear_needs_reassembly("p1", only_shots=["shot_a", "shot_b"])
+
+        assert result["needs_reassembly"] == ["shot_x", "shot_y"]
+        assert result["cleared"] == []
+
+    def test_clear_with_only_shots_full_overlap_empties_list(self):
+        """only_shots covers everything currently dirty — equivalent to
+        a wipe for this state."""
+        project_state: dict = {
+            "id": "p1",
+            NEEDS_REASSEMBLY_KEY: ["shot_a", "shot_b"],
+        }
+
+        with patch("project_manager.mutate_project",
+                   side_effect=self._fake_mutate_runner(project_state)):
+            result = clear_needs_reassembly("p1", only_shots=["shot_a", "shot_b"])
+
+        assert result["needs_reassembly"] == []
+        assert result["cleared"] == ["shot_a", "shot_b"]
+        assert project_state[NEEDS_REASSEMBLY_KEY] == []
+
+    def test_clear_with_only_shots_none_falls_back_to_wipe(self):
+        """only_shots=None (legacy default) preserves the original wipe
+        behavior — regression guard for callers that don't snapshot."""
+        project_state: dict = {
+            "id": "p1",
+            NEEDS_REASSEMBLY_KEY: ["shot_a", "shot_b", "shot_c"],
+        }
+
+        with patch("project_manager.mutate_project",
+                   side_effect=self._fake_mutate_runner(project_state)):
+            result = clear_needs_reassembly("p1")  # no only_shots arg
+
+        assert result["needs_reassembly"] == []
+        assert result["cleared"] == []
+        assert project_state[NEEDS_REASSEMBLY_KEY] == []
+
+    def test_concurrent_iterate_during_reassemble_window(self):
+        """Simulate the I3 race: snapshot [a, b], then BEFORE the mutator
+        runs, a concurrent iterate adds [d] to the list. Mutator runs
+        against the LATEST state (which has [a, b, d]) and clears only
+        the snapshot. Result: [d] preserved. Pre-I3 the wipe would have
+        dropped [d] silently.
+        """
+        # Simulates the project_manager.mutate_project semantics: the
+        # mutator runs against the LATEST persisted state, not against the
+        # snapshot the caller saw earlier. Concurrent iterate slipped in
+        # `shot_d` between snapshot + mutate.
+        latest_state: dict = {
+            "id": "p1",
+            NEEDS_REASSEMBLY_KEY: ["shot_a", "shot_b", "shot_d"],
+        }
+        snapshot_caller_saw = ["shot_a", "shot_b"]
+
+        with patch("project_manager.mutate_project",
+                   side_effect=self._fake_mutate_runner(latest_state)):
+            result = clear_needs_reassembly("p1", only_shots=snapshot_caller_saw)
+
+        # The fresh iterate's shot_d is preserved; only the originally
+        # snapshotted shots are cleared.
+        assert result["needs_reassembly"] == ["shot_d"]
+        assert result["cleared"] == ["shot_a", "shot_b"]
+        assert latest_state[NEEDS_REASSEMBLY_KEY] == ["shot_d"]
+
+
 class TestEstimateReassemblyCost:
     """estimate_reassembly_cost returns reasonable values for known shapes."""
 

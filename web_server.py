@@ -76,6 +76,25 @@ _running_pipelines: dict[str, CinemaPipeline] = {}
 _pipelines_lock = threading.Lock()
 _PIPELINE_PENDING = object()  # sentinel — readers must skip this
 
+# Review-gate stages where the pipeline worker thread is BLOCKED at
+# lifecycle.wait_for_gate (cinema/lifecycle.py:172-188 polling Event.wait
+# loop), not actively running steps. The pid remains in _running_pipelines
+# for the entire gate-wait, but endpoints that operate ON the gate
+# (iterate, /screening/approve, /assemble/re-assemble) MUST be reachable
+# during this window — operator workflow is iterate-during-gate-then-approve.
+# See _reject_if_project_busy_outside_gate for the bypass semantics.
+# Lane V #8 I1 codified this set; before, only the re-assemble + screening-
+# approve endpoints had ad-hoc bypasses, and the iterate endpoint missed
+# the bypass entirely (rendering Surface B's iterate-during-screening flow
+# unreachable behind the flag combination).
+_GATE_STAGES = frozenset({
+    "PLAN_REVIEW",
+    "KEYFRAME_REVIEW",
+    "PERFORMANCE_REVIEW",
+    "REVIEW",
+    "SCREENING",
+})
+
 # PipelineCore cache (Slice 3b Phase 1c). Caches the heavy long-lived
 # services (ContinuityEngine, ChiefDirector, LLMEnsemble,
 # QualityTracker, CostTracker) per project_id so that per-endpoint
@@ -202,6 +221,51 @@ def _project_busy_response(pid: str):
 
 def _reject_if_project_busy(pid: str):
     if pid in _running_pipelines:
+        return _project_busy_response(pid)
+    return None
+
+
+def _pipeline_at_gate_stage(pid: str) -> bool:
+    """Return True if pid's pipeline is parked at a review-gate stage.
+
+    Used by ``_reject_if_project_busy_outside_gate`` to skip the busy
+    fence for endpoints that operate ON the gate (iterate,
+    /screening/approve, /assemble/re-assemble). The pipeline worker is
+    blocked at ``lifecycle.wait_for_gate``, not actively running steps,
+    so concurrent gate-acting endpoint calls are safe.
+
+    Race-safe: ``_get_running_pipeline`` returns ``None`` during the
+    sentinel window (treat as "not at a gate; fence normally"). Returns
+    ``False`` on any ``AttributeError`` accessing ``current_stage`` so
+    test fixtures injecting bare ``object()`` sentinels don't crash —
+    they're treated as "fence normally" too, which preserves the
+    legacy busy-fence semantics for code paths that haven't migrated.
+    """
+    pipeline = _get_running_pipeline(pid)
+    if pipeline is None:
+        return False
+    try:
+        return pipeline.current_stage in _GATE_STAGES
+    except AttributeError:
+        return False
+
+
+def _reject_if_project_busy_outside_gate(pid: str):
+    """Like ``_reject_if_project_busy`` but allows calls through when the
+    running pipeline is parked at a review-gate stage. Operator workflow
+    expects iterate-during-gate; without this bypass, the entire
+    Surface A + Surface B value proposition is unreachable behind the
+    flag combination.
+
+    Mirrors the explicit bypasses already coded for
+    ``api_screening_approve`` and ``api_assemble_reassemble`` (see the
+    block comment at lines 90-101). Lane V #8 I1 surfaced the gap —
+    iterate was the only gate-acting endpoint that still busy-fenced
+    unconditionally, despite the same fence-bypass reasoning applying
+    verbatim. Codified as the canonical helper here so future gate-
+    acting endpoints can share the discipline.
+    """
+    if pid in _running_pipelines and not _pipeline_at_gate_stage(pid):
         return _project_busy_response(pid)
     return None
 
@@ -1511,9 +1575,18 @@ def api_iterate_take(pid, shot_id, take_id):
 
     # Mirror every other mutating endpoint's project-busy fence: an iterate
     # call dispatches a long-running LLM + generator pipeline, which must not
-    # race a concurrent pipeline worker on the same project. Both reviewers
+    # race a concurrent pipeline worker on the same project. Both S16 reviewers
     # (spec + code-quality) flagged this absence as the S16 release blocker.
-    busy_response = _reject_if_project_busy(pid)
+    #
+    # Lane V #8 I1 (cycle 10, 2026-05-26): use the gate-aware variant —
+    # operator MUST be able to iterate during review-gate waits (SCREENING,
+    # KEYFRAME_REVIEW, PERFORMANCE_REVIEW, REVIEW, PLAN_REVIEW). The
+    # pipeline worker is blocked at lifecycle.wait_for_gate, not actively
+    # running steps. Mirrors the explicit bypasses at api_screening_approve
+    # and api_assemble_reassemble. Without this, Surface A iterate is broken
+    # at any review gate AND Surface B's iterate-during-screening flow is
+    # entirely unreachable behind the flag combination as shipped.
+    busy_response = _reject_if_project_busy_outside_gate(pid)
     if busy_response:
         return busy_response
 
@@ -2089,10 +2162,20 @@ def api_assemble_reassemble(pid):
         # dominates the cost curve and skipping it would degrade the
         # preview's fidelity. See commit body for the measurement.
         try:
+            # Lane V #8 I2: pass a no-op progress_callback rather than
+            # _make_progress_cb(pid). _make_progress_cb resolves the SAME
+            # _progress_queues[pid] entry the original gate-waiting pipeline's
+            # SSE client is subscribed to. _assemble_approved_takes_core
+            # emits SCENE_PREVIEW (86-90%) and ASSEMBLY (92%) events; these
+            # would leak into the SSE channel while the UI is at SCREENING
+            # (95%) — flipping the visible stage backward, regressing the
+            # progress bar, and confusing the operator with unexpected
+            # progress chatter. The endpoint's request/response cycle is the
+            # operator's status indicator (button → pending → success/error).
             pipeline = CinemaPipeline(
                 pid,
                 core=_get_or_build_core(pid),
-                progress_callback=_make_progress_cb(pid),
+                progress_callback=lambda *args, **kwargs: None,
             )
             # S21 Critical #1 fix: call the helper that runs steps 1-5
             # only (REVIEW gate + scene_packages + previews + _assemble_final).
@@ -2118,8 +2201,18 @@ def api_assemble_reassemble(pid):
         # Clear dirty-tracking AFTER successful re-assembly. If we cleared
         # before and the assembly failed, the operator would have to manually
         # re-iterate the shots to repopulate the dirty list -- bad UX.
+        #
+        # Lane V #8 I3: pass the snapshot dirty_shots as only_shots so the
+        # mutator does a set-diff rather than a full wipe. Any iterate that
+        # fires DURING the re-assemble window (~30-90s of ffmpeg work; now
+        # reachable once I1's gate-bypass lets iterate-during-screening
+        # through) adds new shot_ids via mark_shot_needs_reassembly. Without
+        # the snapshot semantics, the post-assembly wipe drops those new
+        # entries silently, and the subsequent only_if_changed=true re-assemble
+        # would short-circuit on an empty list — silent data loss for the
+        # operator's most recent iterate.
         try:
-            clear_needs_reassembly(pid)
+            clear_needs_reassembly(pid, only_shots=dirty_shots)
         except ValueError:
             # Race: project deleted between assemble + clear. Best-effort;
             # the assembled mp4 still exists, so the operator's preview

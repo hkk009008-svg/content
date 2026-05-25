@@ -341,7 +341,10 @@ def mark_shot_needs_reassembly(project_id: str, shot_id: str) -> dict:
     return result
 
 
-def clear_needs_reassembly(project_id: str) -> dict:
+def clear_needs_reassembly(
+    project_id: str,
+    only_shots: list[str] | None = None,
+) -> dict:
     """Atomically clear ``project.needs_reassembly``.
 
     Called from the re-assemble endpoint after a successful re-stitch.
@@ -349,15 +352,38 @@ def clear_needs_reassembly(project_id: str) -> dict:
     mutate still runs to ensure persistence is consistent with the
     just-written assembled mp4). Returns a small result dict.
 
+    When ``only_shots`` is provided, ONLY those shot_ids are removed
+    from the needs_reassembly list — any shots added concurrently
+    (e.g., from an iterate-during-re-assemble window once Lane V #8
+    I1 is fixed) are preserved. The caller passes the snapshot list it
+    re-rendered into the new mp4; everything else stays dirty. Lane V
+    #8 I3 closed this race; without the parameter, the post-assembly
+    wipe would silently drop fresh iterations that landed during the
+    ~30-90s re-assemble window.
+
+    When ``only_shots`` is ``None`` (legacy default), wipes the entire
+    list. Preserved for callers that don't need the snapshot semantics.
+
     Raises ``ValueError`` if the project doesn't exist (caller surfaces
     as 404).
     """
     from project_manager import MutationResult, mutate_project
 
     def _mutator(latest_project: dict):
-        latest_project[NEEDS_REASSEMBLY_KEY] = []
+        if only_shots is None:
+            latest_project[NEEDS_REASSEMBLY_KEY] = []
+            cleared: list[str] = []
+        else:
+            current = set(latest_project.get(NEEDS_REASSEMBLY_KEY) or [])
+            to_clear = set(only_shots)
+            latest_project[NEEDS_REASSEMBLY_KEY] = sorted(current - to_clear)
+            cleared = sorted(current & to_clear)
         return MutationResult(
-            {"success": True, "needs_reassembly": []},
+            {
+                "success": True,
+                "needs_reassembly": list(latest_project[NEEDS_REASSEMBLY_KEY]),
+                "cleared": cleared,
+            },
             save=True,
         )
 

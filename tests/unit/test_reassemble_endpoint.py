@@ -188,9 +188,13 @@ class TestDirtyShotsTriggerReassembly:
         }
         clear_called: dict[str, bool] = {"called": False}
 
-        def fake_clear(pid):
+        def fake_clear(pid, only_shots=None):
+            # Lane V #8 I3: signature now accepts only_shots for set-diff
+            # semantics. Test stores the passed-in value so the assertion
+            # below can verify the endpoint snapshots+passes dirty_shots.
             clear_called["called"] = True
-            return {"success": True, "needs_reassembly": []}
+            clear_called["only_shots"] = list(only_shots) if only_shots is not None else None
+            return {"success": True, "needs_reassembly": [], "cleared": list(only_shots or [])}
 
         with patch("web_server.load_project", return_value=project), \
              patch("web_server.CinemaPipeline", return_value=mock_pipeline_inst), \
