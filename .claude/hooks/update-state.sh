@@ -52,6 +52,28 @@ if git diff --cached --name-only 2>/dev/null | grep -qx 'STATE.md'; then
   exit 0
 fi
 
+# B-002 fix: only amend on real commit operations.
+# Without this gate, the marker-vs-HEAD mismatch fires on ANY HEAD-moving
+# operation (reset, checkout, rebase, pull --rebase, ...) and the hook
+# re-amends an already-pushed commit, rewriting its SHA and producing
+# non-fast-forward divergence on the next push attempt. Inspect git
+# reflog's most recent action and proceed only when HEAD moved BECAUSE
+# of a commit. Marker is silently updated on non-commit moves so
+# subsequent Bash calls exit early via the CURRENT == LAST gate above.
+REFLOG_SUBJECT=$(git reflog -1 --format='%gs' 2>/dev/null || echo "")
+case "$REFLOG_SUBJECT" in
+  "commit:"*|"commit ("*)
+    # Real commit landed: commit / commit (initial) / commit (amend) /
+    # commit (merge) / commit (cherry-pick). Fall through to STATE.md
+    # regen + amend below.
+    ;;
+  *)
+    # HEAD moved for a non-commit reason. Re-anchor marker; exit clean.
+    git rev-parse HEAD > "$MARKER"
+    exit 0
+    ;;
+esac
+
 HEAD_SHA="$CURRENT"
 HEAD_SUBJECT=$(git log -1 --format='%s' HEAD)
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
