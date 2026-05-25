@@ -140,3 +140,73 @@ outer boundary and keep inner loops on the typed object you already have.
 Until Sessions 12+ migrate helper functions, pass `.model_dump()` when
 calling helpers that use key-access internally. The type annotations will
 tell you: if a helper is typed `scene: dict`, pass `scene.model_dump()`.
+
+---
+
+## Unhappy-path test recipe
+
+_Added 2026-05-25 per BACKLOG.md B-001 (originated from operator-seat's
+Lane V #3 on `e1b72ca`, F2 advisory). Closes the inherited test gap
+for ALL P1-3 migrations (S10 + part 3 + part 4 + future part N) at
+the template level rather than per-migration._
+
+### Why this matters
+
+The migration moves the failure surface for malformed projects from
+**"runtime `KeyError` or silent default partway through the function"**
+to **"`pydantic.ValidationError` raised at the function boundary."**
+That behavioral-contract change deserves a regression test pin so
+future refactors don't silently relax the boundary (e.g. by removing
+`model_validate` and regressing to dict access, or by wrapping it in
+a try/except that swallows the exception).
+
+### What to test
+
+For each TEMPLATE (not per migration), assert that
+`Project.model_validate()` raises `ValidationError` when given a
+malformed project dict — missing a required field (e.g. `id`) or
+with a type-mismatched array (e.g. `scenes: "not a list"`). The
+tests live in `tests/unit/test_project_models.py:TestMigratedCaller`
+alongside the per-migration regression tests.
+
+### Example tests
+
+```python
+import pytest
+from pydantic import ValidationError
+from domain.models import Project
+
+def test_project_model_validate_raises_on_missing_id(self):
+    """The migrated caller's boundary raises ValidationError on a
+    malformed dict, NOT KeyError mid-function."""
+    raw = self._make_project_dict()
+    del raw["id"]  # Project.id is required
+    with pytest.raises(ValidationError):
+        Project.model_validate(raw)
+
+def test_project_model_validate_raises_on_malformed_scenes(self):
+    """Type-level malformation also raises at the boundary."""
+    raw = self._make_project_dict()
+    raw["scenes"] = "not a list"  # type mismatch with List[Scene]
+    with pytest.raises(ValidationError):
+        Project.model_validate(raw)
+```
+
+### Why one template-level test set, not per-migration
+
+The unhappy-path contract is set by `Project.model_validate()`
+itself, not by any specific call site. One template-level test pair
+covers the contract for ALL P1-3 migrations. Per-migration unhappy-
+path tests would be redundant AND would couple test code to specific
+call-site implementations — making any future caller-side refactor
+needlessly noisy.
+
+### When per-migration unhappy-path tests ARE warranted
+
+Only when the migrated caller explicitly wraps `model_validate` in a
+`try`/`except ValidationError` block and translates the exception to
+a domain-specific error (e.g. an HTTP 400 response). In that case,
+test the translation behavior at the caller level. If the caller
+lets `ValidationError` propagate unchanged (the default migration
+shape — and the shape S10 / parts 3 / 4 all use), the template-level
+tests above are sufficient.

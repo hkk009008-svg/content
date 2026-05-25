@@ -685,3 +685,35 @@ class TestMigratedCaller:
         scene_t = next((s for s in p.scenes if s.id == "scene_001"), None)
         assert scene_t is not None
         assert scene_t.shots == []  # new path's default_factory=list — no divergence
+
+    # ------------------------------------------------------------------
+    # Template-level unhappy-path tests (BACKLOG.md B-001; addresses
+    # operator-seat Lane V #3 F2 advisory; see docs/MIGRATION-PATTERN-
+    # pydantic-caller.md §"Unhappy-path test recipe" for the full why).
+    #
+    # These cover the contract set by Project.model_validate() itself —
+    # ALL P1-3 migrations (S10 + parts 3 + 4 + future part N) inherit
+    # the protection without per-migration test duplication.
+    # ------------------------------------------------------------------
+
+    def test_project_model_validate_raises_on_missing_id(self):
+        """P1-3 template-level regression: Project.model_validate() raises
+        ValidationError on a dict missing the required `id` field — NOT
+        KeyError mid-function. Pins the failure-surface contract that the
+        migration boundary creates. If a future refactor removes
+        `model_validate` (regressing to dict access) or wraps it in a
+        try/except that swallows ValidationError, this test fails."""
+        raw = self._make_project_dict()
+        del raw["id"]  # Project.id is required (domain/models.py:140)
+        with pytest.raises(ValidationError):
+            Project.model_validate(raw)
+
+    def test_project_model_validate_raises_on_malformed_scenes(self):
+        """P1-3 template-level regression: type-level malformation
+        (scenes provided as non-list) also raises at the
+        Project.model_validate boundary, not silently mid-function on
+        the first iteration. Migrated callers inherit this protection."""
+        raw = self._make_project_dict()
+        raw["scenes"] = "not a list — type mismatch with List[Scene]"
+        with pytest.raises(ValidationError):
+            Project.model_validate(raw)

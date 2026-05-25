@@ -28,7 +28,8 @@ once data accumulates.
 
 | ID | Surfaced by | Date | Description | Suggested seat | Priority hint |
 |---|---|---|---|---|---|
-| B-001 | operator-seat (Lane V #3 on `e1b72ca`, F2 advisory) | 2026-05-25 | **Add unhappy-path test recipe to `docs/MIGRATION-PATTERN-pydantic-caller.md`** covering `Project.model_validate()` raising `ValidationError` on a malformed project dict. The recipe-level gap is inherited by ALL P1-3 part-N migrations (currently S10 + parts 3 + 4 lack the regression test). Closing this at the template level — rather than per-migration — fixes the gap for all current AND future migrations in one stroke. Estimate: ~30-45 min Lane A in main context (template edit + one example test that future parts copy). | director-seat (template authorship) OR operator-seat (Lane D-style docs work) | medium — addresses a real coverage gap but template-derived (not a per-migration omission), so no urgency |
+
+_(Empty — B-001 graduated to Recently completed.)_
 
 ---
 
@@ -45,5 +46,4 @@ _(None yet.)_
 
 | ID | Description | Completion SHA |
 |---|---|---|
-
-_(None yet.)_
+| B-001 | Added unhappy-path test recipe to `docs/MIGRATION-PATTERN-pydantic-caller.md` §"Unhappy-path test recipe" (one template-level section covers all P1-3 migrations) + 2 example tests in `tests/unit/test_project_models.py::TestMigratedCaller` (`test_project_model_validate_raises_on_missing_id`, `test_project_model_validate_raises_on_malformed_scenes`) pinning the `ValidationError`-at-boundary contract. Closes operator-seat Lane V #3 F2 advisory. | _(this commit)_ |
