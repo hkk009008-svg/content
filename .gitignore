@@ -63,3 +63,9 @@ domain/projects/*
 
 # State-update hook marker (per-clone runtime state, not source)
 .claude/hooks/.last-state-head
+
+# Auto-generated session snapshot (B-003 Option E, cycle 8). Hook
+# regenerates this file on every Bash call from local git state; not
+# meaningful to track in commit history (the historical versions in
+# the chain prior to the cycle-8 cutover are inert).
+STATE.md

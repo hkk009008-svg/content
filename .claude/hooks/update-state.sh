@@ -1,38 +1,29 @@
 #!/usr/bin/env bash
 # .claude/hooks/update-state.sh
-# PostToolUse hook: regenerates STATE.md after a new git commit lands.
-# Folds into the triggering commit via git commit --amend --no-edit.
+# PostToolUse hook: regenerates STATE.md after every Bash tool call.
 #
-# Failure modes handled:
-# - Skips if HEAD hasn't changed since last hook run (marker file).
-# - Skips if STATE.md is already staged (amend-loop precaution).
-# - Skips if not in a git repo (defensive).
-# - Tolerates missing origin/main (e.g., fresh clone, detached HEAD).
+# B-003 Option E (cycle 8, 2026-05-26) replaced this script's prior
+# "amend STATE.md into the just-made commit" model with the much simpler
+# "STATE.md is gitignored, regenerate it on disk only" model. The historical
+# rationale for amending — making commit history reflect repository state —
+# was already leaky (B-002 stale-by-one: STATE.md inside any commit was one
+# SHA behind because it was generated pre-amend) AND produced B-003 (compound
+# `git commit && git push` left local diverged from origin because the hook
+# fired after the push). Option E retires both failure modes by accepting
+# that STATE.md is purely-local informational state; it never enters commits
+# again. See `docs/B-003-design-exploration.md` for the full analysis.
 #
-# IMPORTANT (per REPLY C2): This hook amends the just-made commit via
-# `git commit --amend --no-edit`. That changes the commit SHA. Reviewers
-# and briefs that cite SHAs from chat output may see a different SHA when
-# they `git show` after the hook fires. Historical commits are NEVER
-# touched; only the just-made one.
+# Behavior:
+# - Runs on every PostToolUse:Bash tool call.
+# - Skip-perf gate: exits early if HEAD hasn't moved since last run AND
+#   STATE.md still exists on disk. Marker stored at
+#   `.claude/hooks/.last-state-head` (gitignored).
+# - On a HEAD move (commit, reset, checkout, rebase, etc.), regenerates
+#   STATE.md from current git state + mailbox cursors.
+# - STATE.md is gitignored; this hook never touches git history.
 #
-# KNOWN LIMITATION (v2.1): STATE.md's HEAD field is one SHA stale
-# immediately after a commit. The script captures HEAD_SHA BEFORE the
-# amend, writes STATE.md with that SHA, then amends — which changes
-# HEAD. STATE.md inside the new commit therefore references the
-# pre-amend SHA. Cold-starters should verify with `git rev-parse HEAD`
-# if the exact SHA matters; the other fields (smoke / pytest / mailbox)
-# are post-amend-accurate because they're computed from commit BODY
-# content + mailbox file state, which don't depend on the amend.
-# Fixing this cleanly requires double-amend (gen → amend → regen with
-# new SHA → amend again) which costs an extra amend per commit; we
-# accept the stale-by-one for simplicity.
-#
-# This hook is configured to fire on PostToolUse:Bash via
-# .claude/settings.local.json. Because that matcher fires on EVERY Bash
-# tool call (not only git commits), the script's first responsibility is
-# to detect whether a new commit actually landed since its last run. The
-# marker file `.claude/hooks/.last-state-head` (gitignored) holds the
-# last-processed HEAD SHA.
+# This hook is configured via `.claude/settings.local.json`'s PostToolUse:Bash
+# matcher.
 
 set -euo pipefail
 
@@ -42,37 +33,13 @@ MARKER=".claude/hooks/.last-state-head"
 CURRENT=$(git rev-parse HEAD 2>/dev/null || exit 0)
 LAST=$(cat "$MARKER" 2>/dev/null || echo "")
 
-# Skip if HEAD hasn't moved since our last run (no new commit to process)
-if [ "$CURRENT" = "$LAST" ]; then
+# Perf: skip regen if HEAD hasn't moved AND STATE.md exists on disk.
+# Mid-session mailbox writes won't refresh STATE.md until the next HEAD
+# move, but mailbox surfacing is mostly used at session-start (Rule #8
+# awareness gate), which always reads the file fresh after a fresh HEAD.
+if [ "$CURRENT" = "$LAST" ] && [ -f STATE.md ]; then
   exit 0
 fi
-
-# Skip if STATE.md is already in the staged set (we're in the amend loop)
-if git diff --cached --name-only 2>/dev/null | grep -qx 'STATE.md'; then
-  exit 0
-fi
-
-# B-002 fix: only amend on real commit operations.
-# Without this gate, the marker-vs-HEAD mismatch fires on ANY HEAD-moving
-# operation (reset, checkout, rebase, pull --rebase, ...) and the hook
-# re-amends an already-pushed commit, rewriting its SHA and producing
-# non-fast-forward divergence on the next push attempt. Inspect git
-# reflog's most recent action and proceed only when HEAD moved BECAUSE
-# of a commit. Marker is silently updated on non-commit moves so
-# subsequent Bash calls exit early via the CURRENT == LAST gate above.
-REFLOG_SUBJECT=$(git reflog -1 --format='%gs' 2>/dev/null || echo "")
-case "$REFLOG_SUBJECT" in
-  "commit:"*|"commit ("*)
-    # Real commit landed: commit / commit (initial) / commit (amend) /
-    # commit (merge) / commit (cherry-pick). Fall through to STATE.md
-    # regen + amend below.
-    ;;
-  *)
-    # HEAD moved for a non-commit reason. Re-anchor marker; exit clean.
-    git rev-parse HEAD > "$MARKER"
-    exit 0
-    ;;
-esac
 
 HEAD_SHA="$CURRENT"
 HEAD_SUBJECT=$(git log -1 --format='%s' HEAD)
@@ -87,10 +54,9 @@ else
   WT_STATE=$(printf "dirty:\n%s" "$WT_LINES")
 fi
 
-# Smoke (per REPLY R1: extracted from latest commit body; not re-run)
-# Trade-off: hook stays ~100ms (vs ~3s if smoke ran). Cold-starter
-# re-runs scripts/ci_smoke.py manually if STATE.md says "unknown" or
-# the commit-body smoke line is stale relative to current code.
+# Smoke + pytest from latest commit body (cheaper than re-running, and the
+# commit body is the truth at commit time; if the working tree has drifted
+# since, both fields explicitly suggest manual re-run).
 SMOKE_LINE=$(git log -1 --format='%B' HEAD | grep -E "ci_smoke\.py" -A1 | tail -1 || true)
 if echo "$SMOKE_LINE" | grep -q "OK"; then
   SMOKE_RESULT="OK (per commit body)"
@@ -100,12 +66,6 @@ else
   SMOKE_RESULT="unknown (not in commit body; re-run manually)"
 fi
 
-# Pytest count from latest commit body (regex).
-# v2.1 fix: original regex required "Z failed" in the match, but pytest
-# omits "0 failed" in the success case (e.g., "636 passed, 3 skipped,
-# 11 warnings, 10 subtests passed"). Made the failed-count match
-# optional. Still tolerates the historical "X passed, Y skipped, Z failed"
-# format.
 PYTEST_LINE=$(git log -1 --format='%B' HEAD | grep -Eo '[0-9]+ passed, [0-9]+ skipped(, [0-9]+ failed)?' | head -1 || true)
 [ -z "$PYTEST_LINE" ] && PYTEST_LINE="(not in commit body; re-run manually for ground truth)"
 
@@ -124,7 +84,9 @@ fi
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 cat > STATE.md <<EOF
-<!-- AUTO-GENERATED by .claude/hooks/update-state.sh — DO NOT HAND-EDIT -->
+<!-- AUTO-GENERATED by .claude/hooks/update-state.sh — DO NOT HAND-EDIT.
+     File is gitignored (B-003 Option E, cycle 8). Purely-local
+     informational artifact; regenerated on each HEAD move. -->
 # Repository State Snapshot
 
 - **HEAD:** \`${HEAD_SHA}\` (${HEAD_SUBJECT})
@@ -133,16 +95,8 @@ cat > STATE.md <<EOF
 - **Smoke:** ${SMOKE_RESULT} (last run ${TIMESTAMP})
 - **Pytest:** ${PYTEST_LINE}
 - **Unread mailbox:** director=${UNREAD_DIR}, operator=${UNREAD_OP}
-- **Updated:** ${TIMESTAMP} (after commit \`${HEAD_SHA}\`)
+- **Updated:** ${TIMESTAMP} (after HEAD \`${HEAD_SHA}\`)
 EOF
 
-# Fold into the just-made commit (no new commit appears in log).
-# DELIBERATE (per REPLY C4): ONLY STATE.md is staged. Never use `git add -A`
-# or `git add .` — counter-bumps in AGENTS.md/CLAUDE.md must remain in working
-# tree per Rule #6 (operator territory; fold-and-surface, not auto-absorb).
-git add STATE.md
-git commit --amend --no-edit --no-verify
-
-# Record the post-amend HEAD so subsequent hook invocations skip until a
-# new commit lands.
+# Record HEAD so subsequent Bash calls skip regen unless HEAD moves again.
 git rev-parse HEAD > "$MARKER"

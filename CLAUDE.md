@@ -369,7 +369,7 @@ If <X happens>, report BLOCKED with what you tried.
 - gitnexus_impact findings (callers, risk) or grep-fallback equivalent
 - Files changed (paths only)
 - Verification command output
-- Commit SHA — capture from `git log --oneline -3` AFTER post-commit hook activity settles (typically ~3-5 seconds after `git commit` returns). The project's post-commit hook amends `STATE.md`, so the SHA from `git commit` stdout may be stale by one. Use the SHA `git log` reports after the hook completes.
+- Commit SHA — `git commit` stdout's SHA is authoritative as of cycle-8 B-003 Option E (the post-commit hook no longer amends; STATE.md is gitignored and regenerated locally). Use `git log --oneline -3` to double-check if desired, but the SHA from commit stdout matches HEAD.
 - Self-review findings
 ```
 
@@ -399,13 +399,15 @@ template, do NOT trim these:
   comparison: design-time check is ~1 grep; post-commit Lane V catch
   cost ~234k tokens (cycle-6 dispatch) + the F1 fix commit's
   developer-time. Front-load is cheap.
-- **Commit SHA capture** — cycle-5 dispatch surfaced that implementer-
-  reported SHAs were sometimes 1 commit stale because the project's
-  `.claude/hooks/update-state.sh` post-commit hook amends `STATE.md`
-  and the original commit SHA from `git commit` stdout no longer
-  matches HEAD. Capturing from `git log --oneline -3` after the hook
-  settles is the reliable source. Already deployed ad-hoc in cycle-5
-  S12 and cycle-6 S13 prompts; this codification makes it inherited.
+- **Commit SHA capture** — historical context: cycle-5 dispatch surfaced
+  that implementer-reported SHAs were sometimes 1 commit stale because
+  the project's `.claude/hooks/update-state.sh` post-commit hook AMENDED
+  STATE.md into the just-made commit, changing its SHA. The Item 6
+  Report-Format guidance directed implementers to capture from
+  `git log --oneline -3` after the hook settled. **Resolved at cycle-8
+  B-003 Option E** — hook no longer amends; STATE.md is gitignored;
+  `git commit` stdout's SHA is now authoritative again. Guidance kept
+  for the audit trail but the stale-by-one failure mode no longer exists.
 
 ## Spec reviewer prompt template
 
