@@ -28,8 +28,7 @@ once data accumulates.
 
 | ID | Surfaced by | Date | Description | Suggested seat | Priority hint |
 |---|---|---|---|---|---|
-
-_(None active — B-003 closed via Option E at this commit; B-002 superseded.)_
+| B-004 | operator (Lane V #5 G4) | 2026-05-26 | IterationPanel UI polish — two items deferred with rationale in director-seat's own S17 review (commit body of `16ce51a`): **m2** Escape-key dismissal for the panel drawer (currently only closes on Cancel / Generate-success / explicit X); **m3** Non-JSON 502 status context surfacing (current behavior: 502 with HTML body throws and IterationPanel's catch block shows a generic "Network error" — should preserve the HTTP status code + best-effort body extract for operator debugging). Both are accessibility / UX polish; neither blocks Surface A functional use. Cleanest fold: bundle with the next IterationPanel touch (S18 verb DSL UI extension OR S17 follow-up). | either seat (small Lane A) | low — pure UX polish; no functional blocker. Pick up opportunistically when adjacent UI work is in flight. |
 
 ---
 
