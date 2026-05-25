@@ -203,6 +203,22 @@ export function usePipelineState(projectId: string | null) {
     return postJson(`/api/projects/${projectId}/assemble`)
   }, [projectId, postJson])
 
+  /** S17: directorial iteration — POST flat body `{ prose, target_stage }` to
+   *  the iterate endpoint. On success the new take is included in the response
+   *  body as `{ success: true, take: {...} }`. The caller is responsible for
+   *  refreshing the project so the new take appears in the keyframe list.
+   *  On 404 (CINEMA_DIRECTORIAL_ITERATION flag off), surface the error JSON
+   *  rather than throwing so the IterationPanel can show an inline message. */
+  const iterateTake = useCallback(async (shotId: string, takeId: string, prose: string) => {
+    if (!projectId) return null
+    const res = await fetch(`/api/projects/${projectId}/shots/${shotId}/takes/${takeId}/iterate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prose, target_stage: 'keyframe' }),
+    })
+    return res.json()
+  }, [projectId])
+
   // Enhanced start that also processes events
   const start = useCallback(() => {
     setShotStates(new Map())
@@ -241,6 +257,7 @@ export function usePipelineState(projectId: string | null) {
     correctShot,
     diagnoseShot,
     proceedToAssembly,
+    iterateTake,
     // Pass-through from useSSE
     events: sse.events,
     latest: sse.latest,

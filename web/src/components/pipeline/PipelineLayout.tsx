@@ -49,6 +49,9 @@ interface Props {
    *  ReviewStage's auto-approve rejection flow to clear the badge once
    *  the server has dropped the `<gate>_auto_approved` flag. */
   onRefreshProject: () => Promise<void> | void
+  /** S17: directorial iteration. Optional — only passed when
+   *  CINEMA_DIRECTORIAL_ITERATION is enabled. Forwarded to ReviewStage. */
+  onIterate?: (shotId: string, takeId: string, prose: string) => Promise<any>
   /** Optional system-level error to render in the execution board. */
   pipelineError?: PipelineError | null
   /** Optional system-level "awaiting backend" placeholder. */
@@ -137,7 +140,7 @@ export default function PipelineLayout({
   onBack, onCancel, onPause, onResume, onApproveShotPlan, onRejectShotPlan,
   onGenerateKeyframe, onApproveKeyframe, onApprovePerformance, onGenerateMotion, onApproveFinal,
   onRegenerateShot, onRestartShot, onCorrectShot, onDiagnoseShot, onProceedToAssembly,
-  onRefreshProject,
+  onRefreshProject, onIterate,
   pipelineError, pipelineLoadingLabel,
 }: Props) {
   const isComplete = latest?.stage === 'COMPLETE' || latest?.stage === 'DONE'
@@ -312,6 +315,7 @@ export default function PipelineLayout({
               onRegenerate={onRestartShot}
               onProceedToAssembly={onProceedToAssembly}
               onRefreshProject={onRefreshProject}
+              onIterate={onIterate}
             />
           ) : (
             <>

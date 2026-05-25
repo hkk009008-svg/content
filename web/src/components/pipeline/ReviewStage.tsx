@@ -3,6 +3,7 @@ import type { Project, ShotState, Scene, Shot, TakeRecord } from '../../types/pr
 import TakeStrip from '../console/TakeStrip'
 import AutoApproveBadge from '../console/AutoApproveBadge'
 import RejectAutoApproveModal from '../console/RejectAutoApproveModal'
+import IterationPanel from './IterationPanel'
 
 const API = '/api'
 
@@ -49,6 +50,11 @@ interface Props {
    *  auto-approve rejection so the badge clears without waiting for the
    *  next poll cycle (per S13 code-review fix). */
   onRefreshProject: () => Promise<void> | void
+  /** S17: directorial iteration. Optional — callers without the
+   *  CINEMA_DIRECTORIAL_ITERATION flag simply omit this prop; the
+   *  Iterate button is hidden when it's absent.
+   *  Sends `{ prose, target_stage: "keyframe" }` to the iterate endpoint. */
+  onIterate?: (shotId: string, takeId: string, prose: string) => Promise<any>
 }
 
 function findTake(takes: TakeRecord[], takeId: string) {
@@ -92,21 +98,28 @@ function CascadeBadge({ meta }: { meta: TakeRecord['cascade_metadata'] }) {
   )
 }
 
-function renderTakeButton({
+function TakeCard({
   take,
   active,
   approved,
+  showIterateButton,
   onSelect,
   onApprove,
+  onIterate,
 }: {
   take: TakeRecord
   active: boolean
   approved: boolean
+  /** S17: show the Iterate button only at KEYFRAME_REVIEW when onIterate is wired. */
+  showIterateButton: boolean
   onSelect: () => void
   onApprove: () => void
+  onIterate?: (takeId: string, prose: string) => Promise<any>
 }) {
+  const [iterating, setIterating] = useState(false)
+
   return (
-    <div key={take.id} className={`rounded border px-2 py-2 ${active ? 'border-editorial-brass bg-editorial-brass/10' : 'border-editorial-rule bg-editorial-ink'}`}>
+    <div className={`rounded border px-2 py-2 ${active ? 'border-editorial-brass bg-editorial-brass/10' : 'border-editorial-rule bg-editorial-ink'}`}>
       <button onClick={onSelect} className="w-full text-left">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-editorial-ivory font-medium">{take.kind}</span>
@@ -116,12 +129,39 @@ function renderTakeButton({
         <CascadeBadge meta={take.cascade_metadata} />
       </button>
       {!approved && (
-        <button
-          onClick={onApprove}
-          className="mt-2 w-full rounded border border-editorial-ready/50 px-2 py-1 text-eyebrow text-editorial-ready hover:bg-editorial-ready/10"
-        >
-          Approve
-        </button>
+        <div className="mt-2 flex gap-2">
+          <button
+            onClick={onApprove}
+            className="flex-1 rounded border border-editorial-ready/50 px-2 py-1 text-eyebrow text-editorial-ready hover:bg-editorial-ready/10"
+          >
+            Approve
+          </button>
+          {showIterateButton && onIterate && !iterating && (
+            <button
+              onClick={() => { setIterating(true) }}
+              className="rounded border border-editorial-brass/50 px-2 py-1 text-eyebrow text-editorial-brass hover:bg-editorial-brass/10"
+              title="Open directorial iteration panel to generate a new take with your direction"
+            >
+              Iterate
+            </button>
+          )}
+        </div>
+      )}
+      {/* S17: inline iteration drawer — KEYFRAME_REVIEW + CINEMA_DIRECTORIAL_ITERATION only */}
+      {iterating && onIterate && (
+        <IterationPanel
+          shotId={''}
+          takeId={take.id}
+          onSubmit={async (prose) => {
+            const result = await onIterate(take.id, prose)
+            // Close panel on non-error result
+            if (!result?.error) {
+              setIterating(false)
+            }
+            return result
+          }}
+          onCancel={() => setIterating(false)}
+        />
       )}
     </div>
   )
@@ -144,6 +184,7 @@ function ClipCard({
   onDiagnose,
   onRegenerate,
   onRefreshProject,
+  onIterate,
 }: {
   shot: Shot
   scene: Scene
@@ -161,6 +202,7 @@ function ClipCard({
   onDiagnose: Props['onDiagnose']
   onRegenerate: Props['onRegenerate']
   onRefreshProject: Props['onRefreshProject']
+  onIterate?: Props['onIterate']
 }) {
   const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null)
   const [diagnosing, setDiagnosing] = useState(false)
@@ -367,13 +409,18 @@ function ClipCard({
             </div>
             {keyframeTakes.length > 0 ? (
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {keyframeTakes.map((take, index) => renderTakeButton({
-                  take,
-                  active: selectedKeyframe?.id === take.id,
-                  approved: shot.approved_keyframe_take_id === take.id,
-                  onSelect: () => setSelectedKeyframeTakeId(take.id),
-                  onApprove: () => runAction(`approve-${take.id}`, () => onApproveKeyframe(shot.id, take.id)),
-                }))}
+                {keyframeTakes.map((take) => (
+                  <TakeCard
+                    key={take.id}
+                    take={take}
+                    active={selectedKeyframe?.id === take.id}
+                    approved={shot.approved_keyframe_take_id === take.id}
+                    showIterateButton={activeStage === 'KEYFRAME_REVIEW' && Boolean(onIterate)}
+                    onSelect={() => setSelectedKeyframeTakeId(take.id)}
+                    onApprove={() => runAction(`approve-${take.id}`, () => onApproveKeyframe(shot.id, take.id))}
+                    onIterate={onIterate ? (takeId, prose) => onIterate(shot.id, takeId, prose) : undefined}
+                  />
+                ))}
               </div>
             ) : (
               <div className="mt-3 text-xs text-editorial-ivory-mute">No keyframe takes yet.</div>
@@ -551,13 +598,17 @@ function ClipCard({
             </div>
             {finalTakes.length > 0 ? (
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {finalTakes.map((take) => renderTakeButton({
-                  take,
-                  active: selectedFinal?.id === take.id,
-                  approved: shot.approved_final_take_id === take.id,
-                  onSelect: () => setSelectedFinalTakeId(take.id),
-                  onApprove: () => runAction(`approve-${take.id}`, () => onApproveFinal(shot.id, take.id)),
-                }))}
+                {finalTakes.map((take) => (
+                  <TakeCard
+                    key={take.id}
+                    take={take}
+                    active={selectedFinal?.id === take.id}
+                    approved={shot.approved_final_take_id === take.id}
+                    showIterateButton={false}
+                    onSelect={() => setSelectedFinalTakeId(take.id)}
+                    onApprove={() => runAction(`approve-${take.id}`, () => onApproveFinal(shot.id, take.id))}
+                  />
+                ))}
               </div>
             ) : (
               <div className="mt-3 text-xs text-editorial-ivory-mute">No motion or postprocess takes yet.</div>
@@ -679,6 +730,7 @@ export default function ReviewStage({
   onRegenerate,
   onProceedToAssembly,
   onRefreshProject,
+  onIterate,
 }: Props) {
   const allShots: { shot: Shot; scene: Scene }[] = []
   for (const scene of project.scenes) {
@@ -734,6 +786,7 @@ export default function ReviewStage({
               onDiagnose={onDiagnose}
               onRegenerate={onRegenerate}
               onRefreshProject={onRefreshProject}
+              onIterate={onIterate}
             />
           ))}
         </div>
