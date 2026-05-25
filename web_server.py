@@ -45,7 +45,7 @@ from project_manager import (
 from character_manager import create_character_with_images, VOICE_POOL
 from location_manager import create_location_with_images
 from scene_decomposer import decompose_scene, update_scene_shots, CAMERA_MOTIONS, VISUAL_EFFECTS, TARGET_APIS, API_REGISTRY, MUSIC_MOODS
-from domain.models import Project
+from domain.models import DirectorialIntent, Project
 from domain.scene_decomposer import PURPOSE_TAGS, PURPOSE_API_RANKING, BILLING_PROVIDERS, estimate_short_cost
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
@@ -1458,6 +1458,75 @@ def api_approve_final_take(pid, shot_id, take_id):
     except ValueError:
         return jsonify({"error": "Project not found"}), 404
     status = 200 if not result.get("error") else 409
+    return jsonify(result), status
+
+
+@app.route("/api/projects/<pid>/shots/<sid>/takes/<take_id>/iterate", methods=["POST"])
+@_project_lock_guard
+def api_iterate_take(pid, sid, take_id):
+    """S16: directorial iteration endpoint.
+
+    Accepts an operator's directorial intent (DirectorialIntent JSON body),
+    calls ``ShotController.regenerate_with_intent``, and returns the new take.
+
+    Feature-flagged behind CINEMA_DIRECTORIAL_ITERATION=1|true|yes.
+    Returns 404 when the flag is off (mirrors §7.7.3 endpoint-level gate).
+
+    Route is pid-scoped per cycle-6 Lane V F1 convention — `sid` is
+    ``shot_{scene}_{i}`` and can collide across projects.
+
+    Body (JSON):
+        {
+            "prose": "tighten the framing on the face",
+            "verb": null,            # optional
+            "params": {},            # optional
+            "refs": [],              # optional
+            "target_stage": "keyframe"  # keyframe|performance|motion
+        }
+
+    Response (success): 200 + ``{success: true, take: {...}}``
+    Response (feature off): 404 + ``{error: "..."}``
+    Response (validation error): 400 + ``{error: "..."}``
+    Response (shot/take not found): 404 + ``{error: "..."}``
+    Response (downstream error): 409 + ``{error: "..."}``
+    """
+    from cinema.shots.controller import _directorial_iteration_enabled
+    if not _directorial_iteration_enabled():
+        return jsonify({"error": "Directorial iteration not enabled (set CINEMA_DIRECTORIAL_ITERATION=1)"}), 404
+
+    if not request.is_json:
+        return jsonify({"error": "JSON body required"}), 400
+
+    data = request.get_json() or {}
+    try:
+        intent = DirectorialIntent.model_validate(data)
+    except Exception as exc:
+        return jsonify({"error": f"Invalid intent body: {exc}"}), 400
+
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+
+    project_typed = Project.model_validate(project)
+    scene_id = next(
+        (s.id for s in project_typed.scenes if any(sh.id == sid for sh in s.shots)),
+        None,
+    )
+    if not scene_id:
+        return jsonify({"error": "Shot not found in project"}), 404
+
+    try:
+        result = _get_stage_pipeline(pid).regenerate_with_intent(
+            scene_id,
+            sid,
+            take_id,
+            intent,
+            project_id=pid,
+        )
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
+
+    status = 200 if result.get("success") else 409
     return jsonify(result), status
 
 

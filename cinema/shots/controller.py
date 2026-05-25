@@ -96,8 +96,18 @@ from lip_sync import (
     upscale_video_seedvr2,
 )
 
+
+def _directorial_iteration_enabled() -> bool:
+    """Feature flag: CINEMA_DIRECTORIAL_ITERATION=1|true|yes enables S16+ iteration endpoints.
+
+    Per §7.7.3 convention. Default off — flag must be set explicitly.
+    """
+    return os.environ.get("CINEMA_DIRECTORIAL_ITERATION", "").strip().lower() in {
+        "1", "true", "yes"
+    }
+
 from cinema.lifecycle import LifecycleService
-from domain.models import Project
+from domain.models import DirectorialIntent, Project
 
 if TYPE_CHECKING:
     # PipelineCore lives in cinema.core, which transitively imports
@@ -279,6 +289,10 @@ class ShotController:
         shot_id: str,
         positive_prompt: Optional[str] = None,
         negative_prompt: Optional[str] = None,
+        *,
+        intent_override: Optional[DirectorialIntent] = None,
+        parent_take_id: str = "",
+        revised_prompt: str = "",
     ) -> dict:
         project = self._host._refresh_project_snapshot() or self.project
         scene, shot, shot_index = self._find_shot(shot_id, project, scene_id)
@@ -465,6 +479,16 @@ class ShotController:
 
         take["path"] = img_path
 
+        # S16: populate directorial iteration provenance when supplied.
+        if parent_take_id:
+            take["parent_take_id"] = parent_take_id
+        if intent_override is not None:
+            take["intent"] = intent_override.model_dump()
+        if revised_prompt:
+            take["revised_prompt"] = revised_prompt
+            take["metadata"].setdefault("params_delta", {})
+            take["metadata"].setdefault("anchor_refs", [])
+
         def _mutator(_scene: dict, project_shot: dict):
             project_shot.setdefault("keyframe_takes", []).append(take)
             project_shot["generated_image"] = img_path
@@ -521,7 +545,15 @@ class ShotController:
             "identity_score": identity_score,
         }
 
-    def generate_performance_take(self, scene_id: str, shot_id: str) -> dict:
+    def generate_performance_take(
+        self,
+        scene_id: str,
+        shot_id: str,
+        *,
+        intent_override: Optional[DirectorialIntent] = None,
+        parent_take_id: str = "",
+        revised_prompt: str = "",
+    ) -> dict:
         """Per-shot performance capture (handoff §7).
 
         Sits between keyframe review and motion render. Routes the shot to one
@@ -686,6 +718,16 @@ class ShotController:
         # --- 5. Persist the take + identity-gate the auto-approve ---
         take["path"] = perf_path
 
+        # S16: populate directorial iteration provenance when supplied.
+        if parent_take_id:
+            take["parent_take_id"] = parent_take_id
+        if intent_override is not None:
+            take["intent"] = intent_override.model_dump()
+        if revised_prompt:
+            take["revised_prompt"] = revised_prompt
+            take["metadata"].setdefault("params_delta", {})
+            take["metadata"].setdefault("anchor_refs", [])
+
         # Resolve the character's face anchor for the gate. Multi-character shots
         # anchor on the first listed character — operators can override via the
         # PERFORMANCE_REVIEW gate. Uses the existing character_manager helper that
@@ -741,7 +783,15 @@ class ShotController:
             "engine": engine,
         }
 
-    def generate_motion_take(self, scene_id: str, shot_id: str) -> dict:
+    def generate_motion_take(
+        self,
+        scene_id: str,
+        shot_id: str,
+        *,
+        intent_override: Optional[DirectorialIntent] = None,
+        parent_take_id: str = "",
+        revised_prompt: str = "",
+    ) -> dict:
         project = self._host._refresh_project_snapshot() or self.project
         settings = project.get("global_settings", {})
         scene, shot, shot_index = self._find_shot(shot_id, project, scene_id)
@@ -928,6 +978,16 @@ class ShotController:
 
         take["path"] = final_vid
 
+        # S16: populate directorial iteration provenance when supplied.
+        if parent_take_id:
+            take["parent_take_id"] = parent_take_id
+        if intent_override is not None:
+            take["intent"] = intent_override.model_dump()
+        if revised_prompt:
+            take["revised_prompt"] = revised_prompt
+            take["metadata"].setdefault("params_delta", {})
+            take["metadata"].setdefault("anchor_refs", [])
+
         def _mutator(_scene: dict, project_shot: dict):
             project_shot.setdefault("motion_takes", []).append(take)
             project_shot["generated_video"] = final_vid
@@ -1060,6 +1120,117 @@ class ShotController:
             positive_prompt=positive_prompt,
             negative_prompt=negative_prompt,
         )
+
+    def regenerate_with_intent(
+        self,
+        scene_id: str,
+        shot_id: str,
+        take_id: str,
+        intent: DirectorialIntent,
+        *,
+        project_id: str = "",
+    ) -> dict:
+        """S16: directorial iteration — translate intent and regenerate the appropriate take stage.
+
+        Calls ``llm.director.intent_translator`` to produce a revised prompt + params_delta +
+        anchor_refs, then routes to the matching take generator (keyframe / performance / motion)
+        with backward-compat kwargs so the new TakeRecord carries:
+          - ``parent_take_id`` pointing at the source take
+          - ``intent``         the original DirectorialIntent (serialised)
+          - ``revised_prompt`` the LLM-translated prompt
+
+        Per S16 disambiguation:
+          - params_delta is stored in take.metadata["params_delta"] only (S18 will use it).
+          - anchor_refs is stored in take.metadata["anchor_refs"] only (S18 will wire continuity).
+          - intent_translator logging is handled by llm/director.py — we do NOT log here.
+        """
+        from llm.director import intent_translator
+
+        project = self._host._refresh_project_snapshot() or self.project
+        scene, shot, _ = self._find_shot(shot_id, project, scene_id)
+        if not scene or not shot:
+            return {"success": False, "error": "Shot not found"}
+
+        # Find the parent take for context.
+        collection_name, parent_take = self._find_take(shot, take_id)
+        if parent_take is None:
+            return {"success": False, "error": f"Take {take_id} not found on shot {shot_id}"}
+
+        take_context = {
+            "take_id": take_id,
+            "kind": parent_take.get("kind", ""),
+            "prompt": parent_take.get("metadata", {}).get("prompt", shot.get("prompt", "")),
+            "metadata": parent_take.get("metadata", {}),
+            "shot_id": shot_id,
+        }
+        scene_context = {
+            "id": scene_id,
+            "title": scene.get("title", ""),
+            "action": scene.get("action", ""),
+            "approved_shots": [
+                s for s in scene.get("shots", [])
+                if s.get("approved_keyframe_take_id") or s.get("approved_motion_take_id")
+            ],
+        }
+
+        translated = intent_translator(
+            intent,
+            take_context,
+            scene_context,
+            project=project,
+        )
+
+        revised_prompt = translated.get("revised_prompt") or take_context["prompt"]
+        params_delta = translated.get("params_delta") or {}
+        anchor_refs = translated.get("anchor_refs") or []
+
+        # Route by target_stage to the matching generator.
+        target_stage = intent.target_stage
+
+        if target_stage == "keyframe":
+            result = self.generate_keyframe_take(
+                scene_id,
+                shot_id,
+                positive_prompt=revised_prompt,
+                intent_override=intent,
+                parent_take_id=take_id,
+                revised_prompt=revised_prompt,
+            )
+        elif target_stage == "performance":
+            result = self.generate_performance_take(
+                scene_id,
+                shot_id,
+                intent_override=intent,
+                parent_take_id=take_id,
+                revised_prompt=revised_prompt,
+            )
+        elif target_stage == "motion":
+            result = self.generate_motion_take(
+                scene_id,
+                shot_id,
+                intent_override=intent,
+                parent_take_id=take_id,
+                revised_prompt=revised_prompt,
+            )
+        else:
+            return {"success": False, "error": f"Unknown target_stage: {target_stage}"}
+
+        # Stash params_delta + anchor_refs into the new take's metadata via mutation.
+        if result.get("success") and (params_delta or anchor_refs):
+            new_take = result.get("take") or {}
+            new_take_id = new_take.get("id") if isinstance(new_take, dict) else ""
+            if new_take_id:
+                def _stash_delta(_scene: dict, project_shot: dict) -> MutationResult:
+                    for coll in ("keyframe_takes", "performance_takes", "motion_takes"):
+                        for t in project_shot.get(coll, []):
+                            if t.get("id") == new_take_id:
+                                t.setdefault("metadata", {})["params_delta"] = params_delta
+                                t.setdefault("metadata", {})["anchor_refs"] = anchor_refs
+                                return MutationResult(t, save=True)
+                    return MutationResult(None, save=False)
+                self._mutate_shot(shot_id, _stash_delta)
+
+        return result
 
     def diagnose_clip(self, shot_id: str, take_id: str = "") -> dict:
         """
