@@ -92,3 +92,38 @@ def synthetic_flickery_frames():
         val = 50 if i % 2 == 0 else 200
         frames.append(np.full((128, 128, 3), val, dtype=np.uint8))
     return frames
+
+
+# ---------------------------------------------------------------------------
+# web_server._running_pipelines test injection
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def inject_pipeline():
+    """Injects a fake pipeline into ``web_server._running_pipelines`` under
+    the canonical ``_pipelines_lock`` discipline; cleans up on teardown.
+
+    Production code (``api_generate`` at ``web_server.py:1256-1290``) takes
+    ``_pipelines_lock`` before mutating ``_running_pipelines``. Tests that
+    simulate "pipeline X is running" should match that discipline rather
+    than bypassing the lock with direct ``_running_pipelines[pid] = X``.
+
+    Concurrency tests that exercise the lock itself
+    (``tests/unit/test_web_server_concurrency.py``) deliberately bypass
+    this fixture — they ARE the lock-discipline tests.
+    """
+    from web_server import _pipelines_lock, _running_pipelines
+
+    injected_pids: list[str] = []
+
+    def _inject(pid: str, pipeline_obj) -> None:
+        with _pipelines_lock:
+            _running_pipelines[pid] = pipeline_obj
+        injected_pids.append(pid)
+
+    yield _inject
+
+    with _pipelines_lock:
+        for pid in injected_pids:
+            _running_pipelines.pop(pid, None)

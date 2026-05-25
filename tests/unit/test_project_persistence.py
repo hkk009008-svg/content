@@ -272,6 +272,16 @@ class WebServerPersistenceTests(ProjectPersistenceBase):
         self.timeout_patch.start()
         self.addCleanup(self.timeout_patch.stop)
 
+    def _inject_running_pipeline(self, pid: str, pipeline_obj) -> None:
+        """Take ``_pipelines_lock`` and inject ``pipeline_obj`` into
+        ``_running_pipelines``. Mirrors the conftest ``inject_pipeline``
+        fixture for unittest.TestCase classes (pytest fixtures don't
+        auto-inject into TestCase methods). Cleanup happens via
+        ``setUp``'s ``.clear()`` call between tests.
+        """
+        with self.web_server._pipelines_lock:
+            self.web_server._running_pipelines[pid] = pipeline_obj
+
     def _create_project_with_shot(self) -> dict:
         project = self.create_project()
 
@@ -397,7 +407,7 @@ class WebServerPersistenceTests(ProjectPersistenceBase):
 
     def test_general_project_mutations_return_project_busy_while_generation_runs(self):
         project = self.create_project()
-        self.web_server._running_pipelines[project["id"]] = object()
+        self._inject_running_pipeline(project["id"], object())
 
         cases = [
             ("put", f"/api/projects/{project['id']}", {"json": {"name": "Renamed"}}),
@@ -446,7 +456,7 @@ class WebServerPersistenceTests(ProjectPersistenceBase):
                 return {"success": True, "scene_id": scene_id, "shot_id": shot_id}
 
         pipeline = RunningPipeline()
-        self.web_server._running_pipelines[project["id"]] = pipeline
+        self._inject_running_pipeline(project["id"], pipeline)
 
         pause_response = self.client.post(f"/api/projects/{project['id']}/pause")
         self.assertEqual(pause_response.status_code, 200)

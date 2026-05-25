@@ -124,16 +124,12 @@ class TestAssembleScreenEndpoint:
         assert resp.status_code == 404
         assert resp.get_json()["error"] == "Project not found"
 
-    def test_busy_project_returns_409_project_busy(self, client, flag_on):
-        # Simulate active pipeline by injecting an entry into _running_pipelines.
-        from web_server import _running_pipelines
+    def test_busy_project_returns_409_project_busy(self, client, flag_on, inject_pipeline):
+        # Simulate active pipeline by injecting an entry into _running_pipelines
+        # via the canonical _pipelines_lock-acquiring fixture.
         pid = "proj-busy"
-        sentinel = object()
-        _running_pipelines[pid] = sentinel
-        try:
-            resp = client.post(f"/api/projects/{pid}/assemble/screen")
-        finally:
-            _running_pipelines.pop(pid, None)
+        inject_pipeline(pid, object())
+        resp = client.post(f"/api/projects/{pid}/assemble/screen")
         assert resp.status_code == 409
         body = resp.get_json()
         assert body["code"] == "project_busy"
@@ -237,43 +233,34 @@ class TestScreeningApproveEndpoint:
         assert body["screening_approved"] is True
         assert project_state.get("screening_approved") is True
 
-    def test_does_not_busy_fence(self, client, flag_on):
+    def test_does_not_busy_fence(self, client, flag_on, inject_pipeline):
         # If /screening/approve busy-fenced, a pipeline polling the SCREENING
         # gate could never get approved -- deadlock. Verify the endpoint
         # ignores _running_pipelines membership.
-        from web_server import _running_pipelines
         pid = "proj-busy-approve"
-        _running_pipelines[pid] = object()
-        try:
-            with patch("project_manager.mutate_project", return_value={
-                "success": True, "screening_approved": True,
-            }):
-                resp = client.post(f"/api/projects/{pid}/screening/approve")
-        finally:
-            _running_pipelines.pop(pid, None)
+        inject_pipeline(pid, object())
+        with patch("project_manager.mutate_project", return_value={
+            "success": True, "screening_approved": True,
+        }):
+            resp = client.post(f"/api/projects/{pid}/screening/approve")
         # 200, NOT 409 project_busy.
         assert resp.status_code == 200
         body = resp.get_json()
         assert body["success"] is True
 
-    def test_signals_running_pipeline_gate_when_present(self, client, flag_on):
+    def test_signals_running_pipeline_gate_when_present(self, client, flag_on, inject_pipeline):
         # Inject a fake pipeline whose lifecycle has signal_gate; verify
         # that the endpoint calls it after the mutation lands.
-        from web_server import _running_pipelines
-
         fake_lifecycle = MagicMock()
         fake_pipeline = MagicMock()
         fake_pipeline.lifecycle = fake_lifecycle
 
         pid = "proj-signal"
-        _running_pipelines[pid] = fake_pipeline
-        try:
-            with patch("project_manager.mutate_project", return_value={
-                "success": True, "screening_approved": True,
-            }):
-                resp = client.post(f"/api/projects/{pid}/screening/approve")
-        finally:
-            _running_pipelines.pop(pid, None)
+        inject_pipeline(pid, fake_pipeline)
+        with patch("project_manager.mutate_project", return_value={
+            "success": True, "screening_approved": True,
+        }):
+            resp = client.post(f"/api/projects/{pid}/screening/approve")
 
         assert resp.status_code == 200
         fake_lifecycle.signal_gate.assert_called_once_with("SCREENING")
@@ -291,25 +278,20 @@ class TestScreeningApproveEndpoint:
         body = resp.get_json()
         assert body["screening_approved"] is True
 
-    def test_signal_gate_exception_is_swallowed(self, client, flag_on):
+    def test_signal_gate_exception_is_swallowed(self, client, flag_on, inject_pipeline):
         # Older lifecycle implementations (NullLifecycle) may not expose
         # signal_gate -- AttributeError must NOT crash the endpoint.
-        from web_server import _running_pipelines
-
         fake_pipeline = MagicMock()
         # Replace lifecycle with an object that raises AttributeError for signal_gate.
         bad_lifecycle = object()  # no signal_gate attribute
         fake_pipeline.lifecycle = bad_lifecycle
 
         pid = "proj-no-signal-method"
-        _running_pipelines[pid] = fake_pipeline
-        try:
-            with patch("project_manager.mutate_project", return_value={
-                "success": True, "screening_approved": True,
-            }):
-                resp = client.post(f"/api/projects/{pid}/screening/approve")
-        finally:
-            _running_pipelines.pop(pid, None)
+        inject_pipeline(pid, fake_pipeline)
+        with patch("project_manager.mutate_project", return_value={
+            "success": True, "screening_approved": True,
+        }):
+            resp = client.post(f"/api/projects/{pid}/screening/approve")
 
         # Still 200 -- the AttributeError is the documented no-op fallback.
         assert resp.status_code == 200

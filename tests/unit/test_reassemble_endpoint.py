@@ -346,31 +346,27 @@ class TestReassemblyInFlightGuard:
 
 
 class TestDoesNotBusyFence:
-    def test_runs_even_when_project_busy_in_running_pipelines(self, client, flag_on):
+    def test_runs_even_when_project_busy_in_running_pipelines(self, client, flag_on, inject_pipeline):
         # The SCREENING gate-waiter occupies _running_pipelines. If
         # re-assemble called _reject_if_project_busy, the operator could
         # never re-assemble during SCREENING -- the gate would never open.
         # Verify the endpoint ignores _running_pipelines membership.
-        from web_server import _running_pipelines
         pid = "proj-busy-reassemble"
-        _running_pipelines[pid] = object()  # sentinel; not None, not _PIPELINE_PENDING
-        try:
-            project = _make_project(pid=pid, dirty=["shot_1_0"])
-            mock_pipeline_inst = MagicMock()
-            mock_pipeline_inst._assemble_approved_takes_core.return_value = {
-                "success": True, "final_path": "/fake/final.mp4",
-            }
-            with patch("web_server.load_project", return_value=project), \
-                 patch("web_server.CinemaPipeline", return_value=mock_pipeline_inst), \
-                 patch("web_server._get_or_build_core", return_value=MagicMock()), \
-                 patch("cinema.screening.clear_needs_reassembly",
-                       return_value={"success": True}):
-                resp = client.post(
-                    f"/api/projects/{pid}/assemble/re-assemble",
-                    json={"only_if_changed": True},
-                )
-        finally:
-            _running_pipelines.pop(pid, None)
+        inject_pipeline(pid, object())  # sentinel; not None, not _PIPELINE_PENDING
+        project = _make_project(pid=pid, dirty=["shot_1_0"])
+        mock_pipeline_inst = MagicMock()
+        mock_pipeline_inst._assemble_approved_takes_core.return_value = {
+            "success": True, "final_path": "/fake/final.mp4",
+        }
+        with patch("web_server.load_project", return_value=project), \
+             patch("web_server.CinemaPipeline", return_value=mock_pipeline_inst), \
+             patch("web_server._get_or_build_core", return_value=MagicMock()), \
+             patch("cinema.screening.clear_needs_reassembly",
+                   return_value={"success": True}):
+            resp = client.post(
+                f"/api/projects/{pid}/assemble/re-assemble",
+                json={"only_if_changed": True},
+            )
 
         # 200, NOT 409 project_busy. The mp4 work would actually run if
         # CinemaPipeline weren't mocked.
