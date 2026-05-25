@@ -97,6 +97,7 @@ from lip_sync import (
 )
 
 from cinema.lifecycle import LifecycleService
+from domain.models import Project
 
 if TYPE_CHECKING:
     # PipelineCore lives in cinema.core, which transitively imports
@@ -1300,14 +1301,24 @@ class ShotController:
     def generate_scene_preview(self, scene_id: str) -> Optional[str]:
         """Generate just one scene for preview purposes."""
         project = self._host._refresh_project_snapshot() or self.project
-        scene = next((s for s in project["scenes"] if s["id"] == scene_id), None)
-        if not scene:
+
+        # P1-3 part 4 migration (third canonical application): scene lookup
+        # + typed shot iteration with helper-call boundary. Validates the
+        # S10 MIGRATION-PATTERN-pydantic-caller recipe at a new consumer
+        # shape — per-shot `.model_dump()` for `_resolve_take_path`'s
+        # dict-shaped signature (`shot: dict`, controller.py:131). Mirrors
+        # web_server.py:1148 api_decompose_scene (P1-3 part 3) and
+        # web_server.py:1113 api_generate_dialogue (S10 baseline).
+        project_typed = Project.model_validate(project)
+        scene_typed = next((s for s in project_typed.scenes if s.id == scene_id), None)
+        if scene_typed is None:
             return None
 
         clips = self._runstate.scene_clips.get(scene_id, [])
         if not clips:
             clips = []
-            for shot in scene.get("shots", []):
+            for shot_typed in scene_typed.shots:
+                shot = shot_typed.model_dump()
                 final_path = self._host._resolve_take_path(shot, shot.get("approved_final_take_id", ""))
                 if final_path and os.path.exists(final_path):
                     clips.append(final_path)

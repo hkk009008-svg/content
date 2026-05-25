@@ -635,3 +635,53 @@ class TestMigratedCaller:
         p = Project.model_validate(raw)
         result = next((s for s in p.scenes if s.id == "does_not_exist"), None)
         assert result is None
+
+    def test_generate_scene_preview_shot_iteration_matches_dict_path(self):
+        """P1-3 part 4 regression: cinema/shots/controller.py:generate_scene_preview's
+        typed shot iteration produces same per-shot (id, approved_final_take_id)
+        pairs as the old dict-access path, in the same order."""
+        raw = self._make_project_dict()
+        raw["scenes"][0]["shots"] = [
+            {"id": "shot_001", "approved_final_take_id": "take_a"},
+            {"id": "shot_002", "approved_final_take_id": "take_b"},
+            {"id": "shot_003", "approved_final_take_id": ""},  # not yet approved
+        ]
+
+        # Old dict path
+        scene_d = raw["scenes"][0]
+        dict_pairs = [
+            (s["id"], s.get("approved_final_take_id", ""))
+            for s in scene_d.get("shots", [])
+        ]
+
+        # New typed path (mirrors generate_scene_preview's migration)
+        p = Project.model_validate(raw)
+        scene_t = next((s for s in p.scenes if s.id == "scene_001"), None)
+        assert scene_t is not None
+        typed_pairs = [
+            (shot_typed.model_dump()["id"], shot_typed.model_dump().get("approved_final_take_id", ""))
+            for shot_typed in scene_t.shots
+        ]
+
+        assert typed_pairs == dict_pairs == [
+            ("shot_001", "take_a"),
+            ("shot_002", "take_b"),
+            ("shot_003", ""),  # Pydantic Shot.approved_final_take_id default="" matches dict's .get default
+        ]
+
+    def test_generate_scene_preview_empty_shots_default_matches_dict(self):
+        """P1-3 part 4 regression: scene with no `shots` key produces an
+        empty iteration via Pydantic default_factory=list, matching dict's
+        .get('shots', []) fallback so the migration doesn't introduce a
+        None-vs-[] divergence."""
+        raw = self._make_project_dict()
+        # Drop the shots key entirely — both paths should yield empty iteration
+        raw["scenes"][0].pop("shots", None)
+
+        scene_d = raw["scenes"][0]
+        assert scene_d.get("shots", []) == []  # old path's default
+
+        p = Project.model_validate(raw)
+        scene_t = next((s for s in p.scenes if s.id == "scene_001"), None)
+        assert scene_t is not None
+        assert scene_t.shots == []  # new path's default_factory=list — no divergence
