@@ -11,7 +11,7 @@ import uuid
 import random
 import shutil
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from typing import Any, Callable, Optional, List, Dict
@@ -130,7 +130,10 @@ def new_id() -> str:
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    # Timezone-aware UTC; datetime.utcnow() is deprecated in 3.12+.
+    # `.replace("+00:00", "Z")` preserves the existing project.json
+    # timestamp suffix shape so old + new entries are visually consistent.
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def make_take(
@@ -921,7 +924,9 @@ def save_shot_spec(project_id: str, shot_id: str, shot_spec: dict) -> str:
     """
     shot_path = ensure_shot_package(project_id, shot_id)
     if "timestamp" not in shot_spec:
-        shot_spec["timestamp"] = datetime.utcnow().isoformat() + "Z"
+        # Timezone-aware UTC (datetime.utcnow() is deprecated 3.12+); same
+        # +00:00 → Z suffix substitution as _now_iso() above for visual parity.
+        shot_spec["timestamp"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     spec_file = os.path.join(shot_path, "shot.json")
     with open(spec_file, "w", encoding="utf-8") as f:
         json.dump(shot_spec, f, indent=2, ensure_ascii=False)
