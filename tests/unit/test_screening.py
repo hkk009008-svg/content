@@ -304,6 +304,106 @@ class TestBuildTimelineManifest:
         assert manifest[0]["shot_id"] == "shot_1_0"
 
 
+class TestBuildTimelineManifestVerifyFiles:
+    """Code-quality reviewer S19 IMPORTANT: verify_files=True locks the strict
+    mirror of _build_scene_packages's filesystem-existence check.
+
+    Without this filter, a shot whose take_id is set but whose mp4 was deleted
+    between assembly and screening would appear in the manifest at a stale
+    start_s/end_s while NOT being in the assembled video — operator scrubber
+    would land on a phantom shot.
+
+    See cinema/screening.py:_build_timeline_manifest verify_files docstring +
+    cinema_pipeline.py:544-548 (the mirrored rule).
+    """
+
+    def test_verify_files_false_includes_shot_without_path(self):
+        """Default (verify_files=False) preserves the original behavior — no
+        filesystem dependency, tests stay filesystem-free."""
+        project = {
+            "scenes": [
+                _scene("s1", [_shot("shot_1_0", approved="take_a")], duration=4.0),
+            ]
+        }
+        manifest = _build_timeline_manifest(project)  # default False
+        assert len(manifest) == 1
+
+    def test_verify_files_true_excludes_missing_path(self, tmp_path):
+        """verify_files=True excludes shots whose approved-take path is missing."""
+        # Build a shot whose take has a path pointing to a NONEXISTENT file
+        missing = tmp_path / "nonexistent.mp4"
+        shot = {
+            "id": "shot_1_0",
+            "approved_final_take_id": "take_a",
+            "motion_takes": [{"id": "take_a", "kind": "motion", "path": str(missing)}],
+        }
+        project = {"scenes": [_scene("s1", [shot], duration=4.0)]}
+        manifest = _build_timeline_manifest(project, verify_files=True)
+        assert manifest == [], "Shot with missing mp4 should be excluded"
+
+    def test_verify_files_true_excludes_empty_path(self):
+        """A take with an empty `path` field is also excluded (corruption signal)."""
+        shot = {
+            "id": "shot_1_0",
+            "approved_final_take_id": "take_a",
+            "motion_takes": [{"id": "take_a", "kind": "motion", "path": ""}],
+        }
+        project = {"scenes": [_scene("s1", [shot], duration=4.0)]}
+        manifest = _build_timeline_manifest(project, verify_files=True)
+        assert manifest == []
+
+    def test_verify_files_true_includes_existing_file(self, tmp_path):
+        """verify_files=True keeps shots whose mp4 actually exists on disk."""
+        real_mp4 = tmp_path / "real.mp4"
+        real_mp4.write_bytes(b"\x00" * 16)  # tiny stub file
+        shot = {
+            "id": "shot_1_0",
+            "approved_final_take_id": "take_a",
+            "motion_takes": [{"id": "take_a", "kind": "motion", "path": str(real_mp4)}],
+        }
+        project = {"scenes": [_scene("s1", [shot], duration=4.0)]}
+        manifest = _build_timeline_manifest(project, verify_files=True)
+        assert len(manifest) == 1
+        assert manifest[0]["shot_id"] == "shot_1_0"
+        assert manifest[0]["start_s"] == 0.0
+        assert manifest[0]["end_s"] == 4.0
+
+    def test_verify_files_true_cumulates_only_present_files(self, tmp_path):
+        """When some files exist and others don't, cumulative timing reflects
+        only the present-file shots — start_s for shot_3 starts at shot_1's
+        end (not shot_1's end + shot_2's missing duration)."""
+        real_a = tmp_path / "shot_a.mp4"
+        real_a.write_bytes(b"\x00" * 16)
+        real_c = tmp_path / "shot_c.mp4"
+        real_c.write_bytes(b"\x00" * 16)
+        missing_b = tmp_path / "shot_b_deleted.mp4"  # not written
+        shots = [
+            {
+                "id": "shot_a",
+                "approved_final_take_id": "take_a",
+                "motion_takes": [{"id": "take_a", "kind": "motion", "path": str(real_a)}],
+            },
+            {
+                "id": "shot_b",
+                "approved_final_take_id": "take_b",
+                "motion_takes": [{"id": "take_b", "kind": "motion", "path": str(missing_b)}],
+            },
+            {
+                "id": "shot_c",
+                "approved_final_take_id": "take_c",
+                "motion_takes": [{"id": "take_c", "kind": "motion", "path": str(real_c)}],
+            },
+        ]
+        project = {"scenes": [_scene("s1", shots, duration=3.0)]}
+        manifest = _build_timeline_manifest(project, verify_files=True)
+        assert [e["shot_id"] for e in manifest] == ["shot_a", "shot_c"]
+        # shot_b's 3.0s gap is NOT added — cursor advances only on included shots.
+        assert manifest[0]["start_s"] == 0.0
+        assert manifest[0]["end_s"] == 3.0
+        assert manifest[1]["start_s"] == 3.0
+        assert manifest[1]["end_s"] == 6.0
+
+
 # ---------------------------------------------------------------------------
 # Gate accessor / mutator tests
 # ---------------------------------------------------------------------------

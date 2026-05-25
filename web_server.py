@@ -1898,7 +1898,11 @@ def api_assemble_screen(pid):
             "error": f"Assembled video not found at {assembled_path}. Run /assemble first.",
         }), 409
 
-    manifest = _build_timeline_manifest(project)
+    # verify_files=True enforces the strict mirror of _build_scene_packages
+    # (cinema_pipeline.py:544-548) so the operator's timeline scrubber never
+    # lands on a phantom shot whose mp4 was deleted between assembly and
+    # screening. Post code-quality review of cycle-9 S19.
+    manifest = _build_timeline_manifest(project, verify_files=True)
     return jsonify({
         "success": True,
         "assembled_mp4_path": assembled_path,

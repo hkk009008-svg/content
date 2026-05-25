@@ -160,6 +160,18 @@ class TestAssembleScreenEndpoint:
             with open(mp4_path, "wb") as f:
                 f.write(b"\x00" * 16)
 
+            # Post-S19 code-quality reviewer fix: the endpoint passes
+            # verify_files=True so the manifest's strict mirror of
+            # _build_scene_packages requires each take's `path` to point
+            # at an extant file. Create per-shot stub mp4s and patch the
+            # take paths to match.
+            for shot in project["scenes"][0]["shots"]:
+                shot_path = os.path.join(export_dir, f"{shot['id']}.mp4")
+                with open(shot_path, "wb") as f:
+                    f.write(b"\x00" * 16)
+                # _make_project stores the approved take in motion_takes[0]
+                shot["motion_takes"][0]["path"] = shot_path
+
             with patch("web_server.load_project", return_value=project), \
                  patch("domain.project_manager.get_project_dir", return_value=tmpd):
                 resp = client.post(f"/api/projects/{project['id']}/assemble/screen")

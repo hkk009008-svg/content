@@ -104,7 +104,7 @@ def _take_duration_seconds(take: dict, fallback: float) -> float:
         return fallback
 
 
-def _build_timeline_manifest(project: dict) -> list[dict]:
+def _build_timeline_manifest(project: dict, *, verify_files: bool = False) -> list[dict]:
     """Walk scenes/shots in order, emit per-shot timeline manifest.
 
     Output entry shape (per proposal §"Endpoint"):
@@ -122,6 +122,18 @@ def _build_timeline_manifest(project: dict) -> list[dict]:
     in ``_assemble_final``'s stitch. Shots that are still pending /
     SKIP / failed are omitted, so the manifest indexes align with what
     the operator actually sees in the assembled mp4.
+
+    ``verify_files``: when True, also require that the approved take's
+    ``path`` field is truthy AND points to an extant file on disk. This
+    is the STRICT mirror of ``_build_scene_packages``'s inclusion rule
+    at ``cinema_pipeline.py:544-548`` (which filters via
+    ``os.path.exists(final_path)`` so the assembled mp4 never references
+    a missing file). Without this flag the manifest is a "best-effort"
+    view from project state alone; with it, the manifest is guaranteed
+    to align with what ``_assemble_final`` would have produced (post
+    Lane V #6 review of cycle-9 S19 — operator's `screening` endpoint
+    passes True so the operator's timeline scrubber never lands on a
+    phantom shot whose mp4 was deleted between assembly and screening).
 
     Duration source per shot (in order):
       1. The approved take's ``metadata.duration_s`` (performance takes
@@ -177,6 +189,16 @@ def _build_timeline_manifest(project: dict) -> list[dict]:
                         break
                 if approved_take is not None:
                     break
+
+            # Strict-mirror file-existence check (Lane V #6 cycle-9 S19 F1
+            # IMPORTANT). Without this, a shot whose take_id is set but
+            # whose mp4 was deleted between assembly and screening would
+            # appear at a stale start_s/end_s while NOT being in the actual
+            # assembled video. Mirrors cinema_pipeline.py:544-548.
+            if verify_files:
+                take_path = (approved_take or {}).get("path", "")
+                if not take_path or not os.path.exists(take_path):
+                    continue
 
             duration = _take_duration_seconds(approved_take or {}, scene_fallback)
 
