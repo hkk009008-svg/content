@@ -31,14 +31,20 @@
 
 - **User-level structural critique on role partition** (preserved in v5 proposal §"Why v5: the user critique"): user surfaced 7 specific concerns (Shared-is-large, director-load asymmetry, memory-write latency, operator-drafts-blind, missing-verification-accountability, codification meta-bias, missing-emergency-backlog-disagreement-protocols). v5 components map 1:1 to those concerns. R11 retroactive beneficiary analysis (4 both / 1 user / 3 operator-seat / 0 director-seat across Rules 1-9) empirically disproved the meta-bias hypothesis.
 
-- **Branch state at this refresh:** HEAD `d66690f` (v5 ship); branch **0 ahead of `origin/main`** — director pushed everything through v5 ship including operator's `1e29610` Lane D commit. Working tree has held counter bumps (`M AGENTS.md`, `M CLAUDE.md`) from director's session reindex after v5's substantive doc additions — disposition is operator's natural-next-commit (per Rule #6).
+- **Cycle-6 close queue — ALL ITEMS SHIPPED (2026-05-25 cycle-7-open session):**
+  1. ✅ **Rules #10 + #11 + v4.1 SHA placeholder fill-ins + PROPOSAL-v5 footer** — operator commit `f665461 docs(rules-log): fill v5 + v4.1 ship SHA placeholders` (auto-amended from `22d1333` via post-commit hook STATE.md fold). Fifth instance of chicken-and-egg precedent chain (`3e57ddf` v2 / `d8f2407` v3 / `d90036b` v4 / `f665461` v5 + v4.1 both).
+  2. ✅ **Counter bumps fold-and-surface (Rule #6)** — N/A; counter bumps were already absorbed before session-start (director-seat absorbed post-v5 reindex deltas before pushing the cycle-6 batch).
+  3. ✅ **Session 14 (`e1b72ca`) Lane V dispatch** — operator commit `8d8ac7b coord(mailbox)` (hook-amended to `d71b2ab`) with `verification-report` mailbox event archived at `coordination/mailbox/archive/2026-05-25T04-40-47Z-operator-to-director-verification-report.md` (director-seat archived in-session). Status: **⚠️ MINOR ADVISORIES — 0 critical, 0 important, 3 minor (all `advisory`)**. ~172k subagent tokens (spec 80k + cq 92k). Cumulative v4.1 telemetry: **3 dispatches / ~581k tokens / 3 novel findings (rate 1.0/dispatch trending toward dispatch-#1 validation-only shape) / 0 hallucinations this round (CC-2 provisional verdict: working)**. v4.1 narrowing trigger NOT warranted.
 
-- **Cycle-6 close immediate operator queue:**
-  1. **Rules #10 + #11 SHA placeholder fill-ins** — both rows currently `_Protocol Bundle v5 ship_` → `d66690f`. Mirror of `3e57ddf` post-v2, `d8f2407` post-v3, `d90036b` post-v4. Chicken-and-egg operator follow-up.
-  2. **v4.1 SHA placeholder also pending**: `_Protocol Bundle v4.1 ship_` → `509db7c` (carried over from v4.1 ship; never filled).
-  3. **PROPOSAL-v5 footer** has `_Protocol Bundle v5 ship_` placeholder → `d66690f`.
-  4. **Counter bumps in WT** — fold into the SHA fill-in commit per Rule #6 (operator's natural-next-commit pattern).
-  5. **Session 14 (`e1b72ca`) Lane V dispatch pending** — feat commit qualifies under operator's R-V1-countered trigger. ~175k subagent tokens; advances cumulative v4.1 telemetry to 3 dispatches.
+- **Cycle-7 open queue (this session's hand-off to next operator-seat):**
+  1. **Session 15 (`308cdef`) Lane V #4 dispatch pending** — director-seat shipped `feat(schema): P1-3 part 4 — migrate generate_scene_preview to Project.model_validate` during this handoff's Write window. Feat commit qualifies under operator's R-V1-countered trigger. **CC-1 coalescing candidate:** part 4 is mechanical repetition of part 3 (same MIGRATION-PATTERN recipe, same template surface); reviewers will likely find similar minors. Sample is now N=3 (part 3 Lane V #3). Could coalesce with the next migration commit (part 5+) if it lands within the same operator-session, OR dispatch standalone. Advances cumulative v4.1 telemetry to 4 dispatches.
+  2. **First `docs/BACKLOG.md` row** (v5 §B dogfood) — director-seat acknowledged F2 in `308cdef` commit body as "BACKLOG.md first-row candidate per v5 §B; queueable as cycle-7 priority #3 dogfood opportunity". Operator-seat surfaced via Lane V #3; natural for operator to draft the row. Cross-seat-allowed per v5 §B but operator-claimable.
+  3. **F1 fold opportunistic** — director-seat acknowledged in `308cdef` body as "opportunistic docs fold candidate; not bundled here per 'Don't combine concerns'". Cite imprecision at `web_server.py:1141` → should reference `:1093` or `:1113` (1-line touch). Either seat can claim opportunistically next docs-touch commit.
+  4. **v5 §M `memory-candidate` first dogfood** — operator-seat-surfaceable observation worth permanent memory beyond handoff (open).
+  5. **v5 §S Lane S scout-request first dogfood** — opt-in per director-seat; pending director-seat request.
+  6. **Push to `origin/main`** — branch is +4 ahead at this Write (`f665461` + `2515182` + `d71b2ab` + `308cdef`); push timing is director-seat-default per v5 specialization.
+
+- **Branch state at this refresh:** HEAD `308cdef` (director-seat P1-3 part 4 omnibus — migrates `generate_scene_preview` + folds operator's Lane V event archive + cites operator's F1/F2 dispositions; SHA may have hook-amended further by next operator-seat's session-start). Branch **4 ahead of `origin/main`** (`f665461` + `2515182` + `d71b2ab` + `308cdef`). **Race-ack (Rule #5):** TWO director-seat commits landed during this single handoff Write window (`2515182` cycle-7 priority #1 implementer-template hardening THEN `308cdef` cycle-7 priority #2 P1-3 part 4). This refresh's TL;DR re-edit happened mid-stream against `d71b2ab` then `308cdef`; both shifts handled by re-Edit before commit. Director-seat's `308cdef` body explicitly cites operator's Lane V #3 F1/F2 findings — first end-to-end operator→director Lane V finding-loop completion within a single operator-session (prior loop completion was cross-session: dispatch #2 caught F1 CRITICAL, director shipped `9e24323` next-session). Next operator-seat: re-verify via STATE.md cold-read + `git log --oneline -10` before trusting any branch-state claim above; expect more director-seat motion if you pick up within ~30 min of this commit's timestamp.
 
 ---
 
@@ -321,6 +327,17 @@ Push state: HEAD `d66690f` is at `origin/main`. Nothing unpushed unless operator
 | `642250d` | docs(reply) | director | v5 REPLY with R-E-1 (emergency criteria) + C-D-1 (counting clarification); 8/8 open questions aligned with operator's lean |
 | `8a4148a` | docs(proposal) | operator | v5 revision per REPLY (zero counter-refinements; cleanest cycle to date) |
 | `d66690f` | feat(protocol) | director | **Ship v5** — two-seat reframe + Rules #10/#11 + D/E/B/M/S/Sh; cycle-6 close |
+| `4fafa8f` | docs(handoff) | director | Director-seat cycle-6 transplant — post-v5-ship + S13 P4-3 SHIPPED + 2 Lane V + 1 Lane D dogfood |
+| `22d7467` | docs(handoff) | operator | Refresh operator-transplant for post-v5-ship / cycle-6 close (prior session's close) |
+
+#### Cycle 7 — opens (2026-05-25; this session)
+
+| SHA | Type | By | Summary |
+|---|---|---|---|
+| `f665461` | docs(rules-log) | operator | Fill v5 + v4.1 ship SHA placeholders (5th instance of chicken-and-egg precedent chain; auto-amended from `22d1333` by post-commit hook) |
+| `2515182` | docs(implementer-prompt) | director | Harden Implementer Prompt Template with cycles 5-6 lessons (cycle-7 priority #1 from `4fafa8f`); commit body race-acks `f665461` per Rule #7 |
+| `d71b2ab` | coord(mailbox) | operator | Lane V #3 verification-report on `e1b72ca` (⚠️ MINOR ADVISORIES — 3 advisory findings, 0 critical/important; CC-2 first clean dispatch; auto-amended from `8d8ac7b`) |
+| `308cdef` | feat(schema) | director | **P1-3 part 4** — migrate `generate_scene_preview` to `Project.model_validate` (omnibus: also folded operator's Lane V #3 event into archive + cited operator's F1/F2 dispositions in commit body — first intra-session Lane V finding-loop completion) |
 
 (For Cycle 3 ledger entries, see historical section below; cycle 4 was operator's Lane D + S13 Lane V dispatches above.)
 
