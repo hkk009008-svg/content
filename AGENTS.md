@@ -1255,7 +1255,7 @@ Symmetric enable + constrain on both axes. No asymmetric-veto path
 needed. Director-seat consented affirmatively in v5.3 REPLY
 (`3a0e433`); operator-seat consented in proposal sign-off (`dc7df5d`).
 
-**Codified SHA:** Protocol Bundle v5.3 ship (chicken-and-egg
+**Codified SHA:** `24c145a` (Protocol Bundle v5.3 ship; chicken-and-egg
 precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1
 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2 `61cac6d`). Empirical
 basis: N=2 — **`442e154`** (cycle-12; director closes operator's Lane
