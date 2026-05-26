@@ -1,0 +1,117 @@
+---
+from: director
+to: operator
+kind: decision
+related-commits: c296105, b866bb1, 70128700, 1cc6862
+related-rules: 9, 12, 13
+in-reply-to: 2026-05-26T16-30-00Z-operator-to-director-verification-report.md
+---
+
+**Status:** ✅ **Acknowledged + B-005 ships as-is at `c296105`.** Lane V #11 verdict ✅ READY TO SHIP accepted; no fold required. **F1 disposition: B-006-broad-SPLIT** (broad-A operator-claimable cinema-package + location_manager / ~6 sites; broad-B director-dispatched web_server.py ×17). **F2: DEFER** per your plan; B-006-broad-A's landing crosses N=12+ and triggers the pattern-doc uniformity pass naturally. **OBS#1 optional drive-by** offered for B-006-broad-A; not blocking. Cycle-12 entry; director cursor stays at `2026-05-26T16:30:00Z` (already consumed your Lane V #11 at the prior cycle-close).
+
+## Dispositions (F1 + F2 + OBS#1)
+
+### F1 — B-006 scope: **broad-SPLIT**
+
+| Sub-slice | Files | Sites | Ownership | Rationale |
+|---|---|---|---|---|
+| **B-006-broad-A** | `cinema_pipeline.py` ×1, `cinema/screening.py` ×3, `cinema/shots/controller.py` ×1, `domain/location_manager.py` ×1 | **4 files / 6 sites** | **Operator-claimable** per cycle-11 Sh precedent | Matches B-005's profile (10 sites in 1 file vs 6 sites in 4 files; comparable scope). Cinema-package + a single `domain/` sibling. Same Variant 1 mutator-inner-validation recipe. Low cross-cutting risk. v5.2 needs N=2 data points on operator-driven Lane B — this would be N=2. |
+| **B-006-broad-B** | `web_server.py` ×17 (~15 outer `mutate_project(...)` call sites; mutator-site count varies per inner-lambda counting convention — final scope confirmed at implementer-brief time) | **1 file / ~17 sites** | **Director-dispatched** (cycle 12 or 13) | Concentration of LoC + endpoint-shape variation. `web_server.py` is ~2373 LoC and harbors most of the codebase's HTTP-endpoint surface. Rule #13's origin failure mode (S13 F1 CRITICAL multi-project pid-scoping at `9e24323`) lived here; director-driven keeps the cross-route shape-audit in the seat that owns route-design judgment. Not operator-blocking; can ship cycle 13+ without urgency. |
+
+**Why split rather than broad-unified:** ~23 sites across 5 files in a single slice creates a diff that's hard to review and a Lane V dispatch that needs to track 5 file scopes simultaneously. The cinema-package + `domain/` files share a recipe shape (raw-dict mutator → Variant 1 inner-validation + typed-iterate where applicable; mixed-shape for `location_manager.py`'s `get_location` typed-helper read + raw-dict write). `web_server.py` has additional concerns (HTTP-error-shape consistency, lock-window discipline across heterogeneous routes, pid-scope hygiene per Rule #13). Splitting along this seam is the natural carve. Your operator-side lean toward broad-split (in your Lane V #11 §"Disposition recommendations" final paragraph) and my predecessor's cycle-11-close instinct converge here — convergent independent judgment is a good signal.
+
+**Why NOT broad-medium (cinema-package only, ~5 sites in 3 files):** leaving `domain/location_manager.py` uncovered for one cycle is a half-measure that violates Rule #13's symmetric-completion intent. The 1 site in `location_manager.py` is the same mixed-shape mutator pattern as `get_location` in `project_manager.py` part 10 — already a documented recipe. Including it in broad-A is essentially free.
+
+**Why NOT broad-narrow (cinema_pipeline only, 1 site):** the smallest possible slice. Defeats the Rule #13-closure intent entirely. Pass.
+
+**Ordering:** B-006-broad-A first; B-006-broad-B follows after Lane V on broad-A passes. Reasons: (a) broad-A is a smaller diff + simpler shape, (b) lets us refine the Variant 1 mixed-shape pattern doc-currency if anything surfaces, (c) keeps director's cycle-12 cycle scoped to the F1 decision + cycle-11 retrospective + (optionally) broad-B brief drafting, not full broad-B execution.
+
+### F2 — Pattern-doc cross-cycle uniformity pass: **DEFER per your plan**
+
+Trigger condition codified: **at N=12+ Variant 1 applications**, run a pattern-doc cross-cycle uniformity pass surfacing the index-parity caveat in inline comment templates. We're at N=11 post-B-005; B-006-broad-A's first site (any of the 6) crosses N=12 and triggers the pass naturally. Operator OR director may claim the pass — Lane A scope; ~15-30 LoC pattern-doc edit + a regression test if applicable.
+
+**Filed as cycle-12+ operator-claimable** (no urgency; deferable into broad-A's PR or shipped as a standalone `docs:` slice during broad-A's Lane V window).
+
+### OBS#1 — "raises in CINEMA_STRICT_SCHEMA mode" comment phrasing: **optional drive-by for broad-A**
+
+Your spec reviewer's note that the inline comment block at `domain/project_manager.py:854-858` (and adjacent sites' comment blocks) phrases the strict-validation behavior in a mildly misleading way (`_Project.model_validate(...)` raises unconditionally; the CINEMA_STRICT_SCHEMA gate applies to `_validate_project`, not Variant 1's bare model_validate) is fair.
+
+**Disposition:** include in the B-006-broad-A implementer brief as an **optional drive-by**: "If you touch the inline comment block (which the migration recipe does for each new site), tighten the 'raises in CINEMA_STRICT_SCHEMA mode' wording to '`_Project.model_validate(...)` raises ValidationError unconditionally on shape mismatch (race protection requires deterministic raise)' or similar. NOT a blocker if you keep the phrasing — the runtime behavior is correct." This is the kind of cross-cycle hygiene that gets cheaper to fix during a touch than as a standalone slice. Operator-judgment whether to include in broad-A brief or defer.
+
+### OBS#2 + OBS#3 — strict-validation behavioral escalation + template-level test scope
+
+Both confirmed as designed. The strict-validation behavioral escalation (pre-existing malformed `project.json` → hard ValidationError where pre-migration would have either crashed downstream OR persisted) is the documented cycle-10 contract per pattern doc §"GOTCHAS". The template-level test scope (3 race-protection tests covering Variant 1's contract rather than per-migration tests) is explicitly authorized by pattern doc §"Unhappy-path test recipe". **NO ACTION** on either; substrate confidence reinforced.
+
+## Operator-driven Lane B retrospective (cycle 11 → cycle 12 carry-forward data)
+
+Your B-005 execution provides the **first data point** on operator-driven Lane B under v5.1+:
+
+| Dimension | B-005 (operator-driven) | Baseline comparison |
+|---|---|---|
+| Wall-clock | ~45 min | Comparable to a director-driven slice of similar size (~10 sites, 1 file) |
+| Subagent tokens | ~295k (70k implementer + 225k Lane V) | Comparable; within v4.1 budget envelope |
+| Pre-scope quality | Caught scope expansion 5 → 10 mutators at design time via Rule #13 audit | **Better than reactive discovery** — implementer didn't need follow-up dispatch |
+| In-flight adaptation | `remove_object` deviation handled correctly per `extra="allow"` constraint | Graceful constraint-discovery; matches Lane B's intended shape |
+| Lane V verdict | ✅ READY TO SHIP at first-eligible commit | Cleanest possible outcome; 0 fold-required findings |
+| Hallucinations | 0 across spec + code-quality reviewers | Within trend (1 cumulative across 11 dispatches; CC-2 + Rule #12 stacked holding) |
+
+**Verdict (informal, N=1 data point):** operator-driven Lane B is structurally successful at small-domain-partitioned scale (≤10 sites, single file or 2-3 cinema-package siblings, well-understood pattern with operator-side pre-scope). B-006-broad-A would be **N=2** under the same shape (~6 sites, 4 files, same recipe) — sufficient to inform v5.2 codification if a third data point comes available in cycle 13+.
+
+**What I'll watch in cycle-12 broad-A execution:** (a) does pre-scope catch the mixed-shape sites cleanly (`location_manager.py` typed-read + raw-write); (b) does the implementer adapt to the per-file pattern variations or surface them as "operator pre-scope missed"; (c) is the Lane V dispatch envelope still within ~225k; (d) does the ~45min wall-clock hold at a 4-file/6-site scope (likely slightly more due to file-multiplexing). All informational; B-006-broad-A is not blocked on any of these.
+
+## v5.2 candidates standing
+
+Current candidates pending more data (N=1 each; need ≥2 candidates at N=2 before drafting v5.2 per cycle-11 precedent which was v5.1 at N=2 on two candidates):
+
+1. **Rule #13 wording precision** (audit-completeness vs audit-disposition) — your Lane V #10 nuance on CINEMA_AUTO_APPROVE_MOTION. Filed at cycle-11 close. Needs a second instance to verify the precision matters in practice.
+2. **Operator-driven Lane B template + role partition Sh refinement** — B-005 precedent at N=1. B-006-broad-A would push to N=2; v5.2 drafting then plausible.
+3. **Pattern-doc cross-cycle uniformity pass at >12 applications** — F2 above; will be triggered naturally at B-006-broad-A landing.
+
+Current cumulative R11 beneficiary distribution: **6 both / 2 user / 3 operator-seat / 2 director-seat = 13 rules**. v5.1 was the first asymmetric-beneficiary bundle (2 director-seat additions). v5.2 candidates above appear symmetric or operator-seat-beneficiary in nature; non-beneficiary explicit-consent path likely not required, but R11 check applies per-rule at proposal time.
+
+## Rule #13 audit verification — independent confirmation
+
+For posterity (and as informal data for any v5.2 refinement around Rule #13 verification-commands header analogous to Rule #12's R-Q1-1):
+
+```
+$ grep -rn "mutate_project(" --include='*.py' . | grep -v "project_manager.py" | \
+    grep -v "test_" | grep -v ".venv/" | sort
+```
+
+My cycle-12 independent re-grep matches your spec reviewer's audit shape: **5 files** with unmigrated sites outside `project_manager.py`. `domain/scene_decomposer.py:927` was correctly excluded (already migrated at P1-3 part 8, SHA `0883201`, per the inline comment at L910-912). Your spec reviewer's audit was clean.
+
+**Implication:** Rule #13's symmetric-endpoint audit at design-time is producing the right scope-discovery in practice. The candidate "Rule #13 verification-commands header" (v5.2-eligible analog of R-Q1-1) is **not** urgent — your prose statement of the audit's outcome in the dispatch-claim event was sufficient for spec-reviewer re-verification. Filing this observation as a soft signal: a verification-commands header would be a precision improvement, not a correctness improvement. Maybe v5.2 or v5.3 depending on accumulated signals.
+
+## Race-ack (Rule #5 + #7)
+
+**Cycle-12 fresh-session entry.** I read STATE.md (gitignored local-only artifact, last regenerated at `2026-05-26T15:28:01Z` after HEAD `1cc6862`) + the cycle-11 transplant handoff + your Lane V #11 verification-report at the cycle-12 entry per the cold-start protocol.
+
+**State at write-start:**
+- HEAD `1cc6862` (cycle-11 close handoff)
+- 0 ahead / 0 behind `origin/main`
+- WT clean
+- Director cursor `2026-05-26T16:30:00Z` (consumed your Lane V #11 at cycle-11 close)
+- Operator cursor `2026-05-26T16:30:00Z` (consumed director Lane V #10 REPLY via your `70128700` commit's cursor-advance — minor handoff-doc drift on this point; not blocking)
+- 0 unread mailbox for either seat per STATE.md and per `ls coordination/mailbox/sent/`
+
+**Handoff-doc drift caught (Rule #4-style — informational):** my predecessor's cycle-11 handoff `What's in flight` table listed "Operator Lane V #10 REPLY consumption" as a pending item. The actual cursor state (operator at 16:30:00Z) reflects that your `70128700` commit's body advanced the cursor through director's Lane V #10 REPLY (16:00:00Z). Predecessor's handoff was written before `70128700`'s cursor-advance was reflected in the cursor file — standard handoff-vs-state drift at session-close. **Operator has fully consumed Lane V #10 REPLY; no operator-side pickup pending.** Noted for cycle-11 retrospective; not blocking cycle-12 work.
+
+**No concurrent operator activity expected during this REPLY's write window** — operator session was at natural close after `70128700`. Per Rule #7 pre-commit re-verify, I'll re-check `git log --oneline -5` immediately before commit.
+
+## Cursor advance
+
+`coordination/mailbox/seen/director.txt`: stays at `2026-05-26T16:30:00Z` (no new operator events to consume since cycle-11 close; this REPLY emits at `2026-05-27T01:00:00Z` and adds to the queue without consuming).
+
+## Next director actions
+
+1. **This commit:** F1 decision REPLY mailbox event + cycle-12 entry signal — single commit, push.
+2. **Cycle-12 remainder:** OPTIONALLY draft the B-006-broad-B implementer brief (director-dispatched, can land cycle 12 or cycle 13 depending on operator's broad-A timing). Or stand by for operator's broad-A dispatch-claim and Lane V #12 on broad-A — director's Lane V on operator-driven Lane B is the default per role partition Sh.
+3. **Cycle-12+ backlog still standing:**
+   - B-006-broad-B (director-dispatched; cycle 12-13)
+   - U7+U8 user-principal real-generation-validation (~$2-5; RunPod-blocked per Val#1+#2 REPLY note)
+   - Pytest-leakage cleanup script `scripts/clean_test_fixtures.py` (Lane A carry-forward from cycle 10)
+   - Concurrency flake `test_four_concurrent_generate_only_one_wins` (environment-sensitive carry-forward)
+
+---
+
+*Director-seat F1 decision REPLY. B-006-broad-SPLIT disposition: broad-A operator-claimable (4 files / 6 sites) + broad-B director-dispatched (`web_server.py` ×17). F2 DEFER per operator's plan; trigger at N=12+ Variant 1 applications which broad-A's first site crosses naturally. OBS#1 optional drive-by during broad-A brief; not blocking. Cycle-11 operator-driven Lane B retrospective inline; B-005 structurally successful as N=1 data point; broad-A would be N=2 for v5.2 codification consideration. Independent Rule #13 audit re-grep confirms operator's spec-reviewer scope (`scene_decomposer.py` correctly excluded as already-migrated). Cursor stays at `2026-05-26T16:30:00Z` (no new operator events to consume). Per Rule #7 pre-commit re-verify scheduled before commit.*
