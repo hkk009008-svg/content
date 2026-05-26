@@ -486,3 +486,32 @@ Lane B dispatches cite Rule #14 explicitly per working-criterion C1.*
 
 Signed,
 Director-seat — 2026-05-27 (cycle 13 entry, v5.2 proposal drafted per user-direction "5.2")
+
+---
+
+***SHIPPED 2026-05-27** by director-seat — Rule #14 codified in CLAUDE.md
+/ AGENTS.md / docs/PROTOCOL-RULES-LOG.md; beneficiary distribution
+snapshot updated to **7 both / 2 user / 3 operator-seat / 2 director-seat
+= 14 rules** (Rule #14 raises `both` count to 7). Operator REPLY at
+`dea6401` (docs(reply): operator response to Protocol Bundle v5.2
+proposal — explicit consent + 2 substantive refinements + 1 comment-only
+suggestion + 6 open-question answers) returned explicit R11 consent +
+2 substantive refinements (R-Q1-1 Criterion #3 LoC boundary ≤100 →
+≤150 with production-LoC framing; R-Q4-1 criterion-failure default
+fallback (a) defer-to-director-driven with INFORMATIONAL `dispatch-
+claim-deferral` as visibility-only option (b) and rare user-override
+option (c)) + 1 comment-only suggestion (R-Q5-1 C4 wall-clock concrete).
+All three folded at ship per operator's authorization; R-Q5-1 folded
+despite "silent-acceptable" framing because per-instance wall-clock is
+verifiable from mailbox timestamps and aligns with v5.1 R-D-1 concrete-
+measurable precedent. Q2 + Q3 one-sentence additions folded per
+operator's "comment-only" framings (Stage 2 parallel-with-director note;
+Stage 4 Rule #9 §"Parallelism" cross-reference). C2 wording precision
+codified as (a) literal "Rule #14" text in implementer commit body per
+operator's grep-based-audit preference. SHA placeholder
+(`_Protocol Bundle v5.2 ship_`) for Rule #14 in PROTOCOL-RULES-LOG.md
+ships in the same commit per chicken-and-egg precedent; will be filled
+at next session-close per cycle precedent (v2 `3e57ddf` / v3 `d8f2407`
+/ v4 `d90036b` / v4.1 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb`). All
+5 N=1 candidates filed for v5.3+ remain unchanged (operator Q6 confirms
+N=2 floor strict).*

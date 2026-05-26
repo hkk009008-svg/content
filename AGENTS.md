@@ -1042,6 +1042,116 @@ endpoint missing gate-bypass that `/screening/approve` +
 had; closed `d10b849`). Beneficiary: `director-seat` (constrains
 endpoint design); operator-seat consented in v5.1 REPLY `9f032db`.
 
+## Operator-driven Lane B template + selection criteria (Rule #14)
+
+**Rule #14: Operator-driven Lane B template + selection criteria.**
+*(Subtitle: when operator-seat may dispatch Lane B implementer subagents.)*
+
+Operator-seat MAY claim and dispatch a Lane B implementer subagent
+(with parallel Lane V follow-up) without prerequisite user-direction
+or director-invitation when ALL five selection criteria below hold.
+Outside the criteria, Lane B remains director-driven per role
+partition Sh.
+
+### Selection criteria (ALL must hold)
+
+1. **Small file count.** Single-file refactor, OR 2-3 closely-related
+   sibling files. >3 files indicates cross-cutting concerns better
+   served by director-driven judgment.
+2. **Clear canonical pattern reference.** Documented pattern + at
+   least one canonical site SHA. Pre-scope MUST cite both in the
+   dispatch-claim (Rule #12 applies for canonical site reference).
+3. **≤150 LoC of net production-code change.** Production files only;
+   test files NOT counted (penalizing test discipline is the wrong
+   signal). Empirical fit: B-005 (142) + B-006-broad-A (82) both
+   satisfy; B-006-broad-B (~243) correctly does NOT.
+4. **No cross-cutting public-API impact.** No signature / return-type /
+   exception-type contract changes that break existing callers.
+   Acceptable: new exception types via inner-validate (preserves caller
+   contract).
+5. **Rule #13 symmetric audit covers the scope.** Pre-scope completes
+   the audit; grep-output cited in dispatch-claim.
+
+ALL 5 hold → eligible. ANY fail → director-driven default.
+
+**Criterion-failure default (R-Q4-1).** Default to (a) defer-to-
+director-driven Lane B per role partition Sh. (b) operator MAY send
+an INFORMATIONAL `dispatch-claim-deferral` event (non-blocking
+visibility; not action-binding per Rule #8). (c) request user-
+direction override — rare; reserved for rule-gap signals.
+
+### Template (5-stage flow)
+
+**Stage 1: Pre-scope (Lane C-style read-only survey).** Grep target
+symbols (Rule #12); identify canonical pattern + site SHA; classify
+per-site variant; Rule #13 audit; verify 5 criteria. Operator-internal;
+no mailbox event. ~10-15min.
+
+**Stage 2: Dispatch-claim mailbox event.** Cite scope + canonical
+pattern + canonical site SHA + per-site variant table + Rule #12 grep
+evidence + Rule #13 audit + cost envelope + 5-min silent-accept window.
+SHOULD note if parallel-with-director work is in flight on disjoint
+files; otherwise default is exclusive operator-driven Lane B.
+
+**Stage 3: Implementer subagent dispatch (Lane B).** Single subagent,
+cold-context prompt with brief + project conventions + verification
+commands + report format. ~70-130k tokens, ~10-15min.
+
+**Stage 4: Parallel Lane V dispatch.** Operator dispatches TWO cold-
+context reviewers in PARALLEL (Rule #9) — spec + code-quality. Both
+prompts include CC-2 + Rule #12 + Rule #13. ~200-250k tokens, ~10-15min
+parallel. Director-seat MAY ALSO dispatch parallel Lane V per Rule #9
+§"Parallelism"; operator's dispatch does NOT preempt director's option.
+
+**Stage 5: Verification-report mailbox event.** Structured catalog
+with status / findings / telemetry / cursor advance / race-ack.
+Director processes per Rule #8 mailbox authority.
+
+### Working criteria (dogfood)
+
+- **C1:** Rule #14 invocation cited in dispatch-claim (5 criteria
+  check enumerated).
+- **C2:** Implementer commit body includes literal "Rule #14" (or
+  "Per Rule #14 operator-driven Lane B") + canonical pattern + site
+  SHA. Enables `git log --grep='Rule #14'` audit.
+- **C3:** 5-criteria pre-flight BEFORE dispatch-claim; criterion-
+  failure → (a) defer default.
+- **C4:** Per-instance wall-clock ~20-30min from pre-scope completion
+  to dispatch-claim (R-Q5-1). Cycle-13+ retrospective rolls up across
+  instances. ≥40% friction reduction is secondary v5.3 roll-up.
+
+### Composition
+
+- Rule #2 (signaling): Stage 2 dispatch-claim is the formal signal.
+- Rule #5 + #7: apply at every commit Stages 3 + 5 produce.
+- Rule #8 (mailbox authority): dispatch-claim binds director-seat to
+  consent (silent or explicit) within 5-min window.
+- Rule #9 (independent reviewer + parallelism): Stage 4 operator-side
+  Lane V is structurally independent; director MAY ALSO dispatch in
+  parallel (complementary findings).
+- Rule #10 (joint-team mode): specialization within Sh, not hierarchy.
+- Rule #12 + #13: applied during pre-scope, cited in dispatch-claim.
+
+### Beneficiary (per R11)
+
+**Beneficiary: `both`** seats.
+
+Rule #14 enables AND constrains both seats symmetrically: operator-
+seat gains codified capability + accepts 5 criteria as constraint;
+director-seat gains yield-signal + accepts "cannot claim operator-
+eligible work without explicit reason" as constraint. No asymmetric-
+veto path needed; operator-seat consented affirmatively in v5.2 REPLY
+(`dea6401`) per v5.1 explicit-consent customary path.
+
+**Codified SHA:** Protocol Bundle v5.2 ship (chicken-and-egg
+precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1
+`509db7c` / v5 `d66690f` / v5.1 `8ab0bbb`). Empirical basis: N=2 —
+**B-005** (cycle-11, `c296105`; 10 sites in `domain/project_manager.py`;
+142 prod LoC; ~295k subagent tokens; Lane V #11 ✅) + **B-006-broad-A**
+(cycle-12, `5b68776`; 6 sites across 4 files; 82 prod LoC; ~275k
+subagent tokens; Lane V #12 ✅). B-006-broad-B (`a0493dc`, 243 prod
+LoC) is the criteria-exclusion validation point.
+
 ## Disagreement protocol (v5)
 
 When operator-seat disagrees with a director REPLY refinement (or

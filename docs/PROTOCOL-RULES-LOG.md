@@ -21,6 +21,7 @@ and per-session invocation count. Updated manually at session-close by operator
 | 11 | Codification bias check (per-rule beneficiary flagging + non-beneficiary veto) | `d66690f` | User surfaced "director-only memory writes" + "codification meta-bias" concerns; R11 makes future codification per-rule auditable |
 | 12 | Brief-level grep-the-writes discipline (codifier MUST grep production writes before naming a symbol in a brief) | `8ab0bbb` | Lane V #6 F1 N=1 (vestigial `performance_take_id` field; production writes `approved_performance_take_id`; closed `6c1171a`) + Lane V #8 spec-reviewer prompt preventive N=2 (0 divergences). N=2 threshold per director's Lane V #6 REPLY at `2026-05-25T18-44-52Z`. Codification per v5.1 proposal `b583305` + operator REPLY explicit consent `9f032db` |
 | 13 | Symmetric-endpoint audit discipline (codifier MUST audit existing endpoints on shared state when adding new endpoint with same fence/flag/state) | `8ab0bbb` | Lane V #8 I1 CRITICAL N=1 (iterate endpoint missing the gate-bypass `/screening/approve` + `/assemble/re-assemble` had; closed `9e9b008`) + Val#1 V1 N=2 (`/screening/approve` missing precondition `/assemble/screen` had; closed `d10b849`). Codification per v5.1 proposal `b583305` + operator REPLY explicit consent `9f032db` |
+| 14 | Operator-driven Lane B template + selection criteria (5-stage flow + 5 selection criteria distinguishing operator-driven-eligible from director-driven-default work) | _Protocol Bundle v5.2 ship_ | B-005 N=1 (cycle-11, `c296105`; 10 sites in `domain/project_manager.py`; 142 prod LoC; Lane V #11 ✅ READY TO SHIP) + B-006-broad-A N=2 (cycle-12, `5b68776`; 6 sites across 4 files; 82 prod LoC; Lane V #12 ✅ READY TO SHIP). Criteria-exclusion validation: B-006-broad-B (cycle-12, `a0493dc`; 243 prod LoC; correctly director-driven). Codification per v5.2 proposal `f5fb58d` + operator REPLY explicit consent + 2 substantive refinements (R-Q1-1 LoC boundary ≤150 prod; R-Q4-1 default fallback (a) defer) folded at ship `dea6401` |
 
 > Historical note: Rules #7 + #8 originally shipped with the placeholder
 > `_Protocol Bundle v2 ship_` in the "Codified" column because the rules-log
@@ -34,7 +35,10 @@ and per-session invocation count. Updated manually at session-close by operator
 > followed the same pattern at v5 ship** (`d66690f`); **Rules #12 + #13
 > follow the same pattern at v5.1 ship** — ship with `_Protocol Bundle
 > v5.1 ship_` placeholders; whichever seat is active next session-close
-> updates to actual ship SHA in follow-up commit.
+> updates to actual ship SHA in follow-up commit. **Rule #14 follows the
+> same pattern at v5.2 ship** — ships with `_Protocol Bundle v5.2 ship_`
+> placeholder; whichever seat is active next session-close updates to
+> actual ship SHA in follow-up commit.
 
 ## Protocol Bundle v4.1 — Lane V refinements (cycle 6)
 
@@ -91,8 +95,23 @@ analysis for Rules 1-11, performed during v5 ship; extended to Rules
 | 11 (Codification bias check) | user | reduces bias; serves principal's interest |
 | 12 (Brief-level grep-the-writes discipline) | director-seat | constrains brief-writing (director-seat specialization); reduces Lane V cleanup for symbol-divergence (operator-seat benefits downstream) |
 | 13 (Symmetric-endpoint audit discipline) | director-seat | constrains endpoint design (director-seat specialization); reduces Lane V findings for symmetric cases (operator-seat benefits downstream) |
+| 14 (Operator-driven Lane B template + selection criteria) | both | enables operator-seat (codifies capability) + constrains operator-seat (5 criteria); enables director-seat (yield signal) + constrains director-seat (cannot claim operator-eligible work without explicit reason); symmetric on both axes |
 
-**Distribution snapshot (cycle-10 close, post-v5.1 ship):**
+**Distribution snapshot (cycle-13 entry, post-v5.2 ship):**
+- `both`: 7 (Rules 1, 2, 3, 5, 7, 10, 14) — symmetric disciplines
+- `user`: 2 (Rules 8, 11) — close gaps in user-supervision
+- `operator-seat`: 3 (Rules 4, 6, 9) — operational layer where races occur
+- `director-seat`: 2 (Rules 12, 13) — constrain director-seat's specialization work
+
+Total: **14 rules** (was 13 at cycle-10 close, post-v5.1 ship).
+Second consecutive bundle to add a `both`-beneficiary rule
+(v5.1 was 2 director-seat; pre-v5.1 was mostly `both` with operator-seat
+asymmetry). The asymmetric lean has returned toward neutral; v5's
+retroactive R11 analysis already disproved the "director codifies rules
+favoring director-seat" bias hypothesis. R11 explicit-consent (operator
+in `dea6401`) was customary not required for `both`-annotated Rule #14.
+
+**Prior snapshot (cycle-10 close, post-v5.1 ship):**
 - `both`: 6 (Rules 1, 2, 3, 5, 7, 10) — symmetric disciplines
 - `user`: 2 (Rules 8, 11) — close gaps in user-supervision
 - `operator-seat`: 3 (Rules 4, 6, 9) — operational layer where races occur
@@ -127,6 +146,15 @@ seat (non-beneficiary) consented affirmatively in REPLY `9f032db`
 per the R11 explicit-consent path. v5.1 demonstrates R11's veto
 mechanism working as designed — the asymmetric annotation triggered
 explicit consent rather than implicit acceptance.
+
+**v5.2 self-application:** v5.2's one new rule (#14) distributes as:
+1 both / 0 user / 0 operator-seat / 0 director-seat. v5.2 returns
+the asymmetric lean toward neutral (post-v5.1's 2 director-seat).
+R11 explicit consent (operator in REPLY `dea6401`) was customary per
+v5.1 precedent — not required for `both`-annotated rules, but
+preserved for cleanliness. v5.2 demonstrates the proposal cycle
+working for a symmetric-beneficiary rule (no veto path applicable;
+consent customary).
 
 **Future bundles MUST update this snapshot** when adding new rules.
 Asymmetric-beneficiary rules require explicit non-beneficiary consent
