@@ -379,24 +379,39 @@ correct shape.
 | `web_server.py::api_update_shot` (broad-B L1761) | V1 full inner-only | Direct POST, no prior load |
 | `web_server.py::api_restart_shot::_resolve_scene_id` (broad-B L1828) | Base no-prior-load | Read-only resolver; no prior load |
 
-**Additional Variant 1 production sites** (F2 uniformity pass — cycle 12):
+**Variant 1 production sites — full enumeration** (F2 uniformity pass — cycle 13 completion of cycle-12 broad-B drive-by):
 
-B-005 part 11 (`c296105`) — `domain/project_manager.py` ×10: `add_character`,
-`remove_character`, `add_object`, `remove_object` (raw-dict deviation;
-`extra="allow"`), `add_location`, `remove_location`, `add_scene`,
-`update_scene`, `remove_scene`, `reorder_scenes`.
+**Cumulative through cycle-12:** **32 `mutate_project(...)` production callers migrated** to `Project.model_validate` discipline (1 part-9 canonical + 10 B-005 + 6 B-006-broad-A + 15 B-006-broad-B). Breakdown by primary classification: **30 Variant 1 strict** (full + simplified + inner-only sub-pattern); **1 Base sub-pattern** (read-only resolver, no prior load); **1 Mixed-shape conditional** (V1 + Base hybrid). Excludes test files; excludes Variant 2 sites (`continuity_engine.py` + `cinema_pipeline.py::_refresh_project_snapshot`) which use validate-before-swap discipline separately — see §"Variant 2" below.
 
-B-006-broad-A (`5b68776`) — `cinema/screening.py` ×3 (simplified inner-only),
-`cinema/shots/controller.py` ×1 (full; dict-callback API preserved),
-`cinema_pipeline.py` ×1 (simplified inner-only), `domain/location_manager.py`
-×1 (mixed-shape inner-only).
+**Part 9 canonical** (`f8cd45f`) — `domain/scene_decomposer.py` ×1:
+- `update_scene_shots` (L895) — V1 full (outer + inner; typed iterate-for-find; dict-write under lock at parity index)
 
-B-006-broad-B (this, P1-3 part 12) — `web_server.py` ×15:
+**B-005 part 11** (`c296105`) — `domain/project_manager.py` ×10 (all V1 full; all with prior load via `project: dict` parameter):
+- `add_character` (L761) — V1 full
+- `remove_character` (L786) — V1 full (typed-iterate-for-find)
+- `add_object` (L828) — V1 full
+- `remove_object` (L852) — V1 full (**raw-dict deviation**; Object model has `extra="allow"` so typed-iterate may lose fields — kept dict-iterate per the deviation gotcha)
+- `add_location` (L883) — V1 full
+- `remove_location` (L906) — V1 full (typed-iterate-for-find)
+- `add_scene` (L945) — V1 full
+- `update_scene` (L969) — V1 full (typed-iterate-for-find)
+- `remove_scene` (L990) — V1 full (typed-iterate + filter; post-filter re-number order)
+- `reorder_scenes` (L1020) — V1 full (typed-iterate + dict-build-by-id)
+
+**B-006-broad-A** (`5b68776`) — 4 files ×6 sites:
+- `cinema/screening.py::mark_screening_approved` (L258) — V1 simplified **inner-only (no-prior-load sub-pattern; takes `project_id: str`)**
+- `cinema/screening.py::mark_shot_needs_reassembly` (L322) — V1 simplified **inner-only (no-prior-load sub-pattern)**
+- `cinema/screening.py::clear_needs_reassembly` (L372) — V1 simplified **inner-only (no-prior-load sub-pattern)**
+- `cinema/shots/controller.py::_mutate_shot` (L262) — V1 full (with prior load via `self.project`; 13 internal callers preserved dict-callback contract)
+- `cinema_pipeline.py::_persist_style_rules` (L793, inner closure in `start_pipeline`) — V1 simplified **inner-only (no-prior-load sub-pattern; helper called inside orchestrator)**
+- `domain/location_manager.py::get_location_prompt::_mutate` (L119, inner closure) — V1 mixed-shape **inner-only (no-prior-load sub-pattern; helper called from many sites)**
+
+**B-006-broad-B (P1-3 part 12)** (`a0493dc`) — `web_server.py` ×15 (line numbers at-ship-time; post-`336403d` +3 shift):
 
 V1 simplified (×5):
 - `api_apply_language_defaults` (L420) — full V1 (outer + inner)
 - `api_update_project` (L485) — **inner-only (no-prior-load sub-pattern)**
-- `api_train_lora::_runner` (L691) — **inner-only (no-prior-load sub-pattern; background thread; ValidationError swallowed by pre-existing thread handler per OOS)**
+- `api_train_lora::_runner` (L691) — **inner-only (no-prior-load sub-pattern; background thread; ValidationError now logged with stack trace per `336403d` M-3 close — was swallowed by pre-existing thread handler at broad-B ship time per OOS)**
 - `api_upload_style_board` (L831) — full V1 (outer + inner)
 - `api_generate_style_rules` (L1301) — full V1 (outer + inner)
 
@@ -404,7 +419,7 @@ V1 full (×8):
 - `api_update_character` (L607) — full V1
 - `api_upload_driving_video` (L772) — full V1 (outer at L789 part 6; only inner+typed-iterate added)
 - `api_clear_performance` (L795) — full V1
-- `api_update_object` (L956) — full V1 (raw-dict deviation; `extra="allow"`)
+- `api_update_object` (L956) — full V1 (**raw-dict deviation**; `extra="allow"`)
 - `api_update_location` (L1079) — full V1 (outer at L1145 part 5; only inner+typed-iterate added)
 - `api_reject_auto_approve` (L1696) — **inner-only (no-prior-load sub-pattern)**
 - `api_update_shot_prompt` (L1722) — **inner-only (no-prior-load sub-pattern)**
