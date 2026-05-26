@@ -123,7 +123,20 @@ def get_location_prompt(project: dict, loc_id: str) -> str:
         return ""
     fragment = loc.get("prompt_fragment", "")
     if not fragment:
+        # P1-3 migration template (S10 + part 9 Variant 1; B-006-broad-A) --
+        # inner mutator-scope validate under the per-project lock. Mixed-shape:
+        # typed-helper read (get_location returns dict by id) + raw-dict
+        # write (latest_location["prompt_fragment"] = ...). Outer validate
+        # skipped: this function is called from many sites that may or may
+        # not pass already-validated projects; inner validate alone provides
+        # the race-protection guarantee while keeping the caller surface
+        # tolerant. See docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1"
+        # for the canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11
+        # c296105).
+        from domain.models import Project as _Project
+
         def _mutate(latest_project: dict):
+            _Project.model_validate(latest_project)  # inner mutator-scope validate
             latest_location = get_location(latest_project, loc_id)
             if not latest_location:
                 return MutationResult("", save=False)

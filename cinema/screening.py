@@ -266,10 +266,21 @@ def mark_screening_approved(project_id: str) -> dict:
     operator's `unset CINEMA_SCREENING_STAGE` cold-import probe -- we
     never want to drag in the heavy project_manager module unless the
     operator actually calls into the screening path.
+
+    P1-3 migration template (S10 + part 9 Variant 1; B-006-broad-A) --
+    inner mutator-scope validate under the per-project lock. No outer
+    boundary validate here: the function takes ``project_id: str``, not
+    a project dict, so the load-then-mutate flow places the only project
+    dict inside the mutator. Inner validate catches a corrupt on-disk
+    snapshot before the root-scalar write. See
+    docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+    canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 c296105).
     """
     from project_manager import MutationResult, mutate_project
+    from domain.models import Project as _Project
 
     def _mutator(latest_project: dict):
+        _Project.model_validate(latest_project)  # inner mutator-scope validate
         latest_project[SCREENING_APPROVED_KEY] = True
         return MutationResult(
             {"success": True, "screening_approved": True},
@@ -322,13 +333,24 @@ def mark_shot_needs_reassembly(project_id: str, shot_id: str) -> dict:
 
     Import is lazy (mirrors mark_screening_approved) so this module
     stays import-safe under cold-flag probes.
+
+    P1-3 migration template (S10 + part 9 Variant 1; B-006-broad-A) --
+    inner mutator-scope validate under the per-project lock. No outer
+    boundary validate (function takes ``project_id: str``); inner validate
+    catches a corrupt on-disk snapshot before the root-list idempotent-add.
+    The shot_id-empty early-return guard below stays unchanged (validate
+    only runs once we're entering the lock-held mutator). See
+    docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+    canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 c296105).
     """
     if not shot_id:
         return {"success": False, "error": "shot_id is empty"}
 
     from project_manager import MutationResult, mutate_project
+    from domain.models import Project as _Project
 
     def _mutator(latest_project: dict):
+        _Project.model_validate(latest_project)  # inner mutator-scope validate
         current = latest_project.get(NEEDS_REASSEMBLY_KEY) or []
         if not isinstance(current, list):
             current = []
@@ -372,10 +394,19 @@ def clear_needs_reassembly(
 
     Raises ``ValueError`` if the project doesn't exist (caller surfaces
     as 404).
+
+    P1-3 migration template (S10 + part 9 Variant 1; B-006-broad-A) --
+    inner mutator-scope validate under the per-project lock. No outer
+    boundary validate (function takes ``project_id: str``); inner validate
+    catches a corrupt on-disk snapshot before the root-list filter/wipe.
+    See docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+    canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 c296105).
     """
     from project_manager import MutationResult, mutate_project
+    from domain.models import Project as _Project
 
     def _mutator(latest_project: dict):
+        _Project.model_validate(latest_project)  # inner mutator-scope validate
         if only_shots is None:
             latest_project[NEEDS_REASSEMBLY_KEY] = []
             cleared: list[str] = []

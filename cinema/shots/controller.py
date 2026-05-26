@@ -260,11 +260,33 @@ class ShotController:
         return os.path.join(output_dir, f"{take_id}{ext}")
 
     def _mutate_shot(self, shot_id: str, mutator, timeout: float = 10):
+        # P1-3 migration template (S10 + part 9 Variant 1; B-006-broad-A) --
+        # outer boundary validate on self.project + inner mutator-scope validate
+        # under the per-project lock. Full variant: typed-iterate to find the
+        # (scene, shot) at parity indices, then PASS DICT-REFS to the
+        # caller-provided mutator callback. The 13 internal callers in this
+        # file (see grep '_mutate_shot' / '_mutator(' patterns) expect
+        # (scene_dict, shot_dict) arguments; that callback API contract is
+        # preserved. Race protection: inner validate catches corruption that
+        # landed between outer validate and lock acquisition.
+        # See docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+        # canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 c296105).
+        Project.model_validate(self.project)  # outer boundary validate
+
         def _mutate(latest_project: dict):
-            for scene in latest_project.get("scenes", []):
-                for shot in scene.get("shots", []):
-                    if shot.get("id") == shot_id:
-                        return mutator(scene, shot)
+            latest_typed = Project.model_validate(latest_project)  # inner mutator-scope validate
+            # Typed-iterate for type-safe find; the matched (scene_idx, shot_idx)
+            # are then used to index back into the dict (latest_project) so the
+            # callback receives raw dict-refs the lock-held mutator can mutate
+            # in place. Pydantic List[Scene] preserves order, so the typed
+            # iteration index matches the dict index (see pattern doc caveat
+            # at §"Variant 1 — Mutator-inner-validation").
+            for scene_idx, scene_typed in enumerate(latest_typed.scenes):
+                for shot_idx, shot_typed in enumerate(scene_typed.shots):
+                    if shot_typed.id == shot_id:
+                        scene_dict = latest_project["scenes"][scene_idx]
+                        shot_dict = scene_dict["shots"][shot_idx]
+                        return mutator(scene_dict, shot_dict)
             return MutationResult(None, save=False)
 
         result = mutate_project(self.project["id"], _mutate, timeout=timeout, snapshot=self.project)

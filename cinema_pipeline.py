@@ -779,7 +779,19 @@ class CinemaPipeline:
                 music_mood=settings.get("music_mood", "suspense"),
                 aspect_ratio=settings.get("aspect_ratio", "16:9"),
             )
+            # P1-3 migration template (S10 + part 9 Variant 1; B-006-broad-A) --
+            # inner mutator-scope validate under the per-project lock.
+            # Simplified: nested-key write into global_settings.style_rules,
+            # no typed-iterate-for-find needed. Outer boundary validate is
+            # transitively provided by self._refresh_project_snapshot() at
+            # line 761 above (cycle-11 aeccc49 added validate-before-swap),
+            # so `project` here is already pydantic-validated. See
+            # docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+            # canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 c296105).
+            from domain.models import Project as _Project
+
             def _persist_style_rules(latest_project: dict):
+                _Project.model_validate(latest_project)  # inner mutator-scope validate
                 latest_settings = latest_project.setdefault("global_settings", {})
                 latest_settings["style_rules"] = style_rules
                 return latest_settings["style_rules"]
