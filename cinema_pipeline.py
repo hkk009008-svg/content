@@ -441,12 +441,22 @@ class CinemaPipeline:
         # boundary (raises in CINEMA_STRICT_SCHEMA mode) + uses typed
         # iteration for the .id key extraction, while preserving the
         # original dict references as values (consumer sites at
-        # continuity_engine.py:208 + :587 continue to do dict-attribute
+        # continuity_engine.py:221 + :608 continue to do dict-attribute
         # access on the values).
+        #
+        # I-1 fix (Lane V #9, cycle 11): validate BEFORE swapping self.project,
+        # not after. If validation raises ValidationError, self.project must
+        # remain unchanged so tracker indices at lines below stay coherent
+        # with the prior state. The previous order (clear → update →
+        # validate) created a partial-state window: self.project swapped to
+        # `latest` malformed dict; validate raised; tracker indices never
+        # rebuilt → continuity engines pointed at stale id-keys against the
+        # new project dict. Reachable when project survives _validate_project's
+        # warn-mode but fails bare Pydantic strict checks.
         from domain.models import Project as _Project
+        latest_typed = _Project.model_validate(latest)
         self.project.clear()
         self.project.update(latest)
-        latest_typed = _Project.model_validate(self.project)
         self.continuity.project = self.project
         self.continuity.character_tracker.project = self.project
         self.continuity.character_tracker.characters = {

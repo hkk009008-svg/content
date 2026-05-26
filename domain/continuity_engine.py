@@ -41,12 +41,14 @@ class CharacterContinuityTracker:
         # Values stay as ORIGINAL dict references from project["characters"][i]
         # (NOT model_dump output) — preserves the implicit contract that
         # mutating project["characters"][0]["name"] is visible through
-        # self.characters[char_id]["name"]. Consumer sites (line 62, 208;
-        # ContinuityEngine.validate at line 587 cross-class) continue to
-        # do dict-attribute access (`.get("name", ...)`); migrating those
-        # to typed Character access is a separate cycle-11+ slice.
+        # self.characters[char_id]["name"]. Consumer sites
+        # (`build_character_prompt_fragment` at line 75 + `validate_continuity_for_scene`
+        # at line 221; `ContinuityEngine.validate_shot` at line 608 cross-class)
+        # continue to do dict-attribute access (`.get("name", ...)`); migrating
+        # those to typed Character access is a separate cycle-11+ slice.
         # See docs/MIGRATION-PATTERN-pydantic-caller.md + part 9
-        # (f8cd45f) for the index-by-typed-iteration pattern.
+        # (f8cd45f) for the index-by-typed-iteration pattern, + part 10
+        # (1bc9263) which extended this variant to external-writer sites.
         from domain.models import Project as _Project
         self.project = project
         project_typed = _Project.model_validate(project)
@@ -236,9 +238,10 @@ class LocationPersistence:
         # P1-3 migration template (S10) — value-preserving variant, parallel
         # to CharacterContinuityTracker.__init__ above. self.locations is
         # populated but no INTERNAL consumer reads it within this class —
-        # only external code in cinema_pipeline.py:445 reassigns it on
-        # project reload. The validation here is the value-add: malformed
-        # project input fails at the boundary (raises in STRICT mode).
+        # only external code in cinema_pipeline.py:466 (within
+        # _refresh_project_snapshot) reassigns it on project reload. The
+        # validation here is the value-add: malformed project input fails
+        # at the boundary (raises in STRICT mode).
         from domain.models import Project as _Project
         self.project = project
         project_typed = _Project.model_validate(project)

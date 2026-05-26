@@ -210,3 +210,186 @@ test the translation behavior at the caller level. If the caller
 lets `ValidationError` propagate unchanged (the default migration
 shape — and the shape S10 / parts 3 / 4 all use), the template-level
 tests above are sufficient.
+
+---
+
+## Pattern variants (cycle-10 additions: parts 9 + 10)
+
+The base pattern above (validate-at-boundary + typed attribute access)
+handles read-only call sites. Cycle 10 surfaced two variants for
+non-trivial cases. Both build on the base; both are validated by
+production code at the cited SHAs.
+
+### Variant 1 — Mutator-inner-validation (part 9, `f8cd45f`)
+
+**When:** the call site is a mutator that needs to read typed shape
+WHILE holding the per-project `mutate_project` lock, then dict-write
+back to the locked record.
+
+**Canonical site:** `domain/scene_decomposer.py::update_scene_shots`.
+
+**Shape:**
+
+```python
+def update_scene_shots(project_id: str, scene_id: str, new_shots: list[dict]) -> dict:
+    # OUTER boundary validate: the call site is the boundary; we
+    # validate the project shape BEFORE entering the mutator so
+    # malformed projects fail fast (lock not even acquired).
+    project = load_project(project_id)
+    from domain.models import Project as _Project
+    _Project.model_validate(project)  # boundary check; ignore return
+
+    def _mutator(latest_project: dict):
+        # INNER mutator-scope validate: revalidate the latest_project
+        # snapshot the mutator sees (it may have changed between
+        # outer validate and lock acquisition). Use the typed object
+        # for the read-shape walk; write back to the dict.
+        latest_typed = _Project.model_validate(latest_project)
+        for scene in latest_typed.scenes:
+            if scene.id == scene_id:
+                # Dict-write under the lock: mutator MUST write to
+                # latest_project (the lock-held dict), NOT to
+                # latest_typed (a snapshot). Typed-iterate to FIND
+                # the scene; dict-write to MUTATE it.
+                idx = latest_typed.scenes.index(scene)
+                latest_project["scenes"][idx]["shots"] = new_shots
+                return MutationResult(...)
+        return MutationResult(success=False, ...)
+
+    return mutate_project(project_id, _mutator)
+```
+
+**Why this shape:**
+
+- **Outer boundary validate** is the same as the base S10 pattern;
+  fails fast on malformed projects so the lock isn't even acquired
+  for a doomed mutation.
+- **Inner mutator validate** handles the race: between outer-validate
+  and lock-acquisition, another writer may have changed the project
+  shape. The inner validate runs on the lock-held `latest_project`
+  snapshot the mutator actually sees.
+- **Index-by-typed-iteration** finds the target scene via typed walk
+  (`scene.id == scene_id` is type-safe); the matched index is then
+  used to dict-write back. Typed-and-dict in parallel: typed for
+  reading, dict for writing under the lock.
+- **Redundant validation cost** (~2-4 ms per mutation) is acceptable
+  for mutator paths (low-frequency relative to read paths).
+
+**Caveat: pydantic.list-order preservation.** This shape relies on
+`latest_typed.scenes[i]` corresponding to `latest_project["scenes"][i]`.
+Pydantic's `List[Scene]` field doesn't reorder; this holds. If a
+future Scene field adds a custom validator that reorders, the index
+parity breaks and the dict-write would write to the wrong scene. Pin
+this invariant with a regression test if list order ever matters.
+
+### Variant 2 — Value-preserving-dict-ref (part 10, `1bc9263`)
+
+**When:** the call site builds an id-keyed lookup for downstream
+consumers that do dict-attribute access. The lookup VALUES must remain
+the original dict references (not `model_dump` snapshots) so caller-side
+mutations on the underlying dict are visible through the lookup.
+
+**Canonical sites:**
+
+- `domain/continuity_engine.py::CharacterContinuityTracker.__init__` —
+  builds `self.characters = {char_id: dict_ref}`; consumer
+  `build_character_prompt_fragment` does `char.get("name", ...)`.
+- `domain/continuity_engine.py::LocationPersistence.__init__` —
+  parallel shape for locations.
+- `cinema_pipeline.py::CinemaPipeline._refresh_project_snapshot` —
+  external-writer site that REBUILDS the same id-keyed lookups when
+  the project snapshot is reloaded from disk.
+
+**Shape:**
+
+```python
+class CharacterContinuityTracker:
+    def __init__(self, project: dict):
+        from domain.models import Project as _Project
+        self.project = project
+        project_typed = _Project.model_validate(project)
+        # TYPED-ITERATE for the .id key extraction (type-safe walk
+        # over Character objects); DICT-REF as the value (preserves
+        # implicit contract: mutating project["characters"][0]["name"]
+        # is visible through self.characters[char_id]["name"]).
+        self.characters = {
+            c.id: project["characters"][i]
+            for i, c in enumerate(project_typed.characters)
+        }
+```
+
+**Why this shape:**
+
+- **Typed iteration for keys** uses the validated typed object's
+  attribute access (`c.id`) — type-safe.
+- **Dict references as values** preserves the consumer-side contract.
+  Consumer sites continue to read via `.get("name", default)` against
+  the dict; migrating consumer sites to typed attribute access is a
+  separate slice.
+- **Index-by-enumerate** pairs typed-iteration with dict-indexing.
+  Same pydantic-list-order-preservation caveat as Variant 1.
+
+**External-writer extension (cinema_pipeline.py:432-470 +
+_refresh_project_snapshot's Lane V #9 I-1 fix at `<v5.1+ ship>`):**
+
+When external code (not the `__init__`) needs to REBUILD the lookup
+because the project state was reloaded, follow the same variant shape
+PLUS the validate-before-swap discipline:
+
+```python
+def _refresh_project_snapshot(self, timeout: float = 10) -> Optional[dict]:
+    latest = load_project(self.project["id"], timeout=timeout)
+    if not latest:
+        return None
+    # VALIDATE FIRST on the loaded dict. If this raises ValidationError,
+    # self.project must remain unchanged so tracker indices stay coherent
+    # with prior state. (Lane V #9 I-1: pre-fix did clear → update →
+    # validate, which left a partial-state window if validate raised.)
+    from domain.models import Project as _Project
+    latest_typed = _Project.model_validate(latest)
+    self.project.clear()
+    self.project.update(latest)
+    # Rebuild id-keyed lookups using the variant-2 shape: typed iterate
+    # for keys + dict-ref values.
+    self.continuity.character_tracker.characters = {
+        c.id: self.project["characters"][i]
+        for i, c in enumerate(latest_typed.characters)
+    }
+    self.continuity.location_persistence.locations = {
+        l.id: self.project["locations"][i]
+        for i, l in enumerate(latest_typed.locations)
+    }
+    # Cross-class project-pointer rebinds happen AFTER validation +
+    # swap, so a failed validation leaves these pointers unchanged.
+    self.continuity.project = self.project
+    self.continuity.character_tracker.project = self.project
+    self.continuity.location_persistence.project = self.project
+    self.director.project = self.project
+    return self.project
+```
+
+**Regression test:** see
+`tests/unit/test_refresh_project_snapshot.py` for the I-1
+partial-state preservation test pair (validation-raises path + happy
+path + None-on-load-failure path).
+
+### Variant taxonomy summary
+
+| Variant | When | Read-shape | Write-shape | Lock |
+|---|---|---|---|---|
+| Base (S10) | Read-only call sites | Typed attribute access | None | None |
+| Variant 1 (part 9) | Mutator call sites | Typed iterate (outer + inner) | Dict-write under lock | per-project mutate_project lock |
+| Variant 2 (part 10) | Lookup builders (init or external) | Typed iterate for keys | Dict-ref values (preserved) | None for init; external-writer site adds validate-before-swap discipline |
+
+When choosing a variant, ask:
+
+1. Is the call site read-only? → **Base.**
+2. Is the call site a mutator? → **Variant 1.**
+3. Is the call site building an id-keyed lookup whose CONSUMERS need
+   to see live dict-state via the lookup values? → **Variant 2.**
+4. Is the call site an EXTERNAL writer rebuilding a Variant-2 lookup
+   on project reload? → **Variant 2 + validate-before-swap discipline.**
+
+All three variants share the same R12 (brief-level grep-the-writes)
+discipline for symbol verification + the same template-level unhappy-
+path test recipe above.
