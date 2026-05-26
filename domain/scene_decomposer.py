@@ -899,13 +899,28 @@ def update_scene_shots(
     timeout: float = 10,
 ) -> None:
     """Save decomposed shots back into the project's scene."""
+    # P1-3 migration template (S10) — mutator-pattern variant. NEW vs parts
+    # 3-8: the inner _mutate closure (a `latest_project` snapshot under
+    # mutate_project's lock) ALSO gets typed iteration, not just the outer
+    # function's input. The mutator still WRITES via dict (the
+    # mutate_project contract is "latest_project is mutated in-place"),
+    # but the .id comparison is typed (scene.id, not scene["id"]). Index
+    # parity (latest_typed.scenes[i] ↔ latest_project["scenes"][i]) is
+    # preserved by Pydantic's list-field-order semantics. See
+    # docs/MIGRATION-PATTERN-pydantic-caller.md for the recipe + part 8
+    # (0883201) for the read-only lookup variant of the same index-by-typed-
+    # iteration pattern.
+    from domain.models import Project as _Project
     from domain.project_manager import MutationResult, mutate_project
 
+    _Project.model_validate(project)  # outer boundary validation
+
     def _mutate(latest_project: dict):
-        for scene in latest_project["scenes"]:
-            if scene["id"] == scene_id:
-                scene["shots"] = shots
-                scene["num_shots"] = len(shots)
+        latest_typed = _Project.model_validate(latest_project)
+        for i, scene in enumerate(latest_typed.scenes):
+            if scene.id == scene_id:
+                latest_project["scenes"][i]["shots"] = shots
+                latest_project["scenes"][i]["num_shots"] = len(shots)
                 return True
         return MutationResult(False, save=False)
 
