@@ -65,22 +65,29 @@ def _make_minimal_project(scene_id="scene_1", shot_id="shot_1_0") -> dict:
 # ---------------------------------------------------------------------------
 
 class TestDirectorialIterationFlag:
-    """_directorial_iteration_enabled() respects env var."""
+    """_directorial_iteration_enabled() respects env var.
 
-    def test_flag_off_by_default(self):
+    Default flipped ON at v5.1+ (2026-05-26 flag-flip authorization).
+    Explicit ``CINEMA_DIRECTORIAL_ITERATION=0|false|no`` is the opt-out.
+    """
+
+    def test_flag_on_by_default(self):
+        """Unset env var defaults to enabled (post-v5.1+ flip)."""
         from cinema.shots.controller import _directorial_iteration_enabled
         env = {k: v for k, v in os.environ.items() if k != "CINEMA_DIRECTORIAL_ITERATION"}
         with patch.dict(os.environ, env, clear=True):
-            assert _directorial_iteration_enabled() is False
+            assert _directorial_iteration_enabled() is True
 
-    @pytest.mark.parametrize("value", ["1", "true", "True", "TRUE", "yes", "YES"])
-    def test_flag_on_truthy_values(self, value):
+    @pytest.mark.parametrize("value", ["1", "true", "True", "TRUE", "yes", "YES", "on", "anything-truthy"])
+    def test_flag_on_for_non_opt_out_values(self, value):
+        """Any value not in the explicit opt-out set leaves the flag enabled."""
         from cinema.shots.controller import _directorial_iteration_enabled
         with patch.dict(os.environ, {"CINEMA_DIRECTORIAL_ITERATION": value}):
             assert _directorial_iteration_enabled() is True
 
-    @pytest.mark.parametrize("value", ["0", "false", "no", "", "off"])
-    def test_flag_off_falsy_values(self, value):
+    @pytest.mark.parametrize("value", ["0", "false", "no", "FALSE", "No"])
+    def test_flag_off_for_explicit_opt_out_values(self, value):
+        """Explicit opt-out values disable the flag."""
         from cinema.shots.controller import _directorial_iteration_enabled
         with patch.dict(os.environ, {"CINEMA_DIRECTORIAL_ITERATION": value}):
             assert _directorial_iteration_enabled() is False

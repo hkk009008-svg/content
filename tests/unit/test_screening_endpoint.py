@@ -62,9 +62,12 @@ def flag_on():
 
 @pytest.fixture()
 def flag_off():
-    """CINEMA_SCREENING_STAGE cleared for the duration of the test."""
-    env = {k: v for k, v in os.environ.items() if k != "CINEMA_SCREENING_STAGE"}
-    with patch.dict(os.environ, env, clear=True):
+    """CINEMA_SCREENING_STAGE=0 explicit opt-out for the duration of the test.
+
+    Default flipped ON at v5.1+ (2026-05-26 flag-flip); opt-out is the
+    only way to exercise the disabled-feature 404 path now.
+    """
+    with patch.dict(os.environ, {"CINEMA_SCREENING_STAGE": "0"}):
         yield
 
 
@@ -103,13 +106,13 @@ class TestFlagOffReturns404:
         resp = client.post("/api/projects/proj-x/assemble/screen")
         assert resp.status_code == 404
         body = resp.get_json()
-        assert "Screening stage not enabled" in body["error"]
+        assert "Screening stage is disabled" in body["error"]
 
     def test_screening_approve_flag_off(self, client, flag_off):
         resp = client.post("/api/projects/proj-x/screening/approve")
         assert resp.status_code == 404
         body = resp.get_json()
-        assert "Screening stage not enabled" in body["error"]
+        assert "Screening stage is disabled" in body["error"]
 
 
 # ---------------------------------------------------------------------------

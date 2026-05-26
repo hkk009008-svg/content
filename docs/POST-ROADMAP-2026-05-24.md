@@ -27,6 +27,15 @@
 > Telemetry: 7 Lane V dispatches across cycles 6-9, ~1.46M tokens,
 > ~20 novel findings, 0 hallucinations.
 >
+> **Cycle 10 update (2026-05-26):** Both feature flags **DEFAULT-ON
+> as of v5.1+ flag-flip** (user-principal authorization 2026-05-26;
+> operator + director joint flag-flip-recommended per Val#1+#2
+> contract validation). Opt-out is now `CINEMA_DIRECTORIAL_ITERATION=0`
+> / `CINEMA_SCREENING_STAGE=0` instead of opt-in. Surfaces A + B
+> are now live for any operator who reaches them through the UI;
+> U7+U8 UX-layer validation deferred to real-usage feedback OR
+> scheduled real-generation session (~$2-5 LLM/Veo budget).
+>
 > **The cycle-10 priority slate is genuinely OPEN** — both Surfaces
 > are functionally complete and the substrate is mature. The picks
 > below reflect that opening: operator-facing validation is the
@@ -43,23 +52,17 @@
 > **Cycle 3 update (2026-05-24, late, historical):** Sessions 7, 8,
 > Monitor.tsx wiring, P3-1 audit, Session 9 brief — all shipped.
 
-1. **Surface A + B operator validation + flag-flip decision** — both
-   surfaces have shipped end-to-end behind feature flags but have
-   NEVER been touched by a real operator in a browser. All
-   correctness gates are static (`npx tsc --noEmit` + `npm run build`
-   + 840-841 pytest pass — see Carry-forward §"environment-sensitive
-   flake" for the 1-test gap) — UX correctness is unverified.
-   **Brief authored cycle-10 by director:
-   [docs/BRIEF-operator-validation-2026-05-26.md](BRIEF-operator-validation-2026-05-26.md)**
-   (pre-validation checklist + Surface A 3-gate × 4-verb playthrough
-   + Surface B SCREENING + re-assembly playthrough + reporting format
-   + 90-120 min total time budget). Operator-claimable as Lane V-adjacent;
-   findings report goes to director via `verification-report` mailbox
-   event. Outcome: a flag-flip recommendation for user-decision on
-   `CINEMA_DIRECTORIAL_ITERATION` and/or `CINEMA_SCREENING_STAGE`.
-   **This is the highest-value cycle-10 work** — without operator
-   validation, cycles 8-9 stay locked behind flags and the
-   engineering investment doesn't translate to user value.
+1. **Surface A + B operator validation + flag-flip decision — CLOSED cycle 10.**
+   Operator ran the validation brief in 2 sessions (Val#1 backend contract
+   + Val#2 UX layer; ~55% coverage; both surfaces recommended SAFE TO FLIP);
+   director shipped V1 + U1 folds; user-principal authorized flag-flip
+   2026-05-26 at v5.1+ ship. **Both `CINEMA_DIRECTORIAL_ITERATION` and
+   `CINEMA_SCREENING_STAGE` default-ON; opt-out via `=0`.** Brief at
+   [docs/BRIEF-operator-validation-2026-05-26.md](BRIEF-operator-validation-2026-05-26.md)
+   remains as cycle-end validation template. U7+U8 (IterationPanel +
+   ScreeningStage actual UX) NOT-VALIDATED gap remains; closure paths:
+   (a) accept-via-real-usage feedback, (b) schedule real-generation
+   session (~$2-5 LLM/Veo budget) for end-to-end playthrough.
 
 2. **P1-3 resumption — domain/ caller migrations using the S10
    template** — handoff says "Parts 1-6 shipped"; remaining
@@ -240,9 +243,9 @@ complete pending operator validation).
 | `CINEMA_STRICT_SCHEMA` env flag + first caller migration | **RESOLVED** by Session 10 (`5f2fe0b` + `ef98629` + `ec607ed` chore) | Migration template ready; future sessions migrate domain/* module-by-module |
 | Motion-gate dead code (rules tested but unreachable in production) | **RESOLVED** by user product decision 2026-05-25: feature-flag pattern (`CINEMA_AUTO_APPROVE_MOTION` default off); Session 12 brief shipped, dispatch pending | Brief: `docs/HANDOFF-roadmap-2026-05-24.md` §SESSION 12 |
 | ARCHITECTURE.md gap: Pydantic boundary + opt-in escalation pattern + Surface A/B documentation | OPERATOR-CLAIMED (Lane D) | important — discovered cycle 4 orientation. Sessions 8/10/12 escalations live but undocumented; **cycle 9 expanded scope** — S19 added `cinema/screening.py` module + 14th SCREENING pipeline stage + 3 new endpoints (`/assemble/screen`, `/screening/approve`, `/assemble/re-assemble`); S15-S18 added Surface A iterate plumbing through PERFORMANCE_REVIEW + REVIEW gates. Operator picks up post-cycle-9 per Lane D convention. |
-| **Surface A + B operator validation** (cycle 9 NEW) | OPEN — gates the flag-flip | important-immediate — both surfaces functionally complete, never touched by real operator in a browser. Verification gates are static (`tsc --noEmit` + `npm run build` + 840-841 pytest pass per session, see flake below) but UX correctness unverified. Outcome: decision on whether to flip `CINEMA_DIRECTORIAL_ITERATION` and/or `CINEMA_SCREENING_STAGE` default-on. **Without operator validation, cycles 8-9 engineering investment stays locked behind flags.** |
+| **Surface A + B operator validation** (cycle 9 NEW) | **RESOLVED cycle 10** — operator-validation brief (`a116e0a`) ran in 2 sessions (Val#1 `18beb92` + Val#2 `8d5e2d4`); V1 + U1 folds shipped (`d10b849` + `dea4cc8`); both surfaces recommended SAFE TO FLIP; user-principal authorized flag-flip 2026-05-26 at v5.1+ ship | **Both flags default-ON**; opt-out via `CINEMA_DIRECTORIAL_ITERATION=0` / `CINEMA_SCREENING_STAGE=0`. U7+U8 (IterationPanel + ScreeningStage actual UX) NOT-VALIDATED — closes via real-usage feedback OR scheduled real-gen session (~$2-5 budget). |
 | **Cycle-9 H-advisory backlog** (Lane V #7 deferred) | OPEN | important-deferred — H1 dead `approved_take_id` field, H2 `iter_takes(shot)` shared helper, H4 `_test_inject_running_pipeline`, H5 per-shot `os.path.exists` scale watchpoint, H7 inline `fontVariationSettings` consolidation. 2-4 small Lane A commits if batched. |
-| **Cycle-9 operational-learnings codification candidates** | OPEN — both N=1, waiting for N=2 | low-priority (decision-deferred) — (a) "brief-level grep-the-writes discipline" (Lane V #6 F1 root cause, PREVENTIVELY applied in #7 with 0 new divergences); (b) "tests that mock the orchestrator cannot catch orchestrator deadlocks" (S21 CRITICAL #1, mitigation in `e6932e3`). Codify as Rule #12 / #13 if cycle-10+ surfaces another instance. |
+| **Cycle-9 operational-learnings codification candidates** | **RESOLVED cycle 10** — (a) brief-level grep-the-writes shipped as **Rule #12** + (b) symmetric-endpoint audit shipped as **Rule #13** at v5.1+ (proposal `b583305` → REPLY `9f032db` → ship `8ab0bbb`). | Rule #12 N=2 evidence: Lane V #6 F1 + Lane V #8 spec-prompt preventive (0 divergences). Rule #13 N=2 evidence: Lane V #8 I1 CRITICAL + Val#1 V1. Both beneficiary `director-seat` (asymmetric); operator-seat explicit consent per R11. |
 | **`test_four_concurrent_generate_only_one_wins` environment-sensitive flake** (cycle-10 START NEW) | OPEN — pre-existing, surfaced cycle-10 orientation | low-priority — added at `a97573e` (cycle 4 / Session 9, P3-1 concurrency hardening) to assert "only 1 of 4 concurrent generates wins via `_pipelines_lock`+`_PIPELINE_PENDING` sentinel". Passed in cycle-9 handoff session ("841 pass / 0 fail" at HEAD `17a06c1`); fails 4-for-4 in cycle-10 director's session at SAME HEAD with observed `[409, 409, 200, 200]` (2 winners instead of 1). Bisected against `a97573e^` / `e6932e3^` / `4075f8e^` / `1aca23d^` / `4bf48cd` — failure persists at every checkpoint, dating back to the test's own authorship. Root cause: race-condition test sensitive to CPU thread-scheduling latency (busy CPU widens the claim window between request-arrival and slot-claim). Action options: (a) tighten timing margins (barrier pre-warm + larger `ctor_release.wait` window), (b) mark `pytest.mark.flaky` with retry, (c) accept as environment-dependent + document. Operator-claimable Lane A (~30 min investigation). |
 | `scene_decomposer` + `lip_sync` coverage gaps | OPEN | important-deferred — audit before scoping new test files |
 | Session 6: `Monitor.tsx` wiring gap | **RESOLVED** by `a6e3ff1` (cycle 3 director-claimed) | — |

@@ -82,15 +82,21 @@ NEEDS_REASSEMBLY_KEY = "needs_reassembly"
 
 
 def _screening_stage_enabled() -> bool:
-    """Feature flag: CINEMA_SCREENING_STAGE=1|true|yes enables S19+ screening stage.
+    """Feature flag: CINEMA_SCREENING_STAGE controls S19+ screening stage.
 
-    Per §7.7.3 convention. Default off -- flag must be set explicitly.
-    Truthy-value set matches ``_directorial_iteration_enabled()`` exactly
-    so an operator who sets the directorial-iteration flag with the same
-    spelling gets the same answer here.
+    Default ON as of v5.1+ flag-flip (2026-05-26 user-principal authorization;
+    operator + director joint flag-flip-recommended per Val#1 V3+V5 LIVE +
+    Val#2 U3 14-stage rail DOM-confirmed; V1 defense-in-depth fold shipped
+    pre-flip at ``d10b849``). Set ``CINEMA_SCREENING_STAGE=0|false|no`` to
+    opt out (e.g., a deployment that needs the pre-S19 endpoint behavior).
+
+    Falsy-value set matches ``_directorial_iteration_enabled()`` exactly
+    so an operator who disables the directorial-iteration flag with the
+    same spelling gets the same answer here. Read at each call so dynamic
+    env mutation is observable without restart.
     """
-    return os.environ.get("CINEMA_SCREENING_STAGE", "").strip().lower() in {
-        "1", "true", "yes",
+    return os.environ.get("CINEMA_SCREENING_STAGE", "").strip().lower() not in {
+        "0", "false", "no",
     }
 
 

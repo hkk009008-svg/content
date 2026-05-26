@@ -46,30 +46,34 @@ from cinema.screening import (
 
 
 class TestScreeningStageFlag:
-    """_screening_stage_enabled() respects CINEMA_SCREENING_STAGE env."""
+    """_screening_stage_enabled() respects CINEMA_SCREENING_STAGE env.
 
-    def test_flag_off_by_default(self):
+    Default flipped ON at v5.1+ (2026-05-26 flag-flip authorization).
+    Explicit ``CINEMA_SCREENING_STAGE=0|false|no`` is the opt-out.
+    """
+
+    def test_flag_on_by_default(self):
+        """Unset env var defaults to enabled (post-v5.1+ flip)."""
         env = {k: v for k, v in os.environ.items() if k != "CINEMA_SCREENING_STAGE"}
         with patch.dict(os.environ, env, clear=True):
-            assert _screening_stage_enabled() is False
+            assert _screening_stage_enabled() is True
 
-    @pytest.mark.parametrize("value", ["1", "true", "True", "TRUE", "yes", "YES"])
-    def test_flag_on_truthy_values(self, value):
+    @pytest.mark.parametrize("value", ["1", "true", "True", "TRUE", "yes", "YES", "on", "anything-truthy"])
+    def test_flag_on_for_non_opt_out_values(self, value):
+        """Any value not in the explicit opt-out set leaves the flag enabled."""
         with patch.dict(os.environ, {"CINEMA_SCREENING_STAGE": value}):
             assert _screening_stage_enabled() is True
 
-    @pytest.mark.parametrize("value", ["0", "false", "no", "", "off", "True ", " 1"])
-    def test_flag_off_falsy_or_unrecognised_values(self, value):
-        # Trailing whitespace is stripped by the helper; leading
-        # whitespace is also stripped. " 1" / "True " ARE truthy because
-        # of the .strip() -- include them in the truthy-args param if
-        # the helper-shape semantics change.
+    @pytest.mark.parametrize("value", ["0", "false", "no", "FALSE", "No", " 0", "false "])
+    def test_flag_off_for_explicit_opt_out_values(self, value):
+        """Explicit opt-out values disable the flag.
+
+        Whitespace is stripped by the helper so `" 0"` / `"false "` still
+        parse as opt-out. Whitespace tolerance matches
+        ``_directorial_iteration_enabled()`` exactly.
+        """
         with patch.dict(os.environ, {"CINEMA_SCREENING_STAGE": value}):
-            if value.strip().lower() in {"1", "true", "yes"}:
-                # whitespace-tolerated values should still parse as on
-                assert _screening_stage_enabled() is True
-            else:
-                assert _screening_stage_enabled() is False
+            assert _screening_stage_enabled() is False
 
 
 # ---------------------------------------------------------------------------

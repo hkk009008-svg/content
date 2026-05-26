@@ -3,7 +3,7 @@
 **Author:** Director-seat (cycle 10, 2026-05-26)
 **For:** Operator-seat OR user-principal (whichever picks up first)
 **Companion:** [docs/POST-ROADMAP-2026-05-24.md](POST-ROADMAP-2026-05-24.md) §"Surface A + B operator validation"
-**Status:** Drafted; not yet executed
+**Status:** EXECUTED cycle-10 — Val#1 + Val#2 reports landed; V1 + U1 folds shipped; user-principal flag-flip authorized at v5.1+ ship (2026-05-26). **Both feature flags now default-ON; the `=1` env-var instructions in §2-4 below are no-op equivalents post-flip but remain accurate for re-running the brief cold.** Brief retained as template for future cycle-end validation passes; opt-out is `CINEMA_*=0`.
 
 > Surface A (`CINEMA_DIRECTORIAL_ITERATION`, cycles 8-9 / S15-S18)
 > and Surface B (`CINEMA_SCREENING_STAGE`, cycle 9 / S19-S21) are

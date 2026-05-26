@@ -1548,8 +1548,10 @@ def api_iterate_take(pid, shot_id, take_id):
     Accepts an operator's directorial intent (DirectorialIntent JSON body),
     calls ``ShotController.regenerate_with_intent``, and returns the new take.
 
-    Feature-flagged behind CINEMA_DIRECTORIAL_ITERATION=1|true|yes.
-    Returns 404 when the flag is off (mirrors §7.7.3 endpoint-level gate).
+    Feature-flagged behind CINEMA_DIRECTORIAL_ITERATION. Default ON as
+    of v5.1+ flag-flip (2026-05-26); set ``CINEMA_DIRECTORIAL_ITERATION=0``
+    to opt out. Returns 404 when explicitly disabled (mirrors §7.7.3
+    endpoint-level gate).
 
     Route is pid-scoped per cycle-6 Lane V F1 convention — `sid` is
     ``shot_{scene}_{i}`` and can collide across projects.
@@ -1564,14 +1566,14 @@ def api_iterate_take(pid, shot_id, take_id):
         }
 
     Response (success): 200 + ``{success: true, take: {...}}``
-    Response (feature off): 404 + ``{error: "..."}``
+    Response (feature disabled): 404 + ``{error: "..."}``
     Response (validation error): 400 + ``{error: "..."}``
     Response (shot/take not found): 404 + ``{error: "..."}``
     Response (downstream error): 409 + ``{error: "..."}``
     """
     from cinema.shots.controller import _directorial_iteration_enabled
     if not _directorial_iteration_enabled():
-        return jsonify({"error": "Directorial iteration not enabled (set CINEMA_DIRECTORIAL_ITERATION=1)"}), 404
+        return jsonify({"error": "Directorial iteration is disabled (unset CINEMA_DIRECTORIAL_ITERATION or set to a non-falsy value)"}), 404
 
     # Mirror every other mutating endpoint's project-busy fence: an iterate
     # call dispatches a long-running LLM + generator pipeline, which must not
@@ -1934,9 +1936,10 @@ def api_proceed_assembly(pid):
 def api_assemble_screen(pid):
     """S19: read-only fetch of the assembled mp4 + per-shot timeline manifest.
 
-    Feature-flagged behind CINEMA_SCREENING_STAGE=1|true|yes.
-    Returns 404 when the flag is off (mirrors §7.7.3 endpoint-level gate
-    convention shared with the directorial-iteration endpoint).
+    Feature-flagged behind CINEMA_SCREENING_STAGE. Default ON as of
+    v5.1+ flag-flip (2026-05-26); set ``CINEMA_SCREENING_STAGE=0`` to opt
+    out. Returns 404 when explicitly disabled (mirrors §7.7.3 endpoint-level
+    gate convention shared with the directorial-iteration endpoint).
 
     Route is pid-scoped per cycle-6 Lane V F1 convention -- no list_projects
     scan; the pid travels through the URL and is the only project the
@@ -1948,7 +1951,7 @@ def api_assemble_screen(pid):
         "timeline_manifest": [{shot_id, scene_id, start_s, end_s,
                                approved_take_id, take_count}, ...],
     }
-    Response (feature off): 404 + {"error": "..."}
+    Response (feature disabled): 404 + {"error": "..."}
     Response (project not found): 404 + {"error": "Project not found"}
     Response (assembled mp4 missing): 409 + {"error": "..."} -- the operator
         called /screen before assembly finished (or after the cinema dir
@@ -1958,7 +1961,7 @@ def api_assemble_screen(pid):
     from cinema.screening import _screening_stage_enabled, _build_timeline_manifest
 
     if not _screening_stage_enabled():
-        return jsonify({"error": "Screening stage not enabled (set CINEMA_SCREENING_STAGE=1)"}), 404
+        return jsonify({"error": "Screening stage is disabled (unset CINEMA_SCREENING_STAGE or set to a non-falsy value)"}), 404
 
     busy_response = _reject_if_project_busy(pid)
     if busy_response:
@@ -2020,11 +2023,12 @@ def api_screening_approve(pid):
     polling at SCREENING wakes up promptly (instead of waiting out the
     next poll_interval tick).
 
-    Feature-flagged behind CINEMA_SCREENING_STAGE=1|true|yes.
-    Returns 404 when the flag is off.
+    Feature-flagged behind CINEMA_SCREENING_STAGE. Default ON as of
+    v5.1+ flag-flip; set ``CINEMA_SCREENING_STAGE=0`` to opt out.
+    Returns 404 when explicitly disabled.
 
     Response (success): 200 + {"success": true, "screening_approved": true}
-    Response (feature off): 404
+    Response (feature disabled): 404
     Response (project not found): 404
     Response (project busy retry-conflict): 409 project_busy
     """
@@ -2035,7 +2039,7 @@ def api_screening_approve(pid):
     )
 
     if not _screening_stage_enabled():
-        return jsonify({"error": "Screening stage not enabled (set CINEMA_SCREENING_STAGE=1)"}), 404
+        return jsonify({"error": "Screening stage is disabled (unset CINEMA_SCREENING_STAGE or set to a non-falsy value)"}), 404
 
     # NOTE: we deliberately do NOT call _reject_if_project_busy here.
     # /screening/approve is the operator's exit-signal for the gate the
@@ -2107,8 +2111,9 @@ def api_assemble_reassemble(pid):
                was missed (e.g. the implementer's best-effort dirty-set
                write swallowed an exception).
 
-    Feature-flagged behind CINEMA_SCREENING_STAGE=1|true|yes.
-    Returns 404 when the flag is off.
+    Feature-flagged behind CINEMA_SCREENING_STAGE. Default ON as of
+    v5.1+ flag-flip; set ``CINEMA_SCREENING_STAGE=0`` to opt out.
+    Returns 404 when explicitly disabled.
 
     Response (success): 200 + {
         "success": true,
@@ -2117,7 +2122,7 @@ def api_assemble_reassemble(pid):
         "cost_estimate_seconds": float,         # the pre-run estimate
         "skipped": bool                         # True iff short-circuited
     }
-    Response (feature off): 404
+    Response (feature disabled): 404
     Response (project not found): 404
     Response (re-assembly already in flight for this project): 409 reassembly_busy
     Response (no approved takes / assembly error): 409
@@ -2137,7 +2142,7 @@ def api_assemble_reassemble(pid):
     )
 
     if not _screening_stage_enabled():
-        return jsonify({"error": "Screening stage not enabled (set CINEMA_SCREENING_STAGE=1)"}), 404
+        return jsonify({"error": "Screening stage is disabled (unset CINEMA_SCREENING_STAGE or set to a non-falsy value)"}), 404
 
     # See module-level _reassembly_in_flight comment for why we don't
     # call _reject_if_project_busy here. Re-entrancy is the actual concern.

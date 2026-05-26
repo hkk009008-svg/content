@@ -98,12 +98,18 @@ from lip_sync import (
 
 
 def _directorial_iteration_enabled() -> bool:
-    """Feature flag: CINEMA_DIRECTORIAL_ITERATION=1|true|yes enables S16+ iteration endpoints.
+    """Feature flag: CINEMA_DIRECTORIAL_ITERATION controls S16+ iteration endpoints.
 
-    Per §7.7.3 convention. Default off — flag must be set explicitly.
+    Default ON as of v5.1+ flag-flip (2026-05-26 user-principal authorization;
+    operator + director joint flag-flip-recommended per Val#1 V4 LIVE 7/7 +
+    Val#1 V8 verb-routing + Val#2 U6 render conditions). Set
+    ``CINEMA_DIRECTORIAL_ITERATION=0|false|no`` to opt out (e.g., a
+    deployment that needs the pre-S16 endpoint behavior).
+
+    Read at each call so dynamic env mutation is observable without restart.
     """
-    return os.environ.get("CINEMA_DIRECTORIAL_ITERATION", "").strip().lower() in {
-        "1", "true", "yes"
+    return os.environ.get("CINEMA_DIRECTORIAL_ITERATION", "").strip().lower() not in {
+        "0", "false", "no",
     }
 
 from cinema.lifecycle import LifecycleService
