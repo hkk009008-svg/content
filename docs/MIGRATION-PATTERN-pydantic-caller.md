@@ -282,6 +282,103 @@ future Scene field adds a custom validator that reorders, the index
 parity breaks and the dict-write would write to the wrong scene. Pin
 this invariant with a regression test if list order ever matters.
 
+### Variant 1 sub-pattern: inner-only (no-prior-load case)
+
+_Codified 2026-05-27 cycle-12 from cluster M1 (Lane V #12 broad-A) +
+M-1 + M-2 (Lane V #13 operator-side broad-B). Closes the "outer-
+omitted" terminology gap surfaced across both Lane V dispatches._
+
+**When:** the call site has NO `load_project()` preamble — route
+handlers that go directly to `mutate_project(pid, ...)` without
+first loading the dict, OR helper functions that take a `project_id:
+str` and have no project dict at their boundary. Outer boundary
+validate is not structurally available; inner validate alone
+preserves race-protection because it runs on the lock-held snapshot.
+
+**Shape:**
+
+```python
+def api_<endpoint>(pid):
+    # NO load_project(pid) preamble; no outer Project.model_validate(...)
+    # available at the route boundary.
+
+    def _mutator(latest_project: dict):
+        # P1-3 sub-pattern (Variant 1 inner-only, no prior load):
+        # inner validate is the race-protection point.
+        # `Project.model_validate(latest_project)` runs on the lock-held
+        # snapshot; raises ValidationError unconditionally on shape
+        # mismatch. Outer boundary validate is OMITTED because no prior
+        # load exists at the route scope.
+        Project.model_validate(latest_project)
+        # ... existing dict-write logic (Variant 1 simplified OR full) ...
+        return MutationResult(...)
+
+    result = mutate_project(pid, _mutator)
+    # ... existing response handling ...
+```
+
+**Race-protection equivalence to full Variant 1:** the canonical
+Variant 1 shape uses outer + inner validate, but the outer is a
+fast-fail optimization (avoid lock acquisition for a doomed mutation),
+NOT a race-protection requirement. The inner validate on the lock-
+held snapshot is what preserves the race-protection contract. When
+no outer validate is available, the inner alone is sufficient.
+
+### Base sub-pattern: validate-inside-mutator (no-prior-load case)
+
+_Codified 2026-05-27 cycle-12 from M-1 (Lane V #13 operator-side
+broad-B Site #14 brief-spec terminology gap)._
+
+**When:** the call site is read-only (Base; `save=False` always) AND
+has no prior `load_project()` preamble. Place a SINGLE
+`Project.model_validate(...)` inside the mutator function body (the
+lock-held snapshot point). This is functionally equivalent to outer-
+validate-then-read because the lock holds the snapshot stable from
+validate-call through return.
+
+**Shape:**
+
+```python
+def api_<readonly_endpoint>(pid, target_id):
+    # NO load_project(pid) preamble.
+
+    def _resolver(latest_project: dict):
+        # P1-3 Base sub-pattern (no-prior-load): single validate
+        # inside the mutator; lock-held snapshot is the validation
+        # point. save=False always — read-only resolver shape.
+        Project.model_validate(latest_project)
+        # ... existing read logic ...
+        return MutationResult(<derived_value>, save=False)
+
+    result = mutate_project(pid, _resolver)
+    # ... use result downstream ...
+```
+
+**Important terminology note:** the "single validate inside the
+mutator" for the Base sub-pattern is NOT the same as the "inner
+validate" of Variant 1. There is no outer validate to pair with; the
+single validate IS the boundary validate, just located inside the
+mutator scope due to no-prior-load. Briefs that say "no inner validate"
+for Base sites should be read as "no inner validate in the V1-paired
+sense" — a single boundary validate at the lock-held snapshot is the
+correct shape.
+
+**Canonical sites of inner-only / no-prior-load patterns:**
+
+| Site | Shape | Reason |
+|---|---|---|
+| `cinema/screening.py::mark_screening_approved` (broad-A site #1) | V1 simplified inner-only | Takes `project_id: str`, not project dict |
+| `cinema/screening.py::mark_shot_needs_reassembly` (broad-A site #2) | V1 simplified inner-only | Takes `project_id: str` |
+| `cinema/screening.py::clear_needs_reassembly` (broad-A site #3) | V1 simplified inner-only | Takes `project_id: str` |
+| `cinema_pipeline.py::_persist_style_rules` (broad-A site #5) | V1 simplified inner-only | Helper called inside `start_pipeline`; outer validate at caller's scope, not function boundary |
+| `domain/location_manager.py::get_location_prompt::_mutate` (broad-A site #6) | V1 mixed-shape inner-only | Helper called from many sites; cannot assume caller pre-validates |
+| `web_server.py::api_update_project` (broad-B L485) | V1 simplified inner-only | Direct POST endpoint, no prior load |
+| `web_server.py::api_train_lora::_runner` (broad-B L691) | V1 simplified inner-only | Background thread; closure captures pid |
+| `web_server.py::api_reject_auto_approve` (broad-B L1696) | V1 full inner-only | Direct POST, no prior load |
+| `web_server.py::api_update_shot_prompt` (broad-B L1722) | V1 full inner-only | Direct POST, no prior load |
+| `web_server.py::api_update_shot` (broad-B L1761) | V1 full inner-only | Direct POST, no prior load |
+| `web_server.py::api_restart_shot::_resolve_scene_id` (broad-B L1828) | Base no-prior-load | Read-only resolver; no prior load |
+
 **Additional Variant 1 production sites** (F2 uniformity pass — cycle 12):
 
 B-005 part 11 (`c296105`) — `domain/project_manager.py` ×10: `add_character`,
@@ -295,18 +392,29 @@ B-006-broad-A (`5b68776`) — `cinema/screening.py` ×3 (simplified inner-only),
 ×1 (mixed-shape inner-only).
 
 B-006-broad-B (this, P1-3 part 12) — `web_server.py` ×15:
-V1 simplified (×5): `api_apply_language_defaults` (L420), `api_update_project`
-(L485, inner-only; no prior load), `api_train_lora` background `_runner`
-(L691, inner-only; ValidationError swallowed by pre-existing thread handler),
-`api_upload_style_board` (L831), `api_generate_style_rules` (L1301).
-V1 full (×8): `api_update_character` (L607), `api_upload_driving_video` (L772;
-outer already at L789 part 6), `api_clear_performance` (L795),
-`api_update_object` (L956; raw-dict deviation, `extra="allow"`),
-`api_update_location` (L1079; outer already at L1145 part 5),
-`api_reject_auto_approve` (L1696), `api_update_shot_prompt` (L1722),
-`api_update_shot` (L1761).
-Base read-only (×1): `api_restart_shot::_resolve_scene_id` (L1828).
-Mixed-shape conditional (×1): `api_regenerate_shot` (L1863).
+
+V1 simplified (×5):
+- `api_apply_language_defaults` (L420) — full V1 (outer + inner)
+- `api_update_project` (L485) — **inner-only (no-prior-load sub-pattern)**
+- `api_train_lora::_runner` (L691) — **inner-only (no-prior-load sub-pattern; background thread; ValidationError swallowed by pre-existing thread handler per OOS)**
+- `api_upload_style_board` (L831) — full V1 (outer + inner)
+- `api_generate_style_rules` (L1301) — full V1 (outer + inner)
+
+V1 full (×8):
+- `api_update_character` (L607) — full V1
+- `api_upload_driving_video` (L772) — full V1 (outer at L789 part 6; only inner+typed-iterate added)
+- `api_clear_performance` (L795) — full V1
+- `api_update_object` (L956) — full V1 (raw-dict deviation; `extra="allow"`)
+- `api_update_location` (L1079) — full V1 (outer at L1145 part 5; only inner+typed-iterate added)
+- `api_reject_auto_approve` (L1696) — **inner-only (no-prior-load sub-pattern)**
+- `api_update_shot_prompt` (L1722) — **inner-only (no-prior-load sub-pattern)**
+- `api_update_shot` (L1761) — **inner-only (no-prior-load sub-pattern)**
+
+Base sub-pattern (×1):
+- `api_restart_shot::_resolve_scene_id` (L1828) — **Base validate-inside-mutator (no-prior-load sub-pattern; single validate at lock-held snapshot; `save=False` always)**
+
+Mixed-shape conditional (×1):
+- `api_regenerate_shot` (L1863) — Mixed-shape (V1 simplified write path + Base no-write path; both share single inner validate)
 
 ### Variant 2 — Value-preserving-dict-ref (part 10, `1bc9263`)
 
@@ -403,19 +511,27 @@ path + None-on-load-failure path).
 
 | Variant | When | Read-shape | Write-shape | Lock |
 |---|---|---|---|---|
-| Base (S10) | Read-only call sites | Typed attribute access | None | None |
-| Variant 1 (part 9) | Mutator call sites | Typed iterate (outer + inner) | Dict-write under lock | per-project mutate_project lock |
+| Base (S10) | Read-only call sites WITH prior `load_project()` preamble | Outer-validate then typed attribute access | None | None |
+| Base sub-pattern (no-prior-load) | Read-only call sites with NO prior `load_project()` preamble | Single validate inside mutator + typed read | None (`save=False`) | per-project mutate_project lock (acquired for snapshot consistency) |
+| Variant 1 full (part 9) | Mutator call sites WITH prior `load_project()` preamble | Outer + inner validate; typed iterate-for-find | Dict-write under lock at parity index | per-project mutate_project lock |
+| Variant 1 inner-only sub-pattern (cycle-12) | Mutator call sites with NO prior `load_project()` preamble (direct POST handlers; helpers taking `project_id: str`) | Inner validate only; typed iterate (V1 full) or simplified | Dict-write under lock | per-project mutate_project lock |
 | Variant 2 (part 10) | Lookup builders (init or external) | Typed iterate for keys | Dict-ref values (preserved) | None for init; external-writer site adds validate-before-swap discipline |
 
 When choosing a variant, ask:
 
-1. Is the call site read-only? → **Base.**
-2. Is the call site a mutator? → **Variant 1.**
+1. Is the call site read-only?
+   - If YES + `load_project()` preamble available → **Base.**
+   - If YES + NO `load_project()` preamble → **Base sub-pattern (no-prior-load): single validate inside mutator.**
+2. Is the call site a mutator?
+   - If YES + `load_project()` preamble available → **Variant 1 full or simplified** (outer + inner).
+   - If YES + NO `load_project()` preamble (direct POST handler; helper taking `project_id: str`) → **Variant 1 inner-only sub-pattern.**
 3. Is the call site building an id-keyed lookup whose CONSUMERS need
    to see live dict-state via the lookup values? → **Variant 2.**
 4. Is the call site an EXTERNAL writer rebuilding a Variant-2 lookup
    on project reload? → **Variant 2 + validate-before-swap discipline.**
 
-All three variants share the same R12 (brief-level grep-the-writes)
+All variants share the same R12 (brief-level grep-the-writes)
 discipline for symbol verification + the same template-level unhappy-
-path test recipe above.
+path test recipe above. The inner-only sub-patterns preserve the same
+race-protection contract as their full counterparts; the outer validate
+is a fast-fail optimization, NOT a race-protection requirement.
