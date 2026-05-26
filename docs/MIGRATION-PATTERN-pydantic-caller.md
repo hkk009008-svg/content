@@ -282,6 +282,32 @@ future Scene field adds a custom validator that reorders, the index
 parity breaks and the dict-write would write to the wrong scene. Pin
 this invariant with a regression test if list order ever matters.
 
+**Additional Variant 1 production sites** (F2 uniformity pass — cycle 12):
+
+B-005 part 11 (`c296105`) — `domain/project_manager.py` ×10: `add_character`,
+`remove_character`, `add_object`, `remove_object` (raw-dict deviation;
+`extra="allow"`), `add_location`, `remove_location`, `add_scene`,
+`update_scene`, `remove_scene`, `reorder_scenes`.
+
+B-006-broad-A (`5b68776`) — `cinema/screening.py` ×3 (simplified inner-only),
+`cinema/shots/controller.py` ×1 (full; dict-callback API preserved),
+`cinema_pipeline.py` ×1 (simplified inner-only), `domain/location_manager.py`
+×1 (mixed-shape inner-only).
+
+B-006-broad-B (this, P1-3 part 12) — `web_server.py` ×15:
+V1 simplified (×5): `api_apply_language_defaults` (L420), `api_update_project`
+(L485, inner-only; no prior load), `api_train_lora` background `_runner`
+(L691, inner-only; ValidationError swallowed by pre-existing thread handler),
+`api_upload_style_board` (L831), `api_generate_style_rules` (L1301).
+V1 full (×8): `api_update_character` (L607), `api_upload_driving_video` (L772;
+outer already at L789 part 6), `api_clear_performance` (L795),
+`api_update_object` (L956; raw-dict deviation, `extra="allow"`),
+`api_update_location` (L1079; outer already at L1145 part 5),
+`api_reject_auto_approve` (L1696), `api_update_shot_prompt` (L1722),
+`api_update_shot` (L1761).
+Base read-only (×1): `api_restart_shot::_resolve_scene_id` (L1828).
+Mixed-shape conditional (×1): `api_regenerate_shot` (L1863).
+
 ### Variant 2 — Value-preserving-dict-ref (part 10, `1bc9263`)
 
 **When:** the call site builds an id-keyed lookup for downstream

@@ -394,6 +394,14 @@ def api_apply_language_defaults(pid):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
+    # P1-3 part 12 (Variant 1 simplified): outer boundary validate — fail
+    # fast on malformed project before lock acquisition.
+    # Project.model_validate(...) raises ValidationError UNCONDITIONALLY on
+    # shape mismatch (race protection requires deterministic raise; NOT gated
+    # by CINEMA_STRICT_SCHEMA).  See docs/MIGRATION-PATTERN-pydantic-caller.md
+    # §"Variant 1".
+    Project.model_validate(project)  # outer boundary validate
+
     data = request.json or {}
     language = data.get("language") or project.get("global_settings", {}).get("language", "English")
     overwrite = bool(data.get("overwrite_existing", False))
@@ -412,6 +420,13 @@ def api_apply_language_defaults(pid):
 
     def _mutate(latest):
         nonlocal changed_fields
+        # P1-3 part 12 (Variant 1 simplified): inner validate for race
+        # protection — Project.model_validate(...) raises ValidationError
+        # UNCONDITIONALLY on shape mismatch (race protection requires
+        # deterministic raise; NOT gated by CINEMA_STRICT_SCHEMA).  Then
+        # dict-write under the lock.  See docs/MIGRATION-PATTERN-pydantic-
+        # caller.md §"Variant 1".
+        Project.model_validate(latest)
         settings = latest.setdefault("global_settings", {})
         _, changed = merge_language_defaults_into_settings(settings, language, overwrite_existing=overwrite)
         changed_fields = changed
@@ -476,6 +491,13 @@ def api_update_project(pid):
     data = request.json or {}
 
     def _mutate_project(project: dict):
+        # P1-3 part 12 (Variant 1 simplified): inner validate for race
+        # protection — Project.model_validate(...) raises ValidationError
+        # UNCONDITIONALLY on shape mismatch (race protection requires
+        # deterministic raise; NOT gated by CINEMA_STRICT_SCHEMA).  Then
+        # dict-write under the lock.  See docs/MIGRATION-PATTERN-pydantic-
+        # caller.md §"Variant 1".
+        Project.model_validate(project)
         if "name" in data:
             project["name"] = data["name"]
         if "global_settings" in data:
@@ -557,6 +579,14 @@ def api_update_character(pid, cid):
     project = load_project(pid)
     if not project:
         return jsonify({"error": "Project not found"}), 404
+
+    # P1-3 part 12 (Variant 1 full): outer boundary validate — fail fast
+    # on malformed project before lock acquisition.
+    # Project.model_validate(...) raises ValidationError UNCONDITIONALLY
+    # on shape mismatch (race protection requires deterministic raise; NOT
+    # gated by CINEMA_STRICT_SCHEMA).  See docs/MIGRATION-PATTERN-pydantic-
+    # caller.md §"Variant 1".
+    Project.model_validate(project)  # outer boundary validate
     char = next((c for c in project["characters"] if c["id"] == cid), None)
     if not char:
         return jsonify({"error": "Character not found"}), 404
@@ -581,28 +611,33 @@ def api_update_character(pid, cid):
                 saved_paths.append(save_path)
 
     def _mutate_project(latest_project: dict):
-        latest_char = next(
-            (character for character in latest_project["characters"] if character["id"] == cid),
-            None,
-        )
-        if not latest_char:
-            return MutationResult(None, save=False)
-
-        for field in ["name", "description", "voice_id", "physical_traits"]:
-            if field in data:
-                latest_char[field] = data[field]
-        if "ip_adapter_weight" in data:
-            latest_char["ip_adapter_weight"] = float(data["ip_adapter_weight"])
-
-        if saved_paths:
-            refs = latest_char.setdefault("reference_images", [])
-            for save_path in saved_paths:
-                if save_path not in refs:
-                    refs.append(save_path)
-            if not latest_char.get("canonical_reference"):
-                latest_char["canonical_reference"] = saved_paths[0]
-
-        return latest_char
+        # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
+        # for-find.  Project.model_validate(latest_project) validates the
+        # latest snapshot the mutator sees; race protection requires this
+        # deterministic raise on shape mismatch (NOT gated by
+        # CINEMA_STRICT_SCHEMA).  Typed-iterate for FIND; dict-write to
+        # MUTATE under the lock.  Index parity between
+        # latest_typed.characters[i] and latest_project["characters"][i]
+        # is preserved by pydantic list-order invariant (see pattern doc
+        # §"Caveat: pydantic list-order preservation").
+        latest_typed = Project.model_validate(latest_project)
+        for i, char in enumerate(latest_typed.characters):
+            if char.id == cid:
+                latest_char = latest_project["characters"][i]
+                for field in ["name", "description", "voice_id", "physical_traits"]:
+                    if field in data:
+                        latest_char[field] = data[field]
+                if "ip_adapter_weight" in data:
+                    latest_char["ip_adapter_weight"] = float(data["ip_adapter_weight"])
+                if saved_paths:
+                    refs = latest_char.setdefault("reference_images", [])
+                    for save_path in saved_paths:
+                        if save_path not in refs:
+                            refs.append(save_path)
+                    if not latest_char.get("canonical_reference"):
+                        latest_char["canonical_reference"] = saved_paths[0]
+                return latest_char
+        return MutationResult(None, save=False)
 
     updated_char = mutate_project(
         pid,
@@ -683,6 +718,17 @@ def api_train_lora(pid, cid):
             # On success, register the LoRA path in project.global_settings.char_lora_paths
             if result.get("success") and result.get("lora_path"):
                 def _mutate(latest):
+                    # P1-3 part 12 (Variant 1 simplified): inner validate for
+                    # race protection — Project.model_validate(...) raises
+                    # ValidationError UNCONDITIONALLY on shape mismatch (race
+                    # protection requires deterministic raise; NOT gated by
+                    # CINEMA_STRICT_SCHEMA).  NOTE: this mutator runs in a
+                    # background thread; ValidationError-on-shape-mismatch will
+                    # be silently logged via the existing [LoRA] print handler
+                    # below (pre-existing exception swallow, not B-006-broad-B
+                    # scope to change).  See docs/MIGRATION-PATTERN-pydantic-
+                    # caller.md §"Variant 1".
+                    Project.model_validate(latest)
                     settings = latest.setdefault("global_settings", {})
                     paths = settings.setdefault("char_lora_paths", {})
                     paths[cid] = result["lora_path"]
@@ -759,13 +805,23 @@ def api_upload_driving_video(pid, sid):
     file_obj.save(dest_path)
 
     def _mutate(latest):
-        for scn in latest.get("scenes", []):
-            for shot in scn.get("shots", []):
-                if shot.get("id") == sid:
-                    shot["driving_video_path"] = dest_path
+        # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
+        # for-find.  Project.model_validate(latest) validates the latest
+        # snapshot the mutator sees; race protection requires this
+        # deterministic raise on shape mismatch (NOT gated by
+        # CINEMA_STRICT_SCHEMA).  Typed-iterate for FIND; dict-write to
+        # MUTATE under the lock.  Index parity between
+        # latest_typed.scenes[i].shots[j] and latest["scenes"][i]["shots"][j]
+        # is preserved by pydantic list-order invariant (see pattern doc
+        # §"Caveat: pydantic list-order preservation").
+        latest_typed = Project.model_validate(latest)
+        for i, scn in enumerate(latest_typed.scenes):
+            for j, shot in enumerate(scn.shots):
+                if shot.id == sid:
+                    latest["scenes"][i]["shots"][j]["driving_video_path"] = dest_path
                     # Clear any prior auto-skip so the next run actually generates
-                    if shot.get("performance_engine", "").upper() == "SKIP":
-                        shot["performance_engine"] = ""
+                    if (latest["scenes"][i]["shots"][j].get("performance_engine", "") or "").upper() == "SKIP":
+                        latest["scenes"][i]["shots"][j]["performance_engine"] = ""
                     return MutationResult(dest_path, save=True)
         return MutationResult(None, save=False)
 
@@ -783,12 +839,29 @@ def api_clear_performance(pid, sid):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
+    # P1-3 part 12 (Variant 1 full): outer boundary validate — fail fast
+    # on malformed project before lock acquisition.
+    # Project.model_validate(...) raises ValidationError UNCONDITIONALLY
+    # on shape mismatch (race protection requires deterministic raise; NOT
+    # gated by CINEMA_STRICT_SCHEMA).  See docs/MIGRATION-PATTERN-pydantic-
+    # caller.md §"Variant 1".
+    Project.model_validate(project)  # outer boundary validate
+
     def _mutate(latest):
-        for scn in latest.get("scenes", []):
-            for shot in scn.get("shots", []):
-                if shot.get("id") == sid:
-                    shot["approved_performance_take_id"] = ""
-                    shot["performance_engine"] = ""
+        # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
+        # for-find.  Project.model_validate(latest) validates the latest
+        # snapshot the mutator sees; race protection requires this
+        # deterministic raise on shape mismatch (NOT gated by
+        # CINEMA_STRICT_SCHEMA).  Typed-iterate for FIND; dict-write to
+        # MUTATE under the lock.  Index parity between
+        # latest_typed.scenes[i].shots[j] and latest["scenes"][i]["shots"][j]
+        # is preserved by pydantic list-order invariant.
+        latest_typed = Project.model_validate(latest)
+        for i, scn in enumerate(latest_typed.scenes):
+            for j, shot in enumerate(scn.shots):
+                if shot.id == sid:
+                    latest["scenes"][i]["shots"][j]["approved_performance_take_id"] = ""
+                    latest["scenes"][i]["shots"][j]["performance_engine"] = ""
                     return MutationResult(True, save=True)
         return MutationResult(None, save=False)
 
@@ -812,6 +885,14 @@ def api_upload_style_board(pid):
     style_dir = os.path.join(project_dir, "style_board")
     os.makedirs(style_dir, exist_ok=True)
 
+    # P1-3 part 12 (Variant 1 simplified): outer boundary validate — fail
+    # fast on malformed project before lock acquisition.
+    # Project.model_validate(...) raises ValidationError UNCONDITIONALLY
+    # on shape mismatch (race protection requires deterministic raise; NOT
+    # gated by CINEMA_STRICT_SCHEMA).  See docs/MIGRATION-PATTERN-pydantic-
+    # caller.md §"Variant 1".
+    Project.model_validate(project)  # outer boundary validate
+
     saved = []
     for f in images:
         if f.filename:
@@ -821,6 +902,13 @@ def api_upload_style_board(pid):
             saved.append(path)
 
     def _mutate(latest):
+        # P1-3 part 12 (Variant 1 simplified): inner validate for race
+        # protection — Project.model_validate(...) raises ValidationError
+        # UNCONDITIONALLY on shape mismatch (race protection requires
+        # deterministic raise; NOT gated by CINEMA_STRICT_SCHEMA).  Then
+        # dict-write under the lock.  See docs/MIGRATION-PATTERN-pydantic-
+        # caller.md §"Variant 1".
+        Project.model_validate(latest)
         settings = latest.setdefault("global_settings", {})
         refs = settings.setdefault("style_reference_paths", [])
         for p in saved:
@@ -911,6 +999,14 @@ def api_update_object(pid, oid):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
+    # P1-3 part 12 (Variant 1 full): outer boundary validate — fail fast
+    # on malformed project before lock acquisition.
+    # Project.model_validate(...) raises ValidationError UNCONDITIONALLY
+    # on shape mismatch (race protection requires deterministic raise; NOT
+    # gated by CINEMA_STRICT_SCHEMA).  See docs/MIGRATION-PATTERN-pydantic-
+    # caller.md §"Variant 1".
+    Project.model_validate(project)  # outer boundary validate
+
     obj = get_object(project, oid)
     if not obj:
         return jsonify({"error": "Object not found"}), 404
@@ -931,6 +1027,15 @@ def api_update_object(pid, oid):
                 saved_paths.append(save_path)
 
     def _mutate_project(latest_project: dict):
+        # P1-3 part 12 (Variant 1 full, remove_object deviation): inner
+        # validate for race protection — Project.model_validate(latest_project)
+        # raises ValidationError UNCONDITIONALLY on shape mismatch (NOT gated
+        # by CINEMA_STRICT_SCHEMA).  Typed-iterate-for-find is NOT applicable
+        # for objects: Project.extra="allow" stores objects as raw dicts (no
+        # typed List[Object]), so items are accessed via dict-style o["id"]
+        # comparison — mirrors B-005's remove_object deviation at c296105.
+        # Race protection from inner validate is preserved regardless.
+        Project.model_validate(latest_project)
         latest_obj = next(
             (o for o in latest_project.get("objects", []) if o["id"] == oid),
             None,
@@ -1057,24 +1162,30 @@ def api_update_location(pid, lid):
                 saved_paths.append(save_path)
 
     def _mutate_project(latest_project: dict):
-        latest_location = next(
-            (location for location in latest_project["locations"] if location["id"] == lid),
-            None,
-        )
-        if not latest_location:
-            return MutationResult(None, save=False)
-
-        for field in ["name", "description", "lighting", "time_of_day", "weather"]:
-            if field in data:
-                latest_location[field] = data[field]
-
-        if saved_paths:
-            refs = latest_location.setdefault("reference_images", [])
-            for save_path in saved_paths:
-                if save_path not in refs:
-                    refs.append(save_path)
-
-        return latest_location
+        # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
+        # for-find.  Project.model_validate(latest_project) validates the
+        # latest snapshot the mutator sees; race protection requires this
+        # deterministic raise on shape mismatch (NOT gated by
+        # CINEMA_STRICT_SCHEMA).  Outer boundary validate ALREADY exists at
+        # the P1-3 part 5 migration above (Project.model_validate(project));
+        # do NOT add a second outer validate here.  Typed-iterate for FIND;
+        # dict-write to MUTATE under the lock.  Index parity between
+        # latest_typed.locations[i] and latest_project["locations"][i] is
+        # preserved by pydantic list-order invariant.
+        latest_typed = Project.model_validate(latest_project)
+        for i, loc in enumerate(latest_typed.locations):
+            if loc.id == lid:
+                latest_location = latest_project["locations"][i]
+                for field in ["name", "description", "lighting", "time_of_day", "weather"]:
+                    if field in data:
+                        latest_location[field] = data[field]
+                if saved_paths:
+                    refs = latest_location.setdefault("reference_images", [])
+                    for save_path in saved_paths:
+                        if save_path not in refs:
+                            refs.append(save_path)
+                return latest_location
+        return MutationResult(None, save=False)
 
     updated_location = mutate_project(
         pid,
@@ -1280,6 +1391,14 @@ def api_generate_style_rules(pid):
     if not project:
         return jsonify({"error": "Project not found"}), 404
 
+    # P1-3 part 12 (Variant 1 simplified): outer boundary validate — fail
+    # fast on malformed project before lock acquisition.
+    # Project.model_validate(...) raises ValidationError UNCONDITIONALLY
+    # on shape mismatch (race protection requires deterministic raise; NOT
+    # gated by CINEMA_STRICT_SCHEMA).  See docs/MIGRATION-PATTERN-pydantic-
+    # caller.md §"Variant 1".
+    Project.model_validate(project)  # outer boundary validate
+
     data = request.json or {}
     settings = project.get("global_settings", {})
 
@@ -1294,6 +1413,13 @@ def api_generate_style_rules(pid):
     )
 
     def _mutate_project(latest_project: dict):
+        # P1-3 part 12 (Variant 1 simplified): inner validate for race
+        # protection — Project.model_validate(...) raises ValidationError
+        # UNCONDITIONALLY on shape mismatch (race protection requires
+        # deterministic raise; NOT gated by CINEMA_STRICT_SCHEMA).  Then
+        # dict-write under the lock.  See docs/MIGRATION-PATTERN-pydantic-
+        # caller.md §"Variant 1".
+        Project.model_validate(latest_project)
         latest_settings = latest_project.setdefault("global_settings", {})
         latest_settings["style_rules"] = rules
         return latest_settings["style_rules"]
@@ -1685,11 +1811,24 @@ def api_reject_auto_approve(pid, shot_id):
     flag_key = f"{gate}_auto_approved"
 
     def _mutate_project(project: dict):
-        for scene in project.get("scenes", []):
-            for shot in scene.get("shots", []):
-                if shot.get("id") == shot_id:
-                    shot.setdefault("auto_approve_audit", []).append(audit_entry)
-                    shot[flag_key] = False
+        # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
+        # for-find.  Project.model_validate(project) validates the latest
+        # snapshot the mutator sees; race protection requires this
+        # deterministic raise on shape mismatch (NOT gated by
+        # CINEMA_STRICT_SCHEMA).  Typed-iterate for FIND (using scene.shots
+        # typed attribute); dict-write to MUTATE under the lock.  Dynamic key
+        # flag_key = f"{gate}_auto_approved" is computed in the outer scope;
+        # dict-write via shot_dict[flag_key] preserves the string-key dynamic
+        # dispatch.  Index parity between latest_typed.scenes[i].shots[j] and
+        # project["scenes"][i]["shots"][j] is preserved by pydantic list-order
+        # invariant.
+        latest_typed = Project.model_validate(project)
+        for i, scene in enumerate(latest_typed.scenes):
+            for j, shot in enumerate(scene.shots):
+                if shot.id == shot_id:
+                    shot_dict = project["scenes"][i]["shots"][j]
+                    shot_dict.setdefault("auto_approve_audit", []).append(audit_entry)
+                    shot_dict[flag_key] = False
                     return MutationResult({"shot_id": shot_id, "gate": gate}, save=True)
         return MutationResult(False, save=False)
 
@@ -1712,10 +1851,19 @@ def api_update_shot_prompt(pid, shot_id):
     new_prompt = request.json.get("prompt", "")
 
     def _mutate_project(project: dict):
-        for scene in project["scenes"]:
-            for shot in scene.get("shots", []):
-                if shot.get("id") == shot_id:
-                    shot["prompt"] = new_prompt
+        # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
+        # for-find.  Project.model_validate(project) validates the latest
+        # snapshot the mutator sees; race protection requires this
+        # deterministic raise on shape mismatch (NOT gated by
+        # CINEMA_STRICT_SCHEMA).  Typed-iterate for FIND; dict-write to
+        # MUTATE under the lock.  Index parity between
+        # latest_typed.scenes[i].shots[j] and project["scenes"][i]["shots"][j]
+        # is preserved by pydantic list-order invariant.
+        latest_typed = Project.model_validate(project)
+        for i, scene in enumerate(latest_typed.scenes):
+            for j, shot in enumerate(scene.shots):
+                if shot.id == shot_id:
+                    project["scenes"][i]["shots"][j]["prompt"] = new_prompt
                     return True
         return MutationResult(False, save=False)
 
@@ -1751,10 +1899,20 @@ def api_update_shot(pid, shot_id):
         return jsonify({"error": f"Invalid target_api. Must be one of: {TARGET_APIS}"}), 400
 
     def _mutate_project(project: dict):
-        for scene in project["scenes"]:
-            for shot in scene.get("shots", []):
-                if shot.get("id") == shot_id:
-                    shot.update(updates)
+        # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
+        # for-find.  Project.model_validate(project) validates the latest
+        # snapshot the mutator sees; race protection requires this
+        # deterministic raise on shape mismatch (NOT gated by
+        # CINEMA_STRICT_SCHEMA).  Typed-iterate for FIND; dict-write to
+        # MUTATE under the lock.  updates are pre-filtered against
+        # allowed_fields in outer scope.  Index parity between
+        # latest_typed.scenes[i].shots[j] and project["scenes"][i]["shots"][j]
+        # is preserved by pydantic list-order invariant.
+        latest_typed = Project.model_validate(project)
+        for i, scene in enumerate(latest_typed.scenes):
+            for j, shot in enumerate(scene.shots):
+                if shot.id == shot_id:
+                    project["scenes"][i]["shots"][j].update(updates)
                     return True
         return MutationResult(False, save=False)
 
@@ -1819,6 +1977,15 @@ def api_restart_shot(pid, shot_id):
     negative_prompt = (payload or {}).get("negative_prompt")
 
     def _resolve_scene_id(project: dict):
+        # P1-3 part 12 (Base read-only): boundary validate on the locked
+        # snapshot — Project.model_validate(...) raises ValidationError
+        # UNCONDITIONALLY on shape mismatch (race protection requires
+        # deterministic raise; NOT gated by CINEMA_STRICT_SCHEMA).  No inner
+        # validate required (save=False; no dict-write under lock).  Raw-dict
+        # double-loop preserved (read-only; typed-iterate not required per
+        # pattern doc §"Base read-only").  See docs/MIGRATION-PATTERN-
+        # pydantic-caller.md §"Pattern variants" / Base entry.
+        Project.model_validate(project)
         for scene in project["scenes"]:
             for shot in scene.get("shots", []):
                 if shot.get("id") == shot_id:
@@ -1851,6 +2018,18 @@ def api_regenerate_shot(pid, shot_id):
     new_prompt = request.json.get("positive_prompt") if request.is_json else None
 
     def _mutate_project(project: dict):
+        # P1-3 part 12 (Mixed-shape conditional): inner validate is required
+        # UNCONDITIONALLY because the write path (new_prompt set) does
+        # dict-write under lock and needs race protection on the latest
+        # snapshot shape.  The no-write path benefits from the same validate
+        # for consistency (cheap; ~1-2ms per call).
+        # Project.model_validate(...) raises ValidationError UNCONDITIONALLY
+        # on shape mismatch (NOT gated by CINEMA_STRICT_SCHEMA).
+        # Write path: returns scene["id"] as a raw str (mutate_project
+        # treats non-MutationResult truthy returns as save=True).
+        # No-write path: returns MutationResult(scene["id"], save=False).
+        # See docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1".
+        Project.model_validate(project)
         for scene in project["scenes"]:
             for shot in scene.get("shots", []):
                 if shot.get("id") == shot_id:
