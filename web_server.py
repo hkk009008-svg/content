@@ -4,6 +4,7 @@ Dashboard API with SSE streaming for real-time generation progress.
 Serves the React frontend and exposes all project/character/location/scene endpoints.
 """
 
+import logging
 import os
 import warnings
 from functools import wraps
@@ -26,6 +27,8 @@ if _homebrew_bin not in os.environ.get("PATH", ""):
 from cinema.logging_config import setup_logging  # noqa: E402
 
 setup_logging()
+
+logger = logging.getLogger(__name__)
 
 import json
 import threading
@@ -735,8 +738,11 @@ def api_train_lora(pid, cid):
                     return MutationResult(True, save=True)
                 try:
                     mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)
-                except Exception as me:
-                    print(f"[LoRA] could not persist lora_path to settings: {me}")
+                except Exception:
+                    logger.error(
+                        "[LoRA] could not persist lora_path to settings (pid=%s cid=%s)",
+                        pid, cid, exc_info=True,
+                    )
         finally:
             with _lora_training_lock:
                 _lora_training_threads.pop(key, None)
