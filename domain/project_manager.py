@@ -758,9 +758,19 @@ def remove_character(project: dict, char_id: str, timeout: float = 10) -> bool:
 
 
 def get_character(project: dict, char_id: str) -> Optional[dict]:
-    for c in project["characters"]:
-        if c["id"] == char_id:
-            return c
+    # P1-3 migration template (S10): validate at boundary, then iterate
+    # typed for the id comparison. Return type stays Optional[dict] —
+    # callers (domain/character_manager.py:343/380/418/429,
+    # cinema/* code) use dict-attribute access on the return; tests
+    # use `is c` identity comparison. We return the original dict
+    # reference (project["characters"][i]), not a fresh model_dump —
+    # full caller-side migration would be a separate cycle-10+ slice.
+    # See docs/MIGRATION-PATTERN-pydantic-caller.md for the full recipe.
+    from domain.models import Project as _Project
+    project_typed = _Project.model_validate(project)
+    for i, c in enumerate(project_typed.characters):
+        if c.id == char_id:
+            return project["characters"][i]
     return None
 
 
@@ -822,9 +832,16 @@ def remove_location(project: dict, loc_id: str, timeout: float = 10) -> bool:
 
 
 def get_location(project: dict, loc_id: str) -> Optional[dict]:
-    for l in project["locations"]:
-        if l["id"] == loc_id:
-            return l
+    # P1-3 migration template (S10): parallel to get_character above.
+    # Return type stays Optional[dict] for caller-identity preservation
+    # (domain/location_manager.py callers + tests use `is loc`). See
+    # the get_character migration block + docs/MIGRATION-PATTERN-
+    # pydantic-caller.md for the full recipe.
+    from domain.models import Project as _Project
+    project_typed = _Project.model_validate(project)
+    for i, l in enumerate(project_typed.locations):
+        if l.id == loc_id:
+            return project["locations"][i]
     return None
 
 
