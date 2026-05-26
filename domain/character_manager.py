@@ -84,7 +84,15 @@ VOICE_POOL = [
 
 # Track which voices are already assigned in a project to avoid duplicates
 def _get_used_voices(project: dict) -> set:
-    return {c["voice_id"] for c in project["characters"] if c.get("voice_id")}
+    # P1-3 migration template (Session 10 / S10): validate to Pydantic at
+    # the function boundary, then access via attributes. Cycle-10 first
+    # post-S10 caller migration; see docs/MIGRATION-PATTERN-pydantic-caller.md
+    # for the full recipe. Character.voice_id defaults to "" (Pydantic field
+    # default; domain/models.py:145), which is falsy — so `if c.voice_id`
+    # is semantically identical to the legacy `c.get("voice_id")` check.
+    from domain.models import Project as _Project
+    project_typed = _Project.model_validate(project)
+    return {c.voice_id for c in project_typed.characters if c.voice_id}
 
 
 def _char_dir(project_id: str, char_id: str) -> str:
