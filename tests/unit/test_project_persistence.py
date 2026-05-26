@@ -89,8 +89,8 @@ class ProjectPersistenceBase(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tempdir.cleanup)
-        self.projects_patch = mock.patch.object(
-            project_manager, "PROJECTS_DIR", self.tempdir.name
+        self.projects_patch = mock.patch(
+            "domain.project_manager.PROJECTS_DIR", self.tempdir.name
         )
         self.projects_patch.start()
         self.addCleanup(self.projects_patch.stop)

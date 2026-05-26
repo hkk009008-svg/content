@@ -627,50 +627,70 @@ def test_wait_for_gate_auto_resolves_on_predicate_satisfaction():
     """Phase 2 contract: _wait_for_gate uses lifecycle.wait_for_gate
     (predicate-poll). When predicate becomes True, gate unblocks
     without an explicit Resume click."""
+    import domain.project_manager as dpm
     with tempfile.TemporaryDirectory() as tmpdir:
         lifecycle = ThreadedLifecycle()
         host, _, core, _ = _make_setup(tmpdir, lifecycle=lifecycle)
-        # Start with unapproved shot
-        core.project["scenes"][0]["shots"][0]["plan_status"] = "pending"
+        # Patch PROJECTS_DIR so _run_auto_approve_pass -> _mutate_shot ->
+        # mutate_project doesn't create an empty dir in domain/projects/.
+        _orig_pdir = dpm.PROJECTS_DIR
+        fake_projects = os.path.join(tmpdir, "projects")
+        os.makedirs(fake_projects, exist_ok=True)
+        dpm.PROJECTS_DIR = fake_projects
+        try:
+            # Start with unapproved shot
+            core.project["scenes"][0]["shots"][0]["plan_status"] = "pending"
 
-        result_holder = {}
-        def gate_worker():
-            result_holder["out"] = host._review_ctrl._wait_for_gate("PLAN_REVIEW", "detail", 25)
+            result_holder = {}
+            def gate_worker():
+                result_holder["out"] = host._review_ctrl._wait_for_gate("PLAN_REVIEW", "detail", 25)
 
-        t = threading.Thread(target=gate_worker, daemon=True)
-        t.start()
-        time.sleep(0.2)
-        assert t.is_alive(), "gate-wait should be blocking"
+            t = threading.Thread(target=gate_worker, daemon=True)
+            t.start()
+            time.sleep(0.2)
+            assert t.is_alive(), "gate-wait should be blocking"
 
-        # Approve all
-        core.project["scenes"][0]["shots"][0]["plan_status"] = "approved"
-        core.project["scenes"][0]["shots"][1]["plan_status"] = "approved"
-        t.join(timeout=2.0)
+            # Approve all
+            core.project["scenes"][0]["shots"][0]["plan_status"] = "approved"
+            core.project["scenes"][0]["shots"][1]["plan_status"] = "approved"
+            t.join(timeout=2.0)
 
-        assert not t.is_alive(), "gate-wait did not return after predicate satisfied"
-        assert result_holder["out"] is True
+            assert not t.is_alive(), "gate-wait did not return after predicate satisfied"
+            assert result_holder["out"] is True
+        finally:
+            dpm.PROJECTS_DIR = _orig_pdir
 
 
 def test_wait_for_gate_returns_false_on_cancel():
     """lifecycle.cancel() causes wait_for_gate to return False."""
+    import domain.project_manager as dpm
     with tempfile.TemporaryDirectory() as tmpdir:
         lifecycle = ThreadedLifecycle()
         host, _, core, _ = _make_setup(tmpdir, lifecycle=lifecycle)
-        # Predicate won't satisfy on its own
-        core.project["scenes"][0]["shots"][0]["plan_status"] = "pending"
+        # Patch PROJECTS_DIR so _run_auto_approve_pass -> _mutate_shot ->
+        # mutate_project doesn't create an empty dir in domain/projects/.
+        _orig_pdir = dpm.PROJECTS_DIR
+        fake_projects = os.path.join(tmpdir, "projects")
+        os.makedirs(fake_projects, exist_ok=True)
+        dpm.PROJECTS_DIR = fake_projects
+        try:
+            # Predicate won't satisfy on its own
+            core.project["scenes"][0]["shots"][0]["plan_status"] = "pending"
 
-        result_holder = {}
-        def gate_worker():
-            result_holder["out"] = host._review_ctrl._wait_for_gate("PLAN_REVIEW", "detail", 25)
+            result_holder = {}
+            def gate_worker():
+                result_holder["out"] = host._review_ctrl._wait_for_gate("PLAN_REVIEW", "detail", 25)
 
-        t = threading.Thread(target=gate_worker, daemon=True)
-        t.start()
-        time.sleep(0.2)
-        lifecycle.cancel()
-        t.join(timeout=2.0)
+            t = threading.Thread(target=gate_worker, daemon=True)
+            t.start()
+            time.sleep(0.2)
+            lifecycle.cancel()
+            t.join(timeout=2.0)
 
-        assert not t.is_alive()
-        assert result_holder["out"] is False
+            assert not t.is_alive()
+            assert result_holder["out"] is False
+        finally:
+            dpm.PROJECTS_DIR = _orig_pdir
 
 
 def test_host_satisfies_runtime_checkable_protocols():

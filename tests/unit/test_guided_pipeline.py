@@ -23,7 +23,7 @@ class GuidedPipelineTestCase(unittest.TestCase):
     def setUp(self):
         self._tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmpdir.cleanup)
-        self._projects_dir_patch = mock.patch.object(project_manager, "PROJECTS_DIR", self._tmpdir.name)
+        self._projects_dir_patch = mock.patch("domain.project_manager.PROJECTS_DIR", self._tmpdir.name)
         self._projects_dir_patch.start()
         self.addCleanup(self._projects_dir_patch.stop)
 
