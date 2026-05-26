@@ -2045,6 +2045,25 @@ def api_screening_approve(pid):
     # mutate_project's per-project file lock, which is the right
     # serialisation primitive here.
 
+    # V1 (Val#1 cycle-10 — operator-validation finding at 18beb92):
+    # precondition check mirroring /assemble/screen's same-condition
+    # check (lines 1980-1987 above). Without this, /screening/approve
+    # cheerfully succeeded on an empty project that never had an
+    # assembled cut — permanently flipping the persistent screening_approved
+    # gate-flag and effectively skipping SCREENING on the next pipeline
+    # run for that project. Defense-in-depth: the UI gates the button
+    # correctly per spec §4.2 step 5, but URL-level callers (curl typos,
+    # scripts, bots) had no backstop.
+    from domain.project_manager import get_project_dir
+    export_dir = os.path.join(get_project_dir(pid), "exports")
+    assembled_path = os.path.join(export_dir, "final_cinema.mp4")
+    if not os.path.exists(assembled_path):
+        return jsonify({
+            "success": False,
+            "error": f"Cannot approve screening; no assembled cut exists at {assembled_path}. Run /assemble/screen first.",
+            "code": "cannot_approve_screening",
+        }), 409
+
     try:
         result = mark_screening_approved(pid)
     except ValueError:

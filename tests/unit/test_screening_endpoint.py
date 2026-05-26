@@ -208,10 +208,39 @@ class TestAssembleScreenEndpoint:
 
 class TestScreeningApproveEndpoint:
     def test_project_not_found_returns_404(self, client, flag_on):
-        with patch("project_manager.mutate_project", return_value=None):
-            resp = client.post("/api/projects/missing-pid/screening/approve")
+        # V1 (cycle-10): with the precondition check landing first, project-
+        # not-found now flows through mark_screening_approved's ValueError
+        # path -- precondition passes (we stub the file), then mutate_project
+        # returns None which surfaces as ValueError -> 404.
+        with tempfile.TemporaryDirectory() as tmpd:
+            os.makedirs(os.path.join(tmpd, "exports"), exist_ok=True)
+            with open(os.path.join(tmpd, "exports", "final_cinema.mp4"), "wb") as f:
+                f.write(b"")
+            with patch("domain.project_manager.get_project_dir", return_value=tmpd), \
+                 patch("project_manager.mutate_project", return_value=None):
+                resp = client.post("/api/projects/missing-pid/screening/approve")
         assert resp.status_code == 404
         assert resp.get_json()["error"] == "Project not found"
+
+    def test_approve_without_assembled_mp4_returns_409(self, client, flag_on):
+        """V1 (Val#1 cycle-10): /screening/approve must check that an
+        assembled cut exists before flipping the persistent gate-flag.
+        Without this, a curl/script/bot POST to /screening/approve on a
+        never-assembled project would permanently bypass SCREENING.
+        """
+        # Tmpdir intentionally LACKS the final_cinema.mp4 file -- precondition
+        # check fires, mutate_project never reached.
+        with tempfile.TemporaryDirectory() as tmpd:
+            # Don't create the exports/final_cinema.mp4 file.
+            with patch("domain.project_manager.get_project_dir", return_value=tmpd):
+                resp = client.post("/api/projects/proj-noscreen/screening/approve")
+
+        assert resp.status_code == 409
+        body = resp.get_json()
+        assert body["success"] is False
+        assert body["code"] == "cannot_approve_screening"
+        assert "no assembled cut exists" in body["error"]
+        assert "Run /assemble/screen first" in body["error"]
 
     def test_happy_path_sets_flag_and_returns_200(self, client, flag_on):
         # Use a real-like fake mutate that returns the mutator's MutationResult value.
@@ -224,8 +253,14 @@ class TestScreeningApproveEndpoint:
                 return result.value
             return result
 
-        with patch("project_manager.mutate_project", side_effect=fake_mutate):
-            resp = client.post("/api/projects/proj-approve/screening/approve")
+        # V1 (cycle-10): stub the assembled mp4 so the precondition passes.
+        with tempfile.TemporaryDirectory() as tmpd:
+            os.makedirs(os.path.join(tmpd, "exports"), exist_ok=True)
+            with open(os.path.join(tmpd, "exports", "final_cinema.mp4"), "wb") as f:
+                f.write(b"")
+            with patch("domain.project_manager.get_project_dir", return_value=tmpd), \
+                 patch("project_manager.mutate_project", side_effect=fake_mutate):
+                resp = client.post("/api/projects/proj-approve/screening/approve")
 
         assert resp.status_code == 200, resp.data
         body = resp.get_json()
@@ -239,10 +274,16 @@ class TestScreeningApproveEndpoint:
         # ignores _running_pipelines membership.
         pid = "proj-busy-approve"
         inject_pipeline(pid, object())
-        with patch("project_manager.mutate_project", return_value={
-            "success": True, "screening_approved": True,
-        }):
-            resp = client.post(f"/api/projects/{pid}/screening/approve")
+        # V1 (cycle-10): stub the assembled mp4 so the precondition passes.
+        with tempfile.TemporaryDirectory() as tmpd:
+            os.makedirs(os.path.join(tmpd, "exports"), exist_ok=True)
+            with open(os.path.join(tmpd, "exports", "final_cinema.mp4"), "wb") as f:
+                f.write(b"")
+            with patch("domain.project_manager.get_project_dir", return_value=tmpd), \
+                 patch("project_manager.mutate_project", return_value={
+                     "success": True, "screening_approved": True,
+                 }):
+                resp = client.post(f"/api/projects/{pid}/screening/approve")
         # 200, NOT 409 project_busy.
         assert resp.status_code == 200
         body = resp.get_json()
@@ -257,10 +298,16 @@ class TestScreeningApproveEndpoint:
 
         pid = "proj-signal"
         inject_pipeline(pid, fake_pipeline)
-        with patch("project_manager.mutate_project", return_value={
-            "success": True, "screening_approved": True,
-        }):
-            resp = client.post(f"/api/projects/{pid}/screening/approve")
+        # V1 (cycle-10): stub the assembled mp4 so the precondition passes.
+        with tempfile.TemporaryDirectory() as tmpd:
+            os.makedirs(os.path.join(tmpd, "exports"), exist_ok=True)
+            with open(os.path.join(tmpd, "exports", "final_cinema.mp4"), "wb") as f:
+                f.write(b"")
+            with patch("domain.project_manager.get_project_dir", return_value=tmpd), \
+                 patch("project_manager.mutate_project", return_value={
+                     "success": True, "screening_approved": True,
+                 }):
+                resp = client.post(f"/api/projects/{pid}/screening/approve")
 
         assert resp.status_code == 200
         fake_lifecycle.signal_gate.assert_called_once_with("SCREENING")
@@ -269,10 +316,16 @@ class TestScreeningApproveEndpoint:
         # A project with no live pipeline (operator approved before the
         # pipeline reached SCREENING) is a silent no-op for signal_gate.
         # The mutation still applies; the endpoint returns 200.
-        with patch("project_manager.mutate_project", return_value={
-            "success": True, "screening_approved": True,
-        }):
-            resp = client.post("/api/projects/proj-cold/screening/approve")
+        # V1 (cycle-10): stub the assembled mp4 so the precondition passes.
+        with tempfile.TemporaryDirectory() as tmpd:
+            os.makedirs(os.path.join(tmpd, "exports"), exist_ok=True)
+            with open(os.path.join(tmpd, "exports", "final_cinema.mp4"), "wb") as f:
+                f.write(b"")
+            with patch("domain.project_manager.get_project_dir", return_value=tmpd), \
+                 patch("project_manager.mutate_project", return_value={
+                     "success": True, "screening_approved": True,
+                 }):
+                resp = client.post("/api/projects/proj-cold/screening/approve")
 
         assert resp.status_code == 200
         body = resp.get_json()
@@ -288,10 +341,16 @@ class TestScreeningApproveEndpoint:
 
         pid = "proj-no-signal-method"
         inject_pipeline(pid, fake_pipeline)
-        with patch("project_manager.mutate_project", return_value={
-            "success": True, "screening_approved": True,
-        }):
-            resp = client.post(f"/api/projects/{pid}/screening/approve")
+        # V1 (cycle-10): stub the assembled mp4 so the precondition passes.
+        with tempfile.TemporaryDirectory() as tmpd:
+            os.makedirs(os.path.join(tmpd, "exports"), exist_ok=True)
+            with open(os.path.join(tmpd, "exports", "final_cinema.mp4"), "wb") as f:
+                f.write(b"")
+            with patch("domain.project_manager.get_project_dir", return_value=tmpd), \
+                 patch("project_manager.mutate_project", return_value={
+                     "success": True, "screening_approved": True,
+                 }):
+                resp = client.post(f"/api/projects/{pid}/screening/approve")
 
         # Still 200 -- the AttributeError is the documented no-op fallback.
         assert resp.status_code == 200
