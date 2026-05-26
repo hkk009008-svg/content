@@ -40,8 +40,8 @@ Before starting the playthrough, verify:
 ```bash
 # 1. Latest origin/main checked out
 git status -sb                # main...origin/main, clean
-git log --oneline -3          # 9e9b008 I1+I2+I3 fix on top (cycle-10);
-                              # earlier: 345c6e3 Lane V #8 REPLY, b6bb76c H4
+git log --oneline -3          # d10b849 V1 fix (cycle-10 Val#1 fold) on top;
+                              # earlier: 9f652a2 Val#1+#2 REPLY, 1bc9263 P1-3 part 10
 
 # 2. Static gates pass
 .venv/bin/python scripts/ci_smoke.py   # OK
@@ -50,23 +50,40 @@ git log --oneline -3          # 9e9b008 I1+I2+I3 fix on top (cycle-10);
 
 # 3. Backend deps fresh
 .venv/bin/python -m pytest tests/unit/ --tb=no -q | tail -2
-# Expected: 852-853 pass, 0-1 environment-sensitive flake
+# Expected: 853-854 pass, 0-1 environment-sensitive flake
 # (test_four_concurrent_generate_only_one_wins — concurrency-race
 # test sensitive to CPU scheduling; see POST-ROADMAP carry-forward
 # §"environment-sensitive flake" for full triage. Baseline was 840-841
-# pre-cycle-10; +12 tests for Lane V #8 I1+I3 coverage at 9e9b008.)
+# pre-cycle-10; +12 tests for I1+I3 coverage at 9e9b008; +1 test for
+# V1 regression at d10b849.)
 
 # 4. Web dev server reachable
-(cd web && npm run dev)       # starts on http://localhost:5173 (or similar)
+# Brief originally said localhost:5173 but the project's vite.config.ts
+# overrides to port 3000 (operator-validation #1 discovered this).
+(cd web && npm run dev)       # starts on http://localhost:3000
 ```
 
-You'll also need a test project. Either:
+You'll also need a test project. **Operator-validation #1 discovered that
+the API project store (`domain/projects/`) may have hundreds-to-thousands
+of tiny test-fixture projects (pytest leakage) but NO populated project
+suitable for end-to-end driving.** Plan accordingly:
+
 - (a) **Reuse an existing project** with ≥5 shots, scene boundaries,
   and at least one assembled timeline output (so SCREENING has
-  something to display).
-- (b) **Create a new minimal project** via the web UI: 1 scene, 5
+  something to display). Most existing projects in `domain/projects/`
+  are pytest fixtures (`Test Project <id8>`); look for human-titled
+  projects or sort by mtime / project.json size.
+- (b) **Create a new minimal project** via the web UI: 1 scene, 3-5
   shots, simple performance, run through to ASSEMBLY at minimum.
-  Option (a) is faster if available; (b) is more comprehensive.
+  Cost: real LLM + generation calls (~$2-5 for a small project end-to-
+  end); requires user-principal budget approval. Option (a) is faster
+  if a populated project exists; (b) is the comprehensive path.
+- (c) **Endpoint-contract-only validation** — if no populated project
+  exists AND no real-generation budget is approved, validate at the
+  endpoint contract layer only (use a fresh empty fixture project,
+  hit each endpoint, verify response shapes). Operator-validation #1
+  followed this path successfully (~25min wall-clock; ~$0; ~40% of
+  brief coverage). Phase 2 (UX layer) deferred to future session.
 
 ## 3. Surface A playthrough — directorial iteration
 
