@@ -36,8 +36,21 @@ class CharacterContinuityTracker:
     """Tracks character identity, wardrobe, and spatial positions across scenes."""
 
     def __init__(self, project: dict):
+        # P1-3 migration template (S10) — value-preserving variant.
+        # Validate at boundary + typed iteration for the .id key extraction.
+        # Values stay as ORIGINAL dict references from project["characters"][i]
+        # (NOT model_dump output) — preserves the implicit contract that
+        # mutating project["characters"][0]["name"] is visible through
+        # self.characters[char_id]["name"]. Consumer sites (line 62, 208;
+        # ContinuityEngine.validate at line 587 cross-class) continue to
+        # do dict-attribute access (`.get("name", ...)`); migrating those
+        # to typed Character access is a separate cycle-11+ slice.
+        # See docs/MIGRATION-PATTERN-pydantic-caller.md + part 9
+        # (f8cd45f) for the index-by-typed-iteration pattern.
+        from domain.models import Project as _Project
         self.project = project
-        self.characters = {c["id"]: c for c in project["characters"]}
+        project_typed = _Project.model_validate(project)
+        self.characters = {c.id: project["characters"][i] for i, c in enumerate(project_typed.characters)}
         self.embeddings: dict[str, np.ndarray] = {}
         self.appearance_log: dict[str, dict] = {}  # char_id -> last known appearance
 
@@ -220,8 +233,16 @@ class LocationPersistence:
     """Manages location consistency via deterministic seeds and prompt fragments."""
 
     def __init__(self, project: dict):
+        # P1-3 migration template (S10) — value-preserving variant, parallel
+        # to CharacterContinuityTracker.__init__ above. self.locations is
+        # populated but no INTERNAL consumer reads it within this class —
+        # only external code in cinema_pipeline.py:445 reassigns it on
+        # project reload. The validation here is the value-add: malformed
+        # project input fails at the boundary (raises in STRICT mode).
+        from domain.models import Project as _Project
         self.project = project
-        self.locations = {l["id"]: l for l in project["locations"]}
+        project_typed = _Project.model_validate(project)
+        self.locations = {l.id: project["locations"][i] for i, l in enumerate(project_typed.locations)}
 
     def get_seed(self, location_id: str) -> Optional[int]:
         return get_location_seed(self.project, location_id)

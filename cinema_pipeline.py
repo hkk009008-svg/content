@@ -434,16 +434,27 @@ class CinemaPipeline:
         if not latest:
             return None
 
+        # P1-3 migration template (S10) — parity with continuity_engine.py
+        # CharacterContinuityTracker.__init__ + LocationPersistence.__init__.
+        # External-writer site rebuilds the typed-id-keyed dicts when the
+        # project state is reloaded. Validates the reloaded snapshot at the
+        # boundary (raises in CINEMA_STRICT_SCHEMA mode) + uses typed
+        # iteration for the .id key extraction, while preserving the
+        # original dict references as values (consumer sites at
+        # continuity_engine.py:208 + :587 continue to do dict-attribute
+        # access on the values).
+        from domain.models import Project as _Project
         self.project.clear()
         self.project.update(latest)
+        latest_typed = _Project.model_validate(self.project)
         self.continuity.project = self.project
         self.continuity.character_tracker.project = self.project
         self.continuity.character_tracker.characters = {
-            character["id"]: character for character in self.project["characters"]
+            c.id: self.project["characters"][i] for i, c in enumerate(latest_typed.characters)
         }
         self.continuity.location_persistence.project = self.project
         self.continuity.location_persistence.locations = {
-            location["id"]: location for location in self.project["locations"]
+            l.id: self.project["locations"][i] for i, l in enumerate(latest_typed.locations)
         }
         self.director.project = self.project
         return self.project
