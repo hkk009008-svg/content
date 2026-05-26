@@ -988,11 +988,13 @@ time (upstream); CC-2 catches at Lane V time (downstream). Both
 layers operate; post-codification Lane V catches of symbol-divergence
 are working two-layer defense, not broken codification.
 
-**Codified SHA:** `_Protocol Bundle v5.1 ship_` (chicken-and-egg
-placeholder). Empirical basis: Lane V #6 F1 (N=1; closed `6c1171a`)
-+ Lane V #8 spec-reviewer prompt preventive (N=2; 0 divergences).
-Beneficiary: `director-seat` (constrains brief-writing); operator-
-seat consented in v5.1 REPLY `9f032db` per R11 explicit-consent path.
+**Codified SHA:** `8ab0bbb` (Protocol Bundle v5.1 ship; chicken-and-egg
+precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1
+`509db7c` / v5 `d66690f`). Empirical basis: Lane V #6 F1 (N=1;
+closed `6c1171a`) + Lane V #8 spec-reviewer prompt preventive (N=2;
+0 divergences). Beneficiary: `director-seat` (constrains brief-writing);
+operator-seat consented in v5.1 REPLY `9f032db` per R11 explicit-
+consent path.
 
 ## Symmetric-endpoint audit discipline (Rule #13)
 
@@ -1032,8 +1034,8 @@ creates blind spot for symmetric cases; Lane V cold-context catches
 them as backstop. Rule #13 moves the catch upstream from Lane V to
 brief-write time; Rule #9's structural value remains as second layer.
 
-**Codified SHA:** `_Protocol Bundle v5.1 ship_` (chicken-and-egg
-placeholder). Empirical basis: Lane V #8 I1 CRITICAL (N=1; iterate
+**Codified SHA:** `8ab0bbb` (Protocol Bundle v5.1 ship; chicken-and-egg
+precedent). Empirical basis: Lane V #8 I1 CRITICAL (N=1; iterate
 endpoint missing gate-bypass that `/screening/approve` +
 `/assemble/re-assemble` had; closed `9e9b008`) + Val#1 V1 (N=2;
 `/screening/approve` missing precondition that `/assemble/screen`

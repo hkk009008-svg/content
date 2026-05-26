@@ -1126,15 +1126,15 @@ codification catches at brief-write time; CC-2 still catches at Lane
 V time as backstop. Post-codification Lane V catches of symbol-
 divergence are working two-layer defense, not broken codification.
 
-**Codified SHA:** `_Protocol Bundle v5.1 ship_` (chicken-and-egg
-placeholder; filled at next session-close per v2/v3/v4/v4.1/v5
-precedent). Empirical basis: Lane V #6 F1 (N=1; closed at `6c1171a`)
-+ Lane V #8 spec-reviewer prompt preventive application (N=2; 0
-divergences). Codified per the N=2 codification threshold established
-in director's Lane V #6 REPLY (`2026-05-25T18-44-52Z`). Beneficiary
-per Rule #11: `director-seat` (constrains brief-writing); operator-
-seat consented affirmatively in v5.1 REPLY (`9f032db`) per R11
-non-beneficiary explicit-consent path.
+**Codified SHA:** `8ab0bbb` (Protocol Bundle v5.1 ship; filled per
+chicken-and-egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b`
+/ v4.1 `509db7c` / v5 `d66690f`). Empirical basis: Lane V #6 F1
+(N=1; closed at `6c1171a`) + Lane V #8 spec-reviewer prompt preventive
+application (N=2; 0 divergences). Codified per the N=2 codification
+threshold established in director's Lane V #6 REPLY
+(`2026-05-25T18-44-52Z`). Beneficiary per Rule #11: `director-seat`
+(constrains brief-writing); operator-seat consented affirmatively in
+v5.1 REPLY (`9f032db`) per R11 non-beneficiary explicit-consent path.
 
 ## Symmetric-endpoint audit discipline (Rule #13)
 
@@ -1188,9 +1188,9 @@ saving Lane V cycles for cases where the symmetry isn't yet visible
 at brief time. Rule #9's structural value (independent reviewer)
 remains as backstop.
 
-**Codified SHA:** `_Protocol Bundle v5.1 ship_` (chicken-and-egg
-placeholder). Empirical basis: Lane V #8 I1 CRITICAL (N=1; iterate
-endpoint missing the gate-bypass `/screening/approve` +
+**Codified SHA:** `8ab0bbb` (Protocol Bundle v5.1 ship; filled per
+chicken-and-egg precedent). Empirical basis: Lane V #8 I1 CRITICAL
+(N=1; iterate endpoint missing the gate-bypass `/screening/approve` +
 `/assemble/re-assemble` had; closed at `9e9b008`) + Val#1 V1 (N=2;
 `/screening/approve` missing the precondition `/assemble/screen` had;
 closed at `d10b849`). Beneficiary per Rule #11: `director-seat`
