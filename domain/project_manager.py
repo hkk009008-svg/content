@@ -759,9 +759,21 @@ def list_projects() -> List[dict]:
 # ---------------------------------------------------------------------------
 
 def add_character(project: dict, character: dict, timeout: float = 10) -> dict:
+    # P1-3 migration template (S10 + part 9 Variant 1) — outer boundary
+    # validate at function entry + inner mutator-scope validate under the
+    # per-project lock. Catches malformed input at boundary (raises in
+    # CINEMA_STRICT_SCHEMA mode); inner validate handles race between
+    # outer validation and lock acquisition. Simplified: append-only, no
+    # typed-iterate-for-find needed.
+    # See docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+    # canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 this).
+    from domain.models import Project as _Project
+    _Project.model_validate(project)  # outer boundary validate
+
     pid = project["id"]
 
     def _mutate(latest: dict):
+        _Project.model_validate(latest)  # inner mutator-scope validate
         latest["characters"].append(character)
         return character
 
@@ -772,9 +784,23 @@ def add_character(project: dict, character: dict, timeout: float = 10) -> dict:
 
 
 def remove_character(project: dict, char_id: str, timeout: float = 10) -> bool:
+    # P1-3 migration template (S10 + part 9 Variant 1) — outer boundary
+    # validate at function entry + inner mutator-scope validate under the
+    # per-project lock. Full: typed-iterate-for-find + raw-dict-by-index
+    # for kept values (value-preserving filter on c.id != char_id).
+    # See docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+    # canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 this).
+    from domain.models import Project as _Project
+    _Project.model_validate(project)  # outer boundary validate
+
     def _mutate(latest: dict):
-        before = len(latest["characters"])
-        latest["characters"] = [c for c in latest["characters"] if c["id"] != char_id]
+        latest_typed = _Project.model_validate(latest)  # inner mutator-scope validate
+        before = len(latest_typed.characters)
+        latest["characters"] = [
+            latest["characters"][i]
+            for i, c in enumerate(latest_typed.characters)
+            if c.id != char_id
+        ]
         changed = len(latest["characters"]) < before
         return MutationResult(changed, save=changed)
 
@@ -801,9 +827,19 @@ def get_character(project: dict, char_id: str) -> Optional[dict]:
 
 def add_object(project: dict, obj: dict, timeout: float = 10) -> dict:
     """Add a product/prop object to the project. Mirrors add_character/add_location."""
+    # P1-3 migration template (S10 + part 9 Variant 1) — outer boundary
+    # validate at function entry + inner mutator-scope validate under the
+    # per-project lock. Simplified: setdefault+append only, no
+    # typed-iterate-for-find needed.
+    # See docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+    # canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 this).
+    from domain.models import Project as _Project
+    _Project.model_validate(project)  # outer boundary validate
+
     pid = project["id"]
 
     def _mutate(latest: dict):
+        _Project.model_validate(latest)  # inner mutator-scope validate
         latest.setdefault("objects", []).append(obj)
         return obj
 
@@ -814,7 +850,19 @@ def add_object(project: dict, obj: dict, timeout: float = 10) -> dict:
 
 
 def remove_object(project: dict, obj_id: str, timeout: float = 10) -> bool:
+    # P1-3 migration template (S10 + part 9 Variant 1) — outer boundary
+    # validate at function entry + inner mutator-scope validate under the
+    # per-project lock. Simplified-filter: objects is an extra="allow" field
+    # (not a typed List[Object]), so items are raw dicts; use dict-style
+    # o["id"] comparison rather than typed-attribute iteration. Race
+    # protection from inner validate is preserved regardless.
+    # See docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+    # canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 this).
+    from domain.models import Project as _Project
+    _Project.model_validate(project)  # outer boundary validate
+
     def _mutate(latest: dict):
+        _Project.model_validate(latest)  # inner mutator-scope validate
         latest.setdefault("objects", [])
         before = len(latest["objects"])
         latest["objects"] = [o for o in latest["objects"] if o["id"] != obj_id]
@@ -833,9 +881,19 @@ def get_object(project: dict, obj_id: str) -> Optional[dict]:
 
 
 def add_location(project: dict, location: dict, timeout: float = 10) -> dict:
+    # P1-3 migration template (S10 + part 9 Variant 1) — outer boundary
+    # validate at function entry + inner mutator-scope validate under the
+    # per-project lock. Simplified: append-only, no typed-iterate-for-find
+    # needed.
+    # See docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+    # canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 this).
+    from domain.models import Project as _Project
+    _Project.model_validate(project)  # outer boundary validate
+
     pid = project["id"]
 
     def _mutate(latest: dict):
+        _Project.model_validate(latest)  # inner mutator-scope validate
         latest["locations"].append(location)
         return location
 
@@ -846,9 +904,23 @@ def add_location(project: dict, location: dict, timeout: float = 10) -> dict:
 
 
 def remove_location(project: dict, loc_id: str, timeout: float = 10) -> bool:
+    # P1-3 migration template (S10 + part 9 Variant 1) — outer boundary
+    # validate at function entry + inner mutator-scope validate under the
+    # per-project lock. Full: typed-iterate-for-find + raw-dict-by-index
+    # for kept values (value-preserving filter on l.id != loc_id).
+    # See docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+    # canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 this).
+    from domain.models import Project as _Project
+    _Project.model_validate(project)  # outer boundary validate
+
     def _mutate(latest: dict):
-        before = len(latest["locations"])
-        latest["locations"] = [l for l in latest["locations"] if l["id"] != loc_id]
+        latest_typed = _Project.model_validate(latest)  # inner mutator-scope validate
+        before = len(latest_typed.locations)
+        latest["locations"] = [
+            latest["locations"][i]
+            for i, l in enumerate(latest_typed.locations)
+            if l.id != loc_id
+        ]
         changed = len(latest["locations"]) < before
         return MutationResult(changed, save=changed)
 
@@ -871,9 +943,19 @@ def get_location(project: dict, loc_id: str) -> Optional[dict]:
 
 
 def add_scene(project: dict, scene: dict, timeout: float = 10) -> dict:
+    # P1-3 migration template (S10 + part 9 Variant 1) — outer boundary
+    # validate at function entry + inner mutator-scope validate under the
+    # per-project lock. Simplified: append-only + len() for order, no
+    # typed-iterate-for-find needed.
+    # See docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+    # canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 this).
+    from domain.models import Project as _Project
+    _Project.model_validate(project)  # outer boundary validate
+
     pid = project["id"]
 
     def _mutate(latest: dict):
+        _Project.model_validate(latest)  # inner mutator-scope validate
         scene["order"] = len(latest["scenes"])
         latest["scenes"].append(scene)
         return scene
@@ -885,20 +967,45 @@ def add_scene(project: dict, scene: dict, timeout: float = 10) -> dict:
 
 
 def update_scene(project: dict, scene_id: str, updates: dict, timeout: float = 10) -> Optional[dict]:
+    # P1-3 migration template (S10 + part 9 Variant 1) — outer boundary
+    # validate at function entry + inner mutator-scope validate under the
+    # per-project lock. Full: typed-iterate-for-find (scene.id check) +
+    # dict-mutate-in-place at the matched index under the lock.
+    # See docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+    # canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 this).
+    from domain.models import Project as _Project
+    _Project.model_validate(project)  # outer boundary validate
+
     def _mutate(latest: dict):
-        for scene in latest["scenes"]:
-            if scene["id"] == scene_id:
-                scene.update(updates)
-                return scene
+        latest_typed = _Project.model_validate(latest)  # inner mutator-scope validate
+        for i, scene in enumerate(latest_typed.scenes):
+            if scene.id == scene_id:
+                latest["scenes"][i].update(updates)
+                return latest["scenes"][i]
         return MutationResult(None, save=False)
 
     return mutate_project(project["id"], _mutate, timeout=timeout, snapshot=project)
 
 
 def remove_scene(project: dict, scene_id: str, timeout: float = 10) -> bool:
+    # P1-3 migration template (S10 + part 9 Variant 1) — outer boundary
+    # validate at function entry + inner mutator-scope validate under the
+    # per-project lock. Full + post-filter reorder: typed-iterate-for-find
+    # + raw-dict-by-index for kept values (value-preserving filter on
+    # scene.id != scene_id), then re-number order via dict-write under lock.
+    # See docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+    # canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 this).
+    from domain.models import Project as _Project
+    _Project.model_validate(project)  # outer boundary validate
+
     def _mutate(latest: dict):
-        before = len(latest["scenes"])
-        latest["scenes"] = [scene for scene in latest["scenes"] if scene["id"] != scene_id]
+        latest_typed = _Project.model_validate(latest)  # inner mutator-scope validate
+        before = len(latest_typed.scenes)
+        latest["scenes"] = [
+            latest["scenes"][i]
+            for i, scene in enumerate(latest_typed.scenes)
+            if scene.id != scene_id
+        ]
         changed = len(latest["scenes"]) < before
         if not changed:
             return MutationResult(False, save=False)
@@ -911,8 +1018,21 @@ def remove_scene(project: dict, scene_id: str, timeout: float = 10) -> bool:
 
 
 def reorder_scenes(project: dict, scene_ids: list[str], timeout: float = 10) -> None:
+    # P1-3 migration template (S10 + part 9 Variant 1) — outer boundary
+    # validate at function entry + inner mutator-scope validate under the
+    # per-project lock. Full + dict-build-by-id: typed-iterate for .id key
+    # extraction; raw-dict-by-index for the id_to_scene dict values.
+    # See docs/MIGRATION-PATTERN-pydantic-caller.md §"Variant 1" for the
+    # canonical shape (cycle-10 part 9 f8cd45f / cycle-11 part 11 this).
+    from domain.models import Project as _Project
+    _Project.model_validate(project)  # outer boundary validate
+
     def _mutate(latest: dict):
-        id_to_scene = {scene["id"]: scene for scene in latest["scenes"]}
+        latest_typed = _Project.model_validate(latest)  # inner mutator-scope validate
+        id_to_scene = {
+            scene.id: latest["scenes"][i]
+            for i, scene in enumerate(latest_typed.scenes)
+        }
         reordered = []
         for index, scene_id in enumerate(scene_ids):
             if scene_id in id_to_scene:

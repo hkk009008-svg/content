@@ -4,6 +4,7 @@ import json
 import tempfile
 
 import pytest
+from pydantic import ValidationError
 
 import project_manager
 
@@ -576,3 +577,68 @@ class TestGetProjectDir:
     def test_returns_expected_path(self, tmp_projects_dir):
         result = project_manager.get_project_dir("my_id")
         assert result == os.path.join(tmp_projects_dir, "my_id")
+
+
+class TestMutatorVariant1RaceProtection:
+    """Variant 1 inner-mutator-validation under the per-project lock.
+
+    Outer validate catches malformed input fast-fail. Inner validate
+    catches the race where another writer mutates the project between
+    outer validate and lock acquisition. Test that an inner-validation
+    failure surfaces as ValidationError (not silent data corruption).
+    """
+
+    @pytest.fixture
+    def valid_project(self, tmp_projects_dir):
+        """Return a saved valid project for mutation tests."""
+        proj = project_manager.make_project("RaceTest")
+        project_manager.save_project(proj)
+        return proj
+
+    def test_outer_validation_raises_on_malformed_project(self, tmp_projects_dir):
+        """Outer boundary validate catches malformed input before lock acquisition."""
+        malformed = {"id": "bad_proj", "characters": "not_a_list"}  # missing 'name'; bad type
+        with pytest.raises(ValidationError):
+            project_manager.add_character(malformed, {"id": "c1", "name": "Alice", "description": ""})
+
+    def test_inner_validation_raises_on_malformed_latest(self, valid_project, tmp_projects_dir):
+        """Inner mutator-scope validate catches corruption that occurred between outer
+        validate and lock acquisition (race simulation).
+
+        We simulate the race by monkey-patching _load_project_unlocked (the
+        function mutate_project calls inside the lock) to return a malformed
+        snapshot. The outer validate sees a good project dict; the inner
+        _Project.model_validate(latest) sees the corrupt snapshot and should
+        raise ValidationError before any dict-write happens.
+
+        Corruption type: a character dict with an integer id (survives
+        normalize_project_schema, which only checks isinstance(..., list),
+        but fails pydantic's str type check for Character.id).
+        """
+        import domain.project_manager as dpm
+        from unittest.mock import patch
+
+        # Corrupt snapshot: character with non-string id — normalize_project_schema
+        # does not repair inner-dict field types, so the inner validate sees
+        # this corrupt structure and raises ValidationError.
+        corrupt_snapshot = dict(valid_project)
+        corrupt_snapshot["characters"] = [
+            {"id": 99999, "name": "BrokenIdType", "description": ""}
+        ]
+
+        with patch.object(dpm, "_load_project_unlocked", return_value=corrupt_snapshot):
+            with pytest.raises(ValidationError):
+                project_manager.add_character(
+                    valid_project, {"id": "c1", "name": "Alice", "description": ""}
+                )
+
+    def test_outer_and_inner_validation_both_pass_for_valid_project(self, valid_project, tmp_projects_dir):
+        """Sanity: a valid project passes both outer and inner validation
+        and the mutation completes successfully."""
+        char = project_manager.make_character("Bob", "Test character")
+        result = project_manager.add_character(valid_project, char)
+        assert result["id"] == char["id"]
+        # Reload and verify the character was persisted
+        reloaded = project_manager.load_project(valid_project["id"])
+        ids = [c["id"] for c in reloaded["characters"]]
+        assert char["id"] in ids
