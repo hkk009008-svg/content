@@ -373,8 +373,8 @@ Per `AGENTS.md` (or `CLAUDE.md` if you're Claude Code):
 1. Run impact analysis before editing existing symbols (GitNexus or grep fallback)
 2. Run scope check after edits — confirm only expected files changed
 3. <task-specific gotcha>
-4. **Brief-pattern reference adherence.** When the brief says "mirror pattern X at file:line" or "use the existing _foo_-style endpoint," verify the FULL shape of X — signature, route path, scope parameters, error handling, lock guards — not just the called function. Brief-pattern references are implicit specs; silent deviations cascade. If the named helper doesn't exist or the wording is ambiguous, report the divergence in your status BEFORE implementing.
-5. **Scoping check on new endpoints.** When adding/touching an HTTP endpoint operating on a tenant- or project-scoped resource, verify the route takes the scoping ID explicitly. Do NOT scan to find a matching resource by leaf ID alone — IDs can collide across tenants/projects depending on the ID-generation scheme. Inspect at least one similar existing endpoint in the same file to confirm the route shape and scoping.
+4. **Brief-pattern reference adherence.** When the brief says "mirror pattern X at file:line" or "use the existing _foo_-style endpoint," verify the FULL shape of X — signature, route path, scope parameters, error handling, lock guards — not just the called function. Brief-pattern references are implicit specs; silent deviations cascade. If the named helper doesn't exist or the wording is ambiguous, report the divergence in your status BEFORE implementing. (Broader codifier-side discipline: see Rule #12 — brief-level grep-the-writes — in `docs/PROTOCOL-RULES-LOG.md`.)
+5. **Scoping check on new endpoints.** When adding/touching an HTTP endpoint operating on a tenant- or project-scoped resource, verify the route takes the scoping ID explicitly. Do NOT scan to find a matching resource by leaf ID alone — IDs can collide across tenants/projects depending on the ID-generation scheme. Inspect at least one similar existing endpoint in the same file to confirm the route shape and scoping. (Broader codifier-side discipline: see Rule #13 — symmetric-endpoint audit — in `docs/PROTOCOL-RULES-LOG.md`.)
 
 ## Verification
 
@@ -956,7 +956,89 @@ the REPLY cycle. If non-beneficiary seat declines, the rule is
 downgraded to "advisory" or revised until both consent.
 
 Retroactive snapshot of Rules 1-9 (4 both / 1 user / 3 operator-seat
-/ 0 director-seat) lives in `docs/PROTOCOL-RULES-LOG.md`.
+/ 0 director-seat) lives in `docs/PROTOCOL-RULES-LOG.md`. Post-v5.1
+distribution (Rules 1-13): 6 both / 2 user / 3 operator-seat /
+2 director-seat.
+
+## Brief-level grep-the-writes discipline (Rule #12)
+
+**Rule #12: Brief-level grep-the-writes discipline.**
+*(Subtitle: type-declaration is not write-evidence.)*
+
+When a brief or dispatch prompt names a schema field, mutator
+function, dict key, or write-path as the target of new code, the
+codifier MUST grep production writes to verify the named symbol is
+actually populated at runtime — not just declared in the type schema.
+Type-declaration proves a field can exist on a record; only a
+write-site proves it does exist at runtime.
+
+**Verification commands (at minimum one of; combine as needed):**
+- Dict key: `grep -rn "\"<key>\"\|'<key>'" --include='*.py' .`
+  filtering for assignment patterns (`["<key>"] =`, `.update({...})`,
+  dict literals, `**`-spread).
+- Pydantic field: grep for `<field_name>=` + `setattr(` patterns,
+  plus mutator helpers (`mutate_project`, `Project.model_validate`,
+  `model_dump` round-trips). Mixed-shape symbols (typed-attribute AND
+  raw-dict access) need both surfaces.
+- Function call: `grep -rn "<func_name>("`; verify production paths,
+  not test-only. Async/background paths count as production.
+
+**Two-layer-defense with v4.1 CC-2.** Rule #12 catches at brief-write
+time (upstream); CC-2 catches at Lane V time (downstream). Both
+layers operate; post-codification Lane V catches of symbol-divergence
+are working two-layer defense, not broken codification.
+
+**Codified SHA:** `_Protocol Bundle v5.1 ship_` (chicken-and-egg
+placeholder). Empirical basis: Lane V #6 F1 (N=1; closed `6c1171a`)
++ Lane V #8 spec-reviewer prompt preventive (N=2; 0 divergences).
+Beneficiary: `director-seat` (constrains brief-writing); operator-
+seat consented in v5.1 REPLY `9f032db` per R11 explicit-consent path.
+
+## Symmetric-endpoint audit discipline (Rule #13)
+
+**Rule #13: Symmetric-endpoint audit discipline.**
+*(Subtitle: a new defense names what existing endpoints may be missing.)*
+
+When adding a new endpoint (or modifying an existing one) that
+bypasses an existing fence, gates on a persistent flag, or operates
+on shared state already touched by other endpoints, the codifier
+MUST audit ALL existing endpoints on the same fence / flag / state
+for parallel checks the new endpoint should mirror — AND for parallel
+checks the existing endpoints may be missing.
+
+**Shared state (any of):** in-memory set/dict (`_running_pipelines`,
+`_progress_queues`); persistent flag on project record
+(`screening_approved`, `needs_reassembly`); on-disk artifact
+(`final_video_path`); shared lock (`_pipelines_lock`).
+
+**Audit procedure:**
+1. `grep -n '<shared_state_symbol>' web_server.py` for existing
+   endpoints touching the state.
+2. For each: identify bypass behavior, precondition checks,
+   error-response shapes.
+3. Ask: *would I include this new check in each existing endpoint
+   from scratch?* If yes, existing is under-defended → flag for
+   symmetric fold or follow-up.
+4. Ask: *do existing endpoints have defenses the new one should
+   mirror?* If yes, include OR document why exempt.
+
+**Verification in brief/commit body:** one-liner listing audited
+endpoints (e.g., "Audited `/assemble/screen`, `/screening/approve`
+for `final_video_path` precondition; mirroring."). Fold the
+symmetric fix OR explicitly defer with rationale.
+
+**Composition with Rule #9.** Internal-review's design-intent context
+creates blind spot for symmetric cases; Lane V cold-context catches
+them as backstop. Rule #13 moves the catch upstream from Lane V to
+brief-write time; Rule #9's structural value remains as second layer.
+
+**Codified SHA:** `_Protocol Bundle v5.1 ship_` (chicken-and-egg
+placeholder). Empirical basis: Lane V #8 I1 CRITICAL (N=1; iterate
+endpoint missing gate-bypass that `/screening/approve` +
+`/assemble/re-assemble` had; closed `9e9b008`) + Val#1 V1 (N=2;
+`/screening/approve` missing precondition that `/assemble/screen`
+had; closed `d10b849`). Beneficiary: `director-seat` (constrains
+endpoint design); operator-seat consented in v5.1 REPLY `9f032db`.
 
 ## Disagreement protocol (v5)
 

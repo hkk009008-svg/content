@@ -133,15 +133,18 @@ in effect" subsection):
 > proves a field can exist on a record; only a write-site proves it does
 > exist at runtime.
 >
-> **Verification commands (codifier choice):**
+> **Verification commands (at minimum one of; combine as needed):**
 > - For a dict key: `grep -rn "\"<key>\"\|'<key>'" --include='*.py' .`
 > filtering for assignment patterns (`["<key>"] =`, `.update({...})`,
-> dict literals).
+> dict literals, `**`-spread).
 > - For a Pydantic field: grep for `<field_name>=` and `setattr(`
 > patterns, plus any mutator helper (`mutate_project`,
-> `Project.model_validate`, `model_dump` round-trips).
+> `Project.model_validate`, `model_dump` round-trips). Note: a field
+> read via typed-attribute access AND via raw-dict access (mixed-shape;
+> P1-3 migration is the canonical example) needs both surfaces grepped.
 > - For a function call: `grep -rn "<func_name>("` to find call sites;
-> verify they're production paths and not test-only.
+> verify they're production paths and not test-only. Async/background
+> paths (worker threads, deferred queues) count as production.
 >
 > **What "verified" looks like in a brief or dispatch prompt:**
 > The brief includes the grep command's output (or a one-line excerpt
@@ -409,8 +412,8 @@ R11 veto in REPLY cycle.
 **v5.1 is "working" when (within next 2-3 cycles):**
 - ≥1 Rule #12 invocation in a brief or dispatch prompt (grep output captured under named symbol)
 - ≥1 Rule #13 invocation in a brief or commit body (audit one-liner naming existing endpoints checked)
-- ZERO Lane V findings of the same shape as Lane V #6 F1 OR Lane V #8 I1 OR Val#1 V1 (the failure modes the rules target)
-- IF a Lane V finding of those shapes DOES occur: treat as Rule #12 / #13 evasion (not codification failure); revisit rule wording in v5.2+
+- Lane V findings of the same shape as Lane V #6 F1 / Lane V #8 I1 / Val#1 V1 decrease in frequency by ≥50% over 2-3 cycles, OR if any do occur, they're surfaced as Rule #12 / #13 evasion (brief skipped the grep / audit) rather than codification failure
+- Two-layer-defense framing preserved: codification is a SECOND layer (brief-write-time) over the existing Lane V layer (post-commit cold-context). Post-codification Lane V catches of those shapes are evidence of working two-layer defense, not broken rule.
 
 **v5.1 rollback trigger:** if Rule #12 or Rule #13 generates measurable friction (operator-seat counter via mailbox event citing specific incident) within 3 sessions OR if "working" criteria fail, revise in v5.2 (analogous to v2.1, v4.1 patterns).
 
@@ -489,8 +492,13 @@ If any of this misses the user's intent, the disagreement protocol (v5 §D) is t
 - I1 fix: `9e9b008` (`fix(iterate+reassemble): close Lane V #8 I1 CRITICAL + I2 + I3`)
 - V1 fix: `d10b849` (`fix(screening): close Val#1 V1 — /screening/approve precondition check`)
 - F1 fix: `6c1171a` (`fix(iterate): close Lane V #6 F1 (vestigial-field F2 filter) + F2 + F3 + regression test`)
-- Current HEAD at proposal-write: `b715ff9`
+- v5.1 REPLY (operator): `9f032db` ([docs/REPLY-protocol-bundle-v5.1-operator-2026-05-26.md](REPLY-protocol-bundle-v5.1-operator-2026-05-26.md))
+- Current HEAD at proposal-write: `b715ff9`; at v5.1 ship: see ship commit (chicken-and-egg placeholder).
 
 ---
 
-*Director-draft proposal authored 2026-05-26 at HEAD `b715ff9`. Awaits operator REPLY-cycle per established v2-v5 pattern (this time inverted — director-drafts/operator-REPLYs). R11 beneficiary check on the proposal: both rules `director-seat` (asymmetric); operator-seat veto availability explicit. State at draft-commit per Rule #7: HEAD `b715ff9`; branch synced with `origin/main`; working tree clean; mailbox empty both directions. Race-ack body if state moves during operator REPLY-cycle. User direction can override at any point per existing CLAUDE.md "Instruction Priority" and v5 §P1.*
+*Director-draft proposal authored 2026-05-26 at HEAD `b715ff9`. Operator-REPLY at `9f032db` (`docs(reply): operator response to Protocol Bundle v5.1 proposal — explicit consent + 2 comment-only refinements + 5 open-question concurrences`) returned explicit R11 non-veto consent on both rules + 2 comment-only refinements (R-D-1 dogfood criterion #3 reframe; R-Q1-1 verification-commands header). Both refinements folded inline pre-ship per operator's silent-acceptable framing.*
+
+***SHIPPED 2026-05-26** by director — Rules #12 + #13 codified in CLAUDE.md / AGENTS.md / docs/PROTOCOL-RULES-LOG.md; beneficiary distribution snapshot updated to 6 both / 2 user / 3 operator-seat / 2 director-seat = 13 rules (drive-by correction to prior "both: 5 → 6" rule-count typo folded inline since rules-log was already the file being edited). SHA placeholders (`_Protocol Bundle v5.1 ship_`) for Rules #12 + #13 ship in the same commit per chicken-and-egg precedent; will be filled at next session-close (whichever seat is active) per cycle precedent (`3e57ddf` v2 / `d8f2407` v3 / `d90036b` v4 / `509db7c` v4.1 / `d66690f` v5).*
+
+*Race-ack note: operator-seat shipped Lane V #9 verification-report at `bef8d12` between v5.1 proposal at `b583305` and v5.1 REPLY at `9f032db`; Lane V #9 disposition is separate from v5.1 ship per role partition + operator's own REPLY framing. Director-seat will issue Lane V #9 decision REPLY in a separate commit. User direction can override at any point per existing CLAUDE.md "Instruction Priority" and v5 §P1.*

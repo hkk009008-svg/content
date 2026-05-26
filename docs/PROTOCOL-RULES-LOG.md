@@ -19,6 +19,8 @@ and per-session invocation count. Updated manually at session-close by operator
 | 9 | Operator-side reviewer is independent, not duplicate (second-opinion convention) | `d61bdc8` | Substance imbalance ~30:1 (director:operator) across cycles 3-4 + structural blind-spot risk in single-context reviewer pass; user surfaced + operator drafted v4 |
 | 10 | Joint-team mode (two seats of one team; co-agent mode) | `d66690f` | User surfaced "director codifies rules that bind themselves" + asymmetry-as-hierarchy concerns; v5 reframes role partition as specialization, not hierarchy |
 | 11 | Codification bias check (per-rule beneficiary flagging + non-beneficiary veto) | `d66690f` | User surfaced "director-only memory writes" + "codification meta-bias" concerns; R11 makes future codification per-rule auditable |
+| 12 | Brief-level grep-the-writes discipline (codifier MUST grep production writes before naming a symbol in a brief) | `_Protocol Bundle v5.1 ship_` | Lane V #6 F1 N=1 (vestigial `performance_take_id` field; production writes `approved_performance_take_id`; closed `6c1171a`) + Lane V #8 spec-reviewer prompt preventive N=2 (0 divergences). N=2 threshold per director's Lane V #6 REPLY at `2026-05-25T18-44-52Z`. Codification per v5.1 proposal `b583305` + operator REPLY explicit consent `9f032db` |
+| 13 | Symmetric-endpoint audit discipline (codifier MUST audit existing endpoints on shared state when adding new endpoint with same fence/flag/state) | `_Protocol Bundle v5.1 ship_` | Lane V #8 I1 CRITICAL N=1 (iterate endpoint missing the gate-bypass `/screening/approve` + `/assemble/re-assemble` had; closed `9e9b008`) + Val#1 V1 N=2 (`/screening/approve` missing precondition `/assemble/screen` had; closed `d10b849`). Codification per v5.1 proposal `b583305` + operator REPLY explicit consent `9f032db` |
 
 > Historical note: Rules #7 + #8 originally shipped with the placeholder
 > `_Protocol Bundle v2 ship_` in the "Codified" column because the rules-log
@@ -28,7 +30,11 @@ and per-session invocation count. Updated manually at session-close by operator
 > ship landed. Pattern for future self-referencing rule additions: ship
 > with placeholder, update at next session-close. **Rule #9 follows the
 > same pattern** — ships with `_Protocol Bundle v4 ship_` placeholder;
-> operator updates to actual SHA in follow-up commit.
+> operator updates to actual SHA in follow-up commit. **Rules #10 + #11
+> followed the same pattern at v5 ship** (`d66690f`); **Rules #12 + #13
+> follow the same pattern at v5.1 ship** — ship with `_Protocol Bundle
+> v5.1 ship_` placeholders; whichever seat is active next session-close
+> updates to actual ship SHA in follow-up commit.
 
 ## Protocol Bundle v4.1 — Lane V refinements (cycle 6)
 
@@ -67,7 +73,8 @@ pattern; mirrors `3e57ddf` v2 / `d8f2407` v3 / `d90036b` v4).
 
 Per Rule #11 (codification bias check), every existing rule and every
 future rule should have its primary beneficiary flagged. Retroactive
-analysis for Rules 1-11, performed during v5 ship:
+analysis for Rules 1-11, performed during v5 ship; extended to Rules
+12-13 at v5.1 ship:
 
 | Rule | Primary beneficiary | Reasoning |
 |---|---|---|
@@ -82,24 +89,44 @@ analysis for Rules 1-11, performed during v5 ship:
 | 9 (Operator-side reviewer is independent) | operator-seat | enables Lane V |
 | 10 (Joint-team mode) | both | discipline for both seats |
 | 11 (Codification bias check) | user | reduces bias; serves principal's interest |
+| 12 (Brief-level grep-the-writes discipline) | director-seat | constrains brief-writing (director-seat specialization); reduces Lane V cleanup for symbol-divergence (operator-seat benefits downstream) |
+| 13 (Symmetric-endpoint audit discipline) | director-seat | constrains endpoint design (director-seat specialization); reduces Lane V findings for symmetric cases (operator-seat benefits downstream) |
 
-**Distribution snapshot (cycle-6 close, post-v5 ship):**
-- `both`: 5 (Rules 1, 2, 3, 5, 7, 10) — symmetric disciplines
+**Distribution snapshot (cycle-10 close, post-v5.1 ship):**
+- `both`: 6 (Rules 1, 2, 3, 5, 7, 10) — symmetric disciplines
 - `user`: 2 (Rules 8, 11) — close gaps in user-supervision
 - `operator-seat`: 3 (Rules 4, 6, 9) — operational layer where races occur
-- `director-seat`: 0 — no rules primarily benefit director-seat alone
+- `director-seat`: 2 (Rules 12, 13) — constrain director-seat's specialization work; empirically derived from N=2 cycle-10 failure modes; operator-seat (non-beneficiary) consented explicitly per R11 veto path
 
-**Observed pattern (5+2+3+0):** codification has been operator-
+**Prior snapshot (cycle-6 close, post-v5 ship):** `both`: 6 / `user`:
+2 / `operator-seat`: 3 / `director-seat`: 0 = 11 rules. (Note: the
+prior text listed "`both`: 5" but the listed rule IDs (1, 2, 3, 5,
+7, 10) are 6 rules — corrected at v5.1 ship as a drive-by; the
+listed IDs were always correct.)
+
+**Observed pattern (6+2+3+2 = 13):** codification has been operator-
 friendly (operator-seat surfaces races they encounter in the
 operational layer) and user-supervisory (mailbox-authority + bias-
 check close coordination gaps the user-as-relay model couldn't
-handle). The bias hypothesis the user surfaced (director codifies
-rules favoring themselves) is empirically not borne out.
+handle). v5.1 adds the first two director-seat-beneficiary rules,
+empirically derived from N=2 evidence operator-seat surfaced; this
+re-balances the distribution without forcing artificial balance.
+The bias hypothesis the user surfaced (director codifies rules
+favoring themselves) remains empirically not borne out — v5.1's
+director-seat-beneficiary rules are CONSTRAINTS on director-seat's
+work, not authority expansions.
 
 **v5 self-application:** v5's components (P1, R10, R11, D, E, B, M,
 S, Sh) distribute as: 7 both / 1 user / 1 operator-seat / 0 director-
-seat. v5 passes its own R11 check at introduction — strongest
-possible introduction for a meta-rule.
+seat. v5 passes its own R11 check at introduction.
+
+**v5.1 self-application:** v5.1's two new rules (#12, #13) distribute
+as: 0 both / 0 user / 0 operator-seat / 2 director-seat. v5.1 is the
+FIRST asymmetric-beneficiary bundle since R11 was codified; operator-
+seat (non-beneficiary) consented affirmatively in REPLY `9f032db`
+per the R11 explicit-consent path. v5.1 demonstrates R11's veto
+mechanism working as designed — the asymmetric annotation triggered
+explicit consent rather than implicit acceptance.
 
 **Future bundles MUST update this snapshot** when adding new rules.
 Asymmetric-beneficiary rules require explicit non-beneficiary consent

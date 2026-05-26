@@ -339,8 +339,8 @@ Per `/Users/.../CLAUDE.md`:
 2. Run `gitnexus_detect_changes()` after edits — confirm scope is what you expect
 3. <task-specific gotcha>
 4. If GitNexus MCP isn't reachable in your environment, fall back to grep + file inspection.
-5. **Brief-pattern reference adherence.** When the brief says "mirror pattern X at file:line" or "use the existing _foo_-style endpoint," verify the FULL shape of X — signature, route path, scope parameters, error handling, lock guards — not just the called function. Brief-pattern references are implicit specs; silent deviations cascade. If the named helper doesn't exist (e.g., brief says `_mutate_shot` but the actual pattern uses `mutate_project`) or the wording is ambiguous, report the divergence in your status BEFORE implementing.
-6. **pid-scope check on new endpoints.** When adding/touching an HTTP endpoint operating on a project-scoped resource (shots, scenes, locations, characters), verify the route takes `<pid>` explicitly. Do NOT scan via `list_projects()` to find a matching resource — IDs can collide across projects (e.g., `shot_id` follows `shot_{scene}_{i}` and matches across projects with matching scene/index layouts). Inspect at least one similar existing endpoint in the same file (e.g., `api_update_shot_prompt`) to confirm the route shape and scoping.
+5. **Brief-pattern reference adherence.** When the brief says "mirror pattern X at file:line" or "use the existing _foo_-style endpoint," verify the FULL shape of X — signature, route path, scope parameters, error handling, lock guards — not just the called function. Brief-pattern references are implicit specs; silent deviations cascade. If the named helper doesn't exist (e.g., brief says `_mutate_shot` but the actual pattern uses `mutate_project`) or the wording is ambiguous, report the divergence in your status BEFORE implementing. (Broader codifier-side discipline: see Rule #12 — brief-level grep-the-writes — in `docs/PROTOCOL-RULES-LOG.md`.)
+6. **pid-scope check on new endpoints.** When adding/touching an HTTP endpoint operating on a project-scoped resource (shots, scenes, locations, characters), verify the route takes `<pid>` explicitly. Do NOT scan via `list_projects()` to find a matching resource — IDs can collide across projects (e.g., `shot_id` follows `shot_{scene}_{i}` and matches across projects with matching scene/index layouts). Inspect at least one similar existing endpoint in the same file (e.g., `api_update_shot_prompt`) to confirm the route shape and scoping. (Broader codifier-side discipline: see Rule #13 — symmetric-endpoint audit — in `docs/PROTOCOL-RULES-LOG.md`.)
 
 ## Verification
 
@@ -1086,6 +1086,116 @@ friendly because operator-seat surfaces races (they're in the
 operational layer where races occur). R11 makes future codification
 EXPLICITLY assessable per-rule + auditable over time. The full
 retroactive snapshot lives in `docs/PROTOCOL-RULES-LOG.md`.
+
+## Brief-level grep-the-writes discipline (Rule #12)
+
+**Rule #12: Brief-level grep-the-writes discipline.**
+*(Subtitle: type-declaration is not write-evidence.)*
+
+When a brief or dispatch prompt names a schema field, mutator function,
+dict key, or write-path as the target of new code, the codifier MUST
+grep production writes to verify the named symbol is actually populated
+at runtime — not just declared in the type schema. Type-declaration
+proves a field can exist on a record; only a write-site proves it does
+exist at runtime.
+
+**Verification commands (at minimum one of; combine as needed):**
+- For a dict key: `grep -rn "\"<key>\"\|'<key>'" --include='*.py' .`
+  filtering for assignment patterns (`["<key>"] =`, `.update({...})`,
+  dict literals, `**`-spread).
+- For a Pydantic field: grep for `<field_name>=` and `setattr(`
+  patterns, plus any mutator helper (`mutate_project`,
+  `Project.model_validate`, `model_dump` round-trips). Mixed-shape
+  symbols (typed-attribute AND raw-dict access; P1-3 migration is the
+  canonical example) need BOTH surfaces grepped.
+- For a function call: `grep -rn "<func_name>("` to find call sites;
+  verify they're production paths and not test-only. Async/background
+  paths (worker threads, deferred queues) count as production.
+
+**What "verified" looks like in a brief or dispatch prompt:** the
+brief includes the grep command's output (or a one-line excerpt +
+file:line ref) under the named symbol. Without it, the symbol is a
+*type-level claim*, not a *runtime claim*; implementers MUST be told
+which.
+
+**Two-layer-defense composition with v4.1 CC-2.** Rule #12 is the
+**upstream** version (brief-write-time grep before dispatch); CC-2
+is the **downstream** version (Lane V spec-reviewer prompts verify
+symbols before assertions). Together they form a two-layer defense:
+codification catches at brief-write time; CC-2 still catches at Lane
+V time as backstop. Post-codification Lane V catches of symbol-
+divergence are working two-layer defense, not broken codification.
+
+**Codified SHA:** `_Protocol Bundle v5.1 ship_` (chicken-and-egg
+placeholder; filled at next session-close per v2/v3/v4/v4.1/v5
+precedent). Empirical basis: Lane V #6 F1 (N=1; closed at `6c1171a`)
++ Lane V #8 spec-reviewer prompt preventive application (N=2; 0
+divergences). Codified per the N=2 codification threshold established
+in director's Lane V #6 REPLY (`2026-05-25T18-44-52Z`). Beneficiary
+per Rule #11: `director-seat` (constrains brief-writing); operator-
+seat consented affirmatively in v5.1 REPLY (`9f032db`) per R11
+non-beneficiary explicit-consent path.
+
+## Symmetric-endpoint audit discipline (Rule #13)
+
+**Rule #13: Symmetric-endpoint audit discipline.**
+*(Subtitle: a new defense names what existing endpoints may be missing.)*
+
+When adding a new endpoint (or modifying an existing one) that
+bypasses an existing fence, gates on a persistent flag, or operates
+on shared state already touched by other endpoints, the codifier
+MUST audit ALL existing endpoints on the same fence / flag / state
+for parallel checks the new endpoint should mirror — AND for parallel
+checks the existing endpoints may be missing.
+
+**What "shared state" means here (any of):**
+- The same in-memory set / dict (e.g., `_running_pipelines`,
+  `_progress_queues`, `_reassembly_in_flight`)
+- The same persistent flag on the project record (e.g.,
+  `screening_approved`, `needs_reassembly`)
+- The same on-disk artifact (e.g., `final_video_path` / assembled mp4)
+- The same lock (`_pipelines_lock`, per-project `mutate_project` lock)
+
+**What the audit looks like (codifier responsibility):**
+1. Grep existing endpoints touching the shared state:
+   `grep -n '<shared_state_symbol>' web_server.py`
+2. For each match, identify: bypass behavior, precondition checks,
+   error-response shapes.
+3. For each existing endpoint, ask: *"If I were writing this endpoint
+   from scratch today knowing what I know now, would I include a
+   check the new endpoint needs?"* If yes, the existing endpoint is
+   under-defended — flag for symmetric fold in the same commit OR a
+   follow-up issue.
+4. For the new endpoint, ask: *"Are there existing endpoints whose
+   defenses I should be mirroring?"* If yes, include them in the new
+   endpoint OR document why the new endpoint is genuinely exempt.
+
+**What "verified" looks like in a brief or commit body:** the brief
+includes a one-liner listing the existing endpoints checked (e.g.,
+"Audited `/assemble/screen`, `/assemble/re-assemble`,
+`/screening/approve` for parallel precondition checks; mirroring
+`final_video_path` existence guard from `/assemble/screen`."). The
+commit body either folds the symmetric fix OR explicitly defers it
+with rationale.
+
+**Why this matters:** internal-review with full design-intent context
+creates a structural blind spot — the reviewer's attention is on the
+NEW code's correctness; existing parallel endpoints feel like
+background. Cold-context Lane V reviewers catch symmetric cases
+precisely because they don't share the design-intent inheritance.
+Rule #13 moves the catch upstream from Lane V to brief-write time,
+saving Lane V cycles for cases where the symmetry isn't yet visible
+at brief time. Rule #9's structural value (independent reviewer)
+remains as backstop.
+
+**Codified SHA:** `_Protocol Bundle v5.1 ship_` (chicken-and-egg
+placeholder). Empirical basis: Lane V #8 I1 CRITICAL (N=1; iterate
+endpoint missing the gate-bypass `/screening/approve` +
+`/assemble/re-assemble` had; closed at `9e9b008`) + Val#1 V1 (N=2;
+`/screening/approve` missing the precondition `/assemble/screen` had;
+closed at `d10b849`). Beneficiary per Rule #11: `director-seat`
+(constrains endpoint design); operator-seat consented affirmatively
+in v5.1 REPLY (`9f032db`) per R11 non-beneficiary explicit-consent path.
 
 ## Disagreement protocol (v5)
 
