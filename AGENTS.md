@@ -1152,6 +1152,120 @@ precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1
 subagent tokens; Lane V #12 ✅). B-006-broad-B (`a0493dc`, 243 prod
 LoC) is the criteria-exclusion validation point.
 
+## Cross-seat fix-on-received-findings convention (Rule #15)
+
+**Rule #15: Cross-seat fix-on-received-findings convention.**
+*(Subtitle: when one seat closes the other seat's Lane V finding.)*
+
+When one seat's Lane V verification surfaces a finding requiring code
+fix, the OTHER seat MAY close it via standalone `fix:` commit.
+Bidirectionally symmetric (operator-closes-director-flagged OR
+director-closes-operator-flagged), though only operator-flagged-
+director-closes instances exist at codification time (N=0 for the
+second direction; bidirectional codification at N=0 per Q4 silent-
+accept avoids retroactive scope-creep at v5.4+).
+
+### Disposition recommendation (flagging seat)
+
+Operator's `verification-report` event MAY include a structured
+3-option disposition:
+
+- **(a) Fold into adjacent in-flight work** (if applicable).
+- **(b) Standalone fix commit.** Always available as fallback —
+  parallel-execution timing can foreclose (a).
+- **(c) NO ACTION (informational only).** Cosmetic / observation-only.
+
+### Severity-vs-option advisory matrix (R-Q2-1)
+
+Advisory, not binding — receiving seat retains discretion.
+
+| Severity | Default | Notes |
+|---|---|---|
+| **CRITICAL** | **preferred (b)** | Option (a) fold-in **only with explicit-justification in commit body** (R-Q2-1 refinement of proposal's "never (a)"). Option (c) not permitted for CRITICAL. |
+| IMPORTANT | (a) if fold-able; else (b) | Same-file ≤5 LoC adjacent commit preferred fold. |
+| MINOR | (a) or (b) per scope | Sub-2-LoC mechanical → (a); structural / multi-file → (b). |
+| INFORMATIONAL | (c) acceptable | Cosmetic / docs / observation-only. |
+
+### Receiving seat's response
+
+Choose option based on:
+- **Timing.** (a) only if adjacent work in-flight + fold cheap; else (b).
+- **Scope.** Sub-2-LoC mechanical → (a); structural → (b).
+- **Severity.** Per matrix above; CRITICAL fold-in requires explicit
+  justification.
+
+Option choice binding once committed; rollback requires another REPLY
+cycle or user escalation.
+
+### Commit-body convention
+
+1. **Subject:** loose format (Q3 silent-accept) — reference Lane V #
+   OR finding ID somewhere in the commit text. Examples: `fix(web):
+   close Lane V #12 I1 — discriminate ValidationError...` (`442e154`);
+   `fix(web): close M-3 — use logger.error...` (`336403d`).
+2. **Body:** cite operator's disposition + chosen option (a/b/c) +
+   brief why.
+3. **Race-ack** per Rule #5 + #7.
+4. **Co-Authored-By** trailer per system prompt.
+
+### Audit-trail reconstructability
+
+Lifecycle reconstructable from public artifacts (mailbox archive + git
+log) WITHOUT requiring original session context. Optional follow-up
+Lane V on the closing commit verifies closure quality.
+
+### Working criteria
+
+- **C1:** commit subject cites Lane V # OR finding ID (grep:
+  `git log --oneline --grep='close Lane V\|close M-\|close F-\|close I'`).
+  N=2 satisfies.
+- **C2:** verification-report includes 3-option disposition when fix
+  required. Mailbox-archive verifiable. N=2 satisfies.
+- **C3:** receiving seat's commit body cites option choice. Body-grep
+  verifiable. N=2 satisfies.
+- **C4:** closure within ~1 session OR explicit cross-cycle DEFER ACK
+  (Q5 silent-accept). N=1 minutes intra-cycle; N=2 half-day cross-
+  cycle DEFER-ACK. Both satisfy.
+
+### Telemetry (Q6 silent-accept)
+
+Rule #15 instances tracked separately from fix-on-own-findings (N=9
+cumulative pre-cycle-12) in cumulative v4.1 telemetry. Merge into a
+single "fix-following-Lane-V" count at v5.5+ if no operational
+distinction emerges in 2-3 cycles.
+
+### Composition
+
+- Rule #2 (signaling): verification-report event is the formal signal.
+- Rule #5 + #7: apply to every closing commit.
+- Rule #8 (mailbox authority): verification-report binds receiving
+  seat per disposition.
+- Rule #9 (independent reviewer + parallelism): produces the findings
+  Rule #15 closes; together they form the Lane V flag-disposition-
+  close lifecycle.
+- Rule #10 (joint-team mode): specialization mechanism, not hierarchy.
+- Rule #14 (operator-driven Lane B template): Stage 4+5 feed into
+  Rule #15's closure mechanism.
+
+### Beneficiary (per R11)
+
+**Beneficiary: `both`** seats.
+
+Symmetric enable + constrain on both axes. No asymmetric-veto path
+needed. Director-seat consented affirmatively in v5.3 REPLY
+(`3a0e433`); operator-seat consented in proposal sign-off (`dc7df5d`).
+
+**Codified SHA:** Protocol Bundle v5.3 ship (chicken-and-egg
+precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1
+`509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2 `61cac6d`). Empirical
+basis: N=2 — **`442e154`** (cycle-12; director closes operator's Lane
+V #12 I1; IMPORTANT-advisory; intra-cycle close ~minutes) + **`336403d`**
+(cycle-13 entry; director closes operator's Lane V #13 M-3; MINOR-
+DEFER; cross-cycle close ~half day with explicit DEFER ACK). Evidence
+spans severity (IMPORTANT → MINOR-DEFER), timing (intra → cross-cycle),
+and disposition route (option-1-foreclosed → DEFER-acknowledged) —
+empirically distributed across the convention's operational shape.
+
 ## Disagreement protocol (v5)
 
 When operator-seat disagrees with a director REPLY refinement (or

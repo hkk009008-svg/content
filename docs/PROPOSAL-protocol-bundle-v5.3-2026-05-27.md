@@ -511,3 +511,30 @@ convention self-documenting at invocation time.*
 
 Signed,
 Operator-seat — 2026-05-27 (cycle-13 in-flight, v5.3 proposal drafted per user-direction "2")
+
+---
+
+***SHIPPED 2026-05-27** by director-seat — Rule #15 codified in CLAUDE.md
+/ AGENTS.md / docs/PROTOCOL-RULES-LOG.md; beneficiary distribution
+snapshot updated to **8 both / 2 user / 3 operator-seat / 2 director-seat
+= 15 rules** (Rule #15 raises `both` count to 8; third consecutive
+`both`-beneficiary bundle). Director REPLY at `3a0e433` (docs(reply):
+director response to Protocol Bundle v5.3 proposal — explicit consent
++ 1 substantive refinement (R-Q2-1) + 5 silent-accepts) returned
+explicit R11 consent + 1 substantive refinement (R-Q2-1: CRITICAL
+"never (a) fold" → "preferred (b); (a) allowed only with explicit-
+justification in commit body") + 5 silent-accepts (Q1 MAY at N=2; Q3
+loose commit subject format; Q4 bidirectional codification at N=0;
+Q5 explicit cross-cycle DEFER ACK framing; Q6 separate telemetry
+tracking). R-Q2-1 folded at ship as the severity-vs-option advisory
+matrix CRITICAL row + receiving seat's response Severity dimension.
+Q2 matrix codified as advisory (not binding); Q4 bidirectional shape
+codified explicitly even though N=0 for operator-closes-director-
+flagged direction. SHA placeholder (`_Protocol Bundle v5.3 ship_`)
+for Rule #15 in PROTOCOL-RULES-LOG.md ships in the same commit per
+chicken-and-egg precedent; will be filled at next session-close per
+cycle precedent (v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1
+`509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2 `61cac6d`). All 4
+N=1 candidates filed for v5.4+ remain unchanged (candidate #3 at
+N=1.5 borderline per operator conservative defer; candidates #1, #4,
+#5 each await N=2 codifiable refinement instance).*

@@ -1432,6 +1432,212 @@ subagent tokens; Lane V #12 ✅ READY TO SHIP). B-006-broad-B
 criteria-exclusion validation point — same cycle's work correctly split
 along the criteria boundary.
 
+## Cross-seat fix-on-received-findings convention (Rule #15)
+
+**Rule #15: Cross-seat fix-on-received-findings convention.**
+*(Subtitle: when one seat closes the other seat's Lane V finding.)*
+
+When one seat's Lane V verification surfaces a finding requiring code
+fix, the OTHER seat MAY close it via standalone `fix:` commit. The
+mechanism is bidirectionally symmetric (operator-closes-director-
+flagged OR director-closes-operator-flagged), though only operator-
+flagged-director-closes instances exist at codification time. Per
+operator's Q4 recommendation + director's REPLY concurrence,
+bidirectional codification at N=0 for the second direction avoids
+retroactive scope-creep at v5.4+.
+
+### Disposition recommendation shape (flagging seat)
+
+When the flagging seat sends a `verification-report` event with a
+finding requiring fix, the report MAY include a structured 3-option
+disposition recommendation:
+
+- **(a) Fold into adjacent in-flight work** (if applicable). The
+  receiving seat folds the fix into the next-natural commit in their
+  in-flight work.
+- **(b) Standalone fix commit.** The receiving seat ships a separate
+  `fix:` commit closing the finding.
+- **(c) NO ACTION (informational only).** The finding is recorded for
+  audit but doesn't require fix (e.g., cosmetic, doesn't affect
+  correctness).
+
+Recommendation: provide all 3 options when applicable. **Option (b)
+MUST always be available as fallback** because (a) may be foreclosed
+by parallel-execution timing (the receiving seat's adjacent work may
+ship during the disposition window). Cycle-12 `442e154` body
+explicitly acknowledged this foreclosure: "Operator-recommended
+Option 1 (fold into broad-B's brief) was missed due to broad-B's
+implementer commit landing during Lane V #12 dispatch window."
+
+### Severity-vs-option advisory matrix (R-Q2-1 refined)
+
+Per director's R-Q2-1 refinement at v5.3 REPLY, severity guides
+default option choice without binding the receiving seat:
+
+| Severity | Default option | Notes |
+|---|---|---|
+| **CRITICAL** | **preferred (b) standalone fix** | Option (a) fold-in **allowed only with explicit-justification in commit body** (e.g., "folded into adjacent fix commit X because same-file ≤5 LoC; audit-trail preserved via Lane V # citation in body"). Option (c) NO ACTION not permitted for CRITICAL by definition. |
+| **IMPORTANT** | option (a) preferred if fold-able; else (b) | Fold-in is fast close path when adjacent work is naturally compatible. |
+| **MINOR** | either (a) or (b) per scope | Sub-2-LoC mechanical fix → (a); structural OR multi-file → (b). |
+| **INFORMATIONAL** | option (c) NO ACTION acceptable | Cosmetic / documentation / observation-only findings. |
+
+The matrix is **advisory, not binding** — receiving seat retains
+discretion. R-Q2-1's refinement of "CRITICAL never (a) fold" to
+"preferred (b); (a) with explicit-justification" preserves the
+burying-risk concern (audit clarity) while allowing legitimate
+fold-in scenarios (same-file ≤5 LoC adjacent commit; in-flight `fix:`
+commit composition; urgent close-loop timing).
+
+### Receiving seat's response (closing seat)
+
+The receiving seat reads the disposition + chooses based on:
+
+- **Timing.** If (a)'s adjacent work has already shipped, (b) is the
+  fallback. If (a)'s adjacent work is in-flight + the fold-in is
+  cheap, (a) is preferred. If (a) is not applicable, (b).
+- **Scope.** If the fix is sub-2-LoC + literal mechanical change, (a)
+  is preferred (less commit-churn). If the fix is structural OR
+  spans multiple files, (b) is preferred (clean diff per concern).
+- **Severity.** Per the matrix above. R-Q2-1 escape-hatch for CRITICAL
+  fold-in requires explicit-justification in commit body.
+
+The receiving seat's option choice is binding once committed; rollback
+requires another REPLY cycle (or escalation to user).
+
+### Commit-body convention (closing commit)
+
+Cross-seat fix-on-received-findings commits MUST follow these
+conventions:
+
+1. **Commit subject:** reference originating Lane V # OR finding ID
+   (loose format per Q3 silent-accept — substantive requirement is
+   the reference exists somewhere in the commit's text).
+   - Examples: `fix(web): close Lane V #12 I1 — discriminate ValidationError from ValueError` (`442e154`); `fix(web): close M-3 — use logger.error with stack trace at api_train_lora::_runner exception handler` (`336403d`).
+
+2. **Commit body:** cite operator's disposition recommendation + note
+   which option (a/b/c) was chosen + brief why.
+
+3. **Race-ack body:** standard per Rule #5 + #7. Note any state shift
+   during the close-loop window.
+
+4. **Co-Authored-By trailer:** standard per system prompt.
+
+### Audit-trail discipline
+
+The full lifecycle of any cross-seat closure is reconstructable from:
+
+- **Mailbox archive:** operator's `verification-report` event with
+  the finding + disposition recommendation.
+- **Git log:** receiving seat's `fix:` commit with subject + body
+  referencing the originating Lane V + finding ID.
+- **(Optional) Next Lane V:** if the flagging seat dispatches a
+  follow-up Lane V on the closing commit, that report verifies
+  closure quality (cycle-12 I1 was NOT re-Lane-V'd because broad-B
+  was the next Lane V eligible commit which transitively audited the
+  fix; cycle-13 M-3 was NOT re-Lane-V'd because mechanical scope +
+  small).
+
+**Audit reconstructability invariant:** the lifecycle must be
+reconstructable from public artifacts (mailbox + git log) WITHOUT
+requiring the original session's context.
+
+### Working criteria (dogfood for v5.3)
+
+Per v5.1's working-criteria precedent (R-D-1 refinement) + v5.2's
+per-instance wall-clock measurable framing (R-Q5-1 refinement), v5.3
+codifies working criteria for Rule #15 invocation:
+
+- **C1: Cross-seat fix commit subject cites Lane V # OR finding ID.**
+  Measurable per-commit via grep: `git log --oneline --grep='close Lane V\|close M-\|close F-\|close I'`.
+  N=2 instances ALREADY satisfy this (`442e154` + `336403d`).
+
+- **C2: Operator's verification-report event includes 3-option
+  disposition when fix is required.** Measurable per-event via
+  mailbox-archive inspection. N=2 instances ALREADY satisfy this
+  (Lane V #12 + Lane V #13 reports at
+  `coordination/mailbox/sent/2026-05-27T02-30-00Z` +
+  `2026-05-27T03-00-00Z`).
+
+- **C3: Receiving seat's commit body cites disposition option choice.**
+  Measurable per-commit via commit body grep. N=2 instances ALREADY
+  satisfy this (`442e154` body acknowledges option 1 foreclosed →
+  option 2 chosen; `336403d` body closes the DEFER M-3 via standalone
+  fix).
+
+- **C4: Cross-seat closure completes within ~1 session OR explicit
+  cross-cycle DEFER acknowledgment** (per Q5 silent-accept). Per-
+  instance wall-clock measurable. N=1: ~minutes (intra-cycle); N=2:
+  ~half day (cross-cycle DEFER-acknowledged). Both within criterion.
+  DEFER findings may legitimately take many cycles — wall-clock
+  upper-bound would force premature closure (Q5 reasoning).
+
+### Telemetry tracking (Q6 silent-accept)
+
+Per Q6 silent-accept, Rule #15 instances are tracked as a separate
+metric in cumulative v4.1 telemetry alongside fix-on-own-findings
+(N=9 cumulative pre-cycle-12). After 2-3 cycles, if no operationally-
+relevant difference emerges between the two categories, telemetry
+can merge into a single "fix-following-Lane-V" count at v5.5+
+without data loss.
+
+### Composition with other rules
+
+- **Rule #2 (signaling):** verification-report event is the formal
+  signal; closing seat MAY narrate in chat per Rule #2.
+- **Rule #5 + #7 (race-ack + pre-commit re-verify):** apply to every
+  closing commit; particular care during parallel-execution windows
+  where option (a) foreclosure can occur mid-write.
+- **Rule #8 (mailbox authority):** verification-report event with
+  disposition obligates the receiving seat to act per its content
+  (one of (a)/(b)/(c) options).
+- **Rule #9 (independent reviewer + parallelism):** Rule #15 is the
+  closure-mechanism for findings produced by Rule #9's Lane V
+  dispatch shape. The two rules compose into the full Lane V
+  flag-disposition-close lifecycle.
+- **Rule #10 (joint-team mode):** cross-seat closure is a
+  specialization mechanism; either seat can close based on disposition
+  + timing + scope, not based on hierarchy.
+- **Rule #14 (operator-driven Lane B template):** Rule #14's Stage 4
+  + Stage 5 (Lane V dispatch + verification-report) feeds into Rule
+  #15's closure mechanism for any findings the Lane V surfaces.
+
+### Beneficiary (per R11)
+
+**Beneficiary: both** seats.
+
+Rule #15 enables both seats (codifies a cross-seat closure mechanism
+that previously operated ad-hoc) AND constrains both seats (formalizes
+the disposition + commit-body convention). The mechanism is
+bidirectionally symmetric — operator MAY close director-flagged
+findings via the same shape, even though N=0 instances of that
+direction exist at codification time. Per Q4 silent-accept,
+codification at N=0 for the second direction avoids retroactive
+scope-creep at v5.4+.
+
+No asymmetric-beneficiary veto path needed per R11. Director-seat
+consented affirmatively in v5.3 REPLY (`3a0e433`) per the v5.1/v5.2
+explicit-consent customary path. Operator-seat (drafter) consented
+affirmatively in proposal sign-off (`dc7df5d`).
+
+**Codified SHA:** Protocol Bundle v5.3 ship (filled per chicken-and-
+egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1
+`509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2 `61cac6d`). Empirical
+basis: N=2 cumulative — **`442e154`** (cycle-12; director closes
+operator's Lane V #12 I1 — IMPORTANT-advisory severity; ValidationError-
+swallow at broad-A helper caller sites; option 2 chosen because
+operator's recommended option 1 fold-into-broad-B-brief was foreclosed
+by parallel-execution timing; intra-cycle close ~minutes after Lane V
+#12 report) + **`336403d`** (cycle-13 entry; director closes operator's
+Lane V #13 M-3 — MINOR DEFER severity; thread-swallow observability
+hardening via `logger.error` + `exc_info=True`; option 2 chosen for
+the DEFER-categorized finding; cross-cycle close ~half day after Lane
+V #13 report).
+
+The N=2 evidence spans severity (IMPORTANT → MINOR-DEFER), timing
+(intra-cycle → cross-cycle), and disposition route (option 1 foreclosed
+→ DEFER-acknowledged) — empirically distributed across the convention's
+full operational shape.
+
 ## Disagreement protocol (v5)
 
 Generalizes v4's R-V1 counter precedent. When operator-seat disagrees
