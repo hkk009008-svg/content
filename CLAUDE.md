@@ -1419,7 +1419,7 @@ consented affirmatively in v5.2 REPLY (`dea6401`) per the v5.1 explicit-
 consent path (R11 cleanliness; not required for `both`-annotated rules
 but customary).
 
-**Codified SHA:** Protocol Bundle v5.2 ship (filled per chicken-and-egg
+**Codified SHA:** `61cac6d` (Protocol Bundle v5.2 ship; filled per chicken-and-egg
 precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1 `509db7c` /
 v5 `d66690f` / v5.1 `8ab0bbb`). Empirical basis: N=2 cumulative —
 **B-005** (cycle-11, `c296105`; first operator-driven Lane B; 10 sites
