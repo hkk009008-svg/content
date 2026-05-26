@@ -2250,7 +2250,18 @@ def api_screening_approve(pid):
 
     try:
         result = mark_screening_approved(pid)
-    except ValueError:
+    except ValueError as e:
+        # Lane V #12 I1 (advisory): discriminate ValidationError from
+        # plain ValueError.  pydantic.ValidationError is a subclass of
+        # ValueError, so a bare `except ValueError:` here would silently
+        # swallow corrupt-snapshot shape errors raised by broad-A's
+        # Variant 1 inner validate inside `mark_screening_approved`.
+        # ONLY plain ValueError ("project not found") should 404; a
+        # ValidationError (malformed on-disk project) must propagate so
+        # the operator sees a 500 and can investigate the corruption.
+        from pydantic import ValidationError as _ValidationError
+        if isinstance(e, _ValidationError):
+            raise
         return jsonify({"error": "Project not found"}), 404
 
     # Wake any pipeline that's polling the SCREENING gate so it picks up
@@ -2417,7 +2428,17 @@ def api_assemble_reassemble(pid):
         # operator's most recent iterate.
         try:
             clear_needs_reassembly(pid, only_shots=dirty_shots)
-        except ValueError:
+        except ValueError as e:
+            # Lane V #12 I1 (advisory): discriminate ValidationError from
+            # plain ValueError.  pydantic.ValidationError is a subclass of
+            # ValueError, so a bare `except ValueError:` would silently
+            # swallow corrupt-snapshot shape errors raised by broad-A's
+            # Variant 1 inner validate inside `clear_needs_reassembly`.
+            # Plain ValueError (race: project deleted) is best-effort
+            # logged below; ValidationError must propagate as 500.
+            from pydantic import ValidationError as _ValidationError
+            if isinstance(e, _ValidationError):
+                raise
             # Race: project deleted between assemble + clear. Best-effort;
             # the assembled mp4 still exists, so the operator's preview
             # still works.
