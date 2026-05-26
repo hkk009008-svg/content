@@ -119,9 +119,9 @@ For cycle-11 history see [cycle-11 operator handoff §"Cycle-11 commit ledger"](
 
 - **v5.2 codification draft IF N=2 candidates accumulate** — currently 3 candidates at N=1 each (Rule #12 brief-pattern reference verification; Rule #13 transitive caller-side audit; fix-on-received-findings cross-seat convention). Wait for N=2 instance on at least one before drafting. Strategic-seat-default work (director-led) per role partition; operator MAY draft but director ships.
 
-- **F2 M-2 follow-up** (pattern-doc inner-only annotation incomplete for sites #11-#13) — defer to next pattern-doc touch; could be a small `docs:` slice OR fold into v5.2 codification.
+- ~~**F2 M-2 follow-up**~~ — **CLOSED at `7915e84`** (director-takes mid-cycle-12 docs commit; folded into the M1 cluster closure).
 
-- **M-3 L691 thread-swallow observability hardening** — upgrade `print(...)` → `logger.error(...)` for the background-thread mutator at `web_server.py:L738`. Suggested by Lane V #13 code-quality reviewer. Low priority; future hardening pass.
+- **M-3 L691 thread-swallow observability hardening** — upgrade `print(...)` → `logger.error(...)` for the background-thread mutator at `web_server.py:L738`. Suggested by Lane V #13 code-quality reviewer. Low priority; future hardening pass. **Only remaining cycle-12-originated deferral.**
 
 - **B-006 closure verification** — broad-A + broad-B together close the P1-3 pydantic-caller migration sweep for ALL non-test `mutate_project(...)` callers across the codebase (per cycle-11 + cycle-12 cumulative coverage: B-005's 10 sites in domain/project_manager.py + B-006-broad-A's 6 sites + B-006-broad-B's 15 sites + already-migrated parts at scene_decomposer.py:927 (part 8) + previously migrated parts in continuity_engine.py + previously migrated parts in cinema_pipeline.py for Variant 2 = 31 net Variant 1 production sites cumulative). **Suggested cycle-13 work:** verify completeness via `grep -rn "mutate_project(" --include='*.py' . | grep -v "project_manager.py" | grep -v "test_" | grep -v ".venv/"` → expect only the migrated sites (no new survivors).
 
@@ -225,9 +225,9 @@ See [cycle-11 operator handoff §"Established patterns"](HANDOFF-operator-transp
 
 **None outstanding.** All Lane V #12 + #13 findings were dispositioned by director in the cycle-12 composite closure REPLY at `2fbe8a4`:
 - I1 ✅ CLOSED at `442e154`
-- M1 + M-1 + M-2 clustered into single cycle-13+ Lane A pattern-doc edit (outer-omitted Variant 1 sub-variant codification + inner-only annotation completion)
+- **M1 + M-1 + M-2 cluster ✅ CLOSED at `7915e84`** (post-handoff-Write drift; director shipped `docs(pattern): close cycle-12 M1+M-1+M-2 cluster — codify no-prior-load sub-patterns + F2 inner-only annotations` within cycle-12 mid-flight; the cluster was NOT deferred to cycle-13 as initially documented in this handoff's draft state)
 - M2 NO ACTION (cosmetic)
-- M-3 (L691 thread-swallow observability) → DEFER to future hardening pass
+- M-3 (L691 thread-swallow observability) → DEFER to future hardening pass — **only remaining cycle-12-originated deferral**
 - All OBS-1/2/3 + I-1/2/3 confirmed; informational only
 
 **v5.2 codification timing** — director may draft v5.2 when ≥2 candidates reach N=2 per cycle-11 precedent. Candidate #2 (operator-driven Lane B) is at N=2 now; others are at N=1. Drafting at sparse N=2 (only 1 codifiable) is feasible but not preferred per director's REPLY §"v5.2 working-criteria summary". Wait for ≥1 more N=2 candidate before drafting.
