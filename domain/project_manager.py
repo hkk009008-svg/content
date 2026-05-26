@@ -718,15 +718,40 @@ def delete_project(project_id: str, timeout: float = 10) -> bool:
 
 
 def list_projects() -> List[dict]:
+    """List all projects, sorted by most-recently-modified first.
+
+    Recent-first ordering closes Val#2 U1 (operator-validation #2): without
+    a sort, the API returned projects in filesystem-listing order (roughly
+    creation order on most platforms), so the "Recent Productions" heading
+    on the landing page rendered ancient pytest fixtures alongside live
+    work. Sort key is the project.json mtime — captures both "created"
+    and "edited" recency cheaply via a single os.stat per project.
+
+    Performance note: this still load_project()s each entry (full JSON
+    parse). At N≈2000 projects, ~200-500ms total on local disk; tolerable
+    for a landing-page fetch. If the page count grows past ~10k, a
+    streaming-pagination API would be the next step.
+    """
     _ensure_projects_dir()
-    projects = []
+    entries = []
     for pid in os.listdir(PROJECTS_DIR):
-        if not os.path.isdir(os.path.join(PROJECTS_DIR, pid)) or pid.startswith("."):
+        project_dir = os.path.join(PROJECTS_DIR, pid)
+        if not os.path.isdir(project_dir) or pid.startswith("."):
+            continue
+        # Read mtime BEFORE load_project so a malformed project.json
+        # doesn't lose its mtime (the entry just skips).
+        try:
+            mtime = os.path.getmtime(os.path.join(project_dir, "project.json"))
+        except OSError:
+            # project.json missing or unreadable — skip entirely.
             continue
         p = load_project(pid)
         if p:
-            projects.append({"id": p["id"], "name": p["name"]})
-    return projects
+            entries.append((mtime, {"id": p["id"], "name": p["name"]}))
+    # Sort by mtime DESC (newest first). Stable: ties preserve filesystem
+    # iteration order.
+    entries.sort(key=lambda e: e[0], reverse=True)
+    return [entry for _, entry in entries]
 
 
 # ---------------------------------------------------------------------------

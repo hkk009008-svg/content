@@ -234,6 +234,55 @@ class TestListProjects:
         assert len(items) == 1
         assert set(items[0].keys()) == {"id", "name"}
 
+    def test_sorted_by_mtime_descending(self, tmp_projects_dir):
+        """Val#2 U1: list must return most-recently-modified projects first.
+        Without this, the landing page's "Recent Productions" heading
+        renders ancient pytest fixtures alongside live work.
+        """
+        import os
+        # Create three projects in deterministic order.
+        oldest = project_manager.create_project("Oldest")
+        middle = project_manager.create_project("Middle")
+        newest = project_manager.create_project("Newest")
+
+        # Backdate the mtimes so order is unambiguous regardless of how
+        # fast create_project ran. os.utime sets (atime, mtime); we only
+        # care about mtime. tmp_projects_dir is the fixture-redirected
+        # PROJECTS_DIR for this test; project_manager.PROJECTS_DIR is the
+        # shim's re-exported (unredirected) symbol — see fixture docstring.
+        base = 1_700_000_000  # arbitrary epoch baseline
+        for pid, mtime_offset in [
+            (oldest["id"], 0),       # base + 0  → oldest
+            (middle["id"], 100),     # base + 100
+            (newest["id"], 200),     # base + 200 → newest
+        ]:
+            project_json = os.path.join(tmp_projects_dir, pid, "project.json")
+            os.utime(project_json, (base + mtime_offset, base + mtime_offset))
+
+        items = project_manager.list_projects()
+        ordered_names = [p["name"] for p in items]
+        assert ordered_names == ["Newest", "Middle", "Oldest"], (
+            f"Expected newest-first ordering; got {ordered_names}"
+        )
+
+    def test_skips_projects_with_missing_json(self, tmp_projects_dir):
+        """Defensive: a directory under PROJECTS_DIR with no project.json
+        (e.g., a half-deleted project, or a stray dir) must NOT crash the
+        list endpoint. Pre-Val#2-U1 the load_project call returned None
+        and the project was skipped silently; post-fix we additionally
+        guard the os.path.getmtime call so missing/unreadable JSON files
+        skip cleanly rather than raising OSError.
+        """
+        import os
+        project_manager.create_project("Valid")
+        # Create a stray directory that looks like a project but lacks project.json
+        stray = os.path.join(tmp_projects_dir, "stray_no_json")
+        os.makedirs(stray, exist_ok=True)
+
+        items = project_manager.list_projects()
+        names = [p["name"] for p in items]
+        assert names == ["Valid"]  # stray skipped, valid included
+
 
 # ===================================================================
 # Mutation helpers — characters
