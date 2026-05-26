@@ -684,11 +684,13 @@ class CinemaPipeline:
         final_path = core_result["final_path"]
 
         # S19 Surface B (cycle-9): SCREENING gate.
-        # Behind CINEMA_SCREENING_STAGE flag. When ON, after the assembled mp4
-        # exists the pipeline enters SCREENING and polls `project.screening_approved`
-        # until the operator signals proceed via POST /api/projects/<pid>/screening/approve.
-        # When OFF (default), pipeline goes ASSEMBLY -> CLEANUP -> COMPLETE as before --
-        # zero behaviour change for v1 users.
+        # Behind CINEMA_SCREENING_STAGE flag (§7.7.3 Class B opt-out UX flag;
+        # default ON as of v5.1+ flag-flip 2026-05-26). When ON (the default),
+        # after the assembled mp4 exists the pipeline enters SCREENING and polls
+        # `project.screening_approved` until the operator signals proceed via
+        # POST /api/projects/<pid>/screening/approve. When explicitly opted out
+        # (CINEMA_SCREENING_STAGE=0), pipeline goes ASSEMBLY -> CLEANUP -> COMPLETE
+        # as before -- legacy-compatible pre-flip behavior.
         # Director-seat REPLY Q4 endorsed gate-predicate parity with the existing four
         # review gates (PLAN_REVIEW / KEYFRAME_REVIEW / PERFORMANCE_REVIEW / REVIEW);
         # SCREENING uses the same wait_for_gate(name, predicate) machinery.

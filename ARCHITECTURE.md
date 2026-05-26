@@ -630,22 +630,120 @@ motion thresholds; schema-stable project files for strict mode). See
 [DECISIONS.md ADR-014](DECISIONS.md) for the motion-gate decision record; the
 same rationale applies to `CINEMA_STRICT_SCHEMA`.
 
-#### 7.7.3 Convention for future escalation flags
+#### 7.7.3 Two-class flag taxonomy
 
-New opt-in escalation flags should:
+Empirically the codebase now uses two classes of `CINEMA_*` env flags
+with distinct lifecycle and defaults. Both share the same parser
+shape (`.strip().lower()` membership-test against a set of literals);
+they differ in which set and which default. The classes are
+documented separately so future flags can be classified at design
+time rather than retrofitted post-hoc.
 
-- **Default off.** Ship tested behavior behind the flag; never silently change
-  v1 default behavior.
-- **Parse `.strip().lower() in {"1", "true", "yes"}`** (per S12's broader form,
-  per the divergence resolution above).
-- **Co-locate the helper with the feature it gates** — not at a central
-  feature-flag registry. Operators opt-in per-feature; the helper lives where
-  the feature lives.
-- **Document via ADR in `DECISIONS.md`** mirroring ADR-014's shape (Context →
-  Decision → Consequences → Alternatives → Tracking).
+##### Class A — Opt-in production escalation (default OFF)
 
-This pattern has now appeared twice (S10 + S12); third+ instances reuse the
-template rather than reinventing.
+Examples: `CINEMA_STRICT_SCHEMA` (§7.7.2), `CINEMA_AUTO_APPROVE_MOTION`
+(§7.7.2).
+
+**Lifecycle:** stays default-off indefinitely. Operators opt in
+per-deployment after validating against their content (e.g.,
+schema-stable project files for strict mode; calibration data for
+motion thresholds). The flag is the public surface of a behavioral
+escalation that's safe-by-default-off.
+
+**Parser shape:**
+```python
+return os.environ.get("CINEMA_<NAME>", "").strip().lower() in {
+    "1", "true", "yes",
+}
+```
+
+**Class A conventions for new flags:**
+
+- **Default off.** Ship tested behavior behind the flag; never
+  silently change v1 default behavior.
+- **Parse `.strip().lower() in {"1", "true", "yes"}`** (S12's
+  broader form per the divergence resolution above).
+- **Co-locate the helper with the feature it gates** — not at a
+  central feature-flag registry. Operators opt-in per-feature; the
+  helper lives where the feature lives.
+- **Document via ADR in `DECISIONS.md`** mirroring ADR-014's shape
+  (Context → Decision → Consequences → Alternatives → Tracking).
+
+##### Class B — Opt-out UX feature flag (default ON post-validation)
+
+Examples: `CINEMA_DIRECTORIAL_ITERATION` (S15-S18, cycles 8-9; flag-
+flipped at v5.1+ ship `8ab0bbb` + flag-flip `44f6beb` on 2026-05-26),
+`CINEMA_SCREENING_STAGE` (S19-S21, cycle 9; same flag-flip).
+
+**Lifecycle:** has two phases.
+
+1. **Phase 1 (Class A shape, default OFF) — pre-validation.** While
+   the feature is being built + reviewed, the flag stays default-off
+   so deployments don't silently pick up incomplete UX. Same parser
+   shape as Class A (`in {"1", "true", "yes"}`).
+2. **Phase 2 (default ON, explicit opt-out) — post-validation
+   flag-flip.** After operator-validation passes (per the
+   `BRIEF-operator-validation-*` template + flag-flip-recommendation
+   from joint operator+director REPLY), user-principal authorizes
+   the flag-flip. The parser inverts to:
+   ```python
+   return os.environ.get("CINEMA_<NAME>", "").strip().lower() not in {
+       "0", "false", "no",
+   }
+   ```
+   Default is now ON; operators set `CINEMA_<NAME>=0` to opt out
+   (e.g., a deployment that needs the pre-flip endpoint behavior
+   for legacy compatibility).
+
+**Why Class B exists separately from Class A:** Class A's
+"default-off forever" works for production escalations where each
+deployment needs to make its own validation call. UX features behind
+flags are NOT that — they're built behind a flag to defer the
+default-flip decision until cross-cutting validation passes (UI
+correctness, contract-layer review, browser playthrough). Without
+Class B's framing, a long-lived Class A flag for a UX feature
+locks the feature in default-off purgatory; engineering investment
+doesn't translate to user value.
+
+**Class B conventions for new flags:**
+
+- **Default off during Phase 1.** Same as Class A; ship tested
+  behavior behind the flag.
+- **Validate via the operator-validation brief template** (see
+  `docs/BRIEF-operator-validation-*.md` for the cycle-10
+  reference shape).
+- **Flip to Phase 2 default-on** after operator + director joint
+  flag-flip-recommendation + user-principal authorization. The
+  flip is a single semantic-inversion edit + 404 error-message
+  refresh + test-fixture update (clear-env → set-env=0).
+- **Parser shape inverts the set** (truthy-enable → falsy-disable).
+  Whitespace-tolerance + case-insensitivity preserved.
+- **Document the flip in DECISIONS.md OR in the bundle ship commit
+  body** so the lifecycle is auditable.
+
+##### Cross-reference convention
+
+Endpoint docstrings that gate on a flag should cite the relevant
+class:
+
+- Class A: "Feature-flagged behind CINEMA_NAME=1|true|yes (§7.7.3
+  Class A opt-in escalation)."
+- Class B: "Feature-flagged behind CINEMA_NAME (§7.7.3 Class B
+  opt-out UX). Default ON; set CINEMA_NAME=0 to opt out."
+
+##### Class-history pattern summary
+
+Class A appeared first (S10 `CINEMA_STRICT_SCHEMA` + S12
+`CINEMA_AUTO_APPROVE_MOTION`); pattern formalized in §7.7.2 +
+documented in §7.7.3 (this section). Class B emerged from cycles
+8-9 (S15-S21 Surface A + Surface B) — built initially as Class A
+(default-off behind flag during operator-validation cycle) +
+promoted to Class B at v5.1+ ship 2026-05-26 (proposal `b583305`
++ REPLY `9f032db` + ship `8ab0bbb` + flag-flip `44f6beb`).
+
+Lane V #10 (2026-05-26, operator on `44f6beb`) surfaced the
+taxonomy tension; this section's expansion codifies the two-class
+shape.
 
 ---
 

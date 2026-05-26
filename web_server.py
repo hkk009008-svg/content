@@ -1548,10 +1548,10 @@ def api_iterate_take(pid, shot_id, take_id):
     Accepts an operator's directorial intent (DirectorialIntent JSON body),
     calls ``ShotController.regenerate_with_intent``, and returns the new take.
 
-    Feature-flagged behind CINEMA_DIRECTORIAL_ITERATION. Default ON as
-    of v5.1+ flag-flip (2026-05-26); set ``CINEMA_DIRECTORIAL_ITERATION=0``
-    to opt out. Returns 404 when explicitly disabled (mirrors §7.7.3
-    endpoint-level gate).
+    Feature-flagged behind CINEMA_DIRECTORIAL_ITERATION (§7.7.3 Class B
+    opt-out UX flag). Default ON as of v5.1+ flag-flip (2026-05-26); set
+    ``CINEMA_DIRECTORIAL_ITERATION=0`` to opt out. Returns 404 when
+    explicitly disabled.
 
     Route is pid-scoped per cycle-6 Lane V F1 convention — `sid` is
     ``shot_{scene}_{i}`` and can collide across projects.
@@ -1936,10 +1936,11 @@ def api_proceed_assembly(pid):
 def api_assemble_screen(pid):
     """S19: read-only fetch of the assembled mp4 + per-shot timeline manifest.
 
-    Feature-flagged behind CINEMA_SCREENING_STAGE. Default ON as of
-    v5.1+ flag-flip (2026-05-26); set ``CINEMA_SCREENING_STAGE=0`` to opt
-    out. Returns 404 when explicitly disabled (mirrors §7.7.3 endpoint-level
-    gate convention shared with the directorial-iteration endpoint).
+    Feature-flagged behind CINEMA_SCREENING_STAGE (§7.7.3 Class B opt-out
+    UX flag; shared convention with the directorial-iteration endpoint).
+    Default ON as of v5.1+ flag-flip (2026-05-26); set
+    ``CINEMA_SCREENING_STAGE=0`` to opt out. Returns 404 when explicitly
+    disabled.
 
     Route is pid-scoped per cycle-6 Lane V F1 convention -- no list_projects
     scan; the pid travels through the URL and is the only project the

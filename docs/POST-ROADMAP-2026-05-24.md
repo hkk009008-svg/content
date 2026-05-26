@@ -35,6 +35,12 @@
 > are now live for any operator who reaches them through the UI;
 > U7+U8 UX-layer validation deferred to real-usage feedback OR
 > scheduled real-generation session (~$2-5 LLM/Veo budget).
+> **Migration note (Lane V #10 M1, cycle 11):** deployments that
+> previously relied on these flags being UNSET to keep Surfaces A+B
+> hidden should set `CINEMA_DIRECTORIAL_ITERATION=0` /
+> `CINEMA_SCREENING_STAGE=0` to preserve the pre-flip behavior.
+> Unset → enabled is the new contract per the §7.7.3 Class B taxonomy
+> (`ARCHITECTURE.md`).
 >
 > **The cycle-10 priority slate is genuinely OPEN** — both Surfaces
 > are functionally complete and the substrate is mature. The picks

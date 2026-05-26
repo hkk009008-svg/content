@@ -19,9 +19,10 @@ const PIPELINE_STAGES: PipelineStage[] = [
   // S19 Surface B (cycle-9): SCREENING is a 14th stage inserted AFTER ASSEMBLY.
   // Visible unconditionally in the stage list; the BACKEND `CINEMA_SCREENING_STAGE`
   // env flag controls whether the pipeline actually emits SCREENING stage events.
-  // When the flag is off the pipeline goes ASSEMBLY → COMPLETE as before and this
-  // stage simply remains in 'pending' status (no behaviour change for v1 users).
-  // S20 will add the per-stage UI card.
+  // Default ON as of v5.1+ flag-flip (2026-05-26); §7.7.3 Class B opt-out UX flag.
+  // When explicitly opted out (CINEMA_SCREENING_STAGE=0) the pipeline goes
+  // ASSEMBLY → COMPLETE as before and this stage simply remains in 'pending'
+  // status (legacy-compatible pre-flip behavior).
   { id: 'SCREENING', label: 'Screening', status: 'pending' },
 ]
 

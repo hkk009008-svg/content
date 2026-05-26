@@ -543,9 +543,10 @@ export default function ScreeningStage({
           {error || 'No data returned from /assemble/screen.'}
         </p>
         <p className="text-eyebrow text-editorial-ivory-mute mb-4">
-          If the screening stage is not enabled (CINEMA_SCREENING_STAGE), this gate
-          will be skipped. Restart the pipeline with the flag set, or proceed without
-          screening.
+          If the screening stage is explicitly opted out (CINEMA_SCREENING_STAGE=0),
+          this gate will be skipped. Unset the env var or set it to a non-falsy
+          value to re-enable, or proceed without screening. (Default is ON
+          as of v5.1+ flag-flip.)
         </p>
         <button
           type="button"
