@@ -631,11 +631,15 @@ class ShotController:
             return {"success": False, "error": "Approved keyframe asset is missing"}
 
         # Audio comes from the scene-level dialogue track (ensured upstream).
-        # We pass scene_id, not characters[], because ensure_scene_audio works
-        # off the scene's dialogue lines + character voices.
+        # _ensure_scene_audio(scene, characters) — pass the full scene dict
+        # AND the filtered character list, mirroring the caller at line 1491.
+        characters = [
+            c for c in (project.get("characters") or [])
+            if c.get("id") in (scene.get("characters_present") or [])
+        ]
         audio_path = ""
         try:
-            audio_path = self._host._ensure_scene_audio(scene["id"]) or ""
+            audio_path = self._host._ensure_scene_audio(scene, characters) or ""
         except Exception:
             # Scene audio is advisory for several performance engines;
             # downstream code handles missing audio gracefully.
