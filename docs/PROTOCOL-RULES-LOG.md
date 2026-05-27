@@ -394,6 +394,76 @@ Rule #15 codification cadence (v5.2 + v5.3 shipped same cycle once
 N=2 accumulated), the v5.4 ship can happen quickly once the first
 candidate crosses.
 
+### Cycle-14 mid-cycle audit (substrate work per user direction "n=2")
+
+Cycle 14 is in-progress at audit-write time. Mid-cycle re-audit
+during director's substrate work covers: cycle-13's open candidates
+(#1, #3, #4, #5) + cycle-14's new candidate (#7).
+
+- **#1 (Rule #13 wording precision):** 0 new Rule #13 invocations
+  cycle-14 mid-cycle (no Lane V dispatches; the cycle-14
+  `dbcde8b` retirement was direct code work, not an audit-with-
+  disposition). N=1 unchanged.
+- **#3 (Pattern-doc uniformity pass mechanism):** 0 new migration
+  pattern docs cycle-14. Only the pydantic-caller pattern doc
+  exists; no P2-X migrations have started. N=1.5 unchanged.
+- **#4 (Rule #12 brief-pattern reference verification):** 0 new
+  operator-driven Lane B dispatch-claim events cycle-14 (mid-cycle;
+  no operator Lane B activity). Director-side commit-body SHA
+  citations during cycle-14 (cinema_pipeline.py LoC drift, cycle-13
+  handoff misframing) reference commits accurately; no
+  brief-pattern reference divergence. N=1 unchanged.
+- **#5 (Rule #13 transitive caller-side audit scope-refinement):**
+  0 new helper-function migrations cycle-14. N=1 unchanged.
+  **Significant empirical inverse evidence already in hand from
+  Lane V #13** (cycle 12, `7472d31..a0493dc`): operator's
+  high-leverage transitive-audit on broad-B's 15 route-handler-
+  direct sites returned 14/15 clean (the 1/15 was a brief-OOS
+  thread-swallow site, not a transitive-audit miss). This inverse
+  evidence is N=1 strength but empirically distinct from N=2
+  same-shape evidence. **v5.4 codification could legitimately
+  scope-refine to "helper-function-encapsulated migrations only"
+  without a second helper-function-positive instance, if the
+  next proposal-cycle director judges the inverse evidence
+  load-bearing.** Director-discretion decision for v5.4+ proposal
+  cycle.
+- **#7 (Carry-forward claim re-verification at handoff
+  inheritance) — NEW cycle-14:** Filed at `a76d881` during cycle-14
+  substrate work. N=1 instance: concurrency flake operational
+  carry-forward retired at `dbcde8b` (cycle-14 entry) after 4-cycle
+  inheritance (cycle-10 → 14). **Scope clarification surfaced
+  during cycle-14 POST-ROADMAP refresh (`69202da`):** state-of-
+  affairs LoC claims (cinema_pipeline.py 1203 inherited 4 cycles
+  in POST-ROADMAP doc cycle-9 → cycle-13 unchanged; web_server.py
+  2406 inherited 1 cycle in cycle-13 handoff; ScreeningStage.tsx
+  720 inherited 1 cycle in cycle-13 handoff) drifted from actual
+  values (1238 / 2579 / 711). **These drifts are Rule #1 violations
+  (claims without verification output), NOT Candidate #7 instances
+  per scope clarification.** Candidate #7's scope is *operational
+  carry-forwards* (open tasks / open decisions / open hypotheses
+  about WORK), not state-snapshot claims about file contents. The
+  fix-pattern differs: Rule #1 enforcement = "run the verifying
+  command before stating the count"; Candidate #7 discipline =
+  "re-investigate the underlying task before propagating its
+  framing forward through handoffs." Different remediation =
+  different scope. N=2 watch criterion for #7 stays "operational
+  carry-forward whose claim survives ≥2 cycle handoffs unverified,
+  found materially false at re-verification."
+
+**Net N=2 status across all 5 candidates: NONE emerged cycle-14
+mid-cycle. No v5.4 ship-candidate ready.** Substrate is stable;
+codification discipline (N=2 floor) holds. **Director-discretion
+opening:** Candidate #5's inverse-evidence pattern could justify
+v5.4 ship at N=1+inverse if a future proposal-cycle director
+judges the empirical strength load-bearing. Otherwise: continue
+N=2 watch through cycle-15+.
+
+**Next re-audit at cycle-14 close** (next director's handoff doc or
+next operator's re-audit; whichever ships first). Re-audit cadence
+mid-cycle is OPTIONAL — established cadence is at cycle-close, but
+cycle-14 mid-cycle audit was triggered by user direction "n=2"
+during ongoing substrate work and produced this subsection.
+
 ## Invocation log
 
 **Note on plateau interpretation (per Protocol Bundle v3 §Minor):** Rule
