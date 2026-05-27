@@ -123,11 +123,13 @@ def _resolve_tts_provider(scene: dict, character: dict, settings_obj) -> str:
     """Decide which TTS provider to use for this scene-character pair.
 
     Inspects ``scene["language"]`` first; falls back to
-    ``character["language"]``; defaults to ``"en"``. Korean is detected by
-    case-insensitive prefix match on ``"ko"`` (matches ``"ko"``, ``"ko_KR"``,
-    ``"korean"``, etc.). When Korean is detected AND the Cartesia API key is
-    set, returns ``"CARTESIA_SONIC_2"``; otherwise (English, other languages,
-    or Cartesia key missing) returns ``"ELEVENLABS"`` — the current default.
+    ``character["language"]``; then to ``settings_obj.language_pref``
+    (or ``settings_obj["language_pref"]`` if dict-shaped); defaults to
+    ``"en"``. Korean is detected by case-insensitive prefix match on
+    ``"ko"`` (matches ``"ko"``, ``"ko_KR"``, ``"korean"``, etc.). When
+    Korean is detected AND the Cartesia API key is set, returns
+    ``"CARTESIA_SONIC_2"``; otherwise (English, other languages, or
+    Cartesia key missing) returns ``"ELEVENLABS"`` — the current default.
 
     Other languages route to ELEVENLABS multilingual; Cartesia is
     Korean-priority per the descriptor at
@@ -139,17 +141,35 @@ def _resolve_tts_provider(scene: dict, character: dict, settings_obj) -> str:
             human name like ``"Korean"``)
         character: a character dict (may contain ``"language"`` as fallback)
         settings_obj: the project settings instance (must expose
-            ``cartesia_api_key``)
+            ``cartesia_api_key``; may also expose ``language_pref`` as
+            project-wide fallback when scene/character lack ``language``)
 
     Returns:
         ``"CARTESIA_SONIC_2"`` for Korean+key-set; ``"ELEVENLABS"`` otherwise.
     """
     scene = scene or {}
     character = character or {}
-    raw_lang = scene.get("language") or character.get("language") or "en"
+    # Settings-level project-wide fallback: read .language_pref (attr) or
+    # ["language_pref"] (dict) when scene/character don't specify a language.
+    settings_lang = ""
+    if settings_obj is not None:
+        settings_lang = (
+            getattr(settings_obj, "language_pref", None)
+            or (settings_obj.get("language_pref") if isinstance(settings_obj, dict) else None)
+            or ""
+        )
+    raw_lang = (
+        scene.get("language")
+        or character.get("language")
+        or settings_lang
+        or "en"
+    )
     lang = str(raw_lang).lower().strip()
     is_korean = lang.startswith("ko")
     if is_korean and getattr(settings_obj, "cartesia_api_key", "") and settings_obj.cartesia_api_key:
+        return "CARTESIA_SONIC_2"
+    # Dict-shaped settings (e.g. project["global_settings"]) — same key access shape.
+    if is_korean and isinstance(settings_obj, dict) and settings_obj.get("cartesia_api_key"):
         return "CARTESIA_SONIC_2"
     return "ELEVENLABS"
 
