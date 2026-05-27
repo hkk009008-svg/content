@@ -328,6 +328,14 @@ def make_project(name: str) -> dict:
             "adaptive_pulid": True,
             "coherence_check_enabled": True,
             "color_drift_sensitivity": 0.3,
+            # F-B.2 closure (cycle-16 max-quality audit a79c59): LLM-based
+            # shot-prompt optimizer (cinematography-precise grammar + API
+            # routing hints + identity anchor + negative constraints).
+            # Default ON — cinema/shots/controller.py:391 reads this; was
+            # defaulting False because the field never existed in defaults.
+            # Caches optimizer output on the shot (.optimizer_cache) so
+            # regen doesn't repeat the LLM call.
+            "prompt_optimizer_enabled": True,
             # Step-3 (2026-05-24): N=8 best-of per-batch parallelism. 1 = sequential
             # (historic behavior); up to 4 = concurrent workers on the same RunPod
             # pod, overlapping submit/poll/download cycles. ComfyUI still serializes
