@@ -271,5 +271,233 @@ class TestEnsureSceneFoley(GuidedPipelineTestCase):
             self.assertEqual(pkg["foley"], [])
 
 
+class TestConcatFoleyTrack(GuidedPipelineTestCase):
+    """Unit tests for CinemaPipeline._concat_foley_track."""
+
+    def _make_pipeline(self):
+        project, _scene, _shot = self.create_project_with_single_shot()
+        return CinemaPipeline(project["id"])
+
+    def test_empty_paths_returns_none(self):
+        pipeline = self._make_pipeline()
+        self.assertIsNone(pipeline._concat_foley_track([]))
+
+    def test_single_path_returned_directly_no_ffmpeg(self):
+        """Single-element list skips concat — path returned as-is, ffmpeg not called."""
+        pipeline = self._make_pipeline()
+        with mock.patch("subprocess.run") as mock_run:
+            result = pipeline._concat_foley_track(["/tmp/foley_a.mp3"])
+        self.assertEqual(result, "/tmp/foley_a.mp3")
+        mock_run.assert_not_called()
+
+    def test_multi_path_calls_ffmpeg_concat(self):
+        """Multi-element list triggers ffmpeg concat; returned path is foley_track.mp3."""
+        pipeline = self._make_pipeline()
+        with mock.patch("subprocess.run") as mock_run:
+            result = pipeline._concat_foley_track(["/tmp/a.mp3", "/tmp/b.mp3"])
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("-f", cmd)
+        self.assertIn("concat", cmd)
+        self.assertTrue(str(result).endswith("foley_track.mp3"))
+
+    def test_multi_path_ffmpeg_failure_returns_none(self):
+        """If ffmpeg concat raises, _concat_foley_track returns None gracefully."""
+        import subprocess
+        pipeline = self._make_pipeline()
+        with mock.patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "ffmpeg")):
+            result = pipeline._concat_foley_track(["/tmp/a.mp3", "/tmp/b.mp3"])
+        self.assertIsNone(result)
+
+
+class TestAssembleFinalFoleyMix(GuidedPipelineTestCase):
+    """Unit tests for _assemble_final tri-mix vs 2-input fallback logic."""
+
+    def _make_pipeline_with_clips(self, tmp_path, foley_paths=None):
+        """Build a minimal pipeline with one real clip file and optional foley."""
+        project, scene, shot = self.create_project_with_single_shot()
+        pipeline = CinemaPipeline(project["id"])
+        if foley_paths is not None:
+            pipeline.foley_audio_paths = foley_paths
+        return pipeline, scene, shot
+
+    def _run_assemble_final_mock(self, tmp_path, foley_paths):
+        """Run _assemble_final with all ffmpeg calls mocked; return captured subprocess.run calls."""
+        import subprocess as _sp
+        pipeline, scene, _shot = self._make_pipeline_with_clips(tmp_path, foley_paths)
+
+        # Create fake stitched + bgm files so os.path.exists checks pass
+        fake_stitched = os.path.join(pipeline.temp_dir, "stitched.mp4")
+        fake_bgm = os.path.join(pipeline.temp_dir, "bgm.mp3")
+        fake_final = os.path.join(pipeline.export_dir, "final_cinema.mp4")
+        os.makedirs(pipeline.temp_dir, exist_ok=True)
+        os.makedirs(pipeline.export_dir, exist_ok=True)
+        open(fake_stitched, "wb").close()
+        open(fake_bgm, "wb").close()
+        # Create foley files so exists check passes
+        for fp in (foley_paths or []):
+            open(fp, "wb").close()
+
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            # Touch final_output for each mix command so return path exists
+            for arg in cmd:
+                if str(arg).endswith(".mp4") and "final_cinema" in str(arg):
+                    open(arg, "wb").close()
+            result = mock.MagicMock()
+            result.returncode = 0
+            return result
+
+        with mock.patch("subprocess.run", side_effect=fake_run), \
+             mock.patch.object(pipeline, "_apply_final_loudnorm"), \
+             mock.patch.object(pipeline, "_concat_foley_track",
+                               wraps=pipeline._concat_foley_track):
+            # Provide scene_data with zero real clips — skip normalize/stitch steps
+            # by patching them out so we can focus on step 5 (the mix).
+            with mock.patch.object(pipeline, "_assemble_final",
+                                   wraps=pipeline._assemble_final):
+                pass  # no-op; just use wraps below
+
+            # Directly invoke step 5 by calling the real method with mocked subprocess
+            # Re-wire: patch the stitched path check by ensuring stitched exists (done above).
+            result = pipeline._assemble_final(
+                scene_data=[],  # empty → no clips → returns None early
+                bgm_path=fake_bgm,
+                settings={},
+            )
+        return calls, result
+
+    def test_no_clips_returns_none_immediately(self):
+        """Empty scene_data returns None before reaching mix step."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            calls, result = self._run_assemble_final_mock(tmp, foley_paths=[])
+        self.assertIsNone(result)
+        # No subprocess.run calls expected (exited before stitch/mix)
+        self.assertEqual(len(calls), 0)
+
+    def test_assemble_final_no_foley_cmd_uses_amix_inputs_2(self):
+        """With no foley paths, the primary mix command uses amix=inputs=2."""
+        pipeline, _, _ = self._make_pipeline_with_clips(None, foley_paths=[])
+
+        captured_cmds = []
+        def fake_run(cmd, **kwargs):
+            captured_cmds.append(list(cmd))
+            m = mock.MagicMock()
+            m.returncode = 0
+            return m
+
+        fake_stitched = os.path.join(pipeline.temp_dir, "stitched.mp4")
+        fake_bgm = os.path.join(pipeline.temp_dir, "bgm.mp3")
+        os.makedirs(pipeline.temp_dir, exist_ok=True)
+        os.makedirs(pipeline.export_dir, exist_ok=True)
+        open(fake_stitched, "wb").close()
+        open(fake_bgm, "wb").close()
+        # Fake clips list so the method reaches step 5
+        fake_clip = os.path.join(pipeline.temp_dir, "clip.mp4")
+        open(fake_clip, "wb").close()
+        scene_data = [{"scene_id": "s1", "clips": [fake_clip]}]
+
+        with mock.patch("subprocess.run", side_effect=fake_run), \
+             mock.patch.object(pipeline, "_apply_final_loudnorm"):
+            pipeline._assemble_final(scene_data, fake_bgm, {})
+
+        mix_cmds = [c for c in captured_cmds if any("amix" in str(a) for a in c)]
+        self.assertTrue(len(mix_cmds) >= 1, "Expected at least one amix command")
+        mix_filter = " ".join(str(a) for a in mix_cmds[0])
+        self.assertIn("amix=inputs=2", mix_filter)
+        self.assertNotIn("amix=inputs=3", mix_filter)
+
+    def test_assemble_final_with_foley_cmd_uses_amix_inputs_3(self):
+        """With foley paths, the primary mix command uses amix=inputs=3 and includes foley input."""
+        pipeline, _, _ = self._make_pipeline_with_clips(None, foley_paths=None)
+
+        os.makedirs(pipeline.temp_dir, exist_ok=True)
+        os.makedirs(pipeline.export_dir, exist_ok=True)
+        fake_foley = os.path.join(pipeline.temp_dir, "foley_s1.mp3")
+        open(fake_foley, "wb").close()
+        pipeline.foley_audio_paths = [fake_foley]
+
+        captured_cmds = []
+        def fake_run(cmd, **kwargs):
+            captured_cmds.append(list(cmd))
+            m = mock.MagicMock()
+            m.returncode = 0
+            return m
+
+        fake_bgm = os.path.join(pipeline.temp_dir, "bgm.mp3")
+        fake_clip = os.path.join(pipeline.temp_dir, "clip.mp4")
+        open(fake_bgm, "wb").close()
+        open(fake_clip, "wb").close()
+        scene_data = [{"scene_id": "s1", "clips": [fake_clip]}]
+
+        with mock.patch("subprocess.run", side_effect=fake_run), \
+             mock.patch.object(pipeline, "_apply_final_loudnorm"):
+            pipeline._assemble_final(scene_data, fake_bgm, {})
+
+        mix_cmds = [c for c in captured_cmds if any("amix" in str(a) for a in c)]
+        self.assertTrue(len(mix_cmds) >= 1, "Expected at least one amix command")
+        mix_filter = " ".join(str(a) for a in mix_cmds[0])
+        self.assertIn("amix=inputs=3", mix_filter)
+        self.assertIn("0.20", mix_filter)  # foley volume
+        # foley path should appear in the command inputs
+        all_args = " ".join(str(a) for a in mix_cmds[0])
+        self.assertIn("foley", all_args)
+
+    def test_assemble_final_foley_concat_called_for_multi_scene(self):
+        """With 2 foley paths, _concat_foley_track is invoked (concat needed)."""
+        pipeline, _, _ = self._make_pipeline_with_clips(None, foley_paths=None)
+
+        os.makedirs(pipeline.temp_dir, exist_ok=True)
+        os.makedirs(pipeline.export_dir, exist_ok=True)
+        fp1 = os.path.join(pipeline.temp_dir, "foley_s1.mp3")
+        fp2 = os.path.join(pipeline.temp_dir, "foley_s2.mp3")
+        for fp in (fp1, fp2):
+            open(fp, "wb").close()
+        pipeline.foley_audio_paths = [fp1, fp2]
+
+        fake_track = os.path.join(pipeline.temp_dir, "foley_track.mp3")
+
+        captured_concat_calls = []
+        original_concat = pipeline._concat_foley_track
+        def mock_concat(paths):
+            captured_concat_calls.append(paths)
+            # Write the track so os.path.exists passes in _assemble_final
+            open(fake_track, "wb").close()
+            return fake_track
+        pipeline._concat_foley_track = mock_concat
+
+        fake_bgm = os.path.join(pipeline.temp_dir, "bgm.mp3")
+        fake_clip = os.path.join(pipeline.temp_dir, "clip.mp4")
+        open(fake_bgm, "wb").close()
+        open(fake_clip, "wb").close()
+        scene_data = [{"scene_id": "s1", "clips": [fake_clip]}]
+
+        with mock.patch("subprocess.run", return_value=mock.MagicMock(returncode=0)), \
+             mock.patch.object(pipeline, "_apply_final_loudnorm"):
+            pipeline._assemble_final(scene_data, fake_bgm, {})
+
+        self.assertEqual(len(captured_concat_calls), 1)
+        self.assertEqual(captured_concat_calls[0], [fp1, fp2])
+
+
+class TestFoleyAudioPathsProperty(GuidedPipelineTestCase):
+    """Unit tests for CinemaPipeline.foley_audio_paths @property and @setter."""
+
+    def test_foley_audio_paths_property_reads_from_runstate(self):
+        project, _, _ = self.create_project_with_single_shot()
+        pipeline = CinemaPipeline(project["id"])
+        pipeline._runstate.foley_audio_paths = ["/tmp/f.mp3"]
+        self.assertEqual(pipeline.foley_audio_paths, ["/tmp/f.mp3"])
+
+    def test_foley_audio_paths_setter_writes_to_runstate(self):
+        project, _, _ = self.create_project_with_single_shot()
+        pipeline = CinemaPipeline(project["id"])
+        pipeline.foley_audio_paths = ["/tmp/a.mp3", "/tmp/b.mp3"]
+        self.assertEqual(pipeline._runstate.foley_audio_paths, ["/tmp/a.mp3", "/tmp/b.mp3"])
+
+
 if __name__ == "__main__":
     unittest.main()

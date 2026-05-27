@@ -208,6 +208,13 @@ class CinemaPipeline:
         self._runstate.scene_foley = value
 
     @property
+    def foley_audio_paths(self) -> list:
+        return self._runstate.foley_audio_paths
+    @foley_audio_paths.setter
+    def foley_audio_paths(self, value: list) -> None:
+        self._runstate.foley_audio_paths = value
+
+    @property
     def failed_shots(self) -> list:
         return self._runstate.failed_shots
     @failed_shots.setter
@@ -1073,13 +1080,43 @@ class CinemaPipeline:
                 extra={"final_path": os.path.basename(final_path)},
             )
 
+    def _concat_foley_track(self, paths: list[str]) -> Optional[str]:
+        """Pre-concatenate per-scene foley clips into a single foley_track.mp3.
+
+        - Returns None if paths is empty.
+        - Returns paths[0] directly if len(paths) == 1 (skip concat).
+        - Writes concat_foley_list.txt to temp_dir, runs ffmpeg concat demuxer,
+          returns temp_dir/foley_track.mp3 on success, None on failure.
+        """
+        if not paths:
+            return None
+        if len(paths) == 1:
+            return paths[0]
+
+        foley_list = os.path.join(self.temp_dir, "concat_foley_list.txt")
+        foley_track = os.path.join(self.temp_dir, "foley_track.mp3")
+        with open(foley_list, "w") as f:
+            for p in paths:
+                f.write(f"file '{os.path.abspath(p)}'\n")
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                 "-i", foley_list, "-c", "copy", foley_track],
+                check=True, capture_output=True, timeout=60,
+            )
+            return foley_track
+        except Exception:
+            logger.exception("Foley concat failed; foley track will be omitted from mix")
+            return None
+
     def _assemble_final(self, scene_data: list, bgm_path: str, settings: dict) -> Optional[str]:
         """
         Assembles all scene clips into the final video:
         - Hard cuts between all clips (no transitions)
         - Preserves embedded audio from dialogue clips (Omnihuman/Veo)
         - Normalizes to 1920x1080@30fps WITHOUT forcing duration (preserves natural clip length)
-        - Mixes: clip audio (dialogue) + BGM (plays once, low volume)
+        - Mixes: clip audio (dialogue) + BGM (0.12 vol) + foley (0.20 vol, when available)
+        - Foley volume 0.20 > BGM 0.12: environmental beds carry diegetic info
         - Color grading applied globally
         """
         final_output = os.path.join(self.export_dir, "final_cinema.mp4")
@@ -1185,29 +1222,62 @@ class CinemaPipeline:
         except Exception:
             logger.exception("Color grading skipped")
 
-        # 5. Mix BGM under existing audio (dialogue clips already have voice baked in)
+        # 5. Mix audio: voice (1.0) + BGM (0.12) + foley (0.20, when available)
         # The stitched video already has audio from dialogue clips (Omnihuman/Veo).
-        # We just add BGM at low volume underneath.
+        # BGM is at 0.12 (ambient bed); foley at 0.20 (slightly louder — diegetic
+        # environmental information like footsteps/weather carries meaning).
+        # amix duration=first clamps foley/BGM to reel length automatically.
+        #
+        # Fallback cascade:
+        #   Primary:    voice + bgm + foley  (3-input amix)
+        #   Fallback 1: voice + bgm          (2-input amix, foley absent or concat failed)
+        #   Fallback 2: BGM-only             (voice mix failed)
+        #   Fallback 3: copy stitched as-is  (all audio mixing failed)
+
+        # Pre-concat per-scene foley clips into a single track (None if no foley).
+        foley_track_path = self._concat_foley_track(self.foley_audio_paths)
+
         try:
             if os.path.exists(bgm_path):
-                cmd = [
-                    "ffmpeg", "-y",
-                    "-i", stitched,
-                    "-i", bgm_path,
-                    "-filter_complex",
-                    # If stitched has audio, mix it with BGM. If not, use BGM only.
-                    "[0:a]volume=1.0[voice];"
-                    "[1:a]volume=0.12[bgm];"
-                    "[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]",
-                    "-map", "0:v", "-map", "[aout]",
-                    "-c:v", "copy",  # No re-encode — just audio mix
-                    "-c:a", "aac", "-b:a", "192k",
-                    final_output,
-                ]
+                use_foley = foley_track_path and os.path.exists(foley_track_path)
+                if use_foley:
+                    # Primary: 3-input tri-mix (voice + BGM + foley)
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-i", stitched,
+                        "-i", bgm_path,
+                        "-i", foley_track_path,
+                        "-filter_complex",
+                        "[0:a]volume=1.0[voice];"
+                        "[1:a]volume=0.12[bgm];"
+                        "[2:a]volume=0.20[foley];"
+                        "[voice][bgm][foley]amix=inputs=3:duration=first:dropout_transition=2[aout]",
+                        "-map", "0:v", "-map", "[aout]",
+                        "-c:v", "copy",
+                        "-c:a", "aac", "-b:a", "192k",
+                        final_output,
+                    ]
+                    mix_label = "voice+BGM+foley"
+                else:
+                    # Fallback 1: 2-input mix (no foley)
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-i", stitched,
+                        "-i", bgm_path,
+                        "-filter_complex",
+                        "[0:a]volume=1.0[voice];"
+                        "[1:a]volume=0.12[bgm];"
+                        "[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]",
+                        "-map", "0:v", "-map", "[aout]",
+                        "-c:v", "copy",  # No re-encode — just audio mix
+                        "-c:a", "aac", "-b:a", "192k",
+                        final_output,
+                    ]
+                    mix_label = "voice+BGM"
                 subprocess.run(cmd, check=True, capture_output=True, timeout=120)
                 logger.info(
-                    "Final cinema video assembled with BGM",
-                    extra={"final_path": final_output},
+                    "Final cinema video assembled",
+                    extra={"mix": mix_label, "final_path": final_output},
                 )
             else:
                 # No BGM — just copy stitched as final
@@ -1222,7 +1292,7 @@ class CinemaPipeline:
             return final_output
 
         except subprocess.CalledProcessError as e:
-            # BGM mix failed (maybe stitched has no audio) — try without voice mix
+            # Primary/2-input BGM mix failed (maybe stitched has no audio) — try BGM-only
             logger.warning(
                 "BGM mix failed, trying BGM-only fallback",
                 extra={

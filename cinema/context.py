@@ -80,7 +80,6 @@ class PipelineContext:
     # --- audio ---
     audio_path: str = ""
     voice_id: str = ""
-    foley_audio_paths: list = field(default_factory=list)
     music_vibe: str = ""
     video_pacing: str = ""
     story_tension: float = 0.0
