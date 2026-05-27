@@ -1335,10 +1335,14 @@ class CinemaPipeline:
                 # it may be shorter than the video (e.g. 3.9s dialogue vs 5.1s
                 # Kling motion). amix duration=first would clamp audio to
                 # dialogue length, leaving a silent tail. duration=longest
-                # plays BGM/foley to the longest input (the video-length
-                # bgm/foley tracks) covering the full reel. Embedded-voice
-                # legacy path (Omnihuman/Veo) preserves duration=first since
-                # voice and video are co-located there.
+                # extends to the longest input (BGM tracks can be 30-60s,
+                # foley typically video-length). Pair with -shortest on the
+                # ffmpeg output so the container clamps to the shortest INPUT
+                # (the video, 5.1s) — audio plays through video length with
+                # BGM/foley filling any silent tail past dialogue end.
+                # Embedded-voice legacy path (Omnihuman/Veo) preserves
+                # duration=first WITHOUT -shortest since voice == video length
+                # there.
                 amix_duration_mode = "longest" if use_standalone_dialogue else "first"
                 filter_parts.append(
                     "".join(amix_inputs)
@@ -1351,8 +1355,13 @@ class CinemaPipeline:
                     "-map", "0:v", "-map", "[aout]",
                     "-c:v", "copy",
                     "-c:a", "aac", "-b:a", "192k",
-                    final_output,
                 ]
+                # -shortest clamps output to shortest INPUT (the video for
+                # standalone-dialogue path); ensures audio doesn't overshoot
+                # video length when BGM/foley are longer than video.
+                if use_standalone_dialogue:
+                    cmd += ["-shortest"]
+                cmd += [final_output]
                 mix_label = (
                     ("standalone-dialogue" if use_standalone_dialogue else "embedded-voice")
                     + "+BGM"
