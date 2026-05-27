@@ -94,7 +94,7 @@ echo ""
 echo "[3/6] Downloading models (this may take a while)..."
 
 MODELS_DIR="$COMFYUI_DIR/models"
-mkdir -p "$MODELS_DIR"/{checkpoints,clip,vae,pulid,upscale_models}
+mkdir -p "$MODELS_DIR"/{checkpoints,clip,vae,pulid,upscale_models,diffusion_models}
 
 # FLUX1 dev FP8
 if [ ! -f "$MODELS_DIR/checkpoints/FLUX1/flux1-dev-fp8.safetensors" ]; then
@@ -102,6 +102,19 @@ if [ ! -f "$MODELS_DIR/checkpoints/FLUX1/flux1-dev-fp8.safetensors" ]; then
     echo "  Downloading FLUX1 dev FP8..."
     wget -q --show-progress -O "$MODELS_DIR/checkpoints/FLUX1/flux1-dev-fp8.safetensors" \
         "https://huggingface.co/Kijai/flux-fp8/resolve/main/flux1-dev-fp8.safetensors"
+fi
+
+# Symlink FLUX UNet for UNETLoader (pulid.json + pulid_max.json reference it).
+# ComfyUI's UNETLoader reads from models/diffusion_models/, distinct from
+# CheckpointLoaderSimple which reads models/checkpoints/. Without this symlink,
+# workflows reject with `unet_name: 'FLUX1/flux1-dev-fp8.safetensors' not in []`
+# and the pipeline falls back to FAL FLUX-Pro WITHOUT PuLID identity anchoring.
+# Closes C-B1 surfaced in Tier B Korean dialogue probe 2026-05-27 (a42a6af).
+mkdir -p "$MODELS_DIR/diffusion_models/FLUX1"
+if [ ! -e "$MODELS_DIR/diffusion_models/FLUX1/flux1-dev-fp8.safetensors" ]; then
+    ln -sf "$MODELS_DIR/checkpoints/FLUX1/flux1-dev-fp8.safetensors" \
+           "$MODELS_DIR/diffusion_models/FLUX1/flux1-dev-fp8.safetensors"
+    echo "  Symlinked FLUX1/flux1-dev-fp8.safetensors into diffusion_models/ for UNETLoader."
 fi
 
 # CLIP models
