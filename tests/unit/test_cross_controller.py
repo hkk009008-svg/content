@@ -589,6 +589,8 @@ def test_checkpoint_round_trip_via_runstate():
         runstate.current_stage = "MOTION"
         runstate.completed_scene_indices = {0}
         runstate.failed_shots = ["sh3_failed"]
+        runstate.scene_foley = {"sc1": os.path.join(tmpdir, "foley_sc1.mp3")}
+        runstate.foley_audio_paths = [os.path.join(tmpdir, "foley_sc1.mp3")]
 
         host._checkpoint._save_checkpoint()
         assert host._checkpoint.has_checkpoint()
@@ -603,10 +605,17 @@ def test_checkpoint_round_trip_via_runstate():
         runstate.shot_results = {}
         runstate.failed_shots = []
         runstate.completed_scene_indices = set()
+        runstate.scene_foley = {}
+        runstate.foley_audio_paths = []
         completed = host._checkpoint._restore_from_checkpoint()
         assert completed == {0}
         assert runstate.failed_shots == ["sh3_failed"]
         assert runstate.shot_results["sh1"]["identity_score"] == 0.91
+        # Foley round-trip (C1 fix from Lane V #3 — without this, resume
+        # silently drops foley to 2-input mix because foley_audio_paths
+        # restores as []).
+        assert runstate.scene_foley == {"sc1": os.path.join(tmpdir, "foley_sc1.mp3")}
+        assert runstate.foley_audio_paths == [os.path.join(tmpdir, "foley_sc1.mp3")]
 
 
 def test_gate_satisfied_predicates_use_project_state():

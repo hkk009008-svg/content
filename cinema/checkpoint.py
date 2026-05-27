@@ -97,6 +97,8 @@ class CheckpointStore:
             "completed_scene_indices": sorted(self._runstate.completed_scene_indices),
             "scene_clips": self._runstate.scene_clips,
             "scene_audio": self._runstate.scene_audio,
+            "scene_foley": self._runstate.scene_foley,
+            "foley_audio_paths": list(self._runstate.foley_audio_paths),
             "shot_results": self._runstate.shot_results,
             "failed_shots": self._runstate.failed_shots,
         }
@@ -169,6 +171,8 @@ class CheckpointStore:
 
         self._runstate.scene_clips = state.get("scene_clips", {})
         self._runstate.scene_audio = state.get("scene_audio", {})
+        self._runstate.scene_foley = state.get("scene_foley", {})
+        self._runstate.foley_audio_paths = state.get("foley_audio_paths", [])
         self._runstate.shot_results = state.get("shot_results", {})
         self._runstate.failed_shots = state.get("failed_shots", [])
         completed = set(state.get("completed_scene_indices", []))

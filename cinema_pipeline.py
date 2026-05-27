@@ -1097,7 +1097,8 @@ class CinemaPipeline:
         foley_track = os.path.join(self.temp_dir, "foley_track.mp3")
         with open(foley_list, "w") as f:
             for p in paths:
-                f.write(f"file '{os.path.abspath(p)}'\n")
+                escaped = os.path.abspath(p).replace("'", r"'\''")
+                f.write(f"file '{escaped}'\n")
         try:
             subprocess.run(
                 ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
