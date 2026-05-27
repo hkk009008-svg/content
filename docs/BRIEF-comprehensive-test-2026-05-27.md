@@ -14,8 +14,8 @@
 **Cross-seat coordination escalation (cycle-14 mid-cycle, 2026-05-27 T08:35Z → director adjudication this commit):** Operator independently drafted `docs/EXTENSIVE-TEST-PLAN-2026-05-27.md` (~768 lines) cold because operator session started before this brief's `T05` dispatch-claim event entered STATE.md. Both seats were responding to identical user direction "both prepare TOGATHER." Per operator's escalation event (`fdd0094`), 4 consolidation options surfaced: (A) operator deletes draft; (B) keep both with semantic split + cross-refs; (C) operator's draft becomes appendix; (D) director-proposed hybrid. **Director-seat adjudicates: OPTION B — semantic split.** Both artifacts preserved with role-aligned scope per Sh: brief = strategic (WHAT/WHY/structure); operator's testplan = operational (HOW/per-prompt/per-parameter). See §"Cross-seat coordination" subsection in this brief's §1 + mirrored ESCALATION-RESOLVED header in operator's testplan (operator commits next).
 
 **Status (at brief-write time, 2026-05-27 cycle-14 mid-cycle):**
-- **DRAFT v0.4** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + user §9 decisions logged + **ALL 9 phase cell PREDICTIONs filled** (P-STYLE, P-BGM, P-DECOMPOSE, P-CHIEFDIR, P-KEYFRAME, P-PERFORMANCE, P-MOTION, P-IDENTITY, P-ASSEMBLY) + 3 prompt class cell PREDICTIONs filled (PR-STORY, PR-IMAGE, PR-MOTION)
-- AWAITING operator-seat REPLY with operational-discipline additions (Lane V coverage, doc-sync points, test isolation, telemetry collection) + remaining cell PREDICTIONs (G-* gate cells, director-doable; PA-* parameter cells, operator-default per Sh; PR-DIALOGUE/PR-CONTINUITY/PR-STYLE-LLM/PR-CHIEFDIR/PR-AUDIO-VIBE prompt cells)
+- **DRAFT v0.5** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + user §9 decisions logged + **ALL 9 phase cell PREDICTIONs filled** (P-STYLE, P-BGM, P-DECOMPOSE, P-CHIEFDIR, P-KEYFRAME, P-PERFORMANCE, P-MOTION, P-IDENTITY, P-ASSEMBLY) + 3 prompt class cell PREDICTIONs filled (PR-STORY, PR-IMAGE, PR-MOTION) + **operator REPLY folded** at `a9b1c32`: operational discipline §1.5, pre-flight A7+A8 refined + A9 ComfyUI workflow probe added, 22 cold-context verification commands §5.5, 2 adjustment-pointing matrix rows §6, operator sign-off ✅ §11, cell-ownership split per Sh codified §5 tables + Candidate #8 filed at `1af3528` (operator + director concurred)
+- AWAITING: director-seat continued fill of 6 G-* gate cells + 5 remaining PR-* prompt cells (director-doable; testplan §5 P1-P14 cross-references); operator-seat fill of 7 PA-* parameter cells (operator-default per Sh; testplan §6 cross-references); user-principal answers to §9 questions 5-9; pre-flight A1-A9 all-green (notably A5/A9 RunPod pod restart blocker)
 - USER-PRINCIPAL DECISIONS LANDED (2026-05-27): Tier B+C+D scope (comprehensive); $50 hard budget cap; fresh RunPod pod deploy via `scripts/setup_runpod.sh`; fill PREDICTIONs in advance (this v0.2)
 - NOT EXECUTABLE until §"Pre-flight checklist" all-green + operator REPLY landed + brief v1.0 + user-principal execution authorization
 
@@ -77,6 +77,90 @@ Per CLAUDE.md role partition Sh: brief authoring is strategic-seat-default (dire
 - Director-seat: prediction calibration; adjustment recommendation drafting
 - Operator-seat: Lane V dispatch on each fix/tune/prompt commit; cold-context verification of findings
 - Either seat: STOP signal if a CRITICAL surfaces (e.g., data corruption, budget overrun, identity-validator failure cascading)
+
+## 1.5 Operational discipline (folded from operator REPLY `a9b1c32` §"Ask #1")
+
+### Lane V cadence — CC-1 COALESCED range-review per tier-end
+
+Per-commit Lane V dispatch on 10-30 adjustment commits would cost
+**2-9M cumulative tokens** vs v4.1 narrowing threshold (>1.5M).
+**Operator REPLY recommends CC-1 coalesced range-review per Rule #9
+§"Coalescing":**
+
+- **Each tier completion triggers ONE Lane V dispatch on the range** —
+  Tier A complete → Lane V on `<pre-Tier-A SHA>..<post-Tier-A SHA>`
+  covering all Tier A artifact commits. Same for B, C, D.
+- **CRITICAL findings within a tier trigger immediate per-commit Lane V
+  on the offending commit** (no waiting for tier-end). Either-seat
+  STOP signal per §1 authority precedence.
+- **Cross-tier dispositions** (e.g., a Tier B finding affecting Tier C
+  predictions) get a separate Lane V dispatch when surfaced.
+
+**Verification reports:** one `verification-report` mailbox event per
+tier-end + extras for CRITICAL escalations. Per Rule #9 §"Parallelism",
+director-seat MAY ALSO dispatch independent reviewers on the same
+range (parallel; operator's Lane V does NOT preempt director-seat's).
+
+Empirical basis (cycle-6 S13 `029dbf9..2fb44d1` coalesced review caught
+F1 CRITICAL that isolation review would have missed) — pattern
+generalizes to tier-range reviews.
+
+### Pytest-leakage discipline — `domain/projects/` count delta = 0
+
+Per cycle-13 `6f8be5d` durable-fix lesson:
+
+- **Pre-flight A8' addition:** record baseline count BEFORE execution
+  (`ls domain/projects/ | wc -l > /tmp/projects-baseline.txt`)
+- **Post-each-tier check (Lane V dispatch precondition):** diff
+  baseline vs post-tier count; non-zero diff = test fixture created
+  outside `tmp_projects_dir` → INVESTIGATE before next tier
+- **Test execution uses operator-created sample project** (per §9 Q6);
+  NO fixtures should be created during execution
+- **Safety net:** `scripts/clean_test_fixtures.py` per cycle-13
+  `540f126`; explicit count-delta enforcement catches non-pytest
+  leakage paths
+
+### Telemetry collection — per-cell artifact `docs/test-cells/<cell-id>-<UTC-ts>.md`
+
+Each test cell generates one artifact during execution:
+
+```
+docs/test-cells/
+├── P-STYLE-2026-05-2XTXX-XX-XXZ.md     # PREDICTION + ACTUAL + DELTA + INSIGHT + ADJUSTMENT
+├── P-BGM-2026-05-2XTXX-XX-XXZ.md
+├── ...
+├── README.md                              # cumulative findings synthesis
+```
+
+**Artifact contents:** frontmatter (cell-id, tier, executor, wall-clock,
+cost actual, success flag) + PREDICTION (verbatim from brief) + ACTUAL +
+DELTA + INSIGHT + ADJUSTMENT + cross-references to related cells.
+
+**Commit cadence:** one commit per cell-artifact during execution.
+Subject form: `test(cell): <CELL-ID> <PASS|MINOR|MAJOR|FALSIFIED> — <summary>`.
+Coalesced into Lane V range-review at tier-end.
+
+**Rationale (vs in-place brief edits):** preserves PREDICTION
+provenance (predictions don't move; locked-in once shipped); avoids
+merge-conflict-prone in-place edits during joint execution; each cell
+artifact independently grepable / linkable for post-test findings
+synthesis; README.md cumulative synthesis becomes input to joint
+findings report (`docs/REPORT-comprehensive-test-2026-05-2X.md`).
+
+### Doc-sync triggers (Lane D)
+
+Lane D triggers on execution-surfaced ARCHITECTURE.md divergences:
+
+- Adjustment commits modifying `cinema/` / `domain/` / `web_server.py`
+  / `cinema_pipeline.py` trigger Lane D per operator default
+- Cells whose ACTUAL reveals undocumented capability/constraint → Lane D
+  candidate (P-IDENTITY threshold range different from §11 → update §11;
+  PA-VIDEO engine routing not in §9 → update §9)
+- Lane D commits ride compound-commit-push discipline (B-003 Option E)
+- Run §15 smoke before Lane D ships per ADR-013
+
+**Out-of-scope for Lane D during execution:** ARCHITECTURE.md cleanup
+unrelated to test findings.
 
 ---
 
@@ -145,16 +229,48 @@ echo "ANTHROPIC_API_KEY: $([ -n "$ANTHROPIC_API_KEY" ] && echo set || echo MISSI
 echo "FAL_KEY: $([ -n "$FAL_KEY" ] && echo set || echo MISSING)"
 # Test project budget: review .env CINEMA_BUDGET_LIMIT_USD
 
-# A7. Identity validator weights present
-ls models/ghostfacenet*.pth 2>/dev/null || ls weights/ghostfacenet* 2>/dev/null
-# (TODO operator-REPLY: confirm exact path; if missing, identity gate cannot validate)
+# A7. Identity validator weights present (RESOLVED at operator REPLY `a9b1c32`)
+ls -la ~/.deepface/weights/ghostfacenet_v1.h5 2>&1
+# Expected: file exists, ~16-25MB. If missing, DeepFace auto-downloads on first
+# DeepFace.represent(model_name="GhostFaceNet", ...) call — adds 5-15s warmup
+# to first identity-validation call. To force download pre-execution:
+.venv/bin/python -c "from deepface import DeepFace; DeepFace.build_model('GhostFaceNet'); print('GhostFaceNet model loaded OK')"
+# Expected: prints "GhostFaceNet model loaded OK"; failure indicates DeepFace
+# import error or network failure during weight download.
+# Impl ref: identity/validator.py:347, 487, 546 — 3 DeepFace call sites.
+# ARCHITECTURE §11: "GhostFaceNet via DeepFace (NOT ArcFace). Singleton via
+# double-checked locking; 4 access paths converge."
 
-# A8. Sample project ready
+# A8. Sample project ready (refined per operator REPLY `a9b1c32` §1.2 + Ask #4)
+ls domain/projects/ | wc -l > /tmp/projects-baseline.txt
+echo "Baseline project count: $(cat /tmp/projects-baseline.txt)"
 # Decision: (a) reuse populated project from domain/projects/ (look for human-titled,
 #  large project.json, non-empty scenes); or (b) create fresh minimal project via UI.
 # Option (a) faster if available; option (b) costs ~$3-7 to create from scratch.
-ls domain/projects/ | head -10
-# Filter strategy: ignore "Test Project <id8>" pytest fixtures; look for distinctive names
+ls domain/projects/ | grep -v "^Test Project [a-f0-9]\{8\}$" | head -10
+# Filter strategy: ignore pytest fixtures named "Test Project <8-hex>"; look for
+# distinctive operator-created names. Post cycle-13 `6f8be5d` durable fix + `540f126`
+# cleanup (2,170 stale fixtures removed), this list should be predominantly real
+# projects. Operator REPLY: re-audit landscape post-cleanup; may favor reuse.
+
+# A9. ComfyUI workflow probe (PROPOSED + ACCEPTED at operator REPLY `a9b1c32` Ask #4)
+# Bare HTTP head check (A5) only proves pod is UP — does NOT verify custom nodes /
+# model checkpoints / LoRA paths. A9 is deeper probe.
+COMFYUI_URL="$COMFYUI_SERVER_URL"
+
+# A9.1 — Object info contains required custom node classes
+curl -sf "$COMFYUI_URL/object_info" --max-time 15 | jq -r 'keys[]' > /tmp/comfyui-nodes.txt
+for node in "PuLIDFluxInsightFaceLoader" "PulidFluxModelLoader" "ApplyPulidFlux" "ControlNetApply" "IPAdapter" "VAELoader" "CheckpointLoaderSimple" "FluxGuidance"; do
+  grep -q "$node" /tmp/comfyui-nodes.txt && echo "OK: $node" || echo "MISSING: $node"
+done
+
+# A9.2 — Model checkpoints loaded (via object_info introspection)
+curl -sf "$COMFYUI_URL/object_info/CheckpointLoaderSimple" --max-time 10 | jq -r '.CheckpointLoaderSimple.input.required.ckpt_name[0][]' | head -20
+# Expected: list of loaded checkpoint files; should include FLUX-1-dev or similar
+# per pulid.json workflow's expected ckpt_name
+
+# A9 is a Tier A pre-flight; runs once per pod restart. If A9 fails, A5 will succeed
+# but Tier B/C will fail at first keyframe generation. Surface as pre-flight blocker.
 ```
 
 **Pre-flight all-green criterion:** A1-A8 all return expected values. ANY red = brief execution paused until red is closed.
@@ -559,7 +675,53 @@ The cells below cover Tier B + C predictively. Tier A (substrate verification) i
 
 **ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
 
-> **Remaining prompt cells (PR-DIALOGUE, PR-CONTINUITY, PR-STYLE-LLM, PR-CHIEFDIR, PR-AUDIO-VIBE) are STUB pending operator REPLY OR continued director session.** 3 of 8 prompt cells filled at v0.3.
+> **Remaining prompt cells (PR-DIALOGUE, PR-CONTINUITY, PR-STYLE-LLM, PR-CHIEFDIR, PR-AUDIO-VIBE) STUB at v0.5.** Per operator REPLY responsibility split (Sh): director-doable; operator's testplan §5 P1-P14 enumeration provides cross-reference content (canonical for HOW; brief PR-* cells cross-reference rather than duplicate). 3 of 8 prompt cells filled at v0.3.
+
+### 5.5 Cold-context verification commands per cell (folded from operator REPLY `a9b1c32` §"Ask #1 §1.5")
+
+Operator-drafted commands for cold-context validation of ACTUAL output without re-loading full predictive harness. **Operator-default per Sh** (operator-seat owns cold-context verification subagent dispatch).
+
+#### Phase cells (P-*)
+
+| Cell | Cold-context verification command | What it falsifies |
+|---|---|---|
+| **P-STYLE** | `cat /tmp/style-rules-output.json \| jq 'keys'` then `cat /tmp/style-rules-output.json \| jq '.[]'` | Shape (keys present) + content (non-empty strings) |
+| **P-BGM** | `ffprobe -v quiet -show_streams /tmp/bgm.mp3 \| grep -E 'duration\|codec_name'` | Duration ≈ 47s + valid mp3 codec |
+| **P-DECOMPOSE** | `cat /tmp/scene-shots.json \| jq '.[] \| {id, prompt: .prompt[:80], camera}'` | Shot count + each shot has prompt + camera directive |
+| **P-CHIEFDIR** | `cat /tmp/chiefdir-validation.json \| jq '.decision, (.shots \| length)'` | Decision ∈ {APPROVED, MODIFIED, REJECTED} + non-empty shots list |
+| **P-KEYFRAME** | `ls -la /tmp/keyframe-takes/*.png && file /tmp/keyframe-takes/*.png` | Files exist + valid PNG + nonzero size |
+| **P-PERFORMANCE** | `ffprobe -v quiet -show_streams /tmp/perf-takes/*.mp4 \| grep -E 'duration\|width\|height'` | Files exist + valid mp4 + non-zero duration |
+| **P-MOTION** | Same as P-PERFORMANCE shape | Same |
+| **P-IDENTITY** | `cat /tmp/identity-scores.json \| jq '.[] \| {shot_id, overall_score, passed}'` | Per-shot score in [0.0, 1.0] + passed bool |
+| **P-ASSEMBLY** | `ffprobe -v quiet -show_format /tmp/final_cinema.mp4 \| grep -E 'duration\|size\|bit_rate'` + `ffmpeg -i /tmp/final_cinema.mp4 -af loudnorm=I=-23:print_format=summary -f null - 2>&1 \| tail -10` | Valid mp4 + duration ≈ sum-of-shots + loudnorm I ≈ -23 LUFS |
+
+#### Gate cells (G-*) — operates on project.json state transitions
+
+| Cell | Cold-context verification command |
+|---|---|
+| **G-PLAN** | `jq '.scenes[].shots[] \| {id, plan_approved}' projects/<pid>/project.json` |
+| **G-KEYFRAME** | `jq '.scenes[].shots[] \| {id, approved_keyframe_take_id}' projects/<pid>/project.json` |
+| **G-PERF** | `jq '.scenes[].shots[] \| {id, approved_performance_take_id, performance_engine}' projects/<pid>/project.json` |
+| **G-REVIEW** | `jq '.scenes[].shots[] \| {id, approved_final_take_id}' projects/<pid>/project.json` |
+| **G-SCREEN** | `jq '.screening_approved, .needs_reassembly' projects/<pid>/project.json` |
+| **G-ITERATE** | `jq '.scenes[].shots[] \| select(.iterations) \| {id, iterations}' projects/<pid>/project.json` |
+
+#### Prompt cells (PR-*) — operator subagent-dispatchable verification of prompt-input itself
+
+| Cell | Cold-context verification (operator subagent dispatchable) |
+|---|---|
+| **PR-STORY** | "Read `domain/scene_decomposer.py:341-440` system prompt; verify it enforces character coverage + camera-vocab + narrative-arc per testplan §5 P4." |
+| **PR-IMAGE** | "Read `cinema/shots/controller.py:333-345`; verify prompt assembly composition order + identity descriptor injection per testplan §5 P12." |
+| **PR-MOTION** | "Read `cinema/phases/motion_render.py`; verify per-engine prompt encoding aligns with brief PR-MOTION expected output shape." |
+| **PR-CHIEFDIR** | "Read `llm/chief_director.py:130-206`; verify HC1-HC8 + T1-T9 phrasing per testplan §5 P2." |
+| **PR-DIALOGUE** | "Read `domain/dialogue_writer.py:60`; verify dialogue system prompt + language adaptation per testplan §5 P8." |
+| **PR-CONTINUITY** | "Read `domain/continuity_engine.py:446 enhance_shot_prompt`; verify assembly order per testplan §5 P12." |
+| **PR-STYLE-LLM** | "Read `llm/style_director.py:62`; verify 6-key output schema per testplan §5 P1." |
+| **PR-AUDIO-VIBE** | "Read `audio/music.py:88 _build_music_prompt`; verify vibe→prompt mapping per testplan §5 P9." |
+
+#### Parameter cells (PA-*) — covered by operator's testplan §6 directional predictions
+
+Per Option B semantic split + operator REPLY responsibility split: operator's testplan §6 provides per-parameter directional predictions (env vars + CINEMA_* + global_settings + sampling + ComfyUI workflow + ffmpeg + gate thresholds). Brief PA-* cells will cross-reference testplan §6 when operator fills next session.
 
 ### 5.4 Parameter class test cells (D — optional sensitivity sweep)
 
@@ -600,6 +762,8 @@ The matrix below maps DELTA-classified findings to specific adjustment targets. 
 | Surface B screening: missing video | final_video_path missing OR SCREENING gate not firing | `cinema/screening.py`, assembly verification | Check assembly success; check SCREENING gate trigger |
 | SSE: no progress events | SSE wiring OR `_progress_callback` not set | `web_server.py` SSE wiring, `cinema/lifecycle.py` `_progress_cb` | Check wiring; check ctor injection |
 | Cost overrun: silent budget bypass | `cost_tracker` not enforcing | `domain/cost_tracker.py` budget enforcement | Add hard-stop on budget; surface budget violations |
+| **Pytest fixtures leaked to `domain/projects/`** (folded from operator REPLY `a9b1c32` §"Ask #3") | Test isolation discipline gap | `tests/conftest.py`, `tests/unit/test_*.py` fixtures | Patch test files to use `tmp_projects_dir` fixture; verify via cycle-13 `6f8be5d` pattern (no `mock.patch.object` shim trap; use `mock.patch("domain.project_manager.PROJECTS_DIR", ...)`) |
+| **Mailbox-event missed at session start** (folded from operator REPLY `a9b1c32` §"Ask #3"; Candidate #8 evidence) | STATE.md staleness vs filesystem | `coordination/mailbox/sent/`, operator's `seen/operator.txt` cursor advance discipline | Re-`ls` mailbox immediately before substantive Write OR fold into Rule #4 RECENCY refinement (Candidate #8 filed at `1af3528`) |
 
 ---
 
@@ -698,12 +862,12 @@ When filling a cell's PREDICTION (joint prep), follow this discipline:
 [x] Structural skeleton ✓ (`<this commit SHA>`)
 [ ] v1.0 fold of operator REPLY (pending operator REPLY)
 
-### Operator-seat sign-off (REPLY pending)
+### Operator-seat sign-off (REPLY LANDED at `a9b1c32`)
 
-[ ] Operational-discipline additions incorporated
-[ ] Cold-context verification commands per cell drafted
-[ ] Pytest-leakage discipline confirmed for execution
-[ ] Counter-refinements OR consent per Rule #11 / v5 disagreement protocol
+[x] **Operational-discipline additions incorporated** — see §1.5 above (Lane V CC-1 coalesced cadence, pytest-leakage delta enforcement, per-cell artifact telemetry, Lane D triggers)
+[x] **Cold-context verification commands per cell drafted** — see §5.5 above (22 commands: 9 P-* + 6 G-* + 7 PR-*; PA-* deferred to operator's PA-fill commit)
+[x] **Pytest-leakage discipline confirmed for execution** — see §1.5 above (pre-execution baseline + per-tier delta check + cycle-13 `6f8be5d` durable-fix pattern reference)
+[x] **Counter-refinements OR consent per Rule #11 / v5 disagreement protocol** — CONSENT to v0.4 structure; one additive matrix row proposed (NOT counter-refinement; folded into §6 above)
 
 ### User-principal sign-off (execution authorization pending)
 
