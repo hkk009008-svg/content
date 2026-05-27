@@ -6,12 +6,19 @@ Contents
 - ``generate_dialogue_voiceover`` — per-character TTS for a list of
   dialogue lines, concatenated into one MP3 with configurable inter-line
   silence via ffmpeg.
+- ``generate_cartesia`` — Cartesia Sonic 2 REST TTS for low-latency
+  Korean (and other) prosody; called by ``_resolve_tts_provider`` when
+  language routing selects it. Re-introduced cycle-16+ with explicit
+  caller integration (Bundle-D 4.3 removed the orphan at commit
+  ``48f2a24`` on 2026-05-24 for zero live callers; re-add addresses
+  that head-on).
 
 Dependencies (all eager — no cycles):
 
 - ``audio._client.client``               — shared ElevenLabs instance
 - ``audio.voiceover.get_voice_direction`` — delivery → voice-param resolver
 - ``elevenlabs.save``                    — write streamed audio to disk
+- ``requests``                           — Cartesia REST POST
 
 This module is a leaf consumer: nothing in ``audio/*`` imports it.
 """
@@ -19,14 +26,93 @@ This module is a leaf consumer: nothing in ``audio/*`` imports it.
 import os
 from typing import TYPE_CHECKING, Optional
 
+import requests
 from elevenlabs import save
 
 from audio._client import client
 from audio.voiceover import get_voice_direction
 from cinema.context import get_project_setting
+from config.settings import settings
 
 if TYPE_CHECKING:
     from cinema.context import PipelineContext
+
+
+# ---------------------------------------------------------------------------
+# Cartesia Sonic 2 — low-latency neural TTS (native Korean prosody)
+# ---------------------------------------------------------------------------
+
+def generate_cartesia(
+    text: str,
+    voice_id: str,
+    output_path: str,
+    language: str = "en",
+    model_id: str = "sonic-2",
+) -> bool:
+    """Generate TTS via Cartesia Sonic 2 REST API. Returns True on success.
+
+    Mirrors the per-line caching pattern of the ElevenLabs path: if
+    ``output_path`` already exists this function returns True immediately
+    without calling the API. Callers control regeneration by removing
+    the file first.
+
+    Args:
+        text: text to synthesise
+        voice_id: Cartesia voice ID (UUID-shaped strings per Cartesia voice library)
+        output_path: where to write the mp3
+        language: ISO language code; ``"ko"`` for Korean, ``"en"`` for English.
+            Cartesia accepts language hints to bias prosody.
+        model_id: Cartesia model identifier (default ``"sonic-2"``)
+
+    Returns:
+        ``True`` on success, ``False`` on missing key / HTTP error / timeout /
+        format issue. **Never raises** — caller's fallback strategy is to
+        route to ElevenLabs on any False return.
+
+    Endpoint: https://docs.cartesia.ai/api-reference/tts/bytes
+    """
+    # Caller-controlled cache hit
+    if os.path.exists(output_path):
+        print(f"   [CARTESIA] Cache hit: {output_path}")
+        return True
+
+    api_key = settings.cartesia_api_key
+    if not api_key:
+        print("   [CARTESIA] CARTESIA_API_KEY not set; skipping")
+        return False
+
+    try:
+        url = "https://api.cartesia.ai/tts/bytes"
+        headers = {
+            "X-API-Key": api_key,
+            "Cartesia-Version": "2024-06-10",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model_id": model_id,
+            "transcript": text,
+            "voice": {"mode": "id", "id": voice_id},
+            "output_format": {
+                "container": "mp3",
+                "sample_rate": 44100,
+                "bit_rate": 128000,
+            },
+            "language": language,
+        }
+
+        print(f"   [CARTESIA] Generating [language={language}] voice={voice_id[:8]}...")
+        r = requests.post(url, headers=headers, json=payload, timeout=60)
+        r.raise_for_status()
+
+        # Cartesia bytes endpoint streams audio bytes in the response body.
+        with open(output_path, "wb") as f:
+            f.write(r.content)
+        print(f"   ✅ Cartesia output: {output_path}")
+        return True
+
+    except Exception as e:
+        print(f"   ⚠️ [CARTESIA] failed: {e}")
+        return False
 
 
 def _try_dialogue_mode(
