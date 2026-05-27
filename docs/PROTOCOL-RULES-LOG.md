@@ -319,6 +319,59 @@ registry table above → candidate row removed from this section.
   distinction wrong). Either crystallizes the scope. **Watch cycle-14+
   for helper-function migrations + Rule #13 invocation patterns.**
 
+### Candidate #7 — Carry-forward claim re-verification at handoff inheritance
+
+- **Refines:** CLAUDE.md "Verification discipline for factual claims" §
+  (Rule 1 / Rule 2 + ADR-013). Scope extension from "new claims" to
+  "inherited claims older than 1 cycle."
+- **N=1 instance:** Cycle-14 entry concurrency carry-forward retirement
+  (`dbcde8b`). The "concurrency flake"
+  `test_four_concurrent_generate_only_one_wins` was characterized in
+  cycle-10 carry-forward as "environment-sensitive; not consistently
+  reproducible." Handoffs at cycle-10, 11, 12, and 13 each inherited
+  this framing without re-running the verifying command (run the test
+  in isolation). At cycle-14 entry, isolation runs showed the test had
+  been **deterministically failing 10/10** since origin commit
+  `a97573e` (2026-05-24, cycle-9). The "flake" framing was false from
+  the start; only full-suite execution warmth (prior tests warming
+  Flask's request context) masked the timing-window bug. The cycle-13
+  handoff even hypothesized "Possibly resolved by cycle-12's broader
+  concurrency hardening + test-fixture leak fix" — extrapolating from
+  full-suite passes to isolation-mode behavior, which is a Rule 2
+  ("scoped output stays scoped") failure pattern applied to *inherited*
+  rather than *newly-generated* claims.
+- **Current N count:** 1 (cycle-14 entry; cycle-10 originating
+  misframing).
+- **Codifiable shape:** Extend the existing verification discipline so
+  that carry-forward claims inherited from prior-cycle handoffs require
+  re-verification at handoff-receipt time before re-assertion in the
+  next handoff. Specifically: (a) the inheriting seat runs the
+  verifying command before propagating the claim verbatim, OR (b)
+  marks the claim "unverified-inherited" with the original handoff's
+  SHA as provenance. Re-verification window: an originating handoff
+  + the immediate next cycle's handoff are presumed authoritative
+  (claim is "fresh"); ≥2 cycles after origin requires explicit
+  re-verification at receipt time. Principle: authority and
+  verification travel together (per CLAUDE.md §"When you cannot
+  comply") — so *inherited* authority requires *fresh* verification or
+  explicit demotion to unverified status.
+- **N=2 emergence criteria:** A second carry-forward whose claim
+  survives ≥2 cycle handoffs unverified, then is found materially
+  false (not merely refined) at re-verification. Watch cycle-15+
+  carry-forward chains; specifically watch for any current carry-forward
+  (RunPod pod state, `web_server.py` LoC, `cinema_pipeline.py` LoC,
+  `ScreeningStage.tsx` LoC) whose re-verification at handoff-receipt
+  time produces a materially different answer than the inheriting
+  handoff asserts. The 4 remaining N=1 candidates above (#1/#3/#4/#5)
+  do NOT count as N=2 emergence for #7 — they have explicit re-audit
+  cadence baked in (the "cycle-13 audit" section pattern), which
+  arguably already satisfies the discipline this candidate would
+  codify.
+- **Beneficiary (per Rule #11):** `both` seats + `user` (cleaner
+  handoff substrate; less wasted investigation time on misframed
+  carry-forwards; faster carry-forward retirement when re-verification
+  reveals "already-resolved" or "always-was-broken" states).
+
 ### Cycle-13 audit (cycle-14 entry watchpoint refresh)
 
 Cycle 13 was the **first markdown-only protocol-substrate cycle** (no
