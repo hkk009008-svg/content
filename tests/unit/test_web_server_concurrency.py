@@ -135,7 +135,9 @@ def test_concurrent_generate_only_one_wins():
     class SlowFake:
         def __init__(self, _pid, core=None, progress_callback=None):
             ctor_entered.set()
-            ctor_release.wait(timeout=3.0)
+            # Block until the test joins both racing threads (see below).
+            # Timeout > t.join(5) safety margin guards against test-thread hang.
+            ctor_release.wait(timeout=10.0)
 
         def generate(self, resume=False):
             return "done"
@@ -167,11 +169,23 @@ def test_concurrent_generate_only_one_wins():
         t1.start()
         t2.start()
 
+        # Wait for the winning bg thread to enter SlowFake.__init__
+        # (sentinel installed, ctor blocked on ctor_release).
         ctor_entered.wait(timeout=3.0)
-        ctor_release.set()
 
+        # Join test threads BEFORE releasing the bg thread. With the bg
+        # thread still blocked, the sentinel stays in _running_pipelines,
+        # so the loser thread MUST see it and return 409. Without this
+        # ordering, in cold runs (no prior warm-up of Flask's request
+        # context) the winning bg-thread could complete generate() and
+        # pop the sentinel before the losing thread arrives at the lock,
+        # letting it also become a winner.
         t1.join(timeout=5)
         t2.join(timeout=5)
+
+        # Both test threads have recorded their lock-race result. Now
+        # release the bg thread so its finally-block cleanup runs.
+        ctor_release.set()
 
     assert sorted(results) == [200, 409], (
         f"Expected exactly one 200 and one 409, got {results}"
@@ -337,7 +351,9 @@ def test_four_concurrent_generate_only_one_wins():
     class SlowFake:
         def __init__(self, _pid, core=None, progress_callback=None):
             ctor_entered.set()
-            ctor_release.wait(timeout=3.0)
+            # See test_concurrent_generate_only_one_wins above for why
+            # we wait longer than t.join(5). Same ordering invariant.
+            ctor_release.wait(timeout=10.0)
 
         def generate(self, resume=False):
             return "done"
@@ -367,11 +383,24 @@ def test_four_concurrent_generate_only_one_wins():
         for t in threads:
             t.start()
 
+        # Wait for the winning bg thread to enter SlowFake.__init__
+        # (sentinel installed, ctor blocked on ctor_release).
         ctor_entered.wait(timeout=3.0)
-        ctor_release.set()
 
+        # Join all 4 test threads BEFORE releasing the bg thread. With
+        # the bg thread still blocked, the sentinel stays in
+        # _running_pipelines, so threads B/C/D MUST see it and return
+        # 409. Without this ordering, in cold runs (no prior warm-up
+        # of Flask's request context) the winning bg-thread could
+        # complete generate() and pop the sentinel before the slower
+        # test threads arrived at the lock, letting them also become
+        # winners (observed: [200,409,200,200] instead of one 200).
         for t in threads:
             t.join(timeout=5)
+
+        # All 4 lock-race verdicts recorded; release the bg thread so
+        # its finally-block cleanup runs.
+        ctor_release.set()
 
     assert results.count(200) == 1, f"Expected exactly 1 success, got {results}"
     assert results.count(409) == 3, f"Expected exactly 3 conflicts, got {results}"
