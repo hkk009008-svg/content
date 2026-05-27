@@ -1331,9 +1331,18 @@ class CinemaPipeline:
                     filter_parts.append(f"[{foley_idx}:a]volume=0.20[foley]")
                     amix_inputs.append("[foley]")
                 n_inputs = len(amix_inputs)
+                # M-B3 closure: when voice is a standalone dialogue track,
+                # it may be shorter than the video (e.g. 3.9s dialogue vs 5.1s
+                # Kling motion). amix duration=first would clamp audio to
+                # dialogue length, leaving a silent tail. duration=longest
+                # plays BGM/foley to the longest input (the video-length
+                # bgm/foley tracks) covering the full reel. Embedded-voice
+                # legacy path (Omnihuman/Veo) preserves duration=first since
+                # voice and video are co-located there.
+                amix_duration_mode = "longest" if use_standalone_dialogue else "first"
                 filter_parts.append(
                     "".join(amix_inputs)
-                    + f"amix=inputs={n_inputs}:duration=first:dropout_transition=2[aout]"
+                    + f"amix=inputs={n_inputs}:duration={amix_duration_mode}:dropout_transition=2[aout]"
                 )
                 filter_complex = ";".join(filter_parts)
 
