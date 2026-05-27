@@ -17,6 +17,15 @@ orphaned post-pivot with zero live callers. The dialogue path
 wired TTS entry; it consumes ``get_voice_direction`` from this module.
 ``VOICE_DIRECTIONS`` is also re-exported through web_server.py for the UI
 voice-style dropdown.
+
+Cycle-16+ update: ``generate_cartesia`` was re-introduced in
+``audio/dialogue.py`` (NOT here — voiceover.py stays caption-/profile-
+only per the Bundle-D 4.3 split). The re-add addresses the "zero live
+callers" reason head-on with explicit caller integration: per-line
+language router (``audio.dialogue._resolve_tts_provider``) selects
+Cartesia Sonic 2 for Korean dialogue (native prosody, ~75ms latency,
+~$0.008/shot) and falls through to ElevenLabs for English/other
+languages. The other Bundle-D 4.3 removals remain correctly dead.
 """
 
 # Maps delivery styles to precise ElevenLabs v3 voice parameters

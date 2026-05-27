@@ -59,6 +59,7 @@ API_COST_USD: dict[str, float] = {
     "HIDREAM_I1":    0.06,
     # Audio APIs (per clip)
     "STABILITY_FOLEY": 0.03,
+    "CARTESIA_SONIC_2": 0.008,  # ~$0.008/shot per descriptor at domain/scene_decomposer.py:67
 }
 
 
