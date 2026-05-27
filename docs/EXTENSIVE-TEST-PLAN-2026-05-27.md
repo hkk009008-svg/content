@@ -435,12 +435,13 @@ Per the user directive "_reveal which part need to be fixed or optimized includi
 - **Tweak variants:** (a) baseline; (b) relax HC1 wording on outfit variation; (c) add explicit "outfit changes do NOT count as identity violations" clarification
 - **Compare:** false-positive REJECTED rate on clean shots before vs after
 
-### P3. Chief Director evaluate_take (`llm/chief_director.py:352`)
+### P3. Chief Director `diagnose_failure` + `validate_shot_prompts` (`llm/chief_director.py:208` validate; `~318-446` diagnose_failure)
 
-- **Current:** RETRY/ACCEPT_LENIENT/FAIL trichotomy
-- **Predicted weakness:** ACCEPT_LENIENT may be over-used (lowering bar) or under-used (forcing FAIL on borderline takes)
-- **Tweak variants:** (a) baseline; (b) add explicit acceptance criteria for ACCEPT_LENIENT; (c) require quality_score floor for ACCEPT_LENIENT
-- **Compare:** distribution of decisions across 20+ takes pre vs post
+- **Verification correction (cycle-15 entry, post-`7d66b71` pre-staging audit):** prior text cited `evaluate_take` at line 352. Per Rule #12 grep-the-writes: (a) `evaluate_take` method does not exist in `llm/chief_director.py` (`grep -n "def evaluate_take" llm/chief_director.py` returns 0 matches); (b) line 352 is `eval_prompt = json.dumps(...)` inside `diagnose_failure`, NOT a method definition. Actual methods: pre-shot validation = `validate_shot_prompts` at line 208 (uses HC1-HC8 + T1-T9 system prompt from lines 130-206; this is P2's scope); per-take diagnosis = `diagnose_failure` (system prompt at line 366; JSON schema enumerating decisions at line 396; decision returns at lines 318, 446). The RETRY/ACCEPT_LENIENT/FAIL trichotomy lives in `diagnose_failure`.
+- **Current:** RETRY/ACCEPT_LENIENT/FAIL trichotomy emitted by `diagnose_failure` (system prompt: "You are ChiefDirector diagnosing a generation failure and deciding how to mutate the prompt.")
+- **Predicted weakness:** ACCEPT_LENIENT may be over-used (lowering bar) or under-used (forcing FAIL on borderline takes); diagnose_failure also produces a mutation suggestion that may not be discriminating across failure modes
+- **Tweak variants:** (a) baseline; (b) add explicit acceptance criteria for ACCEPT_LENIENT; (c) require quality_score floor for ACCEPT_LENIENT; (d) make mutation-suggestion failure-mode-specific (identity-fail → identity_only; coherence-fail → style_only)
+- **Compare:** distribution of decisions across 20+ takes pre vs post; mutation-context distribution (identity_only / style_only / aggressive — see line 350)
 
 ### P4. CineDecompose v1.0 (`domain/scene_decomposer.py:341-440`)
 
@@ -479,10 +480,11 @@ Per the user directive "_reveal which part need to be fixed or optimized includi
 
 ### P9. Music prompt `_build_music_prompt` (`audio/music.py:88`)
 
-- **Current:** Text prompt assembled from `music_vibe`, `video_pacing`, `story_tension`
-- **Predicted weakness:** Three-axis input may be too coarse for FAL Stable Audio
-- **Tweak variants:** (a) baseline; (b) add instrument-list hint; (c) add tempo-bpm hint
-- **Compare:** subjective fit + duration accuracy
+- **Verification correction (cycle-15 entry, post-`7d66b71` pre-staging audit):** prior text claimed "Text prompt assembled from `music_vibe`, `video_pacing`, `story_tension`" — three-axis input. Per Rule #12 grep-the-writes: actual `def _build_music_prompt(music_vibe: str) -> str:` at line 88 takes ONE input (`music_vibe`). Neither `video_pacing` nor `story_tension` appear anywhere in `audio/music.py` (`grep` returns 0 matches). Function uses static `vibe → producer-grade prompt` dict lookup at lines 90-117 (27 mapped keys: suspense, thriller, horror, noir, dystopian, melancholic, romantic, bittersweet, grief, hopeful, epic, action, triumphant, chase, ethereal, dreamy, meditative, cosmic, cyberpunk, corporate, gritty, urban, uplifting, jazz_noir, classical, western); default fallback at lines 120-121 (`"Cinematic ambient music, {music_vibe} mood, slow, atmospheric, film score quality, professional production."`) — much shorter than mapped vibes.
+- **Current:** Single-axis static dict lookup (`music_vibe: str` → producer-grade prompt with BPM + key + instrumentation + reference, e.g. `"suspense"` → `"70bpm D minor, slow deep sub-bass drones, distant reversed piano, ticking clock polyrhythm, cinematic brass stabs, Hans Zimmer tension, dark ambient thriller score."`). 27 mapped vibes have rich producer-grade prompts; unknown vibes fall back to generic.
+- **Predicted weakness:** (a) static vibe → prompt mapping cannot convey scene-context (pacing within scene / story-tension arc not threaded to this prompt); (b) unknown-vibe fallback (line 120-121) is much weaker than mapped vibes — degrades BGM quality if scene's vibe falls outside the 27 keys; (c) the 27 mapped vibes over-cluster around orchestral cinema score (epic / triumphant / classical / grief etc.) and under-cover electronic / contemporary / world-music timbres.
+- **Tweak variants:** (a) baseline; (b) compose scene-context into prompt (thread pacing + story_tension as additional axes — would require call-site change beyond `_build_music_prompt`); (c) enrich fallback for unknown vibes (e.g., fuzzy-match to nearest mapped vibe + neighbor-vibe composition); (d) expand vibe coverage with electronic / contemporary / world-music entries
+- **Compare:** subjective fit + duration accuracy + per-vibe-key hit rate (do scenes' computed vibes hit the 27 mapped keys or land on fallback?)
 
 ### P10. LLM Ensemble quorum selection (`llm/ensemble.py:_QUORUM_MAP`)
 
