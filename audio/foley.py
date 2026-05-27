@@ -172,6 +172,15 @@ def generate_stability_foley(
         with open(output_path, "wb") as f:
             f.write(r.content)
         print(f"   ✅ Stable Audio Foley saved as: {output_path}")
+        # Best-effort cost tracking — M-B2 closure (cycle-16). STABILITY_FOLEY
+        # was in API_COST_USD ($0.03) since cycle-15 v0.9.6 but had no
+        # record_api_call invocation in production (Lane V ab832c7 confirmed).
+        # Mirrors Cartesia pattern at audio/dialogue.py:419-427.
+        try:
+            from cost_tracker import CostTracker
+            CostTracker().record_api_call("STABILITY_FOLEY", operation="scene_foley")
+        except Exception:
+            print(f"   [FOLEY] cost record skipped (non-critical)")
         return output_path
 
     except Exception as e:

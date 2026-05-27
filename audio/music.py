@@ -205,6 +205,14 @@ def generate_suno_v5(
 
         urllib.request.urlretrieve(audio_url, output_filename)
         print(f"   ✅ Suno V5 song saved: {output_filename}")
+        # Best-effort cost tracking — closes part of M-B2 (cycle-16 Tier B
+        # surfaced BGM/foley/TTS sites lacked record_api_call invocations).
+        # Mirrors Cartesia pattern at audio/dialogue.py:419-427.
+        try:
+            from cost_tracker import CostTracker
+            CostTracker().record_api_call("SUNO_V5", operation="bgm")
+        except Exception:
+            print(f"   [SUNO V5] cost record skipped (non-critical)")
         return True
     except requests.RequestException as e:
         print(f"   [SUNO V5] HTTP error: {e}")
@@ -318,6 +326,13 @@ def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42):
         if audio_url:
             urllib.request.urlretrieve(audio_url, output_filename)
             print(f"✅ Fal.ai Generated BGM saved as: {output_filename}")
+            # Best-effort cost tracking — M-B2 closure (cycle-16). Mirrors
+            # Cartesia pattern at audio/dialogue.py:419-427.
+            try:
+                from cost_tracker import CostTracker
+                CostTracker().record_api_call("FAL_STABLE_AUDIO", operation="bgm")
+            except Exception:
+                print(f"   [FAL] cost record skipped (non-critical)")
             return True
 
         print("⚠️ Fal.ai BGM Warning: No audio URL returned.")

@@ -57,9 +57,12 @@ API_COST_USD: dict[str, float] = {
     "FLUX_PRO":      0.05,
     "QUALITY_MAX":   0.40,   # N=8 best-of, ~8x base cost
     "HIDREAM_I1":    0.06,
-    # Audio APIs (per clip)
-    "STABILITY_FOLEY": 0.03,
-    "CARTESIA_SONIC_2": 0.008,  # ~$0.008/shot per descriptor at domain/scene_decomposer.py:67
+    # Audio APIs (per clip / per call)
+    "STABILITY_FOLEY":   0.03,    # per ~5-60s foley clip via Stable Audio 2.0
+    "CARTESIA_SONIC_2":  0.008,   # ~$0.008/shot per descriptor at domain/scene_decomposer.py:67
+    "ELEVENLABS":        0.01,    # per ~5s line (typical short dialogue; Eleven v3)
+    "SUNO_V5":           0.50,    # per ~60s song via Suno V5 chirp model
+    "FAL_STABLE_AUDIO":  0.10,    # per ~47s BGM clip via FAL Stable Audio (production default)
 }
 
 

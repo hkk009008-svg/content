@@ -522,6 +522,63 @@ class TestRecordAPICall:
         assert row["cost_usd"] == pytest.approx(0.04)
 
 
+class TestRecordAPICallAudioTracking:
+    """M-B2 closure (cycle-16 Tier B): audio sites now have API_COST_USD
+    entries + record_api_call invocations at success points.
+
+    Pre-fix gaps surfaced by Tier B run:
+      - STABILITY_FOLEY had entry but no production invocation (Lane V confirmed)
+      - SUNO_V5 had neither entry nor invocation
+      - FAL_STABLE_AUDIO had neither entry nor invocation (production BGM path)
+      - ELEVENLABS had neither entry nor invocation (TTS path; Cartesia was
+        added cycle-15 v0.9.8 but ElevenLabs asymmetry was filed for later)
+
+    Post-fix all four entries exist; invocations live at the success-path
+    return points of each generator (or call-site for ElevenLabs to mirror
+    Cartesia pattern).
+    """
+
+    @pytest.mark.parametrize("api_name,expected_cost", [
+        ("STABILITY_FOLEY", 0.03),
+        ("CARTESIA_SONIC_2", 0.008),
+        ("ELEVENLABS", 0.01),
+        ("SUNO_V5", 0.50),
+        ("FAL_STABLE_AUDIO", 0.10),
+    ])
+    def test_audio_api_costs_present_in_table(self, api_name, expected_cost):
+        """Each audio API has a cost-table entry (M-B2 §1 closure)."""
+        assert api_name in API_COST_USD
+        assert API_COST_USD[api_name] == pytest.approx(expected_cost)
+
+    def test_stability_foley_records_via_table(self, cost_tracker):
+        """STABILITY_FOLEY recording exercised — Lane V flagged zero
+        production invocation pre-fix."""
+        cost = cost_tracker.record_api_call("STABILITY_FOLEY", operation="scene_foley")
+        assert cost == pytest.approx(0.03)
+        assert cost_tracker.spent_usd == pytest.approx(0.03)
+
+    def test_elevenlabs_records_via_table(self, cost_tracker):
+        cost = cost_tracker.record_api_call("ELEVENLABS", operation="dialogue_tts")
+        assert cost == pytest.approx(0.01)
+
+    def test_suno_v5_records_via_table(self, cost_tracker):
+        cost = cost_tracker.record_api_call("SUNO_V5", operation="bgm")
+        assert cost == pytest.approx(0.50)
+
+    def test_fal_stable_audio_records_via_table(self, cost_tracker):
+        cost = cost_tracker.record_api_call("FAL_STABLE_AUDIO", operation="bgm")
+        assert cost == pytest.approx(0.10)
+
+    def test_audio_tier_b_cumulative_total(self, cost_tracker):
+        """A canonical Tier B-shape run (1 line ElevenLabs + 1 BGM FAL +
+        1 foley) accumulates the expected sum."""
+        cost_tracker.record_api_call("ELEVENLABS", operation="dialogue_tts")
+        cost_tracker.record_api_call("FAL_STABLE_AUDIO", operation="bgm")
+        cost_tracker.record_api_call("STABILITY_FOLEY", operation="scene_foley")
+        expected = 0.01 + 0.10 + 0.03
+        assert cost_tracker.spent_usd == pytest.approx(expected)
+
+
 # ===================================================================
 # 14. Budget gate — would_exceed() and is_over_budget()
 # ===================================================================

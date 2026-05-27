@@ -447,6 +447,16 @@ def generate_dialogue_voiceover(
             )
             save(audio, temp_path)
             temp_files.append(temp_path)
+            # Best-effort cost tracking — M-B2 closure (cycle-16). Symmetric
+            # to Cartesia tracking above; closes the asymmetry noted at
+            # cycle-15 v0.9.7 ("ElevenLabs path remains pre-existing
+            # untracked... symmetric ElevenLabs tracking deferred to v0.9.X+")
+            # by adding the tracking at this version (a la deferred → done).
+            try:
+                from cost_tracker import CostTracker
+                CostTracker().record_api_call("ELEVENLABS", operation="dialogue_tts")
+            except Exception:
+                print(f"   [ELEVENLABS] cost record skipped for line {i+1} (non-critical)")
             print(f"   ✅ Line {i+1}: {char_name} ({delivery}) → {temp_path}")
         except Exception as e:
             print(f"   ⚠️ Failed to generate line {i+1} for {char_name}: {e}")
