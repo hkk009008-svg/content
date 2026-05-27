@@ -372,6 +372,67 @@ registry table above → candidate row removed from this section.
   carry-forwards; faster carry-forward retirement when re-verification
   reveals "already-resolved" or "always-was-broken" states).
 
+### Candidate #8 — Rule #4 RECENCY-window refinement (intra-session staleness)
+
+- **Refines:** CLAUDE.md `## State-asserting writes: gate on \`git log --oneline -5\``
+  (Rule #4). Scope extension from "pre-Write gate at session-start" to
+  "pre-Write gate has a RECENCY-window — re-verify immediately before
+  substantive Write if Write happens >30 min after the gate."
+- **N=1 instance:** Cycle-14 mid-cycle parallel-draft collision
+  (operator's `edae013` testplan + `fdd0094` escalation event +
+  director's `68b92d2` decision event resolution; closed via OPTION B
+  at brief v0.4 `2006217`). Operator's session started at ~T07:50Z;
+  performed cold-start `ls coordination/mailbox/sent/ | tail -3` which
+  truncated and missed director's `T05:00:00Z` dispatch-claim event;
+  proceeded to draft ~768-line `docs/EXTENSIVE-TEST-PLAN-2026-05-27.md`
+  from ~T08:15-08:25Z (substantive Write 25-35 min after cold-start
+  `ls`). On finalizing the draft, operator re-`ls`'d mailbox for the
+  dispatch-claim filename + **discovered director's T05 event**;
+  halted publication; surfaced scope conflict to user; user adjudicated
+  "escalate." A re-`ls` immediately before the Write would have caught
+  T05 and prevented the parallel-draft.
+- **Reinforcing N=1 instance (cycle-14 cursor-write gap):** director's
+  `68b92d2` T09 decision event commit body asserted "Cursor advance:
+  director `seen/director.txt` advances from `T03:00:00Z` →
+  `T08:35:00Z` (consuming operator's escalation event)" but the actual
+  filesystem write was missed at commit time. Closed at `ccdc420`
+  cursor-fix follow-up commit on user's "check" state sweep
+  discovering the discrepancy. Same shape as #1 above (state-assertion
+  authored without filesystem-state verification at write-completion
+  time) but at a smaller scale.
+- **Current N count:** 1 (two cycle-14 instances reinforce the
+  primary case but are arguably same-shape; counting as N=1 for
+  N=2-floor discipline conservatism per v5.1 R-D-1).
+- **Codifiable shape:** Extend Rule #4 with a RECENCY-window clause.
+  Specifically: (a) the pre-Write gate (`git log -5` + mailbox `ls`)
+  authoritative for ≤30 minutes; (b) substantive Writes happening
+  >30 min after the gate MUST re-run the verifying command
+  immediately before commit (per Rule #7 pre-commit re-verify), AND
+  re-run the gate command immediately before substantive Write-start
+  to capture mid-session drift; (c) "substantive Write" = any
+  Write/Edit that asserts state about the repo (handoff content,
+  cross-seat events, doc-claim with file paths or counts, brief
+  content referring to other commits). Mechanical cursor-advance or
+  doc-typo fixes are NOT substantive Writes (no re-gate needed).
+  Principle: pre-Write gate is a snapshot, not a license — staleness
+  accumulates as the session progresses.
+- **Distinction from Candidate #7:** failure-mode shape, evidence
+  base, remediation, and trigger window all differ — see operator's
+  REPLY `a9b1c32` §"Ask #5" for the 5-row distinction table. Folding
+  #8 into #7 would lose the distinct intra-session-vs-inter-session
+  remediation discipline.
+- **N=2 emergence criteria:** A second intra-session mailbox-state-
+  staleness incident causing operational error (e.g., another
+  parallel-draft collision in a different cycle; OR a director-side
+  decision-event ship with cursor-write gap; OR a director-or-
+  operator-side ship that asserts state about a recently-modified
+  file the seat hasn't re-read). Watch cycle-15+ for similar shapes,
+  particularly during high-velocity parallel work where both seats
+  ship multiple commits per hour.
+- **Beneficiary (per Rule #11):** `both` seats + `user` (prevents
+  wasted parallel work; reduces escalation cycles; cleaner audit
+  trail for state-asserting writes).
+
 ### Cycle-13 audit (cycle-14 entry watchpoint refresh)
 
 Cycle 13 was the **first markdown-only protocol-substrate cycle** (no
