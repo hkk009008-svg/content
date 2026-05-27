@@ -14,8 +14,8 @@
 **Cross-seat coordination escalation (cycle-14 mid-cycle, 2026-05-27 T08:35Z → director adjudication this commit):** Operator independently drafted `docs/EXTENSIVE-TEST-PLAN-2026-05-27.md` (~768 lines) cold because operator session started before this brief's `T05` dispatch-claim event entered STATE.md. Both seats were responding to identical user direction "both prepare TOGATHER." Per operator's escalation event (`fdd0094`), 4 consolidation options surfaced: (A) operator deletes draft; (B) keep both with semantic split + cross-refs; (C) operator's draft becomes appendix; (D) director-proposed hybrid. **Director-seat adjudicates: OPTION B — semantic split.** Both artifacts preserved with role-aligned scope per Sh: brief = strategic (WHAT/WHY/structure); operator's testplan = operational (HOW/per-prompt/per-parameter). See §"Cross-seat coordination" subsection in this brief's §1 + mirrored ESCALATION-RESOLVED header in operator's testplan (operator commits next).
 
 **Status (at brief-write time, 2026-05-27 cycle-14 mid-cycle):**
-- **DRAFT v0.5** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + user §9 decisions logged + **ALL 9 phase cell PREDICTIONs filled** (P-STYLE, P-BGM, P-DECOMPOSE, P-CHIEFDIR, P-KEYFRAME, P-PERFORMANCE, P-MOTION, P-IDENTITY, P-ASSEMBLY) + 3 prompt class cell PREDICTIONs filled (PR-STORY, PR-IMAGE, PR-MOTION) + **operator REPLY folded** at `a9b1c32`: operational discipline §1.5, pre-flight A7+A8 refined + A9 ComfyUI workflow probe added, 22 cold-context verification commands §5.5, 2 adjustment-pointing matrix rows §6, operator sign-off ✅ §11, cell-ownership split per Sh codified §5 tables + Candidate #8 filed at `1af3528` (operator + director concurred)
-- AWAITING: director-seat continued fill of 6 G-* gate cells + 5 remaining PR-* prompt cells (director-doable; testplan §5 P1-P14 cross-references); operator-seat fill of 7 PA-* parameter cells (operator-default per Sh; testplan §6 cross-references); user-principal answers to §9 questions 5-9; pre-flight A1-A9 all-green (notably A5/A9 RunPod pod restart blocker)
+- **DRAFT v0.6** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + user §9 decisions logged + **ALL 9 phase cell PREDICTIONs filled** (P-STYLE, P-BGM, P-DECOMPOSE, P-CHIEFDIR, P-KEYFRAME, P-PERFORMANCE, P-MOTION, P-IDENTITY, P-ASSEMBLY) + 3 prompt class cell PREDICTIONs filled (PR-STORY, PR-IMAGE, PR-MOTION) + **operator REPLY folded** at `a9b1c32`: operational discipline §1.5, pre-flight A7+A8 refined + A9 ComfyUI workflow probe added, 22 cold-context verification commands §5.5, 2 adjustment-pointing matrix rows §6, operator sign-off ✅ §11, cell-ownership split per Sh codified §5 tables + Candidate #8 filed at `1af3528` (operator + director concurred) + **ALL 7 PA-* parameter cell PREDICTIONs filled** (PA-SAMPLING, PA-IMAGE, PA-VIDEO, PA-MOTION, PA-LIPSYNC, PA-IDENTITY, PA-AUDIO) by operator per Sh operational-default + REPLY Ask #2 responsibility split; cross-references testplan §6 for parameter-level impl details
+- AWAITING: director-seat continued fill of 6 G-* gate cells + 5 remaining PR-* prompt cells (director-doable; testplan §5 P1-P14 cross-references); user-principal answers to §9 questions 5-9; pre-flight A1-A9 all-green (notably A5/A9 RunPod pod restart blocker)
 - USER-PRINCIPAL DECISIONS LANDED (2026-05-27): Tier B+C+D scope (comprehensive); $50 hard budget cap; fresh RunPod pod deploy via `scripts/setup_runpod.sh`; fill PREDICTIONs in advance (this v0.2)
 - NOT EXECUTABLE until §"Pre-flight checklist" all-green + operator REPLY landed + brief v1.0 + user-principal execution authorization
 
@@ -727,13 +727,222 @@ Per Option B semantic split + operator REPLY responsibility split: operator's te
 
 | ID | Parameter class | Sweep candidates | Tier | Status |
 |---|---|---|---|---|
-| PA-SAMPLING | sampler steps / cfg / scheduler | 3 sets × 1 shot = 3 generations | D | STUB |
-| PA-IMAGE | resolution / model swap | 2 sets × 1 shot = 2 generations | D | STUB |
-| PA-VIDEO | engine routing (Veo / LTX / Kling) | 3 engines × 1 shot = 3 generations | D | STUB |
-| PA-MOTION | motion strength low/med/high | 3 sets × 1 shot = 3 generations | D | STUB |
-| PA-LIPSYNC | lip-sync threshold | 2 sets × 1 shot = 2 generations | D | STUB |
-| PA-IDENTITY | GhostFaceNet threshold | 3 sets × 5 shots = 15 evaluations (no new generations) | D | STUB |
-| PA-AUDIO | loudnorm targets | 2 sets × 1 reel = 2 reels | D | STUB |
+| PA-SAMPLING | sampler steps / cfg / scheduler | 3 sets × 1 shot = 3 generations | D | **FILLED v0.6** |
+| PA-IMAGE | resolution / model swap | 2 sets × 1 shot = 2 generations | D | **FILLED v0.6** |
+| PA-VIDEO | engine routing (Veo / LTX / Kling) | 3 engines × 1 shot = 3 generations | D | **FILLED v0.6** |
+| PA-MOTION | motion strength low/med/high | 3 sets × 1 shot = 3 generations | D | **FILLED v0.6** |
+| PA-LIPSYNC | lip-sync threshold | 2 sets × 1 shot = 2 generations | D | **FILLED v0.6** |
+| PA-IDENTITY | GhostFaceNet threshold | 3 sets × 5 shots = 15 evaluations (no new generations) | D | **FILLED v0.6** |
+| PA-AUDIO | loudnorm targets | 2 sets × 1 reel = 2 reels | D | **FILLED v0.6** |
+
+> **All 7 PA-* parameter cells now FILLED at v0.6 (this commit).** Operator-seat fill per Sh operational-default + REPLY `a9b1c32` Ask #2 responsibility split. Cross-references operator's testplan §6 (parameter tweaking surface map) for HOW content (env vars + CINEMA_* + workflow params + ffmpeg + gate thresholds with directional predictions). Brief PA-* cells canonical for SWEEP design (which params, how many sets, cost envelope); testplan §6 canonical for parameter-level impl details. Per Option B semantic split.
+
+#### Test cell PA-SAMPLING — Sampler steps / CFG / scheduler
+
+**Phase / class:** Parameter sensitivity (ComfyUI workflow params; PA-* class)
+**Stage in pipeline:** ARCHITECTURE §8 image generation; impl at `workflow_selector.py:get_workflow_params(shot_type)` + `pulid.json` workflow JSON (nodes for sampling)
+**Test tier:** D (parameter sweep, optional)
+**Estimated cost:** ~$0.15 (3 keyframe regenerations × $0.05 each); GPU lease window shared across the 3
+**Wall-clock prediction:** 3-5 minutes (3 × 60-90s gen + comparison observation)
+
+**PREDICTION (filled v0.6 from testplan §6.5 ComfyUI workflow params + `pulid.json` workflow defaults, per §8 protocol):**
+
+- **Expected output (shape):** 3 distinct keyframe PNG files in `projects/<pid>/keyframes/<shot_id>/`, one per sweep set. Same shot, same character/location/prompt — only sampler params differ. Each output has identity_score + aesthetic_score + composite_score recorded via P-IDENTITY downstream.
+- **Sweep sets:**
+  - **Set 1 (baseline):** steps=20, cfg=7.5, scheduler=karras_normal (current `pulid.json` workflow default)
+  - **Set 2 (higher quality):** steps=40, cfg=10, scheduler=karras_normal — predict marginal aesthetic gain + ~2× latency
+  - **Set 3 (faster):** steps=12, cfg=5, scheduler=ddim_simple — predict ~40% faster + reduced aesthetic, possibly identity-score-equivalent (PuLID anchor dominates)
+- **Expected content quality:** all 3 sets produce valid PNG ≥50KB; visual differences SHOULD be detectable (otherwise sampler doesn't matter for this shot type). Higher steps → smoother texture + better edge definition. Higher CFG → tighter prompt adherence (possibly over-saturated). Lower steps → softer textures, faster, possibly hallucinated detail.
+- **Expected latency:** Set 1 ~60s; Set 2 ~120s (2× steps); Set 3 ~36s (60% steps). Total wall-clock ~3-5 min including pod queue.
+- **Expected cost:** ~$0.05 per set × 3 = ~$0.15 (GPU lease prorated; FLUX_PULID per `API_COST_USD`).
+- **Expected failure modes (top 3):**
+  1. **No visible difference across sweep sets** — sampler params don't matter at this shot type; PuLID anchor dominates regardless. Suggests sweep should focus on PuLID weight (different cell) instead.
+  2. **Set 3 (ddim_simple) produces blurry/under-cooked output** — 12 steps insufficient for FLUX-class model. Confirms steps floor.
+  3. **Set 2 (CFG=10) produces over-saturated / artificial output** — CFG ceiling exceeded; visible "AI look" indicators (over-sharp edges, prompt-keyword artifacts).
+- **Expected adjustment indicators:**
+  - No-difference → sweep PuLID weight (±0.10) at PA-IMAGE instead; sampler is a tuning lever only for non-PuLID workflows
+  - Set 3 too soft → set steps floor at 16-20 for FLUX baseline; document in `workflow_selector.py:get_workflow_params` comments
+  - Set 2 over-saturated → set CFG ceiling at 8-8.5 for FLUX; verify CFG range in workflow templates
+- **ADR-013 quantitative basis:** latency ranges from prior PuLID/FLUX benchmarks at ~1.5s/step on RunPod A100. Cost from `API_COST_USD` FLUX_PULID entry. Visible-difference threshold is qualitative (operator visual inspection).
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution per §1.3 cell-artifact convention (`docs/test-cells/PA-SAMPLING-<UTC-ts>.md`).
+
+#### Test cell PA-IMAGE — Resolution / model swap (production vs max-tier)
+
+**Phase / class:** Parameter sensitivity (workflow JSON swap; PA-* class)
+**Stage in pipeline:** ARCHITECTURE §8 image generation; impl at `phase_c_assembly.py:generate_ai_broll` (production) vs `quality_max.py:generate_ai_broll_max` (max-tier; `pulid_max.json` workflow)
+**Test tier:** D
+**Estimated cost:** ~$0.45 (baseline $0.05 + max-tier $0.40 = $0.45 per `API_COST_USD` `QUALITY_MAX` entry)
+**Wall-clock prediction:** 4-7 minutes (1 baseline keyframe + 1 max-tier keyframe with N=8 best-of)
+
+**PREDICTION (filled v0.6 from testplan §6.6 Max-quality tier + `quality_max.py:574-710 generate_ai_broll_max`, per §8 protocol):**
+
+- **Expected output (shape):** 2 PNG files for the same shot — one via production workflow (`pulid.json`), one via max-tier workflow (`pulid_max.json`). Max-tier may upscale to 4K via SUPIR; final downsample to project aspect_ratio. Each has identity_score + aesthetic_score; composite reflects max-tier's N=8 best-of selection.
+- **Sweep sets:**
+  - **Set 1 (production baseline):** `phase_c_assembly.generate_ai_broll` with default `pulid.json` workflow. SDXL-class behavior; ~30s; ~$0.05.
+  - **Set 2 (max-tier):** `quality_max.generate_ai_broll_max` with `pulid_max.json` + SUPIR + N=8 best-of + HiDream-I1 optional swap. ~4 min; ~$0.40.
+- **Expected content quality:** Set 1 produces typical FLUX-PuLID output (high quality, occasional identity drift). Set 2 produces visibly higher quality (sharper details, better composition, identity score ~0.05-0.10 higher due to N=8 selection over best identity match). Cost factor 8× → quality factor visible but not 8×.
+- **Expected latency:** Set 1 ~30-60s; Set 2 ~3-5 min (8× generations + SUPIR upscale + downsample). Cold pod adds ~30s on first call.
+- **Expected cost:** Set 1 ~$0.05; Set 2 ~$0.40 (8× base = $0.40 per `quality_max.py:705` cost annotation). Total sweep ~$0.45.
+- **Expected failure modes (top 3):**
+  1. **Set 2 produces visibly worse output than Set 1** — N=8 best-of selection criteria miscalibrated; OR SUPIR over-sharpens; OR HiDream-I1 swap produced incompatible style. Indicates max-tier is regressing not improving.
+  2. **Identity score same or lower in Set 2** — N=8 best-of's identity-prioritized selection isn't working; OR SUPIR upscale broke face details.
+  3. **Set 2 exceeds 5min wall-clock** — pod GPU contention OR N=8 not parallelized.
+- **Expected adjustment indicators:**
+  - Set 2 worse than Set 1 → review N=8 selection composite-score weighting; consider disabling SUPIR (`supir_enabled=False`); skip HiDream swap
+  - Identity same/lower → tune N=8 selection criteria toward identity (raise identity weight in composite); verify primary_ref propagation through N=8
+  - Latency >5min → reduce N (try N=4); verify N=8 candidates run parallel not sequential
+- **ADR-013 quantitative basis:** Set 1 cost from `API_COST_USD` FLUX_PULID. Set 2 cost from `quality_max.py:705` documented 8× factor. Latency from cycle-13 max-tier benchmarks.
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution per §1.3 cell-artifact convention.
+
+#### Test cell PA-VIDEO — Engine routing (Veo / LTX / Kling)
+
+**Phase / class:** Parameter sensitivity (video-gen engine swap; PA-* class)
+**Stage in pipeline:** ARCHITECTURE §9 video routing (5 templates × 11 engines); impl at `phase_c_ffmpeg.py:generate_ai_video` dispatch + per-engine modules (`veo_native.py`, `ltx_native.py`, `kling_native.py`)
+**Test tier:** D
+**Estimated cost:** ~$1.00 (3 engines × 1 shot: Veo ~$0.50 + LTX ~$0.10 + Kling 3.0 ~$0.40)
+**Wall-clock prediction:** 5-10 minutes (engine latencies vary widely)
+
+**PREDICTION (filled v0.6 from testplan §6.4 model/sampling params + ARCHITECTURE §9 video routing, per §8 protocol):**
+
+- **Expected output (shape):** 3 mp4 files for the SAME shot (same image + motion prompt), one per engine. Each mp4 ~5s duration; identity_score per-frame + motion fidelity score recorded. Engine routing controlled by overriding `shot["target_api"]` between runs.
+- **Sweep engines:**
+  - **Set 1 — Veo (`veo_native.py`):** `model="veo-3.1-generate"` via Vertex; ~$0.50/5s clip; ~60-180s latency
+  - **Set 2 — LTX (`ltx_native.py`):** `model="ltx-2-3-pro"`; ~$0.10/5s clip; ~30-60s latency  
+  - **Set 3 — Kling 3.0 (`phase_c_ffmpeg.py:508`):** Kling 3.0 via FAL; ~$0.40/5s clip; ~45-120s latency
+- **Expected content quality:** all 3 produce playable 5s mp4. Visual differences expected: Veo tends toward cinematic + smooth motion; LTX tends toward higher-fidelity local-model output (potentially less natural motion); Kling 3.0 tends toward stylized/dramatic motion. Identity preservation varies — Veo strongest, LTX middle, Kling weakest at low motion settings.
+- **Expected latency:** Set 1 (Veo) 60-180s; Set 2 (LTX) 30-60s; Set 3 (Kling) 45-120s. Total wall-clock 5-10 min sequential.
+- **Expected cost:** ~$1.00 total per `API_COST_USD`. Veo dominates; LTX cheapest.
+- **Expected failure modes (top 3):**
+  1. **Engine API error** (rate limit / content policy / quota exceeded) — one or more engines unavailable; cascade fallback triggers OR sweep skips that set
+  2. **Identity drift differs sharply across engines** (Set X's character looks materially different from keyframe; e.g., Kling reshapes face) — indicates engine-level identity preservation issue
+  3. **Motion direction encoding mismatch** — same `camera: "zoom_in_slow"` produces different motion per engine; some honor the hint, some ignore
+- **Expected adjustment indicators:**
+  - API error → check API key + quota + content policy; route to alternative engine for this shot type via `workflow_selector.py` cascade table
+  - Identity drift in specific engine → file engine-specific identity preservation issue; consider per-engine prompt-encoding tweaks; lower motion strength for that engine
+  - Motion direction mismatch → verify per-engine motion vocabulary encoding in motion prompt template; align cascade preference to engines that honor camera hints
+- **ADR-013 quantitative basis:** costs from `API_COST_USD` table; latencies from per-engine `_native.py` module empirical observation comments (where present); identity-preservation observations from cycle-10 benchmark notes.
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution per §1.3 cell-artifact convention.
+
+#### Test cell PA-MOTION — Motion strength (low / med / high)
+
+**Phase / class:** Parameter sensitivity (motion-strength engine param; PA-* class)
+**Stage in pipeline:** ARCHITECTURE §9 video routing; impl at `phase_c_ffmpeg.py:generate_ai_video` per-engine motion-strength dispatch (LTX uses `motion_strength` directly; Veo encodes via prompt keywords)
+**Test tier:** D
+**Estimated cost:** ~$0.30 (3 sets × 1 shot using LTX cheap engine for sweep isolation)
+**Wall-clock prediction:** 3-5 minutes (3 × LTX ~60s + comparison)
+
+**PREDICTION (filled v0.6 from testplan §6.5 + §6.8 motion fidelity floors + LTX engine module, per §8 protocol):**
+
+- **Expected output (shape):** 3 mp4 files for the SAME shot using LTX (cheapest engine; isolates motion-strength variable). Same image input, same prompt — only motion_strength varies. Motion fidelity score recorded.
+- **Sweep sets:**
+  - **Set 1 (low):** motion_strength=0.3 + minimal motion verbs ("slight movement"). Predict: subtle motion; high identity stability; possibly fails motion_fidelity_floor.
+  - **Set 2 (med):** motion_strength=0.5 (default) + standard motion verbs (e.g., "zoom_in_slow"). Predict: balanced; baseline reference.
+  - **Set 3 (high):** motion_strength=0.8 + emphasis verbs (e.g., "dynamic camera movement"). Predict: pronounced motion; possible identity drift; possible motion_fidelity_floor over-pass.
+- **Expected content quality:** all 3 playable mp4. Motion intensity scales linearly with strength. Identity preservation INVERSELY correlates with motion strength (more motion → more identity drift). motion_fidelity_floor check at low end may reject Set 1 if too static.
+- **Expected latency:** uniform ~30-60s per set (LTX); total ~3-5 min.
+- **Expected cost:** 3 × $0.10 = $0.30 (LTX cheap engine for sweep economy).
+- **Expected failure modes (top 3):**
+  1. **All 3 sets visually identical** — motion_strength param ignored by LTX engine; OR LTX has discrete motion levels not continuous
+  2. **Set 1 fails motion_fidelity_floor** — confirms floor is reasonable; OR floor is too strict (legitimate static-shot variants rejected)
+  3. **Set 3 identity-drift severe** — confirms high motion is identity-incompatible; OR motion-prompt encoding overrides motion_strength
+- **Expected adjustment indicators:**
+  - All 3 identical → check `phase_c_ffmpeg.py` motion_strength → LTX param mapping; verify the param actually reaches the LTX API call
+  - Set 1 below floor → either floor is correctly catching too-static (no action) OR floor too strict for shot type (lower floor in `workflow_selector.py:get_workflow_params`)
+  - Set 3 identity drift → enforce motion_strength ceiling per shot type (e.g., portrait shots cap at 0.6); add identity-vs-motion tradeoff guidance to operator docs
+- **ADR-013 quantitative basis:** motion_strength ranges from LTX module; motion_fidelity_floor from per-template `workflow_selector.py` config.
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution per §1.3 cell-artifact convention.
+
+#### Test cell PA-LIPSYNC — Sync threshold (tight / loose)
+
+**Phase / class:** Parameter sensitivity (SyncNet threshold; PA-* class)
+**Stage in pipeline:** ARCHITECTURE §10 performance & lipsync; impl at `lip_sync.py:_sync_gate_settings` + `validate_lipsync_quality`
+**Test tier:** D
+**Estimated cost:** ~$0.20 (2 sets × 1 perf shot using Hedra-FAL cheap engine)
+**Wall-clock prediction:** 3-5 minutes (2 × perf ~60s + lipsync eval)
+
+**PREDICTION (filled v0.6 from testplan §6.8 performance/identity/motion gates + `lip_sync.py:427`, per §8 protocol):**
+
+- **Expected output (shape):** 2 mp4 files for the SAME shot using Hedra-FAL Mode B performance, then run through SyncNet validation at 2 different thresholds. Per-set: video file + sync_score + sync_passed bool.
+- **Sweep sets:**
+  - **Set 1 (tight):** sync threshold = 2.0 (stricter; more retries before accept). Predict: more retries OR rejection.
+  - **Set 2 (loose):** sync threshold = 0.5 (very permissive). Predict: instant accept; possibly accepts visibly-out-of-sync output.
+- **Expected content quality:** both sets produce performance video. Sync quality scales with threshold (tight = better sync OR fail; loose = always accepted regardless of sync).
+- **Expected latency:** uniform ~30-60s perf + 5-10s lipsync validation per set; total ~3-5 min.
+- **Expected cost:** 2 × $0.10 = $0.20 Hedra-FAL. Sync validation is local SyncNet (no cost; ~5s wall-clock).
+- **Expected failure modes (top 3):**
+  1. **SyncNet not installed / `_sync_gate_settings` returns 1.0 fallback** — neither threshold has effect; both sets get same accept result
+  2. **Set 1 (tight=2.0) rejects all real outputs** — threshold unrealistic; SyncNet score scale mismatched expectation
+  3. **Set 2 (loose=0.5) accepts visibly-out-of-sync videos** — threshold too permissive; validation provides no value
+- **Expected adjustment indicators:**
+  - SyncNet fallback → check SyncNet installation; verify `_sync_gate_settings` returns expected non-1.0 value; document fallback behavior
+  - Tight rejects all → tune threshold to realistic SyncNet score range (typically 0.5-1.5 for valid sync); document in `lip_sync.py:_sync_gate_settings`
+  - Loose accepts bad → raise loose-bound default; add minimum-threshold floor regardless of operator setting
+- **ADR-013 quantitative basis:** SyncNet score scale empirical; `_sync_gate_settings` fallback at 1.0 per `lip_sync.py:427` source.
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution per §1.3 cell-artifact convention.
+
+#### Test cell PA-IDENTITY — GhostFaceNet threshold sweep (NO new generations)
+
+**Phase / class:** Parameter sensitivity (identity-gate threshold; PA-* class) — **UNIQUE: re-evaluates existing keyframes, no new gens**
+**Stage in pipeline:** ARCHITECTURE §11 identity validation; impl at `cinema/shots/controller.py:484-506` + `phase_c_vision._get_shared_validator`
+**Test tier:** D
+**Estimated cost:** **$0** (local GhostFaceNet inference on existing keyframe outputs)
+**Wall-clock prediction:** 1-3 minutes (15 evaluations × 1-3s each + analysis)
+
+**PREDICTION (filled v0.6 from testplan §6.8 identity_strictness + `phase_c_vision._get_shared_validator`, per §8 protocol):**
+
+- **Expected output (shape):** 15 evaluations = 3 threshold values × 5 existing keyframes from Tier C reel. For each (threshold, keyframe): `identity_score: float [0.0-1.0]` (immutable per keyframe; threshold doesn't change score) + `passed: bool` (varies per threshold).
+- **Sweep thresholds:**
+  - **Set 1 (lenient):** threshold = 0.60. Predict: ~80-90% pass rate.
+  - **Set 2 (default):** threshold = 0.70. Predict: ~60-75% pass rate.
+  - **Set 3 (strict):** threshold = 0.80. Predict: ~30-50% pass rate.
+- **Expected content quality:** each keyframe gets identity_score; score is DETERMINISTIC for the same image (GhostFaceNet has no randomness). Threshold variation only changes `passed` bool, not score. Distribution of scores across 5 keyframes reveals identity-coherence of the test reel.
+- **Expected latency:** ~1-3s per evaluation × 15 = 15-45s actual inference. Plus operator analysis ~30s-2min.
+- **Expected cost:** $0. No new generations, no API calls.
+- **Expected failure modes (top 3):**
+  1. **All 15 evaluations pass even at strict=0.80** — threshold too lenient OR scores artificially high (validator bug; should investigate)
+  2. **All 15 evaluations fail even at lenient=0.60** — threshold too strict OR scores artificially low (likely model-load issue OR primary_ref mismatch)
+  3. **Bimodal distribution (some keyframes always pass, others always fail)** — keyframe set has identity-quality outliers; pinpoints which shots need regeneration
+- **Expected adjustment indicators:**
+  - All pass at strict → check threshold against actual GhostFaceNet score distribution; raise default threshold; OR investigate whether validator is too lenient
+  - All fail at lenient → check primary_ref propagation; verify GhostFaceNet weights loaded (Pre-flight A7); check character reference image quality
+  - Bimodal → use distribution to identify which shots have weak identity; flag for retry-with-different-pose; build per-shot quality signal
+- **ADR-013 quantitative basis:** identity_score range [0.0-1.0] per `phase_c_vision` validator API; default threshold 0.60-0.70 per `cinema/shots/controller.py:488 cc.get("identity_threshold", 0.70)`.
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution per §1.3 cell-artifact convention.
+
+#### Test cell PA-AUDIO — Loudnorm targets (cinema -23 LUFS vs streaming -16 LUFS)
+
+**Phase / class:** Parameter sensitivity (ffmpeg two-pass loudnorm targets; PA-* class)
+**Stage in pipeline:** ARCHITECTURE §12 audio pipeline; impl at `phase_c_ffmpeg.py:1000 two_pass_loudnorm`
+**Test tier:** D
+**Estimated cost:** **$0** (local ffmpeg)
+**Wall-clock prediction:** 5-10 minutes (2 × full-reel loudnorm passes; each ~2-5 min for typical reel)
+
+**PREDICTION (filled v0.6 from testplan §6.7 ffmpeg loudnorm + `phase_c_ffmpeg.py:1000-1060`, per §8 protocol):**
+
+- **Expected output (shape):** 2 reel mp4 files — same source assembly, different loudnorm targets. Each output has measured I (Integrated loudness LUFS) + LRA (Loudness range LU) + TP (True peak dBTP). Verifiable via `ffmpeg ... -af loudnorm=...:print_format=summary -f null - 2>&1`.
+- **Sweep sets:**
+  - **Set 1 (cinema):** target I=-23 LUFS / LRA=14 / TP=-2 dBTP (EBU R128 broadcast). Default per `phase_c_ffmpeg.py:two_pass_loudnorm`.
+  - **Set 2 (streaming):** target I=-16 LUFS / LRA=8 / TP=-1 dBTP (Spotify/YouTube-style louder + tighter range). Predict: perceptibly louder; less dynamic range.
+- **Expected content quality:** both mp4s play; measured I within ±0.5 LUFS of target (two-pass loudnorm accuracy). Perceptual loudness difference: Set 2 ~7 dB louder than Set 1 (perceptible doubling).
+- **Expected latency:** ~2-5 min per reel for two-pass (analysis pass + apply pass). Total ~5-10 min sequential.
+- **Expected cost:** $0. Local ffmpeg.
+- **Expected failure modes (top 3):**
+  1. **Measured I exceeds ±0.5 LUFS of target** — two-pass loudnorm accuracy issue; ffmpeg version mismatch OR input audio has issues (clipping, DC offset)
+  2. **TP exceeds target ceiling** — true peak limiter not applied correctly; risk of clipping on playback
+  3. **Audio quality degraded (artifacts / pumping)** — over-aggressive normalization OR LRA target too tight for source dynamic range
+- **Expected adjustment indicators:**
+  - I-off-target → verify ffmpeg version (need libloudnorm ≥4.x); check two-pass parsing of analysis-pass output; try single-pass as fallback
+  - TP exceeded → tighten TP target margin (-1.5 instead of -1); check upstream audio peaks
+  - Quality degraded → raise LRA target (more permissive range); use limiter instead of loudnorm if dynamic range needs preserving
+- **ADR-013 quantitative basis:** EBU R128 spec for Set 1; common streaming-platform spec for Set 2; ±0.5 LUFS accuracy from libloudnorm documentation.
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution per §1.3 cell-artifact convention.
 
 ---
 
