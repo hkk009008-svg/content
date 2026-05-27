@@ -14,8 +14,8 @@
 **Cross-seat coordination escalation (cycle-14 mid-cycle, 2026-05-27 T08:35Z → director adjudication this commit):** Operator independently drafted `docs/EXTENSIVE-TEST-PLAN-2026-05-27.md` (~768 lines) cold because operator session started before this brief's `T05` dispatch-claim event entered STATE.md. Both seats were responding to identical user direction "both prepare TOGATHER." Per operator's escalation event (`fdd0094`), 4 consolidation options surfaced: (A) operator deletes draft; (B) keep both with semantic split + cross-refs; (C) operator's draft becomes appendix; (D) director-proposed hybrid. **Director-seat adjudicates: OPTION B — semantic split.** Both artifacts preserved with role-aligned scope per Sh: brief = strategic (WHAT/WHY/structure); operator's testplan = operational (HOW/per-prompt/per-parameter). See §"Cross-seat coordination" subsection in this brief's §1 + mirrored ESCALATION-RESOLVED header in operator's testplan (operator commits next).
 
 **Status (at brief-write time, 2026-05-27 cycle-14 mid-cycle):**
-- **DRAFT v0.7** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + user §9 decisions logged + **ALL 9 phase cell PREDICTIONs filled** (P-STYLE, P-BGM, P-DECOMPOSE, P-CHIEFDIR, P-KEYFRAME, P-PERFORMANCE, P-MOTION, P-IDENTITY, P-ASSEMBLY) + 3 prompt class cell PREDICTIONs filled (PR-STORY, PR-IMAGE, PR-MOTION) + **operator REPLY folded** at `a9b1c32`: operational discipline §1.5, pre-flight A7+A8 refined + A9 ComfyUI workflow probe added, 22 cold-context verification commands §5.5, 2 adjustment-pointing matrix rows §6, operator sign-off ✅ §11, cell-ownership split per Sh codified §5 tables + Candidate #8 filed at `1af3528` (operator + director concurred) + **ALL 7 PA-* parameter cell PREDICTIONs filled** (PA-SAMPLING, PA-IMAGE, PA-VIDEO, PA-MOTION, PA-LIPSYNC, PA-IDENTITY, PA-AUDIO) by operator per Sh operational-default + REPLY Ask #2 responsibility split + **ALL 6 G-* gate cell PREDICTIONs filled** (G-PLAN, G-KEYFRAME, G-PERF, G-REVIEW, G-SCREEN, G-ITERATE) by director per Sh strategic-default at cycle-15 entry; cross-references ARCHITECTURE §6.1 gate predicates + §3.6 approve endpoints + cycle-9 Lane V #8 I1 bypass `_reject_if_project_busy_outside_gate`
-- AWAITING: director-seat continued fill of 5 remaining PR-* prompt cells (director-doable; testplan §5 P1-P14 cross-references); user-principal answers to §9 questions 5-9; pre-flight A1-A9 all-green (notably A5/A9 RunPod pod restart blocker)
+- **DRAFT v0.8** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + user §9 decisions logged + **ALL 9 phase cell PREDICTIONs filled** (P-STYLE, P-BGM, P-DECOMPOSE, P-CHIEFDIR, P-KEYFRAME, P-PERFORMANCE, P-MOTION, P-IDENTITY, P-ASSEMBLY) + **ALL 8 prompt class cell PREDICTIONs filled** (PR-STORY, PR-IMAGE, PR-MOTION at v0.3 + PR-STYLE-LLM, PR-DIALOGUE, PR-CONTINUITY, PR-AUDIO-VIBE, PR-CHIEFDIR at v0.8 — director-doable last batch; cross-references operator's `docs/PR-cells-prestaging-2026-05-27-cycle15.md` substrate + testplan §5 P1-P14) + **operator REPLY folded** at `a9b1c32`: operational discipline §1.5, pre-flight A7+A8 refined + A9 ComfyUI workflow probe added, 22 cold-context verification commands §5.5, 2 adjustment-pointing matrix rows §6, operator sign-off ✅ §11, cell-ownership split per Sh codified §5 tables + Candidate #8 filed at `1af3528` (operator + director concurred) + **ALL 7 PA-* parameter cell PREDICTIONs filled** (PA-SAMPLING, PA-IMAGE, PA-VIDEO, PA-MOTION, PA-LIPSYNC, PA-IDENTITY, PA-AUDIO) by operator per Sh operational-default + REPLY Ask #2 responsibility split + **ALL 6 G-* gate cell PREDICTIONs filled** (G-PLAN, G-KEYFRAME, G-PERF, G-REVIEW, G-SCREEN, G-ITERATE) by director per Sh strategic-default at cycle-15 entry; cross-references ARCHITECTURE §6.1 gate predicates + §3.6 approve endpoints + cycle-9 Lane V #8 I1 bypass `_reject_if_project_busy_outside_gate`. **All 30 test cells now FILLED** (9 P + 6 G + 8 PR + 7 PA); brief is structurally ready for v1.0 ship pending user-§9 5-9 + pre-flight all-green.
+- AWAITING: user-principal answers to §9 questions 5-9; pre-flight A1-A9 all-green (notably A5/A9 RunPod pod restart blocker); joint v0.9 mid-prep review per operator REPLY §2 hybrid protocol; then v1.0 ship + execution authorization
 - USER-PRINCIPAL DECISIONS LANDED (2026-05-27): Tier B+C+D scope (comprehensive); $50 hard budget cap; fresh RunPod pod deploy via `scripts/setup_runpod.sh`; fill PREDICTIONs in advance (this v0.2)
 - NOT EXECUTABLE until §"Pre-flight checklist" all-green + operator REPLY landed + brief v1.0 + user-principal execution authorization
 
@@ -750,13 +750,13 @@ The cells below cover Tier B + C predictively. Tier A (substrate verification) i
 | ID | Prompt class | Where invoked | Tier | Status |
 |---|---|---|---|---|
 | PR-STORY | Story decomposition prompts | LLMEnsemble.decompose | B + C | **FILLED v0.3** |
-| PR-DIALOGUE | Dialogue generation prompts | LLMEnsemble.generate_dialogue | C | STUB |
-| PR-CONTINUITY | Continuity engine prompts | ContinuityEngine.* | B + C | STUB |
-| PR-STYLE-LLM | Style rules generation prompts | LLMEnsemble.generate_style_rules | B + C | STUB (covered partially by P-STYLE) |
+| PR-DIALOGUE | Dialogue generation prompts | `domain/dialogue_writer.py:60 system_prompt` | C | **FILLED v0.8** |
+| PR-CONTINUITY | Continuity engine prompts | `domain/continuity_engine.py:446 enhance_shot_prompt` | B + C | **FILLED v0.8** |
+| PR-STYLE-LLM | Style rules generation prompts | `llm/style_director.py:62 system_prompt` | B + C | **FILLED v0.8** (distinct angle from P-STYLE: input-side prompt construction vs output JSON validation) |
 | PR-IMAGE | Per-shot image prompts | KeyframeRenderPhase prompt assembly | B + C | **FILLED v0.3** |
 | PR-MOTION | Per-shot motion prompts | MotionRenderPhase prompt assembly | B + C | **FILLED v0.3** |
-| PR-CHIEFDIR | ChiefDirector validation prompts | post-decompose validation | B + C | STUB |
-| PR-AUDIO-VIBE | BGM vibe selection prompts | `_ensure_bgm` upstream | B + C | STUB |
+| PR-CHIEFDIR | ChiefDirector validation prompts | `llm/chief_director.py:130-206` + `:208 validate_shot_prompts` + `:276 evaluate_generation_quality` (diagnosis) | B + C | **FILLED v0.8** (dual-source P2 + P3) |
+| PR-AUDIO-VIBE | BGM vibe selection prompts | `audio/music.py:88 _build_music_prompt` | B + C | **FILLED v0.8** |
 
 #### Test cell PR-STORY — Story decomposition prompts
 
@@ -827,7 +827,142 @@ The cells below cover Tier B + C predictively. Tier A (substrate verification) i
 
 **ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
 
-> **Remaining prompt cells (PR-DIALOGUE, PR-CONTINUITY, PR-STYLE-LLM, PR-CHIEFDIR, PR-AUDIO-VIBE) STUB at v0.5.** Per operator REPLY responsibility split (Sh): director-doable; operator's testplan §5 P1-P14 enumeration provides cross-reference content (canonical for HOW; brief PR-* cells cross-reference rather than duplicate). 3 of 8 prompt cells filled at v0.3.
+#### Test cell PR-STYLE-LLM — Style rules generation prompts
+
+**Phase / class:** Prompt class (cross-cuts P-STYLE phase; INPUT side of the LLM call — JSON-shape elicitation, distinct from P-STYLE's OUTPUT validation focus)
+**Stage in pipeline:** ARCHITECTURE §7.1 style stage; impl at `llm/style_director.py:62 system_prompt` (cinematographer + production-designer persona); tools-appended assembly at line 95 (`system_with_tools = system_prompt + """`) → line 107 (`system_prompt=system_with_tools`) consumed by LLM call
+**Test tier:** B + C
+**Estimated cost:** $0 — prompt observation intrinsic to P-STYLE; this cell is a focused angle on prompt construction, not a separate LLM call
+**Wall-clock prediction:** N/A — reuses P-STYLE observation
+
+**PREDICTION (filled at v0.8 from impl-read at `llm/style_director.py:62`, operator pre-staging substrate at `docs/PR-cells-prestaging-2026-05-27-cycle15.md` §"PR-STYLE-LLM", per §8 protocol):**
+
+- **Expected output (shape):** 6-key JSON elicited by the cinematographer/production-designer persona — `color_palette` / `camera_style` / `lighting` / `production_design` / `mood` / `sound_design_rules`. Output schema enforced via tools-appended format. P-STYLE observes the JSON output; this cell observes the prompt that produces it.
+- **Expected content quality:** named-color palette (concrete: "burnt sienna and ochre at sunset" not abstract "warm tones"); specific camera/lens class (e.g., "anamorphic 2.39:1, soft falloff"); concrete lighting setups (e.g., "single-source practicals + sodium-vapor wash"); production-design specificity (era-appropriate props, period-correct materials); `sound_design_rules` non-generic. If user_prompt includes topic/genre context, expect topic-aligned rules; else generic-cinematic baseline.
+- **Expected failure modes (top 3):**
+  1. **Generic palette** — output uses abstract color words ("warm", "cool", "neutral") instead of named pigments. Root: persona doesn't enforce concrete-noun preference.
+  2. **`sound_design_rules` generic** — cinematographer persona may de-prioritize audio specificity; output reads like a template (e.g., "diegetic sound, sparse score, atmospheric effects").
+  3. **Topic-context absence** — `user_prompt` template may not pass genre/scene context; LLM produces topic-agnostic boilerplate.
+- **Expected adjustment indicators:**
+  - Generic palette → add explicit "be specific about color palette (named pigments/colors only; no abstract color descriptors)" instruction at end of system_prompt; few-shot examples with concrete palettes
+  - Sound generic → expand persona to "cinematographer AND sound designer"; add 1-2 sentences requiring audio-specific vocab (diegesis, source-position, score-instrumentation); audit `sound_design_rules` length vs other keys
+  - Topic absent → modify `user_prompt` template to inject `topic` + `scene_genre` context as named fields; tighten lower temperature to reduce LLM auto-completion of templates
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell PR-DIALOGUE — Dialogue generation prompts
+
+**Phase / class:** Prompt class (cross-cuts P-PERFORMANCE phase's dialogue layer; specifically the LLM input to `dialogue_writer`)
+**Stage in pipeline:** ARCHITECTURE §7 LLM ensemble + dialogue layer; impl at `domain/dialogue_writer.py:60 system_prompt` ("professional screenwriter for photorealistic cinema" persona); tools-appended assembly at line 94 → line 103 LLM call
+**Test tier:** C (dialogue invoked during full-reel performance capture, not Tier B single-shot)
+**Estimated cost:** $0 — prompt observation intrinsic to P-PERFORMANCE; this cell is a focused angle
+**Wall-clock prediction:** N/A — reuses P-PERFORMANCE observation
+
+**PREDICTION (filled at v0.8 from impl-read at `domain/dialogue_writer.py:60`, operator pre-staging substrate §"PR-DIALOGUE", per §8 protocol):**
+
+- **Expected output (shape):** dialogue strings per shot/scene with speaker attribution + content; LLM call returns structured JSON via tools-appended format (line 94); each dialogue entry maps to a character listed in scene's `characters_present`.
+- **Expected content quality:** era-appropriate vocabulary matching scene period; character-voice-consistent (each character has stable register, idiom set, sentence-length distribution); no cinematic clichés ("It's over, Anya. We both know it." / "I never wanted this." / "We don't have much time."); cultural register matches source language structure (Korean characters in Korean-cultural scene: SOV syntax, honorifics-aware).
+- **Expected failure modes (top 3):**
+  1. **Cinematic clichés** — LLM regresses to genre boilerplate; root: persona-default to "movie dialogue" without explicit anti-cliché constraint
+  2. **Language structural drift** — Korean character + Korean-cultural scene gets English-shaped SVO dialogue with no honorifics; root: prompt doesn't preserve source-language structural conventions
+  3. **Character voice collapse** — all characters speak in same register (formal/informal/genre-fit); root: prompt doesn't enforce per-character voice differentiation; no `character_voice` trait propagated to LLM
+- **Expected adjustment indicators:**
+  - Clichés → add explicit "avoid these clichés: [list]" with examples in system_prompt; lower temperature; few-shot anti-cliché dialogue exemplars; manual cliché-rate coding on N=10 dialogues pre vs post
+  - Language drift → add per-language sub-prompt or explicit "preserve source language's structural conventions (subject ordering, honorifics, register)" instruction; route per-character `language_pref` field if available
+  - Voice collapse → introduce per-character voice anchor in `user_prompt` (each character's idiomatic snippet); enforce voice-distinctness post-check; expose `character_voice` trait at character-creation time
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell PR-CONTINUITY — Continuity engine prompts
+
+**Phase / class:** Prompt class (cross-cuts P-KEYFRAME + P-MOTION at the `enhance_shot_prompt` prompt-assembly injection point)
+**Stage in pipeline:** ARCHITECTURE §8 continuity engine; impl at `domain/continuity_engine.py:446 enhance_shot_prompt(self, shot, scene, previous_shot=None, shot_index=0, approved_anchor_image=None)`; assembly order at lines 467 (raw shot prompt) → 472-474 (location persistence) → 478-490 (character identity fragments with spatial position for ≥2 chars) → 493-497 (physics constraints) → 501-505 (motion from action continuity) → 507-509 (continuity notes); anchor_image resolution at line 513 (separate from positive-prompt assembly)
+**Test tier:** B + C (continuity injection runs at every keyframe + motion phase; observable at both single-shot and full-reel scale)
+**Estimated cost:** $0 — prompt observation intrinsic to P-KEYFRAME/P-MOTION
+**Wall-clock prediction:** N/A — reuses upstream cell observation
+
+**PREDICTION (filled at v0.8 from impl-read at `domain/continuity_engine.py:446-513`, operator pre-staging substrate §"PR-CONTINUITY", per §8 protocol):**
+
+- **Expected output (shape):** `(enhanced_prompt: str, continuity_config: dict)` tuple-equivalent. `enhanced_prompt` is `prompt_parts` joined — 6 fragment classes appended in order: raw shot prompt → location persistence → character identity fragments (with `left/center/right` spatial positioning when ≥2 characters present) → physics constraints → motion constraints → continuity notes. `continuity_config` holds `anchor_image` path (or None) — anchor is NOT part of positive-prompt assembly per ARCHITECTURE §8.
+- **Expected content quality:** all 6 fragment classes present when applicable; spatial-positioning labels for multi-character shots; physics constraints reflect scene's physical state (e.g., "outdoors, rain falling, wet surfaces"); motion constraints reflect previous shot's action vector when `previous_shot` is provided; continuity notes from `shot["continuity_constraints"]` field; anchor_image resolves to a real file or None.
+- **Expected failure modes (top 3):**
+  1. **Assembly-order weight effects** — later fragments (notes, motion at indices 5-6) dominate over earlier (raw shot intent at index 1) due to image-gen attention bias toward recent tokens. Symptom: shots come back over-emphasizing peripheral notes vs the narrative-core intent.
+  2. **Character fragment token-budget dominance** — ≥3 characters per shot → character fragments overwhelm raw shot prompt; root: no per-character length cap in lines 478-490 character-fragment generation.
+  3. **Anchor / shot conflict** — `approved_anchor_image` references a day-shot keyframe but raw shot is night-scene; visual continuity breaks at next keyframe. Root: `_resolve_previous_approved_keyframe` selection not scene-boundary-aware (already flagged in PR-IMAGE PREDICTION failure mode #1).
+- **Expected adjustment indicators:**
+  - Order effects → A/B reorder: inject character anchor + narrative intent earlier; place style/notes LAST so they have less weight; measure identity-score variance across reorderings (operator testplan §5 P12 tweak variant proposal)
+  - Character token overflow → add per-character length cap (e.g., max 30 tokens per character fragment); condense multi-char descriptors at line ≥3 character threshold
+  - Anchor conflict → tighten `_resolve_previous_approved_keyframe` to scene-boundary-aware selection (skip anchors from different `time_of_day`); allow operator override via per-shot `anchor_override` field; document anchor as "style reference only, not scene-state ground truth"
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell PR-AUDIO-VIBE — BGM vibe selection prompts
+
+**Phase / class:** Prompt class (cross-cuts P-BGM phase; specifically the static vibe→prompt mapping in `_build_music_prompt`)
+**Stage in pipeline:** ARCHITECTURE §13 audio pipeline; impl at `audio/music.py:88 def _build_music_prompt(music_vibe: str) -> str:` — **single parameter, dict-lookup design**; mapping at lines 90-117 (27 mood keys); default fallback at lines 120-121; consumed by `generate_bgm` (line 216) and `generate_suno_v5` path (called from line 158)
+**Test tier:** B + C (BGM generation runs once per project; observable at single-call probe and full-reel assembly)
+**Estimated cost:** $0 — prompt observation intrinsic to P-BGM
+**Wall-clock prediction:** N/A — reuses P-BGM observation
+
+**PREDICTION (filled at v0.8 from impl-read at `audio/music.py:88-121`, operator pre-staging substrate §"PR-AUDIO-VIBE", per §8 protocol — re-framed away from operator-testplan §5 P9's inaccurate three-axis premise; actual function takes `music_vibe` ONLY, no `video_pacing` or `story_tension` inputs):**
+
+- **Expected output (shape):** producer-grade text prompt string with concrete BPM + key + instrumentation + named reference. Example for `music_vibe="suspense"` (line ~92): `"70bpm D minor, slow deep sub-bass drones, distant reversed piano, ticking clock polyrhythm, cinematic brass stabs, Hans Zimmer tension, dark ambient thriller score."` 27 mapped vibes have rich producer-grade specs; unknown vibes hit the line 120-121 generic fallback (`"Cinematic ambient music, {music_vibe} mood, slow, atmospheric, film score quality, professional production."`).
+- **Expected content quality:** for mapped vibes — concrete BPM/key/instrumentation/cinematic-reference tuple is present; reads like a producer brief, not generic mood-word. For unmapped vibes — fallback is much weaker (no BPM, no instrumentation, no named reference); audible quality gap vs mapped vibes.
+- **Expected failure modes (top 3):**
+  1. **Static mapping misses scene-context** — pacing changes within a scene (slow setup → fast climax) can't be conveyed by a single vibe key; root: dict-lookup design has no scene-aware composition. Symptom: BGM stays flat across narrative pacing shifts.
+  2. **Unknown-vibe fallback much weaker** — if scene's vibe falls outside the 27 mapped keys, BGM quality degrades noticeably; root: no fuzzy-match or neighbor-composition logic.
+  3. **27-vibe taxonomy biased toward orchestra/score** — 7 of 27 (`epic`, `triumphant`, `classical`, `chase`, `action`, `western`, `jazz_noir`) are orchestra/classical-leaning; few electronic/contemporary entries; root: hand-curated dict reflects curator taste. Symptom: contemporary scenes pulled toward score-like aesthetic.
+- **Expected adjustment indicators:**
+  - Scene-context → add optional `scene_stage` parameter (intro/build/climax) with tempo-modulation hint OR composition between 2 vibes (transition mapping); tweak-variant: surface scene-stage to operator at BGM-prompt time
+  - Fallback weakness → fuzzy-match unknown vibes to nearest mapped vibe via embedding distance OR LLM-elicit producer-grade prompt for unmapped vibes (single LLM call per unknown vibe; cached); ensures fallback parity with mapped vibes
+  - Taxonomy bias → expand dict to cover electronic / contemporary / world-music vibes (priority gaps: lo-fi, synthwave, ambient electronic, hip-hop, K-pop); track usage histogram from production to identify which mapped vibes operators actually invoke vs which fall through to fallback
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell PR-CHIEFDIR — ChiefDirector validation + diagnosis prompts (dual-source: P2 + P3)
+
+**Phase / class:** Prompt class (cross-cuts P-CHIEFDIR validation phase + per-take diagnosis pathway invoked during P-KEYFRAME / P-PERFORMANCE / P-MOTION on take-quality failures)
+**Stage in pipeline:** ARCHITECTURE §7 LLM ensemble + post-decompose validation; impl spans:
+  - **Validation pathway:** `llm/chief_director.py:130-206` (system prompt with HC1-HC8 hard constraints + T1-T9 tripwires) → `llm/chief_director.py:208 validate_shot_prompts(self, shots, scene) -> Dict` (pre-keyframe shot-prompt validation; emits `decision ∈ {APPROVED, MODIFIED, REJECTED}`)
+  - **Diagnosis pathway:** `llm/chief_director.py:276 evaluate_generation_quality(...)` (per-take diagnosis) with inner `diagnosis_system` prompt at line 365 + JSON decision schema at line 396 (`"decision": "RETRY" | "ACCEPT_LENIENT" | "FAIL"`) + decision returns at lines 318 (RETRY default) + 446 (RETRY with mutation_level)
+**Test tier:** B + C (validation runs at decompose for both tiers; diagnosis runs at any take-quality threshold breach during retries)
+**Estimated cost:** $0 — prompt observation intrinsic to validation + diagnosis phases
+**Wall-clock prediction:** N/A — reuses upstream cells
+
+> **Two-layer Rule #12 catch (cycle-15 entry):** operator's pre-staging substrate (`docs/PR-cells-prestaging-2026-05-27-cycle15.md` §"PR-CHIEFDIR") correctly flagged operator-testplan §5 P3's `evaluate_take@352` as inaccurate (no such method), but proposed `diagnose_failure` as the replacement — which also doesn't grep-verify. Director-side Rule #12 re-verify at cycle-15 entry caught this: the actual diagnosis method is **`evaluate_generation_quality` at line 276** (its inner `diagnosis_system` prompt starts at line 365). This cell uses the verified `evaluate_generation_quality` reference. Operator's pre-staging fix is non-blocking; advisory.
+
+**PREDICTION (dual-paragraph: validation + diagnosis; filled at v0.8 from impl-read at `llm/chief_director.py:130-206 + 208-276 + 318/365/396/446`, per §8 protocol):**
+
+**Paragraph 1 — Validation prompt (`validate_shot_prompts`, P2-sourced):**
+
+- **Expected output (shape):** dict with top-level `decision ∈ {APPROVED, MODIFIED, REJECTED}` + per-shot decisions list (`shots: [{shot_id, decision, ...}]`). The system prompt (lines 130-206) enumerates HC1-HC8 hard constraints (HC1: JSON-only output; HC2-HC8 cover identity firewall + per-shot single-character validation + scene/character consistency) plus T1-T9 tripwires for prompt-injection / role-play / hallucinated-content failure modes.
+- **Expected content quality:** APPROVED for clean shot-prompt sets that satisfy all HCs and trigger no T-tripwires; MODIFIED with explicit per-shot edits when constraints partially violated (e.g., character ID drift between shots); REJECTED when constraints catastrophically violated → caller falls back to single-decomposer regen (P-DECOMPOSE failure mode #2).
+- **Expected failure modes (validation):**
+  1. **HC1-HC8 over-trigger on legitimate variation** — outfit/hair/lighting variation flagged as identity violation; root: HC phrasing may not distinguish costume vs face/build.
+  2. **HC enumeration redundancy** — HC2-HC4 may overlap in scope; same shot may trip multiple HCs for one root cause, inflating perceived constraint density.
+  3. **T1-T9 over-trigger on narrative content** — scene legitimately referencing identity (e.g., character "remembers former self") flagged as identity-tripwire; root: T-tripwires don't distinguish "scene about identity" from "prompt asks to violate identity."
+
+**Paragraph 2 — Diagnosis prompt (`evaluate_generation_quality` → inner `diagnosis_system`, P3-sourced):**
+
+- **Expected output (shape):** JSON with `decision ∈ {RETRY, ACCEPT_LENIENT, FAIL}` + `mutation` (suggested prompt-edit string or None) + `mutation_level` (int). System prompt at line 365 (`"You are ChiefDirector diagnosing a generation failure..."`); JSON decision schema at line 396; decision returns at lines 318 (RETRY default with `mutation_level: 1`) + 446 (RETRY with operator-supplied `level`).
+- **Expected content quality:** decision tied to take-quality data passed via user_prompt (`coherence_info`, `shot_prompt[:500]`, `scene_context[:200]`); mutation suggestions actionable when present (concrete prompt-edit strings, not vague "improve quality"); ACCEPT_LENIENT used sparingly with explicit reason.
+- **Expected failure modes (diagnosis):**
+  1. **ACCEPT_LENIENT over-use** — borderline takes accepted at scale → quality dilution; root: no `quality_score` floor enforcement in prompt; LLM defaults to permissive when unsure.
+  2. **FAIL under-use** — broken takes get RETRY repeatedly → wasted budget across regeneration loops; root: prompt may not enforce "if X failure mode, prefer FAIL over RETRY" rule.
+  3. **RETRY-without-mutation** — `decision: RETRY` returned but `mutation: null` (no prompt edit suggested); regenerating with identical prompt yields identical failure. Root: prompt may not force mutation-non-null when decision == RETRY.
+
+**Expected adjustment indicators (combined across both prompts):**
+
+- HC over-trigger on costume → relax HC1 phrasing on outfit/hair variation; add explicit "costume variation does NOT count as identity violation" clarification; bump to ChiefDirector v2.1 system prompt with version-tracked rollout
+- HC redundancy → consolidate overlapping HCs; track per-HC trigger histogram in production to identify dominant constraint; deprecate underperforming HCs
+- T tripwire over-trigger on narrative → add T-level severity tiers (T-block vs T-flag); distinguish "scene about identity" (legitimate narrative) from "prompt asks to violate identity" (block); audit logs for false-positive T-tripwires
+- ACCEPT_LENIENT over-use → add `quality_score` floor (e.g., ACCEPT_LENIENT requires score ≥ 0.65); require explicit per-criterion check before ACCEPT_LENIENT in prompt; distribute decisions across 20+ takes for calibration
+- FAIL under-use → add "if X failure mode (broken file / OOM / engine-error), prefer FAIL over RETRY" rule; track RETRY-then-FAIL chains and cap RETRY count (e.g., max 2 RETRY → FAIL)
+- RETRY-without-mutation → enforce `mutation` non-null when decision == RETRY (post-call validation; reject diagnosis output if violated); fall back to deterministic mutation strategy when LLM omits
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+> **All 8 prompt cells now FILLED at v0.8 (this commit).** Cross-references operator's pre-staging substrate at `docs/PR-cells-prestaging-2026-05-27-cycle15.md` (verified impl refs + 2 testplan inaccuracies surfaced) + operator's testplan §5 P1-P14 (canonical for HOW per Option B semantic split). PR-CHIEFDIR captures dual-source content (validation + diagnosis prompts) per operator's recommendation §"PR-CHIEFDIR" option (a). Director-side Rule #12 re-verify caught an additional inaccuracy in operator's pre-staging (`diagnose_failure` → actual `evaluate_generation_quality` at line 276) — two-layer Rule #12 catch chain captured in PR-CHIEFDIR cell note above.
 
 ### 5.5 Cold-context verification commands per cell (folded from operator REPLY `a9b1c32` §"Ask #1 §1.5")
 
