@@ -14,8 +14,8 @@
 **Cross-seat coordination escalation (cycle-14 mid-cycle, 2026-05-27 T08:35Z → director adjudication this commit):** Operator independently drafted `docs/EXTENSIVE-TEST-PLAN-2026-05-27.md` (~768 lines) cold because operator session started before this brief's `T05` dispatch-claim event entered STATE.md. Both seats were responding to identical user direction "both prepare TOGATHER." Per operator's escalation event (`fdd0094`), 4 consolidation options surfaced: (A) operator deletes draft; (B) keep both with semantic split + cross-refs; (C) operator's draft becomes appendix; (D) director-proposed hybrid. **Director-seat adjudicates: OPTION B — semantic split.** Both artifacts preserved with role-aligned scope per Sh: brief = strategic (WHAT/WHY/structure); operator's testplan = operational (HOW/per-prompt/per-parameter). See §"Cross-seat coordination" subsection in this brief's §1 + mirrored ESCALATION-RESOLVED header in operator's testplan (operator commits next).
 
 **Status (at brief-write time, 2026-05-27 cycle-14 mid-cycle):**
-- **DRAFT v0.6** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + user §9 decisions logged + **ALL 9 phase cell PREDICTIONs filled** (P-STYLE, P-BGM, P-DECOMPOSE, P-CHIEFDIR, P-KEYFRAME, P-PERFORMANCE, P-MOTION, P-IDENTITY, P-ASSEMBLY) + 3 prompt class cell PREDICTIONs filled (PR-STORY, PR-IMAGE, PR-MOTION) + **operator REPLY folded** at `a9b1c32`: operational discipline §1.5, pre-flight A7+A8 refined + A9 ComfyUI workflow probe added, 22 cold-context verification commands §5.5, 2 adjustment-pointing matrix rows §6, operator sign-off ✅ §11, cell-ownership split per Sh codified §5 tables + Candidate #8 filed at `1af3528` (operator + director concurred) + **ALL 7 PA-* parameter cell PREDICTIONs filled** (PA-SAMPLING, PA-IMAGE, PA-VIDEO, PA-MOTION, PA-LIPSYNC, PA-IDENTITY, PA-AUDIO) by operator per Sh operational-default + REPLY Ask #2 responsibility split; cross-references testplan §6 for parameter-level impl details
-- AWAITING: director-seat continued fill of 6 G-* gate cells + 5 remaining PR-* prompt cells (director-doable; testplan §5 P1-P14 cross-references); user-principal answers to §9 questions 5-9; pre-flight A1-A9 all-green (notably A5/A9 RunPod pod restart blocker)
+- **DRAFT v0.7** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + user §9 decisions logged + **ALL 9 phase cell PREDICTIONs filled** (P-STYLE, P-BGM, P-DECOMPOSE, P-CHIEFDIR, P-KEYFRAME, P-PERFORMANCE, P-MOTION, P-IDENTITY, P-ASSEMBLY) + 3 prompt class cell PREDICTIONs filled (PR-STORY, PR-IMAGE, PR-MOTION) + **operator REPLY folded** at `a9b1c32`: operational discipline §1.5, pre-flight A7+A8 refined + A9 ComfyUI workflow probe added, 22 cold-context verification commands §5.5, 2 adjustment-pointing matrix rows §6, operator sign-off ✅ §11, cell-ownership split per Sh codified §5 tables + Candidate #8 filed at `1af3528` (operator + director concurred) + **ALL 7 PA-* parameter cell PREDICTIONs filled** (PA-SAMPLING, PA-IMAGE, PA-VIDEO, PA-MOTION, PA-LIPSYNC, PA-IDENTITY, PA-AUDIO) by operator per Sh operational-default + REPLY Ask #2 responsibility split + **ALL 6 G-* gate cell PREDICTIONs filled** (G-PLAN, G-KEYFRAME, G-PERF, G-REVIEW, G-SCREEN, G-ITERATE) by director per Sh strategic-default at cycle-15 entry; cross-references ARCHITECTURE §6.1 gate predicates + §3.6 approve endpoints + cycle-9 Lane V #8 I1 bypass `_reject_if_project_busy_outside_gate`
+- AWAITING: director-seat continued fill of 5 remaining PR-* prompt cells (director-doable; testplan §5 P1-P14 cross-references); user-principal answers to §9 questions 5-9; pre-flight A1-A9 all-green (notably A5/A9 RunPod pod restart blocker)
 - USER-PRINCIPAL DECISIONS LANDED (2026-05-27): Tier B+C+D scope (comprehensive); $50 hard budget cap; fresh RunPod pod deploy via `scripts/setup_runpod.sh`; fill PREDICTIONs in advance (this v0.2)
 - NOT EXECUTABLE until §"Pre-flight checklist" all-green + operator REPLY landed + brief v1.0 + user-principal execution authorization
 
@@ -580,18 +580,170 @@ The cells below cover Tier B + C predictively. Tier A (substrate verification) i
 
 **ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
 
-> **All 9 phase cells now FILLED at v0.3 (this commit).** Remaining: gate cells (§5.2, 6 cells, director-doable from ARCHITECTURE §6) + parameter cells (§5.4, 7 cells, operator-default per Sh) + 5 prompt class cells (PR-DIALOGUE, PR-CONTINUITY, PR-STYLE-LLM (partial), PR-CHIEFDIR, PR-AUDIO-VIBE). All cells must be filled before v1.0 ship + execution.
+> **All 9 phase cells FILLED at v0.3; all 7 parameter cells FILLED at v0.6; all 6 gate cells FILLED at v0.7.** Remaining: 5 prompt class cells (PR-DIALOGUE, PR-CONTINUITY, PR-STYLE-LLM (partial), PR-CHIEFDIR, PR-AUDIO-VIBE) — director-doable; testplan §5 P1-P14 cross-references. All cells must be filled before v1.0 ship + execution.
 
 ### 5.2 Gate test cells (C only)
 
 | ID | Gate | What it validates | Tier | Status |
 |---|---|---|---|---|
-| G-PLAN | GATE 1 PLAN_REVIEW @ 25% | Plans approved before keyframe | C | STUB |
-| G-KEYFRAME | GATE 2 KEYFRAME_REVIEW @ 55% | Keyframes approved before performance | C | STUB |
-| G-PERF | GATE 3 PERFORMANCE_REVIEW @ 65% | Performance approved (or SKIP-bypassed) before motion | C | STUB |
-| G-REVIEW | GATE 4 REVIEW @ 82% | Reviews approved before assembly | C | STUB |
-| G-SCREEN | SCREENING @ post-assembly | User approves final reel before re-assembly | C | STUB |
-| G-ITERATE | Surface A iterate-from-gate | `regenerate_with_intent` flow at any gate | C | STUB |
+| G-PLAN | GATE 1 PLAN_REVIEW @ 25% | Plans approved before keyframe | C | **FILLED v0.7** |
+| G-KEYFRAME | GATE 2 KEYFRAME_REVIEW @ 55% | Keyframes approved before performance | C | **FILLED v0.7** |
+| G-PERF | GATE 3 PERFORMANCE_REVIEW @ 65% | Performance approved (or SKIP-bypassed) before motion | C | **FILLED v0.7** |
+| G-REVIEW | GATE 4 REVIEW @ 82% | Reviews approved before assembly | C | **FILLED v0.7** |
+| G-SCREEN | SCREENING @ post-assembly | User approves final reel before re-assembly | C | **FILLED v0.7** |
+| G-ITERATE | Surface A iterate-from-gate | `regenerate_with_intent` flow at any gate | C | **FILLED v0.7** |
+
+> **All 6 gate cells now FILLED at v0.7 (this commit).** Cross-references ARCHITECTURE §6 (predicate-poll mechanism) + §6.1 (`_gate_satisfied` predicates at `cinema/review/controller.py:214-237`) + §3.6 (approve endpoints) + §7.7.2 (auto-approve `CINEMA_AUTO_APPROVE_MOTION` opt-in) + cycle-9 Lane V #8 I1 fix at `9e9b008` (`_reject_if_project_busy_outside_gate` enables iterate-during-gate bypass for all 5 gates). Companion gate-state inspection commands per cell are at §5.5 "Gate cells (G-*) — operates on project.json state transitions."
+
+#### Test cell G-PLAN — GATE 1 PLAN_REVIEW @ 25%
+
+**Phase / class:** Gate (between step 5 decompose and step 8 keyframe; worker waits at `cinema_pipeline.py:870`)
+**Stage in pipeline:** ARCHITECTURE §6 predicate-poll + §6.1 PLAN_REVIEW predicate at `cinema/review/controller.py:219-220`; approve endpoint per ARCHITECTURE §3.6 at `web_server.py:1568 api_approve_shot_plan`
+**Test tier:** C only (Tier C is full reel — Tier B single-shot does not exercise multi-shot gate semantics meaningfully)
+**Estimated cost:** $0 (pure operator action; no LLM/API calls unless auto-approve rules invoke validators)
+**Wall-clock prediction:** depends on operator pace; ~5-30 seconds per shot to review + approve a plan; gate-resume detection ≤500ms after last approval (`lifecycle.wait_for_gate` poll interval per ARCHITECTURE §6)
+
+**PREDICTION (filled at v0.7 from impl-read at `cinema/review/controller.py:214-220`, `cinema_pipeline.py:870`, `web_server.py:1568`, ARCHITECTURE §6.1, per §8 protocol):**
+
+- **Expected behavior (shape):** Worker reaches step "PLAN_REVIEW @ 25%", invokes `_run_auto_approve_pass("PLAN_REVIEW")` (audit key `"plan"`) which appends decisions to `shot["auto_approve_audit"]` for each shot; non-auto-approved shots block on operator review. Operator POSTs `/api/projects/<pid>/shots/<sid>/plan/approve` per shot; each call mutates `shot["plan_status"] = "approved"` via `pipeline.approve_shot_plan(sid, approved=True)`. Worker's 500ms-poll predicate `all(shot.get("plan_status") == "approved" for shot in shots)` returns True after the LAST shot approves; worker resumes into keyframe render. Reject path: `/plan/reject` sets `plan_status != "approved"`; predicate remains False.
+- **Expected content quality:** `project.json` shows every shot's `plan_status == "approved"` post-gate; `auto_approve_audit` array non-empty for each shot regardless of auto/manual outcome (audit is the persistence layer per Session 13 brief). For a 3-5-shot Tier C reel: ~3-5 audit entries with `decision.auto_approved` mixed True/False depending on rule fit. Iterate-during-gate calls to `/iterate` succeed (Lane V #8 I1 bypass).
+- **Expected latency (gate-open detection):** ≤500ms from last approve POST to worker resume — bounded by `wait_for_gate` poll interval at `cinema/lifecycle.py:172-188`. Network/server latency adds a few ms.
+- **Expected cost:** $0 unless auto-approve rules invoke vision validators (plan gate currently has no vision check; pure text/structure validation). LLM cost upstream (decompose) already accounted for in P-DECOMPOSE.
+- **Expected failure modes (top 3):**
+  1. **Stale-state read** — operator approves last shot but predicate evaluates against pre-write snapshot (mutate_project + refresh-snapshot interaction; `_refresh_project_snapshot` race with the writing thread). Symptom: worker stays at 25% past expected unblock window.
+  2. **Reject doesn't propagate** — `/plan/reject` returns 200 but `plan_status` field write missed; predicate still satisfies → premature unblock.
+  3. **Auto-approve over-eager** — `CINEMA_AUTO_APPROVE_PLAN` (or rules) silently approves shot that operator would have rejected; audit log records decision but operator never sees the gate (no user-facing "pending" UI for auto-approved shots).
+- **Expected adjustment indicators:**
+  - Stale-state read → trace `mutate_project` → disk-write fsync → `_refresh_project_snapshot` chain; verify gate predicate reads fresh snapshot per poll, not cached `self.project`
+  - Reject doesn't propagate → grep `web_server.py` for `api_reject_shot_plan` (or equivalent); verify it negates `plan_status`; cross-check round-trip via §5.5 G-PLAN jq inspection command
+  - Auto-approve over-eager → tighten `auto_approve_rules` for plan stage; verify `/api/projects/<pid>/shots/<sid>/reject-auto-approve` override path works (`web_server.py:1780`); confirm UI surfaces auto-approved shots for optional human review
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell G-KEYFRAME — GATE 2 KEYFRAME_REVIEW @ 55%
+
+**Phase / class:** Gate (between step 8 keyframe render and step ~12 performance capture; worker waits at `cinema_pipeline.py:910`)
+**Stage in pipeline:** ARCHITECTURE §6.1 KEYFRAME_REVIEW predicate at `cinema/review/controller.py:221-222`; approve endpoint per ARCHITECTURE §3.6 at `web_server.py:1618 api_approve_keyframe_take`; per-take alternates per ARCHITECTURE §6.2 (`keyframe_takes[]` array; approval is pointer-set, array immutable)
+**Test tier:** C only
+**Estimated cost:** $0 directly; auto-approve rules invoke identity-validator (P-IDENTITY) which has already been costed in keyframe phase
+**Wall-clock prediction:** ~10-60 seconds per shot to review (visual inspection + approve); gate-resume ≤500ms
+
+**PREDICTION (filled at v0.7 from impl-read at `cinema/review/controller.py:221-222`, `cinema_pipeline.py:910`, `web_server.py:1618`, ARCHITECTURE §6.2, per §8 protocol):**
+
+- **Expected behavior (shape):** Worker reaches "KEYFRAME_REVIEW @ 55%", runs `_run_auto_approve_pass("KEYFRAME_REVIEW")` (audit key `"image"`). Auto-approve rules can include identity-score thresholds + visual-quality gates; passing shots get `approved_keyframe_take_id` set + audit entry. Operator approves remaining shots via `/keyframes/<take_id>/approve` → `approve_take(sid, take_id, "keyframe")` sets `shot["approved_keyframe_take_id"] = take_id`. Multiple alternates per shot live in `keyframe_takes[]`; approval picks one pointer. Predicate `all(shot.get("approved_keyframe_take_id") for shot in shots)` returns True after last shot's approval.
+- **Expected content quality:** Every shot has exactly one `approved_keyframe_take_id` pointing to an entry in `keyframe_takes[]`; the take file exists on disk at the path stored in the take entry; identity validation (P-IDENTITY) passed for the approved take (or operator explicitly accepted a borderline score). Audit log records every alternate that was generated, with the final selection's `auto_approved` field and any `vetoes`.
+- **Expected latency:** Same 500ms-bounded poll. UI alternates-rendering may add ~1-2s if N=8 max-tier alternates per shot need thumbnail render.
+- **Expected cost:** $0 for the gate itself. Auto-approve identity check uses already-computed GhostFaceNet score from generation (no fresh inference).
+- **Expected failure modes (top 3):**
+  1. **Bogus take_id approved** — operator UI passes a `take_id` not in `keyframe_takes[]`; `approve_take` silently succeeds OR errors. Symptom: `approved_keyframe_take_id` points to nonexistent take; downstream phase fails at file lookup.
+  2. **Alternate mis-selection** — UI shows 8 alternates with validator scores; operator approves the wrong one (e.g., highest score is identity-correct but wrong composition); audit captures the choice but downstream identity gate (P-IDENTITY) misframes the issue.
+  3. **Auto-approve at borderline threshold** — identity score 0.71 vs threshold 0.70 silently passes; visually-poor take advances; downstream motion (P-MOTION) inherits the bad keyframe → cascading drift.
+- **Expected adjustment indicators:**
+  - Bogus take_id → tighten `_find_take` strictness; reject if `take_id` not in `keyframe_takes[]`; return 404 with explicit "take_id not in this shot's keyframe alternates"
+  - Alternate mis-selection → UI should display validator score + composition preview side-by-side; expose `auto_approve_audit` for the discarded alternates as decision-context
+  - Borderline auto-approve → tighten threshold OR add "borderline zone" requiring explicit human OK; track `IDENTITY_THRESHOLD - 0.05` band as manual-only; verify `auto_approve_audit` exposes the score
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell G-PERF — GATE 3 PERFORMANCE_REVIEW @ 65%
+
+**Phase / class:** Gate (between performance capture and step 15 motion render; worker waits at `cinema_pipeline.py:951-955`)
+**Stage in pipeline:** ARCHITECTURE §6.1 PERFORMANCE_REVIEW predicate (three-paths-satisfied) at `cinema/review/controller.py:223-234`; approve endpoint per ARCHITECTURE §3.6 at `web_server.py:1629 api_approve_performance_take`; `all_skipped` short-circuit at `cinema_pipeline.py:767-788` (redundant per ARCHITECTURE §6.1 note but preserved for explicit `PERFORMANCE_SKIPPED_GATE` UX event); auto-approve gated behind `CINEMA_AUTO_APPROVE_MOTION` opt-in per ARCHITECTURE §7.7.2 + ADR-014
+**Test tier:** C only
+**Estimated cost:** $0 for gate; performance capture upstream already costed in P-PERFORMANCE
+**Wall-clock prediction:** ~30-90 seconds per shot to review performance video (must watch ~3-8s clip); gate-resume ≤500ms
+
+**PREDICTION (filled at v0.7 from impl-read at `cinema/review/controller.py:223-234`, `cinema_pipeline.py:951-955`, `cinema_pipeline.py:767-788`, ARCHITECTURE §6.1, per §8 protocol):**
+
+- **Expected behavior (shape):** Worker reaches "PERFORMANCE_REVIEW @ 65%". Three-paths-satisfied predicate: a shot is satisfied iff (a) `performance_engine == "SKIP"` (no performance needed), OR (b) no `approved_keyframe_take_id` (broken chain — predicate skips it since downstream can't proceed anyway), OR (c) `approved_performance_take_id` is set. Default test reel: most shots route to live actors / driving-video / SKIP per `performance/_router.dispatch()` (ARCHITECTURE §10.1); SKIP-routed shots auto-satisfy without operator action; non-SKIP shots require explicit approval. With `CINEMA_AUTO_APPROVE_MOTION=1`, the opt-in helper at `cinema/auto_approve.py:472` runs against motion takes; otherwise default-off per ADR-014.
+- **Expected content quality:** Post-gate, every shot satisfies at least one of the three paths. For mixed reel (some SKIP, some live-perf): `auto_approve_audit` entries exist for non-SKIP shots; SKIP shots may or may not have audit entry depending on whether helper runs at all. Approved performance take video file exists on disk; visual identity matches keyframe (perf-to-keyframe coherence, separate from cross-frame identity drift in P-MOTION).
+- **Expected latency:** 500ms-bounded as above. The orchestrator's `all_skipped` shortcut at `cinema_pipeline.py:767-788` emits `PERFORMANCE_SKIPPED_GATE` event instantly when ALL shots route to SKIP (no operator action needed); this is a UX optimization, redundant with the predicate's path-(a).
+- **Expected cost:** $0 for gate.
+- **Expected failure modes (top 3):**
+  1. **SKIP shot still blocks gate** — `performance_engine` field has stray whitespace OR mixed-case ("skip", "Skip") that survives `(performance_engine or "").upper() == "SKIP"` literal compare. Symptom: pure-SKIP reel doesn't fast-forward; operator confused why gate is paused with no approvable takes.
+  2. **Mixed-reel premature unblock** — 3 SKIP + 1 needs-perf, predicate returns True somehow despite path-(c) unsatisfied on the 1; motion phase pre-runs on un-approved shot. Suggests predicate `all()` semantics broken OR shot mutation race.
+  3. **`CINEMA_AUTO_APPROVE_MOTION=1` rules over-permissive** — every performance take auto-approves regardless of quality; operator's gate-blocking review never happens; bad performances inherited downstream.
+- **Expected adjustment indicators:**
+  - SKIP still blocks → re-grep predicate; verify `.upper()` normalization; check field-write path for `performance_engine` value; verify `cinema/performance/_router.dispatch` writes canonical uppercase `"SKIP"`
+  - Premature unblock → re-verify predicate at `controller.py:229-234`; add diagnostic logging at predicate evaluation; verify `_all_shots` returns ALL shots (not a stale subset)
+  - Auto-approve over-permissive → unset `CINEMA_AUTO_APPROVE_MOTION` (revert to default-off per ADR-014); tighten motion auto-approve rules; verify audit log captures per-shot decision; expose `/reject-auto-approve` UI path (`web_server.py:1778`)
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell G-REVIEW — GATE 4 REVIEW @ 82%
+
+**Phase / class:** Gate (between motion render and step 19 assembly; worker waits at `cinema_pipeline.py:990`)
+**Stage in pipeline:** ARCHITECTURE §6.1 REVIEW predicate at `cinema/review/controller.py:235-236`; approve endpoint per ARCHITECTURE §3.6 at `web_server.py:1666 api_approve_final_take`; postprocess-variant chain-walk per ARCHITECTURE §6.2 (`source_take_id` chain → sets BOTH `approved_motion_take_id` AND `approved_final_take_id`)
+**Test tier:** C only
+**Estimated cost:** $0 for gate; postprocess variants (color grade / re-grade) costed upstream if invoked
+**Wall-clock prediction:** ~60-120 seconds per shot (must watch full clip with audio + assess color/grading); gate-resume ≤500ms
+
+**PREDICTION (filled at v0.7 from impl-read at `cinema/review/controller.py:235-236`, `cinema_pipeline.py:990`, `web_server.py:1666`, ARCHITECTURE §6.2, per §8 protocol):**
+
+- **Expected behavior (shape):** Worker reaches "REVIEW @ 82%", runs `_run_auto_approve_pass("REVIEW")` (audit key `"final"`). Operator approves via `/final/<take_id>/approve` → `approve_take(sid, take_id, "final")`. Critical mechanic: if `take_id` refers to a postprocess variant (e.g., color-graded version), `approve_take` walks `source_take_id` chain to find the underlying `motion_take` AND sets BOTH `approved_motion_take_id` + `approved_final_take_id`. Predicate `all(shot.get("approved_final_take_id") for shot in shots)` returns True after last approval; worker proceeds to assembly.
+- **Expected content quality:** Every shot has exactly one `approved_final_take_id` AND one `approved_motion_take_id` (chain-walk invariant). Both pointers resolve to files that exist on disk; assembly's `_build_scene_packages` returns empty `missing_shots`. Postprocess variants when present have intact `source_take_id` lineage. Auto-approve audit covers every shot.
+- **Expected latency:** 500ms-bounded.
+- **Expected cost:** $0.
+- **Expected failure modes (top 3):**
+  1. **Broken chain** — operator approves postprocess variant whose `source_take_id` doesn't resolve (variant lineage corrupt); `approved_final_take_id` set but `approved_motion_take_id` unchanged → assembly fails with "missing motion take for shot X".
+  2. **Take-file missing at approval time** — operator approves a take, but cleanup OR a race deletes the file before assembly reads it; assembly's `missing_shots` non-empty; abort.
+  3. **Concurrent approval + motion-regen race** — operator approves while a stray motion regenerate is mid-flight on same shot; `_project_lock_guard` should serialize but lock acquisition order matters. Symptom: approved_take points to obsolete file path.
+- **Expected adjustment indicators:**
+  - Broken chain → trace `_walk_source_chain` (or `_find_take` chain logic at `cinema/review/controller.py`); add explicit lineage check at variant create time; fail-fast at approval if chain broken
+  - Missing file at assembly → verify `approve_take` checks file existence pre-mutation; OR rely on assembly's `missing_shots` check + clearer error surfacing
+  - Concurrent race → confirm `_project_lock_guard` decorator on `api_approve_final_take` (`web_server.py:1666`); verify lock scope covers full chain-walk + mutation; cross-check no motion regen endpoint bypasses the same lock
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell G-SCREEN — SCREENING @ post-assembly
+
+**Phase / class:** Gate (post-step-19 assembly, pre-cleanup; worker waits at `cinema_pipeline.py:710-712`)
+**Stage in pipeline:** ARCHITECTURE §7.7.3 Class B opt-out flag `CINEMA_SCREENING_STAGE` (default ON post-flag-flip `44f6beb` 2026-05-26); predicate `is_screening_approved(project)` reads `project["screening_approved"] == True` per `cinema/screening.py`; approve endpoint at `web_server.py:2202 /api/projects/<pid>/screening/approve` → `mark_screening_approved(pid)` → `mutate_project(pid, p.update(screening_approved=True))`; re-assemble path at `/api/projects/<pid>/assemble/re-assemble` (requires `needs_reassembly` non-empty); Lane V #8 I1 (`9e9b008`) gates `/screening/approve` to reject when `needs_reassembly` non-empty
+**Test tier:** C only
+**Estimated cost:** $0 for gate; re-assemble path (if invoked) re-runs assembly (P-ASSEMBLY scope)
+**Wall-clock prediction:** ~3-10 minutes for operator to watch full final reel + decide approve vs request changes; gate-resume ≤500ms after approval POST
+
+**PREDICTION (filled at v0.7 from impl-read at `cinema_pipeline.py:697-717`, `web_server.py:2202-2260`, ARCHITECTURE §7.7.3, cycle-9 Lane V #8 I1 fix `9e9b008`, per §8 protocol):**
+
+- **Expected behavior (shape):** Final assembly completes (step 19); worker enters SCREENING stage at 95% progress; emits `current_stage = SCREENING_STAGE_NAME` + `progress("Awaiting operator screening approval...", 95)`. Operator reviews `final_cinema.mp4`; either (a) approves via `POST /screening/approve` → flag persists to disk → predicate poll returns True → worker resumes into cleanup + COMPLETE at 100%, OR (b) marks shots needing re-do → `needs_reassembly` populated → operator iterates on flagged shots (G-ITERATE) → re-assembles via `POST /assemble/re-assemble`. Iterate-during-screening reachable per Lane V #8 I1 bypass.
+- **Expected content quality:** Post-approve: `project.json` shows `screening_approved == True`; `needs_reassembly` is empty (Lane V #8 I1 precondition enforced — approval rejected with explicit error if `needs_reassembly` non-empty). Cleanup runs (`cleanup_project` invoked at `cinema_pipeline.py:721`); temp files removed; `progress("COMPLETE", final_path, 100)` emitted; SSE stream surfaces COMPLETE event.
+- **Expected latency:** Operator-bound (3-10 min depending on reel length and review depth). Worker's 500ms-poll detects flag flip promptly.
+- **Expected cost:** $0 for gate; re-assemble path repeats P-ASSEMBLY costs (~$0 since pure FFmpeg).
+- **Expected failure modes (top 3):**
+  1. **Stale snapshot in predicate** — `mark_screening_approved` writes via `mutate_project` but `_refresh_project_snapshot` reads pre-write cache; worker keeps polling indefinitely. Symptom: UI shows approve POST returned 200 but progress stays at 95%.
+  2. **`CINEMA_SCREENING_STAGE=0` opt-out + stale UI** — operator sees pre-flag-flip UI that omits screening stage; approve POST hits endpoint but worker has already cleaned up + COMPLETED (pipeline skipped screening per flag-off); flag-write is benign no-op.
+  3. **Premature approve with `needs_reassembly` non-empty** — historical CRITICAL pre-`9e9b008`; operator approved screening despite pending re-do; permanent flag flip lost the re-assemble path. Fix in cycle-9: `/screening/approve` rejects with 409 + explicit message when `needs_reassembly` is non-empty.
+- **Expected adjustment indicators:**
+  - Stale snapshot → verify `_refresh_project_snapshot` in `_screening_predicate` (`cinema_pipeline.py:707`) actually re-reads disk; cross-check with §5.5 G-SCREEN jq inspection of `screening_approved` flag
+  - Opt-out + stale UI → benign (idempotent); document for operator; consider `/api/feature-flags` endpoint exposing `CINEMA_SCREENING_STAGE` state so UI can feature-detect
+  - Premature approve regression → grep `web_server.py` for the `needs_reassembly` non-empty check in `api_screening_approve` (post-`9e9b008` line range; verify at audit time per Rule #1); confirm 409 response with operator-actionable error message; add regression test covering "approve-with-pending-redo rejects" if not already present
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell G-ITERATE — Surface A iterate-from-gate
+
+**Phase / class:** Endpoint (operator-invokable at ANY of 5 gate waits: PLAN/KEYFRAME/PERFORMANCE/REVIEW/SCREENING)
+**Stage in pipeline:** ARCHITECTURE §7.7.3 Class B opt-out flag `CINEMA_DIRECTORIAL_ITERATION` (default ON post-flag-flip `44f6beb` 2026-05-26); endpoint at `web_server.py:1677 api_iterate_take` → `ShotController.regenerate_with_intent(scene_id, shot_id, take_id, DirectorialIntent, project_id=pid)`; gate-aware bypass `_reject_if_project_busy_outside_gate(pid)` per cycle-9 Lane V #8 I1 fix `9e9b008`; accept-both flat/nested body per F1 decision 2026-05-25
+**Test tier:** C only (multi-shot reel needed to exercise multiple iterate-from-gate surfaces)
+**Estimated cost:** $0.05-1.00 per iterate (varies by `target_stage`: keyframe ~$0.05-0.30; performance variable; motion ~$0.30-1.00 — engine-routed per shot's `target_api`)
+**Wall-clock prediction:** ~15-60s per keyframe iterate; ~30-180s per motion iterate; gate-resume after iterate + operator re-approve ≤500ms
+
+**PREDICTION (filled at v0.7 from impl-read at `web_server.py:1677-1775`, `cinema/shots/controller.py regenerate_with_intent`, cycle-9 Lane V #8 I1 fix `9e9b008`, ARCHITECTURE §7.7.3 Class B, per §8 protocol):**
+
+- **Expected behavior (shape):** Operator POSTs `/api/projects/<pid>/shots/<sid>/<take_id>/iterate` with body `{prose, verb?, params?, refs?, target_stage}` (flat) OR `{intent: {...}}` (nested; both accepted, nested wins on ambiguity per G1 precedence). Endpoint validates: (1) `CINEMA_DIRECTORIAL_ITERATION` enabled (else 404), (2) `_reject_if_project_busy_outside_gate(pid)` passes (allows during any gate wait; rejects during active phase work with 423), (3) JSON body parses + `DirectorialIntent.model_validate` succeeds (else 400), (4) shot exists in project (else 404). On success: invokes `regenerate_with_intent` which creates a new take entry under the appropriate collection (keyframe_takes / motion_takes / postprocess_variants) based on `target_stage`; returns 200 + `{success: true, take: {...}}`. Operator's previously-approved-take pointer remains until they explicitly re-approve the new take.
+- **Expected content quality:** New take entry has unique ID; appears in shot's relevant array; file exists at take path; `auto_approve_audit` may capture validator score on the new take. Old `approved_*_take_id` pointers unchanged until operator re-approves. Iterate-during-PLAN_REVIEW works (prose may target plan-stage); iterate-during-KEYFRAME/PERFORMANCE/REVIEW/SCREENING works per target_stage.
+- **Expected latency:** depends on `target_stage` — keyframe iterate ~15-60s (LLM prompt rewrite + image gen); motion iterate ~30-180s (engine-routed video gen); performance iterate variable (driver-video re-route is cheap; live re-record is wall-clock-bound by operator). Cost dominates on motion (Veo if routed there).
+- **Expected cost:** Per-iterate. Operator-pacing-bound; cumulative cost across multiple iterates can push toward §9 $50 cap if uncontrolled.
+- **Expected failure modes (top 3):**
+  1. **Iterate during ACTIVE phase not rejected** — `_reject_if_project_busy_outside_gate` returns None when a phase is running (not gate-waiting); endpoint proceeds; concurrent regenerate races with active phase; corrupted state. Symptom: spurious 500s OR silent data corruption.
+  2. **Target-stage mismatch** — operator iterates with `target_stage="motion"` but shot is still at PLAN_REVIEW (no keyframe yet); `regenerate_with_intent` may create motion take on non-existent base; downstream phases fail.
+  3. **Opt-out flag UI leak** — `CINEMA_DIRECTORIAL_ITERATION=0` set; endpoint returns 404 but UI still surfaces "Iterate" button on review stages → operator confused; or worse, frontend tries to call non-existent endpoint and reports a generic network error.
+- **Expected adjustment indicators:**
+  - Active-phase iterate not rejected → re-grep `_reject_if_project_busy_outside_gate` impl; verify it checks BOTH `_running_pipelines` membership AND current stage; add explicit "not at a gate" path returning 423; trace cycle-9 Lane V #8 I1 fix at `9e9b008` for the regression guard
+  - Target_stage mismatch → tighten `regenerate_with_intent` precondition: assert prior-stage take exists for the requested `target_stage` (e.g., motion iterate requires `approved_keyframe_take_id`); reject 409 with explicit message
+  - Opt-out UI leak → verify frontend feature-detects `CINEMA_DIRECTORIAL_ITERATION` (probe via `/api/feature-flags` if it exists; else hard-code based on a build-time inject); audit all 5 gate UIs (PlanReviewStage.tsx, KeyframeReviewStage.tsx, PerformanceReviewStage.tsx, ReviewStage.tsx, ScreeningStage.tsx) to confirm iterate-UI hidden when flag-off
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
 
 ### 5.3 Prompt class test cells (B + C)
 
