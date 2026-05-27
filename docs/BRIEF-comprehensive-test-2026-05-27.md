@@ -14,8 +14,8 @@
 **Cross-seat coordination escalation (cycle-14 mid-cycle, 2026-05-27 T08:35Z → director adjudication this commit):** Operator independently drafted `docs/EXTENSIVE-TEST-PLAN-2026-05-27.md` (~768 lines) cold because operator session started before this brief's `T05` dispatch-claim event entered STATE.md. Both seats were responding to identical user direction "both prepare TOGATHER." Per operator's escalation event (`fdd0094`), 4 consolidation options surfaced: (A) operator deletes draft; (B) keep both with semantic split + cross-refs; (C) operator's draft becomes appendix; (D) director-proposed hybrid. **Director-seat adjudicates: OPTION B — semantic split.** Both artifacts preserved with role-aligned scope per Sh: brief = strategic (WHAT/WHY/structure); operator's testplan = operational (HOW/per-prompt/per-parameter). See §"Cross-seat coordination" subsection in this brief's §1 + mirrored ESCALATION-RESOLVED header in operator's testplan (operator commits next).
 
 **Status (at brief-write time, 2026-05-27 cycle-14 mid-cycle):**
-- **DRAFT v0.8** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + user §9 decisions logged + **ALL 9 phase cell PREDICTIONs filled** (P-STYLE, P-BGM, P-DECOMPOSE, P-CHIEFDIR, P-KEYFRAME, P-PERFORMANCE, P-MOTION, P-IDENTITY, P-ASSEMBLY) + **ALL 8 prompt class cell PREDICTIONs filled** (PR-STORY, PR-IMAGE, PR-MOTION at v0.3 + PR-STYLE-LLM, PR-DIALOGUE, PR-CONTINUITY, PR-AUDIO-VIBE, PR-CHIEFDIR at v0.8 — director-doable last batch; cross-references operator's `docs/PR-cells-prestaging-2026-05-27-cycle15.md` substrate + testplan §5 P1-P14) + **operator REPLY folded** at `a9b1c32`: operational discipline §1.5, pre-flight A7+A8 refined + A9 ComfyUI workflow probe added, 22 cold-context verification commands §5.5, 2 adjustment-pointing matrix rows §6, operator sign-off ✅ §11, cell-ownership split per Sh codified §5 tables + Candidate #8 filed at `1af3528` (operator + director concurred) + **ALL 7 PA-* parameter cell PREDICTIONs filled** (PA-SAMPLING, PA-IMAGE, PA-VIDEO, PA-MOTION, PA-LIPSYNC, PA-IDENTITY, PA-AUDIO) by operator per Sh operational-default + REPLY Ask #2 responsibility split + **ALL 6 G-* gate cell PREDICTIONs filled** (G-PLAN, G-KEYFRAME, G-PERF, G-REVIEW, G-SCREEN, G-ITERATE) by director per Sh strategic-default at cycle-15 entry; cross-references ARCHITECTURE §6.1 gate predicates + §3.6 approve endpoints + cycle-9 Lane V #8 I1 bypass `_reject_if_project_busy_outside_gate`. **All 30 test cells now FILLED** (9 P + 6 G + 8 PR + 7 PA); brief is structurally ready for v1.0 ship pending user-§9 5-9 + pre-flight all-green.
-- AWAITING: user-principal answers to §9 questions 5-9; pre-flight A1-A9 all-green (notably A5/A9 RunPod pod restart blocker); joint v0.9 mid-prep review per operator REPLY §2 hybrid protocol; then v1.0 ship + execution authorization
+- **DRAFT v0.9** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + **ALL 9 user §9 questions ANSWERED** (1-4 at v0.2; 5-9 at v0.9 cycle-15 entry: timeline defer to cycle 16+; sample project = fresh minimal; Surface A+B = defer to later cycle; commit discipline = inline per-finding; execution model = synchronous joint) + **ALL 30 test cell PREDICTIONs filled** (9 P phase + 6 G gate + 8 PR prompt + 7 PA parameter): P-* (v0.3 director); G-* (v0.7 director cycle 15); PR-* (v0.3 + v0.8 director); PA-* (v0.6 operator); cross-references ARCHITECTURE §6 + operator `docs/PR-cells-prestaging-2026-05-27-cycle15.md` substrate + testplan §5 P1-P14 + cycle-9 Lane V #8 I1 fix `9e9b008` + **operator REPLY folded** at `a9b1c32`: operational discipline §1.5, pre-flight A7+A8+A9, 22 cold-context verification commands §5.5, 2 adjustment-pointing matrix rows §6, operator sign-off ✅ §11, cell-ownership split per Sh codified + Candidate #8 filed at `1af3528`. **Brief is now substantively complete pending joint v0.9 mid-prep review.**
+- AWAITING: pre-flight A1-A9 all-green (notably A5/A9 RunPod pod restart blocker); joint v0.9 mid-prep review per operator REPLY §2 hybrid protocol (both seats cross-review predictions ~15-30 min before execution); user-principal execution authorization. Execution itself deferred to cycle 16+ per Q5; synchronous joint-seat model per Q9 (both seats available concurrently)
 - USER-PRINCIPAL DECISIONS LANDED (2026-05-27): Tier B+C+D scope (comprehensive); $50 hard budget cap; fresh RunPod pod deploy via `scripts/setup_runpod.sh`; fill PREDICTIONs in advance (this v0.2)
 - NOT EXECUTABLE until §"Pre-flight checklist" all-green + operator REPLY landed + brief v1.0 + user-principal execution authorization
 
@@ -1311,7 +1311,7 @@ When filling a cell's PREDICTION (joint prep), follow this discipline:
 
 ## 9. Open questions for user-principal
 
-### ANSWERED (v0.2, 2026-05-27)
+### ANSWERED (v0.2 — questions 1-4, 2026-05-27)
 
 1. **Scope: Tier B + C + D (comprehensive)** — full parameter sensitivity sweep included. Estimated $15-25 base + re-runs. Cap below.
 
@@ -1321,17 +1321,28 @@ When filling a cell's PREDICTION (joint prep), follow this discipline:
 
 4. **In-session direction: fill PREDICTIONs in advance.** Director starts filling phase + prompt cell PREDICTIONs at v0.2 (this commit); operator REPLY adds parameter + gate cell predictions + cold-context verification commands. Reduces total prep wall-clock vs sequential.
 
+### ANSWERED (v0.9 — questions 5-9, 2026-05-27 cycle-15 entry)
+
+5. **Timeline: defer execution to cycle 16+.** Execution is NOT scheduled for cycle 15. Substrate work remains stable; pod restart, joint v0.9 mid-prep review, and any further brief polish can land any time before then. Removes artificial cycle-alignment pressure on this cycle's work. Cycle 16+ entry is the execution starting point.
+
+6. **Sample project: fresh minimal project** (~$3-7 cost; within $50 §9.2 cap). Create a clean test-specific project for Tier B/C/D execution; do NOT reuse an existing populated project. Cleaner state means more falsifiable results; aligns with "prove every function works as intended" mandate. Project-creation step folds into pre-flight A-checks (specifically A1 substrate verification + character/scene/dialogue stubs needed pre-Tier B).
+
+7. **Surface A + B inclusion: DEFER to separate validation later.** U7 (IterationPanel) + U8 (ScreeningStage + iterate-from-screening) UX validation will NOT be in Tier C scope this round. Keeps Tier C tighter; preserves Surface A+B as a clean standalone validation cycle later (Surface A+B becomes its own future cycle's scope). Cycle-13 deferred work stays OPEN as a known carry-forward; not closed by this test gauntlet.
+
+8. **Adjustment commit discipline: INLINE (one commit per finding).** During execution, each `tune:` / `prompt:` / `fix:` commit ships immediately when surfaced. Per-finding traceability; Lane V cadence per commit; matches cycle-13+ substrate-discipline patterns + Rule #15 fix-on-received-findings shape. Accept higher commit count for cleaner audit trail.
+
+9. **Joint execution model: SYNCHRONOUS** (both seats observe execution in real time). Both seats follow tier execution simultaneously, narrate findings as they occur. Higher coordination overhead trades against catching novel surprises immediately. Both seats need to be available concurrently for execution sessions. **Implication for Q5 timing:** cycle 16+ execution requires both seats present simultaneously; user-principal coordinates the joint-session start. Operator REPLY §2 hybrid protocol's pre-execution v0.9 review remains async (cross-review predictions cold); ONLY execution itself is sync.
+
 ### STILL OPEN (await user-principal answer for v1.0)
 
-5. **Timeline:** execute in cycle-14 (this cycle, after operator REPLY + pod deploy), or push to cycle-15+? Brief prep is on track to finish cycle-14; pod deploy + operator REPLY are the bottleneck.
+*(none — all 9 questions answered at v0.9, this commit cycle-15 entry)*
 
-6. **Sample project:** reuse an existing populated project (faster, free) or create fresh minimal project (slower, ~$3-7 cost, comprehensive)? Operator REPLY should re-audit `domain/projects/` post cycle-13 cleanup (2,170 stale fixtures removed); landscape may now favor reuse-of-existing.
-
-7. **Surface A + B inclusion in Tier C:** include U7+U8 UX validation (IterationPanel + ScreeningStage + iterate-from-screening) in Tier C, or run as separate validation later? Including expands test cell count by ~3-5; closes cycle-13 deferred work.
-
-8. **Adjustment commit discipline:** during execution, ship adjustment commits inline (each `tune:` / `prompt:` / `fix:` immediately) or batch into post-test fold? Inline = per-finding traceability + Lane V cadence per commit; batch = reduced commit noise + single post-test review pass.
-
-9. **Joint execution model:** synchronous (both seats observe same execution in real time) or asynchronous (one seat executes; other reviews via verification report)? Synchronous = higher coordination overhead + catches surprises immediately; asynchronous = lower overhead + cleaner audit trail via mailbox events.
+**Implications for §2 Scope + §3 Pre-flight that the brief carries via cross-reference:**
+- Q5+Q9 → cycle 16+ joint sync execution session requires user-principal-set start time + both-seats-available signal
+- Q6 → pre-flight A1+A2 must include "fresh minimal project created with N≥2 scenes / N≥1 character / N≥1 dialogue / N≥1 location" sub-check
+- Q7 → Tier C scope EXCLUDES U7+U8; matrix rows referencing IterationPanel/ScreeningStage stay valid for future Surface A+B validation cycle but are NOT exercised this round
+- Q8 → per-finding `tune:` / `prompt:` / `fix:` commits; matches Rule #15 closure mechanism (advisory matrix at cycle-13 R-Q2-1)
+- Q9 → synchronous execution model means real-time observation by both seats; verification-report mailbox events still useful for tier-end summarization but not the primary signal channel during a sync tier
 
 ---
 
