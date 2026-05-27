@@ -11,10 +11,10 @@
 - [docs/PROTOCOL-RULES-LOG.md](PROTOCOL-RULES-LOG.md) §"N=1 candidates" — Candidate #7 discipline (re-verify before re-assert) applies throughout
 
 **Status (at brief-write time, 2026-05-27 cycle-14 mid-cycle):**
-- DRAFT v0.1 — director-seat structural skeleton + predictive harness framework + adjustment rubric framework
-- AWAITING operator-seat REPLY with operational-discipline additions (Lane V coverage, doc-sync points, test isolation, telemetry collection)
-- AWAITING user-principal decisions on §"Open questions" (scope, budget, timeline)
-- NOT EXECUTABLE until §"Pre-flight checklist" all-green + operator REPLY landed + user §"Open questions" answered
+- **DRAFT v0.2** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + user §9 decisions logged + 4 phase cell PREDICTIONs filled (P-STYLE, P-KEYFRAME, P-MOTION, P-ASSEMBLY)
+- AWAITING operator-seat REPLY with operational-discipline additions (Lane V coverage, doc-sync points, test isolation, telemetry collection) + remaining cell PREDICTIONs (P-BGM, P-DECOMPOSE, P-CHIEFDIR, P-PERFORMANCE, P-IDENTITY; G-* gate cells; PA-* parameter cells; PR-* prompt class cells)
+- USER-PRINCIPAL DECISIONS LANDED (2026-05-27): Tier B+C+D scope (comprehensive); $50 hard budget cap; fresh RunPod pod deploy via `scripts/setup_runpod.sh`; fill PREDICTIONs in advance (this v0.2)
+- NOT EXECUTABLE until §"Pre-flight checklist" all-green + operator REPLY landed + brief v1.0 + user-principal execution authorization
 
 ---
 
@@ -226,15 +226,117 @@ The cells below cover Tier B + C predictively. Tier A (substrate verification) i
 
 | ID | Phase | Trigger | Tier | Cost est. | Status |
 |---|---|---|---|---|---|
-| P-STYLE | STYLE rules generation | `generate_style_rules(project)` | B + C | $0.01-0.05 LLM | STUB |
+| P-STYLE | STYLE rules generation | `generate_style_rules(project)` | B + C | $0.01-0.05 LLM | **FILLED v0.2** |
 | P-BGM | BGM generation | `_ensure_bgm(settings)` (FAL Stable Audio) | B + C | $0.10-0.30 | STUB |
 | P-DECOMPOSE | Scene decomposition | `decompose` (competitive or single LLM) | B + C | $0.05-0.20 per scene | STUB |
 | P-CHIEFDIR | ChiefDirector validation | post-decompose validation pass | B + C | $0.02-0.10 | STUB |
-| P-KEYFRAME | Keyframe rendering | `KeyframeRenderPhase.run(ctx)` | B + C | $0.05-0.30 per shot (ComfyUI) | STUB |
+| P-KEYFRAME | Keyframe rendering | `KeyframeRenderPhase.run(ctx)` | B + C | $0.05-0.30 per shot (ComfyUI) | **FILLED v0.2** |
 | P-PERFORMANCE | Performance capture | `PerformanceCapturePhase.run(ctx)` | C | $0.10-0.50 per shot | STUB |
-| P-MOTION | Motion rendering | `MotionRenderPhase.run(ctx)` | B + C | $0.30-1.00 per shot (Veo/LTX/Kling/...) | STUB |
+| P-MOTION | Motion rendering | `MotionRenderPhase.run(ctx)` | B + C | $0.30-1.00 per shot (Veo/LTX/Kling/...) | **FILLED v0.2** |
 | P-IDENTITY | Identity validation | GhostFaceNet at end-of-shot | C | $0 (local) | STUB |
-| P-ASSEMBLY | Final assembly | `_assemble_final` (FFmpeg stitch + color + BGM mix + 2-pass loudnorm) | B + C | $0 (local) | STUB |
+| P-ASSEMBLY | Final assembly | `_assemble_final` (FFmpeg stitch + color + BGM mix + 2-pass loudnorm) | B + C | $0 (local) | **FILLED v0.2** |
+
+#### Test cell P-STYLE — STYLE rules generation
+
+**Phase / class:** Phase (step 3 in `generate()`)
+**Stage in pipeline:** ARCHITECTURE §7 + §13 LLM coordination; impl at `cinema_pipeline.py:772-805` + `llm/style_director.py:generate_style_rules`
+**Test tier:** B + C
+**Estimated cost:** $0.01-0.05 (single LLM call; depends on provider)
+**Wall-clock prediction:** 3-8 seconds
+
+**PREDICTION (filled at v0.2 from impl-read at `e25a737`, per §8 protocol):**
+
+- **Expected output (shape):** dict with keys derived from `style_rules_to_prompt_suffix` consumers (style/aesthetic/palette/mood). Function called with `(project_name, mood, color_palette, music_mood, aspect_ratio)`; returns a dict suitable for `latest_settings["style_rules"] = style_rules` write. Per `cinema_pipeline.py:797`, the return value gets persisted under `global_settings.style_rules` and consumed later via `style_rules_to_prompt_suffix(settings.get("style_rules", {}))` at `cinema/shots/controller.py:333`.
+- **Expected content quality:** non-empty dict; at least one human-readable string field that meaningfully alters image prompts (validation: `style_rules_to_prompt_suffix(result)` returns non-empty string for at least 80% of inputs). For `topic="moody noir thriller"`, expect mood-aligned fields (e.g., palette mentions "deep shadows" / "muted tones"); for `topic="bright children's animation"`, expect inverse.
+- **Expected latency:** 3-8 seconds (single LLM call; depends on provider — OpenAI typically 2-4s, Anthropic typically 3-6s, local model variable). Anything >15s suggests provider degradation OR oversized prompt.
+- **Expected cost:** $0.005-0.02 per call (assuming GPT-4o-class model with ~500-token prompt + ~200-token response per pricing).
+- **Expected failure modes (top 3):**
+  1. **Empty dict returned** (LLM produced non-JSON or malformed JSON; parser fell through to default)
+  2. **Generic/topic-mismatched content** (LLM ignored topic; returned boilerplate aesthetic boilerplate)
+  3. **Missing required keys** (LLM returned valid JSON but omitted fields consumers expect; `style_rules_to_prompt_suffix` returns empty string)
+- **Expected adjustment indicators:**
+  - Empty dict → check `llm/style_director.py` prompt; check JSON parsing robustness; add schema validator with retry
+  - Generic content → tighten system prompt with topic-conditioning + few-shot examples; lower temperature
+  - Missing keys → add post-call schema validation with required-fields check + retry-with-error-feedback
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell P-KEYFRAME — Keyframe rendering
+
+**Phase / class:** Phase (step 8 in `generate()`)
+**Stage in pipeline:** ARCHITECTURE §8 image generation; impl at `cinema/phases/keyframe_render.py` (iterates shots) → `cinema/shots/controller.py:314 generate_keyframe_take` (per-shot)
+**Test tier:** B (1 shot) + C (3-5 shots per scene)
+**Estimated cost:** $0.05-0.30 per shot via ComfyUI pod (model-dependent; SDXL ~$0.02, FLUX ~$0.10-0.20 per image at typical settings)
+**Wall-clock prediction:** 15-60 seconds per shot (depends on model + steps + max-tier wire-up)
+
+**PREDICTION (filled at v0.2 from impl-read at `cinema/shots/controller.py:314-400`, per §8 protocol):**
+
+- **Expected output (shape):** dict with `success: bool` + `take_id: str` + `image: <path>` on success; `success: False, error: <reason>` on failure. Take stored under `runstate.shot_results[shot_id]` with `image=<path>` + `take_id` + `status`. Image file at `_take_output_path(shot_id, take_id, ".jpg")`.
+- **Expected content quality:** image file exists at returned path; file size >50KB (rejects empty/blank-image failure mode); image dimensions match `settings.aspect_ratio` config (16:9 → 1920×1080 or similar); subject content visually aligns with `enhanced["prompt"]` (which combines shot prompt + style_suffix + continuity context). For test topic with named character, expect character identity present (gates to P-IDENTITY downstream).
+- **Expected latency:** 15-60s per shot (SDXL ~15-25s; FLUX ~25-45s; FLUX max-tier with LoRA/IP-Adapter ~40-60s). Pod-side cold-start adds ~10-30s on first request after fresh deploy.
+- **Expected cost:** ComfyUI generation cost is pod-time-based, not per-call. RunPod A100 ~$1-2/hr; ~$0.02-0.05 per 30s generation. LLM cost for prompt assembly is negligible (~$0.001 per shot for `enhance_shot_prompt`).
+- **Expected failure modes (top 3):**
+  1. **Plan not approved** — `shot.get("plan_status") != "approved"` returns early with error. Gate flow bug if encountered post-PLAN_REVIEW.
+  2. **ComfyUI workflow error** (pod returns 500 / missing custom node / model not loaded / OOM)
+  3. **Subject mismatch / identity drift** (image generated but character looks wrong; gates to P-IDENTITY false-positive risk)
+- **Expected adjustment indicators:**
+  - Plan-not-approved → investigate GATE 1 plumbing; check PLAN_REVIEW gate predicate
+  - ComfyUI error → check pod logs; verify custom nodes (`scripts/setup_runpod.sh` outputs); verify model loaded; adjust steps/resolution if OOM
+  - Subject mismatch → strengthen IP-Adapter weight; verify LoRA path resolution at `char_lora_paths`; tighten character prompt section; lower CFG if subject is over-stylized
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell P-MOTION — Motion rendering (image→video)
+
+**Phase / class:** Phase (step 15 in `generate()`)
+**Stage in pipeline:** ARCHITECTURE §9 video routing (5 templates × 11 engines); impl at `cinema/phases/motion_render.py` (iterates shots) → `cinema/shots/controller.py:generate_motion_take` (per-shot; sibling of generate_keyframe_take)
+**Test tier:** B (1 shot) + C (3-5 shots per scene)
+**Estimated cost:** $0.30-1.00 per shot, engine-dependent — Veo ~$0.50-1.00 per 5s clip; LTX local ~$0.05-0.10; Kling ~$0.35-0.50; Sora variable
+**Wall-clock prediction:** 30s-3min per shot, engine-dependent
+
+**PREDICTION (filled at v0.2 from impl-read at `cinema/phases/motion_render.py:43-80` + ARCHITECTURE §9, per §8 protocol):**
+
+- **Expected output (shape):** dict with `success: bool` + `take_id` + `video: <path>` on success; `success: False, error: <reason>` on failure. Phase requires approved keyframe (precondition enforced by motion generator); returns "Approved keyframe required..." error if absent. Video file at take output path with `.mp4` extension; runstate.shot_results updated with `video=<path>`.
+- **Expected content quality:** video file exists; duration matches shot's intended length (typically 3-8s per shot per BGM 47s hard cap divided across ~6-10 shots); subject from keyframe persists across frames (no identity-drift across generated video); motion direction matches `shot.get("camera", "zoom_in_slow")` directive (zoom in → subject grows; pan left → background shifts right). Audio not yet present (mute video; audio mixed in at P-ASSEMBLY).
+- **Expected latency:** Veo ~60-180s/clip; LTX local ~30-60s; Kling ~45-120s. Cold engine call adds ~10-30s. Total Tier C reel (3-5 shots × motion) potentially 5-15 minutes.
+- **Expected cost:** Veo dominates if used — $0.50-1.00 per 5s clip × 3-5 shots = $1.50-5 for Tier C reel. LTX local is ~10x cheaper. Engine routing is per-shot via `target_api` field; mixed engines per reel is supported per ARCHITECTURE §9.
+- **Expected failure modes (top 3):**
+  1. **Engine API error** (Veo / Kling / Sora returned error: rate limit / content policy / quota exceeded)
+  2. **Identity drift across frames** (character morphs mid-clip; visible at frame 30+ of 5s clip)
+  3. **Motion direction wrong** (`camera: "zoom_in"` but video pans instead; engine ignored hint)
+- **Expected adjustment indicators:**
+  - Engine API error → check API key + quota; check error response body; route to alternative engine; verify content-policy compliance
+  - Identity drift → strengthen IP-Adapter conditioning; lower motion strength; use shorter clip; try alternative engine (some engines more identity-stable than others)
+  - Motion wrong → check `target_api` routing; check engine-specific motion prompt encoding; adjust motion strength keywords
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell P-ASSEMBLY — Final assembly (FFmpeg stitch + color + BGM + loudnorm)
+
+**Phase / class:** Phase (step 19 in `generate()`)
+**Stage in pipeline:** ARCHITECTURE §4.1 step 19 + §12 audio pipeline; impl at `cinema_pipeline.py:_assemble_final` + `phase_c_ffmpeg.py`
+**Test tier:** B (single-shot assembled into 1-shot reel) + C (multi-shot reel)
+**Estimated cost:** $0 (all local FFmpeg)
+**Wall-clock prediction:** 30s-2min for Tier B; 1-5min for Tier C (depends on reel length + transcode complexity)
+
+**PREDICTION (filled at v0.2 from impl-read at `cinema_pipeline.py:644-665` + `_assemble_approved_takes_core` doc per §8 protocol):**
+
+- **Expected output (shape):** `{"success": True, "final_path": <path>}` with file at `final_cinema.mp4` in project export_dir. Per-scene preview files at `scene_<id>_preview.mp4` from `generate_scene_preview` step. Final mp4 is single concatenated file with BGM + per-scene audio mixed + loudnorm normalized.
+- **Expected content quality:** mp4 file exists + plays in standard player; duration ≈ sum(shot durations) + transitions; BGM audible at -23 LUFS (broadcast standard) per loudnorm; no abrupt audio cuts at shot boundaries; color grade applied uniformly per scene (no scene-to-scene color jump unless intended); resolution matches `aspect_ratio` setting throughout. Subject identity preserved at scene boundaries (continuity from P-IDENTITY).
+- **Expected latency:** 30s-2min for Tier B (1-3 shots × 5s each); 1-5min for Tier C (5+ shots × 5s + audio mix + 2-pass loudnorm). Two-pass loudnorm alone takes ~30-90s for typical reel length.
+- **Expected cost:** $0 (local FFmpeg + local color grade preset + BGM already generated upstream).
+- **Expected failure modes (top 3):**
+  1. **Missing take mp4** — `_build_scene_packages` returns `missing_shots` non-empty; assembly aborts with "Approved take files are missing for: <list>"
+  2. **FFmpeg error** (codec mismatch / corrupt input / OOM during transcode / loudnorm crash)
+  3. **Audio sync drift** (BGM length mismatched to video length; per-scene audio offset misaligned)
+- **Expected adjustment indicators:**
+  - Missing take → trace why approved_final_take_id points to nonexistent file; check P-MOTION output path discipline
+  - FFmpeg error → check FFmpeg version + codecs; reduce transcode complexity (lower resolution if OOM); check loudnorm input format compatibility
+  - Audio sync drift → verify BGM 47s hard cap enforcement; verify per-scene audio length calculation; check two-pass loudnorm I/LRA/TP target consistency
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+> **Remaining phase cells (P-BGM, P-DECOMPOSE, P-CHIEFDIR, P-PERFORMANCE, P-IDENTITY) are STUB pending operator REPLY (operator-default per Sh: parameter + gate cells; cold-context verification commands) OR continued director session.** All 9 phase cells must be filled before v1.0 ship.
 
 ### 5.2 Gate test cells (C only)
 
@@ -350,23 +452,27 @@ When filling a cell's PREDICTION (joint prep), follow this discipline:
 
 ## 9. Open questions for user-principal
 
-These need answers before v1.0 ship + execution:
+### ANSWERED (v0.2, 2026-05-27)
 
-1. **Scope:** Tier B + C only ($3-7 estimated), Tier B + C + D ($15-25 estimated, parameter sensitivity sweep), or Tier B only ($1-2, plumbing verification only)?
+1. **Scope: Tier B + C + D (comprehensive)** — full parameter sensitivity sweep included. Estimated $15-25 base + re-runs. Cap below.
 
-2. **Budget cap:** what's the hard ceiling on real-generation spend across this test gauntlet? (cost_tracker enforces budget at pipeline level; test budget is separate concern from project budget)
+2. **Budget cap: $50 USD hard ceiling.** `cost_tracker` enforces at pipeline level. Test budget is the AGGREGATE across all test cells + re-runs + Surface A iterate cycles. If cost approaches $40, STOP signal fires per §1 authority precedence.
 
-3. **Timeline:** execute in cycle-14, or push to cycle-15+ when more substrate work backed up? (Brief prep can finish cycle-14; execution depends on pod + budget.)
+3. **RunPod: fresh deploy via `scripts/setup_runpod.sh`.** Existing pod (`https://0f8wqszne2zby7-8188.proxy.runpod.net`) returning 403/404 since cycle-13 entry. Fresh deploy ~30 min including model downloads. New pod URL replaces `COMFYUI_SERVER_URL` in `.env`. **User-principal owns pod restart action** (RunPod console access + cost commitment).
 
-4. **RunPod:** restart existing pod (`https://0f8wqszne2zby7-8188.proxy.runpod.net`) or deploy fresh per `scripts/setup_runpod.sh`? Fresh deploy is ~30 min including model downloads. Restart is ~5 min if pod is suspended-not-deleted.
+4. **In-session direction: fill PREDICTIONs in advance.** Director starts filling phase + prompt cell PREDICTIONs at v0.2 (this commit); operator REPLY adds parameter + gate cell predictions + cold-context verification commands. Reduces total prep wall-clock vs sequential.
 
-5. **Sample project:** reuse an existing populated project (faster, free) or create fresh minimal project (slower, ~$3-7 cost, comprehensive)? Operator-validation-cycle-10 noted `domain/projects/` had pytest leakage masking populated projects; post-cycle-13 cleanup (2,170 stale fixtures removed) may have changed the landscape. Operator REPLY should re-audit.
+### STILL OPEN (await user-principal answer for v1.0)
 
-6. **Surface A + B inclusion:** include U7+U8 UX validation in Tier C (default-on flag-flipped surfaces; cycle-13 deferred work), or run as separate validation later? Including expands test cell count by ~3 (IterationPanel, ScreeningStage, iterate-from-screening).
+5. **Timeline:** execute in cycle-14 (this cycle, after operator REPLY + pod deploy), or push to cycle-15+? Brief prep is on track to finish cycle-14; pod deploy + operator REPLY are the bottleneck.
 
-7. **Adjustment commit discipline:** during execution, ship adjustment commits inline (each `tune:` / `prompt:` immediately) or batch into post-test fold? Inline gives per-finding traceability; batch reduces commit noise.
+6. **Sample project:** reuse an existing populated project (faster, free) or create fresh minimal project (slower, ~$3-7 cost, comprehensive)? Operator REPLY should re-audit `domain/projects/` post cycle-13 cleanup (2,170 stale fixtures removed); landscape may now favor reuse-of-existing.
 
-8. **Joint execution model:** synchronous (both seats observe same execution in real time) or asynchronous (one seat executes; other reviews report)? Synchronous is higher coordination overhead but catches surprises immediately.
+7. **Surface A + B inclusion in Tier C:** include U7+U8 UX validation (IterationPanel + ScreeningStage + iterate-from-screening) in Tier C, or run as separate validation later? Including expands test cell count by ~3-5; closes cycle-13 deferred work.
+
+8. **Adjustment commit discipline:** during execution, ship adjustment commits inline (each `tune:` / `prompt:` / `fix:` immediately) or batch into post-test fold? Inline = per-finding traceability + Lane V cadence per commit; batch = reduced commit noise + single post-test review pass.
+
+9. **Joint execution model:** synchronous (both seats observe same execution in real time) or asynchronous (one seat executes; other reviews via verification report)? Synchronous = higher coordination overhead + catches surprises immediately; asynchronous = lower overhead + cleaner audit trail via mailbox events.
 
 ---
 
