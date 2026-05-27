@@ -1110,6 +1110,42 @@ class CinemaPipeline:
             logger.exception("Foley concat failed; foley track will be omitted from mix")
             return None
 
+    def _concat_dialogue_track(self, paths: list[str]) -> Optional[str]:
+        """Pre-concatenate per-scene dialogue clips into a single dialogue_track.mp3.
+
+        Parallel to _concat_foley_track. Required when motion engines that don't
+        embed dialogue audio (Kling Native image2video, etc) are used — the
+        dialogue mp3 must be muxed as a separate input at tri-mix time rather
+        than read as `[0:a]` from the stitched video (which has no dialogue
+        track in those paths).
+
+        - Returns None if paths is empty.
+        - Returns paths[0] directly if len(paths) == 1 (skip concat).
+        - Writes concat_dialogue_list.txt to temp_dir, runs ffmpeg concat demuxer,
+          returns temp_dir/dialogue_track.mp3 on success, None on failure.
+        """
+        if not paths:
+            return None
+        if len(paths) == 1:
+            return paths[0]
+
+        dialogue_list = os.path.join(self.temp_dir, "concat_dialogue_list.txt")
+        dialogue_track = os.path.join(self.temp_dir, "dialogue_track.mp3")
+        with open(dialogue_list, "w") as f:
+            for p in paths:
+                escaped = os.path.abspath(p).replace("'", r"'\''")
+                f.write(f"file '{escaped}'\n")
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                 "-i", dialogue_list, "-c", "copy", dialogue_track],
+                check=True, capture_output=True, timeout=60,
+            )
+            return dialogue_track
+        except Exception:
+            logger.exception("Dialogue concat failed; dialogue track will be omitted from mix")
+            return None
+
     def _assemble_final(self, scene_data: list, bgm_path: str, settings: dict) -> Optional[str]:
         """
         Assembles all scene clips into the final video:
@@ -1224,7 +1260,17 @@ class CinemaPipeline:
             logger.exception("Color grading skipped")
 
         # 5. Mix audio: voice (1.0) + BGM (0.12) + foley (0.20, when available)
-        # The stitched video already has audio from dialogue clips (Omnihuman/Veo).
+        #
+        # Voice source resolution:
+        #   - When motion engine embeds dialogue (Omnihuman, Veo audio-drive):
+        #     stitched.mp4 already has dialogue baked in → use [0:a] from stitched.
+        #   - When motion engine does NOT embed dialogue (Kling Native image2video,
+        #     LTX, base Veo without audio-drive): stitched.mp4 has no audio →
+        #     mux scene_audio dialogue mp3 as a separate input (input index N).
+        #     C-B2 closure: previously the path assumed embedded audio always
+        #     and the `[voice]` filtergraph label couldn't bind, dropping
+        #     dialogue from the final mix silently.
+        #
         # BGM is at 0.12 (ambient bed); foley at 0.20 (slightly louder — diegetic
         # environmental information like footsteps/weather carries meaning).
         # amix duration=first clamps foley/BGM to reel length automatically.
@@ -1238,43 +1284,71 @@ class CinemaPipeline:
         # Pre-concat per-scene foley clips into a single track (None if no foley).
         foley_track_path = self._concat_foley_track(self.foley_audio_paths)
 
+        # Pre-concat per-scene dialogue mp3s into a single track (None if no
+        # standalone dialogue audio — i.e. engines that embed audio in clips).
+        # `scene_data[i]["audio"]` is the path to the per-scene dialogue mp3
+        # set by _ensure_scene_audio + threaded through _build_scene_packages.
+        dialogue_paths = [
+            sd.get("audio") for sd in scene_data
+            if sd.get("audio") and os.path.exists(sd.get("audio", ""))
+        ]
+        dialogue_track_path = self._concat_dialogue_track(dialogue_paths)
+
         try:
             if os.path.exists(bgm_path):
                 use_foley = foley_track_path and os.path.exists(foley_track_path)
+                use_standalone_dialogue = (
+                    dialogue_track_path and os.path.exists(dialogue_track_path)
+                )
+                # Voice source label: [N:a] for standalone dialogue input;
+                # [0:a] for engine-embedded audio in stitched.
+                # Inputs ordering: [0]=stitched [1]=bgm [2]=foley(opt) [3 or 2]=dialogue(opt)
+                # Compute dialogue input index dynamically below.
+                cmd_inputs = ["ffmpeg", "-y", "-i", stitched, "-i", bgm_path]
+                next_idx = 2  # next available input index
+                foley_idx = None
+                dialogue_idx = None
                 if use_foley:
-                    # Primary: 3-input tri-mix (voice + BGM + foley)
-                    cmd = [
-                        "ffmpeg", "-y",
-                        "-i", stitched,
-                        "-i", bgm_path,
-                        "-i", foley_track_path,
-                        "-filter_complex",
-                        "[0:a]volume=1.0[voice];"
-                        "[1:a]volume=0.12[bgm];"
-                        "[2:a]volume=0.20[foley];"
-                        "[voice][bgm][foley]amix=inputs=3:duration=first:dropout_transition=2[aout]",
-                        "-map", "0:v", "-map", "[aout]",
-                        "-c:v", "copy",
-                        "-c:a", "aac", "-b:a", "192k",
-                        final_output,
-                    ]
-                    mix_label = "voice+BGM+foley"
-                else:
-                    # Fallback 1: 2-input mix (no foley)
-                    cmd = [
-                        "ffmpeg", "-y",
-                        "-i", stitched,
-                        "-i", bgm_path,
-                        "-filter_complex",
-                        "[0:a]volume=1.0[voice];"
-                        "[1:a]volume=0.12[bgm];"
-                        "[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]",
-                        "-map", "0:v", "-map", "[aout]",
-                        "-c:v", "copy",  # No re-encode — just audio mix
-                        "-c:a", "aac", "-b:a", "192k",
-                        final_output,
-                    ]
-                    mix_label = "voice+BGM"
+                    cmd_inputs += ["-i", foley_track_path]
+                    foley_idx = next_idx
+                    next_idx += 1
+                if use_standalone_dialogue:
+                    cmd_inputs += ["-i", dialogue_track_path]
+                    dialogue_idx = next_idx
+                    next_idx += 1
+
+                # Build filtergraph parts conditionally.
+                voice_label_src = (
+                    f"[{dialogue_idx}:a]"
+                    if use_standalone_dialogue else "[0:a]"
+                )
+                filter_parts = [
+                    f"{voice_label_src}volume=1.0[voice]",
+                    "[1:a]volume=0.12[bgm]",
+                ]
+                amix_inputs = ["[voice]", "[bgm]"]
+                if use_foley:
+                    filter_parts.append(f"[{foley_idx}:a]volume=0.20[foley]")
+                    amix_inputs.append("[foley]")
+                n_inputs = len(amix_inputs)
+                filter_parts.append(
+                    "".join(amix_inputs)
+                    + f"amix=inputs={n_inputs}:duration=first:dropout_transition=2[aout]"
+                )
+                filter_complex = ";".join(filter_parts)
+
+                cmd = cmd_inputs + [
+                    "-filter_complex", filter_complex,
+                    "-map", "0:v", "-map", "[aout]",
+                    "-c:v", "copy",
+                    "-c:a", "aac", "-b:a", "192k",
+                    final_output,
+                ]
+                mix_label = (
+                    ("standalone-dialogue" if use_standalone_dialogue else "embedded-voice")
+                    + "+BGM"
+                    + ("+foley" if use_foley else "")
+                )
                 subprocess.run(cmd, check=True, capture_output=True, timeout=120)
                 logger.info(
                     "Final cinema video assembled",
