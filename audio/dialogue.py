@@ -355,6 +355,23 @@ def generate_dialogue_voiceover(
                 language=lang_for_api,
             )
             if cartesia_ok:
+                # Best-effort cost tracking — Cartesia call succeeded; record
+                # spend so cycle-16 Tier C budget reflects Korean dialogue
+                # accurately. Closes I-2 from cycle-15 code-quality review
+                # (`docs/BRIEF-comprehensive-test-2026-05-27.md` v0.9.7 PR-DIALOGUE
+                # failure mode #3 noted record_api_call was not wired). Note:
+                # ElevenLabs path remains pre-existing untracked (no entry in
+                # `API_COST_USD`; no callers across codebase) — adding ElevenLabs
+                # tracking is symmetric improvement deferred to v0.9.X+.
+                try:
+                    from cost_tracker import CostTracker
+                    CostTracker().record_api_call(
+                        "CARTESIA_SONIC_2",
+                        operation="dialogue_tts",
+                    )
+                except Exception:
+                    # Cost tracking is best-effort; the TTS itself succeeded.
+                    print(f"   [CARTESIA] cost record skipped for line {i+1} (non-critical)")
                 temp_files.append(temp_path)
                 print(f"   ✅ Line {i+1}: {char_name} ({delivery}) → {temp_path} [Cartesia]")
                 continue

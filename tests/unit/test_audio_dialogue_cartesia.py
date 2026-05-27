@@ -542,3 +542,123 @@ class TestDispatcherIntegration:
         # character.language=ko (the router prioritizes scene/project language).
         assert len(cartesia_calls) == 0
         assert mock_client.text_to_speech.convert.called
+
+    def test_cartesia_success_records_cost_via_cost_tracker(self, tmp_path):
+        """Successful Cartesia call records CARTESIA_SONIC_2 spend via CostTracker.
+
+        Closes I-2 from cycle-15 v0.9.7 code-quality review: cost-tracker entry
+        was dormant because dispatcher never invoked record_api_call. v0.9.8
+        wires the call inside the cartesia_ok success branch.
+        """
+        from audio import dialogue as dlg
+
+        dialogue_lines = [
+            {"character_id": "char1", "text": "안녕하세요", "delivery": "natural"},
+        ]
+        characters = [{"id": "char1", "name": "준호", "voice_id": "vid_kr"}]
+        output = str(tmp_path / "cost.mp3")
+
+        mock_settings = MagicMock()
+        mock_settings.cartesia_api_key = "sk_test"
+
+        # Patch CostTracker at the import site (audio.dialogue imports it
+        # lazily inside the success branch, so we patch via the cost_tracker
+        # module attribute that the lazy import resolves against).
+        mock_tracker_instance = MagicMock()
+        mock_tracker_cls = MagicMock(return_value=mock_tracker_instance)
+
+        def fake_cartesia(*args, **kw):
+            # Write the temp file so dispatcher's success-branch appending works
+            with open(kw.get("output_path"), "wb") as f:
+                f.write(b"fake_cartesia_mp3")
+            return True
+
+        with patch.object(dlg, "_try_dialogue_mode", return_value=None), \
+             patch.object(dlg, "generate_cartesia", side_effect=fake_cartesia), \
+             patch.object(dlg, "settings", mock_settings), \
+             patch("audio.dialogue.client") as mock_client, \
+             patch("audio.dialogue.save") as mock_save, \
+             patch("cost_tracker.CostTracker", mock_tracker_cls), \
+             patch("subprocess.run") as mock_subproc:
+
+            mock_client.text_to_speech.convert.return_value = b"x"
+            def fake_save(b, p):
+                with open(p, "wb") as f:
+                    f.write(b)
+            mock_save.side_effect = fake_save
+
+            def fake_subproc_run(args, *_args, **_kw):
+                with open(args[-1], "wb") as f:
+                    f.write(b"assembled")
+                return MagicMock(returncode=0)
+            mock_subproc.side_effect = fake_subproc_run
+
+            ctx = self._make_ctx(language="Korean")
+            dlg.generate_dialogue_voiceover(dialogue_lines, characters, output, ctx=ctx)
+
+        # CostTracker was instantiated + record_api_call invoked with CARTESIA_SONIC_2
+        assert mock_tracker_cls.called, "CostTracker should be instantiated on Cartesia success"
+        assert mock_tracker_instance.record_api_call.called, "record_api_call should be invoked"
+        call_kwargs = mock_tracker_instance.record_api_call.call_args
+        # First positional arg is api_name = "CARTESIA_SONIC_2"
+        assert call_kwargs.args[0] == "CARTESIA_SONIC_2"
+        assert call_kwargs.kwargs.get("operation") == "dialogue_tts"
+
+    def test_cartesia_success_cost_tracker_failure_does_not_break_dispatcher(self, tmp_path):
+        """If CostTracker fails (SQLite locked / import error), dispatcher continues.
+
+        Best-effort cost tracking — TTS success path must not regress when
+        cost-record fails. Mirror's cinema/shots/controller.py:551-554 pattern.
+        """
+        from audio import dialogue as dlg
+
+        dialogue_lines = [
+            {"character_id": "char1", "text": "안녕", "delivery": "natural"},
+        ]
+        characters = [{"id": "char1", "name": "준호", "voice_id": "vid_kr"}]
+        output = str(tmp_path / "cost_fail.mp3")
+
+        mock_settings = MagicMock()
+        mock_settings.cartesia_api_key = "sk_test"
+
+        # CostTracker constructor raises (simulating SQLite lock or similar)
+        def explode(*a, **kw):
+            raise RuntimeError("simulated cost-tracker failure")
+        mock_tracker_cls = MagicMock(side_effect=explode)
+
+        def fake_cartesia(*args, **kw):
+            with open(kw.get("output_path"), "wb") as f:
+                f.write(b"fake_cartesia_mp3")
+            return True
+
+        with patch.object(dlg, "_try_dialogue_mode", return_value=None), \
+             patch.object(dlg, "generate_cartesia", side_effect=fake_cartesia), \
+             patch.object(dlg, "settings", mock_settings), \
+             patch("audio.dialogue.client") as mock_client, \
+             patch("audio.dialogue.save") as mock_save, \
+             patch("cost_tracker.CostTracker", mock_tracker_cls), \
+             patch("subprocess.run") as mock_subproc:
+
+            mock_client.text_to_speech.convert.return_value = b"x"
+            def fake_save(b, p):
+                with open(p, "wb") as f:
+                    f.write(b)
+            mock_save.side_effect = fake_save
+
+            def fake_subproc_run(args, *_args, **_kw):
+                with open(args[-1], "wb") as f:
+                    f.write(b"assembled")
+                return MagicMock(returncode=0)
+            mock_subproc.side_effect = fake_subproc_run
+
+            ctx = self._make_ctx(language="Korean")
+            # Should NOT raise — best-effort cost tracking
+            result = dlg.generate_dialogue_voiceover(
+                dialogue_lines, characters, output, ctx=ctx
+            )
+
+        # CostTracker was attempted but failed; dispatcher continued + assembled output
+        assert mock_tracker_cls.called, "CostTracker instantiation should be attempted"
+        # Cartesia was the actual TTS provider invoked (didn't fall back to ElevenLabs)
+        assert not mock_client.text_to_speech.convert.called, \
+            "ElevenLabs should NOT be invoked on Cartesia success (cost-record failure is best-effort)"
