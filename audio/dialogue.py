@@ -303,7 +303,16 @@ def generate_dialogue_voiceover(
     from elevenlabs import VoiceSettings
 
     char_voices = {c["id"]: c.get("voice_id", "") for c in characters}
+    char_by_id = {c["id"]: c for c in characters}
     temp_files = []
+
+    # Build a scene-shaped dict from the project's language setting (via
+    # PipelineContext.global_settings) so _resolve_tts_provider can read it.
+    # The pipeline stores language in global_settings (see cinema_pipeline.py
+    # :512-513); this surface keeps the router signature scene-shaped while
+    # honoring the actual source-of-truth.
+    project_lang = get_project_setting(ctx, "language", "English") or "English"
+    scene_for_router = {"language": project_lang}
 
     print(f"🎙️ [CINEMA] Generating multi-character dialogue ({len(dialogue_lines)} lines)...")
 
@@ -326,6 +335,33 @@ def generate_dialogue_voiceover(
         directed_text = voice_profile["markup"](text) if voice_profile.get("markup") else text
 
         temp_path = f"temp_dialogue_line_{i}.mp3"
+
+        # Route per-line: language-aware provider selection. Korean +
+        # CARTESIA_API_KEY set → Cartesia Sonic 2 (native prosody, low
+        # latency). Everything else → ElevenLabs (unchanged path).
+        char_record = char_by_id.get(cid, {})
+        provider = _resolve_tts_provider(scene_for_router, char_record, settings)
+        cartesia_ok = False
+        if provider == "CARTESIA_SONIC_2":
+            # Cartesia's language field expects an ISO code; map the project
+            # language name to "ko" when Korean, else pass the raw value
+            # lowercased. The dispatcher already routed correctly upstream
+            # so this is just the API param shape.
+            lang_for_api = "ko" if str(project_lang).lower().startswith("ko") else str(project_lang).lower()[:2] or "en"
+            cartesia_ok = generate_cartesia(
+                text=directed_text,
+                voice_id=voice_id,
+                output_path=temp_path,
+                language=lang_for_api,
+            )
+            if cartesia_ok:
+                temp_files.append(temp_path)
+                print(f"   ✅ Line {i+1}: {char_name} ({delivery}) → {temp_path} [Cartesia]")
+                continue
+            # Cartesia failed (False return) — fall through to ElevenLabs
+            print(f"   [CARTESIA] failed for line {i+1}; falling back to ElevenLabs")
+
+        # ElevenLabs path (default OR Cartesia fallback)
         try:
             audio = client.text_to_speech.convert(
                 voice_id=voice_id,

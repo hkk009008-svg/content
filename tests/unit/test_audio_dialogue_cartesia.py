@@ -335,3 +335,210 @@ class TestResolveTtsProvider:
         from audio.dialogue import _resolve_tts_provider
         result = _resolve_tts_provider(None, None, self._settings())
         assert result == "ELEVENLABS"
+
+
+# ---------------------------------------------------------------------------
+# Dispatcher integration in generate_dialogue_voiceover
+# ---------------------------------------------------------------------------
+
+class TestDispatcherIntegration:
+    """End-to-end-ish tests for generate_dialogue_voiceover routing per language.
+
+    Bypass PATH 1 (ElevenLabs Dialogue Mode) by forcing _try_dialogue_mode
+    to None; verify the per-line PATH 2 dispatcher selects Cartesia for
+    Korean and ElevenLabs for English. Subprocess concat is mocked.
+    """
+
+    def _make_ctx(self, language: str = "English"):
+        """Build a PipelineContext-shape with the project language set."""
+        from cinema.context import PipelineContext
+        return PipelineContext(global_settings={"language": language})
+
+    def test_korean_pipeline_routes_to_cartesia(self, tmp_path, monkeypatch):
+        """Korean project language → per-line Cartesia generation."""
+        from audio import dialogue as dlg
+
+        dialogue_lines = [
+            {"character_id": "char1", "text": "안녕하세요", "delivery": "natural"},
+        ]
+        characters = [{"id": "char1", "name": "준호", "voice_id": "vid_korean_male"}]
+        output = str(tmp_path / "ko_dialogue.mp3")
+
+        # Force Cartesia success
+        cartesia_calls = []
+        def fake_cartesia(text, voice_id, output_path, language="en", model_id="sonic-2"):
+            cartesia_calls.append({"text": text, "voice_id": voice_id, "language": language})
+            with open(output_path, "wb") as f:
+                f.write(b"fake_cartesia_mp3")
+            return True
+
+        mock_settings = MagicMock()
+        mock_settings.cartesia_api_key = "sk_test_cartesia"
+
+        # Mock subprocess to skip ffmpeg and the elevenlabs SDK to avoid imports
+        with patch.object(dlg, "_try_dialogue_mode", return_value=None), \
+             patch.object(dlg, "generate_cartesia", side_effect=fake_cartesia), \
+             patch.object(dlg, "settings", mock_settings), \
+             patch("audio.dialogue.client") as mock_client, \
+             patch("subprocess.run") as mock_subproc:
+
+            # Make subprocess "succeed" — create the silence + output files
+            def fake_subproc_run(args, *_args, **_kw):
+                # Last arg is output filename for both lavfi and concat calls
+                out = args[-1]
+                with open(out, "wb") as f:
+                    f.write(b"fake_audio_assembled")
+                return MagicMock(returncode=0)
+            mock_subproc.side_effect = fake_subproc_run
+
+            ctx = self._make_ctx(language="Korean")
+            result = dlg.generate_dialogue_voiceover(
+                dialogue_lines, characters, output, ctx=ctx
+            )
+
+        # Cartesia was called (Korean routing succeeded)
+        assert len(cartesia_calls) == 1
+        assert cartesia_calls[0]["language"] == "ko"
+        assert cartesia_calls[0]["voice_id"] == "vid_korean_male"
+        # ElevenLabs was NOT called for the Cartesia line
+        assert not mock_client.text_to_speech.convert.called
+
+    def test_english_pipeline_routes_to_elevenlabs(self, tmp_path):
+        """English project language → ElevenLabs path; Cartesia not called."""
+        from audio import dialogue as dlg
+
+        dialogue_lines = [
+            {"character_id": "char1", "text": "Hello there", "delivery": "natural"},
+        ]
+        characters = [{"id": "char1", "name": "Alice", "voice_id": "vid_english"}]
+        output = str(tmp_path / "en_dialogue.mp3")
+
+        cartesia_calls = []
+        def fake_cartesia(*args, **kw):
+            cartesia_calls.append(kw)
+            return True
+
+        mock_settings = MagicMock()
+        mock_settings.cartesia_api_key = "sk_test_cartesia"
+
+        with patch.object(dlg, "_try_dialogue_mode", return_value=None), \
+             patch.object(dlg, "generate_cartesia", side_effect=fake_cartesia), \
+             patch.object(dlg, "settings", mock_settings), \
+             patch("audio.dialogue.client") as mock_client, \
+             patch("audio.dialogue.save") as mock_save, \
+             patch("subprocess.run") as mock_subproc:
+
+            mock_client.text_to_speech.convert.return_value = b"el_audio_bytes"
+
+            def fake_subproc_run(args, *_args, **_kw):
+                out = args[-1]
+                with open(out, "wb") as f:
+                    f.write(b"fake_audio_assembled")
+                return MagicMock(returncode=0)
+            mock_subproc.side_effect = fake_subproc_run
+
+            # Mock save to actually create the temp file
+            def fake_save(audio_bytes, path):
+                with open(path, "wb") as f:
+                    f.write(b"fake_eleven_mp3")
+            mock_save.side_effect = fake_save
+
+            ctx = self._make_ctx(language="English")
+            result = dlg.generate_dialogue_voiceover(
+                dialogue_lines, characters, output, ctx=ctx
+            )
+
+        # ElevenLabs was called
+        assert mock_client.text_to_speech.convert.called
+        # Cartesia was NOT called for English
+        assert len(cartesia_calls) == 0
+
+    def test_korean_cartesia_failure_falls_back_to_elevenlabs(self, tmp_path):
+        """Cartesia returning False triggers ElevenLabs fallback in same loop."""
+        from audio import dialogue as dlg
+
+        dialogue_lines = [
+            {"character_id": "char1", "text": "안녕", "delivery": "natural"},
+        ]
+        characters = [{"id": "char1", "name": "준호", "voice_id": "vid_kr"}]
+        output = str(tmp_path / "fallback.mp3")
+
+        mock_settings = MagicMock()
+        mock_settings.cartesia_api_key = "sk_test"
+
+        with patch.object(dlg, "_try_dialogue_mode", return_value=None), \
+             patch.object(dlg, "generate_cartesia", return_value=False), \
+             patch.object(dlg, "settings", mock_settings), \
+             patch("audio.dialogue.client") as mock_client, \
+             patch("audio.dialogue.save") as mock_save, \
+             patch("subprocess.run") as mock_subproc:
+
+            mock_client.text_to_speech.convert.return_value = b"el_fallback_bytes"
+
+            def fake_save(audio_bytes, path):
+                with open(path, "wb") as f:
+                    f.write(b"fake_fallback_mp3")
+            mock_save.side_effect = fake_save
+
+            def fake_subproc_run(args, *_args, **_kw):
+                out = args[-1]
+                with open(out, "wb") as f:
+                    f.write(b"fake_assembled")
+                return MagicMock(returncode=0)
+            mock_subproc.side_effect = fake_subproc_run
+
+            ctx = self._make_ctx(language="Korean")
+            result = dlg.generate_dialogue_voiceover(
+                dialogue_lines, characters, output, ctx=ctx
+            )
+
+        # ElevenLabs was called as fallback — exactly once for the failed Cartesia line
+        assert mock_client.text_to_speech.convert.called
+        assert mock_client.text_to_speech.convert.call_count == 1
+
+    def test_mixed_scene_korean_char_routes_per_line(self, tmp_path):
+        """Project language wins per the scene-shaped router input."""
+        from audio import dialogue as dlg
+
+        dialogue_lines = [
+            {"character_id": "char1", "text": "Hi", "delivery": "natural"},
+        ]
+        # Even if character.language is set to ko, the scene-language
+        # (project default) takes precedence per _resolve_tts_provider semantics.
+        characters = [{"id": "char1", "name": "X", "voice_id": "vid", "language": "ko"}]
+        output = str(tmp_path / "mixed.mp3")
+
+        cartesia_calls = []
+        def fake_cartesia(*args, **kw):
+            cartesia_calls.append(kw)
+            return True
+
+        mock_settings = MagicMock()
+        mock_settings.cartesia_api_key = "sk_test"
+
+        with patch.object(dlg, "_try_dialogue_mode", return_value=None), \
+             patch.object(dlg, "generate_cartesia", side_effect=fake_cartesia), \
+             patch.object(dlg, "settings", mock_settings), \
+             patch("audio.dialogue.client") as mock_client, \
+             patch("audio.dialogue.save") as mock_save, \
+             patch("subprocess.run") as mock_subproc:
+
+            mock_client.text_to_speech.convert.return_value = b"x"
+            def fake_save(b, p):
+                with open(p, "wb") as f:
+                    f.write(b)
+            mock_save.side_effect = fake_save
+
+            def fake_subproc_run(args, *_args, **_kw):
+                with open(args[-1], "wb") as f:
+                    f.write(b"assembled")
+                return MagicMock(returncode=0)
+            mock_subproc.side_effect = fake_subproc_run
+
+            ctx = self._make_ctx(language="English")
+            dlg.generate_dialogue_voiceover(dialogue_lines, characters, output, ctx=ctx)
+
+        # Scene language (English) wins; Cartesia NOT called even though
+        # character.language=ko (the router prioritizes scene/project language).
+        assert len(cartesia_calls) == 0
+        assert mock_client.text_to_speech.convert.called
