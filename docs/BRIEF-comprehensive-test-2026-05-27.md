@@ -4,15 +4,18 @@
 **Co-author (pending):** Operator-seat (joint prep per user direction "both director and operator need to prepare … togather")
 **For:** Both seats jointly, then user-principal sign-off, then joint execution
 **Companion docs:**
+- **[docs/EXTENSIVE-TEST-PLAN-2026-05-27.md](EXTENSIVE-TEST-PLAN-2026-05-27.md)** — **operator-authored COMPANION** (semantic split per cycle-14 mid-cycle escalation adjudication; see v0.4 status). Operator's testplan covers HOW (per-prompt P1-P14 enumeration with file:line refs; parameter directional predictions for ComfyUI/ffmpeg/env-vars; Lane C inventory of 61 routes + 35 UI components + 14 prompt sites). This brief covers WHAT/WHY (test cell framework + predictive harness format + adjustment-pointing matrix + tier sequencing + user-§9 decision tracking). **Cross-references go in both directions; both canonical for their respective scopes.**
 - [docs/POST-ROADMAP-2026-05-24.md](POST-ROADMAP-2026-05-24.md) §"Cycle 14 entry" — substrate state at brief-write time
 - [docs/BRIEF-operator-validation-2026-05-26.md](BRIEF-operator-validation-2026-05-26.md) — cycle-10 Surface A/B validation template (structural reference, narrower scope)
 - [ARCHITECTURE.md](../ARCHITECTURE.md) §4.1 `generate()` phase sequence (19 steps); §5 phase protocol; §7 story prep; §8 image; §9 video; §10 perf+lipsync; §11 identity; §12 audio; §13 LLM
 - [docs/HANDOFF-director-transplant-2026-05-27-cycle13.md](HANDOFF-director-transplant-2026-05-27-cycle13.md) §"What's in flight" — RunPod pod state + U7/U8 carry-forward
 - [docs/PROTOCOL-RULES-LOG.md](PROTOCOL-RULES-LOG.md) §"N=1 candidates" — Candidate #7 discipline (re-verify before re-assert) applies throughout
 
+**Cross-seat coordination escalation (cycle-14 mid-cycle, 2026-05-27 T08:35Z → director adjudication this commit):** Operator independently drafted `docs/EXTENSIVE-TEST-PLAN-2026-05-27.md` (~768 lines) cold because operator session started before this brief's `T05` dispatch-claim event entered STATE.md. Both seats were responding to identical user direction "both prepare TOGATHER." Per operator's escalation event (`fdd0094`), 4 consolidation options surfaced: (A) operator deletes draft; (B) keep both with semantic split + cross-refs; (C) operator's draft becomes appendix; (D) director-proposed hybrid. **Director-seat adjudicates: OPTION B — semantic split.** Both artifacts preserved with role-aligned scope per Sh: brief = strategic (WHAT/WHY/structure); operator's testplan = operational (HOW/per-prompt/per-parameter). See §"Cross-seat coordination" subsection in this brief's §1 + mirrored ESCALATION-RESOLVED header in operator's testplan (operator commits next).
+
 **Status (at brief-write time, 2026-05-27 cycle-14 mid-cycle):**
-- **DRAFT v0.3** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + user §9 decisions logged + 6 phase cell PREDICTIONs filled (P-STYLE, P-DECOMPOSE, P-KEYFRAME, P-MOTION, P-IDENTITY, P-ASSEMBLY) + 3 prompt class cell PREDICTIONs filled (PR-STORY, PR-IMAGE, PR-MOTION)
-- AWAITING operator-seat REPLY with operational-discipline additions (Lane V coverage, doc-sync points, test isolation, telemetry collection) + remaining cell PREDICTIONs (P-BGM, P-CHIEFDIR, P-PERFORMANCE; G-* gate cells; PA-* parameter cells; PR-DIALOGUE/PR-CONTINUITY/PR-STYLE-LLM/PR-CHIEFDIR/PR-AUDIO-VIBE prompt cells)
+- **DRAFT v0.4** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + user §9 decisions logged + **ALL 9 phase cell PREDICTIONs filled** (P-STYLE, P-BGM, P-DECOMPOSE, P-CHIEFDIR, P-KEYFRAME, P-PERFORMANCE, P-MOTION, P-IDENTITY, P-ASSEMBLY) + 3 prompt class cell PREDICTIONs filled (PR-STORY, PR-IMAGE, PR-MOTION)
+- AWAITING operator-seat REPLY with operational-discipline additions (Lane V coverage, doc-sync points, test isolation, telemetry collection) + remaining cell PREDICTIONs (G-* gate cells, director-doable; PA-* parameter cells, operator-default per Sh; PR-DIALOGUE/PR-CONTINUITY/PR-STYLE-LLM/PR-CHIEFDIR/PR-AUDIO-VIBE prompt cells)
 - USER-PRINCIPAL DECISIONS LANDED (2026-05-27): Tier B+C+D scope (comprehensive); $50 hard budget cap; fresh RunPod pod deploy via `scripts/setup_runpod.sh`; fill PREDICTIONs in advance (this v0.2)
 - NOT EXECUTABLE until §"Pre-flight checklist" all-green + operator REPLY landed + brief v1.0 + user-principal execution authorization
 
@@ -227,11 +230,11 @@ The cells below cover Tier B + C predictively. Tier A (substrate verification) i
 | ID | Phase | Trigger | Tier | Cost est. | Status |
 |---|---|---|---|---|---|
 | P-STYLE | STYLE rules generation | `generate_style_rules(project)` | B + C | $0.01-0.05 LLM | **FILLED v0.2** |
-| P-BGM | BGM generation | `_ensure_bgm(settings)` (FAL Stable Audio) | B + C | $0.10-0.30 | STUB |
+| P-BGM | BGM generation | `_ensure_bgm(settings)` (FAL Stable Audio) | B + C | $0.10-0.30 | **FILLED v0.3** |
 | P-DECOMPOSE | Scene decomposition | `decompose` (competitive or single LLM) | B + C | $0.05-0.20 per scene | **FILLED v0.3** |
-| P-CHIEFDIR | ChiefDirector validation | post-decompose validation pass | B + C | $0.02-0.10 | STUB |
+| P-CHIEFDIR | ChiefDirector validation | post-decompose validation pass | B + C | $0.02-0.10 | **FILLED v0.3** |
 | P-KEYFRAME | Keyframe rendering | `KeyframeRenderPhase.run(ctx)` | B + C | $0.05-0.30 per shot (ComfyUI) | **FILLED v0.2** |
-| P-PERFORMANCE | Performance capture | `PerformanceCapturePhase.run(ctx)` | C | $0.10-0.50 per shot | STUB |
+| P-PERFORMANCE | Performance capture | `PerformanceCapturePhase.run(ctx)` | C | $0.10-0.50 per shot | **FILLED v0.3** |
 | P-MOTION | Motion rendering | `MotionRenderPhase.run(ctx)` | B + C | $0.30-1.00 per shot (Veo/LTX/Kling/...) | **FILLED v0.2** |
 | P-IDENTITY | Identity validation | GhostFaceNet at end-of-shot | C | $0 (local) | **FILLED v0.3** |
 | P-ASSEMBLY | Final assembly | `_assemble_final` (FFmpeg stitch + color + BGM mix + 2-pass loudnorm) | B + C | $0 (local) | **FILLED v0.2** |
@@ -386,7 +389,82 @@ The cells below cover Tier B + C predictively. Tier A (substrate verification) i
 
 **ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
 
-> **Remaining phase cells (P-BGM, P-CHIEFDIR, P-PERFORMANCE) are STUB pending operator REPLY OR continued director session.** 6 of 9 phase cells filled at v0.3.
+#### Test cell P-BGM — Background music generation
+
+**Phase / class:** Phase (step 4 in `generate()`; also called during assembly path at line 643/807)
+**Stage in pipeline:** ARCHITECTURE §12 audio pipeline; impl at `cinema_pipeline.py:533-553 _ensure_bgm` → `generate_fal_bgm(music_mood, bgm_path, duration=47)` + optional `audio.music.master_music` mastering pass with `cinema_master` preset
+**Test tier:** B + C
+**Estimated cost:** $0.10-0.30 per generation (FAL Stable Audio pricing)
+**Wall-clock prediction:** 30-90 seconds (FAL generation) + 5-15s mastering = 35-105s total
+
+**PREDICTION (filled at v0.3 from `cinema_pipeline.py:533-553`, per §8 protocol):**
+
+- **Expected output (shape):** mp3 file at `<temp_dir>/bgm_<music_mood>.mp3` (or `bgm_<music_mood>_mastered.mp3` after mastering). Returns `bgm_path: str` consumed by `_assemble_final`. Cached: existing file skips regeneration (`if not os.path.exists(bgm_path)`).
+- **Expected content quality:** mp3 plays in standard player; duration exactly 47s (FAL hard-cap per call); music style matches `music_mood` setting (default "suspense"); mastering produces louder + more dynamic output vs raw generation (cinema_master preset target ~-14 LUFS for streaming). Non-empty audio (rejects silent-track failure mode).
+- **Expected latency:** 30-90s FAL generation (model-dependent); 5-15s mastering. Cached path returns instantly (~10ms file-existence check).
+- **Expected cost:** ~$0.10-0.30 per FAL generation. Mastering is local FFmpeg, $0. Re-runs hit cache (no additional cost). For a Tier B single-shot reel, BGM cost is one-time.
+- **Expected failure modes (top 3):**
+  1. **FAL API error / timeout** — quota / network / model load issue; `generate_fal_bgm` throws or returns failure; downstream `_assemble_final` operates without BGM (silent reel)
+  2. **Mastering fails silently** — `audio.music.master_music` throws; caught at line 549 `except Exception` → logged as warning + raw BGM used. Degrades gracefully but may indicate broken mastering chain.
+  3. **Music mood mismatched** — generated BGM doesn't match topic mood (e.g., topic "horror" produces uplifting BGM); LLM/Audio model interpretation gap.
+- **Expected adjustment indicators:**
+  - FAL error → check FAL key + quota; check FAL service status; add retry-with-backoff; consider local-fallback (e.g., Stable Audio Open self-hosted) for budget protection
+  - Mastering silent fail → check `audio.music` module imports; verify `cinema_master` preset config; check FFmpeg-loudnorm compat; consider promoting WARNING to surfaced error if mastering is intended
+  - Mood mismatch → tighten `music_mood` → FAL prompt mapping; add topic-conditioning (currently only uses raw mood string); consider LLM-pre-prompt-rewriting layer
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell P-CHIEFDIR — ChiefDirector shot validation
+
+**Phase / class:** Phase sub-step (within step 5 decomposition flow, per-scene)
+**Stage in pipeline:** ARCHITECTURE §7 + §13; impl at `cinema_pipeline.py:847-864` calling `self.director.validate_shot_prompts(shots, scene)` → returns `{"decision": "APPROVED" | "MODIFIED" | "REJECTED", "shots": [...], "violations": [...]}`. Director class at `llm/chief_director.ChiefDirector` (imported via `cinema/core.py:51`).
+**Test tier:** B + C
+**Estimated cost:** $0.02-0.10 per scene validation (single LLM call with shot-list context)
+**Wall-clock prediction:** 3-10 seconds per validation pass
+
+**PREDICTION (filled at v0.3 from `cinema_pipeline.py:847-864` + `cinema/core.py:51` ChiefDirector import, per §8 protocol):**
+
+- **Expected output (shape):** dict with `decision: str` (APPROVED / MODIFIED / REJECTED); on MODIFIED, `shots: list[dict]` returns modified shots that REPLACE the original list (line 850); on REJECTED, list of violations + caller regenerates with single decomposer (line 864). On APPROVED, shots unchanged.
+- **Expected content quality:** decisions reflect quality of decompose output. APPROVED expected ~60-80% of the time for well-formed prompts. MODIFIED indicates minor fixes (e.g., camera term standardization, slight reword for clarity). REJECTED is rare (<10%) and indicates structural issues (character coverage gap, scene-mood violation, prompt-policy violation).
+- **Expected latency:** 3-10s LLM call. MODIFIED takes slightly longer because output is full modified shot list, not just decision.
+- **Expected cost:** $0.02-0.10 per call; tokens scale with shot count (more shots = more output tokens).
+- **Expected failure modes (top 3):**
+  1. **Validator over-modifies** — MODIFIED rate >40% indicates decompose output is consistently weak OR validator is too aggressive; downstream variance in shot quality
+  2. **REJECT-then-regenerate produces same issues** — single-decomposer fallback also produces shots violating constraints; regenerate-loop wastes tokens without improving quality
+  3. **Silent quality drift** — APPROVED returned but shots are subtly off-target (validator missed issue); manifests as poor downstream KEYFRAME quality
+- **Expected adjustment indicators:**
+  - Over-modify → tune ChiefDirector validator strictness; review which modifications are systematic (could be folded into decompose prompt instead)
+  - REJECT-then-regenerate same issues → strengthen single-decomposer prompt with examples of past REJECTs; add explicit "do not violate X" constraints; loop-detection (3+ REJECTs in row → escalate to user)
+  - Silent quality drift → add more dimensions to ChiefDirector validation (currently only structural); add aesthetic-quality dimension via separate LLM judge
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell P-PERFORMANCE — Performance capture (driving performance retargeting)
+
+**Phase / class:** Phase (step 12 in `generate()`)
+**Stage in pipeline:** ARCHITECTURE §10 performance capture & lipsync; impl at `cinema/phases/performance.py PerformanceCapturePhase.run` (iterates shots) → `shot_generator.generate_performance_take(scene_id, shot_id)` (per-shot)
+**Test tier:** C (skip for B; B has no character performance step)
+**Estimated cost:** $0.10-0.50 per shot (model-dependent; LivePortrait / EMO / similar driving-video models)
+**Wall-clock prediction:** 20-90 seconds per shot
+
+**PREDICTION (filled at v0.3 from `cinema/phases/performance.py:35-89`, per §8 protocol):**
+
+- **Expected output (shape):** `PhaseResult` with `ok: bool` + `message: str` ("performance: N new, M skipped, K failed") + `elapsed_s: float`. Per-shot, `generate_performance_take` returns `{"success": bool, "skipped": bool, "error": str}`. Skips: shot has approved performance OR `performance_engine == "SKIP"` OR no approved keyframe. Result persisted on shot.
+- **Expected content quality:** performance video files exist for each non-SKIP non-approved shot with a keyframe; performance shows reasonable face/body movement; identity preserved (same character across frames; gates to P-IDENTITY downstream); audio drive shape matches scene audio. For a 3-shot scene with 2 character shots, expect 2 performance takes generated + 1 skip.
+- **Expected latency:** 20-90s per shot. Phase total scales linearly: 5-shot reel × 60s = ~5 min worst case.
+- **Expected cost:** $0.10-0.50 per shot depending on model. Tier C reel (3-5 shots) → $0.30-2.50 performance cost.
+- **Expected failure modes (top 3):**
+  1. **Driving model API error** (LivePortrait / EMO / similar provider returns 500; quota / model-not-loaded)
+  2. **Identity drift in performance** (driven face loses character identity mid-clip; downstream P-IDENTITY catches; performance must be regenerated)
+  3. **Performance lacks expression** (face is static / mouth doesn't sync to audio drive; lip-sync separate from performance capture but related quality concern)
+- **Expected adjustment indicators:**
+  - API error → check provider key + quota; route to alternative driving model (LivePortrait → EMO swap); add retry-with-backoff
+  - Identity drift → use shorter clip-segments; reinforce IP-Adapter via per-frame conditioning; lower driving strength to preserve identity
+  - Static / lack of expression → adjust driving audio amplitude (louder audio → more expressive lip movement); check audio sample rate compatibility with driving model; verify driving model's expressiveness config
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+> **All 9 phase cells now FILLED at v0.3 (this commit).** Remaining: gate cells (§5.2, 6 cells, director-doable from ARCHITECTURE §6) + parameter cells (§5.4, 7 cells, operator-default per Sh) + 5 prompt class cells (PR-DIALOGUE, PR-CONTINUITY, PR-STYLE-LLM (partial), PR-CHIEFDIR, PR-AUDIO-VIBE). All cells must be filled before v1.0 ship + execution.
 
 ### 5.2 Gate test cells (C only)
 
