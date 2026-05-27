@@ -192,6 +192,155 @@ v5.4+ when N=1 emerges.
 Asymmetric-beneficiary rules require explicit non-beneficiary consent
 per Rule #11's veto path.
 
+## N=1 candidates filed for future codification
+
+Tracks rules-pipeline candidates that emerged from Lane V dispatches /
+operational observations but haven't yet accumulated N=2 evidence to
+warrant codification. Per the N=2-floor discipline (v5.1 R-D-1 + v5.2 Q6;
+"never codify at N=0 or N=1 evidence"), candidates wait here until a
+second qualitatively-distinct instance crystallizes the codifiable shape.
+
+**Candidate numbering** preserves the original cycle-12 closure REPLY
+series (`2fbe8a4`): #1-#6. Already codified: **#2 → Rule #14** at
+`61cac6d` (v5.2 ship; operator-driven Lane B template); **#6 → Rule #15**
+at `24c145a` (v5.3 ship; cross-seat fix-on-received-findings). The
+remaining 4 candidates carry forward below. Future candidates added at
+#7+.
+
+**Promotion lifecycle** (de-facto observed; not yet codified): candidate
+filed at N=1 → carry-forward annotated in transplant handoffs →
+PROTOCOL-RULES-LOG.md registry entry (this section) → N=2 emergence in
+later cycle → proposal-cycle drafting (operator OR director per role
+partition Sh) → REPLY-cycle refinement → ship → row added to rule
+registry table above → candidate row removed from this section.
+
+### Candidate #1 — Rule #13 wording precision (audit-completeness vs audit-disposition)
+
+- **Refines:** Rule #13 (symmetric-endpoint audit discipline; codified
+  `8ab0bbb`).
+- **N=1 instance:** Lane V #10 (cycle 11; mid-cycle); audit on
+  `CINEMA_AUTO_APPROVE_MOTION` flag emergence raised a nuance the
+  current Rule #13 wording elides: when the audit IS complete but the
+  disposition decision is the gap (mirror vs. defer vs. document), the
+  rule's "audit + symmetric fold OR follow-up issue" language doesn't
+  distinguish completeness from disposition.
+- **Current N count:** 1 (cycle-11 originating; unchanged through
+  cycle-13 close).
+- **Codifiable shape:** Add to Rule #13's audit-completion language an
+  explicit "audit-completeness ≠ audit-disposition" distinction: the
+  codifier MUST not only enumerate sibling endpoints (completeness) but
+  ALSO state the disposition for each (mirror / defer / document /
+  exempt). Cleanly separates "did you look?" from "what did you decide?"
+- **N=2 emergence criteria:** A second Lane V (or director-driven audit)
+  where the audit enumeration is complete but disposition is missing or
+  ambiguous, AND the missed disposition cascades to a real finding (not
+  just a hypothetical concern). Cycle-12 Lane V #12's audit on broad-A
+  was complete + dispositioned cleanly; cycle-13 had no Rule #13
+  invocations. **Watch cycle-14+ Lane V dispatches that cite Rule #13.**
+
+### Candidate #3 — Pattern-doc cross-cycle uniformity pass mechanism
+
+- **Refines:** F2 trigger codification (cycle-11+ workflow — when does
+  the migration pattern doc trigger a uniformity pass?).
+- **N=1 instance, with partial-close history:**
+  - Cycle-11 originating: F2 trigger codified (initial threshold ~N=12).
+  - Cycle-12 partial close: broad-B implementer's drive-by site listing
+    advanced the doc but didn't lift older sites to uniform detail.
+  - Cycle-13 partial close (`a3af770`): full enumeration pass at 32
+    cumulative V1 production sites; per-site detail uniform.
+- **Current N count:** 1.5 (per cycle-13 operator handoff). The full
+  enumeration pass at `a3af770` is "third partial-close" rather than a
+  discrete second N=2 instance because it's the same pattern (the docs
+  uniformity is now caught up, not a new mechanism emerging).
+- **Codifiable shape:** Trigger criteria for pattern-doc uniformity
+  pass — e.g., "when cumulative sites cross 20 AND per-site detail
+  drift exceeds X across more than Y prior pass-windows, the next
+  operator-driven Lane A docs slice MUST include a uniformity pass."
+  Or alternatively, fold uniformity passes into Lane B implementer
+  briefs automatically (cycle-12 broad-B precedent).
+- **N=2 emergence criteria:** A FUTURE migration-pattern doc (e.g., a
+  new P2-X migration doc in cycle-14+) exhibits the same partial-close
+  → drift → full-enumeration-pass pattern. The emergence would
+  empirically show the mechanism is doc-class-general, not specific to
+  the pydantic-caller pattern. **Watch cycle-14+ for new migration
+  pattern docs OR cumulative-site-count thresholds crossed without
+  uniformity.**
+
+### Candidate #4 — Rule #12 brief-pattern reference verification
+
+- **Refines:** Rule #12 (brief-level grep-the-writes discipline;
+  codified `8ab0bbb`).
+- **N=1 instance:** Cycle-12 Lane V #12 OBS-1 — operator's broad-A
+  dispatch-claim cited `update_location` in `project_manager.py`
+  (P1-3 part 10, `1bc9263`) as Mixed-shape canonical; spec reviewer
+  verified the function doesn't exist + the commit is V2 not V1 Mixed-
+  shape. Implementer adapted gracefully (no commit damage). Confirmed
+  by director-side Lane V #12 dispatch.
+- **Current N count:** 1 (cycle-12 originating; unchanged through
+  cycle-13 close — operator-driven Lane B activity was zero cycle-13).
+- **Codifiable shape:** Extend Rule #12's grep-the-writes requirement
+  to brief-pattern REFERENCES (canonical pattern + canonical site SHA)
+  in addition to brief-pattern WRITES. The codifier MUST grep-verify
+  the named function/symbol exists AT the cited SHA, AND that the
+  cited SHA exhibits the named sub-pattern (V1 strict vs. V2 wrap vs.
+  Base vs. Mixed-shape). Closes the brief-vs-source divergence at the
+  reference layer, not just at the write-site layer.
+- **N=2 emergence criteria:** A second brief-vs-source divergence at
+  the canonical-site reference layer (operator OR director-authored
+  brief cites a function/SHA combination that doesn't exhibit the
+  named pattern). **Watch cycle-14+ Rule #14 dispatch-claim events
+  citing canonical-site SHAs; ALSO watch director-authored implementer
+  prompts citing canonical patterns.**
+
+### Candidate #5 — Rule #13 transitive caller-side audit scope-refinement
+
+- **Refines:** Rule #13 (symmetric-endpoint audit discipline; codified
+  `8ab0bbb`). Possible scope-refinement at codification time.
+- **N=1 instance:** Cycle-12 Lane V #12 I1 — IMPORTANT-advisory
+  ValidationError-swallow at 2 broad-A helper-function caller sites in
+  `web_server.py` L2073/L2240. The audit on the helper-function
+  migration surfaced caller-side transitive concerns. Operator's
+  parallel Lane V #13 transitive audit on broad-B route-handler
+  migration (14/15 clean) demonstrates the failure mode is
+  STRUCTURALLY SCOPED to helper-function-encapsulated migrations, not
+  route-handler-encapsulated ones.
+- **Current N count:** 1 (cycle-12 originating; unchanged through
+  cycle-13 close).
+- **Codifiable shape:** Refine Rule #13 to distinguish "shared state
+  touched by a helper function" (broader audit scope; transitive
+  caller-side audit needed) from "shared state touched by a route
+  handler" (narrower audit scope; the handler IS the audit boundary).
+  This is a SCOPE REFINEMENT, not an extension — Rule #13's existing
+  language conflates the two.
+- **N=2 emergence criteria:** A second helper-function migration with
+  transitive caller-side audit value (the broad-A pattern repeats on
+  a different domain). ALTERNATIVELY, a route-handler migration where
+  the transitive audit IS valuable (counter-example proving the scope
+  distinction wrong). Either crystallizes the scope. **Watch cycle-14+
+  for helper-function migrations + Rule #13 invocation patterns.**
+
+### Cycle-13 audit (cycle-14 entry watchpoint refresh)
+
+Cycle 13 was the **first markdown-only protocol-substrate cycle** (no
+new feat/refactor commits triggering Lane V dispatches; only `chore`,
+`docs`, `test`, and the `336403d` `fix(web)` M-3 close which received
+operator-judgment Lane V skip). **NO movement on any of the 4
+candidates in cycle-13:**
+
+- **#1:** 0 new Rule #13 invocations cycle-13. N=1 unchanged.
+- **#3:** Cycle-13 `a3af770` added a partial-close but candidate stays
+  at N=1.5; no new pattern-doc mechanism emergence.
+- **#4:** 0 new operator-driven Lane B dispatch-claim events
+  cycle-13 (cycle-13 was markdown-only). N=1 unchanged.
+- **#5:** 0 new Rule #13 invocations cycle-13. N=1 unchanged.
+
+**Next operator-seat OR director-seat session should re-audit at
+cycle-14 close** when new Lane V dispatches OR new brief activity
+crosses one of the N=2 emergence criteria above. Per Rule #14 +
+Rule #15 codification cadence (v5.2 + v5.3 shipped same cycle once
+N=2 accumulated), the v5.4 ship can happen quickly once the first
+candidate crosses.
+
 ## Invocation log
 
 **Note on plateau interpretation (per Protocol Bundle v3 §Minor):** Rule
