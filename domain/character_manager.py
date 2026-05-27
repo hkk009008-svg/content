@@ -318,6 +318,19 @@ def _generate_multi_angle_refs(
             urllib.request.urlretrieve(img_url, out_path)
             angle_refs.append(out_path)
             print(f"   [ANGLE] Generated {cfg['name']} (Max Multi): {out_path}")
+            # F-D.1 / MR-C0 closure (cycle-16 max-quality audit a79c59):
+            # character-creation FLUX Kontext Max Multi calls were
+            # untracked by cost_tracker — 5 calls × ~$0.04 = ~$0.20 per
+            # character invisible to budget enforcement. Mirrors M-B2
+            # best-effort pattern; non-fatal if tracker import fails.
+            try:
+                from cost_tracker import CostTracker
+                CostTracker().record_api_call(
+                    "FLUX_KONTEXT",
+                    operation="multi_angle_ref",
+                )
+            except Exception:
+                print(f"   [ANGLE] cost record skipped for {cfg['name']} (non-critical)")
 
         except Exception as e:
             print(f"   [WARN] Angle generation failed ({cfg['name']}): {e}")
