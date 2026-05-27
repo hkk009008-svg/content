@@ -109,6 +109,7 @@ def create_character_with_images(
     voice_id: str = "",
     ip_adapter_weight: float = 0.85,
     commit_timeout: float = 10,
+    gender: str = "",
 ) -> dict:
     """
     Creates a character from REAL uploaded photos.
@@ -118,11 +119,16 @@ def create_character_with_images(
     2. Validate face detectability (REQUIRED — reject if no face found)
     3. Set the best face-detected upload as canonical reference
     4. Generate multi-angle reference sheet (front, 45°, profile, back)
-    5. Assign voice, pre-compute embedding
+    5. Assign voice (gender + language-aware), pre-compute embedding
     6. Store all references for downstream Kling subject binding
     """
     pid = project["id"]
-    character = make_character(name, description, voice_id=voice_id, ip_adapter_weight=ip_adapter_weight)
+    character = make_character(
+        name, description,
+        voice_id=voice_id,
+        ip_adapter_weight=ip_adapter_weight,
+        gender=gender,
+    )
     cid = character["id"]
     char_path = _char_dir(pid, cid)
 
@@ -153,9 +159,19 @@ def create_character_with_images(
     character["multi_angle_refs"] = multi_angles
     print(f"   [ANGLES] Generated {len(multi_angles)} angle references")
 
-    # 4. Assign voice if not provided
+    # 4. Assign voice if not provided — pass language + gender so picker
+    # narrows VOICE_POOL to a sensible candidate set (closes VG-B1: prior
+    # path returned VOICE_POOL[0] = Rachel English regardless of project
+    # language; dispatcher then hit hardcoded Adam fallback if char.voice_id
+    # somehow stayed empty).
     if not voice_id:
-        character["voice_id"] = assign_voice(project)
+        project_lang = (project.get("global_settings") or {}).get("language", "") \
+            or (project.get("global_settings") or {}).get("language_pref", "")
+        character["voice_id"] = assign_voice(
+            project,
+            language=project_lang,
+            gender=gender,
+        )
 
     # 5. Pre-compute embedding
     if canonical and DEEPFACE_AVAILABLE:
@@ -355,23 +371,78 @@ def get_character_embedding(project: dict, char_id: str) -> Optional[np.ndarray]
     return None
 
 
-def assign_voice(project: dict, preference: str = "") -> str:
-    """Assign an ElevenLabs voice, avoiding duplicates within the project."""
+def assign_voice(
+    project: dict,
+    preference: str = "",
+    language: str = "",
+    gender: str = "",
+) -> str:
+    """Assign an ElevenLabs voice, avoiding duplicates within the project.
+
+    Selection priority:
+      1. ``preference`` matches a known voice (name substring or exact id) → return.
+      2. Language + gender → filter VOICE_POOL by language's voice_pool_filter
+         (from ``domain.language_defaults``) AND gender-mapped category prefix,
+         return first unused.
+      3. Language only → filter VOICE_POOL by language's voice_pool_filter,
+         return first unused.
+      4. Gender only → filter VOICE_POOL by gender-mapped category prefix
+         (``man`` / ``korean_man`` / ``elderly`` for male; ``woman`` /
+         ``korean_woman`` / ``young`` for female), return first unused.
+      5. No hints → first unused voice (legacy behavior).
+      6. All filtered candidates used → cycle to first in filtered set; if
+         filter empty, fall back to legacy VOICE_POOL[0].
+
+    Closes VG-B1 (cycle-16) — prior signature picked Adam (English male) as
+    the de facto default when called without preference on a Korean-female
+    project. Language/gender awareness was already encoded in
+    ``domain.language_defaults`` and ``VOICE_POOL.category``; this surface
+    just wires it through.
+    """
     used = _get_used_voices(project)
 
-    # If preference matches a known voice, use it
+    # 1. Direct preference match (name or id)
     if preference:
         for v in VOICE_POOL:
             if preference.lower() in v["name"].lower() or preference == v["id"]:
                 return v["id"]
 
-    # Pick first unused voice
-    for v in VOICE_POOL:
+    # 2/3/4. Build filtered candidate set from language + gender hints
+    candidates = list(VOICE_POOL)
+    if language:
+        try:
+            from domain.language_defaults import get_language_defaults
+            filt = get_language_defaults(language).get("voice_pool_filter")
+            if filt:
+                candidates = [v for v in candidates if v.get("category") in filt]
+        except Exception:
+            # If language_defaults is unavailable, fall through with full pool.
+            pass
+
+    if gender:
+        g = gender.lower()
+        male_cats = {"man", "korean_man", "elderly"}
+        female_cats = {"woman", "korean_woman", "young", "child"}
+        if g in {"male", "m", "man"}:
+            candidates = [v for v in candidates if v.get("category") in male_cats]
+        elif g in {"female", "f", "woman"}:
+            candidates = [v for v in candidates if v.get("category") in female_cats]
+
+    # Pick first unused candidate
+    for v in candidates:
         if v["id"] not in used:
             print(f"   🎙️ Auto-assigned voice: {v['name']} ({v['style']})")
             return v["id"]
 
-    # All voices used — cycle back to first
+    # All filtered candidates used — cycle to first in filtered set
+    if candidates:
+        return candidates[0]["id"]
+
+    # Filter excluded everything (e.g., gender + language with no matching
+    # category) — fall back to full pool first-unused, then VOICE_POOL[0].
+    for v in VOICE_POOL:
+        if v["id"] not in used:
+            return v["id"]
     return VOICE_POOL[0]["id"]
 
 

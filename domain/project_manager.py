@@ -161,6 +161,7 @@ def make_character(
     reference_images: Optional[List[str]] = None,
     voice_id: str = "",
     ip_adapter_weight: float = 0.85,
+    gender: str = "",
 ) -> dict:
     return {
         "id": f"char_{new_id()}",
@@ -169,6 +170,7 @@ def make_character(
         "reference_images": reference_images or [],
         "canonical_reference": "",
         "voice_id": voice_id,
+        "gender": gender,
         "ip_adapter_weight": ip_adapter_weight,
         "physical_traits": "",
         "embedding_cache": "",

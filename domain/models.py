@@ -144,6 +144,12 @@ class Character(BaseModel):
     description: str = ""
     voice_id: str = ""
     reference_image: str = ""
+    # Optional gender hint ("male" / "female" / ""). Used by voice picker to
+    # narrow VOICE_POOL when assigning voice_id. Empty means no preference;
+    # picker uses language defaults' default_female_voice as the unhinted
+    # fallback (closer to common cinema use than the prior hardcoded Adam).
+    # See VG-B1 closure 2026-05-27.
+    gender: str = ""
 
 
 class Location(BaseModel):

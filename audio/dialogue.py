@@ -350,8 +350,35 @@ def generate_dialogue_voiceover(
 
         voice_id = char_voices.get(cid, "")
         if not voice_id:
-            # Fallback to first available voice
-            voice_id = next((v for v in char_voices.values() if v), "pNInz6obpgDQGcFmaJgB")
+            # Fallback chain (closes VG-B1 — prior code hardcoded
+            # "pNInz6obpgDQGcFmaJgB" = Adam English-male; produced wrong-
+            # gendered + wrong-language audio for projects where
+            # character.voice_id was never assigned at create-time):
+            #   1. Any other character's assigned voice in this project
+            #   2. Language + gender-aware default from language_defaults
+            #      (Korean female → 안나 Anna; Korean male → 준호 Junho;
+            #       English → Rachel / Adam; unknown language → English
+            #       fallback per get_language_defaults("_default"))
+            #   3. Adam (legacy hardcode) — only when import fails
+            voice_id = next((v for v in char_voices.values() if v), "")
+            if not voice_id:
+                try:
+                    from domain.language_defaults import get_language_defaults
+                    char_record = char_by_id.get(cid, {})
+                    char_gender = (char_record.get("gender") or "").lower()
+                    lang_defaults = get_language_defaults(project_lang)
+                    # Default to female voice unless character has explicit
+                    # male gender hint. Female default is closer to common
+                    # narrative cinema use than the prior unconditional
+                    # male hardcode.
+                    if char_gender in {"male", "m", "man"}:
+                        voice_id = lang_defaults.get("default_male_voice", "")
+                    else:
+                        voice_id = lang_defaults.get("default_female_voice", "")
+                except Exception:
+                    pass
+            if not voice_id:
+                voice_id = "pNInz6obpgDQGcFmaJgB"  # legacy hardcode last resort
 
         char_name = next((c["name"] for c in characters if c["id"] == cid), cid)
         delivery = line.get("delivery", "natural")
