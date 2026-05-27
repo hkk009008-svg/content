@@ -330,8 +330,14 @@ def generate_dialogue_voiceover(
     # PipelineContext.global_settings) so _resolve_tts_provider can read it.
     # The pipeline stores language in global_settings (see cinema_pipeline.py
     # :512-513); this surface keeps the router signature scene-shaped while
-    # honoring the actual source-of-truth.
-    project_lang = get_project_setting(ctx, "language", "English") or "English"
+    # honoring the actual source-of-truth. I-B1 closure: also accept the
+    # brief's `language_pref` alias as fallback — was unbound in code; now
+    # both `language` (canonical) and `language_pref` (brief alias) route.
+    project_lang = (
+        get_project_setting(ctx, "language", None)
+        or get_project_setting(ctx, "language_pref", None)
+        or "English"
+    )
     scene_for_router = {"language": project_lang}
 
     print(f"🎙️ [CINEMA] Generating multi-character dialogue ({len(dialogue_lines)} lines)...")
