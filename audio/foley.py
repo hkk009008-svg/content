@@ -17,7 +17,6 @@ path only; pipeline wiring comes in T2.
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 import requests
 from config.settings import settings
@@ -110,11 +109,11 @@ def _build_foley_prompt(scene_foley_descriptor: str) -> str:
 def generate_stability_foley(
     foley_description: str,
     output_path: str,
-    duration: float = 5.0,
+    duration: float = 5.0,  # Per-scene foley callers should pass scene_duration (~15-60s); 5.0 is the per-shot default.
     steps: int = 50,
     cfg_scale: float = 7.0,
-    seed: Optional[int] = None,
-) -> Optional[str]:
+    seed: int | None = None,
+) -> str | None:
     """Generate environmental foley via Stability AI Stable Audio 2.0 REST API.
 
     Caller-controlled caching: if ``output_path`` already exists this
@@ -153,7 +152,7 @@ def generate_stability_foley(
         # Stability AI requires multipart form data for this endpoint
         data: dict[str, str] = {
             "prompt": foley_description,
-            "duration": str(min(int(duration), 190)),
+            "duration": str(min(int(round(duration)), 190)),
             "steps": str(steps),
             "cfg_scale": str(cfg_scale),
             "output_format": "mp3",
@@ -168,10 +167,7 @@ def generate_stability_foley(
             files={k: (None, v) for k, v in data.items()},
             timeout=120,
         )
-
-        if r.status_code != 200:
-            print(f"   [FOLEY] HTTP {r.status_code}: {r.text[:200]}")
-            return None
+        r.raise_for_status()
 
         with open(output_path, "wb") as f:
             f.write(r.content)

@@ -201,6 +201,13 @@ class CinemaPipeline:
         self._runstate.scene_audio = value
 
     @property
+    def scene_foley(self) -> dict:
+        return self._runstate.scene_foley
+    @scene_foley.setter
+    def scene_foley(self, value: dict) -> None:
+        self._runstate.scene_foley = value
+
+    @property
     def failed_shots(self) -> list:
         return self._runstate.failed_shots
     @failed_shots.setter
@@ -552,6 +559,50 @@ class CinemaPipeline:
                 logger.warning("BGM mastering skipped (non-critical)", exc_info=True)
         return bgm_path
 
+    def _ensure_scene_foley(self, scene: dict) -> str:
+        """Generate (and cache) environmental foley for a single scene.
+
+        Per-scene caching: one foley file per scene_id, stored in temp_dir.
+        Returns the foley file path on success, empty string on failure so
+        callers can treat it as a boolean — mirrors _ensure_scene_audio's
+        graceful-degradation pattern (scene_packages["foley"] stays empty
+        when foley is unavailable).
+
+        The tri-mix consumption of the returned path is T3 scope.
+        """
+        scene_id = scene.get("id", "")
+        existing = self.scene_foley.get(scene_id)
+        if existing and os.path.exists(existing):
+            return existing
+
+        # Aggregate unique non-empty scene_foley descriptors across the scene's shots
+        descriptors: list[str] = []
+        for shot in scene.get("shots", []):
+            f = shot.get("scene_foley", "").strip()
+            if f and f not in descriptors:
+                descriptors.append(f)
+        scene_foley_descriptor = ", ".join(descriptors) or "subtle ambient room tone"
+
+        # Rough duration proxy: number of shots × 5 s, capped at 60 s
+        num_shots = len(scene.get("shots", []))
+        scene_duration = float(min(num_shots * 5, 60)) if num_shots else 30.0
+
+        foley_path = os.path.join(self.temp_dir, f"foley_{scene_id}.mp3")
+
+        self.progress("AUDIO", f"Generating foley for scene {scene_id}...", 5)
+        try:
+            from audio.foley import _build_foley_prompt, generate_stability_foley
+            prompt = _build_foley_prompt(scene_foley_descriptor)
+            result = generate_stability_foley(prompt, foley_path, duration=scene_duration)
+            if result and os.path.exists(result):
+                self.scene_foley[scene_id] = result
+                self._runstate.foley_audio_paths.append(result)
+                self._save_checkpoint()
+                return result
+        except Exception:
+            logger.warning("Foley generation skipped for scene %s (non-critical)", scene_id, exc_info=True)
+        return ""
+
     def _build_scene_packages(self, project: Optional[dict] = None) -> tuple[list[dict], list[str]]:
         active_project = project or self.project
         scene_packages = []
@@ -575,11 +626,12 @@ class CinemaPipeline:
                 if character.get("id") in scene.get("characters_present", [])
             ]
             scene_audio = self._ensure_scene_audio(scene, characters)
+            foley_path = self._ensure_scene_foley(scene)
             scene_packages.append({
                 "scene_id": scene_id,
                 "clips": clips,
                 "audio": scene_audio,
-                "foley": [],
+                "foley": [foley_path] if foley_path else [],
             })
 
         return scene_packages, missing_shots

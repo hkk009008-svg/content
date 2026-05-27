@@ -172,5 +172,104 @@ class TestGuidedStageCommands(GuidedPipelineTestCase):
         self.assertEqual(state["gate_status"]["finals_approved"], 1)
 
 
+class TestEnsureSceneFoley(GuidedPipelineTestCase):
+    """Unit tests for CinemaPipeline._ensure_scene_foley wiring."""
+
+    def _make_scene_with_foley(self, scene_id: str = "scene_1") -> dict:
+        """Minimal scene dict with two shots carrying scene_foley descriptors."""
+        return {
+            "id": scene_id,
+            "shots": [
+                {"id": "shot_1", "scene_foley": "rain"},
+                {"id": "shot_2", "scene_foley": "rain"},   # duplicate — should deduplicate
+                {"id": "shot_3", "scene_foley": "crowd"},
+            ],
+        }
+
+    def test_ensure_scene_foley_returns_path_and_populates_state(self):
+        """generate_stability_foley returns a path → scene_foley dict + foley_audio_paths updated."""
+        project, _scene, _shot = self.create_project_with_single_shot()
+        pipeline = CinemaPipeline(project["id"])
+        scene = self._make_scene_with_foley("scene_foley_test")
+        foley_output = os.path.join(pipeline.temp_dir, "foley_scene_foley_test.mp3")
+
+        def fake_generate(prompt, out_path, duration=5.0, **kwargs):
+            # Simulate successful generation by writing a file
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            with open(out_path, "wb") as f:
+                f.write(b"fake_foley_audio")
+            return out_path
+
+        with mock.patch("audio.foley.generate_stability_foley", side_effect=fake_generate):
+            result = pipeline._ensure_scene_foley(scene)
+
+        self.assertEqual(result, foley_output)
+        self.assertEqual(pipeline.scene_foley.get("scene_foley_test"), foley_output)
+        self.assertIn(foley_output, pipeline._runstate.foley_audio_paths)
+
+    def test_ensure_scene_foley_deduplicates_descriptors(self):
+        """Duplicate scene_foley strings across shots are collapsed to one entry."""
+        project, _scene, _shot = self.create_project_with_single_shot()
+        pipeline = CinemaPipeline(project["id"])
+        scene = self._make_scene_with_foley("scene_dedup")
+        captured_prompts: list[str] = []
+
+        def fake_generate(prompt, out_path, duration=5.0, **kwargs):
+            captured_prompts.append(prompt)
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            with open(out_path, "wb") as f:
+                f.write(b"x")
+            return out_path
+
+        with mock.patch("audio.foley.generate_stability_foley", side_effect=fake_generate):
+            pipeline._ensure_scene_foley(scene)
+
+        # Should have been called exactly once
+        self.assertEqual(len(captured_prompts), 1)
+        # The descriptor passed to generate should NOT contain duplicate "rain"
+        # (deduplicated to: "rain, crowd")
+        prompt_used = captured_prompts[0]
+        self.assertIn("rain", prompt_used.lower())
+        self.assertIn("crowd", prompt_used.lower())
+
+    def test_ensure_scene_foley_returns_empty_on_failure(self):
+        """generate_stability_foley returning None → _ensure_scene_foley returns ''."""
+        project, _scene, _shot = self.create_project_with_single_shot()
+        pipeline = CinemaPipeline(project["id"])
+        scene = self._make_scene_with_foley("scene_fail")
+
+        with mock.patch("audio.foley.generate_stability_foley", return_value=None):
+            result = pipeline._ensure_scene_foley(scene)
+
+        self.assertEqual(result, "")
+        self.assertNotIn("scene_fail", pipeline.scene_foley)
+        self.assertEqual(pipeline._runstate.foley_audio_paths, [])
+
+    def test_build_scene_packages_populates_foley_list(self):
+        """foley field in scene_packages is [path] when foley succeeds, [] when it fails."""
+        project, _scene, _shot = self.create_project_with_single_shot()
+        pipeline = CinemaPipeline(project["id"])
+
+        # _build_scene_packages normally requires mp4 files; mock _ensure_scene_foley
+        # and the scene_audio helper so we can focus on foley field population.
+        with mock.patch.object(pipeline, "_ensure_scene_audio", return_value=None), \
+             mock.patch.object(pipeline, "_ensure_scene_foley", return_value="/tmp/foley.mp3"):
+            # Also mock _resolve_take_path so no-clip scenes don't add to missing_shots
+            with mock.patch.object(pipeline, "_resolve_take_path", return_value=None):
+                packages, _missing = pipeline._build_scene_packages(project)
+
+        for pkg in packages:
+            self.assertEqual(pkg["foley"], ["/tmp/foley.mp3"])
+
+        # Now test degraded path: foley returns ""
+        with mock.patch.object(pipeline, "_ensure_scene_audio", return_value=None), \
+             mock.patch.object(pipeline, "_ensure_scene_foley", return_value=""), \
+             mock.patch.object(pipeline, "_resolve_take_path", return_value=None):
+            packages_empty, _ = pipeline._build_scene_packages(project)
+
+        for pkg in packages_empty:
+            self.assertEqual(pkg["foley"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

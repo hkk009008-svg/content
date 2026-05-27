@@ -56,12 +56,12 @@ class TestGenerateStabilityFoley:
     # ---- success path -------------------------------------------------------
 
     def test_success_writes_file_and_returns_path(self, tmp_path):
-        """Happy path: 200 response writes mp3 bytes and returns output_path."""
+        """Happy path: successful response writes mp3 bytes and returns output_path."""
         output = str(tmp_path / "foley_out.mp3")
         fake_audio = b"ID3\x00fake_mp3_bytes"
 
         mock_response = MagicMock()
-        mock_response.status_code = 200
+        mock_response.raise_for_status.return_value = None
         mock_response.content = fake_audio
 
         mock_settings = MagicMock()
@@ -112,12 +112,12 @@ class TestGenerateStabilityFoley:
     # ---- HTTP error ---------------------------------------------------------
 
     def test_http_error_returns_none(self, tmp_path):
-        """Non-200 status returns None (no exception propagation)."""
+        """HTTP error (raise_for_status) returns None (no exception propagation)."""
+        import requests as req_lib
         output = str(tmp_path / "foley.mp3")
 
         mock_response = MagicMock()
-        mock_response.status_code = 500
-        mock_response.text = "Internal Server Error"
+        mock_response.raise_for_status.side_effect = req_lib.exceptions.HTTPError("500 Server Error")
 
         mock_settings = MagicMock()
         mock_settings.stability_api_key = "sk-test-key-0123456789"
@@ -151,7 +151,7 @@ class TestGenerateStabilityFoley:
         output = str(tmp_path / "foley.mp3")
 
         mock_response = MagicMock()
-        mock_response.status_code = 200
+        mock_response.raise_for_status.return_value = None
         mock_response.content = b"fake"
 
         mock_settings = MagicMock()
@@ -167,6 +167,62 @@ class TestGenerateStabilityFoley:
         duration_val = files_arg["duration"][1]
         assert duration_val == "190"
 
+    # ---- duration boundary cases -------------------------------------------
+
+    def test_duration_exact_cap(self, tmp_path):
+        """duration=190 (exact cap) produces '190' in form data."""
+        output = str(tmp_path / "foley_190.mp3")
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.content = b"fake"
+
+        mock_settings = MagicMock()
+        mock_settings.stability_api_key = "sk-test-key-0123456789"
+
+        with patch("audio.foley.requests.post", return_value=mock_response) as mock_post, \
+             patch("audio.foley.settings", mock_settings):
+            generate_stability_foley("rain", output, duration=190)
+
+        files_arg = mock_post.call_args.kwargs.get("files") or mock_post.call_args[1]["files"]
+        assert files_arg["duration"][1] == "190"
+
+    def test_duration_first_over_cap(self, tmp_path):
+        """duration=191 (first-over) is clamped to '190'."""
+        output = str(tmp_path / "foley_191.mp3")
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.content = b"fake"
+
+        mock_settings = MagicMock()
+        mock_settings.stability_api_key = "sk-test-key-0123456789"
+
+        with patch("audio.foley.requests.post", return_value=mock_response) as mock_post, \
+             patch("audio.foley.settings", mock_settings):
+            generate_stability_foley("rain", output, duration=191)
+
+        files_arg = mock_post.call_args.kwargs.get("files") or mock_post.call_args[1]["files"]
+        assert files_arg["duration"][1] == "190"
+
+    def test_duration_float_rounds_up(self, tmp_path):
+        """duration=5.5 rounds to 6 (not truncated to 5)."""
+        output = str(tmp_path / "foley_5_5.mp3")
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.content = b"fake"
+
+        mock_settings = MagicMock()
+        mock_settings.stability_api_key = "sk-test-key-0123456789"
+
+        with patch("audio.foley.requests.post", return_value=mock_response) as mock_post, \
+             patch("audio.foley.settings", mock_settings):
+            generate_stability_foley("rain", output, duration=5.5)
+
+        files_arg = mock_post.call_args.kwargs.get("files") or mock_post.call_args[1]["files"]
+        assert files_arg["duration"][1] == "6"
+
     # ---- seed propagation ---------------------------------------------------
 
     def test_seed_passed_when_provided(self, tmp_path):
@@ -174,7 +230,7 @@ class TestGenerateStabilityFoley:
         output = str(tmp_path / "foley.mp3")
 
         mock_response = MagicMock()
-        mock_response.status_code = 200
+        mock_response.raise_for_status.return_value = None
         mock_response.content = b"fake"
 
         mock_settings = MagicMock()
@@ -193,7 +249,7 @@ class TestGenerateStabilityFoley:
         output = str(tmp_path / "foley.mp3")
 
         mock_response = MagicMock()
-        mock_response.status_code = 200
+        mock_response.raise_for_status.return_value = None
         mock_response.content = b"fake"
 
         mock_settings = MagicMock()

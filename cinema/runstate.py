@@ -89,6 +89,13 @@ class RunState:
     # scene_id -> audio path
     scene_audio: dict = field(default_factory=dict)
 
+    # scene_id -> foley path
+    scene_foley: dict = field(default_factory=dict)
+
+    # Ordered list of all foley paths generated during the run
+    # (one per scene; appended by _ensure_scene_foley). Consumed by T3 tri-mix.
+    foley_audio_paths: list = field(default_factory=list)
+
     # ---------------------------------------------------------------------
     # Failure tracking.
     # Written by orchestrator (generate() loop when a shot fails).
