@@ -11,8 +11,8 @@
 - [docs/PROTOCOL-RULES-LOG.md](PROTOCOL-RULES-LOG.md) §"N=1 candidates" — Candidate #7 discipline (re-verify before re-assert) applies throughout
 
 **Status (at brief-write time, 2026-05-27 cycle-14 mid-cycle):**
-- **DRAFT v0.2** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + user §9 decisions logged + 4 phase cell PREDICTIONs filled (P-STYLE, P-KEYFRAME, P-MOTION, P-ASSEMBLY)
-- AWAITING operator-seat REPLY with operational-discipline additions (Lane V coverage, doc-sync points, test isolation, telemetry collection) + remaining cell PREDICTIONs (P-BGM, P-DECOMPOSE, P-CHIEFDIR, P-PERFORMANCE, P-IDENTITY; G-* gate cells; PA-* parameter cells; PR-* prompt class cells)
+- **DRAFT v0.3** — director-seat structural skeleton + predictive harness framework + adjustment rubric framework + user §9 decisions logged + 6 phase cell PREDICTIONs filled (P-STYLE, P-DECOMPOSE, P-KEYFRAME, P-MOTION, P-IDENTITY, P-ASSEMBLY) + 3 prompt class cell PREDICTIONs filled (PR-STORY, PR-IMAGE, PR-MOTION)
+- AWAITING operator-seat REPLY with operational-discipline additions (Lane V coverage, doc-sync points, test isolation, telemetry collection) + remaining cell PREDICTIONs (P-BGM, P-CHIEFDIR, P-PERFORMANCE; G-* gate cells; PA-* parameter cells; PR-DIALOGUE/PR-CONTINUITY/PR-STYLE-LLM/PR-CHIEFDIR/PR-AUDIO-VIBE prompt cells)
 - USER-PRINCIPAL DECISIONS LANDED (2026-05-27): Tier B+C+D scope (comprehensive); $50 hard budget cap; fresh RunPod pod deploy via `scripts/setup_runpod.sh`; fill PREDICTIONs in advance (this v0.2)
 - NOT EXECUTABLE until §"Pre-flight checklist" all-green + operator REPLY landed + brief v1.0 + user-principal execution authorization
 
@@ -228,12 +228,12 @@ The cells below cover Tier B + C predictively. Tier A (substrate verification) i
 |---|---|---|---|---|---|
 | P-STYLE | STYLE rules generation | `generate_style_rules(project)` | B + C | $0.01-0.05 LLM | **FILLED v0.2** |
 | P-BGM | BGM generation | `_ensure_bgm(settings)` (FAL Stable Audio) | B + C | $0.10-0.30 | STUB |
-| P-DECOMPOSE | Scene decomposition | `decompose` (competitive or single LLM) | B + C | $0.05-0.20 per scene | STUB |
+| P-DECOMPOSE | Scene decomposition | `decompose` (competitive or single LLM) | B + C | $0.05-0.20 per scene | **FILLED v0.3** |
 | P-CHIEFDIR | ChiefDirector validation | post-decompose validation pass | B + C | $0.02-0.10 | STUB |
 | P-KEYFRAME | Keyframe rendering | `KeyframeRenderPhase.run(ctx)` | B + C | $0.05-0.30 per shot (ComfyUI) | **FILLED v0.2** |
 | P-PERFORMANCE | Performance capture | `PerformanceCapturePhase.run(ctx)` | C | $0.10-0.50 per shot | STUB |
 | P-MOTION | Motion rendering | `MotionRenderPhase.run(ctx)` | B + C | $0.30-1.00 per shot (Veo/LTX/Kling/...) | **FILLED v0.2** |
-| P-IDENTITY | Identity validation | GhostFaceNet at end-of-shot | C | $0 (local) | STUB |
+| P-IDENTITY | Identity validation | GhostFaceNet at end-of-shot | C | $0 (local) | **FILLED v0.3** |
 | P-ASSEMBLY | Final assembly | `_assemble_final` (FFmpeg stitch + color + BGM mix + 2-pass loudnorm) | B + C | $0 (local) | **FILLED v0.2** |
 
 #### Test cell P-STYLE — STYLE rules generation
@@ -336,7 +336,57 @@ The cells below cover Tier B + C predictively. Tier A (substrate verification) i
 
 **ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
 
-> **Remaining phase cells (P-BGM, P-DECOMPOSE, P-CHIEFDIR, P-PERFORMANCE, P-IDENTITY) are STUB pending operator REPLY (operator-default per Sh: parameter + gate cells; cold-context verification commands) OR continued director session.** All 9 phase cells must be filled before v1.0 ship.
+#### Test cell P-DECOMPOSE — Scene decomposition (LLM, competitive or single)
+
+**Phase / class:** Phase (step 5 in `generate()`, per-scene)
+**Stage in pipeline:** ARCHITECTURE §7.3 (decomposition has TWO trigger paths) + §7.4 LLM decomposer; impl at `cinema_pipeline.py:820-867` → `competitive_decompose_scene` / `decompose_scene` + `director.validate_shot_prompts`
+**Test tier:** B (1 scene) + C (1-2 scenes)
+**Estimated cost:** $0.05-0.20 per scene (competitive uses 2-3 parallel LLMs; single uses 1)
+**Wall-clock prediction:** 8-25 seconds per scene (competitive: 8-15s parallel; single: 8-12s; +ChiefDirector validation 3-8s)
+
+**PREDICTION (filled at v0.3 from impl-read at `cinema_pipeline.py:830-866`, per §8 protocol):**
+
+- **Expected output (shape):** list of shot dicts, each with `id`, `description`, `prompt`, `camera`, `characters` (subset of scene's characters_present), `target_api` (optional engine routing hint). Persisted via `update_scene_shots(project, scene_id, shots)` at line 866. ChiefDirector validation may modify (`decision: "MODIFIED"`) or reject (`decision: "REJECTED"` → regenerate with single decomposer).
+- **Expected content quality:** ≥3 shots per scene (storyboard-meaningful decomposition); each shot has a non-empty description that advances scene narrative; camera directives match scene mood (e.g., "zoom_in_slow" for intimate moments); character coverage matches `characters_present`. For a 60s scene, expect 5-10 shots (~6-12s per shot).
+- **Expected latency:** competitive ~8-15s wall-clock (parallel max-of-N); single ~8-12s; ChiefDirector adds ~3-8s. Total step ~12-25s per scene.
+- **Expected cost:** competitive 2-3× single cost; single ~$0.02-0.07 per scene (token-based); ChiefDirector adds ~$0.01-0.05.
+- **Expected failure modes (top 3):**
+  1. **Competitive decompose throws → fallback to single** (`except Exception` at line 837 catches and falls through; logged via `logger.exception`). Indicates competitive race-condition OR provider error.
+  2. **ChiefDirector REJECTED** (`decision: "REJECTED"` at line 858; regenerates with single decomposer). Indicates first-pass shots violated constraints (character coverage, scene-mood mismatch, prompt-policy violation).
+  3. **Empty or single-shot decomposition** (LLM didn't elaborate; storyboard insufficient for downstream phases). KeyframeRenderPhase would produce sparse output.
+- **Expected adjustment indicators:**
+  - Competitive-failure-then-fallback → check competitive race semantics; check parallel LLM concurrency limits; verify provider rate limits
+  - ChiefDirector REJECTED → strengthen prompt with explicit constraints; add few-shot examples for shot-decomposition; verify ChiefDirector's validate_shot_prompts prompt
+  - Empty / single-shot → strengthen "decompose into N shots" instruction; add `min_shots=3` post-validation; lower LLM temperature to reduce randomness
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell P-IDENTITY — GhostFaceNet identity validation
+
+**Phase / class:** Quality gate (invoked at end of each keyframe generation, NOT a phase per se)
+**Stage in pipeline:** ARCHITECTURE §11 identity validation; impl at `cinema/shots/controller.py:484-506` → `phase_c_vision._get_shared_validator().validate_image(img_path, primary_ref, character_id, threshold)`
+**Test tier:** C (multi-shot reel with named characters)
+**Estimated cost:** $0 (local GhostFaceNet inference)
+**Wall-clock prediction:** 0.5-3 seconds per shot (GhostFaceNet on CPU/GPU)
+
+**PREDICTION (filled at v0.3 from impl-read at `cinema/shots/controller.py:484-506` + ARCHITECTURE §11, per §8 protocol):**
+
+- **Expected output (shape):** `id_result` object with `overall_score: float [0.0-1.0]`, `passed: bool`, `character_results: dict[char_id → CharResult]`, where CharResult has `primary_failure_reason` (enum) + `suggested_pulid_adjustment`. Take metadata persists `identity_score` (always) + `identity_failure_reason` + `suggested_pulid_adjustment` (only on fail).
+- **Expected content quality:** for shots with `primary_ref` (character reference image), `identity_score` correlates with visible character similarity. Threshold default 0.70 (per `cc.get("identity_threshold", 0.70)`); operator can override via `settings.identity_strictness`. Score >0.85 = strong identity match; 0.70-0.85 = passable; <0.70 = fail (take rejected or flagged for review).
+- **Expected latency:** 0.5-3s per shot. Singleton validator (`_get_shared_validator()`) amortizes model-load cost across pipeline run; first call after fresh process can take +5-15s for model load.
+- **Expected cost:** $0 (local inference). GPU vs CPU latency differs but cost is identical.
+- **Expected failure modes (top 3):**
+  1. **False negative — real character rejected** (legitimate face but pose/lighting/angle differs from reference; threshold too strict)
+  2. **False positive — wrong face accepted** (different person passes threshold; threshold too lenient OR reference image ambiguous)
+  3. **Validator throws / returns malformed result** (model not loaded; reference image missing; weights missing; phase_c_vision import error)
+- **Expected adjustment indicators:**
+  - False negative → lower `identity_strictness` (try 0.65); diversify reference images (multi-pose); add retry-with-different-pose logic; check `suggested_pulid_adjustment` for IP-Adapter weight hint
+  - False positive → raise `identity_strictness` (try 0.80); add multi-frame validation across video (P-MOTION); verify reference image is unambiguous (single face, frontal)
+  - Validator throws → check phase_c_vision module path; verify GhostFaceNet weights present (pre-flight A7); check primary_ref file exists; lower-level CV library compat issue
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+> **Remaining phase cells (P-BGM, P-CHIEFDIR, P-PERFORMANCE) are STUB pending operator REPLY OR continued director session.** 6 of 9 phase cells filled at v0.3.
 
 ### 5.2 Gate test cells (C only)
 
@@ -353,14 +403,85 @@ The cells below cover Tier B + C predictively. Tier A (substrate verification) i
 
 | ID | Prompt class | Where invoked | Tier | Status |
 |---|---|---|---|---|
-| PR-STORY | Story decomposition prompts | LLMEnsemble.decompose | B + C | STUB |
+| PR-STORY | Story decomposition prompts | LLMEnsemble.decompose | B + C | **FILLED v0.3** |
 | PR-DIALOGUE | Dialogue generation prompts | LLMEnsemble.generate_dialogue | C | STUB |
 | PR-CONTINUITY | Continuity engine prompts | ContinuityEngine.* | B + C | STUB |
-| PR-STYLE-LLM | Style rules generation prompts | LLMEnsemble.generate_style_rules | B + C | STUB |
-| PR-IMAGE | Per-shot image prompts | KeyframeRenderPhase prompt assembly | B + C | STUB |
-| PR-MOTION | Per-shot motion prompts | MotionRenderPhase prompt assembly | B + C | STUB |
+| PR-STYLE-LLM | Style rules generation prompts | LLMEnsemble.generate_style_rules | B + C | STUB (covered partially by P-STYLE) |
+| PR-IMAGE | Per-shot image prompts | KeyframeRenderPhase prompt assembly | B + C | **FILLED v0.3** |
+| PR-MOTION | Per-shot motion prompts | MotionRenderPhase prompt assembly | B + C | **FILLED v0.3** |
 | PR-CHIEFDIR | ChiefDirector validation prompts | post-decompose validation | B + C | STUB |
 | PR-AUDIO-VIBE | BGM vibe selection prompts | `_ensure_bgm` upstream | B + C | STUB |
+
+#### Test cell PR-STORY — Story decomposition prompts
+
+**Phase / class:** Prompt class (cross-cuts P-DECOMPOSE phase; specifically the LLM input to `decompose_scene` / `competitive_decompose_scene`)
+**Stage in pipeline:** ARCHITECTURE §7.4 LLM decomposer; impl in domain/llm/* (decompose modules)
+**Test tier:** B + C
+**Estimated cost:** $0 — prompt evaluation is intrinsic to P-DECOMPOSE; this cell is a focused angle, not a separate LLM call
+**Wall-clock prediction:** N/A — reuses P-DECOMPOSE observation
+
+**PREDICTION (filled at v0.3 from P-DECOMPOSE impl + scene-decompose call chain, per §8 protocol):**
+
+- **Expected output (shape):** N/A — this cell observes the LLM-input prompts that produce the P-DECOMPOSE outputs. Evaluation is qualitative: does the prompt elicit a faithful storyboard decomposition?
+- **Expected content quality:** prompt construction includes: scene description + character list (with traits) + location description + style rules (from P-STYLE) + decomposition instructions (number-of-shots range, camera language vocabulary, narrative-arc expectation). Prompt should be specific enough that the LLM produces 3-10 shots that ADVANCE the scene narrative (not 10 static talking-head shots).
+- **Expected failure modes (top 3):**
+  1. **Generic shots** — LLM produced shots that could fit ANY scene (no scene-specific narrative); root cause: prompt under-specified the narrative arc expectation
+  2. **Character coverage gap** — shots omit characters listed in `characters_present`; root cause: prompt didn't enforce per-character minimum or list characters prominently
+  3. **Camera-language vocabulary out of bounds** — shots use camera terms the downstream image gen doesn't support; root cause: prompt didn't constrain to canonical vocabulary (zoom_in_slow, pan_left, dolly_back, etc.)
+- **Expected adjustment indicators:**
+  - Generic shots → strengthen "advance the narrative" instruction; add few-shot examples of strong scene-decomposition; add chain-of-thought "first identify scene's narrative arc, then..."
+  - Character coverage gap → add "every character listed must appear in at least one shot" constraint; add post-validation `validate_character_coverage(shots, characters_present)`
+  - Camera vocab out of bounds → enumerate allowed camera terms in prompt; add post-validation against canonical list; add fuzzy-match fallback to nearest canonical term
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell PR-IMAGE — Per-shot image prompts
+
+**Phase / class:** Prompt class (cross-cuts P-KEYFRAME phase; the prompt assembly logic at `cinema/shots/controller.py:333-345`)
+**Stage in pipeline:** ARCHITECTURE §8; impl spans `enhance_shot_prompt` (ContinuityEngine `domain/continuity_engine.py:446`) → `style_suffix` (`style_rules_to_prompt_suffix`) → `positive_prompt` override path
+**Test tier:** B + C
+**Estimated cost:** $0 — prompt assembly is intrinsic to P-KEYFRAME; this cell is a focused angle
+**Wall-clock prediction:** N/A — reuses P-KEYFRAME observation
+
+**PREDICTION (filled at v0.3 from `cinema/shots/controller.py:333-345` + `domain/continuity_engine.py:446 enhance_shot_prompt`, per §8 protocol):**
+
+- **Expected output (shape):** `full_prompt: str` constructed from `enhanced["prompt"]` (continuity-enhanced shot prompt with character/location injection + approved-anchor reference) + `style_suffix` (style rules formatted as prompt fragment). Final prompt passed to ComfyUI workflow as positive prompt.
+- **Expected content quality:** prompt is image-generation-ready (descriptive nouns + adjectives; no abstract narrative-only language); contains character name + visual descriptor (if character in shot); contains location descriptor; reflects scene style (mood/palette/aesthetic per P-STYLE output); 50-300 words typical length. For shot with character "Anya, dark hair, leather jacket" at location "rainy alley at night", expect prompt mentions both subject and setting.
+- **Expected failure modes (top 3):**
+  1. **Continuity-anchor inconsistency** — `approved_anchor` reference image conflicts with shot's intended visual (e.g., character was day-shot in anchor, this shot is night; visual continuity breaks)
+  2. **Style suffix duplicates / contradicts shot prompt** — style_suffix mentions "warm tones" but shot prompt mentions "cold blue lighting"; LLM-image-gen produces ambiguous output
+  3. **Character descriptor missing / wrong** — character name appears but no visual descriptor (LLM-image-gen produces inconsistent renders across shots; identity validation fails)
+- **Expected adjustment indicators:**
+  - Continuity anchor conflict → improve `_resolve_previous_approved_keyframe` selection (e.g., scene-boundary-aware; skip anchors from different time-of-day); allow operator override
+  - Style suffix contradicts → reconcile style_suffix with per-shot scene-mood; add precedence rule (per-shot wins over global)
+  - Character descriptor missing → enforce per-character descriptor injection in `enhance_shot_prompt` for every character in shot; validate prompt mentions all characters present
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+#### Test cell PR-MOTION — Per-shot motion prompts
+
+**Phase / class:** Prompt class (cross-cuts P-MOTION phase; motion prompt assembly inside `generate_motion_take`)
+**Stage in pipeline:** ARCHITECTURE §9 video routing (5 templates × 11 engines); each engine has its own prompt-encoding shape
+**Test tier:** B + C
+**Estimated cost:** $0 — prompt assembly is intrinsic to P-MOTION; this cell is a focused angle
+**Wall-clock prediction:** N/A — reuses P-MOTION observation
+
+**PREDICTION (filled at v0.3 from `cinema/phases/motion_render.py` + ARCHITECTURE §9 + per-engine template structure, per §8 protocol):**
+
+- **Expected output (shape):** engine-specific prompt encoding. Veo expects natural-language motion description + camera directive + optional negative prompt; LTX expects keyword-style motion encoding; Kling expects narrative-paragraph format; each engine's template is a `5 templates × 11 engines` grid mapping (per ARCHITECTURE §9). Prompt typically extends the keyframe prompt with motion verbs (zoom_in, pan_left, dolly_back) + optional motion-strength qualifier.
+- **Expected content quality:** prompt explicitly encodes camera direction (matches `shot.get("camera")`); preserves character identity descriptor from PR-IMAGE; maintains style continuity (no abrupt aesthetic change from keyframe to motion); engine-appropriate format (Veo: natural; LTX: keyword).
+- **Expected failure modes (top 3):**
+  1. **Engine-template mismatch** — prompt encoded for engine X passed to engine Y (e.g., natural-language prompt sent to keyword-style engine); engine ignores or misinterprets
+  2. **Motion verb absent / contradictory** — prompt says "zoom_in" but description includes "static shot"; engine produces ambiguous motion
+  3. **Identity drift in motion prompt** — character descriptor in PR-IMAGE not preserved in PR-MOTION; engine generates motion of "a character" not "Anya specifically"; identity_score drops vs keyframe
+- **Expected adjustment indicators:**
+  - Engine-template mismatch → verify `target_api` routing to template-selection; add prompt-format validator per engine class
+  - Motion verb absent → enforce camera-directive inclusion in motion prompt template; add post-assembly verification (prompt contains camera term from canonical list)
+  - Identity drift → propagate character descriptor from PR-IMAGE to PR-MOTION explicitly; verify prompt mentions character name + visual descriptor; consider keyframe-conditioned video gen (engines that accept image+text vs text-only)
+
+**ACTUAL / DELTA / INSIGHT / ADJUSTMENT:** filled during execution.
+
+> **Remaining prompt cells (PR-DIALOGUE, PR-CONTINUITY, PR-STYLE-LLM, PR-CHIEFDIR, PR-AUDIO-VIBE) are STUB pending operator REPLY OR continued director session.** 3 of 8 prompt cells filled at v0.3.
 
 ### 5.4 Parameter class test cells (D — optional sensitivity sweep)
 
