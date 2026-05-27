@@ -161,6 +161,22 @@ def run_with_tools(
 
             try:
                 response = client.chat.completions.create(**kwargs)
+                # F-F.5 closure (cycle-16 max-quality audit a79c59): web
+                # research LLM calls were untracked. Best-effort log; non-
+                # fatal if cost_tracker import fails. Tool-round calls
+                # tracked separately from final-response call (Phase 2).
+                try:
+                    from cost_tracker import CostTracker
+                    usage = getattr(response, "usage", None)
+                    if usage is not None:
+                        CostTracker().log_llm(
+                            model=model,
+                            operation=f"web_research_tool_round_{round_num + 1}",
+                            input_tokens=getattr(usage, "prompt_tokens", 0),
+                            output_tokens=getattr(usage, "completion_tokens", 0),
+                        )
+                except Exception:
+                    pass
                 msg = response.choices[0].message
 
                 if msg.tool_calls:
@@ -188,5 +204,18 @@ def run_with_tools(
         kwargs["response_format"] = response_format
 
     response = client.chat.completions.create(**kwargs)
+    # F-F.5 closure: track Phase 2 final-response LLM call.
+    try:
+        from cost_tracker import CostTracker
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            CostTracker().log_llm(
+                model=model,
+                operation="web_research_final",
+                input_tokens=getattr(usage, "prompt_tokens", 0),
+                output_tokens=getattr(usage, "completion_tokens", 0),
+            )
+    except Exception:
+        pass
     content = response.choices[0].message.content
     return content.strip() if content else ""
