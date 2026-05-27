@@ -28,7 +28,7 @@ This doc provides:
 | **PR-DIALOGUE** | P8 — Dialogue Writer | [`domain/dialogue_writer.py:60`](../domain/dialogue_writer.py) (`system_prompt = ...`) | C | §7 LLM ensemble (dialogue layer) |
 | **PR-CONTINUITY** | P12 — Continuity prompt enhancement | [`domain/continuity_engine.py:446`](../domain/continuity_engine.py) (`def enhance_shot_prompt`) | B + C | §8 continuity engine |
 | **PR-STYLE-LLM** | P1 — Style Director system_prompt | [`llm/style_director.py:62`](../llm/style_director.py) (`system_prompt = f"""You are a world-class cinematographer...`) | B + C | §7.1 style stage |
-| **PR-CHIEFDIR** | P2 (HC1-HC8 / T1-T9) + P3 (RETRY/ACCEPT_LENIENT/FAIL) | [`llm/chief_director.py:130-206`](../llm/chief_director.py) (system prompt) + [`llm/chief_director.py:208`](../llm/chief_director.py) (`def validate_shot_prompts`) + [`llm/chief_director.py:~318-446`](../llm/chief_director.py) (`diagnose_failure` decision arms) | B + C | §7 LLM ensemble + validation |
+| **PR-CHIEFDIR** | P2 (HC1-HC8 / T1-T9) + P3 (RETRY/ACCEPT_LENIENT/FAIL) | [`llm/chief_director.py:130-206`](../llm/chief_director.py) (system prompt) + [`llm/chief_director.py:208`](../llm/chief_director.py) (`def validate_shot_prompts`) + [`llm/chief_director.py:276`](../llm/chief_director.py) (`def evaluate_generation_quality`; RETRY/ACCEPT_LENIENT/FAIL decision returns at lines 318 + 446 inside method body) | B + C | §7 LLM ensemble + validation |
 | **PR-AUDIO-VIBE** | P9 — Music prompt `_build_music_prompt` | [`audio/music.py:88`](../audio/music.py) (`def _build_music_prompt(music_vibe: str)`) | B + C | §13 audio pipeline |
 
 ---
@@ -168,19 +168,19 @@ This doc provides:
 > - **Tweak variants:** (a) baseline; (b) add explicit acceptance criteria for ACCEPT_LENIENT; (c) require quality_score floor for ACCEPT_LENIENT
 > - **Compare:** distribution of decisions across 20+ takes pre vs post
 
-**⚠️ P3 reference inaccuracy — see Verification notes §1.** Actual `evaluate_take`-shaped method is `diagnose_failure` (RETRY/ACCEPT_LENIENT/FAIL emitted ~lines 318-446). Validation pre-shot uses `validate_shot_prompts` at line 208. Director should treat P3 as referring to `diagnose_failure`, not `evaluate_take` (which doesn't exist).
+**⚠️ P3 reference inaccuracy — see Verification notes §1.** Actual `evaluate_take`-shaped method is `evaluate_generation_quality` (RETRY/ACCEPT_LENIENT/FAIL emitted ~lines 318-446). Validation pre-shot uses `validate_shot_prompts` at line 208. Director should treat P3 as referring to `evaluate_generation_quality`, not `evaluate_take` (which doesn't exist).
 
 **Verified impl context (validated by Rule #12 grep):**
 - Line 27: `class ChiefDirector:`
 - Line 130: `You are "ChiefDirector v2.0" — a strict metacognitive oversight engine...` (system prompt for validation pathway)
 - Line 138: `HC1: You MUST output valid JSON. No markdown, no explanation, no conversational text.` (start of HC1-HC8 enumeration; T1-T9 follows)
 - Line 208: `def validate_shot_prompts(self, shots: List[Dict], scene: Dict) -> Dict:` (pre-keyframe shot-prompt validation; uses lines 130-206 system prompt)
-- Line 318: First `return {"decision": "RETRY", ...}` in diagnose_failure
-- Line 352: `eval_prompt = json.dumps({...})` inside diagnose_failure DIAGNOSE_GENERATION_FAILURE pathway (NOT a method definition — testplan P3's "line 352" is inaccurate; actual method is `diagnose_failure`)
+- Line 318: First `return {"decision": "RETRY", ...}` in evaluate_generation_quality
+- Line 352: `eval_prompt = json.dumps({...})` inside evaluate_generation_quality DIAGNOSE_GENERATION_FAILURE pathway (NOT a method definition — testplan P3's "line 352" is inaccurate; actual method is `evaluate_generation_quality`)
 - Line 366: Second system prompt: `"You are ChiefDirector diagnosing a generation failure..."`
 - Line 396: JSON schema: `'  "decision": "RETRY" | "ACCEPT_LENIENT" | "FAIL",\n'`
 - Line 427: ACCEPT_LENIENT visible-skip log comment
-- Line 446: Another `return {"decision": "RETRY", ...}` in diagnose_failure
+- Line 446: Another `return {"decision": "RETRY", ...}` in evaluate_generation_quality
 - File length: 459 lines
 
 **ARCHITECTURE reference:** §7 LLM ensemble + validation (Chief Director is post-decompose validation + post-take diagnosis)
@@ -195,7 +195,7 @@ Operator recommendation: (a) — single cell, two-paragraph PREDICTION addressin
 
 **Format reminder:**
 - Phase / class: Prompt class (cross-cuts P-CHIEFDIR phase + per-take diagnosis pathway during P-KEYFRAME/P-PERFORMANCE/P-MOTION)
-- Stage in pipeline: ARCHITECTURE §7 + impl `llm/chief_director.py:130-206` (validation) + `llm/chief_director.py:diagnose_failure` (~318-446) (diagnosis)
+- Stage in pipeline: ARCHITECTURE §7 + impl `llm/chief_director.py:130-206` (validation system prompt) + `llm/chief_director.py:276 evaluate_generation_quality` (per-take diagnosis method; decision returns at lines 318 + 446 inside method body)
 - Test tier: B + C
 - Estimated cost: $0 — prompt evaluation intrinsic to validation + diagnosis phases
 - Wall-clock prediction: N/A — reuses upstream cells
@@ -263,12 +263,12 @@ Per Rule #12 brief-pattern reference verification (cycle-13 codification at `8ab
 **Actual:**
 - Line 352 is `eval_prompt = json.dumps({...})` inside a method (NOT a method definition).
 - `grep -n "def evaluate_take" llm/chief_director.py` returns NO matches.
-- The method emitting RETRY/ACCEPT_LENIENT/FAIL is `diagnose_failure` (system prompt at line 366; JSON schema enumerating decisions at line 396; decision returns at lines 318, 446).
+- The method emitting RETRY/ACCEPT_LENIENT/FAIL is `evaluate_generation_quality` (system prompt at line 366; JSON schema enumerating decisions at line 396; decision returns at lines 318, 446).
 - Pre-shot validation method is `validate_shot_prompts` at line 208 (uses HC1-HC8 + T1-T9 system prompt from lines 130-206).
 
 **Severity:** MINOR — testplan got the BEHAVIOR right (the prompt does emit RETRY/ACCEPT_LENIENT/FAIL trichotomy) but wrong METHOD NAME and LINE NUMBER. Director using this doc's PR-CHIEFDIR substrate has the correct refs.
 
-**Disposition recommendation:** advisory; testplan revision optional. If shipped, operator can land a `docs(testplan): correct P3 reference — diagnose_failure not evaluate_take` commit (separate, ~5 LoC change in 1 file). Operator-default per Sh + brief-pattern reference scope. Director-side action: NONE; this doc's substrate is authoritative for PR-CHIEFDIR.
+**Disposition recommendation:** advisory; testplan revision optional. If shipped, operator can land a `docs(testplan): correct P3 reference — evaluate_generation_quality not evaluate_take` commit (separate, ~5 LoC change in 1 file). Operator-default per Sh + brief-pattern reference scope. Director-side action: NONE; this doc's substrate is authoritative for PR-CHIEFDIR.
 
 ### Finding B — Testplan §5 P9 claims three-axis input not in impl
 
