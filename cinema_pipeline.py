@@ -758,7 +758,7 @@ class CinemaPipeline:
             _screening_stage_enabled,
             is_screening_approved,
         )
-        if _screening_stage_enabled():
+        if _screening_stage_enabled(self.project):
             self.current_stage = SCREENING_STAGE_NAME
             self.progress(SCREENING_STAGE_NAME, "Awaiting operator screening approval...", 95)
 

@@ -94,6 +94,7 @@ def _build_music_prompt(music_vibe: str) -> str:
         "noir": "75bpm Bb minor, smoky jazz saxophone, brushed drums, walking upright bass, rain-soaked city, 1940s detective.",
         "dystopian": "85bpm F# minor, industrial metallic percussion, distorted analog synth drones, mechanical rhythms, Blade Runner 2049.",
         "melancholic": "65bpm A minor, solo piano with sustain pedal, distant cello legato, vinyl crackle, gentle rain, Chopin meets Nils Frahm.",
+        "contemplative": "62bpm B minor, sparse Rhodes piano arpeggios, sustained cello pad, soft tape hiss, slow breathing pace, introspective film montage, Ryuichi Sakamoto reflection, Lost in Translation interior.",
         "romantic": "72bpm D major, warm acoustic guitar fingerpicking, soft string quartet, golden hour, Richard Linklater film.",
         "bittersweet": "68bpm G minor, solo violin, piano arpeggios, muted trumpet, autumn nostalgia, Wong Kar-wai mood.",
         "grief": "55bpm C minor, slow cello solo, sparse piano with long reverb, silences, devastating, Schindler's List.",
@@ -256,6 +257,7 @@ def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42):
 
             # --- Emotional / Dramatic ---
             "melancholic": "65bpm, A minor, solo piano with sustain pedal, distant cello legato, vinyl crackle texture, gentle rain ambience, introspective, Chopin meets Nils Frahm.",
+            "contemplative": "62bpm, B minor, sparse Rhodes piano arpeggios, sustained cello pad, soft tape hiss, slow breathing pace, introspective film montage, reflective interior monologue, Ryuichi Sakamoto reflection, Lost in Translation atmosphere.",
             "romantic": "72bpm, D major, warm acoustic guitar fingerpicking, soft string quartet, gentle woodwind, golden hour warmth, tender, intimate, Richard Linklater film.",
             "bittersweet": "68bpm, G minor, solo violin melody, piano arpeggios, muted trumpet, autumn leaves atmosphere, nostalgic, wistful, Wong Kar-wai mood.",
             "grief": "55bpm, C minor, slow cello solo, sparse piano chords with long reverb, silence between notes, distant choir hum, devastating emotional weight, Schindler's List.",

@@ -81,20 +81,49 @@ SCREENING_APPROVED_KEY = "screening_approved"
 NEEDS_REASSEMBLY_KEY = "needs_reassembly"
 
 
-def _screening_stage_enabled() -> bool:
-    """Feature flag: CINEMA_SCREENING_STAGE controls S19+ screening stage.
+def _screening_stage_enabled(project: dict | None = None) -> bool:
+    """Feature flag: project-level ``global_settings.screening_stage_enabled``
+    wins over env-var ``CINEMA_SCREENING_STAGE``; either may disable.
 
-    Default ON as of v5.1+ flag-flip (2026-05-26 user-principal authorization;
-    operator + director joint flag-flip-recommended per Val#1 V3+V5 LIVE +
-    Val#2 U3 14-stage rail DOM-confirmed; V1 defense-in-depth fold shipped
-    pre-flip at ``d10b849``). Set ``CINEMA_SCREENING_STAGE=0|false|no`` to
-    opt out (e.g., a deployment that needs the pre-S19 endpoint behavior).
+    Lookup order (closes M-B1 — cycle-16 Tier B surfaced that project-level
+    setting was completely ignored; env-var was the only knob):
+
+      1. ``project["global_settings"]["screening_stage_enabled"]`` (if project
+         passed AND key is explicitly present — truthy/falsy interpreted
+         leniently for backward compat with operator-typed UI values like
+         ``"true"`` / ``"1"`` / ``False``).
+      2. Env var ``CINEMA_SCREENING_STAGE`` (legacy path; default ON; falsy
+         values ``0|false|no`` opt out).
+      3. Default ON.
+
+    Default ON history: v5.1+ flag-flip (2026-05-26 user-principal
+    authorization; operator + director joint flag-flip-recommended per
+    Val#1 V3+V5 LIVE + Val#2 U3 14-stage rail DOM-confirmed; V1
+    defense-in-depth fold shipped pre-flip at ``d10b849``).
 
     Falsy-value set matches ``_directorial_iteration_enabled()`` exactly
     so an operator who disables the directorial-iteration flag with the
     same spelling gets the same answer here. Read at each call so dynamic
     env mutation is observable without restart.
+
+    Callers that don't have project context (e.g., the cold endpoint at
+    ``web_server.py:2147`` before ``load_project`` is invoked) may pass
+    ``None`` (default) and get the env-only legacy behavior — backward
+    compatible.
     """
+    if project is not None:
+        global_settings = project.get("global_settings") or {}
+        if "screening_stage_enabled" in global_settings:
+            val = global_settings["screening_stage_enabled"]
+            # Lenient truthy/falsy: handle bool, int, and string values
+            # from the project schema (UI may store any of these).
+            if isinstance(val, bool):
+                return val
+            if isinstance(val, (int, float)):
+                return val != 0
+            if isinstance(val, str):
+                return val.strip().lower() not in {"0", "false", "no", ""}
+            # Any other type — fall through to env-var path
     return os.environ.get("CINEMA_SCREENING_STAGE", "").strip().lower() not in {
         "0", "false", "no",
     }

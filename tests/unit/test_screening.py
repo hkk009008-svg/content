@@ -76,6 +76,69 @@ class TestScreeningStageFlag:
             assert _screening_stage_enabled() is False
 
 
+class TestScreeningStageProjectOverride:
+    """M-B1 closure (cycle-16 Tier B): project-level
+    ``global_settings.screening_stage_enabled`` wins over env-var.
+
+    The pre-fix Tier B run set `screening_stage_enabled: False` on the
+    project and the pipeline IGNORED it — gate-wait spun indefinitely
+    because the env var was unset (defaulting ON). Post-fix the pipeline
+    caller (``cinema_pipeline.py:761``) passes ``self.project`` and
+    project-setting takes precedence.
+    """
+
+    def _proj(self, **gs) -> dict:
+        return {"id": "p1", "global_settings": gs}
+
+    # ---- Project setting present: overrides env-var --------------------------
+
+    def test_project_false_wins_over_env_unset(self):
+        env = {k: v for k, v in os.environ.items() if k != "CINEMA_SCREENING_STAGE"}
+        with patch.dict(os.environ, env, clear=True):
+            assert _screening_stage_enabled(self._proj(screening_stage_enabled=False)) is False
+
+    def test_project_true_wins_over_env_off(self):
+        with patch.dict(os.environ, {"CINEMA_SCREENING_STAGE": "0"}):
+            assert _screening_stage_enabled(self._proj(screening_stage_enabled=True)) is True
+
+    @pytest.mark.parametrize("val", [False, 0, "0", "false", "no", "FALSE", ""])
+    def test_project_falsy_values_disable(self, val):
+        assert _screening_stage_enabled(self._proj(screening_stage_enabled=val)) is False
+
+    @pytest.mark.parametrize("val", [True, 1, "1", "true", "yes", "anything-truthy"])
+    def test_project_truthy_values_enable(self, val):
+        # Use opt-out env to verify project-truthy overrides env-disable
+        with patch.dict(os.environ, {"CINEMA_SCREENING_STAGE": "0"}):
+            assert _screening_stage_enabled(self._proj(screening_stage_enabled=val)) is True
+
+    # ---- Project setting absent: env-var still controls (backward compat) ----
+
+    def test_project_without_key_falls_through_to_env(self):
+        """Project dict exists but doesn't have the key → env-var controls.
+        Backward compat: existing projects without the field aren't affected.
+        """
+        proj = {"id": "p1", "global_settings": {"some_other_field": True}}
+        with patch.dict(os.environ, {"CINEMA_SCREENING_STAGE": "0"}):
+            assert _screening_stage_enabled(proj) is False
+        env = {k: v for k, v in os.environ.items() if k != "CINEMA_SCREENING_STAGE"}
+        with patch.dict(os.environ, env, clear=True):
+            assert _screening_stage_enabled(proj) is True  # env default ON
+
+    def test_none_project_uses_env_legacy_behavior(self):
+        """Callers without project context (web endpoints) pass None → env."""
+        with patch.dict(os.environ, {"CINEMA_SCREENING_STAGE": "0"}):
+            assert _screening_stage_enabled(None) is False
+        env = {k: v for k, v in os.environ.items() if k != "CINEMA_SCREENING_STAGE"}
+        with patch.dict(os.environ, env, clear=True):
+            assert _screening_stage_enabled(None) is True
+
+    def test_no_global_settings_dict_uses_env(self):
+        """Project without global_settings key entirely → env."""
+        proj = {"id": "p1"}
+        with patch.dict(os.environ, {"CINEMA_SCREENING_STAGE": "0"}):
+            assert _screening_stage_enabled(proj) is False
+
+
 # ---------------------------------------------------------------------------
 # _take_duration_seconds unit tests
 # ---------------------------------------------------------------------------
