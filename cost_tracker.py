@@ -57,6 +57,8 @@ API_COST_USD: dict[str, float] = {
     "FLUX_PRO":      0.05,
     "QUALITY_MAX":   0.40,   # N=8 best-of, ~8x base cost
     "HIDREAM_I1":    0.06,
+    # Audio APIs (per clip)
+    "STABILITY_FOLEY": 0.03,
 }
 
 
