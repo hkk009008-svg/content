@@ -232,3 +232,106 @@ class TestGenerateCartesiaFailures:
             result = generate_cartesia("hi", "vid", output, language="en")
 
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# _resolve_tts_provider — language routing
+# ---------------------------------------------------------------------------
+
+class TestResolveTtsProvider:
+    """The router selects CARTESIA_SONIC_2 for Korean when the key is set;
+    ELEVENLABS otherwise. Scene-level language wins over character-level;
+    both fall back to "en"/ELEVENLABS when absent.
+    """
+
+    def _settings(self, key: str = "sk_test_cartesia"):
+        s = MagicMock()
+        s.cartesia_api_key = key
+        return s
+
+    # ---- Korean routing -----------------------------------------------------
+
+    def test_korean_scene_routes_to_cartesia(self):
+        from audio.dialogue import _resolve_tts_provider
+        scene = {"language": "ko"}
+        char = {}
+        result = _resolve_tts_provider(scene, char, self._settings())
+        assert result == "CARTESIA_SONIC_2"
+
+    def test_ko_kr_locale_routes_to_cartesia(self):
+        """`ko_KR` (full locale code) also matches Korean."""
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider({"language": "ko_KR"}, {}, self._settings())
+        assert result == "CARTESIA_SONIC_2"
+
+    def test_human_name_korean_routes_to_cartesia(self):
+        """`"Korean"` (human name from PIPELINE_LANGUAGE_DEFAULTS) starts with
+        case-insensitive "ko" and routes correctly."""
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider({"language": "Korean"}, {}, self._settings())
+        assert result == "CARTESIA_SONIC_2"
+
+    def test_case_insensitive_match(self):
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider({"language": "KO_KR"}, {}, self._settings())
+        assert result == "CARTESIA_SONIC_2"
+
+    def test_character_language_fallback_when_scene_missing(self):
+        """Scene lacks language → fall back to character language."""
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider({}, {"language": "ko"}, self._settings())
+        assert result == "CARTESIA_SONIC_2"
+
+    def test_scene_language_wins_over_character_language(self):
+        """Scene language takes precedence — English scene with Korean char."""
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider({"language": "en"}, {"language": "ko"}, self._settings())
+        assert result == "ELEVENLABS"
+
+    # ---- English / non-Korean routing --------------------------------------
+
+    def test_english_routes_to_elevenlabs(self):
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider({"language": "en"}, {}, self._settings())
+        assert result == "ELEVENLABS"
+
+    def test_japanese_routes_to_elevenlabs(self):
+        """Other multilingual languages stay on ElevenLabs multilingual."""
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider({"language": "ja"}, {}, self._settings())
+        assert result == "ELEVENLABS"
+
+    def test_mandarin_routes_to_elevenlabs(self):
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider({"language": "zh_CN"}, {}, self._settings())
+        assert result == "ELEVENLABS"
+
+    def test_missing_language_defaults_to_elevenlabs(self):
+        """Neither scene nor character has language → default `en` → ElevenLabs."""
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider({}, {}, self._settings())
+        assert result == "ELEVENLABS"
+
+    # ---- Cartesia key missing → fallback to ElevenLabs even for Korean ------
+
+    def test_korean_without_cartesia_key_falls_back_to_elevenlabs(self):
+        """CARTESIA_API_KEY unset → Korean still routes to ElevenLabs (graceful)."""
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider({"language": "ko"}, {}, self._settings(key=""))
+        assert result == "ELEVENLABS"
+
+    def test_korean_with_none_cartesia_key_falls_back_to_elevenlabs(self):
+        """`None` API key (not just empty string) also falls back."""
+        from audio.dialogue import _resolve_tts_provider
+        s = MagicMock()
+        s.cartesia_api_key = None
+        result = _resolve_tts_provider({"language": "ko"}, {}, s)
+        assert result == "ELEVENLABS"
+
+    # ---- Defensive: None inputs handled ------------------------------------
+
+    def test_none_scene_and_character_default_to_elevenlabs(self):
+        """Robustness — None inputs don't crash; default to ELEVENLABS."""
+        from audio.dialogue import _resolve_tts_provider
+        result = _resolve_tts_provider(None, None, self._settings())
+        assert result == "ELEVENLABS"

@@ -115,6 +115,45 @@ def generate_cartesia(
         return False
 
 
+# ---------------------------------------------------------------------------
+# TTS provider language router
+# ---------------------------------------------------------------------------
+
+def _resolve_tts_provider(scene: dict, character: dict, settings_obj) -> str:
+    """Decide which TTS provider to use for this scene-character pair.
+
+    Inspects ``scene["language"]`` first; falls back to
+    ``character["language"]``; defaults to ``"en"``. Korean is detected by
+    case-insensitive prefix match on ``"ko"`` (matches ``"ko"``, ``"ko_KR"``,
+    ``"korean"``, etc.). When Korean is detected AND the Cartesia API key is
+    set, returns ``"CARTESIA_SONIC_2"``; otherwise (English, other languages,
+    or Cartesia key missing) returns ``"ELEVENLABS"`` — the current default.
+
+    Other languages route to ELEVENLABS multilingual; Cartesia is
+    Korean-priority per the descriptor at
+    ``domain/scene_decomposer.py:67`` (multilingual fallback is fine but
+    ElevenLabs is already wired for non-Korean).
+
+    Args:
+        scene: a scene dict (may contain ``"language"`` as an ISO code or
+            human name like ``"Korean"``)
+        character: a character dict (may contain ``"language"`` as fallback)
+        settings_obj: the project settings instance (must expose
+            ``cartesia_api_key``)
+
+    Returns:
+        ``"CARTESIA_SONIC_2"`` for Korean+key-set; ``"ELEVENLABS"`` otherwise.
+    """
+    scene = scene or {}
+    character = character or {}
+    raw_lang = scene.get("language") or character.get("language") or "en"
+    lang = str(raw_lang).lower().strip()
+    is_korean = lang.startswith("ko")
+    if is_korean and getattr(settings_obj, "cartesia_api_key", "") and settings_obj.cartesia_api_key:
+        return "CARTESIA_SONIC_2"
+    return "ELEVENLABS"
+
+
 def _try_dialogue_mode(
     dialogue_lines: list,
     characters: list,
