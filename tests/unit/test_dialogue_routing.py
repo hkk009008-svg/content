@@ -102,8 +102,10 @@ class TestDialogueRoutingResolvesVeoNative:
         )
         assert has_dialogue is True
 
-    def test_non_dialogue_purpose_falls_back_to_template(self):
-        """Non-dialogue purposes should still use the shot-type template."""
+    def test_non_dialogue_purpose_honors_cached_suggestion(self):
+        """A non-dialogue purpose with a valid cached suggestion still honors it
+        (the suggestion-wins branch is purpose-agnostic); has_dialogue stays False.
+        Template fallback is covered by test_no_optimizer_cache_uses_template."""
         from workflow_selector import WORKFLOW_TEMPLATES, classify_shot_type
         from domain.scene_decomposer import API_REGISTRY
 
@@ -129,8 +131,11 @@ class TestDialogueRoutingResolvesVeoNative:
             template = WORKFLOW_TEMPLATES.get(classify_shot_type(shot), WORKFLOW_TEMPLATES["medium"])
             target_api = template["target_api"]
 
-        # SORA_NATIVE is in API_REGISTRY so the suggestion is honored here too —
-        # the point is that has_dialogue is False for non-dialogue purposes.
+        # SORA_NATIVE is in API_REGISTRY, so the suggestion-wins branch is taken
+        # regardless of purpose; assert both the routing outcome and the flag.
+        assert target_api == "SORA_NATIVE", (
+            f"valid cached suggestion should be honored, got {target_api}"
+        )
         assert has_dialogue is False
 
     def test_no_optimizer_cache_uses_template(self):
