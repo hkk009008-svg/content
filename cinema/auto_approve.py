@@ -378,30 +378,55 @@ def _best_take_motion_score(takes: list[dict]) -> float:
 
 
 def _best_take_lipsync(takes: list[dict]) -> float:
-    """Return the highest lipsync_score across all takes, or 1.0 if none present.
+    """Return the highest lipsync_score across all takes, with dialogue-aware defaults.
 
-    1.0 default: when lipsync wasn't computed (shot has no dialogue) the
-    gate should not veto on this rule.  The predicate only fires when at
-    least one take has a score AND the max score is below threshold.
+    Default semantics (F1b fix):
+    - Non-dialogue takes (no take has ``has_dialogue=True``): return 1.0 (N/A pass).
+    - Audio-embedded dialogue takes (``audio_embedded=True``): return 1.0 (native sync pass).
+    - Dialogue takes with a real ``lipsync_score``: return the max score (existing behaviour).
+    - Dialogue takes with NO ``lipsync_score`` AND NOT ``audio_embedded``: return 0.0
+      (fail — the lipsync pass was skipped or failed; do not silently approve).
 
     Fixed v1.1 (Session 11 review): was returning the FIRST take's score
     instead of the MAX, inconsistent with _best_take_composite / _identity
     / _motion_score pattern. A shot with takes
     [lipsync_score=0.7, lipsync_score=0.95] would veto despite an
     acceptable take being present.
+
+    F1b: The original 1.0 blind default masked dialogue shots that went through
+    generation with no lipsync pass.  The fix distinguishes: if any take is
+    dialogue AND it has neither a lipsync_score nor audio_embedded=True, that
+    take is syncing-unverified and should be caught by the gate.
     """
     best = 0.0
-    any_present = False
+    any_score_present = False
+    any_dialogue_unverified = False
+
     for take in takes:
         metadata = take.get("metadata") or {}
         score = metadata.get("lipsync_score")
         if score is not None:
-            any_present = True
+            any_score_present = True
             try:
                 best = max(best, float(score))
             except (TypeError, ValueError):
                 continue
-    return best if any_present else 1.0
+        elif metadata.get("audio_embedded"):
+            # Native-audio take: voice is baked in; treat as perfect sync.
+            any_score_present = True
+            best = max(best, 1.0)
+        elif metadata.get("has_dialogue"):
+            # Dialogue take with no lipsync_score and no audio_embedded:
+            # lipsync either didn't run or failed — this is the blind gap.
+            any_dialogue_unverified = True
+
+    if any_dialogue_unverified and not any_score_present:
+        # Every dialogue take is unverified: gate must fail.
+        return 0.0
+    if any_score_present:
+        return best
+    # No dialogue takes at all (non-dialogue shot): N/A pass.
+    return 1.0
 
 
 def pick_best_take_by_composite(takes: list[dict]) -> Optional[dict]:

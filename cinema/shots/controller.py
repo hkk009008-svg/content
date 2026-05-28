@@ -867,19 +867,55 @@ class ShotController:
         has_dialogue = cached_purpose in _dialogue_purposes
 
         if raw_api == "AUTO":
-            # Prefer the optimizer's per-shot suggestion over the shot-type template,
-            # so dialogue shots (purpose=dialogue_close_up/talking_head_full) route
-            # to VEO_NATIVE (native audio) instead of KLING_NATIVE.
+            # Prefer the optimizer's per-shot suggestion over the shot-type template.
             cached_suggestion = opt_spec_cached.get("suggested_video_api", "")
             if cached_suggestion and cached_suggestion != "AUTO" and cached_suggestion in API_REGISTRY:
                 target_api = cached_suggestion
-                # Dialogue shots use VEO_NATIVE; no shot-type template fallbacks needed —
-                # the engine's own cascade handles failures.
-                video_fallbacks = None
+                # F1a Lane V #18 §2 fix: preserve template fallbacks even when honoring
+                # a cached suggestion, so non-dialogue shots with a suggestion don't lose
+                # their cross-engine fallback chain.  Dialogue shots (see upgrade below)
+                # get None explicitly because the native-audio engine's internal cascade
+                # handles failures and cross-engine fallback to KLING_NATIVE would
+                # reintroduce the "no native audio" bug.
+                template = WORKFLOW_TEMPLATES.get(resolved_shot_type, WORKFLOW_TEMPLATES["medium"])
+                video_fallbacks = template.get("video_fallbacks")
             else:
                 template = WORKFLOW_TEMPLATES.get(resolved_shot_type, WORKFLOW_TEMPLATES["medium"])
                 target_api = template["target_api"]
                 video_fallbacks = template.get("video_fallbacks")
+
+            # F1a Lane V #18 §1 fix (consumer-side): when has_dialogue is True, the
+            # resolved target_api MUST carry native_audio for the native-audio path to
+            # work.  The optimizer's suggestion for dialogue_close_up returns KLING_NATIVE
+            # (first video-modality entry in PURPOSE_API_RANKING before VEO_NATIVE), which
+            # has no native_audio.  Override to the first native_audio video engine in the
+            # purpose ranking.  If none exists (policy change in API_REGISTRY), fall through
+            # to the current target_api and rely on the standalone lipsync pass (F1b).
+            if has_dialogue:
+                from domain.scene_decomposer import PURPOSE_API_RANKING
+                for _engine_key in PURPOSE_API_RANKING.get(cached_purpose, []):
+                    _engine_info = API_REGISTRY.get(_engine_key, {})
+                    if (
+                        _engine_info.get("native_audio")
+                        and _engine_info.get("modality") == "video"
+                        and _engine_info.get("status") == "live"
+                    ):
+                        if target_api != _engine_key:
+                            logger.info(
+                                "dialogue routing override: %s → %s "
+                                "(purpose=%s; original suggestion lacked native_audio)",
+                                target_api,
+                                _engine_key,
+                                cached_purpose,
+                            )
+                        target_api = _engine_key
+                        # Drop video_fallbacks for dialogue: the native-audio engine's
+                        # internal cascade handles failures; cross-engine fallbacks would
+                        # route to non-native-audio engines and silently remove embedded voice.
+                        video_fallbacks = None
+                        break
+                # If no native_audio engine found in ranking: keep resolved target_api.
+                # F1b's mandatory lipsync pass will cover the gap.
         else:
             target_api = raw_api
             video_fallbacks = None
@@ -952,6 +988,101 @@ class ShotController:
         engine_info = API_REGISTRY.get(winning_engine, {})
         if engine_info.get("native_audio") and has_dialogue:
             take["metadata"]["audio_embedded"] = True
+
+        # F1b: Write has_dialogue to the take so the auto-approve gate can
+        # distinguish "no-score because no dialogue" from "no-score because
+        # lipsync was skipped for a dialogue shot" (the blind-gate bug).
+        take["metadata"]["has_dialogue"] = has_dialogue
+
+        # F1b: Mandatory lipsync pass for dialogue shots that are NOT audio-embedded.
+        # Mirrors the apply_correction "lip_sync" action path (controller.py:1524-1543)
+        # but runs unconditionally during take generation so the gate always has a score.
+        #
+        # NOTE: generate_lip_sync_video's "mode" param is "auto"/"overlay"/"generation",
+        # NOT an engine name.  The optimizer cache carries suggested_lipsync (e.g.
+        # HEDRA_C3) as an engine-level hint, but there is no engine-selection knob on
+        # generate_lip_sync_video — the engine cascade inside lipsync_overlay/generation
+        # handles selection internally.  We pass mode="auto" (same as the manual
+        # lip_sync correction action) and let the cascade choose.
+        if has_dialogue and not take["metadata"].get("audio_embedded"):
+            try:
+                from lip_sync import generate_lip_sync_video, validate_lipsync_quality
+                chars_for_sync = shot.get("characters_in_frame", []) or scene.get("characters_present", [])
+                # Resolve the character list to full character dicts for _ensure_scene_audio.
+                project_for_sync = self.project
+                chars_dicts = [
+                    c for c in project_for_sync.get("characters", [])
+                    if c.get("id") in chars_for_sync
+                ]
+                audio_path_for_sync = self._host._ensure_scene_audio(scene, chars_dicts)
+                primary_ref_for_sync = (
+                    get_reference_image(project_for_sync, chars_for_sync[0])
+                    if chars_for_sync else None
+                )
+                if audio_path_for_sync and primary_ref_for_sync:
+                    lipsync_out = self._take_output_path(shot_id, take["id"] + "_ls", ".mp4")
+                    _ls_cascade: dict = {}
+                    ls_result = generate_lip_sync_video(
+                        character_image_path=primary_ref_for_sync,
+                        audio_path=audio_path_for_sync,
+                        output_path=lipsync_out,
+                        existing_video_path=final_vid,
+                        mode=settings.get("lip_sync_mode", "auto"),
+                        settings=settings,
+                        _cascade_out=_ls_cascade,
+                    )
+                    if ls_result and os.path.exists(ls_result):
+                        # Replace take video with the lip-synced output.
+                        final_vid = ls_result
+                        take["metadata"]["lipsync_score"] = validate_lipsync_quality(
+                            ls_result, audio_path_for_sync
+                        )
+                        if "cascade_metadata" in _ls_cascade:
+                            take["metadata"]["lipsync_cascade"] = _ls_cascade["cascade_metadata"]
+                        logger.info(
+                            "[DIALOGUE] shot=%s audio=standalone+lipsync score=%.3f",
+                            shot_id,
+                            take["metadata"]["lipsync_score"],
+                        )
+                    else:
+                        # Lipsync pass returned nothing — leave lipsync_score absent
+                        # (0.0 sentinel) so the auto-approve gate treats this as FAIL.
+                        take["metadata"]["lipsync_score"] = 0.0
+                        logger.warning(
+                            "[DIALOGUE] shot=%s audio=DEGRADED-no-lipsync "
+                            "(generate_lip_sync_video returned no output)",
+                            shot_id,
+                        )
+                else:
+                    # Missing audio or character ref — cannot run lipsync.
+                    take["metadata"]["lipsync_score"] = 0.0
+                    logger.warning(
+                        "[DIALOGUE] shot=%s audio=DEGRADED-no-lipsync "
+                        "(missing audio_path=%s or primary_ref=%s)",
+                        shot_id,
+                        audio_path_for_sync,
+                        primary_ref_for_sync,
+                    )
+            except Exception:
+                # Lipsync pass is advisory for generation; never fail the take.
+                # Leave lipsync_score absent/0.0 so the gate catches the gap.
+                take["metadata"].setdefault("lipsync_score", 0.0)
+                logger.warning(
+                    "[DIALOGUE] shot=%s audio=DEGRADED-lipsync-exception",
+                    shot_id,
+                    exc_info=True,
+                )
+        elif has_dialogue and take["metadata"].get("audio_embedded"):
+            # Native-audio take: voice is baked in at generation time.
+            # Use a high constant score — the engine's own sync quality is
+            # not measurable offline, but native-audio sync is structurally
+            # reliable (the model generates speech and video together).
+            # The auto-approve gate treats audio_embedded=True as a pass;
+            # this score is stored for telemetry only.
+            NATIVE_AUDIO_LIPSYNC_SCORE = 1.0
+            take["metadata"]["lipsync_score"] = NATIVE_AUDIO_LIPSYNC_SCORE
+            logger.info("[DIALOGUE] shot=%s audio=embedded-native", shot_id)
+        # Non-dialogue shots: no lipsync_score written → gate defaults to 1.0 (N/A).
 
         identity_score = 0.0
         primary_ref = cc.get("primary_reference")

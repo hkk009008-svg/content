@@ -610,6 +610,22 @@ class CinemaPipeline:
             logger.warning("Foley generation skipped for scene %s (non-critical)", scene_id, exc_info=True)
         return ""
 
+    @staticmethod
+    def _approved_take_metadata(shot: dict) -> dict:
+        """Return the metadata dict of the shot's approved final take, or {}.
+
+        Look up approved_final_take_id in motion_takes then postprocess_variants.
+        Used by _build_scene_packages to check audio_embedded on approved takes.
+        """
+        take_id = shot.get("approved_final_take_id", "")
+        if not take_id:
+            return {}
+        for collection in ("motion_takes", "postprocess_variants"):
+            for take in shot.get(collection) or []:
+                if isinstance(take, dict) and take.get("id") == take_id:
+                    return take.get("metadata") or {}
+        return {}
+
     def _build_scene_packages(self, project: Optional[dict] = None) -> tuple[list[dict], list[str]]:
         active_project = project or self.project
         scene_packages = []
@@ -619,6 +635,13 @@ class CinemaPipeline:
         for scene in active_project.get("scenes", []):
             scene_id = scene.get("id", "")
             clips = []
+            # F1b assembler guard: track whether EVERY approved shot in this
+            # scene has audio_embedded=True.  We only suppress standalone TTS
+            # when ALL shots are embedded — mixed scenes keep TTS for the
+            # non-embedded shots (conservative choice: double-voice on one
+            # embedded shot is less bad than silent non-embedded shots).
+            approved_shot_count = 0
+            all_embedded_count = 0
             for shot in scene.get("shots", []):
                 final_take_id = shot.get("approved_final_take_id", "")
                 final_path = self._resolve_take_path(shot, final_take_id)
@@ -626,13 +649,40 @@ class CinemaPipeline:
                     missing_shots.append(shot.get("id", ""))
                     continue
                 clips.append(final_path)
+                approved_shot_count += 1
+                take_meta = self._approved_take_metadata(shot)
+                if take_meta.get("audio_embedded"):
+                    all_embedded_count += 1
 
             self.scene_clips[scene_id] = clips
             characters = [
                 character for character in active_project.get("characters", [])
                 if character.get("id") in scene.get("characters_present", [])
             ]
-            scene_audio = self._ensure_scene_audio(scene, characters)
+            # Suppress standalone TTS only when EVERY approved shot is embedded.
+            # Mixed-embedded scenes: include TTS to avoid silent non-embedded shots.
+            all_shots_embedded = (
+                approved_shot_count > 0 and all_embedded_count == approved_shot_count
+            )
+            if all_shots_embedded:
+                scene_audio = None
+                logger.info(
+                    "[DIALOGUE] scene=%s: all %d shots are audio-embedded "
+                    "— suppressing standalone TTS from mux to avoid double-voice",
+                    scene_id,
+                    approved_shot_count,
+                )
+            else:
+                scene_audio = self._ensure_scene_audio(scene, characters)
+                if all_embedded_count > 0:
+                    # Mixed scene: some embedded, some not.  Log for observability.
+                    logger.info(
+                        "[DIALOGUE] scene=%s: %d/%d shots audio-embedded (mixed) "
+                        "— keeping TTS for non-embedded shots",
+                        scene_id,
+                        all_embedded_count,
+                        approved_shot_count,
+                    )
             foley_path = self._ensure_scene_foley(scene)
             scene_packages.append({
                 "scene_id": scene_id,
