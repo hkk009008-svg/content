@@ -18,6 +18,8 @@ Offline — no GPU, no pod, no API calls.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 from quality_max import _swap_to_hidream
 
 
@@ -77,3 +79,97 @@ class TestSwapToHidream:
     def test_noop_when_no_unet_node(self):
         wf = {"700": {"class_type": "LoraLoaderModelOnly", "inputs": {}}}
         assert _swap_to_hidream(wf, {"HiDreamModelLoader"}) is False
+
+
+def _build_keyframe_controller():
+    """A minimal ShotController that can run generate_keyframe_take up to the
+    generate_ai_broll seam (mirrors test_iterate_endpoint._build_controller).
+
+    The keyframe shot is plan-approved so the method proceeds; the image write is
+    short-circuited by a non-existent img_path (os.path.exists -> False) so the
+    method returns right after the seam without touching identity validation,
+    cost tracking, or the project mutation."""
+    from cinema.shots.controller import ShotController
+
+    shot = {
+        "id": "shot_1_0",
+        "plan_status": "approved",
+        "characters_in_frame": [],
+        "camera": "zoom_in_slow",
+        "target_api": "AUTO",
+    }
+    scene = {"id": "scene_1", "title": "T", "action": "A", "location_id": None, "shots": [shot]}
+    project = {
+        "id": "proj_1",
+        "scenes": [scene],
+        "characters": [],
+        "objects": [],
+        "locations": [],
+        "global_settings": {},
+    }
+
+    host = MagicMock()
+    host._refresh_project_snapshot.return_value = project
+    lifecycle = MagicMock()
+    runstate = MagicMock()
+    runstate.shot_results = {}
+    core = MagicMock()
+    core.project = project
+    core.project_dir = "/tmp/fake_project"
+    core.continuity.enhance_shot_prompt.return_value = {"prompt": "base prompt", "continuity_config": {}}
+    core.cost_tracker = MagicMock()
+
+    ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
+    ctrl._take_output_path = MagicMock(return_value="/nonexistent/keyframe.jpg")
+    ctrl._resolve_previous_approved_keyframe = MagicMock(return_value="")
+    ctrl._mutate_shot = MagicMock()
+    return ctrl, project
+
+
+class TestSuggestedImageApiForwarding:
+    """The controller seam feeding quality_max's HiDream gate. After Lane V #20
+    M-2 (d73eebb), generate_keyframe_take resolves shot_hint["image_api"] with a
+    guard: a user-pinned shot["image_api"] wins, else the optimizer's
+    suggested_image_api, else None. The consumer (_swap_to_hidream) is covered
+    above; these cover the (previously-untested) forward + its M-2 guard."""
+
+    def test_user_pinned_image_api_wins_over_suggestion(self):
+        # M-2 guard: a user pin on shot["image_api"] must beat the optimizer's
+        # suggestion (mirrors the video-routing target_api AUTO guard).
+        ctrl, project = _build_keyframe_controller()
+        project["global_settings"]["prompt_optimizer_enabled"] = True
+        project["scenes"][0]["shots"][0]["image_api"] = "FLUX_DEV"
+        opt_spec = {"suggested_image_api": "HIDREAM_I1", "image_prompt": "optimized prompt"}
+
+        with patch("cinema.shots.controller.generate_ai_broll") as mock_broll, \
+             patch("llm.prompt_optimizer.optimize_shot_prompt", return_value=opt_spec):
+            ctrl.generate_keyframe_take("scene_1", "shot_1_0", positive_prompt="a test prompt")
+
+        mock_broll.assert_called_once()
+        shot_hint = mock_broll.call_args.kwargs["shot_hint"]
+        assert shot_hint["image_api"] == "FLUX_DEV"
+
+    def test_forwards_suggested_image_api_into_shot_hint(self):
+        ctrl, project = _build_keyframe_controller()
+        project["global_settings"]["prompt_optimizer_enabled"] = True
+        opt_spec = {"suggested_image_api": "HIDREAM_I1", "image_prompt": "optimized prompt"}
+
+        with patch("cinema.shots.controller.generate_ai_broll") as mock_broll, \
+             patch("llm.prompt_optimizer.optimize_shot_prompt", return_value=opt_spec):
+            ctrl.generate_keyframe_take("scene_1", "shot_1_0", positive_prompt="a test prompt")
+
+        mock_broll.assert_called_once()
+        shot_hint = mock_broll.call_args.kwargs["shot_hint"]
+        assert shot_hint["image_api"] == "HIDREAM_I1"
+
+    def test_shot_hint_image_api_none_when_optimizer_disabled(self):
+        # prompt_optimizer_enabled defaults off -> opt_spec stays None -> the
+        # gate reads None and HiDream never fires (stays on FLUX).
+        ctrl, project = _build_keyframe_controller()
+
+        with patch("cinema.shots.controller.generate_ai_broll") as mock_broll:
+            ctrl.generate_keyframe_take("scene_1", "shot_1_0", positive_prompt="a test prompt")
+
+        mock_broll.assert_called_once()
+        shot_hint = mock_broll.call_args.kwargs["shot_hint"]
+        assert shot_hint["image_api"] is None
