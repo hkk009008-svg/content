@@ -817,6 +817,210 @@ class ShotController:
             "engine": engine,
         }
 
+    def _finalize_motion_take(
+        self,
+        scene: dict,
+        shot: dict,
+        take: dict,
+        video_path: str,
+        *,
+        source_image: str,
+        target_api: str,
+        cc: dict,
+        settings: dict,
+        resolved_shot_type: str,
+        driving_video_path: str = "",
+        parent_take_id: str = "",
+        intent_override=None,
+        revised_prompt: str = "",
+        extra_metadata: Optional[dict] = None,
+    ) -> dict:
+        """Post-generation finalize step for a motion take.
+
+        Extracted from generate_motion_take (F2a) so the storyboard path
+        (F2b) can register each per-shot segment as a motion take without
+        duplicating this logic.  The normal generate_motion_take path is
+        behavior-identical — it calls this method with the same arguments
+        it previously inlined.
+
+        Performs in order:
+          1. Continuity / identity validation.
+          2. Motion-fidelity gate (when driving_video_path is provided).
+          3. Provenance fields (parent_take_id / intent / revised_prompt).
+          4. take["path"] assignment.
+          5. _mutate_shot (appends to motion_takes + sets generated_video).
+          6. shot_results update.
+          7. _rebuild_review_clips + _save_checkpoint.
+          8. Cost record (best-effort).
+          9. Budget gate.
+          10. MOTION_READY progress event.
+
+        Returns:
+            ``{"success": True, "take": stored_take, "video": video_path,
+               "identity_score": <float>}``
+        """
+        shot_id = shot.get("id", "")
+        scene_id = scene.get("id", "")
+
+        # 1. Identity / continuity validation
+        identity_score = 0.0
+        primary_ref = cc.get("primary_reference")
+        chars_in_frame = shot.get("characters_in_frame", [])
+        if chars_in_frame and primary_ref:
+            vid_result = self.continuity.validate_shot(
+                video_path,
+                [chars_in_frame[0]],
+                shot_type=resolved_shot_type,
+                mode="standard",
+                attempt=0,
+                max_attempts=settings.get("identity_retry_max", 3),
+            )
+            identity_score = vid_result.overall_score if hasattr(vid_result, "overall_score") else 0.0
+            take["metadata"]["identity_score"] = identity_score
+
+        # 2. Motion fidelity gate
+        if driving_video_path and os.path.exists(driving_video_path):
+            try:
+                from performance.motion_gate import score_motion_fidelity
+                motion_score = score_motion_fidelity(video_path, driving_video_path)
+                take["metadata"]["motion_fidelity"] = motion_score
+                if motion_score is not None:
+                    logger.info(
+                        "motion fidelity scored",
+                        extra={
+                            "shot_id": shot_id,
+                            "motion_fidelity": round(motion_score, 3),
+                        },
+                    )
+            except Exception:
+                logger.warning(
+                    "motion-gate score skipped",
+                    exc_info=True,
+                    extra={"shot_id": shot_id},
+                )
+                take["metadata"]["motion_fidelity"] = None
+
+            try:
+                from performance.motion_gate import needs_remotion
+                motion_score = take["metadata"].get("motion_fidelity")
+                floor_override = settings.get("motion_quality_threshold")
+                if motion_score is not None:
+                    below_floor = (
+                        motion_score < floor_override
+                        if floor_override is not None
+                        else needs_remotion(motion_score, shot_type=resolved_shot_type)
+                    )
+                else:
+                    below_floor = False
+                if below_floor:
+                    take["metadata"]["motion_floor_failed"] = True
+                    logger.warning(
+                        "motion below floor",
+                        extra={
+                            "shot_id": shot_id,
+                            "motion_fidelity": round(motion_score, 3),
+                            "shot_type": resolved_shot_type,
+                        },
+                    )
+                    self.progress(
+                        "MOTION_BELOW_FLOOR",
+                        f"Shot {shot_id} motion fidelity {motion_score:.3f} below floor for {resolved_shot_type}",
+                        -1,
+                        scene_id=scene_id,
+                        shot_id=shot_id,
+                        motion_fidelity=motion_score,
+                        shot_type=resolved_shot_type,
+                    )
+            except Exception:
+                logger.warning(
+                    "motion-gate floor check skipped",
+                    exc_info=True,
+                    extra={"shot_id": shot_id},
+                )
+
+        # 3. Provenance + path
+        take["path"] = video_path
+        if parent_take_id:
+            take["parent_take_id"] = parent_take_id
+        if intent_override is not None:
+            take["intent"] = intent_override.model_dump()
+        if revised_prompt:
+            take["revised_prompt"] = revised_prompt
+        if extra_metadata:
+            take["metadata"].update(extra_metadata)
+
+        # 4–5. Persist take via mutation
+        final_vid = video_path
+
+        def _mutator(_scene: dict, project_shot: dict):
+            project_shot.setdefault("motion_takes", []).append(take)
+            project_shot["generated_video"] = final_vid
+            return MutationResult(take, save=True)
+
+        stored_take = self._mutate_shot(shot_id, _mutator)
+
+        # 6. Update shot_results
+        self._runstate.shot_results[shot_id] = {
+            "image": source_image,
+            "video": final_vid,
+            "identity_score": identity_score,
+            "status": "final_review",
+            "take_id": take["id"],
+        }
+
+        # 7. Rebuild + checkpoint
+        self._host._rebuild_review_clips()
+        self._host._save_checkpoint()
+
+        # 8. Cost record (best-effort)
+        try:
+            video_id = self.project.get("id", "")
+            self.cost_tracker.record_api_call(
+                target_api,
+                operation="motion_generation",
+                shot_id=shot_id,
+                video_id=video_id,
+            )
+        except Exception:
+            logger.warning(
+                "motion cost record skipped",
+                exc_info=True,
+                extra={"shot_id": shot_id},
+            )
+
+        # 9. Budget gate
+        if self.cost_tracker.is_over_budget():
+            self.progress(
+                "BUDGET_EXCEEDED",
+                f"Spend ${self.cost_tracker.spent_usd:.2f} reached budget cap "
+                f"${self.cost_tracker.budget_usd:.2f}. Pausing.",
+                -1,
+                scene_id=scene_id,
+                shot_id=shot_id,
+                spent=self.cost_tracker.spent_usd,
+                budget=self.cost_tracker.budget_usd,
+            )
+            self._lifecycle.pause()
+
+        # 10. Progress event
+        self.progress(
+            "MOTION_READY",
+            f"Motion take ready for {shot_id}",
+            -1,
+            scene_id=scene_id,
+            shot_id=shot_id,
+            video_url=final_vid,
+            identity_score=identity_score,
+            take_id=take["id"],
+            take_kind="motion",
+        )
+        return {
+            "success": True,
+            "take": stored_take,
+            "video": final_vid,
+            "identity_score": identity_score,
+        }
+
     def generate_motion_take(
         self,
         scene_id: str,
@@ -1084,177 +1288,24 @@ class ShotController:
             logger.info("[DIALOGUE] shot=%s audio=embedded-native", shot_id)
         # Non-dialogue shots: no lipsync_score written → gate defaults to 1.0 (N/A).
 
-        identity_score = 0.0
-        primary_ref = cc.get("primary_reference")
-        chars_in_frame = shot.get("characters_in_frame", [])
-        if chars_in_frame and primary_ref:
-            vid_result = self.continuity.validate_shot(
-                final_vid,
-                [chars_in_frame[0]],
-                shot_type=resolved_shot_type,
-                mode="standard",
-                attempt=0,
-                max_attempts=settings.get("identity_retry_max", 3),
-            )
-            identity_score = vid_result.overall_score if hasattr(vid_result, "overall_score") else 0.0
-            take["metadata"]["identity_score"] = identity_score
-
-        # --- Motion fidelity gate (handoff §11) ---
-        # When the performance phase produced a driving video AND a downstream
-        # engine actually consumed it (Sora/Veo), score whether the motion
-        # output follows the driving signature. Inconclusive scores (None)
-        # are stored as the literal sentinel so the operator can tell "didn't
-        # measure" from "measured low".
-        if driving_video_path and os.path.exists(driving_video_path):
-            try:
-                from performance.motion_gate import score_motion_fidelity
-                motion_score = score_motion_fidelity(final_vid, driving_video_path)
-                take["metadata"]["motion_fidelity"] = motion_score
-                if motion_score is not None:
-                    logger.info(
-                        "motion fidelity scored",
-                        extra={
-                            "shot_id": shot_id,
-                            "motion_fidelity": round(motion_score, 3),
-                        },
-                    )
-            except Exception:
-                # Gate is advisory only — never fail the shot because the gate broke.
-                logger.warning(
-                    "motion-gate score skipped",
-                    exc_info=True,
-                    extra={"shot_id": shot_id},
-                )
-                take["metadata"]["motion_fidelity"] = None
-
-            # --- Motion floor check (handoff §11 / B4) ---
-            # Advisory only — never raise, never fail the shot. A separate
-            # try/except isolates floor-check failures from the score block above.
-            try:
-                from performance.motion_gate import needs_remotion
-                motion_score = take["metadata"].get("motion_fidelity")
-                # Per-project `motion_quality_threshold` UI knob overrides the
-                # per-shot-type floor in MOTION_FIDELITY_FLOORS. When set, the
-                # comparison is strict scalar; when unset, defer to needs_remotion.
-                floor_override = settings.get("motion_quality_threshold")
-                if motion_score is not None:
-                    below_floor = (
-                        motion_score < floor_override
-                        if floor_override is not None
-                        else needs_remotion(motion_score, shot_type=resolved_shot_type)
-                    )
-                else:
-                    below_floor = False
-                if below_floor:
-                    take["metadata"]["motion_floor_failed"] = True
-                    logger.warning(
-                        "motion below floor",
-                        extra={
-                            "shot_id": shot_id,
-                            "motion_fidelity": round(motion_score, 3),
-                            "shot_type": resolved_shot_type,
-                        },
-                    )
-                    self.progress(
-                        "MOTION_BELOW_FLOOR",
-                        f"Shot {shot_id} motion fidelity {motion_score:.3f} below floor for {resolved_shot_type}",
-                        -1,
-                        scene_id=scene_id,
-                        shot_id=shot_id,
-                        motion_fidelity=motion_score,
-                        shot_type=resolved_shot_type,
-                    )
-            except Exception:
-                # Floor check is advisory — keep WARNING to match the score
-                # block above; never raise for an advisory gate failure.
-                logger.warning(
-                    "motion-gate floor check skipped",
-                    exc_info=True,
-                    extra={"shot_id": shot_id},
-                )
-
-        take["path"] = final_vid
-
-        # S16: populate directorial iteration provenance when supplied.
-        if parent_take_id:
-            take["parent_take_id"] = parent_take_id
-        if intent_override is not None:
-            take["intent"] = intent_override.model_dump()
-        if revised_prompt:
-            take["revised_prompt"] = revised_prompt
-            # params_delta + anchor_refs are populated post-generation by
-            # regenerate_with_intent's _stash_delta mutator (single source of
-            # truth — pre-seed removed per operator Lane V #4 F5).
-
-        def _mutator(_scene: dict, project_shot: dict):
-            project_shot.setdefault("motion_takes", []).append(take)
-            project_shot["generated_video"] = final_vid
-            return MutationResult(take, save=True)
-
-        stored_take = self._mutate_shot(shot_id, _mutator)
-        self._runstate.shot_results[shot_id] = {
-            "image": source_image,
-            "video": final_vid,
-            "identity_score": identity_score,
-            "status": "final_review",
-            "take_id": take["id"],
-        }
-        self._host._rebuild_review_clips()
-        self._host._save_checkpoint()
-
-        # Record video generation cost (success path only — after checkpoint).
-        try:
-            video_id = self.project.get("id", "")
-            self.cost_tracker.record_api_call(
-                target_api,
-                operation="motion_generation",
-                shot_id=shot_id,
-                video_id=video_id,
-            )
-        except Exception:
-            # Same as keyframe-cost: best-effort tracking; the motion take
-            # itself succeeded.
-            logger.warning(
-                "motion cost record skipped",
-                exc_info=True,
-                extra={"shot_id": shot_id},
-            )
-
-        # Budget gate — pause the pipeline when in-process spend has crossed
-        # the operator's budget_limit_usd cap.  Uses lifecycle.pause() so the
-        # operator can inspect the project and either raise the cap and resume
-        # or cancel the run.  The gate fires once per shot completion (after
-        # checkpoint) so all work done so far is safely persisted.
-        if self.cost_tracker.is_over_budget():
-            self.progress(
-                "BUDGET_EXCEEDED",
-                f"Spend ${self.cost_tracker.spent_usd:.2f} reached budget cap "
-                f"${self.cost_tracker.budget_usd:.2f}. Pausing.",
-                -1,
-                scene_id=scene_id,
-                shot_id=shot_id,
-                spent=self.cost_tracker.spent_usd,
-                budget=self.cost_tracker.budget_usd,
-            )
-            self._lifecycle.pause()
-
-        self.progress(
-            "MOTION_READY",
-            f"Motion take ready for {shot_id}",
-            -1,
-            scene_id=scene_id,
-            shot_id=shot_id,
-            video_url=final_vid,
-            identity_score=identity_score,
-            take_id=take["id"],
-            take_kind="motion",
+        # F2a: delegate the post-generation finalize step to the reusable helper.
+        # Behavior is identical to the inlined block this replaces — same take shape,
+        # same cost call, same shot_results, same continuity validation.
+        return self._finalize_motion_take(
+            scene,
+            shot,
+            take,
+            final_vid,
+            source_image=source_image,
+            target_api=target_api,
+            cc=cc,
+            settings=settings,
+            resolved_shot_type=resolved_shot_type,
+            driving_video_path=driving_video_path,
+            parent_take_id=parent_take_id,
+            intent_override=intent_override,
+            revised_prompt=revised_prompt,
         )
-        return {
-            "success": True,
-            "take": stored_take,
-            "video": final_vid,
-            "identity_score": identity_score,
-        }
 
     def regenerate_shot(self, scene_id: str, shot_id: str) -> dict:
         """Compatibility wrapper for the older regenerate endpoint."""

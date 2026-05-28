@@ -787,6 +787,106 @@ def stitch_modules(module_paths: list, final_output: str) -> str:
     print(f"      Stitched sequence: {final_output}")
     return final_output
 
+
+# ---------------------------------------------------------------------------
+# Storyboard split (F2a)
+# ---------------------------------------------------------------------------
+
+def split_video_into_segments(
+    source_path: str,
+    durations: list,
+    output_dir: str,
+    stem: str = "segment",
+) -> list:
+    """Split a combined video into per-segment mp4s matching the given durations.
+
+    Used by the storyboard integration (F2b) to convert Kling's combined
+    storyboard output back into per-shot segments so they can flow through
+    the normal per-shot continuity / take-registration / assembly machinery.
+
+    Args:
+        source_path: Path to the combined mp4 (e.g. storyboard output).
+        durations: Ordered list of floats, one per desired segment (seconds).
+            They need not sum exactly to the video length — any remainder is
+            absorbed into the final segment (clamped to end-of-video).
+        output_dir: Directory in which to write segment files.  Created if
+            absent.
+        stem: Filename prefix for segment files.  Final names are
+            ``{stem}_000.mp4``, ``{stem}_001.mp4``, etc.
+
+    Returns:
+        List of absolute paths to the written segment files, in order.
+        Returns an empty list if ``source_path`` does not exist or
+        ``durations`` is empty.
+
+    Raises:
+        RuntimeError: If any ffmpeg subprocess exits with a non-zero code.
+            The message includes the captured stderr for diagnosis.
+
+    Notes:
+        - Uses ``-c copy`` (stream-copy) for speed and lossless quality.
+          Stream-copy may drift slightly at non-keyframe boundaries; this is
+          acceptable for continuity validation which is score-based, not
+          frame-exact.
+        - Segments shorter than 1 s are written as-is (the caller — i.e.,
+          the storyboard API — already enforces 1 s minimum per shot during
+          duration allocation).
+        - The last segment always runs to the end of the source video
+          (``-to`` is omitted for the final segment) so floating-point
+          accumulation errors do not drop the last few frames.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    if not source_path or not os.path.exists(source_path):
+        _log.warning("split_video_into_segments: source not found: %s", source_path)
+        return []
+    if not durations:
+        _log.warning("split_video_into_segments: empty durations list")
+        return []
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    segment_paths = []
+    start = 0.0
+
+    for idx, dur in enumerate(durations):
+        out_path = os.path.join(output_dir, f"{stem}_{idx:03d}.mp4")
+        is_last = idx == len(durations) - 1
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", str(start),
+            "-i", source_path,
+        ]
+        if not is_last:
+            cmd += ["-t", str(dur)]
+        cmd += ["-c", "copy", "-avoid_negative_ts", "make_zero", out_path]
+
+        try:
+            result = subprocess.run(
+                cmd,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+        except subprocess.CalledProcessError as exc:
+            stderr_text = exc.stderr.decode(errors="replace")
+            raise RuntimeError(
+                f"split_video_into_segments: ffmpeg failed on segment {idx} "
+                f"(start={start:.3f}s, dur={dur:.3f}s): {stderr_text}"
+            ) from exc
+
+        segment_paths.append(os.path.abspath(out_path))
+        _log.debug(
+            "split_video_into_segments: segment %d written (start=%.3fs dur=%.3fs) → %s",
+            idx, start, dur, out_path,
+        )
+        start += dur
+
+    return segment_paths
+
+
 # ---------------------------------------------------------------------------
 # Motion Quality Assessment (Component C)
 # ---------------------------------------------------------------------------
