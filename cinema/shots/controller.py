@@ -421,6 +421,7 @@ class ShotController:
                         global_settings=settings,
                         scene_context=f"Scene: {scene.get('title', '')}\nAction: {scene.get('action', '')[:300]}",
                         has_dialogue=has_dialogue,
+                        intent_notes=shot.get("intent_notes", ""),
                     )
                     # Persist optimizer output for regen + telemetry
                     def _stash_cache(_scene, project_shot):
