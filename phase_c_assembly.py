@@ -269,9 +269,18 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             # instead of EmptyLatentImage (node 102)
             workflow["13"]["inputs"]["latent_image"] = ["201", 0]
 
-            # Set denoise strength in BasicScheduler (node 17)
-            workflow["17"]["inputs"]["denoise"] = denoise_strength
-            print(f"      ↳ img2img mode: denoise={denoise_strength:.2f} from {os.path.basename(init_image)}")
+            # Set denoise strength in BasicScheduler (node 17).
+            # img2img_denoise from global_settings.continuity_options overrides the
+            # caller-supplied denoise_strength when present (slider: min 0.2, max 0.6).
+            _ui_denoise = None
+            if ctx is not None:
+                _co = (ctx.global_settings or {}).get("continuity_options", {})
+                _raw = _co.get("img2img_denoise")
+                if _raw is not None and isinstance(_raw, (int, float)):
+                    _ui_denoise = max(0.2, min(0.6, float(_raw)))
+            effective_denoise = _ui_denoise if _ui_denoise is not None else denoise_strength
+            workflow["17"]["inputs"]["denoise"] = effective_denoise
+            print(f"      ↳ img2img mode: denoise={effective_denoise:.2f} from {os.path.basename(init_image)}")
         else:
             # Full text-to-image: EmptyLatentImage feeds sampler (default workflow)
             workflow["13"]["inputs"]["latent_image"] = ["102", 0]

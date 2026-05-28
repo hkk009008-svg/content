@@ -403,3 +403,69 @@ class TestGetAdaptivePulidWeight:
             base_params={"pulid_weight": 0.65},
         )
         assert result == pytest.approx(0.65)
+
+
+# --- img2img_denoise slider overlay (closes the inert-toggle finding) --------
+
+
+class TestImg2ImgDenoiseOverlay:
+    """img2img_denoise (continuity_options) must reach params['denoise_default']."""
+
+    def test_slider_value_reaches_denoise_default(self):
+        settings = {"continuity_options": {"img2img_denoise": 0.5}}
+        params = get_workflow_params("medium", settings=settings)
+        assert params["denoise_default"] == pytest.approx(0.5)
+
+    def test_slider_applies_across_all_shot_types(self):
+        settings = {"continuity_options": {"img2img_denoise": 0.45}}
+        for shot_type in ("portrait", "medium", "wide", "action", "landscape"):
+            params = get_workflow_params(shot_type, settings=settings)
+            assert params["denoise_default"] == pytest.approx(0.45), (
+                f"{shot_type} denoise_default not overridden"
+            )
+
+    def test_absent_continuity_options_leaves_template_default(self):
+        """No continuity_options key → template default is untouched."""
+        params_default = get_workflow_params("medium")
+        params_no_co = get_workflow_params("medium", settings={"flux_guidance": 3.5})
+        assert params_default["denoise_default"] == params_no_co["denoise_default"]
+
+    def test_absent_img2img_denoise_key_leaves_template_default(self):
+        params_default = get_workflow_params("medium")
+        params_co_empty = get_workflow_params("medium", settings={"continuity_options": {}})
+        assert params_default["denoise_default"] == params_co_empty["denoise_default"]
+
+    def test_out_of_range_value_is_clamped_to_min(self):
+        settings = {"continuity_options": {"img2img_denoise": 0.05}}
+        params = get_workflow_params("medium", settings=settings)
+        assert params["denoise_default"] == pytest.approx(0.2)
+
+    def test_out_of_range_value_is_clamped_to_max(self):
+        settings = {"continuity_options": {"img2img_denoise": 0.99}}
+        params = get_workflow_params("medium", settings=settings)
+        assert params["denoise_default"] == pytest.approx(0.6)
+
+    def test_non_numeric_value_is_ignored(self):
+        params_default = get_workflow_params("medium")
+        params_bad = get_workflow_params(
+            "medium", settings={"continuity_options": {"img2img_denoise": "high"}}
+        )
+        assert params_default["denoise_default"] == params_bad["denoise_default"]
+
+    def test_no_settings_leaves_template_default(self):
+        params = get_workflow_params("medium", settings=None)
+        assert "denoise_default" in params  # template always has it
+
+    def test_other_overrides_unaffected(self):
+        """img2img_denoise override must not disturb guidance/sampler/steps."""
+        settings = {
+            "flux_guidance": 4.0,
+            "comfyui_sampler": "euler",
+            "comfyui_steps": 30,
+            "continuity_options": {"img2img_denoise": 0.4},
+        }
+        params = get_workflow_params("portrait", settings=settings)
+        assert params["guidance"] == pytest.approx(4.0)
+        assert params["sampler"] == "euler"
+        assert params["steps"] == 30
+        assert params["denoise_default"] == pytest.approx(0.4)

@@ -487,6 +487,14 @@ def get_workflow_params(
         if comfyui_steps is not None and isinstance(comfyui_steps, (int, float)):
             params["steps"] = int(comfyui_steps)
 
+        # img2img_denoise is nested under continuity_options (unlike the top-level
+        # knobs above).  Validate in-range [0.2, 0.6] matching the slider bounds
+        # in web_server.py:331 before writing — the JSON API can send any float.
+        img2img_denoise = settings.get("continuity_options", {}).get("img2img_denoise")
+        if img2img_denoise is not None and isinstance(img2img_denoise, (int, float)):
+            clamped = max(0.2, min(0.6, float(img2img_denoise)))
+            params["denoise_default"] = clamped
+
     return params
 
 
