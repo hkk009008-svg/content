@@ -679,6 +679,16 @@ def generate_ai_broll_max(
             if accepted is not None:
                 params[param_key] = accepted
 
+        # img2img_denoise is nested under continuity_options (not a flat UI key),
+        # so it isn't in the loop above. Overlay it onto denoise_default, which
+        # quality_max applies at the BasicScheduler denoise node (~line 481).
+        # Mirrors the standard-path wire at phase_c_assembly.py:276-281 (same
+        # [0.2, 0.6] slider clamp). Completes the max-tier half of img2img_denoise.
+        _co = (ctx.global_settings or {}).get("continuity_options", {})
+        _i2i = _co.get("img2img_denoise") if isinstance(_co, dict) else None
+        if isinstance(_i2i, (int, float)):
+            params["denoise_default"] = max(0.2, min(0.6, float(_i2i)))
+
     # Apply adaptive PuLID weight override (from continuity feedback loop)
     if pulid_weight_override is not None:
         params["pulid_weight"] = pulid_weight_override
