@@ -60,6 +60,7 @@ status: DIRECTOR DRAFT — pending operator REPLY-cycle then user-principal sign
 6. **Cost envelope per tier updated with cycle-16 actuals** + a dedicated cost-attribution section (§9) documenting the phantom-Sora / Kling-double-count / ElevenLabs-multiplication bugs per user Q2.
 7. **Pipeline upgrade roadmap with P0/P1/P2/P3 priority** + an implemented-but-unutilized catalog (§10) per user Q3 and audit `a79c59`.
 8. **Rule #16 codification** (per user Q4) in the process-discipline section, with the cycle-16 race-shape catalog re-numbered onto a stable shape-based scheme. See §8.
+9. **Insight-achievement reframe** (per user-principal design advisory `brief-2.0-advisory.md`). The test's *product* shifts from a pass/fail verdict to **located divergence-points** — places where the brief failed to transmit intent so behavior matched expectation. PASS/DEGRADED/FAIL becomes the *detector*; the divergence-point is the *product*. Mechanism: intent-encoding + purpose-verification + divergence-logging, piloted incrementally. See §2.6 (frame) + §8.6 (mechanism).
 
 ---
 
@@ -179,6 +180,54 @@ Per-tier verdict aggregates per-cell:
 
 A cell that exceeds its cost band by >2× without a logged reason is itself a
 finding (cost-attribution class — see §9).
+
+### §2.6 Test philosophy — insight-achievement frame (advisory-integrated)
+
+Per the user-principal design advisory (`brief-2.0-advisory.md`), v2.0 reframes
+what the test is *for*. This frame governs the whole brief; hold it throughout.
+
+**The product is a located divergence-point, not a verdict.** The
+PASS/DEGRADED/FAIL machinery of §2.4 is the *detector*. The *product* is the
+**divergence-point**: the specific place where the agent's task-model diverged
+from the predictor's intent-model — i.e., where the brief failed to transmit
+intent clearly enough that behavior matched expectation. Each divergence-point
+is an actionable target for enriching the next brief.
+
+**The core distinction — read once, hold throughout.** The goal is
+**better-aligned behavior achieved by encoding intent and purpose more richly
+into the protocol** — NOT agent self-understanding in any literal sense.
+
+- *In scope:* briefs + verification that carry *why*/*intent*, so an agent
+  reasons from purpose when a spec doesn't cover a case, and local decisions
+  extrapolate correctly from the goal.
+- *Out of scope:* any mechanism that treats agent-generated self-description as
+  genuine introspective self-knowledge. An agent's "what I'm doing and why" text
+  is plausible reconstruction, useful as *signal* — not a true internal causal
+  trace. Do not mistake it for real self-access.
+
+**The failure mode to avoid.** Optimizing toward output that *looks like*
+deepening self-understanding (more elaborate rationale-talk) instead of toward
+*actual better-aligned behavior* (decisions that match intent). The first is
+easy to produce and measure; the second is the goal. **The protocol must not
+reward rationale-talk volume.** This is the same appearance-vs-substance /
+prevention-vs-verification discipline the protocol applies elsewhere (cf. Rule
+#12 type-declaration-is-not-write-evidence) — applied here too.
+
+**The metric.** **Prediction-match rate ↑ and divergence-point frequency ↓
+across cycles, with no increase in rationale-talk.** That decreasing-divergence
+trend is the measurable evidence the mechanism works. If divergence frequency
+does *not* fall, intent-encoding is producing rationale-talk without behavioral
+effect — the failure mode above; kill or rework the mechanism (§8.6.4).
+
+**Tightening = intent-clarification.** Protocol-tightening is not merely
+rule-reduction; it is reducing the places where an agent must *guess* intent.
+The divergence-points (§8.6.3) are a direct map of where intent leaks — so they
+tell us **where to tighten next**, evidence-driven, consistent with the existing
+N=2 emergence-from-evidence discipline. Tighten there first, not speculatively.
+
+The mechanism that operationalizes this frame (intent-encoding +
+purpose-verification + divergence-logging, as candidates piloted incrementally)
+is specified in §8.6.
 
 ---
 
@@ -311,11 +360,17 @@ firing is invalid until a marker is added.
 - **PREDICTION (v2.0):** "P-KEYFRAME PuLID-FLUX produces identity-locked keyframes — REQUIRED MARKER: log shows `via ComfyUI PuLID` **and** `PuLID face-locked to: <canonical>.jpg` **and** NO `missing_node_type` error."
 - **Evaluation:** marker present + output present → **PASS**. Marker absent but output present → **DEGRADED** (compensating mechanism; investigate). Marker absent + output absent → **FAIL**.
 
-### §4.3 Cell template (v2.0 — marker field added)
+### §4.3 Cell template (v2.0 — intent + marker + divergence-point fields)
 
 ```
 Cell ID / phase / class
 Stage in pipeline · Test tier · Estimated cost · Wall-clock prediction
+
+INTENT (write BEFORE prediction):  ← NEW v2.0: what this cell serves + what a
+  correct outcome accomplishes for the larger goal, in 1-2 concrete sentences.
+  Adequacy test: could a cold-context agent, given ONLY this, choose correctly
+  between two ambiguous implementation paths? If not, it is too vague to verify
+  against (§8.6.1). Optional for mechanical cells; required where path is ambiguous.
 
 PREDICTION (write BEFORE running):
   Expected output (shape)
@@ -332,6 +387,13 @@ ACTUAL (fill DURING/AFTER):
 DELTA:
   Classification: PASS | DEGRADED | MINOR-DELTA | MAJOR-DELTA | FALSIFIED
   Reasoning (must address marker presence explicitly)
+  DIVERGENCE-POINT (when DELTA ≠ PASS):  ← NEW v2.0
+    predicted / actual:  mechanism-level (the §4 marker hit/miss)
+    classification:      INTENT-GAP | REAL-BUG | PREDICTION-ERROR
+    fix-target:          §section whose intent under-transmitted (INTENT-GAP) |
+                         finding ID + severity (REAL-BUG) | recalibrate predictor (PREDICTION-ERROR)
+    Only INTENT-GAP feeds brief-enrichment + the §8.6.3 ledger — not every miss
+    is an intent-gap; a REAL-BUG must NOT trigger a brief edit.
 
 INSIGHT (if DELTA ≠ PASS): what this reveals · confidence · investigation cost
 ADJUSTMENT: target (file:line / prompt / param) · tweak · risk · verification
@@ -356,7 +418,7 @@ are concrete; markers for Phase-1-pending closures are flagged.
 | PR-DIALOGUE ElevenLabs | `text-to-speech/<voice_id>` HTTP request | concrete |
 | Voice assignment | `🎙️ Auto-assigned voice: 안나 (Anna)` for Korean female | concrete (VG-B1 closed) |
 | BGM contemplative | `[BGM] ... contemplative ...` → 62bpm B-minor + Rhodes prompt | concrete (I-B2 closed) |
-| Tri-mix audio | `[VIDEO/AUDIO] tri-mix: voice+bgm+foley` | concrete (C-B2 closed) |
+| P-ASSEMBLY tri-mix | PASS: `Final cinema video assembled` + `mix=standalone-dialogue+BGM+foley` (or `embedded-voice+BGM+foley`); DEGRADED: `Final cinema video assembled (BGM only, no dialogue audio)` (C-B2 silent-video fallback) | concrete — operator Rule #12 grep-verified (REPLY §3.1); corrects the fabricated `[VIDEO/AUDIO] tri-mix:` string that does NOT exist in `cinema_pipeline.py` |
 | P-CHIEFDIR | `[DIRECTOR] decision=<APPROVED\|MODIFIED\|BLOCKED>` (no `Evaluation parse error`) | [PHASE-1-DEPENDENT — C-D3 closure] |
 | P-DECOMPOSE judge | `[Ensemble] Judge: <model> picked <winner> with score <X>` | [PHASE-1-DEPENDENT — C-D2 closure] |
 | Auto-approve plan | `[AUTO-APPROVE] plan: <decision>` (parse-error → `DEFERRED`, not VETO) | [PHASE-1-DEPENDENT — C-D3 part 2] |
@@ -390,7 +452,7 @@ its `docs/test-cells/` artifact.
 | **P-MOTION** | image→video | `{success, take_id, video}`; ~5s; identity persists; camera honored; mute; 30s-3min | `[KLING-NATIVE]`/`[VEO]`/`[LTX]` + `Polling task` + `succeed` | **C-D-pulid-1** insight: Kling Native carries ~0.754 identity without PuLID — DEGRADED-compensated, not PASS |
 | **P-PERFORMANCE** | performance capture (lipsync) | `PhaseResult {ok, "N new, M skipped, K failed"}`; per-shot `{success, skipped, error}`; 20-90s; $0.10-0.50/shot | `[HEDRA]` + audio-source confirmation | **C-D6** signature drift `_ensure_scene_audio` (closed `024723d`); **C-D-perf-1** cell was UNEXERCISED in cycle-16 (pre-fix code in memory) — MUST exercise this run |
 | **P-IDENTITY** | GhostFaceNet validation | `{overall_score [0-1], passed, character_results}`; threshold 0.70 default; 0.5-3s; $0 (local) | `[IDENTITY] overall_score=<X> passed=<bool>` | — (threshold sweep is PA-IDENTITY in Tier D) |
-| **P-ASSEMBLY** | FFmpeg tri-mix + loudnorm | `{success, final_path}`; single audio stream post-mix; BGM −23 LUFS; foley 0.20; 30s-5min | `[VIDEO/AUDIO] tri-mix: voice+bgm+foley` + ffprobe shows 3 source streams | **C-B2 CRITICAL** tri-mix fell to BGM-only on silent Kling video (closed `b11edd4`); **M-B3** amix duration=longest + `-shortest` (closed `ee70fd1`→`e867aac`); **LV-1** root cause is Kling silent video, not a filtergraph flag bug (ARCH §12.6 doc-note closed `d16733f`) |
+| **P-ASSEMBLY** | FFmpeg tri-mix + loudnorm | `{success, final_path}`; single audio stream post-mix; BGM −23 LUFS; foley 0.20; 30s-5min | `Final cinema video assembled` + `mix=...+BGM+foley` (DEGRADED if `(BGM only, no dialogue audio)`) + ffprobe shows 3 source streams | **C-B2 CRITICAL** tri-mix fell to BGM-only on silent Kling video (closed `b11edd4`); **M-B3** amix duration=longest + `-shortest` (closed `ee70fd1`→`e867aac`); **LV-1** root cause is Kling silent video, not a filtergraph flag bug (ARCH §12.6 doc-note closed `d16733f`) |
 | **P-BGM** | background music gen | mp3 at `temp_dir/bgm_<mood>.mp3`; ~47s; matches mood; ~−14 LUFS; $0.10-0.30 | `[BGM] <mood>` resolves to specific (not generic) prompt | **I-B2** "contemplative" missing from vibe dict → generic fallback (closed `dac17c3`: 62bpm B-minor + Rhodes + Sakamoto) |
 
 ### §5.2 Gate cells (G-*) — Tier C
@@ -545,6 +607,12 @@ Agent({
 })
 ```
 
+> **Blind-dispatch (operator REPLY §3.4).** The §7.1 prompt MUST NOT feed the
+> subagent the §7.2 expected-delta table — that would bias the audit toward
+> confirming. Dispatch blind (subagent finds gaps cold); compare its independent
+> findings to §7.2 *after*. Same cold-context independence Rule #9 enforces for
+> Lane V reviewers (+ CC-2 "verify before asserting existence").
+
 ### §7.2 Expected delta vs cycle-16 (`a79c59`) baseline
 
 | Cycle-16 finding | Expected cycle-17 status |
@@ -681,6 +749,126 @@ Per Rule #14 working criteria C1-C4: dispatch-claim cites Rule #14 + the
 5-criteria check; the implementer commit body includes a literal "Rule #14"
 reference; per-instance wall-clock (pre-scope → dispatch-claim) is measurable.
 
+### §8.6 Intent-alignment mechanism (advisory-integrated; CANDIDATE — pilot first)
+
+Operationalizes the §2.6 frame. Three components, all **candidates (N=0)**, not
+rules — piloted incrementally per the advisory + existing N=2 codification
+discipline. Sequencing matters: component 2 depends on component 1; component 3
+runs alongside from the start (cheap, produces the guiding evidence).
+
+> **Anti-bloat guard (the advisory's own discipline, applied to this section).**
+> This mechanism is specified concretely — fields, checks, ledger format, a
+> metric — precisely so it does not become rationale-talk. If implementing it
+> starts producing more *narrative* without falling divergence-frequency, that
+> is the failure mode (§2.6); stop and rework.
+
+#### §8.6.1 Component 1 — Intent-encoding (give *why* a home at the decision point)
+
+Briefs already carry *what* (director) and *how* (operator). The gap is ensuring
+*why/intent* reaches the agent **at the decision point**, not just the header.
+
+- A dedicated **INTENT field** is added to dispatch-level units: the test-cell
+  template (§4.3, done) and the implementer/Lane B dispatch prompt.
+- It states, in 1-2 concrete sentences: *what this serves, and what a correct
+  outcome accomplishes for the larger goal* — concrete, not abstraction.
+- **Adequacy test:** could a cold-context agent, given ONLY the intent field,
+  correctly choose between two ambiguous implementation paths? Yes → concrete
+  enough. No → too vague to verify against (and thus invalid per §8.6.2).
+
+> **Director decision (flagged "yours" in the advisory):** the INTENT field
+> attaches at **dispatch level** (cell PREDICTION + implementer prompt), NOT the
+> brief header (the header already carries high-level why; the leak is at
+> dispatch). It is **conditional on dispatch complexity** — mandatory where the
+> path is ambiguous, optional for mechanical dispatches. This avoids
+> rationale-talk bloat on trivial work.
+
+#### §8.6.2 Component 2 — Purpose-verification (does the output serve the intent?)
+
+Lane V checks *correctness* ("is this output right?"). v2.0 adds a
+*purpose-alignment* check ("does this output serve the stated intent?").
+
+- Two findings become distinct + legible: **correct-but-misaligned** (right
+  thing, wrong goal) vs **aligned-but-incorrect** (right goal, flawed execution).
+- **Prerequisite:** concrete intent (§8.6.1). Vague intent ("make it good")
+  can't be purpose-verified; specific intent ("serves X by doing Y") can. This
+  is why component 2 sequences after component 1.
+
+> **Director decision:** purpose-verification is **folded into Lane V's existing
+> pass as a distinct check**, NOT a new lane or subagent — to control token cost
+> (the advisory explicitly warns a separate full pass may not justify itself). It
+> emits a distinct finding-type (`purpose-misalignment`). Reassess to a separate
+> reviewer role ONLY if the folded check proves insufficient (evidence-driven).
+
+#### §8.6.3 Component 3 — Divergence-logging (the insight engine)
+
+The predict→compare→mine-the-difference methodology becomes systematic, not
+incidental:
+
+- The predicting party records predicted behavior/outcome **before** execution
+  (already the cell INTENT + PREDICTION; for dispatches, the dispatch-claim).
+- **After** execution, actual vs predicted. Each divergence is logged as a
+  **divergence-point** and CLASSIFIED (operator REPLY §2.3 refinement —
+  load-bearing): **INTENT-GAP** (intent under-transmitted; the brief failed) ·
+  **REAL-BUG** (pipeline did the wrong thing, intent was clear) ·
+  **PREDICTION-ERROR** (the predictor's model was wrong, not the brief).
+- The insight is **not** the agent understanding itself — it is **locating where
+  intent-encoding was insufficient**, which is the **INTENT-GAP subset only.**
+  Not every miss is an intent-gap: a REAL-BUG triggers a finding (not a brief
+  edit); a PREDICTION-ERROR recalibrates the predictor. Only INTENT-GAP feeds
+  brief-enrichment. (A §2.4 DEGRADED cell — output present, marker absent — is
+  usually an INTENT-GAP or REAL-BUG to classify.)
+
+> **Director decision:** format = the §4.3 **DELTA `DIVERGENCE-POINT` sub-field**
+> (done) + a **cumulative ledger** at `docs/divergence-ledger.md`, one row per
+> divergence-point tying it to the specific brief section whose intent was
+> insufficient (unambiguous fix target). Cycle placement: predict at
+> cell-write/dispatch time; compare at tier-end; log into the tier-end
+> verification-report AND the cumulative ledger. The ledger's
+> divergence-frequency-per-cycle column is the §8.6.4 metric's data source.
+
+#### §8.6.4 The metric + failure mode (component-spanning)
+
+Track **prediction-match rate** (did *behavior* align with stated intent?),
+**not rationale-volume** (did the agent produce more rationale text? — easy to
+game, diverges from the goal). Working = prediction-match rate rises **and**
+divergence-point frequency falls across cycles, with no increase in
+rationale-talk. If divergence frequency does not fall, the mechanism is
+producing rationale-talk without behavioral effect → rework or retire it.
+
+#### §8.6.5 Pilot plan + decision summary
+
+Incremental, not wholesale (advisory §"Suggested path" + N=2 discipline):
+
+1. **Pilot component 1 + 3 on cycle-17 Phase 1** operator-driven Lane B
+   dispatches (C-D2 / C-D3 / C-D5 fixes): each dispatch-claim carries an INTENT
+   field; each gets predict→compare→divergence-log. This is one dispatch type,
+   observed at N=1 — exactly the advisory's "pilot on one dispatch type."
+2. **Add component 2** (purpose-verification in Phase 1's Lane V) only once the
+   Phase 1 intent fields are concrete enough to verify against.
+3. **Then Phase 2 Tier C-rerun-validation runs under the insight frame** — its
+   per-finding predictions become divergence-mining, not just pass/fail.
+4. Each component stays a **candidate** until N=2 per existing discipline. A
+   mechanism that works once is N=1, not codification-ready.
+5. Let divergence-points tell us where to tighten next (§2.6), not speculation.
+
+**Decision summary** (the advisory flagged these as director/operator/user calls;
+director's calls below, open to operator REPLY + user override):
+
+| Advisory question | Director decision | Status |
+|---|---|---|
+| Which protocol level the intent field attaches to + mandatory/conditional | dispatch level (cell + implementer prompt); conditional on ambiguity | decided (§8.6.1) |
+| Purpose-verification: new lane / Lane V extension / distinct role | folded check inside Lane V's existing pass; distinct finding-type | decided (§8.6.2) |
+| Divergence-logging format + cycle placement | DELTA sub-field + `docs/divergence-ledger.md`; predict@dispatch, compare@tier-end | decided (§8.6.3) |
+| Codification thresholds for new conventions | existing N=2 discipline; all 3 are candidates (N=0) | decided |
+| Tier C/D validation: before/after restructuring, or redesigned | resumes as planned (Phase 1 prerequisite regardless), **redesigned under the insight frame**; Phase 1 = pilot | decided (§8.6.5) |
+
+> **Composition with existing rules.** Component 3's divergence-frequency trend
+> is the same emergence-from-evidence signal that drives N=2 codification. The
+> INTENT field composes with the Rule #14 ODLB dispatch-claim (one more field).
+> Purpose-verification composes with Rule #9 Lane V (one more check, not a new
+> dispatch). No new rule numbers are minted here — these are candidates until the
+> pilot earns the evidence.
+
 ---
 
 ## §9. Cost-attribution audit (per user-principal Q2 fold)
@@ -746,6 +934,12 @@ Q6 pre-authorized the pod-side C-D4 fix. Q1 deferred Tier D Phase 5.
 
 ### §11.1 Phase 1 — P0 fixes (Tier-D blockers) + ownership matrix
 
+> **Phase 1 is the §8.6 pilot.** Each operator-driven Lane B dispatch below
+> carries an INTENT field (§8.6.1) and runs predict→compare→divergence-log
+> (§8.6.3); purpose-verification (§8.6.2) folds into Phase 1's Lane V once the
+> intent fields are concrete. This is the advisory's "pilot on one dispatch
+> type, observe" — N=1, candidate-status, not codification.
+
 | Item | Owner | Rule #14 ODLB? | Status |
 |---|---|---|---|
 | C-D3 pt1 ChiefDirector parse-robust (`llm/chief_director.py`) | operator-driven Lane B | yes (sibling LLM call site; ≤150 LoC; json_object pattern) | locked |
@@ -753,7 +947,7 @@ Q6 pre-authorized the pod-side C-D4 fix. Q1 deferred Tier D Phase 5.
 | C-D2 LLMEnsemble parse-robust (`llm/ensemble.py`) | operator-driven Lane B | yes | locked |
 | C-D4 `setup_runpod.sh` harden (PulidInsightFaceLoader custom node + antelopev2 model) | director (mea culpa lane — `eb6af85` C-B1 was incomplete) | n/a (script) | locked |
 | C-D4 pod one-liner application | user-principal (Q6 PRE-AUTHORIZED) | n/a | locked |
-| LV-1 ARCH §12 doc note | operator opportunistic (Lane D) | n/a | available now |
+| LV-1 ARCH §12.6 doc note | operator (Lane D) | n/a | ✅ closed `d16733f` |
 | A9-redux probe sequence (§3 A9.1-A9.5) | operator | n/a | post-pod-fix |
 
 **Director's pod one-liner for C-D4** (user applies per Q6; A10 steps 2-3):
@@ -810,6 +1004,7 @@ git clone https://github.com/balazik/ComfyUI-PuLID-Flux \
 - **Q-V2-3 — Pod refresh / migration.** `525nb9d5cc0p3y` is the long-running cycle-15 instance. Refresh schedule? Migration to dedicated infra?
 - **Q-V2-4 — num_shots contract decision (C-D1 / P2-4).** If the validation rerun still FAILs (≥5 shots), enforce the contract in `scene_decomposer.py` OR document `num_shots` as advisory? (Tier D cost control depends on this.)
 - **Q-V2-5 — Phase 1 dispatch parallelism.** The 3 operator-driven Lane B fixes (C-D2 / C-D3 / C-D5) touch sibling LLM files. Dispatch sequentially (safer, slower) or accept a small merge-coordination cost to parallelize? (Default: sequential per "never dispatch multiple implementers in parallel.")
+- **Q-V2-6 — §8.6 mechanism scope after pilot.** The advisory's three components are piloted on Phase 1 (§8.6.5) at candidate-status. After the pilot: do we extend the INTENT field + purpose-verification to ALL dispatch types (not just Lane B P0 fixes), or keep it scoped to ambiguous/complex dispatches until divergence-frequency data justifies broadening? (Director lean: keep scoped; let the divergence-ledger trend decide, per §2.6 evidence-driven tightening.)
 
 ---
 
@@ -817,7 +1012,7 @@ git clone https://github.com/balazik/ComfyUI-PuLID-Flux \
 
 **Brief v2.0 author chain:**
 
-1. **Director full re-author (this document)** — per user-principal Q5 + Q7, at cycle-16 mid. Substrate: closing-report `e4615c7` + operator Tier-D brief `2c9ee9f` + operator scaffold (adopted-and-reframed per Rule #16 variant) + v1.0 cell catalog.
+1. **Director full re-author (this document)** — per user-principal Q5 + Q7, at cycle-16 mid. Substrate: closing-report `e4615c7` + operator Tier-D brief `2c9ee9f` + operator scaffold (adopted-and-reframed per Rule #16 variant) + v1.0 cell catalog + **user-principal design advisory** (`brief-2.0-advisory.md`; insight-achievement frame §2.6 + intent-alignment mechanism §8.6, integrated as candidates).
 2. **Operator REPLY-cycle** — ≤2 cycles (v5 disagreement protocol); deepest review surfaces: §5 cells, §7 Tier F spec, §11 phase plan.
 3. **User-principal sign-off.**
 4. **Promotion-to-final** — at cycle-17 entry, after Phases 1-4 fill the `[PHASE-N-DEPENDENT]` placeholders; supersedes v1.0.
@@ -898,6 +1093,26 @@ curl -s --max-time 10 https://525nb9d5cc0p3y-8188.proxy.runpod.net/object_info/P
 - §10 implemented-but-unutilized catalog (per Q3 + audit `a79c59`).
 - §11 cycle-17 phase plan + P0-P3 roadmap + ownership matrix + C-D4 pod one-liner.
 - §12 Q1-Q7 absorbed; Q-V2-1..5 surfaced.
+
+### v2.0 — advisory-integrated revision (2026-05-28, same draft cycle, pre-sign-off)
+
+User-principal design advisory (`brief-2.0-advisory.md`) integrated into the
+v2.0 draft (arrived pre-operator-REPLY, pre-sign-off; folded rather than deferred):
+
+- §0 9th improvement (insight-achievement reframe).
+- §2.6 NEW — test philosophy / insight-achievement frame (product = located divergence-point, not verdict; core distinction intent-encoding ≠ self-understanding; metric = prediction-match rate not rationale-volume; tightening = intent-clarification).
+- §4.3 cell template gains INTENT field + DELTA DIVERGENCE-POINT sub-field.
+- §8.6 NEW — intent-alignment mechanism (3 components: intent-encoding / purpose-verification / divergence-logging) as candidates; director decisions on all 5 advisory-flagged questions; pilot plan on cycle-17 Phase 1.
+- §11.1 Phase 1 designated the §8.6 pilot. §12.2 Q-V2-6 added (post-pilot scope).
+- §13 sign-off substrate updated to cite the advisory.
+
+**Operator REPLY-cycle-1 folds (operator independently received the same advisory — Shape-A convergence; nearly identical mechanism design):**
+
+- §4.4 + §5.1 **P-ASSEMBLY marker corrected** (operator Rule #12 grep): the fabricated `[VIDEO/AUDIO] tri-mix:` string does NOT exist in `cinema_pipeline.py`. Real markers: PASS `Final cinema video assembled` + `mix=...+BGM+foley`; DEGRADED `(BGM only, no dialogue audio)`. (Self-correction: the brief violated its own §4 marker thesis.)
+- §4.3 + §8.6.3 divergence-point gains **3-way classification INTENT-GAP | REAL-BUG | PREDICTION-ERROR** (operator §2.3 refinement) — only INTENT-GAP feeds brief-enrichment; prevents mis-attributing every miss to intent-encoding.
+- §11.1 LV-1 ownership row marked ✅ closed `d16733f` (was stale).
+- §7.1 blind-dispatch note added (don't feed §7.2 expected-delta to the audit subagent; operator §3.4).
+- Operator concurred on §3 A9/A10, §4 markers, §6/§7, §8.1 Shape-A..D, §8.2 Rule #16 C1-C4, §11 sequential dispatch. Convergence reached at REPLY-cycle-1 (no cycle-2 needed).
 
 ### Pending (post-Phase-1-4, at promotion-to-final)
 
