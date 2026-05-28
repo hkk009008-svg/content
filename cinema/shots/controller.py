@@ -1278,7 +1278,7 @@ class ShotController:
                                 shot_id=shot_id, video_id=self.project.get("id", ""),
                             )
                         except Exception:
-                            logger.warning("lipsync cost record skipped", exc_info=True)
+                            logger.warning("lipsync cost record skipped", exc_info=True, extra={"shot_id": shot_id})
                     else:
                         # Lipsync pass returned nothing — leave lipsync_score absent
                         # (0.0 sentinel) so the auto-approve gate treats this as FAIL.
@@ -1764,7 +1764,7 @@ class ShotController:
                                 shot_id=shot_id, video_id=self.project.get("id", ""),
                             )
                         except Exception:
-                            logger.warning("lipsync cost record skipped", exc_info=True)
+                            logger.warning("lipsync cost record skipped", exc_info=True, extra={"shot_id": shot_id})
 
             elif action == "rife":
                 if video_path:
