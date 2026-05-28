@@ -745,6 +745,34 @@ Lane V #10 (2026-05-26, operator on `44f6beb`) surfaced the
 taxonomy tension; this section's expansion codifies the two-class
 shape.
 
+#### 7.7.4 Location-research auto-population (cycle-17 — `8376784`, Part 1 of 2)
+
+A **project-config toggle** (`location_research`, not a `CINEMA_*` env flag)
+following the same default-off / ship-infrastructure-now / opt-in-later shape.
+When enabled, `create_location_with_images`
+([domain/location_manager.py](domain/location_manager.py)) calls the
+previously-dead `research_engine.research_location_visual(description)` to fetch
+real location photos via Tavily image search, downloads them locally
+(`_download_url_to_file` — stdlib urllib, 10s timeout, graceful False-on-error),
+and appends them to the location's existing `reference_images` slot —
+supplementing user uploads. No Tavily key → `research_location_visual` returns
+`[]` → behaviour identical to the no-research path.
+
+**Part 1 (shipped, GPU-independent):** fetch → download → persist, behind the
+flag (default OFF), via an additive `auto_research: bool = False` param on
+`create_location_with_images`. 8 unit tests; no regressions.
+
+**Part 2 (pending, GPU-gated):** gen-time *consumption* of location
+`reference_images` as IP-Adapter / img2img conditioning does NOT yet exist —
+`get_location_reference` is currently unconsumed; a location influences
+generation today via `prompt_fragment` text + deterministic seed only.
+
+**Known follow-up (on-switch coherence):** the flag's UI default is declared in
+`api_engine_defaults` (`/api/config`) but read at runtime from
+`project["global_settings"]["location_research"]`; the settings-save path that
+persists the toggle must target `global_settings` for the opt-in to take effect
+end-to-end. Resolve alongside Part 2 / the api-engine toggle wiring.
+
 ---
 
 ## 8. Image generation — production + max-tier N=8
