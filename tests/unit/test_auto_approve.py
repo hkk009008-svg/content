@@ -926,6 +926,55 @@ class TestDeferredDecision:
             "substantive rule veto must NOT be marked deferred"
         )
 
+    def test_real_veto_before_predicate_crash_stays_veto_not_deferred(self):
+        """If a substantive veto fires BEFORE a later predicate crashes, the
+        decision must stay a real VETO (deferred=False) — the crash must not
+        mask the legitimate veto by re-labeling it DEFERRED.
+
+        Regression for the Lane V #16 IMPORTANT finding on 1cab3d2: the
+        per-predicate early-return labeled DEFERRED unconditionally, so a real
+        veto co-occurring with a later crash was masked. The `if not vetoes`
+        guard keeps the real veto authoritative.
+        """
+        from cinema import auto_approve as aa_mod
+
+        real_rule = aa_mod.VetoRule(
+            name="real_veto_rule",
+            predicate=lambda ctx: True,  # substantive veto fires
+            reason_template="legitimate rejection reason",
+        )
+
+        def _crashing_predicate(ctx):
+            raise RuntimeError("simulated crash AFTER a real veto")
+
+        crash_rule = aa_mod.VetoRule(
+            name="crashing_rule",
+            predicate=_crashing_predicate,
+            reason_template="should not drive the label",
+        )
+
+        original_builder = aa_mod._rules_for_plan
+        aa_mod._rules_for_plan = lambda cfg: [real_rule, crash_rule]
+        try:
+            decision = check_gate(
+                "plan",
+                shot_state=_make_shot(),
+                project=_make_project(),
+                takes=[],
+                config=AutoApproveConfig(),
+            )
+        finally:
+            aa_mod._rules_for_plan = original_builder
+
+        # The real veto stands; the later crash is skipped as noise.
+        assert decision.auto_approved is False
+        assert decision.deferred is False, (
+            "a substantive veto that fired before a later predicate crash must "
+            "stay labeled VETO, not be masked as DEFERRED"
+        )
+        assert "legitimate rejection reason" in decision.vetoes
+        assert decision.rule_names == ["real_veto_rule"]
+
     def test_deferred_distinct_from_veto_via_deferred_flag(self):
         """Deferred decision and veto decision both have auto_approved=False,
         but only the deferred one has deferred=True — callers can distinguish them."""

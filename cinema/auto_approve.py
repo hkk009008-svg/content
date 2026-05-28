@@ -569,23 +569,26 @@ def check_gate(
                 fired = rule.predicate(ctx)
             except Exception as pred_exc:
                 logger.warning(
-                    "auto_approve rule %r predicate raised: %r — treating as eval-error (deferred)",
+                    "auto_approve rule %r predicate raised: %r — eval-error",
                     rule.name,
                     pred_exc,
                 )
-                fired = True  # conservative: predicate failure → veto
-                vetoes.append(
-                    f"eval error in rule {rule.name!r} — manual review required"
-                )
-                rule_names.append(rule.name)
-                # Return immediately with deferred=True — this is an eval-error,
-                # not a substantive rule veto.
-                return AutoApproveDecision(
-                    auto_approved=False,
-                    vetoes=vetoes,
-                    rule_names=rule_names,
-                    deferred=True,
-                )
+                if not vetoes:
+                    # No substantive veto has fired yet — this eval-error means
+                    # we cannot reliably decide the gate; defer to manual review
+                    # (a distinct state, NOT a real veto).
+                    return AutoApproveDecision(
+                        auto_approved=False,
+                        vetoes=[
+                            f"eval error in rule {rule.name!r} — manual review required"
+                        ],
+                        rule_names=[rule.name],
+                        deferred=True,
+                    )
+                # A substantive veto already fired — it stands; the decision is a
+                # real VETO (deferred=False), not masked as DEFERRED. The crashed
+                # predicate is skipped as noise rather than overriding the veto.
+                continue
             if fired:
                 vetoes.append(rule.reason_template)
                 rule_names.append(rule.name)
