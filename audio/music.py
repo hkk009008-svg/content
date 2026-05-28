@@ -123,6 +123,13 @@ def _build_music_prompt(music_vibe: str) -> str:
     )
 
 
+_SUNO_MODEL = "V5"  # sunoapi.org: V4 | V4_5 | V4_5PLUS | V4_5ALL | V5 | V5_5 — change per plan
+# callBackUrl is a required request field even though we poll record-info for the
+# result (this pipeline has no public callback URL); a placeholder satisfies the schema.
+_SUNO_CALLBACK_PLACEHOLDER = "https://example.com/suno-callback"
+_SUNO_POLL_INTERVAL_S = 5
+
+
 def generate_suno_v5(
     music_vibe: str,
     output_filename: str,
@@ -133,15 +140,16 @@ def generate_suno_v5(
 ) -> bool:
     """Generate a song via Suno V5 (the SOTA music model with vocals).
 
-    Requires SUNO_API_KEY in env. Uses Suno's REST API: POST /api/v1/songs to
-    enqueue, then poll GET /api/v1/songs/{id} until status == 'complete'.
+    Requires SUNO_API_KEY + SUNO_API_BASE (sunoapi.org). Enqueues via
+    POST /api/v1/generate, then polls GET /api/v1/generate/record-info?taskId=...
+    until data.status == 'SUCCESS', then downloads data.response.sunoData[0].audioUrl.
 
     Falls back to False on any error so the caller can route to FAL/ElevenLabs.
 
     Args:
         music_vibe:     mood key (see _build_music_prompt for the full list)
         output_filename: where to save the .mp3 (Suno returns MP3)
-        duration:        target seconds (Suno V5 supports up to ~240s)
+        duration:        kept for signature compat; sunoapi.org returns full-length songs (no duration knob)
         instrumental:    True for score work; False if you want sung vocals
         custom_lyrics:   optional lyric override (Suno V5's killer feature)
         poll_timeout_s:  give up after this many seconds of polling
@@ -155,52 +163,66 @@ def generate_suno_v5(
         print("   [SUNO V5] SUNO_API_KEY not set; skipping")
         return False
 
-    base = settings.suno_api_base
+    base = settings.suno_api_base.rstrip("/")
     prompt = _build_music_prompt(music_vibe)
 
+    # sunoapi.org custom mode: style + title are required, prompt is optional (we
+    # always pass it for guidance); instrumental toggles vocals. There is no
+    # duration knob — the service returns full-length songs (trimmed/looped to the
+    # scene length downstream). custom_lyrics, when given, is used as the prompt.
     payload = {
-        "model_version": "chirp-v5",
-        "prompt": prompt,
-        "make_instrumental": instrumental,
-        "duration": min(duration, 240),
-        "tags": music_vibe,
+        "customMode": True,
+        "instrumental": instrumental,
+        "model": _SUNO_MODEL,
+        "callBackUrl": _SUNO_CALLBACK_PLACEHOLDER,  # required by schema; we poll instead
+        "style": music_vibe,
+        "title": f"{music_vibe} BGM",
+        "prompt": (custom_lyrics or prompt)[:4900],
     }
-    if custom_lyrics:
-        payload["lyrics"] = custom_lyrics
 
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
+    _FAILED = {"CREATE_TASK_FAILED", "GENERATE_AUDIO_FAILED",
+               "CALLBACK_EXCEPTION", "SENSITIVE_WORD_ERROR"}
+
     try:
-        print(f"   [SUNO V5] Generating [{music_vibe.upper()}] (instrumental={instrumental})...")
-        r = requests.post(f"{base}/songs", json=payload, headers=headers, timeout=30)
+        print(f"   [SUNO V5] Generating [{music_vibe.upper()}] (model={_SUNO_MODEL}, instrumental={instrumental})...")
+        r = requests.post(f"{base}/api/v1/generate", json=payload, headers=headers, timeout=30)
         r.raise_for_status()
-        body = r.json()
-        # Suno responses vary by endpoint variant — accept any of:
-        # { id, audio_url } | { song_id, output_url } | { task_id }
-        song_id = body.get("id") or body.get("song_id") or body.get("task_id")
-        audio_url = body.get("audio_url") or body.get("output_url")
-        if not song_id and not audio_url:
-            print(f"   [SUNO V5] Unrecognized response shape: {list(body.keys())}")
+        body = r.json() or {}
+        if body.get("code") != 200:
+            print(f"   [SUNO V5] generate rejected: code={body.get('code')} msg={body.get('msg')}")
+            return False
+        task_id = (body.get("data") or {}).get("taskId")
+        if not task_id:
+            print(f"   [SUNO V5] no taskId in response: {list(body.keys())}")
             return False
 
-        # Poll for completion if we got a job id
+        # Poll record-info until SUCCESS (stream URL ~30-40s, full audio ~2-3 min).
+        audio_url = ""
         start = time.time()
-        while not audio_url and song_id and (time.time() - start) < poll_timeout_s:
-            time.sleep(5)
-            sr = requests.get(f"{base}/songs/{song_id}", headers=headers, timeout=15)
+        while (time.time() - start) < poll_timeout_s:
+            time.sleep(_SUNO_POLL_INTERVAL_S)
+            sr = requests.get(
+                f"{base}/api/v1/generate/record-info",
+                params={"taskId": task_id}, headers=headers, timeout=15,
+            )
             if not sr.ok:
                 continue
-            sb = sr.json()
-            status = sb.get("status", "").lower()
-            if status in ("complete", "completed", "ready", "done"):
-                audio_url = sb.get("audio_url") or sb.get("output_url") or sb.get("url")
+            data = (sr.json() or {}).get("data") or {}
+            status = (data.get("status") or "").upper()
+            if status == "SUCCESS":
+                tracks = ((data.get("response") or {}).get("sunoData")) or []
+                if tracks:
+                    audio_url = tracks[0].get("audioUrl") or tracks[0].get("streamAudioUrl") or ""
                 break
-            if status in ("failed", "error"):
-                print(f"   [SUNO V5] generation failed: {sb.get('error', 'unknown')}")
+            if status in _FAILED:
+                print(f"   [SUNO V5] generation failed: status={status}")
                 return False
+            # else PENDING / TEXT_SUCCESS / FIRST_SUCCESS → keep polling
 
         if not audio_url:
-            print(f"   [SUNO V5] timed out after {poll_timeout_s}s")
+            print(f"   [SUNO V5] timed out after {poll_timeout_s}s (no audioUrl)")
             return False
 
         urllib.request.urlretrieve(audio_url, output_filename)
