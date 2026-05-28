@@ -15,6 +15,28 @@ from typing import Any
 from config.settings import settings as env_settings   # aliased to avoid clash with the per-instance `settings: dict` ctor arg below
 
 
+def _strip_json_fences(raw: str) -> str:
+    """Strip ```json … ``` fences that LLMs emit despite instructions.
+
+    Mirrors the canonical pattern at llm/prompt_optimizer.py:339 and the
+    copy in llm/chief_director.py.  Local copy avoids importing a _-private
+    cross-module symbol and keeps this a single-file change.
+
+    NOTE: This is the 3rd copy of this helper (prompt_optimizer + chief_director
+    + here). DRY dedup (extract to llm/_utils.py or similar) is tracked as a
+    P2/P3 follow-up; out of scope for this dispatch.
+    """
+    raw = raw.strip()
+    if raw.startswith("```"):
+        lines = raw.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        raw = "\n".join(lines)
+    return raw
+
+
 def build_anthropic_system_blocks(text: str) -> list[dict[str, Any]]:
     """Wrap a stable system prompt for Anthropic prompt caching.
 
@@ -382,28 +404,50 @@ class LLMEnsemble:
         )
 
         try:
-            if judge_model.startswith("claude"):
-                _, raw = self._generate_anthropic(
-                    judge_model,
-                    "You are an impartial quality judge. Respond only with valid JSON.",
-                    judge_user_prompt,
-                )
-            elif judge_model.startswith("gemini"):
-                _, raw = self._generate_gemini(
-                    judge_model,
-                    "You are an impartial quality judge. Respond only with valid JSON.",
-                    judge_user_prompt,
-                    json_mode=True,
-                )
-            else:
-                _, raw = self._generate_openai(
-                    judge_model,
-                    "You are an impartial quality judge. Respond only with valid JSON.",
-                    judge_user_prompt,
-                    json_mode=True,
-                )
+            # --- nested helper: 3-branch LLM call --------------------------------
+            def _call_judge(prompt: str) -> Any:
+                """Call the judge model and return raw output (str or dict)."""
+                if judge_model.startswith("claude"):
+                    _, raw = self._generate_anthropic(
+                        judge_model,
+                        "You are an impartial quality judge. Respond only with valid JSON.",
+                        prompt,
+                    )
+                elif judge_model.startswith("gemini"):
+                    _, raw = self._generate_gemini(
+                        judge_model,
+                        "You are an impartial quality judge. Respond only with valid JSON.",
+                        prompt,
+                        json_mode=True,
+                    )
+                else:
+                    _, raw = self._generate_openai(
+                        judge_model,
+                        "You are an impartial quality judge. Respond only with valid JSON.",
+                        prompt,
+                        json_mode=True,
+                    )
+                return raw
+            # ---------------------------------------------------------------------
 
-            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            # ≤1-retry loop for JSONDecodeError only.
+            # The outer broad except (below) still catches all other failures
+            # (wrong-shape result, missing keys, TypeError, IndexError, etc.).
+            raw = _call_judge(judge_user_prompt)
+            try:
+                parsed = json.loads(_strip_json_fences(raw)) if isinstance(raw, str) else raw
+            except json.JSONDecodeError:
+                # Attempt 1 failed to parse — retry once with a correction appended.
+                correction_prompt = (
+                    judge_user_prompt
+                    + "\n\nYour previous response was not valid JSON. "
+                    "Output ONLY a valid JSON object — no markdown, no prose."
+                )
+                raw = _call_judge(correction_prompt)
+                # Let JSONDecodeError on attempt 2 propagate to the outer except
+                # (→ first-valid fallback), preserving the existing contract.
+                parsed = json.loads(_strip_json_fences(raw)) if isinstance(raw, str) else raw
+
             judge_scores: list[float] = [float(s) for s in parsed["scores"]]
             winner_among_valid: int = int(parsed["winner"])
             reasoning: str = parsed.get("reasoning", "")
@@ -417,10 +461,18 @@ class LLMEnsemble:
                 if seq < len(judge_scores):
                     full_scores[orig_idx] = judge_scores[seq]
 
+            print(
+                f"[Ensemble] Judge: {judge_model} picked candidate "
+                f"{winner_original_idx} with score {full_scores[winner_original_idx]:.2f}"
+            )
             return (winner_original_idx, full_scores, reasoning)
 
         except Exception as exc:  # noqa: BLE001
             # Judging failed -- fall back to first valid candidate.
+            # NOTE: This broad except is INTENTIONALLY preserved to absorb
+            # wrong-shape results (list/str instead of dict), missing "scores"/
+            # "winner" keys, TypeErrors, IndexErrors, etc. — the DP-01
+            # fold-forward from chief_director.py's Lane V CRITICAL finding.
             print(f"[LLMEnsemble] Judging failed: {exc}")
             idx = valid[0][0]
             scores = [0.0] * len(candidates)
