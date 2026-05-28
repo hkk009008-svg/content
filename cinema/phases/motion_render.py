@@ -227,11 +227,15 @@ class MotionRenderPhase:
         # MUST NOT re-count it per-shot.
         ctrl = self._gen._shot_ctrl
         settings = self._project.get("global_settings", {}) or {}
+        from workflow_selector import classify_shot_type
 
         for idx, (shot, kf_path) in enumerate(shot_kf_pairs):
             seg_path = segment_paths[idx]
             shot_id = shot.get("id", "")
             kf_take_id = shot.get("approved_keyframe_take_id", "")
+            # Classify per shot (not hardcoded "medium") so _finalize_motion_take's
+            # motion-fidelity floor / remotion gate matches the normal per-shot path.
+            resolved_st = classify_shot_type(shot)
 
             take = make_take(
                 "motion",
@@ -240,12 +244,14 @@ class MotionRenderPhase:
                     "scene_id": scene_id,
                     "shot_id": shot_id,
                     "target_api": "KLING_NATIVE",
-                    "shot_type": "medium",
+                    "shot_type": resolved_st,
                     "storyboard_source": combined_path,
                     "storyboard_segment_index": idx,
                 },
             )
 
+            finalize_ok = False
+            finalize_err = "storyboard segment finalize failed"
             try:
                 result = ctrl._finalize_motion_take(
                     scene,
@@ -256,25 +262,49 @@ class MotionRenderPhase:
                     target_api="KLING_NATIVE",
                     cc={},
                     settings=settings,
-                    resolved_shot_type="medium",
+                    resolved_shot_type=resolved_st,
                     extra_metadata={
                         "storyboard_source": combined_path,
                         "storyboard_segment_index": idx,
                     },
                     record_cost=False,
                 )
-                if result.get("success"):
-                    ok_count += 1
-                else:
-                    fail_count += 1
-                    self._on_failure(
-                        scene_id, shot_id,
-                        result.get("error", "storyboard segment finalize failed"),
-                    )
+                finalize_ok = bool(result.get("success"))
+                if not finalize_ok:
+                    finalize_err = result.get("error", finalize_err)
             except Exception as exc:
                 logger.exception(
                     "storyboard batch: _finalize_motion_take failed for "
                     "scene=%s shot=%s",
+                    scene_id, shot_id,
+                )
+                finalize_err = str(exc)
+
+            if finalize_ok:
+                ok_count += 1
+                continue
+
+            # Partial-finalize failure: retry THIS shot via the normal per-shot
+            # path. Keeps the successful batch segments (no scene loss) and does
+            # NOT re-generate the ones that succeeded (no double-gen). The retry
+            # records its own per-shot motion cost (a separate generation).
+            logger.warning(
+                "storyboard batch: segment finalize failed for scene=%s shot=%s "
+                "(%s) — retrying via per-shot generation",
+                scene_id, shot_id, finalize_err,
+            )
+            try:
+                retry = self._gen.generate_motion_take(scene_id, shot_id)
+                if retry.get("success"):
+                    ok_count += 1
+                else:
+                    fail_count += 1
+                    self._on_failure(
+                        scene_id, shot_id, retry.get("error", finalize_err),
+                    )
+            except Exception as exc:
+                logger.exception(
+                    "storyboard batch: per-shot retry failed for scene=%s shot=%s",
                     scene_id, shot_id,
                 )
                 fail_count += 1

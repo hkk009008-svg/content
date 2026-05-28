@@ -316,6 +316,58 @@ class TestIneligibleScenes:
 
 
 # ---------------------------------------------------------------------------
+# (g) partial-finalize failure → failed shot retried per-shot (no scene loss)
+# ---------------------------------------------------------------------------
+
+class TestStoryboardPartialFinalizeFailure:
+    def test_failed_segment_retried_per_shot_not_dropped(self, tmp_path):
+        """If one segment's _finalize_motion_take fails, that shot is retried via
+        the per-shot path (generate_motion_take) — successful batch segments are
+        kept, the failed one is not dropped, and the scene is not lost."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        shots = [_make_shot("s1_0"), _make_shot("s1_1"), _make_shot("s1_2")]
+        scene = _make_scene("scene_1", shots)
+        project = _make_project([scene], storyboard_mode=True)
+
+        kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
+        for p in kf_paths.values():
+            open(p, "w").close()
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+        # Segment 1 (shot s1_1) fails to finalize; 0 and 2 succeed.
+        ok = {"success": True, "take": {}, "video": "/tmp/seg.mp4", "identity_score": 0.0}
+        bad = {"success": False, "error": "finalize boom"}
+        gen._shot_ctrl._finalize_motion_take.side_effect = [ok, bad, ok]
+        # The per-shot retry for the failed shot succeeds.
+        gen.generate_motion_take.return_value = {"success": True}
+
+        with patch("kling_native.KlingNativeAPI") as mock_kling_cls:
+            mock_kling = MagicMock()
+            mock_kling.generate_storyboard.return_value = str(tmp_path / "combined.mp4")
+            open(str(tmp_path / "combined.mp4"), "w").close()
+            mock_kling_cls.return_value = mock_kling
+
+            with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
+                seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(3)]
+                for p in seg_paths:
+                    open(p, "w").close()
+                mock_split.return_value = seg_paths
+
+                phase = MotionRenderPhase(shot_generator=gen, project=project)
+                result = phase.run(_make_lifecycle())
+
+        # Batch ran once; all 3 segments attempted finalize.
+        mock_kling.generate_storyboard.assert_called_once()
+        assert gen._shot_ctrl._finalize_motion_take.call_count == 3
+        # The ONE failed segment's shot was retried via per-shot generation (not dropped).
+        assert gen.generate_motion_take.call_count == 1
+        gen.generate_motion_take.assert_called_once_with("scene_1", "s1_1")
+        # Scene not lost.
+        assert result.ok is True
+
+
+# ---------------------------------------------------------------------------
 # (a) main storyboard happy path
 # ---------------------------------------------------------------------------
 
