@@ -80,7 +80,7 @@ it cold; empirically reproduced.)
 
 | Cycle | Dispatches w/ prediction | Predictions made | Prediction-matches | Match-rate | Divergence-points | INTENT-GAP count | INTENT-GAP freq (per dispatch) |
 |---|---|---|---|---|---|---|---|
-| 17 (Phase-1 pilot) | 2 of 3 (D1+D2 done; D3 pending) | 7 explicit (3 D1 + 4 D2) | ~6.5 (D2 (d) marker-loc soft-miss) | ~93% (explicit) | 2 (DP-01, DP-02) | 1 (DP-01 only) | 0.5 (1 INTENT-GAP / 2 dispatches) |
+| 17 (Phase-1 pilot) | 3 of 3 (D1+D2+D3 done) | 10 explicit (3+4+3) | ~9.5 (only D2 (d) marker-loc soft-miss) | ~95% (explicit) | 2 (DP-01, DP-02; **D3 clean**) | 1 (DP-01 only) | **0.33** (1 INTENT-GAP / 3 dispatches) |
 
 **Caveat on the high match-rate (the honest read):** explicit predictions match
 well (~93%), yet 2 divergence-points emerged — DP-01 *outside* the prediction set
@@ -91,12 +91,22 @@ caught by Lane V**, not shipped — the parse/eval-robustness fixes were themsel
 fragile in ways the cold reviewers caught. That is the system working: predict →
 implement → independent-review → the *review* finds what the prediction missed.
 
-**The DP-01 fold-forward is the live §8.6.4 test:** Dispatch 3 (C-D2 ensemble,
-same `json.loads` shape) inherits an enriched INTENT — "add retry WITHOUT narrowing
-the broad-except (do not repeat DP-01); keep type-safety." If D3 ships without a
-DP-01-class divergence, the INTENT-GAP fold-forward *worked* (INTENT-GAP freq would
-trend 1/2 → 1/3). If D3 reproduces it anyway, the mechanism is rationale without
-behavioral effect (§8.6.4 failure mode → rework). **Falsifiable, intra-cycle.**
+**§8.6.4 falsification test — VERDICT: the fold-forward WORKED (N=1 positive).**
+Dispatch 3 (C-D2 ensemble, the same `json.loads` + `parsed["..."]` extraction shape
+that crashed in DP-01) inherited the enriched INTENT — "add retry WITHOUT narrowing
+the broad-except; preserve type-safety; do not repeat DP-01." **D3 shipped with the
+broad `except Exception`→first-valid fallback preserved, and the DP-01 bug-class did
+NOT recur.** Not self-reported: the cold Lane V #17 code-quality reviewer
+*independently traced all 5 wrong-shape inputs* (list / dict-missing-scores /
+dict-missing-winner / bare-string / None) and confirmed each is caught → fallback,
+none propagate (crash-safety verdict: YES). INTENT-GAP freq **1/2 → 1/3.** This is
+**behavioral effect, not rationale-volume** — exactly the §8.6.4 success signal.
+
+**Honest scope of the claim:** this is **N=1** — one known bug-class, prevented once,
+within one cycle. It is a positive data point for the candidate, NOT codification
+(which needs N=2 per existing discipline). The mechanism's cost was ~1 enriched
+sentence in D3's INTENT field (cheap, no rationale-bloat). If future cycles show
+INTENT-GAP freq does NOT keep falling, revert per the §8.6.4 anti-bloat guard.
 
 **Trend read (needs N≥2 cycles):** _N=1 cycle; no cross-cycle trend. The intra-cycle
 D1→D3 fold-forward is the first within-pilot evidence; verdict at D3 close._
