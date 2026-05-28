@@ -66,15 +66,22 @@ tractable filtergraph. Within-scene cuts stay stream-copy.
 ## Components
 
 ### 1. `_probe_duration(path) -> float` (new, `phase_c_ffmpeg.py`)
-Thin `ffprobe` wrapper. Mirrors the existing inlined pattern at `lip_sync.py:77`/`:99`:
+Thin `ffprobe` wrapper. Mirrors the clean single-purpose pattern at `lip_sync.py:99`:
 `["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", path]`.
-No shared duration helper exists today, so this is new. Returns float seconds.
+(`lip_sync.py:77` is a similar call but also fetches stream width/height — don't
+mirror that one.) No shared duration helper exists today, so this is new. Returns
+float seconds.
 
 ### 2. `xfade_concat(scene_videos, out_path, duration=0.5, transition="dissolve") -> str` (new, `phase_c_ffmpeg.py`)
 Builds the chained `xfade` (video) + `acrossfade` (audio) filtergraph over the
-ordered per-scene videos and re-encodes once to `out_path`. Offset for junction
-*k* = (sum of scene durations `0..k`) − (cumulative transition overlaps so far).
-Returns `out_path`.
+ordered per-scene videos and re-encodes once to `out_path`. The `xfade` `offset`
+is *when the transition starts on the output timeline*; for scene durations
+`d[0..N-1]` and uniform transition `t`, junction *k* (0-indexed) has
+`offset(k) = sum(d[0..k]) − k*t` (each prior transition overlaps two scenes,
+shortening the timeline by `t`). Audio is threaded in parallel: each `acrossfade`
+pairs with its junction's `xfade`, with explicit stream labels routed through the
+chain (standard FFmpeg filtergraph labeling — implementer consults an FFmpeg
+reference for the exact `[v01]`/`[a01]` label wiring). Returns `out_path`.
 
 ### 3. `_assemble_final` changes (`cinema_pipeline.py:1199`)
 - Read flags off the existing `settings` arg (no signature change):
@@ -115,7 +122,7 @@ confirmed at implementation (they drift):
 Frontend checkbox (PostProcessingSection.tsx)
   → update(key, value)  [SettingsPanel.tsx — unchanged]
   → PUT /api/projects/<pid> { global_settings: { scene_transitions, transition_duration } }
-  → web_server.py :506  project["global_settings"].update(...)  [unchanged]
+  → web_server.py :507  project["global_settings"].update(...)  [unchanged]
   → persisted to project record
   ...at render/assembly time...
   → cinema_pipeline.py:751  settings = project.get("global_settings", {})
@@ -165,7 +172,7 @@ Mirror the existing mocked-subprocess pattern (`test_guided_pipeline.py` capture
 - `web/src/types/project.ts` (`GlobalSettings`) — add two optional keys. [type]
 - `web/src/components/settings/PostProcessingSection.tsx` — checkbox + duration
   slider, mirroring `coherence_check_enabled`. [frontend-markup]
-- `web_server.py:506` — **no change** (open-merge passthrough). [verified]
+- `web_server.py:507` — **no change** (open-merge passthrough). [verified]
 - `web/src/components/SettingsPanel.tsx` — **no change** (universal sender).
 
 ## Out of scope / follow-ups
