@@ -476,7 +476,10 @@ class ShotController:
             char_lora_path=char_lora_path,
             style_reference=style_reference,
             shot_hint={"prompt": full_prompt, "characters_in_frame": shot.get("characters_in_frame", []),
-                       "camera": shot.get("camera", "")},
+                       "camera": shot.get("camera", ""),
+                       # IMAGE twin of the suggested_video_api routing above: forward the
+                       # optimizer's pick so quality_max's HiDream gate can fire (self-guarded).
+                       "image_api": opt_spec.get("suggested_image_api") if opt_spec else None},
             ctx=ctx,
         )
         if not result or not os.path.exists(img_path):
