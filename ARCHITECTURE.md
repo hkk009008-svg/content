@@ -1170,6 +1170,34 @@ What remains is the live surface only.
 `generate_fal_bgm(music_mood, bgm_path, duration=47)`. FAL Stable Audio's
 practical max; loops in assembly.
 
+### 12.6 Final-assembly audio mux — engine-dependent voice source
+
+`_assemble_final` ([cinema_pipeline.py:1149](cinema_pipeline.py:1149)) muxes the
+final video's audio with an FFmpeg `amix` filtergraph over up to three sources
+(voice/dialogue + BGM + foley). The **voice source is motion-engine-dependent**:
+
+- **Audio-embedding engines** (Omnihuman, Veo audio-drive): dialogue is baked
+  into `stitched.mp4`; the filtergraph binds voice from the embedded stream
+  (`[0:a]`), `amix` uses `duration=first`, no `-shortest`.
+- **Silent-video engines** (Kling Native image2video — the PA-VIDEO Set-3
+  default): motion clips carry **no audio**. `_concat_dialogue_track`
+  ([cinema_pipeline.py:1113](cinema_pipeline.py:1113), mirrors
+  `_concat_foley_track`) concatenates per-scene dialogue into a standalone track
+  muxed as a separate ffmpeg input (`[N:a]`); `amix` uses `duration=longest`
+  paired with `-shortest` on the output
+  ([:1346](cinema_pipeline.py:1346), [:1362](cinema_pipeline.py:1362)) so audio
+  plays through video length with BGM/foley filling any tail past dialogue end.
+  The `mix` log label reflects the actual source (`standalone-dialogue+BGM+foley`
+  vs `embedded-voice+BGM+foley`).
+
+**Root-cause precision (Tier-B finding C-B2 / advisory LV-1):** the original
+symptom — `amix=inputs=3 … matches no streams` → BGM-only fallback with dialogue
++ foley silently dropped — *looked* like a filtergraph bug. It was not: the
+filtergraph was correct for embedded-audio engines. The true root cause was the
+embedded-audio **assumption** breaking when PA-VIDEO routing defaulted to Kling
+Native (silent video). Closed by `b11edd4` (standalone-dialogue mux) +
+`ee70fd1` / `e867aac` (`duration=longest` + `-shortest` pairing).
+
 ---
 
 ## 13. LLM coordination
