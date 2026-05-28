@@ -24,6 +24,24 @@ from llm.ensemble import build_anthropic_system_blocks
 from llm.negative_prompts import get_negative_prompt_for_failure
 
 
+def _strip_json_fences(raw: str) -> str:
+    """Strip ```json … ``` fences that LLMs emit despite instructions.
+
+    Mirrors the shape of prompt_optimizer._strip_json_fences (canonical
+    pattern: llm/prompt_optimizer.py:339). Local copy avoids importing a
+    _-private cross-module symbol and keeps this a single-file change.
+    """
+    raw = raw.strip()
+    if raw.startswith("```"):
+        lines = raw.split("\n")
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        raw = "\n".join(lines)
+    return raw
+
+
 class ChiefDirector:
     """
     Metacognitive AI overseer for the cinema production pipeline.
@@ -239,39 +257,60 @@ When suggesting prompt_mutation for failures:
 
         raw = self._call_llm(self.SYSTEM_PROMPT, user_prompt)
 
-        try:
-            result = json.loads(raw)
-            decision = result.get("decision", "APPROVED")
-            violations = result.get("violations", [])
-            modifications = result.get("modifications", [])
+        # ── fence-tolerant parse with ≤1 retry-with-correction ──────────────
+        # Scope: only the json.loads is guarded for retry; post-parse logic
+        # exceptions (modifications/.get()) are NOT retry-eligible — they
+        # indicate bugs, not transient LLM format noise.
+        result = None
+        for _attempt in range(2):
+            try:
+                result = json.loads(_strip_json_fences(raw))
+                break
+            except json.JSONDecodeError:
+                if _attempt == 0:
+                    correction = (
+                        "\n\nYour previous response was not valid JSON. "
+                        "Output ONLY a valid JSON object — no markdown, no prose."
+                    )
+                    raw = self._call_llm(self.SYSTEM_PROMPT, user_prompt + correction)
+                # second attempt: fall through to result=None
 
-            if violations:
-                print(f"   [DIRECTOR] {decision}: {len(violations)} violation(s) found")
-                for v in violations[:3]:
-                    print(f"      - {v}")
-
-            # Apply modifications if any
-            if modifications and decision == "MODIFIED":
-                for mod in modifications:
-                    idx = mod.get("shot_index", -1)
-                    if 0 <= idx < len(shots) and "corrected" in mod:
-                        field = mod.get("field", "prompt")
-                        shots[idx][field] = mod["corrected"]
-                        print(f"   [DIRECTOR] Shot {idx} '{field}' corrected")
-
-            self.diagnostic_log.append({
-                "stage": "shot_validation",
-                "scene": scene.get("title"),
-                "decision": decision,
-                "violations": violations,
-                "score": result.get("quality_score", 0),
-            })
-
-            return {"decision": decision, "violations": violations, "shots": shots}
-
-        except (json.JSONDecodeError, Exception) as e:
-            print(f"   [DIRECTOR] Evaluation parse error: {e}")
+        if result is None:
+            # Both attempts failed — flagged deterministic fallback (not silent).
+            # Fail-safe-for-throughput: APPROVED so the pipeline isn't blocked,
+            # but the log line is distinct from the normal decision path so
+            # operators can detect and investigate.
+            print(f"   [DIRECTOR] decision=APPROVED (parse-fallback after retry)")
             return {"decision": "APPROVED", "violations": [], "shots": shots}
+
+        decision = result.get("decision", "APPROVED")
+        violations = result.get("violations", [])
+        modifications = result.get("modifications", [])
+
+        if violations:
+            print(f"   [DIRECTOR] {decision}: {len(violations)} violation(s) found")
+            for v in violations[:3]:
+                print(f"      - {v}")
+
+        # Apply modifications if any
+        if modifications and decision == "MODIFIED":
+            for mod in modifications:
+                idx = mod.get("shot_index", -1)
+                if 0 <= idx < len(shots) and "corrected" in mod:
+                    field = mod.get("field", "prompt")
+                    shots[idx][field] = mod["corrected"]
+                    print(f"   [DIRECTOR] Shot {idx} '{field}' corrected")
+
+        self.diagnostic_log.append({
+            "stage": "shot_validation",
+            "scene": scene.get("title"),
+            "decision": decision,
+            "violations": violations,
+            "score": result.get("quality_score", 0),
+        })
+
+        print(f"   [DIRECTOR] decision={decision}")
+        return {"decision": decision, "violations": violations, "shots": shots}
 
     def evaluate_generation_quality(
         self,
@@ -404,7 +443,7 @@ When suggesting prompt_mutation for failures:
         raw = self._call_llm(diagnosis_system, eval_prompt)
 
         try:
-            result = json.loads(raw)
+            result = json.loads(_strip_json_fences(raw))
 
             # Append the negative-prompt hint to the LLM's mutation instructions.
             # Opt-in: unknown reasons and "passed" return "" and are silently skipped.
