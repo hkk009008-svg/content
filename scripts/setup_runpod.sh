@@ -37,6 +37,8 @@ apt-get update -qq && apt-get install -y -qq \
     libglib2.0-0 \
     wget \
     git \
+    unzip \
+    jq \
     > /dev/null 2>&1
 echo "  Done."
 
@@ -84,6 +86,34 @@ for node_name in "${!CUSTOM_NODES[@]}"; do
         echo "  $node_name already installed."
     fi
 done
+
+# ComfyUI-PuLID-Flux (balazik) — provides ApplyPulidFlux / PulidFluxModelLoader /
+# PulidFluxEvaClipLoader for the max-tier workflow (pulid_max.json). git clone to
+# match the brief v2.0 §11.1 manual one-liner. Closes C-D4 / A10 step 2.
+PULID_FLUX_DIR="$CUSTOM_NODES_DIR/ComfyUI-PuLID-Flux"
+if [ ! -d "$PULID_FLUX_DIR" ]; then
+    echo "  Installing ComfyUI-PuLID-Flux (balazik)..."
+    if git clone --depth 1 https://github.com/balazik/ComfyUI-PuLID-Flux "$PULID_FLUX_DIR"; then
+        if [ -f "$PULID_FLUX_DIR/requirements.txt" ]; then
+            pip install -r "$PULID_FLUX_DIR/requirements.txt" -q || true
+        fi
+    else
+        echo "  ERROR: failed to clone ComfyUI-PuLID-Flux; max-tier PuLID-FLUX unavailable."
+        rm -rf "$PULID_FLUX_DIR"
+    fi
+else
+    echo "  ComfyUI-PuLID-Flux already installed."
+fi
+
+# InsightFace runtime stack — REQUIRED for the PuLID node packs (both cubiq's
+# ComfyUI-PuLID and balazik's ComfyUI-PuLID-Flux) to register PulidInsightFaceLoader.
+# When absent, the pack import fails and ComfyUI silently drops EVERY node in it —
+# the exact C-B1/C-D4 cascade. Install explicitly rather than rely on each pack's
+# -q requirements.txt (which can fail silently). onnxruntime-gpu suits the pod GPU;
+# swap to onnxruntime if a CUDA mismatch surfaces. Closes the C-D4 root.
+echo "  Installing InsightFace stack (insightface, onnxruntime-gpu, facexlib)..."
+pip install -q insightface onnxruntime-gpu facexlib || \
+    echo "  WARNING: InsightFace stack install failed — PulidInsightFaceLoader will NOT register. Resolve on-pod."
 
 echo "  Done."
 
@@ -144,6 +174,44 @@ if [ ! -f "$MODELS_DIR/pulid/ip-adapter_pulid_sdxl_fp16.safetensors" ]; then
         "https://huggingface.co/huchenlei/ipadapter_pulid/resolve/main/ip-adapter_pulid_sdxl_fp16.safetensors"
 fi
 
+# PuLID-Flux model (pulid_max.json references pulid_flux_v0.9.1.safetensors).
+# Source: official PuLID author repo (guozinan/PuLID).
+if [ ! -f "$MODELS_DIR/pulid/pulid_flux_v0.9.1.safetensors" ]; then
+    echo "  Downloading PuLID-Flux v0.9.1..."
+    wget -q --show-progress -O "$MODELS_DIR/pulid/pulid_flux_v0.9.1.safetensors" \
+        "https://huggingface.co/guozinan/PuLID/resolve/main/pulid_flux_v0.9.1.safetensors" \
+        || echo "  WARNING: PuLID-Flux model download failed — install into models/pulid/ manually."
+fi
+
+# antelopev2 InsightFace model (C-D4 / A10 step 3). PulidInsightFaceLoader loads
+# it via insightface FaceAnalysis(name="antelopev2", root=models/insightface),
+# which resolves to models/insightface/models/antelopev2/ — note the nested
+# models/. The brief §11.1/A10 shorthand "models/insightface/antelopev2/" omits
+# it; we populate the insightface-canonical path AND symlink the brief's path so
+# the A10 probe `ls models/insightface/antelopev2/*.onnx` also resolves.
+ANTELOPE_CANON="$MODELS_DIR/insightface/models/antelopev2"
+ANTELOPE_PROBE="$MODELS_DIR/insightface/antelopev2"
+if [ ! -f "$ANTELOPE_CANON/glintr100.onnx" ]; then
+    echo "  Downloading antelopev2 InsightFace model..."
+    mkdir -p "$ANTELOPE_CANON"
+    rm -rf /tmp/antelope_dl && mkdir -p /tmp/antelope_dl
+    if curl -sfL "https://huggingface.co/MonsterMMORPG/tools/resolve/main/antelopev2.zip" \
+            -o /tmp/antelope_dl/antelopev2.zip \
+        && unzip -q -o /tmp/antelope_dl/antelopev2.zip -d /tmp/antelope_dl; then
+        find /tmp/antelope_dl -name '*.onnx' -exec mv -t "$ANTELOPE_CANON/" {} + 2>/dev/null || true
+    fi
+    if [ ! -f "$ANTELOPE_CANON/glintr100.onnx" ]; then
+        echo "  WARNING: antelopev2 auto-download failed or changed layout. MANUAL STEP —"
+        echo "    place these 5 files into $ANTELOPE_CANON/ :"
+        echo "    1k3d68.onnx 2d106det.onnx genderage.onnx glintr100.onnx scrfd_10g_bnkps.onnx"
+        echo "    (verify the source on-pod where you have shell access — Q6.)"
+    fi
+fi
+mkdir -p "$MODELS_DIR/insightface"
+if [ ! -e "$ANTELOPE_PROBE" ]; then
+    ln -sf "$ANTELOPE_CANON" "$ANTELOPE_PROBE"
+fi
+
 # Real-ESRGAN upscaler
 if [ ! -f "$MODELS_DIR/upscale_models/RealESRGAN_x4plus.pth" ]; then
     echo "  Downloading Real-ESRGAN 4x..."
@@ -195,6 +263,11 @@ pip install -q \
     torch \
     torchvision
 
+# blinker is often pre-installed via distutils on RunPod base images, which
+# blocks pip from upgrading deps that require a newer blinker. --ignore-installed
+# clears the conflict (cycle-15 manual hardening step 4; A10).
+pip install -q --ignore-installed blinker || true
+
 # Install project-specific deps if requirements.txt exists
 if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
     pip install -q -r "$PROJECT_ROOT/requirements.txt"
@@ -233,6 +306,29 @@ else
         sleep 2
     done
     cd "$PROJECT_ROOT"
+fi
+
+# ------------------------------------------------------------------
+# 6b. Verify PuLID node availability (closes the C-D4 silent-missing-node class)
+# ------------------------------------------------------------------
+# A silently-missing custom node was the root of both C-B1 and C-D4: a workflow
+# referenced a class_type ComfyUI never registered, and nothing caught it until
+# generation. Probe /object_info now, while it's cheap to act on. Mirrors brief
+# v2.0 §3 A9.5.
+echo ""
+echo "[verify] Checking PuLID node availability via /object_info..."
+PULID_NODES_OK=1
+for node in PulidInsightFaceLoader ApplyPulidFlux; do
+    if curl -s "http://127.0.0.1:${COMFYUI_PORT}/object_info/${node}" | grep -q "\"${node}\""; then
+        echo "  OK: ${node} registered."
+    else
+        echo "  MISSING: ${node} not registered — PuLID identity path will fall back (C-D4)."
+        PULID_NODES_OK=0
+    fi
+done
+if [ "$PULID_NODES_OK" -eq 0 ]; then
+    echo "  -> Inspect $COMFYUI_LOG for custom-node import errors (usually a missing"
+    echo "     insightface/onnxruntime dep or absent antelopev2 model)."
 fi
 
 # ------------------------------------------------------------------

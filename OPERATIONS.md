@@ -203,7 +203,10 @@ tier) and certain performance capture paths (LivePortrait, SadTalker).
 ### Bootstrap script
 
 `scripts/setup_runpod.sh` installs ComfyUI + the custom node packs the
-workflows depend on. Run it on the pod after first boot.
+workflows depend on (incl. `ComfyUI-PuLID-Flux`), the InsightFace runtime
+stack + `antelopev2` model that `PulidInsightFaceLoader` needs to register,
+and runs a post-start `/object_info` check that the PuLID nodes are
+available (C-D4 guard). Run it on the pod after first boot.
 
 ### Required custom nodes
 
