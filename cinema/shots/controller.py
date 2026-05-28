@@ -834,6 +834,7 @@ class ShotController:
         intent_override=None,
         revised_prompt: str = "",
         extra_metadata: Optional[dict] = None,
+        record_cost: bool = True,
     ) -> dict:
         """Post-generation finalize step for a motion take.
 
@@ -972,21 +973,25 @@ class ShotController:
         self._host._rebuild_review_clips()
         self._host._save_checkpoint()
 
-        # 8. Cost record (best-effort)
-        try:
-            video_id = self.project.get("id", "")
-            self.cost_tracker.record_api_call(
-                target_api,
-                operation="motion_generation",
-                shot_id=shot_id,
-                video_id=video_id,
-            )
-        except Exception:
-            logger.warning(
-                "motion cost record skipped",
-                exc_info=True,
-                extra={"shot_id": shot_id},
-            )
+        # 8. Cost record (best-effort).
+        # Suppressed when record_cost=False so the storyboard batch path (F2b)
+        # can record ONE batch cost via cost_tracker directly and then call
+        # _finalize_motion_take per-segment without N-counting the generation.
+        if record_cost:
+            try:
+                video_id = self.project.get("id", "")
+                self.cost_tracker.record_api_call(
+                    target_api,
+                    operation="motion_generation",
+                    shot_id=shot_id,
+                    video_id=video_id,
+                )
+            except Exception:
+                logger.warning(
+                    "motion cost record skipped",
+                    exc_info=True,
+                    extra={"shot_id": shot_id},
+                )
 
         # 9. Budget gate
         if self.cost_tracker.is_over_budget():
