@@ -128,6 +128,12 @@ _SUNO_MODEL = "V5"  # sunoapi.org: V4 | V4_5 | V4_5PLUS | V4_5ALL | V5 | V5_5 �
 # result (this pipeline has no public callback URL); a placeholder satisfies the schema.
 _SUNO_CALLBACK_PLACEHOLDER = "https://example.com/suno-callback"
 _SUNO_POLL_INTERVAL_S = 5
+# sunoapi.org's audioUrl is a CDN asset that 403s the default urllib User-Agent
+# (Python-urllib/*); fetch it via requests with a browser UA instead.
+_SUNO_DOWNLOAD_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
 
 
 def generate_suno_v5(
@@ -155,7 +161,6 @@ def generate_suno_v5(
         poll_timeout_s:  give up after this many seconds of polling
     """
     import requests
-    import urllib.request
     from config.settings import settings
 
     api_key = settings.suno_api_key
@@ -225,7 +230,10 @@ def generate_suno_v5(
             print(f"   [SUNO V5] timed out after {poll_timeout_s}s (no audioUrl)")
             return False
 
-        urllib.request.urlretrieve(audio_url, output_filename)
+        dl = requests.get(audio_url, headers={"User-Agent": _SUNO_DOWNLOAD_UA}, timeout=60)
+        dl.raise_for_status()
+        with open(output_filename, "wb") as f:
+            f.write(dl.content)
         print(f"   ✅ Suno V5 song saved: {output_filename}")
         # Best-effort cost tracking — closes part of M-B2 (cycle-16 Tier B
         # surfaced BGM/foley/TTS sites lacked record_api_call invocations).
