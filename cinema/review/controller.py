@@ -325,8 +325,18 @@ class ReviewController:
                         "auto_approved": decision.auto_approved,
                         "vetoes": decision.vetoes,
                         "rule_names": decision.rule_names,
+                        "deferred": decision.deferred,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
+
+                    # Emit observable marker for log scanning / unattended runs.
+                    if decision.auto_approved:
+                        _gate_label = "APPROVED"
+                    elif decision.deferred:
+                        _gate_label = "DEFERRED"
+                    else:
+                        _gate_label = f"VETO({','.join(decision.rule_names)})"
+                    print(f"[AUTO-APPROVE] {aa_gate}: {_gate_label}")
 
                     if decision.auto_approved:
                         shot_id = shot.get("id", "unknown")

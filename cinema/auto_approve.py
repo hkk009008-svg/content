@@ -61,6 +61,10 @@ class AutoApproveDecision:
     auto_approved: bool
     vetoes: list[str] = field(default_factory=list)   # human-readable reasons
     rule_names: list[str] = field(default_factory=list)  # parallel to vetoes
+    deferred: bool = False  # True when the decision is due to an eval-error,
+    # not a substantive rule veto.  auto_approved remains False (still routes
+    # to manual review) but the caller can distinguish eval-error from real
+    # veto.  Additive: existing consumers of auto_approved are unaffected.
 
 
 @dataclass
@@ -80,7 +84,8 @@ class AutoApproveConfig:
     plan_reject_on_violations: bool = True   # veto if violations[] non-empty
 
     # --- Image (keyframe) gate ---
-    image_min_composite: float = 0.97         # conservative threshold
+    image_min_composite: float = 0.97         # conservative threshold (PuLID-calibrated)
+    image_min_composite_fallback: float = 0.78  # fair bar for non-PuLID fallback engines
     image_veto_on_fallback: bool = True       # veto if cascade fallback
     image_max_spent_multiplier: float = 1.5   # veto if spent > 1.5× budget
 
@@ -118,6 +123,9 @@ class AutoApproveConfig:
                 "plan_reject_on_violations", cls.plan_reject_on_violations
             ),
             image_min_composite=_get("image_min_composite", cls.image_min_composite),
+            image_min_composite_fallback=_get(
+                "image_min_composite_fallback", cls.image_min_composite_fallback
+            ),
             image_veto_on_fallback=_get("image_veto_on_fallback", cls.image_veto_on_fallback),
             image_max_spent_multiplier=_get(
                 "image_max_spent_multiplier", cls.image_max_spent_multiplier
@@ -143,6 +151,7 @@ class AutoApproveConfig:
             "plan_require_approved": self.plan_require_approved,
             "plan_reject_on_violations": self.plan_reject_on_violations,
             "image_min_composite": self.image_min_composite,
+            "image_min_composite_fallback": self.image_min_composite_fallback,
             "image_veto_on_fallback": self.image_veto_on_fallback,
             "image_max_spent_multiplier": self.image_max_spent_multiplier,
             "motion_min_identity": self.motion_min_identity,
@@ -195,16 +204,33 @@ def _rules_for_image(config: AutoApproveConfig) -> list[VetoRule]:
     rules: list[VetoRule] = []
 
     min_composite = config.image_min_composite
+    min_composite_fallback = config.image_min_composite_fallback
 
     if min_composite > 0:
+        def _image_composite_predicate(
+            ctx,
+            _thr=min_composite,
+            _thr_fallback=min_composite_fallback,
+        ) -> bool:
+            """Dynamic threshold: use fallback bar when any take used a fallback engine."""
+            takes = ctx["takes"]
+            if _any_take_has_fallback(takes):
+                chosen = _thr_fallback
+                print(
+                    f"[AUTO-APPROVE] image_min_composite_kontext_fallback={chosen:.2f} applied"
+                )
+            else:
+                chosen = _thr
+            return _best_take_composite(takes) < chosen
+
         rules.append(
             VetoRule(
                 name="image_composite_below_threshold",
-                predicate=lambda ctx, _thr=min_composite: _best_take_composite(
-                    ctx["takes"]
-                )
-                < _thr,
-                reason_template=f"best keyframe composite below threshold (< {min_composite:.2f})",
+                predicate=_image_composite_predicate,
+                reason_template=(
+                    f"best keyframe composite below threshold "
+                    f"(< {min_composite:.2f} PuLID / {min_composite_fallback:.2f} fallback)"
+                ),
             )
         )
 
@@ -543,11 +569,23 @@ def check_gate(
                 fired = rule.predicate(ctx)
             except Exception as pred_exc:
                 logger.warning(
-                    "auto_approve rule %r predicate raised: %r — treating as veto",
+                    "auto_approve rule %r predicate raised: %r — treating as eval-error (deferred)",
                     rule.name,
                     pred_exc,
                 )
                 fired = True  # conservative: predicate failure → veto
+                vetoes.append(
+                    f"eval error in rule {rule.name!r} — manual review required"
+                )
+                rule_names.append(rule.name)
+                # Return immediately with deferred=True — this is an eval-error,
+                # not a substantive rule veto.
+                return AutoApproveDecision(
+                    auto_approved=False,
+                    vetoes=vetoes,
+                    rule_names=rule_names,
+                    deferred=True,
+                )
             if fired:
                 vetoes.append(rule.reason_template)
                 rule_names.append(rule.name)
@@ -561,7 +599,7 @@ def check_gate(
     except Exception as exc:
         logger.warning(
             "auto_approve.check_gate crashed (gate=%r, shot=%r): %r — "
-            "falling back to manual review",
+            "falling back to manual review (deferred)",
             gate,
             (shot_state or {}).get("id"),
             exc,
@@ -570,6 +608,7 @@ def check_gate(
             auto_approved=False,
             vetoes=["auto_approve module error — manual review required"],
             rule_names=["module_error"],
+            deferred=True,
         )
 
 

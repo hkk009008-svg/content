@@ -826,3 +826,334 @@ class TestMotionGateIntegration:
             "mutator must pick take_a (higher motion_fidelity=0.92 > 0.75), "
             f"got: {shot.get('approved_motion_take_id')!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestDeferredDecision (TE-C-D3-2) — C-D3 pt2: eval-error → deferred=True
+# ---------------------------------------------------------------------------
+
+
+class TestDeferredDecision:
+    """Tests for the 'deferred' field on AutoApproveDecision.
+
+    An eval-error (predicate exception or whole-gate crash) must produce
+    deferred=True AND auto_approved=False, distinguishable from a
+    substantive rule veto (which has deferred=False).
+    """
+
+    def test_predicate_exception_produces_deferred_decision(self):
+        """A predicate that raises → deferred=True, auto_approved=False."""
+        def _bad_predicate(ctx):
+            raise RuntimeError("simulated predicate failure")
+
+        config = AutoApproveConfig()
+        # Patch _rules_for_plan to include a bad rule.
+        from cinema import auto_approve as aa_mod
+        bad_rule = aa_mod.VetoRule(
+            name="bad_rule",
+            predicate=_bad_predicate,
+            reason_template="should not appear in real veto",
+        )
+
+        original_builder = aa_mod._rules_for_plan
+
+        def _patched_builder(cfg):
+            return [bad_rule]
+
+        aa_mod._rules_for_plan = _patched_builder
+        try:
+            decision = check_gate(
+                "plan",
+                shot_state=_make_shot(),
+                project=_make_project(),
+                takes=[],
+                config=config,
+            )
+        finally:
+            aa_mod._rules_for_plan = original_builder
+
+        assert decision.deferred is True, "predicate exception → deferred must be True"
+        assert decision.auto_approved is False, "deferred decision still routes to manual review"
+        # Veto list contains an eval-error message, not the rule's reason_template
+        assert any("eval error" in v.lower() or "manual review" in v.lower()
+                   for v in decision.vetoes), (
+            f"expected an eval-error veto message, got: {decision.vetoes}"
+        )
+
+    def test_whole_gate_exception_produces_deferred_decision(self):
+        """A config=None + broken project dict → whole-gate crash → deferred=True."""
+        # Pass something that will crash AutoApproveConfig.from_project
+        broken_project = {"global_settings": None}  # .get("auto_approve") → None → ok
+        # Actually cause a crash by providing a non-iterable scenes to trigger
+        # an exception inside check_gate's outer try block via bad config access.
+        from cinema import auto_approve as aa_mod
+
+        original_builder = aa_mod._rules_for_plan
+
+        def _crashing_builder(cfg):
+            raise ValueError("simulated whole-gate crash")
+
+        aa_mod._rules_for_plan = _crashing_builder
+        try:
+            decision = check_gate(
+                "plan",
+                shot_state=_make_shot(),
+                project=_make_project(),
+                takes=[],
+                config=AutoApproveConfig(),
+            )
+        finally:
+            aa_mod._rules_for_plan = original_builder
+
+        assert decision.deferred is True, "whole-gate crash → deferred must be True"
+        assert decision.auto_approved is False
+        assert any("module error" in v.lower() or "manual review" in v.lower()
+                   for v in decision.vetoes)
+
+    def test_substantive_veto_has_deferred_false(self):
+        """A real rule firing (not an exception) → deferred=False."""
+        config = AutoApproveConfig(plan_require_approved=True)
+        shot = _make_shot(director_review={"decision": "REJECTED", "violations": []})
+        decision = check_gate(
+            "plan",
+            shot_state=shot,
+            project=_make_project(),
+            takes=[],
+            config=config,
+        )
+        assert decision.auto_approved is False
+        assert decision.deferred is False, (
+            "substantive rule veto must NOT be marked deferred"
+        )
+
+    def test_deferred_distinct_from_veto_via_deferred_flag(self):
+        """Deferred decision and veto decision both have auto_approved=False,
+        but only the deferred one has deferred=True — callers can distinguish them."""
+        # veto decision
+        config = AutoApproveConfig(plan_require_approved=True)
+        shot = _make_shot(director_review={"decision": "REJECTED", "violations": []})
+        veto_decision = check_gate(
+            "plan",
+            shot_state=shot,
+            project=_make_project(),
+            takes=[],
+            config=config,
+        )
+
+        # deferred decision via predicate exception
+        from cinema import auto_approve as aa_mod
+        original_builder = aa_mod._rules_for_plan
+
+        def _crash_builder(cfg):
+            def _bad(ctx): raise RuntimeError("crash")
+            return [aa_mod.VetoRule("crash", _bad, "bad")]
+        aa_mod._rules_for_plan = _crash_builder
+        try:
+            deferred_decision = check_gate(
+                "plan",
+                shot_state=_make_shot(),
+                project=_make_project(),
+                takes=[],
+                config=AutoApproveConfig(),
+            )
+        finally:
+            aa_mod._rules_for_plan = original_builder
+
+        assert veto_decision.auto_approved is False
+        assert deferred_decision.auto_approved is False
+        assert veto_decision.deferred is False
+        assert deferred_decision.deferred is True
+
+    def test_audit_entry_carries_deferred_field(self):
+        """The controller builds audit_entry with 'deferred' key from decision."""
+        # This tests the shape expected by the controller (simulated directly,
+        # not via full integration, since the marker already tested in controller integration).
+        from cinema import auto_approve as aa_mod
+        original_builder = aa_mod._rules_for_plan
+
+        def _crash_builder(cfg):
+            def _bad(ctx): raise RuntimeError("crash")
+            return [aa_mod.VetoRule("crash", _bad, "bad")]
+        aa_mod._rules_for_plan = _crash_builder
+        try:
+            decision = check_gate(
+                "plan",
+                shot_state=_make_shot(),
+                project=_make_project(),
+                takes=[],
+                config=AutoApproveConfig(),
+            )
+        finally:
+            aa_mod._rules_for_plan = original_builder
+
+        from datetime import datetime, timezone
+        audit_entry = {
+            "gate": "plan",
+            "auto_approved": decision.auto_approved,
+            "vetoes": decision.vetoes,
+            "rule_names": decision.rule_names,
+            "deferred": decision.deferred,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        assert audit_entry["deferred"] is True
+        assert audit_entry["auto_approved"] is False
+
+
+# ---------------------------------------------------------------------------
+# TestConditionalCompositeThreshold (TE-C-D5) — C-D5: fallback threshold
+# ---------------------------------------------------------------------------
+
+
+class TestConditionalCompositeThreshold:
+    """Tests for the conditional image_min_composite_fallback threshold.
+
+    With a fallback take and composite in [0.78, 0.97), the rule must NOT veto.
+    With a non-fallback take at the same composite, the rule MUST veto (0.97 bar).
+    """
+
+    def test_fallback_take_at_mid_composite_passes(self):
+        """composite=0.85 with fallback=True → passes (0.78 bar), NOT vetoed."""
+        config = AutoApproveConfig(
+            image_min_composite=0.97,
+            image_min_composite_fallback=0.78,
+            image_veto_on_fallback=False,  # disable the separate fallback-engine veto
+        )
+        rules = _rules_for_image(config)
+        composite_rule = next(
+            r for r in rules if r.name == "image_composite_below_threshold"
+        )
+        fallback_take = {
+            "id": "take_fb",
+            "metadata": {"composite": 0.85},
+            "cascade_metadata": {"fallback": True},
+        }
+        ctx = {
+            "shot_state": _make_shot(),
+            "project": _make_project(),
+            "takes": [fallback_take],
+        }
+        # 0.85 >= 0.78 (fallback threshold) → rule should NOT fire
+        assert composite_rule.predicate(ctx) is False, (
+            "composite=0.85 with fallback take must pass the 0.78 fallback threshold"
+        )
+
+    def test_non_fallback_take_at_mid_composite_vetoed(self):
+        """composite=0.85 with fallback=False → vetoed (0.97 PuLID bar)."""
+        config = AutoApproveConfig(
+            image_min_composite=0.97,
+            image_min_composite_fallback=0.78,
+            image_veto_on_fallback=False,
+        )
+        rules = _rules_for_image(config)
+        composite_rule = next(
+            r for r in rules if r.name == "image_composite_below_threshold"
+        )
+        non_fallback_take = {
+            "id": "take_nfb",
+            "metadata": {"composite": 0.85},
+            "cascade_metadata": {"fallback": False},
+        }
+        ctx = {
+            "shot_state": _make_shot(),
+            "project": _make_project(),
+            "takes": [non_fallback_take],
+        }
+        # 0.85 < 0.97 (PuLID threshold) → rule MUST fire
+        assert composite_rule.predicate(ctx) is True, (
+            "composite=0.85 with non-fallback take must fail the 0.97 PuLID threshold"
+        )
+
+    def test_fallback_take_below_fallback_threshold_vetoed(self):
+        """composite=0.70 with fallback=True → vetoed (below even 0.78 fallback bar)."""
+        config = AutoApproveConfig(
+            image_min_composite=0.97,
+            image_min_composite_fallback=0.78,
+            image_veto_on_fallback=False,
+        )
+        rules = _rules_for_image(config)
+        composite_rule = next(
+            r for r in rules if r.name == "image_composite_below_threshold"
+        )
+        fallback_take = {
+            "id": "take_fb_low",
+            "metadata": {"composite": 0.70},
+            "cascade_metadata": {"fallback": True},
+        }
+        ctx = {
+            "shot_state": _make_shot(),
+            "project": _make_project(),
+            "takes": [fallback_take],
+        }
+        # 0.70 < 0.78 (fallback threshold) → rule MUST fire
+        assert composite_rule.predicate(ctx) is True, (
+            "composite=0.70 with fallback take must fail the 0.78 fallback threshold"
+        )
+
+    def test_non_fallback_take_above_pulid_threshold_passes(self):
+        """composite=0.98 with fallback=False → passes (above 0.97 PuLID bar)."""
+        config = AutoApproveConfig(
+            image_min_composite=0.97,
+            image_min_composite_fallback=0.78,
+            image_veto_on_fallback=False,
+        )
+        rules = _rules_for_image(config)
+        composite_rule = next(
+            r for r in rules if r.name == "image_composite_below_threshold"
+        )
+        good_take = {
+            "id": "take_good",
+            "metadata": {"composite": 0.98},
+            "cascade_metadata": {"fallback": False},
+        }
+        ctx = {
+            "shot_state": _make_shot(),
+            "project": _make_project(),
+            "takes": [good_take],
+        }
+        assert composite_rule.predicate(ctx) is False
+
+    def test_image_min_composite_fallback_round_trips_from_project_to_dict(self):
+        """image_min_composite_fallback round-trips through from_project / to_dict."""
+        original = AutoApproveConfig(image_min_composite_fallback=0.72)
+        project = {
+            "id": "proj_rt",
+            "global_settings": {"auto_approve": original.to_dict()},
+        }
+        recovered = AutoApproveConfig.from_project(project)
+        assert recovered.image_min_composite_fallback == pytest.approx(0.72), (
+            "image_min_composite_fallback must round-trip through from_project/to_dict"
+        )
+
+    def test_image_min_composite_fallback_default_in_to_dict(self):
+        """Default config serialises image_min_composite_fallback into to_dict."""
+        cfg = AutoApproveConfig()
+        d = cfg.to_dict()
+        assert "image_min_composite_fallback" in d
+        assert d["image_min_composite_fallback"] == pytest.approx(0.78)
+
+    def test_fallback_marker_printed(self, capsys):
+        """When fallback threshold applies, the marker is printed."""
+        config = AutoApproveConfig(
+            image_min_composite=0.97,
+            image_min_composite_fallback=0.78,
+            image_veto_on_fallback=False,
+        )
+        rules = _rules_for_image(config)
+        composite_rule = next(
+            r for r in rules if r.name == "image_composite_below_threshold"
+        )
+        fallback_take = {
+            "id": "take_fb_marker",
+            "metadata": {"composite": 0.85},
+            "cascade_metadata": {"fallback": True},
+        }
+        ctx = {
+            "shot_state": _make_shot(),
+            "project": _make_project(),
+            "takes": [fallback_take],
+        }
+        composite_rule.predicate(ctx)
+        captured = capsys.readouterr()
+        assert "image_min_composite_kontext_fallback=0.78 applied" in captured.out, (
+            f"expected fallback marker in stdout; got: {captured.out!r}"
+        )
