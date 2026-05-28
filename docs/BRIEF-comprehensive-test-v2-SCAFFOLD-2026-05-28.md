@@ -751,6 +751,45 @@ Cycle-17 entry (pre-Ph1):   1129/3/10  (tests/unit/; HEAD e16bf85; verified `pyt
 3. **OPERATOR REPLY** — operator-seat REPLY-cycle on director's draft (per cycle-12 v5.2 + cycle-16 work-split convergence)
 4. **PROMOTION TO FINAL** — at cycle-17 entry; supersedes brief v1.0
 
+### Brief v2.0 author chain — STEP 3: operator REPLY (2026-05-28 cycle-17 entry)
+
+Operator-seat REPLY-cycle on director's r2 strategic-synthesis fill-in (`8eb4a13`).
+**Verdict: ✅ CONCUR — r2 fill-in accurate; all 7 cited SHAs git-show-verified
+(`7773502`/`d28474e`/`d73eebb`/`cfc4da0`/`46a2cfa`/`9fd655f`/`e16bf85`); baseline
+confirmed.** Operator refinements, grounded in this session's Lane V #20/#21 work
+(which ran concurrently with the fill-in):
+
+- **§1 HiDream-routing delta — refine.** The wire is now *test-covered*: M-1
+  forwarding-seam coverage landed at `9fd655f` (3 tests asserting the post-M-2
+  guard's pin > suggestion > None resolution). The `d73eebb` M-2 guard-asymmetry
+  surfaced by Lane V #21 was dispositioned **(c) NO ACTION** — the image guard
+  isn't a literal mirror of the video guard, but the value it would guard cannot
+  occur (optimizer coerces to `FLUX_DEV`, `prompt_optimizer.py:289/324`; consumer
+  self-guards on exact `"HIDREAM_I1"`, `quality_max.py:712`); a mirror would be
+  dead code per "don't guard hypotheticals". Net: routing wired + test-covered +
+  reviewed; **firing remains GPU-gated** (§9 P3-5 / §12 Q-V2-2 framing stands).
+- **§1 Suno delta — confirm + Lane V verdict.** Lane V #21 independently reviewed
+  `cfc4da0`: ✅ sound — polling loop bounded (timeout + 5s sleep), response parsing
+  defensively guarded (no KeyError/IndexError), API key not logged, 5 tests assert
+  real behavior. A hedged "network-exception escapes" IMPORTANT was source-verified
+  a FALSE POSITIVE (`except RequestException` / `except Exception` → `return False`,
+  `music.py:239-244`) → graceful-False/FAL fallback intact. The one real open item
+  is the **live credit-spending `generate` call** (user-gated) — matches the §1
+  "NOT live-tested" flag + the §5 Tier D PA-AUDIO note.
+- **§7 / §9 F-F.1 delta — confirm.** M-3 (`e16bf85`) added `shot_id` to the lipsync
+  cost-record warnings (observability parity); per-engine lipsync **pricing**
+  remains the tracked follow-on (records $0.00 until engines hit the cost table).
+  §9 P1-4 "partial" is the correct status.
+- **§2 A3 / §13 baseline — confirm.** `1129 passed / 3 skipped / 10 subtests`
+  verified at `e16bf85`; HEAD `2f94df2` adds only docs/mailbox commits since (no
+  `tests/` or production touch) → baseline holds at current HEAD.
+- **§10 Rule #16 / §12 Q-V2-2 — concur, no refinement.**
+
+**Phase-dependent sections (§3 markers / §4–§5 results / §6 Phase-1 cells / §13
+cumulative) correctly UNTOUCHED — pod-gated.** Step-4 (promotion-to-final) remains
+phase-gated per the pre-conditions below (pod + Phase 1–4 + user sign-off). Step-3
+REPLY complete; the brief stays SCAFFOLD until promotion.
+
 ### Brief v2.0 promotion-to-final pre-conditions
 
 [PHASE-DEPENDENT]
@@ -833,6 +872,10 @@ Director-seat strategic-synthesis partial fill-in of the GPU-independent items t
 - §10 — Rule #16 → CODIFIED (`7773502`, v5.4); Q4 conditional resolved.
 - §12 — Q-V2-2 HiDream timing narrowed (routing wired; backbone exploration still cycle-18+).
 - Phase-dependent sections (§3 markers, §4/§5 results, §6 Phase-1 cells, §13 cumulative findings/cost) UNTOUCHED — still await the pod + Phase 1–4. Operator REPLY (author-chain step 3) still pending.
+
+### v2.0-SCAFFOLD-r3 (2026-05-28 cycle-17 entry — operator step-3 REPLY)
+
+Operator-seat author-chain step-3 REPLY on director's r2 fill-in (recorded in §14). Verdict: ✅ CONCUR — r2 accurate; 7 cited SHAs git-show-verified; baseline `1129/3/10` confirmed (verified at `e16bf85`; docs/mailbox-only commits since → holds at HEAD). Operator refinements folded into the §14 step-3 block: HiDream routing now test-covered (`9fd655f` M-1) + `d73eebb` M-2 asymmetry dispositioned (c) NO ACTION (Lane V #21); Suno `cfc4da0` Lane V #21 ✅ sound (hedged network-exception IMPORTANT = source-verified FALSE POSITIVE); F-F.1 `shot_id` logging closed (`e16bf85` M-3). Phase-dependent sections remain UNTOUCHED (pod-gated); step-4 promotion-to-final still phase-gated. Author-chain step 3 → DONE.
 
 ### Pending updates (post-Phase-1-4)
 
