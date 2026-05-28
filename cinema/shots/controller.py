@@ -852,13 +852,34 @@ class ShotController:
         )
         cc = enhanced.get("continuity_config", {})
         from workflow_selector import classify_shot_type, WORKFLOW_TEMPLATES
+        from domain.scene_decomposer import API_REGISTRY
 
         resolved_shot_type = classify_shot_type(shot)
         raw_api = shot.get("target_api", "AUTO")
+
+        # F1a: Read the optimizer cache to recover the purpose + suggested_video_api
+        # that was computed during keyframe generation but not forwarded here.
+        # The cache structure is: shot["optimizer_cache"]["spec"]["purpose"] / ["suggested_video_api"]
+        opt_cache = shot.get("optimizer_cache") or {}
+        opt_spec_cached = opt_cache.get("spec") or {}
+        cached_purpose = opt_spec_cached.get("purpose", "")
+        _dialogue_purposes = {"dialogue_close_up", "talking_head_full"}
+        has_dialogue = cached_purpose in _dialogue_purposes
+
         if raw_api == "AUTO":
-            template = WORKFLOW_TEMPLATES.get(resolved_shot_type, WORKFLOW_TEMPLATES["medium"])
-            target_api = template["target_api"]
-            video_fallbacks = template.get("video_fallbacks")
+            # Prefer the optimizer's per-shot suggestion over the shot-type template,
+            # so dialogue shots (purpose=dialogue_close_up/talking_head_full) route
+            # to VEO_NATIVE (native audio) instead of KLING_NATIVE.
+            cached_suggestion = opt_spec_cached.get("suggested_video_api", "")
+            if cached_suggestion and cached_suggestion != "AUTO" and cached_suggestion in API_REGISTRY:
+                target_api = cached_suggestion
+                # Dialogue shots use VEO_NATIVE; no shot-type template fallbacks needed —
+                # the engine's own cascade handles failures.
+                video_fallbacks = None
+            else:
+                template = WORKFLOW_TEMPLATES.get(resolved_shot_type, WORKFLOW_TEMPLATES["medium"])
+                target_api = template["target_api"]
+                video_fallbacks = template.get("video_fallbacks")
         else:
             target_api = raw_api
             video_fallbacks = None
@@ -912,6 +933,7 @@ class ShotController:
             shot_type=resolved_shot_type,
             video_fallbacks=video_fallbacks,
             driving_video_path=driving_video_path,
+            has_dialogue=has_dialogue,
             ctx=motion_ctx,
             _cascade_out=_video_cascade,
         )
@@ -920,6 +942,16 @@ class ShotController:
             return {"success": False, "error": "Video generation failed"}
         if "cascade_metadata" in _video_cascade:
             take["cascade_metadata"] = _video_cascade["cascade_metadata"]
+
+        # F1a: Tag the take when the winning engine carries embedded voice audio.
+        # Check the API_REGISTRY native_audio flag rather than hardcoding a name.
+        # The assembler (F1b) reads audio_embedded=True to skip the TTS+mux path.
+        winning_engine = (
+            _video_cascade.get("cascade_metadata", {}).get("engine", target_api).upper()
+        )
+        engine_info = API_REGISTRY.get(winning_engine, {})
+        if engine_info.get("native_audio") and has_dialogue:
+            take["metadata"]["audio_embedded"] = True
 
         identity_score = 0.0
         primary_ref = cc.get("primary_reference")

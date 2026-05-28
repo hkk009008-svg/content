@@ -54,6 +54,7 @@ def generate_ai_video(
     shot_type: str = None,
     video_fallbacks: list = None,
     driving_video_path: str = "",
+    has_dialogue: bool = False,
     ctx: Optional["PipelineContext"] = None,
     _cascade_out: Optional[dict] = None,
 ) -> str:
@@ -147,6 +148,7 @@ def generate_ai_video(
                     image_path, camera_motion, api, output_mp4, pacing,
                     character_id, attempted_apis, multi_angle_refs,
                     shot_type=shot_type, video_fallbacks=video_fallbacks,
+                    has_dialogue=has_dialogue,
                     ctx=ctx, _cascade_out=_cascade_out,
                 )
 
@@ -172,6 +174,7 @@ def generate_ai_video(
             image_path, camera_motion, first_api, output_mp4, pacing,
             character_id, [], multi_angle_refs, _cascade_retries=_cascade_retries + 1,
             shot_type=shot_type, video_fallbacks=video_fallbacks,
+            has_dialogue=has_dialogue,
             ctx=ctx, _cascade_out=_cascade_out,
         )
 
@@ -275,7 +278,7 @@ def generate_ai_video(
                 ),
                 output_path=output_mp4,
                 reference_images=multi_angle_refs,
-                generate_audio=(shot_type == "landscape"),  # Native audio for environments
+                generate_audio=(shot_type == "landscape" or has_dialogue),  # Environments + dialogue
                 driving_video_path=driving_video_path,
             )
             if result:
