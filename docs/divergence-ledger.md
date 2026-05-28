@@ -47,9 +47,20 @@ or retire it.** This ledger is the falsification instrument for its own pilot.
 One row per divergence-point. `DP-<NN>`. Empty until the first Phase-1 dispatch
 compare step.
 
-| ID | Cycle / Dispatch | Brief § (intent source) | INTENT (stated) | PREDICTED (pre-exec) | ACTUAL (post-exec) | Class | Disposition |
+| ID | Cycle / Dispatch | Brief § (intent source) | INTENT (stated) | PREDICTED | ACTUAL | Class | Disposition |
 |---|---|---|---|---|---|---|---|
-| _(none yet)_ | — | — | — | — | — | — | — |
+| DP-01 | 17 / D1 (C-D3 pt1) | dispatch-claim INTENT (`cf02b3c`) + §4.4 P-CHIEFDIR | "scope retry to **parse failures** only" | implementer narrows `except` to `json.loads` (JSONDecodeError) — clean | did exactly that; but the narrowing removed the broad-except that absorbed **valid-but-non-dict** results → new uncaught `AttributeError` crash on the Anthropic path | **REAL-BUG** (primary) · **INTENT-GAP** (secondary) | REAL-BUG → fixed `1b3ca2d` (isinstance guard + regression test). INTENT-GAP → **enrich**: parse-robustness intent must say "handle malformed AND parsed-but-wrong-type", not just JSONDecodeError → **applied to Dispatch 3 (C-D2) INTENT** |
+
+**DP-01 detail.** The 3 *explicit* predictions (helper-locality, fallback-decision,
+diagnosis-retry) all MATCHED. The divergence emerged *outside* the prediction
+set: my INTENT + PREDICTION framed robustness as "parse failure" (JSONDecodeError)
+and never named the "parsed successfully but wrong type" case — so the implementer
+faithfully scoped to JSONDecodeError and the broad-except's incidental type-safety
+was lost. The insight is the INTENT-GAP: **"robust parse" ≠ "robust to
+JSONDecodeError"; it must also mean "robust to valid-but-wrong-shape."** This is
+the §8.6 engine working — a Dispatch-1 divergence enriches Dispatch-3's intent
+*before* it ships the same class of bug. (Lane V #15 code-quality reviewer caught
+it cold; empirically reproduced.)
 
 ---
 
@@ -57,9 +68,19 @@ compare step.
 
 | Cycle | Dispatches w/ prediction | Predictions made | Prediction-matches | Match-rate | Divergence-points | INTENT-GAP count | INTENT-GAP freq (per dispatch) |
 |---|---|---|---|---|---|---|---|
-| 17 (Phase-1 pilot) | _in progress_ | 0 | 0 | — | 0 | 0 | — |
+| 17 (Phase-1 pilot) | 1 of 3 (D1 done; D2/D3 pending) | 3 explicit | 3 | 100% (explicit) | 1 (DP-01) | 1 (DP-01 secondary) | 1.0 (1 dispatch) |
 
-**Trend read (needs N≥2 cycles):** _not yet — pilot is N=1 at cycle-17._
+**Caveat on the 100%/1-divergence pair (the honest read):** the 3 *explicit*
+predictions matched, yet a divergence still emerged — because it fell *outside*
+the prediction set (I never predicted the type-safety dimension). So "100%
+match-rate" overstates foresight; the real signal is **prediction-set
+completeness**, not just match rate on the predictions I happened to make. Cycle-17
+target as D2/D3 land: does the DP-01 INTENT-GAP fold-forward (richer Dispatch-3
+intent) *prevent* the same class of divergence (→ INTENT-GAP freq falls)? That is
+the §8.6.4 falsification test in miniature.
+
+**Trend read (needs N≥2 cycles):** _N=1 at cycle-17; no cross-cycle trend yet. The
+intra-cycle D1→D3 fold-forward is the first within-pilot evidence._
 
 ---
 
