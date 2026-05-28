@@ -154,9 +154,11 @@ class MotionRenderPhase:
                 first_shot_id, f"storyboard_{scene_id}", ".mp4"
             )
         except Exception:
-            # Fallback path (e.g. in test stubs that don't expose _shot_ctrl).
+            # Fallback path (e.g. in test stubs that don't expose _shot_ctrl);
+            # project-scope the filename so concurrent same-scene_id runs in
+            # different projects can't overwrite each other's /tmp output.
             storyboard_output_path = os.path.join(
-                "/tmp", f"storyboard_{scene_id}.mp4"
+                "/tmp", f"storyboard_{self._project.get('id', 'unk')}_{scene_id}.mp4"
             )
 
         logger.info(
