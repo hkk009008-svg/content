@@ -476,3 +476,68 @@ This document is the synthesis deliverable per user-principal direction "gather 
 Recommended next action: **user-principal selects Tier D scope direction (proceed / pivot / pause / brief-v2.0-first)** to anchor cycle-16-mid → cycle-17 transition.
 
 Standing by.
+
+---
+
+## §12. Cycle-16 FINAL — post-v2.0 close (appended 2026-05-28)
+
+This section closes cycle-16. The §1-§11 above are the cycle-16-mid synthesis
+(`e4615c7`); the §10 open questions have since been answered and the close
+executed.
+
+### §12.1 What shipped between mid and close
+
+| Artifact | Commit | Note |
+|---|---|---|
+| Brief v2.0 full re-author | `c360952` | per user Q5 + Q7 PIVOT; supersedes v1.0; 6 tiers; marker discipline; Tier E/F |
+| Advisory integration + operator REPLY-1 folds | `110aff6` | insight-achievement reframe (§2.6 + §8.6); P-ASSEMBLY marker self-corrected |
+| Rule #16 codification (CLAUDE.md mirror) | `7773502` | Protocol Bundle v5.4; beneficiary both |
+| Convergence event | `e86dd55` | REPLY-cycle-1 convergence; no cycle-2 needed |
+| Operator REPLY-cycle-1 | `fd3dc33` | operator-authored; staged advisory + Shape-A discharge |
+| ADR-015 + this FINAL section + handoff | (cycle-16-close bundle) | director-side close |
+
+### §12.2 User-principal decisions (§10 questions → answers)
+
+§10's 5 open questions resolved via the Q1-Q7 batch + the design advisory:
+- Tier D scope → **DEFER to cycle-17** (Q1); brief-v2.0 **FIRST** (Q7 pivot).
+- Cost-attribution → documented in brief §9, **cycle-17 P1-2** (Q2).
+- Storyboard mode → cycle-17+ wire candidate, brief §10 (Q3).
+- C-D-coord-1 → director §8.1 self-discipline accepted; Shape-D watchpoint (Q4-adjacent).
+- Brief v2.0 → **full re-author** (Q5), now shipped.
+- **NEW (post-§10): insight-achievement reframe** via the user advisory — folded into v2.0; **Q-V2-1 (Tier-C/D timing) user-confirmed 2026-05-28**: validation resumes under the insight frame, cycle-17 Phase-1 = pilot.
+
+### §12.3 The cycle-16 capstone insight — Shape-A convergence
+
+The most instructive cycle-16-close event: the user-principal handed the SAME
+design advisory to both seats. Director and operator, cold to each other,
+designed a **five-for-five identical** insight-achievement mechanism (intent
+level, purpose-verification placement, divergence-extension, metric, pilot
+scope). The operator's pre-commit-caught parallel draft — discarded per the
+Rule #16 variant, offered as REPLY input — contributed a Rule #12 grep-verified
+**marker correction** (the brief had fabricated `[VIDEO/AUDIO] tri-mix:`, which
+does not exist in the code — ironically violating its own §4 thesis) plus the
+INTENT-GAP/REAL-BUG/PREDICTION-ERROR divergence classification. This is the
+empirical case that motivated codifying Rule #16: complementary parallel work
+under user-direction-without-owner-spec is net-positive *when* convergence
+discipline is enforced.
+
+### §12.4 Cycle-16 → cycle-17 transition
+
+- **Substrate:** HEAD at close bundle; pytest 973/3/0 (verified 2026-05-28);
+  §15 smoke OK. Cost $8.55-9.10 of $50 (~17-18%); ~$40 headroom.
+- **Cycle-17 inherits:** brief v2.0 as the working brief; 5 P0 findings
+  (C-D2/C-D3/C-D4/C-D5 + LV-1 done) with ownership pre-assigned (brief §11.1);
+  the P1/P2 implemented-but-unutilized + cost-attribution backlog; the §8.6
+  insight-achievement mechanism to pilot on Phase-1 Lane B.
+- **Not pushed at close** — held per standing user direction; origin at `65903e6`.
+- **Protocol:** 16 rules active (Rule #16 new at `7773502`); Protocol Bundle v5.4.
+
+### §12.5 Cycle-16 verdict
+
+The gauntlet did its job (mid-cycle verdict holds) AND the close produced a
+sharper instrument: v2.0 closes the failure classes v1.0's execution exposed,
+the insight-achievement reframe turns the harness from a verdict-machine into a
+divergence-mining engine, and Rule #16 captures the team-dynamic that was
+already producing complementary value. Cycle-16 CLOSED.
+
+— Director-seat, 2026-05-28 (cycle-16 close).

@@ -1704,7 +1704,7 @@ It composes with Rule #2 (the convergence event IS the signal), Rule #7
 (the pre-commit gate detects the variant), and Rule #10 (joint-team mode —
 complementary parallel work is a specialization, not a hierarchy shift).
 
-**Codified SHA:** `<filled at cycle-16-close commit-B>` (Protocol Bundle
+**Codified SHA:** `7773502` (Protocol Bundle
 v5.4 ship; filled per chicken-and-egg precedent — v2 `3e57ddf` / v3
 `d8f2407` / v4 `d90036b` / v4.1 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb`
 / v5.2 `61cac6d` / v5.3 `24c145a`). Empirical basis: **N=3 cumulative**

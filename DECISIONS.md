@@ -424,6 +424,77 @@ Each entry is **dated and immutable** — supersession is tracked via the
 
 ---
 
+## ADR-015 — Cycle-16 close: brief v2.0, insight-achievement reframe, Rule #16
+
+- **Date:** 2026-05-28
+- **Status:** Accepted
+- **Context:** Cycle-16 ran the v1.0 4-tier predictive-harness gauntlet (Tier A
+  pre-flight + Tier B Korean dialogue probe + Tier C cheongsam reel + max-quality
+  audit `a79c59`) end-to-end. Outcome: 17 findings closed (9 Tier-B + 1 Tier-C
+  inline `024723d` + 3 audit quick-wins + others), 5 deferred to cycle-17 (2
+  CRITICAL C-D3/C-D4 + 2 IMPORTANT C-D2/C-D5 + 1 INFO), 6 advisory open, 10+
+  implemented-but-unutilized features catalogued, 3 cost-attribution bugs found.
+  Pytest 925→973/3/0. Cost $8.55-9.10 of $50. Two strategic inputs reshaped the
+  close: (a) user-principal Q7 **pivoted to brief v2.0 FIRST** (Phases 1-4
+  execution → cycle-17); (b) a user-principal design advisory
+  (`docs/brief-2.0-advisory.md`) reframed the test toward **insight-achievement
+  over pass/fail**. The advisory reached BOTH seats without owner-spec — a
+  Shape-A race (see Rule #16).
+- **Decision:**
+  1. **Brief v2.0 full re-author** (`docs/BRIEF-comprehensive-test-v2.0-2026-05-28.md`,
+     `c360952`; supersedes v1.0, preserved). 6 tiers (added Tier E closed-finding
+     regression + Tier F audit re-execution); A9 refined to probe ACTUAL workflow
+     `class_type` (closes the C-B1/C-D4 misleading-PASS root); mechanism-MARKER
+     discipline with PASS/DEGRADED/FAIL (closes the PuLID compensating-mechanism
+     illusion); validation-first sequencing.
+  2. **Insight-achievement reframe** (advisory-integrated, `110aff6`): the test's
+     *product* is a **located divergence-point** (where the brief failed to
+     transmit intent), not a pass/fail verdict — PASS/DEGRADED/FAIL is the
+     *detector*. The metric is **prediction-match rate, not rationale-volume**
+     (the explicit failure mode to refuse). Mechanism = intent-encoding (INTENT
+     field at dispatch level) + purpose-verification (folded into Lane V, not a
+     new lane) + divergence-logging (INTENT-GAP | REAL-BUG | PREDICTION-ERROR
+     classification; only INTENT-GAP feeds brief-enrichment). All three are
+     **candidates (N=0)**, piloted on cycle-17 Phase-1 Lane B per the N=2
+     discipline. The director-vs-self-understanding distinction is explicit:
+     agent rationale-text is plausible reconstruction, useful as signal, NOT
+     introspective truth.
+  3. **Rule #16 codified** (`7773502`; brief §8.2 is the design home, CLAUDE.md
+     is the binding mirror). Beneficiary: both. Both seats independently designed
+     the same insight-achievement mechanism from the same advisory (five-for-five
+     convergence) — the Shape-A net-positive that motivates the rule.
+  4. **Cost-attribution audit (§9) + implemented-but-unutilized catalog (§10)**
+     documented in the brief and deferred to cycle-17 as P1/P2 work items (per
+     user Q2 fold + Q3); not blockers for cycle-17 entry but cost-attribution
+     MUST close before any Tier D scale execution.
+- **Consequences:**
+  - +: The brief now catches the failure class v1.0's own execution exposed
+    (probe-vs-workflow divergence; compensating-mechanism illusion; no regression
+    guard; no quality-debt trend).
+  - +: A measurable insight engine (divergence-frequency ↓ across cycles) that is
+    falsifiable — if it produces rationale-talk without behavioral effect, the
+    metric exposes it and the mechanism is reverted.
+  - −: Three new candidate conventions to pilot + track (intent-field,
+    purpose-verification, divergence-ledger); deliberately scoped to one dispatch
+    type first to avoid rationale-talk bloat.
+  - −: Cycle-17 inherits a substantial deferred backlog (5 P0 findings + P1/P2
+    catalog); ownership is pre-assigned in brief §11.1.
+- **Alternatives considered:**
+  - Incremental brief v1.1 instead of full re-author: rejected per user Q5.
+  - Defer the advisory to cycle-17: rejected — it arrived pre-sign-off and is
+    additive to the §4 marker discipline; folding now avoided a v2.1 churn.
+  - Wholesale protocol restructuring per the advisory: rejected — the advisory
+    itself prescribes incremental pilot-first; honored.
+- **Tracking:** `c360952` (v2.0) + `110aff6` (advisory integration + operator
+  REPLY-1 folds) + `7773502` (Rule #16) + `e86dd55` (convergence). Cycle-16 fix
+  bundle: `0ecda24`…`669e5cd` (15 fixes). Q-V2-1 (Tier-C/D timing) user-confirmed
+  2026-05-28: resumes under the insight frame, Phase-1 = pilot.
+- **Cross-ref:** `docs/BRIEF-comprehensive-test-v2.0-2026-05-28.md` §2.6 + §8.6;
+  `docs/CYCLE-16-CLOSING-REPORT-2026-05-27.md`; CLAUDE.md Rule #16;
+  `docs/brief-2.0-advisory.md`.
+
+---
+
 *To add a new decision: copy the template below, increment the ADR
 number, fill in Context / Decision / Consequences, and append at the
 bottom. Do not edit prior entries — supersede via Status field instead.*
