@@ -275,12 +275,15 @@ When suggesting prompt_mutation for failures:
                     raw = self._call_llm(self.SYSTEM_PROMPT, user_prompt + correction)
                 # second attempt: fall through to result=None
 
-        if result is None:
-            # Both attempts failed — flagged deterministic fallback (not silent).
-            # Fail-safe-for-throughput: APPROVED so the pipeline isn't blocked,
-            # but the log line is distinct from the normal decision path so
-            # operators can detect and investigate.
-            print(f"   [DIRECTOR] decision=APPROVED (parse-fallback after retry)")
+        if result is None or not isinstance(result, dict):
+            # Parse failed after retry, OR parsed to a non-object (a JSON array /
+            # bare string — valid JSON but not a dict, possible on the Anthropic
+            # path which has no response_format=json_object guard; .get() below
+            # would otherwise raise AttributeError and crash the run at the
+            # cinema_pipeline.py caller). Flagged deterministic fallback, not
+            # silent. Fail-safe-for-throughput: APPROVED so the pipeline isn't
+            # blocked, but the log line is distinct so operators can detect it.
+            print("   [DIRECTOR] decision=APPROVED (parse-fallback after retry)")
             return {"decision": "APPROVED", "violations": [], "shots": shots}
 
         decision = result.get("decision", "APPROVED")

@@ -186,3 +186,46 @@ class TestFallbackAfterBothAttemptsFail:
         # a genuine LLM APPROVED decision
         out = capsys.readouterr().out
         assert "parse-fallback" in out
+
+
+# ─── (d) valid-but-non-dict JSON → flagged fallback, no crash ────────────────
+
+class TestNonDictParseDoesNotCrash:
+    """Valid JSON that is NOT an object (array / bare string) must degrade to the
+    flagged fallback, not crash.
+
+    Regression for the Lane V #15 CRITICAL on 57f63d6: narrowing the except to
+    json.loads alone let a valid-but-wrong-type result reach ``result.get()``,
+    raising AttributeError that propagates uncaught to the cinema_pipeline.py:907
+    caller and crashes the per-scene loop. The OpenAI path is protected by
+    response_format=json_object; the Anthropic path (used here) is NOT, so a
+    model that emits a top-level array is the live exposure. The
+    ``isinstance(result, dict)`` guard degrades to the flagged fallback instead.
+    """
+
+    def test_json_array_does_not_crash_returns_fallback(self, capsys):
+        cd = _make_chief_director()  # provider="anthropic" — the unguarded path
+        # Valid JSON, but a list (not an object). Parse SUCCEEDS, so no retry;
+        # the type guard — not the JSONDecodeError path — must catch it.
+        with patch.object(cd, "_call_llm", return_value='["APPROVED", "x"]') as mock_llm:
+            result = cd.validate_shot_prompts(_minimal_shots(), _minimal_scene())
+
+        # No exception raised; contract keys intact.
+        assert result["decision"] == "APPROVED"
+        assert "violations" in result
+        assert "shots" in result
+        # Parse succeeded on attempt 0 → no retry triggered.
+        assert mock_llm.call_count == 1
+        out = capsys.readouterr().out
+        assert "parse-fallback" in out
+        assert "Evaluation parse error" not in out
+
+    def test_json_bare_string_does_not_crash(self, capsys):
+        cd = _make_chief_director()
+        with patch.object(cd, "_call_llm", return_value='"just a quoted string"'):
+            result = cd.validate_shot_prompts(_minimal_shots(), _minimal_scene())
+
+        assert result["decision"] == "APPROVED"
+        assert "shots" in result
+        out = capsys.readouterr().out
+        assert "parse-fallback" in out
