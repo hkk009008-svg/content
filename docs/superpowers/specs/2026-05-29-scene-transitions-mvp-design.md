@@ -75,10 +75,12 @@ float seconds.
 ### 2. `xfade_concat(scene_videos, out_path, duration=0.5, transition="dissolve") -> str` (new, `phase_c_ffmpeg.py`)
 Builds the chained `xfade` (video) + `acrossfade` (audio) filtergraph over the
 ordered per-scene videos and re-encodes once to `out_path`. The `xfade` `offset`
-is *when the transition starts on the output timeline*; for scene durations
-`d[0..N-1]` and uniform transition `t`, junction *k* (0-indexed) has
-`offset(k) = sum(d[0..k]) − k*t` (each prior transition overlaps two scenes,
-shortening the timeline by `t`). Audio is threaded in parallel: each `acrossfade`
+is *when the transition starts on the first input's timeline*; for scene
+durations `d[0..N-1]` and uniform transition `t`, junction *j* (0-indexed,
+`j = 0..N-2`, joining the accumulated video `[0..j]` with clip `j+1`) has
+`offset(j) = (Σ d[0..j]) − (j+1)·t` — e.g. durations `[4.0, 5.0, 6.0]`, `t=0.5`
+→ junction 0 = `3.5`, junction 1 = `8.0`. (Each prior transition overlaps two
+scenes, shortening the accumulated timeline by `t`.) Audio is threaded in parallel: each `acrossfade`
 pairs with its junction's `xfade`, with explicit stream labels routed through the
 chain (standard FFmpeg filtergraph labeling — implementer consults an FFmpeg
 reference for the exact `[v01]`/`[a01]` label wiring). Returns `out_path`.
