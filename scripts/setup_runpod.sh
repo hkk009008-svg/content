@@ -105,12 +105,13 @@ else
     echo "  ComfyUI-PuLID-Flux already installed."
 fi
 
-# InsightFace runtime stack — REQUIRED for the PuLID node packs (both cubiq's
-# ComfyUI-PuLID and balazik's ComfyUI-PuLID-Flux) to register PulidInsightFaceLoader.
-# When absent, the pack import fails and ComfyUI silently drops EVERY node in it —
-# the exact C-B1/C-D4 cascade. Install explicitly rather than rely on each pack's
-# -q requirements.txt (which can fail silently). onnxruntime-gpu suits the pod GPU;
-# swap to onnxruntime if a CUDA mismatch surfaces. Closes the C-D4 root.
+# InsightFace runtime stack — REQUIRED for BOTH PuLID node packs to import at all.
+# cubiq's ComfyUI-PuLID registers PulidInsightFaceLoader; balazik's ComfyUI-PuLID-Flux
+# registers PulidFluxInsightFaceLoader + ApplyPulidFlux. Either pack's import fails
+# without insightface/onnxruntime present, and ComfyUI then silently drops EVERY node
+# in that pack — the exact C-B1/C-D4 cascade. Install explicitly rather than rely on
+# each pack's -q requirements.txt (which can fail silently). onnxruntime-gpu suits the
+# pod GPU; swap to onnxruntime if a CUDA mismatch surfaces. Closes the C-D4 root.
 echo "  Installing InsightFace stack (insightface, onnxruntime-gpu, facexlib)..."
 pip install -q insightface onnxruntime-gpu facexlib || \
     echo "  WARNING: InsightFace stack install failed — PulidInsightFaceLoader will NOT register. Resolve on-pod."
@@ -283,30 +284,39 @@ echo "[6/6] Starting ComfyUI server..."
 
 COMFYUI_LOG="/workspace/comfyui.log"
 
+# If ComfyUI is already running, RESTART it — a live instance loaded its node set
+# at its own start, BEFORE this run's custom-node installs, so it will not serve the
+# newly-installed PuLID nodes and the /object_info probe below would false-negative
+# (Lane V #14 F2). On a fresh/restarted pod nothing is running and this is a no-op.
 if curl -s "http://127.0.0.1:${COMFYUI_PORT}/system_stats" > /dev/null 2>&1; then
-    echo "  ComfyUI already running on port $COMFYUI_PORT"
-else
-    cd "$COMFYUI_DIR"
-    nohup python main.py --listen 0.0.0.0 --port "$COMFYUI_PORT" \
-        > "$COMFYUI_LOG" 2>&1 &
-    COMFYUI_PID=$!
-    echo "  ComfyUI starting (PID: $COMFYUI_PID), log: $COMFYUI_LOG"
-
-    # Wait for ComfyUI to be ready (up to 120s)
-    echo "  Waiting for ComfyUI to initialize..."
-    for i in $(seq 1 60); do
-        if curl -s "http://127.0.0.1:${COMFYUI_PORT}/system_stats" > /dev/null 2>&1; then
-            echo "  ComfyUI ready after ${i}x2 seconds."
-            break
-        fi
-        if [ "$i" -eq 60 ]; then
-            echo "  ERROR: ComfyUI failed to start. Check $COMFYUI_LOG"
-            exit 1
-        fi
+    echo "  ComfyUI already running — restarting to load newly-installed nodes..."
+    pkill -f "main.py.*--port ${COMFYUI_PORT}" 2>/dev/null || true
+    for i in $(seq 1 15); do
+        curl -s "http://127.0.0.1:${COMFYUI_PORT}/system_stats" > /dev/null 2>&1 || break
         sleep 2
     done
-    cd "$PROJECT_ROOT"
 fi
+
+cd "$COMFYUI_DIR"
+nohup python main.py --listen 0.0.0.0 --port "$COMFYUI_PORT" \
+    > "$COMFYUI_LOG" 2>&1 &
+COMFYUI_PID=$!
+echo "  ComfyUI starting (PID: $COMFYUI_PID), log: $COMFYUI_LOG"
+
+# Wait for ComfyUI to be ready (up to 120s)
+echo "  Waiting for ComfyUI to initialize..."
+for i in $(seq 1 60); do
+    if curl -s "http://127.0.0.1:${COMFYUI_PORT}/system_stats" > /dev/null 2>&1; then
+        echo "  ComfyUI ready after ${i}x2 seconds."
+        break
+    fi
+    if [ "$i" -eq 60 ]; then
+        echo "  ERROR: ComfyUI failed to start. Check $COMFYUI_LOG"
+        exit 1
+    fi
+    sleep 2
+done
+cd "$PROJECT_ROOT"
 
 # ------------------------------------------------------------------
 # 6b. Verify PuLID node availability (closes the C-D4 silent-missing-node class)
