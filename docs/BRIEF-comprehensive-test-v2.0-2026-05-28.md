@@ -322,20 +322,22 @@ closed step 1 and surfaced steps 2-3; the full set was never authoritatively
 inventoried, which is exactly how C-D4 slipped through. A10 makes the set
 explicit and probes each.
 
-[PHASE-1-DEPENDENT — director's `setup_runpod.sh` harden commit produces the authoritative list. The set below is the cycle-16-known subset to verify.]
+[Director's `setup_runpod.sh` harden commit `345f697` (cycle-17 Phase-1 entry) produced the authoritative list. Steps 2-4 are now script-side closed; 5-6 confirmed (see Status). Pod-apply (user, Q6) + A9.5 GREEN re-probe is the remaining half of C-D4.]
 
 | # | Manual step | Probe | Status |
 |---|---|---|---|
 | 1 | FLUX1-dev-fp8 in `models/diffusion_models/` (symlink) | A9.4 UNETLoader | ✅ closed `eb6af85` + user pod symlink |
-| 2 | ComfyUI-PuLID-Flux custom node in `custom_nodes/` | A9.5 + `ls custom_nodes/ComfyUI-PuLID-Flux` | [PENDING Phase 1 — director script + user pod] |
-| 3 | antelopev2 InsightFace model in `models/insightface/antelopev2/` | `ls models/insightface/antelopev2/*.onnx` (5 files expected) | [PENDING Phase 1] |
-| 4 | `pip install --ignore-installed blinker` | `pip show blinker` | [TBD — confirm during Phase 1 harden] |
-| 5 | torch pin `2.4.1+cu118` | `python -c "import torch; print(torch.__version__)"` | [TBD] |
-| 6 | unconditional `pip install -r ComfyUI/requirements.txt` on restart | (script idempotency review) | [TBD] |
+| 2 | ComfyUI-PuLID-Flux custom node in `custom_nodes/` | A9.5 + `ls custom_nodes/ComfyUI-PuLID-Flux` | ✅ script-side `345f697`; pod-apply pending (user Q6) |
+| 3 | antelopev2 InsightFace model | `ls models/insightface/antelopev2/*.onnx` (5 files) | ✅ script-side `345f697` — canonical path is `models/insightface/models/antelopev2/` (nested `models/`; InsightFace `FaceAnalysis` resolution), symlinked at the stated path so this probe passes; pod-apply pending |
+| 4 | `pip install --ignore-installed blinker` | `pip show blinker` | ✅ `345f697` (script Python-deps section) |
+| 5 | torch pin `2.4.1+cu118` | `python -c "import torch; print(torch.__version__)"` | confirmed suspected — script leaves torch **unpinned** by design (pod-CUDA-specific; pin manually only if a torch/CUDA mismatch surfaces) |
+| 6 | unconditional `pip install -r ComfyUI/requirements.txt` on restart | (script idempotency review) | confirmed — script installs ComfyUI reqs on first clone only; restart skips by design (acceptable; reqs stable post-clone) |
 
-Director's Phase-1 `setup_runpod.sh` harden authoritatively enumerates the set;
-A10 then becomes a fixed checklist. Until then, treat steps 4-6 as *suspected*
-and confirm during the harden.
+Director's Phase-1 `setup_runpod.sh` harden (`345f697`) authoritatively
+enumerated the set; A10 is now the fixed checklist. Steps 1-4 are script-side
+closed (step 1 also pod-applied); steps 5-6 confirmed as deliberate non-actions.
+The remaining C-D4 work is the pod-apply (user, Q6) + A9.5 `/object_info`
+re-probe returning a valid `PulidInsightFaceLoader` schema.
 
 ---
 
