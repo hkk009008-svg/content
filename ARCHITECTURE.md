@@ -133,13 +133,13 @@ two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:1545-1546](web_se
 
 | Symbol | Lock? | Lives at |
 |---|---|---|
-| `_progress_queues: dict[pid, Queue]` | no (GIL-atomic `dict.get`) | [web_server.py:60](web_server.py:60) |
-| `_running_pipelines: dict[pid, CinemaPipeline]` | no | [web_server.py:61](web_server.py:61) |
-| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:70-71](web_server.py:70) |
-| `_lora_training_threads` | `_lora_training_lock` | [web_server.py:531-532](web_server.py:531) |
+| `_progress_queues: dict[pid, Queue]` | no (GIL-atomic `dict.get`) | [web_server.py:71](web_server.py:71) |
+| `_running_pipelines: dict[pid, CinemaPipeline]` | no | [web_server.py:72](web_server.py:72) |
+| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:108-109](web_server.py:108) |
+| `_lora_training_threads` | `_lora_training_lock` | [web_server.py:683-684](web_server.py:683) |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
-spawned by `POST /generate` ([web_server.py:1178](web_server.py:1178)).
+spawned by `POST /generate` ([web_server.py:1505](web_server.py:1505)).
 **Cancellation is cooperative** — `pipeline.cancel()` flips a flag the worker
 polls; the HTTP handler returns immediately and the worker may take seconds to
 wind down.
@@ -150,10 +150,10 @@ wind down.
 - Pipeline thread builds a callback via
   `web_services.make_progress_callback(q)` and passes it into `CinemaPipeline`.
 - `GET /api/projects/<pid>/stream` opens an EventSource. Generator at
-  [web_server.py:1203-1213](web_server.py:1203) does `q.get(timeout=30)`;
+  [web_server.py:1530-1544](web_server.py:1530) does `q.get(timeout=30)`;
   on timeout emits HEARTBEAT, on `None` sentinel emits END and breaks.
 - Pipeline thread writes `None` to the queue in `finally`
-  ([web_server.py:1176](web_server.py:1176)) after success or error.
+  ([web_server.py:1503](web_server.py:1503)) after success or error.
 - **Queue is released on run completion** (Bundle-C 3.2, 2026-05-24) —
   the `run_pipeline` daemon's `finally` block now pops `_progress_queues[pid]`
   after sending the `None` sentinel, gated on identity-check to avoid racing
@@ -163,16 +163,16 @@ wind down.
 
 - **No auth.** No decorator across all 59 routes.
 - **CORS defaults to localhost.** `CORS(app, origins=list(env_settings.web_cors_origins))`
-  at [web_server.py:57](web_server.py:57). Default `web_cors_origins`
+  at [web_server.py:68](web_server.py:68). Default `web_cors_origins`
   is localhost-only (`http://localhost:8080` + Vite dev port `5173`). Opt into
   wide-open with `WEB_CORS_ORIGINS=*`. Banner warning emitted when wide-open.
 
 ### 3.5 cinema/services.py usage (no-pipeline-spin path)
 
 Two endpoints avoid constructing `CinemaPipeline`:
-- `GET /api/projects/<pid>/checkpoint` → `checkpoint_info(pid)` ([web_server.py:1193](web_server.py:1193))
+- `GET /api/projects/<pid>/checkpoint` → `checkpoint_info(pid)` ([web_server.py:1511](web_server.py:1511))
 - `GET /api/projects/<pid>/pipeline-state` → `state_snapshot(pid)` only when no
-  live pipeline exists ([web_server.py:1437](web_server.py:1437)).
+  live pipeline exists ([web_server.py:1976](web_server.py:1976)).
 
 Rationale: instantiating `CinemaPipeline` also instantiates
 `ContinuityEngine + ChiefDirector + LLMEnsemble + CostTracker`, which is heavy
@@ -187,7 +187,7 @@ for a state-read endpoint.
 | PERFORMANCE_REVIEW | `POST .../shots/<sid>/performance/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "performance")` |
 | REVIEW | `POST .../shots/<sid>/final/<take_id>/approve` | `pipeline.approve_take(sid, take_id, "final")` |
 
-`_get_stage_pipeline(pid)` ([web_server.py:112-118](web_server.py:112)) returns
+`_get_stage_pipeline(pid)` ([web_server.py:183-190](web_server.py:183)) returns
 the live `CinemaPipeline` if running, else instantiates a fresh one sharing
 the cached `PipelineCore` — so **operators can approve plans even when no
 worker is active**, because gate state lives in `project.json`, not in memory.
@@ -196,7 +196,7 @@ worker is active**, because gate state lives in `project.json`, not in memory.
 
 ## 4. Orchestrator — `cinema_pipeline.py` + `cinema/`
 
-`CinemaPipeline.__init__` composes everything ([cinema_pipeline.py:69-122](cinema_pipeline.py:69)):
+`CinemaPipeline.__init__` composes everything ([cinema_pipeline.py:72-122](cinema_pipeline.py:72)):
 
 | Attribute | Type | Source |
 |---|---|---|
@@ -216,25 +216,25 @@ propagate by reference. Forwarder block at
 
 | Step | What happens | File:line |
 |---|---|---|
-| 1 | `_refresh_project_snapshot()`; early-return if no scenes | [cinema_pipeline.py:609-613](cinema_pipeline.py:609) |
-| 2 | If `resume=True`: `_restore_from_checkpoint()` + `_rebuild_review_clips` | :615-617 |
-| 3 | STYLE — `generate_style_rules` → persist | :620-641 |
-| 4 | `_ensure_bgm(settings)` (FAL Stable Audio, 47s hard cap) | :643 |
-| 5 | Per scene: decompose (competitive or single) → ChiefDirector validate → ensure scene audio → checkpoint | :645-692 |
-| 6 | **GATE 1 PLAN_REVIEW** @ 25% | :694 |
-| 7 | Build `PipelineContext` with lifecycle + global_settings + language | :707-712 |
-| 8 | **KeyframeRenderPhase.run(ctx)** | :724-728 |
-| 9 | Cancellation check | :730-732 |
-| 10 | **GATE 2 KEYFRAME_REVIEW** @ 55% | :734 |
-| 11 | Refresh project snapshot | :738 |
-| 12 | **PerformanceCapturePhase.run(ctx)** | :754-758 |
-| 13 | Cancellation check | :760-762 |
-| 14 | **GATE 3 PERFORMANCE_REVIEW** @ 65% — bypassed when every shot has `performance_engine=="SKIP"` or `approved_performance_take_id`. Emits `PERFORMANCE_SKIPPED_GATE` event. | :767-788 |
-| 15 | **MotionRenderPhase.run(ctx)** | :801-805 |
-| 16 | Cancellation check | :807-809 |
-| 17 | Refresh + `_rebuild_review_clips` + checkpoint | :811-813 |
-| 18 | **GATE 4 REVIEW** @ 82% → on satisfaction call `proceed_to_assembly()` | :814 |
-| 19 | `assemble_approved_takes()` → `_assemble_final(...)`: stitch + color grade + BGM mix + two-pass loudnorm → final mp4 | :821-826 |
+| 1 | `_refresh_project_snapshot()`; early-return if no scenes | [cinema_pipeline.py:870-874](cinema_pipeline.py:870) |
+| 2 | If `resume=True`: `_restore_from_checkpoint()` + `_rebuild_review_clips` | :876-878 |
+| 3 | STYLE — `generate_style_rules` → persist | :881-914 |
+| 4 | `_ensure_bgm(settings)` (FAL Stable Audio, 47s hard cap) | :916 |
+| 5 | Per scene: decompose (competitive or single) → ChiefDirector validate → ensure scene audio → checkpoint | :918-977 |
+| 6 | **GATE 1 PLAN_REVIEW** @ 25% | :979 |
+| 7 | Build `PipelineContext` with lifecycle + global_settings + language | :992-997 |
+| 8 | **KeyframeRenderPhase.run(ctx)** | :1009-1013 |
+| 9 | Cancellation check | :1015-1017 |
+| 10 | **GATE 2 KEYFRAME_REVIEW** @ 55% | :1019 |
+| 11 | Refresh project snapshot | :1023 |
+| 12 | **PerformanceCapturePhase.run(ctx)** | :1039-1043 |
+| 13 | Cancellation check | :1045-1047 |
+| 14 | **GATE 3 PERFORMANCE_REVIEW** @ 65% — bypassed when every shot has `performance_engine=="SKIP"` or `approved_performance_take_id`. Emits `PERFORMANCE_SKIPPED_GATE` event. | :1052-1073 |
+| 15 | **MotionRenderPhase.run(ctx)** | :1086-1090 |
+| 16 | Cancellation check | :1092-1094 |
+| 17 | Refresh + `_rebuild_review_clips` + checkpoint | :1096-1098 |
+| 18 | **GATE 4 REVIEW** @ 82% → on satisfaction call `proceed_to_assembly()` | :1099 |
+| 19 | `assemble_approved_takes()` → `_assemble_final(...)`: stitch + color grade + BGM mix + two-pass loudnorm → final mp4 | :1106-1110 |
 
 ### 4.2 `PipelineContext` ([cinema/context.py](cinema/context.py))
 
@@ -249,7 +249,7 @@ Dataclass + dict API. Fields:
 - **Workspace:** `downloaded_vids: list`.
 - **Max-quality:** `prev_shot_latent`, `char_lora_paths`, `style_reference_paths`.
 
-Dict API methods at [cinema/context.py:112-144](cinema/context.py:112):
+Dict API methods at [cinema/context.py:111-143](cinema/context.py:111):
 `__getitem__`, `__setitem__`, `__contains__`, `__iter__`, `get`, `update`,
 `keys`, `items`, `values`, plus `as_dict()`. `__setitem__` falls back to
 `setattr` so legacy code can write undeclared keys.
@@ -323,7 +323,7 @@ rename). On any `BaseException`, the temp file is removed.
 `scene_clips`, `scene_audio`, `shot_results`, `failed_shots`.
 
 **On resume:** missing `image`/`video` paths set to None with
-`status="lost"` ([cinema/checkpoint.py:115-132](cinema/checkpoint.py:115)).
+`status="lost"` ([cinema/checkpoint.py:117-134](cinema/checkpoint.py:117)).
 
 File: `<temp_dir>/pipeline_state.json` (constant `CHECKPOINT_FILE`).
 
@@ -417,7 +417,7 @@ Implications:
 - Approvals survive worker crashes — state lives on disk.
 - A 500ms-bounded latency between approval and resume.
 
-### 6.1 `_gate_satisfied` predicates ([cinema/review/controller.py:201-212](cinema/review/controller.py:201))
+### 6.1 `_gate_satisfied` predicates ([cinema/review/controller.py:214-236](cinema/review/controller.py:214))
 
 | Gate | Predicate |
 |---|---|
@@ -427,10 +427,10 @@ Implications:
 | REVIEW | all shots have `approved_final_take_id` |
 
 PERFORMANCE_REVIEW is symmetric with the other three gates as of 2026-05-24:
-the predicate at [cinema/review/controller.py:209-219](cinema/review/controller.py:209)
+the predicate at [cinema/review/controller.py:223-235](cinema/review/controller.py:223)
 covers all three satisfaction paths (SKIP routing, missing keyframe, explicit
 approval). The orchestrator's `all_skipped` short-circuit at
-[cinema_pipeline.py:767-788](cinema_pipeline.py:767) is now redundant for
+[cinema_pipeline.py:1053-1073](cinema_pipeline.py:1053) is now redundant for
 correctness but kept for the explicit `PERFORMANCE_SKIPPED_GATE` UX event.
 
 Approve endpoint: `POST /api/projects/<pid>/shots/<sid>/performance/<take_id>/approve`
@@ -454,7 +454,7 @@ the pointer ID; the array is not mutated.
 
 ### 7.1 Project lifecycle
 
-1. Operator creates project ([domain/project_manager.py:568](domain/project_manager.py:568)).
+1. Operator creates project ([domain/project_manager.py:605](domain/project_manager.py:605)).
 2. Operator uploads character photos → FLUX Kontext MAX MULTI generates 5
    multi-angle synthetic refs; GhostFaceNet embedding cached as `embedding.npy`.
 3. Operator defines locations → `prompt_fragment` + deterministic seed.
@@ -469,7 +469,7 @@ the pointer ID; the array is not mutated.
 
 ### 7.2 `project_manager.py` defaults
 
-`make_project()` ([domain/project_manager.py:297](domain/project_manager.py:297))
+`make_project()` ([domain/project_manager.py:309](domain/project_manager.py:309))
 seeds these `global_settings`:
 
 ```python
@@ -488,12 +488,12 @@ seeds these `global_settings`:
 "color_drift_sensitivity": 0.3,
 ```
 
-`normalize_project_schema()` ([domain/project_manager.py:528-535](domain/project_manager.py:528))
+`normalize_project_schema()` ([domain/project_manager.py:540-547](domain/project_manager.py:540))
 **actively strips** three legacy keys from any project.json loaded from disk:
 `vbench_overall_threshold`, `temporal_flicker_tolerance`, `regression_sensitivity`.
 
 **Filelock:** 10s default timeout via `FileLock(project.lock, timeout=10)`
-at [domain/project_manager.py:62](domain/project_manager.py:62).
+at [domain/project_manager.py:71](domain/project_manager.py:71).
 
 **Storage:** `domain/projects/<12-hex-id>/` with `project.json`,
 `characters/<cid>/`, `locations/<lid>/`, `shots/<sid>/`, `exports/`, `temp/`.
@@ -501,9 +501,9 @@ at [domain/project_manager.py:62](domain/project_manager.py:62).
 ### 7.3 Decomposition has TWO trigger paths
 
 1. **Operator-initiated, eager** — `POST /api/projects/<pid>/scenes/<sid>/decompose`
-   ([web_server.py:1079](web_server.py:1079)) calls `decompose_scene` directly.
+   ([web_server.py:1348](web_server.py:1348)) calls `decompose_scene` directly.
    UI button on the setup screen.
-2. **Pipeline-internal, lazy** — `cinema_pipeline.py:666-690` inside the main
+2. **Pipeline-internal, lazy** — `cinema_pipeline.py:939-976` inside the main
    scene loop, only runs if `scene.get("shots", [])` is empty. Honors
    `settings["competitive_generation"]` (default `True`).
 
@@ -537,9 +537,9 @@ falls through to `"AUTO"` if LLM returns an unrecognized key.
 Composes 4 subsystems:
 
 1. `CharacterContinuityTracker` ([:35](domain/continuity_engine.py:35)) — preloads embeddings, builds identity-anchored prompt fragments (respecting HC1), tracks wardrobe via `appearance_log`.
-2. `LocationPersistence` ([:219](domain/continuity_engine.py:219)) — wraps `location_manager.get_location_prompt()` + `get_location_seed()`.
-3. `PhysicsPromptEngineer` ([:237](domain/continuity_engine.py:237)) — appends physics constraint clauses.
-4. `TemporalConsistencyManager` ([:315](domain/continuity_engine.py:315)) — manages img2img chaining with `denoise_strength ∈ {0.30, 0.40, 0.50, 0.55}` based on transition type.
+2. `LocationPersistence` ([:234](domain/continuity_engine.py:234)) — wraps `location_manager.get_location_prompt()` + `get_location_seed()`.
+3. `PhysicsPromptEngineer` ([:261](domain/continuity_engine.py:261)) — appends physics constraint clauses.
+4. `TemporalConsistencyManager` ([:339](domain/continuity_engine.py:339)) — manages img2img chaining with `denoise_strength ∈ {0.30, 0.40, 0.50, 0.55}` based on transition type.
 
 **Key public methods:**
 - `enhance_shot_prompt(shot, scene, previous_shot, shot_index, approved_anchor_image)` → returns shot with appended prompt + `continuity_config` dict.
@@ -568,10 +568,10 @@ operator-opts-in-later" shape.
 #### 7.7.1 Pydantic schema boundary (Session 8 — `ceb0a32` + `f9b0aff`)
 
 [domain/models.py](domain/models.py) defines a Pydantic v2 `Project` model
-([:131](domain/models.py:131)) mirroring the project.json structure
+([:166](domain/models.py:166)) mirroring the project.json structure
 (scenes, characters, locations, shots, takes, settings). The boundary is
 enforced via `_validate_project()` at
-[domain/project_manager.py:599](domain/project_manager.py:599), called on
+[domain/project_manager.py:620](domain/project_manager.py:620), called on
 both save and load paths through `project_manager.py`.
 
 **Default contract is warn-only.** Any `ValidationError` (or even
@@ -589,7 +589,7 @@ Two env flags formalize an "opt-in production escalation" convention.
 **`CINEMA_STRICT_SCHEMA`** (Session 10 — `5f2fe0b`). When set, `_validate_project()`
 re-raises `ValidationError` instead of warning, letting callers crash hard
 rather than persist invalid schema. Parser at
-[domain/project_manager.py:612](domain/project_manager.py:612):
+[domain/project_manager.py:633](domain/project_manager.py:633):
 
 ```python
 strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
@@ -599,7 +599,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:1093](web_server.py:1093) — uses the
+`api_generate_dialogue` at [web_server.py:1313](web_server.py:1313) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 
@@ -607,9 +607,9 @@ canonical migration recipe at
 `cinema/review/controller.py`'s `_gate_map` is extended with
 `"PERFORMANCE_REVIEW" → "motion"`, wiring the motion-gate auto-approve
 rules (themselves shipped tested-but-dead in Session 11) into production.
-Helper at [cinema/auto_approve.py:472](cinema/auto_approve.py:472); conditional
+Helper at [cinema/auto_approve.py:523](cinema/auto_approve.py:523); conditional
 at [cinema/review/controller.py:270-271](cinema/review/controller.py:270).
-Parser at [cinema/auto_approve.py:481](cinema/auto_approve.py:481):
+Parser at [cinema/auto_approve.py:532](cinema/auto_approve.py:532):
 
 ```python
 return os.environ.get("CINEMA_AUTO_APPROVE_MOTION", "").strip().lower() in {
@@ -788,7 +788,7 @@ if quality_tier == "max":
 ```
 
 `quality_tier` is sourced from `settings.get("quality_tier", "production")`
-at [cinema/shots/controller.py:315](cinema/shots/controller.py:315). Operator
+at [cinema/shots/controller.py:375](cinema/shots/controller.py:375). Operator
 picks via UI Advanced Settings; no per-shot heuristic.
 
 ### 8.2 Production tier — `phase_c_assembly.py`
@@ -815,7 +815,7 @@ quality_max.
 Workflow file: [pulid_max.json](pulid_max.json) (cached at module level with
 `_WORKFLOW_LOCK`).
 
-**Adaptive halt loop** ([quality_max.py:738-781](quality_max.py:738)):
+**Adaptive halt loop** ([quality_max.py:784-792](quality_max.py:784)):
 ```
 while len(scores) < n_max:
     starting_index = len(scores)
@@ -835,7 +835,7 @@ speedup at workers=4 on a 4-candidate batch: ~3.9× wall-clock. `pool.map`
 yields in submission order so log + scores ordering is stable regardless
 of workers count.
 
-**Halt rule** ([face_validator_gate.py:205-228](face_validator_gate.py:205)):
+**Halt rule** ([face_validator_gate.py:225-248](face_validator_gate.py:225)):
 - `n >= halt_min_n (default 4) AND best.composite >= halt_threshold_composite (default 0.92)`
 - OR `n >= halt_max_n (default 8)` (budget)
 - `halt_threshold_arc=0.85` is **informational only** — not gated
@@ -953,7 +953,7 @@ fallback_list = [
 - Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:18](phase_c_ffmpeg.py:18))
 - TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:19](phase_c_ffmpeg.py:19))
 - Check: `_veo_quota_blocked()` ([:22-28](phase_c_ffmpeg.py:22))
-- Set on 429/quota error ([:476-479](phase_c_ffmpeg.py:476))
+- Set on 429/quota error ([:503-506](phase_c_ffmpeg.py:503))
 - Gates only the `VEO` (FAL) branch — NOT `VEO_NATIVE`
 
 ### 9.7 Helper functions in `phase_c_ffmpeg.py`
@@ -1051,7 +1051,7 @@ purely informational for the PERFORMANCE_REVIEW gate.
 | 2 | Omnihuman v1.5 | `fal-ai/bytedance/omnihuman/v1.5` |
 | 3 | Creatify Aurora | `fal-ai/creatify/aurora` |
 
-**SyncNet quality gate** ([lip_sync.py:208-222](lip_sync.py:208)) scores each
+**SyncNet quality gate** ([lip_sync.py:218-232](lip_sync.py:218)) scores each
 engine's output against `lipsync_validation_threshold` (default 0.65).
 Below-threshold outputs stashed (`.{engine}.tmp`); if no engine clears the bar,
 the **highest-scored stashed candidate** is restored as the final output.
@@ -1107,7 +1107,7 @@ Verified by id-comparison:
 | `identity.get_shared_validator()` | [identity/__init__.py:62](identity/__init__.py:62) |
 | `phase_c_vision._get_shared_validator()` | [phase_c_vision.py:15](phase_c_vision.py:15) |
 | `face_validator_gate._get_validator()` | [face_validator_gate.py:104-119](face_validator_gate.py:104) |
-| `performance.identity_gate._get_validator()` | [performance/identity_gate.py:46-52](performance/identity_gate.py:46) |
+| `performance.identity_gate._get_validator()` | [performance/identity_gate.py:34-40](performance/identity_gate.py:34) |
 
 ### 11.4 Per-shot thresholds ([identity/types.py:92-98](identity/types.py:92))
 
@@ -1123,16 +1123,16 @@ Verified by id-comparison:
 interpolates from `mode` to `lenient` over retries.
 
 Project-wide `identity_strictness` setting (default 0.60) overrides per-shot
-defaults at [cinema/shots/controller.py:424](cinema/shots/controller.py:424).
+defaults at [cinema/shots/controller.py:504](cinema/shots/controller.py:504).
 
 ### 11.5 Rolling-stats update sites (4 sites total)
 
 `IdentityValidator.history` accumulates from:
 
-1. **Keyframe validation** — `cinema/shots/controller.py:426` and `:1027`
+1. **Keyframe validation** — `cinema/shots/controller.py:506` and `:1617`
 2. **N=8 best-of grading** — `face_validator_gate._arcface_score` → `validate_image(threshold=0.0)`
 3. **Performance gate scoring** — `performance/identity_gate._arcface_score` → `validate_image(threshold=0.0)`
-4. **Continuity video validation** — `domain/continuity_engine.py:592` → `validate_video`
+4. **Continuity video validation** — `domain/continuity_engine.py:616` → `validate_video`
 
 Consumer: `workflow_selector.get_adaptive_pulid_weight` reads
 `identity_validator.get_rolling_stats(character_id)` and adjusts PuLID weight
@@ -1194,13 +1194,13 @@ What remains is the live surface only.
 
 ### 12.5 BGM duration is hard-coded to 47s
 
-[cinema_pipeline.py:490](cinema_pipeline.py:490):
+[cinema_pipeline.py:552](cinema_pipeline.py:552):
 `generate_fal_bgm(music_mood, bgm_path, duration=47)`. FAL Stable Audio's
 practical max; loops in assembly.
 
 ### 12.6 Final-assembly audio mux — engine-dependent voice source
 
-`_assemble_final` ([cinema_pipeline.py:1149](cinema_pipeline.py:1149)) muxes the
+`_assemble_final` ([cinema_pipeline.py:1199](cinema_pipeline.py:1199)) muxes the
 final video's audio with an FFmpeg `amix` filtergraph over up to three sources
 (voice/dialogue + BGM + foley). The **voice source is motion-engine-dependent**:
 
@@ -1209,11 +1209,11 @@ final video's audio with an FFmpeg `amix` filtergraph over up to three sources
   (`[0:a]`), `amix` uses `duration=first`, no `-shortest`.
 - **Silent-video engines** (Kling Native image2video — the PA-VIDEO Set-3
   default): motion clips carry **no audio**. `_concat_dialogue_track`
-  ([cinema_pipeline.py:1113](cinema_pipeline.py:1113), mirrors
+  ([cinema_pipeline.py:1163](cinema_pipeline.py:1163), mirrors
   `_concat_foley_track`) concatenates per-scene dialogue into a standalone track
   muxed as a separate ffmpeg input (`[N:a]`); `amix` uses `duration=longest`
   paired with `-shortest` on the output
-  ([:1346](cinema_pipeline.py:1346), [:1362](cinema_pipeline.py:1362)) so audio
+  ([:1396](cinema_pipeline.py:1396), [:1413](cinema_pipeline.py:1413)) so audio
   plays through video length with BGM/foley filling any tail past dialogue end.
   The `mix` log label reflects the actual source (`standalone-dialogue+BGM+foley`
   vs `embedded-voice+BGM+foley`).
@@ -1230,7 +1230,7 @@ Native (silent video). Closed by `b11edd4` (standalone-dialogue mux) +
 
 ## 13. LLM coordination
 
-### 13.1 `LLMEnsemble` ([llm/ensemble.py:71](llm/ensemble.py:71))
+### 13.1 `LLMEnsemble` ([llm/ensemble.py:93](llm/ensemble.py:93))
 
 **Pattern: parallel quorum, NOT fallback.**
 
@@ -1241,7 +1241,7 @@ Native (silent video). Closed by `b11edd4` (standalone-dialogue mux) +
 - Provider-level failures return `(model, None)`; filtered before judging.
 - If only one survives → auto-winner. If judging itself fails → first valid candidate with `scores[idx]=5.0`.
 
-**Default rosters** ([llm/ensemble.py:58-62](llm/ensemble.py:58)):
+**Default rosters** ([llm/ensemble.py:80-84](llm/ensemble.py:80)):
 | Task | Models |
 |---|---|
 | `script` | `["claude-sonnet-4-20250514", "gpt-4o"]` |
@@ -1249,14 +1249,14 @@ Native (silent video). Closed by `b11edd4` (standalone-dialogue mux) +
 | `default` | `["claude-sonnet-4-20250514", "gpt-4o"]` |
 | Default judge | `claude-sonnet-4-20250514` |
 
-**Provider routing by model name prefix** ([llm/ensemble.py:216-232](llm/ensemble.py:216)):
+**Provider routing by model name prefix** ([llm/ensemble.py:231-247](llm/ensemble.py:231)):
 - `claude*` → Anthropic
 - `gpt*`/`o4*` → OpenAI
 - `gemini*` → Gemini (via `google.genai`)
 
 ### 13.2 Gemini is opt-in but wired
 
-`_generate_gemini` ([llm/ensemble.py:300-329](llm/ensemble.py:300)) is fully
+`_generate_gemini` ([llm/ensemble.py:322-351](llm/ensemble.py:322)) is fully
 implemented. Gemini client constructed lazily when `GEMINI_API_KEY` OR
 `GOOGLE_API_KEY` is set. Judge override map exposes `gemini-pro → gemini-2.5-pro`.
 
@@ -1265,7 +1265,7 @@ To dispatch Gemini, pass `models=["gemini-2.5-pro", ...]` explicitly OR set
 
 ### 13.3 Anthropic prompt caching
 
-`build_anthropic_system_blocks(text)` ([llm/ensemble.py:18-35](llm/ensemble.py:18))
+`build_anthropic_system_blocks(text)` ([llm/ensemble.py:40-57](llm/ensemble.py:40))
 wraps system prompts as a single content block with
 `cache_control={"type": "ephemeral"}` (5-min TTL).
 
@@ -1481,7 +1481,7 @@ script, the local check + CI move together.
 | Severity | Issue | Location |
 |---|---|---|
 | Low | 3 documented `@unittest.skip` tests in `test_project_persistence.py`. Mock setup hasn't caught up with `project_manager`/`character_manager`/`location_manager` refactors. Mock-only updates, not behavior changes. | `tests/unit/test_project_persistence.py:139,197,221` |
-| Cosmetic | BGM duration hard-coded to 47s with no comment. | `cinema_pipeline.py:490` |
+| Cosmetic | BGM duration hard-coded to 47s with no comment. | `cinema_pipeline.py:552` |
 | ~~Cosmetic~~ Resolved 2026-05-26 (`9c749b7`) | ~~`datetime.utcnow()` deprecation warnings — migrated to `datetime.now(timezone.utc)` with `.replace("+00:00", "Z")` to preserve existing project.json timestamp suffix shape.~~ | ~~`domain/project_manager.py:133,924`~~ |
 
 ---
@@ -1564,4 +1564,6 @@ section above; this is a flat lookup table for quick reference.
 
 *Last verified: 2026-05-24 by parallel investigation across 11 subsystems
 + subsequent point-fixes through 2026-05-24. Glossary section added by
-new-director Task 1.*
+new-director Task 1. All file:line anchors re-audited against current
+source & 72 stale line numbers corrected on 2026-05-29 (full sweep,
+§15 smoke OK); prose claims not re-verified in that pass.*
