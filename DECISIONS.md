@@ -511,3 +511,73 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   - −: Tradeoffs accepted
 - **Cross-ref:** Link to ARCHITECTURE.md section if applicable.
 ```
+
+---
+
+## ADR-016 — GitNexus mandate was a phantom rule; removed in favor of grep/Read
+
+- **Date:** 2026-05-28
+- **Status:** Accepted
+- **Context:** `CLAUDE.md` and `AGENTS.md` opened with a 101-line auto-generated
+  block (`<!-- gitnexus:start -->`…`<!-- gitnexus:end -->`) mandating GitNexus
+  MCP tools as the REQUIRED method for impact analysis, refactoring, and
+  pre-commit scope checks ("MUST run `gitnexus_impact` before editing any
+  symbol"; "NEVER edit a function … without first running `gitnexus_impact`").
+  A user-prompted audit (operator proposal, 2026-05-28; ADR-013-compliant) found
+  the mandate was never wired to reality; the director independently re-verified
+  every claim at HEAD `7bded26`:
+  - **0 GitNexus tool calls across 67 session transcripts** (calibrated against
+    `"name":"Bash"` = 4482 in the same corpus).
+  - **Never configured:** no `.mcp.json`, no `gitnexus` in `.claude/settings*.json`,
+    not a dependency. The `gitnexus_*` tools were *absent* from every session's
+    runtime, not merely "unreachable."
+  - **Second phantom:** CLAUDE.md claimed "A PostToolUse hook handles [index
+    refresh] automatically after git commit and git merge." No such hook exists
+    (`grep -rl gitnexus .claude/hooks/` → empty).
+  - The on-disk index proved it: `.gitnexus/meta.json` `lastCommit` = `eeea93f`,
+    **251 commits behind HEAD**, 77 MB, never refreshed.
+  - The block is **auto-injected by the `npx gitnexus` CLI itself** (the
+    `gitnexus:start/end` markers), so the tool wrote its own "MUST use me"
+    mandate into our protocol while its server was never set up.
+  - **grep/Read carried all 67 sessions.** This is the §10 unwired-feature
+    pattern in the protocol layer, caught by turning ADR-013 / Rule #12 inward.
+- **Decision:** Remove the GitNexus integration; codify the de-facto method.
+  1. Delete the auto-gen blocks from `CLAUDE.md` and `AGENTS.md` (markers
+     inclusive) and stop running `npx gitnexus analyze` (the auto-refresh hook is
+     phantom, so removal sticks — nothing regenerates the block).
+  2. Delete the stale `.gitnexus/` index (gitignored — local cleanup) and the
+     `.claude/skills/gitnexus/` skills (6 files; they only document dead tools).
+  3. Replace the mandate with a hand-authored "Impact analysis before editing"
+     note (grep callers + Read call sites + grep imports; report blast radius;
+     `git show --stat` / `git diff` to confirm scope before commit).
+  4. Rewrite every in-body dead-tool reference (implementer-prompt template,
+     report-format, background-work bullet, failure-mode list) to the grep/Read
+     method.
+  5. **Excise the counter-bump sub-protocol.** "Counter-bump dispositions"
+     existed solely to fold the auto-gen block's symbol/edge/flow count edits
+     into commits. With the block gone and `analyze` stopped, counter-bumps can
+     never occur again; the sub-protocol is now dead and is removed (role
+     partition, the dedicated section, the phase-taxonomy "hold counter bumps"
+     rows).
+- **Consequences:**
+  - +: No agent is instructed to use a non-existent tool and silently fall back;
+    the protocol now matches 67 sessions of actual practice. Beneficiary: both
+    seats + user (honesty).
+  - +: One fewer sub-protocol (counter-bumps) and a large block of dead
+    governance text removed across the two root files.
+  - +: `mcp__server__tool` call-naming makes tool usage fully grep-auditable —
+    periodic documented-vs-actual audits can catch this class of drift.
+  - −: Lose the *option* of a real call-graph tool. If graph-based impact
+    analysis is wanted later, it must be wired for real (`.mcp.json` + a genuine
+    refresh hook + a fresh index) — see the rejected alternative.
+- **Alternatives considered:**
+  - **B — wire GitNexus for real** (configure the MCP server, refresh the
+    251-commit-stale index, build the real auto-refresh hook): rejected for now —
+    no evidence grep/Read missed a blast-radius in 67 sessions; bigger lift with
+    no demonstrated need.
+  - **C — rewrite the mandate text in place:** rejected as unstable — the block
+    is CLI-auto-generated and regenerates on the next `analyze`, so C collapses
+    into A unless `analyze` is also stopped (at which point A is the honest form).
+- **Cross-ref:** operator proposal
+  `coordination/mailbox/sent/2026-05-28T10-02-08Z-operator-to-director-proposal.md`;
+  ADR-013 (verification discipline); CLAUDE.md Rule #12 (grep-the-writes).

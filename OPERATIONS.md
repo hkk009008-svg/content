@@ -366,15 +366,6 @@ curl -X POST http://localhost:8080/api/cleanup
 
 Removes temp files / unreferenced shots. Doesn't delete projects themselves.
 
-### Force re-index GitNexus
-
-```bash
-npx gitnexus analyze --embeddings
-```
-
-Without `--embeddings`, previously generated embeddings are deleted (per
-the script's behavior). Always pass `--embeddings` to preserve them.
-
 ---
 
 ## 9. Troubleshooting

@@ -6,7 +6,7 @@
 > drift.
 >
 > This file is the *truth layer*. `CLAUDE.md` is the *process layer*
-> (GitNexus playbook, session-start protocol, multi-task orchestration). When
+> (the impact-analysis method, session-start protocol, multi-task orchestration). When
 > they disagree about facts, **this file wins**.
 
 ---

@@ -1,109 +1,7 @@
-<!-- gitnexus:start -->
-# GitNexus — Code Intelligence
-
-This project is indexed by GitNexus as **Content** (4309 symbols, 23541 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
-
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
-
-## Always Do
-
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
-- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
-
-## When Debugging
-
-1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
-2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/Content/process/{processName}` — trace the full execution flow step by step
-4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
-
-## When Refactoring
-
-- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
-- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
-- After any refactor: run `gitnexus_detect_changes({scope: "all"})` to verify only expected files changed.
-
-## Never Do
-
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
-- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
-
-## Tools Quick Reference
-
-| Tool | When to use | Command |
-|------|-------------|---------|
-| `query` | Find code by concept | `gitnexus_query({query: "auth validation"})` |
-| `context` | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})` |
-| `impact` | Blast radius before editing | `gitnexus_impact({target: "X", direction: "upstream"})` |
-| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged"})` |
-| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
-| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
-
-## Impact Risk Levels
-
-| Depth | Meaning | Action |
-|-------|---------|--------|
-| d=1 | WILL BREAK — direct callers/importers | MUST update these |
-| d=2 | LIKELY AFFECTED — indirect deps | Should test |
-| d=3 | MAY NEED TESTING — transitive | Test if critical path |
-
-## Resources
-
-| Resource | Use for |
-|----------|---------|
-| `gitnexus://repo/Content/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/Content/clusters` | All functional areas |
-| `gitnexus://repo/Content/processes` | All execution flows |
-| `gitnexus://repo/Content/process/{name}` | Step-by-step execution trace |
-
-## Self-Check Before Finishing
-
-Before completing any code modification task, verify:
-1. `gitnexus_impact` was run for all modified symbols
-2. No HIGH/CRITICAL risk warnings were ignored
-3. `gitnexus_detect_changes()` confirms changes match expected scope
-4. All d=1 (WILL BREAK) dependents were updated
-
-## Keeping the Index Fresh
-
-After committing code changes, the GitNexus index becomes stale. Re-run analyze to update it:
-
-```bash
-npx gitnexus analyze
-```
-
-If the index previously included embeddings, preserve them by adding `--embeddings`:
-
-```bash
-npx gitnexus analyze --embeddings
-```
-
-To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.embeddings` field shows the count (0 means no embeddings). **Running analyze without `--embeddings` will delete any previously generated embeddings.**
-
-> Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.
-
-## CLI
-
-| Task | Read this skill file |
-|------|---------------------|
-| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
-| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
-| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
-| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
-| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
-| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
-
-<!-- gitnexus:end -->
-
 # Session-start protocol (read me first)
 
 **Truth lives in `ARCHITECTURE.md` at the repo root.** This file (CLAUDE.md)
-is the *process layer* — GitNexus playbook, multi-task orchestration, session
+is the *process layer* — the impact-analysis method, multi-task orchestration, session
 discipline. `ARCHITECTURE.md` is the *truth layer* — verified facts about the
 pipeline, with file:line references and a §15 smoke test. When they disagree
 about facts, `ARCHITECTURE.md` wins.
@@ -146,6 +44,26 @@ Don't duplicate ARCHITECTURE.md content in this file. If you need to record
 something load-bearing about how a subsystem works, find or add the
 appropriate section in `ARCHITECTURE.md`. For decisions (with rationale),
 append to `DECISIONS.md` — never edit prior entries.
+
+# Impact analysis before editing
+
+Before modifying a function, class, or method, gauge its blast radius with
+grep + Read (the de-facto method across every session to date):
+
+- `grep -rn 'symbolName' --include='*.py' .` to find the definition + callers;
+  Read the call sites; grep imports for cross-file references.
+- Report the direct callers + risk to the user before editing a high-fanout
+  symbol.
+- Before committing, run `git show --stat` / `git diff` to confirm the changed
+  scope matches intent.
+
+For renames / extracts / splits: grep the symbol across the repo first
+(callers, imports, string references), update every site, then re-grep to
+confirm none remain. Don't find-and-replace blind to the call graph.
+
+*(A GitNexus MCP integration was auto-documented here as mandatory but its
+server was never configured — 0 tool calls in 67 sessions; grep/Read was the
+real method throughout. Removed 2026-05-28; see DECISIONS.md ADR-016.)*
 
 # Verification discipline for factual claims
 
@@ -216,7 +134,7 @@ Qualitative directional claims = use your judgment but flag uncertainty.
 
 ## When you change something
 
-Beyond the GitNexus checks above:
+Beyond the impact-analysis checks above:
 
 - One commit per logical slice. Run the §15 smoke block in `ARCHITECTURE.md`
   before declaring a slice done.
@@ -335,12 +253,11 @@ Working dir: `<absolute>`. Branch: `<branch>`. Latest commit: `<sha>`.
 ## Project conventions you MUST follow
 
 Per `/Users/.../CLAUDE.md`:
-1. Run `gitnexus_impact({target: "<symbol>", direction: "upstream"})` before editing existing symbols
-2. Run `gitnexus_detect_changes()` after edits — confirm scope is what you expect
+1. Before editing an existing symbol, `grep -rn 'symbolName' --include='*.py' .` to find callers/importers and Read the call sites; report blast radius to the user.
+2. After edits, run `git diff --stat` to confirm scope matches intent.
 3. <task-specific gotcha>
-4. If GitNexus MCP isn't reachable in your environment, fall back to grep + file inspection.
-5. **Brief-pattern reference adherence.** When the brief says "mirror pattern X at file:line" or "use the existing _foo_-style endpoint," verify the FULL shape of X — signature, route path, scope parameters, error handling, lock guards — not just the called function. Brief-pattern references are implicit specs; silent deviations cascade. If the named helper doesn't exist (e.g., brief says `_mutate_shot` but the actual pattern uses `mutate_project`) or the wording is ambiguous, report the divergence in your status BEFORE implementing. (Broader codifier-side discipline: see Rule #12 — brief-level grep-the-writes — in `docs/PROTOCOL-RULES-LOG.md`.)
-6. **pid-scope check on new endpoints.** When adding/touching an HTTP endpoint operating on a project-scoped resource (shots, scenes, locations, characters), verify the route takes `<pid>` explicitly. Do NOT scan via `list_projects()` to find a matching resource — IDs can collide across projects (e.g., `shot_id` follows `shot_{scene}_{i}` and matches across projects with matching scene/index layouts). Inspect at least one similar existing endpoint in the same file (e.g., `api_update_shot_prompt`) to confirm the route shape and scoping. (Broader codifier-side discipline: see Rule #13 — symmetric-endpoint audit — in `docs/PROTOCOL-RULES-LOG.md`.)
+4. **Brief-pattern reference adherence.** When the brief says "mirror pattern X at file:line" or "use the existing _foo_-style endpoint," verify the FULL shape of X — signature, route path, scope parameters, error handling, lock guards — not just the called function. Brief-pattern references are implicit specs; silent deviations cascade. If the named helper doesn't exist (e.g., brief says `_mutate_shot` but the actual pattern uses `mutate_project`) or the wording is ambiguous, report the divergence in your status BEFORE implementing. (Broader codifier-side discipline: see Rule #12 — brief-level grep-the-writes — in `docs/PROTOCOL-RULES-LOG.md`.)
+5. **pid-scope check on new endpoints.** When adding/touching an HTTP endpoint operating on a project-scoped resource (shots, scenes, locations, characters), verify the route takes `<pid>` explicitly. Do NOT scan via `list_projects()` to find a matching resource — IDs can collide across projects (e.g., `shot_id` follows `shot_{scene}_{i}` and matches across projects with matching scene/index layouts). Inspect at least one similar existing endpoint in the same file (e.g., `api_update_shot_prompt`) to confirm the route shape and scoping. (Broader codifier-side discipline: see Rule #13 — symmetric-endpoint audit — in `docs/PROTOCOL-RULES-LOG.md`.)
 
 ## Verification
 
@@ -366,7 +283,7 @@ If <X happens>, report BLOCKED with what you tried.
 ## Report Format
 
 - Status: DONE / DONE_WITH_CONCERNS / BLOCKED / NEEDS_CONTEXT
-- gitnexus_impact findings (callers, risk) or grep-fallback equivalent
+- Impact findings (callers, risk) from grep/Read
 - Files changed (paths only)
 - Verification command output
 - Commit SHA — `git commit` stdout's SHA is authoritative as of cycle-8 B-003 Option E (the post-commit hook no longer amends; STATE.md is gitignored and regenerated locally). Use `git log --oneline -3` to double-check if desired, but the SHA from commit stdout matches HEAD.
@@ -378,12 +295,12 @@ discovering everything you already know, and the report will be vague.
 
 ## Hardening notes — provenance for the implementer-template additions
 
-Items 5-6 in "Project conventions you MUST follow" and the Commit SHA
+Items 4-5 in "Project conventions you MUST follow" and the Commit SHA
 capture guidance in "Report Format" are hardened in from cycle-5 + cycle-6
 failure modes. Carry them forward in future dispatches; if you trim the
 template, do NOT trim these:
 
-- **Item 5 (brief-pattern adherence)** — S13 implementer interpreted the
+- **Item 4 (brief-pattern adherence)** — S13 implementer interpreted the
   brief's `_mutate_shot` pattern reference as "use `mutate_project`"
   without inheriting the route shape (pid-scoping, single-project
   mutation). Operator-seat's Lane V caught **F1 CRITICAL** post-commit:
@@ -392,8 +309,8 @@ template, do NOT trim these:
   (CRITICAL) + F2 — pid-scoped reject route + monotonic-run dedup`). The
   brief named a non-existent helper, but the pattern's shape was still
   recoverable by inspecting the cited `api_update_shot_prompt`
-  endpoint — that's the inspection step item 5 codifies.
-- **Item 6 (pid-scope check)** — same F1 CRITICAL root cause, codified
+  endpoint — that's the inspection step item 4 codifies.
+- **Item 5 (pid-scope check)** — same F1 CRITICAL root cause, codified
   as a standing project convention so the next implementer catches the
   failure mode at design time, not via Lane V post-commit. Cost
   comparison: design-time check is ~1 grep; post-commit Lane V catch
@@ -402,7 +319,7 @@ template, do NOT trim these:
 - **Commit SHA capture** — historical context: cycle-5 dispatch surfaced
   that implementer-reported SHAs were sometimes 1 commit stale because
   the project's `.claude/hooks/update-state.sh` post-commit hook AMENDED
-  STATE.md into the just-made commit, changing its SHA. The Item 6
+  STATE.md into the just-made commit, changing its SHA. The Item 5
   Report-Format guidance directed implementers to capture from
   `git log --oneline -3` after the hook settled. **Resolved at cycle-8
   B-003 Option E** — hook no longer amends; STATE.md is gitignored;
@@ -551,8 +468,6 @@ Auto Mode says: make the reasonable call and keep going.
 ## Background work
 
 `run_in_background: true` is for:
-- `npx gitnexus analyze --embeddings` after a batch of commits — index will
-  be ready before the next slice needs it.
 - Long verification (`pytest -v` on a large suite, `vite build`, `gh pr create`
   on a slow network).
 - Anything where you have independent work to do meanwhile.
@@ -623,28 +538,21 @@ prevents acting on bad input.
    explicit user/system instructions, proceed and note the false
    positive in your response.
 
-5. **"GitNexus MCP not available" from a subagent** — Subagents have a
-   different MCP environment than the orchestrator. Several subagents
-   couldn't reach GitNexus and fell back to grep + file inspection.
-   **Mitigation:** don't require subagents to use GitNexus tools; tell
-   them in the prompt that grep + file reading is an acceptable fallback
-   for impact analysis when MCP isn't reachable.
-
 ### Tool and environment failure modes
 
-6. **`Edit` requires `Read` first** — Trying to `Edit` a file the harness
+5. **`Edit` requires `Read` first** — Trying to `Edit` a file the harness
    hasn't seen returns `File has not been read yet`. **Mitigation:**
    always `Read` (even a small offset+limit window) before the first
    `Edit` on a file in a session.
 
-7. **System `python3` vs project `.venv/bin/python`** — Default `python3`
+6. **System `python3` vs project `.venv/bin/python`** — Default `python3`
    doesn't have project test deps (pytest, etc.); the project venv does.
    **Mitigation:** for project-specific tooling (pytest, vite, npx,
    anything not in the standard library), use the project's binary
    explicitly: `.venv/bin/python -m pytest ...`, `npx ...` from the
    right directory.
 
-8. **Background-task completion notifications mid-conversation** — The
+7. **Background-task completion notifications mid-conversation** — The
    harness fires `<system-reminder>` blocks when a background command
    finishes. These are NOT user input. **Mitigation:** treat them as
    informational; don't confuse them with user acknowledgement of a
@@ -681,7 +589,7 @@ distribution, not hierarchy.
 | Seat | Specializes in | Why this seat? |
 |---|---|---|
 | **Director-seat** | Strategic synthesis: brief authoring, ADR composition, push decisions, post-roadmap reassessment, cross-cycle planning, codifying discipline | Strategic work requires synthesizing cross-cycle context; director's session preserves cycle-spanning state |
-| **Operator-seat** | Operational verification: post-commit Lane V reviewer dispatch, Lane D doc-sync, transplant-handoff refresh, counter-bump dispositions, mailbox event authoring | Operational work requires cold-context independence (Rule #9); operator's session is naturally orthogonal to director's |
+| **Operator-seat** | Operational verification: post-commit Lane V reviewer dispatch, Lane D doc-sync, transplant-handoff refresh, mailbox event authoring | Operational work requires cold-context independence (Rule #9); operator's session is naturally orthogonal to director's |
 
 Both seats are equal in authority within their specialization. Within
 Lane V/D/S, operator-seat acts unilaterally (mailbox events bind
@@ -735,9 +643,6 @@ of running both is roughly zero.
 
 **Operational-seat-default** (operator-seat unless explicitly handed off):
 
-- Counter-bump dispositions (the auto-generated GitNexus-block edits at
-  the top of this file / `AGENTS.md`) — folded into the nearest
-  relevant code commit or shipped as `chore(baseline)`.
 - Trust-but-verify reads after each commit (`git show --stat`, brief
   test run)
 - Updating the operator transplant handoff
@@ -840,21 +745,6 @@ are forms of acknowledging what shifted around this commit). This
 codifies the convention so the next instance of either role doesn't
 independently re-invent it.
 
-## Counter-bump dispositions during concurrent operation
-
-The "fold counter bumps into the nearest relevant commit" rule (in
-the multi-task discipline section above) avoids trailing
-`chore(baseline):` commits when not isolated. **During active
-concurrent operation**, the right move is **fold-and-surface**: hold
-the counter bump for the other party's next natural commit (their
-session minors chore, next code commit) rather than racing with a
-standalone `chore(baseline)`. Announce the held delta in conversation
-("4-line counter bump held for director's next commit") so the other
-party can fold it.
-
-Standalone `chore(baseline)` remains correct only when the bump truly
-is isolated (no other work in flight).
-
 ## Pre-commit re-verify (Rule #7)
 
 Rule #4 above (`## State-asserting writes: gate on \`git log --oneline -5\``)
@@ -869,8 +759,7 @@ Immediately before `git commit` for any state-asserting commit, run
 newer than your Write-start time. Compare to the pre-Write check (Rule
 #4). If observed HEAD or unread mailbox events changed:
 
-- **Drift below your concern threshold** (counter bump, unrelated
-  commit, informational mailbox event): commit normally; mention
+- **Drift below your concern threshold** (unrelated commit, informational mailbox event): commit normally; mention
   "rebased mentally on `<new HEAD>`" in body.
 - **Drift that contradicts your content** (HEAD shipped something your
   doc says is pending; mailbox event invalidates your assertion):
@@ -1850,7 +1739,7 @@ commit.
 | Director phase | Detection signal | Operator action | Phase exit signal |
 |---|---|---|---|
 | **Pre-dispatch** | `scout-request` mailbox event OR director's in-chat "Dispatching X" narration | **Lane S** (v5+): read-only survey; send `scout-report`. v4: ignore. | Director's subagent commit lands |
-| **Subagent active** | Dispatch-claim event seen; WT has uncommitted changes director-attributed | **Silent.** No `.py` writes; hold counter bumps. | Director's commit lands |
+| **Subagent active** | Dispatch-claim event seen; WT has uncommitted changes director-attributed | **Silent.** No `.py` writes. | Director's commit lands |
 | **Post-commit (feat / refactor / fix)** | New commit by director (Author: `hkk009008-svg`), type matches | **Lane V**: dispatch spec + code-quality reviewer subagents in parallel; send `verification-report` | Director's reviewer-fix commit OR new feat OR 10-min idle |
 | **Post-commit (subsystem touch)** | New commit by director, touches `cinema/` / `domain/` / `web_server.py` / `cinema_pipeline.py` | **Lane D**: update ARCHITECTURE.md / OPERATIONS.md (README carved out); commit `docs(arch-sync)`; send `doc-sync-notice` | Commit landed |
 | **Post-commit (chore / docs / test / style)** | New commit by director, type matches | **Ignore.** No Lane V / D action. | Next commit |
