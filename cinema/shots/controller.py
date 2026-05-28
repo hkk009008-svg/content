@@ -455,6 +455,18 @@ class ShotController:
             identity_anchor_override = cc.get("identity_anchor", "")
             negative_override = negative_prompt or cc.get("negative_constraints") or shot.get("negative_constraints", "")
 
+        # Image-engine routing — mirror the video-routing AUTO guard above
+        # (shot["target_api"]): a user-pinned shot["image_api"] wins; otherwise
+        # forward the optimizer's suggestion. Guards a future image_api user-pin
+        # from being silently overridden by the optimizer (Lane V #20 M-2).
+        _pinned_image_api = shot.get("image_api", "AUTO")
+        if _pinned_image_api and _pinned_image_api != "AUTO":
+            _image_api_hint = _pinned_image_api
+        elif opt_spec:
+            _image_api_hint = opt_spec.get("suggested_image_api")
+        else:
+            _image_api_hint = None
+
         # Build a lightweight PipelineContext so max-tier UI knobs
         # (MaxTierComfyControls + halt overrides) flow through to
         # generate_ai_broll_max.  settings is a plain dict; wrapping it in
@@ -477,9 +489,7 @@ class ShotController:
             style_reference=style_reference,
             shot_hint={"prompt": full_prompt, "characters_in_frame": shot.get("characters_in_frame", []),
                        "camera": shot.get("camera", ""),
-                       # IMAGE twin of the suggested_video_api routing above: forward the
-                       # optimizer's pick so quality_max's HiDream gate can fire (self-guarded).
-                       "image_api": opt_spec.get("suggested_image_api") if opt_spec else None},
+                       "image_api": _image_api_hint},
             ctx=ctx,
         )
         if not result or not os.path.exists(img_path):
