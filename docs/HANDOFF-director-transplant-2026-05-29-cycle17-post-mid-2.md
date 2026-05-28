@@ -3,8 +3,8 @@
 **Outgoing director-seat session:** cycle-17 POST-MID → POST-MID-2 (picked up at `e16bf85`)
 **Inheritor:** next director-seat
 **Prior handoff:** `docs/HANDOFF-director-transplant-2026-05-28-cycle17-post-mid.md`
-**Companion (operator side):** `docs/HANDOFF-operator-transplant-2026-05-28-cycle17-POST-MID.md` + operator's author-chain step-3 REPLY (`78f758b`)
-**HEAD at handoff:** `96c934a` — **PUSHED (origin/main == HEAD, fully synced)**
+**Companion (operator side):** `docs/HANDOFF-operator-transplant-2026-05-29-cycle17-postMID.md` (operator rev4 `e03c9ab`, shipped **concurrently** with this doc — both seats transplanted on disjoint files; git serialized clean) + operator's author-chain step-3 REPLY (`78f758b`)
+**HEAD at handoff:** handed-off WORK **PUSHED** through `96c934a` (== origin/main). The two transplant-handoff commits on top (operator `e03c9ab` rev4 + this director doc) are **unpushed** — push user-gated.
 **Pytest:** 1129 passed / 5 skipped / 10 subtests (full suite, verified at `96c934a`)
 **§15 smoke:** OK (verified at `96c934a`)
 **Cycle-17 state:** brief v2.0 SCAFFOLD partial fill-in landed + author-chain step-3 done; **Suno BGM fixed + live-verified**; branch fully pushed; suite green. Remainder GPU-gated.
