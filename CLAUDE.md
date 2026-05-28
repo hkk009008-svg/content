@@ -1638,6 +1638,85 @@ The N=2 evidence spans severity (IMPORTANT → MINOR-DEFER), timing
 → DEFER-acknowledged) — empirically distributed across the convention's
 full operational shape.
 
+## User-direction without owner-spec (Rule #16)
+
+**Rule #16: User-direction without owner-spec.**
+*(Subtitle: complementary-parallel work with mandatory convergence.)*
+
+When user-principal direction reaches both seats simultaneously without
+explicit owner specification, both seats MAY interpret it as joint-team
+work and produce complementary parallel deliverables. **The second seat
+to ship (by git timestamp) MUST send a follow-up coordination event
+within 30 minutes of the second commit landing**, acknowledging the
+parallel deliverable and proposing a convergence path (REPLY-cycle /
+merge / delegation / further parallelism).
+
+**Variant (pre-commit-detected race).** If the receiving seat has not
+yet committed but detects the conflict via the Rule #7 pre-commit gate,
+it MAY discard the pre-commit and send a convergence event offering its
+content as REPLY-cycle input (preserves the work's value without
+committing a parallel doc). Silent ship of a second deliverable without
+a coordination event = Rule #2 §"Signaling" violation.
+
+**Why net-positive, not merely tolerated.** Cycle-16's Shape-A instances
+produced *complementary coverage* that improved synthesis quality rather
+than redundant churn: the director closing-report (`e4615c7`,
+findings-authority view) and operator Tier-D brief (`2c9ee9f`,
+validation-design view) informed each other; brief v2.0 (`c360952`)
+adopted structure from the operator scaffold while reframing through
+director synthesis. The capstone instance: the user-principal handed the
+SAME brief-2.0 design advisory to BOTH seats ("read my advice / act as
+you see fit" → operator; "continue as director" → director); both
+independently designed a near-identical insight-achievement mechanism
+(five-for-five decision convergence, cold to each other), and the
+operator's pre-commit-caught draft — discarded per the variant, offered
+as REPLY input (`fd3dc33`) — contributed a Rule #12 grep-verified marker
+correction + the INTENT-GAP/REAL-BUG/PREDICTION-ERROR divergence
+classification that a solo director pass would have missed. Convergence
+at REPLY-cycle-1 (`110aff6` fold + `e86dd55` convergence event). Rule #16
+preserves that value while requiring the convergence discipline.
+
+**Beneficiary (per Rule #11): `both` seats** — symmetric obligation
+(either seat, whichever ships second, owes the convergence event). No
+asymmetric-veto path needed. Operator-seat drafted the candidate text
+(REPLY-cycle-1 `7380d43` + scaffold §3 + REPLY `fd3dc33`); director-seat
+concurred (REPLY-cycle-2 `aba7755`), authored the brief §8.2 framing, and
+ships this binding mirror.
+
+**Working criteria (dogfood for v5.4, following the Rule #14/#15 pattern):**
+
+- **C1** — convergence event cites Rule #16 explicitly + names the parallel
+  deliverable's SHA (or "uncommitted, on disk" for the variant).
+  Grep-auditable: `git log --grep='Rule #16'`.
+- **C2** — convergence event lands within 30 min of the second deliverable's
+  commit (or, for the variant, within 30 min of pre-commit-gate detection).
+  Per-instance wall-clock measurable from event timestamps.
+- **C3** — the proposing seat names a concrete convergence path (not just
+  "noted").
+- **C4** — over a cycle, Shape-A instances that follow Rule #16 produce zero
+  "duplicate-work-discarded" outcomes (the value is *complementary*, not
+  redundant).
+
+**Composition with other rules.** Rule #16 is the disposition-mechanism for
+the Shape-A race (the catalog's stable shape-labels are defined in brief
+v2.0 §8.1, resolving the chronological-vs-shape-label "Race-N=k" drift).
+It composes with Rule #2 (the convergence event IS the signal), Rule #7
+(the pre-commit gate detects the variant), and Rule #10 (joint-team mode —
+complementary parallel work is a specialization, not a hierarchy shift).
+
+**Codified SHA:** `<filled at cycle-16-close commit-B>` (Protocol Bundle
+v5.4 ship; filled per chicken-and-egg precedent — v2 `3e57ddf` / v3
+`d8f2407` / v4 `d90036b` / v4.1 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb`
+/ v5.2 `61cac6d` / v5.3 `24c145a`). Empirical basis: **N=3 cumulative**
+Shape-A instances (cycle-16-entry T19:19Z dispatch-claim race +
+cycle-16-mid T22:25Z synthesis-doc + proposal race + cycle-16-mid T22:53Z
+brief-scaffold race) + the **cycle-16-mid→close advisory-convergence
+instance** (user advisory to both seats; five-for-five mechanism
+convergence; pre-commit variant discharged at `fd3dc33`). User-principal
+Q4 authorized codification (brief v2.0 §8.2 is the design home; this is
+the binding CLAUDE.md mirror). Operator-seat consented affirmatively as
+drafter; director-seat ships per Sh role partition.
+
 ## Disagreement protocol (v5)
 
 Generalizes v4's R-V1 counter precedent. When operator-seat disagrees
