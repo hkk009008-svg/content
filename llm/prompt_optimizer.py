@@ -206,6 +206,7 @@ def _fallback_optimize(
     has_dialogue: bool = False,
     objects: Optional[list] = None,
     primary_subject: str = "character",
+    intent_notes: str = "",
 ) -> dict:
     """Deterministic fallback — runs without an LLM. Produces a reasonable spec
     using heuristics + the user's own input as the seed prompt. Lower quality
@@ -271,8 +272,9 @@ def _fallback_optimize(
     else:
         camera_str = "85mm f/1.4, shallow DoF, eye-level" if shot_type == "portrait" else "50mm, standard framing"
         lighting_str = loc_light
+        intent_prefix = f"Director's intent: {intent_notes.strip()}. " if intent_notes and intent_notes.strip() else ""
         image_prompt = (
-            f"{user_input.strip().rstrip('.')}. {loc_desc}. {loc_light}. "
+            f"{intent_prefix}{user_input.strip().rstrip('.')}. {loc_desc}. {loc_light}. "
             f"{mood} mood, {palette} palette. "
             f"Photorealistic cinematic, 35mm film grain, "
             f"shallow depth of field, professional cinematography."
@@ -359,6 +361,7 @@ def optimize_shot_prompt(
     has_dialogue: bool = False,
     objects: Optional[list] = None,
     primary_subject: str = "character",
+    intent_notes: str = "",
     ensemble=None,
 ) -> dict:
     """Translate raw user intent into a structured shot generation spec.
@@ -374,6 +377,10 @@ def optimize_shot_prompt(
                          surface_type, branding_constraints, texture_anchor, ...).
         primary_subject: 'character' | 'object' | 'environment' — disambiguates
                          hero subject when both characters and objects are present.
+        intent_notes:    Operator's per-shot creative direction (e.g., "emphasize
+                         isolation, cold tones"). Forwarded to the LLM as director's-
+                         intent guidance. Empty string (default) leaves existing
+                         callers unaffected.
         ensemble:        Optional pre-built LLMEnsemble. If None, builds one or
                          falls back to heuristic path on import failure.
 
@@ -398,6 +405,7 @@ def optimize_shot_prompt(
             return _fallback_optimize(
                 user_input, characters, location, global_settings,
                 has_dialogue, objects=objects, primary_subject=primary_subject,
+                intent_notes=intent_notes,
             )
 
     char_lines = []
@@ -416,8 +424,13 @@ def optimize_shot_prompt(
         obj_lines.append(f"- {o.get('name', o.get('id', '?'))}: {'; '.join(bits)}")
 
     project_lang = global_settings.get("language", "English")
+    intent_section = (
+        f"DIRECTOR'S INTENT FOR THIS SHOT:\n{intent_notes.strip()}\n\n"
+        if intent_notes and intent_notes.strip() else ""
+    )
     user_prompt = (
         f"USER INTENT:\n{user_input}\n\n"
+        f"{intent_section}"
         f"SCENE CONTEXT:\n{scene_context or '(standalone shot)'}\n\n"
         f"CHARACTERS IN FRAME:\n{chr(10).join(char_lines) if char_lines else '(none)'}\n\n"
         f"OBJECTS IN FRAME (products/props):\n{chr(10).join(obj_lines) if obj_lines else '(none)'}\n\n"
@@ -451,6 +464,7 @@ def optimize_shot_prompt(
         return _fallback_optimize(
             user_input, characters, location, global_settings,
             has_dialogue, objects=objects, primary_subject=primary_subject,
+            intent_notes=intent_notes,
         )
 
     return _coerce_to_valid_keys(spec, has_chars, has_dialogue)
