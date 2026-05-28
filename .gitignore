@@ -64,6 +64,9 @@ domain/projects/*
 # State-update hook marker (per-clone runtime state, not source)
 .claude/hooks/.last-state-head
 
+# Hookify local rules (per-clone runtime guardrails, not source — see /hookify)
+.claude/hookify.*.local.md
+
 # Auto-generated session snapshot (B-003 Option E, cycle 8). Hook
 # regenerates this file on every Bash call from local git state; not
 # meaningful to track in commit history (the historical versions in
