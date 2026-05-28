@@ -1257,6 +1257,18 @@ class ShotController:
                             shot_id,
                             take["metadata"]["lipsync_score"],
                         )
+                        # Cost-track the lipsync generation (Tier F NEW-2: lipsync was
+                        # previously untracked). Attribute to the winning cascade engine;
+                        # unpriced engines record $0.00 + a warning, same as other gens.
+                        try:
+                            _ls_engine = (_ls_cascade.get("cascade_metadata", {})
+                                          .get("engine") or "LIPSYNC")
+                            self.cost_tracker.record_api_call(
+                                _ls_engine, operation="lipsync",
+                                shot_id=shot_id, video_id=self.project.get("id", ""),
+                            )
+                        except Exception:
+                            logger.warning("lipsync cost record skipped", exc_info=True)
                     else:
                         # Lipsync pass returned nothing — leave lipsync_score absent
                         # (0.0 sentinel) so the auto-approve gate treats this as FAIL.
@@ -1732,6 +1744,17 @@ class ShotController:
                         variant["path"] = result
                         if "cascade_metadata" in _lipsync_cascade:
                             variant["cascade_metadata"] = _lipsync_cascade["cascade_metadata"]
+                        # Cost-track the lipsync correction (Tier F NEW-2: previously
+                        # untracked). Attribute to the winning cascade engine.
+                        try:
+                            _ls_engine = (_lipsync_cascade.get("cascade_metadata", {})
+                                          .get("engine") or "LIPSYNC")
+                            self.cost_tracker.record_api_call(
+                                _ls_engine, operation="lipsync",
+                                shot_id=shot_id, video_id=self.project.get("id", ""),
+                            )
+                        except Exception:
+                            logger.warning("lipsync cost record skipped", exc_info=True)
 
             elif action == "rife":
                 if video_path:
