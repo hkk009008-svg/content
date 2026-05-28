@@ -345,6 +345,14 @@ def make_project(name: str) -> dict:
             # defaults; operator tunes via project settings. Typed schema is
             # Session 10 (P1-3 part 2) work — rides through extra="allow" for now.
             "auto_approve": AutoApproveConfig().to_dict(),
+            # api_engines (per-engine config: KLING_NATIVE.storyboard_mode,
+            # .enabled, .duration, .face_consistency, etc.) is intentionally
+            # NOT scaffolded here: it's operator-opt-in, merged into
+            # global_settings only on UI settings-save, seeded from the
+            # api_engine_defaults catalog in web_server.py (the source of truth
+            # for shape/defaults). Every reader safe-defaults the absent key
+            # (cinema/phases/motion_render.py _get_storyboard_mode,
+            # phase_c_ffmpeg.py).
         },
     }
 
