@@ -581,3 +581,72 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
 - **Cross-ref:** operator proposal
   `coordination/mailbox/sent/2026-05-28T10-02-08Z-operator-to-director-proposal.md`;
   ADR-013 (verification discipline); CLAUDE.md Rule #12 (grep-the-writes).
+
+---
+
+## ADR-017 — Storyboard B-integrate: batched Kling generation behind a default-off flag
+
+- **Date:** 2026-05-28
+- **Status:** Accepted
+- **Context:** Motion rendering generated one Kling take per shot, independently.
+  "Storyboard mode" (brief item B-integrate / F-A.1) instead generates a whole
+  scene's shots in a single batched `KlingNativeAPI.generate_storyboard` call —
+  anchored on the first shot's keyframe, with the other shots' keyframes passed as
+  `image_references` — for cross-shot character/style consistency, then splits the
+  combined video back into per-shot segments. The hazard of a second render path
+  is silent divergence from the proven per-shot path: cost double-counting,
+  dropped shots on partial failure, cross-project output collisions, or broken
+  lock discipline. The integration therefore had to be additive and reversible.
+- **Decision:** Ship storyboard mode behind a default-OFF `storyboard_mode` flag
+  (`cinema/phases/motion_render.py`), gated before the per-shot loop. Pipeline:
+  1. Batch-generate via `generate_storyboard` (anchor = first keyframe; the rest as
+     `image_references`).
+  2. Record **exactly one** batch cost (`cost_tracker.record_api_call("KLING_NATIVE",
+     operation="storyboard_generation")`) for the whole scene — this also closes
+     Tier F NEW-2 (kling_native previously had no call-site cost tracking).
+  3. `split_video_into_segments` on the combined output, by per-shot duration.
+  4. `_finalize_motion_take(record_cost=False)` per segment — reuses the per-shot
+     take machinery but suppresses cost (already recorded once at step 2).
+  5. **Partial-finalize retry is per-shot and finite:** only a failed segment is
+     retried via `generate_motion_take`; no loop.
+  6. **Fall-through is safe:** None return / split raises / wrong segment count all
+     return `batch_handled=False`, so the untouched per-shot loop runs. Flag off OR
+     any batch failure ⇒ behavior identical to the legacy per-shot path.
+  7. All project-state writes go through `_mutate_shot → mutate_project` (FileLock);
+     no new bare mutations.
+  - **Cost-on-split-failure policy (Lane V #19 F2b-1):** if `generate_storyboard`
+    succeeds but the split then fails, the batch cost from step 2 is **retained**
+    and the per-shot fallback records its own per-shot costs on top. This is
+    intentional and accurate — the storyboard call genuinely ran and genuinely
+    incurred Kling spend *before* the split, so recording it is not a leak; moving
+    the record after the split-count check (the reviewer's first idea) would
+    *under-count real money spent*. The retry path's per-shot costs are likewise
+    real (separate generations). Accepted as correct billing, documented here per
+    the operator's recommended disposition.
+- **Consequences:**
+  - +: Cross-shot consistency from one batched generation; fully reversible (flag
+    off = legacy path); cost-accurate; no dropped shots on partial failure;
+    lock-safe.
+  - −: A second motion-render path to maintain. Storyboard *quality* is GPU-gated
+    and unvalidated at ship time — the real Kling coherence plus 3 known tuning
+    items (anchor = first-keyframe vs. others-as-references; split uses REQUESTED
+    durations so the last segment absorbs drift vs. actual Kling output length;
+    the batch motion prompt is thinner than per-shot) wait on the pod (tracked in
+    the cycle-17 GPU-validation task).
+  - −: On split failure the scene is billed for both the (real) batch call and the
+    per-shot fallback — correct, but costlier than a clean per-shot run.
+- **Alternatives considered:**
+  - Generate batch + per-shot and keep the better: rejected — doubles cost with no
+    automated quality signal yet.
+  - Default storyboard mode ON: rejected — unvalidated on GPU; default-off is the
+    safe additive ship.
+  - Record the cost after the split-count check: rejected — under-counts real Kling
+    spend when the split fails (see the policy above).
+- **Tracking:** `51e6886` (F2a: split + reusable finalize helper, no behavior
+  change) · `f9af2de` (F2b: wire batch mode behind the flag; closes F-A.1) ·
+  `8354c9a` (F2b Lane V fix: partial-finalize retry-per-shot + per-shot classify) ·
+  `ca9f090` (Lane V #19 F2b-2: project-scope the `/tmp` fallback path). Operator
+  Lane V #19 verification-report
+  `coordination/mailbox/sent/2026-05-28T10-24-58Z-operator-to-director-verification-report.md`
+  (⚠️ minor, F2b sound, 0 blocking).
+- **Cross-ref:** `cinema/phases/motion_render.py`; brief item B-integrate / F-A.1.
