@@ -4,10 +4,15 @@
 **Inheritor:** next director-seat
 **Prior handoff:** `docs/HANDOFF-director-transplant-2026-05-28-cycle17-mid.md`
 **Companion (operator side):** `docs/HANDOFF-operator-transplant-2026-05-28-cycle17-POST-MID.md` (`92e7bde`)
-**HEAD at handoff:** `d6734ba` — **0 ahead of origin (everything PUSHED)**
-**Pytest:** 1117 passed / 3 skipped / 10 subtests (verified at `d6734ba`: `1117 passed ... in 32.38s`)
-**§15 smoke:** OK (verified at `d6734ba`)
-**Cycle-17 state:** doc-backlog cleared + GPU-independent sweep items shipped; remainder GPU-gated.
+**HEAD at handoff:** `ad8545f` — **7 ahead of origin, UNPUSHED (push user-gated)**
+**Pytest:** 1126 passed / 3 skipped / 10 subtests (verified at `ad8545f`); +2 once the operator's in-flight M-1 test commits
+**§15 smoke:** OK (verified at `ad8545f`)
+**Cycle-17 state:** doc-backlog + GPU-independent sweep cleared; API keys (Viggle, Suno/sunoapi.org) configured + Suno code adapted; Lane V #20 dispositioned. Remainder GPU-gated.
+
+> **⚠️ READ THE "POST-HANDOFF CONTINUATION" SECTION BELOW FIRST.** Significant work landed
+> after this doc's first revision (`5dfe0d0`): API-key setup, the Suno→sunoapi.org adaptation,
+> and Lane V #20 M-2. The header above is the LATEST state; the ledger / closed / open sections
+> further down were written at `d6734ba` and the continuation section reconciles them.
 
 ---
 
@@ -23,6 +28,58 @@ NEW-2). The **branch is fully pushed** (the previous handoffs' "23 unpushed" was
 had already pushed). The operator ran **concurrently** in the shared tree (shipped
 `research_location_visual` Part 1, relayed user decisions). **Everything remaining is GPU-gated
 (pod down).**
+
+---
+
+## POST-HANDOFF CONTINUATION (same session, after `5dfe0d0`)
+
+After the first revision of this doc, the user directed several API-key / provider tasks and a
+Lane V follow-up. All landed; **everything here is pushed-pending (7 ahead, push user-gated).**
+
+**API keys configured — local `.env` only (gitignored, `git check-ignore .env` ✓, 0 tracked):**
+- `VIGGLE_API_KEY` — activates the dormant **Viggle full-body motion-retargeting** performance
+  engine (`performance/viggle.py`; one of {ACT_ONE, LIVE_PORTRAIT, VIGGLE, SKIP}; **Mode A**,
+  needs a per-shot operator driving video). `.env` is loaded via `config/settings.py` `load_dotenv`.
+- `SUNO_API_KEY` + `SUNO_API_BASE=https://api.sunoapi.org` — Suno BGM via the sunoapi.org gateway.
+- **Key audit done:** all 29 env vars the code reads vs `.env` — **nothing required is missing.**
+  Only absent: `HEDRA_API_KEY` (optional; FAL proxy is the preferred Hedra path, `FAL_KEY` set)
+  + `SUNO_TOKEN` (legacy alias for `SUNO_API_KEY`, not needed).
+- ⚠️ **Both keys were pasted in chat → treat as exposed; recommend rotation** (replace the value
+  on the one `.env` line; no code change).
+
+**Code shipped (pushed-pending):**
+- **`cfc4da0` fix(music): Suno BGM → sunoapi.org contract.** Old code POSTed `{base}/songs`
+  (chirp-v5) — a 404 against sunoapi.org. Rewrote `audio/music.py::generate_suno_v5` to
+  `POST /api/v1/generate` → poll `GET /api/v1/generate/record-info?taskId=...`
+  (PENDING/TEXT_SUCCESS/FIRST_SUCCESS→poll, SUCCESS→done, *_FAILED→abort) → download
+  `data.response.sunoData[0].audioUrl`. `_SUNO_MODEL="V5"`; `callBackUrl` placeholder (we poll).
+  +5 mocked-HTTP tests (`tests/unit/test_suno_music.py`). **NOT live-tested — a real generate
+  call spends sunoapi.org credits; that's the only remaining Suno verification.** Graceful-False
+  preserved → FAL Stable Audio fallback intact.
+- **`d73eebb` fix(image-routing): Lane V #20 M-2 — image_api user-pin guard.** Image routing now
+  mirrors the video-routing AUTO guard: `shot["image_api"]` pin wins → else
+  `opt_spec.suggested_image_api` → else None (was an unconditional forward). User overrode the
+  operator's (c) NO-ACTION-now disposition to land it now.
+
+**Lane V #20** (operator, on `d28474e`+`46a2cfa`): ✅ both sound, 5 minor, 0 blocking. Per
+user split: **director did M-2 (`d73eebb`); operator owns M-1 (forwarding test) + M-3 (lipsync
+`shot_id` logging).** Operator's M-1 test (`TestSuggestedImageApiForwarding` in
+`test_hidream_image_routing.py`) was **in-flight uncommitted** at handoff — verified it PASSES
+against M-2's guard (8/8 in that file). Remaining minors (warning-noise, pre-existing
+`cost_tracker.spent_usd` unlocked `+=`) stay NO-ACTION until lipsync pricing lands.
+
+**Operator concurrent work (shared tree):** `7ce6440` (toggle follow-up #1 fix — the
+`location_research` persistence I handed back; their cluster, closed) · `af49f96` (Lane V #20) ·
+`5e979c7`/`68c4879` (their handoff revs). Director→operator coord: `…11-27-57Z`, `…12-11-12Z`.
+Director cursor `T11:52:29Z`.
+
+**OPEN (this continuation):** Suno **live-test** (1 generate call, spends credits) · Viggle/Suno
+**key rotation** · operator's **M-1/M-3** to land · everything in the GPU-gated OPEN list below
+(unchanged: B2, research Part 2, SD3_5, upscale, dialogue/storyboard/HiDream validation).
+
+**⚠️ Working tree at handoff:** `tests/unit/test_hidream_image_routing.py` is dirty (operator's
+uncommitted M-1 test) + the 2 long-standing untracked items (BRIEF scaffold, `logs/`).
+**Surgical-stage only — never `git add -A`.**
 
 ---
 
