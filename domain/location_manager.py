@@ -6,11 +6,30 @@ for consistent environments across scenes.
 
 import os
 import shutil
+import urllib.request
+import urllib.error
 from typing import Optional, List
 from domain.project_manager import (
     MutationResult, make_location, add_location, get_project_dir, get_location,
     mutate_project,
 )
+
+
+def _download_url_to_file(url: str, dst_path: str) -> bool:
+    """
+    Download *url* to *dst_path*.  Returns True on success, False on any error.
+    Never raises — callers must treat False as "skip this URL".
+    """
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = resp.read()
+        with open(dst_path, "wb") as f:
+            f.write(data)
+        return True
+    except Exception as exc:
+        print(f"   [RESEARCH] Download failed for {url}: {exc}")
+        return False
 
 
 def _loc_dir(project_id: str, loc_id: str) -> str:
@@ -28,10 +47,18 @@ def create_location_with_images(
     time_of_day: str = "day",
     weather: str = "clear",
     commit_timeout: float = 10,
+    auto_research: bool = False,
 ) -> dict:
     """
     Creates a location, copies reference images, and generates
     the reusable prompt fragment for injection into all image prompts.
+
+    When *auto_research* is True (default: False), also calls
+    ``research_location_visual`` to fetch real photographs of the described
+    location via Tavily image search, downloads them locally, and appends
+    to ``reference_images``.  This supplements any user-provided uploads.
+    If Tavily is unavailable or the download fails for any URL, those refs
+    are silently skipped — behaviour is identical to the no-research path.
     """
     pid = project["id"]
     location = make_location(
@@ -44,7 +71,7 @@ def create_location_with_images(
     lid = location["id"]
     loc_path = _loc_dir(pid, lid)
 
-    # Copy reference images
+    # Copy user-provided reference images
     stored_refs = []
     if reference_image_paths:
         for i, src in enumerate(reference_image_paths):
@@ -54,6 +81,23 @@ def create_location_with_images(
                 shutil.copy2(src, dst)
                 stored_refs.append(dst)
                 print(f"   📍 Stored location reference: {dst}")
+
+    # Auto-research: fetch real photos from Tavily and download locally.
+    # Supplements uploads — always appends, never replaces.
+    if auto_research:
+        try:
+            from research_engine import research_location_visual
+            urls = research_location_visual(description)
+        except (ImportError, Exception) as exc:
+            print(f"   [RESEARCH] Location visual research unavailable: {exc}")
+            urls = []
+        base_idx = len(stored_refs)
+        for j, url in enumerate(urls):
+            ext = ".jpg"
+            dst = os.path.join(loc_path, f"ref_research_{base_idx + j}{ext}")
+            if _download_url_to_file(url, dst):
+                stored_refs.append(dst)
+                print(f"   [RESEARCH] Stored researched location ref: {dst}")
 
     location["reference_images"] = stored_refs
 

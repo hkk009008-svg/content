@@ -354,6 +354,10 @@ def get_config():
             "RUNWAY_GEN4": {
                 "enabled": True, "duration": 10, "resolution": "1080p",
             },
+            # Location research: auto-populate location reference images via
+            # Tavily image search.  Default OFF — requires explicit opt-in
+            # to avoid surprise API calls.
+            "location_research": False,
         },
         # V11: dropdown options for new settings
         "cost_optimization_levels": [
@@ -1117,6 +1121,13 @@ def api_add_location(pid):
             img.save(path)
             image_paths.append(path)
 
+    # Read project-level location_research toggle (default OFF).
+    # Stored at global_settings["location_research"]; also surfaced as
+    # api_engine_defaults["location_research"] in /api/config for UI access.
+    auto_research = bool(
+        project.get("global_settings", {}).get("location_research", False)
+    )
+
     location = create_location_with_images(
         project, name, description,
         reference_image_paths=image_paths,
@@ -1124,6 +1135,7 @@ def api_add_location(pid):
         time_of_day=time_of_day,
         weather=weather,
         commit_timeout=HTTP_PROJECT_TIMEOUT,
+        auto_research=auto_research,
     )
 
     return jsonify(location), 201
