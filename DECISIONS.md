@@ -650,3 +650,58 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   `coordination/mailbox/sent/2026-05-28T10-24-58Z-operator-to-director-verification-report.md`
   (⚠️ minor, F2b sound, 0 blocking).
 - **Cross-ref:** `cinema/phases/motion_render.py`; brief item B-integrate / F-A.1.
+
+## ADR-018 — Dynamic Workflows adopted for read-analysis lanes; implementation stays subagent-driven
+
+- **Date:** 2026-05-29
+- **Status:** Accepted
+- **Context:** Claude Code shipped "Dynamic Workflows" (`/workflows`, v2.1.154,
+  2026-05-28) — background orchestration of tens–hundreds of agents that returns
+  one synthesized report per run. Two doc lookups established the load-bearing
+  mechanics: agents' intermediate results stay in script variables; there is **no**
+  documented branch/PR/per-task-commit landing, no per-unit review gate, no custom
+  agent types, and the edit-isolation/file-conflict mechanism is undocumented. So it
+  is a **fan-out→synthesize-a-report engine, not a parallel-commit-with-review
+  engine**. The question was where it fits the director-operator protocol's existing
+  workflow layers without weakening the per-task-commit + two-stage-review + race-ack
+  discipline.
+- **Decision:** Adopt `/workflows` (Rule #17, Protocol Bundle v5.5) as the scaled
+  execution engine for **read-only, report-producing analysis lanes** — Lane C/S,
+  Rule #12 grep-the-writes, Rule #13 symmetric-endpoint audits, blast-radius/impact
+  analysis, doc-truth sweeps — under five guardrails: (1) read-only/report-only, no
+  implementation; (2) evidence captured + cited **+ the launching seat spot-checks a
+  sample of citations post-run** (folds operator R-OP-1, extending CC-2 to
+  workflow-synthesized reports; prefer calling `scripts/check_doc_claims.py` for
+  anchor/symbol claims = un-hallucinatable by construction); (3) output re-enters the
+  normal protocol (workflow agents emit no mailbox events; committed code → Lane V/D,
+  Rule #9 independent review intact); (4) inspect-before-launch; (5) hard gate
+  ≥ 2.1.154, read-only until edit-isolation is documented. **Implementation stays on
+  `subagent-driven-development`.**
+- **Consequences:**
+  - +: Scales read-analysis disciplines the protocol already runs by hand (Lane C/S,
+    Rule #12/#13 audits, impact analysis) without touching the implementation
+    discipline; beneficiary=both; reversible (an opt-in engine for existing lanes).
+  - −: Forward-looking — the feature is unavailable in the current runtime
+    (2.1.74 / 2.1.149 < 2.1.154), so the rule ratifies a *shape* with no dogfood
+    datapoint yet (first at v5.6 / C4 after env update).
+  - −: Per-agent cost is not exposed (only run-total) — coarser than the protocol's
+    context-hygiene instinct; noted, not blocking.
+- **Alternatives considered:**
+  - Use `/workflows` for parallel *implementation* (the original over-optimistic
+    framing): rejected — no reviewable per-task commit, no per-unit Lane V gate,
+    undocumented edit-isolation; would break the per-task-commit + two-stage-review
+    discipline. Implementation stays subagent-driven.
+  - Require citations in the report but no post-run spot-check: rejected via R-OP-1 —
+    citations close the asserting half but not the fabrication half (CC-2 precedent).
+  - Wait until the env updates to ≥ 2.1.154 before codifying: rejected — ratifying the
+    shape now (with the hard gate) means the guardrails are agreed *before* first use,
+    not improvised under it.
+- **Tracking:** proposal
+  `coordination/mailbox/sent/2026-05-29T01-19-08Z-director-to-operator-proposal.md`
+  (director-originated, per user direction) · operator CONSENT + R-OP-1 `afb2c75`
+  (`2026-05-29T01-26-32Z-operator-to-director-proposal-reply.md`) · Rule #17 codified
+  at `__V55_SHIP_SHA__` (Bundle v5.5).
+- **Cross-ref:** CLAUDE.md Rule #17; Rules #9 (CC-2), #12, #13, #14, Lane C/S;
+  ADR-013 (verification discipline). Composition note: `scripts/check_doc_claims.py`
+  + `docs/pipeline_status.toml` (operator Increment-2) supply machine-verified
+  evidence a doc-truth-sweep workflow should call.

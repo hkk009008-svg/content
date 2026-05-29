@@ -1606,6 +1606,110 @@ Q4 authorized codification (brief v2.0 §8.2 is the design home; this is
 the binding CLAUDE.md mirror). Operator-seat consented affirmatively as
 drafter; director-seat ships per Sh role partition.
 
+## Workflow-assisted analysis lanes (Rule #17)
+
+**Rule #17: Workflow-assisted analysis lanes.**
+*(Subtitle: `/workflows` is a read-analysis multiplier, not an implementation engine.)*
+
+Claude Code's **Dynamic Workflows** (`/workflows`, v2.1.154) orchestrates
+tens–hundreds of agents in the background and returns **one synthesized
+report per run** (agents' intermediate results stay in script variables;
+docs document no branch/PR/per-task-commit landing, no per-unit review
+gate, no custom agent types, and the edit-isolation/file-conflict
+mechanism is undocumented). It is therefore a **fan-out → synthesize-a-
+report engine, NOT a parallel-commit-with-review engine** — and that
+single fact bounds where it fits this protocol.
+
+When `/workflows` is available (runtime ≥ 2.1.154), **either seat MAY use
+it as the execution engine for read-only, report-producing analysis at
+scale** — Lane C surveys, Lane S scouting, Rule #12 grep-the-writes
+audits, Rule #13 symmetric-endpoint audits, blast-radius / impact
+analysis, post-roadmap reassessment, and doc-truth sweeps — subject to
+ALL five guardrails:
+
+1. **Read-only / report-output only.** Workflows MUST NOT be used for
+   implementation (code-landing); implementation stays on
+   `subagent-driven-development`. Rationale: no reviewable per-task
+   commit, no per-unit spec+code-quality gate (Rule #9), and undocumented
+   edit-isolation — none of which can carry the "one commit per task /
+   two-stage review / Rule #7 race-ack" discipline.
+
+2. **Verification discipline + post-run spot-check (folds R-OP-1).** A
+   workflow report makes inventory claims ("N endpoints miss the gate").
+   (a) The workflow's agent prompts MUST instruct each agent to **capture
+   the command output (grep/Read) as evidence**, and the synthesized
+   report MUST **cite, not assert** — subject to "no inventory claim
+   without verification output" (ADR-013 / Rules #1–3) exactly as any
+   director-voice doc. (b) Citations close the *asserting* half but not
+   the *fabrication* half: per CC-2 precedent (Rule #9 §"Spec-reviewer
+   prompt discipline" — 2 dispatches hallucinated 2 "X exists" claims), a
+   report synthesized across tens of agents has the same-or-larger
+   hallucination surface, and inspecting the *script* (guardrail 4) does
+   NOT verify the *output's* citations after the run. So **the launching
+   seat MUST spot-check a representative sample of the report's cited
+   evidence (re-run a few of the grep/Read commands) before the report's
+   claims re-enter the protocol (guardrail 3).** (c) For anchor /
+   symbol-existence claims, prefer having the workflow **call
+   `scripts/check_doc_claims.py`** (machine-verified def/anchor truth;
+   operator Increment-2 tooling) over agent grep-and-assert — this closes
+   the fabrication gap *by construction* for those claim types.
+
+3. **Output re-enters the normal protocol.** A workflow report is an
+   *input* to a seat's normal work; workflow agents do NOT emit mailbox
+   events. Any code a seat then commits from the findings flows through
+   Lane V/D + mailbox unchanged — the other seat's independent Lane V
+   (Rule #9) still applies. A workflow never substitutes for Lane V.
+
+4. **Inspect-before-launch.** Use plan-approval / "View raw script"
+   before launching; do not fire blind. The launching seat owns the
+   report's correctness.
+
+5. **Hard gate ≥ 2.1.154.** Until the edit-isolation / file-conflict
+   mechanics are documented or empirically confirmed, workflows MUST NOT
+   write files (guardrail 1 already forbids implementation; this restates
+   it for any future file-touching use).
+
+**Composition with other rules.**
+- **Lane C / Lane S:** Rule #17 is an *execution-engine* option for these
+  lanes, not a new lane; their triggers/outputs are unchanged.
+- **Rule #9:** unaffected — review still happens on committed code,
+  post-workflow; a workflow never substitutes for the independent Lane V.
+- **Rule #12 / #13:** Rule #17 *scales* these audits; their evidence
+  discipline is inherited via guardrail 2.
+- **Rule #14:** orthogonal — #14 governs *implementation* dispatch, #17
+  governs *analysis*. A #14 pre-scope (Stage 1) MAY use a #17 workflow to
+  produce its survey, then dispatch implementation the normal
+  (subagent-driven) way.
+
+**Working criteria (dogfood for v5.6):**
+- **C1** — any workflow-assisted lane work cites "Rule #17" in the
+  resulting artifact (report header / commit body / mailbox event).
+  Grep-auditable.
+- **C2** — the workflow report cites command-output evidence per unit AND
+  **the launching seat spot-checks a sample of those citations** (R-OP-1).
+- **C3** — read-only adherence: no workflow run lands code (guardrail 1);
+  verifiable from the run producing a report + zero direct commits.
+- **C4** — first real use is retro'd at v5.6: did it save
+  wall-clock/context vs. manual Lane C, and did the evidence-citation +
+  spot-check hold?
+
+**Beneficiary (per R11): `both` seats.** Director gains scaled
+blast-radius/impact analysis before Lane B; operator gains scaled Lane S
+scouting + Rule #12/#13 audits. Symmetric — no asymmetric-veto path.
+
+**Codified SHA:** `__V55_SHIP_SHA__` (Protocol Bundle v5.5 ship; filled
+per chicken-and-egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4
+`d90036b` / v4.1 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2
+`61cac6d` / v5.3 `24c145a` / v5.4 `7773502`). **Forward-looking
+codification:** the feature is unavailable in the current runtime
+(`claude --version` 2.1.74 / session 2.1.149, both < 2.1.154), so this
+ratifies the integration *shape* + guardrails ahead of activation; the
+first dogfood datapoint (C4) lands at v5.6 after the env updates.
+Director-originated proposal (`2026-05-29T01-19-08Z`, per user
+direction); operator-seat consented affirmatively + added R-OP-1 (folded
+into guardrail 2 + C2) in REPLY `afb2c75`
+(`2026-05-29T01-26-32Z`); director-seat ships per Sh role partition.
+
 ## Disagreement protocol (v5)
 
 Generalizes v4's R-V1 counter precedent. When operator-seat disagrees
