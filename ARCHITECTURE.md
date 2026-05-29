@@ -1484,14 +1484,14 @@ script, the local check + CI move together.
 
 ## 16. Known bugs & latent issues
 
-> Test suite state (verified 2026-05-26 post cycle-8 datetime cleanup):
-> **737 pass / 3 skip / 0 fail** in `tests/unit/`. The 3 skips below are
+> Test suite state (verified 2026-05-29 cycle-17):
+> **1223 pass / 3 skip / 0 fail** in `tests/unit/`. The 3 skips below are
 > the only known stragglers. Run `.venv/bin/python -m pytest tests/unit/ -q`
 > to verify.
 
 | Severity | Issue | Location |
 |---|---|---|
-| Low | 3 documented `@unittest.skip` tests in `test_project_persistence.py`. Mock setup hasn't caught up with `project_manager`/`character_manager`/`location_manager` refactors. Mock-only updates, not behavior changes. | `tests/unit/test_project_persistence.py:139,197,221` |
+| Low | 3 documented `@unittest.skip` tests in `test_project_persistence.py`. Mock setup hasn't caught up with `project_manager`/`character_manager`/`location_manager` refactors. Mock-only updates, not behavior changes. | `tests/unit/test_project_persistence.py:139,203,232` |
 | Cosmetic | BGM duration hard-coded to 47s with no comment. | `cinema_pipeline.py:523` |
 | ~~Cosmetic~~ Resolved 2026-05-26 (`9c749b7`) | ~~`datetime.utcnow()` deprecation warnings — migrated to `datetime.now(timezone.utc)` with `.replace("+00:00", "Z")` to preserve existing project.json timestamp suffix shape.~~ | ~~`domain/project_manager.py:133,924`~~ |
 
@@ -1500,11 +1500,9 @@ script, the local check + CI move together.
 ## 17. Dead code & cleanup candidates
 
 - **`main.py`** — already deleted. Root-shim docstrings still mention it.
-- **Root-level orphans worth investigating:** `cleanup.py`, `reporter.py`, `research_engine.py`, `web_research.py`, `web_services.py`, `coherence_analyzer.py`. Status unverified.
-
-`research_engine.py` and `web_research.py` are actually load-bearing —
-`scene_decomposer.py`, `dialogue_writer.py`, `style_director.py` all import
-from them. Don't delete without grep.
+- **Root-level module status** (verified 2026-05-29 via `grep -rn 'import <mod>' --include='*.py'`, excluding tests/worktrees):
+  - **Load-bearing — do NOT delete without grep:** `research_engine.py` + `web_research.py` (imported by `scene_decomposer.py` / `dialogue_writer.py` / `style_director.py`); `cleanup.py` (`web_server.py`, `cinema_pipeline.py`); `web_services.py` (`web_server.py:59`); `coherence_analyzer.py` (`cinema/shots/controller.py`).
+  - **True orphan candidate:** `reporter.py` — no detected production callers (grep clean 2026-05-29).
 
 ---
 
