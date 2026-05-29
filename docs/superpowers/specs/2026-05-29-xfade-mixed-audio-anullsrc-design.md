@@ -125,10 +125,13 @@ unchanged (surgical scope, user-selected).
   format precondition regardless of heterogeneous embedded formats (the exact
   mixed-engine reality M1 comes from).
 
-> **To validate at implementation (TDD):** the exact silent-source incantation
-> (`anullsrc=...,atrim=0:{dur}` vs `aevalsrc=0:d={dur}`) against ffmpeg 8.1. The
-> real-ffmpeg integration test (§6) is the gate — a mock cannot prove ffmpeg accepts
-> the graph, which is the class of bug F1 was.
+> **To validate at implementation (TDD):**
+> (a) the exact silent-source incantation (`anullsrc=...,atrim=0:{dur}` vs
+> `aevalsrc=0:d={dur}`) against ffmpeg 8.1;
+> (b) **[spec-review R2]** that `_fmt`'s decimal precision is sufficient for `atrim` —
+> an under-trimmed silent pad could make `acrossfade` run short. The Tier-2 real-ffmpeg
+> test (§6, test 5) catches both by asserting the output's audio-stream duration.
+> A mock cannot prove ffmpeg accepts the graph — which is the class of bug F1 was.
 
 ### 4.4 Interaction with `_assemble_final` step 5
 No change to `cinema_pipeline.py`. Per §2, step-5 keys on standalone-dialogue
