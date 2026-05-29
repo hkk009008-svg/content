@@ -543,13 +543,18 @@ class ReviewController:
         # reasons instead of polling forever (the cycle-17 headless
         # plan-review-gate stall). Web runs leave headless False and keep the
         # blocking poll below.
-        if self._runstate.headless and not predicate():
+        if self._runstate.headless:
+            # Refresh the snapshot once and reuse it for both the satisfied-check
+            # and the reason detail (avoids a redundant second snapshot on the
+            # raise path).
             project = self._host._refresh_project_snapshot() or self.project
-            details = self._gate_block_details(gate, project)
-            raise GateNotSatisfiedError(
-                f"{gate} not satisfied in a headless run with no operator to "
-                f"approve it (auto-approve did not clear): " + "; ".join(details)
-            )
+            if not self._gate_satisfied(gate, project):
+                details = self._gate_block_details(gate, project)
+                raise GateNotSatisfiedError(
+                    f"{gate} not satisfied in a headless run with no operator to "
+                    f"approve it (auto-approve did not clear): " + "; ".join(details)
+                )
+            return True
 
         return self._lifecycle.wait_for_gate(gate, predicate)
 

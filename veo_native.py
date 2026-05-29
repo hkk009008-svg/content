@@ -93,6 +93,10 @@ def _extract_video_bytes(client, generated_video):
     """
     video_obj = generated_video.video
     inline = getattr(video_obj, "video_bytes", None)
+    # `is not None` (not truthiness) on purpose: an empty-but-present payload
+    # (b"") must still count as inline. Falling through to files.download on
+    # Vertex RAISES ("only supported in the Gemini Developer client"), which
+    # would turn a degenerate-empty into a hard crash.
     if inline is not None:
         return inline
     return client.files.download(file=video_obj)
