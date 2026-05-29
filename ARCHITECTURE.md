@@ -234,7 +234,7 @@ propagate by reference. Forwarder block at
 | 16 | Cancellation check | :1092-1094 |
 | 17 | Refresh + `_rebuild_review_clips` + checkpoint | :1096-1098 |
 | 18 | **GATE 4 REVIEW** @ 82% → on satisfaction call `proceed_to_assembly()` | :1099 |
-| 19 | `assemble_approved_takes()` → `_assemble_final(...)`: stitch + color grade + BGM mix + two-pass loudnorm → final mp4 | :1106-1110 |
+| 19 | `assemble_approved_takes()` → `_assemble_final(...)`: stitch (hard cuts; opt-in scene-boundary cross-dissolve, default-off `scene_transitions`) + color grade + BGM mix + two-pass loudnorm → final mp4 | :1106-1110 |
 
 ### 4.2 `PipelineContext` ([cinema/context.py](cinema/context.py))
 
@@ -958,12 +958,18 @@ fallback_list = [
 
 ### 9.7 Helper functions in `phase_c_ffmpeg.py`
 
-7 functions total: `_veo_quota_blocked`, `generate_ai_video`, `stitch_modules`
-(ffmpeg concat demuxer), `assess_motion_quality` (OpenCV Farneback flow →
+12 functions total. Core: `_veo_quota_blocked`, `generate_ai_video`,
+`stitch_modules` (ffmpeg concat demuxer), `split_video_into_segments`,
+`assess_motion_quality` (OpenCV Farneback flow →
 {smoothness, frozen_ratio, recommendation∈{accept,interpolate,regenerate}}),
 `apply_color_grade` (8 named presets + optional LUT3D), `adjust_speed` (setpts
 + atempo), `two_pass_loudnorm` (EBU R128 — pass-1 measure via JSON parse of
 stderr, pass-2 normalize; defaults `I=-14 LUFS, LRA=11, TP=-1.5 dBTP`).
+**Scene transitions (opt-in, cycle-17):** `xfade_concat` chains per-scene videos
+with an xfade (video) + acrossfade (audio) — probes each scene, clamps the
+transition to ≤0.4× the shortest scene, re-encodes once; built on
+`_probe_duration` + `_build_xfade_filtergraph` (+ `_fmt`). Raises on ffmpeg
+failure so `_assemble_final` falls back to a plain hard-cut concat.
 
 ---
 
