@@ -68,7 +68,7 @@ def _build_generate_videos_config(
     Image objects are loaded by the caller; this only assembles the config."""
 ```
 
-It sets `generate_audio`, `duration_seconds` (parsed from `"8s"`→`8`), `resolution`, `person_generation`, `aspect_ratio`, and `reference_images` (when non-empty) on the config. Returns the config.
+It sets `generate_audio`, `duration_seconds` (parsed from `"8s"`→`8`), `resolution`, `person_generation`, `aspect_ratio`, and `reference_images` (when non-empty) on the config. Returns the config. **Contract on malformed `duration`** (not matching `"<N>s"`, or `N` not in `VEO_DURATIONS`): default `duration_seconds` to `8` (Veo's safe default) rather than raising — a formatting edge must not fail the whole generation. A unit test pins this.
 
 > **Plan-time SDK-verify gates** (confirm against `google-genai 2.6.0` before pinning): exact `config.resolution` accepted format (e.g. `"720p"` vs `"720"`); `duration_seconds` type (int seconds); whether `reference_images` wants `types.Image` vs a `VideoGenerationReferenceImage` wrapper. Where the actual API differs from this sketch, use the actual and note the divergence (plan-vs-source rule).
 
@@ -95,7 +95,7 @@ The whole body stays in the existing `try/except` that returns `None` on failure
 
 ## 6. Risks
 
-- **Coordination — `veo_native.py` is the operator's active file** (`39d095e`, + their running test). The fix overlaps; the plan must flag it and the implementer must `git log -1 veo_native.py` + re-read before editing. Likely best landed after the operator's test run completes (so the diff doesn't collide mid-run).
+- **Coordination — `veo_native.py` is the operator's active file** (`39d095e`, + their running test). The fix overlaps; the plan must flag it and the implementer must `git log -1 veo_native.py` + re-read before editing. **Recommended sequencing: land the fix AFTER the operator's `run_veo_dialogue_test.py` run exits** (so the diff doesn't collide mid-run, and the operator's failure output becomes the live confirmation that pins the unit-test expectations).
 - **SDK API shape uncertainty** (§4.1/§4.2 gates). Mitigation: verify against `google-genai 2.6.0` at plan execution; keep the driving-video skip-on-error guard.
 - **Behavior change:** Veo will now actually run for character shots (previously TypeError→cascade) and request audio. This is the intended fix, but it changes what `VEO_NATIVE` produces — call out in the doc-sync + PR body.
 
