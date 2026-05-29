@@ -524,7 +524,8 @@ class TestAssembleFinalSceneTransitions(TestAssembleFinalFoleyMix):
 
         with mock.patch("subprocess.run", side_effect=fake_run), \
              mock.patch.object(pipeline, "_apply_final_loudnorm"):
-            pipeline._assemble_final(scene_data, fake_bgm, settings)
+            result = pipeline._assemble_final(scene_data, fake_bgm, settings)
+        assert result is not None, "assembly must return a path (every _run case)"
         return captured
 
     def test_off_uses_concat_demuxer_no_xfade(self):
