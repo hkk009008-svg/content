@@ -200,7 +200,7 @@ worker is active**, because gate state lives in `project.json`, not in memory.
 
 | Attribute | Type | Source |
 |---|---|---|
-| `self._core` | `PipelineCore` | [cinema/core.py:75-115](cinema/core.py:75) `build_pipeline_core(pid)` |
+| `self._core` | `PipelineCore` | [cinema/core.py:62-102](cinema/core.py:62) `build_pipeline_core(pid)` |
 | `self.lifecycle` | `ThreadedLifecycle` | [cinema/lifecycle.py:100](cinema/lifecycle.py:100), fresh per pipeline |
 | `self._runstate` | `RunState` | [cinema/runstate.py:60](cinema/runstate.py:60), fresh per `__init__` |
 | `self._shot_ctrl` | `ShotController` | [cinema/shots/controller.py](cinema/shots/controller.py) |
@@ -216,7 +216,7 @@ propagate by reference. Forwarder block at
 
 | Step | What happens | File:line |
 |---|---|---|
-| 1 | `_refresh_project_snapshot()`; early-return if no scenes | [cinema_pipeline.py:870-874](cinema_pipeline.py:870) |
+| 1 | `_refresh_project_snapshot()`; early-return if no scenes | [cinema_pipeline.py:446-450](cinema_pipeline.py:446) |
 | 2 | If `resume=True`: `_restore_from_checkpoint()` + `_rebuild_review_clips` | :876-878 |
 | 3 | STYLE — `generate_style_rules` → persist | :881-914 |
 | 4 | `_ensure_bgm(settings)` (FAL Stable Audio, 47s hard cap) | :916 |
@@ -890,7 +890,7 @@ mirrors these with different fallback orderings.
 NOT a general multi-character fallback. Two-character dialogue shots
 classify as `medium` and route Kling → Runway → Sora → LTX.
 
-### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:112-133](workflow_selector.py:112))
+### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:411-432](workflow_selector.py:411))
 
 Empty `characters_in_frame` → `landscape`; otherwise concatenate `[SHOT]` +
 prompt + camera into a search string, first containment match wins; default `medium`.
@@ -1337,7 +1337,7 @@ character's reason.
 
 `@dataclass(frozen=True) Settings` ([config/settings.py:48](config/settings.py:48)).
 **Env-derived API keys + paths ONLY. No UI knobs.** Cached as `@lru_cache(maxsize=1)`
-singleton via `get_settings()` ([:138-140](config/settings.py:138)).
+singleton via `get_settings()` ([:137-139](config/settings.py:137)).
 
 Reading project UI knobs from `settings` is a silent-failure bug
 (`getattr(settings, "tts_provider", "DEFAULT")` returns the default because
