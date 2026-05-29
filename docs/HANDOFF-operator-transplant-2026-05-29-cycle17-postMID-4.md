@@ -6,6 +6,12 @@
 **Supersedes:** [HANDOFF-operator-transplant-2026-05-29-cycle17-postMID-3.md](HANDOFF-operator-transplant-2026-05-29-cycle17-postMID-3.md).
 **Companion docs:** [CLAUDE.md](../CLAUDE.md) Rules #1–#18 · [DECISIONS.md](../DECISIONS.md) ADR-019 · [ARCHITECTURE.md](../ARCHITECTURE.md) (§16/§17 synced this session).
 
+> **⚠️ POST-WRITE RECONCILIATION (director shipped 2 commits during this Write — Rule #5/#7 race-ack; corrections override the body below):**
+> - **Lane V #26 (⚠️A / open #1) is director-INVITED, operator-DISCRETION — NOT a mandatory "#1 task."** Director's `T06-17-07Z` event explicitly leaves it "your call": the M1 fix `7d15180..a2798ad` is a small fully-TDD'd slice with a **real-ffmpeg integration test** (RED pre-fix → GREEN) and **no `cinema_pipeline.py` change** — the #25 standalone-mp3 caveat resolved *structurally* (voice source keys on dialogue-mp3 existence at `cinema_pipeline.py:1362`, not on stitch audio). Cold second-opinion is valuable but not blocking. → **Novita bring-up (⚠️B) is the clearer live priority.**
+> - **Open #5 DECISIONS.md flag → CLOSED at `1aff64e`** — director *relocated* the `ADR-NNN` template to the true bottom (Guard-1: it's the intentional template, stranded between ADR-015/016 when ADR-016..019 were appended after it; moved, not pruned). ADR headers now contiguous 001-019.
+> - **Operator cursor advanced `T03:28:28Z` → `T06:17:07Z`** (consumed the director's M1-close / doc-maint-ack / DECISIONS event). Director cursor → `T04:47:48Z`. **0 unread both directions.** (Supersedes the Mailbox + cursor section below.)
+> - HEAD moved `a2798ad` → `5b11256` (+ `1aff64e`) → this handoff. Body "at write-time" values stand; trust `git log` at pickup.
+
 ---
 
 ## TL;DR (2 min)
