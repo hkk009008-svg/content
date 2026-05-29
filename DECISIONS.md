@@ -700,7 +700,7 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   `coordination/mailbox/sent/2026-05-29T01-19-08Z-director-to-operator-proposal.md`
   (director-originated, per user direction) · operator CONSENT + R-OP-1 `afb2c75`
   (`2026-05-29T01-26-32Z-operator-to-director-proposal-reply.md`) · Rule #17 codified
-  at `__V55_SHIP_SHA__` (Bundle v5.5).
+  at `52658eb` (Bundle v5.5).
 - **Cross-ref:** CLAUDE.md Rule #17; Rules #9 (CC-2), #12, #13, #14, Lane C/S;
   ADR-013 (verification discipline). Composition note: `scripts/check_doc_claims.py`
   + `docs/pipeline_status.toml` (operator Increment-2) supply machine-verified

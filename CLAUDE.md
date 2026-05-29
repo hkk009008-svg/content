@@ -1697,7 +1697,7 @@ ALL five guardrails:
 blast-radius/impact analysis before Lane B; operator gains scaled Lane S
 scouting + Rule #12/#13 audits. Symmetric — no asymmetric-veto path.
 
-**Codified SHA:** `__V55_SHIP_SHA__` (Protocol Bundle v5.5 ship; filled
+**Codified SHA:** `52658eb` (Protocol Bundle v5.5 ship; filled
 per chicken-and-egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4
 `d90036b` / v4.1 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2
 `61cac6d` / v5.3 `24c145a` / v5.4 `7773502`). **Forward-looking
