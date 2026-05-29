@@ -65,6 +65,36 @@ class TestFalFallbackProvenance:
         assert isinstance(res, pca.ImageGenResult)
         assert res.api_name == "FLUX_PRO"
 
+    def test_schnell_branch_reports_flux_schnell(self, stub_fal, tmp_path):
+        # FLUX-Pro fails, FLUX-schnell succeeds → FLUX_SCHNELL.
+        stub_fal.subscribe.side_effect = [
+            RuntimeError("flux-pro down"),                      # 1st call: FLUX-Pro
+            {"images": [{"url": "https://fake/schnell.jpg"}]},  # 2nd call: schnell
+        ]
+        out = str(tmp_path / "out.jpg")
+
+        res = pca._fal_flux_fallback("a prompt", out, seed=7, character_image=None)
+
+        assert isinstance(res, pca.ImageGenResult)
+        assert res.api_name == "FLUX_SCHNELL"
+
+    def test_pollinations_branch_reports_pollinations(self, stub_fal, tmp_path, monkeypatch):
+        # FLUX-Pro AND schnell fail; the free Pollinations fallback returns
+        # enough bytes → POLLINATIONS.
+        stub_fal.subscribe.side_effect = RuntimeError("fal down")
+
+        class _Resp:
+            def read(self_inner):
+                return b"x" * 6000  # > 5000-byte floor in _fal_flux_fallback
+
+        monkeypatch.setattr(urllib.request, "urlopen", lambda url: _Resp())
+        out = str(tmp_path / "out.jpg")
+
+        res = pca._fal_flux_fallback("a prompt", out, seed=7, character_image=None)
+
+        assert isinstance(res, pca.ImageGenResult)
+        assert res.api_name == "POLLINATIONS"
+
     def test_no_fal_key_returns_none(self, monkeypatch, tmp_path):
         # No FAL key → None (failure), so the caller's `if not result` guard
         # still trips and the keyframe is reported as failed.
