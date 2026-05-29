@@ -966,10 +966,15 @@ fallback_list = [
 + atempo), `two_pass_loudnorm` (EBU R128 — pass-1 measure via JSON parse of
 stderr, pass-2 normalize; defaults `I=-14 LUFS, LRA=11, TP=-1.5 dBTP`).
 **Scene transitions (opt-in, cycle-17):** `xfade_concat` chains per-scene videos
-with an xfade (video) + acrossfade (audio) — probes each scene, clamps the
-transition to ≤0.4× the shortest scene, re-encodes once; built on
-`_probe_duration` + `_build_xfade_filtergraph` (+ `_fmt`). Raises on ffmpeg
-failure so `_assemble_final` falls back to a plain hard-cut concat.
+with an xfade (video) + a *conditional* acrossfade — audio is crossfaded only when
+every input has an audio stream (`_has_audio_stream`); otherwise the output is
+video-only (the default Kling-Native/LTX silent path, where an unconditional
+acrossfade referenced a non-existent `[0:a]` and errored → silent hard-cut
+fallback; Lane V #24 F1). Probes each scene, clamps the transition to ≤0.4× the
+shortest scene, re-encodes once; built on `_probe_duration` +
+`_build_xfade_filtergraph` (+ `_fmt`). Raises on ffmpeg failure so `_assemble_final`
+falls back to a plain hard-cut concat. Mixed audio-presence inputs go fully
+video-only (Lane V #25 M1, (c)-deferred).
 
 ---
 
