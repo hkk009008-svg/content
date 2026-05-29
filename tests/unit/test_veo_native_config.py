@@ -93,6 +93,9 @@ def _completed_operation():
     op.done = True
     op.error = None  # a successful operation has no error (Bug 3 reads operation.error)
     gen_vid = MagicMock()
+    # Make the Vertex inline-bytes path explicit (Lane V M1): _extract_video_bytes
+    # prefers video_bytes, so set it rather than relying on a truthy MagicMock.
+    gen_vid.video.video_bytes = b"VIDEO_BYTES"
     op.response.generated_videos = [gen_vid]
     op.response.rai_media_filtered_reasons = []
     return op
