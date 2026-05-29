@@ -18,7 +18,12 @@ VEO_RESOLUTIONS = {
     "4k": "2160p",
     "2160p": "2160p",
 }
-VEO_DURATIONS = ["5s", "6s", "8s"]
+# Server-valid output durations (seconds) for the image_to_video feature.
+# 5s is REJECTED with INVALID_ARGUMENT for image_to_video despite older docs
+# (captured server error: "supported durations are [8,4,6] for feature
+# image_to_video"). text_to_video may differ, but this client only ever does
+# image_to_video — it always supplies a start `image`.
+VEO_IMAGE_TO_VIDEO_DURATIONS = (4, 6, 8)
 
 
 def _parse_duration_seconds(duration, default: int = 8) -> int:
@@ -28,6 +33,18 @@ def _parse_duration_seconds(duration, default: int = 8) -> int:
         return int(str(duration).strip().lower().rstrip("s"))
     except (ValueError, TypeError, AttributeError):
         return default
+
+
+def _clamp_image_to_video_duration(seconds: int) -> int:
+    """Snap `seconds` to the nearest server-valid image_to_video duration
+    (``VEO_IMAGE_TO_VIDEO_DURATIONS``). Ties round UP so we never truncate the
+    requested content (5 -> 6, 7 -> 8). The Veo server rejects any other value
+    (e.g. 5s) with INVALID_ARGUMENT, so this MUST run before the config is built.
+    """
+    if seconds in VEO_IMAGE_TO_VIDEO_DURATIONS:
+        return seconds
+    # Nearest valid; on a tie prefer the larger (minimise (distance, -value)).
+    return min(VEO_IMAGE_TO_VIDEO_DURATIONS, key=lambda v: (abs(v - seconds), -v))
 
 
 def _build_generate_videos_config(
@@ -51,7 +68,7 @@ def _build_generate_videos_config(
         person_generation=person_generation,
         aspect_ratio=aspect_ratio,
         generate_audio=generate_audio,
-        duration_seconds=_parse_duration_seconds(duration),
+        duration_seconds=_clamp_image_to_video_duration(_parse_duration_seconds(duration)),
         resolution=resolution,
     )
     if reference_images:
@@ -63,6 +80,22 @@ def _build_generate_videos_config(
             for img in reference_images
         ]
     return types.GenerateVideosConfig(**kwargs)
+
+
+def _extract_video_bytes(client, generated_video):
+    """Return raw video bytes from a completed ``generated_video``.
+
+    Vertex AI (the only audio-capable backend) returns the bytes INLINE on
+    ``generated_video.video.video_bytes`` and ``client.files.download`` raises
+    there ("This method is only supported in the Gemini Developer client"). The
+    Gemini Developer backend instead returns a Files handle that must be
+    downloaded. So prefer inline bytes; only fall back to download when absent.
+    """
+    video_obj = generated_video.video
+    inline = getattr(video_obj, "video_bytes", None)
+    if inline is not None:
+        return inline
+    return client.files.download(file=video_obj)
 
 
 class VeoNativeAPI:
@@ -118,7 +151,9 @@ class VeoNativeAPI:
             output_path: Where to save the generated video.
             reference_images: Optional list of up to 3 image paths for character
                               preservation across shots.
-            duration: Video duration — "5s", "6s", or "8s".
+            duration: Requested video duration. Snapped to the nearest
+                server-valid image_to_video value (4/6/8s) — e.g. "5s" -> 6s —
+                since Veo rejects other values with INVALID_ARGUMENT.
             resolution: Output resolution — "720p" or "1080p".
             generate_audio: If True, Veo generates synced audio (use for dialogue scenes).
             driving_video_path: Optional path to a performance-capture clip.
@@ -203,18 +238,29 @@ class VeoNativeAPI:
                 if poll_count % 6 == 0:
                     print(f"[VEO-NATIVE] Still generating... ({poll_count * 10}s elapsed)")
 
-            # Check for RAI content filter rejection
+            # Surface a deterministic operation error (e.g. INVALID_ARGUMENT for
+            # an unsupported duration) instead of letting it fall through to the
+            # generic "empty response" branch — the error carries the real reason.
+            op_error = getattr(operation, "error", None)
+            if op_error:
+                print(f"[VEO-NATIVE] Generation error: {op_error}")
+                return None
+
+            # Check for RAI content filter rejection / empty response.
             resp = operation.response
             if not resp or not resp.generated_videos:
                 rai_reasons = getattr(resp, "rai_media_filtered_reasons", []) if resp else []
+                rai_count = getattr(resp, "rai_media_filtered_count", 0) if resp else 0
                 if rai_reasons:
-                    print(f"[VEO-NATIVE] RAI filter: {rai_reasons[0][:120]}")
+                    print(f"[VEO-NATIVE] RAI filter ({rai_count} filtered): {rai_reasons[0][:120]}")
                 else:
                     print(f"[VEO-NATIVE] No video generated (empty response)")
                 return None
 
+            # Retrieve bytes — Vertex returns them inline; only the Gemini
+            # backend needs a Files API download (which raises on Vertex).
             generated_video = resp.generated_videos[0]
-            video_data = self.client.files.download(file=generated_video.video)
+            video_data = _extract_video_bytes(self.client, generated_video)
             with open(output_path, "wb") as f:
                 f.write(video_data)
 

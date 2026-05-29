@@ -63,11 +63,13 @@ def test_builds_config_with_all_caller_params():
 
 
 def test_generate_audio_false_is_respected():
+    # duration "6s" is server-valid for image_to_video; "5s" would clamp (see
+    # the Bug 2 clamp tests below) -- keep this test focused on the audio flag.
     cfg = _build_generate_videos_config(
-        generate_audio=False, duration="5s", resolution="720p", reference_images=None
+        generate_audio=False, duration="6s", resolution="720p", reference_images=None
     )
     assert cfg.generate_audio is False
-    assert cfg.duration_seconds == 5
+    assert cfg.duration_seconds == 6
 
 
 def test_wraps_reference_images_into_config():
@@ -89,6 +91,7 @@ def test_wraps_reference_images_into_config():
 def _completed_operation():
     op = MagicMock()
     op.done = True
+    op.error = None  # a successful operation has no error (Bug 3 reads operation.error)
     gen_vid = MagicMock()
     op.response.generated_videos = [gen_vid]
     op.response.rai_media_filtered_reasons = []
@@ -168,3 +171,88 @@ def test_driving_video_not_passed_alongside_image():
 
     assert "video" not in captured   # image-only; no mutual-exclusion conflict
     assert "image" in captured
+
+
+# ---------------------------------------------------------------------------
+# Bug 2 — image_to_video duration must be server-valid (4/6/8); 5s is rejected
+# (operator live test: gRPC code 3 "Unsupported output video duration 5 seconds,
+#  supported durations are [8,4,6] for feature image_to_video").
+# ---------------------------------------------------------------------------
+def test_clamp_image_to_video_duration_snaps_to_valid_set():
+    from veo_native import _clamp_image_to_video_duration as clamp
+
+    # Exact valid values pass through.
+    assert clamp(4) == 4
+    assert clamp(6) == 6
+    assert clamp(8) == 8
+    # Invalid -> nearest valid; ties round UP (don't truncate requested content).
+    assert clamp(5) == 6   # 4 and 6 equidistant -> 6
+    assert clamp(7) == 8   # 6 and 8 equidistant -> 8
+    assert clamp(3) == 4
+    assert clamp(10) == 8  # above range -> max
+    assert clamp(1) == 4   # below range -> min
+
+
+def test_build_config_clamps_invalid_duration():
+    # 5s is invalid for image_to_video; the config must carry a server-valid
+    # duration so generate_videos isn't rejected with INVALID_ARGUMENT.
+    cfg = _build_generate_videos_config(
+        generate_audio=True, duration="5s", resolution="720p", reference_images=None
+    )
+    assert cfg.duration_seconds == 6
+
+
+# ---------------------------------------------------------------------------
+# Bug 1 (CRITICAL) — Vertex returns the video INLINE (video_bytes); the Files
+# API download() raises on Vertex ("only supported in the Gemini Developer
+# client"). Prefer inline bytes; fall back to download only for the Gemini
+# backend.
+# ---------------------------------------------------------------------------
+def test_extract_video_bytes_prefers_inline_vertex():
+    from veo_native import _extract_video_bytes
+
+    client = MagicMock()
+    gen_vid = MagicMock()
+    gen_vid.video.video_bytes = b"VERTEX_INLINE"
+    assert _extract_video_bytes(client, gen_vid) == b"VERTEX_INLINE"
+    client.files.download.assert_not_called()  # Vertex: download() would raise
+
+
+def test_extract_video_bytes_falls_back_to_download_for_gemini():
+    from veo_native import _extract_video_bytes
+
+    client = MagicMock()
+    client.files.download.return_value = b"GEMINI_DL"
+    gen_vid = MagicMock()
+    gen_vid.video.video_bytes = None  # Gemini Developer backend: no inline bytes
+    assert _extract_video_bytes(client, gen_vid) == b"GEMINI_DL"
+    client.files.download.assert_called_once_with(file=gen_vid.video)
+
+
+# ---------------------------------------------------------------------------
+# Bug 3 (MEDIUM) — operation.error must be surfaced, not masked as the generic
+# "empty response" (the deterministic INVALID_ARGUMENT cost two debug rounds).
+# ---------------------------------------------------------------------------
+def test_generate_video_surfaces_operation_error(capsys):
+    api = VeoNativeAPI.__new__(VeoNativeAPI)  # bypass __init__ (no real client)
+    api._model = "veo-3.1-generate-001"
+
+    op = MagicMock()
+    op.done = True
+    op.error = {"code": 3, "message": "Unsupported output video duration 5 seconds"}
+
+    api.client = MagicMock()
+    api.client.models.generate_videos.return_value = op
+    api.client.operations.get.side_effect = lambda o: o
+
+    fake_img = types.Image(gcs_uri="gs://x/y.png")
+    with patch("veo_native.os.path.exists", return_value=True), \
+         patch("google.genai.types.Image.from_file", return_value=fake_img):
+        result = api.generate_video(
+            image_path="/tmp/frame.png", prompt="x", output_path="/tmp/out.mp4",
+        )
+
+    assert result is None
+    out = capsys.readouterr().out
+    assert "Generation error" in out
+    assert "Unsupported output video duration" in out
