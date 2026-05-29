@@ -34,35 +34,6 @@ from cinema.checkpoint import CheckpointStore
 logger = logging.getLogger(__name__)
 
 
-def _build_transition_prompt(from_mood: str, to_mood: str) -> str:
-    """
-    Build a cinematic transition prompt based on the emotional arc between two scenes.
-    The transition should feel motivated — not just a random morph but a purposeful shift.
-    """
-    from_mood = from_mood.lower()
-    to_mood = to_mood.lower()
-
-    # Mood-aware transition descriptions
-    if from_mood == to_mood:
-        return f"Smooth continuous camera movement, same {from_mood} atmosphere, natural flow between moments"
-
-    # Emotional contrasts
-    dark_moods = {"suspense", "thriller", "horror", "noir", "dystopian", "grief", "dark", "tense"}
-    light_moods = {"hopeful", "uplifting", "romantic", "dreamy", "peaceful", "ethereal", "triumphant"}
-
-    if from_mood in dark_moods and to_mood in light_moods:
-        return "Slow dissolve from darkness to light, gradual warmth entering the frame, sunrise-like transition, hopeful opening"
-    elif from_mood in light_moods and to_mood in dark_moods:
-        return "Light fading to shadow, colors desaturating, warmth draining from the frame, ominous shift"
-    elif from_mood in dark_moods and to_mood in dark_moods:
-        return "Slow atmospheric dissolve, maintaining tension, dark environment shifting, continuous unease"
-    elif from_mood in light_moods and to_mood in light_moods:
-        return "Warm cross-dissolve, maintaining positive energy, gentle movement, flowing continuity"
-
-    # Default: cinematic match cut
-    return f"Cinematic transition from {from_mood} to {to_mood} mood, smooth camera movement, natural temporal flow, professional film edit"
-
-
 class CinemaPipeline:
     """
     Interactive cinema production pipeline with maximum API utilization

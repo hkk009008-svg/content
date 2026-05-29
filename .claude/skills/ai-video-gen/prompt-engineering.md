@@ -101,7 +101,7 @@ Appended to every image generation prompt via Style Director:
 
 ## Transition Prompts
 
-From `_build_transition_prompt()` — mood-aware transitions between shots:
+Mood-aware transition prompt patterns between shots:
 
 | Transition Type | Condition | Prompt Pattern |
 |----------------|-----------|----------------|

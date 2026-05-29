@@ -196,7 +196,7 @@ worker is active**, because gate state lives in `project.json`, not in memory.
 
 ## 4. Orchestrator — `cinema_pipeline.py` + `cinema/`
 
-`CinemaPipeline.__init__` composes everything ([cinema_pipeline.py:72-122](cinema_pipeline.py:72)):
+`CinemaPipeline.__init__` composes everything ([cinema_pipeline.py:43-93](cinema_pipeline.py:43)):
 
 | Attribute | Type | Source |
 |---|---|---|
@@ -209,14 +209,14 @@ worker is active**, because gate state lives in `project.json`, not in memory.
 
 All four sub-controllers share the same `RunState` reference — mutations
 propagate by reference. Forwarder block at
-[cinema_pipeline.py:164-325](cinema_pipeline.py:164) (`# GENERATED BEGIN/END`,
+[cinema_pipeline.py:135-296](cinema_pipeline.py:135) (`# GENERATED BEGIN/END`,
 ~161 lines, 53 delegate methods) preserves backward compat for legacy callers.
 
 ### 4.1 `generate()` phase sequence
 
 | Step | What happens | File:line |
 |---|---|---|
-| 1 | `_refresh_project_snapshot()`; early-return if no scenes | [cinema_pipeline.py:446-450](cinema_pipeline.py:446) |
+| 1 | `_refresh_project_snapshot()`; early-return if no scenes | [cinema_pipeline.py:417-421](cinema_pipeline.py:417) |
 | 2 | If `resume=True`: `_restore_from_checkpoint()` + `_rebuild_review_clips` | :876-878 |
 | 3 | STYLE — `generate_style_rules` → persist | :881-914 |
 | 4 | `_ensure_bgm(settings)` (FAL Stable Audio, 47s hard cap) | :916 |
@@ -430,7 +430,7 @@ PERFORMANCE_REVIEW is symmetric with the other three gates as of 2026-05-24:
 the predicate at [cinema/review/controller.py:223-235](cinema/review/controller.py:223)
 covers all three satisfaction paths (SKIP routing, missing keyframe, explicit
 approval). The orchestrator's `all_skipped` short-circuit at
-[cinema_pipeline.py:1053-1073](cinema_pipeline.py:1053) is now redundant for
+[cinema_pipeline.py:1024-1044](cinema_pipeline.py:1024) is now redundant for
 correctness but kept for the explicit `PERFORMANCE_SKIPPED_GATE` UX event.
 
 Approve endpoint: `POST /api/projects/<pid>/shots/<sid>/performance/<take_id>/approve`
@@ -503,7 +503,7 @@ at [domain/project_manager.py:71](domain/project_manager.py:71).
 1. **Operator-initiated, eager** — `POST /api/projects/<pid>/scenes/<sid>/decompose`
    ([web_server.py:1348](web_server.py:1348)) calls `decompose_scene` directly.
    UI button on the setup screen.
-2. **Pipeline-internal, lazy** — `cinema_pipeline.py:939-976` inside the main
+2. **Pipeline-internal, lazy** — `cinema_pipeline.py:910-947` inside the main
    scene loop, only runs if `scene.get("shots", [])` is empty. Honors
    `settings["competitive_generation"]` (default `True`).
 
@@ -1205,13 +1205,13 @@ What remains is the live surface only.
 
 ### 12.5 BGM duration is hard-coded to 47s
 
-[cinema_pipeline.py:552](cinema_pipeline.py:552):
+[cinema_pipeline.py:523](cinema_pipeline.py:523):
 `generate_fal_bgm(music_mood, bgm_path, duration=47)`. FAL Stable Audio's
 practical max; loops in assembly.
 
 ### 12.6 Final-assembly audio mux — engine-dependent voice source
 
-`_assemble_final` ([cinema_pipeline.py:1199](cinema_pipeline.py:1199)) muxes the
+`_assemble_final` ([cinema_pipeline.py:1170](cinema_pipeline.py:1170)) muxes the
 final video's audio with an FFmpeg `amix` filtergraph over up to three sources
 (voice/dialogue + BGM + foley). The **voice source is motion-engine-dependent**:
 
@@ -1220,11 +1220,11 @@ final video's audio with an FFmpeg `amix` filtergraph over up to three sources
   (`[0:a]`), `amix` uses `duration=first`, no `-shortest`.
 - **Silent-video engines** (Kling Native image2video — the PA-VIDEO Set-3
   default): motion clips carry **no audio**. `_concat_dialogue_track`
-  ([cinema_pipeline.py:1163](cinema_pipeline.py:1163), mirrors
+  ([cinema_pipeline.py:1134](cinema_pipeline.py:1134), mirrors
   `_concat_foley_track`) concatenates per-scene dialogue into a standalone track
   muxed as a separate ffmpeg input (`[N:a]`); `amix` uses `duration=longest`
   paired with `-shortest` on the output
-  ([:1396](cinema_pipeline.py:1396), [:1413](cinema_pipeline.py:1413)) so audio
+  ([:1367](cinema_pipeline.py:1367), [:1384](cinema_pipeline.py:1384)) so audio
   plays through video length with BGM/foley filling any tail past dialogue end.
   The `mix` log label reflects the actual source (`standalone-dialogue+BGM+foley`
   vs `embedded-voice+BGM+foley`).
@@ -1492,7 +1492,7 @@ script, the local check + CI move together.
 | Severity | Issue | Location |
 |---|---|---|
 | Low | 3 documented `@unittest.skip` tests in `test_project_persistence.py`. Mock setup hasn't caught up with `project_manager`/`character_manager`/`location_manager` refactors. Mock-only updates, not behavior changes. | `tests/unit/test_project_persistence.py:139,197,221` |
-| Cosmetic | BGM duration hard-coded to 47s with no comment. | `cinema_pipeline.py:552` |
+| Cosmetic | BGM duration hard-coded to 47s with no comment. | `cinema_pipeline.py:523` |
 | ~~Cosmetic~~ Resolved 2026-05-26 (`9c749b7`) | ~~`datetime.utcnow()` deprecation warnings — migrated to `datetime.now(timezone.utc)` with `.replace("+00:00", "Z")` to preserve existing project.json timestamp suffix shape.~~ | ~~`domain/project_manager.py:133,924`~~ |
 
 ---

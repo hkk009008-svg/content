@@ -169,7 +169,7 @@ Two operational modes for audio-visual synchronization.
 - Creates seamless motion between cuts
 
 ### Mood-Aware Transitions
-From `_build_transition_prompt()`:
+Example prompt patterns:
 - Dark → Light: "sunrise-like illumination"
 - Light → Dark: "colors desaturating, shadows deepening"
 - Same mood: "smooth continuous flow"
