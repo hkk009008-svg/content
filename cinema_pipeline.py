@@ -1208,14 +1208,20 @@ class CinemaPipeline:
         """
         final_output = os.path.join(self.export_dir, "final_cinema.mp4")
 
+        scene_transitions = settings.get("scene_transitions", False)
+        transition_duration = float(settings.get("transition_duration", 0.5))
+
         # 1. Collect clips in scene order — deduplicate (use only final version per shot)
         all_clips = []
+        scene_sizes = []  # number of valid clips per scene, in order
         for si, sd in enumerate(scene_data):
             scene_id = sd.get("scene_id", f"scene_{si}")
             clips = sd.get("clips", [])
+            count = 0
             for clip_path in clips:
                 if clip_path and os.path.exists(clip_path):
                     all_clips.append(clip_path)
+                    count += 1
                     logger.debug(
                         "Assembly clip queued",
                         extra={
@@ -1224,6 +1230,8 @@ class CinemaPipeline:
                             "clip": os.path.basename(clip_path),
                         },
                     )
+            if count:
+                scene_sizes.append(count)
 
         if not all_clips:
             logger.warning("No clips to assemble")
@@ -1258,31 +1266,64 @@ class CinemaPipeline:
                 )
                 all_normalized.append(clip_path)  # Use original as fallback
 
-        # 3. Stitch with hard cuts using concat demuxer
+        # 3. Stitch: hard cuts (default) or scene-boundary cross-dissolve (opt-in)
         stitched = os.path.join(self.temp_dir, "stitched.mp4")
-        concat_list = os.path.join(self.temp_dir, "concat_list.txt")
-        with open(concat_list, "w") as f:
-            for clip in all_normalized:
-                f.write(f"file '{os.path.abspath(clip)}'\n")
 
-        try:
+        def _concat_copy(clip_paths, dest, tag):
+            list_path = os.path.join(self.temp_dir, f"concat_list_{tag}.txt")
+            with open(list_path, "w") as f:
+                for clip in clip_paths:
+                    f.write(f"file '{os.path.abspath(clip)}'\n")
             # Use concat demuxer — requires same codec/resolution (normalized above)
-            subprocess.run([
-                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-                "-i", concat_list,
-                "-c", "copy",
-                stitched,
-            ], check=True, capture_output=True, timeout=120)
-            logger.info(
-                "Stitched clips",
-                extra={
-                    "clip_count": len(all_normalized),
-                    "stitched_path": stitched,
-                },
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", list_path,
+                 "-c", "copy", dest],
+                check=True, capture_output=True, timeout=120,
             )
-        except Exception:
-            logger.exception("Stitch failed")
-            return None
+            return dest
+
+        use_transitions = scene_transitions and len(scene_sizes) >= 2
+
+        if use_transitions:
+            try:
+                from phase_c_ffmpeg import xfade_concat
+                scene_videos = []
+                idx = 0
+                for si, size in enumerate(scene_sizes):
+                    group = all_normalized[idx:idx + size]
+                    idx += size
+                    scene_mp4 = os.path.join(self.temp_dir, f"scene_{si}.mp4")
+                    _concat_copy(group, scene_mp4, f"scene_{si}")
+                    scene_videos.append(scene_mp4)
+                xfade_concat(scene_videos, stitched, duration=transition_duration)
+                logger.info(
+                    "Stitched clips with scene transitions",
+                    extra={"scene_count": len(scene_videos)},
+                )
+            except Exception:
+                logger.exception("Scene-transition stitch failed; falling back to hard-cut concat")
+                try:
+                    _concat_copy(all_normalized, stitched, "all")
+                    logger.info(
+                        "Stitched clips (fallback hard-cut)",
+                        extra={"clip_count": len(all_normalized), "stitched_path": stitched},
+                    )
+                except Exception:
+                    logger.exception("Stitch failed")
+                    return None
+        else:
+            try:
+                _concat_copy(all_normalized, stitched, "all")
+                logger.info(
+                    "Stitched clips",
+                    extra={
+                        "clip_count": len(all_normalized),
+                        "stitched_path": stitched,
+                    },
+                )
+            except Exception:
+                logger.exception("Stitch failed")
+                return None
 
         # 4. Color grading
         try:

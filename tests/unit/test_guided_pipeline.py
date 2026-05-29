@@ -499,5 +499,89 @@ class TestFoleyAudioPathsProperty(GuidedPipelineTestCase):
         self.assertEqual(pipeline._runstate.foley_audio_paths, ["/tmp/a.mp3", "/tmp/b.mp3"])
 
 
+class TestAssembleFinalSceneTransitions(TestAssembleFinalFoleyMix):
+    def _run(self, settings, n_scenes):
+        pipeline, _, _ = self._make_pipeline_with_clips(None, foley_paths=[])
+        os.makedirs(pipeline.temp_dir, exist_ok=True)
+        os.makedirs(pipeline.export_dir, exist_ok=True)
+        fake_bgm = os.path.join(pipeline.temp_dir, "bgm.mp3")
+        open(fake_bgm, "wb").close()
+        scene_data = []
+        for si in range(n_scenes):
+            clip = os.path.join(pipeline.temp_dir, f"clip_{si}.mp4")
+            open(clip, "wb").close()
+            scene_data.append({"scene_id": f"s{si}", "clips": [clip]})
+
+        captured = []
+
+        def fake_run(cmd, **kwargs):
+            captured.append(list(cmd))
+            for arg in cmd:
+                if str(arg).endswith(".mp4"):
+                    open(arg, "wb").close()
+            m = mock.MagicMock(); m.returncode = 0; m.stdout = '{"format":{"duration":"4.0"}}'
+            return m
+
+        with mock.patch("subprocess.run", side_effect=fake_run), \
+             mock.patch.object(pipeline, "_apply_final_loudnorm"):
+            pipeline._assemble_final(scene_data, fake_bgm, settings)
+        return captured
+
+    def test_off_uses_concat_demuxer_no_xfade(self):
+        cmds = self._run({"scene_transitions": False}, n_scenes=2)
+        joined = [" ".join(str(a) for a in c) for c in cmds]
+        assert any("-f concat" in j or "concat" in j for j in joined)
+        assert not any("xfade" in j for j in joined), "OFF must not emit xfade"
+
+    def test_default_is_off(self):
+        cmds = self._run({}, n_scenes=2)
+        assert not any("xfade" in " ".join(str(a) for a in c) for c in cmds)
+
+    def test_on_with_two_scenes_emits_xfade(self):
+        cmds = self._run({"scene_transitions": True}, n_scenes=2)
+        assert any("xfade" in " ".join(str(a) for a in c) for c in cmds), \
+            "ON with >=2 scenes must emit an xfade command"
+
+    def test_on_with_single_scene_falls_back_to_concat(self):
+        cmds = self._run({"scene_transitions": True}, n_scenes=1)
+        assert not any("xfade" in " ".join(str(a) for a in c) for c in cmds), \
+            "ON with 1 scene cannot xfade -> fall back to concat"
+
+    def test_on_xfade_raises_falls_back_to_concat(self):
+        # If xfade_concat raises mid-assembly, the ON path must fall back to a
+        # plain concat and still return a path (the only otherwise untested branch).
+        # xfade_concat is imported locally inside _assemble_final, so patching it on
+        # the module is picked up at call time.
+        pipeline, _, _ = self._make_pipeline_with_clips(None, foley_paths=[])
+        os.makedirs(pipeline.temp_dir, exist_ok=True)
+        os.makedirs(pipeline.export_dir, exist_ok=True)
+        fake_bgm = os.path.join(pipeline.temp_dir, "bgm.mp3")
+        open(fake_bgm, "wb").close()
+        scene_data = []
+        for si in range(2):
+            clip = os.path.join(pipeline.temp_dir, f"clip_{si}.mp4")
+            open(clip, "wb").close()
+            scene_data.append({"scene_id": f"s{si}", "clips": [clip]})
+
+        captured = []
+
+        def fake_run(cmd, **kwargs):
+            captured.append(list(cmd))
+            for arg in cmd:
+                if str(arg).endswith(".mp4"):
+                    open(arg, "wb").close()
+            m = mock.MagicMock(); m.returncode = 0; m.stdout = '{"format":{"duration":"4.0"}}'
+            return m
+
+        with mock.patch("subprocess.run", side_effect=fake_run), \
+             mock.patch("phase_c_ffmpeg.xfade_concat", side_effect=RuntimeError("boom")), \
+             mock.patch.object(pipeline, "_apply_final_loudnorm"):
+            result = pipeline._assemble_final(scene_data, fake_bgm, {"scene_transitions": True})
+
+        joined = [" ".join(str(a) for a in c) for c in captured]
+        assert any("concat" in j for j in joined), "fallback must use the concat demuxer"
+        assert result is not None, "assembly must still return a path after fallback"
+
+
 if __name__ == "__main__":
     unittest.main()
