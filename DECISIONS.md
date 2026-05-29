@@ -755,7 +755,7 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
     residual unhandled now; the sequenced bridge (C) handles it while the verifier matures.
 - **Tracking:** principal synthesis `PROPOSAL-doc-maintenance-role-v1.md` (user-mediated) ·
   operator REPLY `d385bb2` (bounded carve-out consent) · director REPLY `d5f3bb6` (consent +
-  F1 provenance fix + spawning-seat reviewer) · Rule #18 codified at `__V56_SHIP_SHA__`.
+  F1 provenance fix + spawning-seat reviewer) · Rule #18 codified at `4eecb72`.
 - **Cross-ref:** CLAUDE.md Rule #18; Rules #9 (CC-2 / R-OP-1), #12, #13, #14, #17, Lane C/D/S;
   ADR-013 (verification discipline), ADR-016 (GitNexus phantom), ADR-018 (Rule #17).
   `scripts/check_doc_claims.py` + `docs/pipeline_status.toml` are the role's instruments.

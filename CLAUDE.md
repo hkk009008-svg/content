@@ -1808,7 +1808,7 @@ needs-driven framing + librarian metaphor stand; only the persistence-as-memory
 justification was corrected (both seniors, independently — the convergence is the
 proof it was wrong).
 
-**Codified SHA:** `__V56_SHIP_SHA__` (Protocol Bundle v5.6 ship; filled per
+**Codified SHA:** `4eecb72` (Protocol Bundle v5.6 ship; filled per
 chicken-and-egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1
 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2 `61cac6d` / v5.3 `24c145a` / v5.4
 `7773502` / v5.5 `52658eb`). **Forward-looking:** no dogfood result yet — the
