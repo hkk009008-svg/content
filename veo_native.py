@@ -21,6 +21,50 @@ VEO_RESOLUTIONS = {
 VEO_DURATIONS = ["5s", "6s", "8s"]
 
 
+def _parse_duration_seconds(duration, default: int = 8) -> int:
+    """'8s' -> 8. Returns `default` on any malformed input — a formatting edge
+    must not fail the whole generation."""
+    try:
+        return int(str(duration).strip().lower().rstrip("s"))
+    except (ValueError, TypeError, AttributeError):
+        return default
+
+
+def _build_generate_videos_config(
+    *,
+    generate_audio: bool,
+    duration: str,
+    resolution: str,
+    reference_images=None,
+    person_generation: str = "allow_adult",
+    aspect_ratio: str = "16:9",
+):
+    """Pure: map generate_video() params -> GenerateVideosConfig. No I/O.
+
+    `reference_images` is a list of already-loaded ``types.Image`` (or None); each
+    is wrapped in a ``VideoGenerationReferenceImage`` (reference_type=ASSET — the
+    config's required type for subject/character preservation). The previous code
+    passed raw Images as a top-level ``generate_videos`` kwarg, which the SDK
+    rejects (TypeError); and never set audio/duration/resolution at all.
+    """
+    kwargs = dict(
+        person_generation=person_generation,
+        aspect_ratio=aspect_ratio,
+        generate_audio=generate_audio,
+        duration_seconds=_parse_duration_seconds(duration),
+        resolution=resolution,
+    )
+    if reference_images:
+        kwargs["reference_images"] = [
+            types.VideoGenerationReferenceImage(
+                image=img,
+                reference_type=types.VideoGenerationReferenceType.ASSET,
+            )
+            for img in reference_images
+        ]
+    return types.GenerateVideosConfig(**kwargs)
+
+
 class VeoNativeAPI:
     """Native Google Veo 3.1 client using the google-genai SDK.
 
@@ -99,13 +143,28 @@ class VeoNativeAPI:
             # Upload start frame — from_file requires keyword arg 'location'
             start_image = types.Image.from_file(location=image_path)
 
-            # Build config
-            config = types.GenerateVideosConfig(
-                person_generation="allow_adult",
-                aspect_ratio="16:9",
+            # Load reference images for character preservation (up to 3). Loaded
+            # here (I/O); the pure builder wraps them + places them INSIDE the
+            # config. Passing raw Images as a top-level generate_videos kwarg (the
+            # old code) raises TypeError -> Veo fails -> cascade.
+            ref_images = []
+            if reference_images:
+                for ref_path in reference_images[:3]:
+                    if os.path.exists(ref_path):
+                        ref_images.append(types.Image.from_file(location=ref_path))
+                        print(f"[VEO-NATIVE] Reference image loaded: {os.path.basename(ref_path)}")
+                    else:
+                        print(f"[VEO-NATIVE] Reference image not found, skipping: {ref_path}")
+
+            # Thread ALL caller-intent params into the config (audio/duration/
+            # resolution/refs) — see _build_generate_videos_config.
+            config = _build_generate_videos_config(
+                generate_audio=generate_audio,
+                duration=duration,
+                resolution=resolution,
+                reference_images=ref_images or None,
             )
 
-            # Build the generation request kwargs
             generate_kwargs = {
                 "model": self._model,
                 "prompt": prompt,
@@ -113,32 +172,15 @@ class VeoNativeAPI:
                 "config": config,
             }
 
-            # Upload reference images for character preservation (up to 3)
-            if reference_images:
-                ref_images = []
-                for ref_path in reference_images[:3]:
-                    if os.path.exists(ref_path):
-                        ref_images.append(types.Image.from_file(location=ref_path))
-                        print(f"[VEO-NATIVE] Reference image loaded: {os.path.basename(ref_path)}")
-                    else:
-                        print(f"[VEO-NATIVE] Reference image not found, skipping: {ref_path}")
-                if ref_images:
-                    generate_kwargs["reference_images"] = ref_images
-
-            # Driving-video motion conditioning. The Vertex SDK may expose this
-            # under different names across versions: ``reference_video``,
-            # ``motion_reference``, or as a ``Video`` instance in a list. We try
-            # the documented modern name first and silently skip on AttributeError
-            # so older SDK builds don't break the call.
+            # Driving-video motion conditioning goes via the SDK's top-level
+            # ``video=`` param (NOT a kwarg the SDK rejects). Preserve version
+            # robustness: skip silently if the installed SDK lacks types.Video.
             if driving_video_path and os.path.exists(driving_video_path):
                 try:
-                    # Modern Vertex AI SDK (>= 0.30): types.Video.from_file()
-                    driving_video = types.Video.from_file(location=driving_video_path)  # type: ignore[attr-defined]
-                    generate_kwargs["reference_video"] = driving_video
+                    generate_kwargs["video"] = types.Video.from_file(location=driving_video_path)  # type: ignore[attr-defined]
                     print(f"[VEO-NATIVE] Driving video loaded: {os.path.basename(driving_video_path)}")
                 except AttributeError:
-                    # Older SDK — no Video type. Skip silently; fall through to
-                    # baseline image-to-video.
+                    # Older SDK — no Video type. Skip silently; baseline image-to-video.
                     print(f"[VEO-NATIVE] reference_video not supported by installed SDK; using image-only path")
                 except Exception as _e:
                     print(f"[VEO-NATIVE] driving_video load failed ({_e}); using image-only path")
