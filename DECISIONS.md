@@ -495,25 +495,6 @@ Each entry is **dated and immutable** — supersession is tracked via the
 
 ---
 
-*To add a new decision: copy the template below, increment the ADR
-number, fill in Context / Decision / Consequences, and append at the
-bottom. Do not edit prior entries — supersede via Status field instead.*
-
-```
-## ADR-NNN — <Short imperative title>
-
-- **Date:** YYYY-MM-DD
-- **Status:** Proposed | Accepted | Superseded by ADR-XXX | Rejected
-- **Context:** What's the problem, what existed before, what triggered the discussion.
-- **Decision:** What was decided. Be specific — names of types/functions, file paths.
-- **Consequences:**
-  - +: Wins
-  - −: Tradeoffs accepted
-- **Cross-ref:** Link to ARCHITECTURE.md section if applicable.
-```
-
----
-
 ## ADR-016 — GitNexus mandate was a phantom rule; removed in favor of grep/Read
 
 - **Date:** 2026-05-28
@@ -759,3 +740,22 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
 - **Cross-ref:** CLAUDE.md Rule #18; Rules #9 (CC-2 / R-OP-1), #12, #13, #14, #17, Lane C/D/S;
   ADR-013 (verification discipline), ADR-016 (GitNexus phantom), ADR-018 (Rule #17).
   `scripts/check_doc_claims.py` + `docs/pipeline_status.toml` are the role's instruments.
+
+---
+
+*To add a new decision: copy the template below, increment the ADR
+number, fill in Context / Decision / Consequences, and append at the
+bottom. Do not edit prior entries — supersede via Status field instead.*
+
+```
+## ADR-NNN — <Short imperative title>
+
+- **Date:** YYYY-MM-DD
+- **Status:** Proposed | Accepted | Superseded by ADR-XXX | Rejected
+- **Context:** What's the problem, what existed before, what triggered the discussion.
+- **Decision:** What was decided. Be specific — names of types/functions, file paths.
+- **Consequences:**
+  - +: Wins
+  - −: Tradeoffs accepted
+- **Cross-ref:** Link to ARCHITECTURE.md section if applicable.
+```
