@@ -973,8 +973,9 @@ acrossfade referenced a non-existent `[0:a]` and errored → silent hard-cut
 fallback; Lane V #24 F1). Probes each scene, clamps the transition to ≤0.4× the
 shortest scene, re-encodes once; built on `_probe_duration` +
 `_build_xfade_filtergraph` (+ `_fmt`). Raises on ffmpeg failure so `_assemble_final`
-falls back to a plain hard-cut concat. Mixed audio-presence inputs go fully
-video-only (Lane V #25 M1, (c)-deferred).
+falls back to a plain hard-cut concat. Mixed audio-presence inputs (some scenes
+with embedded audio, some without) pad the silent legs with `anullsrc` + normalize
+every leg, preserving embedded audio across the stitch (Lane V #25 M1, fixed).
 
 ---
 
@@ -1485,7 +1486,7 @@ script, the local check + CI move together.
 ## 16. Known bugs & latent issues
 
 > Test suite state (verified 2026-05-29 cycle-17):
-> **1223 pass / 3 skip / 0 fail** in `tests/unit/`. The 3 skips below are
+> **1229 pass / 3 skip / 0 fail** in `tests/unit/`. The 3 skips below are
 > the only known stragglers. Run `.venv/bin/python -m pytest tests/unit/ -q`
 > to verify.
 
