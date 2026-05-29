@@ -90,6 +90,16 @@ if TYPE_CHECKING:
     from cinema.runstate import RunState
 
 
+class GateNotSatisfiedError(RuntimeError):
+    """Raised by ``_wait_for_gate`` in a headless run when a review gate cannot
+    be cleared: auto-approve did not approve it and there is no operator / web
+    UI to approve it manually. Replaces the prior infinite poll (the cycle-17
+    headless plan-review-gate stall) with a fast, diagnosable failure naming
+    the unsatisfied shots + reasons. Web runs (``headless`` False) never raise
+    this -- they block on ``ThreadedLifecycle`` until the operator approves.
+    """
+
+
 @runtime_checkable
 class ReviewControllerHost(Protocol):
     """Methods that ReviewController calls on its host.
@@ -528,7 +538,65 @@ class ReviewController:
             project = self._host._refresh_project_snapshot() or self.project
             return self._gate_satisfied(gate, project)
 
+        # Headless / non-interactive run: no operator + no web UI to approve a
+        # gate that auto-approve didn't clear. Fail fast with the per-shot
+        # reasons instead of polling forever (the cycle-17 headless
+        # plan-review-gate stall). Web runs leave headless False and keep the
+        # blocking poll below.
+        if self._runstate.headless and not predicate():
+            project = self._host._refresh_project_snapshot() or self.project
+            details = self._gate_block_details(gate, project)
+            raise GateNotSatisfiedError(
+                f"{gate} not satisfied in a headless run with no operator to "
+                f"approve it (auto-approve did not clear): " + "; ".join(details)
+            )
+
         return self._lifecycle.wait_for_gate(gate, predicate)
+
+    def _gate_block_details(self, gate: str, project: Optional[dict] = None) -> list[str]:
+        """Per-shot reasons ``gate`` is unsatisfied -- for the headless
+        ``GateNotSatisfiedError`` message. Best-effort and human-readable.
+
+        For PLAN_REVIEW it surfaces the auto-approve veto rule names (when the
+        ``auto_approve_audit`` is present) or the ChiefDirector ``decision``,
+        so a headless operator sees WHY the plan wasn't auto-approved. The
+        per-gate conditions mirror ``_gate_satisfied``.
+        """
+        active_project = project or self.project
+        details: list[str] = []
+        for _scene, _shot_index, shot in self._all_shots(active_project):
+            sid = shot.get("id", "?")
+            if gate == "PLAN_REVIEW":
+                if shot.get("plan_status") == "approved":
+                    continue
+                director_review = shot.get("director_review") or {}
+                plan_audit = [
+                    a for a in (shot.get("auto_approve_audit") or [])
+                    if a.get("gate") == "plan"
+                ]
+                why = (
+                    ",".join((plan_audit[-1].get("rule_names") if plan_audit else []) or [])
+                    or director_review.get("decision")
+                    or shot.get("plan_status")
+                    or "pending_review"
+                )
+                details.append(f"shot {sid} (plan: {why})")
+            elif gate == "KEYFRAME_REVIEW":
+                if not shot.get("approved_keyframe_take_id"):
+                    details.append(f"shot {sid} (no approved keyframe)")
+            elif gate == "PERFORMANCE_REVIEW":
+                # Unsatisfied iff the shot NEEDS a performance but lacks an
+                # approved one (mirror of _gate_satisfied's PERFORMANCE branch).
+                if (
+                    (shot.get("performance_engine") or "").upper() != "SKIP"
+                    and shot.get("approved_keyframe_take_id")
+                    and not shot.get("approved_performance_take_id")
+                ):
+                    details.append(f"shot {sid} (no approved performance)")
+            elif gate == "REVIEW":
+                if not shot.get("approved_final_take_id"):
+                    details.append(f"shot {sid} (no approved final take)")
+        return details or [f"all shots (gate {gate})"]
 
     def _rebuild_review_clips(self, project: Optional[dict] = None) -> dict:
         active_project = project or self.project

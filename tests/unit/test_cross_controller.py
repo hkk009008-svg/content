@@ -702,6 +702,69 @@ def test_wait_for_gate_returns_false_on_cancel():
             dpm.PROJECTS_DIR = _orig_pdir
 
 
+def test_wait_for_gate_headless_raises_when_unsatisfied():
+    """Headless run: a gate auto-approve cannot clear raises
+    GateNotSatisfiedError (naming the unsatisfied shot + reason) instead of
+    polling forever. Root-cause fix for the cycle-17 headless plan-review-gate
+    stall."""
+    from cinema.review.controller import GateNotSatisfiedError
+    import domain.project_manager as dpm
+    with tempfile.TemporaryDirectory() as tmpdir:
+        host, runstate, core, _ = _make_setup(tmpdir)  # NullLifecycle default
+        runstate.headless = True
+        _orig_pdir = dpm.PROJECTS_DIR
+        fake_projects = os.path.join(tmpdir, "projects")
+        os.makedirs(fake_projects, exist_ok=True)
+        dpm.PROJECTS_DIR = fake_projects
+        try:
+            # PLAN_REVIEW unsatisfiable: shot pending + a non-APPROVED
+            # director_review, so auto-approve vetoes and the gate never opens.
+            shot0 = core.project["scenes"][0]["shots"][0]
+            shot0["plan_status"] = "pending"
+            shot0["director_review"] = {"decision": "REJECTED", "violations": []}
+            raised = None
+            try:
+                host._review_ctrl._wait_for_gate("PLAN_REVIEW", "detail", 25)
+            except GateNotSatisfiedError as exc:
+                raised = exc
+            assert raised is not None, "expected GateNotSatisfiedError in headless run"
+            msg = str(raised)
+            assert "PLAN_REVIEW" in msg
+            assert shot0["id"] in msg
+        finally:
+            dpm.PROJECTS_DIR = _orig_pdir
+
+
+def test_wait_for_gate_headless_proceeds_when_satisfied():
+    """Headless + gate already satisfied (all plans approved) -> returns True,
+    no raise. (_sample_project has all shots plan_status=approved.)"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        host, runstate, core, _ = _make_setup(tmpdir)
+        runstate.headless = True
+        assert host._review_ctrl._gate_satisfied("PLAN_REVIEW") is True
+        out = host._review_ctrl._wait_for_gate("PLAN_REVIEW", "detail", 25)
+        assert out is True
+
+
+def test_wait_for_gate_non_headless_does_not_raise():
+    """Non-headless (default) keeps the existing behavior: an unsatisfied gate
+    is handled by lifecycle.wait_for_gate (here NullLifecycle -> True), never
+    GateNotSatisfiedError. Proves the headless flag gates the fail-fast."""
+    import domain.project_manager as dpm
+    with tempfile.TemporaryDirectory() as tmpdir:
+        host, runstate, core, _ = _make_setup(tmpdir)  # NullLifecycle, headless=False
+        _orig_pdir = dpm.PROJECTS_DIR
+        fake_projects = os.path.join(tmpdir, "projects")
+        os.makedirs(fake_projects, exist_ok=True)
+        dpm.PROJECTS_DIR = fake_projects
+        try:
+            core.project["scenes"][0]["shots"][0]["plan_status"] = "pending"
+            out = host._review_ctrl._wait_for_gate("PLAN_REVIEW", "detail", 25)
+            assert out is True
+        finally:
+            dpm.PROJECTS_DIR = _orig_pdir
+
+
 def test_host_satisfies_runtime_checkable_protocols():
     """V1.1 #3 invariant: WiredHost passes isinstance against
     @runtime_checkable host protocols. If a future protocol method

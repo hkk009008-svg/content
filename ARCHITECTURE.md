@@ -216,7 +216,7 @@ propagate by reference. Forwarder block at
 
 | Step | What happens | File:line |
 |---|---|---|
-| 1 | `_refresh_project_snapshot()`; early-return if no scenes | [cinema_pipeline.py:417-421](cinema_pipeline.py:417) |
+| 1 | `_refresh_project_snapshot()`; early-return if no scenes | [cinema_pipeline.py:425-429](cinema_pipeline.py:425) |
 | 2 | If `resume=True`: `_restore_from_checkpoint()` + `_rebuild_review_clips` | :876-878 |
 | 3 | STYLE — `generate_style_rules` → persist | :881-914 |
 | 4 | `_ensure_bgm(settings)` (FAL Stable Audio, 47s hard cap) | :916 |
@@ -1221,7 +1221,7 @@ practical max; loops in assembly.
 
 ### 12.6 Final-assembly audio mux — engine-dependent voice source
 
-`_assemble_final` ([cinema_pipeline.py:1177](cinema_pipeline.py:1177)) muxes the
+`_assemble_final` ([cinema_pipeline.py:1184](cinema_pipeline.py:1184)) muxes the
 final video's audio with an FFmpeg `amix` filtergraph over up to three sources
 (voice/dialogue + BGM + foley). The **voice source is motion-engine-dependent**:
 

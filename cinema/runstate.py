@@ -115,6 +115,18 @@ class RunState:
     current_shot_id: str = ""
 
     # ---------------------------------------------------------------------
+    # Run-mode flag.
+    # Set once at construction (CinemaPipeline(headless=...)). When True,
+    # review gates do NOT block on operator/web approval: ReviewController.
+    # _wait_for_gate raises GateNotSatisfiedError if a gate can't be cleared
+    # by auto-approve (for non-interactive script / E2E runs) instead of
+    # polling forever. Web runs leave this False -- ThreadedLifecycle blocks
+    # until the operator approves via the UI.
+    # ---------------------------------------------------------------------
+
+    headless: bool = False
+
+    # ---------------------------------------------------------------------
     # Checkpoint-resume bookkeeping.
     # ---------------------------------------------------------------------
 

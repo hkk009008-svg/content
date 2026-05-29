@@ -46,6 +46,7 @@ class CinemaPipeline:
         project_id: str,
         progress_callback=None,
         core: Optional[PipelineCore] = None,
+        headless: bool = False,
     ):
         """
         Parameters
@@ -63,6 +64,12 @@ class CinemaPipeline:
             core across multiple consumers, avoiding the cost of
             re-instantiating ContinuityEngine / ChiefDirector / LLMEnsemble /
             trackers.
+        headless:
+            When True, review gates do not block on operator/web approval:
+            ReviewController._wait_for_gate raises GateNotSatisfiedError if
+            auto-approve cannot clear a gate (for non-interactive script /
+            E2E runs). Defaults to False -- web/UI runs block on
+            ThreadedLifecycle until the operator approves.
         """
         self._core = core if core is not None else build_pipeline_core(project_id)
 
@@ -81,7 +88,7 @@ class CinemaPipeline:
         # across ShotController.shot_results, ReviewController.review_clips,
         # and CinemaPipeline's own attributes). All three controllers
         # share the SAME RunState reference -- mutations propagate.
-        self._runstate = RunState()
+        self._runstate = RunState(headless=headless)
 
         # ShotController -- composed. Cross-controller calls still flow
         # through self (the host); state reads/writes flow through
