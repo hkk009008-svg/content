@@ -20,6 +20,7 @@ from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
 from audio.dialogue import generate_dialogue_voiceover
 from audio.music import generate_fal_bgm
+from cinema.auto_approve import record_director_review_on_shots
 from cinema.context import PipelineContext
 from cinema.core import PipelineCore, build_pipeline_core
 from cinema.lifecycle import ThreadedLifecycle
@@ -943,6 +944,12 @@ class CinemaPipeline:
                     # Regenerate with stricter constraints
                     shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules)
 
+                # Persist the ChiefDirector verdict onto each shot so the
+                # PLAN_REVIEW auto-approve gate can read it. This is the writer
+                # for _rules_for_plan's contract; without it plan auto-approve
+                # always vetoes (director_review absent) and a non-interactive
+                # run hangs forever at the gate.
+                record_director_review_on_shots(shots, review)
                 update_scene_shots(project, scene_id, shots)
                 self._save_checkpoint()
             self._ensure_scene_audio(scene, chars_in_scene)

@@ -199,6 +199,36 @@ def _rules_for_plan(config: AutoApproveConfig) -> list[VetoRule]:
     return rules
 
 
+def record_director_review_on_shots(shots: list[dict], review: dict) -> None:
+    """Persist the ChiefDirector's scene-level verdict onto each shot as the
+    ``director_review`` field that ``_rules_for_plan`` (above) reads to decide
+    the PLAN_REVIEW gate.
+
+    Co-located with the reader on purpose. The headless-gate-stall root cause
+    was that the reader existed but NO writer did: plan auto-approve always
+    vetoed (``director_review`` absent → ``decision`` None ≠ "APPROVED"), so
+    the gate could never auto-satisfy and a non-interactive run hung forever.
+    Keeping write + read in one file makes the contract grep-visible
+    (Rule #12: a type/field read is not write-evidence).
+
+    ``review`` is the dict returned by ``ChiefDirector.validate_shot_prompts``
+    — scene-level ``{decision, violations, shots}``. The decision/violations
+    apply to every shot in the scene (the ChiefDirector reviews the scene's
+    shots collectively); per-shot ``modifications`` are already applied to the
+    shot prompts by the caller before this runs. A missing ``decision``
+    defaults to "APPROVED", mirroring ``validate_shot_prompts``' own
+    parse-fallback.
+    """
+    decision = (review or {}).get("decision", "APPROVED")
+    violations = list((review or {}).get("violations") or [])
+    for shot in shots:
+        if isinstance(shot, dict):
+            shot["director_review"] = {
+                "decision": decision,
+                "violations": violations,
+            }
+
+
 def _rules_for_image(config: AutoApproveConfig) -> list[VetoRule]:
     """Veto rules for the KEYFRAME_REVIEW gate."""
     rules: list[VetoRule] = []

@@ -1206,3 +1206,65 @@ class TestConditionalCompositeThreshold:
         assert "image_min_composite_kontext_fallback=0.78 applied" in captured.out, (
             f"expected fallback marker in stdout; got: {captured.out!r}"
         )
+
+
+class TestRecordDirectorReview:
+    """The PLAN_REVIEW rule (_rules_for_plan) reads shot['director_review'],
+    but nothing in the pipeline ever WROTE it (the headless-gate-stall root
+    cause: plan auto-approve could never pass, so the gate hung forever
+    headless). record_director_review_on_shots is the writer, co-located with
+    the reader so the write/read contract stays in one file."""
+
+    def test_writes_decision_and_violations_onto_each_shot(self):
+        from cinema.auto_approve import record_director_review_on_shots
+
+        shots = [{"id": "a"}, {"id": "b"}]
+        record_director_review_on_shots(shots, {"decision": "APPROVED", "violations": []})
+        for s in shots:
+            assert s["director_review"] == {"decision": "APPROVED", "violations": []}
+
+    def test_propagates_modified_decision_and_violations(self):
+        from cinema.auto_approve import record_director_review_on_shots
+
+        shots = [{"id": "a"}]
+        record_director_review_on_shots(
+            shots, {"decision": "MODIFIED", "violations": ["too bright"]}
+        )
+        assert shots[0]["director_review"] == {
+            "decision": "MODIFIED",
+            "violations": ["too bright"],
+        }
+
+    def test_missing_decision_defaults_to_approved(self):
+        # ChiefDirector parse-fallback can return {} / partial dicts; mirror
+        # validate_shot_prompts' own .get("decision", "APPROVED") default.
+        from cinema.auto_approve import record_director_review_on_shots
+
+        shots = [{"id": "a"}]
+        record_director_review_on_shots(shots, {})
+        assert shots[0]["director_review"]["decision"] == "APPROVED"
+        assert shots[0]["director_review"]["violations"] == []
+
+    def test_recorded_approved_review_lets_plan_gate_auto_approve(self):
+        # End-to-end contract: a shot with NO director_review cannot pass the
+        # plan gate (the bug). After recording an APPROVED review, it can.
+        from cinema.auto_approve import record_director_review_on_shots
+
+        cfg = AutoApproveConfig()
+        shot = {"id": "a"}  # deliberately no director_review
+        before = check_gate("plan", shot_state=shot, project={}, takes=[], config=cfg)
+        assert before.auto_approved is False  # the bug: no director_review -> veto
+        record_director_review_on_shots(
+            [shot], {"decision": "APPROVED", "violations": []}
+        )
+        after = check_gate("plan", shot_state=shot, project={}, takes=[], config=cfg)
+        assert after.auto_approved is True
+
+    def test_recorded_rejected_review_keeps_plan_gate_vetoed(self):
+        from cinema.auto_approve import record_director_review_on_shots
+
+        shot = {"id": "a"}
+        record_director_review_on_shots([shot], {"decision": "REJECTED", "violations": []})
+        decision = check_gate("plan", shot_state=shot, project={}, takes=[], config=AutoApproveConfig())
+        assert decision.auto_approved is False
+        assert "plan_decision_not_approved" in decision.rule_names
