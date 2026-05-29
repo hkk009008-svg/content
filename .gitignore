@@ -72,3 +72,6 @@ domain/projects/*
 # meaningful to track in commit history (the historical versions in
 # the chain prior to the cycle-8 cutover are inert).
 STATE.md
+# Auto-generated status dashboard snapshot (scripts/status.py --write).
+# Local-only artifact; never commit.
+STATUS.md
