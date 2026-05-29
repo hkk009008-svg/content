@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 # Bootstrap sys.path so we can import from the repo root regardless of CWD
 # (matches the pattern in scripts/verify_llm_caching.py + calibrate_motion_floor.py).
@@ -72,6 +73,32 @@ def main() -> int:
     # §15.7 — project-setting plumbing (the getattr(settings,...) bug stays dead).
     ctx = PipelineContext(global_settings={"tts_provider": "CARTESIA_SONIC_2"})
     assert get_project_setting(ctx, "tts_provider") == "CARTESIA_SONIC_2"
+
+    # Doc-anchor drift gate (§ check_doc_claims Phase-1).
+    # Hard-fail locally; warn-only in CI.
+    import check_doc_claims as _cdc
+
+    _repo_root = Path(_REPO_ROOT)
+    _drifts = _cdc.run(["ARCHITECTURE.md"], _repo_root)
+    if _drifts:
+        _n = len(_drifts)
+        if os.environ.get("CI"):
+            print(
+                f"WARNING: {_n} doc-anchor drift(s) found (non-blocking in CI; "
+                f"run .venv/bin/python scripts/check_doc_claims.py --fix to repair)"
+            )
+            for _d in _drifts:
+                print(f"  [{_d.kind}] {_d.target_file}:{_d.target_line} — {_d.message}")
+        else:
+            print(f"\nDOC-ANCHOR DRIFT: {_n} issue(s) found in ARCHITECTURE.md")
+            for _d in _drifts:
+                _hint = f"  → suggested line {_d.suggested_line}" if _d.suggested_line else ""
+                print(f"  [{_d.kind}] {_d.target_file}:{_d.target_line}{_hint}")
+                print(f"    {_d.message}")
+            print(
+                "\nRun: .venv/bin/python scripts/check_doc_claims.py --fix"
+            )
+            return 1
 
     print("OK")
     return 0
