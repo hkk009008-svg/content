@@ -77,6 +77,17 @@ class TestBuildXfadeFiltergraph(unittest.TestCase):
         assert "[1:a]aresample=48000" in fg                          # leg 1 real
         assert alab == "a1"
 
+    def test_mixed_audio_silent_middle(self):
+        # 3 clips, middle silent ([T, F, T]) — the chained-acrossfade mixed shape
+        fg, vlab, alab = pcf._build_xfade_filtergraph(
+            [4.0, 5.0, 6.0], 0.5, "dissolve", audio_flags=[True, False, True])
+        assert "[0:a]aresample=48000" in fg                          # leg 0 real, normalized
+        assert "anullsrc=r=48000:cl=stereo,atrim=0:5" in fg          # leg 1 silent, mid dur 5
+        assert "[2:a]aresample=48000" in fg                          # leg 2 real, normalized
+        assert "aformat=sample_fmts=fltp:channel_layouts=stereo" in fg
+        assert fg.count("acrossfade") == 2                           # chained over 3 legs
+        assert alab == "a2"
+
 
 class TestXfadeConcat(unittest.TestCase):
     def _run(self, scene_videos, durations, duration=0.5):
