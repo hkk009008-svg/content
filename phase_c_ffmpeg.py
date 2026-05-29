@@ -1237,22 +1237,23 @@ def _build_xfade_filtergraph(durations: list, duration: float, transition: str,
     Requires len(durations) >= 2. Offset for junction j is
     sum(durations[0..j]) - (j+1)*duration. ``audio_flags`` is a per-input list
     of bools (True = that input has an audio stream); None ≡ all inputs have
-    audio. When not all inputs have audio, no acrossfade chain is emitted and
-    the audio label is None (video-only; Lane V #24 F1). (Task 2 adds the mixed
-    -> anullsrc-pad branch.)
+    audio:
+      - all True  -> raw acrossfade on [j:a]
+      - all False -> video-only, audio label None (Lane V #24 F1)
+      - mixed     -> normalize every leg + anullsrc-pad the silent legs, then
+                     acrossfade, preserving embedded audio (Lane V #25 M1)
     """
     n = len(durations)
     if n < 2:
         raise ValueError("xfade filtergraph requires >= 2 inputs")
     if audio_flags is None:
         audio_flags = [True] * n
-    emit_audio = all(audio_flags)
+    emit_audio = any(audio_flags)
+    padded = emit_audio and not all(audio_flags)
 
     t = _fmt(duration)
     video_parts = []
-    audio_parts = []
     prev_v = "0:v"
-    prev_a = "0:a"
     cumulative = durations[0]
     for j in range(n - 1):
         offset = cumulative - (j + 1) * duration
@@ -1262,14 +1263,39 @@ def _build_xfade_filtergraph(durations: list, duration: float, transition: str,
             f"duration={t}:offset={_fmt(offset)}[{vlabel}]"
         )
         prev_v = vlabel
-        if emit_audio:
-            alabel = f"a{j + 1}"
-            audio_parts.append(f"[{prev_a}][{j + 1}:a]acrossfade=d={t}[{alabel}]")
-            prev_a = alabel
         cumulative += durations[j + 1]
 
-    filter_complex = ";".join(video_parts + audio_parts)
-    return filter_complex, f"v{n - 1}", (f"a{n - 1}" if emit_audio else None)
+    if not emit_audio:
+        return ";".join(video_parts), f"v{n - 1}", None
+
+    # Audio legs. padded (mixed presence) -> normalize every leg to a canonical
+    # format so acrossfade's matching rate/layout/fmt precondition holds across
+    # heterogeneous embedded audio + anullsrc silence (Lane V #25 M1). All-audio
+    # -> raw [j:a] (unchanged).
+    _AFMT = "aformat=sample_fmts=fltp:channel_layouts=stereo"
+    leg_parts = []
+    if padded:
+        audio_src = []
+        for j in range(n):
+            if audio_flags[j]:
+                leg_parts.append(f"[{j}:a]aresample=48000,{_AFMT}[na{j}]")
+            else:
+                leg_parts.append(
+                    f"anullsrc=r=48000:cl=stereo,atrim=0:{_fmt(durations[j])},{_AFMT}[na{j}]"
+                )
+            audio_src.append(f"na{j}")
+    else:
+        audio_src = [f"{j}:a" for j in range(n)]
+
+    audio_parts = []
+    prev_a = audio_src[0]
+    for j in range(n - 1):
+        alabel = f"a{j + 1}"
+        audio_parts.append(f"[{prev_a}][{audio_src[j + 1]}]acrossfade=d={t}[{alabel}]")
+        prev_a = alabel
+
+    filter_complex = ";".join(video_parts + leg_parts + audio_parts)
+    return filter_complex, f"v{n - 1}", f"a{n - 1}"
 
 
 def xfade_concat(scene_videos: list, out_path: str,
@@ -1289,13 +1315,12 @@ def xfade_concat(scene_videos: list, out_path: str,
     """
     durations = [_probe_duration(v) for v in scene_videos]
     audio_flags = [_has_audio_stream(v) for v in scene_videos]
-    # Known limitation (Lane V #25 M1, (c)-deferred per user 2026-05-29): on MIXED
-    # audio-presence inputs (some scenes silent, some not) all() is False, so the whole
-    # stitch goes video-only and audio-bearing scenes lose their audio. Narrow (transitions
-    # are default-OFF) + hedged impact (silent-engine dialogue is recoverable via the
-    # standalone-mp3 amux; embedded-audio may be lost). Revisit with an anullsrc-pad
-    # approach (pad silent inputs to a uniform audio track) if mixed-dialogue + transitions
-    # becomes a target — verify it doesn't disturb the _assemble_final standalone-mp3 mux first.
+    # Mixed audio-presence (some inputs carry an embedded audio stream, some don't):
+    # silent inputs are padded with anullsrc and every leg is normalized to a canonical
+    # format, so acrossfade runs uniformly and embedded audio is preserved across the
+    # stitch rather than dropped (Lane V #25 M1, fixed 2026-05-29). The downstream
+    # _assemble_final dialogue mux is unaffected — it selects its voice source on
+    # standalone-dialogue-mp3 existence, not on whether this stitch carries audio.
     t_eff = min(duration, 0.4 * min(durations))
     filter_complex, vlab, alab = _build_xfade_filtergraph(
         durations, t_eff, transition, audio_flags=audio_flags)

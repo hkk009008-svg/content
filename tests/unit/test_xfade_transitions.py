@@ -1,6 +1,8 @@
 import json
 import os
+import shutil
 import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -56,6 +58,23 @@ class TestBuildXfadeFiltergraph(unittest.TestCase):
         assert "[0:a][1:a]acrossfade" in fg
         assert "anullsrc" not in fg
         assert "aformat" not in fg
+        assert alab == "a1"
+
+    def test_mixed_audio_pads_silent_leg(self):
+        # input 0 has audio, input 1 silent (durations 4.0, 5.0)
+        fg, vlab, alab = pcf._build_xfade_filtergraph(
+            [4.0, 5.0], 0.5, "dissolve", audio_flags=[True, False])
+        assert "[0:a]aresample=48000" in fg                          # real leg normalized
+        assert "anullsrc=r=48000:cl=stereo,atrim=0:5" in fg          # silent leg, input-1 dur
+        assert "aformat=sample_fmts=fltp:channel_layouts=stereo" in fg
+        assert "acrossfade" in fg
+        assert alab == "a1"
+
+    def test_mixed_audio_silent_first(self):
+        fg, vlab, alab = pcf._build_xfade_filtergraph(
+            [4.0, 5.0], 0.5, "dissolve", audio_flags=[False, True])
+        assert "anullsrc=r=48000:cl=stereo,atrim=0:4" in fg          # leg 0 silent, dur 4
+        assert "[1:a]aresample=48000" in fg                          # leg 1 real
         assert alab == "a1"
 
 
@@ -164,3 +183,65 @@ class TestXfadeConcatAudioPresence(unittest.TestCase):
         joined = self._run([4.0, 5.0], has_audio=True)
         assert "acrossfade=d=" in joined, "audio present -> keep acrossfade"
         assert "-map [a1]" in joined
+
+    def test_mixed_audio_cmd_maps_audio(self):
+        # Mixed presence (input 0 audio, input 1 silent) -> audio preserved via
+        # anullsrc-pad, so the command maps an audio stream + re-encodes (Lane V #25 M1).
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            m = mock.MagicMock()
+            m.returncode = 0
+            return m
+
+        with mock.patch.object(pcf, "_probe_duration", side_effect=[4.0, 5.0]), \
+             mock.patch.object(pcf, "_has_audio_stream", side_effect=[True, False]), \
+             mock.patch("subprocess.run", side_effect=fake_run):
+            pcf.xfade_concat(["/s0.mp4", "/s1.mp4"], "/out.mp4")
+        joined = " ".join(captured["cmd"])
+        assert "-map [a1]" in joined
+        assert "aac" in joined
+        assert "anullsrc" in joined
+
+
+@unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"),
+                     "ffmpeg/ffprobe not available")
+class TestXfadeConcatRealFFmpeg(unittest.TestCase):
+    def _make_clip(self, path, dur, with_audio):
+        cmd = ["ffmpeg", "-y", "-f", "lavfi",
+               "-i", f"testsrc=size=320x240:rate=30:duration={dur}"]
+        if with_audio:
+            cmd += ["-f", "lavfi", "-i", f"sine=frequency=440:duration={dur}"]
+        cmd += ["-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast"]
+        if with_audio:
+            cmd += ["-c:a", "aac", "-shortest"]
+        cmd.append(path)
+        subprocess.run(cmd, check=True, capture_output=True)
+
+    def _has_audio(self, path):
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=codec_type", "-of", "csv=p=0", path],
+            capture_output=True, text=True, check=True).stdout
+        return "audio" in out
+
+    def _audio_duration(self, path):
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a:0",
+             "-show_entries", "stream=duration", "-of", "default=nw=1:nk=1", path],
+            capture_output=True, text=True, check=True).stdout.strip()
+        return float(out)
+
+    def test_mixed_audio_runs_and_outputs_audio(self):
+        with tempfile.TemporaryDirectory() as d:
+            a = os.path.join(d, "a.mp4")
+            b = os.path.join(d, "b.mp4")
+            out = os.path.join(d, "out.mp4")
+            self._make_clip(a, 3, with_audio=True)
+            self._make_clip(b, 3, with_audio=False)
+            pcf.xfade_concat([a, b], out, duration=0.5)
+            assert os.path.exists(out)
+            assert self._has_audio(out)  # M1 fix: audio preserved, not dropped
+            # Duration ~ sum - overlap = 3 + 3 - 0.5 = 5.5s; guards atrim under-trim.
+            self.assertAlmostEqual(self._audio_duration(out), 5.5, delta=0.3)
