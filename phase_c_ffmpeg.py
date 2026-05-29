@@ -1207,3 +1207,43 @@ def _probe_duration(path: str) -> float:
         capture_output=True, text=True, timeout=30,
     )
     return float(json.loads(probe.stdout)["format"]["duration"])
+
+
+def _fmt(x: float) -> str:
+    """Format a float for an ffmpeg filter arg: strip trailing zeros (8.0 -> '8', 3.5 -> '3.5')."""
+    return f"{x:.6f}".rstrip("0").rstrip(".")
+
+
+def _build_xfade_filtergraph(durations: list, duration: float, transition: str):
+    """Build a chained xfade (video) + acrossfade (audio) filter_complex string.
+
+    Returns (filter_complex, final_video_label, final_audio_label).
+    Requires len(durations) >= 2. Offset for junction j is
+    sum(durations[0..j]) - (j+1)*duration.
+    """
+    n = len(durations)
+    if n < 2:
+        raise ValueError("xfade filtergraph requires >= 2 inputs")
+
+    t = _fmt(duration)
+    video_parts = []
+    audio_parts = []
+    prev_v = "0:v"
+    prev_a = "0:a"
+    cumulative = durations[0]
+    for j in range(n - 1):
+        offset = cumulative - (j + 1) * duration
+        vlabel = f"v{j + 1}"
+        alabel = f"a{j + 1}"
+        video_parts.append(
+            f"[{prev_v}][{j + 1}:v]xfade=transition={transition}:"
+            f"duration={t}:offset={_fmt(offset)}[{vlabel}]"
+        )
+        audio_parts.append(f"[{prev_a}][{j + 1}:a]acrossfade=d={t}[{alabel}]")
+        prev_v = vlabel
+        prev_a = alabel
+        if j + 1 < n:
+            cumulative += durations[j + 1]
+
+    filter_complex = ";".join(video_parts + audio_parts)
+    return filter_complex, f"v{n - 1}", f"a{n - 1}"
