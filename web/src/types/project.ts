@@ -159,6 +159,9 @@ export interface GlobalSettings {
   // V11: Workflow & Coherence
   coherence_check_enabled?: boolean
   color_drift_sensitivity?: number
+  // Scene Transitions (assembly cross-dissolve)
+  scene_transitions?: boolean
+  transition_duration?: number
 
   // -----------------------------------------------------------------
   // MAX-QUALITY TIER — opt-in via quality_tier='max'.
