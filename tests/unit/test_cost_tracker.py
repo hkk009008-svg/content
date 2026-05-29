@@ -521,6 +521,36 @@ class TestRecordAPICall:
         ).fetchone()
         assert row["cost_usd"] == pytest.approx(0.04)
 
+    # --- Image-backend provenance (pod-PuLID vs FAL fallback) -------------
+    # The keyframe cost site used to hardcode FLUX_KONTEXT/QUALITY_MAX from
+    # quality_tier, so a generation that ran on the ComfyUI/PuLID pod was
+    # indistinguishable from a FAL fallback in cost_log (both provider='fal').
+    # The backend that actually ran is now threaded out of generate_ai_broll
+    # and recorded here; pod backends must log a provider distinct from 'fal'.
+    @pytest.mark.parametrize("api_name,expected_provider", [
+        ("COMFYUI_PULID", "comfyui"),       # production pod PuLID
+        ("QUALITY_MAX",   "comfyui"),       # N=8 best-of — also the pod
+        ("FLUX_KONTEXT",  "fal"),           # FAL identity-preserving fallback
+        ("FLUX_PRO",      "fal"),           # FAL last-resort
+        ("FLUX_SCHNELL",  "fal"),           # FAL fast fallback
+        ("POLLINATIONS",  "pollinations"),  # free fallback
+    ])
+    def test_image_backend_provider_provenance(self, cost_tracker, api_name, expected_provider):
+        cost_tracker.record_api_call(api_name, operation="keyframe_generation")
+        row = cost_tracker.conn.execute(
+            "SELECT provider, model FROM cost_log ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert row["provider"] == expected_provider
+        assert row["model"] == api_name
+
+    def test_new_image_backend_names_have_cost_entries(self):
+        """Threaded backend names must exist in API_COST_USD so real
+        generations don't warn + silently record $0.00."""
+        for name in ("COMFYUI_PULID", "FLUX_SCHNELL", "POLLINATIONS"):
+            assert name in API_COST_USD, f"{name} missing from API_COST_USD"
+        assert API_COST_USD["COMFYUI_PULID"] > 0.0   # pod GPU time isn't free
+        assert API_COST_USD["POLLINATIONS"] == 0.0   # pollinations is free
+
 
 class TestRecordAPICallAudioTracking:
     """M-B2 closure (cycle-16 Tier B): audio sites now have API_COST_USD

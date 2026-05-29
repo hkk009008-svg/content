@@ -548,12 +548,15 @@ class ShotController:
         self._host._rebuild_review_clips()
         self._host._save_checkpoint()
 
-        # Record image generation cost.  The API name depends on which
-        # tier executed: max-tier uses QUALITY_MAX; production tier routes
-        # through FLUX_KONTEXT (Kontext fallback), FLUX_PULID (ComfyUI),
-        # or FLUX_PRO (last-resort).  We use quality_tier as the selector
-        # here — the actual backend branch is opaque from this level.
-        _image_api = "QUALITY_MAX" if quality_tier == "max" else "FLUX_KONTEXT"
+        # Record image generation cost under the backend that ACTUALLY ran.
+        # generate_ai_broll threads the real provenance back via
+        # ImageGenResult.api_name (COMFYUI_PULID on the pod; FLUX_KONTEXT /
+        # FLUX_PRO / FLUX_SCHNELL / POLLINATIONS on FAL fallback; QUALITY_MAX for
+        # the max tier) rather than a quality_tier-based guess — so cost_log can
+        # tell a pod generation from a FAL fallback (both used to log 'fal').
+        # result is a truthy ImageGenResult here (the `if not result` guard above
+        # already returned on failure).
+        _image_api = result.api_name
         try:
             video_id = self.project.get("id", "")
             self.cost_tracker.record_api_call(

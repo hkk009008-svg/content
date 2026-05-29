@@ -173,3 +173,40 @@ class TestSuggestedImageApiForwarding:
         mock_broll.assert_called_once()
         shot_hint = mock_broll.call_args.kwargs["shot_hint"]
         assert shot_hint["image_api"] is None
+
+
+class TestKeyframeCostProvenance:
+    """The keyframe cost is recorded under the backend that ACTUALLY ran
+    (threaded out of generate_ai_broll via ImageGenResult), not a tier-based
+    hardcoded guess. Before this fix the cost site computed
+    `"QUALITY_MAX" if quality_tier == "max" else "FLUX_KONTEXT"`, so a pod-PuLID
+    generation logged provider='fal', model='FLUX_KONTEXT' — indistinguishable
+    from a real FAL fallback (cycle-17 live test: cost_log row 1065 logged
+    'fal' for a generation the pod /history confirmed ran via ApplyPulid)."""
+
+    def test_records_threaded_backend_not_hardcoded(self, tmp_path):
+        from phase_c_assembly import ImageGenResult
+
+        ctrl, project = _build_keyframe_controller()
+        # Make the output path real so os.path.exists(img_path) is True and the
+        # method flows past the seam to the cost-recording site.
+        real_path = str(tmp_path / "kf.jpg")
+        ctrl._take_output_path = MagicMock(return_value=real_path)
+
+        def _fake_broll(*args, **kwargs):
+            # Simulate the pod-PuLID branch: write the artifact and report that
+            # it ran on the ComfyUI pod, not FAL.
+            with open(real_path, "wb") as fh:
+                fh.write(b"img")
+            return ImageGenResult(real_path, "COMFYUI_PULID")
+
+        with patch("cinema.shots.controller.generate_ai_broll", side_effect=_fake_broll):
+            ctrl.generate_keyframe_take("scene_1", "shot_1_0", positive_prompt="a test prompt")
+
+        ctrl.cost_tracker.record_api_call.assert_called_once()
+        call = ctrl.cost_tracker.record_api_call.call_args
+        assert call.args[0] == "COMFYUI_PULID", (
+            f"expected the threaded backend, got {call.args[0]!r} "
+            "(tier-based hardcoded-guess regression)"
+        )
+        assert call.kwargs["operation"] == "keyframe_generation"

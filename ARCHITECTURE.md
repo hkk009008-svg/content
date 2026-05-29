@@ -798,6 +798,15 @@ Three-priority cascade inside `generate_ai_broll`:
 2. **FAL FLUX Kontext Max Multi** — multi-image refs.
 3. **FLUX-Pro v1.1-ultra → FLUX-schnell → Pollinations** — final fallback chain.
 
+Each branch returns `ImageGenResult(path, api_name)` naming the backend that
+actually ran (`COMFYUI_PULID` on the pod; `FLUX_KONTEXT`/`FLUX_PRO`/
+`FLUX_SCHNELL`/`POLLINATIONS` down the FAL chain; `QUALITY_MAX` for the max
+tier), or `None` on total failure. `generate_keyframe_take` records `api_name`
+to `cost_log` via `record_api_call`, so a pod generation logs
+`provider='comfyui'` — distinguishable from a FAL fallback (`provider='fal'`).
+The cost site previously hardcoded the api_name from `quality_tier`,
+mislabeling every pod generation as `fal` (e.g. cycle-17 cost_log row 1065).
+
 `RunPodComfyUI` class ([phase_c_assembly.py:12-50](phase_c_assembly.py:12)):
 
 | Method | Endpoint | Notes |

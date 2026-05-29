@@ -52,10 +52,13 @@ API_COST_USD: dict[str, float] = {
     "RUNWAY_GEN4":   0.50,
     "RUNWAY":        0.40,
     # Image APIs (per still)
+    "COMFYUI_PULID": 0.04,   # FLUX+PuLID on the ComfyUI pod (GPU-time estimate)
     "FLUX_PULID":    0.05,
     "FLUX_KONTEXT":  0.04,
     "FLUX_PRO":      0.05,
-    "QUALITY_MAX":   0.40,   # N=8 best-of, ~8x base cost
+    "FLUX_SCHNELL":  0.01,   # FAL flux/schnell — fast, low-cost fallback
+    "POLLINATIONS":  0.00,   # free service (last-resort fallback)
+    "QUALITY_MAX":   0.40,   # N=8 best-of on the pod, ~8x base cost
     "HIDREAM_I1":    0.06,
     # Audio APIs (per clip / per call)
     "STABILITY_FOLEY":   0.03,    # per ~5-60s foley clip via Stable Audio 2.0
@@ -296,10 +299,16 @@ class CostTracker:
                 )
 
         # Derive a human-readable provider name from the API key.
+        # Prefix match in insertion order; first hit wins. Pod (ComfyUI/PuLID)
+        # image backends map to a provider DISTINCT from "fal" so cost_log can
+        # tell "ran on the pod" from "fell back to FAL". QUALITY_MAX is the N=8
+        # best-of, which also runs on the pod.
         _provider_map = {
             "KLING": "kling", "SORA": "openai", "VEO": "google",
             "LTX": "ltx", "RUNWAY": "runway",
-            "FLUX": "fal", "QUALITY_MAX": "fal", "HIDREAM": "fal",
+            "COMFYUI": "comfyui", "QUALITY_MAX": "comfyui",
+            "POLLINATIONS": "pollinations",
+            "FLUX": "fal", "HIDREAM": "fal",
         }
         provider = "unknown"
         for prefix, prov in _provider_map.items():

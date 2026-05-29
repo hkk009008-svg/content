@@ -57,7 +57,7 @@ from face_validator_gate import (
 from workflow_selector import classify_shot_type, get_max_quality_params
 
 # Reuse the existing RunPod client class — no duplication.
-from phase_c_assembly import RunPodComfyUI
+from phase_c_assembly import RunPodComfyUI, ImageGenResult
 
 
 # ---------------------------------------------------------------------------
@@ -588,8 +588,8 @@ def generate_ai_broll_max(
     style_reference: Optional[str] = None,
     shot_hint: Optional[dict] = None,
     ctx: Optional["PipelineContext"] = None,
-) -> Optional[str]:
-    """N=8 adaptive best-of generation. Returns saved path or None.
+) -> Optional["ImageGenResult"]:
+    """N=8 adaptive best-of generation. Returns ImageGenResult or None.
 
     Mirrors generate_ai_broll's signature so the dispatcher in
     phase_c_assembly.py can forward kwargs unchanged.
@@ -860,4 +860,6 @@ def generate_ai_broll_max(
     # Cleanup losers (optional — keeping them for now in case caller wants forensics)
     print(f"[quality_max] DONE: best seed={best.seed} composite={best.composite:.3f} "
           f"arc={best.arc_score:.3f} aes={best.aesthetic_score:.3f} -> {output_filename}")
-    return output_filename
+    # Max tier runs entirely on the ComfyUI pod (N=8 PuLID best-of); a non-None
+    # return is always a pod generation, so the provenance is QUALITY_MAX.
+    return ImageGenResult(output_filename, "QUALITY_MAX")

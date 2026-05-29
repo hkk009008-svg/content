@@ -5,9 +5,29 @@ import time
 
 import requests
 
+from typing import NamedTuple
+
 from config.settings import settings
 
 PEXELS_API_KEY = settings.pexels_api_key
+
+
+class ImageGenResult(NamedTuple):
+    """Provenance-carrying result of an image-generation backend.
+
+    ``path`` is the saved image (equals ``output_filename`` on success);
+    ``api_name`` is the cost_tracker API key for the backend that ACTUALLY ran
+    (``COMFYUI_PULID`` | ``FLUX_KONTEXT`` | ``FLUX_PRO`` | ``FLUX_SCHNELL`` |
+    ``POLLINATIONS`` | ``QUALITY_MAX``). Callers record ``api_name`` so cost_log
+    reflects where the image was really generated (pod vs FAL), not a tier-based
+    guess. Backends return ``None`` (not this type) on failure, so the caller's
+    ``if not result`` success guard is preserved (a 2-field NamedTuple is always
+    truthy).
+    """
+
+    path: str
+    api_name: str
+
 
 class RunPodComfyUI:
     def __init__(self, server_url):
@@ -83,6 +103,13 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         char_lora_path: (max tier only) Path to per-character LoRA .safetensors.
         style_reference: (max tier only) Path to style-board reference image.
         shot_hint: (max tier only) Pre-classified shot dict; bypasses re-classification.
+
+    Returns:
+        ImageGenResult(path, api_name) naming the backend that actually ran
+        (COMFYUI_PULID | FLUX_KONTEXT | FLUX_PRO | FLUX_SCHNELL | POLLINATIONS |
+        QUALITY_MAX), or None if every backend failed. Callers record
+        ``api_name`` for cost attribution so a pod generation is distinguishable
+        from a FAL fallback in cost_log.
     """
     # --- MAX-TIER DISPATCH ---
     # Try the maxed-quality path first; fall through to production on any failure
@@ -350,7 +377,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                                 with open(output_filename, 'wb') as f:
                                     f.write(img_data)
                                 print(f"      ✅ Downloaded {mode} render: {output_filename}")
-                                return output_filename
+                                return ImageGenResult(output_filename, "COMFYUI_PULID")
                     # Outputs exist but no images — task failed
                     print(f"      ⚠️ ComfyUI task completed but no images in output")
                     break
@@ -491,7 +518,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                 img_url = result["images"][0]["url"]
                 urllib.request.urlretrieve(img_url, output_filename)
                 print(f"      [OK] FLUX Kontext image: {output_filename}")
-                return output_filename
+                return ImageGenResult(output_filename, "FLUX_KONTEXT")
             except Exception as e_kontext:
                 print(f"      [WARN] FLUX Kontext failed: {e_kontext}, trying FLUX-Pro...")
 
@@ -512,7 +539,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
             img_url = result["images"][0]["url"]
             urllib.request.urlretrieve(img_url, output_filename)
             print(f"      [OK] FLUX-Pro image: {output_filename}")
-            return output_filename
+            return ImageGenResult(output_filename, "FLUX_PRO")
         except Exception as e1:
             print(f"      [WARN] FLUX-Pro failed: {e1}, trying FLUX schnell...")
 
@@ -531,7 +558,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
             img_url = result["images"][0]["url"]
             urllib.request.urlretrieve(img_url, output_filename)
             print(f"      ✅ FAL FLUX-schnell image: {output_filename}")
-            return output_filename
+            return ImageGenResult(output_filename, "FLUX_SCHNELL")
         except Exception as e2:
             print(f"      ⚠️ FLUX-schnell also failed: {e2}")
 
@@ -544,7 +571,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
             with open(output_filename, "wb") as f:
                 f.write(img_data)
             print(f"      ✅ Pollinations fallback image: {output_filename}")
-            return output_filename
+            return ImageGenResult(output_filename, "POLLINATIONS")
 
         print("❌ All image generation methods failed.")
         return None
