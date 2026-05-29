@@ -113,6 +113,21 @@ def main() -> int:
         for _md in _manifest_drifts:
             print(f"  {_md.message}")
 
+    # Commit-SHA ref drift WARN (git-backed; never a hard-fail — shallow clones
+    # skip reachability, and SHA drift is not auto-fixable).
+    _sha_drifts = _cdc.check_sha_refs(_cdc.SHA_DEFAULT_DOCS, _repo_root)
+    if _sha_drifts:
+        _sn = len(_sha_drifts)
+        print(
+            f"WARNING: {_sn} stale commit-SHA ref(s) in docs"
+            f" (run .venv/bin/python scripts/check_doc_claims.py --sha-refs):"
+        )
+        for _sd in _sha_drifts:
+            print(
+                f"  [{_sd.kind}] {Path(_sd.doc_path).name}:{_sd.doc_line}"
+                f" (sha: {_sd.symbol}) — {_sd.message}"
+            )
+
     print("OK")
     return 0
 

@@ -5,13 +5,16 @@ Public API
 ----------
 Drift            dataclass for a single drift finding
 check_line_anchors(doc_paths, repo_root) -> list[Drift]
+check_sha_refs(doc_paths, repo_root) -> list[Drift]   (git: resolve/reachable/subject)
+audit_sha_refs(doc_paths, repo_root) -> list[dict]    (raw git facts per citation)
 run(doc_paths, repo_root, fix=False) -> list[Drift]
-CHECKERS         list of enabled checker functions
+CHECKERS         enabled default checkers (line-anchors only; SHA + manifest are opt-in)
 main(argv=None)  -> int   (exit 0=clean, 1=drift, >1=error)
 """
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -439,6 +442,239 @@ def check_manifest(
 
 
 # ---------------------------------------------------------------------------
+# Commit-SHA reference checking (Tier 2: resolve + reachable + quoted-subject)
+# ---------------------------------------------------------------------------
+
+# Default doc set for SHA-ref checking — the SHA-dense docs (anchors default to
+# ARCHITECTURE.md only).  README/OPERATIONS carry no SHA citations.
+SHA_DEFAULT_DOCS = ["CLAUDE.md", "DECISIONS.md", "ARCHITECTURE.md"]
+
+# A backtick token's contents that look like a git short/long SHA (lowercase hex,
+# 7-40 chars).  All real citations are 7-char; the wider bound is future-proofing.
+_SHA_TOKEN_RE = re.compile(r'^[0-9a-f]{7,40}$')
+
+# A backtick token whose contents are a conventional-commit subject
+# (e.g. `fix(web): ...`, `docs: ...`).  Used to detect a quoted commit subject
+# sitting next to a cited SHA on the same doc line.
+_CONV_COMMIT_RE = re.compile(
+    r'^(?:feat|fix|docs|chore|refactor|test|style|perf|build|ci|revert|coord|merge|wip)'
+    r'(?:\([^)]*\))?: \S'
+)
+
+
+def _nearest_token(target, candidates):
+    """Return the candidate match nearest to *target* on a line (prefer before)."""
+    if not candidates:
+        return None
+    start = target.start()
+    before = [c for c in candidates if c.end() <= start]
+    if before:
+        return before[-1]
+    after = [c for c in candidates if c.start() >= target.end()]
+    return after[0] if after else None
+
+
+def _collect_sha_citations(doc_paths: list[str], repo_root: Path) -> list[dict]:
+    """Scan docs for backtick SHA tokens; pair each with an adjacent quoted subject.
+
+    Returns one dict per citation: {doc_path, doc_line, sha, quoted_subject}.
+    """
+    citations: list[dict] = []
+    for doc_path in doc_paths:
+        full = Path(doc_path) if Path(doc_path).is_absolute() else repo_root / doc_path
+        if not full.exists():
+            continue
+        for line_num, line in enumerate(
+            full.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+        ):
+            tokens = list(_BACKTICK_RE.finditer(line))
+            if not tokens:
+                continue
+            sha_tokens = [t for t in tokens if _SHA_TOKEN_RE.match(t.group(1))]
+            if not sha_tokens:
+                continue
+            subj_tokens = [t for t in tokens if _CONV_COMMIT_RE.match(t.group(1))]
+            for st in sha_tokens:
+                quoted = _nearest_token(st, subj_tokens)
+                citations.append({
+                    "doc_path": str(full),
+                    "doc_line": line_num,
+                    "sha": st.group(1),
+                    "quoted_subject": quoted.group(1) if quoted else None,
+                })
+    return citations
+
+
+def _git_run(repo_root: Path, args: list[str], stdin: Optional[str] = None):
+    """Run a git command; return CompletedProcess, or None if git is unavailable."""
+    try:
+        return subprocess.run(
+            ["git", "-C", str(repo_root), *args],
+            capture_output=True, text=True, input=stdin,
+        )
+    except OSError:
+        return None
+
+
+def _repo_state(repo_root: Path) -> tuple[bool, bool]:
+    """Return (is_git_repo, is_shallow). (False, False) when not a repo."""
+    r = _git_run(repo_root, ["rev-parse", "--is-shallow-repository"])
+    if r is None or r.returncode != 0:
+        return (False, False)
+    return (True, r.stdout.strip() == "true")
+
+
+def _resolve_commits(repo_root: Path, shas: list[str]) -> dict:
+    """Batch-resolve abbreviated SHAs to full commit oids via cat-file.
+
+    Returns {short_sha: full_oid} for inputs that resolve to a commit object.
+    """
+    if not shas:
+        return {}
+    r = _git_run(repo_root, ["cat-file", "--batch-check"], stdin="\n".join(shas) + "\n")
+    if r is None or r.returncode != 0:
+        return {}
+    resolved: dict = {}
+    for sha, line in zip(shas, r.stdout.splitlines()):
+        parts = line.split()
+        # Resolved line: "<full-oid> <type> <size>"; missing/ambiguous: "<input> missing".
+        if len(parts) >= 2 and parts[1] == "commit":
+            resolved[sha] = parts[0]
+    return resolved
+
+
+def _reachable_oids(repo_root: Path) -> set:
+    """Return the set of full commit oids reachable from HEAD."""
+    r = _git_run(repo_root, ["rev-list", "HEAD"])
+    if r is None or r.returncode != 0:
+        return set()
+    return set(r.stdout.split())
+
+
+def _commit_subjects(repo_root: Path, oids: list[str]) -> dict:
+    """Return {full_oid: subject} for the given commit oids (one git call)."""
+    if not oids:
+        return {}
+    sep = "\x1f"
+    r = _git_run(repo_root, ["show", "-s", f"--format=%H{sep}%s", *oids])
+    if r is None or r.returncode != 0:
+        return {}
+    subjects: dict = {}
+    for line in r.stdout.splitlines():
+        if sep in line:
+            h, s = line.split(sep, 1)
+            subjects[h] = s
+    return subjects
+
+
+def _subject_matches(quoted: str, actual: str) -> bool:
+    """True if the whitespace-normalised quoted subject is contained in actual.
+
+    Containment (not equality) tolerates the doc truncating a long subject.
+    """
+    q = " ".join(quoted.split()).strip()
+    a = " ".join(actual.split()).strip()
+    return bool(q) and q in a
+
+
+def audit_sha_refs(doc_paths: list[str], repo_root: Path) -> list[dict]:
+    """Gather git facts for every backtick SHA citation across *doc_paths*.
+
+    Returns one dict per citation with keys:
+        doc_path, doc_line, sha, quoted_subject,
+        resolves (bool), reachable (bool|None — None when repo is shallow),
+        full_oid (str|None), actual_subject (str|None),
+        subject_ok (bool|None — None when no subject is quoted), problem (str|None).
+
+    Returns [] when there are no citations OR repo_root is not a git repo.
+    Never raises.
+    """
+    citations = _collect_sha_citations(doc_paths, repo_root)
+    if not citations:
+        return []
+
+    is_repo, shallow = _repo_state(repo_root)
+    if not is_repo:
+        return []
+
+    unique = sorted({c["sha"] for c in citations})
+    resolved = _resolve_commits(repo_root, unique)
+    reachable = None if shallow else _reachable_oids(repo_root)
+    subjects = _commit_subjects(repo_root, sorted(set(resolved.values())))
+
+    rows: list[dict] = []
+    for c in citations:
+        full_oid = resolved.get(c["sha"])
+        if full_oid is None:
+            rows.append({
+                **c, "resolves": False, "reachable": None, "full_oid": None,
+                "actual_subject": None, "subject_ok": None,
+                "problem": "does not resolve to a commit",
+            })
+            continue
+
+        reach = None if reachable is None else (full_oid in reachable)
+        actual_subject = subjects.get(full_oid)
+        quoted = c["quoted_subject"]
+        subject_ok = None
+        if quoted is not None and actual_subject is not None:
+            subject_ok = _subject_matches(quoted, actual_subject)
+
+        if reach is False:
+            problem = "resolves but is not reachable from HEAD"
+        elif subject_ok is False:
+            problem = "quoted subject does not match the commit"
+        else:
+            problem = None
+
+        rows.append({
+            **c, "resolves": True, "reachable": reach, "full_oid": full_oid,
+            "actual_subject": actual_subject, "subject_ok": subject_ok,
+            "problem": problem,
+        })
+    return rows
+
+
+def check_sha_refs(doc_paths: list[str], repo_root: Path) -> list[Drift]:
+    """Derive Drift objects from audit_sha_refs for every problematic citation.
+
+    kind="sha_not_found"        — SHA does not resolve to a commit
+    kind="sha_unreachable"      — resolves but not reachable from HEAD
+    kind="sha_subject_mismatch" — adjacent quoted subject != the commit's subject
+
+    NOT added to CHECKERS: the default path is pure-filesystem / git-free.
+    """
+    drifts: list[Drift] = []
+    for r in audit_sha_refs(doc_paths, repo_root):
+        if not r["resolves"]:
+            kind = "sha_not_found"
+            message = f"`{r['sha']}` does not resolve to a commit"
+        elif r["reachable"] is False:
+            kind = "sha_unreachable"
+            message = f"`{r['sha']}` resolves but is not reachable from HEAD"
+        elif r["subject_ok"] is False:
+            kind = "sha_subject_mismatch"
+            message = (
+                f"`{r['sha']}` quoted subject {r['quoted_subject']!r} "
+                f"does not match actual {r['actual_subject']!r}"
+            )
+        else:
+            continue
+        drifts.append(Drift(
+            doc_path=r["doc_path"],
+            doc_line=r["doc_line"],
+            target_file="",
+            target_line=0,
+            kind=kind,
+            symbol=r["sha"],
+            suggested_line=None,
+            fixable=False,
+            message=message,
+        ))
+    return drifts
+
+
+# ---------------------------------------------------------------------------
 # run() — orchestrates all checkers
 # ---------------------------------------------------------------------------
 
@@ -463,18 +699,63 @@ def run(doc_paths: list[str], repo_root: Path, fix: bool = False) -> list[Drift]
 # CLI
 # ---------------------------------------------------------------------------
 
+def _report_sha_drifts(drifts: list[Drift], n_docs: int) -> int:
+    """Print a SHA-ref drift report. Return 0 (clean) or 1 (drift)."""
+    if not drifts:
+        print(f"SHA refs checked across {n_docs} doc(s) — no drift.")
+        return 0
+    print(f"\n{'='*60}")
+    print(f"SHA-REF DRIFT REPORT  ({len(drifts)} issue(s))")
+    print(f"{'='*60}")
+    for d in drifts:
+        print(f"  [{d.kind}]  {d.doc_path}:{d.doc_line}  (sha: `{d.symbol}`)")
+        print(f"    {d.message}")
+    return 1
+
+
+def _print_sha_subjects(docs: list[str], repo_root: Path) -> int:
+    """List every cited SHA with its actual subject (manual mis-citation review)."""
+    rows = audit_sha_refs(docs, repo_root)
+    if not rows:
+        print("No SHA citations found.")
+        return 0
+    for r in rows:
+        if not r["resolves"]:
+            subject, flag = "<unresolved>", " [NOT FOUND]"
+        else:
+            subject = r["actual_subject"] or "<no subject>"
+            if r["reachable"] is False:
+                flag = " [UNREACHABLE]"
+            elif r["subject_ok"] is False:
+                flag = " [SUBJECT MISMATCH]"
+            else:
+                flag = ""
+        print(f"  {r['sha']}  {subject}{flag}  ({Path(r['doc_path']).name}:{r['doc_line']})")
+    return 0
+
+
 def main(argv=None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Verify doc line-anchors against source files."
+        description="Verify doc line-anchors and commit-SHA refs against source/git."
     )
     parser.add_argument("--fix", action="store_true", help="Auto-fix def_drift anchors.")
     parser.add_argument(
+        "--sha-refs", action="store_true",
+        help="Check commit-SHA refs (resolve + reachable from HEAD + quoted-subject match).",
+    )
+    parser.add_argument(
+        "--show-subjects", action="store_true",
+        help="List every cited SHA with its actual commit subject (mis-citation review).",
+    )
+    parser.add_argument(
         "docs",
         nargs="*",
-        default=["ARCHITECTURE.md"],
-        help="Markdown doc(s) to check (relative to repo root). Default: ARCHITECTURE.md",
+        help=(
+            "Markdown doc(s) to check (relative to repo root). Default: ARCHITECTURE.md "
+            "for anchors; CLAUDE.md DECISIONS.md ARCHITECTURE.md for --sha-refs/--show-subjects."
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -482,7 +763,16 @@ def main(argv=None) -> int:
     script_dir = Path(__file__).resolve().parent
     repo_root = script_dir.parent
 
-    drifts = run(args.docs, repo_root, fix=args.fix)
+    sha_mode = args.sha_refs or args.show_subjects
+    docs = args.docs or (SHA_DEFAULT_DOCS if sha_mode else ["ARCHITECTURE.md"])
+
+    if args.show_subjects:
+        return _print_sha_subjects(docs, repo_root)
+
+    if args.sha_refs:
+        return _report_sha_drifts(check_sha_refs(docs, repo_root), len(docs))
+
+    drifts = run(docs, repo_root, fix=args.fix)
 
     if not drifts:
         print(f"{'All' if not args.fix else 'Remaining'} anchors checked — no drift.")

@@ -8,6 +8,7 @@ real tmp_path files (no mocking).
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -30,6 +31,8 @@ from check_doc_claims import (  # noqa: E402
     CHECKERS,
     audit_manifest,
     check_manifest,
+    check_sha_refs,
+    audit_sha_refs,
 )
 
 
@@ -47,6 +50,34 @@ def _write_md(tmp_path: Path, name: str, content: str) -> Path:
     p = tmp_path / name
     p.write_text(textwrap.dedent(content))
     return p
+
+
+# ---------------------------------------------------------------------------
+# Git-repo fixture helpers (SHA-ref checker tests) — real repos, no mocking.
+# ---------------------------------------------------------------------------
+
+def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        capture_output=True, text=True, check=check,
+    )
+
+
+def _init_repo(tmp_path: Path) -> Path:
+    """git init a repo at tmp_path with deterministic identity + no signing."""
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "Test")
+    _git(tmp_path, "config", "commit.gpgsign", "false")
+    return tmp_path
+
+
+def _commit(repo: Path, message: str, *, fname: str = "f.txt") -> str:
+    """Commit a change with *message*; return the 7-char short SHA."""
+    (repo / fname).write_text(message)
+    _git(repo, "add", fname)
+    _git(repo, "commit", "-q", "-m", message)
+    return _git(repo, "rev-parse", "--short=7", "HEAD").stdout.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -718,3 +749,126 @@ class TestAuditManifestModuleConst:
         r = results[0]
         assert r["valid"] is True
         assert r["current_line"] == 3
+
+
+# ===========================================================================
+# SHA-ref checker (Tier 2: resolve + reachable + quoted-subject match)
+# ===========================================================================
+
+class TestShaRefResolves:
+    def test_resolving_sha_no_drift(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        sha = _commit(repo, "feat: initial commit")
+        md = _write_md(tmp_path, "doc.md", f"""\
+            See commit `{sha}` for details.
+            """)
+        drifts = check_sha_refs([str(md)], repo)
+        assert drifts == []
+
+
+class TestShaRefNotFound:
+    def test_fabricated_sha_is_drift(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        _commit(repo, "feat: initial commit")
+        md = _write_md(tmp_path, "doc.md", """\
+            Cited `deadbee` which does not exist.
+            """)
+        drifts = check_sha_refs([str(md)], repo)
+        assert len(drifts) == 1
+        assert drifts[0].kind == "sha_not_found"
+        assert drifts[0].symbol == "deadbee"
+
+
+class TestShaRefUnreachable:
+    def test_dangling_sha_is_unreachable_drift(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        _commit(repo, "first")
+        dangling = _commit(repo, "second")
+        # Move HEAD back; `dangling` stays in the object db but off HEAD's history.
+        _git(repo, "reset", "--hard", "HEAD~1")
+        md = _write_md(tmp_path, "doc.md", f"""\
+            Cited `{dangling}` no longer reachable from HEAD.
+            """)
+        drifts = check_sha_refs([str(md)], repo)
+        assert len(drifts) == 1
+        assert drifts[0].kind == "sha_unreachable"
+        assert drifts[0].symbol == dangling
+
+
+class TestShaRefSubjectMatch:
+    def test_quoted_subject_contained_no_drift(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        sha = _commit(repo, "feat(api): add the widget endpoint")
+        md = _write_md(tmp_path, "doc.md", f"""\
+            Shipped `feat(api): add the widget endpoint` (`{sha}`).
+            """)
+        drifts = check_sha_refs([str(md)], repo)
+        assert drifts == []
+
+    def test_truncated_quoted_subject_no_drift(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        sha = _commit(repo, "feat(api): add the widget endpoint with retries")
+        # Doc quotes only a prefix of the real subject — containment, not equality.
+        md = _write_md(tmp_path, "doc.md", f"""\
+            Shipped `feat(api): add the widget endpoint` (`{sha}`).
+            """)
+        drifts = check_sha_refs([str(md)], repo)
+        assert drifts == []
+
+
+class TestShaRefSubjectMismatch:
+    def test_wrong_quoted_subject_is_drift(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        sha = _commit(repo, "feat(api): add the widget endpoint")
+        md = _write_md(tmp_path, "doc.md", f"""\
+            Shipped `fix(core): a completely unrelated subject` (`{sha}`).
+            """)
+        drifts = check_sha_refs([str(md)], repo)
+        assert len(drifts) == 1
+        assert drifts[0].kind == "sha_subject_mismatch"
+        assert drifts[0].symbol == sha
+
+
+class TestShaRefDetection:
+    def test_non_hex_backtick_ignored(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        _commit(repo, "init")
+        md = _write_md(tmp_path, "doc.md", """\
+            Call `someFunction` to do the thing.
+            """)
+        assert check_sha_refs([str(md)], repo) == []
+
+    def test_hex_shorter_than_7_ignored(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        _commit(repo, "init")
+        md = _write_md(tmp_path, "doc.md", """\
+            Short token `abc12` is not a sha.
+            """)
+        assert check_sha_refs([str(md)], repo) == []
+
+
+class TestShaRefPublicAPI:
+    def test_check_sha_refs_not_in_default_checkers(self):
+        # git-dependent — must NOT run on the pure-filesystem / --fix default path.
+        assert check_sha_refs not in CHECKERS
+
+    def test_audit_sha_refs_surfaces_actual_subject(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        sha = _commit(repo, "docs: write the thing")
+        md = _write_md(tmp_path, "doc.md", f"""\
+            Ref `{sha}`.
+            """)
+        rows = audit_sha_refs([str(md)], repo)
+        assert len(rows) == 1
+        assert rows[0]["sha"] == sha
+        assert rows[0]["resolves"] is True
+        assert rows[0]["actual_subject"] == "docs: write the thing"
+
+
+class TestShaRefNonGitDir:
+    def test_non_git_dir_no_raise_returns_empty(self, tmp_path):
+        # tmp_path is NOT a git repo — audit must not raise, returns no drift.
+        md = _write_md(tmp_path, "doc.md", """\
+            Ref `deadbee` here.
+            """)
+        assert check_sha_refs([str(md)], tmp_path) == []
