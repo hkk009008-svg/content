@@ -52,7 +52,7 @@ class VeoNativeAPI:
             print("[VEO-NATIVE] Gemini API client initialized (no audio generation)")
 
         # Vertex AI uses stable model names; Gemini API uses -preview suffix
-        self._model = "veo-3.1-generate" if self._backend == "vertex" else "veo-3.1-generate-preview"
+        self._model = "veo-3.1-generate-001" if self._backend == "vertex" else "veo-3.1-generate-preview"
 
     def generate_video(
         self,
