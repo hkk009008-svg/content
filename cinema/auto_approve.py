@@ -215,17 +215,32 @@ def record_director_review_on_shots(shots: list[dict], review: dict) -> None:
     — scene-level ``{decision, violations, shots}``. The decision/violations
     apply to every shot in the scene (the ChiefDirector reviews the scene's
     shots collectively); per-shot ``modifications`` are already applied to the
-    shot prompts by the caller before this runs. A missing ``decision``
-    defaults to "APPROVED", mirroring ``validate_shot_prompts``' own
-    parse-fallback.
+    shot prompts by the caller before this runs. A MODIFIED verdict is
+    normalized to gate-decision "APPROVED" with no violations (the applied
+    corrections are the resolution); the raw verdict is kept in
+    ``chief_director_verdict``. A missing ``decision`` defaults to "APPROVED",
+    mirroring ``validate_shot_prompts``' own parse-fallback.
     """
     decision = (review or {}).get("decision", "APPROVED")
     violations = list((review or {}).get("violations") or [])
+    # A MODIFIED verdict means the ChiefDirector already rewrote the shot
+    # prompts to resolve what it flagged (the ChiefDirector step applies the
+    # modifications in-place before this runs) — the corrections ARE the
+    # resolution, so for the PLAN gate MODIFIED counts as APPROVED with no
+    # outstanding violations (cycle-17 decision: auto-clear MODIFIED so a
+    # headless run doesn't dead-end on a scene the director already fixed).
+    # REJECTED is preserved (it fails the gate). The raw verdict is retained in
+    # `chief_director_verdict` for audit/logs.
+    if decision == "MODIFIED":
+        gate_decision, gate_violations = "APPROVED", []
+    else:
+        gate_decision, gate_violations = decision, violations
     for shot in shots:
         if isinstance(shot, dict):
             shot["director_review"] = {
-                "decision": decision,
-                "violations": violations,
+                "decision": gate_decision,
+                "violations": gate_violations,
+                "chief_director_verdict": decision,
             }
 
 

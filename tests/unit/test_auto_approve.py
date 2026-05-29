@@ -1221,19 +1221,29 @@ class TestRecordDirectorReview:
         shots = [{"id": "a"}, {"id": "b"}]
         record_director_review_on_shots(shots, {"decision": "APPROVED", "violations": []})
         for s in shots:
-            assert s["director_review"] == {"decision": "APPROVED", "violations": []}
+            assert s["director_review"]["decision"] == "APPROVED"
+            assert s["director_review"]["violations"] == []
+            assert s["director_review"]["chief_director_verdict"] == "APPROVED"
 
-    def test_propagates_modified_decision_and_violations(self):
+    def test_modified_verdict_normalizes_and_clears_plan_gate(self):
+        # cycle-17 user decision: a MODIFIED verdict means the ChiefDirector
+        # already rewrote the shot prompts to fix what it flagged -> for the
+        # PLAN gate it counts as APPROVED with no outstanding violations (the
+        # corrections are the resolution). The raw verdict is kept for audit.
         from cinema.auto_approve import record_director_review_on_shots
 
-        shots = [{"id": "a"}]
+        shot = {"id": "a"}
         record_director_review_on_shots(
-            shots, {"decision": "MODIFIED", "violations": ["too bright"]}
+            [shot], {"decision": "MODIFIED", "violations": ["too bright"]}
         )
-        assert shots[0]["director_review"] == {
-            "decision": "MODIFIED",
-            "violations": ["too bright"],
-        }
+        assert shot["director_review"]["decision"] == "APPROVED"
+        assert shot["director_review"]["violations"] == []
+        assert shot["director_review"]["chief_director_verdict"] == "MODIFIED"
+        # ...and that means the plan gate auto-approves it.
+        decision = check_gate(
+            "plan", shot_state=shot, project={}, takes=[], config=AutoApproveConfig()
+        )
+        assert decision.auto_approved is True
 
     def test_missing_decision_defaults_to_approved(self):
         # ChiefDirector parse-fallback can return {} / partial dicts; mirror
