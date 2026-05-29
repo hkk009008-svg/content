@@ -161,11 +161,14 @@ if [ ! -f "$MODELS_DIR/clip/clip_l.safetensors" ]; then
         "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors"
 fi
 
-# VAE
+# VAE — the FLUX autoencoder. black-forest-labs/FLUX.1-{dev,schnell} are BOTH
+# gated (HTTP 401 token-free), which hard-failed this wget under `set -e` and
+# aborted the whole script before pulid/launch. ffxvs/vae-flux is a public
+# mirror of the identical ae.safetensors (335304388 bytes).
 if [ ! -f "$MODELS_DIR/vae/ae.safetensors" ]; then
     echo "  Downloading FLUX VAE..."
     wget -q --show-progress -O "$MODELS_DIR/vae/ae.safetensors" \
-        "https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/ae.safetensors"
+        "https://huggingface.co/ffxvs/vae-flux/resolve/main/ae.safetensors"
 fi
 
 # PuLID
