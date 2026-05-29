@@ -1230,18 +1230,23 @@ def _fmt(x: float) -> str:
 
 
 def _build_xfade_filtergraph(durations: list, duration: float, transition: str,
-                             include_audio: bool = True):
+                             audio_flags: Optional[list] = None):
     """Build a chained xfade (video) + acrossfade (audio) filter_complex string.
 
     Returns (filter_complex, final_video_label, final_audio_label).
     Requires len(durations) >= 2. Offset for junction j is
-    sum(durations[0..j]) - (j+1)*duration. When include_audio is False, no
-    acrossfade chain is emitted and the returned audio label is None
-    (video-only output — used when inputs have no audio stream; Lane V #24 F1).
+    sum(durations[0..j]) - (j+1)*duration. ``audio_flags`` is a per-input list
+    of bools (True = that input has an audio stream); None ≡ all inputs have
+    audio. When not all inputs have audio, no acrossfade chain is emitted and
+    the audio label is None (video-only; Lane V #24 F1). (Task 2 adds the mixed
+    -> anullsrc-pad branch.)
     """
     n = len(durations)
     if n < 2:
         raise ValueError("xfade filtergraph requires >= 2 inputs")
+    if audio_flags is None:
+        audio_flags = [True] * n
+    emit_audio = all(audio_flags)
 
     t = _fmt(duration)
     video_parts = []
@@ -1257,14 +1262,14 @@ def _build_xfade_filtergraph(durations: list, duration: float, transition: str,
             f"duration={t}:offset={_fmt(offset)}[{vlabel}]"
         )
         prev_v = vlabel
-        if include_audio:
+        if emit_audio:
             alabel = f"a{j + 1}"
             audio_parts.append(f"[{prev_a}][{j + 1}:a]acrossfade=d={t}[{alabel}]")
             prev_a = alabel
         cumulative += durations[j + 1]
 
     filter_complex = ";".join(video_parts + audio_parts)
-    return filter_complex, f"v{n - 1}", (f"a{n - 1}" if include_audio else None)
+    return filter_complex, f"v{n - 1}", (f"a{n - 1}" if emit_audio else None)
 
 
 def xfade_concat(scene_videos: list, out_path: str,
@@ -1283,7 +1288,7 @@ def xfade_concat(scene_videos: list, out_path: str,
     _assemble_final owns the dialogue/BGM/foley mix on every path.
     """
     durations = [_probe_duration(v) for v in scene_videos]
-    include_audio = all(_has_audio_stream(v) for v in scene_videos)
+    audio_flags = [_has_audio_stream(v) for v in scene_videos]
     # Known limitation (Lane V #25 M1, (c)-deferred per user 2026-05-29): on MIXED
     # audio-presence inputs (some scenes silent, some not) all() is False, so the whole
     # stitch goes video-only and audio-bearing scenes lose their audio. Narrow (transitions
@@ -1293,16 +1298,16 @@ def xfade_concat(scene_videos: list, out_path: str,
     # becomes a target — verify it doesn't disturb the _assemble_final standalone-mp3 mux first.
     t_eff = min(duration, 0.4 * min(durations))
     filter_complex, vlab, alab = _build_xfade_filtergraph(
-        durations, t_eff, transition, include_audio=include_audio)
+        durations, t_eff, transition, audio_flags=audio_flags)
 
     cmd = ["ffmpeg", "-y"]
     for v in scene_videos:
         cmd += ["-i", v]
     cmd += ["-filter_complex", filter_complex, "-map", f"[{vlab}]"]
-    if include_audio:
+    if alab is not None:
         cmd += ["-map", f"[{alab}]"]
     cmd += ["-c:v", "libx264", "-preset", "fast", "-crf", "20"]
-    if include_audio:
+    if alab is not None:
         cmd += ["-c:a", "aac", "-b:a", "192k"]
     cmd += [out_path]
     try:

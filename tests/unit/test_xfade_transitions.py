@@ -44,6 +44,20 @@ class TestBuildXfadeFiltergraph(unittest.TestCase):
             "[a1][2:a]acrossfade=d=0.5[a2]"
         )
 
+    def test_audio_flags_none_defaults_all_audio(self):
+        fg, vlab, alab = pcf._build_xfade_filtergraph([4.0, 5.0], 0.5, "dissolve")
+        assert "acrossfade" in fg
+        assert "anullsrc" not in fg
+        assert alab == "a1"
+
+    def test_all_audio_uses_raw_acrossfade(self):
+        fg, vlab, alab = pcf._build_xfade_filtergraph(
+            [4.0, 5.0], 0.5, "dissolve", audio_flags=[True, True])
+        assert "[0:a][1:a]acrossfade" in fg
+        assert "anullsrc" not in fg
+        assert "aformat" not in fg
+        assert alab == "a1"
+
 
 class TestXfadeConcat(unittest.TestCase):
     def _run(self, scene_videos, durations, duration=0.5):
@@ -109,9 +123,9 @@ class TestHasAudioStream(unittest.TestCase):
 
 
 class TestBuildXfadeFiltergraphVideoOnly(unittest.TestCase):
-    def test_include_audio_false_omits_acrossfade(self):
+    def test_no_audio_video_only(self):
         fg, vlab, alab = pcf._build_xfade_filtergraph(
-            [4.0, 5.0], 0.5, "dissolve", include_audio=False)
+            [4.0, 5.0], 0.5, "dissolve", audio_flags=[False, False])
         assert "xfade=transition=dissolve" in fg
         assert "acrossfade" not in fg
         assert vlab == "v1"
