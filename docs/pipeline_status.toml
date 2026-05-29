@@ -1,0 +1,72 @@
+# pipeline_status.toml — living pipeline-capability manifest (state-view Increment 2)
+#
+# The verifier-validated, drift-proof replacement for the static
+# "implemented-but-unutilized catalog" (§10 of the comprehensive-test brief).
+#
+# Each [[component]] declares a capability + its current utilization status +
+# a code anchor. The anchor is `file:SYMBOL` (NOT file:line) on purpose: symbol
+# names survive line shifts, so this manifest does NOT drift when unrelated code
+# moves. `scripts/check_doc_claims.py` (check_manifest) validates every anchor —
+# if the named symbol no longer exists, the claim is flagged (a stale "X → symbol"
+# claim can't survive silently). `scripts/status.py` renders this grouped by status.
+#
+# status enum:
+#   live    — always runs in the default production path
+#   wired   — reachable/works when its flag/condition is on (opt-in)
+#   stubbed — code exists but is never effectively reached (dead toggle, no-op
+#             return, zero callers) — a candidate to wire
+#   parked  — implemented but blocked on external state (e.g. GPU pod / node install)
+#   dead    — confirmed dead; removal candidate
+#
+# Adding an entry: pick a stable `def`/`class`/module-const SYMBOL as the anchor
+# and run `.venv/bin/python scripts/check_doc_claims.py` (or status.py) to confirm
+# it resolves. Grows over time; v1 is a verified starter, not exhaustive.
+
+[[component]]
+id = "scene_transitions"
+title = "Opt-in cross-dissolve at scene boundaries"
+status = "wired"
+anchor = "phase_c_ffmpeg.py:xfade_concat"
+note = "Cycle-17 MVP (9e75373/cc8dec6). Default-off flag `scene_transitions`; when on, _assemble_final routes per-scene concat through xfade_concat, else byte-identical hard-cut."
+
+[[component]]
+id = "final_assembly"
+title = "Final video assembly (per-scene concat + bgm)"
+status = "live"
+anchor = "cinema_pipeline.py:_assemble_final"
+note = "Core assembly step; always runs at end of pipeline. Hosts the scene_transitions ON/OFF branch + fallback to hard-cut concat."
+
+[[component]]
+id = "storyboard_mode"
+title = "Batched 6-shot latent storyboard path"
+status = "stubbed"
+anchor = "kling_native.py:generate_storyboard"
+note = "§10 F-A.1: 135 LoC, zero callers; UI toggle `storyboard_mode` is never read by phase_c_ffmpeg.py, so the toggle does nothing. Cycle-17+ wire candidate (brief P1-5)."
+
+[[component]]
+id = "lora_validation"
+title = "LoRA training quality gate"
+status = "stubbed"
+anchor = "prep/lora_training.py:validate_lora_quality"
+note = "§10 F-A.2: returns LORA_VALIDATION_SKIPPED (-1.0) unconditionally; bad LoRA weights silently degrade max-tier identity. Impl candidate (brief P1-7)."
+
+[[component]]
+id = "batch_scene_optimize"
+title = "Cross-shot batched prompt optimization"
+status = "stubbed"
+anchor = "llm/prompt_optimizer.py:batch_optimize_scene"
+note = "§10 F-A.3: zero callers; per-shot optimization currently loses cross-shot context. Refactor candidate (brief P1-6)."
+
+[[component]]
+id = "hires_fix"
+title = "Hi-res-fix upscale passes in max-tier image gen"
+status = "stubbed"
+anchor = "quality_max.py:_inject_post_passes"
+note = "§10 F-B.3: hires_fix nodes (900/901/902) are always pruned by _inject_post_passes regardless of `hires_fix_enabled`. Wire candidate, needs pod node verify (brief P2-1)."
+
+[[component]]
+id = "multi_identity_validation"
+title = "Multi-character identity continuity check"
+status = "stubbed"
+anchor = "domain/continuity_engine.py:validate_multi_identity"
+note = "§10 F-A.4: zero callers; only single-char validate_shot is wired. Wire when multi-char reaches Tier D (brief P2-2)."

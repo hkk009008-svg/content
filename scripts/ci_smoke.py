@@ -100,6 +100,19 @@ def main() -> int:
             )
             return 1
 
+    # Manifest drift WARN (never a hard-fail — manifest is not auto-fixable).
+    _manifest_drifts = _cdc.check_manifest(
+        _repo_root / "docs" / "pipeline_status.toml", _repo_root
+    )
+    if _manifest_drifts:
+        _mn = len(_manifest_drifts)
+        print(
+            f"WARNING: {_mn} stale manifest claim(s) in docs/pipeline_status.toml"
+            f" (edit the manifest):"
+        )
+        for _md in _manifest_drifts:
+            print(f"  {_md.message}")
+
     print("OK")
     return 0
 

@@ -120,6 +120,86 @@ def latest_adr(text: str) -> Optional[tuple[int, str]]:
 # render
 # ---------------------------------------------------------------------------
 
+_STATUS_ORDER = ["live", "wired", "stubbed", "parked", "dead"]
+
+
+def render_manifest(components: Optional[list]) -> list[str]:
+    """Return lines for the '## Pipeline status (manifest)' section.
+
+    *components* is the list returned by check_doc_claims.audit_manifest,
+    or None/[] when no manifest exists.
+
+    Returns a list of strings (no trailing newlines).
+    """
+    lines: list[str] = []
+    lines.append("## Pipeline status (manifest)")
+
+    if components is None:
+        lines.append("  (no docs/pipeline_status.toml)")
+        lines.append("  source:  docs/pipeline_status.toml (validated by check_doc_claims.audit_manifest)")
+        return lines
+
+    if not components:
+        lines.append("  (no docs/pipeline_status.toml)")
+        lines.append("  source:  docs/pipeline_status.toml (validated by check_doc_claims.audit_manifest)")
+        return lines
+
+    # Group by status in canonical order; unknown statuses go last
+    grouped: dict[str, list] = {s: [] for s in _STATUS_ORDER}
+    other: list = []
+    for comp in components:
+        status = comp.get("status", "")
+        if status in grouped:
+            grouped[status].append(comp)
+        else:
+            other.append(comp)
+
+    for status in _STATUS_ORDER:
+        for comp in grouped[status]:
+            anchor = comp.get("anchor", "")
+            # Split anchor for display: file_rel + symbol
+            if anchor and ":" in anchor:
+                file_rel, symbol = anchor.rsplit(":", 1)
+            else:
+                file_rel, symbol = anchor, ""
+
+            if comp.get("valid"):
+                line_num = comp.get("current_line")
+                lines.append(
+                    f"  ✓ {comp['id']}  ({status})  {file_rel}:{symbol} @{line_num}"
+                    f"  — {comp['title']}"
+                )
+            else:
+                problem = comp.get("problem", "unknown problem")
+                lines.append(
+                    f"  ✗ {comp['id']}  ({status})  {file_rel}:{symbol}"
+                    f"  [BROKEN: {problem}]"
+                )
+
+    for comp in other:
+        anchor = comp.get("anchor", "")
+        if anchor and ":" in anchor:
+            file_rel, symbol = anchor.rsplit(":", 1)
+        else:
+            file_rel, symbol = anchor, ""
+        status = comp.get("status", "unknown")
+        if comp.get("valid"):
+            line_num = comp.get("current_line")
+            lines.append(
+                f"  ✓ {comp['id']}  ({status})  {file_rel}:{symbol} @{line_num}"
+                f"  — {comp['title']}"
+            )
+        else:
+            problem = comp.get("problem", "unknown problem")
+            lines.append(
+                f"  ✗ {comp['id']}  ({status})  {file_rel}:{symbol}"
+                f"  [BROKEN: {problem}]"
+            )
+
+    lines.append("  source:  docs/pipeline_status.toml (validated by check_doc_claims.audit_manifest)")
+    return lines
+
+
 def render(data: dict) -> str:
     """Format an already-collected data dict into the report string.
 
@@ -169,6 +249,12 @@ def render(data: dict) -> str:
     a("## Infra (GPU pod / ComfyUI)")
     a(f"  pod: {data['pod_status']}")
     a("  source:  .env COMFYUI_SERVER_URL → <url>/system_stats (timeout=3s)")
+    a("")
+
+    # --- Pipeline manifest ---
+    manifest_components = data.get("manifest_components")
+    manifest_lines = render_manifest(manifest_components)
+    lines.extend(manifest_lines)
     a("")
 
     # --- Smoke pointer ---
@@ -351,6 +437,27 @@ def collect_pod(repo_root: Path) -> dict:
     return {"pod_status": status}
 
 
+def collect_manifest(repo_root: Path) -> dict:
+    """Load and validate docs/pipeline_status.toml via check_doc_claims.audit_manifest.
+
+    Returns {"manifest_components": list} where list may be:
+      - a list of component dicts (from audit_manifest)
+      - [] when the manifest file is absent
+      - None when unavailable due to an error (rendered as unavailable sentinel)
+    """
+    try:
+        scripts_dir = str(repo_root / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import check_doc_claims  # type: ignore
+        manifest_path = repo_root / "docs" / "pipeline_status.toml"
+        components = check_doc_claims.audit_manifest(manifest_path, repo_root)
+        # audit_manifest returns [] if file absent — pass through as-is
+        return {"manifest_components": components}
+    except Exception as e:
+        return {"manifest_components": None}
+
+
 # ===========================================================================
 # Main
 # ===========================================================================
@@ -364,6 +471,7 @@ def _collect_all(repo_root: Path) -> dict:
     data.update(collect_adr(repo_root))
     data.update(collect_doc_integrity(repo_root))
     data.update(collect_pod(repo_root))
+    data.update(collect_manifest(repo_root))
     return data
 
 

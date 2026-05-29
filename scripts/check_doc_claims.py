@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import re
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +290,152 @@ def _apply_fixes(drifts: list[Drift]) -> list[Drift]:
         path.write_text("".join(lines), encoding="utf-8")
 
     return unfixed
+
+
+# ---------------------------------------------------------------------------
+# Manifest auditing (pipeline_status.toml)
+# ---------------------------------------------------------------------------
+
+def audit_manifest(
+    manifest_path: Union[str, Path],
+    repo_root: Path,
+) -> list[dict]:
+    """Parse *manifest_path* (TOML) and validate every component's anchor.
+
+    Returns a list of dicts — one per [[component]] — with keys:
+        id, title, status, anchor, note,
+        valid (bool), current_line (int|None), problem (str|None).
+
+    Returns [] when the file doesn't exist.
+    Never raises; malformed entries produce valid=False entries.
+    """
+    p = Path(manifest_path)
+    if not p.exists():
+        return []
+
+    try:
+        with open(p, "rb") as f:
+            data = tomllib.load(f)
+    except Exception as e:
+        # Unparseable TOML — treat as zero components
+        return []
+
+    results: list[dict] = []
+    for entry in data.get("component", []):
+        # Collect base fields defensively
+        cid = entry.get("id")
+        title = entry.get("title", "")
+        status = entry.get("status", "")
+        anchor = entry.get("anchor")
+        note = entry.get("note", "")
+
+        base = {
+            "id": cid,
+            "title": title,
+            "status": status,
+            "anchor": anchor,
+            "note": note,
+        }
+
+        # Guard malformed entries (missing anchor or id)
+        if anchor is None or cid is None:
+            missing = "anchor" if anchor is None else "id"
+            results.append({
+                **base,
+                "valid": False,
+                "current_line": None,
+                "problem": f"malformed entry (missing '{missing}')",
+            })
+            continue
+
+        # Split anchor → (file_rel, symbol) using rsplit on ":" (rightmost)
+        # File paths use '/' but no ':'; symbol has no ':'.
+        try:
+            file_rel, symbol = anchor.rsplit(":", 1)
+        except ValueError:
+            results.append({
+                **base,
+                "valid": False,
+                "current_line": None,
+                "problem": f"malformed anchor (no ':' separator): {anchor!r}",
+            })
+            continue
+
+        # File existence
+        target_path = repo_root / file_rel
+        if not target_path.exists():
+            results.append({
+                **base,
+                "valid": False,
+                "current_line": None,
+                "problem": f"file not found: {file_rel}",
+            })
+            continue
+
+        # Symbol lookup via _def_lines
+        source_lines = target_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        def_line_list = _def_lines(source_lines, symbol)
+        if not def_line_list:
+            results.append({
+                **base,
+                "valid": False,
+                "current_line": None,
+                "problem": f"symbol not found: {symbol}",
+            })
+        else:
+            results.append({
+                **base,
+                "valid": True,
+                "current_line": def_line_list[0],
+                "problem": None,
+            })
+
+    return results
+
+
+def check_manifest(
+    manifest_path: Union[str, Path],
+    repo_root: Path,
+) -> list[Drift]:
+    """Derive Drift objects from audit_manifest for every invalid component.
+
+    kind="manifest_missing_file"     — target file absent
+    kind="manifest_symbol_not_found" — file exists but symbol missing
+    """
+    components = audit_manifest(manifest_path, repo_root)
+    drifts: list[Drift] = []
+    for comp in components:
+        if comp["valid"]:
+            continue
+        anchor = comp.get("anchor") or ""
+        problem = comp.get("problem") or ""
+        cid = comp.get("id") or "unknown"
+
+        # Determine target_file and symbol from anchor (best-effort)
+        if anchor and ":" in anchor:
+            file_rel, symbol = anchor.rsplit(":", 1)
+        else:
+            file_rel = anchor
+            symbol = cid
+
+        # Determine kind
+        if "file not found" in problem:
+            kind = "manifest_missing_file"
+        else:
+            kind = "manifest_symbol_not_found"
+
+        drifts.append(Drift(
+            doc_path=str(manifest_path),
+            doc_line=0,
+            target_file=file_rel,
+            target_line=0,
+            kind=kind,
+            symbol=symbol if symbol else cid,
+            suggested_line=None,
+            fixable=False,
+            message=f"{cid}: {problem}",
+        ))
+    return drifts
 
 
 # ---------------------------------------------------------------------------

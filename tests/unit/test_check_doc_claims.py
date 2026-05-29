@@ -28,6 +28,8 @@ from check_doc_claims import (  # noqa: E402
     check_anchor,
     run,
     CHECKERS,
+    audit_manifest,
+    check_manifest,
 )
 
 
@@ -477,3 +479,242 @@ class TestPublicAPI:
         md = _write_md(tmp_path, "clean.md", "# heading\nNo anchors here.\n")
         result = run([str(md)], tmp_path)
         assert result == []
+
+
+# ===========================================================================
+# Part A — audit_manifest / check_manifest tests
+# ===========================================================================
+
+def _write_toml(tmp_path: Path, name: str, content: str) -> Path:
+    p = tmp_path / name
+    p.write_text(textwrap.dedent(content))
+    return p
+
+
+class TestAuditManifestValidAnchor:
+    """audit_manifest — valid anchor resolves to valid=True with correct current_line."""
+
+    def test_valid_anchor_returns_valid_true_and_line(self, tmp_path):
+        """A component whose symbol exists → valid=True, current_line=correct."""
+        src = tmp_path / "mod.py"
+        src.write_text("# line 1\n# line 2\ndef xfade_concat():\n    pass\n")
+        # def is at line 3
+        toml = _write_toml(tmp_path, "manifest.toml", """\
+            [[component]]
+            id = "scene_transitions"
+            title = "Cross-dissolve"
+            status = "wired"
+            anchor = "mod.py:xfade_concat"
+            note = "test"
+        """)
+        results = audit_manifest(toml, tmp_path)
+        assert len(results) == 1
+        r = results[0]
+        assert r["id"] == "scene_transitions"
+        assert r["valid"] is True
+        assert r["current_line"] == 3
+        assert r["problem"] is None
+
+
+class TestAuditManifestSymbolNotFound:
+    """audit_manifest — symbol missing → valid=False, kind=manifest_symbol_not_found."""
+
+    def test_missing_symbol_returns_invalid(self, tmp_path):
+        """File exists but symbol is absent → valid=False."""
+        src = tmp_path / "mod.py"
+        src.write_text("# no defs here\n")
+        toml = _write_toml(tmp_path, "manifest.toml", """\
+            [[component]]
+            id = "storyboard_mode"
+            title = "Storyboard"
+            status = "stubbed"
+            anchor = "mod.py:generate_storyboard"
+            note = "test"
+        """)
+        results = audit_manifest(toml, tmp_path)
+        assert len(results) == 1
+        r = results[0]
+        assert r["valid"] is False
+        assert r["current_line"] is None
+        assert "generate_storyboard" in r["problem"]
+
+    def test_check_manifest_emits_drift_with_correct_kind(self, tmp_path):
+        src = tmp_path / "mod.py"
+        src.write_text("# no defs here\n")
+        toml = _write_toml(tmp_path, "manifest.toml", """\
+            [[component]]
+            id = "storyboard_mode"
+            title = "Storyboard"
+            status = "stubbed"
+            anchor = "mod.py:generate_storyboard"
+            note = "test"
+        """)
+        drifts = check_manifest(toml, tmp_path)
+        assert len(drifts) == 1
+        d = drifts[0]
+        assert d.kind == "manifest_symbol_not_found"
+        assert d.fixable is False
+        assert "storyboard_mode" in d.message
+
+
+class TestAuditManifestMissingFile:
+    """audit_manifest — target file doesn't exist → valid=False, kind=manifest_missing_file."""
+
+    def test_missing_file_returns_invalid(self, tmp_path):
+        toml = _write_toml(tmp_path, "manifest.toml", """\
+            [[component]]
+            id = "batch_scene"
+            title = "Batch"
+            status = "stubbed"
+            anchor = "nonexistent.py:batch_optimize_scene"
+            note = "test"
+        """)
+        results = audit_manifest(toml, tmp_path)
+        assert len(results) == 1
+        r = results[0]
+        assert r["valid"] is False
+        assert r["current_line"] is None
+        assert "nonexistent.py" in r["problem"]
+
+    def test_check_manifest_emits_missing_file_kind(self, tmp_path):
+        toml = _write_toml(tmp_path, "manifest.toml", """\
+            [[component]]
+            id = "batch_scene"
+            title = "Batch"
+            status = "stubbed"
+            anchor = "nonexistent.py:batch_optimize_scene"
+            note = "test"
+        """)
+        drifts = check_manifest(toml, tmp_path)
+        assert len(drifts) == 1
+        assert drifts[0].kind == "manifest_missing_file"
+
+
+class TestAuditManifestPathWithSlash:
+    """audit_manifest — anchor file path contains '/' — rsplit correctness."""
+
+    def test_subdirectory_path_resolves(self, tmp_path):
+        """anchor = 'prep/lora_training.py:validate_lora_quality' — path with '/'."""
+        subdir = tmp_path / "prep"
+        subdir.mkdir()
+        (subdir / "lora_training.py").write_text(
+            "# line 1\ndef validate_lora_quality():\n    pass\n"
+        )
+        toml = _write_toml(tmp_path, "manifest.toml", """\
+            [[component]]
+            id = "lora_validation"
+            title = "LoRA validation"
+            status = "stubbed"
+            anchor = "prep/lora_training.py:validate_lora_quality"
+            note = "test"
+        """)
+        results = audit_manifest(toml, tmp_path)
+        assert len(results) == 1
+        r = results[0]
+        assert r["valid"] is True
+        assert r["current_line"] == 2
+
+
+class TestAuditManifestMixed:
+    """audit_manifest — mixed valid/invalid — check_manifest returns only invalid."""
+
+    def test_mixed_components_check_manifest_only_invalid(self, tmp_path):
+        """Two components: one valid, one with missing symbol. check_manifest → 1 drift."""
+        src = tmp_path / "mod.py"
+        src.write_text("def good_func():\n    pass\n")
+        toml = _write_toml(tmp_path, "manifest.toml", """\
+            [[component]]
+            id = "good"
+            title = "Good one"
+            status = "live"
+            anchor = "mod.py:good_func"
+            note = "ok"
+
+            [[component]]
+            id = "bad"
+            title = "Bad one"
+            status = "stubbed"
+            anchor = "mod.py:missing_func"
+            note = "broken"
+        """)
+        results = audit_manifest(toml, tmp_path)
+        assert len(results) == 2
+        valid_ones = [r for r in results if r["valid"]]
+        invalid_ones = [r for r in results if not r["valid"]]
+        assert len(valid_ones) == 1
+        assert len(invalid_ones) == 1
+
+        drifts = check_manifest(toml, tmp_path)
+        assert len(drifts) == 1
+        assert drifts[0].symbol == "missing_func"
+
+
+class TestAuditManifestAbsent:
+    """audit_manifest — manifest file doesn't exist → returns []."""
+
+    def test_absent_manifest_returns_empty_list(self, tmp_path):
+        no_such_file = tmp_path / "does_not_exist.toml"
+        results = audit_manifest(no_such_file, tmp_path)
+        assert results == []
+
+    def test_check_manifest_absent_returns_empty(self, tmp_path):
+        no_such_file = tmp_path / "does_not_exist.toml"
+        drifts = check_manifest(no_such_file, tmp_path)
+        assert drifts == []
+
+
+class TestAuditManifestMalformed:
+    """audit_manifest — malformed entry (missing anchor/id) → valid=False, no raise."""
+
+    def test_missing_anchor_field_no_raise(self, tmp_path):
+        """Component with no 'anchor' key → valid=False, problem mentions 'malformed'."""
+        toml = _write_toml(tmp_path, "manifest.toml", """\
+            [[component]]
+            id = "no_anchor"
+            title = "Missing anchor"
+            status = "stubbed"
+            note = "oops"
+        """)
+        # Must not raise
+        results = audit_manifest(toml, tmp_path)
+        assert len(results) == 1
+        r = results[0]
+        assert r["valid"] is False
+        assert "malformed" in r["problem"]
+
+    def test_missing_id_field_no_raise(self, tmp_path):
+        """Component with no 'id' key → valid=False, no raise."""
+        toml = _write_toml(tmp_path, "manifest.toml", """\
+            [[component]]
+            title = "No ID"
+            status = "stubbed"
+            anchor = "mod.py:something"
+            note = "oops"
+        """)
+        results = audit_manifest(toml, tmp_path)
+        assert len(results) == 1
+        r = results[0]
+        assert r["valid"] is False
+        assert "malformed" in r["problem"]
+
+
+class TestAuditManifestModuleConst:
+    """audit_manifest — module-level constant resolves via _def_lines assignment rule."""
+
+    def test_module_const_anchor_resolves(self, tmp_path):
+        """anchor = 'mod.py:SOME_CONST' where SOME_CONST = { at line 3 → valid, line 3."""
+        src = tmp_path / "mod.py"
+        src.write_text("# line 1\n# line 2\nSOME_CONST = {\n    'a': 1,\n}\n")
+        toml = _write_toml(tmp_path, "manifest.toml", """\
+            [[component]]
+            id = "const_test"
+            title = "Constant test"
+            status = "live"
+            anchor = "mod.py:SOME_CONST"
+            note = "test"
+        """)
+        results = audit_manifest(toml, tmp_path)
+        assert len(results) == 1
+        r = results[0]
+        assert r["valid"] is True
+        assert r["current_line"] == 3
