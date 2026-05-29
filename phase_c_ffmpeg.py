@@ -1284,6 +1284,13 @@ def xfade_concat(scene_videos: list, out_path: str,
     """
     durations = [_probe_duration(v) for v in scene_videos]
     include_audio = all(_has_audio_stream(v) for v in scene_videos)
+    # Known limitation (Lane V #25 M1, (c)-deferred per user 2026-05-29): on MIXED
+    # audio-presence inputs (some scenes silent, some not) all() is False, so the whole
+    # stitch goes video-only and audio-bearing scenes lose their audio. Narrow (transitions
+    # are default-OFF) + hedged impact (silent-engine dialogue is recoverable via the
+    # standalone-mp3 amux; embedded-audio may be lost). Revisit with an anullsrc-pad
+    # approach (pad silent inputs to a uniform audio track) if mixed-dialogue + transitions
+    # becomes a target — verify it doesn't disturb the _assemble_final standalone-mp3 mux first.
     t_eff = min(duration, 0.4 * min(durations))
     filter_complex, vlab, alab = _build_xfade_filtergraph(
         durations, t_eff, transition, include_audio=include_audio)
