@@ -1016,7 +1016,7 @@ V time as backstop. Post-codification Lane V catches of symbol-
 divergence are working two-layer defense, not broken codification.
 
 **Codified SHA:** `8ab0bbb` (Protocol Bundle v5.1 ship; filled per
-chicken-and-egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b`
+chicken-and-egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `7da49ed`
 / v4.1 `509db7c` / v5 `d66690f`). Empirical basis: Lane V #6 F1
 (N=1; closed at `6c1171a`) + Lane V #8 spec-reviewer prompt preventive
 application (N=2; 0 divergences). Codified per the N=2 codification
@@ -1309,7 +1309,7 @@ consent path (R11 cleanliness; not required for `both`-annotated rules
 but customary).
 
 **Codified SHA:** `61cac6d` (Protocol Bundle v5.2 ship; filled per chicken-and-egg
-precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1 `509db7c` /
+precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `7da49ed` / v4.1 `509db7c` /
 v5 `d66690f` / v5.1 `8ab0bbb`). Empirical basis: N=2 cumulative —
 **B-005** (cycle-11, `c296105`; first operator-driven Lane B; 10 sites
 in `domain/project_manager.py`; ~45min operator wall-clock; ~295k
@@ -1509,7 +1509,7 @@ explicit-consent customary path. Operator-seat (drafter) consented
 affirmatively in proposal sign-off (`dc7df5d`).
 
 **Codified SHA:** `24c145a` (Protocol Bundle v5.3 ship; filled per chicken-and-
-egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1
+egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `7da49ed` / v4.1
 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2 `61cac6d`). Empirical
 basis: N=2 cumulative — **`442e154`** (cycle-12; director closes
 operator's Lane V #12 I1 — IMPORTANT-advisory severity; ValidationError-
@@ -1595,7 +1595,7 @@ complementary parallel work is a specialization, not a hierarchy shift).
 
 **Codified SHA:** `7773502` (Protocol Bundle
 v5.4 ship; filled per chicken-and-egg precedent — v2 `3e57ddf` / v3
-`d8f2407` / v4 `d90036b` / v4.1 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb`
+`d8f2407` / v4 `7da49ed` / v4.1 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb`
 / v5.2 `61cac6d` / v5.3 `24c145a`). Empirical basis: **N=3 cumulative**
 Shape-A instances (cycle-16-entry T19:19Z dispatch-claim race +
 cycle-16-mid T22:25Z synthesis-doc + proposal race + cycle-16-mid T22:53Z
@@ -1699,7 +1699,7 @@ scouting + Rule #12/#13 audits. Symmetric — no asymmetric-veto path.
 
 **Codified SHA:** `52658eb` (Protocol Bundle v5.5 ship; filled
 per chicken-and-egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4
-`d90036b` / v4.1 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2
+`7da49ed` / v4.1 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2
 `61cac6d` / v5.3 `24c145a` / v5.4 `7773502`). **Forward-looking
 codification:** the feature is unavailable in the current runtime
 (`claude --version` 2.1.74 / session 2.1.149, both < 2.1.154), so this
@@ -1809,7 +1809,7 @@ justification was corrected (both seniors, independently — the convergence is 
 proof it was wrong).
 
 **Codified SHA:** `4eecb72` (Protocol Bundle v5.6 ship; filled per
-chicken-and-egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1
+chicken-and-egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `7da49ed` / v4.1
 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2 `61cac6d` / v5.3 `24c145a` / v5.4
 `7773502` / v5.5 `52658eb`). **Forward-looking:** no dogfood result yet — the
 graduation metrics are the first data, post-launch. **F1 facts at ship:** no F1
