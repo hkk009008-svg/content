@@ -1204,7 +1204,7 @@ def _probe_duration(path: str) -> float:
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "json", path],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, timeout=30, check=True,
     )
     return float(json.loads(probe.stdout)["format"]["duration"])
 
@@ -1242,8 +1242,7 @@ def _build_xfade_filtergraph(durations: list, duration: float, transition: str):
         audio_parts.append(f"[{prev_a}][{j + 1}:a]acrossfade=d={t}[{alabel}]")
         prev_v = vlabel
         prev_a = alabel
-        if j + 1 < n:
-            cumulative += durations[j + 1]
+        cumulative += durations[j + 1]
 
     filter_complex = ";".join(video_parts + audio_parts)
     return filter_complex, f"v{n - 1}", f"a{n - 1}"
@@ -1272,5 +1271,13 @@ def xfade_concat(scene_videos: list, out_path: str,
         "-c:a", "aac", "-b:a", "192k",
         out_path,
     ]
-    subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+    except subprocess.CalledProcessError as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "xfade_concat ffmpeg failed: %s",
+            exc.stderr.decode(errors="replace") if exc.stderr else exc,
+        )
+        raise
     return out_path
