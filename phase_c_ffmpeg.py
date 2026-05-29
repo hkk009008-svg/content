@@ -1193,3 +1193,17 @@ def two_pass_loudnorm(
         f"measured I={measured['input_i']} → target I={target_i}"
     )
     return True
+
+
+# ---------------------------------------------------------------------------
+# Scene-transition helpers (xfade / acrossfade)
+# ---------------------------------------------------------------------------
+
+def _probe_duration(path: str) -> float:
+    """Return the duration of a media file in seconds via ffprobe."""
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "json", path],
+        capture_output=True, text=True, timeout=30,
+    )
+    return float(json.loads(probe.stdout)["format"]["duration"])
