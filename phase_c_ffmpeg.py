@@ -1209,17 +1209,35 @@ def _probe_duration(path: str) -> float:
     return float(json.loads(probe.stdout)["format"]["duration"])
 
 
+def _has_audio_stream(path: str) -> bool:
+    """Return True if the media file has at least one audio stream (via ffprobe).
+
+    The default silent-video motion path (Kling-Native image2video, LTX, base
+    Veo without audio-drive) produces clips with no audio stream; xfade_concat
+    uses this to decide whether an acrossfade chain is valid (Lane V #24 F1).
+    """
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a",
+         "-show_entries", "stream=index", "-of", "json", path],
+        capture_output=True, text=True, timeout=30, check=True,
+    )
+    return bool(json.loads(probe.stdout).get("streams"))
+
+
 def _fmt(x: float) -> str:
     """Format a float for an ffmpeg filter arg: strip trailing zeros (8.0 -> '8', 3.5 -> '3.5')."""
     return f"{x:.6f}".rstrip("0").rstrip(".")
 
 
-def _build_xfade_filtergraph(durations: list, duration: float, transition: str):
+def _build_xfade_filtergraph(durations: list, duration: float, transition: str,
+                             include_audio: bool = True):
     """Build a chained xfade (video) + acrossfade (audio) filter_complex string.
 
     Returns (filter_complex, final_video_label, final_audio_label).
     Requires len(durations) >= 2. Offset for junction j is
-    sum(durations[0..j]) - (j+1)*duration.
+    sum(durations[0..j]) - (j+1)*duration. When include_audio is False, no
+    acrossfade chain is emitted and the returned audio label is None
+    (video-only output — used when inputs have no audio stream; Lane V #24 F1).
     """
     n = len(durations)
     if n < 2:
@@ -1234,43 +1252,52 @@ def _build_xfade_filtergraph(durations: list, duration: float, transition: str):
     for j in range(n - 1):
         offset = cumulative - (j + 1) * duration
         vlabel = f"v{j + 1}"
-        alabel = f"a{j + 1}"
         video_parts.append(
             f"[{prev_v}][{j + 1}:v]xfade=transition={transition}:"
             f"duration={t}:offset={_fmt(offset)}[{vlabel}]"
         )
-        audio_parts.append(f"[{prev_a}][{j + 1}:a]acrossfade=d={t}[{alabel}]")
         prev_v = vlabel
-        prev_a = alabel
+        if include_audio:
+            alabel = f"a{j + 1}"
+            audio_parts.append(f"[{prev_a}][{j + 1}:a]acrossfade=d={t}[{alabel}]")
+            prev_a = alabel
         cumulative += durations[j + 1]
 
     filter_complex = ";".join(video_parts + audio_parts)
-    return filter_complex, f"v{n - 1}", f"a{n - 1}"
+    return filter_complex, f"v{n - 1}", (f"a{n - 1}" if include_audio else None)
 
 
 def xfade_concat(scene_videos: list, out_path: str,
                  duration: float = 0.5, transition: str = "dissolve") -> str:
-    """Chain per-scene videos with xfade (video) + acrossfade (audio).
+    """Chain per-scene videos with xfade (video) + conditional acrossfade (audio).
 
     Probes each scene's duration, clamps the transition to fit the shortest
     scene, builds the filtergraph, and re-encodes once to out_path.
     Requires len(scene_videos) >= 2 (caller guarantees). Returns out_path.
     Raises on ffmpeg failure (caller falls back to a plain concat).
+
+    Audio is crossfaded ONLY when every input has an audio stream; otherwise the
+    output is video-only. The default silent-video motion path (Kling-Native/LTX)
+    has no audio stream, where emitting an acrossfade referenced a non-existent
+    [0:a] and errored -> the caller silently hard-cut (Lane V #24 F1). Downstream
+    _assemble_final owns the dialogue/BGM/foley mix on every path.
     """
     durations = [_probe_duration(v) for v in scene_videos]
+    include_audio = all(_has_audio_stream(v) for v in scene_videos)
     t_eff = min(duration, 0.4 * min(durations))
-    filter_complex, vlab, alab = _build_xfade_filtergraph(durations, t_eff, transition)
+    filter_complex, vlab, alab = _build_xfade_filtergraph(
+        durations, t_eff, transition, include_audio=include_audio)
 
     cmd = ["ffmpeg", "-y"]
     for v in scene_videos:
         cmd += ["-i", v]
-    cmd += [
-        "-filter_complex", filter_complex,
-        "-map", f"[{vlab}]", "-map", f"[{alab}]",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
-        "-c:a", "aac", "-b:a", "192k",
-        out_path,
-    ]
+    cmd += ["-filter_complex", filter_complex, "-map", f"[{vlab}]"]
+    if include_audio:
+        cmd += ["-map", f"[{alab}]"]
+    cmd += ["-c:v", "libx264", "-preset", "fast", "-crf", "20"]
+    if include_audio:
+        cmd += ["-c:a", "aac", "-b:a", "192k"]
+    cmd += [out_path]
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=300)
     except subprocess.CalledProcessError as exc:

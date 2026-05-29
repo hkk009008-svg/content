@@ -56,6 +56,7 @@ class TestXfadeConcat(unittest.TestCase):
             return m
 
         with mock.patch.object(pcf, "_probe_duration", side_effect=durations), \
+             mock.patch.object(pcf, "_has_audio_stream", return_value=True), \
              mock.patch("subprocess.run", side_effect=fake_run):
             out = pcf.xfade_concat(scene_videos, "/out/final.mp4", duration=duration)
         return out, captured["cmd"]
@@ -78,3 +79,74 @@ class TestXfadeConcat(unittest.TestCase):
         joined = " ".join(cmd)
         assert "duration=0.2" in joined
         assert "acrossfade=d=0.2" in joined
+
+
+class TestHasAudioStream(unittest.TestCase):
+    def test_true_when_audio_stream_present(self):
+        payload = json.dumps({"streams": [{"index": 1}]})
+
+        def fake_run(cmd, **kwargs):
+            self.assertIn("-select_streams", cmd)
+            m = mock.MagicMock()
+            m.stdout = payload
+            m.returncode = 0
+            return m
+
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            assert pcf._has_audio_stream("/clip.mp4") is True
+
+    def test_false_when_no_audio_stream(self):
+        payload = json.dumps({"streams": []})
+
+        def fake_run(cmd, **kwargs):
+            m = mock.MagicMock()
+            m.stdout = payload
+            m.returncode = 0
+            return m
+
+        with mock.patch("subprocess.run", side_effect=fake_run):
+            assert pcf._has_audio_stream("/clip.mp4") is False
+
+
+class TestBuildXfadeFiltergraphVideoOnly(unittest.TestCase):
+    def test_include_audio_false_omits_acrossfade(self):
+        fg, vlab, alab = pcf._build_xfade_filtergraph(
+            [4.0, 5.0], 0.5, "dissolve", include_audio=False)
+        assert "xfade=transition=dissolve" in fg
+        assert "acrossfade" not in fg
+        assert vlab == "v1"
+        assert alab is None
+
+
+class TestXfadeConcatAudioPresence(unittest.TestCase):
+    def _run(self, durations, has_audio):
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            m = mock.MagicMock()
+            m.returncode = 0
+            return m
+
+        with mock.patch.object(pcf, "_probe_duration", side_effect=durations), \
+             mock.patch.object(pcf, "_has_audio_stream", return_value=has_audio), \
+             mock.patch("subprocess.run", side_effect=fake_run):
+            pcf.xfade_concat(["/s0.mp4", "/s1.mp4"], "/out.mp4")
+        return " ".join(captured["cmd"])
+
+    def test_silent_inputs_produce_video_only_command(self):
+        # F1 regression (Lane V #24): silent (no-audio) inputs must NOT emit
+        # acrossfade or an audio -map. Real ffmpeg errors when [0:a] is referenced
+        # on silent clips (default Kling-Native path is silent-video), which
+        # silently fell back to hard cuts — a dead toggle.
+        joined = self._run([4.0, 5.0], has_audio=False)
+        assert "xfade=transition=dissolve" in joined, "video xfade must remain"
+        assert "acrossfade" not in joined, "F1: no acrossfade for silent inputs"
+        assert "-map [a" not in joined, "F1: no audio map for silent inputs"
+
+    def test_audio_inputs_keep_acrossfade(self):
+        # Embedded-audio engines (Omnihuman/Veo): inputs have audio -> preserve the
+        # acrossfade + audio map so the downstream amix still finds [0:a] dialogue.
+        joined = self._run([4.0, 5.0], has_audio=True)
+        assert "acrossfade=d=" in joined, "audio present -> keep acrossfade"
+        assert "-map [a1]" in joined
