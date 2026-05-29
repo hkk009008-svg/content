@@ -1307,10 +1307,13 @@ def xfade_concat(scene_videos: list, out_path: str,
     Requires len(scene_videos) >= 2 (caller guarantees). Returns out_path.
     Raises on ffmpeg failure (caller falls back to a plain concat).
 
-    Audio is crossfaded ONLY when every input has an audio stream; otherwise the
-    output is video-only. The default silent-video motion path (Kling-Native/LTX)
-    has no audio stream, where emitting an acrossfade referenced a non-existent
-    [0:a] and errored -> the caller silently hard-cut (Lane V #24 F1). Downstream
+    Audio has three cases: all inputs carry audio -> streams are crossfaded
+    directly; no input carries audio -> output is video-only (the default
+    silent-video motion path, Kling-Native/LTX, has no audio stream, where
+    emitting an acrossfade once referenced a non-existent [0:a] and errored ->
+    the caller silently hard-cut, Lane V #24 F1); mixed audio-presence -> silent
+    legs are anullsrc-padded and every leg normalized so embedded audio is
+    preserved across the stitch rather than dropped (Lane V #25 M1). Downstream
     _assemble_final owns the dialogue/BGM/foley mix on every path.
     """
     durations = [_probe_duration(v) for v in scene_videos]
