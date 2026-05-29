@@ -406,8 +406,8 @@ This is how to catch the plan being wrong without blocking on a re-spec.
   preserves the audit trail showing what the reviewer caught.
 - **Commit message convention:** `<type>(<scope>): <subject>` plus a
   short body explaining the *why* if non-obvious. End with the
-  `Co-Authored-By: Claude Opus 4.7 (1M context)` trailer that Claude Code
-  injects by default.
+  `Co-Authored-By:` trailer Claude Code injects by default (whatever the
+  active model is — `Claude Opus 4.8 (1M context)` at present).
 
 ## Context hygiene (the long-session rule)
 
