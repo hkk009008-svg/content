@@ -134,3 +134,37 @@ def test_generate_video_passes_config_not_toplevel_kwargs():
     cfg = captured["config"]
     assert cfg.generate_audio is True
     assert cfg.reference_images is not None and len(cfg.reference_images) == 1
+
+
+def test_driving_video_not_passed_alongside_image():
+    """SDK: `image` and `video` are mutually exclusive ("Not allowed if image is
+    provided"). A driving clip must NOT be added as `video=` next to the start
+    image, or the whole generation fails server-side. Image-only is correct."""
+    api = VeoNativeAPI.__new__(VeoNativeAPI)
+    api._model = "veo-3.1-generate-001"
+    captured = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return _completed_operation()
+
+    api.client = MagicMock()
+    api.client.models.generate_videos.side_effect = _capture
+    api.client.operations.get.side_effect = lambda o: o
+    api.client.files.download.return_value = b"\x00"
+
+    fake_img = types.Image(gcs_uri="gs://x/y.png")
+    with patch("veo_native.os.path.exists", return_value=True), \
+         patch("veo_native.os.path.getsize", return_value=10), \
+         patch("google.genai.types.Image.from_file", return_value=fake_img), \
+         patch("builtins.open", mock_open()):
+        api.generate_video(
+            image_path="/tmp/frame.png",
+            prompt="hello",
+            output_path="/tmp/out.mp4",
+            driving_video_path="/tmp/drive.mp4",
+            generate_audio=False,
+        )
+
+    assert "video" not in captured   # image-only; no mutual-exclusion conflict
+    assert "image" in captured

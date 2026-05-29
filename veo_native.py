@@ -121,13 +121,14 @@ class VeoNativeAPI:
             duration: Video duration — "5s", "6s", or "8s".
             resolution: Output resolution — "720p" or "1080p".
             generate_audio: If True, Veo generates synced audio (use for dialogue scenes).
-            driving_video_path: Optional path to a performance-capture clip
-                (produced by the performance/ engine adapters). When provided
-                AND the file is readable, Veo accepts it as a ``reference_video``
-                for motion conditioning — the character moves like the clip
-                while compositionally respecting the start image. Falls through
-                silently when the file is missing OR when the installed Vertex
-                SDK doesn't expose the reference_video field (older builds).
+            driving_video_path: Optional path to a performance-capture clip.
+                NOT currently applied. The SDK's video input (`video=` /
+                `source.video`) is for video *extension* and is mutually
+                exclusive with the start `image` we always supply ("Not allowed
+                if image is provided"), so a driving clip cannot condition an
+                image-to-video call here. Accepted for interface stability;
+                wiring motion conditioning needs a separate GenerateVideosSource
+                design (spec §4.2). Currently image-only.
 
         Returns:
             output_path on success, None on failure.
@@ -172,18 +173,19 @@ class VeoNativeAPI:
                 "config": config,
             }
 
-            # Driving-video motion conditioning goes via the SDK's top-level
-            # ``video=`` param (NOT a kwarg the SDK rejects). Preserve version
-            # robustness: skip silently if the installed SDK lacks types.Video.
+            # NOTE: driving-video motion conditioning is NOT wired on this path.
+            # The SDK's only video input (`video=` / `source.video`) is for video
+            # *extension* and is mutually exclusive with `image=` (SDK: "Not
+            # allowed if image is provided"). Since we always supply a start
+            # image, a driving clip cannot ride along an image-to-video call here.
+            # Applying motion conditioning needs a separate GenerateVideosSource
+            # design (spec §4.2). Until then the param is accepted for interface
+            # stability but the call is image-only — we must NOT add `video=`
+            # alongside `image=`, or the whole generation fails server-side.
             if driving_video_path and os.path.exists(driving_video_path):
-                try:
-                    generate_kwargs["video"] = types.Video.from_file(location=driving_video_path)  # type: ignore[attr-defined]
-                    print(f"[VEO-NATIVE] Driving video loaded: {os.path.basename(driving_video_path)}")
-                except AttributeError:
-                    # Older SDK — no Video type. Skip silently; baseline image-to-video.
-                    print(f"[VEO-NATIVE] reference_video not supported by installed SDK; using image-only path")
-                except Exception as _e:
-                    print(f"[VEO-NATIVE] driving_video load failed ({_e}); using image-only path")
+                print(f"[VEO-NATIVE] Driving video provided but not wired on the "
+                      f"image-to-video path (SDK image/video are mutually exclusive); "
+                      f"proceeding image-only: {os.path.basename(driving_video_path)}")
 
             # Submit generation
             operation = self.client.models.generate_videos(**generate_kwargs)
