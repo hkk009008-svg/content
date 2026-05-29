@@ -1247,3 +1247,30 @@ def _build_xfade_filtergraph(durations: list, duration: float, transition: str):
 
     filter_complex = ";".join(video_parts + audio_parts)
     return filter_complex, f"v{n - 1}", f"a{n - 1}"
+
+
+def xfade_concat(scene_videos: list, out_path: str,
+                 duration: float = 0.5, transition: str = "dissolve") -> str:
+    """Chain per-scene videos with xfade (video) + acrossfade (audio).
+
+    Probes each scene's duration, clamps the transition to fit the shortest
+    scene, builds the filtergraph, and re-encodes once to out_path.
+    Requires len(scene_videos) >= 2 (caller guarantees). Returns out_path.
+    Raises on ffmpeg failure (caller falls back to a plain concat).
+    """
+    durations = [_probe_duration(v) for v in scene_videos]
+    t_eff = min(duration, 0.4 * min(durations))
+    filter_complex, vlab, alab = _build_xfade_filtergraph(durations, t_eff, transition)
+
+    cmd = ["ffmpeg", "-y"]
+    for v in scene_videos:
+        cmd += ["-i", v]
+    cmd += [
+        "-filter_complex", filter_complex,
+        "-map", f"[{vlab}]", "-map", f"[{alab}]",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "192k",
+        out_path,
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+    return out_path
