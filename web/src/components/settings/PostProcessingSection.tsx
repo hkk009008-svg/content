@@ -75,6 +75,25 @@ export function PostProcessingSection({ s, update }: Props) {
           min={0.1} max={0.5} step={0.05} defaultValue={0.3}
           hint="Max color histogram drift before triggering prompt adjustment. Lower = stricter." />
       )}
+
+      {/* Scene Transitions Toggle */}
+      <div className="flex items-center gap-2 bg-editorial-ink rounded-lg px-3 py-2 border border-editorial-rule">
+        <input type="checkbox"
+          checked={s.scene_transitions === true}
+          onChange={e => update('scene_transitions', e.target.checked)}
+          className="accent-editorial-brass" />
+        <div>
+          <span className="text-eyebrow text-editorial-ivory font-medium">Scene Transitions</span>
+          <p className="text-eyebrow-sm text-editorial-ivory-mute">Cross-dissolve between scenes (re-encodes on assembly)</p>
+        </div>
+      </div>
+
+      {/* Transition Duration */}
+      {s.scene_transitions === true && (
+        <Slider label="Transition duration (s)" field="transition_duration" s={s} update={update}
+          min={0.2} max={2.0} step={0.1} defaultValue={0.5}
+          hint="Length of the cross-dissolve in seconds." />
+      )}
     </SettingsSection>
   )
 }
