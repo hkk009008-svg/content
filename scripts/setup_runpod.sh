@@ -263,9 +263,7 @@ pip install -q \
     python-dotenv \
     openai \
     moviepy==1.0.3 \
-    whisper \
-    torch \
-    torchvision
+    whisper
 
 # blinker is often pre-installed via distutils on RunPod base images, which
 # blocks pip from upgrading deps that require a newer blinker. --ignore-installed
@@ -276,6 +274,16 @@ pip install -q --ignore-installed blinker || true
 if [ -f "$PROJECT_ROOT/requirements.txt" ]; then
     pip install -q -r "$PROJECT_ROOT/requirements.txt"
 fi
+
+# Pin a MATCHED torch stack as the FINAL word on these versions. ComfyUI hard-imports
+# torchaudio at startup (comfy/sd.py -> ldm/lightricks audio_vae), and torchaudio lags
+# torch (no torchaudio 2.12 build exists yet), so an unpinned torch resolved above (by
+# ComfyUI's or the project's requirements) can leave torch+torchaudio ABI-mismatched ->
+# "undefined symbol ..._ZNK5torch8autograd4Node4nameEv" and ComfyUI fails to start.
+# Install torch/torchvision/torchaudio together at a known-matched set, overriding
+# whatever the requirements above resolved. cu130 verified working on H100 sm_90.
+pip install -q torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
+    --index-url https://download.pytorch.org/whl/cu130
 
 echo "  Done."
 
