@@ -201,7 +201,7 @@ worker is active**, because gate state lives in `project.json`, not in memory.
 | Attribute | Type | Source |
 |---|---|---|
 | `self._core` | `PipelineCore` | [cinema/core.py:62-102](cinema/core.py:62) `build_pipeline_core(pid)` |
-| `self.lifecycle` | `ThreadedLifecycle` | [cinema/lifecycle.py:100](cinema/lifecycle.py:100), fresh per pipeline |
+| `self.lifecycle` | `ThreadedLifecycle` | [cinema/lifecycle.py:110](cinema/lifecycle.py:110), fresh per pipeline |
 | `self._runstate` | `RunState` | [cinema/runstate.py:60](cinema/runstate.py:60), fresh per `__init__` |
 | `self._shot_ctrl` | `ShotController` | [cinema/shots/controller.py](cinema/shots/controller.py) |
 | `self._review_ctrl` | `ReviewController` | [cinema/review/controller.py](cinema/review/controller.py) |
@@ -290,9 +290,21 @@ Long-lived per-project deps (cached in `web_server._running_cores`):
 | `_gate_lock` | `threading.Lock` | Guards `_gate_events` dict only |
 | `_progress_cb` | `Optional[Callable]` | Injected; `None` swallows |
 
-`NullLifecycle` ([cinema/lifecycle.py:64-97](cinema/lifecycle.py:64)) is the
-CLI/test default: every check is no-op, `wait_for_gate` returns True
-immediately.
+`NullLifecycle` ([cinema/lifecycle.py:70-107](cinema/lifecycle.py:70)) is the
+`PipelineContext.lifecycle` default + the test lifecycle: every check is
+no-op, `wait_for_gate` returns True immediately. It is NOT wired into
+`CinemaPipeline` (which always builds `ThreadedLifecycle`); the prior
+non-interactive `main.py` CLI that used it was removed in the web-only pivot.
+
+**Headless runs** — `CinemaPipeline(headless=True)` keeps `ThreadedLifecycle`
+but sets `RunState.headless`, so `ReviewController._wait_for_gate` raises
+`GateNotSatisfiedError` (naming the unsatisfied shots + reasons) instead of
+polling a review gate forever when auto-approve can't clear it. This closes
+the cycle-17 stall where an inline `CinemaPipeline().generate()` hung at
+PLAN_REVIEW: the plan auto-approve rule reads `shot["director_review"]`, which
+nothing wrote until `record_director_review_on_shots`
+([cinema/auto_approve.py](cinema/auto_approve.py)) now persists the
+ChiefDirector verdict at the validation step ([cinema_pipeline.py](cinema_pipeline.py)).
 
 `cancel()` does THREE things atomically:
 1. `_cancelled = True`
@@ -394,7 +406,7 @@ thread polls every 500ms by re-reading project state from disk and asking
 the predicate.
 
 ```python
-# cinema/lifecycle.py:172-188
+# cinema/lifecycle.py:182-198
 def wait_for_gate(self, name, predicate, poll_interval=0.5) -> bool:
     with self._gate_lock:
         ev = self._gate_events.setdefault(name, threading.Event())

@@ -7,8 +7,14 @@ in Slice E (replacing its ad-hoc ``self.cancelled`` / ``self.paused`` /
 injectable service).
 
 Phases poll the service voluntarily at pause-safe points; the driver
-doesn't enforce when. The non-interactive CLI (``main.py``) gets
-``NullLifecycle`` which never blocks and silently swallows progress.
+doesn't enforce when. ``NullLifecycle`` never blocks and silently swallows
+progress -- it is the ``PipelineContext.lifecycle`` default and the test
+lifecycle. (It was also the prior non-interactive ``main.py`` CLI's
+lifecycle, but that CLI was removed in the web-only pivot.) ``CinemaPipeline``
+ALWAYS constructs ``ThreadedLifecycle``; for non-interactive script / E2E
+runs pass ``CinemaPipeline(headless=True)``, which keeps ``ThreadedLifecycle``
+but makes review gates FAIL FAST (``ReviewController.GateNotSatisfiedError``)
+instead of blocking forever when auto-approve can't clear them.
 The interactive web server gets ``ThreadedLifecycle`` which is backed
 by ``threading.Event`` for cancel and pause, a per-gate ``Event`` for
 operator review gates, and an optional progress-callback closure
@@ -65,9 +71,13 @@ class NullLifecycle:
     """No-op LifecycleService.
 
     Cancel always returns False, pause never blocks, gates open
-    immediately, progress is silently dropped. Used by the
-    non-interactive CLI and as the default for ``PipelineContext.lifecycle``
-    so phase code can call ``ctx.lifecycle.X()`` unconditionally.
+    immediately, progress is silently dropped. The default for
+    ``PipelineContext.lifecycle`` (so phase code can call
+    ``ctx.lifecycle.X()`` unconditionally) and the test lifecycle. NOT wired
+    into ``CinemaPipeline``, which always builds ``ThreadedLifecycle``;
+    non-interactive runs use ``CinemaPipeline(headless=True)`` (review gates
+    fail fast, they do NOT open silently). The former ``main.py`` CLI that
+    paired with this was removed in the web-only pivot.
     """
 
     def is_cancelled(self) -> bool:
