@@ -705,3 +705,57 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   ADR-013 (verification discipline). Composition note: `scripts/check_doc_claims.py`
   + `docs/pipeline_status.toml` (operator Increment-2) supply machine-verified
   evidence a doc-truth-sweep workflow should call.
+
+## ADR-019 — Doc-maintenance run as a verifier-scoped dispatch pattern; persistence earned; scope bounded to the Guard-1 line
+
+- **Date:** 2026-05-29
+- **Status:** Accepted
+- **Context:** Documentation drift (stale anchors, superseded refs, unpruned memory
+  ~36.6k, doc-vs-code divergence) is a recurring cross-cutting cost split across both
+  seats as a side-duty (operator's Lane D + ad-hoc). A three-way triangulation (advisor
+  proposal + independent operator + director reads) considered adding a persistent
+  doc-junior. Both seniors INDEPENDENTLY corrected the advisor's central justification:
+  persistence-as-context-accumulation contradicts truth-in-files (ADR-013) — the doc
+  ecosystem already lives in machine-checkable artifacts (the verifier, the manifest,
+  gate-enforced conventions); the durable value is loop-ownership, not memory. Live
+  exhibit during the cycle: the proposal's own provenance cited a closed F1 (`561ad6b`)
+  as open — a prose/status claim the verifier-as-built can't catch, caught only by a
+  senior (the 3rd Guard-1 exhibit this session, with the GitNexus phantom and a wrong
+  Lane V #24 fix-rec).
+- **Decision:** Adopt **Rule #18 (Bundle v5.6)** — doc-maintenance as a **verifier-scoped
+  dispatch pattern**, NOT a standing junior on day one. Scope = the Guard-1 boundary = the
+  carve-out boundary (one line): the role writes the **mechanical/verifier-confirmed slice**
+  directly (anchor-fix, formatting, cross-ref, manifest, pruning); **prose/claim-changing
+  edits → role prepares a diff, a senior verifies and lands it** (spawning seat owns the
+  review). This bounds the carve-out of operator's Lane D — only the mechanical half moves;
+  prose-truth sync stays a senior duty (operator's Rule #11 gating consent is to this
+  bounded carve-out). Guards: (1) prose-truth leash + cite-or-don't-claim; (2) extended
+  race-ack, NOT exclusive ownership (seniors keep inline fixes). Invest **C** — a **bridge**
+  (role and verifier-buildout are partial substitutes; value declines as the verifier
+  matures) with a **sunset review** at each verifier-buildout milestone. Graduation to a
+  standing role requires ALL of: residual > ephemeral-sized (post-automation baseline),
+  N≥3 dispatches re-discovering the same structure, prose-stays-true via R-OP-1 spot-check.
+  Launch surface = line-anchors + manifest symbol-existence + mechanical only.
+- **Consequences:**
+  - +: Offloads a real recurring side-duty to a safe (verifier-checkable) executor; frees
+    operator's Lane D mechanical half; composes with the verifier (un-hallucinatable
+    evidence) and Rule #17; beneficiary both; reversible (a bridge, not a hire).
+  - −: Forward-looking — no dogfood yet; the graduation metrics are the first data.
+    Per-dispatch cost folds into session cost (not separately exposed).
+  - −: May self-obsolete by design as the verifier-buildout proceeds — a feature of the
+    honest framing, not a flaw.
+- **Alternatives considered:**
+  - Persistent doc-junior on day one (advisor's original): rejected — persistence-as-memory
+    contradicts truth-in-files; persistence must be earned, not granted.
+  - Extract ALL of Lane D to the role: rejected (operator's §B) — incoherent, since Lane D
+    includes prose-truth sync the Guard-1 leash bars the role from owning.
+  - Exclusive doc-ownership to the role: rejected — grants persistence's privileges before
+    earned; seniors lose inline fixes. Extended race-ack instead.
+  - Verifier-buildout only, no role (invest A): viable but leaves the partial-verifier
+    residual unhandled now; the sequenced bridge (C) handles it while the verifier matures.
+- **Tracking:** principal synthesis `PROPOSAL-doc-maintenance-role-v1.md` (user-mediated) ·
+  operator REPLY `d385bb2` (bounded carve-out consent) · director REPLY `d5f3bb6` (consent +
+  F1 provenance fix + spawning-seat reviewer) · Rule #18 codified at `__V56_SHIP_SHA__`.
+- **Cross-ref:** CLAUDE.md Rule #18; Rules #9 (CC-2 / R-OP-1), #12, #13, #14, #17, Lane C/D/S;
+  ADR-013 (verification discipline), ADR-016 (GitNexus phantom), ADR-018 (Rule #17).
+  `scripts/check_doc_claims.py` + `docs/pipeline_status.toml` are the role's instruments.

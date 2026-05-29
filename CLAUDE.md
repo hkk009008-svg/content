@@ -1710,6 +1710,116 @@ direction); operator-seat consented affirmatively + added R-OP-1 (folded
 into guardrail 2 + C2) in REPLY `afb2c75`
 (`2026-05-29T01-26-32Z`); director-seat ships per Sh role partition.
 
+## Doc-maintenance as a verifier-scoped dispatch pattern (Rule #18)
+
+**Rule #18: Doc-maintenance as a verifier-scoped dispatch pattern.**
+*(Subtitle: a librarian wielding the verifier — persistence earned, not granted; a bridge that may self-retire.)*
+
+Documentation drift (stale anchors, superseded refs, unpruned memory, doc-vs-code
+divergence) is a real, recurring, cross-cutting cost, currently a side-duty split
+across both seats (operator's Lane D + ad-hoc). It MAY be consolidated into a
+**doc-maintenance dispatch** — a librarian wielding `scripts/check_doc_claims.py`,
+the manifest, and the written conventions — subject to the boundary, guards, and
+graduation criteria below. The role is NOT a third coder and NOT (initially) a
+standing agent: it is **a dedicated executor of the truth-machinery already built**.
+Its value is **loop-ownership, not memory** — the doc ecosystem lives in
+machine-checkable artifacts (the verifier knows stale anchors; the manifest IS the
+cross-ref web; conventions are gate-enforced), so optimizing for an agent's
+accumulated memory would contradict truth-in-files (ADR-013). Give it good
+instruments and a narrow shelf, not a long memory and a broad mandate.
+
+**Form — dispatch pattern first; persistence EARNED.** Run it as a dispatch (a
+senior spawns a doc-maintenance task with the doc-map + verifier + conventions in
+the prompt), NOT a persistent agent on day one. This *tests* rather than assumes
+whether cross-task context compounds. Graduate to a standing role ONLY on the
+evidence in "Graduation" below; if fresh-prompt dispatches keep re-supplying the
+structure from the artifacts, ephemeral was always sufficient (learned cheaply).
+
+**Scope = the Guard-1 boundary = the carve-out boundary (one line).** The role OWNS
+(writes directly) only the **mechanical / verifier-confirmed** slice: anchor
+`--fix`, formatting, cross-reference repair, `docs/pipeline_status.toml` updates,
+memory pruning per the one-line-hook discipline, sweeping the claim types the
+verifier covers. The role does NOT autonomously edit **prose / claims** in
+truth-files (ARCHITECTURE.md, CLAUDE.md, ADRs, memory): any **claim-changing edit**
+→ the role **prepares a diff; a senior verifies the claim and lands it** (the senior
+owns the hot-file write + Rule #5/#7 race-ack). "Keep the docs true and clean"
+(role) vs. "decide what is true" (seniors). This **bounds the carve-out of operator's
+Lane D**: the mechanical half moves to the role; the **prose-truth half stays a senior
+duty** (operator's Rule #11 gating consent is to THIS bounded carve-out only — Lane D
+includes prose-sync, which Guard 1 bars the role from owning).
+
+**Guard 1 — the leash on load-bearing docs (prose is the catch).** A "mechanical"
+edit can still introduce a **false claim** the verifier cannot detect (it checks
+anchors + symbol existence, NOT whether a paragraph is *true*). THREE live exhibits
+this session: the GitNexus phantom (ADR-016 — a doc asserting a tool that never
+existed, survived 66 sessions); a Lane V #24 video-only fix-rec that was confidently
+wrong (would have regressed dialogue); and the doc-maintenance proposal's OWN
+provenance citing a closed F1 (`561ad6b`) as open. All prose/status claims the
+verifier-as-built would NOT catch; each caught only by a senior who knew the live
+state. **Therefore:** the role is autonomous ONLY on verifier-confirmed or non-claim
+edits; every claim-changing edit is verifier-backed or senior-reviewed, inheriting
+cite-or-don't-claim (ADR-013). **The spawning seat owns the review** of that
+dispatch's claim-changing edits (parallel to Rule #17 guardrail 4).
+
+**Guard 2 — write-contention, not coordination ceremony.** The role's docs
+(ARCHITECTURE.md, CLAUDE.md, memory) are the most-contended files in the repo.
+Decision for the experiment: **extended race-ack, NOT exclusive ownership** — the
+role writes the low-contention mechanical slice directly; claim-changing edits go via
+patch-then-senior-lands (so seniors keep inline doc-fixes; exclusive ownership grants
+persistence's privileges before earned and is a graduation-time question only). Doc
+work is largely serializable/idempotent (the verifier's drift-list is the natural
+FIFO backlog), so direct collisions are rare and git-tiebreak + race-ack handle them.
+
+**Invest posture — C (sequenced bridge) + sunset review.** The role and the
+verifier-buildout are **partial substitutes** (more automated claim-types = less
+hand-work), so the role's value is **highest today** (verifier covers only
+line-anchors + manifest symbol-existence) and **declines** as operator builds out
+marker-strings / SHA-refs / file-paths per the N=2 threshold. Run the dispatch now,
+framed explicitly as a **bridge that may retire**, with a **sunset review** at each
+verifier-buildout milestone. (Priority signal from the F1-citation exhibit: the
+**SHA-ref claim-type checker** would catch that mis-citation class by construction —
+worth bumping in the buildout.)
+
+**Launch surface (today):** line-anchors + manifest symbol-existence + mechanical ops
+ONLY. Marker-strings / SHA-refs / file-paths are OUT of launch scope (not yet
+automated → hand-work → prose-adjacent → senior) until the verifier covers them.
+
+**Graduation (dispatch → standing role) requires ALL of:** (a) residual doc-load
+POST-automation meaningfully larger than ephemeral-subagent-sized (measured against
+the post-automation baseline, NOT today's build-spike); (b) **N≥3 dispatches
+re-discovering the same ecosystem structure** (a higher bar than the N=2
+codification threshold); (c) prose stays TRUE under the role's own work, via the
+R-OP-1 spot-check applied to the role's prepared diffs. Anchors-green is necessary
+but NOT sufficient.
+
+**Composition.** The verifier is the instrument (`check_doc_claims.py` → machine-
+verified citations, closing the R-OP-1 fabrication gap by construction for covered
+claim types). Rule #17: a one-time codebase-wide doc audit is a Rule #17 read-analysis
+workflow; this role *runs* the verifier continuously — same instrument, different
+cadence. Rule #14 orthogonal (governs implementation dispatch; this governs
+doc-maintenance; implementation stays subagent-driven). Rules #12/#13 audits are
+doc-maintenance inputs. ADR-013 inherited on every claim-changing edit.
+
+**Beneficiary (per R11): `both`.** The consolidation cost lands on operator (Lane D
+carve-out) → operator's consent was REQUIRED, not customary; **given, bounded to the
+mechanical slice** (REPLY `d385bb2`). Director consents (REPLY `d5f3bb6`), resolving
+its inline-doc-fix stake toward extended-race-ack (non-blocking). The advisor's
+needs-driven framing + librarian metaphor stand; only the persistence-as-memory
+justification was corrected (both seniors, independently — the convergence is the
+proof it was wrong).
+
+**Codified SHA:** `__V56_SHIP_SHA__` (Protocol Bundle v5.6 ship; filled per
+chicken-and-egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1
+`509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2 `61cac6d` / v5.3 `24c145a` / v5.4
+`7773502` / v5.5 `52658eb`). **Forward-looking:** no dogfood result yet — the
+graduation metrics are the first data, post-launch. **F1 facts at ship:** no F1
+open (scene-transitions F1 closed `1f9d46b`, operator-acked `35c530c`; the
+proposal's `561ad6b`-open citation was a stale conflation — `561ad6b` is the
+2026-05-28 dialogue feat whose own F1 closed `d3fcfb0` — corrected here per ADR-013).
+Principal-originated synthesis of the advisor/operator/director triangulation;
+both seats consented (operator bounded carve-out + director); director-seat ships
+per Sh role partition. ADR-019.
+
 ## Disagreement protocol (v5)
 
 Generalizes v4's R-V1 counter precedent. When operator-seat disagrees
