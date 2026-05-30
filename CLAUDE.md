@@ -28,6 +28,28 @@ Concrete protocol at session start (≤2 minutes):
 
 Trust the code; update the prose when it diverges.
 
+# The user-principal's intent for this program (read PROGRAM-MANUAL.md)
+
+**The user-principal has designated [docs/PROGRAM-MANUAL.md](docs/PROGRAM-MANUAL.md)
+— with the dense per-subsystem research in
+[docs/PROGRAM-MANUAL-digests.md](docs/PROGRAM-MANUAL-digests.md) — as the canonical
+expression of their intent for this program.** This is a standing directive to
+every seat, current and future, director and operator: read the manual early in a
+session to internalize *what we are building* and *how the user wants it operated*.
+
+- **What the program is for** — turning a script/idea into finished, photorealistic
+  cinematic video with synced audio (manual §1–§2).
+- **How the user wants it driven** — to realize the program's **full capability**.
+  The capability-maximization user manual (§5: quality tiers, the capability-knobs
+  playbook, the "to maximize X, do Y" recipes) is the direct statement of that
+  intent; §3/§4/§6 show how the machine interconnects so changes respect the whole.
+
+When a decision trades off against *realizing the program's full capability for AI
+video generation*, that is a trade against the user's stated intent — surface it
+rather than silently making the call. The manual defines what "good" means here;
+keep it true as the code evolves (same staleness discipline as `ARCHITECTURE.md`:
+if a change makes a manual claim stale, fix the manual in the same change).
+
 # Repo doc map
 
 | Need to | Read |
