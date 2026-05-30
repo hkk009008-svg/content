@@ -169,13 +169,26 @@ no longer sweep the other's staged WIP (the `2c5ca05` /
 own `GIT_INDEX_FILE` + role marker:
 
 ```bash
-# director session
+# director session (run in the shared tree, BEFORE launching `claude`)
+cd /Users/hyungkoookkim/Content
 export CLAUDE_SEAT=director
-export GIT_INDEX_FILE="$(git rev-parse --git-dir)/index-director"
-# operator session
+export GIT_INDEX_FILE="$(git rev-parse --absolute-git-dir)/index-director"
+[ -f "$GIT_INDEX_FILE" ] || git read-tree HEAD   # seed a fresh per-seat index from HEAD
+claude
+
+# operator session (separate terminal, same tree)
+cd /Users/hyungkoookkim/Content
 export CLAUDE_SEAT=operator
-export GIT_INDEX_FILE="$(git rev-parse --git-dir)/index-operator"
+export GIT_INDEX_FILE="$(git rev-parse --absolute-git-dir)/index-operator"
+[ -f "$GIT_INDEX_FILE" ] || git read-tree HEAD
+claude
 ```
+
+The `git read-tree HEAD` seed is **required**: a fresh `GIT_INDEX_FILE` is an
+empty index, so without it `git status` reports every tracked file as a phantom
+deletion (verified: 555 phantoms vs 0 after seeding). It writes only the new
+per-seat index — the working tree and the shared index are untouched. On
+relaunch the index already exists, so the seed is skipped.
 
 `CLAUDE_SEAT` (Rule #19) tells the hook which presence file to stamp and lets a
 session self-identify its role. `GIT_INDEX_FILE` gives per-seat staging on the
