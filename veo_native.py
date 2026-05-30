@@ -153,8 +153,14 @@ class VeoNativeAPI:
             image_path: Path to the start frame image.
             prompt: Cinematic text prompt describing the desired motion/scene.
             output_path: Where to save the generated video.
-            reference_images: Optional list of up to 3 image paths for character
-                              preservation across shots.
+            reference_images: Optional list of image paths. NOT applied on this
+                              image-to-video path: config `reference_images` are
+                              mutually exclusive with the start `image` we always
+                              supply (Vertex: "Image and reference images cannot
+                              be both set."), so identity comes from the start
+                              frame (generated upstream from the character's refs).
+                              Accepted for interface stability. (Bug #4; cf. the
+                              driving_video_path note below + f6d6995.)
             duration: Requested video duration. Snapped to the nearest
                 server-valid image_to_video value (4/6/8s) — e.g. "5s" -> 6s —
                 since Veo rejects other values with INVALID_ARGUMENT.
@@ -183,26 +189,27 @@ class VeoNativeAPI:
             # Upload start frame — from_file requires keyword arg 'location'
             start_image = types.Image.from_file(location=image_path)
 
-            # Load reference images for character preservation (up to 3). Loaded
-            # here (I/O); the pure builder wraps them + places them INSIDE the
-            # config. Passing raw Images as a top-level generate_videos kwarg (the
-            # old code) raises TypeError -> Veo fails -> cascade.
-            ref_images = []
+            # Veo image-to-video derives BOTH composition and character identity
+            # from the start frame (the keyframe is generated upstream from the
+            # character's references). The config-level `reference_images` are
+            # MUTUALLY EXCLUSIVE with the start `image` we always supply — Vertex
+            # rejects "Image and reference images cannot be both set." (code 3).
+            # A start frame is present here by construction (guarded above), so
+            # reference_images cannot ride along: accept the param for interface
+            # stability but proceed image-only. Mirrors the driving-video handling
+            # below and the image/video exclusion fixed in f6d6995. (Bug #4.)
             if reference_images:
-                for ref_path in reference_images[:3]:
-                    if os.path.exists(ref_path):
-                        ref_images.append(types.Image.from_file(location=ref_path))
-                        print(f"[VEO-NATIVE] Reference image loaded: {os.path.basename(ref_path)}")
-                    else:
-                        print(f"[VEO-NATIVE] Reference image not found, skipping: {ref_path}")
+                print(f"[VEO-NATIVE] {len(reference_images)} reference image(s) provided but "
+                      f"not applied on the image-to-video path (image/reference_images are "
+                      f"mutually exclusive); identity comes from the start frame.")
 
-            # Thread ALL caller-intent params into the config (audio/duration/
-            # resolution/refs) — see _build_generate_videos_config.
+            # Thread caller-intent params into the config (audio/duration/
+            # resolution). reference_images is intentionally NOT threaded (see above).
             config = _build_generate_videos_config(
                 generate_audio=generate_audio,
                 duration=duration,
                 resolution=resolution,
-                reference_images=ref_images or None,
+                reference_images=None,
             )
 
             generate_kwargs = {

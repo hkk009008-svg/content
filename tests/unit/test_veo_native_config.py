@@ -136,10 +136,50 @@ def test_generate_video_passes_config_not_toplevel_kwargs():
     # The bug fix: NO illegal top-level kwargs
     assert "reference_images" not in captured
     assert "reference_video" not in captured
-    # Audio + refs threaded via the config
+    # Audio threaded via the config; refs NOT threaded — image-to-video uses the
+    # start frame for identity and rejects image+reference_images (Bug #4).
     cfg = captured["config"]
     assert cfg.generate_audio is True
-    assert cfg.reference_images is not None and len(cfg.reference_images) == 1
+    assert not cfg.reference_images
+
+
+def test_reference_images_not_threaded_when_start_image_present():
+    """Veo image-to-video: `image` (start frame) and config `reference_images`
+    are mutually exclusive — Vertex rejects "Image and reference images cannot
+    be both set." (code 3). generate_video ALWAYS supplies a start image (it
+    returns None without one), so reference_images can never ride along: the
+    config must NOT carry them. Identity comes from the start frame. Mirrors the
+    image/video exclusion fixed in f6d6995. (Bug #4, operator live-E2E.)"""
+    api = VeoNativeAPI.__new__(VeoNativeAPI)
+    api._model = "veo-3.1-generate-001"
+    captured = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return _completed_operation()
+
+    api.client = MagicMock()
+    api.client.models.generate_videos.side_effect = _capture
+    api.client.operations.get.side_effect = lambda o: o
+    api.client.files.download.return_value = b"\x00"
+
+    fake_img = types.Image(gcs_uri="gs://x/y.png")
+    with patch("veo_native.os.path.exists", return_value=True), \
+         patch("veo_native.os.path.getsize", return_value=10), \
+         patch("google.genai.types.Image.from_file", return_value=fake_img), \
+         patch("builtins.open", mock_open()):
+        api.generate_video(
+            image_path="/tmp/frame.png",
+            prompt="hello",
+            output_path="/tmp/out.mp4",
+            reference_images=["/tmp/ref1.png", "/tmp/ref2.png"],
+            generate_audio=True,
+        )
+
+    assert "image" in captured            # start frame is the identity source
+    assert "reference_images" not in captured  # never a top-level kwarg
+    cfg = captured["config"]
+    assert not cfg.reference_images       # and NOT threaded into the config
 
 
 def test_driving_video_not_passed_alongside_image():
