@@ -34,6 +34,8 @@ Trust the code; update the prose when it diverges.
 |---|---|
 | Get oriented (purpose + quick start) | [README.md](README.md) |
 | Understand the code (verified truth — what's where, what does what) | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Learn the whole program — macro flow, every subsystem (micro), and how to operate it for maximum capability | [docs/PROGRAM-MANUAL.md](docs/PROGRAM-MANUAL.md) |
+| Dig into the per-subsystem raw research (dense file:line detail behind the manual) | [docs/PROGRAM-MANUAL-digests.md](docs/PROGRAM-MANUAL-digests.md) |
 | Run / configure / troubleshoot | [OPERATIONS.md](OPERATIONS.md) |
 | See WHY the architecture is shaped this way (ADR log) | [DECISIONS.md](DECISIONS.md) |
 | Current leadership critique + forward direction | [docs/STRATEGIC_REVIEW-2026-05-24.md](docs/STRATEGIC_REVIEW-2026-05-24.md) |
