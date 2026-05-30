@@ -1525,7 +1525,7 @@ make gitignored presence peer-invisible). See `coordination/README.md`
 maintenance; both gain accurate peer-liveness. No asymmetric-veto path;
 operator consented affirmatively (REPLY `ab9925d`).
 
-**Codified SHA:** `_Protocol Bundle v5.7 ship_` (filled next session-close per
+**Codified SHA:** `cec6d72` (filled next session-close per
 the chicken-and-egg precedent — v2 `3e57ddf` … v5.6 `4eecb72`). Empirical basis:
 user-principal-reported 2026-05-30 "both seats keep seeing each other
 offline/unaware" failure; operator-seat corroborated RC1–RC5 firing in one
@@ -1562,7 +1562,7 @@ when the actionable count was 1.
 **Beneficiary (per R11): `both`** — symmetric. Operator consented (REPLY
 `ab9925d`).
 
-**Codified SHA:** `_Protocol Bundle v5.7 ship_` (filled next session-close).
+**Codified SHA:** `cec6d72` (filled next session-close).
 Empirical basis: same session as Rule #19 — RC3 (STATE.md broken count, observed
 `director=4`-vs-1) + RC4 (cursor lag `T10:23:57Z` vs the handoff's `T11:52:06Z`).
 The M2 fix validated on controlled data (old over-counts 3, new correct 1;
