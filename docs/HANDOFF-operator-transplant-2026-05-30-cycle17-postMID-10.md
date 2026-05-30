@@ -2,9 +2,9 @@
 
 **From:** Operator-seat (cold-pickup at `842f68f` → drove a big session: the user-invited re-Lane-V of `138d7c7` that became a coalesced Lane V with the live director; authored the comprehensive **PROGRAM-MANUAL.md** + digests via a Rule #17 workflow and codified the user's program intent; drove the **v5.7 Phase-1 operator-half** end-to-end under Rule #14 with full cross-Lane-V both directions; Lane-V'd the director's v5.7 half).
 **To:** Next operator-seat instance, fresh chat.
-**State at handoff:** **HEAD == origin/main == `c5b1549`** (director's `fix(docs): close Lane V L1 + L2`) — run `git log` for live HEAD; the director is **actively shipping**. Tree: director has **uncommitted `MM` changes on `coordination/README.md` + `docs/PROTOCOL-RULES-LOG.md`** (their partition, mid-edit closing my Lane V findings — do NOT touch; pathspec-commit only your own files). Untracked: `.claude/launch.json`, `logs/`, the four `scripts/veo_*`/`run_veo_*` validation scripts (not mine / carry-forward), this handoff.
+**State at handoff:** **HEAD == origin/main == `54f0a32`** (this handoff commit; lands on top of the director's companion handoff `7db6608`). HEAD moved `c5b1549 → 7db6608 → 54f0a32` during this write (Rule #5 race-ack — the director shipped their own transplant handoff in the window). **Run `git log` for live HEAD; the director is actively shipping.** Tree: the director has **uncommitted `MM` on `coordination/README.md` + `docs/PROTOCOL-RULES-LOG.md`** = the **v5.7 SHA-placeholder fill** (`cec6d72`, ~6 sites, per their handoff) — their partition, in-flight; **do NOT touch; pathspec-commit only your own files**. Untracked: `.claude/launch.json`, `logs/`, the four `scripts/veo_*`/`run_veo_*` validation scripts (carry-forward).
 **Supersedes:** [HANDOFF-operator-transplant-2026-05-29-cycle17-postMID-9.md](HANDOFF-operator-transplant-2026-05-29-cycle17-postMID-9.md).
-**Companion (director side):** the director's own transplant handoff (run `ls docs/HANDOFF-director-transplant-*` for the latest). Both seats active + converging all session (Rule #16/#10): I found Bug #4-area issues + the v5.7 footgun, the director fixed; the director Lane-V'd my hook, I closed; mutual.
+**Companion (director side):** `docs/HANDOFF-director-transplant-2026-05-31-cycle17-post-mid-10.md` (`7db6608`). Both seats transplanted together — partitioned closing-reports (director-transplant vs operator-transplant), companions not duplicates, so no Rule #16 convergence event needed. Converged all session (Rule #16/#10): I surfaced the v5.7 L1 footgun + M-A, the director fixed; the director Lane-V'd my M2 hook, I closed; mutual.
 
 ---
 
@@ -68,7 +68,7 @@ Bug #4 (`67a4096`) cleared the last code blocker. `scripts/run_veo_dialogue_test
 1. **D-a activation** (§A/§B) — the **USER** relaunches both seats with `CLAUDE_SEAT`+`GIT_INDEX_FILE`. First **verify the director's `c5b1549` README fix** keeps pathspec mandatory. Until relaunch: KEEP pathspec-commit.
 2. **M-A producer guard** (§C) — optionally claim under Rule #14 (≤5-LoC, `llm/chief_director.py:299`). Director-offered; advisory-MINOR.
 3. **Full-pipeline Veo E2E** (§D) — user-spend-auth + pod-up; operator's tier; the loop-closer.
-4. **L3 + director MM follow-up** — verify the director's README/RULES-LOG settle (their partition; L3 = the C2-fixture-note overstatement, NO-ACTION-able).
+4. **Director-side in-flight (verify settled, NOT yours):** the `MM` on README/RULES-LOG = the **v5.7 SHA-placeholder fill** (`cec6d72`, ~6 "Codified SHA" placeholder sites) + any L3 follow-up (the C2-fixture-note overstatement, NO-ACTION-able). Their partition; just confirm it lands cleanly, don't touch.
 5. **Carry-forward** (unchanged): GPU backlog (HiDream / storyboard / research Part 2 / max-tier SUPIR-HiDream / scene-transitions real-render); hybrid-dialogue-voice-routing build (deferred, `42bd014`); doc-maint graduation N≥3.
 
 ## Cold-start checklist
