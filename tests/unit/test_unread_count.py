@@ -145,42 +145,62 @@ def test_unread_python_empty_sent_is_0():
 
 
 # ---------------------------------------------------------------------------
-# Test 2: Bash function — source the hook and call _unread_for directly
+# Test 2: Bash logic — exercise the REAL _unread_for() FROM the hook.
+#
+# Per Lane V I1/M-2 (both seats flagged it): the test must guard the PRODUCTION
+# function, not a re-pasted copy. We slice _unread_for() verbatim out of
+# .claude/hooks/update-state.sh with awk and run THAT under bash, against a
+# fixture laid out at the hook's real RELATIVE paths
+# (coordination/mailbox/{sent,seen}) under a temp cwd. So a regression in the
+# hook's own _unread_for is caught here — not just in a copy.
 # ---------------------------------------------------------------------------
 
 HOOK_PATH = Path(__file__).parents[2] / ".claude" / "hooks" / "update-state.sh"
 
 
-def _run_bash_unread(sent_dir: Path, seen_dir: Path, role: str) -> int:
-    """
-    Source the hook to pick up _unread_for(), then call it from a subshell
-    that has the correct coordination/mailbox/sent + seen layout.
-    """
-    # The hook does `cd $(git rev-parse --show-toplevel)` at the top, so
-    # we can't just source it in an arbitrary dir. Instead we extract only
-    # the _unread_for function definition + call it with our paths substituted.
-    #
-    # We do this by:
-    # 1. Reading the hook and extracting the _unread_for body.
-    # 2. Running it in a bash -c with overridden paths.
-    script = f"""
-set -euo pipefail
-export LC_ALL=C
-_unread_for() {{
-  local role="$1" cf cur curkey count=0 f ts
-  cf="{seen_dir}/${{role}}.txt"
-  [ -f "$cf" ] || {{ echo 0; return; }}
-  cur=$(tr -d '[:space:]' < "$cf")
-  curkey=$(printf '%s' "$cur" | tr ':' '-')
-  for f in "{sent_dir}"/*-to-"${{role}}"-*.md; do
-    [ -e "$f" ] || continue
-    ts=$(basename "$f"); ts=${{ts:0:20}}
-    [[ "$ts" > "$curkey" ]] && count=$((count+1))
-  done
-  echo "$count"
-}}
-_unread_for "{role}"
-"""
+def _extract_unread_for() -> str:
+    """Slice the real `_unread_for() { … }` body out of the hook (not a copy)."""
+    func = subprocess.run(
+        ["awk", r'/^_unread_for\(\) \{/{p=1} p{print} p&&/^\}/{exit}', str(HOOK_PATH)],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    assert func.strip().startswith("_unread_for()") and func.rstrip().endswith("}"), (
+        f"failed to extract _unread_for() from {HOOK_PATH}:\n{func!r}"
+    )
+    return func
+
+
+def _build_real_fixture(tmp: Path, cursor_content: str, cursor_mtime_ts: float,
+                        with_events: bool = True) -> Path:
+    """Lay out the adversarial fixture at the hook's REAL relative paths
+    (coordination/mailbox/{sent,seen}) under tmp; return tmp (the cwd to run in)."""
+    mb = tmp / "coordination" / "mailbox"
+    sent = mb / "sent"; seen = mb / "seen"
+    sent.mkdir(parents=True); seen.mkdir(parents=True)
+    for role in ("director", "operator"):
+        cf = seen / f"{role}.txt"
+        cf.write_text(cursor_content + "\n")
+        os.utime(cf, (cursor_mtime_ts, cursor_mtime_ts))  # force mtime to expose the old bug
+    if with_events:
+        for name in (
+            "2026-05-30T07-00-00Z-operator-to-director-old.md",    # before cursor content
+            "2026-05-30T09-00-00Z-operator-to-director-new.md",    # after cursor content
+            "2026-05-30T09-30-00Z-director-to-operator-reply.md",  # after, wrong direction
+        ):
+            (sent / name).write_text(f"# {name}\n")
+    return tmp
+
+
+def _run_real_unread_for(workdir: Path, role: str) -> int:
+    """Run the REAL extracted _unread_for() under bash with cwd=workdir (which
+    holds coordination/mailbox/{sent,seen}). Guards the production function."""
+    script = (
+        "set -euo pipefail\n"
+        "export LC_ALL=C\n"
+        f'cd "{workdir}"\n'
+        f"{_extract_unread_for()}\n"
+        f'_unread_for "{role}"\n'
+    )
     result = subprocess.run(
         ["bash", "-c", script],
         capture_output=True, text=True, check=True
@@ -188,43 +208,34 @@ _unread_for "{role}"
     return int(result.stdout.strip())
 
 
-def test_unread_bash_director_is_1():
-    """Bash _unread_for returns 1 for director on the adversarial fixture."""
+def _cursor_mtime_0700() -> float:
+    import calendar
+    return float(calendar.timegm(time.strptime("2026-05-30T07:00:00", "%Y-%m-%dT%H:%M:%S")))
+
+
+def test_unread_real_hook_director_is_1():
+    """The REAL hook _unread_for returns 1 for director on the adversarial fixture."""
     with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        import calendar
-        cursor_mtime = float(calendar.timegm(
-            time.strptime("2026-05-30T07:00:00", "%Y-%m-%dT%H:%M:%S")
-        ))
-        sent, seen = build_fixture(tmp, "2026-05-30T08:00:00Z", cursor_mtime)
-        result = _run_bash_unread(sent, seen, "director")
+        wd = _build_real_fixture(Path(td), "2026-05-30T08:00:00Z", _cursor_mtime_0700())
+        result = _run_real_unread_for(wd, "director")
         assert result == 1, (
-            f"Bash _unread_for: expected director=1, got {result}. "
-            "New bash logic must filter to: director AND compare filename-ts to cursor CONTENT."
+            f"REAL hook _unread_for: expected director=1, got {result}. "
+            "Must filter to: director AND compare filename-ts to cursor CONTENT (not mtime)."
         )
 
 
-def test_unread_bash_operator_is_1():
-    """Bash _unread_for returns 1 for operator on the adversarial fixture."""
+def test_unread_real_hook_operator_is_1():
+    """The REAL hook _unread_for returns 1 for operator on the adversarial fixture."""
     with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        import calendar
-        cursor_mtime = float(calendar.timegm(
-            time.strptime("2026-05-30T07:00:00", "%Y-%m-%dT%H:%M:%S")
-        ))
-        sent, seen = build_fixture(tmp, "2026-05-30T08:00:00Z", cursor_mtime)
-        result = _run_bash_unread(sent, seen, "operator")
-        assert result == 1, (
-            f"Bash _unread_for: expected operator=1, got {result}."
-        )
+        wd = _build_real_fixture(Path(td), "2026-05-30T08:00:00Z", _cursor_mtime_0700())
+        result = _run_real_unread_for(wd, "operator")
+        assert result == 1, f"REAL hook _unread_for: expected operator=1, got {result}."
 
 
-def test_unread_bash_empty_glob_is_0():
-    """Bash _unread_for returns 0 on empty sent/ (glob expands to nothing)."""
+def test_unread_real_hook_empty_glob_is_0():
+    """The REAL hook _unread_for returns 0 on empty sent/ (literal glob, no match)."""
     with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        sent = tmp / "sent"; sent.mkdir()
-        seen = tmp / "seen"; seen.mkdir()
-        (seen / "director.txt").write_text("2026-05-30T08:00:00Z\n")
-        result = _run_bash_unread(sent, seen, "director")
+        wd = _build_real_fixture(Path(td), "2026-05-30T08:00:00Z", _cursor_mtime_0700(),
+                                 with_events=False)
+        result = _run_real_unread_for(wd, "director")
         assert result == 0, f"Expected 0 for empty sent/; got {result}"

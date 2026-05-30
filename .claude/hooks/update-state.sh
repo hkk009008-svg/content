@@ -39,6 +39,10 @@ cd "$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 # Bash/Write/Edit call (NOT HEAD-gated — liveness must update during
 # non-committing work). The agent owns `status` + `current_task` (Rule #19);
 # the hook only bumps `head_at_write` + `updated`.
+# Wrapped in `{ … } || true` (Lane V M1, 2026-05-30): a presence-write hiccup
+# (mkdir/mktemp/sed/mv/printf) must NEVER abort the hook under `set -e` before
+# the STATE.md regen below — presence is best-effort, STATE.md is the priority.
+{
 if [ -n "${CLAUDE_SEAT:-}" ]; then
   mkdir -p coordination/presence
   _PF="coordination/presence/${CLAUDE_SEAT}.md"
@@ -53,6 +57,7 @@ if [ -n "${CLAUDE_SEAT:-}" ]; then
       "$CLAUDE_SEAT" "$_H" "$_NOW" > "$_PF"
   fi
 fi
+} || true
 
 MARKER=".claude/hooks/.last-state-head"
 CURRENT=$(git rev-parse HEAD 2>/dev/null || exit 0)
