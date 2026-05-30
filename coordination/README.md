@@ -196,5 +196,9 @@ session self-identify its role. `GIT_INDEX_FILE` gives per-seat staging on the
 (gitignored files in the same working dir) — which separate **worktrees** would
 break (they force separate branches + separate working dirs → gitignored
 presence becomes peer-invisible; rejected per operator REPLY `ab9925d`). With
-this live, the `git commit -- <pathspec>` discipline becomes
-belt-and-suspenders rather than mandatory.
+this live, the `git commit -- <pathspec>` discipline becomes **more
+load-bearing, not less**: each seat's per-seat index does NOT auto-advance
+when the peer commits, so a wholesale `git add . && git commit` would build
+its tree from a stale index and silently revert the peer's changes to files
+this seat never touched. Always commit via pathspec (`git commit -- <files>`)
+or re-sync first (`git read-tree HEAD`).

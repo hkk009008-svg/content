@@ -119,7 +119,7 @@ analysis for Rules 1-11, performed during v5 ship; extended to Rules
 - `director-seat`: 2 (Rules 12, 13) — constrain director-seat's specialization work
 - (was 8 both / 2 user / 3 operator-seat / 2 director-seat = 15 at cycle-13 mid; v5.4–v5.7 added Rules #16–20, all `both` — the symmetric-discipline trend continues; total **20 rules**)
 
-Total: **15 rules** (was 14 at cycle-13 entry, post-v5.2 ship).
+*Prior snapshot (cycle-13 close, post-v5.3 ship):* Total: **15 rules** (was 14 at cycle-13 entry, post-v5.2 ship).
 **Third consecutive bundle to add a `both`-beneficiary rule** (v5.1
 was 2 director-seat; v5.2 was 1 `both`; v5.3 is 1 `both`). `both` is
 now the dominant category at 53.3% (8/15). R11 explicit-consent
