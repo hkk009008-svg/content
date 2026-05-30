@@ -1188,6 +1188,386 @@ spans severity (IMPORTANT → MINOR-DEFER), timing (intra → cross-cycle),
 and disposition route (option-1-foreclosed → DEFER-acknowledged) —
 empirically distributed across the convention's operational shape.
 
+## User-direction without owner-spec (Rule #16)
+
+**Rule #16: User-direction without owner-spec.**
+*(Subtitle: complementary-parallel work with mandatory convergence.)*
+
+When user-principal direction reaches both seats simultaneously without
+explicit owner specification, both seats MAY interpret it as joint-team
+work and produce complementary parallel deliverables. **The second seat
+to ship (by git timestamp) MUST send a follow-up coordination event
+within 30 minutes of the second commit landing**, acknowledging the
+parallel deliverable and proposing a convergence path (REPLY-cycle /
+merge / delegation / further parallelism).
+
+**Variant (pre-commit-detected race).** If the receiving seat has not
+yet committed but detects the conflict via the Rule #7 pre-commit gate,
+it MAY discard the pre-commit and send a convergence event offering its
+content as REPLY-cycle input (preserves the work's value without
+committing a parallel doc). Silent ship of a second deliverable without
+a coordination event = Rule #2 §"Signaling" violation.
+
+**Why net-positive, not merely tolerated.** Cycle-16's Shape-A instances
+produced *complementary coverage* that improved synthesis quality rather
+than redundant churn: the director closing-report (`e4615c7`,
+findings-authority view) and operator Tier-D brief (`2c9ee9f`,
+validation-design view) informed each other; brief v2.0 (`c360952`)
+adopted structure from the operator scaffold while reframing through
+director synthesis. The capstone instance: the user-principal handed the
+SAME brief-2.0 design advisory to BOTH seats ("read my advice / act as
+you see fit" → operator; "continue as director" → director); both
+independently designed a near-identical insight-achievement mechanism
+(five-for-five decision convergence, cold to each other), and the
+operator's pre-commit-caught draft — discarded per the variant, offered
+as REPLY input (`fd3dc33`) — contributed a Rule #12 grep-verified marker
+correction + the INTENT-GAP/REAL-BUG/PREDICTION-ERROR divergence
+classification that a solo director pass would have missed. Convergence
+at REPLY-cycle-1 (`110aff6` fold + `e86dd55` convergence event). Rule #16
+preserves that value while requiring the convergence discipline.
+
+**Beneficiary (per Rule #11): `both` seats** — symmetric obligation
+(either seat, whichever ships second, owes the convergence event). No
+asymmetric-veto path needed. Operator-seat drafted the candidate text
+(REPLY-cycle-1 `7380d43` + scaffold §3 + REPLY `fd3dc33`); director-seat
+concurred (REPLY-cycle-2 `aba7755`), authored the brief §8.2 framing, and
+ships this binding mirror.
+
+**Working criteria (dogfood for v5.4, following the Rule #14/#15 pattern):**
+
+- **C1** — convergence event cites Rule #16 explicitly + names the parallel
+  deliverable's SHA (or "uncommitted, on disk" for the variant).
+  Grep-auditable: `git log --grep='Rule #16'`.
+- **C2** — convergence event lands within 30 min of the second deliverable's
+  commit (or, for the variant, within 30 min of pre-commit-gate detection).
+  Per-instance wall-clock measurable from event timestamps.
+- **C3** — the proposing seat names a concrete convergence path (not just
+  "noted").
+- **C4** — over a cycle, Shape-A instances that follow Rule #16 produce zero
+  "duplicate-work-discarded" outcomes (the value is *complementary*, not
+  redundant).
+
+**Composition with other rules.** Rule #16 is the disposition-mechanism for
+the Shape-A race (the catalog's stable shape-labels are defined in brief
+v2.0 §8.1, resolving the chronological-vs-shape-label "Race-N=k" drift).
+It composes with Rule #2 (the convergence event IS the signal), Rule #7
+(the pre-commit gate detects the variant), and Rule #10 (joint-team mode —
+complementary parallel work is a specialization, not a hierarchy shift).
+
+**Codified SHA:** `7773502` (Protocol Bundle
+v5.4 ship; filled per chicken-and-egg precedent — v2 `3e57ddf` / v3
+`d8f2407` / v4 `7da49ed` / v4.1 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb`
+/ v5.2 `61cac6d` / v5.3 `24c145a`). Empirical basis: **N=3 cumulative**
+Shape-A instances (cycle-16-entry T19:19Z dispatch-claim race +
+cycle-16-mid T22:25Z synthesis-doc + proposal race + cycle-16-mid T22:53Z
+brief-scaffold race) + the **cycle-16-mid→close advisory-convergence
+instance** (user advisory to both seats; five-for-five mechanism
+convergence; pre-commit variant discharged at `fd3dc33`). User-principal
+Q4 authorized codification (brief v2.0 §8.2 is the design home; this is
+the binding CLAUDE.md mirror). Operator-seat consented affirmatively as
+drafter; director-seat ships per Sh role partition.
+
+## Workflow-assisted analysis lanes (Rule #17)
+
+**Rule #17: Workflow-assisted analysis lanes.**
+*(Subtitle: `/workflows` is a read-analysis multiplier, not an implementation engine.)*
+
+Claude Code's **Dynamic Workflows** (`/workflows`, v2.1.154) orchestrates
+tens–hundreds of agents in the background and returns **one synthesized
+report per run** (agents' intermediate results stay in script variables;
+docs document no branch/PR/per-task-commit landing, no per-unit review
+gate, no custom agent types, and the edit-isolation/file-conflict
+mechanism is undocumented). It is therefore a **fan-out → synthesize-a-
+report engine, NOT a parallel-commit-with-review engine** — and that
+single fact bounds where it fits this protocol.
+
+When `/workflows` is available (runtime ≥ 2.1.154), **either seat MAY use
+it as the execution engine for read-only, report-producing analysis at
+scale** — Lane C surveys, Lane S scouting, Rule #12 grep-the-writes
+audits, Rule #13 symmetric-endpoint audits, blast-radius / impact
+analysis, post-roadmap reassessment, and doc-truth sweeps — subject to
+ALL five guardrails:
+
+1. **Read-only / report-output only.** Workflows MUST NOT be used for
+   implementation (code-landing); implementation stays on
+   `subagent-driven-development`. Rationale: no reviewable per-task
+   commit, no per-unit spec+code-quality gate (Rule #9), and undocumented
+   edit-isolation — none of which can carry the "one commit per task /
+   two-stage review / Rule #7 race-ack" discipline.
+
+2. **Verification discipline + post-run spot-check (folds R-OP-1).** A
+   workflow report makes inventory claims ("N endpoints miss the gate").
+   (a) The workflow's agent prompts MUST instruct each agent to **capture
+   the command output (grep/Read) as evidence**, and the synthesized
+   report MUST **cite, not assert** — subject to "no inventory claim
+   without verification output" (ADR-013 / Rules #1–3) exactly as any
+   director-voice doc. (b) Citations close the *asserting* half but not
+   the *fabrication* half: per CC-2 precedent (Rule #9 §"Spec-reviewer
+   prompt discipline" — 2 dispatches hallucinated 2 "X exists" claims), a
+   report synthesized across tens of agents has the same-or-larger
+   hallucination surface, and inspecting the *script* (guardrail 4) does
+   NOT verify the *output's* citations after the run. So **the launching
+   seat MUST spot-check a representative sample of the report's cited
+   evidence (re-run a few of the grep/Read commands) before the report's
+   claims re-enter the protocol (guardrail 3).** (c) For anchor /
+   symbol-existence claims, prefer having the workflow **call
+   `scripts/check_doc_claims.py`** (machine-verified def/anchor truth;
+   operator Increment-2 tooling) over agent grep-and-assert — this closes
+   the fabrication gap *by construction* for those claim types.
+
+3. **Output re-enters the normal protocol.** A workflow report is an
+   *input* to a seat's normal work; workflow agents do NOT emit mailbox
+   events. Any code a seat then commits from the findings flows through
+   Lane V/D + mailbox unchanged — the other seat's independent Lane V
+   (Rule #9) still applies. A workflow never substitutes for Lane V.
+
+4. **Inspect-before-launch.** Use plan-approval / "View raw script"
+   before launching; do not fire blind. The launching seat owns the
+   report's correctness.
+
+5. **Hard gate ≥ 2.1.154.** Until the edit-isolation / file-conflict
+   mechanics are documented or empirically confirmed, workflows MUST NOT
+   write files (guardrail 1 already forbids implementation; this restates
+   it for any future file-touching use).
+
+**Composition with other rules.**
+- **Lane C / Lane S:** Rule #17 is an *execution-engine* option for these
+  lanes, not a new lane; their triggers/outputs are unchanged.
+- **Rule #9:** unaffected — review still happens on committed code,
+  post-workflow; a workflow never substitutes for the independent Lane V.
+- **Rule #12 / #13:** Rule #17 *scales* these audits; their evidence
+  discipline is inherited via guardrail 2.
+- **Rule #14:** orthogonal — #14 governs *implementation* dispatch, #17
+  governs *analysis*. A #14 pre-scope (Stage 1) MAY use a #17 workflow to
+  produce its survey, then dispatch implementation the normal
+  (subagent-driven) way.
+
+**Working criteria (dogfood for v5.6):**
+- **C1** — any workflow-assisted lane work cites "Rule #17" in the
+  resulting artifact (report header / commit body / mailbox event).
+  Grep-auditable.
+- **C2** — the workflow report cites command-output evidence per unit AND
+  **the launching seat spot-checks a sample of those citations** (R-OP-1).
+- **C3** — read-only adherence: no workflow run lands code (guardrail 1);
+  verifiable from the run producing a report + zero direct commits.
+- **C4** — first real use is retro'd at v5.6: did it save
+  wall-clock/context vs. manual Lane C, and did the evidence-citation +
+  spot-check hold?
+
+**Beneficiary (per R11): `both` seats.** Director gains scaled
+blast-radius/impact analysis before Lane B; operator gains scaled Lane S
+scouting + Rule #12/#13 audits. Symmetric — no asymmetric-veto path.
+
+**Codified SHA:** `52658eb` (Protocol Bundle v5.5 ship; filled
+per chicken-and-egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4
+`7da49ed` / v4.1 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2
+`61cac6d` / v5.3 `24c145a` / v5.4 `7773502`). **Forward-looking
+codification:** the feature is unavailable in the current runtime
+(`claude --version` 2.1.74 / session 2.1.149, both < 2.1.154), so this
+ratifies the integration *shape* + guardrails ahead of activation; the
+first dogfood datapoint (C4) lands at v5.6 after the env updates.
+Director-originated proposal (`2026-05-29T01-19-08Z`, per user
+direction); operator-seat consented affirmatively + added R-OP-1 (folded
+into guardrail 2 + C2) in REPLY `afb2c75`
+(`2026-05-29T01-26-32Z`); director-seat ships per Sh role partition.
+
+## Doc-maintenance as a verifier-scoped dispatch pattern (Rule #18)
+
+**Rule #18: Doc-maintenance as a verifier-scoped dispatch pattern.**
+*(Subtitle: a librarian wielding the verifier — persistence earned, not granted; a bridge that may self-retire.)*
+
+Documentation drift (stale anchors, superseded refs, unpruned memory, doc-vs-code
+divergence) is a real, recurring, cross-cutting cost, currently a side-duty split
+across both seats (operator's Lane D + ad-hoc). It MAY be consolidated into a
+**doc-maintenance dispatch** — a librarian wielding `scripts/check_doc_claims.py`,
+the manifest, and the written conventions — subject to the boundary, guards, and
+graduation criteria below. The role is NOT a third coder and NOT (initially) a
+standing agent: it is **a dedicated executor of the truth-machinery already built**.
+Its value is **loop-ownership, not memory** — the doc ecosystem lives in
+machine-checkable artifacts (the verifier knows stale anchors; the manifest IS the
+cross-ref web; conventions are gate-enforced), so optimizing for an agent's
+accumulated memory would contradict truth-in-files (ADR-013). Give it good
+instruments and a narrow shelf, not a long memory and a broad mandate.
+
+**Form — dispatch pattern first; persistence EARNED.** Run it as a dispatch (a
+senior spawns a doc-maintenance task with the doc-map + verifier + conventions in
+the prompt), NOT a persistent agent on day one. This *tests* rather than assumes
+whether cross-task context compounds. Graduate to a standing role ONLY on the
+evidence in "Graduation" below; if fresh-prompt dispatches keep re-supplying the
+structure from the artifacts, ephemeral was always sufficient (learned cheaply).
+
+**Scope = the Guard-1 boundary = the carve-out boundary (one line).** The role OWNS
+(writes directly) only the **mechanical / verifier-confirmed** slice: anchor
+`--fix`, formatting, cross-reference repair, `docs/pipeline_status.toml` updates,
+memory pruning per the one-line-hook discipline, sweeping the claim types the
+verifier covers. The role does NOT autonomously edit **prose / claims** in
+truth-files (ARCHITECTURE.md, CLAUDE.md, ADRs, memory): any **claim-changing edit**
+→ the role **prepares a diff; a senior verifies the claim and lands it** (the senior
+owns the hot-file write + Rule #5/#7 race-ack). "Keep the docs true and clean"
+(role) vs. "decide what is true" (seniors). This **bounds the carve-out of operator's
+Lane D**: the mechanical half moves to the role; the **prose-truth half stays a senior
+duty** (operator's Rule #11 gating consent is to THIS bounded carve-out only — Lane D
+includes prose-sync, which Guard 1 bars the role from owning).
+
+**Guard 1 — the leash on load-bearing docs (prose is the catch).** A "mechanical"
+edit can still introduce a **false claim** the verifier cannot detect (it checks
+anchors + symbol existence, NOT whether a paragraph is *true*). THREE live exhibits
+this session: the GitNexus phantom (ADR-016 — a doc asserting a tool that never
+existed, survived 66 sessions); a Lane V #24 video-only fix-rec that was confidently
+wrong (would have regressed dialogue); and the doc-maintenance proposal's OWN
+provenance citing a closed F1 (`561ad6b`) as open. All prose/status claims the
+verifier-as-built would NOT catch; each caught only by a senior who knew the live
+state. **Therefore:** the role is autonomous ONLY on verifier-confirmed or non-claim
+edits; every claim-changing edit is verifier-backed or senior-reviewed, inheriting
+cite-or-don't-claim (ADR-013). **The spawning seat owns the review** of that
+dispatch's claim-changing edits (parallel to Rule #17 guardrail 4).
+
+**Guard 2 — write-contention, not coordination ceremony.** The role's docs
+(ARCHITECTURE.md, CLAUDE.md, memory) are the most-contended files in the repo.
+Decision for the experiment: **extended race-ack, NOT exclusive ownership** — the
+role writes the low-contention mechanical slice directly; claim-changing edits go via
+patch-then-senior-lands (so seniors keep inline doc-fixes; exclusive ownership grants
+persistence's privileges before earned and is a graduation-time question only). Doc
+work is largely serializable/idempotent (the verifier's drift-list is the natural
+FIFO backlog), so direct collisions are rare and git-tiebreak + race-ack handle them.
+
+**Invest posture — C (sequenced bridge) + sunset review.** The role and the
+verifier-buildout are **partial substitutes** (more automated claim-types = less
+hand-work), so the role's value is **highest today** (verifier covers only
+line-anchors + manifest symbol-existence) and **declines** as operator builds out
+marker-strings / SHA-refs / file-paths per the N=2 threshold. Run the dispatch now,
+framed explicitly as a **bridge that may retire**, with a **sunset review** at each
+verifier-buildout milestone. (Priority signal from the F1-citation exhibit: the
+**SHA-ref claim-type checker** would catch that mis-citation class by construction —
+worth bumping in the buildout.)
+
+**Launch surface (today):** line-anchors + manifest symbol-existence + mechanical ops
+ONLY. Marker-strings / SHA-refs / file-paths are OUT of launch scope (not yet
+automated → hand-work → prose-adjacent → senior) until the verifier covers them.
+
+**Graduation (dispatch → standing role) requires ALL of:** (a) residual doc-load
+POST-automation meaningfully larger than ephemeral-subagent-sized (measured against
+the post-automation baseline, NOT today's build-spike); (b) **N≥3 dispatches
+re-discovering the same ecosystem structure** (a higher bar than the N=2
+codification threshold); (c) prose stays TRUE under the role's own work, via the
+R-OP-1 spot-check applied to the role's prepared diffs. Anchors-green is necessary
+but NOT sufficient.
+
+**Composition.** The verifier is the instrument (`check_doc_claims.py` → machine-
+verified citations, closing the R-OP-1 fabrication gap by construction for covered
+claim types). Rule #17: a one-time codebase-wide doc audit is a Rule #17 read-analysis
+workflow; this role *runs* the verifier continuously — same instrument, different
+cadence. Rule #14 orthogonal (governs implementation dispatch; this governs
+doc-maintenance; implementation stays subagent-driven). Rules #12/#13 audits are
+doc-maintenance inputs. ADR-013 inherited on every claim-changing edit.
+
+**Beneficiary (per R11): `both`.** The consolidation cost lands on operator (Lane D
+carve-out) → operator's consent was REQUIRED, not customary; **given, bounded to the
+mechanical slice** (REPLY `d385bb2`). Director consents (REPLY `d5f3bb6`), resolving
+its inline-doc-fix stake toward extended-race-ack (non-blocking). The advisor's
+needs-driven framing + librarian metaphor stand; only the persistence-as-memory
+justification was corrected (both seniors, independently — the convergence is the
+proof it was wrong).
+
+**Codified SHA:** `4eecb72` (Protocol Bundle v5.6 ship; filled per
+chicken-and-egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `7da49ed` / v4.1
+`509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2 `61cac6d` / v5.3 `24c145a` / v5.4
+`7773502` / v5.5 `52658eb`). **Forward-looking:** no dogfood result yet — the
+graduation metrics are the first data, post-launch. **F1 facts at ship:** no F1
+open (scene-transitions F1 closed `1f9d46b`, operator-acked `35c530c`; the
+proposal's `561ad6b`-open citation was a stale conflation — `561ad6b` is the
+2026-05-28 dialogue feat whose own F1 closed `d3fcfb0` — corrected here per ADR-013).
+Principal-originated synthesis of the advisor/operator/director triangulation;
+both seats consented (operator bounded carve-out + director); director-seat ships
+per Sh role partition. ADR-019.
+
+## Live-presence-over-inferred-idle (Rule #19)
+
+**Rule #19: Live-presence-over-inferred-idle.**
+*(Subtitle: read the peer's presence; don't infer liveness from commit silence; bind cross-seat signals via artifacts, not chat.)*
+
+The director–operator protocol had **no live, shared, agent-observable presence
+channel**: each seat inferred the other's liveness from a 10-minute-idle-since-
+last-commit heuristic, so any seat doing non-committing work (reading, TDD,
+review, thinking) read as "offline." Rule #19 replaces inference with a signal.
+
+1. **Each seat maintains `coordination/presence/<seat>.md`** (gitignored,
+   per-clone; flat `key: value`: `seat`, `status` (active|wrapping|away),
+   `current_task`, `head_at_write`, `updated`). The hook bumps
+   `updated`/`head_at_write` every tool call (operator-shipped M2/M3); the
+   **agent owns `status` + `current_task`** and updates `current_task` at each
+   task boundary.
+2. **Liveness is read from presence freshness + `current_task`, NOT from commit
+   recency.** "Offline" = presence `updated` stale > T (default 10 min). A seat
+   mid-implementation with a fresh presence file is active, not idle.
+3. **Binding cross-seat signals MUST be artifacts** — a mailbox event or a
+   presence-file update — never chat narration alone. Chat is per-session-
+   private (only the user-principal sees both terminals), so it is a user-facing
+   courtesy, not a peer channel. This **supersedes the implicit "narrate in
+   conversation" reliance in Rule #2 §Signaling** (Rule #2's narration is
+   retained for the user; the peer learns intent from `current_task` + mailbox).
+
+**`current_task`-rot guard.** The hook bumps freshness every tool call, so a
+file can read *fresh* while `current_task` is *semantically stale* ("drafting X"
+long after you moved on) — a maintained-looking artifact that lies (cf. the
+GitNexus phantom, ADR-016). Mitigations: (a) agent updates `current_task` at
+task boundaries; (b) the Rule #8 bootstrap awareness gate surfaces "peer
+presence fresh but `current_task` unchanged since HEAD <X>" as a soft warning;
+(c) session-wrap checklist clears `current_task`.
+
+**Topology (D-a).** Rule #19's presence files + STATE.md + `coordination/`
+assume **one shared working tree**; the seats isolate *staging* via per-seat
+`GIT_INDEX_FILE` (NOT separate worktrees — those force separate branches and
+make gitignored presence peer-invisible). See `coordination/README.md`
+§"Per-seat launch (D-a)".
+
+**Beneficiary (per R11): `both`** — symmetric. Both seats owe presence
+maintenance; both gain accurate peer-liveness. No asymmetric-veto path;
+operator consented affirmatively (REPLY `ab9925d`).
+
+**Codified SHA:** `_Protocol Bundle v5.7 ship_` (filled next session-close per
+the chicken-and-egg precedent — v2 `3e57ddf` … v5.6 `4eecb72`). Empirical basis:
+user-principal-reported 2026-05-30 "both seats keep seeing each other
+offline/unaware" failure; operator-seat corroborated RC1–RC5 firing in one
+session (inferred director offline while director fixed Bug #4; Rule-#2
+narration inert; STATE.md `director=4`-vs-1; cursor lag; ref-race ×2). v5.7
+proposal `e353479` → operator REPLY `ab9925d` (CONSENT) → user Q4=D-a
+adjudication → greenlight `f9ae567`.
+
+## Shared-state-accuracy (Rule #20)
+
+**Rule #20: Shared-state-accuracy.**
+*(Subtitle: the awareness gate computes truth; it does not trust a stale snapshot.)*
+
+STATE.md is gitignored/local, refreshes only on a HEAD move, and (pre-v5.7) its
+`unread mailbox` count used `find -newer <cursor-file-mtime>` — no `to:` filter
+(counted **both directions**, including the role's own sends) and mtime-vs-
+content (decoupled from the cursor's ISO timestamp). This produced `director=4`
+when the actionable count was 1.
+
+1. **The Rule #8 awareness gate recomputes unread LIVE** — count events
+   `*-to-<me>-*` whose filename-timestamp is strictly newer than the cursor's
+   **content** timestamp — rather than trusting STATE.md's possibly-frozen
+   field. STATE.md is a convenience cache; the gate verifies. (The M2 hook fix,
+   operator-shipped, makes STATE.md's own field correct; the gate verifies
+   regardless.)
+2. **Until M2 is live, reconcile STATE.md against the filesystem** before acting
+   on its count (Rule #8 §F "filesystem wins" as a positive step, not a
+   fallback).
+3. **Cursors support per-event acknowledgment** — partial/deferred processing
+   must be representable, so a lagged single-timestamp cursor cannot masquerade
+   as "peer never saw it." Cursor advance is part of *processing* an event,
+   verified at session-wrap.
+
+**Beneficiary (per R11): `both`** — symmetric. Operator consented (REPLY
+`ab9925d`).
+
+**Codified SHA:** `_Protocol Bundle v5.7 ship_` (filled next session-close).
+Empirical basis: same session as Rule #19 — RC3 (STATE.md broken count, observed
+`director=4`-vs-1) + RC4 (cursor lag `T10:23:57Z` vs the handoff's `T11:52:06Z`).
+The M2 fix validated on controlled data (old over-counts 3, new correct 1;
+`docs/DRAFT-v5.7-phase1-implementation-2026-05-30.md` §1).
+
 ## Disagreement protocol (v5)
 
 When operator-seat disagrees with a director REPLY refinement (or
