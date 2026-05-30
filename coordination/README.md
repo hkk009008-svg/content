@@ -2,7 +2,7 @@
 
 Inter-session coordination scaffold for the director-operator parallel-Claude
 protocol. See [CLAUDE.md](../CLAUDE.md) / [AGENTS.md](../AGENTS.md) `# Director-Operator Concurrent Operation`
-for the full discipline (Rules 1–8).
+for the full discipline (Rules 1–20).
 
 ## Layout
 
@@ -16,6 +16,12 @@ for the full discipline (Rules 1–8).
   timestamp (e.g., `2026-05-24T13:42:00Z`).
 - `mailbox/archive/` — Old events moved out of `sent/` for log hygiene (manual
   move by operator).
+- `presence/director.md`, `presence/operator.md` — (v5.7, Rule #19) per-seat
+  **live presence**: flat `key: value` (`seat`, `status`, `current_task`,
+  `head_at_write`, `updated`). Gitignored + per-clone; the hook bumps
+  `updated`/`head_at_write` every tool call, the agent owns `current_task`. The
+  peer reads the other file for liveness (fresh `updated` < T = active),
+  replacing the old "no commit in 10 min = offline" inference.
 
 ## Authority (Rule #8)
 
@@ -108,24 +114,21 @@ Manual for v1. Operator-only task: periodically move events older than ~N
 sessions from `sent/` to `archive/`. Stale-event surfacing automation
 deferred to v2 if it becomes painful.
 
-## Known limitations (v2.1)
+## STATE.md model (current — post B-003 Option E + v5.7)
 
-**STATE.md HEAD field is one SHA stale immediately after a commit.** The
-hook captures `HEAD_SHA` BEFORE the `git commit --amend` that folds
-STATE.md into the commit; the amend changes HEAD, but STATE.md inside the
-new commit references the pre-amend SHA. Other STATE.md fields (smoke,
-pytest, mailbox unread, working tree, branch ahead/behind) are post-amend-
-accurate because they don't depend on the amend.
+STATE.md is **gitignored, per-clone, regenerated on disk** by
+`.claude/hooks/update-state.sh` on each HEAD move. B-003 Option E (cycle 8)
+retired the prior `git commit --amend` STATE.md-fold model — the hook **never
+touches git history**. STATE.md is an informational cache, NOT a coordination
+channel (it is not shared between seats).
 
-**For cold-starters:** Trust STATE.md's smoke / pytest / mailbox / tree
-fields. For exact current HEAD, verify with `git rev-parse HEAD`. The
-HEAD field in STATE.md is the previous (pre-amend) version of the
-current commit.
-
-**Fixing cleanly** requires a double-amend (gen → amend → regen with new
-SHA → amend again). Costs an extra amend per commit. The v2.1 fix-up
-accepts the stale-by-one as the simpler default; revisit if it causes
-real confusion in practice.
+**Unread-count accuracy (Rule #20, v5.7).** The hook counts events
+`*-to-<role>-*` whose filename-timestamp is newer than the cursor's **content**
+timestamp — replacing the pre-v5.7 `find -newer <cursor-mtime>` that counted
+both directions AND compared file mtime (the source of the observed
+`director=4`-vs-1). The Rule #8 awareness gate **recomputes unread live**
+regardless; STATE.md's field is a convenience cache. For exact current HEAD,
+`git rev-parse HEAD` (git > STATE.md per the authority precedence).
 
 ## Per-clone setup
 
@@ -139,7 +142,7 @@ under the top-level `hooks` key:
 "hooks": {
   "PostToolUse": [
     {
-      "matcher": "Bash",
+      "matcher": "Bash|Write|Edit",
       "hooks": [
         {
           "type": "command",
@@ -152,4 +155,33 @@ under the top-level `hooks` key:
 ```
 
 Without registration, `STATE.md` becomes stale after each commit (the cold-
-start checklist will still work but the read will be out-of-date).
+start checklist will still work but the read will be out-of-date). The matcher
+is `Bash|Write|Edit` (v5.7): presence freshness (Rule #19) must update through
+long edit stretches with no Bash call, not just on commits.
+
+## Per-seat launch (D-a, v5.7)
+
+The two seats run as concurrent Claude Code sessions in **one shared working
+tree** (shared object store, shared HEAD on `main`). Per Q4 (user-adjudicated
+**D-a**), each seat isolates only its **git index** so one seat's `git add` can
+no longer sweep the other's staged WIP (the `2c5ca05` /
+`feedback_shared_index_sweep_use_pathspec` class). Launch each session with its
+own `GIT_INDEX_FILE` + role marker:
+
+```bash
+# director session
+export CLAUDE_SEAT=director
+export GIT_INDEX_FILE="$(git rev-parse --git-dir)/index-director"
+# operator session
+export CLAUDE_SEAT=operator
+export GIT_INDEX_FILE="$(git rev-parse --git-dir)/index-operator"
+```
+
+`CLAUDE_SEAT` (Rule #19) tells the hook which presence file to stamp and lets a
+session self-identify its role. `GIT_INDEX_FILE` gives per-seat staging on the
+**shared** tree, so presence / STATE.md / `coordination/` stay peer-visible
+(gitignored files in the same working dir) — which separate **worktrees** would
+break (they force separate branches + separate working dirs → gitignored
+presence becomes peer-invisible; rejected per operator REPLY `ab9925d`). With
+this live, the `git commit -- <pathspec>` discipline becomes
+belt-and-suspenders rather than mandatory.

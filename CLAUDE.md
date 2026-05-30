@@ -1844,6 +1844,93 @@ Principal-originated synthesis of the advisor/operator/director triangulation;
 both seats consented (operator bounded carve-out + director); director-seat ships
 per Sh role partition. ADR-019.
 
+## Live-presence-over-inferred-idle (Rule #19)
+
+**Rule #19: Live-presence-over-inferred-idle.**
+*(Subtitle: read the peer's presence; don't infer liveness from commit silence; bind cross-seat signals via artifacts, not chat.)*
+
+The director–operator protocol had **no live, shared, agent-observable presence
+channel**: each seat inferred the other's liveness from a 10-minute-idle-since-
+last-commit heuristic, so any seat doing non-committing work (reading, TDD,
+review, thinking) read as "offline." Rule #19 replaces inference with a signal.
+
+1. **Each seat maintains `coordination/presence/<seat>.md`** (gitignored,
+   per-clone; flat `key: value`: `seat`, `status` (active|wrapping|away),
+   `current_task`, `head_at_write`, `updated`). The hook bumps
+   `updated`/`head_at_write` every tool call (operator-shipped M2/M3); the
+   **agent owns `status` + `current_task`** and updates `current_task` at each
+   task boundary.
+2. **Liveness is read from presence freshness + `current_task`, NOT from commit
+   recency.** "Offline" = presence `updated` stale > T (default 10 min). A seat
+   mid-implementation with a fresh presence file is active, not idle.
+3. **Binding cross-seat signals MUST be artifacts** — a mailbox event or a
+   presence-file update — never chat narration alone. Chat is per-session-
+   private (only the user-principal sees both terminals), so it is a user-facing
+   courtesy, not a peer channel. This **supersedes the implicit "narrate in
+   conversation" reliance in Rule #2 §Signaling** (Rule #2's narration is
+   retained for the user; the peer learns intent from `current_task` + mailbox).
+
+**`current_task`-rot guard.** The hook bumps freshness every tool call, so a
+file can read *fresh* while `current_task` is *semantically stale* ("drafting X"
+long after you moved on) — a maintained-looking artifact that lies (cf. the
+GitNexus phantom, ADR-016). Mitigations: (a) agent updates `current_task` at
+task boundaries; (b) the Rule #8 bootstrap awareness gate surfaces "peer
+presence fresh but `current_task` unchanged since HEAD <X>" as a soft warning;
+(c) session-wrap checklist clears `current_task`.
+
+**Topology (D-a).** Rule #19's presence files + STATE.md + `coordination/`
+assume **one shared working tree**; the seats isolate *staging* via per-seat
+`GIT_INDEX_FILE` (NOT separate worktrees — those force separate branches and
+make gitignored presence peer-invisible). See `coordination/README.md`
+§"Per-seat launch (D-a)".
+
+**Beneficiary (per R11): `both`** — symmetric. Both seats owe presence
+maintenance; both gain accurate peer-liveness. No asymmetric-veto path;
+operator consented affirmatively (REPLY `ab9925d`).
+
+**Codified SHA:** `_Protocol Bundle v5.7 ship_` (filled next session-close per
+the chicken-and-egg precedent — v2 `3e57ddf` … v5.6 `4eecb72`). Empirical basis:
+user-principal-reported 2026-05-30 "both seats keep seeing each other
+offline/unaware" failure; operator-seat corroborated RC1–RC5 firing in one
+session (inferred director offline while director fixed Bug #4; Rule-#2
+narration inert; STATE.md `director=4`-vs-1; cursor lag; ref-race ×2). v5.7
+proposal `e353479` → operator REPLY `ab9925d` (CONSENT) → user Q4=D-a
+adjudication → greenlight `f9ae567`.
+
+## Shared-state-accuracy (Rule #20)
+
+**Rule #20: Shared-state-accuracy.**
+*(Subtitle: the awareness gate computes truth; it does not trust a stale snapshot.)*
+
+STATE.md is gitignored/local, refreshes only on a HEAD move, and (pre-v5.7) its
+`unread mailbox` count used `find -newer <cursor-file-mtime>` — no `to:` filter
+(counted **both directions**, including the role's own sends) and mtime-vs-
+content (decoupled from the cursor's ISO timestamp). This produced `director=4`
+when the actionable count was 1.
+
+1. **The Rule #8 awareness gate recomputes unread LIVE** — count events
+   `*-to-<me>-*` whose filename-timestamp is strictly newer than the cursor's
+   **content** timestamp — rather than trusting STATE.md's possibly-frozen
+   field. STATE.md is a convenience cache; the gate verifies. (The M2 hook fix,
+   operator-shipped, makes STATE.md's own field correct; the gate verifies
+   regardless.)
+2. **Until M2 is live, reconcile STATE.md against the filesystem** before acting
+   on its count (Rule #8 §F "filesystem wins" as a positive step, not a
+   fallback).
+3. **Cursors support per-event acknowledgment** — partial/deferred processing
+   must be representable, so a lagged single-timestamp cursor cannot masquerade
+   as "peer never saw it." Cursor advance is part of *processing* an event,
+   verified at session-wrap.
+
+**Beneficiary (per R11): `both`** — symmetric. Operator consented (REPLY
+`ab9925d`).
+
+**Codified SHA:** `_Protocol Bundle v5.7 ship_` (filled next session-close).
+Empirical basis: same session as Rule #19 — RC3 (STATE.md broken count, observed
+`director=4`-vs-1) + RC4 (cursor lag `T10:23:57Z` vs the handoff's `T11:52:06Z`).
+The M2 fix validated on controlled data (old over-counts 3, new correct 1;
+`docs/DRAFT-v5.7-phase1-implementation-2026-05-30.md` §1).
+
 ## Disagreement protocol (v5)
 
 Generalizes v4's R-V1 counter precedent. When operator-seat disagrees
