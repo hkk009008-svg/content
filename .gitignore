@@ -75,3 +75,5 @@ STATE.md
 # Auto-generated status dashboard snapshot (scripts/status.py --write).
 # Local-only artifact; never commit.
 STATUS.md
+# v5.7 M1 — real-time presence signals (per-clone, like STATE.md; not source)
+coordination/presence/
