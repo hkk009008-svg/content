@@ -229,3 +229,87 @@ class TestNonDictParseDoesNotCrash:
         assert "shots" in result
         out = capsys.readouterr().out
         assert "parse-fallback" in out
+
+
+# ─── (e) MODIFIED with violations but no modifications → downgrade to REJECTED ──
+
+class TestModifiedWithoutModificationsDowngrades:
+    """M-A guard: a MODIFIED verdict that flags violations but supplies an empty
+    ``modifications`` list is degenerate.
+
+    The gate-side normalizer (cinema/auto_approve.py:record_director_review_on_shots)
+    auto-clears MODIFIED → gate-APPROVED on the assumption that the corrections
+    flagged were applied in-place (its own comment: "the corrections ARE the
+    resolution"). With empty ``modifications`` nothing was corrected, so the
+    auto-clear would ship a plan the ChiefDirector flagged with open violations
+    straight through the headless PLAN gate — uncorrected.
+
+    The producer is the only layer that can see ``modifications`` is empty (its
+    return dict is just {decision, violations, shots} — the normalizer never sees
+    ``modifications``), so the guard lives here: downgrade to REJECTED so the gate
+    fails fast (GateNotSatisfiedError headless) instead of silently approving.
+    """
+
+    def _modified_no_mods_json(self) -> str:
+        return json.dumps({
+            "decision": "MODIFIED",
+            "violations": ["HC2: shot 0 describes blue eyes"],
+            "modifications": [],
+            "quality_score": 0.4,
+            "reasoning": "flagged a violation but produced no corrections",
+        })
+
+    def test_modified_with_violations_no_mods_downgrades_to_rejected(self, capsys):
+        cd = _make_chief_director()
+        with patch.object(cd, "_call_llm", return_value=self._modified_no_mods_json()):
+            result = cd.validate_shot_prompts(_minimal_shots(), _minimal_scene())
+
+        # Downgraded so the normalizer won't auto-clear an uncorrected plan.
+        assert result["decision"] == "REJECTED"
+        # Violations preserved for the gate / audit trail.
+        assert len(result["violations"]) == 1
+        assert "shots" in result
+
+        out = capsys.readouterr().out
+        assert "downgrading to REJECTED" in out
+
+    def test_modified_with_modifications_is_not_downgraded(self, capsys):
+        """The normal MODIFIED path (corrections supplied) must be untouched:
+        decision stays MODIFIED and the correction is applied in-place."""
+        cd = _make_chief_director()
+        modified_with_mods = json.dumps({
+            "decision": "MODIFIED",
+            "violations": ["HC2: shot 0 describes blue eyes"],
+            "modifications": [
+                {"shot_index": 0, "field": "prompt", "corrected": "[SHOT]close-up brown eyes"}
+            ],
+            "quality_score": 0.6,
+            "reasoning": "fixed in place",
+        })
+        shots = _minimal_shots()
+        with patch.object(cd, "_call_llm", return_value=modified_with_mods):
+            result = cd.validate_shot_prompts(shots, _minimal_scene())
+
+        assert result["decision"] == "MODIFIED"
+        # Correction applied in-place — the existing MODIFIED contract is intact.
+        assert shots[0]["prompt"] == "[SHOT]close-up brown eyes"
+        out = capsys.readouterr().out
+        assert "downgrading to REJECTED" not in out
+
+    def test_modified_empty_violations_and_mods_is_not_downgraded(self):
+        """Boundary: MODIFIED with neither violations nor modifications is NOT the
+        degenerate case the guard targets — there are no open violations to ship
+        uncorrected, so auto-clearing to APPROVED is harmless. Leave it unchanged."""
+        cd = _make_chief_director()
+        modified_empty = json.dumps({
+            "decision": "MODIFIED",
+            "violations": [],
+            "modifications": [],
+            "quality_score": 0.8,
+            "reasoning": "nominal",
+        })
+        with patch.object(cd, "_call_llm", return_value=modified_empty):
+            result = cd.validate_shot_prompts(_minimal_shots(), _minimal_scene())
+
+        # No violations → not the uncorrected-plan risk → not downgraded.
+        assert result["decision"] == "MODIFIED"

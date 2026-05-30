@@ -290,6 +290,24 @@ When suggesting prompt_mutation for failures:
         violations = result.get("violations", [])
         modifications = result.get("modifications", [])
 
+        # M-A guard: a MODIFIED verdict that flags violations but supplies NO
+        # modifications is degenerate. The gate-side normalizer
+        # (cinema/auto_approve.py:record_director_review_on_shots) auto-clears
+        # MODIFIED → gate-APPROVED on the assumption the flagged corrections were
+        # applied in-place — but with empty `modifications` nothing was corrected,
+        # so auto-clear would ship a plan with open violations straight through
+        # the headless PLAN gate. The normalizer can't see `modifications` (the
+        # return dict is only {decision, violations, shots}), so the guard lives
+        # here: downgrade to REJECTED so the gate fails fast (GateNotSatisfiedError
+        # headless; regenerate / operator-review interactive) instead of silently
+        # approving an uncorrected plan.
+        if decision == "MODIFIED" and violations and not modifications:
+            print(
+                "   [DIRECTOR] MODIFIED with open violations but no modifications "
+                "— downgrading to REJECTED (uncorrected plan)"
+            )
+            decision = "REJECTED"
+
         if violations:
             print(f"   [DIRECTOR] {decision}: {len(violations)} violation(s) found")
             for v in violations[:3]:
