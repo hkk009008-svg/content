@@ -7,7 +7,9 @@
 #
 # Prerequisites:
 #   - RunPod GPU pod (RTX 4090 / A100 recommended, minimum 24GB VRAM)
-#   - Ubuntu 22.04+ base image (e.g., runpod/pytorch:2.1.0-py3.10-cuda11.8.0)
+#   - Ubuntu 22.04+ base image with NVIDIA drivers (any recent RunPod/Novita
+#     PyTorch image works; step 5 reinstalls a torch/torchvision/torchaudio stack
+#     matched to the pod driver's max CUDA, detected via nvidia-smi)
 #   - .env file with API keys (see .env.example)
 #
 # Usage:
@@ -277,13 +279,56 @@ fi
 
 # Pin a MATCHED torch stack as the FINAL word on these versions. ComfyUI hard-imports
 # torchaudio at startup (comfy/sd.py -> ldm/lightricks audio_vae), and torchaudio lags
-# torch (no torchaudio 2.12 build exists yet), so an unpinned torch resolved above (by
-# ComfyUI's or the project's requirements) can leave torch+torchaudio ABI-mismatched ->
+# torch, so an unpinned torch resolved above (by ComfyUI's or the project's
+# requirements) can leave torch+torchaudio ABI-mismatched ->
 # "undefined symbol ..._ZNK5torch8autograd4Node4nameEv" and ComfyUI fails to start.
-# Install torch/torchvision/torchaudio together at a known-matched set, overriding
-# whatever the requirements above resolved. cu130 verified working on H100 sm_90.
-pip install -q torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0 \
-    --index-url https://download.pytorch.org/whl/cu130
+# So install torch/torchvision/torchaudio together as ONE matched set per channel,
+# overriding whatever the requirements above resolved (the ABI lesson from 3fe8299).
+#
+# WHICH set depends on the HOST DRIVER's max CUDA: a cuXYZ wheel only uses the GPU if
+# the driver supports CUDA >= X.Y. cu130 wheels need a CUDA-13.0 driver; common
+# Novita/RunPod hosts cap at CUDA 12.4 (e.g. driver 550.x on an RTX 6000 Ada), where
+# cu130 silently can't see the GPU. So read the driver's max CUDA from nvidia-smi's
+# "CUDA Version: X.Y" header and pick the matched channel + version set.
+DRIVER_CUDA=""
+if command -v nvidia-smi >/dev/null 2>&1; then
+    DRIVER_CUDA="$(nvidia-smi 2>/dev/null \
+        | sed -n 's/.*CUDA Version: \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' \
+        | head -n1 || true)"
+fi
+
+# Encode "X.Y" as X*100+Y for an integer compare that stays safe under `set -u`
+# (10# forces base-10 so a value like "12.08" isn't read as octal).
+if [[ "$DRIVER_CUDA" =~ ^[0-9]+\.[0-9]+$ ]]; then
+    CUDA_NUM=$((10#${DRIVER_CUDA%%.*} * 100 + 10#${DRIVER_CUDA#*.}))
+else
+    CUDA_NUM=0
+fi
+
+if [ "$CUDA_NUM" -ge 1300 ]; then
+    TORCH_PKGS="torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0"  # verified H100 sm_90
+    TORCH_CHANNEL="cu130"
+elif [ "$CUDA_NUM" -ge 1204 ]; then
+    TORCH_PKGS="torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0"    # verified RTX 6000 Ada
+    TORCH_CHANNEL="cu124"
+elif [ "$CUDA_NUM" -ge 1108 ]; then
+    TORCH_PKGS="torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1"
+    TORCH_CHANNEL="cu118"
+else
+    # nvidia-smi absent/unparseable, or a driver older than CUDA 11.8. Default to
+    # cu124 (broadest modern-pod fit; the set verified on RTX 6000 Ada / H100). If
+    # ComfyUI then fails with a torch/CUDA error, override the pin manually -- see
+    # OPERATIONS.md §5.
+    echo "  WARN: no CUDA >= 11.8 driver detected (nvidia-smi reported '${DRIVER_CUDA:-none}')."
+    echo "        Defaulting to cu124; override the pin manually if ComfyUI hits a CUDA error."
+    TORCH_PKGS="torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0"
+    TORCH_CHANNEL="cu124"
+fi
+
+echo "  Driver max CUDA: ${DRIVER_CUDA:-unknown} -> installing matched torch stack (${TORCH_CHANNEL})."
+# shellcheck disable=SC2086  # word-split $TORCH_PKGS into separate pip args (intended)
+pip install -q $TORCH_PKGS \
+    --index-url "https://download.pytorch.org/whl/${TORCH_CHANNEL}"
 
 echo "  Done."
 

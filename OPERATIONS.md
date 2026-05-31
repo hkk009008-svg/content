@@ -208,6 +208,32 @@ stack + `antelopev2` model that `PulidInsightFaceLoader` needs to register,
 and runs a post-start `/object_info` check that the PuLID nodes are
 available (C-D4 guard). Run it on the pod after first boot.
 
+### torch / CUDA build (driver-dependent)
+
+The pod's torch build must match the **host NVIDIA driver's max CUDA**, not just
+the GPU model. A `cuXYZ` wheel only uses the GPU if the driver supports CUDA ≥ X.Y —
+e.g. cu130 wheels need a CUDA-13.0 driver, but common Novita/RunPod hosts cap at
+CUDA 12.4 (driver 550.x on an RTX 6000 Ada), where cu130 silently can't see the GPU.
+ComfyUI also **hard-imports torchaudio** at startup, so torch / torchvision /
+torchaudio must be installed as **one matched set per channel** or ComfyUI crashes
+with `undefined symbol ..._ZNK5torch8autograd4Node4nameEv` (the lesson from `3fe8299`).
+
+`setup_runpod.sh` (step 5) handles this automatically: it reads the driver's max
+CUDA from `nvidia-smi`'s `CUDA Version: X.Y` header and installs the matched stack:
+
+| Driver max CUDA | Channel | torch / torchvision / torchaudio | Verified on |
+|---|---|---|---|
+| ≥ 13.0 | `cu130` | 2.11.0 / 0.26.0 / 2.11.0 | H100 sm_90 |
+| ≥ 12.4 | `cu124` | 2.6.0 / 0.21.0 / 2.6.0 | RTX 6000 Ada (Novita) |
+| ≥ 11.8 | `cu118` | 2.4.1 / 0.19.1 / 2.4.1 | — |
+
+If detection fails (no `nvidia-smi`, or a driver older than CUDA 11.8) the script
+warns and defaults to `cu124`. **Check the driver first** — `nvidia-smi` top-right
+shows `CUDA Version`. If a build still fails with a torch/CUDA error, override the
+pin in `setup_runpod.sh` step 5 to the channel matching that driver, keeping torch /
+torchvision / torchaudio as one matched set (note: cu124's highest torch is 2.6.0 —
+torch 2.11.0 is cu130-only).
+
 ### Required custom nodes
 
 The pruning logic in `quality_max.py:_probe_node_availability` removes any
