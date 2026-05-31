@@ -63,7 +63,7 @@ tests/capability/
 - `@pytest.mark.live` — `skipif` the relevant env/cred is absent (`COMFYUI_SERVER_URL`, `RUNWAYML_API_SECRET`, `GOOGLE_CLOUD_PROJECT`, `ELEVENLABS`/`CARTESIA`, …). Skips cleanly when absent.
 - `@pytest.mark.e2e` — the one paid golden run; opt-in (`CAPABILITY_E2E=1` + creds + pod).
 
-Markers registered in `pyproject.toml`/`pytest.ini`. Convenience targets: CI → `pytest tests/capability -m offline`; `make capability-live` → `-m "live"`; `make capability-e2e` → `-m "e2e"`.
+New `offline`/`live` markers are registered via `config.addinivalue_line` in a `pytest_configure` hook in `tests/capability/conftest.py`, mirroring how `tests/conftest.py` already registers `e2e`/`grid_search` (there is no `[tool.pytest]` block in `pyproject.toml` and no `pytest.ini` today; the existing `e2e` marker is reused as-is). Convenience targets: CI → `pytest tests/capability -m offline`; `make capability-live` → `-m "live"`; `make capability-e2e` → `-m "e2e"`.
 
 ## 4. Capability dimensions & quality bars (the scorecard)
 
@@ -86,7 +86,7 @@ Each test reports `{dimension, pass, measured, bar, claim_id}` into `_scorecard.
 
 ## 5. Execution tiers, fixtures & determinism
 
-**Offline tier.** Pure logic, mocked at the client boundary, reusing existing patterns: `unittest.mock.patch`; `_stub_module()` for heavy imports (`veo_native`, `kling_native`, `torch`, `cv2`) at collection time; `monkeypatch.setitem(sys.modules, "fal_client", fake)`; fake `urllib.request.urlretrieve`. `conftest.py` supplies synthetic images (numpy/cv2), synthetic clips (ffmpeg `testsrc2`), temp projects. Fully deterministic: fixed seeds, canned LLM JSON, no network, no GPU, no spend.
+**Offline tier.** Pure logic, mocked at the client boundary, reusing existing patterns: `unittest.mock.patch`; `_stub_module()` for heavy imports (`veo_native`, `kling_native`, `torch`, `cv2`) at collection time; `monkeypatch.setitem(sys.modules, "fal_client", fake)`; fake `urllib.request.urlretrieve`. *(`_stub_module()` is today copy-defined in `test_dialogue_routing.py` / `test_f1b_dialogue_lipsync.py` / `test_veo_native_config.py`; slice 1 lifts it into `tests/capability/conftest.py` as a shared helper — a new extraction, not reuse of an existing shared fixture.)* The capability `conftest.py` supplies synthetic images (numpy/cv2), synthetic clips (ffmpeg `testsrc2`), temp projects. Fully deterministic: fixed seeds, canned LLM JSON, no network, no GPU, no spend.
 
 **Live tier.** `@pytest.mark.live` + `skipif` on the relevant env. **Componentized** — each test validates one capability against a real artifact cheaply (one ComfyUI keyframe ≈ $0.04 → ArcFace; one short video-API call; one ffmpeg encode + loudness probe; one lipsync clip). **Tolerance policy:** stochastic output asserted with a margin (e.g. ArcFace ≥ threshold − 0.05); transient API/network errors get a bounded retry (≤2); a *quality* miss is recorded as a capability finding (scorecard FAIL with measured value), not a crash/exception.
 
@@ -103,7 +103,7 @@ Each test reports `{dimension, pass, measured, bar, claim_id}` into `_scorecard.
 
 ## 6. Intent ledger, scorecard & stub/gap policy
 
-**Intent ledger** (`_ledger.py`). The ~76 manual claims (seed enumerated in §9) become a registry: `{claim_id, manual_section, dimension, tier, test_id, status}`. Each test references its `claim_id`(s). Produces a coverage report (manual § → test → pass/fail/gap). **Align with the existing `scripts/check_doc_claims.py` + `docs/pipeline_status.toml`** (which already tracks stubbed features) rather than reinventing — the ledger extends that machinery.
+**Intent ledger** (`_ledger.py`). The ~76 manual claims (seed enumerated in §9) become a registry: `{claim_id, manual_section, dimension, tier, test_id, status}`. Each test references its `claim_id`(s). Produces a coverage report (manual § → test → pass/fail/gap). **Align with the existing `scripts/check_doc_claims.py` + `docs/pipeline_status.toml`** (which already tracks stubbed features) rather than reinventing — the ledger extends that machinery. Where a claim is already covered by an existing test (e.g. the F1b mandatory-lipsync contract in `test_f1b_dialogue_lipsync.py`), the ledger **cross-links** to it rather than re-counting, so coverage isn't double-counted.
 
 **Scorecard** (`_scorecard.py`). A pytest hook (`pytest_terminal_summary` / fixtures) collects per-dimension `{pass, measured, bar}` and emits a capability scorecard at session end (markdown + JSON), e.g.:
 
@@ -130,8 +130,10 @@ When a stub gets wired, its test breaks → signal to update code **and** ledger
 From the coverage survey (1280 tests / 56 files):
 
 - **Well-covered:** `domain/models.py`, `domain/project_manager.py`.
-- **Zero direct tests (highest leverage):** `identity_validator.py`, `style_director.py`, `lip_sync.py`, `scene_decomposer.py`, `kling_native.py`, `sora_native.py`, `ltx_native.py`.
-- **Thin / happy-path only:** `chief_director.py` (only JSON parse — veto enforcement untested), `cinema_pipeline.py` (only indirect orchestration), `coherence_analyzer.py`, `identity_types.py`, `phase_c_assembly.py`, the cascade *error/fallback* paths (order tested; retry counts / quota-vs-timeout classification not), end-to-end orchestration.
+- **No behavioral/internal-logic tests (highest leverage):** `identity/validator.py` (truly 0 references), `style_director.py` (appears only as a stub-module registration), `kling_native.py` / `sora_native.py` / `ltx_native.py` (mocked-out at collection via `_stub_module`; no behavioral tests).
+- **Partial / contract-only (internal logic untested):** `domain/scene_decomposer.py` — its `API_REGISTRY` + `PURPOSE_API_RANKING` are exercised by `test_dialogue_routing.py` (~10 tests), but `decompose`/`_fallback_decompose` are not; `lip_sync.py` — `test_f1b_dialogue_lipsync.py` covers the call-contract (that `generate_motion_take` invokes lip-sync, mocked) but not internal logic.
+- **Thin / happy-path only:** `llm/chief_director.py` (parse paths via `test_chief_director_parse.py`; the ChiefDirector's own veto-*decision* composition is untested — `test_auto_approve.py` exercises the *gate's* consumption in `cinema/auto_approve.py`, not the LLM layer), `cinema_pipeline.py` (only indirect orchestration), `coherence_analyzer.py`, `identity/types.py`, `phase_c_assembly.py`, the cascade *error/fallback* paths (order tested; retry counts / quota-vs-timeout classification not), end-to-end orchestration.
+- *Per ADR-013, the `grep -rln <module> tests/` + file:line evidence for each bucket above is transcribed into `_ledger.py` at slice 1 — this §7 list drives the §8 priority order, so its anchors live with the ledger.*
 
 The suite targets these blind spots first, where they are also offline-testable (cheap, deterministic, fastest ROI).
 
@@ -141,7 +143,7 @@ This is large (≫5 sub-tasks, ≥800 LOC), so per `CLAUDE.md` it is **planned (
 
 **Priority order (by leverage):**
 
-1. **Scaffolding:** `tests/capability/` package, markers, `conftest.py` fixtures (synthetic images/clips/temp projects), `_ledger.py`, `_scorecard.py`.
+1. **Scaffolding:** `tests/capability/` package, markers (`pytest_configure`), `conftest.py` fixtures (synthetic images/clips/temp projects + the lifted `_stub_module` helper), `_ledger.py`, `_scorecard.py`, **and transcription of the full ~76-claim enumeration with file:line + `grep -rln` coverage evidence into `_ledger.py`** (explicit deliverable, not a hidden TBD).
 2. **Offline core on untested quality machinery** (the biggest blind spots, all $0/deterministic): identity logic, chief_director veto enforcement, gate predicates + orchestration, cascade error/fallback paths, scene_decomposer, style_director, lip_sync routing, coherence/motion math.
 3. **Offline core on already-thin areas:** routing/cascade, audio/loudness builders, format/assembly builders, cost/budget.
 4. **`stubs_and_gaps` ledger** (`INTENDED_NOT_WIRED`).
@@ -150,7 +152,7 @@ This is large (≫5 sub-tasks, ≥800 LOC), so per `CLAUDE.md` it is **planned (
 
 ## 9. Appendix — seed of testable intent claims
 
-The complete ~76-claim enumeration (with manual §/file:line, dimension, tier, offline-testability) was produced during exploration and will be encoded in `_ledger.py`. Representative high-priority seed (offline unless noted):
+The complete ~76-claim enumeration (with manual §/file:line, dimension, tier, offline-testability) was produced during exploration and is transcribed into `_ledger.py` as a **slice-1 deliverable** (§8.1). **Module-path note (root-vs-domain duplicates):** `scene_decomposer.py` and `continuity_engine.py` each exist at BOTH repo root and under `domain/`; the tests target the `domain/` ones (`domain.scene_decomposer`, `domain.continuity_engine`). The identity validator + thresholds live at `identity/validator.py` + `identity/types.py`; tri-mix is in `cinema_pipeline.py::_assemble_final` while loudnorm/xfade are in `phase_c_ffmpeg.py`. Representative high-priority seed (offline unless noted):
 
 - **Routing/Cascade:** exact default cascade order; `try_next_api` filters attempted + `api_engines`-disabled; exhaustion→30s→retry ≤`cascade_retry_limit`; dialogue shot overrides `target_api`→VEO_NATIVE + `video_fallbacks=None` + `audio_embedded`; VEO_NATIVE is the only `native_audio:True` engine; Veo duration ∈{4,6,8} (5→6,7→8); Sora ∈[4,8,12,16,20] (invalid→4); Veo `reference_images`/`driving_video_path` accepted-but-dropped (Bug #4).
 - **Shot routing:** `classify_shot_type` ∈ {portrait,medium,wide,action,landscape} (never close_up); `WORKFLOW_TEMPLATES` primary+fallbacks per type; PuLID weight per type (1.0/.9/.65/.8/.0).
