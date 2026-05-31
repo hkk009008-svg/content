@@ -111,10 +111,19 @@ class AutoApproveConfig:
         Unknown sub-keys are silently ignored; missing sub-keys fall back
         to the dataclass defaults.
         """
-        raw: dict = (project.get("global_settings") or {}).get("auto_approve") or {}
+        gs: dict = project.get("global_settings") or {}
+        raw: dict = gs.get("auto_approve") or {}
+        quality_tier = gs.get("quality_tier", "production")
 
         def _get(key: str, default):
             return raw.get(key, default)
+
+        # Tier-aware composite default: max-tier writes a real ``composite`` (~0.92-0.97),
+        # so the 0.97 class default fits. Production-tier never writes composite — the gate's
+        # _best_take_composite falls back to identity_score (~0.6-0.8) — so a 0.97 bar would
+        # veto every production keyframe; default to the keyframe identity threshold (0.60).
+        # An explicit project ``auto_approve.image_min_composite`` still overrides either.
+        composite_default = cls.image_min_composite if quality_tier == "max" else 0.60
 
         return cls(
             enabled=_get("enabled", cls.enabled),
@@ -122,7 +131,7 @@ class AutoApproveConfig:
             plan_reject_on_violations=_get(
                 "plan_reject_on_violations", cls.plan_reject_on_violations
             ),
-            image_min_composite=_get("image_min_composite", cls.image_min_composite),
+            image_min_composite=_get("image_min_composite", composite_default),
             image_min_composite_fallback=_get(
                 "image_min_composite_fallback", cls.image_min_composite_fallback
             ),

@@ -295,7 +295,10 @@ class TestConfigFromProject:
         config = AutoApproveConfig.from_project(project)
         defaults = AutoApproveConfig()
         assert config.enabled == defaults.enabled
-        assert config.image_min_composite == defaults.image_min_composite
+        # image_min_composite is tier-aware (see TestFromProjectTierAwareCompositeDefault):
+        # an empty/production project uses the production identity-fallback bar (0.60),
+        # NOT the class default 0.97 (which is the max-tier composite bar).
+        assert config.image_min_composite == 0.60
         assert config.motion_min_identity == defaults.motion_min_identity
         assert config.final_min_lipsync == defaults.final_min_lipsync
 
@@ -1304,3 +1307,30 @@ class TestBestTakeCompositeIdentityFallback:
         # No quality signal at all → 0.0 (correct: cannot auto-approve blind).
         takes = [{"metadata": {}}]
         assert _best_take_composite(takes) == 0.0
+
+
+class TestFromProjectTierAwareCompositeDefault:
+    """The image_min_composite DEFAULT must be tier-aware. Production-tier takes
+    write only identity_score (composite absent → _best_take_composite falls back to
+    identity ~0.6-0.8), so the flat 0.97 class default would veto every production
+    keyframe. Max-tier writes a real composite (~0.92-0.97), so 0.97 fits there.
+    Explicit project overrides always win over the tier default."""
+
+    def test_production_tier_default_is_identity_bar(self):
+        cfg = AutoApproveConfig.from_project({"global_settings": {"quality_tier": "production"}})
+        assert cfg.image_min_composite == 0.60
+
+    def test_missing_tier_defaults_to_production_bar(self):
+        cfg = AutoApproveConfig.from_project({"global_settings": {}})
+        assert cfg.image_min_composite == 0.60
+
+    def test_max_tier_default_stays_high(self):
+        cfg = AutoApproveConfig.from_project({"global_settings": {"quality_tier": "max"}})
+        assert cfg.image_min_composite == 0.97
+
+    def test_explicit_value_overrides_tier_default(self):
+        cfg = AutoApproveConfig.from_project(
+            {"global_settings": {"quality_tier": "production",
+                                 "auto_approve": {"image_min_composite": 0.42}}}
+        )
+        assert cfg.image_min_composite == 0.42
