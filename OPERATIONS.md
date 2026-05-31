@@ -311,7 +311,8 @@ Exit 0 = invariants hold.
 .venv/bin/python -m pytest tests/unit/ -q
 ```
 
-Expected: **478 pass, 3 skipped, 0 failed** (baseline as of 2026-05-24).
+Expected: **1275 pass, 3 skipped, 0 failed** (verified 2026-06-01 via the
+command above; up from 478 at the 2026-05-24 baseline as the suite grew).
 The 3 skips are documented `@unittest.skip` in
 `test_project_persistence.py:139,197,221` — mock setup hasn't caught up
 with `project_manager`/`character_manager`/`location_manager` refactors.
