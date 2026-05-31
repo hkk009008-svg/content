@@ -389,13 +389,23 @@ def _rules_for_final(config: AutoApproveConfig) -> list[VetoRule]:
 
 
 def _best_take_composite(takes: list[dict]) -> float:
-    """Return the highest composite score across all takes, or 0.0 if none."""
+    """Return the best keyframe quality score across all takes, or 0.0 if none.
+
+    Prefers ``metadata["composite"]`` but FALLS BACK to ``metadata["identity_score"]``
+    when composite is absent. Production-tier keyframe takes only ever write
+    ``identity_score`` (``composite`` is computed solely in max-tier, see
+    ``quality_max.py``); without this fallback the function returned 0.0 for every
+    production take, so any ``image_min_composite > 0`` (default 0.97) vetoed EVERY
+    keyframe → headless ``GateNotSatisfiedError`` regardless of actual quality.
+    """
     best = 0.0
     for take in takes:
         metadata = take.get("metadata") or {}
-        composite = metadata.get("composite")
-        if composite is not None:
-            best = max(best, float(composite))
+        score = metadata.get("composite")
+        if score is None:
+            score = metadata.get("identity_score")
+        if score is not None:
+            best = max(best, float(score))
     return best
 
 

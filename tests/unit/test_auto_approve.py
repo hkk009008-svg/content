@@ -28,6 +28,7 @@ from cinema.auto_approve import (
     _rules_for_motion,
     _rules_for_final,
     _best_take_lipsync,
+    _best_take_composite,
 )
 
 
@@ -1278,3 +1279,28 @@ class TestRecordDirectorReview:
         decision = check_gate("plan", shot_state=shot, project={}, takes=[], config=AutoApproveConfig())
         assert decision.auto_approved is False
         assert "plan_decision_not_approved" in decision.rule_names
+
+
+class TestBestTakeCompositeIdentityFallback:
+    """Regression: the keyframe gate scores takes via metadata['composite'], but
+    production keyframe takes only write 'identity_score' (composite is written
+    ONLY in max-tier, quality_max.py). With no fallback, _best_take_composite
+    returns 0.0 for every production take, so image_min_composite > 0 vetoes every
+    keyframe → headless GateNotSatisfiedError regardless of actual quality (the
+    default image_min_composite=0.97 makes this fire on every unattended run).
+    It must fall back to identity_score, the score production DOES populate."""
+
+    def test_falls_back_to_identity_when_composite_absent(self):
+        # Mirrors a real production keyframe take: identity_score present, no composite.
+        takes = [{"metadata": {"identity_score": 0.72}}]
+        assert _best_take_composite(takes) == pytest.approx(0.72)
+
+    def test_prefers_composite_when_present(self):
+        # Max-tier writes composite; it must still take precedence over identity.
+        takes = [{"metadata": {"composite": 0.95, "identity_score": 0.60}}]
+        assert _best_take_composite(takes) == pytest.approx(0.95)
+
+    def test_zero_when_neither_score_present(self):
+        # No quality signal at all → 0.0 (correct: cannot auto-approve blind).
+        takes = [{"metadata": {}}]
+        assert _best_take_composite(takes) == 0.0
