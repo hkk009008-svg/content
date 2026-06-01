@@ -427,9 +427,23 @@ def _inject_identity(workflow: dict, char_lora: Optional[str], face_anchor_remot
             workflow["700"]["inputs"]["strength_model"] = params.get("lora_strength_model", 1.0)
             workflow["700"]["inputs"]["strength_clip"] = params.get("lora_strength_clip", 1.0)
         else:
-            # No LoRA -> set strength to 0 (load runs but has zero effect)
-            workflow["700"]["inputs"]["strength_model"] = 0.0
-            workflow["700"]["inputs"]["strength_clip"] = 0.0
+            # No trained per-char LoRA -> drop LoraLoader(700) entirely and feed
+            # PuLID(100)/CLIP consumers from the base loaders, so the graph
+            # validates without a PLACEHOLDER_char.safetensors file (LoraLoader
+            # would otherwise reject the missing file). Identity is carried by
+            # PuLID(100) alone, applied on the base UNet; a per-char LoRA would
+            # add fidelity -- this is an explicit LoRA-less degradation, NOT full
+            # max. 700's consumers: 100.model<-[700,0], 122.clip<-[700,1],
+            # 600.clip<-[700,1] (600 only if FaceDetailer survived).
+            print("[quality_max] no per-char LoRA -> running LoRA-less (PuLID-only "
+                  "identity; train a per-char LoRA for full max fidelity)")
+            _prune_node(workflow, "700")
+            if "100" in workflow:
+                workflow["100"]["inputs"]["model"] = ["112", 0]
+            if "122" in workflow:
+                workflow["122"]["inputs"]["clip"] = ["11", 0]
+            if "600" in workflow:
+                workflow["600"]["inputs"]["clip"] = ["11", 0]
     if face_anchor_remote and "93" in workflow:
         workflow["93"]["inputs"]["image"] = face_anchor_remote
     if "100" in workflow:

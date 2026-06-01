@@ -38,7 +38,15 @@ from __future__ import annotations
 
 import pytest
 
-from quality_max import _load_max_workflow, _prune_unavailable
+from quality_max import (
+    _inject_conditioning,
+    _inject_identity,
+    _inject_latent_source,
+    _inject_post_passes,
+    _inject_sampling,
+    _load_max_workflow,
+    _prune_unavailable,
+)
 
 
 def _all_class_types(workflow: dict) -> set:
@@ -105,6 +113,102 @@ def test_prune_unavailable_leaves_no_reachable_dangling_links(has_character, has
     available = _all_class_types(workflow)
 
     _prune_unavailable(workflow, available, has_character=has_character, has_init=has_init)
+
+    dangling = _reachable_dangling(workflow, original_ids)
+    assert not dangling, (
+        f"has_character={has_character} has_init={has_init}: "
+        f"{len(dangling)} reachable dangling link(s): {dangling}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# LoRA-less identity path (_inject_identity with no char_lora)
+# ---------------------------------------------------------------------------
+
+_PLACEHOLDER_LORA = "PLACEHOLDER_char.safetensors"
+
+
+def test_inject_identity_loraless_prunes_700_no_placeholder():
+    """No trained per-char LoRA -> LoraLoader(700) must be pruned (not left with
+    the PLACEHOLDER_char filename, which fails ComfyUI validation). PuLID(100) +
+    CLIP consumers rewire to the base loaders (112/11); no reachable dangling.
+
+    A character max shot without a LoRA is the common first-run case (PuLID
+    carries identity); today it hard-fails on PLACEHOLDER_char.safetensors."""
+    workflow = _load_max_workflow()
+    original_ids = set(workflow.keys())
+    available = _all_class_types(workflow)
+
+    _prune_unavailable(workflow, available, has_character=True, has_init=True)
+    _inject_identity(workflow, char_lora=None, face_anchor_remote=None,
+                     params={}, has_character=True)
+
+    assert "700" not in workflow, "LoraLoader(700) must be pruned when no char_lora"
+    for node in workflow.values():
+        if isinstance(node, dict):
+            assert node.get("inputs", {}).get("lora_name") != _PLACEHOLDER_LORA, (
+                "PLACEHOLDER_char.safetensors must not survive into the queued graph"
+            )
+    assert workflow["100"]["inputs"]["model"] == ["112", 0], "PuLID.model -> base UNet"
+    assert workflow["122"]["inputs"]["clip"] == ["11", 0], "CLIPTextEncode.clip -> base CLIP"
+    if "600" in workflow:
+        assert workflow["600"]["inputs"]["clip"] == ["11", 0], "FaceDetailer.clip -> base CLIP"
+    assert not _reachable_dangling(workflow, original_ids)
+
+
+def test_inject_identity_with_lora_keeps_700():
+    """A real per-char LoRA keeps LoraLoader(700) wired with the LoRA name; the
+    identity stack stays intact and there are no reachable dangling links."""
+    workflow = _load_max_workflow()
+    original_ids = set(workflow.keys())
+    available = _all_class_types(workflow)
+
+    _prune_unavailable(workflow, available, has_character=True, has_init=True)
+    _inject_identity(workflow, char_lora="mara_v1.safetensors", face_anchor_remote=None,
+                     params={}, has_character=True)
+
+    assert workflow["700"]["inputs"]["lora_name"] == "mara_v1.safetensors"
+    assert workflow["100"]["inputs"]["model"] == ["700", 0], "PuLID.model stays on the LoRA"
+    assert not _reachable_dangling(workflow, original_ids)
+
+
+# ---------------------------------------------------------------------------
+# Availability-pruning reachability (production-pod runs max: SUPIR/FaceDetailer/
+# Redux/DetailDaemon classes absent). Coverage for the path the full-pod tests
+# above don't exercise.
+# ---------------------------------------------------------------------------
+
+_MAX_EXTRA_CLASSES = {
+    "SUPIR_model_loader_v2", "SUPIR_first_stage", "SUPIR_sample", "SUPIR_decode",
+    "SUPIR_conditioner", "FaceDetailer", "UltralyticsDetectorProvider",
+    "StyleModelApplyAdvanced", "DetailDaemonSamplerNode",
+}
+
+
+@pytest.mark.parametrize(
+    "has_character,has_init",
+    [(True, True), (True, False), (False, True), (False, False)],
+)
+def test_max_extras_absent_full_sequence_no_dangling(has_character, has_init):
+    """Production-pod-runs-max: the heavy max classes (SUPIR/FaceDetailer/Redux/
+    DetailDaemon) are absent. After the FULL production graph-surgery sequence
+    (prune + the inject_* steps, as generate_ai_broll_max runs them), the queued
+    graph must leave no SaveImage-reachable dangling link, for any shot type.
+
+    The SUPIR feed-rewire (950.image) lives in _inject_post_passes, so the
+    invariant only holds across the whole sequence -- mirroring the director's F2
+    test, which called _prune_unavailable + _inject_post_passes together."""
+    workflow = _load_max_workflow()
+    original_ids = set(workflow.keys())
+    available = _all_class_types(workflow) - _MAX_EXTRA_CLASSES
+    params: dict = {}
+
+    _prune_unavailable(workflow, available, has_character=has_character, has_init=has_init)
+    _inject_identity(workflow, None, None, params, has_character)
+    _inject_conditioning(workflow, "a prompt", None, None, params, has_character)
+    _inject_sampling(workflow, params)
+    _inject_latent_source(workflow, None, params)
+    _inject_post_passes(workflow, params, available)
 
     dangling = _reachable_dangling(workflow, original_ids)
     assert not dangling, (
