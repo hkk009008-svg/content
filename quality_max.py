@@ -319,6 +319,27 @@ def _upload_with_cache(comfy: RunPodComfyUI, local_path: str) -> str:
 # Workflow injection — split by axis
 # ---------------------------------------------------------------------------
 
+def _apply_model_precision(workflow: dict, precision: str):
+    """Re-point the FLUX UNet (112) + T5 text encoder (11) to fp8 weights when
+    precision='fp8', so the fp16-canonical pulid_max.json runs on an fp8-
+    provisioned pod (the filenames setup_runpod.sh downloads). precision='fp16'
+    (the true-max flag) leaves the fp16 defaults, which setup_runpod.sh --max-fp16
+    provisions. Guarded + idempotent: only swaps a UNETLoader / DualCLIPLoader
+    whose name still references fp16, so a HiDream-swapped node 112 or an
+    already-fp8 graph is left untouched.
+    """
+    if precision != "fp8":
+        return
+    n112 = workflow.get("112")
+    if (isinstance(n112, dict) and n112.get("class_type") == "UNETLoader"
+            and "fp16" in str(n112.get("inputs", {}).get("unet_name", ""))):
+        n112["inputs"]["unet_name"] = "FLUX1/flux1-dev-fp8.safetensors"
+    n11 = workflow.get("11")
+    if (isinstance(n11, dict) and n11.get("class_type") == "DualCLIPLoader"
+            and "fp16" in str(n11.get("inputs", {}).get("clip_name1", ""))):
+        n11["inputs"]["clip_name1"] = "t5xxl_fp8_e4m3fn.safetensors"
+
+
 def _prune_node(workflow: dict, node_id: str, rewire_to: Optional[Tuple[str, int]] = None):
     """Remove a node and rewire any downstream consumer that referenced it.
 
@@ -750,6 +771,17 @@ def generate_ai_broll_max(
             print("[quality_max] image backbone: HiDream-I1-Full")
         else:
             print("[quality_max] HiDream-I1 requested but node not available on pod; staying on FLUX")
+
+    # Model precision: pulid_max.json is fp16-canonical. Re-point UNet/T5 to fp8
+    # for the fp8-provisioned pod (the default first-run path); fp16 (true max)
+    # is opt-in via params['max_model_precision'] or $MAX_MODEL_PRECISION and
+    # needs setup_runpod.sh --max-fp16. No-op if HiDream swapped node 112.
+    max_precision = (params.get("max_model_precision")
+                     or os.environ.get("MAX_MODEL_PRECISION", "fp8"))
+    _apply_model_precision(workflow, max_precision)
+    print(f"[quality_max] model precision: {max_precision}"
+          + (" (UNet/T5 re-pointed to fp8 weights)" if max_precision == "fp8"
+             else " (fp16 canonical; needs --max-fp16 provisioning)"))
 
     _prune_unavailable(workflow, available, has_character, has_init)
 

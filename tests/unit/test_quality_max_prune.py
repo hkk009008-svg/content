@@ -39,6 +39,7 @@ from __future__ import annotations
 import pytest
 
 from quality_max import (
+    _apply_model_precision,
     _inject_conditioning,
     _inject_identity,
     _inject_latent_source,
@@ -215,3 +216,44 @@ def test_max_extras_absent_full_sequence_no_dangling(has_character, has_init):
         f"has_character={has_character} has_init={has_init}: "
         f"{len(dangling)} reachable dangling link(s): {dangling}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Model-precision re-point: pulid_max.json is fp16-canonical; fp8 lets it run on
+# the fp8-provisioned pod for a fast first green run, fp16 is the true-max flag.
+# ---------------------------------------------------------------------------
+
+def test_apply_model_precision_fp8_repoints_unet_and_t5():
+    """precision='fp8' -> node 112 UNet + node 11 T5 re-point to the fp8 weights
+    setup_runpod.sh provisions; node 11's clip_l is unchanged (shared)."""
+    workflow = _load_max_workflow()
+    assert workflow["112"]["inputs"]["unet_name"] == "FLUX1/flux1-dev-fp16.safetensors"
+    assert workflow["11"]["inputs"]["clip_name1"] == "t5xxl_fp16.safetensors"
+
+    _apply_model_precision(workflow, "fp8")
+
+    assert workflow["112"]["inputs"]["unet_name"] == "FLUX1/flux1-dev-fp8.safetensors"
+    assert workflow["11"]["inputs"]["clip_name1"] == "t5xxl_fp8_e4m3fn.safetensors"
+    assert workflow["11"]["inputs"]["clip_name2"] == "clip_l.safetensors"
+
+
+def test_apply_model_precision_fp16_leaves_canonical_defaults():
+    """precision='fp16' (the true-max flag) leaves the fp16-canonical JSON as-is."""
+    workflow = _load_max_workflow()
+    _apply_model_precision(workflow, "fp16")
+    assert workflow["112"]["inputs"]["unet_name"] == "FLUX1/flux1-dev-fp16.safetensors"
+    assert workflow["11"]["inputs"]["clip_name1"] == "t5xxl_fp16.safetensors"
+
+
+def test_apply_model_precision_fp8_is_idempotent_and_guarded():
+    """A second fp8 call is a no-op, and the re-point only fires on the expected
+    fp16 FLUX loaders (guarded by class_type + an fp16 filename)."""
+    workflow = _load_max_workflow()
+    _apply_model_precision(workflow, "fp8")
+    _apply_model_precision(workflow, "fp8")
+    assert workflow["112"]["inputs"]["unet_name"] == "FLUX1/flux1-dev-fp8.safetensors"
+    # A non-UNETLoader node 112 (e.g. a HiDream swap) is left untouched.
+    workflow["112"]["class_type"] = "HiDreamModelLoader"
+    workflow["112"]["inputs"]["unet_name"] = "fp16-marker"
+    _apply_model_precision(workflow, "fp8")
+    assert workflow["112"]["inputs"]["unet_name"] == "fp16-marker"
