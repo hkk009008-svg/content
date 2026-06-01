@@ -6,6 +6,30 @@ end-to-end; this is purely the max-tier provisioning gap.*
 
 ---
 
+## UPDATE — 2026-06-01 (operator prep: blockers narrowed + F1/F1b backstop)
+
+**Actionable runbook: [RUNBOOK-max-tier-test.md](RUNBOOK-max-tier-test.md).**
+Start there to run the test; this doc is the context/blocker analysis behind it.
+
+Since this snapshot, offline prep on branch `feat/max-tier-provisioning`
+(4 commits) plus the F1/F1b fixes on `main` have closed or narrowed every
+code-side blocker below:
+- **git state corrected:** `8cf0f07` is now in `origin/main` — `main` =
+  `origin/main` = `5425f9e` (the F1/F1b merge carried it up). The "UNPUSHED"
+  lines in *State at handoff* and the *Verification* footer are superseded.
+- **LoRA (node 700):** LoRA-less prune path added (`5a229d2`) — runs PuLID-only
+  without a trained LoRA; training remains the full-fidelity option.
+- **fp16 models (112/11):** fp8 re-point (`4d33868`) lets the fp16-canonical
+  workflow run on the fp8 pod; `--max-fp16` provisions true fp16.
+- **Max nodes (SUPIR/Impact/Redux/AYS/DetailDaemon/ReActor):**
+  `setup_runpod.sh --max` installs them (`339b674`); and if any are still absent
+  they now prune cleanly (F1/F1b, `5425f9e`) instead of silently falling back.
+
+The blocker table + provisioning plan below remain the authoritative *analysis*;
+the runbook turns them into ordered steps with a verify column.
+
+---
+
 ## TL;DR
 
 - **Production tier is fully working** — Veo native-audio E2E proven (consistent
@@ -22,9 +46,10 @@ end-to-end; this is purely the max-tier provisioning gap.*
 
 ## State at handoff (all verified)
 
-- **git:** HEAD = `8cf0f07` (tier-aware composite default). **`8cf0f07` is 1 ahead of
-  `origin/main` = `d55d487` — UNPUSHED.** Push when ready (needs explicit
-  authorization; harness soft-blocks direct-to-`main`).
+- **git:** HEAD = `8cf0f07` (tier-aware composite default) *at handoff time*.
+  **SUPERSEDED (see UPDATE above):** `8cf0f07` is now in `origin/main`; `main` =
+  `origin/main` = `5425f9e`. *(Original claim: 1 ahead of `origin/main` =
+  `d55d487`, unpushed.)*
   - `c917bc1` fix(auto-approve): composite→identity fallback (pushed, in `d55d487`)
   - `8cf0f07` fix(auto-approve): tier-aware default 0.97 max / 0.60 production (local)
 - **Tests:** `pytest tests/unit/` → 1282 passed / 3 skipped / 0 failed; `§15 ci_smoke` OK.

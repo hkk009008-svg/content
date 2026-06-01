@@ -208,6 +208,13 @@ stack + `antelopev2` model that `PulidInsightFaceLoader` needs to register,
 and runs a post-start `/object_info` check that the PuLID nodes are
 available (C-D4 guard). Run it on the pod after first boot.
 
+For **max tier**, pass `--max` (or `--max-fp16` for true fp16 base models;
+needs `HF_TOKEN` for the gated FLUX weights) to also install the max-tier
+custom nodes (SUPIR, Impact-Pack + Subpack, Detail-Daemon) and model weights.
+The flag is additive — no flag = production-only. See
+[docs/RUNBOOK-max-tier-test.md](docs/RUNBOOK-max-tier-test.md) for the
+end-to-end provisioning + run + verify steps.
+
 ### torch / CUDA build (driver-dependent)
 
 The pod's torch build must match the **host NVIDIA driver's max CUDA**, not just
