@@ -196,11 +196,10 @@ if [ "$MAX" -eq 1 ]; then
     echo "    curl -s http://127.0.0.1:8188/object_info/StyleModelApplyAdvanced"
     echo "  # VERIFY: both must return non-empty JSON before running pulid_max.json."
     echo ""
-    echo "  NOTE: ComfyUI-SUPIR (kijai) and ComfyUI-PuLID-Flux (balazik) may need"
-    echo "  source-level compat patches for ComfyUI >= 0.22. See scripts/setup_runpod_max.sh"
-    echo "  (in the repo) for the compat_patches() function proven against pod 07ed667185a895bb"
-    echo "  (2026-06-01). Run that script's compat_patches() section on-pod if SUPIR or"
-    echo "  PuLID-Flux fails to load."
+    echo "  NOTE: custom nodes can break on ComfyUI version drift. If ComfyUI-SUPIR"
+    echo "  (kijai) or ComfyUI-PuLID-Flux (balazik) fail to load after a core update,"
+    echo "  check each node's GitHub issues/README for a compatible commit or a source"
+    echo "  patch. (Not automated here -- verify on-pod.)"
 fi
 
 # ------------------------------------------------------------------
