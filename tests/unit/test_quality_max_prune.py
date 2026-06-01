@@ -92,10 +92,7 @@ def _reachable_dangling(workflow: dict, original_ids: set) -> list:
     "has_character,has_init",
     [
         (True, True),
-        pytest.param(True, False, marks=pytest.mark.xfail(
-            reason="F1b: no-init conditioning dangling (600.positive/negative<-[804,0]); "
-                   "separate finding, fixed in the follow-up commit",
-            strict=True)),
+        (True, False),
         (False, True),
         (False, False),
     ],

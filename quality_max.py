@@ -371,6 +371,16 @@ def _prune_unavailable(workflow: dict, available: Set[str], has_character: bool,
         # Rewire BasicGuider.conditioning straight to FluxGuidance
         if "22" in workflow:
             workflow["22"]["inputs"]["conditioning"] = ["60", 0]
+        # FaceDetailer(600) reads the same pruned Redux conditioning [804,0] as
+        # the guider above (for BOTH its positive and negative inputs); mirror the
+        # 22->[60,0] rewire so a character text-to-image shot (has_character, no
+        # init) doesn't leave 600.positive/negative -> [804,0] dangling -> /prompt
+        # reject -> silent production-tier fallback. No-character shots prune 600
+        # entirely in the has_character branch above, so this only fires for
+        # character + no-init. (Rule #13 symmetric completion of the 22 rewire.)
+        if "600" in workflow:
+            workflow["600"]["inputs"]["positive"] = ["60", 0]
+            workflow["600"]["inputs"]["negative"] = ["60", 0]
         # Rewire sampler latent to EmptyLatentImage
         if "13" in workflow:
             workflow["13"]["inputs"]["latent_image"] = ["102", 0]
