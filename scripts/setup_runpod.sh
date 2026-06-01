@@ -13,10 +13,36 @@
 #   - .env file with API keys (see .env.example)
 #
 # Usage:
-#   bash scripts/setup_runpod.sh
+#   bash scripts/setup_runpod.sh            # production tier (default, unchanged)
+#   bash scripts/setup_runpod.sh --max      # + max-tier nodes and models
+#   bash scripts/setup_runpod.sh --max-fp16 # + max-tier AND fp16 base models
+#
+# --max-fp16 implies --max.
+# Gated downloads (FLUX.1-dev fp16, FLUX.1-Redux-dev) require:
+#   export HF_TOKEN=hf_xxx   # must have accepted the relevant licenses on HF
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Argument parsing — defaults to production-only (no-flag behaviour unchanged)
+# ---------------------------------------------------------------------------
+MAX=0
+MAX_FP16=0
+
+for _arg in "$@"; do
+    case "$_arg" in
+        --max)       MAX=1 ;;
+        --max-fp16)  MAX=1; MAX_FP16=1 ;;
+        *)
+            echo "Usage: $0 [--max] [--max-fp16]"
+            echo "  --max       Install max-tier custom nodes + models (pulid_max.json)"
+            echo "  --max-fp16  Also install fp16 base models (implies --max)"
+            echo "  (no flags)  Production-tier setup only"
+            exit 1
+            ;;
+    esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -121,6 +147,63 @@ pip install -q insightface onnxruntime-gpu facexlib || \
 echo "  Done."
 
 # ------------------------------------------------------------------
+# 2b. Max-tier custom nodes (only when --max or --max-fp16 passed)
+# ------------------------------------------------------------------
+if [ "$MAX" -eq 1 ]; then
+    echo ""
+    echo "[2b] Installing max-tier custom nodes (pulid_max.json)..."
+
+    # Install helper: idempotent git clone + pip install -r requirements.txt if present.
+    # Mirrors the ComfyUI-PuLID-Flux git clone pattern used above.
+    _install_max_node() {
+        local node_url="$1"
+        local node_dir_name="$2"
+        local node_path="$CUSTOM_NODES_DIR/$node_dir_name"
+        if [ ! -d "$node_path" ]; then
+            echo "  Installing $node_dir_name..."
+            if git clone --depth 1 "$node_url" "$node_path"; then
+                if [ -f "$node_path/requirements.txt" ]; then
+                    pip install -r "$node_path/requirements.txt" -q || true
+                fi
+            else
+                echo "  ERROR: failed to clone $node_dir_name; max-tier node unavailable."
+                rm -rf "$node_path"
+            fi
+        else
+            echo "  $node_dir_name already installed."
+        fi
+    }
+
+    # ComfyUI-SUPIR: SUPIR_model_loader_v2 / SUPIR_sample / SUPIR_decode (nodes 500-503)
+    _install_max_node "https://github.com/kijai/ComfyUI-SUPIR" "ComfyUI-SUPIR"
+
+    # ComfyUI-Impact-Pack: FaceDetailer (node 600)
+    _install_max_node "https://github.com/ltdrdata/ComfyUI-Impact-Pack" "ComfyUI-Impact-Pack"
+
+    # ComfyUI-Impact-Subpack: UltralyticsDetectorProvider (node 600 detector input)
+    _install_max_node "https://github.com/ltdrdata/ComfyUI-Impact-Subpack" "ComfyUI-Impact-Subpack"
+
+    # ComfyUI-Detail-Daemon: DetailDaemonSamplerNode (node 700)
+    _install_max_node "https://github.com/Jonseed/ComfyUI-Detail-Daemon" "ComfyUI-Detail-Daemon"
+
+    echo "  Max-tier custom nodes done."
+    echo ""
+    echo "  NOTE: AlignYourStepsScheduler (FLUX model_type) and StyleModelApplyAdvanced"
+    echo "  (FLUX Redux) are ComfyUI CORE nodes. They require a recent ComfyUI build."
+    echo "  Update ComfyUI core manually (cd /workspace/ComfyUI && git pull &&"
+    echo "  pip install -r requirements.txt -q) and restart ComfyUI, then confirm:"
+    echo "    curl -s http://127.0.0.1:8188/object_info/AlignYourStepsScheduler"
+    echo "    curl -s http://127.0.0.1:8188/object_info/StyleModelApplyAdvanced"
+    echo "  # VERIFY: both must return non-empty JSON before running pulid_max.json."
+    echo ""
+    echo "  NOTE: ComfyUI-SUPIR (kijai) and ComfyUI-PuLID-Flux (balazik) may need"
+    echo "  source-level compat patches for ComfyUI >= 0.22. See scripts/setup_runpod_max.sh"
+    echo "  (in the repo) for the compat_patches() function proven against pod 07ed667185a895bb"
+    echo "  (2026-06-01). Run that script's compat_patches() section on-pod if SUPIR or"
+    echo "  PuLID-Flux fails to load."
+fi
+
+# ------------------------------------------------------------------
 # 3. Download required models
 # ------------------------------------------------------------------
 echo ""
@@ -223,6 +306,206 @@ if [ ! -f "$MODELS_DIR/upscale_models/RealESRGAN_x4plus.pth" ]; then
     echo "  Downloading Real-ESRGAN 4x..."
     wget -q --show-progress -O "$MODELS_DIR/upscale_models/RealESRGAN_x4plus.pth" \
         "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"
+fi
+
+# ------------------------------------------------------------------
+# 3b. Max-tier model downloads (only when --max or --max-fp16 passed)
+# ------------------------------------------------------------------
+if [ "$MAX" -eq 1 ]; then
+    echo ""
+    echo "[3b] Downloading max-tier models (pulid_max.json)..."
+
+    # Create max-tier model dirs up front
+    mkdir -p "$MODELS_DIR"/{insightface,ultralytics/bbox,ultralytics/segm,sams,supir,style_models}
+
+    # --- ReActor swap weights [ASSERT — public HF dataset mirror] ---
+    # node 610 in pulid_max.json references inswapper_128.onnx.
+    # Placed under $MODELS_DIR/insightface/ which is the insightface-canonical root
+    # (insightface FaceAnalysis resolves models/ relative to its root).
+    # VERIFY: ReActor node may alternatively expect the file under
+    #   custom_nodes/comfyui-reactor-node/models/insightface/inswapper_128.onnx
+    # If ReActor fails to load, copy or symlink the file to that path too.
+    if [ ! -f "$MODELS_DIR/insightface/inswapper_128.onnx" ]; then
+        echo "  Downloading ReActor inswapper_128.onnx..."
+        wget -q --show-progress \
+            -O "$MODELS_DIR/insightface/inswapper_128.onnx" \
+            "https://huggingface.co/datasets/Gourieff/ReActor/resolve/main/models/inswapper_128.onnx"
+    else
+        echo "  inswapper_128.onnx already present."
+    fi
+
+    # --- FaceDetailer bbox detector [ASSERT — public HF] ---
+    # node 600 in pulid_max.json: UltralyticsDetectorProvider uses this.
+    if [ ! -f "$MODELS_DIR/ultralytics/bbox/face_yolov8m.pt" ]; then
+        echo "  Downloading face_yolov8m.pt (bbox detector)..."
+        wget -q --show-progress \
+            -O "$MODELS_DIR/ultralytics/bbox/face_yolov8m.pt" \
+            "https://huggingface.co/Bingsu/adetailer/resolve/main/face_yolov8m.pt"
+    else
+        echo "  face_yolov8m.pt already present."
+    fi
+
+    # --- Segm detector [ASSERT URL — VERIFY exact filename] ---
+    # node 600 in pulid_max.json references segm/face_yolov8m-seg2_60.pt.
+    # VERIFY: confirm the exact filename on-pod by checking
+    #   $MODELS_DIR/ultralytics/segm/ after download and cross-referencing
+    #   node 600's segm_detector_opt input in pulid_max.json.
+    if [ ! -f "$MODELS_DIR/ultralytics/segm/face_yolov8m-seg2_60.pt" ]; then
+        echo "  Downloading face_yolov8m-seg2_60.pt (segm detector)..."
+        wget -q --show-progress \
+            -O "$MODELS_DIR/ultralytics/segm/face_yolov8m-seg2_60.pt" \
+            "https://huggingface.co/Bingsu/adetailer/resolve/main/face_yolov8m-seg2_60.pt"
+    else
+        echo "  face_yolov8m-seg2_60.pt already present."
+    fi
+
+    # --- SAM (Segment Anything) for FaceDetailer [ASSERT — public fbaipublicfiles] ---
+    # node 600 references sam_vit_b_01ec64.pth.
+    if [ ! -f "$MODELS_DIR/sams/sam_vit_b_01ec64.pth" ]; then
+        echo "  Downloading SAM vit_b..."
+        wget -q --show-progress \
+            -O "$MODELS_DIR/sams/sam_vit_b_01ec64.pth" \
+            "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
+    else
+        echo "  sam_vit_b_01ec64.pth already present."
+    fi
+
+    # --- SUPIR v0Q fp16 [ASSERT URL from Kijai/SUPIR_pruned — VERIFY exact filename] ---
+    # node 500 in pulid_max.json wants SUPIR-v0Q_fp16.safetensors.
+    # Source: Kijai/SUPIR_pruned (pruned for inference, no training overhead).
+    # SUPIR also requires an SDXL base model as its first-stage backbone — see
+    # SDXL download below. Operator: confirm against ComfyUI-SUPIR node README
+    # if the SUPIR loader expects a different filename or dir.
+    if [ ! -f "$MODELS_DIR/supir/SUPIR-v0Q_fp16.safetensors" ]; then
+        echo "  Downloading SUPIR-v0Q fp16 (~5GB, be patient)..."
+        wget -q --show-progress \
+            -O "$MODELS_DIR/supir/SUPIR-v0Q_fp16.safetensors" \
+            "https://huggingface.co/Kijai/SUPIR_pruned/resolve/main/SUPIR-v0Q_fp16.safetensors" \
+            || echo "  WARNING: SUPIR-v0Q_fp16 download failed — install into $MODELS_DIR/supir/ manually."
+    else
+        echo "  SUPIR-v0Q_fp16.safetensors already present."
+    fi
+    # SUPIR loader reads from checkpoints dir; symlink so both paths resolve.
+    if [ ! -e "$MODELS_DIR/checkpoints/SUPIR-v0Q_fp16.safetensors" ]; then
+        ln -sf "$MODELS_DIR/supir/SUPIR-v0Q_fp16.safetensors" \
+               "$MODELS_DIR/checkpoints/SUPIR-v0Q_fp16.safetensors"
+        echo "  Symlinked SUPIR-v0Q_fp16.safetensors into checkpoints/ for SUPIR loader."
+    fi
+
+    # --- SDXL base (SUPIR first-stage backbone) [ASSERT — public stabilityai] ---
+    # SUPIR's SDXL encoder requires a full SDXL base checkpoint to run.
+    if [ ! -f "$MODELS_DIR/checkpoints/sd_xl_base_1.0.safetensors" ]; then
+        echo "  Downloading SDXL base 1.0 (~6.5GB, SUPIR backbone)..."
+        wget -q --show-progress \
+            -O "$MODELS_DIR/checkpoints/sd_xl_base_1.0.safetensors" \
+            "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors" \
+            || echo "  WARNING: SDXL base download failed — required for SUPIR; install manually."
+    else
+        echo "  sd_xl_base_1.0.safetensors already present."
+    fi
+
+    # --- FLUX Redux style model [GATED — black-forest-labs/FLUX.1-Redux-dev] ---
+    # node 800 in pulid_max.json: StyleModelApply / StyleModelApplyAdvanced.
+    # VERIFY: StyleModelApplyAdvanced may require a newer ComfyUI core than the
+    #   pod has — see ComfyUI core NOTE below. If absent, node 804 will fail.
+    echo "  WARNING: FLUX.1-Redux-dev is GATED (black-forest-labs/FLUX.1-Redux-dev)."
+    echo "    You must accept the license at https://huggingface.co/black-forest-labs/FLUX.1-Redux-dev"
+    echo "    and export HF_TOKEN=hf_xxx before running this script."
+    if [ ! -f "$MODELS_DIR/style_models/flux1-redux-dev.safetensors" ]; then
+        if [ -n "${HF_TOKEN:-}" ]; then
+            echo "  HF_TOKEN set — attempting FLUX Redux download..."
+            wget -q --show-progress \
+                --header="Authorization: Bearer ${HF_TOKEN}" \
+                -O "$MODELS_DIR/style_models/flux1-redux-dev.safetensors" \
+                "https://huggingface.co/black-forest-labs/FLUX.1-Redux-dev/resolve/main/flux1-redux-dev.safetensors" \
+                || echo "  (FLUX Redux gated download failed — provide HF_TOKEN + accept the license at HF)"
+        else
+            echo "  HF_TOKEN not set — skipping FLUX Redux download (required for node 800)."
+            echo "  Set HF_TOKEN and re-run, or download manually to:"
+            echo "    $MODELS_DIR/style_models/flux1-redux-dev.safetensors"
+        fi
+    else
+        echo "  flux1-redux-dev.safetensors already present."
+    fi
+
+    # --- Aesthetic predictor [FLAG — needs verification of dest/filename] ---
+    # shunk031/aesthetics-predictor-v2-sac-logos-ava1-l14-linearMSE.
+    # VERIFY: exact HF filename and dest dir for ComfyUI. This node is referenced
+    #   in pulid_max.json but the exact file the ComfyUI node loads is uncertain.
+    #   Inspect the node's __init__.py on the pod to confirm expected path.
+    #   Placeholder: download to $MODELS_DIR/aesthetic_predictor/ and adjust.
+    echo "  NOTE: Aesthetic predictor (shunk031/aesthetics-predictor-v2-sac-logos-ava1-l14-linearMSE)"
+    echo "    dest dir and filename need verification on-pod. Skipping automatic download."
+    echo "  # VERIFY: run the ComfyUI node once and check its error output for expected path."
+
+    # ------------------------------------------------------------------
+    # NOTE: ComfyUI core nodes — AlignYourStepsScheduler (FLUX model_type)
+    # and StyleModelApplyAdvanced (FLUX Redux) are ComfyUI CORE nodes that
+    # require a recent ComfyUI build (post 0.22.x). Do NOT auto-update ComfyUI
+    # here (risks breaking the pinned torch/deps). Instead:
+    #   1. SSH to the pod.
+    #   2. cd /workspace/ComfyUI && git pull
+    #   3. pip install -r requirements.txt -q
+    #   4. Restart ComfyUI and check /object_info for AlignYourStepsScheduler
+    #      and StyleModelApplyAdvanced.
+    # # VERIFY: confirm these two nodes register after a ComfyUI core update
+    # by running: curl -s http://127.0.0.1:8188/object_info/AlignYourStepsScheduler
+    # ------------------------------------------------------------------
+
+    echo "  Max-tier models done."
+fi
+
+# ------------------------------------------------------------------
+# 3c. Max-fp16 base models (only when --max-fp16 passed; implies --max above)
+# ------------------------------------------------------------------
+if [ "$MAX_FP16" -eq 1 ]; then
+    echo ""
+    echo "[3c] Downloading fp16 base models (--max-fp16)..."
+
+    # --- T5-XXL fp16 [ASSERT — public comfyanonymous/flux_text_encoders] ---
+    # node 11 in pulid_max.json wants t5xxl_fp16.safetensors.
+    if [ ! -f "$MODELS_DIR/clip/t5xxl_fp16.safetensors" ]; then
+        echo "  Downloading T5-XXL fp16..."
+        wget -q --show-progress \
+            -O "$MODELS_DIR/clip/t5xxl_fp16.safetensors" \
+            "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors"
+    else
+        echo "  t5xxl_fp16.safetensors already present."
+    fi
+
+    # --- FLUX.1-dev fp16 [GATED — black-forest-labs/FLUX.1-dev] ---
+    # node 112 in pulid_max.json wants unet_name: FLUX1/flux1-dev-fp16.safetensors.
+    # Mirrors the fp8 symlink-into-diffusion_models pattern at the top of section 3.
+    echo "  WARNING: FLUX.1-dev fp16 is GATED (black-forest-labs/FLUX.1-dev)."
+    echo "    You must accept the license at https://huggingface.co/black-forest-labs/FLUX.1-dev"
+    echo "    and export HF_TOKEN=hf_xxx before running this script."
+    FLUX_FP16_DEST="$MODELS_DIR/diffusion_models/FLUX1/flux1-dev-fp16.safetensors"
+    # Download into checkpoints first, then symlink into diffusion_models (mirrors fp8 pattern).
+    FLUX_FP16_CKPT="$MODELS_DIR/checkpoints/FLUX1/flux1-dev-fp16.safetensors"
+    mkdir -p "$MODELS_DIR/checkpoints/FLUX1"
+    if [ ! -f "$FLUX_FP16_CKPT" ]; then
+        if [ -n "${HF_TOKEN:-}" ]; then
+            echo "  HF_TOKEN set — attempting FLUX.1-dev fp16 download (~23GB, be patient)..."
+            wget -q --show-progress \
+                --header="Authorization: Bearer ${HF_TOKEN}" \
+                -O "$FLUX_FP16_CKPT" \
+                "https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors" \
+                || echo "  (FLUX.1-dev fp16 gated download failed — provide HF_TOKEN + accept the license at HF)"
+        else
+            echo "  HF_TOKEN not set — skipping FLUX.1-dev fp16 download."
+            echo "  Set HF_TOKEN and re-run, or download manually to:"
+            echo "    $FLUX_FP16_CKPT"
+        fi
+    else
+        echo "  flux1-dev-fp16 checkpoint already present."
+    fi
+    # Symlink into diffusion_models/ so UNETLoader finds it at FLUX1/flux1-dev-fp16.safetensors.
+    if [ -f "$FLUX_FP16_CKPT" ] && [ ! -e "$FLUX_FP16_DEST" ]; then
+        ln -sf "$FLUX_FP16_CKPT" "$FLUX_FP16_DEST"
+        echo "  Symlinked flux1-dev-fp16.safetensors into diffusion_models/FLUX1/ for UNETLoader."
+    fi
+
+    echo "  fp16 base models done."
 fi
 
 echo "  Done."
