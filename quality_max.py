@@ -349,6 +349,18 @@ def _prune_unavailable(workflow: dict, available: Set[str], has_character: bool,
         # If 700 was dropped, CLIPTextEncode needs base CLIP
         if "122" in workflow:
             workflow["122"]["inputs"]["clip"] = ["11", 0]
+        # FaceDetailer(600) reads the popped LoRA stack (600.clip<-[700,1]) and
+        # ReActor(610) face-swaps a popped source face (610.source_image<-[93,0]);
+        # a no-character shot has no face to detail or swap. Drop both face passes,
+        # feeding the SUPIR/save chain from the base VAEDecode (same fallbacks as
+        # the pruning_rules 600/610 rows). Without this they survive on a full pod
+        # with [700,1]/[93,0] links reachable from SaveImage -> /prompt validation
+        # reject -> silent production-tier fallback for landscape/establishing max
+        # shots. (Ported from max-tier Lane V F1, 4b20f1b; the FLUX-incompat
+        # 100-bridge half is N/A here -- this 56-node version has no such loop and
+        # the 100->112 rewire above already handles every [100, slot] model ref.)
+        _prune_node(workflow, "600", rewire_to=("902", 0) if "902" in workflow else ("8", 0))
+        _prune_node(workflow, "610", rewire_to=("902", 0) if "902" in workflow else ("8", 0))
 
     # No init image -> drop CN, Redux, img2img, latent blend
     if not has_init:
