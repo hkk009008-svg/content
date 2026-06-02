@@ -400,6 +400,28 @@ curl -X POST http://localhost:8080/api/cleanup
 
 Removes temp files / unreferenced shots. Doesn't delete projects themselves.
 
+### Configure dialogue voice mode
+
+Dialogue shots (purpose `dialogue_close_up` / `talking_head_full`) default to
+**Veo silent video → per-shot TTS → lip-sync overlay** (`dialogue_voice_mode="overlay"`),
+giving Veo's look with a consistent character voice. To switch to the legacy
+Veo-embedded-voice path:
+
+```bash
+curl -X PUT http://localhost:8080/api/projects/<pid> \
+  -H 'Content-Type: application/json' \
+  -d '{"global_settings": {"dialogue_voice_mode": "native"}}'
+```
+
+| Value | Behaviour |
+|---|---|
+| `"overlay"` **(default)** | Veo silent + per-shot TTS overlay. Consistent character voice. Veo RAI-blocks fall through cascade; overlay still fires. |
+| `"native"` | Veo generates its own embedded voice (legacy path). |
+
+The UI also exposes this as a dropdown (`dialogue_voice_modes` list in the project
+settings panel). For overlay quality, tune `lip_sync_mode` and
+`lipsync_validation_threshold` alongside.
+
 ---
 
 ## 9. Troubleshooting
@@ -499,4 +521,5 @@ calls `lifecycle.pause()` to halt at the next checkpoint.
 ---
 
 *This file is operations-only. For architectural claims, defer to
-[ARCHITECTURE.md](ARCHITECTURE.md).*
+[ARCHITECTURE.md](ARCHITECTURE.md). §8 `dialogue_voice_mode` section added
+2026-06-03 (Chunk 4 Task 9; scoped to §8 only — not a whole-file re-verify).*

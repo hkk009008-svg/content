@@ -1087,17 +1087,26 @@ Per-shot identity thresholds also auto-scale by shot type (`SHOT_TYPE_THRESHOLDS
 
 #### C. Native audio, dialogue & lip-sync strategy
 
-The pipeline has two ways to get a talking character: **native-audio video generation** (best, single-pass) and a **mandatory lip-sync correction pass** (fallback). This is decided automatically in `controller.py`:
+The pipeline achieves talking characters via **Veo's look + your TTS voice overlaid** —
+the default since 2026-06-03. This realizes a *consistent character voice* (Veo has no
+`voice_id` so its native audio is never character-consistent). The mode is controlled by
+`dialogue_voice_mode`.
 
-1. A shot is dialogue if its optimizer purpose ∈ `{dialogue_close_up, talking_head_full}` → `has_dialogue=True` (`controller.py:1093`).
-2. If `has_dialogue`, the router **overrides** `target_api` to the first video engine in the purpose ranking with `native_audio=True` — currently **`VEO_NATIVE`** is the only one (`controller.py:1120`; `domain/scene_decomposer.py:43`). It also sets `video_fallbacks=None` to avoid falling back to a silent engine.
-3. On a native-audio win with dialogue, the take is tagged `metadata.audio_embedded=True` (`controller.py:1215`) — the assembler then **suppresses standalone TTS** for that shot to avoid double-voice.
-4. If the take is dialogue but *not* embedded, a **mandatory lip-sync pass** runs via `generate_lip_sync_video` (`controller.py:1233`, F1b).
+**Default flow (`dialogue_voice_mode="overlay"`):**
+1. A shot is dialogue if its optimizer purpose ∈ `{dialogue_close_up, talking_head_full}` → `has_dialogue=True`.
+2. Router sets primary to `VEO_NATIVE` (silent, `generate_audio=False`). Video fallback cascade is kept intact so a Veo RAI-block falls through to a silent-video engine — the overlay still fires.
+3. Per-shot TTS rendered (`_ensure_shot_audio`); Veo clip duration clamped to ≥ speech length ({4s,6s,8s}).
+4. F1b lip-sync pass overlays TTS onto the silent clip → lip-synced output with your consistent voice.
+5. On overlay success, `take.metadata.dialogue_audio_in_clip=True`; assembler suppresses scene-level TTS (no double-voice).
 
-**Lip-sync knobs:**
+**Legacy path (`dialogue_voice_mode="native"`):** Veo generates its own embedded voice.
+`video_fallbacks=None`. Take tagged `audio_embedded=True`. F1b overlay skipped.
+
+**Lip-sync and dialogue knobs:**
 
 | Knob | Default | Values | Effect |
 |---|---|---|---|
+| `dialogue_voice_mode` | `"overlay"` | `overlay`/`native` | `overlay` = Veo silent + TTS overlay (consistent voice, RAI-resilient); `native` = Veo embedded voice (legacy) |
 | `lip_sync_mode` | `"auto"` | `auto`/`overlay`/`generation`/`skip` | `overlay` = mouth-only on existing video (SyncV3→MuseTalk→LatentSync→SyncV2); `generation` = full talking-head from a still (Hedra→Kling→Omnihuman→Aurora) (`lip_sync.py:682`) |
 | `lipsync_quality_validation` | True | bool | Enables the SyncNet quality gate (`lip_sync.py:427`) |
 | `lipsync_validation_threshold` | 0.65 | 0–1 | Raise to 0.8+ to force the cascade to try more engines until sync clears |
@@ -1105,7 +1114,7 @@ The pipeline has two ways to get a talking character: **native-audio video gener
 | `forced_alignment_enabled` | False | bool | Emits word-level `.alignment.json` sidecars (WhisperX) for tighter sync (`audio/dialogue.py:252`) |
 | `language` | "English" | — | Korean routes TTS to Cartesia Sonic 2; sets a stricter 0.70 lip-sync gate (`audio/dialogue.py:122`) |
 
-> **To maximize dialogue quality:** ensure `GOOGLE_CLOUD_PROJECT` is set and `VEO_NATIVE` is live and enabled (it's the only engine that generates voice+video together), set `dialogue_mode_enabled=true`, and call `POST .../apply-language-defaults` (`web_server.py:384`) for non-English projects to get the right TTS provider + native-trained lip-sync ordering.
+> **To maximize dialogue quality:** keep `dialogue_voice_mode="overlay"` (default) and ensure `ELEVENLABS_API_KEY` is set for high-quality TTS. Set `dialogue_mode_enabled=true` for 2+ speaker scenes. Raise `lipsync_validation_threshold` to 0.80+ to push the cascade toward better sync engines. For non-English projects, call `POST .../apply-language-defaults` (`web_server.py:384`) for the right TTS provider + native-trained lip-sync ordering. The overlay approach was validated end-to-end at sync score 0.955 (`logs/veo_musetalk_v2studio.mp4`).
 
 #### D. Continuity & coherence tuning
 
@@ -2031,3 +2040,9 @@ The Pydantic models in `domain/models.py` are validation-only and omit several l
 | D-post-1 | The final color grade is one project-level preset (`global_settings["mood"]`); all scenes share it |
 
 > **General caution on line anchors:** `check_doc_claims.py` does not verify prose/comment line-RANGE anchors, and any edit shifts line numbers. The `file:line` citations throughout this appendix are point-in-time (2026-05-30). When a line no longer matches, grep the symbol name — the function/class is what's load-bearing, not the exact line.
+
+---
+
+*§5.3C dialogue strategy updated 2026-06-03 to reflect the Veo+overlay default
++ `dialogue_voice_mode` knob (Chunk 4 Task 9). Scoped to §5.3C only —
+not a whole-file re-verify.*

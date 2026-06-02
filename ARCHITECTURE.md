@@ -1066,6 +1066,12 @@ purely informational for the PERFORMANCE_REVIEW gate.
 
 ### 10.6 Lipsync ([lip_sync.py](lip_sync.py))
 
+**Dialogue default (F1b overlay pass):** As of 2026-06-03, dialogue shots
+(`dialogue_close_up` / `talking_head_full`) default to
+**Veo silent video → per-shot TTS → lip-sync OVERLAY** instead of
+Veo's embedded voice. This gives Veo's look with a consistent character voice.
+The flow is controlled by `dialogue_voice_mode` (see §10.7).
+
 **Overlay cascade** (existing video + audio → lip-sync overlaid, all cloud via FAL):
 
 | Order | Engine | Endpoint |
@@ -1100,12 +1106,42 @@ engine's output against `lipsync_validation_threshold` (default 0.65).
 Below-threshold outputs stashed (`.{engine}.tmp`); if no engine clears the bar,
 the **highest-scored stashed candidate** is restored as the final output.
 
-### 10.7 Cascade-choice via `lip_sync_mode`
+**Dialogue F1b overlay flow (overlay mode, per-shot line present):**
+1. Per-shot TTS rendered via `_ensure_shot_audio` (falls back to `_ensure_scene_audio`
+   when shot has no own line).
+2. Veo duration clamped to ≥ speech length (`_clamp_veo_duration`, {4s,6s,8s}).
+3. Veo runs **silent** (`generate_audio=False`); video fallback cascade kept intact
+   so a Veo RAI-block falls through to a silent-video engine (overlay still fires).
+4. `audio_embedded` NOT set (overlay mode). F1b pass fires:
+   `generate_lip_sync_video(existing_video_path=silent_clip, audio_path=shot_tts)`.
+5. On overlay success, `take.metadata.dialogue_audio_in_clip=True`; assembler
+   suppresses scene-level TTS for that shot (no double-voice).
+
+Key helpers (all in [`cinema/shots/controller.py`](cinema/shots/controller.py)):
+- `_dialogue_voice_mode` (`:119`) — resolves mode from `global_settings`.
+- `_resolve_dialogue_routing` (`:132`) — sets primary/fallbacks per mode.
+- `_should_tag_audio_embedded` (`:182`) — gates the `audio_embedded` tag.
+- `_clamp_veo_duration` (`:218`) — clamps speech length to Veo-supported duration.
+- `_resolve_f1b_audio` (`:232`) — picks per-shot vs. scene-level TTS audio.
+
+Assembler dedup: `cinema_pipeline.py:_build_scene_packages` (`:667`) counts both
+`audio_embedded` and `dialogue_audio_in_clip` (`:692`) to decide TTS suppression.
+
+### 10.7 Cascade-choice via `lip_sync_mode` and `dialogue_voice_mode`
 
 `generate_lip_sync_video(...)` auto-routes:
 - `existing_video_path` provided → `overlay`
 - only image + audio → `generation`
 - Operator forces via `lip_sync_mode ∈ {"auto", "overlay", "generation"}`.
+
+**`dialogue_voice_mode` (new as of 2026-06-03):** controls how dialogue shots get audio.
+
+| Value | Behaviour |
+|---|---|
+| `"overlay"` **(default)** | Veo runs silent; per-shot TTS is overlaid by F1b. Consistent character voice. RAI-block falls through cascade; overlay still fires. |
+| `"native"` | Legacy: Veo generates its own embedded voice. `video_fallbacks=None`. The take is tagged `audio_embedded=True`. F1b overlay pass is skipped. |
+
+Set via `project.global_settings.dialogue_voice_mode` (see OPERATIONS.md §8).
 
 ---
 
@@ -1610,4 +1646,6 @@ new-director Task 1. All file:line anchors re-audited against current
 source & 72 stale line numbers corrected on 2026-05-29 (full sweep,
 §15 smoke OK); prose claims not re-verified in that pass. §10.6 generation
 cascade updated 2026-06-03 to document the `hedra_native` direct Character-3
-ATTEMPT-0 (`cb31207`).*
+ATTEMPT-0 (`cb31207`). §10.6/§10.7 updated 2026-06-03 to document the
+Veo+overlay dialogue default + `dialogue_voice_mode` (Chunk 4, Task 9;
+anchors scoped to §10.6/§10.7 only — not a whole-file re-verify).*
