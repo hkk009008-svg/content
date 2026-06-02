@@ -406,6 +406,24 @@ def _prune_unavailable(workflow: dict, available: Set[str], has_character: bool,
         if "13" in workflow:
             workflow["13"]["inputs"]["latent_image"] = ["102", 0]
 
+    # FLUX-incompatibility prunes (independent of pod availability): these
+    # advanced guidance patches pass /prompt validation but raise at RUNTIME on
+    # this ComfyUI's FLUX forward (verified empirically against the live pod):
+    #   - FreeU_V2 (772): reads model_config.unet_config["model_channels"] which
+    #     FLUX's transformer config doesn't expose -> KeyError 'model_channels'.
+    #   - SkipLayerGuidanceDiT (770) / PerturbedAttentionGuidance (301) /
+    #     DifferentialDiffusion (740): inject a 'timestep_zero_index' kwarg this
+    #     build's FLUX forward_orig() rejects -> TypeError at the sampler.
+    # Chain is 100(PuLID)->301->770->772->740->22(BasicGuider). Drop each and
+    # bridge to its nearest surviving upstream so BasicGuider/FaceDetailer still
+    # receive the PuLID-patched model (PuLID + FaceDetailer + ReActor + SUPIR
+    # carry the quality). Ported from max-tier-provisioning-2026-06-01; the
+    # no-char path pops 100, so bridge to base UNet 112 when 100 is already gone.
+    for _bad, _up in (("772", "770"), ("770", "301"), ("301", "100"), ("740", "100")):
+        if _bad in workflow:
+            _tgt = _up if _up in workflow else ("112" if "100" not in workflow else "100")
+            _prune_node(workflow, _bad, rewire_to=(_tgt, 0))
+
     # Per-class pruning
     pruning_rules = [
         # (node_id, rewire_to_if_missing)

@@ -360,6 +360,16 @@
     "_meta": { "title": "VAE decode Pass 2 (hires-fix output)" }
   },
 
+  "606": {
+    "inputs": { "model_name": "bbox/face_yolov8m.pt" },
+    "class_type": "UltralyticsDetectorProvider",
+    "_meta": { "title": "BBOX detector (face_yolov8m) — provides BBOX_DETECTOR object" }
+  },
+  "607": {
+    "inputs": { "model_name": "sam_vit_b_01ec64.pth", "device_mode": "AUTO" },
+    "class_type": "SAMLoader",
+    "_meta": { "title": "SAM loader (vit_b) — provides SAM_MODEL object" }
+  },
   "600": {
     "inputs": {
       "image": ["902", 0],
@@ -368,9 +378,8 @@
       "vae": ["10", 0],
       "positive": ["804", 0],
       "negative": ["804", 0],
-      "bbox_detector": "bbox/face_yolov8m.pt",
-      "sam_model_opt": "sam_vit_b_01ec64.pth",
-      "segm_detector_opt": "segm/face_yolov8m-seg2_60.pt",
+      "bbox_detector": ["606", 0],
+      "sam_model_opt": ["607", 0],
       "guide_size": 1024,
       "guide_size_for": true,
       "max_size": 2048,
