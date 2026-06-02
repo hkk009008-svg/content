@@ -689,7 +689,7 @@ class CinemaPipeline:
                 clips.append(final_path)
                 approved_shot_count += 1
                 take_meta = self._approved_take_metadata(shot)
-                if take_meta.get("audio_embedded"):
+                if take_meta.get("audio_embedded") or take_meta.get("dialogue_audio_in_clip"):
                     all_embedded_count += 1
 
             self.scene_clips[scene_id] = clips

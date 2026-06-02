@@ -1454,6 +1454,10 @@ class ShotController:
                         )
                         if "cascade_metadata" in _ls_cascade:
                             take["metadata"]["lipsync_cascade"] = _ls_cascade["cascade_metadata"]
+                        # Chunk 3 / Task 7: mark that this clip already carries
+                        # per-shot TTS so the assembler (_build_scene_packages)
+                        # suppresses the scene-level TTS mux and avoids double-voice.
+                        take["metadata"]["dialogue_audio_in_clip"] = True
                         logger.info(
                             "[DIALOGUE] shot=%s audio=standalone+lipsync score=%.3f",
                             shot_id,
