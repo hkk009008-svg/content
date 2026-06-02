@@ -39,9 +39,9 @@ note = "Core assembly step; always runs at end of pipeline. Hosts the scene_tran
 [[component]]
 id = "storyboard_mode"
 title = "Batched 6-shot latent storyboard path"
-status = "stubbed"
-anchor = "kling_native.py:generate_storyboard"
-note = "§10 F-A.1: 135 LoC, zero callers; UI toggle `storyboard_mode` is never read by phase_c_ffmpeg.py, so the toggle does nothing. Cycle-17+ wire candidate (brief P1-5)."
+status = "wired"
+anchor = "cinema/phases/motion_render.py:_run_storyboard_scene"
+note = "F2b wired it: motion_render._get_storyboard_mode (:45) gates _run_storyboard_scene (:100) -> KlingNativeAPI.generate_storyboard. Covered by tests/unit/test_f2b_storyboard_mode.py."
 
 [[component]]
 id = "lora_validation"
