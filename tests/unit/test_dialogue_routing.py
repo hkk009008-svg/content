@@ -290,21 +290,47 @@ class TestAudioEmbeddedTakeTag:
         from domain.scene_decomposer import API_REGISTRY
         assert API_REGISTRY["VEO_NATIVE"].get("native_audio") is True
 
-    def test_audio_embedded_set_when_winning_engine_is_native_audio_and_dialogue(self):
-        """Simulate take-tagging logic: native_audio engine + has_dialogue → audio_embedded."""
+    def test_audio_embedded_set_in_native_mode(self):
+        """native mode: native_audio engine + has_dialogue + mode=native → audio_embedded=True."""
         from domain.scene_decomposer import API_REGISTRY
+        from cinema.shots.controller import _dialogue_voice_mode
 
-        # Simulated winning engine via cascade_metadata
         winning_engine = "VEO_NATIVE"
         has_dialogue = True
+        settings = {"dialogue_voice_mode": "native"}
 
         take_metadata = {}
         engine_info = API_REGISTRY.get(winning_engine, {})
-        if engine_info.get("native_audio") and has_dialogue:
+        # Task 4: audio_embedded requires native mode
+        if (engine_info.get("native_audio") and has_dialogue
+                and _dialogue_voice_mode(settings) == "native"):
             take_metadata["audio_embedded"] = True
 
         assert take_metadata.get("audio_embedded") is True, (
-            "VEO_NATIVE + has_dialogue should produce audio_embedded=True"
+            "VEO_NATIVE + has_dialogue + native mode should produce audio_embedded=True"
+        )
+
+    def test_audio_embedded_not_set_in_overlay_mode(self):
+        """overlay mode (default): native_audio engine + has_dialogue → NOT audio_embedded.
+        In overlay mode the F1b pass fires and the clip gets TTS overlaid.
+        """
+        from domain.scene_decomposer import API_REGISTRY
+        from cinema.shots.controller import _dialogue_voice_mode
+
+        winning_engine = "VEO_NATIVE"
+        has_dialogue = True
+        settings = {}  # default overlay mode
+
+        take_metadata = {}
+        engine_info = API_REGISTRY.get(winning_engine, {})
+        # Task 4: audio_embedded requires native mode
+        if (engine_info.get("native_audio") and has_dialogue
+                and _dialogue_voice_mode(settings) == "native"):
+            take_metadata["audio_embedded"] = True
+
+        assert "audio_embedded" not in take_metadata, (
+            "overlay mode (default): VEO_NATIVE + has_dialogue should NOT set audio_embedded "
+            "— the F1b lipsync overlay pass must run"
         )
 
     def test_audio_embedded_not_set_for_non_native_audio_engine(self):

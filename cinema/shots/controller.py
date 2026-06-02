@@ -1242,11 +1242,14 @@ class ShotController:
         # F1a: Tag the take when the winning engine carries embedded voice audio.
         # Check the API_REGISTRY native_audio flag rather than hardcoding a name.
         # The assembler (F1b) reads audio_embedded=True to skip the TTS+mux path.
+        # Task 4: gate behind native mode — in overlay mode (default) the tag is NOT
+        # set so the F1b TTS overlay pass at :1267 runs and overlays the per-shot TTS.
         winning_engine = (
             _video_cascade.get("cascade_metadata", {}).get("engine", target_api).upper()
         )
         engine_info = API_REGISTRY.get(winning_engine, {})
-        if engine_info.get("native_audio") and has_dialogue:
+        if (engine_info.get("native_audio") and has_dialogue
+                and _dialogue_voice_mode(settings) == "native"):
             take["metadata"]["audio_embedded"] = True
 
         # F1b: Write has_dialogue to the take so the auto-approve gate can
