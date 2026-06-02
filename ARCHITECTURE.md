@@ -1075,14 +1075,25 @@ purely informational for the PERFORMANCE_REVIEW gate.
 | 2 | LatentSync | `fal-ai/latentsync` |
 | 3 | Sync Lipsync v2 | `fal-ai/sync-lipsync/v2` |
 
-**Generation cascade** (still image + audio → full talking-head, all cloud via FAL):
+**Generation cascade** (still image + audio → full talking-head; order-0 is a
+direct native call, orders 1–3 cloud via FAL):
 
 | Order | Engine | Endpoint |
 |---|---|---|
-| 0 | Hedra Character-3 | `fal-ai/hedra/character-3` |
+| 0 | Hedra Character-3 (direct) | `api.hedra.com/web-app/public` ([`hedra_native.HedraAPI`](hedra_native.py:25)) |
 | 1 | Kling lipsync | `fal-ai/kling-video/lipsync/audio-to-video` |
 | 2 | Omnihuman v1.5 | `fal-ai/bytedance/omnihuman/v1.5` |
 | 3 | Creatify Aurora | `fal-ai/creatify/aurora` |
+
+ATTEMPT-0 is now a **direct** Character-3 call —
+[`hedra_native.HedraAPI.generate_talking_head`](hedra_native.py:60) →
+`api.hedra.com/web-app/public` (model `d1dd37a3-…`), wired `cb31207` to replace
+the **dead** `fal-ai/hedra/character-3` FAL proxy (HTTP 404). Flow: create+upload
+image asset → create+upload audio asset → POST `/generations` → poll
+`/generations/{id}/status` → download. Invoked as ATTEMPT 0 from
+[lip_sync.py:559](lip_sync.py:559); key from `settings.hedra_api_key` (`.env`
+`HEDRA_API_KEY`). On any failure it returns `None` and the cascade falls through
+to Kling → Omnihuman → Creatify.
 
 **SyncNet quality gate** ([lip_sync.py:218-232](lip_sync.py:218)) scores each
 engine's output against `lipsync_validation_threshold` (default 0.65).
@@ -1597,4 +1608,6 @@ section above; this is a flat lookup table for quick reference.
 + subsequent point-fixes through 2026-05-24. Glossary section added by
 new-director Task 1. All file:line anchors re-audited against current
 source & 72 stale line numbers corrected on 2026-05-29 (full sweep,
-§15 smoke OK); prose claims not re-verified in that pass.*
+§15 smoke OK); prose claims not re-verified in that pass. §10.6 generation
+cascade updated 2026-06-03 to document the `hedra_native` direct Character-3
+ATTEMPT-0 (`cb31207`).*
