@@ -1133,6 +1133,14 @@ class ShotController:
             # has no native_audio.  Override to the first native_audio video engine in the
             # purpose ranking.  If none exists (policy change in API_REGISTRY), fall through
             # to the current target_api and rely on the standalone lipsync pass (F1b).
+            #
+            # Task 3 (dialogue_voice_mode):
+            # - overlay mode (default): keep VEO_NATIVE as primary via the override,
+            #   but DO NOT null video_fallbacks. Restored cascade means a Veo RAI-block
+            #   falls through to Kling/Sora/etc. (silent) → F1b overlay still fires.
+            # - native mode: preserve today's behavior verbatim (force native-audio
+            #   engine + video_fallbacks=None so embedded voice is never lost to a
+            #   cross-engine fallback that lacks native_audio).
             if has_dialogue:
                 from domain.scene_decomposer import PURPOSE_API_RANKING
                 for _engine_key in PURPOSE_API_RANKING.get(cached_purpose, []):
@@ -1151,10 +1159,15 @@ class ShotController:
                                 cached_purpose,
                             )
                         target_api = _engine_key
-                        # Drop video_fallbacks for dialogue: the native-audio engine's
-                        # internal cascade handles failures; cross-engine fallbacks would
-                        # route to non-native-audio engines and silently remove embedded voice.
-                        video_fallbacks = None
+                        if _dialogue_voice_mode(settings) == "native":
+                            # Native mode: drop video_fallbacks — the native-audio
+                            # engine's internal cascade handles failures; cross-engine
+                            # fallbacks would route to non-native-audio engines and
+                            # silently remove the embedded voice.
+                            video_fallbacks = None
+                        # overlay mode: video_fallbacks intentionally kept from template
+                        # so a Veo RAI-block cascades to a silent engine and the F1b
+                        # overlay pass still fires.
                         break
                 # If no native_audio engine found in ranking: keep resolved target_api.
                 # F1b's mandatory lipsync pass will cover the gap.
