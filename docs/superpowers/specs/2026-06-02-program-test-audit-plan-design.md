@@ -50,7 +50,7 @@ Each success criterion → test method → tier → current status. **Status fro
 
 | Crit | Test method | Tier | Current status | Gap to close |
 |---|---|---|---|---|
-| S1 face | Score known on-model vs off-model frames through `IdentityValidator.validate_video`; assert per-shot bars + rolling-stats PuLID feedback | 🟢 | ❌ `identity/validator.py` **0 refs — biggest blind spot**; `identity_gate` ✅ | Behavioral tests for the validator + adaptive-weight loop |
+| S1 face | Score known on-model vs off-model frames through `IdentityValidator.validate_video`; assert per-shot bars + rolling-stats PuLID feedback | 🟢 | ❌ `identity/validator.py` **0 behavioral-test refs** (4 production importers — `identity/__init__.py`, `performance/identity_gate.py`, `face_validator_gate.py`, `continuity_engine.py`; biggest *test* blind spot, NOT dead); `identity_gate` ✅ | Behavioral tests for the validator + adaptive-weight loop |
 | S2 location | Assert same seed+`prompt_fragment` injected for two shots at one location | 🟢 | ⚠️ `location_manager` partial | Determinism + injection test |
 | S3 coherence | Synthetic shot pairs → `assess_coherence` ≥/< .6 boundary | 🟢 | ✅ `test_coherence_analyzer` | (light) error paths |
 | S4 dialogue | (a) Veo native-audio config; (b) **Veo→overlay(TTS)** produces video+audio, SyncNet ≥ .65; (c) generation cascade (Hedra→Omnihuman) | 🟡 | ⚠️ `lip_sync` contract (F1b); `veo_native` config ✅; **Veo+overlay & `hedra_native` only manually validated this session** | Tests for overlay cascade + `hedra_native`; wire Veo+overlay as default route |
@@ -79,7 +79,7 @@ Grep-verified zero-live-callers on this branch (excl. tests/worktrees). **Re-ver
 | `generate_characters.py` (whole file) | superseded by `character_manager.create_character_with_images` | **prune** |
 | `dialogue_writer.{format_dialogue_for_voiceover, dialogue_to_narration_text}` | 0 non-test callers | **prune** |
 | `continuity_engine.{record_shot_generated, reset_scene}` | 0 callers; dead `last_generated_image` path | **prune** |
-| `continuity_engine.validate_multi_identity` | only a docstring ref (`identity/validator.py:45`) | **prune-or-keep — DECISION NEEDED** (conflicts with multi-char Tier-D lever below; update the docstring either way) |
+| `continuity_engine.validate_multi_identity` | 0 callers; only a docstring ref (`identity/validator.py:45`) | **Phase-A decision** (owner: prune-verification step): default **prune** unless multi-char (Tier-D) is roadmapped; update the `validator.py:45` docstring either way |
 | *(optional, ops not quality)* `auto_approve.summarize_audit`, `cinema/pipeline.py::CinemaPipeline` (§15.9), `run_tier_c.py` | 0 prod importers | **prune-optional** |
 
 **KEEP — dormant *quality* levers (NOT prune; pruning trades against full capability):** `chief_director.evaluate_generation_quality` + `negative_prompts.py` (the auto-diagnose/remediate loop), `ltx_native.{_fal_transition,_native_transition}`, `validate_lora_quality` (implement — see Part 3), `hires_fix`, `continuity_engine.validate_multi_identity` (if multi-char reaches Tier-D). These move to Part 3 as *wire* candidates.
@@ -91,14 +91,14 @@ Grep-verified zero-live-callers on this branch (excl. tests/worktrees). **Re-ver
 | Item | Type | Severity | Action |
 |---|---|---|---|
 | `validate_lora_quality` → unconditional `-1.0` stub (`prep/lora_training.py:515`) | dormant lever | **HIGH** (LoRA is the #1 identity lever; bad LoRA silently degrades identity) | **Implement** real validation |
-| Dialogue routing not defaulted to Veo→overlay | wiring | **HIGH** (this session's decision) | Wire `recommend_lip_sync_mode`/motion-render to route dialogue → Veo video → overlay(TTS) |
+| Dialogue routing not defaulted to Veo→overlay | wiring | **HIGH** (this session's decision) | Wire `generate_lip_sync_video` (`lip_sync_mode` routing, `lip_sync.py:680`) + the `motion_render` call-site to default dialogue → Veo video → overlay(TTS) |
 | `hires_fix_enabled/denoise` validated+stored but never injected (nodes 900–902 pruned) | no-op | MED | Wire pass-2 denoise or remove the setting |
 | `max_halt_rule` accepts 3 modes, `should_halt` implements only composite-only (`face_validator_gate.py:225`) | partial | MED | Implement conjunctive/budget_only or document the limit |
 | Budget gate caps video/image only — **audio API costs uncapped**; `spent_usd` resets per-process (§5.3E) | bug | MED | Cap audio; persist spend |
 | `evaluate_generation_quality` + `negative_prompts` auto-diagnose loop has no top-level caller | dormant lever | MED | **Wire** the retry/remediate loop into generation |
 | `EXPERIMENTS_DB_PATH` read but never wired to CostTracker (always `data/experiments.db`) | no-op | LOW | Wire or remove |
 | `pipeline_context.md` lip-sync guidance vs hard-coded `PURPOSE_API_RANKING` disagree (§5.7) | drift | LOW | Reconcile |
-| `storyboard_mode` — manifest/manual say "stubbed", but F2b **wired** it (`motion_render.py:170`) | **stale doc** | DOC | Fix `pipeline_status.toml` + manual §5.3A in same change |
+| `storyboard_mode` — manifest/manual say "stubbed", but F2b **wired** it (`cinema/phases/motion_render.py`: `_get_storyboard_mode`:45 / `_run_storyboard_scene`:100) | **stale doc** | DOC | Fix `pipeline_status.toml` + manual §5.3A in same change |
 | `hedra_native.py` ATTEMPT-0 wiring (`cb31207`) undocumented in `ARCHITECTURE.md §10.6` | **stale doc** | DOC | Document (§10.6 lists Hedra only via FAL) |
 | 3 `@unittest.skip` in `test_project_persistence.py:139,203,232` | test debt | LOW | Fix or remove |
 
@@ -139,4 +139,4 @@ Prioritized by leverage-per-dollar. Each phase is independently shippable.
 
 ## Appendix — Provenance
 
-Grounded in a read-only grounding survey (2026-06-02) of: `docs/PROGRAM-MANUAL.md` (intent), `ARCHITECTURE.md` (truth + §15 smoke), `tests/` (55 unit + 2 integration + empty `tests/capability/`), the component map, `web_server.py` (65 routes), and the latest `docs/HANDOFF-*.md` (prune/fix/dormant-lever lists). The production+LoRA photoreal reframe and the Veo+overlay dialogue decision are this session's manually-validated findings (clips: `logs/{veo,hedra,lipsync_gen,veo_musetalk}_v2studio.mp4`). All file:line/§ anchors are point-in-time; re-verify at HEAD before acting.
+Grounded in a read-only grounding survey (2026-06-02) of: `docs/PROGRAM-MANUAL.md` (intent), `ARCHITECTURE.md` (truth + §15 smoke), `tests/` (55 unit + 2 integration; `tests/capability/` scaffolding begun — `identity/` subdir), the component map, `web_server.py` (65 routes), and the latest `docs/HANDOFF-*.md` (prune/fix/dormant-lever lists). The production+LoRA photoreal reframe and the Veo+overlay dialogue decision are this session's manually-validated findings (clips: `logs/{veo,hedra,lipsync_gen,veo_musetalk}_v2studio.mp4`). All file:line/§ anchors are point-in-time; re-verify at HEAD before acting.
