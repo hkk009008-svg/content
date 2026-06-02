@@ -568,8 +568,6 @@ class CinemaPipeline:
             return None
 
         output_path = os.path.join(self.temp_dir, f"audio_{shot_id}.mp3")
-        proj_settings = self.project.get("global_settings", {}) if hasattr(self, "project") else {}
-        lang = proj_settings.get("language", "English")
         dialogue_ctx = PipelineContext(
             global_settings=dict(self.project.get("global_settings", {})) if self.project else {},
         )
