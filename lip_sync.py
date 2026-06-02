@@ -28,7 +28,7 @@ import urllib.request  # retained for legacy code paths; new downloads use perfo
 from performance._net import safe_download
 from typing import Optional, Dict, List
 from dataclasses import dataclass
-from config.settings import settings
+from config.settings import settings as ENV_SETTINGS
 
 try:
     import fal_client
@@ -190,7 +190,7 @@ def lipsync_overlay(
         cascade_metadata written into it on return (both success and fallback).
         Key: "cascade_metadata" → {engine, score?, threshold?, fallback, attempts}
     """
-    if not FAL_AVAILABLE or not settings.fal_key:
+    if not FAL_AVAILABLE or not ENV_SETTINGS.fal_key:
         print("   [LIPSYNC-OVERLAY] FAL not available")
         return None
 
@@ -485,7 +485,7 @@ def lipsync_generation(
         cascade_metadata written into it on return (both success and fallback).
         Key: "cascade_metadata" → {engine, score?, threshold?, fallback, attempts}
     """
-    if not FAL_AVAILABLE or not settings.fal_key:
+    if not FAL_AVAILABLE or not ENV_SETTINGS.fal_key:
         print("   [LIPSYNC-GEN] FAL not available")
         return None
 
@@ -708,7 +708,7 @@ def generate_lip_sync_video(
     - If only image + audio → GENERATION (create from scratch)
     - User can force a specific mode
     """
-    if not FAL_AVAILABLE or not settings.fal_key:
+    if not FAL_AVAILABLE or not ENV_SETTINGS.fal_key:
         print("   [LIPSYNC] FAL not available — skipping")
         return None
 
@@ -751,7 +751,7 @@ def generate_rife_interpolation(
     Returns:
         Path to interpolated video, or None on failure
     """
-    if not FAL_AVAILABLE or not settings.fal_key:
+    if not FAL_AVAILABLE or not ENV_SETTINGS.fal_key:
         print("   [RIFE] FAL not available — skipping cloud interpolation")
         return None
 
@@ -805,7 +805,7 @@ def upscale_video_seedvr2(
     Returns:
         Path to upscaled video, or None on failure
     """
-    if not FAL_AVAILABLE or not settings.fal_key:
+    if not FAL_AVAILABLE or not ENV_SETTINGS.fal_key:
         print("   [UPSCALE] FAL not available — skipping cloud upscaling")
         return None
 
