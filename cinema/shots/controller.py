@@ -112,6 +112,22 @@ def _directorial_iteration_enabled() -> bool:
         "0", "false", "no",
     }
 
+
+_VALID_DIALOGUE_VOICE_MODES = {"overlay", "native"}
+
+
+def _dialogue_voice_mode(settings: dict) -> str:
+    """Resolve the dialogue voice mode from global_settings (default 'overlay').
+
+    'overlay' = Veo silent video + our TTS lip-sync overlay (consistent voice).
+    'native'  = Veo generates its own embedded voice (legacy).
+
+    Mirror of settings.get("lip_sync_mode","auto") at controller.py:1256.
+    Unknown values fall back to 'overlay' (typo guard).
+    """
+    mode = (settings or {}).get("dialogue_voice_mode", "overlay")
+    return mode if mode in _VALID_DIALOGUE_VOICE_MODES else "overlay"
+
 from cinema.lifecycle import LifecycleService
 from domain.models import DirectorialIntent, Project
 

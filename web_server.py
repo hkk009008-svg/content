@@ -337,6 +337,7 @@ def get_config():
             "golden_hour", "moonlight", "high_contrast", "pastel",
         ],
         "lip_sync_modes": ["auto", "overlay", "generation", "skip"],
+        "dialogue_voice_modes": ["overlay", "native"],
         "api_engine_defaults": {
             "KLING_NATIVE": {
                 "enabled": True, "duration": "5", "face_consistency": True,
