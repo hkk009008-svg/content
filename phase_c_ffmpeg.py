@@ -56,6 +56,7 @@ def generate_ai_video(
     driving_video_path: str = "",
     has_dialogue: bool = False,
     dialogue_native_audio: bool = False,
+    duration: str = "8s",
     ctx: Optional["PipelineContext"] = None,
     _cascade_out: Optional[dict] = None,
 ) -> str:
@@ -151,6 +152,7 @@ def generate_ai_video(
                     shot_type=shot_type, video_fallbacks=video_fallbacks,
                     has_dialogue=has_dialogue,
                     dialogue_native_audio=dialogue_native_audio,
+                    duration=duration,
                     ctx=ctx, _cascade_out=_cascade_out,
                 )
 
@@ -178,6 +180,7 @@ def generate_ai_video(
             shot_type=shot_type, video_fallbacks=video_fallbacks,
             has_dialogue=has_dialogue,
             dialogue_native_audio=dialogue_native_audio,
+            duration=duration,
             ctx=ctx, _cascade_out=_cascade_out,
         )
 
@@ -283,6 +286,7 @@ def generate_ai_video(
                 reference_images=multi_angle_refs,
                 generate_audio=(shot_type == "landscape" or dialogue_native_audio),  # Environments + native-mode dialogue
                 driving_video_path=driving_video_path,
+                duration=duration,
             )
             if result:
                 _record_video_cascade(target_api.upper())
@@ -484,7 +488,7 @@ def generate_ai_video(
                         "prompt": veo_prompt,
                         "image_urls": image_urls,
                         "aspect_ratio": "16:9",
-                        "duration": "8s",
+                        "duration": duration,
                         "resolution": "720p",
                         "generate_audio": False,
                     },

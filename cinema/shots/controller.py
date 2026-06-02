@@ -88,7 +88,7 @@ from llm.style_director import style_rules_to_prompt_suffix
 from character_manager import get_reference_image
 from cinema.context import PipelineContext
 from phase_c_assembly import generate_ai_broll
-from phase_c_ffmpeg import generate_ai_video, stitch_modules
+from phase_c_ffmpeg import generate_ai_video, stitch_modules, _probe_duration
 from phase_c_vision import face_swap_video_frames
 from lip_sync import (
     generate_lip_sync_video,
@@ -207,6 +207,54 @@ def _should_tag_audio_embedded(
         and has_dialogue
         and voice_mode == "native"
     )
+
+
+# Supported Veo clip durations (ascending).  The clamp picks the smallest
+# value >= speech_seconds; values beyond the maximum are capped to "8s".
+_VEO_SUPPORTED_DURATIONS = ("4s", "6s", "8s")
+_VEO_DURATION_SECONDS = {d: float(d[:-1]) for d in _VEO_SUPPORTED_DURATIONS}
+
+
+def _clamp_veo_duration(speech_seconds: float) -> str:
+    """Return the shortest Veo-supported duration string >= speech_seconds.
+
+    E.g. 3.5 → '4s', 4.1 → '6s', 9.0 → '8s' (capped at max).
+    Over-length tails are truncated by the overlay engine (flagged
+    out-of-scope for this PR; long-line splitting is a future concern).
+    """
+    for d in _VEO_SUPPORTED_DURATIONS:
+        if speech_seconds <= _VEO_DURATION_SECONDS[d]:
+            return d
+    # Longer than any supported value: cap at max.
+    return _VEO_SUPPORTED_DURATIONS[-1]
+
+
+def _resolve_f1b_audio(
+    host,
+    shot: dict,
+    scene: dict,
+    characters: list,
+    voice_mode: str,
+) -> "Optional[str]":
+    """Resolve the audio path to feed the F1b lipsync overlay pass.
+
+    overlay mode:
+      - Try _ensure_shot_audio first (per-shot TTS keyed on this shot's
+        dialogue line).  Falls back to _ensure_scene_audio when the shot
+        has no own line (None return).
+    native mode:
+      - Skip _ensure_shot_audio entirely; use _ensure_scene_audio only
+        (preserves legacy behaviour for the native escape hatch).
+
+    Returns the resolved audio path string, or None if both sources fail.
+    """
+    if voice_mode == "overlay":
+        audio = host._ensure_shot_audio(shot, scene, characters)
+        if audio is None:
+            audio = host._ensure_scene_audio(scene, characters)
+        return audio
+    # native (or unknown) mode: scene-level TTS only.
+    return host._ensure_scene_audio(scene, characters)
 
 
 from cinema.lifecycle import LifecycleService
@@ -1285,6 +1333,32 @@ class ShotController:
         # overlay mode (default) keeps Veo silent; the F1b lipsync pass overlays TTS.
         dialogue_native_audio = has_dialogue and _voice_mode == "native"
 
+        # Task 6: For overlay-mode dialogue, resolve per-shot TTS before generating
+        # the video so we can size the Veo clip to the speech duration.
+        # _f1b_audio holds the resolved audio path for reuse in the F1b block
+        # (avoids a redundant _ensure_scene_audio call there).
+        _f1b_audio: Optional[str] = None
+        _veo_duration: str = "8s"  # default: unchanged for non-dialogue / native
+        if has_dialogue and _voice_mode == "overlay":
+            chars_for_duration = shot.get("characters_in_frame", []) or scene.get("characters_present", [])
+            chars_dicts_for_duration = [
+                c for c in self.project.get("characters", [])
+                if c.get("id") in chars_for_duration
+            ]
+            _f1b_audio = _resolve_f1b_audio(
+                self._host, shot, scene, chars_dicts_for_duration, _voice_mode
+            )
+            if _f1b_audio:
+                try:
+                    _speech_secs = _probe_duration(_f1b_audio)
+                    _veo_duration = _clamp_veo_duration(_speech_secs)
+                except Exception:
+                    logger.warning(
+                        "[DIALOGUE] shot=%s: could not probe TTS duration; using default '8s'",
+                        shot_id,
+                        exc_info=True,
+                    )
+
         _video_cascade: dict = {}
         temp_vid = generate_ai_video(
             source_image,
@@ -1300,6 +1374,7 @@ class ShotController:
             driving_video_path=driving_video_path,
             has_dialogue=has_dialogue,
             dialogue_native_audio=dialogue_native_audio,
+            duration=_veo_duration,
             ctx=motion_ctx,
             _cascade_out=_video_cascade,
         )
@@ -1346,7 +1421,15 @@ class ShotController:
                     c for c in project_for_sync.get("characters", [])
                     if c.get("id") in chars_for_sync
                 ]
-                audio_path_for_sync = self._host._ensure_scene_audio(scene, chars_dicts)
+                # Task 6: reuse the per-shot audio resolved before generate_ai_video
+                # (avoids a redundant _ensure_scene_audio call and guarantees the
+                # overlay uses the same sized audio the Veo clip was sized for).
+                # _f1b_audio is None for native mode / non-dialogue; fall back to
+                # _ensure_scene_audio in that case (preserves legacy behaviour).
+                if _f1b_audio is not None:
+                    audio_path_for_sync = _f1b_audio
+                else:
+                    audio_path_for_sync = self._host._ensure_scene_audio(scene, chars_dicts)
                 primary_ref_for_sync = (
                     get_reference_image(project_for_sync, chars_for_sync[0])
                     if chars_for_sync else None

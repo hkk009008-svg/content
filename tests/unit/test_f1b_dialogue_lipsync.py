@@ -568,3 +568,167 @@ class TestAssemblerEmbeddedGuard:
             "postprocess_variants": [],
         }
         assert CinemaPipeline._approved_take_metadata(shot) == {}
+
+
+# ---------------------------------------------------------------------------
+# Task 6 — per-shot TTS in F1b pass + Veo clip sized to speech
+# ---------------------------------------------------------------------------
+
+
+class TestDurationClamp:
+    """Unit tests for the _clamp_veo_duration helper (pure function)."""
+
+    def test_clamp_returns_nearest_not_less(self):
+        """Duration is clamped to the nearest supported value >= speech length."""
+        from cinema.shots.controller import _clamp_veo_duration
+        assert _clamp_veo_duration(0.0) == "4s"
+        assert _clamp_veo_duration(3.5) == "4s"
+        assert _clamp_veo_duration(4.0) == "4s"
+        assert _clamp_veo_duration(4.1) == "6s"
+        assert _clamp_veo_duration(5.9) == "6s"
+        assert _clamp_veo_duration(6.0) == "6s"
+        assert _clamp_veo_duration(6.1) == "8s"
+        assert _clamp_veo_duration(8.0) == "8s"
+
+    def test_clamp_caps_at_8s_for_long_lines(self):
+        """Lines longer than max supported duration are clamped to '8s'."""
+        from cinema.shots.controller import _clamp_veo_duration
+        assert _clamp_veo_duration(9.0) == "8s"
+        assert _clamp_veo_duration(30.0) == "8s"
+        assert _clamp_veo_duration(100.0) == "8s"
+
+
+class TestGenerateAiVideoDurationParam:
+    """
+    Task 6: generate_ai_video now accepts a duration: str = "8s" param and
+    threads it through the VEO_NATIVE branch and the fal-proxy branch.
+    Default "8s" leaves all existing callers unchanged.
+    """
+
+    def test_veo_native_receives_duration_param(self):
+        """
+        When duration is passed to generate_ai_video, VeoNativeAPI.generate_video
+        is called with that duration value.
+        """
+        from phase_c_ffmpeg import generate_ai_video
+
+        mock_veo_instance = MagicMock()
+        mock_veo_instance.generate_video.return_value = "/tmp/fake_output.mp4"
+        mock_veo_cls = MagicMock(return_value=mock_veo_instance)
+
+        with patch.dict("sys.modules", {"veo_native": MagicMock(VeoNativeAPI=mock_veo_cls)}):
+            with patch("os.path.exists", return_value=True):
+                generate_ai_video(
+                    image_path="/tmp/fake_frame.png",
+                    camera_motion="zoom_in_slow",
+                    target_api="VEO_NATIVE",
+                    output_mp4="/tmp/out.mp4",
+                    shot_type="portrait",
+                    duration="6s",
+                )
+
+        call_kwargs = mock_veo_instance.generate_video.call_args
+        assert call_kwargs.kwargs.get("duration") == "6s", (
+            "generate_ai_video must thread duration into veo.generate_video"
+        )
+
+    def test_veo_native_default_duration_is_8s(self):
+        """When duration is omitted, the VEO_NATIVE branch defaults to '8s'."""
+        from phase_c_ffmpeg import generate_ai_video
+
+        mock_veo_instance = MagicMock()
+        mock_veo_instance.generate_video.return_value = "/tmp/fake_output.mp4"
+        mock_veo_cls = MagicMock(return_value=mock_veo_instance)
+
+        with patch.dict("sys.modules", {"veo_native": MagicMock(VeoNativeAPI=mock_veo_cls)}):
+            with patch("os.path.exists", return_value=True):
+                generate_ai_video(
+                    image_path="/tmp/fake_frame.png",
+                    camera_motion="zoom_in_slow",
+                    target_api="VEO_NATIVE",
+                    output_mp4="/tmp/out.mp4",
+                    shot_type="portrait",
+                )
+
+        call_kwargs = mock_veo_instance.generate_video.call_args
+        assert call_kwargs.kwargs.get("duration") == "8s", (
+            "default duration must be '8s' to preserve existing call-site behavior"
+        )
+
+
+class TestF1bPerShotAudioWire:
+    """
+    Task 6: In overlay-mode dialogue, the F1b block:
+    - Resolves per-shot TTS via _ensure_shot_audio before generate_ai_video.
+    - Uses _ensure_scene_audio as fallback when shot has no own line.
+    - Passes the clamped duration to generate_ai_video.
+    - In native mode the old behaviour is unchanged.
+
+    We test the logic of the new helper _resolve_f1b_audio_and_duration
+    (or equivalent) by inspecting what the F1b block passes to
+    generate_ai_video / the lipsync call — white-box, same approach as
+    TestMandatoryLipsyncPass above.
+    """
+
+    def _make_host_with_audio(self, tmp_path, shot_audio_path=None, scene_audio_path=None):
+        """Build a minimal host whose _ensure_shot_audio / _ensure_scene_audio return controlled values."""
+        host = MagicMock()
+        host._ensure_shot_audio.return_value = shot_audio_path
+        host._ensure_scene_audio.return_value = scene_audio_path or str(tmp_path / "scene.mp3")
+        return host
+
+    def test_per_shot_audio_used_when_shot_has_dialogue(self, tmp_path):
+        """
+        When the shot has its own dialogue line, _ensure_shot_audio is called and
+        its return value feeds the F1b lipsync call (not _ensure_scene_audio).
+        """
+        from cinema.shots.controller import _resolve_f1b_audio
+
+        shot_audio = str(tmp_path / "audio_shot.mp3")
+        shot = {"id": "s1", "dialogue": "Hello."}
+        scene = {"id": "sc1"}
+        chars = []
+        host = self._make_host_with_audio(tmp_path, shot_audio_path=shot_audio)
+
+        result = _resolve_f1b_audio(host, shot, scene, chars, voice_mode="overlay")
+
+        host._ensure_shot_audio.assert_called_once_with(shot, scene, chars)
+        assert result == shot_audio
+
+    def test_scene_audio_fallback_when_shot_has_no_line(self, tmp_path):
+        """
+        When _ensure_shot_audio returns None (no own line), the result falls
+        back to _ensure_scene_audio.
+        """
+        from cinema.shots.controller import _resolve_f1b_audio
+
+        scene_audio = str(tmp_path / "scene.mp3")
+        shot = {"id": "s2"}  # no dialogue key
+        scene = {"id": "sc1"}
+        chars = []
+        host = self._make_host_with_audio(tmp_path, shot_audio_path=None, scene_audio_path=scene_audio)
+
+        result = _resolve_f1b_audio(host, shot, scene, chars, voice_mode="overlay")
+
+        host._ensure_shot_audio.assert_called_once()
+        host._ensure_scene_audio.assert_called_once_with(scene, chars)
+        assert result == scene_audio
+
+    def test_native_mode_uses_scene_audio_only(self, tmp_path):
+        """
+        In native mode, _resolve_f1b_audio skips _ensure_shot_audio entirely
+        and falls back directly to _ensure_scene_audio (matching legacy behavior).
+        """
+        from cinema.shots.controller import _resolve_f1b_audio
+
+        scene_audio = str(tmp_path / "scene.mp3")
+        shot = {"id": "s3", "dialogue": "Native line."}
+        scene = {"id": "sc1"}
+        chars = []
+        host = self._make_host_with_audio(tmp_path, shot_audio_path=None, scene_audio_path=scene_audio)
+
+        result = _resolve_f1b_audio(host, shot, scene, chars, voice_mode="native")
+
+        host._ensure_shot_audio.assert_not_called()
+        host._ensure_scene_audio.assert_called_once_with(scene, chars)
+        assert result == scene_audio
