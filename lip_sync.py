@@ -36,6 +36,8 @@ try:
 except ImportError:
     FAL_AVAILABLE = False
 
+from hedra_native import HedraAPI as _HedraAPI
+
 
 # ─────────────────────────────────────────────────────────────
 # PREREQUISITES CHECKER
@@ -547,32 +549,28 @@ def lipsync_generation(
         return False
 
     # ATTEMPT 0: Hedra Character-3 (Q=0.93, SOTA portrait talking head)
+    # Direct api.hedra.com (fal-ai/hedra/character-3 returns HTTP 404 — dead).
+    # Uses LOCAL image/audio paths (own asset upload), NOT the fal-uploaded urls.
     # Best emotional micro-expressions + head movement correlated with speech.
     # Native full-body output, handles off-axis angles better than Omnihuman.
     try:
         aspect = _hedra_aspect_ratio_from_image(character_image_path)
-        print(f"   [LIPSYNC-GEN] Hedra Character-3 (aspect={aspect}, res={resolution})...")
-        result = fal_client.subscribe(
-            "fal-ai/hedra/character-3",
-            arguments={
-                "image_url": image_url,
-                "audio_url": audio_url,
-                "aspect_ratio": aspect,
-                "resolution": resolution,
-            },
-            with_logs=True,
+        print(f"   [LIPSYNC-GEN] Hedra Character-3 via direct API (aspect={aspect}, res={resolution})...")
+        hedra_result = _HedraAPI().generate_talking_head(
+            character_image_path=character_image_path,
+            audio_path=audio_path,
+            output_path=output_path,
+            resolution=resolution,
+            aspect_ratio=aspect,
         )
-        video_url = result.get("video", {}).get("url")
-        if video_url:
-            if safe_download(video_url, output_path) is None:
-                print(f"   [LIPSYNC-GEN] Hedra Character-3 download failed")
-            elif _gate_or_stash("Hedra"):
+        if hedra_result and os.path.exists(output_path):
+            if _gate_or_stash("Hedra"):
                 print(f"   [LIPSYNC-GEN] Hedra Character-3 success: {output_path}")
                 return output_path
+        else:
+            print(f"   [LIPSYNC-GEN] Hedra Character-3 returned no output")
     except Exception as e:
         # Graceful fallback — caller will try the next engine below.
-        # If the FAL endpoint name or field schema drifts, the cascade keeps the
-        # pipeline running on the legacy engines while we patch the integration.
         print(f"   [LIPSYNC-GEN] Hedra Character-3 failed: {e}")
 
     # ATTEMPT 1: Kling native lip sync (cheapest at $0.014/sec, integrated motion)
