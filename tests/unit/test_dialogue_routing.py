@@ -293,20 +293,13 @@ class TestAudioEmbeddedTakeTag:
     def test_audio_embedded_set_in_native_mode(self):
         """native mode: native_audio engine + has_dialogue + mode=native → audio_embedded=True."""
         from domain.scene_decomposer import API_REGISTRY
-        from cinema.shots.controller import _dialogue_voice_mode
+        from cinema.shots.controller import _should_tag_audio_embedded
 
         winning_engine = "VEO_NATIVE"
-        has_dialogue = True
-        settings = {"dialogue_voice_mode": "native"}
-
-        take_metadata = {}
         engine_info = API_REGISTRY.get(winning_engine, {})
-        # Task 4: audio_embedded requires native mode
-        if (engine_info.get("native_audio") and has_dialogue
-                and _dialogue_voice_mode(settings) == "native"):
-            take_metadata["audio_embedded"] = True
+        result = _should_tag_audio_embedded(engine_info, has_dialogue=True, voice_mode="native")
 
-        assert take_metadata.get("audio_embedded") is True, (
+        assert result is True, (
             "VEO_NATIVE + has_dialogue + native mode should produce audio_embedded=True"
         )
 
@@ -315,20 +308,13 @@ class TestAudioEmbeddedTakeTag:
         In overlay mode the F1b pass fires and the clip gets TTS overlaid.
         """
         from domain.scene_decomposer import API_REGISTRY
-        from cinema.shots.controller import _dialogue_voice_mode
+        from cinema.shots.controller import _should_tag_audio_embedded
 
         winning_engine = "VEO_NATIVE"
-        has_dialogue = True
-        settings = {}  # default overlay mode
-
-        take_metadata = {}
         engine_info = API_REGISTRY.get(winning_engine, {})
-        # Task 4: audio_embedded requires native mode
-        if (engine_info.get("native_audio") and has_dialogue
-                and _dialogue_voice_mode(settings) == "native"):
-            take_metadata["audio_embedded"] = True
+        result = _should_tag_audio_embedded(engine_info, has_dialogue=True, voice_mode="overlay")
 
-        assert "audio_embedded" not in take_metadata, (
+        assert result is False, (
             "overlay mode (default): VEO_NATIVE + has_dialogue should NOT set audio_embedded "
             "— the F1b lipsync overlay pass must run"
         )
@@ -336,49 +322,40 @@ class TestAudioEmbeddedTakeTag:
     def test_audio_embedded_not_set_for_non_native_audio_engine(self):
         """Non-native-audio engine (KLING_NATIVE) should NOT set audio_embedded."""
         from domain.scene_decomposer import API_REGISTRY
+        from cinema.shots.controller import _should_tag_audio_embedded
 
         winning_engine = "KLING_NATIVE"
-        has_dialogue = True
-
-        take_metadata = {}
         engine_info = API_REGISTRY.get(winning_engine, {})
-        if engine_info.get("native_audio") and has_dialogue:
-            take_metadata["audio_embedded"] = True
+        result = _should_tag_audio_embedded(engine_info, has_dialogue=True, voice_mode="native")
 
-        assert "audio_embedded" not in take_metadata, (
+        assert result is False, (
             "KLING_NATIVE has no native_audio — audio_embedded should not be set"
         )
 
     def test_audio_embedded_not_set_when_no_dialogue(self):
         """Native-audio engine (VEO_NATIVE) + has_dialogue=False → no audio_embedded."""
         from domain.scene_decomposer import API_REGISTRY
+        from cinema.shots.controller import _should_tag_audio_embedded
 
         winning_engine = "VEO_NATIVE"
-        has_dialogue = False
-
-        take_metadata = {}
         engine_info = API_REGISTRY.get(winning_engine, {})
-        if engine_info.get("native_audio") and has_dialogue:
-            take_metadata["audio_embedded"] = True
+        result = _should_tag_audio_embedded(engine_info, has_dialogue=False, voice_mode="native")
 
-        assert "audio_embedded" not in take_metadata, (
+        assert result is False, (
             "VEO_NATIVE without has_dialogue should not set audio_embedded"
         )
 
     def test_audio_embedded_not_set_when_veo_falls_back_to_kling(self):
         """If VEO_NATIVE fails and cascade picks KLING_NATIVE, no audio_embedded."""
         from domain.scene_decomposer import API_REGISTRY
+        from cinema.shots.controller import _should_tag_audio_embedded
 
         # Primary was VEO_NATIVE but winning_engine ends up KLING_NATIVE after cascade
         winning_engine = "KLING_NATIVE"
-        has_dialogue = True
-
-        take_metadata = {}
         engine_info = API_REGISTRY.get(winning_engine, {})
-        if engine_info.get("native_audio") and has_dialogue:
-            take_metadata["audio_embedded"] = True
+        result = _should_tag_audio_embedded(engine_info, has_dialogue=True, voice_mode="native")
 
-        assert "audio_embedded" not in take_metadata
+        assert result is False
 
 
 # ---------------------------------------------------------------------------
@@ -564,64 +541,20 @@ class TestDialogueVideoFallbacks:
     Task 3: Overlay-mode dialogue keeps video_fallbacks non-None (primary=VEO,
     fallbacks restored). Native-mode dialogue nulls fallbacks (today's behavior).
     RAI-block → fallback engine → overlay still fires (take NOT audio_embedded).
+
+    All tests call the REAL _resolve_dialogue_routing helper from controller.py.
     """
 
-    def _apply_dialogue_routing_override(self, has_dialogue, mode, purpose, template_fallbacks):
-        """
-        Simulate the controller's dialogue routing override logic.
-        Returns (target_api, video_fallbacks) after the mode branch.
-
-        Mirrors controller.py:1136-1163 with the Task 3 mode gate applied.
-        """
-        from domain.scene_decomposer import PURPOSE_API_RANKING, API_REGISTRY
-        from cinema.shots.controller import _dialogue_voice_mode
-
-        target_api = "VEO_NATIVE"  # assumed from template / cache
-        video_fallbacks = template_fallbacks  # from WORKFLOW_TEMPLATES
-
-        settings = {"dialogue_voice_mode": mode}
-
-        if has_dialogue:
-            if _dialogue_voice_mode(settings) == "native":
-                # Native: force native-audio engine, null fallbacks (today's behavior)
-                for _engine_key in PURPOSE_API_RANKING.get(purpose, []):
-                    _engine_info = API_REGISTRY.get(_engine_key, {})
-                    if (
-                        _engine_info.get("native_audio")
-                        and _engine_info.get("modality") == "video"
-                        and _engine_info.get("status") == "live"
-                    ):
-                        target_api = _engine_key
-                        video_fallbacks = None
-                        break
-            else:
-                # Overlay: keep VEO as primary via PURPOSE_API_RANKING override,
-                # but DO NOT null video_fallbacks — restore the cascade.
-                for _engine_key in PURPOSE_API_RANKING.get(purpose, []):
-                    _engine_info = API_REGISTRY.get(_engine_key, {})
-                    if (
-                        _engine_info.get("native_audio")
-                        and _engine_info.get("modality") == "video"
-                        and _engine_info.get("status") == "live"
-                    ):
-                        target_api = _engine_key
-                        # video_fallbacks intentionally kept from template
-                        break
-
-        return target_api, video_fallbacks
-
     def test_overlay_dialogue_keeps_video_fallbacks(self):
-        """overlay mode: VEO_NATIVE primary + template fallbacks preserved (non-None).
-        This test uses the new _apply_dialogue_routing_override helper which will be
-        inlined into the controller in Task 3. It fails against the old controller
-        code because the old code always nulls video_fallbacks for dialogue.
-        """
+        """overlay mode: VEO_NATIVE primary + template fallbacks preserved (non-None)."""
+        from cinema.shots.controller import _resolve_dialogue_routing
+
         template_fallbacks = ["RUNWAY_GEN4", "SORA_NATIVE", "KLING_NATIVE"]
-        _, video_fallbacks = self._apply_dialogue_routing_override(
-            has_dialogue=True,
-            mode="overlay",
+        _, video_fallbacks = _resolve_dialogue_routing(
             purpose="dialogue_close_up",
-            template_fallbacks=template_fallbacks,
+            voice_mode="overlay",
+            resolved_target_api="VEO_NATIVE",
+            resolved_fallbacks=template_fallbacks,
         )
         assert video_fallbacks is not None, (
             "overlay-mode dialogue must keep video_fallbacks for RAI-block resilience"
@@ -630,12 +563,14 @@ class TestDialogueVideoFallbacks:
 
     def test_native_dialogue_nulls_video_fallbacks(self):
         """native mode: video_fallbacks=None (today's behavior preserved)."""
+        from cinema.shots.controller import _resolve_dialogue_routing
+
         template_fallbacks = ["RUNWAY_GEN4", "SORA_NATIVE", "KLING_NATIVE"]
-        _, video_fallbacks = self._apply_dialogue_routing_override(
-            has_dialogue=True,
-            mode="native",
+        _, video_fallbacks = _resolve_dialogue_routing(
             purpose="dialogue_close_up",
-            template_fallbacks=template_fallbacks,
+            voice_mode="native",
+            resolved_target_api="VEO_NATIVE",
+            resolved_fallbacks=template_fallbacks,
         )
         assert video_fallbacks is None, (
             "native-mode dialogue must null video_fallbacks (embedded voice engine handles cascade)"
@@ -644,13 +579,14 @@ class TestDialogueVideoFallbacks:
     def test_overlay_dialogue_primary_is_native_audio_engine(self):
         """overlay mode: primary engine still has native_audio (VEO_NATIVE)."""
         from domain.scene_decomposer import API_REGISTRY
+        from cinema.shots.controller import _resolve_dialogue_routing
 
         template_fallbacks = ["RUNWAY_GEN4", "SORA_NATIVE", "KLING_NATIVE"]
-        target_api, _ = self._apply_dialogue_routing_override(
-            has_dialogue=True,
-            mode="overlay",
+        target_api, _ = _resolve_dialogue_routing(
             purpose="dialogue_close_up",
-            template_fallbacks=template_fallbacks,
+            voice_mode="overlay",
+            resolved_target_api="VEO_NATIVE",
+            resolved_fallbacks=template_fallbacks,
         )
         engine_info = API_REGISTRY.get(target_api, {})
         assert engine_info.get("native_audio") is True, (
@@ -661,21 +597,15 @@ class TestDialogueVideoFallbacks:
         """RAI-block: when VEO_NATIVE fails and cascade picks KLING_NATIVE (no native_audio),
         the take is NOT audio_embedded in overlay mode — the F1b overlay pass still fires."""
         from domain.scene_decomposer import API_REGISTRY
-        from cinema.shots.controller import _dialogue_voice_mode
+        from cinema.shots.controller import _should_tag_audio_embedded
 
         # Simulate: VEO_NATIVE was primary; RAI-block caused cascade to KLING_NATIVE.
         winning_engine = "KLING_NATIVE"
         has_dialogue = True
-        settings = {}  # default overlay mode
+        voice_mode = "overlay"  # default
 
-        # Replicate the controller's audio_embedded tagging logic (controller.py:1231)
-        # with the Task 4 mode gate (tested separately; included here for the cascade scenario)
         engine_info = API_REGISTRY.get(winning_engine, {})
-        audio_embedded = (
-            engine_info.get("native_audio")
-            and has_dialogue
-            and _dialogue_voice_mode(settings) == "native"
-        )
+        audio_embedded = _should_tag_audio_embedded(engine_info, has_dialogue, voice_mode)
 
         assert not audio_embedded, (
             "After RAI-block cascade to KLING_NATIVE (no native_audio) in overlay mode, "

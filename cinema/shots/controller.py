@@ -128,6 +128,87 @@ def _dialogue_voice_mode(settings: dict) -> str:
     mode = (settings or {}).get("dialogue_voice_mode", "overlay")
     return mode if mode in _VALID_DIALOGUE_VOICE_MODES else "overlay"
 
+
+def _resolve_dialogue_routing(
+    purpose: str,
+    voice_mode: str,
+    resolved_target_api: str,
+    resolved_fallbacks,
+):
+    """Return (target_api, video_fallbacks) after applying the dialogue routing override.
+
+    Pure helper — mirrors the inline block at generate_motion_take:1144-1173.
+
+    For dialogue shots (has_dialogue=True callers), walks PURPOSE_API_RANKING for the
+    given purpose to find the first live video engine with native_audio.  Then:
+    - overlay mode: sets target_api to that engine; keeps resolved_fallbacks intact so
+      a Veo RAI-block can cascade to a silent engine (F1b overlay still fires).
+    - native mode:  sets target_api to that engine AND nulls fallbacks so the
+      native-audio engine's internal cascade never routes to a non-native-audio engine.
+
+    If no native_audio video engine is found in the ranking, returns the inputs
+    unchanged (F1b lipsync pass covers the gap).
+
+    Args:
+        purpose: The cached optimizer purpose (e.g. 'dialogue_close_up').
+        voice_mode: The resolved voice mode string ('overlay' or 'native').
+        resolved_target_api: The engine already resolved from the optimizer/template.
+        resolved_fallbacks: The fallback list already resolved from the template.
+
+    Returns:
+        (target_api, video_fallbacks) — potentially overridden.
+    """
+    from domain.scene_decomposer import PURPOSE_API_RANKING, API_REGISTRY
+
+    target_api = resolved_target_api
+    video_fallbacks = resolved_fallbacks
+
+    for _engine_key in PURPOSE_API_RANKING.get(purpose, []):
+        _engine_info = API_REGISTRY.get(_engine_key, {})
+        if (
+            _engine_info.get("native_audio")
+            and _engine_info.get("modality") == "video"
+            and _engine_info.get("status") == "live"
+        ):
+            target_api = _engine_key
+            if voice_mode == "native":
+                video_fallbacks = None
+            # overlay mode: video_fallbacks intentionally kept from template
+            break
+    # If no native_audio engine found: return inputs unchanged.
+    return target_api, video_fallbacks
+
+
+def _should_tag_audio_embedded(
+    engine_info: dict,
+    has_dialogue: bool,
+    voice_mode: str,
+) -> bool:
+    """Return True when the winning engine's take should be tagged audio_embedded.
+
+    Pure helper — mirrors the inline if-expression at generate_motion_take:1251-1253.
+
+    audio_embedded is True only when ALL three conditions hold:
+    - The winning engine has native_audio=True in API_REGISTRY.
+    - The shot has dialogue (has_dialogue=True).
+    - The voice mode is 'native' (overlay mode intentionally skips the tag so
+      the F1b TTS overlay pass runs).
+
+    Args:
+        engine_info: API_REGISTRY entry for the winning engine (may be {}).
+        has_dialogue: True when the shot purpose is a dialogue purpose.
+        voice_mode: The resolved voice mode string ('overlay' or 'native').
+
+    Returns:
+        bool
+    """
+    return bool(
+        engine_info.get("native_audio")
+        and has_dialogue
+        and voice_mode == "native"
+    )
+
+
 from cinema.lifecycle import LifecycleService
 from domain.models import DirectorialIntent, Project
 
@@ -1142,33 +1223,21 @@ class ShotController:
             #   engine + video_fallbacks=None so embedded voice is never lost to a
             #   cross-engine fallback that lacks native_audio).
             if has_dialogue:
-                from domain.scene_decomposer import PURPOSE_API_RANKING
-                for _engine_key in PURPOSE_API_RANKING.get(cached_purpose, []):
-                    _engine_info = API_REGISTRY.get(_engine_key, {})
-                    if (
-                        _engine_info.get("native_audio")
-                        and _engine_info.get("modality") == "video"
-                        and _engine_info.get("status") == "live"
-                    ):
-                        if target_api != _engine_key:
-                            logger.info(
-                                "dialogue routing override: %s → %s "
-                                "(purpose=%s; original suggestion lacked native_audio)",
-                                target_api,
-                                _engine_key,
-                                cached_purpose,
-                            )
-                        target_api = _engine_key
-                        if _dialogue_voice_mode(settings) == "native":
-                            # Native mode: drop video_fallbacks — the native-audio
-                            # engine's internal cascade handles failures; cross-engine
-                            # fallbacks would route to non-native-audio engines and
-                            # silently remove the embedded voice.
-                            video_fallbacks = None
-                        # overlay mode: video_fallbacks intentionally kept from template
-                        # so a Veo RAI-block cascades to a silent engine and the F1b
-                        # overlay pass still fires.
-                        break
+                _pre_override_api = target_api
+                target_api, video_fallbacks = _resolve_dialogue_routing(
+                    cached_purpose,
+                    _dialogue_voice_mode(settings),
+                    target_api,
+                    video_fallbacks,
+                )
+                if target_api != _pre_override_api:
+                    logger.info(
+                        "dialogue routing override: %s → %s "
+                        "(purpose=%s; original suggestion lacked native_audio)",
+                        _pre_override_api,
+                        target_api,
+                        cached_purpose,
+                    )
                 # If no native_audio engine found in ranking: keep resolved target_api.
                 # F1b's mandatory lipsync pass will cover the gap.
         else:
@@ -1248,8 +1317,7 @@ class ShotController:
             _video_cascade.get("cascade_metadata", {}).get("engine", target_api).upper()
         )
         engine_info = API_REGISTRY.get(winning_engine, {})
-        if (engine_info.get("native_audio") and has_dialogue
-                and _dialogue_voice_mode(settings) == "native"):
+        if _should_tag_audio_embedded(engine_info, has_dialogue, _dialogue_voice_mode(settings)):
             take["metadata"]["audio_embedded"] = True
 
         # F1b: Write has_dialogue to the take so the auto-approve gate can
