@@ -104,10 +104,16 @@ opt-in escape hatch (absorbs the "keep it configurable" alternative cheaply).
   `veo_native.generate_video:143`) to the nearest engine-supported value ≥ speech length
   (clamped to the supported set, e.g. {4s, 6s, 8s}), then generate the (silent) video, then
   overlay. Result: video length ≈ speech length → clean sync, no truncation.
-- **Fallback:** when `_ensure_shot_audio` returns `None` (no per-shot line; dialogue lives
-  only at scene level), fall back to today's `_ensure_scene_audio` + the shot's configured
-  duration (current behavior, partial). The overlay still runs; only the duration-sizing
-  benefit is skipped.
+- **Fallback:** when `_ensure_shot_audio` returns `None` (i.e. `shot.get("dialogue")` is
+  None/empty; dialogue lives only at scene level), fall back to today's
+  `_ensure_scene_audio` + the shot's configured duration (current behavior, partial). The
+  overlay still runs; only the duration-sizing benefit is skipped.
+- **Call site (do not miss):** the F1b pass at `controller.py:1243` currently calls
+  `self._host._ensure_scene_audio(scene, chars_dicts)` — *this* is the line that feeds the
+  overlay's `audio_path`. For overlay-mode dialogue it must be replaced with
+  `_ensure_shot_audio(shot, scene, chars_dicts)` (with the scene-audio fallback inside).
+  Adding `_ensure_shot_audio` to `cinema_pipeline.py` without changing `:1243` would leave
+  the scene-level call in place (a silent no-op fix).
 
 ### Component 4 — Assembler dedup (no double-audio)
 *File: `cinema_pipeline.py:628-664`.*
@@ -174,7 +180,8 @@ opt-in escape hatch (absorbs the "keep it configurable" alternative cheaply).
 1. `generate_audio=False` for dialogue, `=True` for landscape (`phase_c_ffmpeg.py:281`).
 2. Overlay pass fires for dialogue in `overlay` mode (no `audio_embedded`).
 3. `_ensure_shot_audio` renders the shot line; Veo `duration` clamped to speech length;
-   scene-audio fallback when no per-shot line.
+   scene-audio fallback specifically when `shot.get("dialogue")` is None/empty (the
+   fallback trigger).
 4. Veo failure → fallback engine wins → overlay still applies (`video_fallbacks` non-None).
 5. Assembler suppresses scene TTS when all dialogue shots are `dialogue_audio_in_clip`
    (no double-audio); mixed scene keeps TTS for non-in-clip shots.
@@ -198,7 +205,7 @@ not real media. `ci_smoke.py` green; full unit suite green.
 |---|---|
 | `cinema/shots/controller.py:1120-1147` | Dialogue routing: VEO primary, restore `video_fallbacks`, gate native-only behavior on `dialogue_voice_mode` |
 | `cinema/shots/controller.py:1215-1216` | Gate `audio_embedded` tag behind `dialogue_voice_mode==native` |
-| `cinema/shots/controller.py:1233-1262` | Per-shot TTS + duration sizing before video; set `dialogue_audio_in_clip` on overlay success |
+| `cinema/shots/controller.py:1233-1262` | Per-shot TTS + duration sizing before video; **replace the `_ensure_scene_audio` call at `:1243` with `_ensure_shot_audio`** (scene fallback inside); set `dialogue_audio_in_clip` on overlay success |
 | `phase_c_ffmpeg.py:281` | `generate_audio=(shot_type=="landscape")` (drop `or has_dialogue`) |
 | `cinema_pipeline.py` (~:481) | New `_ensure_shot_audio` |
 | `cinema_pipeline.py:633` | Count `dialogue_audio_in_clip` alongside `audio_embedded` for TTS suppression |
