@@ -1,0 +1,16 @@
+#!/usr/bin/expect -f
+# Reusable pod SSH driver. Runs a base64-encoded script on the pod (b64 in argv[0]),
+# so local/remote quoting layers can never corrupt the command. Password via $POD_PW env.
+log_user 1
+set timeout 1200
+set pw $env(POD_PW)
+set b64 [lindex $argv 0]
+spawn ssh -p 38597 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=25 root@35.164.116.189 "echo $b64 | base64 -d | bash"
+expect {
+  -re {[Pp]assword:} { send "$pw\r"; exp_continue }
+  "Permission denied" { puts "\n>>> AUTH_FAILED"; exit 1 }
+  timeout { puts "\n>>> TIMEOUT"; exit 2 }
+  eof
+}
+catch wait result
+exit [lindex $result 3]
