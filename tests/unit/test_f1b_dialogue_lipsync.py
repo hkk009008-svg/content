@@ -83,20 +83,20 @@ def _make_take(
 
 class TestMandatoryLipsyncPass:
     """
-    Test that generate_motion_take calls generate_lip_sync_video for
-    non-embedded dialogue shots and writes lipsync_score to take metadata.
+    Inline-simulation tests for the metadata contracts produced by the F1b
+    lipsync block.
 
-    We test the logic indirectly by invoking the controller's behaviour
-    through the auto-approve gate's metadata contracts — the controller
-    is hard to isolate end-to-end in offline unit tests because of its
-    host-protocol dependencies (ShotControllerHost).  Instead we verify
-    the shape of the metadata written, using mocks.
+    NOTE: These tests are INLINE MIRRORS of the block's logic — they
+    re-implement the block structure inline rather than calling the REAL
+    generate_motion_take.  They therefore cannot catch production drift in the
+    wiring itself.  Use TestGenerateMotionTakeOverlayWiring (below) for the
+    real end-to-end wiring test.
     """
 
     def _build_controller_fragment(self, monkeypatch, lipsync_returns: Optional[str]):
         """
-        Build a minimal environment to exercise the lipsync block inside
-        generate_motion_take without invoking full ShotController.__init__.
+        Build a minimal environment to simulate the lipsync block inline
+        (does NOT call generate_motion_take — this is a white-box inline mirror).
 
         Returns (take_metadata, final_vid_after_block) after running the block.
         """
@@ -184,8 +184,10 @@ class TestMandatoryLipsyncPass:
 
     def test_lipsync_pass_writes_score_when_succeeds(self, tmp_path):
         """
-        (a) When generate_lip_sync_video returns a valid path,
-        lipsync_score is written to take metadata and final_vid is updated.
+        Inline simulation: when the mock generate_lip_sync_video returns a
+        valid path, lipsync_score is written to the inline metadata dict.
+        (Does NOT call the real generate_motion_take — see
+        TestGenerateMotionTakeOverlayWiring for the real wiring test.)
         """
         take_meta, final_vid, mock_gen, mock_validate = (
             self._build_controller_fragment(None, lipsync_returns="something")
@@ -197,8 +199,8 @@ class TestMandatoryLipsyncPass:
 
     def test_lipsync_pass_writes_zero_when_fails(self, tmp_path):
         """
-        (a) When generate_lip_sync_video returns None (API unavailable etc.),
-        lipsync_score is set to 0.0 so the gate treats it as FAIL.
+        Inline simulation: when the mock returns None, lipsync_score is 0.0.
+        (Does NOT call the real generate_motion_take — inline mirror only.)
         """
         take_meta, final_vid, mock_gen, _ = (
             self._build_controller_fragment(None, lipsync_returns=None)
@@ -209,9 +211,8 @@ class TestMandatoryLipsyncPass:
 
     def test_has_dialogue_written_to_take_metadata(self):
         """
-        (a) has_dialogue is unconditionally written to take metadata for
-        any motion take — this is how the gate distinguishes dialogue from
-        non-dialogue shots.
+        Inline simulation: has_dialogue is written to take metadata.
+        (Inline dict operation, not a call to generate_motion_take.)
         """
         # Simulate the F1b has_dialogue write (controller.py).
         take_metadata = {}
@@ -735,101 +736,201 @@ class TestF1bPerShotAudioWire:
 
 
 # ---------------------------------------------------------------------------
-# Chunk 3 — Task 7: dialogue_audio_in_clip flag + assembler dedup
+# Chunk 3 — Task 7: overlay-wiring integration + assembler dedup
 # ---------------------------------------------------------------------------
 
 
-class TestDialogueAudioInClipFlag:
+class TestGenerateMotionTakeOverlayWiring:
     """
-    Chunk 3, Task 7a: On F1b overlay success, take["metadata"]["dialogue_audio_in_clip"]
-    is set to True so the assembler can suppress scene-level TTS for that shot.
+    Real integration test: calls the ACTUAL ShotController.generate_motion_take
+    for an overlay-mode dialogue shot and asserts the F1b wiring contract:
 
-    We verify this via the controller code path using `_resolve_f1b_audio` and
-    by inspecting the metadata written on a mocked take dict (the exact location
-    is the overlay-success branch: controller.py ~:1451 where final_vid = ls_result).
+    1. generate_ai_video called with dialogue_native_audio=False (silent Veo)
+       and a duration sized from the per-shot TTS (clamped value).
+    2. generate_lip_sync_video called with existing_video_path=<the veo clip>
+       and audio_path=<the per-shot TTS> and mode matching settings.
+    3. The resulting take metadata has:
+       - NO audio_embedded key (overlay path does not tag it)
+       - dialogue_audio_in_clip == True
+       - a numeric lipsync_score
+
+    All externals are mocked; no GPU, no network.  _finalize_motion_take is
+    also mocked (avoids continuity/checkpoint/cost machinery) so we can inspect
+    the take argument it receives.
     """
 
-    def _make_take_dict(self) -> dict:
+    def _build_controller(self, project: dict, tmp_path):
+        """Build a minimal ShotController with mocked host + core."""
+        from cinema.shots.controller import ShotController
+
+        host = MagicMock()
+        host._refresh_project_snapshot.return_value = project
+        host._rebuild_review_clips.return_value = {}
+        host._save_checkpoint.return_value = None
+        # _resolve_take_path returns a real file so os.path.exists passes.
+        keyframe_path = str(tmp_path / "keyframe.jpg")
+        open(keyframe_path, "wb").write(b"fake_jpg")
+        host._resolve_take_path.return_value = keyframe_path
+        host._ensure_shot_audio.return_value = None  # override per test
+        host._ensure_scene_audio.return_value = None  # override per test
+
+        lifecycle = MagicMock()
+        lifecycle.report_progress.return_value = None
+        runstate = MagicMock()
+        runstate.shot_results = {}
+        runstate.update_progress_pointer.return_value = None
+
+        core = MagicMock()
+        core.project = project
+        core.project_dir = str(tmp_path)
+        core.continuity = MagicMock()
+        core.continuity.enhance_shot_prompt.return_value = {
+            "continuity_config": {"primary_character": "char_1", "multi_angle_refs": []}
+        }
+        cost_tracker = MagicMock()
+        cost_tracker.is_over_budget.return_value = False
+        core.cost_tracker = cost_tracker
+
+        ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
+        # _take_output_path: return deterministic paths under tmp_path.
+        ctrl._take_output_path = MagicMock(
+            side_effect=lambda shot_id, take_id, ext: str(tmp_path / f"{take_id}{ext}")
+        )
+        return ctrl, host
+
+    def _make_overlay_dialogue_project(self, tmp_path, voice_mode: str = "overlay") -> dict:
+        """
+        Minimal project with one dialogue_close_up shot approved for motion
+        generation.  optimizer_cache drives has_dialogue=True in the controller.
+        """
+        keyframe_take_id = "kf_t1"
         return {
-            "id": "take_t1",
-            "kind": "motion",
-            "path": "/tmp/take_t1.mp4",
-            "metadata": {"has_dialogue": True},
+            "id": "proj_overlay_test",
+            "characters": [
+                {"id": "char_1", "name": "Alice"},
+            ],
+            "global_settings": {"dialogue_voice_mode": voice_mode},
+            "scenes": [
+                {
+                    "id": "scene_1",
+                    "title": "Dialogue Scene",
+                    "action": "Alice speaks.",
+                    "characters_present": ["char_1"],
+                    "shots": [
+                        {
+                            "id": "shot_1_0",
+                            "prompt": "Close-up of Alice speaking",
+                            "plan_status": "approved",
+                            "target_api": "AUTO",
+                            "camera": "static",
+                            "characters_in_frame": ["char_1"],
+                            "approved_keyframe_take_id": keyframe_take_id,
+                            "optimizer_cache": {
+                                "spec": {
+                                    "purpose": "dialogue_close_up",
+                                    "suggested_video_api": "VEO_NATIVE",
+                                }
+                            },
+                        }
+                    ],
+                }
+            ],
         }
 
-    def test_flag_set_on_overlay_success(self, tmp_path):
+    def test_overlay_wiring_calls_real_generate_motion_take(self, tmp_path):
         """
-        When the F1b overlay lipsync pass succeeds (ls_result exists),
-        take["metadata"]["dialogue_audio_in_clip"] is set to True.
+        Calls the REAL generate_motion_take for a dialogue_close_up shot in
+        overlay mode and asserts the full F1b wiring contract.
 
-        We exercise the REAL overlay-success branch logic by calling it
-        the same way the production code does (same metadata dict, same
-        condition), confirming the flag write is present.
+        This is the only test in this file that exercises production code
+        end-to-end through the dialogue F1b block.
         """
-        # Create real temp files so os.path.exists passes in the branch.
-        real_vid = str(tmp_path / "take_t1.mp4")
-        ls_result = str(tmp_path / "take_t1_ls.mp4")
-        audio_path = str(tmp_path / "audio.mp3")
-        open(real_vid, "wb").write(b"fake")
-        open(ls_result, "wb").write(b"fake_ls")
-        open(audio_path, "wb").write(b"fake_audio")
+        project = self._make_overlay_dialogue_project(tmp_path, voice_mode="overlay")
+        ctrl, host = self._build_controller(project, tmp_path)
 
-        take = self._make_take_dict()
-        take["path"] = real_vid
+        # Per-shot TTS audio file (exists on disk so _probe_duration and
+        # the lipsync call see a real path).
+        audio_file = str(tmp_path / "shot_tts.mp3")
+        open(audio_file, "wb").write(b"fake_audio_bytes")
+        # Character reference image (get_reference_image mock must return a real path).
+        ref_image_file = str(tmp_path / "ref_char1.jpg")
+        open(ref_image_file, "wb").write(b"fake_jpg")
 
-        # Simulate the overlay-success branch (controller.py ~:1449-1452 + NEW flag).
-        # This is the exact same pattern as TestMandatoryLipsyncPass above, but we
-        # now also check that dialogue_audio_in_clip is written.
-        from unittest.mock import MagicMock
+        # Veo silent clip output (generate_ai_video returns this).
+        veo_clip = str(tmp_path / "veo_clip.mp4")
+        open(veo_clip, "wb").write(b"fake_veo")
+        # Lipsync output (generate_lip_sync_video returns this).
+        ls_clip = str(tmp_path / "ls_clip.mp4")
+        open(ls_clip, "wb").write(b"fake_ls")
 
-        mock_generate = MagicMock(return_value=ls_result)
-        mock_validate = MagicMock(return_value=0.91)
+        # --- per-shot TTS: host._ensure_shot_audio returns our file ---
+        host._ensure_shot_audio.return_value = audio_file
 
-        final_vid = real_vid
-        _ls_cascade: dict = {}
-        lipsync_out = str(tmp_path / "lipsync_out.mp4")
+        # Capture the take that reaches _finalize_motion_take so we can assert
+        # on it after generate_motion_take returns.
+        _captured_take = {}
 
-        generate_lip_sync_video = mock_generate
-        validate_lipsync_quality = mock_validate
+        def _fake_finalize(scene, shot, take, video_path, **kwargs):
+            _captured_take.update(take)
+            return {"success": True, "take": dict(take), "video": video_path, "identity_score": 0.0}
 
-        ls_result_val = generate_lip_sync_video(
-            character_image_path="/tmp/ref.jpg",
-            audio_path=audio_path,
-            output_path=lipsync_out,
-            existing_video_path=final_vid,
-            mode="auto",
-            settings={},
-            _cascade_out=_ls_cascade,
+        ctrl._finalize_motion_take = MagicMock(side_effect=_fake_finalize)
+
+        with (
+            patch("cinema.shots.controller.generate_ai_video", return_value=veo_clip) as mock_gen_vid,
+            patch("cinema.shots.controller.generate_lip_sync_video", return_value=ls_clip) as mock_gen_ls_ctrl,
+            patch("lip_sync.generate_lip_sync_video", return_value=ls_clip) as mock_gen_ls_lip,
+            patch("lip_sync.validate_lipsync_quality", return_value=0.91) as mock_validate,
+            patch("cinema.shots.controller.get_reference_image", return_value=ref_image_file),
+            patch("cinema.shots.controller._probe_duration", return_value=3.5),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        # --- Primary assertion: the method was called and returned successfully ---
+        assert result.get("success") is True, (
+            f"generate_motion_take returned failure: {result}"
         )
-        if ls_result_val and os.path.exists(ls_result_val):
-            final_vid = ls_result_val
-            take["metadata"]["lipsync_score"] = validate_lipsync_quality(
-                ls_result_val, audio_path
-            )
-            # Chunk 3: this is the new flag write we are testing.
-            take["metadata"]["dialogue_audio_in_clip"] = True
 
-        assert take["metadata"].get("dialogue_audio_in_clip") is True, (
-            "dialogue_audio_in_clip must be True after a successful overlay"
+        # --- generate_ai_video called with dialogue_native_audio=False (silent Veo) ---
+        mock_gen_vid.assert_called_once()
+        gen_vid_kwargs = mock_gen_vid.call_args.kwargs
+        assert gen_vid_kwargs.get("dialogue_native_audio") is False, (
+            "overlay mode must call generate_ai_video with dialogue_native_audio=False "
+            f"(got {gen_vid_kwargs.get('dialogue_native_audio')!r})"
         )
-        assert final_vid == ls_result, "final_vid should be updated to ls_result"
 
-    def test_flag_not_set_on_overlay_failure(self, tmp_path):
-        """
-        When the F1b overlay lipsync pass fails (ls_result is None or missing),
-        take["metadata"]["dialogue_audio_in_clip"] must NOT be set.
-        """
-        take = self._make_take_dict()
+        # --- duration sized from TTS: 3.5s → clamped to '4s' ---
+        assert gen_vid_kwargs.get("duration") == "4s", (
+            "overlay mode must size the Veo duration from per-shot TTS "
+            f"(expected '4s' for 3.5s audio; got {gen_vid_kwargs.get('duration')!r})"
+        )
 
-        # Simulate the failure branch: ls_result is None → condition is False.
-        ls_result_val = None
+        # --- generate_lip_sync_video called with the Veo clip as existing_video_path
+        #     and the per-shot TTS as audio_path ---
+        # Either the module-level or the re-imported binding is called; check both.
+        ls_call = mock_gen_ls_ctrl.call_args or mock_gen_ls_lip.call_args
+        assert ls_call is not None, "generate_lip_sync_video was never called"
+        ls_kwargs = ls_call.kwargs
+        assert ls_kwargs.get("existing_video_path") == veo_clip, (
+            "F1b must overlay the per-shot TTS onto the Veo clip "
+            f"(expected existing_video_path={veo_clip!r}; got {ls_kwargs.get('existing_video_path')!r})"
+        )
+        assert ls_kwargs.get("audio_path") == audio_file, (
+            "F1b must use the per-shot TTS audio "
+            f"(expected audio_path={audio_file!r}; got {ls_kwargs.get('audio_path')!r})"
+        )
 
-        if ls_result_val and os.path.exists(str(ls_result_val)):
-            take["metadata"]["dialogue_audio_in_clip"] = True
-        # else: flag is not set
-
-        assert "dialogue_audio_in_clip" not in take["metadata"], (
-            "dialogue_audio_in_clip must NOT be set when overlay fails"
+        # --- take metadata ---
+        assert "audio_embedded" not in _captured_take.get("metadata", {}), (
+            "overlay mode must NOT set audio_embedded on the take"
+        )
+        assert _captured_take.get("metadata", {}).get("dialogue_audio_in_clip") is True, (
+            "F1b must set dialogue_audio_in_clip=True after successful overlay"
+        )
+        lipsync_score = _captured_take.get("metadata", {}).get("lipsync_score")
+        assert isinstance(lipsync_score, (int, float)) and lipsync_score > 0, (
+            f"take metadata must carry a positive lipsync_score; got {lipsync_score!r}"
         )
 
 
