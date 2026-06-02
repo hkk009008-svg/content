@@ -272,9 +272,9 @@
     "_meta": { "title": "DPM++ 3M SDE GPU (highest-order solver)" }
   },
   "17": {
-    "inputs": { "model_type": "FLUX", "steps": 28, "denoise": 1.0, "model": ["740", 0] },
-    "class_type": "AlignYourStepsScheduler",
-    "_meta": { "title": "AYS scheduler — NVIDIA-optimal sigmas for FLUX" }
+    "inputs": { "model_type": "FLUX", "steps": 28, "denoise": 1.0 },
+    "class_type": "OptimalStepsScheduler",
+    "_meta": { "title": "OptimalSteps scheduler — FLUX-native sigmas (AYS is FLUX-incompatible on the pod)" }
   },
   "780": {
     "inputs": {
@@ -339,7 +339,7 @@
   },
 
   "900": {
-    "inputs": { "samples": ["13", 0], "scale_by": 1.5 },
+    "inputs": { "samples": ["13", 0], "upscale_method": "nearest-exact", "scale_by": 1.5 },
     "class_type": "LatentUpscaleBy",
     "_meta": { "title": "Latent upscale 1.5x for hires-fix" }
   },
@@ -348,7 +348,7 @@
       "noise": ["25", 0],
       "guider": ["22", 0],
       "sampler": ["16", 0],
-      "sigmas": ["17", 1],
+      "sigmas": ["17", 0],
       "latent_image": ["900", 0]
     },
     "class_type": "SamplerCustomAdvanced",
@@ -422,16 +422,28 @@
     "_meta": { "title": "ReActor + CodeFormer (identity rescue, weight 0.5)" }
   },
 
+  "505": {
+    "inputs": { "ckpt_name": "sd_xl_base_1.0.safetensors" },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": { "title": "SDXL base for SUPIR (provides model/clip/vae)" }
+  },
   "500": {
-    "inputs": { "supir_model": "SUPIR-v0Q_fp16.safetensors", "fp8_unet": false, "diffusion_dtype": "fp16" },
+    "inputs": {
+      "supir_model": "SUPIR-v0Q_fp16.safetensors",
+      "fp8_unet": false,
+      "diffusion_dtype": "fp16",
+      "high_vram": false,
+      "model": ["505", 0],
+      "clip": ["505", 1],
+      "vae": ["505", 2]
+    },
     "class_type": "SUPIR_model_loader_v2",
-    "_meta": { "title": "SUPIR-v0Q (portrait-tuned, fp16)" }
+    "_meta": { "title": "SUPIR-v0Q (portrait-tuned, fp16) — kijai v2 API" }
   },
   "501": {
     "inputs": {
-      "supir_model": ["500", 0],
+      "SUPIR_VAE": ["500", 1],
       "image": ["610", 0],
-      "captions": "PLACEHOLDER_supir_caption",
       "use_tiled_vae": true,
       "encoder_tile_size": 512,
       "decoder_tile_size": 64,
@@ -440,11 +452,22 @@
     "class_type": "SUPIR_first_stage",
     "_meta": { "title": "SUPIR first-stage encode (tiled VAE)" }
   },
+  "504": {
+    "inputs": {
+      "SUPIR_model": ["500", 0],
+      "latents": ["501", 2],
+      "positive_prompt": "high quality, sharp focus, fine detail, photorealistic",
+      "negative_prompt": "blurry, low quality, deformed, artifacts, oversaturated"
+    },
+    "class_type": "SUPIR_conditioner",
+    "_meta": { "title": "SUPIR conditioner (pos/neg cond from denoised latents)" }
+  },
   "502": {
     "inputs": {
-      "supir_model": ["500", 0],
-      "latents": ["501", 0],
-      "captions": "PLACEHOLDER_supir_caption",
+      "SUPIR_model": ["500", 0],
+      "latents": ["501", 2],
+      "positive": ["504", 0],
+      "negative": ["504", 1],
       "seed": 42,
       "steps": 50,
       "cfg_scale_start": 4.0,
@@ -457,7 +480,6 @@
       "restore_cfg": -1.0,
       "keep_model_loaded": true,
       "sampler": "RestoreEDMSampler",
-      "scheduler": "edm",
       "sampler_tile_size": 1024,
       "sampler_tile_stride": 512
     },
@@ -466,7 +488,7 @@
   },
   "503": {
     "inputs": {
-      "supir_model": ["500", 0],
+      "SUPIR_VAE": ["500", 1],
       "latents": ["502", 0],
       "use_tiled_vae": true,
       "decoder_tile_size": 64
