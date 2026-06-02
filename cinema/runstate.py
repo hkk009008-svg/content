@@ -89,6 +89,9 @@ class RunState:
     # scene_id -> audio path
     scene_audio: dict = field(default_factory=dict)
 
+    # shot_id -> per-shot TTS audio path (_ensure_shot_audio cache)
+    shot_audio: dict = field(default_factory=dict)
+
     # scene_id -> foley path
     scene_foley: dict = field(default_factory=dict)
 

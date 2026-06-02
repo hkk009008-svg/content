@@ -180,6 +180,13 @@ class CinemaPipeline:
         self._runstate.scene_audio = value
 
     @property
+    def shot_audio(self) -> dict:
+        return self._runstate.shot_audio
+    @shot_audio.setter
+    def shot_audio(self, value: dict) -> None:
+        self._runstate.shot_audio = value
+
+    @property
     def scene_foley(self) -> dict:
         return self._runstate.scene_foley
     @scene_foley.setter
@@ -520,6 +527,60 @@ class CinemaPipeline:
         if result and os.path.exists(output_path):
             self.scene_audio[scene_id] = output_path
             self._save_checkpoint()
+            return output_path
+        return None
+
+    def _ensure_shot_audio(
+        self,
+        shot: dict,
+        scene: dict,
+        characters: list[dict],
+    ) -> Optional[str]:
+        """Render and cache the per-shot TTS for a single dialogue line.
+
+        Mirrors _ensure_scene_audio but operates on shot.get("dialogue")
+        instead of the full scene dialogue block.  Returns None when the
+        shot carries no own dialogue line — the caller should fall back to
+        _ensure_scene_audio (scene-level TTS).
+
+        Keyed on shot["id"] so each shot's line is rendered independently,
+        giving the overlay pass a correctly-sized audio clip.
+        """
+        shot_id = shot.get("id", "")
+        existing = self.shot_audio.get(shot_id)
+        if existing and os.path.exists(existing):
+            return existing
+
+        dialogue = shot.get("dialogue")
+        if not dialogue:
+            return None
+
+        # Wrap the single shot line as a one-element dialogue list so it
+        # feeds generate_dialogue_voiceover the same way scene dialogue does.
+        if isinstance(dialogue, str):
+            dialogue_lines = [{"text": dialogue}]
+        elif isinstance(dialogue, list):
+            dialogue_lines = dialogue
+        else:
+            return None
+
+        if not dialogue_lines:
+            return None
+
+        output_path = os.path.join(self.temp_dir, f"audio_{shot_id}.mp3")
+        proj_settings = self.project.get("global_settings", {}) if hasattr(self, "project") else {}
+        lang = proj_settings.get("language", "English")
+        dialogue_ctx = PipelineContext(
+            global_settings=dict(self.project.get("global_settings", {})) if self.project else {},
+        )
+        result = generate_dialogue_voiceover(
+            dialogue_lines,
+            characters,
+            output_path,
+            ctx=dialogue_ctx,
+        )
+        if result and os.path.exists(output_path):
+            self.shot_audio[shot_id] = output_path
             return output_path
         return None
 
