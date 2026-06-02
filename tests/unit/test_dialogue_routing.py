@@ -611,3 +611,95 @@ class TestDialogueVideoFallbacks:
             "After RAI-block cascade to KLING_NATIVE (no native_audio) in overlay mode, "
             "audio_embedded must be False — the F1b overlay pass must still fire"
         )
+
+
+# ---------------------------------------------------------------------------
+# Task 8 — native-mode escape-hatch regression
+# ---------------------------------------------------------------------------
+
+
+class TestNativeModeEscapeHatch:
+    """
+    Chunk 4, Task 8: Assert the full native-mode legacy path is preserved
+    end-to-end.  These tests call the REAL helpers from controller.py
+    (not inline simulations) so any future regression in the production
+    helpers is caught immediately.
+
+    Three assertions constitute the escape-hatch guarantee:
+    1. _resolve_dialogue_routing with voice_mode="native" → VEO_NATIVE primary
+       AND video_fallbacks=None (native engine never cascades to silent engines).
+    2. _should_tag_audio_embedded with voice_mode="native" → True (the take is
+       tagged audio_embedded so the assembler suppresses standalone TTS).
+    3. _dialogue_voice_mode({"dialogue_voice_mode": "native"}) → "native" (the
+       setting is honoured, not coerced back to "overlay").
+    """
+
+    def test_native_routing_forces_veo_primary_and_nulls_fallbacks(self):
+        """native mode: _resolve_dialogue_routing returns VEO_NATIVE + None fallbacks."""
+        from domain.scene_decomposer import API_REGISTRY
+        from cinema.shots.controller import _resolve_dialogue_routing
+
+        template_fallbacks = ["RUNWAY_GEN4", "SORA_NATIVE", "KLING_NATIVE"]
+        target_api, video_fallbacks = _resolve_dialogue_routing(
+            purpose="dialogue_close_up",
+            voice_mode="native",
+            resolved_target_api="VEO_NATIVE",
+            resolved_fallbacks=template_fallbacks,
+        )
+
+        # The routing must return the native-audio engine.
+        engine_info = API_REGISTRY.get(target_api, {})
+        assert engine_info.get("native_audio") is True, (
+            f"native-mode primary engine '{target_api}' must have native_audio=True; "
+            "VEO_NATIVE is the only qualifying engine"
+        )
+        # Fallbacks must be nulled so the native-audio engine's own cascade handles failure
+        # (never falls through to a silent-video engine that lacks embedded voice).
+        assert video_fallbacks is None, (
+            "native mode must null video_fallbacks so a Veo failure is not silently "
+            "routed to a non-native-audio engine"
+        )
+
+    def test_native_routing_audio_embedded_tag_is_set(self):
+        """native mode: _should_tag_audio_embedded returns True for VEO_NATIVE + dialogue."""
+        from domain.scene_decomposer import API_REGISTRY
+        from cinema.shots.controller import _should_tag_audio_embedded
+
+        engine_info = API_REGISTRY["VEO_NATIVE"]
+        result = _should_tag_audio_embedded(engine_info, has_dialogue=True, voice_mode="native")
+
+        assert result is True, (
+            "native mode + VEO_NATIVE + has_dialogue must tag the take audio_embedded=True "
+            "so the assembler suppresses standalone TTS (no double-voice)"
+        )
+
+    def test_native_voice_mode_setting_is_honoured(self):
+        """_dialogue_voice_mode({'dialogue_voice_mode': 'native'}) → 'native' (not coerced)."""
+        from cinema.shots.controller import _dialogue_voice_mode
+
+        result = _dialogue_voice_mode({"dialogue_voice_mode": "native"})
+
+        assert result == "native", (
+            "Explicit 'native' setting must be returned verbatim; "
+            f"got {result!r}"
+        )
+
+    def test_native_mode_talking_head_full_routing(self):
+        """native mode works for talking_head_full purpose too (both dialogue purposes)."""
+        from domain.scene_decomposer import API_REGISTRY
+        from cinema.shots.controller import _resolve_dialogue_routing
+
+        target_api, video_fallbacks = _resolve_dialogue_routing(
+            purpose="talking_head_full",
+            voice_mode="native",
+            resolved_target_api="VEO_NATIVE",
+            resolved_fallbacks=["KLING_NATIVE", "SORA_NATIVE"],
+        )
+
+        engine_info = API_REGISTRY.get(target_api, {})
+        assert engine_info.get("native_audio") is True, (
+            f"talking_head_full native mode must route to native_audio engine; got {target_api!r}"
+        )
+        assert video_fallbacks is None, (
+            "talking_head_full native mode must also null fallbacks"
+        )
