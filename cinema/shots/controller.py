@@ -1222,11 +1222,12 @@ class ShotController:
             # - native mode: preserve today's behavior verbatim (force native-audio
             #   engine + video_fallbacks=None so embedded voice is never lost to a
             #   cross-engine fallback that lacks native_audio).
+            _voice_mode = _dialogue_voice_mode(settings)  # resolve once; reuse at all 3 dialogue sites
             if has_dialogue:
                 _pre_override_api = target_api
                 target_api, video_fallbacks = _resolve_dialogue_routing(
                     cached_purpose,
-                    _dialogue_voice_mode(settings),
+                    _voice_mode,
                     target_api,
                     video_fallbacks,
                 )
@@ -1282,7 +1283,7 @@ class ShotController:
 
         # Compute dialogue_native_audio: True only when dialogue + native mode.
         # overlay mode (default) keeps Veo silent; the F1b lipsync pass overlays TTS.
-        dialogue_native_audio = has_dialogue and _dialogue_voice_mode(settings) == "native"
+        dialogue_native_audio = has_dialogue and _voice_mode == "native"
 
         _video_cascade: dict = {}
         temp_vid = generate_ai_video(
@@ -1317,7 +1318,7 @@ class ShotController:
             _video_cascade.get("cascade_metadata", {}).get("engine", target_api).upper()
         )
         engine_info = API_REGISTRY.get(winning_engine, {})
-        if _should_tag_audio_embedded(engine_info, has_dialogue, _dialogue_voice_mode(settings)):
+        if _should_tag_audio_embedded(engine_info, has_dialogue, _voice_mode):
             take["metadata"]["audio_embedded"] = True
 
         # F1b: Write has_dialogue to the take so the auto-approve gate can
