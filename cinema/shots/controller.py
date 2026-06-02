@@ -1198,6 +1198,10 @@ class ShotController:
         # as the generate_ai_broll call site above (line ~395).
         motion_ctx = PipelineContext(global_settings=settings)
 
+        # Compute dialogue_native_audio: True only when dialogue + native mode.
+        # overlay mode (default) keeps Veo silent; the F1b lipsync pass overlays TTS.
+        dialogue_native_audio = has_dialogue and _dialogue_voice_mode(settings) == "native"
+
         _video_cascade: dict = {}
         temp_vid = generate_ai_video(
             source_image,
@@ -1212,6 +1216,7 @@ class ShotController:
             video_fallbacks=video_fallbacks,
             driving_video_path=driving_video_path,
             has_dialogue=has_dialogue,
+            dialogue_native_audio=dialogue_native_audio,
             ctx=motion_ctx,
             _cascade_out=_video_cascade,
         )

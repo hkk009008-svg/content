@@ -190,12 +190,16 @@ class TestDialogueRoutingResolvesVeoNative:
 
 class TestGenerateAudioForDialogue:
     """
-    When has_dialogue=True is passed to generate_ai_video and the engine is
+    When dialogue_native_audio=True is passed to generate_ai_video and the engine is
     VEO_NATIVE, the veo.generate_video() call should receive generate_audio=True.
+    overlay mode (dialogue_native_audio=False, the default) runs Veo silent.
     """
 
-    def test_veo_native_receives_generate_audio_true_for_dialogue(self):
-        """has_dialogue=True → VeoNativeAPI.generate_video(generate_audio=True)."""
+    def test_veo_native_receives_generate_audio_true_for_native_dialogue(self):
+        """dialogue_native_audio=True → VeoNativeAPI.generate_video(generate_audio=True).
+        (Updated from Task 2: has_dialogue alone no longer sets generate_audio; the
+        controller passes dialogue_native_audio=True only in native mode.)
+        """
         from phase_c_ffmpeg import generate_ai_video
 
         mock_veo_instance = MagicMock()
@@ -212,12 +216,13 @@ class TestGenerateAudioForDialogue:
                     output_mp4="/tmp/out.mp4",
                     shot_type="portrait",
                     has_dialogue=True,
+                    dialogue_native_audio=True,
                 )
 
         mock_veo_instance.generate_video.assert_called_once()
         call_kwargs = mock_veo_instance.generate_video.call_args
         assert call_kwargs.kwargs.get("generate_audio") is True, (
-            "has_dialogue=True should set generate_audio=True for VEO_NATIVE"
+            "dialogue_native_audio=True should set generate_audio=True for VEO_NATIVE"
         )
 
     def test_veo_native_generate_audio_false_without_dialogue(self):
@@ -429,3 +434,95 @@ class TestDialogueRoutingNativeAudioVerification:
             f"No native_audio video engine for '{purpose}' in PURPOSE_API_RANKING"
         )
         assert API_REGISTRY[override_engine].get("native_audio") is True
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — dialogue_native_audio flag controls generate_audio in overlay mode
+# ---------------------------------------------------------------------------
+
+
+class TestDialogueNativeAudioFlag:
+    """
+    The new dialogue_native_audio param controls generate_audio for dialogue shots.
+    - overlay mode (default): has_dialogue=True but dialogue_native_audio=False
+      → generate_audio=False (Veo runs silent)
+    - native mode: has_dialogue=True + dialogue_native_audio=True
+      → generate_audio=True (Veo generates embedded voice)
+    - landscape: generate_audio=True regardless of dialogue flags
+    """
+
+    def test_generate_audio_false_for_overlay_dialogue(self):
+        """Overlay-mode dialogue (dialogue_native_audio=False) → Veo silent."""
+        from phase_c_ffmpeg import generate_ai_video
+
+        mock_veo_instance = MagicMock()
+        mock_veo_instance.generate_video.return_value = "/tmp/fake_output.mp4"
+        mock_veo_cls = MagicMock(return_value=mock_veo_instance)
+
+        with patch.dict("sys.modules", {"veo_native": MagicMock(VeoNativeAPI=mock_veo_cls)}):
+            with patch("os.path.exists", return_value=True):
+                generate_ai_video(
+                    image_path="/tmp/fake_frame.png",
+                    camera_motion="zoom_in_slow",
+                    target_api="VEO_NATIVE",
+                    output_mp4="/tmp/out.mp4",
+                    shot_type="portrait",
+                    has_dialogue=True,
+                    dialogue_native_audio=False,
+                )
+
+        call_kwargs = mock_veo_instance.generate_video.call_args
+        assert call_kwargs.kwargs.get("generate_audio") is False, (
+            "has_dialogue=True but dialogue_native_audio=False (overlay) "
+            "should NOT set generate_audio=True"
+        )
+
+    def test_generate_audio_true_for_native_dialogue(self):
+        """native mode dialogue (dialogue_native_audio=True) → Veo generates embedded voice."""
+        from phase_c_ffmpeg import generate_ai_video
+
+        mock_veo_instance = MagicMock()
+        mock_veo_instance.generate_video.return_value = "/tmp/fake_output.mp4"
+        mock_veo_cls = MagicMock(return_value=mock_veo_instance)
+
+        with patch.dict("sys.modules", {"veo_native": MagicMock(VeoNativeAPI=mock_veo_cls)}):
+            with patch("os.path.exists", return_value=True):
+                generate_ai_video(
+                    image_path="/tmp/fake_frame.png",
+                    camera_motion="zoom_in_slow",
+                    target_api="VEO_NATIVE",
+                    output_mp4="/tmp/out.mp4",
+                    shot_type="portrait",
+                    has_dialogue=True,
+                    dialogue_native_audio=True,
+                )
+
+        call_kwargs = mock_veo_instance.generate_video.call_args
+        assert call_kwargs.kwargs.get("generate_audio") is True, (
+            "dialogue_native_audio=True should set generate_audio=True"
+        )
+
+    def test_generate_audio_true_for_landscape_regardless_of_dialogue_flags(self):
+        """Landscape shot still gets native audio regardless of dialogue flags."""
+        from phase_c_ffmpeg import generate_ai_video
+
+        mock_veo_instance = MagicMock()
+        mock_veo_instance.generate_video.return_value = "/tmp/fake_output.mp4"
+        mock_veo_cls = MagicMock(return_value=mock_veo_instance)
+
+        with patch.dict("sys.modules", {"veo_native": MagicMock(VeoNativeAPI=mock_veo_cls)}):
+            with patch("os.path.exists", return_value=True):
+                generate_ai_video(
+                    image_path="/tmp/fake_frame.png",
+                    camera_motion="zoom_in_slow",
+                    target_api="VEO_NATIVE",
+                    output_mp4="/tmp/out.mp4",
+                    shot_type="landscape",
+                    has_dialogue=False,
+                    dialogue_native_audio=False,
+                )
+
+        call_kwargs = mock_veo_instance.generate_video.call_args
+        assert call_kwargs.kwargs.get("generate_audio") is True, (
+            "Landscape shots always get generate_audio=True regardless of dialogue flags"
+        )
