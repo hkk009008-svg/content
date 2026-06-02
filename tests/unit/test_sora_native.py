@@ -5,6 +5,16 @@ Candidate bugs are asserted against ACTUAL behaviour with # CANDIDATE BUG tags.
 """
 from __future__ import annotations
 
+import sys
+
+# Other test files (test_dialogue_routing, test_ensure_shot_audio, test_f1b_dialogue_lipsync)
+# inject a lightweight stub module for 'sora_native' via sys.modules to satisfy
+# import-time deps without the full SDK. When that stub is already in sys.modules
+# at collection time, `from sora_native import SoraNativeAPI` would fail with
+# "cannot import name 'SoraNativeAPI' from 'sora_native' (unknown location)".
+# Remove the stub so our import always gets the real module.
+sys.modules.pop("sora_native", None)
+
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
