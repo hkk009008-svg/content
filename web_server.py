@@ -709,18 +709,20 @@ def api_train_lora(pid, cid):
     key = f"{pid}:{cid}"
 
     try:
-        from prep.lora_training import train_character_lora
+        from prep.lora_quality import train_character_lora_gated
     except Exception as e:
-        return jsonify({"error": f"prep.lora_training unavailable: {e}"}), 500
+        return jsonify({"error": f"prep.lora_quality unavailable: {e}"}), 500
 
     project_dir = get_project_dir(pid)
     config_overrides = (request.json or {}).get("config_overrides") if request.is_json else None
 
     def _runner():
         try:
-            result = train_character_lora(project_dir, char, config_overrides=config_overrides)
-            # On success, register the LoRA path in project.global_settings.char_lora_paths
-            if result.get("success") and result.get("lora_path"):
+            result = train_character_lora_gated(project_dir, char, config_overrides=config_overrides)
+            # On success, register the LoRA path only when the gated orchestrator
+            # did NOT reject the result (rejected=True means net-negative vs PuLID-only;
+            # the pipeline falls back to PuLID-only in that case).
+            if result.get("success") and result.get("lora_path") and not result.get("rejected"):
                 def _mutate(latest):
                     # P1-3 part 12 (Variant 1 simplified): inner validate for
                     # race protection — Project.model_validate(...) raises
@@ -736,6 +738,8 @@ def api_train_lora(pid, cid):
                     settings = latest.setdefault("global_settings", {})
                     paths = settings.setdefault("char_lora_paths", {})
                     paths[cid] = result["lora_path"]
+                    if result.get("best_strength") is not None:
+                        settings.setdefault("char_lora_strengths", {})[cid] = result["best_strength"]
                     return MutationResult(True, save=True)
                 try:
                     mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)
