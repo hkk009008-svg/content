@@ -227,31 +227,30 @@ class HaltDecision:
 def should_halt(
     scores: List[CandidateScore],
     halt_threshold_composite: float = 0.92,
-    halt_threshold_arc: float = 0.85,    # informational — see docstring
+    halt_threshold_arc: float = 0.85,
     halt_min_n: int = 4,
     halt_max_n: int = 8,
     has_character: bool = True,          # informational — see docstring
+    halt_rule: str = "composite_only",
 ) -> HaltDecision:
     """Decide whether N=8 best-of generation can stop early.
 
-    Composite-only rule (Option 2):
-      - If we've hit halt_max_n, stop regardless (budget exhausted).
-      - If we've generated >= halt_min_n AND best.composite >= halt_threshold_composite
-        -> halt with success.
-      - Otherwise -> keep going.
+    halt_rule governs the QUALITY early-halt check (n >= halt_min_n branch).
+    The budget halt (n >= halt_max_n) is unconditional for all modes.
 
-    Identity is NOT gated separately at halt time — it's already folded into
-    the composite via the 0.6 weight in DEFAULT_WEIGHTS. A high composite with
-    a low arc means the aesthetic score lifted the average; that candidate
-    can still fail the regenerate_floor_arc check in needs_regenerate() and
-    trigger a PuLID-boost retry. So the two stages stay decoupled: halt =
-    "is the best of the batch good enough?"; regenerate = "is the best of
-    the batch identity-acceptable?".
+    Supported values:
+      'composite_only' (default):
+        Halt when composite >= halt_threshold_composite. Arc is informational.
+      'conjunctive':
+        Halt when composite >= halt_threshold_composite AND
+        arc >= halt_threshold_arc. Enforces an identity floor.
+      'budget_only':
+        # budget_only: deferred — falls back to composite_only.
+        Behaves identically to 'composite_only'. Distinct "never-early-halt"
+        semantics deferred pending user decision.
 
-    Informational params (NOT enforced here; surfaced in the decision reason
-    so callers can log/audit what bars were expected without re-deriving them):
-      - halt_threshold_arc: the arc bar callers consider sufficient
-      - has_character: whether this shot was an identity-bearing shot
+    has_character: informational — surfaced in the decision reason for
+    logging/audit; not enforced in halt logic.
     """
     if not scores:
         return HaltDecision(halt=False, reason="no candidates yet")
@@ -265,6 +264,27 @@ def should_halt(
     if n < halt_min_n:
         return HaltDecision(halt=False, reason=f"below halt_min_n ({n} < {halt_min_n})", best=best)
 
+    if halt_rule == "conjunctive":
+        # Both composite AND arc must meet their thresholds.
+        composite_ok = best.composite >= halt_threshold_composite
+        arc_ok = best.arc_score >= halt_threshold_arc
+        if composite_ok and arc_ok:
+            return HaltDecision(
+                halt=True,
+                reason=(f"conjunctive threshold met (composite={best.composite:.3f} >= "
+                        f"{halt_threshold_composite:.2f}, arc={best.arc_score:.3f} >= "
+                        f"{halt_threshold_arc:.2f}, n={n})"),
+                best=best,
+            )
+        return HaltDecision(
+            halt=False,
+            reason=(f"conjunctive threshold not met (composite={best.composite:.3f}, "
+                    f"composite_ok={composite_ok}, arc={best.arc_score:.3f}, "
+                    f"arc_ok={arc_ok}, n={n})"),
+            best=best,
+        )
+
+    # composite_only / budget_only (deferred) / unknown → composite-only behavior
     if best.composite >= halt_threshold_composite:
         return HaltDecision(
             halt=True,

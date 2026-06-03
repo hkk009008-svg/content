@@ -854,6 +854,7 @@ def generate_ai_broll_max(
     halt_composite = float(params.get("halt_threshold_composite", 0.92))
     halt_arc = float(params.get("halt_threshold_arc", 0.85))
     regen_floor = float(params.get("regenerate_floor_arc", 0.82))
+    halt_rule = params.get("halt_rule", "composite_only")
 
     scores: List[CandidateScore] = []
     candidate_paths: List[str] = []
@@ -921,6 +922,7 @@ def generate_ai_broll_max(
             halt_min_n=halt_min_n,
             halt_max_n=n_max,
             has_character=has_character,
+            halt_rule=halt_rule,
         )
         if decision.halt:
             print(f"[quality_max] HALT: {decision.reason}")
