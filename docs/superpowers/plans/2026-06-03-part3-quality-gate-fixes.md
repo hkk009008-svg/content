@@ -154,8 +154,13 @@ Run: `.venv/bin/python -m pytest <new tests> -v` → Expected: FAIL.
 
 - [ ] **Step 5: Full suite + smoke.** `.venv/bin/python scripts/ci_smoke.py && .venv/bin/python -m pytest tests/unit/ -q` → Expected: `OK`; suite green (still no skip results in production yet, so no behavior change).
 
-- [ ] **Step 6: Commit** (explicit pathspec of exactly the files touched + the test files).
-
+- [ ] **Step 6: Commit.** Use an **explicit pathspec naming every file you touched** (never `git add -A`):
+```bash
+git commit -- face_validator_gate.py performance/identity_gate.py \
+  llm/chief_director.py cinema/shots/controller.py <the test file(s) you added> \
+  -m "fix(identity): guard overall_score readers for None (Part-3 pre-skip)"
+```
+Commit message body:
 ```
 fix(identity): guard overall_score readers for None (Part-3 pre-skip)
 
@@ -246,7 +251,7 @@ fix(identity): validate_image missing-generated FAILs, missing-ref SKIPs (Part-3
 - Modify: `identity/validator.py` (`validate_video` ~150-240; the missing-video guard near the `cv2.VideoCapture` open ~182; the post-`_compute_sample_positions` empty-positions branch)
 - Test: `tests/unit/test_identity_validator.py`
 
-- [ ] **Step 1: Flip/add the failing tests.** (a) The empty-`character_configs` `# CANDIDATE BUG (G1 variant)` test (~270-281): assert `skipped is True` (was `passed=True/1.0`). (b) The `# CANDIDATE BUG (G2)` test `test_landscape_zero_frames_sampled_fails_when_ref_exists` (~317-340): **rename/flip** to assert landscape-with-refs → `skipped is True`, `passed is True`, `overall_score is None` (was `passed=False, 0.0`). (c) New: missing video file → `passed is False`, `metadata["failure_reason"] == "generated_image_missing"`. (d) New: all-refs-fail-to-load → `skipped is True`.
+- [ ] **Step 1: Flip/add the failing tests.** (a) The empty-`character_configs` test `test_empty_configs_passes_silently` (class `TestValidateVideoEmptyCharacterConfigs`, ~271): assert `skipped is True` (was `overall_score == 1.0`). (b) The `# CANDIDATE BUG (G2)` test `test_landscape_zero_frames_sampled_fails_when_ref_exists` (~317-340): **rename/flip** to assert landscape-with-refs → `skipped is True`, `passed is True`, `overall_score is None` (was `passed=False, 0.0`). (c) New: missing video file → `passed is False`, `metadata["failure_reason"] == "generated_image_missing"`. (d) New: all-refs-fail-to-load → `skipped is True`.
 
 - [ ] **Step 2: Run to verify they fail.** Expected: FAIL.
 
