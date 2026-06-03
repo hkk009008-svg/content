@@ -14,7 +14,9 @@
   director ticket-closes + the operator's T1 spec** (6 commits). Pushed to origin (backup).
 - **Suite: 1527 passed / 0 skipped / 0 failed** (re-run at wrap, tree code-clean; the 3
   former skips were T11's, now passing). **§15 ci_smoke OK.**
-- **Operator is LIVE on T1** (user-directed parallel session), in spec phase.
+- **Operator is LIVE on T1** (user-directed parallel session) — in **PLAN phase**: plan
+  `9bd657a` (7 TDD tasks, 2 chunks) landed *during this wrap-write*; **T1 implementation +
+  its `quality_max.py` edits are IMMINENT** (watch closely — see §4).
 - D-a INACTIVE (shared working tree, no per-seat `GIT_INDEX_FILE`). **`quality_max.py`
   contention with the operator's T1 is REAL** (see §2/§5).
 
@@ -48,8 +50,8 @@ All 4 pushed to `origin/feat`.
 - I **corrected their "no contention" claim** (event `2026-06-03T13-56-21Z`, on disk): **T3 +
   T4 both edit `quality_max.py`**, which their T1 wiring (`:466`/`:649`/`:662`) also edits →
   shared-tree intermingling hazard. Proposed: **HOLD T3/T4 until T1's quality_max.py edits
-  land.** Operator hadn't replied at wrap (heads-down on spec). My independent Lane V (Rule #9)
-  applies to whatever T1 commits.
+  land.** Operator hadn't replied at wrap; moved spec→plan (`9bd657a`) during the wrap-write.
+  My independent Lane V (Rule #9) applies to whatever T1 commits.
 
 **T3 + T4 PRE-DESIGNED** (read-only, user-directed) — execution-ready plans below (§3).
 
@@ -57,7 +59,7 @@ All 4 pushed to `origin/feat`.
 
 | Item | Owner | Status |
 |---|---|---|
-| **T1** validate_lora_quality | **OPERATOR** (user-directed) | Spec phase (`082edb5`). Their lane. |
+| **T1** validate_lora_quality | **OPERATOR** (user-directed) | **Plan `9bd657a` committed** (7 TDD tasks); impl imminent. Spec `082edb5`. T1 will edit `quality_max.py` at `_inject_identity:466` (char_lora_strength) + `_inject_conditioning` (5→6 args) — disjoint *hunks* from T3 (`_inject_post_passes ~:572`) / T4 (schema `:131`, caller `:897`), but **same file on the shared tree** → the reason T3/T4 are held. Their lane. |
 | **T3** hires_fix Pass-2 wiring | DIRECTOR | **HELD** for T1's quality_max.py edits. Plan §3.1. |
 | **T4** halt_rule modes | DIRECTOR | **HELD** for T1. Recommend implement `conjunctive`; reject/defer `budget_only`. Plan §3.2. |
 | **T6** auto-diagnose loop wiring | unassigned | Design-first; not started. Quality lever (PROGRAM-MANUAL §5). |
