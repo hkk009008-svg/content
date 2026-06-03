@@ -303,12 +303,15 @@ def record_lora_verdict(
     if best_strength is not None:
         data["best_strength"] = best_strength
 
+    # The early-return guard above proves the status file (and its dir) exists,
+    # so no makedirs is needed here.
     try:
-        os.makedirs(os.path.dirname(sp), exist_ok=True)
         with open(sp, "w") as f:
             json.dump(data, f, indent=2)
-    except Exception:
-        pass  # don't crash the runner on a verdict-write failure
+    except Exception as e:
+        # Surface the failure (a stale verdict is misleading) but don't crash the
+        # daemon runner. Matches the module's [LoRA] print convention.
+        print(f"[LoRA] verdict-write failed for {char_id}: {e}")
 
 
 # ---------------------------------------------------------------------------

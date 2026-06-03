@@ -721,7 +721,9 @@ def api_train_lora(pid, cid):
             result = train_character_lora_gated(project_dir, char, config_overrides=config_overrides)
             # Persist the quality-gate verdict so that get_lora_status surfaces
             # rejected / quality_warning / quality_score / best_strength for
-            # polling clients — for BOTH accept and reject outcomes.
+            # polling clients — for BOTH accept and reject outcomes. On a train
+            # FAILURE (success=False) we intentionally skip this: the failure is
+            # already surfaced by status=failed + error, and there is no verdict.
             if result.get("success"):
                 from prep.lora_training import record_lora_verdict
                 try:
