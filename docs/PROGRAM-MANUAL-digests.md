@@ -3828,7 +3828,7 @@ Parses `WEB_CORS_ORIGINS` value: empty → localhost-only default; comma-separat
 
 **6. `cleanup.py` imports from root `project_manager` shim**, not `domain.project_manager` directly (`cleanup.py:30`). The shim is a `from domain.project_manager import *` — functionally identical but callers should eventually be migrated per the shim's own docstring.
 
-**7. `pipeline_status.toml` is a partial manifest** (8 components as of 2026-05-29). Stubbed features include `storyboard_mode` (zero callers — the toggle is never read by `phase_c_ffmpeg.py`), `hires_fix` (always pruned regardless of flag), `lora_validation` (returns -1.0 unconditionally), `batch_scene_optimize` (zero callers), and `multi_identity_validation` (zero callers). None of these are wirable by env var alone — all require code changes.
+**7. `pipeline_status.toml` is a partial manifest** (8 components as of 2026-05-29). Stubbed/partial features include `hires_fix` (flag may now be injected via `quality_max.py` overlay params — under verification, Part-3 audit ticket), `lora_validation` (returns -1.0 unconditionally), `batch_scene_optimize` (zero callers), and `multi_identity_validation` (zero callers). None of these are wirable by env var alone — all require code changes. (`storyboard_mode` was previously listed here as stubbed; it is **wired** end-to-end via `motion_render._get_storyboard_mode` → `_run_storyboard_scene` (F2b, `tests/unit/test_f2b_storyboard_mode.py`) — corrected 2026-06-03.)
 
 **8. `reporter.py` globs from CWD, not project dirs.** The old pipeline emitted `temp_foley_*.mp3` etc. to CWD. Post-pivot, artifacts are in `data/projects/<pid>/temp/`. The reporter would find nothing even if called.
 
