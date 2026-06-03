@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import tempfile
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -155,7 +157,7 @@ DEFAULT_VALIDATION_PROMPTS = [
 _VALIDATION_SEEDS = [101, 202, 303]   # fixed per-prompt seeds for reproducibility
 
 
-def _score_candidate(image_path, anchor):
+def _score_candidate(image_path: str, anchor: str):
     from face_validator_gate import score_candidate
     return score_candidate(image_path, anchor)   # threshold=0.0 default -> just scores
 
@@ -163,11 +165,7 @@ def _score_candidate(image_path, anchor):
 def _resolve_comfyui_url(comfyui_url: Optional[str]) -> str:
     if comfyui_url:
         return comfyui_url
-    # Both `get_settings()` (lru_cache, line 137) and the module-level
-    # `settings` singleton (line 141) are available; use `get_settings()`
-    # per spec convention #5.  quality_max.py uses the singleton directly
-    # (`settings.comfyui_server_url`); either resolves to the same object.
-    from config.settings import get_settings
+    from config.settings import get_settings  # cached singleton; same object quality_max uses
     return get_settings().comfyui_server_url
 
 
@@ -184,26 +182,33 @@ def validate_lora_quality(lora_path, character, *, strengths=None, prompts=None,
     prompt_tmpls = prompts or DEFAULT_VALIDATION_PROMPTS
     url = _resolve_comfyui_url(comfyui_url)
 
+    # Generated validation images are transient: write them to a temp dir, score
+    # in-loop, then discard — don't litter cwd/repo root (quality_max writes wherever
+    # out_path points, so we own the location). Images are consumed before cleanup.
+    tmpdir = tempfile.mkdtemp(prefix="loraval_")
     sweep = []
-    for strength in strengths:
-        sample_scores = []
-        per_prompt = []
-        for i, tmpl in enumerate(prompt_tmpls):
-            prompt = tmpl.format(trigger=trigger) if "{trigger}" in tmpl else f"{trigger} {tmpl}"
-            seed = _VALIDATION_SEEDS[i % len(_VALIDATION_SEEDS)]
-            img = _generate_with_lora(lora_path, prompt, strength=strength, seed=seed,
-                                      out_path=f"_loraval_{character['id']}_{strength}_{i}.png",
-                                      comfyui_url=url)
-            arc = None
-            if img:
-                sc = _score_candidate(img, anchor)
-                if getattr(sc, "has_arc", False):
-                    arc = sc.arc_score
-            if arc is not None:
-                sample_scores.append(arc)
-            per_prompt.append((tmpl, arc))
-        mean_arc = (sum(sample_scores) / len(sample_scores)) if sample_scores else None
-        sweep.append(StrengthScore(strength=strength, mean_arc=mean_arc, per_prompt=per_prompt))
+    try:
+        for strength in strengths:
+            sample_scores = []
+            per_prompt = []
+            for i, tmpl in enumerate(prompt_tmpls):
+                prompt = tmpl.format(trigger=trigger) if "{trigger}" in tmpl else f"{trigger} {tmpl}"
+                seed = _VALIDATION_SEEDS[i % len(_VALIDATION_SEEDS)]
+                out_path = os.path.join(tmpdir, f"loraval_{character['id']}_{strength:.2f}_{i}.png")
+                img = _generate_with_lora(lora_path, prompt, strength=strength, seed=seed,
+                                          out_path=out_path, comfyui_url=url)
+                arc = None
+                if img:
+                    sc = _score_candidate(img, anchor)
+                    if getattr(sc, "has_arc", False):
+                        arc = sc.arc_score
+                if arc is not None:
+                    sample_scores.append(arc)
+                per_prompt.append((tmpl, arc))
+            mean_arc = (sum(sample_scores) / len(sample_scores)) if sample_scores else None
+            sweep.append(StrengthScore(strength=strength, mean_arc=mean_arc, per_prompt=per_prompt))
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
     scored = [s for s in sweep if s.mean_arc is not None]
     if not scored:
