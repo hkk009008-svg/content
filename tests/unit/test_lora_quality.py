@@ -88,3 +88,60 @@ def test_generate_with_lora_injects_seed_into_node_25(tmp_path, monkeypatch):
     lq._generate_with_lora("/loras/c1.safetensors", "<c1>", strength=0.55, seed=4242,
                            out_path=str(tmp_path / "g.png"), comfyui_url="http://x:8188")
     assert captured["wf"]["25"]["inputs"]["noise_seed"] == 4242
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — validate_lora_quality
+# ---------------------------------------------------------------------------
+from types import SimpleNamespace
+
+
+def _cs(arc, has_arc=True):
+    return SimpleNamespace(arc_score=arc, has_arc=has_arc)
+
+
+def test_validate_picks_best_strength(monkeypatch, tmp_path):
+    # score depends on strength: 0.55 is best, 1.0 over-bakes
+    scores_by_strength = {0.45: 0.50, 0.55: 0.74, 0.7: 0.66, 1.0: 0.58}
+    cur = {"score": 0.0}   # side-channel: gen() sets the score the next score_candidate returns
+
+    def gen(lora_path, prompt, *, strength, seed, out_path, comfyui_url):
+        cur["score"] = scores_by_strength[strength]
+        return out_path
+    monkeypatch.setattr(lq, "_generate_with_lora", gen)
+    monkeypatch.setattr(lq, "_score_candidate", lambda img, anchor: _cs(cur["score"]))
+
+    (tmp_path / "ref.png").write_bytes(b"x")
+    char = {"id": "c1", "name": "Mara", "canonical_reference": str(tmp_path / "ref.png")}
+    res = lq.validate_lora_quality("/loras/c1.safetensors", char,
+                                   strengths=[0.45, 0.55, 0.7, 1.0], comfyui_url="http://x:8188")
+    assert not res.skipped
+    assert res.best_strength == 0.55
+    assert abs(res.best_score - 0.74) < 1e-6
+
+
+def test_validate_skips_when_no_canonical_reference(monkeypatch):
+    res = lq.validate_lora_quality("/loras/c1.safetensors", {"id": "c1", "canonical_reference": ""},
+                                   comfyui_url="http://x:8188")
+    assert res.skipped and res.skip_reason == "no_canonical_reference"
+
+
+def test_validate_skips_when_all_generations_fail(monkeypatch, tmp_path):
+    (tmp_path / "ref.png").write_bytes(b"x")
+    monkeypatch.setattr(lq, "_generate_with_lora", lambda *a, **k: None)  # all gens fail
+    res = lq.validate_lora_quality("/loras/c1.safetensors",
+                                   {"id": "c1", "canonical_reference": str(tmp_path / "ref.png")},
+                                   strengths=[0.55, 1.0], comfyui_url="http://x:8188")
+    assert res.skipped
+
+
+def test_validate_mean_ignores_has_arc_false(monkeypatch, tmp_path):
+    (tmp_path / "ref.png").write_bytes(b"x")
+    monkeypatch.setattr(lq, "_generate_with_lora", lambda *a, **k: "g.png")
+    seq = iter([_cs(0.7), _cs(0.0, has_arc=False), _cs(0.5)])  # middle sample is a skip
+    monkeypatch.setattr(lq, "_score_candidate", lambda img, anchor: next(seq))
+    res = lq.validate_lora_quality("/loras/c1.safetensors",
+                                   {"id": "c1", "canonical_reference": str(tmp_path / "ref.png")},
+                                   strengths=[0.55], prompts=["a", "b", "c"], comfyui_url="http://x:8188")
+    # mean of 0.7 and 0.5 (skip the has_arc=False sample) = 0.6
+    assert abs(res.best_score - 0.6) < 1e-6

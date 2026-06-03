@@ -11,6 +11,7 @@ Units:
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -139,3 +140,74 @@ def _generate_with_lora(lora_path: str, prompt: str, *, strength: float, seed: i
         # for diagnosis (Lane V #13 M-3 pattern) instead of a bare print.
         logger.error("[lora_quality] generation failed (%s); treating as skip", e, exc_info=True)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — validate_lora_quality (scoring oracle)
+# ---------------------------------------------------------------------------
+
+DEFAULT_STRENGTH_SWEEP = [0.45, 0.55, 0.7, 1.0]
+DEFAULT_VALIDATION_PROMPTS = [
+    "{trigger} photo, professional headshot, soft natural light",
+    "{trigger} photo, full body, daylight, casual outfit",
+    "{trigger} portrait, side profile, indoor window light",
+]
+_VALIDATION_SEEDS = [101, 202, 303]   # fixed per-prompt seeds for reproducibility
+
+
+def _score_candidate(image_path, anchor):
+    from face_validator_gate import score_candidate
+    return score_candidate(image_path, anchor)   # threshold=0.0 default -> just scores
+
+
+def _resolve_comfyui_url(comfyui_url: Optional[str]) -> str:
+    if comfyui_url:
+        return comfyui_url
+    # Both `get_settings()` (lru_cache, line 137) and the module-level
+    # `settings` singleton (line 141) are available; use `get_settings()`
+    # per spec convention #5.  quality_max.py uses the singleton directly
+    # (`settings.comfyui_server_url`); either resolves to the same object.
+    from config.settings import get_settings
+    return get_settings().comfyui_server_url
+
+
+def validate_lora_quality(lora_path, character, *, strengths=None, prompts=None,
+                          comfyui_url=None) -> LoraQualityResult:
+    """Scoring oracle: sweep strengths x prompts, ArcFace-score each generation vs the
+    character's canonical_reference, pick the best strength. See spec section 6.2."""
+    anchor = (character.get("canonical_reference") or "")
+    if not anchor or not os.path.exists(anchor):
+        return LoraQualityResult(None, None, skipped=True, skip_reason="no_canonical_reference")
+
+    trigger = character.get("trigger_token") or f"<{character['id']}>"
+    strengths = strengths or DEFAULT_STRENGTH_SWEEP
+    prompt_tmpls = prompts or DEFAULT_VALIDATION_PROMPTS
+    url = _resolve_comfyui_url(comfyui_url)
+
+    sweep = []
+    for strength in strengths:
+        sample_scores = []
+        per_prompt = []
+        for i, tmpl in enumerate(prompt_tmpls):
+            prompt = tmpl.format(trigger=trigger) if "{trigger}" in tmpl else f"{trigger} {tmpl}"
+            seed = _VALIDATION_SEEDS[i % len(_VALIDATION_SEEDS)]
+            img = _generate_with_lora(lora_path, prompt, strength=strength, seed=seed,
+                                      out_path=f"_loraval_{character['id']}_{strength}_{i}.png",
+                                      comfyui_url=url)
+            arc = None
+            if img:
+                sc = _score_candidate(img, anchor)
+                if getattr(sc, "has_arc", False):
+                    arc = sc.arc_score
+            if arc is not None:
+                sample_scores.append(arc)
+            per_prompt.append((tmpl, arc))
+        mean_arc = (sum(sample_scores) / len(sample_scores)) if sample_scores else None
+        sweep.append(StrengthScore(strength=strength, mean_arc=mean_arc, per_prompt=per_prompt))
+
+    scored = [s for s in sweep if s.mean_arc is not None]
+    if not scored:
+        return LoraQualityResult(None, None, sweep=sweep, skipped=True,
+                                 skip_reason="generation_or_scoring_unavailable")
+    best = max(scored, key=lambda s: s.mean_arc)
+    return LoraQualityResult(best_score=best.mean_arc, best_strength=best.strength, sweep=sweep)
