@@ -246,6 +246,9 @@ def _escalate_config(config: dict, action: LoraAction) -> dict:
 
 def _gated_result(train: dict, *, score, strength, lora_path, warning, rejected,
                   skipped=False, skip_reason="", attempts=1) -> dict:
+    # NOTE: train["quality_score"] is the single-train stub value (None); we always
+    # REPLACE it with the validated score (or None when skipped) — the clobber is
+    # deliberate, not a bug. The orchestrator owns quality_score, not the trainer.
     out = dict(train)
     out.update(lora_path=lora_path, quality_score=score, best_strength=strength,
                quality_warning=warning, rejected=rejected, skipped=skipped,
