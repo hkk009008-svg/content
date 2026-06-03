@@ -580,10 +580,6 @@ class ContinuityEngine:
 
         return enhanced
 
-    def record_shot_generated(self, image_path: str, scene_id: str):
-        """Record generated image for temporal chaining."""
-        self.temporal_manager.record_generated(image_path, scene_id)
-
     def validate_shot(
         self,
         video_path: str,
@@ -622,6 +618,3 @@ class ContinuityEngine:
             max_attempts=max_attempts,
         )
 
-    def reset_scene(self):
-        """Reset temporal state for a new scene."""
-        self.temporal_manager.reset()
