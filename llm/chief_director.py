@@ -507,7 +507,12 @@ When suggesting prompt_mutation for failures:
             })
             return result
         except Exception:
-            level = 1 if identity_score > 0.55 else (2 if identity_score > 0.40 else 3)
+            # A skipped identity has identity_score=None (couldn't be checked):
+            # don't escalate the retry on identity — use the least-aggressive level.
+            if identity_score is None:
+                level = 1
+            else:
+                level = 1 if identity_score > 0.55 else (2 if identity_score > 0.40 else 3)
             return {"decision": "RETRY", "mutation": None, "mutation_level": level}
 
     def get_diagnostic_summary(self) -> str:

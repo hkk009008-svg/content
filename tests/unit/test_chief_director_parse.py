@@ -375,3 +375,29 @@ class TestEvaluateGenerationQualitySkipGuard:
         assert result.get("decision") == "ACCEPT", (
             f"Expected ACCEPT for skipped identity, got {result.get('decision')}"
         )
+
+    def test_skip_identity_does_not_crash_in_llm_except_fallback(self):
+        """Skip identity (overall_score=None) + incoherence + an LLM parse failure
+        must not crash at the except-fallback (chief_director.py ~:510, which does
+        `identity_score > 0.55`). identity_passed=True (skip) but coherent=False
+        bypasses the ACCEPT short-circuit and reaches the LLM path; a garbage
+        response makes parsing raise → the except fallback runs with score=None."""
+        cd = _make_chief_director()
+
+        class _FakeCoherence:
+            overall_coherence_score = 0.3   # < 0.6 -> coherent=False
+            color_drift = 0.1
+            lighting_consistency = 0.9
+            recommendations = []
+
+        with patch.object(cd, "_call_llm", return_value="}{ not json {"):
+            result = cd.evaluate_generation_quality(
+                image_path="/fake/img.jpg",
+                reference_path="/fake/ref.jpg",
+                identity_result=_skip_result(),
+                coherence_result=_FakeCoherence(),
+            )
+
+        # Before the guard: TypeError (None > 0.55). After: a valid RETRY fallback.
+        assert result.get("decision") == "RETRY"
+        assert result.get("mutation_level") in (1, 2, 3)
