@@ -46,9 +46,9 @@ note = "F2b wired it: motion_render._get_storyboard_mode (:45) gates _run_storyb
 [[component]]
 id = "lora_validation"
 title = "LoRA training quality gate"
-status = "implemented"
+status = "parked"
 anchor = "prep/lora_quality.py:validate_lora_quality"
-note = "§10 F-A.2: real ArcFace oracle — strength sweep + score vs. reference. Gated orchestrator is train_character_lora_gated. Stub + LORA_VALIDATION_SKIPPED removed from prep.lora_training (T1 task 5)."
+note = "§10 F-A.2: real ArcFace oracle — strength sweep + score vs. reference. Gated orchestrator is train_character_lora_gated. Stub + LORA_VALIDATION_SKIPPED removed from prep.lora_training (T1 task 5). PARKED: not yet reachable from production (web/controller wiring lands T1 tasks 6-7) AND live calibration blocked on a GPU pod (Phase-B). Bump to 'wired' when api_train_lora calls the orchestrator."
 
 [[component]]
 id = "batch_scene_optimize"
