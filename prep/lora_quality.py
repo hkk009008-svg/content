@@ -26,14 +26,14 @@ class LoraAction(Enum):
 class StrengthScore:
     strength: float
     mean_arc: Optional[float]           # mean arc_score across prompts; None if all samples skipped
-    per_prompt: list = field(default_factory=list)  # [(label, arc_score|None), ...]
+    per_prompt: list[tuple[str, Optional[float]]] = field(default_factory=list)  # [(label, arc_score|None), ...]
 
 
 @dataclass
 class LoraQualityResult:
     best_score: Optional[float]         # mean_arc at best strength; None if skipped
     best_strength: Optional[float]      # argmax strength; None if skipped
-    sweep: list = field(default_factory=list)        # list[StrengthScore]
+    sweep: list[StrengthScore] = field(default_factory=list)
     skipped: bool = False
     skip_reason: str = ""
 
