@@ -66,3 +66,25 @@ def test_generate_with_lora_returns_none_on_failure(tmp_path, monkeypatch):
     out = lq._generate_with_lora("/loras/x.safetensors", "<x>", strength=1.0, seed=1,
                                  out_path=str(tmp_path / "g.png"), comfyui_url="http://x:8188")
     assert out is None
+
+
+def test_generate_with_lora_injects_seed_into_node_25(tmp_path, monkeypatch):
+    # The seed must reach the workflow's noise node (25) — _inject_sampling does NOT
+    # set it, so without the explicit injection every gen reuses the template seed.
+    captured = {}
+    monkeypatch.setattr(lq, "_qm_load_max_workflow",
+                        lambda: {"700": {"inputs": {}}, "25": {"inputs": {}}}, raising=False)
+    monkeypatch.setattr(lq, "_qm_inject_identity", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(lq, "_qm_inject_conditioning", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(lq, "_qm_inject_sampling", lambda *a, **k: None, raising=False)
+    monkeypatch.setattr(lq, "_default_max_params", lambda shot_type="portrait": {}, raising=False)
+    monkeypatch.setattr(lq, "_make_comfy", lambda url: MagicMock(), raising=False)
+
+    def fake_run_one(comfy, wf, output_filename, *a, **k):
+        captured["wf"] = wf
+        return str(tmp_path / "g.png")
+    monkeypatch.setattr(lq, "_qm_run_one_candidate", fake_run_one, raising=False)
+
+    lq._generate_with_lora("/loras/c1.safetensors", "<c1>", strength=0.55, seed=4242,
+                           out_path=str(tmp_path / "g.png"), comfyui_url="http://x:8188")
+    assert captured["wf"]["25"]["inputs"]["noise_seed"] == 4242

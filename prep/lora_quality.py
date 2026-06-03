@@ -10,9 +10,12 @@ Units:
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class LoraAction(Enum):
@@ -123,8 +126,16 @@ def _generate_with_lora(lora_path: str, prompt: str, *, strength: float, seed: i
         # _inject_conditioning(workflow, prompt, prev_shot_remote, style_remote, params, has_character)
         _qm_inject_conditioning(wf, prompt, None, None, params, True)
         _qm_inject_sampling(wf, params)
-        comfy = _make_comfy(comfyui_url)
+        # _inject_sampling does NOT touch the seed; generate_ai_broll_max sets it
+        # directly on node 25 (quality_max.py:884 `wf["25"]["inputs"]["noise_seed"]`).
+        # Mirror that so per-prompt seeds actually vary the output and the validation
+        # score is reproducible — otherwise every gen reuses the template's baked seed.
+        if "25" in wf:
+            wf["25"]["inputs"]["noise_seed"] = seed
+        comfy = _make_comfy(comfyui_url)  # RunPodComfyUI is stateless (request-per-call) — no close() needed
         return _qm_run_one_candidate(comfy, wf, out_path)
     except Exception as e:
-        print(f"[lora_quality] generation failed ({e}); treating as skip")
+        # Swallow-and-skip is required (never crash training), but keep the traceback
+        # for diagnosis (Lane V #13 M-3 pattern) instead of a bare print.
+        logger.error("[lora_quality] generation failed (%s); treating as skip", e, exc_info=True)
         return None
