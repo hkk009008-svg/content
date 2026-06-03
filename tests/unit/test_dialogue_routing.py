@@ -49,138 +49,147 @@ for _dep in [
 # ---------------------------------------------------------------------------
 
 
-class TestDialogueRoutingResolvesVeoNative:
+class TestAutoRoutingDecisions:
     """
-    When target_api == "AUTO" and the shot's optimizer cache carries a
-    dialogue purpose, the cached suggested_video_api (VEO_NATIVE) should
-    override the shot-type template (KLING_NATIVE for portrait/medium).
+    Tests for the AUTO-routing decisions made inside generate_motion_take
+    (the optimizer-cache and template-fallback branches).
+
+    These call the REAL generate_motion_take so any production drift is caught.
+    The harness mirrors TestGenerateMotionTakeOverlayWiring in test_f1b_dialogue_lipsync.py.
     """
 
-    def _make_dialogue_shot(self, purpose: str, suggested: str = "VEO_NATIVE"):
-        """Return a shot dict that simulates a cached optimizer result."""
+    def _build_controller(self, project: dict, tmp_path):
+        """Build a minimal ShotController with mocked host + core."""
+        import os
+        from cinema.shots.controller import ShotController
+
+        host = MagicMock()
+        host._refresh_project_snapshot.return_value = project
+        host._rebuild_review_clips.return_value = {}
+        host._save_checkpoint.return_value = None
+        keyframe_path = str(tmp_path / "keyframe.jpg")
+        open(keyframe_path, "wb").write(b"fake_jpg")
+        host._resolve_take_path.return_value = keyframe_path
+        host._ensure_shot_audio.return_value = None
+        host._ensure_scene_audio.return_value = None
+
+        lifecycle = MagicMock()
+        lifecycle.report_progress.return_value = None
+        runstate = MagicMock()
+        runstate.shot_results = {}
+        runstate.update_progress_pointer.return_value = None
+
+        core = MagicMock()
+        core.project = project
+        core.project_dir = str(tmp_path)
+        core.continuity = MagicMock()
+        core.continuity.enhance_shot_prompt.return_value = {
+            "continuity_config": {"primary_character": "char_1", "multi_angle_refs": []}
+        }
+        cost_tracker = MagicMock()
+        cost_tracker.is_over_budget.return_value = False
+        core.cost_tracker = cost_tracker
+
+        ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
+        ctrl._take_output_path = MagicMock(
+            side_effect=lambda shot_id, take_id, ext: str(tmp_path / f"{take_id}{ext}")
+        )
+        return ctrl, host
+
+    def _run_and_capture_gen_vid_kwargs(self, project, tmp_path):
+        """Run generate_motion_take and return the kwargs passed to generate_ai_video."""
+        ctrl, host = self._build_controller(project, tmp_path)
+        veo_clip = str(tmp_path / "veo_clip.mp4")
+        open(veo_clip, "wb").write(b"fake_veo")
+        ls_clip = str(tmp_path / "ls_clip.mp4")
+        open(ls_clip, "wb").write(b"fake_ls")
+        ref_image_file = str(tmp_path / "ref_char1.jpg")
+        open(ref_image_file, "wb").write(b"fake_jpg")
+        audio_file = str(tmp_path / "shot_tts.mp3")
+        open(audio_file, "wb").write(b"a")
+        host._ensure_shot_audio.return_value = audio_file
+        ctrl._finalize_motion_take = MagicMock(
+            side_effect=lambda scene, shot, take, video_path, **kw: {
+                "success": True, "take": dict(take), "video": video_path, "identity_score": 0.0,
+            }
+        )
+        captured = {}
+
+        def _fake_gen_vid(*args, **kwargs):
+            # target_api is the 3rd positional arg (0-indexed: image_path, camera_motion, target_api)
+            if args:
+                kwargs.setdefault("target_api", args[2] if len(args) > 2 else None)
+            captured.update(kwargs)
+            return veo_clip
+
+        with (
+            patch("cinema.shots.controller.generate_ai_video", side_effect=_fake_gen_vid),
+            patch("cinema.shots.controller.generate_lip_sync_video", return_value=ls_clip),
+            patch("lip_sync.generate_lip_sync_video", return_value=ls_clip),
+            patch("lip_sync.validate_lipsync_quality", return_value=0.91),
+            patch("cinema.shots.controller.get_reference_image", return_value=ref_image_file),
+            patch("cinema.shots.controller._probe_duration", return_value=3.5),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+        ):
+            ctrl.generate_motion_take("scene_1", "shot_1_0")
+        return captured
+
+    def _make_project(self, tmp_path, *, target_api="AUTO", optimizer_cache=None):
+        """Minimal project with one shot; allows caller to configure routing fields."""
         return {
-            "target_api": "AUTO",
-            "optimizer_cache": {
-                "source_prompt": "A character speaking",
-                "spec": {
-                    "purpose": purpose,
-                    "suggested_video_api": suggested,
-                    "suggested_lipsync": "HEDRA_C3",
-                    "image_prompt": "Character speaking, close-up",
-                },
-            },
+            "id": "proj_routing_test",
+            "characters": [{"id": "char_1", "name": "Alice"}],
+            "global_settings": {"dialogue_voice_mode": "overlay"},
+            "scenes": [{
+                "id": "scene_1",
+                "title": "Scene",
+                "action": "Action.",
+                "characters_present": ["char_1"],
+                "shots": [{
+                    "id": "shot_1_0",
+                    "prompt": "A shot",
+                    "plan_status": "approved",
+                    "target_api": target_api,
+                    "camera": "static",
+                    "characters_in_frame": ["char_1"],
+                    "approved_keyframe_take_id": "kf_t1",
+                    **({"optimizer_cache": optimizer_cache} if optimizer_cache else {}),
+                }],
+            }],
         }
 
-    @pytest.mark.parametrize("purpose", ["dialogue_close_up", "talking_head_full"])
-    def test_dialogue_purpose_resolves_to_suggested_api(self, purpose):
-        """Optimizer suggestion wins over shot-type template for dialogue purposes."""
-        from workflow_selector import WORKFLOW_TEMPLATES, classify_shot_type
-        from domain.scene_decomposer import API_REGISTRY
+    def test_non_dialogue_purpose_honors_cached_suggestion(self, tmp_path):
+        """A non-dialogue purpose with a valid cached suggestion is honored.
 
-        shot = self._make_dialogue_shot(purpose)
-
-        # Replicate the routing logic from generate_motion_take
-        opt_cache = shot.get("optimizer_cache") or {}
-        opt_spec_cached = opt_cache.get("spec") or {}
-        cached_purpose = opt_spec_cached.get("purpose", "")
-        _dialogue_purposes = {"dialogue_close_up", "talking_head_full"}
-        has_dialogue = cached_purpose in _dialogue_purposes
-
-        raw_api = shot.get("target_api", "AUTO")
-        assert raw_api == "AUTO"
-
-        if raw_api == "AUTO":
-            cached_suggestion = opt_spec_cached.get("suggested_video_api", "")
-            if cached_suggestion and cached_suggestion != "AUTO" and cached_suggestion in API_REGISTRY:
-                target_api = cached_suggestion
-            else:
-                template = WORKFLOW_TEMPLATES.get(classify_shot_type(shot), WORKFLOW_TEMPLATES["medium"])
-                target_api = template["target_api"]
-
-        assert target_api == "VEO_NATIVE", (
-            f"Dialogue purpose '{purpose}' should route to VEO_NATIVE, got {target_api}"
+        Calls the REAL generate_motion_take; asserts generate_ai_video received
+        the cached suggestion (SORA_NATIVE), not a template API.
+        """
+        project = self._make_project(
+            tmp_path,
+            target_api="AUTO",
+            optimizer_cache={"spec": {"purpose": "action_motion", "suggested_video_api": "SORA_NATIVE"}},
         )
-        assert has_dialogue is True
-
-    def test_non_dialogue_purpose_honors_cached_suggestion(self):
-        """A non-dialogue purpose with a valid cached suggestion still honors it
-        (the suggestion-wins branch is purpose-agnostic); has_dialogue stays False.
-        Template fallback is covered by test_no_optimizer_cache_uses_template."""
-        from workflow_selector import WORKFLOW_TEMPLATES, classify_shot_type
-        from domain.scene_decomposer import API_REGISTRY
-
-        shot = {
-            "target_api": "AUTO",
-            "optimizer_cache": {
-                "spec": {
-                    "purpose": "action_motion",
-                    "suggested_video_api": "SORA_NATIVE",
-                }
-            },
-        }
-
-        opt_spec_cached = shot["optimizer_cache"]["spec"]
-        cached_purpose = opt_spec_cached.get("purpose", "")
-        _dialogue_purposes = {"dialogue_close_up", "talking_head_full"}
-        has_dialogue = cached_purpose in _dialogue_purposes
-
-        cached_suggestion = opt_spec_cached.get("suggested_video_api", "")
-        if cached_suggestion and cached_suggestion != "AUTO" and cached_suggestion in API_REGISTRY:
-            target_api = cached_suggestion
-        else:
-            template = WORKFLOW_TEMPLATES.get(classify_shot_type(shot), WORKFLOW_TEMPLATES["medium"])
-            target_api = template["target_api"]
-
-        # SORA_NATIVE is in API_REGISTRY, so the suggestion-wins branch is taken
-        # regardless of purpose; assert both the routing outcome and the flag.
-        assert target_api == "SORA_NATIVE", (
-            f"valid cached suggestion should be honored, got {target_api}"
+        kwargs = self._run_and_capture_gen_vid_kwargs(project, tmp_path)
+        assert kwargs.get("target_api") == "SORA_NATIVE", (
+            f"valid cached suggestion for non-dialogue purpose should be honored; "
+            f"got {kwargs.get('target_api')!r}"
         )
-        assert has_dialogue is False
 
-    def test_no_optimizer_cache_uses_template(self):
-        """When no optimizer cache is present, fall through to shot-type template."""
-        from workflow_selector import WORKFLOW_TEMPLATES, classify_shot_type
-        from domain.scene_decomposer import API_REGISTRY
+    def test_no_optimizer_cache_uses_template(self, tmp_path):
+        """When no optimizer cache is present, routing falls back to the shot-type template.
 
-        shot = {"target_api": "AUTO", "prompt": "Close up of hero speaking"}
+        Calls the REAL generate_motion_take; asserts generate_ai_video received
+        a template API (classify_shot_type mock returns 'medium').
+        """
+        from workflow_selector import WORKFLOW_TEMPLATES
 
-        opt_cache = shot.get("optimizer_cache") or {}
-        opt_spec_cached = opt_cache.get("spec") or {}
-        cached_purpose = opt_spec_cached.get("purpose", "")
-        has_dialogue = cached_purpose in {"dialogue_close_up", "talking_head_full"}
-
-        cached_suggestion = opt_spec_cached.get("suggested_video_api", "")
-        if cached_suggestion and cached_suggestion != "AUTO" and cached_suggestion in API_REGISTRY:
-            target_api = cached_suggestion
-        else:
-            template = WORKFLOW_TEMPLATES.get(classify_shot_type(shot), WORKFLOW_TEMPLATES["medium"])
-            target_api = template["target_api"]
-
-        # Without optimizer cache, routes via template — portrait → KLING_NATIVE
-        assert target_api in {t["target_api"] for t in WORKFLOW_TEMPLATES.values()}, (
-            "Without cache should fall back to a template API"
+        project = self._make_project(tmp_path, target_api="AUTO")  # no optimizer_cache
+        kwargs = self._run_and_capture_gen_vid_kwargs(project, tmp_path)
+        template_apis = {t["target_api"] for t in WORKFLOW_TEMPLATES.values()}
+        assert kwargs.get("target_api") in template_apis, (
+            f"without optimizer cache, target_api must come from a template; "
+            f"got {kwargs.get('target_api')!r}"
         )
-        assert has_dialogue is False
-
-    def test_pinned_target_api_is_not_overridden(self):
-        """When target_api is pinned (not AUTO), optimizer cache is ignored."""
-        shot = {
-            "target_api": "KLING_NATIVE",
-            "optimizer_cache": {
-                "spec": {
-                    "purpose": "dialogue_close_up",
-                    "suggested_video_api": "VEO_NATIVE",
-                }
-            },
-        }
-
-        raw_api = shot.get("target_api", "AUTO")
-        # Routing logic: only enters the optimizer-cache branch when raw_api == "AUTO"
-        assert raw_api != "AUTO"
-        # target_api stays as-is
-        target_api = raw_api
-        assert target_api == "KLING_NATIVE"
 
 
 # ---------------------------------------------------------------------------
@@ -356,87 +365,6 @@ class TestAudioEmbeddedTakeTag:
         result = _should_tag_audio_embedded(engine_info, has_dialogue=True, voice_mode="native")
 
         assert result is False
-
-
-# ---------------------------------------------------------------------------
-# F1a Lane V #18 §3 fix: non-tautological routing tests that call the real
-# optimizer resolver and verify native_audio on the resolved engine.
-# ---------------------------------------------------------------------------
-
-
-class TestDialogueRoutingNativeAudioVerification:
-    """
-    Verify that the consumer-side routing override in generate_motion_take
-    actually produces a native_audio engine for dialogue purposes.
-
-    These tests call the real PURPOSE_API_RANKING + API_REGISTRY data (not
-    hardcoded engine names) so they CAN catch a regression like the original
-    F1a bug where dialogue_close_up resolved to KLING_NATIVE (no native audio).
-    """
-
-    def test_dialogue_close_up_routing_uses_native_audio_engine(self):
-        """
-        F1a Lane V #18 §1 fix: after the consumer-side override, a
-        dialogue_close_up shot must route to an engine with native_audio=True.
-
-        The original F1a bug: _top_live_api_for_purpose("dialogue_close_up","video")
-        returned KLING_NATIVE (first video-modality entry), not VEO_NATIVE.
-        The fix: generate_motion_take scans PURPOSE_API_RANKING for the first
-        native_audio video engine and overrides to it.
-        """
-        from domain.scene_decomposer import API_REGISTRY, PURPOSE_API_RANKING
-
-        purpose = "dialogue_close_up"
-
-        # Replicate the consumer-side override logic from generate_motion_take:
-        # find the first native_audio video engine in the purpose ranking.
-        override_engine = None
-        for engine_key in PURPOSE_API_RANKING.get(purpose, []):
-            engine_info = API_REGISTRY.get(engine_key, {})
-            if (
-                engine_info.get("native_audio")
-                and engine_info.get("modality") == "video"
-                and engine_info.get("status") == "live"
-            ):
-                override_engine = engine_key
-                break
-
-        assert override_engine is not None, (
-            f"No native_audio video engine found in PURPOSE_API_RANKING['{purpose}']. "
-            "If the ranking is intentionally lipsync-only, the standalone F1b lipsync "
-            "path is the only fallback — but audio_embedded will never be set."
-        )
-        assert API_REGISTRY[override_engine].get("native_audio") is True, (
-            f"Override engine {override_engine} lacks native_audio flag"
-        )
-        assert API_REGISTRY[override_engine].get("modality") == "video", (
-            f"Override engine {override_engine} is not a video engine"
-        )
-
-    def test_talking_head_full_routing_uses_native_audio_engine(self):
-        """
-        talking_head_full also needs a native_audio engine via the override
-        (this purpose already worked in the original F1a, but verify it stays
-        working after the consumer-side override logic is added).
-        """
-        from domain.scene_decomposer import API_REGISTRY, PURPOSE_API_RANKING
-
-        purpose = "talking_head_full"
-        override_engine = None
-        for engine_key in PURPOSE_API_RANKING.get(purpose, []):
-            engine_info = API_REGISTRY.get(engine_key, {})
-            if (
-                engine_info.get("native_audio")
-                and engine_info.get("modality") == "video"
-                and engine_info.get("status") == "live"
-            ):
-                override_engine = engine_key
-                break
-
-        assert override_engine is not None, (
-            f"No native_audio video engine for '{purpose}' in PURPOSE_API_RANKING"
-        )
-        assert API_REGISTRY[override_engine].get("native_audio") is True
 
 
 # ---------------------------------------------------------------------------

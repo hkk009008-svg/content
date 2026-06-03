@@ -78,155 +78,6 @@ def _make_take(
 
 
 # ---------------------------------------------------------------------------
-# (a) Non-embedded dialogue take → lipsync pass runs + lipsync_score written
-# ---------------------------------------------------------------------------
-
-class TestMandatoryLipsyncPass:
-    """
-    Inline-simulation tests for the metadata contracts produced by the F1b
-    lipsync block.
-
-    NOTE: These tests are INLINE MIRRORS of the block's logic — they
-    re-implement the block structure inline rather than calling the REAL
-    generate_motion_take.  They therefore cannot catch production drift in the
-    wiring itself.  Use TestGenerateMotionTakeOverlayWiring (below) for the
-    real end-to-end wiring test.
-    """
-
-    def _build_controller_fragment(self, monkeypatch, lipsync_returns: Optional[str]):
-        """
-        Build a minimal environment to simulate the lipsync block inline
-        (does NOT call generate_motion_take — this is a white-box inline mirror).
-
-        Returns (take_metadata, final_vid_after_block) after running the block.
-        """
-        import tempfile
-
-        # Create a real temp file to act as final_vid (generate_motion_take checks
-        # os.path.exists on final_vid before calling the lipsync block).
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
-            real_vid = f.name
-
-        lipsync_out_path = real_vid + "_ls.mp4"
-        if lipsync_returns is not None:
-            # Create the "lipsync output" so os.path.exists passes.
-            with open(lipsync_out_path, "wb") as f:
-                f.write(b"fake_ls")
-
-        # Audio + ref image paths (simulate existing files).
-        audio_path = real_vid + "_audio.mp3"
-        with open(audio_path, "wb") as f:
-            f.write(b"fake_audio")
-        ref_image = real_vid + "_ref.jpg"
-        with open(ref_image, "wb") as f:
-            f.write(b"fake_ref")
-
-        # Mock generate_lip_sync_video and validate_lipsync_quality.
-        mock_generate = MagicMock(
-            return_value=lipsync_out_path if lipsync_returns else None
-        )
-        mock_validate = MagicMock(return_value=0.87)
-
-        # Inline the lipsync block logic, matching controller.py exactly.
-        # This is a white-box test of the metadata contract produced by the block.
-        take_metadata: dict = {"has_dialogue": True}
-        final_vid = real_vid
-        shot_id = "shot_test"
-        settings: dict = {}
-
-        # Simulate the block (mirrors controller.py F1b block structure):
-        # has_dialogue=True, audio_embedded not set → enter the lipsync branch.
-        try:
-            generate_lip_sync_video = mock_generate
-            validate_lipsync_quality = mock_validate
-
-            chars_for_sync = ["char_1"]
-            audio_path_for_sync = audio_path
-            primary_ref_for_sync = ref_image
-
-            if audio_path_for_sync and primary_ref_for_sync:
-                lipsync_out = lipsync_out_path
-                _ls_cascade: dict = {}
-                ls_result = generate_lip_sync_video(
-                    character_image_path=primary_ref_for_sync,
-                    audio_path=audio_path_for_sync,
-                    output_path=lipsync_out,
-                    existing_video_path=final_vid,
-                    mode=settings.get("lip_sync_mode", "auto"),
-                    settings=settings,
-                    _cascade_out=_ls_cascade,
-                )
-                if ls_result and os.path.exists(ls_result):
-                    final_vid = ls_result
-                    take_metadata["lipsync_score"] = validate_lipsync_quality(
-                        ls_result, audio_path_for_sync
-                    )
-                else:
-                    take_metadata["lipsync_score"] = 0.0
-            else:
-                take_metadata["lipsync_score"] = 0.0
-        except Exception:
-            take_metadata.setdefault("lipsync_score", 0.0)
-
-        # Cleanup.
-        for p in [real_vid, audio_path, ref_image]:
-            try:
-                os.unlink(p)
-            except OSError:
-                pass
-        if lipsync_returns is None:
-            try:
-                os.unlink(lipsync_out_path)
-            except OSError:
-                pass
-
-        return take_metadata, final_vid, mock_generate, mock_validate
-
-    def test_lipsync_pass_writes_score_when_succeeds(self, tmp_path):
-        """
-        Inline simulation: when the mock generate_lip_sync_video returns a
-        valid path, lipsync_score is written to the inline metadata dict.
-        (Does NOT call the real generate_motion_take — see
-        TestGenerateMotionTakeOverlayWiring for the real wiring test.)
-        """
-        take_meta, final_vid, mock_gen, mock_validate = (
-            self._build_controller_fragment(None, lipsync_returns="something")
-        )
-        assert "lipsync_score" in take_meta, "lipsync_score should be set after successful pass"
-        assert take_meta["lipsync_score"] == pytest.approx(0.87)
-        assert mock_gen.called, "generate_lip_sync_video should be called"
-        assert mock_validate.called, "validate_lipsync_quality should be called"
-
-    def test_lipsync_pass_writes_zero_when_fails(self, tmp_path):
-        """
-        Inline simulation: when the mock returns None, lipsync_score is 0.0.
-        (Does NOT call the real generate_motion_take — inline mirror only.)
-        """
-        take_meta, final_vid, mock_gen, _ = (
-            self._build_controller_fragment(None, lipsync_returns=None)
-        )
-        assert take_meta.get("lipsync_score") == pytest.approx(0.0), (
-            "Failed lipsync should produce 0.0 score, not absent or 1.0"
-        )
-
-    def test_has_dialogue_written_to_take_metadata(self):
-        """
-        Inline simulation: has_dialogue is written to take metadata.
-        (Inline dict operation, not a call to generate_motion_take.)
-        """
-        # Simulate the F1b has_dialogue write (controller.py).
-        take_metadata = {}
-        has_dialogue = True
-        take_metadata["has_dialogue"] = has_dialogue
-        assert take_metadata["has_dialogue"] is True
-
-        has_dialogue = False
-        take_metadata2 = {}
-        take_metadata2["has_dialogue"] = has_dialogue
-        assert take_metadata2["has_dialogue"] is False
-
-
-# ---------------------------------------------------------------------------
 # (b/c/d) Auto-approve gate: blind-gate fix
 # ---------------------------------------------------------------------------
 
@@ -989,6 +840,51 @@ class TestGenerateMotionTakeOverlayWiring:
         lipsync_score = _captured_take.get("metadata", {}).get("lipsync_score")
         assert isinstance(lipsync_score, (int, float)) and lipsync_score > 0, (
             f"take metadata must carry a positive lipsync_score; got {lipsync_score!r}"
+        )
+
+    def test_lipsync_fail_writes_zero_score(self, tmp_path):
+        """
+        When generate_lip_sync_video returns None (lipsync failure), the take
+        metadata must carry lipsync_score=0.0 — not absent, not 1.0.
+
+        Calls the REAL generate_motion_take; generate_lip_sync_video mocked to
+        return None to simulate the failure branch.
+        """
+        project = self._make_overlay_dialogue_project(tmp_path, voice_mode="overlay")
+        ctrl, host = self._build_controller(project, tmp_path)
+
+        audio_file = str(tmp_path / "shot_tts.mp3")
+        open(audio_file, "wb").write(b"fake_audio_bytes")
+        ref_image_file = str(tmp_path / "ref_char1.jpg")
+        open(ref_image_file, "wb").write(b"fake_jpg")
+        veo_clip = str(tmp_path / "veo_clip.mp4")
+        open(veo_clip, "wb").write(b"fake_veo")
+
+        host._ensure_shot_audio.return_value = audio_file
+
+        _captured_take = {}
+
+        def _fake_finalize(scene, shot, take, video_path, **kwargs):
+            _captured_take.update(take)
+            return {"success": True, "take": dict(take), "video": video_path, "identity_score": 0.0}
+
+        ctrl._finalize_motion_take = MagicMock(side_effect=_fake_finalize)
+
+        with (
+            patch("cinema.shots.controller.generate_ai_video", return_value=veo_clip),
+            patch("cinema.shots.controller.generate_lip_sync_video", return_value=None),
+            patch("lip_sync.generate_lip_sync_video", return_value=None),
+            patch("lip_sync.validate_lipsync_quality", return_value=0.0),
+            patch("cinema.shots.controller.get_reference_image", return_value=ref_image_file),
+            patch("cinema.shots.controller._probe_duration", return_value=3.5),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result.get("success") is True, f"generate_motion_take returned failure: {result}"
+        lipsync_score = _captured_take.get("metadata", {}).get("lipsync_score")
+        assert lipsync_score == pytest.approx(0.0), (
+            f"Failed lipsync must write lipsync_score=0.0 to take metadata; got {lipsync_score!r}"
         )
 
 
