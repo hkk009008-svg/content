@@ -741,6 +741,47 @@ Each entry is **dated and immutable** — supersession is tracked via the
   ADR-013 (verification discipline), ADR-016 (GitNexus phantom), ADR-018 (Rule #17).
   `scripts/check_doc_claims.py` + `docs/pipeline_status.toml` are the role's instruments.
 
+## ADR-020 — Prune 5 confirmed-dead modules/symbols (327 LOC); keep dormant quality levers + preserved primitives
+
+- **Date:** 2026-06-03
+- **Status:** Accepted
+- **Context:** The Test/Audit program (Part 2) flagged suspected dead code; the original
+  max-tier director handoff §4a recommended a quality-neutral prune set. Before deletion, each
+  candidate was re-grepped at HEAD incl. tests + dynamic/string refs (operator cold audit, per the
+  `feedback_re-verify-before-destructive-commits` discipline). The user-principal approved pruning
+  the confirmed-zero-reference set and keeping the nuance items; director independently re-verified
+  0 production callers for every removed symbol before merge.
+- **Decision:** Removed the confirmed-dead set, one `chore(prune)` commit each on
+  `feat/max-tier-provisioning`:
+  - `reporter.py` (52 LOC, true orphan per ARCHITECTURE §17) — `b4a03c8`
+  - `generate_characters.py` (68 LOC, superseded by `character_manager.create_character_with_images`) — `e31d6a2`
+  - `domain/dialogue_writer.py::{format_dialogue_for_voiceover, dialogue_to_narration_text}`
+    (28 LOC, absorbed into `generate_dialogue_voiceover`) — `45c2299`
+  - `domain/continuity_engine.py::{record_shot_generated, reset_scene}` (7 LOC, dead
+    `last_generated_image` write path; `last_generated_image` itself retained — still live) — `6e8ce34`
+  - `scripts/run_tier_c.py` (172 LOC, 0 importers; never a real unattended harness) — `8a5d425`
+  - ARCHITECTURE.md doc-synced (dropped stale `record_shot_generated` + `reporter.py` refs) — `51f1826`.
+    Total **327 LOC**.
+- **Kept (explicitly NOT pruned):**
+  - `cinema/pipeline.py::CinemaPipeline` — **reclassified from prune-candidate to KEEP.** Not dead
+    code: ARCHITECTURE §4.8 documents it a "preserved primitive," §15.9 is a deliberate zero-callers
+    GUARD invariant, and `cinema/phases/` references it as the future phase-scaffold orchestrator.
+    Pruning it would delete a documented design artifact + a §15 truth-doc invariant.
+  - `continuity_engine.validate_multi_identity` (multi-character Tier-D lever) and
+    `auto_approve.summarize_audit` (tested) — user kept.
+  - All dormant QUALITY levers (`negative_prompts.py`, `evaluate_generation_quality`,
+    `validate_lora_quality`, ltx keyframe transitions) — pruning these trades against the program's
+    full-capability intent (PROGRAM-MANUAL §5).
+- **Consequences:**
+  - +: −327 LOC maintenance surface; the dead-vs-dormant boundary is now recorded.
+  - +: Zero behavior change — every removed symbol had 0 production callers (re-grepped at HEAD by
+    operator's cold audit and director pre-merge); suite **1512/3/0 unchanged**, §15 smoke OK.
+  - −: The `CinemaPipeline` keep means §15.9's zero-callers guard remains a (deliberate) maintenance item.
+- **Cross-ref:** ARCHITECTURE.md §17 (dead code), §4.8 + §15.9 (CinemaPipeline preserved primitive),
+  PROGRAM-MANUAL §5 (capability levers kept); precedent ADR-016 (GitNexus removal);
+  `feedback_re-verify-before-destructive-commits`. Tracking: operator coordination
+  `2026-06-03T09-11-52Z`; prune commits `b4a03c8`..`51f1826`.
+
 ---
 
 *To add a new decision: copy the template below, increment the ADR
