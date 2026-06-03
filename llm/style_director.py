@@ -110,6 +110,11 @@ Use tools proactively to make the style guide as professional as possible."""
             response_format={"type": "json_object"},
         )
         rules = json.loads(raw)
+        defaults = _default_style_rules(mood, color_palette, music_mood)
+        missing = [k for k in defaults if k not in rules]
+        if missing:
+            print(f"   ⚠️ style rules missing {missing} — back-filling from defaults")
+        rules = {**defaults, **rules}   # LLM values win; absent keys back-filled
 
         print(f"   ✅ Style rules generated for '{project_name}'")
         return rules

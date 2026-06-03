@@ -300,16 +300,20 @@ def test_g1_research_cinematography_called_unconditionally():
 
 
 # ---------------------------------------------------------------------------
-# CANDIDATE BUG G4 — no schema validation: missing photorealism_rules silently omitted
+# G4 FIX — missing keys back-filled from defaults so photorealism_rules can't vanish
 # ---------------------------------------------------------------------------
 
-def test_g4_missing_photorealism_rules_silently_omitted():
+def test_g4_missing_photorealism_rules_backfilled():
     """
-    CANDIDATE BUG (G4): When run_with_tools returns valid JSON that is MISSING
-    'photorealism_rules', generate_style_rules returns that partial dict as-is
-    (no fallback, no validation). Downstream style_rules_to_prompt_suffix then
-    silently omits the photorealism injection.
-    This is the highest-value finding: the core photorealism formula can vanish silently.
+    FIX (G4): When run_with_tools returns valid JSON that is MISSING
+    'photorealism_rules', generate_style_rules must back-fill it from
+    _default_style_rules so the key is always present and the photorealism
+    formula is injected into every shot's prompt.
+
+    The fix merges defaults UNDER the LLM output (LLM values win on present keys;
+    absent keys are back-filled). This is purely additive — callers that receive
+    all 7 keys see no change; callers that relied on a partial dict now get the
+    missing keys silently back-filled with a ⚠️ warning.
     """
     partial_payload = {k: f"v_{k}" for k in _ALL_7_KEYS - {"photorealism_rules"}}
     assert "photorealism_rules" not in partial_payload
@@ -326,13 +330,13 @@ def test_g4_missing_photorealism_rules_silently_omitted():
         from llm.style_director import generate_style_rules
         result = generate_style_rules("TestFilm")
 
-    # CANDIDATE BUG (G4): partial dict returned as-is — photorealism_rules is absent
-    assert "photorealism_rules" not in result  # no validation / no fallback
+    # FIX (G4): missing key back-filled — photorealism_rules is now present
+    assert "photorealism_rules" in result
 
-    # Downstream consequence: style_rules_to_prompt_suffix silently omits the injection
+    # Downstream consequence: style_rules_to_prompt_suffix now injects the formula
     from llm.style_director import style_rules_to_prompt_suffix
     suffix = style_rules_to_prompt_suffix(result)
-    assert PHOTOREALISM_LITERAL not in suffix  # photorealism formula silently missing
+    assert PHOTOREALISM_LITERAL in suffix  # photorealism formula present
 
 
 # ---------------------------------------------------------------------------
