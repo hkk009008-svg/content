@@ -761,6 +761,11 @@ def api_train_lora(pid, cid):
                     paths[cid] = result["lora_path"]
                     if result.get("best_strength") is not None:
                         settings.setdefault("char_lora_strengths", {})[cid] = result["best_strength"]
+                    else:
+                        # skip-retrain (best_strength None): drop any stale strength so it
+                        # doesn't apply to the re-trained-but-unvalidated LoRA — keep
+                        # char_lora_strengths and char_lora_paths in lockstep.
+                        settings.get("char_lora_strengths", {}).pop(cid, None)
                     return MutationResult(True, save=True)
                 try:
                     mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)

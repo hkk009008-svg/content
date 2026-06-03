@@ -289,3 +289,54 @@ def test_verdict_visible_via_get_lora_status(client, tmp_path):
     assert status.get("best_strength") == pytest.approx(0.55), (
         f"expected best_strength=0.55 in status; got {status!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 4 — skip-retrain (best_strength=None) drops a stale strength (M-6)
+# ---------------------------------------------------------------------------
+
+def test_skip_retrain_pops_stale_strength(client):
+    """
+    A re-train that SKIPS validation (skipped=True, best_strength=None) still registers
+    the new path (not rejected), but must DROP any previously-stored
+    char_lora_strengths[cid] so a stale strength doesn't apply to the
+    re-trained-but-unvalidated LoRA — keeps the two dicts in lockstep (review M-6).
+    """
+    project = _make_project()
+    # Pre-seed a stale strength + path from an earlier validated train
+    project["global_settings"]["char_lora_strengths"] = {_CID: 0.7}
+    project["global_settings"]["char_lora_paths"] = {_CID: "/l/old.safetensors"}
+
+    def fake_gated(project_dir, char, *, config_overrides=None):
+        return {
+            "success": True,
+            "lora_path": "/l/new.safetensors",
+            "best_strength": None,      # validation skipped (no GPU/anchor)
+            "rejected": False,
+            "quality_warning": False,
+            "quality_score": None,
+            "skipped": True,
+            "attempts": 1,
+        }
+
+    def fake_mutate(pid, mutator_fn, timeout=None):
+        return mutator_fn(project)
+
+    with (
+        patch("web_server.load_project", return_value=project),
+        patch("web_server.get_project_dir", return_value="/proj/t6"),
+        patch("web_server.mutate_project", side_effect=fake_mutate),
+        patch("prep.lora_quality.train_character_lora_gated", side_effect=fake_gated),
+    ):
+        resp = _post_train(client)
+        assert resp.status_code == 202, resp.data
+        _wait_for_runner()
+
+    settings = project.get("global_settings", {})
+    # Path updated (registered — not rejected)
+    assert settings.get("char_lora_paths", {}).get(_CID) == "/l/new.safetensors"
+    # Stale strength dropped (best_strength None -> pop)
+    assert _CID not in settings.get("char_lora_strengths", {}), (
+        f"stale char_lora_strengths[{_CID!r}] must be popped on skip-retrain; "
+        f"got {settings.get('char_lora_strengths')!r}"
+    )

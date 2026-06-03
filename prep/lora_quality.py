@@ -194,7 +194,7 @@ def validate_lora_quality(lora_path, character, *, strengths=None, prompts=None,
             for i, tmpl in enumerate(prompt_tmpls):
                 prompt = tmpl.format(trigger=trigger) if "{trigger}" in tmpl else f"{trigger} {tmpl}"
                 seed = _VALIDATION_SEEDS[i % len(_VALIDATION_SEEDS)]
-                out_path = os.path.join(tmpdir, f"loraval_{character['id']}_{strength:.2f}_{i}.png")
+                out_path = os.path.join(tmpdir, f"loraval_{character.get('id', 'char')}_{strength:.2f}_{i}.png")
                 img = _generate_with_lora(lora_path, prompt, strength=strength, seed=seed,
                                           out_path=out_path, comfyui_url=url)
                 arc = None
@@ -278,6 +278,12 @@ def train_character_lora_gated(project_dir, character, *, config_overrides=None)
             return _gated_result(train, score=best[0], strength=best[1], lora_path=best[2],
                                  warning=best[0] < PASS_THRESHOLD, rejected=False, attempts=attempt + 1)
         if action is LoraAction.REJECT:
+            # A net-negative reject (LoRA worse than PuLID-only) is a notable quality
+            # event worth surfacing at pod-time, beyond the rejected flag in the return.
+            logger.warning(
+                "[lora_quality] rejecting LoRA for %s: best %.3f < baseline %.3f (PuLID-only fallback)",
+                character.get("id", "?"), best[0], NET_NEGATIVE_BASELINE,
+            )
             return _gated_result(train, score=best[0], strength=best[1], lora_path=best[2],
                                  warning=True, rejected=True, attempts=attempt + 1)
         config = _escalate_config(config, action)
