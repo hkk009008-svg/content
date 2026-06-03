@@ -44,6 +44,59 @@ MIN_N = 4
 MAX_N = 8
 
 
+def _score_no_arc(composite: float) -> CandidateScore:
+    """A candidate with NO ArcFace score (landscape / no-character shot)."""
+    return CandidateScore(
+        image_path="/fake/img.jpg",
+        seed=0,
+        arc_score=0.0,
+        composite=composite,
+        has_arc=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 0. Conjunctive mode + no identity to gate — the arc floor must NOT block the
+#    halt (mirrors needs_regenerate's has_character/has_arc guard). Otherwise a
+#    landscape/no-character shot can never early-halt and burns the full budget.
+# ---------------------------------------------------------------------------
+
+class TestConjunctiveNoCharacterShot:
+    def test_no_character_halts_on_composite_alone(self):
+        """conjunctive + has_character=False: arc floor is auto-satisfied →
+        halt on composite alone (no identity to gate)."""
+        scores = [_score_no_arc(0.95) for _ in range(MIN_N)]
+        decision = should_halt(
+            scores, halt_threshold_composite=COMP_T, halt_threshold_arc=ARC_T,
+            halt_min_n=MIN_N, halt_max_n=MAX_N,
+            has_character=False, halt_rule="conjunctive",
+        )
+        assert decision.halt is True
+
+    def test_character_but_no_arc_halts_on_composite(self):
+        """conjunctive + has_character=True but best candidate has no arc score
+        (no face detected): floor cannot be evaluated → don't block the halt
+        (the PuLID-boost retry is handled separately by needs_regenerate)."""
+        scores = [_score_no_arc(0.95) for _ in range(MIN_N)]
+        decision = should_halt(
+            scores, halt_threshold_composite=COMP_T, halt_threshold_arc=ARC_T,
+            halt_min_n=MIN_N, halt_max_n=MAX_N,
+            has_character=True, halt_rule="conjunctive",
+        )
+        assert decision.halt is True
+
+    def test_no_character_low_composite_still_no_halt(self):
+        """conjunctive + has_character=False: composite still gates (a bad
+        landscape shot keeps generating)."""
+        scores = [_score_no_arc(0.80) for _ in range(MIN_N)]  # composite < 0.92
+        decision = should_halt(
+            scores, halt_threshold_composite=COMP_T, halt_threshold_arc=ARC_T,
+            halt_min_n=MIN_N, halt_max_n=MAX_N,
+            has_character=False, halt_rule="conjunctive",
+        )
+        assert decision.halt is False
+
+
 # ---------------------------------------------------------------------------
 # 1. Conjunctive mode — both composite AND arc required to halt
 # ---------------------------------------------------------------------------

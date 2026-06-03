@@ -243,14 +243,18 @@ def should_halt(
         Halt when composite >= halt_threshold_composite. Arc is informational.
       'conjunctive':
         Halt when composite >= halt_threshold_composite AND
-        arc >= halt_threshold_arc. Enforces an identity floor.
+        arc >= halt_threshold_arc. Enforces an identity floor — but only when
+        there is an identity to gate: the floor is skipped (auto-satisfied) for
+        non-character shots and candidates without an ArcFace score, so they
+        halt on composite alone instead of burning the full budget.
       'budget_only':
         # budget_only: deferred — falls back to composite_only.
         Behaves identically to 'composite_only'. Distinct "never-early-halt"
         semantics deferred pending user decision.
 
-    has_character: informational — surfaced in the decision reason for
-    logging/audit; not enforced in halt logic.
+    has_character: enforced in the 'conjunctive' branch as an identity-floor
+    bypass for non-character shots; informational (reason string only) for the
+    other modes.
     """
     if not scores:
         return HaltDecision(halt=False, reason="no candidates yet")
@@ -265,9 +269,13 @@ def should_halt(
         return HaltDecision(halt=False, reason=f"below halt_min_n ({n} < {halt_min_n})", best=best)
 
     if halt_rule == "conjunctive":
-        # Both composite AND arc must meet their thresholds.
+        # Composite must pass; the arc identity-floor applies ONLY when there's an
+        # identity to gate. For non-character shots (or candidates with no ArcFace
+        # score) the floor is auto-satisfied — otherwise such shots could never
+        # early-halt and would burn the full N-budget. Mirrors needs_regenerate's
+        # has_character/has_arc guard.
         composite_ok = best.composite >= halt_threshold_composite
-        arc_ok = best.arc_score >= halt_threshold_arc
+        arc_ok = (not has_character) or (not best.has_arc) or best.arc_score >= halt_threshold_arc
         if composite_ok and arc_ok:
             return HaltDecision(
                 halt=True,

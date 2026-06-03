@@ -5,7 +5,8 @@ out-of-range / wrong-type values arriving via `ctx.global_settings`.
 
 Bounds mirror the React sliders in:
   * `web/src/components/settings/AdvancedSection.tsx::MaxTierComfyControls`
-    (17 sampler / CN / post-pass knobs)
+    (17 sampler / CN / post-pass sliders; `hires_fix_steps` is also validated
+    here — schema/template-driven via T3 — but has no dedicated slider yet)
   * `web/src/components/settings/MaxQualityTierSection.tsx`
     (7 best-of-N halt knobs)
 """
