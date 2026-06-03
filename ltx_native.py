@@ -266,8 +266,15 @@ class LTXVideoAPI:
                 return self._fal_generate(image_path, prompt, output_path, num_frames, resolution, camera_motion)
             print(f"[LTX] Native failed ({getattr(e, 'code', '?')}): {body}")
             return None
+        except (urllib.request.URLError, TimeoutError, ConnectionError) as e:
+            # Transient network errors (DNS, timeout, connection refused) — recover via FAL, like 5xx
+            if self.fal_key and FAL_AVAILABLE:
+                print(f"[LTX] Native network error ({e}); falling back to FAL")
+                return self._fal_generate(image_path, prompt, output_path, num_frames, resolution, camera_motion)
+            print(f"[LTX] Native network error (no fallback): {e}")
+            return None
         except (OSError, json.JSONDecodeError) as e:
-            # Local errors — no fallback (don't mask bugs)
+            # Local file-I/O / decode errors — no fallback (FAL can't fix disk/permission issues)
             print(f"[LTX] Local error (no fallback): {e}")
             return None
         except Exception as e:

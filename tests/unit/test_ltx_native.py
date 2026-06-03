@@ -378,13 +378,14 @@ def test_http_4xx_does_not_fallback_to_fal(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# G(ltx)1 FIXED: native OSError (local error) → does NOT fall back to FAL
+# CRITICAL FIX: transient network errors (URLError / TimeoutError) → FAL fallback
 # ---------------------------------------------------------------------------
 
-def test_local_oserror_does_not_fallback_to_fal(monkeypatch, tmp_path):
-    """A local OSError (e.g., file not found, connection refused) does NOT
-    trigger the FAL fallback — local errors are bugs, not transient API failures;
-    burning a FAL call would not help and masks the real issue.
+
+def test_native_urlerror_falls_back_to_fal(monkeypatch, tmp_path):
+    """A urllib.request.URLError from urlopen (e.g., DNS failure, connection refused)
+    is a TRANSIENT NETWORK error and MUST trigger the FAL fallback — exactly like a
+    5xx HTTPError. Before the fix this returned None (OSError clause caught it).
     """
     monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
     api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
@@ -394,19 +395,114 @@ def test_local_oserror_does_not_fallback_to_fal(monkeypatch, tmp_path):
 
     monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
 
-    # OSError after urlopen succeeds (e.g., write failure)
+    # urllib.request.URLError is raised by urlopen on DNS / connection failures
+    url_error = urllib.request.URLError(reason="Name or service not known")
+    monkeypatch.setattr(
+        ltx_native.urllib.request, "urlopen", MagicMock(side_effect=url_error)
+    )
+
+    subscribe_spy = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
+    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_spy)
+    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
+
+    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
+
+    # URLError (transient network) MUST trigger FAL fallback, not return None
+    assert result == out
+    subscribe_spy.assert_called_once()
+
+
+def test_native_timeout_falls_back_to_fal(monkeypatch, tmp_path):
+    """A TimeoutError from urlopen (600s timeout elapsed) is a TRANSIENT NETWORK
+    error and MUST trigger the FAL fallback. Before the fix this returned None.
+    """
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"imgdata")
+    out = str(tmp_path / "out.mp4")
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+
+    # TimeoutError is an OSError subclass raised on socket timeout
     monkeypatch.setattr(
         ltx_native.urllib.request,
         "urlopen",
-        MagicMock(side_effect=OSError("no space left on device")),
+        MagicMock(side_effect=TimeoutError("timed out after 600s")),
+    )
+
+    subscribe_spy = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
+    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_spy)
+    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
+
+    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
+
+    # TimeoutError (transient network) MUST trigger FAL fallback, not return None
+    assert result == out
+    subscribe_spy.assert_called_once()
+
+
+def test_native_urlerror_no_fal_key_returns_none(monkeypatch, tmp_path):
+    """With no fal_key configured, a URLError returns None (no fallback possible)."""
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx-key")  # no fal_key
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"imgdata")
+    out = str(tmp_path / "out.mp4")
+
+    url_error = urllib.request.URLError(reason="Connection refused")
+    monkeypatch.setattr(
+        ltx_native.urllib.request, "urlopen", MagicMock(side_effect=url_error)
+    )
+
+    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
+    assert result is None
+
+
+# ---------------------------------------------------------------------------
+# G(ltx)1 FIXED: native local file-I/O OSError → does NOT fall back to FAL
+# ---------------------------------------------------------------------------
+
+
+def test_local_oserror_does_not_fallback_to_fal(monkeypatch, tmp_path):
+    """A local file-I/O OSError (disk full, permission denied) from the file-WRITE
+    path does NOT trigger the FAL fallback — a disk/permission error cannot be
+    fixed by retrying via FAL.  The OSError is raised from open(output_path, 'wb')
+    AFTER urlopen succeeds, so it genuinely tests the file-I/O no-fallback path.
+    """
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"imgdata")
+    out = str(tmp_path / "out.mp4")
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+
+    # urlopen succeeds and returns video bytes; OSError happens at file-write time
+    urlopen_cm = _urlopen_cm(b"VIDEOBYTES")
+    monkeypatch.setattr(
+        ltx_native.urllib.request,
+        "urlopen",
+        MagicMock(return_value=urlopen_cm),
     )
 
     subscribe_spy = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
     monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_spy)
 
+    # Patch builtins.open so the file-write raises OSError (disk-full simulation)
+    import builtins
+    original_open = builtins.open
+
+    def _open_raises_on_write(path, mode="r", *args, **kwargs):
+        if mode == "wb" and str(path) == out:
+            raise OSError("no space left on device")
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", _open_raises_on_write)
+
     result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
 
-    # Local OSError does NOT trigger FAL fallback — returns None
+    # Local file-I/O OSError does NOT trigger FAL fallback — returns None
     assert result is None
     subscribe_spy.assert_not_called()
 
