@@ -719,6 +719,25 @@ def api_train_lora(pid, cid):
     def _runner():
         try:
             result = train_character_lora_gated(project_dir, char, config_overrides=config_overrides)
+            # Persist the quality-gate verdict so that get_lora_status surfaces
+            # rejected / quality_warning / quality_score / best_strength for
+            # polling clients — for BOTH accept and reject outcomes.
+            if result.get("success"):
+                from prep.lora_training import record_lora_verdict
+                try:
+                    record_lora_verdict(
+                        project_dir,
+                        cid,
+                        quality_score=result.get("quality_score"),
+                        best_strength=result.get("best_strength"),
+                        rejected=bool(result.get("rejected")),
+                        quality_warning=bool(result.get("quality_warning")),
+                    )
+                except Exception:
+                    logger.error(
+                        "[LoRA] could not write verdict to status (pid=%s cid=%s)",
+                        pid, cid, exc_info=True,
+                    )
             # On success, register the LoRA path only when the gated orchestrator
             # did NOT reject the result (rejected=True means net-negative vs PuLID-only;
             # the pipeline falls back to PuLID-only in that case).

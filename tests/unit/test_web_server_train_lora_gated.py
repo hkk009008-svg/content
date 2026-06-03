@@ -131,11 +131,13 @@ def test_accept_writes_path_and_strength(client):
     ):
         resp = _post_train(client)
 
-    assert resp.status_code == 202, resp.data
-    data = resp.get_json()
-    assert data.get("started") is True
+        assert resp.status_code == 202, resp.data
+        data = resp.get_json()
+        assert data.get("started") is True
 
-    _wait_for_runner()
+        # Wait inside the patch context so mutate_project remains mocked while
+        # the background thread executes record_lora_verdict then mutate_project.
+        _wait_for_runner()
 
     # Both path and strength must be written
     settings = project.get("global_settings", {})
@@ -200,4 +202,90 @@ def test_reject_skips_registration(client):
     settings = project.get("global_settings", {})
     assert "char_lora_paths" not in settings or _CID not in settings.get("char_lora_paths", {}), (
         f"char_lora_paths[{_CID!r}] must not be written on reject; settings={settings!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 3 — Verdict visible via get_lora_status (rejected / quality_warning /
+#          quality_score / best_strength all surfaced on the polling path)
+# ---------------------------------------------------------------------------
+
+def test_verdict_visible_via_get_lora_status(client, tmp_path):
+    """
+    After a gated run that returns rejected=True, quality_warning=True,
+    quality_score=0.40, best_strength=0.55, calling get_lora_status for
+    the same char must return those fields in its dict so a polling client
+    can see the verdict.
+
+    This test exercises the gap identified in the Task 6 code review:
+    train_character_lora_gated returned a verdict dict but the background
+    _runner never wrote it to the on-disk status file.
+    """
+    import json
+    import os
+    from prep.lora_training import get_lora_status
+
+    project_dir = str(tmp_path)
+    project = _make_project()
+    project["id"] = _PID
+
+    # Pre-seed a minimal status file as the real gated orchestrator would have
+    # written via train_character_lora (the mock bypasses that).
+    status_dir = os.path.join(project_dir, "loras", _CID)
+    os.makedirs(status_dir, exist_ok=True)
+    initial_status = {
+        "char_id": _CID,
+        "status": "done",
+        "progress_percent": 100.0,
+        "started_at": "2026-06-04T00:00:00Z",
+        "finished_at": "2026-06-04T00:01:00Z",
+        "lora_path": "/l/c1.safetensors",
+        "quality_score": None,
+        "image_count": 20,
+        "config": None,
+        "error": None,
+        "log_tail": None,
+        "rejected": False,
+        "quality_warning": False,
+        "best_strength": None,
+    }
+    with open(os.path.join(status_dir, "status.json"), "w") as f:
+        json.dump(initial_status, f)
+
+    def fake_gated(proj_dir, char, *, config_overrides=None):
+        return {
+            "success": True,
+            "lora_path": "/l/c1.safetensors",
+            "rejected": True,
+            "quality_warning": True,
+            "quality_score": 0.40,
+            "best_strength": 0.55,
+            "skipped": False,
+            "attempts": 3,
+        }
+
+    with (
+        patch("web_server.load_project", return_value=project),
+        patch("web_server.get_project_dir", return_value=project_dir),
+        patch("web_server.mutate_project"),  # should not be called but don't crash
+        patch("prep.lora_quality.train_character_lora_gated", side_effect=fake_gated),
+    ):
+        resp = _post_train(client)
+
+    assert resp.status_code == 202, resp.data
+    _wait_for_runner()
+
+    status = get_lora_status(project_dir, _CID)
+
+    assert status.get("rejected") is True, (
+        f"expected rejected=True in status; got {status!r}"
+    )
+    assert status.get("quality_warning") is True, (
+        f"expected quality_warning=True in status; got {status!r}"
+    )
+    assert status.get("quality_score") == pytest.approx(0.40), (
+        f"expected quality_score=0.40 in status; got {status!r}"
+    )
+    assert status.get("best_strength") == pytest.approx(0.55), (
+        f"expected best_strength=0.55 in status; got {status!r}"
     )

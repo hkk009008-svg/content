@@ -128,6 +128,12 @@ class LoraStatus:
     config: Optional[dict] = None
     error: Optional[str] = None
     log_tail: Optional[str] = None  # last few lines of trainer stdout
+    # Verdict fields written by record_lora_verdict after a gated train run.
+    # get_lora_status surfaces these so polling clients can see whether the
+    # LoRA was rejected by the quality gate.
+    rejected: bool = False
+    quality_warning: bool = False
+    best_strength: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +265,50 @@ def _write_status(project_dir: str, status: LoraStatus) -> None:
     os.makedirs(os.path.dirname(sp), exist_ok=True)
     with open(sp, "w") as f:
         json.dump(asdict(status), f, indent=2)
+
+
+def record_lora_verdict(
+    project_dir: str,
+    char_id: str,
+    *,
+    quality_score: Optional[float] = None,
+    best_strength: Optional[float] = None,
+    rejected: bool = False,
+    quality_warning: bool = False,
+) -> None:
+    """Persist the quality-gate verdict into the on-disk status file.
+
+    Called from the web-server background thread after
+    ``prep.lora_quality.train_character_lora_gated`` returns, for BOTH
+    accept and reject outcomes, so that ``get_lora_status`` surfaces the
+    verdict to polling clients.
+
+    Resilient: if no status file exists yet (edge case where the runner
+    crashed before writing the initial status), the call is a no-op rather
+    than crashing the runner.
+    """
+    sp = _status_path(project_dir, char_id)
+    if not os.path.exists(sp):
+        return  # no status to annotate — don't crash the runner
+    try:
+        with open(sp) as f:
+            data = json.load(f)
+    except Exception:
+        return  # corrupt/unreadable status — no-op
+
+    data["rejected"] = rejected
+    data["quality_warning"] = quality_warning
+    if quality_score is not None:
+        data["quality_score"] = quality_score
+    if best_strength is not None:
+        data["best_strength"] = best_strength
+
+    try:
+        os.makedirs(os.path.dirname(sp), exist_ok=True)
+        with open(sp, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass  # don't crash the runner on a verdict-write failure
 
 
 # ---------------------------------------------------------------------------
