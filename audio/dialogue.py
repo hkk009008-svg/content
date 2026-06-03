@@ -289,6 +289,7 @@ def generate_dialogue_voiceover(
     output_filename: str = "temp_dialogue_voiceover.mp3",
     pause_between_lines: float = 0.3,
     ctx: "Optional[PipelineContext]" = None,
+    cost_tracker: Optional[object] = None,
 ) -> Optional[str]:
     """
     Multi-character dialogue voiceover for cinema production.
@@ -418,7 +419,11 @@ def generate_dialogue_voiceover(
                 # tracking is symmetric improvement deferred to v0.9.X+.
                 try:
                     from cost_tracker import CostTracker
-                    CostTracker().record_api_call(
+                    # T5: use caller-supplied tracker when provided so spend accumulates
+                    # on the pipeline's budget-aware tracker (cross-process persistence
+                    # deferred).
+                    _tracker = cost_tracker or CostTracker()
+                    _tracker.record_api_call(
                         "CARTESIA_SONIC_2",
                         operation="dialogue_tts",
                     )
@@ -454,7 +459,11 @@ def generate_dialogue_voiceover(
             # by adding the tracking at this version (a la deferred → done).
             try:
                 from cost_tracker import CostTracker
-                CostTracker().record_api_call("ELEVENLABS", operation="dialogue_tts")
+                # T5: use caller-supplied tracker when provided so spend accumulates
+                # on the pipeline's budget-aware tracker (cross-process persistence
+                # deferred).
+                _tracker = cost_tracker or CostTracker()
+                _tracker.record_api_call("ELEVENLABS", operation="dialogue_tts")
             except Exception:
                 print(f"   [ELEVENLABS] cost record skipped for line {i+1} (non-critical)")
             print(f"   ✅ Line {i+1}: {char_name} ({delivery}) → {temp_path}")

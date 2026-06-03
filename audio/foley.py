@@ -17,6 +17,7 @@ path only; pipeline wiring comes in T2.
 from __future__ import annotations
 
 import os
+from typing import Optional
 
 import requests
 from config.settings import settings
@@ -113,6 +114,7 @@ def generate_stability_foley(
     steps: int = 50,
     cfg_scale: float = 7.0,
     seed: int | None = None,
+    cost_tracker: "Optional[object]" = None,
 ) -> str | None:
     """Generate environmental foley via Stability AI Stable Audio 2.0 REST API.
 
@@ -176,9 +178,12 @@ def generate_stability_foley(
         # was in API_COST_USD ($0.03) since cycle-15 v0.9.6 but had no
         # record_api_call invocation in production (Lane V ab832c7 confirmed).
         # Mirrors Cartesia pattern at audio/dialogue.py:419-427.
+        # T5: use caller-supplied tracker when provided so spend accumulates on
+        # the pipeline's budget-aware tracker (cross-process persistence deferred).
         try:
             from cost_tracker import CostTracker
-            CostTracker().record_api_call("STABILITY_FOLEY", operation="scene_foley")
+            _tracker = cost_tracker or CostTracker()
+            _tracker.record_api_call("STABILITY_FOLEY", operation="scene_foley")
         except Exception:
             print(f"   [FOLEY] cost record skipped (non-critical)")
         return output_path

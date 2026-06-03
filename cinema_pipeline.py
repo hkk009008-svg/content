@@ -523,6 +523,7 @@ class CinemaPipeline:
             characters,
             output_path,
             ctx=dialogue_ctx,
+            cost_tracker=self.cost_tracker,  # T5: gate audio spend on pipeline budget
         )
         if result and os.path.exists(output_path):
             self.scene_audio[scene_id] = output_path
@@ -576,6 +577,7 @@ class CinemaPipeline:
             characters,
             output_path,
             ctx=dialogue_ctx,
+            cost_tracker=self.cost_tracker,  # T5: gate audio spend on pipeline budget
         )
         if result and os.path.exists(output_path):
             self.shot_audio[shot_id] = output_path
@@ -587,7 +589,7 @@ class CinemaPipeline:
         music_mood = settings.get("music_mood", "suspense")
         bgm_path = os.path.join(self.temp_dir, f"bgm_{music_mood}.mp3")
         if not os.path.exists(bgm_path):
-            generate_fal_bgm(music_mood, bgm_path, duration=47)
+            generate_fal_bgm(music_mood, bgm_path, duration=47, cost_tracker=self.cost_tracker)  # T5: gate audio spend on pipeline budget
 
         if os.path.exists(bgm_path):
             try:
@@ -638,7 +640,7 @@ class CinemaPipeline:
         try:
             from audio.foley import _build_foley_prompt, generate_stability_foley
             prompt = _build_foley_prompt(scene_foley_descriptor)
-            result = generate_stability_foley(prompt, foley_path, duration=scene_duration)
+            result = generate_stability_foley(prompt, foley_path, duration=scene_duration, cost_tracker=self.cost_tracker)  # T5: gate audio spend on pipeline budget
             if result and os.path.exists(result):
                 self.scene_foley[scene_id] = result
                 self._runstate.foley_audio_paths.append(result)

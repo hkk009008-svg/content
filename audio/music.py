@@ -143,6 +143,7 @@ def generate_suno_v5(
     instrumental: bool = True,
     custom_lyrics: str = "",
     poll_timeout_s: int = 240,
+    cost_tracker: Optional = None,
 ) -> bool:
     """Generate a song via Suno V5 (the SOTA music model with vocals).
 
@@ -238,9 +239,12 @@ def generate_suno_v5(
         # Best-effort cost tracking — closes part of M-B2 (cycle-16 Tier B
         # surfaced BGM/foley/TTS sites lacked record_api_call invocations).
         # Mirrors Cartesia pattern at audio/dialogue.py:419-427.
+        # T5: use caller-supplied tracker when provided so spend accumulates on
+        # the pipeline's budget-aware tracker (cross-process persistence deferred).
         try:
             from cost_tracker import CostTracker
-            CostTracker().record_api_call("SUNO_V5", operation="bgm")
+            _tracker = cost_tracker or CostTracker()
+            _tracker.record_api_call("SUNO_V5", operation="bgm")
         except Exception:
             print(f"   [SUNO V5] cost record skipped (non-critical)")
         return True
@@ -276,7 +280,7 @@ def generate_bgm(
 
 import time  # used by Suno polling — placed here to keep the import surface stable
 
-def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42):
+def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42, cost_tracker: Optional = None):
     """Uses Fal.ai's text-to-audio engine to generate custom background music."""
     import urllib.request
 
@@ -358,9 +362,12 @@ def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42):
             print(f"✅ Fal.ai Generated BGM saved as: {output_filename}")
             # Best-effort cost tracking — M-B2 closure (cycle-16). Mirrors
             # Cartesia pattern at audio/dialogue.py:419-427.
+            # T5: use caller-supplied tracker when provided so spend accumulates on
+            # the pipeline's budget-aware tracker (cross-process persistence deferred).
             try:
                 from cost_tracker import CostTracker
-                CostTracker().record_api_call("FAL_STABLE_AUDIO", operation="bgm")
+                _tracker = cost_tracker or CostTracker()
+                _tracker.record_api_call("FAL_STABLE_AUDIO", operation="bgm")
             except Exception:
                 print(f"   [FAL] cost record skipped (non-critical)")
             return True

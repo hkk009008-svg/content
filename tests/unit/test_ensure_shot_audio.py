@@ -93,7 +93,7 @@ class TestEnsureShotAudio:
 
         expected_path = str(tmp_path / "audio_shot_abc.mp3")
 
-        def fake_voiceover(lines, chars, out_path, ctx=None):
+        def fake_voiceover(lines, chars, out_path, ctx=None, cost_tracker=None):
             # Simulate writing the mp3.
             with open(out_path, "wb") as f:
                 f.write(b"fake_mp3")
@@ -120,7 +120,7 @@ class TestEnsureShotAudio:
 
         render_count = {"n": 0}
 
-        def fake_voiceover(lines, chars, out_path, ctx=None):
+        def fake_voiceover(lines, chars, out_path, ctx=None, cost_tracker=None):
             render_count["n"] += 1
             with open(out_path, "wb") as f:
                 f.write(b"fake_mp3")
@@ -167,7 +167,7 @@ class TestEnsureShotAudio:
         scene = {"id": "scene_1"}
         characters = []
 
-        def fake_voiceover_fail(lines, chars, out_path, ctx=None):
+        def fake_voiceover_fail(lines, chars, out_path, ctx=None, cost_tracker=None):
             # Do NOT write the file — simulate API failure.
             return False
 
@@ -197,7 +197,7 @@ class TestEnsureShotAudio:
 
         call_count = {"n": 0}
 
-        def fake_voiceover(lines, chars, out_path, ctx=None):
+        def fake_voiceover(lines, chars, out_path, ctx=None, cost_tracker=None):
             call_count["n"] += 1
             return True
 
