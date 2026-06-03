@@ -6,10 +6,7 @@ After Task 5:
 - LORA_VALIDATION_SKIPPED constant is removed.
 - The validate_lora_quality stub is removed from prep.lora_training.
 """
-import os
 import json
-import tempfile
-import importlib
 
 import pytest
 
@@ -75,15 +72,11 @@ def test_train_character_lora_success_quality_score_is_none(tmp_path, monkeypatc
     assert result["quality_score"] is None, (
         f"Expected quality_score=None (no internal validation), got {result['quality_score']!r}"
     )
-    # validate_lora_quality must NOT be called — confirm sentinel doesn't bleed in
-    assert result["quality_score"] != -1.0, "Sentinel -1.0 leaked into result"
 
 
 def test_train_character_lora_no_validate_stub_defined():
     """After Task 5, validate_lora_quality and LORA_VALIDATION_SKIPPED must not exist in prep.lora_training."""
     import prep.lora_training as lt
-    # Reload to be certain
-    importlib.reload(lt)
     assert not hasattr(lt, "validate_lora_quality"), (
         "validate_lora_quality stub must be removed from prep.lora_training"
     )
