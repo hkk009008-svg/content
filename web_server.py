@@ -1424,7 +1424,7 @@ def api_generate_style_rules(pid):
         music_mood=data.get("music_mood", settings.get("music_mood", "suspense")),
         aspect_ratio=settings.get("aspect_ratio", "16:9"),
         reference_films=data.get("reference_films", ""),
-        use_web_research=data.get("use_web_research", False),
+        use_web_research=data.get("use_web_research", True),
     )
 
     def _mutate_project(latest_project: dict):

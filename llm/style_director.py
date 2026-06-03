@@ -16,7 +16,7 @@ def generate_style_rules(
     music_mood: str = "suspense",
     aspect_ratio: str = "16:9",
     reference_films: str = "",
-    use_web_research: bool = False,
+    use_web_research: bool = True,
 ) -> dict:
     """
     Generates consistent style rules for the entire production.
@@ -39,19 +39,18 @@ def generate_style_rules(
     if not api_key:
         return _default_style_rules(mood, color_palette, music_mood)
 
-    client = openai.OpenAI(api_key=api_key)
-
     # Research-enhanced context — Tavily + Firecrawl for real cinematography references
     research_context = ""
-    try:
-        from research_engine import research_cinematography
-        # Always search for mood-specific techniques — this grounds the LLM in real cinema
-        ref = research_cinematography(mood, "general cinematic setting", f"{mood} film")
-        if ref:
-            research_context = ref
-            print(f"   [STYLE] Research-enhanced with cinematography reference")
-    except Exception:
-        pass
+    if use_web_research:
+        try:
+            from research_engine import research_cinematography
+            # Search for mood-specific techniques — grounds the LLM in real cinema
+            ref = research_cinematography(mood, "general cinematic setting", f"{mood} film")
+            if ref:
+                research_context = ref
+                print(f"   [STYLE] Research-enhanced with cinematography reference")
+        except Exception:
+            pass
 
     # Additional reference film research if specified
     if use_web_research and reference_films:
@@ -90,6 +89,7 @@ Output a JSON object with these exact keys:
 Output ONLY valid JSON."""
 
     try:
+        client = openai.OpenAI(api_key=api_key)
         from web_research import run_with_tools
 
         system_with_tools = system_prompt + """

@@ -272,15 +272,14 @@ def test_use_web_research_false_does_not_call_research_aesthetic():
 
 
 # ---------------------------------------------------------------------------
-# CANDIDATE BUG G1 — research_cinematography called UNCONDITIONALLY
+# FIX G1 — research_cinematography gated by use_web_research
 # ---------------------------------------------------------------------------
 
-def test_g1_research_cinematography_called_unconditionally():
+def test_research_honors_use_web_research_false():
     """
-    CANDIDATE BUG (G1): research_cinematography is called regardless of use_web_research.
-    Even with use_web_research=False and no reference_films, the call is made.
-    This may be intentional ("always ground the LLM in real cinema") but it is
-    unconditional regardless of the flag.
+    FIX (G1): research_cinematography must NOT be called when use_web_research=False.
+    Both research calls (research_cinematography and _research_aesthetic) must be
+    consistently gated behind the use_web_research flag.
     """
     fake = _fake_settings(openai_api_key="sk-fake")
     mock_client = MagicMock()
@@ -295,8 +294,17 @@ def test_g1_research_cinematography_called_unconditionally():
         from llm.style_director import generate_style_rules
         generate_style_rules("TestFilm", use_web_research=False)
 
-    # CANDIDATE BUG (G1): research_cinematography called even with use_web_research=False
-    assert mock_rc.call_count == 1
+    # FIX (G1): research_cinematography NOT called when use_web_research=False
+    assert mock_rc.call_count == 0
+
+
+def test_research_default_is_true():
+    """
+    FIX (G1): use_web_research default must be True — research on by default.
+    """
+    import inspect
+    from llm.style_director import generate_style_rules
+    assert inspect.signature(generate_style_rules).parameters["use_web_research"].default is True
 
 
 # ---------------------------------------------------------------------------
@@ -340,33 +348,30 @@ def test_g4_missing_photorealism_rules_backfilled():
 
 
 # ---------------------------------------------------------------------------
-# CANDIDATE BUG G3 — openai.OpenAI constructed BEFORE the try block
+# FIX G3 — openai.OpenAI constructed INSIDE the try block for fallback
 # ---------------------------------------------------------------------------
 
-def test_g3_openai_client_constructed_before_try():
+def test_openai_construction_failure_falls_back_to_defaults(monkeypatch):
     """
-    CANDIDATE BUG (G3): openai.OpenAI(api_key=...) is constructed at line ~42,
-    BEFORE the try block at line ~92. If OpenAI construction raises (e.g. bad import,
-    network DNS at import time), the exception propagates uncaught and does NOT fall
-    back to _default_style_rules. This is documented as a bug candidate; the test
-    asserts the ACTUAL behavior: OpenAI() is called exactly once before run_with_tools.
+    FIX (G3): If openai.OpenAI() construction raises, the exception must be caught
+    by the try/except that returns _default_style_rules — not propagate uncaught.
+    Moving client construction inside the try block closes this gap.
     """
+    import openai as _openai_module
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("OpenAI client construction failed")
+
     fake = _fake_settings(openai_api_key="sk-fake")
-    mock_client = MagicMock()
-    llm_payload = {k: f"v_{k}" for k in _ALL_7_KEYS}
+    monkeypatch.setattr("llm.style_director.settings", fake)
+    monkeypatch.setattr(_openai_module, "OpenAI", _raise)
 
-    with (
-        patch("llm.style_director.settings", new=fake),
-        patch("openai.OpenAI", return_value=mock_client) as mock_openai,
-        patch("research_engine.research_cinematography", return_value=""),
-        patch("web_research.run_with_tools", return_value=json.dumps(llm_payload)),
-    ):
-        from llm.style_director import generate_style_rules
-        generate_style_rules("TestFilm")
+    from llm.style_director import generate_style_rules
+    rules = generate_style_rules("TestFilm")
 
-    # CANDIDATE BUG (G3): client constructed before the try-block; no fallback if it raises
-    assert mock_openai.call_count == 1
-    mock_openai.assert_called_once_with(api_key="sk-fake")
+    # FIX (G3): construction failure caught → falls back to _default_style_rules
+    assert set(rules.keys()) == _ALL_7_KEYS
+    assert rules["photorealism_rules"] == PHOTOREALISM_LITERAL
 
 
 # ---------------------------------------------------------------------------
