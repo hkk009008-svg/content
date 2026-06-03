@@ -7,10 +7,11 @@ cleaned the orphan branch, and shipped ADR-020. State re-verified live at write-
 
 > **TL;DR for the next director:** `main` (`7e807d8`, **pushed, GREEN 1512/3/0**) carries the entire
 > Part-3 program through the **moderates/minors** cycle. The live line `feat/max-tier-provisioning`
-> (`6d87f22`) is **ahead 10 of origin/feat and UNPUSHED** — it holds the **dead-code prune (327 LOC,
-> verified 0-callers)**, **ADR-020**, and 2 docs commits. **#1 pickup item: push `feat` → origin and
-> decide the merge-to-main** (user gated both this session; awaiting go). Everything ahead-10 is
-> verified clean.
+> (`073811e` at wrap) is **ahead ~12 of origin/feat and UNPUSHED** — it holds the **dead-code prune
+> (327 LOC, verified 0-callers)**, **ADR-020**, 2 docs commits, and both seats' wrap-handoff docs
+> (operator `c152749` + this). **#1 pickup item: push `feat` → origin and decide the merge-to-main**
+> (user gated both this session; awaiting go). Everything unpushed is verified clean (no production
+> code in the handoff/audit docs). `git log` for the exact tip — both seats wrapped ~simultaneously.
 
 ---
 
@@ -19,7 +20,7 @@ cleaned the orphan branch, and shipped ADR-020. State re-verified live at write-
 | Branch | Tip | Pushed? | What it is | suite |
 |---|---|---|---|---|
 | **`main`** | `7e807d8` | **YES** (origin==`7e807d8`) | Trunk. Carries max-tier provisioning + **dialogue wire (Veo+overlay)** + Plan-2 char tests + **P0 fix** + **Part-3 F1/F2/F3** + **all Part-3 moderates/minors**. | **1512 / 3 / 0** |
-| **`feat/max-tier-provisioning`** *(HEAD)* | `6d87f22` | **NO — ahead 10** | Live line on `main`. The +10: 7 `chore(prune)`/doc-sync (`b4a03c8`..`51f1826`, 327 LOC) + **ADR-020** (`f499c81`) + 2 docs (`fb8d628` manual digests sync, `6d87f22` Part-3 no-op audit tickets). origin/feat==`7e807d8`. | **1512 / 3 / 0** (smoke OK, anchors clean) |
+| **`feat/max-tier-provisioning`** *(HEAD)* | `073811e` (wrap) | **NO — ahead ~12** | Live line on `main`. The delta: 7 `chore(prune)`/doc-sync (`b4a03c8`..`51f1826`, 327 LOC) + **ADR-020** (`f499c81`) + 2 docs (`fb8d628` manual sync, `6d87f22` no-op audit tickets) + both seats' wrap handoffs (operator `c152749`, this `073811e`). origin/feat==`7e807d8`; `git log` for live tip. | **1512 / 3 / 0** (smoke OK) |
 
 Both seats idle at write (operator wrapped ~3h ago; director wrapping now). The orphan
 `max-tier-provisioning-2026-06-01` branch + `.claude/worktrees/f1-max-tier` were **cleaned this
