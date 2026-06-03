@@ -152,19 +152,16 @@ class IdentityValidator:
             attempt: Current retry attempt (0-based).
             max_attempts: Total retries planned.
         """
-        th = threshold or get_threshold_for_shot(shot_type, mode, attempt, max_attempts)
+        threshold = threshold if threshold is not None else get_threshold_for_shot(shot_type, mode, attempt, max_attempts)
         if not os.path.exists(video_path):
-            return self._missing_output_result(shot_type, th)
+            return self._missing_output_result(shot_type, threshold)
         if not character_configs:
-            return self._skipped_result(shot_type, th)
+            return self._skipped_result(shot_type, threshold)
 
         if not DEEPFACE_AVAILABLE:
             return self._vision_llm_validate_video(
-                video_path, character_configs, shot_type, th,
+                video_path, character_configs, shot_type, threshold,
             )
-
-        if threshold is None:
-            threshold = get_threshold_for_shot(shot_type, mode, attempt, max_attempts)
 
         # Pre-compute reference embeddings
         ref_embeddings = {}
@@ -193,11 +190,7 @@ class IdentityValidator:
 
         if total_frames == 0:
             cap.release()
-            return IdentityValidationResult(
-                passed=False, overall_score=0.0, character_results={},
-                frames_sampled=0, video_duration_seconds=0.0,
-                shot_type=shot_type, threshold_used=threshold,
-            )
+            return self._missing_output_result(shot_type, threshold)
 
         positions = self._compute_sample_positions(total_frames, fps, shot_type)
 
@@ -821,11 +814,7 @@ class IdentityValidator:
 
         if total_frames == 0:
             cap.release()
-            return IdentityValidationResult(
-                passed=False, overall_score=0.0, character_results={},
-                frames_sampled=0, video_duration_seconds=0.0,
-                shot_type=shot_type, threshold_used=threshold,
-            )
+            return self._missing_output_result(shot_type, threshold)
 
         # Sample 3 frames: 10%, 50%, 90%
         sample_positions = [0.1, 0.5, 0.9]

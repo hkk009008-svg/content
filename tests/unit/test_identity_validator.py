@@ -4,7 +4,7 @@ Characterization tests for identity/validator.py (IdentityValidator).
 These tests LOCK IN the EXISTING behavior of already-written code.
 They PASS against HEAD.  Where the code does something surprising or buggy,
 each test asserts the ACTUAL current behavior and adds a comment:
-    # CANDIDATE BUG (Gn): <one line>
+    # FIXED / NOTED (Gn): <one line>
 
 Offline-only: all external deps (DeepFace, cv2.VideoCapture, os.path.exists,
 tempfile) are mocked.  No GPU, no model weights, no network, no real files.
@@ -342,7 +342,7 @@ class TestValidateVideoAllRefsFail:
 
 
 class TestValidateVideoZeroFrames:
-    """Test case 8: zero frames → passed=False, overall_score=0.0."""
+    """Test case 8: zero frames → passed=False, overall_score=0.0, failure_reason=generated_image_missing."""
 
     def test_zero_frames_fails(self):
         ref_emb = _make_embedding(1.0)
@@ -361,6 +361,27 @@ class TestValidateVideoZeroFrames:
         assert result.passed is False
         assert result.overall_score == 0.0
         assert result.frames_sampled == 0
+        # Fixed (Part-3 T4): zero-frame result routed via _missing_output_result,
+        # so failure_reason is populated (same as video-file-missing).
+        assert result.metadata.get("failure_reason") == FailureReason.GENERATED_IMAGE_MISSING.value
+
+    def test_zero_frames_vision_path_fails_with_missing_reason(self):
+        """Zero frames in the vision-LLM path also routes via _missing_output_result."""
+        mock_cap = _make_mock_cap(total_frames=0)
+
+        with patch("identity.validator.DEEPFACE_AVAILABLE", False), \
+             patch("identity.validator.os.path.exists", return_value=True), \
+             patch("identity.validator.cv2.VideoCapture", return_value=mock_cap):
+            validator = IdentityValidator(vision_fallback=lambda *a: {"confidence": 0.9})
+            result = validator.validate_video(
+                video_path="/fake.mp4",
+                character_configs=[{"id": "char_a", "reference_image": "/ref.jpg", "name": "Alice"}],
+            )
+
+        assert result.passed is False
+        assert result.overall_score == 0.0
+        assert result.frames_sampled == 0
+        assert result.metadata.get("failure_reason") == FailureReason.GENERATED_IMAGE_MISSING.value
 
 
 class TestValidateVideoLandscape:
@@ -635,8 +656,8 @@ class TestClassifyFailure:
         for args in inputs:
             result = IdentityValidator._classify_failure(*args)
             assert result != FailureReason.MULTIPLE_FACES_AMBIGUOUS, (
-                f"CANDIDATE BUG (G3): _classify_failure returned MULTIPLE_FACES_AMBIGUOUS "
-                f"for inputs {args}, but this path was thought to be unreachable"
+                f"DEAD-ENUM (intentional, G3): MULTIPLE_FACES_AMBIGUOUS reserved in enum; "
+                f"no _classify_failure path returns it — {args}"
             )
 
 
@@ -873,11 +894,9 @@ class TestThresholdZeroInconsistency:
     """
 
     def test_threshold_zero_not_none_skips_override(self):
-        # CANDIDATE BUG (G4): threshold=0.0 in validate_video:
-        #   - Line 153: th = threshold or ... → th = get_threshold_for_shot(...)  (0.0 is falsy)
-        #   - Line 162: if threshold is None: → False; threshold stays 0.0
-        # So th != threshold — the two variables diverge when threshold=0.0 is passed.
-        # With threshold=0.0, ANY similarity passes (>= 0.0 is always True).
+        # FIXED (G4): threshold=0.0 is now honored as a real override via
+        # `threshold = threshold if threshold is not None else get_threshold_for_shot(...)`.
+        # One variable; 0.0 is NOT falsy-discarded.
 
         ref_emb = _make_embedding(1.0)
         mock_cap = _make_mock_cap(total_frames=0)
@@ -893,10 +912,50 @@ class TestThresholdZeroInconsistency:
                 threshold=0.0,
             )
 
-        # total_frames=0 → early return with threshold_used=threshold (which is 0.0 from line 162
-        # ... actually the early-return at line 192-196 uses `threshold` (post-line-162), not `th`.
-        # At this point threshold=0.0 (not overridden since 0.0 is not None).
-        assert result.threshold_used == 0.0  # actual behavior: 0.0 survives to the result
+        # total_frames=0 → early return through _missing_output_result with threshold=0.0
+        assert result.threshold_used == 0.0
+
+    def test_threshold_zero_is_honored_as_real_override(self):
+        """threshold=0.0 should be used as the ACTUAL gate (a real override is possible),
+        NOT diverge from th. Assert threshold_used == 0.0 in the result AND that a
+        below-shot-threshold similarity passes ONLY because 0.0 was explicitly chosen.
+        (Pin: single variable, no th/threshold split.)
+        """
+        # Use DEEPFACE_AVAILABLE=False so the vision path is exercised.
+        # Similarity returned = 0.3 (below any real shot threshold but >= 0.0).
+        # With the BUG: th = get_threshold_for_shot(...) ≈ 0.7, vision path uses th,
+        #   so threshold_used would NOT be 0.0 → this assertion fails.
+        # With the FIX: threshold = 0.0 throughout, threshold_used == 0.0.
+        def fake_vision_fallback(ref_img, frame_path):
+            return {"confidence": 0.3, "matched": True}
+
+        mock_cap = _make_mock_cap(total_frames=30, fps=24.0)
+        fake_frame = b"\x00" * 10
+
+        with patch("identity.validator.DEEPFACE_AVAILABLE", False), \
+             patch("identity.validator.os.path.exists", return_value=True), \
+             patch("identity.validator.cv2.VideoCapture", return_value=mock_cap):
+            mock_cap.read.return_value = (True, fake_frame)
+            validator = IdentityValidator(vision_fallback=fake_vision_fallback)
+            with patch("identity.validator.cv2.imwrite"):
+                with patch("identity.validator.os.remove"):
+                    result = validator.validate_video(
+                        video_path="/fake.mp4",
+                        character_configs=[{"id": "char_a", "reference_image": "/ref.jpg", "name": "Alice"}],
+                        threshold=0.0,
+                    )
+
+        # threshold_used must be the explicitly-passed 0.0, not the shot-type default.
+        assert result.threshold_used == 0.0, (
+            f"threshold_used={result.threshold_used!r} but expected 0.0 — "
+            f"threshold=0.0 must be honored as real override (not falsy-discarded)"
+        )
+        # similarity=0.3 passes ONLY because 0.0 was the gate (not the ~0.7 default)
+        char_result = result.character_results.get("char_a")
+        assert char_result is not None
+        assert char_result.matched is True, (
+            f"char matched={char_result.matched!r}; similarity=0.3 should pass with threshold=0.0"
+        )
 
 
 # ---------------------------------------------------------------------------
