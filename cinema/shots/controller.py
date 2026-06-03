@@ -1237,6 +1237,15 @@ class ShotController:
         _dialogue_purposes = {"dialogue_close_up", "talking_head_full"}
         has_dialogue = cached_purpose in _dialogue_purposes
 
+        # Resolve the dialogue voice mode ONCE, before the AUTO/non-AUTO split,
+        # so it is bound on every path. It is used unconditionally below — at the
+        # audio-embedded tag (_should_tag_audio_embedded arg) and the
+        # dialogue_native_audio / overlay-TTS sites. Previously this was bound
+        # only inside the `if raw_api == "AUTO"` branch, so a pinned (non-AUTO)
+        # shot — the normal production case per scene_decomposer — raised
+        # UnboundLocalError on every shot, dialogue or not. P0 regression fix.
+        _voice_mode = _dialogue_voice_mode(settings)  # resolve once; reuse at all dialogue sites
+
         if raw_api == "AUTO":
             # Prefer the optimizer's per-shot suggestion over the shot-type template.
             cached_suggestion = opt_spec_cached.get("suggested_video_api", "")
@@ -1270,7 +1279,6 @@ class ShotController:
             # - native mode: preserve today's behavior verbatim (force native-audio
             #   engine + video_fallbacks=None so embedded voice is never lost to a
             #   cross-engine fallback that lacks native_audio).
-            _voice_mode = _dialogue_voice_mode(settings)  # resolve once; reuse at all 3 dialogue sites
             if has_dialogue:
                 _pre_override_api = target_api
                 target_api, video_fallbacks = _resolve_dialogue_routing(

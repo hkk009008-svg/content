@@ -837,6 +837,64 @@ class TestGenerateMotionTakeOverlayWiring:
             ],
         }
 
+    def _make_pinned_non_auto_project(self, tmp_path, *, dialogue: bool):
+        """Overlay project but PIN target_api to a non-AUTO engine.
+
+        Every other test uses target_api='AUTO' — which is exactly why the
+        _voice_mode NameError shipped green. raw_api != 'AUTO' takes the `else`
+        branch in generate_motion_take, where _voice_mode was never bound.
+        """
+        project = self._make_overlay_dialogue_project(tmp_path, voice_mode="overlay")
+        shot = project["scenes"][0]["shots"][0]
+        shot["target_api"] = "KLING_NATIVE"   # raw_api != "AUTO" -> the else branch
+        if not dialogue:
+            # purpose not in {dialogue_close_up, talking_head_full} -> has_dialogue=False
+            shot["optimizer_cache"]["spec"]["purpose"] = "establishing"
+        return project
+
+    def _run_motion_take_minimal(self, project, tmp_path):
+        ctrl, host = self._build_controller(project, tmp_path)
+        audio_file = str(tmp_path / "shot_tts.mp3")
+        open(audio_file, "wb").write(b"a")
+        host._ensure_shot_audio.return_value = audio_file
+        ref_image_file = str(tmp_path / "ref_char1.jpg")
+        open(ref_image_file, "wb").write(b"fake_jpg")
+        veo_clip = str(tmp_path / "veo_clip.mp4")
+        open(veo_clip, "wb").write(b"fake_veo")
+        ls_clip = str(tmp_path / "ls_clip.mp4")
+        open(ls_clip, "wb").write(b"fake_ls")
+        ctrl._finalize_motion_take = MagicMock(
+            side_effect=lambda scene, shot, take, video_path, **kw: {
+                "success": True, "take": dict(take), "video": video_path, "identity_score": 0.0,
+            }
+        )
+        with (
+            patch("cinema.shots.controller.generate_ai_video", return_value=veo_clip),
+            patch("cinema.shots.controller.generate_lip_sync_video", return_value=ls_clip),
+            patch("lip_sync.generate_lip_sync_video", return_value=ls_clip),
+            patch("lip_sync.validate_lipsync_quality", return_value=0.91),
+            patch("cinema.shots.controller.get_reference_image", return_value=ref_image_file),
+            patch("cinema.shots.controller._probe_duration", return_value=3.5),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+        ):
+            return ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+    def test_pinned_non_auto_dialogue_shot_does_not_crash(self, tmp_path):
+        # REGRESSION (P0): a pinned non-AUTO *dialogue* shot must not raise
+        # NameError. _voice_mode was bound only inside `if raw_api=="AUTO"` but
+        # used at controller.py:1334 (has_dialogue and _voice_mode=="native").
+        project = self._make_pinned_non_auto_project(tmp_path, dialogue=True)
+        result = self._run_motion_take_minimal(project, tmp_path)
+        assert result.get("success") is True
+
+    def test_pinned_non_auto_nondialogue_shot_does_not_crash(self, tmp_path):
+        # REGRESSION (P0): a pinned non-AUTO *non-dialogue* shot also crashed —
+        # :1334/:1342 short-circuit (has_dialogue=False) but :1396 passes
+        # _voice_mode as a function arg, evaluated unconditionally.
+        project = self._make_pinned_non_auto_project(tmp_path, dialogue=False)
+        result = self._run_motion_take_minimal(project, tmp_path)
+        assert result.get("success") is True
+
     def test_overlay_wiring_calls_real_generate_motion_take(self, tmp_path):
         """
         Calls the REAL generate_motion_take for a dialogue_close_up shot in
