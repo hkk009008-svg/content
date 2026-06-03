@@ -55,6 +55,9 @@ projects/*
 domain/projects/*
 !domain/projects/.gitkeep
 
+# Pipeline run logs / scratch render output (per-clone runtime, not source)
+logs/
+
 # GitNexus index
 .gitnexus
 
@@ -66,6 +69,9 @@ domain/projects/*
 
 # Hookify local rules (per-clone runtime guardrails, not source — see /hookify)
 .claude/hookify.*.local.md
+
+# Per-seat launch config (D-a per-seat GIT_INDEX_FILE/CLAUDE_SEAT; per-clone, not source)
+.claude/launch.json
 
 # Auto-generated session snapshot (B-003 Option E, cycle 8). Hook
 # regenerates this file on every Bash call from local git state; not
