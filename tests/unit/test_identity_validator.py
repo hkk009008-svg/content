@@ -121,7 +121,8 @@ class TestValidateImageMissingFile:
         assert result.overall_score is None
 
     def test_missing_file_uses_supplied_threshold(self):
-        # The threshold is forwarded to _skipped_result via `threshold or 0.70`.
+        # exists()==False for both paths hits the image-missing branch first, so the
+        # threshold is forwarded via _missing_output_result (`threshold or 0.70`).
         with patch("identity.validator.os.path.exists", return_value=False):
             validator = IdentityValidator()
             result = validator.validate_image(
