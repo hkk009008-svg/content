@@ -338,7 +338,7 @@ When suggesting prompt_mutation for failures:
         image_path: str,
         reference_path: str,
         identity_result=None,
-        identity_score: float = 0.0,
+        identity_score: Optional[float] = 0.0,
         shot_prompt: str = "",
         scene_context: str = "",
         coherence_result=None,
@@ -348,7 +348,7 @@ When suggesting prompt_mutation for failures:
 
         Accepts either:
         - identity_result: IdentityValidationResult (rich diagnostics) — preferred
-        - identity_score: float (legacy fallback)
+        - identity_score: Optional[float] (legacy fallback; None when identity was skipped)
 
         Also accepts coherence_result for 2x2 mutation matrix:
         |              | Identity PASS | Identity FAIL |
