@@ -555,7 +555,6 @@ Composes 4 subsystems:
 
 **Key public methods:**
 - `enhance_shot_prompt(shot, scene, previous_shot, shot_index, approved_anchor_image)` → returns shot with appended prompt + `continuity_config` dict.
-- `record_shot_generated(image_path, scene_id)`.
 - `validate_shot(video_path, expected_chars, threshold, shot_type, mode, attempt, max_attempts)` — delegates to shared `IdentityValidator`.
 
 ### 7.6 Root shim files
@@ -1571,7 +1570,7 @@ script, the local check + CI move together.
 - **`main.py`** — already deleted. Root-shim docstrings still mention it.
 - **Root-level module status** (verified 2026-05-29 via `grep -rn 'import <mod>' --include='*.py'`, excluding tests/worktrees):
   - **Load-bearing — do NOT delete without grep:** `research_engine.py` + `web_research.py` (imported by `scene_decomposer.py` / `dialogue_writer.py` / `style_director.py`); `cleanup.py` (`web_server.py`, `cinema_pipeline.py`); `web_services.py` (`web_server.py:59`); `coherence_analyzer.py` (`cinema/shots/controller.py`).
-  - **True orphan candidate:** `reporter.py` — no detected production callers (grep clean 2026-05-29).
+  - *(`reporter.py` was here as a true-orphan candidate; pruned 2026-06-03.)*
 
 ---
 
