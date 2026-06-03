@@ -99,7 +99,8 @@ Split `_no_file_result` (696) into two precise helpers:
 Re-point the 4 trigger sites:
 - `validate_image` (~83): **split** the combined `not exists(image) or not exists(ref)`
   check. `image_path` missing → `_missing_output_result` (FAIL). `reference_path` missing
-  → `_skipped_result` (SKIP).
+  → `_skipped_result` (SKIP). (The combined condition sits a few lines *above* the line-83
+  `return`; Read ~78–100 before editing — don't jump straight to 83.)
 - `validate_image` (~97): reference yields no embedding → `_skipped_result` (can't
   compare).
 - `validate_video` (~155): no `character_configs` → `_skipped_result`.
@@ -122,15 +123,18 @@ early-returns).
 - Dead code, fixed for consistency (with an "unreached in production" comment):
   `quality_control_image` (112–114) → return `False` on missing file;
   `validate_shot_quality_vision` (170–173) → `{"pass": False, ...}` on missing file.
+  (Zero callers on `main`/`feat`; the only references are in historical
+  `.claude/worktrees/` branches — ignore those, do not preserve the old behavior for them.)
 
 ### 4.3 F2 — landscape skip, `identity/validator.py`
 
 In `validate_video`, immediately after `_compute_sample_positions` returns `[]`
 (which occurs **only** for landscape per the threshold table), return `_skipped_result`
 **before** the per-character aggregation that currently manufactures
-`matched=False / NO_FACE_DETECTED`. Detection = empty positions (equivalently
-`shot_type == "landscape"` / threshold `0.0`); the empty-positions check is the most
-robust because it tracks the actual sampling decision.
+`matched=False / NO_FACE_DETECTED`. **Detect with `if not positions:`** (the empty list),
+NOT a literal `shot_type == "landscape"` string — the empty-positions check tracks the
+actual sampling decision and so also covers any future zero-density shot type. (Empty
+positions currently arises only for landscape / threshold `0.0`.)
 
 ### 4.4 F3 — `llm/style_director.py`
 
@@ -152,18 +156,35 @@ implementation and adapt — plan-vs-source divergence rule.)
 
 ## 5. Call-site impact & the `Optional[float]` audit
 
-`overall_score: float → Optional[float]` is the only ripple. The 5 production callers all
-**gate on `result.passed`** (skip → `passed=True` → proceed; missing-output → `passed=False`
-→ retry), so no gating logic changes:
+Two distinct surfaces.
+
+**(a) Gate sites — gate on `result.passed`, no logic change.** Skip → `passed=True` →
+proceed; missing-output → `passed=False` → retry:
 - `cinema/shots/controller.py:651`, `:1813`
 - `face_validator_gate.py:141`
 - `performance/identity_gate.py:71`
 - `domain/continuity_engine.py:616`
 
-**Audit (implementation task):** grep every read of `.overall_score` / `get("similarity")`
-and any `f"{...:.2f}"` / arithmetic / `float()` on it; guard the skipped case (`None`).
-Skipped results don't enter `history`, so the rolling-stats/PuLID path is safe by
-construction; the realistic risk is a log line formatting `None`.
+**(b) Score-reader sites — MUST be guarded for `None` (the #1 risk).** Making
+`overall_score` nullable turns every direct read into a crash- or `None`-store risk.
+Authoritative production read sites (verified
+`grep -rn "\.overall_score" --include='*.py'`, excluding tests + `.claude/worktrees/`):
+
+| Site | Code | Risk on skip (`None`) | Guard |
+|---|---|---|---|
+| `face_validator_gate.py:142` | `return float(result.overall_score)` | **TypeError** (`float(None)`) | guard skip before the `float()`; return value per caller intent (this feeds a gate — skip must not block) |
+| `performance/identity_gate.py:72` | `return float(result.overall_score)` | **TypeError** | same |
+| `llm/chief_director.py:360` | `identity_score = identity_result.overall_score`; then `identity_passed = identity_score >= threshold` (line 365) | **TypeError** (`None >= float`) | when `skipped`: set `identity_passed = True` (skip ⇒ don't drive an identity mutation) and bypass the `>=` compare |
+| `cinema/shots/controller.py:656` | `identity_score = id_result.overall_score` → `take["metadata"]["identity_score"]` | stores `None` | store `None` or a skip marker; ensure metadata consumers tolerate it |
+| `cinema/shots/controller.py:1041` | `vid_result.overall_score if hasattr(...) else 0.0` | returns `None` (hasattr is True; no `None` guard) | add `and vid_result.overall_score is not None` |
+| `cinema/shots/controller.py:1816` | `result["scores"]["identity"] = id_result.overall_score` | stores `None` | as :656 |
+| `identity/types.py:79` | `.get("similarity")` returns `overall_score` | returns `None` | the accessor is fine; audit `.get("similarity")` consumers the same way |
+
+The three `float()`/compare sites (`face_validator_gate:142`, `performance/identity_gate:72`,
+`chief_director:360`) are hard crashes and **MUST** be guarded in slice B. The three
+controller store-sites are lower-risk (store `None`) but should set a skip-aware value for
+operator-facing diagnostics. Skipped results don't enter `self.history`, so the
+rolling-stats / PuLID feedback path is safe by construction.
 
 ## 6. Test strategy (TDD)
 
@@ -217,7 +238,9 @@ commit; tests-first within each.
    dead QC fns no longer pass on missing file.
 5. `generate_style_rules` always returns a dict containing `photorealism_rules`; a missing
    key logs a warning; the prompt suffix always carries the photorealism formula.
-6. No call site dereferences a `None` score; the 5 gate sites behave correctly (skip→proceed,
-   missing-output→retry).
+6. No production read of `overall_score` crashes or mis-stores on a skipped (`None`) result —
+   in particular the three `float()`/compare sites (`face_validator_gate.py:142`,
+   `performance/identity_gate.py:72`, `llm/chief_director.py:360`) are guarded (§5b); the gate
+   sites (§5a) behave correctly (skip→proceed, missing-output→retry).
 7. All `# CANDIDATE BUG` tests updated to assert the fixed behavior; suite green (≥1491
    pass / 3 skip / 0 fail); `ci_smoke` `OK`.
