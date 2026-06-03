@@ -957,6 +957,53 @@ class TestThresholdZeroInconsistency:
             f"char matched={char_result.matched!r}; similarity=0.3 should pass with threshold=0.0"
         )
 
+    def test_validate_image_threshold_zero_honored_on_vision_path(self):
+        """Rule #13 symmetric site of G4: validate_image had the SAME `threshold or X`
+        falsy pattern as validate_video.  With DEEPFACE_AVAILABLE=False, the vision-fallback
+        path used `threshold or get_threshold_for_shot(shot_type)` — meaning threshold=0.0
+        was silently discarded and the shot default (~0.7) was used instead.
+
+        Fix: `threshold if threshold is not None else get_threshold_for_shot(shot_type)`.
+
+        TDD: this test FAILS against unfixed code (threshold_used ≠ 0.0) and PASSES
+        after the fix.
+        """
+        captured_threshold = []
+
+        def fake_vision_fallback(ref_img, frame_path):
+            return {"confidence": 0.3, "matched": True}
+
+        with patch("identity.validator.DEEPFACE_AVAILABLE", False), \
+             patch("identity.validator.os.path.exists", return_value=True):
+            validator = IdentityValidator(vision_fallback=fake_vision_fallback)
+            # Spy on _vision_llm_validate_image to capture the threshold argument
+            original_method = validator._vision_llm_validate_image
+            def spy_vision(image_path, reference_path, character_id, character_name,
+                           shot_type, threshold):
+                captured_threshold.append(threshold)
+                return original_method(image_path, reference_path, character_id,
+                                       character_name, shot_type, threshold)
+            validator._vision_llm_validate_image = spy_vision
+
+            result = validator.validate_image(
+                "/gen.jpg", "/ref.jpg",
+                character_id="char_a",
+                character_name="Alice",
+                shot_type="medium",
+                threshold=0.0,
+            )
+
+        assert len(captured_threshold) == 1, "vision path must have been called"
+        assert captured_threshold[0] == 0.0, (
+            f"_vision_llm_validate_image received threshold={captured_threshold[0]!r} "
+            f"but expected 0.0 — threshold=0.0 must be honored as real override "
+            f"(not falsy-discarded by `threshold or get_threshold_for_shot(...)`)"
+        )
+        # Also verify threshold_used reflects 0.0 end-to-end
+        assert result.threshold_used == 0.0, (
+            f"result.threshold_used={result.threshold_used!r}; expected 0.0"
+        )
+
 
 # ---------------------------------------------------------------------------
 # _diagnose_failure tests (bonus — covers the helper thoroughly)

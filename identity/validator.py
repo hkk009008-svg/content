@@ -80,14 +80,14 @@ class IdentityValidator:
         Backward-compatible: result.get("passed") and result.get("similarity") work.
         """
         if not os.path.exists(image_path):
-            return self._missing_output_result(shot_type, threshold or 0.70)
+            return self._missing_output_result(shot_type, threshold if threshold is not None else 0.70)
         if not os.path.exists(reference_path):
-            return self._skipped_result(shot_type, threshold or 0.70)
+            return self._skipped_result(shot_type, threshold if threshold is not None else 0.70)
 
         if not DEEPFACE_AVAILABLE:
             return self._vision_llm_validate_image(
                 image_path, reference_path, character_id, character_name,
-                shot_type, threshold or get_threshold_for_shot(shot_type),
+                shot_type, threshold if threshold is not None else get_threshold_for_shot(shot_type),
             )
 
         if threshold is None:
