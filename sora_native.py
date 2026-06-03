@@ -11,14 +11,26 @@ import os
 import time
 import base64
 import mimetypes
-import urllib.request
 
 import openai
 from config.settings import settings
 
+# Maps the public resolution string to the Sora API `size` parameter value.
+# Mirrors ltx_native.RESOLUTION_MAP shape.
+RESOLUTION_MAP: dict[str, str] = {
+    "480p": "480x270",
+    "720p": "1280x720",
+    "1080p": "1920x1080",
+}
+
 
 class SoraNativeAPI:
-    """Native OpenAI Sora 2 client using the openai SDK."""
+    """Native OpenAI Sora 2 client using the openai SDK.
+
+    Note: __init__ raises EnvironmentError when OPENAI_API_KEY is empty.
+    This is intentional — matches veo_native behaviour; caller (phase_c_ffmpeg)
+    catches the exception and falls through to the next API.
+    """
 
     def __init__(self):
         api_key = settings.openai_api_key
@@ -90,16 +102,21 @@ class SoraNativeAPI:
             # Encode image as data URL
             image_data_url = self._image_to_data_url(image_path)
 
-            # Resize image to 1280x720 and save as temp file
+            # Resolve resolution to the API size string, then parse W×H for resize.
+            size = RESOLUTION_MAP.get(resolution, "1280x720")
+            w_str, h_str = size.split("x")
+            target_w, target_h = int(w_str), int(h_str)
+
+            # Resize image to the target resolution and save as temp file.
             from PIL import Image as PILImage
             import tempfile
             img = PILImage.open(image_path)
-            img = img.resize((1280, 720), PILImage.LANCZOS)
+            img = img.resize((target_w, target_h), PILImage.LANCZOS)
             tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
             img.save(tmp.name, format="JPEG", quality=90)
             tmp_path = tmp.name
             tmp.close()
-            print(f"[SORA-NATIVE] Image resized to 1280x720: {tmp_path}")
+            print(f"[SORA-NATIVE] Image resized to {size}: {tmp_path}")
 
             # Pass as PathLike — the SDK expects a file path, bytes, or IO object.
             # When a driving video was supplied, prefer it as the reference: Sora 2
@@ -113,7 +130,7 @@ class SoraNativeAPI:
                 prompt=prompt,
                 input_reference=reference_for_sora,
                 seconds=duration,
-                size="1280x720",
+                size=size,
             )
 
             # Clean up the still-frame temp file (driving video is operator-owned, leave it).
@@ -128,18 +145,6 @@ class SoraNativeAPI:
                 return None
 
             print(f"[SORA-NATIVE] Generation completed")
-
-            # Download — try multiple response structures
-            download_url = None
-            for attr_chain in [("url",), ("video", "url"), ("output", "url")]:
-                obj = video
-                for attr in attr_chain:
-                    obj = getattr(obj, attr, None)
-                    if obj is None:
-                        break
-                if isinstance(obj, str) and obj.startswith("http"):
-                    download_url = obj
-                    break
 
             # Download via download_content — the primary method for Sora
             print(f"[SORA-NATIVE] Downloading video {video.id}...")

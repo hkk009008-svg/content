@@ -1,7 +1,7 @@
 # tests/unit/test_sora_native.py
 """Characterization tests for sora_native.SoraNativeAPI (offline, mocked SDK).
 Locks in EXISTING behaviour — all tests must PASS.
-Candidate bugs are asserted against ACTUAL behaviour with # CANDIDATE BUG tags.
+Intentional behaviours are documented with # DOCUMENTED-INTENTIONAL tags.
 """
 from __future__ import annotations
 
@@ -92,7 +92,7 @@ def test_init_raises_on_empty_key():
     Asymmetric vs the rest of the API family (other clients return None on a bad
     key rather than raising at construction time).
     """
-    # CANDIDATE BUG (G(sora)1): raises EnvironmentError instead of returning None
+    # DOCUMENTED-INTENTIONAL (G(sora)1): raises EnvironmentError instead of returning None — matches veo_native; caller catches it
     with (
         patch("sora_native.settings", _fake_settings(api_key="")),
         patch("sora_native.openai.OpenAI"),
@@ -154,13 +154,17 @@ def test_invalid_duration_clamped_to_4(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# generate_video — resolution param is IGNORED (G(sora)2)
+# generate_video — resolution param maps to correct API size (G(sora)2 fixed)
 # ---------------------------------------------------------------------------
 
-def test_resolution_param_ignored_hardcoded_size(monkeypatch, tmp_path):
-    """G(sora)2: the `resolution` parameter is silently ignored.
-    `create_and_poll` is always called with size='1280x720' regardless of
-    what the caller passes for `resolution`.
+@pytest.mark.parametrize("resolution,expected_size", [
+    ("1080p", "1920x1080"),
+    ("720p", "1280x720"),
+    ("480p", "480x270"),
+])
+def test_resolution_maps_to_size(resolution, expected_size, monkeypatch, tmp_path):
+    """G(sora)2 (fixed): `resolution` param maps to the correct `size` kwarg.
+    RESOLUTION_MAP drives the mapping; 1080p unlocks Sora's max output quality.
     """
     api = _make_api()
     img_path = _real_jpeg(tmp_path)
@@ -172,14 +176,12 @@ def test_resolution_param_ignored_hardcoded_size(monkeypatch, tmp_path):
 
     monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
 
-    # Request 1080p — the API docstring says this is supported, code ignores it.
-    api.generate_video(image_path=img_path, prompt="test", output_path=out, resolution="1080p")
+    api.generate_video(image_path=img_path, prompt="test", output_path=out, resolution=resolution)
 
     call_kwargs = api.client.videos.create_and_poll.call_args
     actual_size = call_kwargs.kwargs.get("size")
-    # CANDIDATE BUG (G(sora)2): resolution param is ignored; size is always '1280x720'
-    assert actual_size == "1280x720", (
-        f"Expected hardcoded size '1280x720', got {actual_size!r}"
+    assert actual_size == expected_size, (
+        f"resolution={resolution!r} should map to size={expected_size!r}, got {actual_size!r}"
     )
 
 

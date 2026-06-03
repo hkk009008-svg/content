@@ -258,6 +258,7 @@ def generate_ai_video(
                 ),
                 output_path=output_mp4,
                 duration=sora_duration,
+                resolution="1080p",
                 driving_video_path=driving_video_path,
             )
             if result:
