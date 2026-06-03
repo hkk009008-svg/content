@@ -10,6 +10,9 @@ import unittest
 from unittest import mock
 
 import character_manager
+import domain.character_manager
+import domain.location_manager
+import domain.project_manager
 import location_manager
 import project_manager
 
@@ -136,12 +139,6 @@ class ProjectManagerMutationTests(ProjectPersistenceBase):
         )
         self.assertEqual(errors, [])
 
-    @unittest.skip(
-        "Pre-existing failure as of 2026-05-24: project_manager.mutate_project's lock "
-        "pattern was refactored after this test was written; the mock setup no longer "
-        "intercepts the lock acquisition. Tracked in ARCHITECTURE.md; fix is a "
-        "mock-update, not a behavior change."
-    )
     def test_mutate_project_acquires_lock_once(self):
         project = self.create_project()
         enter_count = 0
@@ -158,7 +155,9 @@ class ProjectManagerMutationTests(ProjectPersistenceBase):
             def __exit__(self, exc_type, exc, tb):
                 return False
 
-        with mock.patch.object(project_manager, "FileLock", FakeLock):
+        # FileLock is resolved at call-time inside domain.project_manager._acquire_project_lock,
+        # so we must patch the name in that module's namespace — not on the shim re-export.
+        with mock.patch.object(domain.project_manager, "FileLock", FakeLock):
             project_manager.mutate_project(
                 project["id"],
                 lambda latest_project: latest_project["global_settings"].update(
@@ -200,21 +199,20 @@ class AssetCommitFailureTests(ProjectPersistenceBase):
         image_path.write_bytes(b"not-a-real-image")
         return str(image_path)
 
-    @unittest.skip(
-        "Pre-existing failure as of 2026-05-24: character_manager asset-commit pathway "
-        "was refactored after this test was written; the cleanup verification needs "
-        "updated mocks. Tracked in ARCHITECTURE.md."
-    )
     def test_character_asset_prep_cleans_up_on_commit_failure(self):
         project = self.create_project()
         image_path = self._make_temp_image()
 
+        # add_character is imported directly into domain.character_manager's namespace
+        # (from domain.project_manager import add_character), so the call-site resolves
+        # the name there — patching the shim re-export has no effect.  Patch the
+        # domain module's attribute instead.
         with mock.patch.object(
-            character_manager, "DEEPFACE_AVAILABLE", False
+            domain.character_manager, "DEEPFACE_AVAILABLE", False
         ), mock.patch.object(
-            character_manager, "FAL_AVAILABLE", False
+            domain.character_manager, "FAL_AVAILABLE", False
         ), mock.patch.object(
-            character_manager,
+            domain.character_manager,
             "add_character",
             side_effect=project_manager.ProjectLockError(project["id"], 0.05),
         ):
@@ -229,17 +227,16 @@ class AssetCommitFailureTests(ProjectPersistenceBase):
         characters_dir = pathlib.Path(project_manager.get_project_dir(project["id"])) / "characters"
         self.assertEqual(list(characters_dir.iterdir()), [])
 
-    @unittest.skip(
-        "Pre-existing failure as of 2026-05-24: location_manager asset-commit pathway "
-        "was refactored after this test was written; the cleanup verification needs "
-        "updated mocks. Tracked in ARCHITECTURE.md."
-    )
     def test_location_asset_prep_cleans_up_on_commit_failure(self):
         project = self.create_project()
         image_path = self._make_temp_image()
 
+        # add_location is imported directly into domain.location_manager's namespace
+        # (from domain.project_manager import add_location), so the call-site resolves
+        # the name there — patching the shim re-export has no effect.  Patch the
+        # domain module's attribute instead.
         with mock.patch.object(
-            location_manager,
+            domain.location_manager,
             "add_location",
             side_effect=project_manager.ProjectLockError(project["id"], 0.05),
         ):
