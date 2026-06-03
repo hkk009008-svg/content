@@ -16,7 +16,8 @@ import openai
 from config.settings import settings
 
 # Maps the public resolution string to the Sora API `size` parameter value.
-# Mirrors ltx_native.RESOLUTION_MAP shape.
+# Mirrors the naming convention of ltx_native.RESOLUTION_MAP (sora uses flat
+# "WxH" strings; ltx uses {"width": N, "height": N} dicts).
 RESOLUTION_MAP: dict[str, str] = {
     "480p": "480x270",
     "720p": "1280x720",
@@ -103,7 +104,7 @@ class SoraNativeAPI:
             image_data_url = self._image_to_data_url(image_path)
 
             # Resolve resolution to the API size string, then parse W×H for resize.
-            size = RESOLUTION_MAP.get(resolution, "1280x720")
+            size = RESOLUTION_MAP.get(resolution, RESOLUTION_MAP["720p"])
             w_str, h_str = size.split("x")
             target_w, target_h = int(w_str), int(h_str)
 
