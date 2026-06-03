@@ -362,7 +362,12 @@ When suggesting prompt_mutation for failures:
         else:
             threshold = 0.70
 
-        identity_passed = identity_score >= threshold
+        # A skipped identity result has overall_score=None (couldn't be checked):
+        # treat as non-blocking — don't drive an identity mutation off a non-score.
+        if identity_score is None:
+            identity_passed = True
+        else:
+            identity_passed = identity_score >= threshold
 
         # Check coherence
         coherent = True

@@ -12,6 +12,22 @@ from performance.identity_gate import (
     DEFAULT_PERFORMANCE_FLOOR,
 )
 
+from identity.types import IdentityValidationResult
+
+
+def _skip_result():
+    """An IdentityValidationResult with overall_score=None (skipped state, Part-3 T1 schema)."""
+    return IdentityValidationResult(
+        passed=True,
+        overall_score=None,
+        character_results={},
+        frames_sampled=0,
+        video_duration_seconds=0.0,
+        shot_type="medium",
+        threshold_used=0.7,
+        skipped=True,
+    )
+
 
 class TestValidatePerformanceTake:
     def test_missing_video_returns_none(self):
@@ -45,3 +61,41 @@ class TestFloorConstant:
     def test_floor_is_sane(self):
         # Just guard against accidental 0.99 floors that would fail every take.
         assert 0.5 <= DEFAULT_PERFORMANCE_FLOOR <= 0.9
+
+
+# ===================================================================
+# TestArcfaceScoreSkipGuard — _arcface_score() None-score guard
+# ===================================================================
+
+
+class TestArcfaceScoreSkipGuard:
+    """Regression: when validate_image returns a skipped result (overall_score=None),
+    _arcface_score must return None WITHOUT logging an error (Part-3 T2, pre-skip).
+
+    Before the guard: float(None) raises TypeError; the except-block catches it and
+    returns None but prints "[PerformanceGate] ArcFace score failed …" — misleading.
+    After the guard: early-return None before float(), no log line.
+    """
+
+    @patch("performance.identity_gate._get_validator")
+    def test_skip_result_returns_none_without_error_log(self, mock_get_validator, capsys):
+        """_arcface_score returns None cleanly on a skip result — no error log."""
+        from performance.identity_gate import _arcface_score
+
+        class _MockValidator:
+            def validate_image(self, *args, **kwargs):
+                return _skip_result()
+
+        mock_get_validator.return_value = _MockValidator()
+
+        result = _arcface_score("/fake/frame.png", "/fake/anchor.png")
+
+        # Must return None (skip = no comparable face).
+        assert result is None
+
+        # Must NOT emit the "[PerformanceGate] ArcFace score failed" error line —
+        # that marker is the observable signal that the old exception-path fired.
+        captured = capsys.readouterr()
+        assert "ArcFace score failed" not in captured.out, (
+            "Detected old exception-path log — explicit None guard missing"
+        )

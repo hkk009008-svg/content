@@ -12,6 +12,22 @@ from face_validator_gate import (
     should_halt,
 )
 
+from identity.types import IdentityValidationResult
+
+
+def _skip_result():
+    """An IdentityValidationResult with overall_score=None (skipped state, Part-3 T1 schema)."""
+    return IdentityValidationResult(
+        passed=True,
+        overall_score=None,
+        character_results={},
+        frames_sampled=0,
+        video_duration_seconds=0.0,
+        shot_type="medium",
+        threshold_used=0.7,
+        skipped=True,
+    )
+
 
 # ===================================================================
 # 1. TestScoreCandidate — score_candidate()  (line 168)
@@ -346,3 +362,46 @@ class TestSelectBest:
         high = _make_score(0.9)
         result = select_best([low, high, mid])
         assert result is high
+
+
+# ===================================================================
+# 5. TestArcfaceScoreSkipGuard — _arcface_score() None-score guard
+# ===================================================================
+
+
+class TestArcfaceScoreSkipGuard:
+    """Regression: when validate_image returns a skipped result (overall_score=None),
+    _arcface_score must return None WITHOUT logging an error (Part-3 T2, pre-skip).
+
+    Before the guard: float(None) raises TypeError; the except-block catches it and
+    returns None but prints "[FaceGate] ArcFace failed …" — a misleading error for a
+    legitimate skip.  After the guard: early-return None before float(), no log line.
+    """
+
+    def test_skip_result_returns_none_without_error_log(self, monkeypatch, tmp_path, capsys):
+        """_arcface_score returns None cleanly on a skip result — no 'ArcFace failed' log."""
+        from face_validator_gate import _arcface_score
+
+        fake_img = tmp_path / "img.jpg"
+        fake_img.write_bytes(b"fake")
+        fake_ref = tmp_path / "ref.jpg"
+        fake_ref.write_bytes(b"fake")
+
+        # Build a mock validator whose validate_image returns a skip result.
+        class _MockValidator:
+            def validate_image(self, *args, **kwargs):
+                return _skip_result()
+
+        monkeypatch.setattr("face_validator_gate._get_validator", lambda: _MockValidator())
+
+        result = _arcface_score(str(fake_img), str(fake_ref))
+
+        # Must return None (no comparable face / skip).
+        assert result is None
+
+        # Must NOT emit a misleading "[FaceGate] ArcFace failed" error — that marker
+        # is the observable signal that the old float(None)-via-exception path fired.
+        captured = capsys.readouterr()
+        assert "ArcFace failed" not in captured.out, (
+            "Detected old exception-path log — explicit None guard missing"
+        )

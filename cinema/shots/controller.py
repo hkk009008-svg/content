@@ -653,7 +653,7 @@ class ShotController:
                 character_id=primary_char_id,
                 threshold=threshold,
             )
-            identity_score = id_result.overall_score
+            identity_score = id_result.overall_score  # None on skip = not scored
             take["metadata"]["identity_score"] = identity_score
             # Surface rich diagnostics from the singleton — the deprecated
             # validate_identity_image wrapper discarded these. Retry logic +
@@ -1038,7 +1038,9 @@ class ShotController:
                 attempt=0,
                 max_attempts=settings.get("identity_retry_max", 3),
             )
-            identity_score = vid_result.overall_score if hasattr(vid_result, "overall_score") else 0.0
+            identity_score = (vid_result.overall_score
+                              if hasattr(vid_result, "overall_score") and vid_result.overall_score is not None
+                              else 0.0)
             take["metadata"]["identity_score"] = identity_score
 
         # 2. Motion fidelity gate
@@ -1821,7 +1823,7 @@ class ShotController:
                 id_result = _get_shared_validator().validate_image(
                     str(image_path), primary_ref, character_id=chars[0]
                 )
-                result["scores"]["identity"] = id_result.overall_score
+                result["scores"]["identity"] = id_result.overall_score  # None on skip = not scored
                 if not id_result.passed:
                     # Specific failure mode + recommended PuLID delta replace
                     # the previous generic "Low identity score" string.

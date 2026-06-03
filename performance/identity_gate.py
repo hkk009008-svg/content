@@ -69,6 +69,8 @@ def _arcface_score(
         return None
     try:
         result = v.validate_image(frame_path, anchor_path, threshold=threshold)
+        if result.overall_score is None:        # skipped: no comparable face
+            return None
         return float(result.overall_score)
     except Exception as e:
         print(f"[PerformanceGate] ArcFace score failed: {e}")

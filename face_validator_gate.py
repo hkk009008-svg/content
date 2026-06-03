@@ -139,6 +139,8 @@ def _arcface_score(
         return None
     try:
         result = validator.validate_image(image_path, reference_path, threshold=threshold)
+        if result.overall_score is None:        # skipped: no comparable face
+            return None
         return float(result.overall_score)
     except Exception as e:
         print(f"[FaceGate] ArcFace failed for {os.path.basename(image_path)}: {e}")

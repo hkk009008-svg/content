@@ -22,6 +22,21 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from llm.chief_director import ChiefDirector
+from identity.types import IdentityValidationResult
+
+
+def _skip_result():
+    """An IdentityValidationResult with overall_score=None (skipped state, Part-3 T1 schema)."""
+    return IdentityValidationResult(
+        passed=True,
+        overall_score=None,
+        character_results={},
+        frames_sampled=0,
+        video_duration_seconds=0.0,
+        shot_type="medium",
+        threshold_used=0.7,
+        skipped=True,
+    )
 
 
 # ─── helpers ────────────────────────────────────────────────────────────────
@@ -313,3 +328,50 @@ class TestModifiedWithoutModificationsDowngrades:
 
         # No violations → not the uncorrected-plan risk → not downgraded.
         assert result["decision"] == "MODIFIED"
+
+
+# ─── (f) evaluate_generation_quality with skipped identity result ────────────
+
+
+class TestEvaluateGenerationQualitySkipGuard:
+    """Regression: evaluate_generation_quality must not crash when identity_result
+    has overall_score=None (skipped state).
+
+    Before the guard (chief_director.py line ~365):
+        identity_score = None  →  None >= threshold  →  TypeError crash.
+
+    After the guard:
+        identity_passed = True  (skip = non-blocking, treat as pass).
+    """
+
+    def test_skip_identity_result_does_not_raise(self):
+        """evaluate_generation_quality with a skip result must not raise TypeError."""
+        cd = _make_chief_director()
+
+        # Should not raise — before the guard this throws TypeError on None >= threshold.
+        result = cd.evaluate_generation_quality(
+            image_path="/fake/img.jpg",
+            reference_path="/fake/ref.jpg",
+            identity_result=_skip_result(),
+        )
+
+        # Skip result is non-blocking: identity_passed should be True so the method
+        # does not drive an identity mutation decision off a non-score.
+        assert isinstance(result, dict), "result must be a dict"
+        assert "decision" in result, f"result keys: {list(result.keys())}"
+
+    def test_skip_identity_result_treated_as_non_blocking(self):
+        """A skipped identity (overall_score=None) must be treated as passing:
+        if coherence is also nominal the decision should be ACCEPT (not a mutation path)."""
+        cd = _make_chief_director()
+
+        result = cd.evaluate_generation_quality(
+            image_path="/fake/img.jpg",
+            reference_path="/fake/ref.jpg",
+            identity_result=_skip_result(),
+        )
+
+        # With skip + no coherence issue, identity is non-blocking → ACCEPT.
+        assert result.get("decision") == "ACCEPT", (
+            f"Expected ACCEPT for skipped identity, got {result.get('decision')}"
+        )
