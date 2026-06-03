@@ -983,3 +983,48 @@ def test_skipped_defaults_false():
 
 def test_generated_image_missing_reason_exists():
     assert FailureReason.GENERATED_IMAGE_MISSING.value == "generated_image_missing"
+
+
+# ---------------------------------------------------------------------------
+# Part-3 T5: _vision_llm_validate_image skip/fail marker mapping
+# ---------------------------------------------------------------------------
+
+class TestVisionFallbackMarkerMapping:
+    """Test that _vision_llm_validate_image maps skip/missing_generated markers
+    from validate_identity_vision through to IdentityValidationResult correctly.
+    """
+
+    def test_vision_skip_marker_returns_skipped_result(self):
+        """vision_fallback returns skip=True → validate_image returns skipped=True, overall_score=None."""
+        skip_marker = {"match": True, "skip": True, "confidence": None, "issues": [], "source": "default"}
+        mock_fallback = MagicMock(return_value=skip_marker)
+
+        with patch("identity.validator.os.path.exists", return_value=True), \
+             patch("identity.validator.DEEPFACE_AVAILABLE", False):
+            validator = IdentityValidator(vision_fallback=mock_fallback)
+            result = validator.validate_image(
+                "/gen.jpg", "/ref.jpg",
+                character_id="char_a",
+                shot_type="medium",
+            )
+
+        assert result.skipped is True
+        assert result.overall_score is None
+        assert result.passed is True
+
+    def test_vision_missing_generated_marker_returns_failed_result(self):
+        """vision_fallback returns missing_generated=True → validate_image returns passed=False."""
+        fail_marker = {"match": False, "missing_generated": True, "confidence": 0.0, "issues": ["generated image missing"], "source": "default"}
+        mock_fallback = MagicMock(return_value=fail_marker)
+
+        with patch("identity.validator.os.path.exists", return_value=True), \
+             patch("identity.validator.DEEPFACE_AVAILABLE", False):
+            validator = IdentityValidator(vision_fallback=mock_fallback)
+            result = validator.validate_image(
+                "/gen.jpg", "/ref.jpg",
+                character_id="char_a",
+                shot_type="medium",
+            )
+
+        assert result.passed is False
+        assert result.skipped is False

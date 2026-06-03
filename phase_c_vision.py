@@ -109,9 +109,10 @@ def quality_control_image(image_path: str, prompt_text: str = "") -> bool:
     Validates structural integrity of a generated latent frame using GPT-4o Vision.
     Returns True if image passes quality threshold (score >= 7/10), False otherwise.
     """
+    # Unreached in production (zero callers on main/feat); fixed for consistency.
     if not os.path.exists(image_path):
-        print(f"[QC] WARNING: Image not found: {image_path} — skipping QC")
-        return True
+        print(f"[QC] WARNING: Image not found: {image_path} — QC fail (missing)")
+        return False
 
     result = validate_shot_quality_vision(image_path, prompt_text)
     passed = result.get("pass", True)
@@ -168,9 +169,10 @@ def validate_shot_quality_vision(image_path: str, original_prompt: str) -> dict:
         print("[VISION-QA] WARNING: No OPENAI_API_KEY — returning default pass")
         return default_pass
 
+    # Unreached in production (zero callers on main/feat); fixed for consistency.
     if not os.path.exists(image_path):
         print(f"[VISION-QA] WARNING: Image not found: {image_path}")
-        return default_pass
+        return {"pass": False, "score": 0, "issues": ["image missing"], "suggestions": [], "source": "default"}
 
     try:
         from openai import OpenAI
@@ -259,10 +261,10 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
 
     if not os.path.exists(reference_path):
         print(f"[VISION-ID] WARNING: Reference image not found: {reference_path}")
-        return default_pass
+        return {"match": True, "skip": True, "confidence": None, "issues": [], "source": "default"}
     if not os.path.exists(generated_path):
         print(f"[VISION-ID] WARNING: Generated image not found: {generated_path}")
-        return default_pass
+        return {"match": False, "missing_generated": True, "confidence": 0.0, "issues": ["generated image missing"], "source": "default"}
 
     try:
         from anthropic import Anthropic

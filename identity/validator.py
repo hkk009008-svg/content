@@ -743,6 +743,13 @@ class IdentityValidator:
             )
         result = self._vision_fallback(reference_path, image_path)
 
+        # Map skip/fail markers from validate_identity_vision to the same
+        # policy as the DeepFace path (_skipped_result / _missing_output_result).
+        if result.get("skip"):
+            return self._skipped_result(shot_type, threshold)
+        if result.get("missing_generated"):
+            return self._missing_output_result(shot_type, threshold)
+
         confidence = result.get("confidence", 0.0)
         matched = confidence >= threshold
         failure = FailureReason.PASSED if matched else FailureReason.WRONG_PERSON

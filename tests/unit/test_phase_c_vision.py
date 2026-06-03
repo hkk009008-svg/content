@@ -298,17 +298,12 @@ class TestFaceSwapVideoFrames:
 
 class TestQualityControlImage:
 
-    def test_missing_file_returns_true(self):
-        """Image not found → silently returns True (skips QC).
-
-        # CANDIDATE BUG (G1): missing file silently PASSES — same class as
-        # identity G1 (validator returns passed=True on missing file).
-        """
+    def test_missing_file_returns_false(self):
+        """Image not found → returns False (consistent no-pass policy on missing files)."""
         with patch.object(pcv.os.path, "exists", return_value=False):
             result = pcv.quality_control_image("/missing.jpg")
 
-        # CANDIDATE BUG (G1): missing file returns True instead of False/error
-        assert result is True
+        assert result is False
 
     def test_delegates_to_validate_shot_quality_vision(self):
         """File present → calls validate_shot_quality_vision, returns its 'pass' value."""
@@ -354,17 +349,14 @@ class TestValidateShotQualityVision:
             "score": 7, "issues": [], "pass": True, "suggestions": [], "source": "default"
         }
 
-    def test_file_missing_returns_default_pass(self):
-        """File not found → default_pass (G1: silent pass on missing file).
-
-        # CANDIDATE BUG (G1): validate_shot_quality_vision silently PASSES when
-        # the image file is missing, rather than returning pass=False.
-        """
+    def test_file_missing_returns_fail(self):
+        """File not found → pass=False, score=0, issues=['image missing'] (consistent no-pass policy)."""
         with patch.object(pcv.os.path, "exists", return_value=False):
             result = pcv.validate_shot_quality_vision("/missing.jpg", "prompt")
 
-        # CANDIDATE BUG (G1): missing file returns pass=True default_pass
-        assert result["pass"] is True
+        assert result["pass"] is False
+        assert result["score"] == 0
+        assert "image missing" in result["issues"]
         assert result["source"] == "default"
 
     def test_happy_path_score_8_returns_pass_true(self):
@@ -461,36 +453,30 @@ class TestValidateIdentityVision:
             "match": True, "confidence": 0.7, "issues": [], "source": "default"
         }
 
-    def test_reference_missing_returns_default_pass(self):
-        """Reference image not found → default_pass (G1: silent pass on missing file).
-
-        # CANDIDATE BUG (G1): validate_identity_vision silently PASSES when reference
-        # file is missing, rather than returning match=False.
-        """
+    def test_reference_missing_returns_skip_marker(self):
+        """Reference image not found → skip marker (match=True, skip=True, confidence=None)."""
         def _exists(p):
             return "/gen" in p  # gen exists, ref doesn't
 
         with patch.object(pcv.os.path, "exists", side_effect=_exists):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
-        # CANDIDATE BUG (G1): missing ref returns match=True default_pass
+        assert result["skip"] is True
         assert result["match"] is True
+        assert result["confidence"] is None
         assert result["source"] == "default"
 
-    def test_generated_missing_returns_default_pass(self):
-        """Generated image not found → default_pass.
-
-        # CANDIDATE BUG (G1): validate_identity_vision silently PASSES when generated
-        # file is missing, rather than returning match=False.
-        """
+    def test_generated_missing_returns_fail_marker(self):
+        """Generated image not found → fail marker (match=False, missing_generated=True, confidence=0.0)."""
         def _exists(p):
             return "/ref" in p  # ref exists, gen doesn't
 
         with patch.object(pcv.os.path, "exists", side_effect=_exists):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
-        # CANDIDATE BUG (G1): missing gen returns match=True default_pass
-        assert result["match"] is True
+        assert result["missing_generated"] is True
+        assert result["match"] is False
+        assert result["confidence"] == 0.0
         assert result["source"] == "default"
 
     def test_confidence_085_returns_match_true(self):
