@@ -134,7 +134,7 @@ class TestSchemaCoverage:
         "controlnet_pose_strength",
         "controlnet_tile_strength",
         "redux_strength",
-        "hires_fix_enabled", "hires_fix_denoise",
+        "hires_fix_enabled", "hires_fix_denoise", "hires_fix_steps",
         "face_detailer_enabled", "face_detailer_guide_size",
         "supir_enabled", "supir_steps",
     }
@@ -155,7 +155,8 @@ class TestSchemaCoverage:
     }
 
     def test_schema_covers_comfycontrols_and_halt_knobs(self):
-        # 17 ComfyControls + 7 halt knobs + 1 parallelism knob = 25 total schemad keys.
+        # 18 ComfyControls + 7 halt knobs + 1 parallelism knob = 26 total schemad keys.
+        # (T3 added hires_fix_steps alongside hires_fix_enabled/hires_fix_denoise.)
         assert set(_MAX_TIER_KNOB_SCHEMA.keys()) == (
             self.COMFYCONTROLS_KEYS | self.HALT_KNOB_KEYS | self.PARALLEL_KNOB_KEYS
         )
