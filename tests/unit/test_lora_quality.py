@@ -145,3 +145,70 @@ def test_validate_mean_ignores_has_arc_false(monkeypatch, tmp_path):
                                    strengths=[0.55], prompts=["a", "b", "c"], comfyui_url="http://x:8188")
     # mean of 0.7 and 0.5 (skip the has_arc=False sample) = 0.6
     assert abs(res.best_score - 0.6) < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — train_character_lora_gated (orchestrator)
+# ---------------------------------------------------------------------------
+
+def _qr(score, strength, skipped=False, reason=""):
+    return lq.LoraQualityResult(best_score=score, best_strength=strength,
+                                skipped=skipped, skip_reason=reason)
+
+
+def test_gated_accepts_on_first_pass(monkeypatch):
+    trains = {"n": 0}
+    monkeypatch.setattr(lq, "_train_character_lora",
+                        lambda pd, ch, **k: (trains.__setitem__("n", trains["n"] + 1)
+                                             or {"success": True, "lora_path": "/l/c1.safetensors"}))
+    monkeypatch.setattr(lq, "validate_lora_quality", lambda lp, ch, **k: _qr(0.74, 0.55))
+    out = lq.train_character_lora_gated("/proj", {"id": "c1"})
+    assert trains["n"] == 1
+    assert out["rejected"] is False and out["quality_warning"] is False
+    assert out["quality_score"] == 0.74 and out["best_strength"] == 0.55
+
+
+def test_gated_escalates_then_keeps_best(monkeypatch):
+    configs = []
+    def fake_train(pd, ch, *, config_overrides=None, **k):
+        configs.append(dict(config_overrides or {}))
+        return {"success": True, "lora_path": f"/l/c1_{len(configs)}.safetensors"}
+    seq = iter([_qr(0.50, 0.55), _qr(0.55, 0.7), _qr(0.58, 0.55)])  # never reaches 0.6
+    monkeypatch.setattr(lq, "_train_character_lora", fake_train)
+    monkeypatch.setattr(lq, "validate_lora_quality", lambda lp, ch, **k: next(seq))
+    out = lq.train_character_lora_gated("/proj", {"id": "c1"})
+    assert len(configs) == 3                              # 1 base + 2 retrains
+    assert configs[1].get("steps") == 4500                # +50% of 3000
+    assert configs[2].get("rank") == 64 and configs[2].get("alpha") == 64
+    assert out["rejected"] is False and out["quality_warning"] is True   # best 0.58 < 0.6, >= 0.45
+    assert out["quality_score"] == 0.58 and out["best_strength"] == 0.55  # best across attempts
+
+
+def test_gated_rejects_when_net_negative(monkeypatch):
+    monkeypatch.setattr(lq, "_train_character_lora",
+                        lambda pd, ch, **k: {"success": True, "lora_path": "/l/c1.safetensors"})
+    monkeypatch.setattr(lq, "validate_lora_quality", lambda lp, ch, **k: _qr(0.40, 0.55))  # always < baseline
+    out = lq.train_character_lora_gated("/proj", {"id": "c1"})
+    assert out["rejected"] is True and out["quality_warning"] is True
+
+
+def test_gated_skip_registers_unvalidated(monkeypatch):
+    trains = {"n": 0}
+    monkeypatch.setattr(lq, "_train_character_lora",
+                        lambda pd, ch, **k: (trains.__setitem__("n", trains["n"] + 1)
+                                             or {"success": True, "lora_path": "/l/c1.safetensors"}))
+    monkeypatch.setattr(lq, "validate_lora_quality",
+                        lambda lp, ch, **k: _qr(None, None, skipped=True, reason="comfyui_unreachable"))
+    out = lq.train_character_lora_gated("/proj", {"id": "c1"})
+    assert trains["n"] == 1                               # no retrain on skip
+    assert out["rejected"] is False and out["quality_score"] is None and out["skipped"] is True
+
+
+def test_gated_train_failure_returns_immediately_no_retrain(monkeypatch):
+    trains = {"n": 0}
+    def fail_train(pd, ch, **k):
+        trains["n"] += 1
+        return {"success": False, "error": "trainer crashed"}
+    monkeypatch.setattr(lq, "_train_character_lora", fail_train)
+    out = lq.train_character_lora_gated("/proj", {"id": "c1"})
+    assert trains["n"] == 1 and out["success"] is False   # infra failure -> no retrain

@@ -216,3 +216,69 @@ def validate_lora_quality(lora_path, character, *, strengths=None, prompts=None,
                                  skip_reason="generation_or_scoring_unavailable")
     best = max(scored, key=lambda s: s.mean_arc)
     return LoraQualityResult(best_score=best.mean_arc, best_strength=best.strength, sweep=sweep)
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — train_character_lora_gated (orchestrator)
+# ---------------------------------------------------------------------------
+
+PASS_THRESHOLD = 0.6
+NET_NEGATIVE_BASELINE = 0.45
+MAX_LORA_TRAIN_ATTEMPTS = 3
+_BASE_STEPS = 3000      # mirror DEFAULT_TRAIN_CONFIG["steps"] (prep/lora_training.py:103)
+_HIGHER_RANK = 64       # escalate from base 32 (prep/lora_training.py:100)
+
+
+def _train_character_lora(project_dir, character, *, config_overrides=None):
+    from prep.lora_training import train_character_lora
+    return train_character_lora(project_dir, character, config_overrides=config_overrides)
+
+
+def _escalate_config(config: dict, action: LoraAction) -> dict:
+    nxt = dict(config)
+    if action is LoraAction.RETRY_MORE_STEPS:
+        nxt["steps"] = int(nxt.get("steps", _BASE_STEPS) * 1.5)
+    elif action is LoraAction.RETRY_HIGHER_RANK:
+        nxt["rank"] = _HIGHER_RANK
+        nxt["alpha"] = _HIGHER_RANK
+    return nxt
+
+
+def _gated_result(train: dict, *, score, strength, lora_path, warning, rejected,
+                  skipped=False, skip_reason="", attempts=1) -> dict:
+    out = dict(train)
+    out.update(lora_path=lora_path, quality_score=score, best_strength=strength,
+               quality_warning=warning, rejected=rejected, skipped=skipped,
+               skip_reason=skip_reason, attempts=attempts)
+    return out
+
+
+def train_character_lora_gated(project_dir, character, *, config_overrides=None) -> dict:
+    """Train -> validate -> decide loop (spec section 6.4). Persists nothing itself;
+    returns the best result + quality_warning + rejected for the caller to register."""
+    best = None   # (score, strength, lora_path)
+    config = dict(config_overrides or {})
+    for attempt in range(MAX_LORA_TRAIN_ATTEMPTS):
+        train = _train_character_lora(project_dir, character, config_overrides=config)
+        if not train.get("success"):
+            return train                                  # infra/train error -> surface, NO retrain
+        result = validate_lora_quality(train["lora_path"], character)
+        if result.skipped:                                # no GPU/anchor -> register unvalidated
+            return _gated_result(train, score=None, strength=None, lora_path=train["lora_path"],
+                                 warning=False, rejected=False, skipped=True,
+                                 skip_reason=result.skip_reason, attempts=attempt + 1)
+        if best is None or result.best_score > best[0]:
+            best = (result.best_score, result.best_strength, train["lora_path"])
+        action = _next_lora_action(attempt, best[0], threshold=PASS_THRESHOLD,
+                                   baseline=NET_NEGATIVE_BASELINE, budget=MAX_LORA_TRAIN_ATTEMPTS)
+        if action is LoraAction.ACCEPT:
+            return _gated_result(train, score=best[0], strength=best[1], lora_path=best[2],
+                                 warning=best[0] < PASS_THRESHOLD, rejected=False, attempts=attempt + 1)
+        if action is LoraAction.REJECT:
+            return _gated_result(train, score=best[0], strength=best[1], lora_path=best[2],
+                                 warning=True, rejected=True, attempts=attempt + 1)
+        config = _escalate_config(config, action)
+    # Unreachable (budget-exhausted branch always ACCEPT/REJECTs), but be safe:
+    return _gated_result(train, score=best[0], strength=best[1], lora_path=best[2],
+                         warning=best[0] < PASS_THRESHOLD, rejected=best[0] < NET_NEGATIVE_BASELINE,
+                         attempts=MAX_LORA_TRAIN_ATTEMPTS)
