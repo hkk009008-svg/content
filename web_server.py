@@ -1417,6 +1417,9 @@ def api_generate_style_rules(pid):
     data = request.json or {}
     settings = project.get("global_settings", {})
 
+    # use_web_research defaults True: cinematography research is on by default (a client may
+    # send use_web_research=False to skip the Tavily calls). Note a non-empty reference_films
+    # additionally triggers per-film aesthetic research (_research_aesthetic) when enabled.
     rules = generate_style_rules(
         project_name=project["name"],
         mood=data.get("mood", settings.get("music_mood", "cinematic")),
