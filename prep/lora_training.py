@@ -35,8 +35,10 @@ API
 ---
 prepare_character_lora_dataset(project_dir, character) -> dict
 train_character_lora(project_dir, character, base_model="FLUX1/flux1-dev-fp16.safetensors") -> dict
-validate_lora_quality(lora_path, character) -> float
 get_lora_status(project_dir, char_id) -> dict
+
+Note: validate_lora_quality has moved to prep.lora_quality (real ArcFace oracle).
+The gated orchestrator (train + validate + retrain loop) is prep.lora_quality.train_character_lora_gated.
 """
 
 from __future__ import annotations
@@ -472,26 +474,10 @@ def train_character_lora(
         _write_status(project_dir, status)
         return {"success": False, "error": status.error, "status": asdict(status)}
 
-    # 5. Validate
-    status.status = "validating"
+    # Validation now lives in prep.lora_quality.train_character_lora_gated.
+    # This function is pure single-train; quality_score is left unset (None).
+    status.quality_score = None
     status.lora_path = lora_path
-    _write_status(project_dir, status)
-
-    try:
-        quality = validate_lora_quality(lora_path, character)
-        # Sentinel value means the validation path isn't implemented yet — keep
-        # quality_score as None so the UI shows "not validated" rather than a
-        # confusing -1.0. Once validate_lora_quality is real, this branch will
-        # also store legitimate failures (e.g., 0.0 = unrecognizable).
-        if quality == LORA_VALIDATION_SKIPPED:
-            status.quality_score = None
-        else:
-            status.quality_score = quality
-    except Exception as e:
-        # Validation failure is non-fatal — the LoRA still exists.
-        print(f"[LoRA] validation skipped: {e}")
-        status.quality_score = None
-
     status.status = "done"
     status.progress_percent = 100.0
     status.finished_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -503,34 +489,6 @@ def train_character_lora(
         "quality_score": status.quality_score,
         "status": asdict(status),
     }
-
-
-# ---------------------------------------------------------------------------
-# Quality validation — uses ArcFace gate to score a few test generations
-# ---------------------------------------------------------------------------
-
-LORA_VALIDATION_SKIPPED = -1.0  # Sentinel returned when validation isn't implemented yet.
-
-
-def validate_lora_quality(lora_path: str, character: dict) -> float:
-    """STUB — LoRA quality validation is not yet implemented.
-
-    Always returns LORA_VALIDATION_SKIPPED (-1.0). A real implementation would:
-      1. Generate 4 reference shots with the LoRA + the character's trigger token.
-      2. Score each against the character's canonical_reference via ArcFace.
-      3. Return mean ArcFace score on [0.0, 1.0].
-
-    The stub is kept as a hook so:
-      - The caller (train_character_lora) has somewhere to call from when the
-        real implementation lands.
-      - The UI can render "validation skipped" today and "validation score: N"
-        tomorrow without API changes.
-
-    Callers should compare against LORA_VALIDATION_SKIPPED to detect the
-    not-implemented case (rather than treating any negative value as failure).
-    """
-    print(f"[LoRA] validate_lora_quality is a stub; returning LORA_VALIDATION_SKIPPED for {os.path.basename(lora_path) if lora_path else '?'}")
-    return LORA_VALIDATION_SKIPPED
 
 
 # ---------------------------------------------------------------------------

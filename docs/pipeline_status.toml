@@ -46,9 +46,9 @@ note = "F2b wired it: motion_render._get_storyboard_mode (:45) gates _run_storyb
 [[component]]
 id = "lora_validation"
 title = "LoRA training quality gate"
-status = "stubbed"
-anchor = "prep/lora_training.py:validate_lora_quality"
-note = "§10 F-A.2: returns LORA_VALIDATION_SKIPPED (-1.0) unconditionally; bad LoRA weights silently degrade max-tier identity. Impl candidate (brief P1-7)."
+status = "implemented"
+anchor = "prep/lora_quality.py:validate_lora_quality"
+note = "§10 F-A.2: real ArcFace oracle — strength sweep + score vs. reference. Gated orchestrator is train_character_lora_gated. Stub + LORA_VALIDATION_SKIPPED removed from prep.lora_training (T1 task 5)."
 
 [[component]]
 id = "batch_scene_optimize"
