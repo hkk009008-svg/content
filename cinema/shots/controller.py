@@ -525,6 +525,9 @@ class ShotController:
         in_frame = shot.get("characters_in_frame") or []
         primary_char_id = shot.get("primary_character") or (in_frame[0] if in_frame else "")
         char_lora_path = char_lora_paths.get(primary_char_id) or None
+        # Per-character LoRA strength validated at train-time (Task 7).
+        # None → tier default (e.g. 1.0) in _inject_identity. Backward-compat.
+        char_lora_strength = (settings.get("char_lora_strengths", {}) or {}).get(primary_char_id)
         style_refs = settings.get("style_reference_paths", []) or []
         style_reference = style_refs[0] if style_refs else None
 
@@ -631,6 +634,7 @@ class ShotController:
             negative_prompt=negative_override,
             quality_tier=quality_tier,
             char_lora_path=char_lora_path,
+            char_lora_strength=char_lora_strength,
             style_reference=style_reference,
             shot_hint={"prompt": full_prompt, "characters_in_frame": shot.get("characters_in_frame", []),
                        "camera": shot.get("camera", ""),

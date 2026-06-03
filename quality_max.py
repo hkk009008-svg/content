@@ -456,15 +456,26 @@ def _prune_unavailable(workflow: dict, available: Set[str], has_character: bool,
 
 
 def _inject_identity(workflow: dict, char_lora: Optional[str], face_anchor_remote: Optional[str],
-                      params: dict, has_character: bool):
-    """Wire LoRA name + face ref into the identity stack."""
+                      params: dict, has_character: bool,
+                      char_lora_strength: Optional[float] = None):
+    """Wire LoRA name + face ref into the identity stack.
+
+    char_lora_strength: per-character validated strength from project settings.
+        When provided (not None), overrides the tier-default params["lora_strength_model"].
+        None (the default) → use params["lora_strength_model"] unchanged (backward-compat).
+    """
     if not has_character:
         return
     if "700" in workflow:
         if char_lora:
             workflow["700"]["inputs"]["lora_name"] = char_lora
-            workflow["700"]["inputs"]["strength_model"] = params.get("lora_strength_model", 1.0)
-            workflow["700"]["inputs"]["strength_clip"] = params.get("lora_strength_clip", 1.0)
+            # Use the validated per-character strength if provided; fall back to
+            # the tier-default (params["lora_strength_model"], typically 1.0).
+            # This is intentional: `if char_lora_strength is not None` so that
+            # strength=0.0 is honored (not treated as falsy → tier default).
+            s = char_lora_strength if char_lora_strength is not None else params.get("lora_strength_model", 1.0)
+            workflow["700"]["inputs"]["strength_model"] = s
+            workflow["700"]["inputs"]["strength_clip"] = s
         else:
             # No trained per-char LoRA -> drop LoraLoader(700) entirely and feed
             # PuLID(100)/CLIP consumers from the base loaders, so the graph
@@ -660,6 +671,7 @@ def generate_ai_broll_max(
     negative_prompt: str = "",
     # max-tier extras:
     char_lora_path: Optional[str] = None,
+    char_lora_strength: Optional[float] = None,
     style_reference: Optional[str] = None,
     shot_hint: Optional[dict] = None,
     ctx: Optional["PipelineContext"] = None,
@@ -815,7 +827,8 @@ def generate_ai_broll_max(
     )
 
     # ---- Inject per-axis params ----
-    _inject_identity(workflow, char_lora_path, face_anchor_remote, params, has_character)
+    _inject_identity(workflow, char_lora_path, face_anchor_remote, params, has_character,
+                     char_lora_strength=char_lora_strength)
     _inject_conditioning(workflow, prompt, init_remote, style_remote, params, has_character)
     _inject_sampling(workflow, params)
     _inject_latent_source(workflow, init_remote, params)
@@ -917,7 +930,8 @@ def generate_ai_broll_max(
               f"Boosting PuLID weight +0.15 and retrying once.")
         boosted_params = dict(params)
         boosted_params["pulid_weight"] = min(1.0, params["pulid_weight"] + 0.15)
-        _inject_identity(workflow, char_lora_path, face_anchor_remote, boosted_params, has_character)
+        _inject_identity(workflow, char_lora_path, face_anchor_remote, boosted_params, has_character,
+                         char_lora_strength=char_lora_strength)
         retry_seed = base_seed + n_max * 1009
         retry_wf = copy.deepcopy(workflow)
         if "25" in retry_wf:

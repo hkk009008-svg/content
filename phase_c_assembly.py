@@ -74,6 +74,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                        multi_angle_refs=None, identity_anchor="",
                        pulid_weight_override=None, negative_prompt="",
                        quality_tier="production", char_lora_path=None,
+                       char_lora_strength=None,
                        style_reference=None, shot_hint=None, ctx=None):
     """
     Generates a cinematic image with face-identity preservation.
@@ -130,6 +131,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                 pulid_weight_override=pulid_weight_override,
                 negative_prompt=negative_prompt,
                 char_lora_path=char_lora_path,
+                char_lora_strength=char_lora_strength,
                 style_reference=style_reference,
                 shot_hint=shot_hint,
                 ctx=ctx,

@@ -101,6 +101,11 @@ class PipelineContext:
     # Per-character LoRA registry: character_id -> local path to .safetensors.
     # Consumed by quality_max via the char_lora_path kwarg.
     char_lora_paths: dict = field(default_factory=dict)
+    # Per-character LoRA validated strength: character_id -> float (0.0–1.0).
+    # Written by web_server /train-lora when a LoRA passes identity gating.
+    # Consumed by quality_max._inject_identity via char_lora_strength kwarg.
+    # Absent key (or None) → tier default (e.g. 1.0 from params).
+    char_lora_strengths: dict = field(default_factory=dict)
     # Style reference board for FLUX Redux (max tier). List of local paths.
     style_reference_paths: list = field(default_factory=list)
 
