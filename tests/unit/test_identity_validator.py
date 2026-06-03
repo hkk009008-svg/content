@@ -90,21 +90,35 @@ def _make_char_result(
 # ---------------------------------------------------------------------------
 
 class TestValidateImageMissingFile:
-    """Test case 1: missing file → silent pass (G1)."""
+    """Test case 1: missing generated image → FAIL; missing reference → SKIP."""
 
-    def test_missing_image_returns_passed_true_score_1(self):
-        # CANDIDATE BUG (G1): missing file silently returns passed=True, overall_score=1.0
-        # instead of raising an error or returning passed=False.
-        with patch("identity.validator.os.path.exists", return_value=False):
+    def test_missing_generated_image_fails(self):
+        # FIX (was G1): generated image missing → passed=False, not a skip.
+        # Mock: image_path missing (False), reference_path exists (True).
+        with patch("identity.validator.os.path.exists", side_effect=[False, True]):
             validator = IdentityValidator()
             result = validator.validate_image(
                 image_path="/nonexistent/generated.jpg",
                 reference_path="/nonexistent/reference.jpg",
                 character_id="char_a",
             )
+        assert result.passed is False
+        assert result.skipped is False
+        assert result.metadata.get("failure_reason") == "generated_image_missing"
+
+    def test_missing_reference_skips(self):
+        # FIX (was G1): reference missing → passed=True, skipped=True, score=None.
+        # Mock: image_path exists (True), reference_path missing (False).
+        with patch("identity.validator.os.path.exists", side_effect=[True, False]):
+            validator = IdentityValidator()
+            result = validator.validate_image(
+                image_path="/exists/generated.jpg",
+                reference_path="/nonexistent/reference.jpg",
+                character_id="char_a",
+            )
         assert result.passed is True
-        assert result.overall_score == 1.0
-        assert result.frames_sampled == 0
+        assert result.skipped is True
+        assert result.overall_score is None
 
     def test_missing_file_uses_supplied_threshold(self):
         # The threshold is forwarded to _no_file_result via `threshold or 0.70`.

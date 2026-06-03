@@ -79,8 +79,10 @@ class IdentityValidator:
         Uses DeepFace when available, falls back to Claude Vision identity check.
         Backward-compatible: result.get("passed") and result.get("similarity") work.
         """
-        if not os.path.exists(image_path) or not os.path.exists(reference_path):
-            return self._no_file_result(shot_type, threshold or 0.70)
+        if not os.path.exists(image_path):
+            return self._missing_output_result(shot_type, threshold or 0.70)
+        if not os.path.exists(reference_path):
+            return self._skipped_result(shot_type, threshold or 0.70)
 
         if not DEEPFACE_AVAILABLE:
             return self._vision_llm_validate_image(
@@ -94,7 +96,7 @@ class IdentityValidator:
         # Get reference embedding
         ref_emb = self._get_embedding(reference_path, character_id)
         if ref_emb is None:
-            return self._no_file_result(shot_type, threshold)
+            return self._skipped_result(shot_type, threshold)
 
         # Analyze the image as a single "frame"
         frame_sample = self._analyze_single_image(
@@ -699,6 +701,27 @@ class IdentityValidator:
             passed=True, overall_score=1.0, character_results={},
             frames_sampled=0, video_duration_seconds=0.0,
             shot_type=shot_type, threshold_used=threshold,
+        )
+
+    @staticmethod
+    def _skipped_result(shot_type: str, threshold: float) -> IdentityValidationResult:
+        """SKIP: identity genuinely cannot be checked (missing reference, no
+        character configured, no face expected). Shot proceeds; not a failure."""
+        return IdentityValidationResult(
+            passed=True, overall_score=None, character_results={},
+            frames_sampled=0, video_duration_seconds=0.0,
+            shot_type=shot_type, threshold_used=threshold, skipped=True,
+        )
+
+    @staticmethod
+    def _missing_output_result(shot_type: str, threshold: float) -> IdentityValidationResult:
+        """FAIL: the generated output (image/video) is missing — a real
+        generation/IO failure that must surface, not silently pass."""
+        return IdentityValidationResult(
+            passed=False, overall_score=0.0, character_results={},
+            frames_sampled=0, video_duration_seconds=0.0,
+            shot_type=shot_type, threshold_used=threshold, skipped=False,
+            metadata={"failure_reason": FailureReason.GENERATED_IMAGE_MISSING.value},
         )
 
     def _vision_llm_validate_image(
