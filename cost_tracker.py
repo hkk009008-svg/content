@@ -138,15 +138,21 @@ class CostTracker:
 
     def __init__(
         self,
-        db_path: str = "data/experiments.db",
+        db_path: Optional[str] = None,
         budget_usd: Optional[float] = None,
     ):
-        self.db_path = db_path
+        # db_path resolution (T7): honor EXPERIMENTS_DB_PATH so the env var —
+        # also surfaced as config.settings.experiments_db_path — actually takes
+        # effect for every CostTracker, not just the settings object. Explicit
+        # db_path arg wins; env var next; legacy default last. Resolved here
+        # (not in the signature default) so the env is read at construction
+        # time, and to avoid coupling this low-level util to config.settings.
+        self.db_path = db_path or os.environ.get("EXPERIMENTS_DB_PATH", "data/experiments.db")
         self.budget_usd = budget_usd
         # Fast in-process accumulator for the budget gate.  The SQLite
         # store is the durable record; this counter is reset each process.
         self.spent_usd: float = 0.0
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row
         self._create_table()
 

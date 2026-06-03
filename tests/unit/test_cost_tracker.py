@@ -655,3 +655,31 @@ class TestBudgetGate:
         tracker.record_api_call("SORA_2")
         assert tracker.is_over_budget() is True
         tracker.close()
+
+
+class TestDbPathResolution:
+    """T7: CostTracker resolves db_path from the EXPERIMENTS_DB_PATH env var
+    (the same var config.settings.experiments_db_path reads), so configuring
+    it actually takes effect. Precedence: explicit arg > env > legacy default."""
+
+    def test_env_var_honored_when_no_explicit_path(self, tmp_path, monkeypatch):
+        target = str(tmp_path / "env.db")
+        monkeypatch.setenv("EXPERIMENTS_DB_PATH", target)
+        tracker = CostTracker()
+        assert tracker.db_path == target
+        tracker.close()
+
+    def test_explicit_arg_overrides_env(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("EXPERIMENTS_DB_PATH", str(tmp_path / "env.db"))
+        explicit = str(tmp_path / "explicit.db")
+        tracker = CostTracker(db_path=explicit)
+        assert tracker.db_path == explicit
+        tracker.close()
+
+    def test_legacy_default_when_env_unset(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("EXPERIMENTS_DB_PATH", raising=False)
+        monkeypatch.chdir(tmp_path)  # keep the relative default db inside tmp
+        (tmp_path / "data").mkdir()
+        tracker = CostTracker()
+        assert tracker.db_path == "data/experiments.db"
+        tracker.close()
