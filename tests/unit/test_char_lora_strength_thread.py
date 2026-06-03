@@ -73,6 +73,23 @@ def test_inject_identity_strength_zero_is_honored():
     assert wf["700"]["inputs"]["strength_model"] == 0.0
 
 
+def test_inject_identity_preserves_independent_model_clip_when_none():
+    """Backward-compat: when char_lora_strength is None and the tier params carry
+    DIFFERENT model/clip values, each is honored SEPARATELY (clip must NOT collapse
+    to the model value)."""
+    import quality_max
+    wf = {"700": {"class_type": "LoraLoader", "inputs": {}}}
+    params = {"lora_strength_model": 0.8, "lora_strength_clip": 0.6}
+    quality_max._inject_identity(
+        wf, "mara.safetensors", None, params, True, char_lora_strength=None
+    )
+    assert wf["700"]["inputs"]["strength_model"] == 0.8
+    assert wf["700"]["inputs"]["strength_clip"] == 0.6, (
+        f"strength_clip must use lora_strength_clip (0.6), not collapse to the model "
+        f"value; got {wf['700']['inputs']['strength_clip']!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Hop 1: cinema/context.py declares char_lora_strengths field
 # ---------------------------------------------------------------------------

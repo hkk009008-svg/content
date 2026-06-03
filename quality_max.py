@@ -469,13 +469,14 @@ def _inject_identity(workflow: dict, char_lora: Optional[str], face_anchor_remot
     if "700" in workflow:
         if char_lora:
             workflow["700"]["inputs"]["lora_name"] = char_lora
-            # Use the validated per-character strength if provided; fall back to
-            # the tier-default (params["lora_strength_model"], typically 1.0).
-            # This is intentional: `if char_lora_strength is not None` so that
-            # strength=0.0 is honored (not treated as falsy → tier default).
-            s = char_lora_strength if char_lora_strength is not None else params.get("lora_strength_model", 1.0)
-            workflow["700"]["inputs"]["strength_model"] = s
-            workflow["700"]["inputs"]["strength_clip"] = s
+            # Use the validated per-character strength if provided; else fall back to
+            # the tier-default model/clip values SEPARATELY (preserves the original
+            # independent-clip behavior — they aren't always equal, cf. _max_lora_test).
+            # `is not None` so strength=0.0 is honored (not treated as falsy → tier default).
+            s_model = char_lora_strength if char_lora_strength is not None else params.get("lora_strength_model", 1.0)
+            s_clip = char_lora_strength if char_lora_strength is not None else params.get("lora_strength_clip", 1.0)
+            workflow["700"]["inputs"]["strength_model"] = s_model
+            workflow["700"]["inputs"]["strength_clip"] = s_clip
         else:
             # No trained per-char LoRA -> drop LoraLoader(700) entirely and feed
             # PuLID(100)/CLIP consumers from the base loaders, so the graph
