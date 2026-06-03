@@ -97,10 +97,11 @@ Split `_no_file_result` (696) into two precise helpers:
   = GENERATED_IMAGE_MISSING` where a character result is constructed.
 
 Re-point the 4 trigger sites:
-- `validate_image` (~83): **split** the combined `not exists(image) or not exists(ref)`
-  check. `image_path` missing → `_missing_output_result` (FAIL). `reference_path` missing
-  → `_skipped_result` (SKIP). (The combined condition sits a few lines *above* the line-83
-  `return`; Read ~78–100 before editing — don't jump straight to 83.)
+- `validate_image`: **split** the combined check `if not os.path.exists(image_path) or
+  not os.path.exists(reference_path):` (line 82) whose `return self._no_file_result(...)`
+  is line 83 — into two: `image_path` missing → `_missing_output_result` (FAIL);
+  `reference_path` missing → `_skipped_result` (SKIP). (Read ~78–100 for context; note the
+  separate DeepFace-absent fallback at line 86 and the no-embedding return at line 97.)
 - `validate_image` (~97): reference yields no embedding → `_skipped_result` (can't
   compare).
 - `validate_video` (~155): no `character_configs` → `_skipped_result`.
@@ -167,18 +168,20 @@ proceed; missing-output → `passed=False` → retry:
 
 **(b) Score-reader sites — MUST be guarded for `None` (the #1 risk).** Making
 `overall_score` nullable turns every direct read into a crash- or `None`-store risk.
-Authoritative production read sites (verified
-`grep -rn "\.overall_score" --include='*.py'`, excluding tests + `.claude/worktrees/`):
+All 8 production read sites (verified `grep -rn "\.overall_score" --include='*.py'`,
+excluding tests + `.claude/worktrees/`); 7 need handling, the 8th (`validator.py:128`) is
+safe by structure:
 
 | Site | Code | Risk on skip (`None`) | Guard |
 |---|---|---|---|
 | `face_validator_gate.py:142` | `return float(result.overall_score)` | **TypeError** (`float(None)`) | guard skip before the `float()`; return value per caller intent (this feeds a gate — skip must not block) |
 | `performance/identity_gate.py:72` | `return float(result.overall_score)` | **TypeError** | same |
-| `llm/chief_director.py:360` | `identity_score = identity_result.overall_score`; then `identity_passed = identity_score >= threshold` (line 365) | **TypeError** (`None >= float`) | when `skipped`: set `identity_passed = True` (skip ⇒ don't drive an identity mutation) and bypass the `>=` compare |
+| `llm/chief_director.py:360` | `identity_score = identity_result.overall_score`; then `identity_passed = identity_score >= threshold` (line 365) | **TypeError** (`None >= float`) | when `skipped`: set `identity_passed = True` (skip ⇒ don't drive an identity mutation) and bypass the `>=` compare. (`identity_score` is a param defaulting to `0.0` — no NameError; only the `None`-from-`overall_score` assignment at 360 needs guarding.) |
 | `cinema/shots/controller.py:656` | `identity_score = id_result.overall_score` → `take["metadata"]["identity_score"]` | stores `None` | store `None` or a skip marker; ensure metadata consumers tolerate it |
 | `cinema/shots/controller.py:1041` | `vid_result.overall_score if hasattr(...) else 0.0` | returns `None` (hasattr is True; no `None` guard) | add `and vid_result.overall_score is not None` |
 | `cinema/shots/controller.py:1816` | `result["scores"]["identity"] = id_result.overall_score` | stores `None` | as :656 |
 | `identity/types.py:79` | `.get("similarity")` returns `overall_score` | returns `None` | the accessor is fine; audit `.get("similarity")` consumers the same way |
+| `identity/validator.py:128` | `print(f"...similarity={result.overall_score:.3f}...")` | none — **safe** | unreachable on skip: the missing/skip early-returns (lines 83/86/97) exit before this happy-path print, where `overall_score` is always a real float. No guard needed. |
 
 The three `float()`/compare sites (`face_validator_gate:142`, `performance/identity_gate:72`,
 `chief_director:360`) are hard crashes and **MUST** be guarded in slice B. The three
