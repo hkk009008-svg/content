@@ -478,22 +478,22 @@
       "positive": ["504", 0],
       "negative": ["504", 1],
       "seed": 42,
-      "steps": 50,
-      "cfg_scale_start": 4.0,
-      "cfg_scale_end": 4.0,
-      "EDM_s_churn": 5,
+      "steps": 40,
+      "cfg_scale_start": 2.8,
+      "cfg_scale_end": 2.8,
+      "EDM_s_churn": 2,
       "s_noise": 1.003,
       "DPMPP_eta": 1.0,
       "control_scale_start": 1.0,
       "control_scale_end": 1.0,
-      "restore_cfg": -1.0,
+      "restore_cfg": 3.0,
       "keep_model_loaded": true,
       "sampler": "RestoreEDMSampler",
       "sampler_tile_size": 1024,
       "sampler_tile_stride": 512
     },
     "class_type": "SUPIR_sample",
-    "_meta": { "title": "SUPIR sample (50 steps, EDM restore)" }
+    "_meta": { "title": "SUPIR sample (40 steps, EDM restore, softened cfg2.8/restore3.0 — anti over-restoration)" }
   },
   "503": {
     "inputs": {
