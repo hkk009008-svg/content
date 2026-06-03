@@ -33,7 +33,7 @@ class LTXVideoAPI:
 
     RESOLUTION_MAP = {
         "480p": {"width": 854, "height": 480},
-        "720p": {"width": 1920, "height": 1080},  # LTX native doesn't support 720p — use 1080p
+        "720p": {"width": 1920, "height": 1080},  # DOCUMENTED-INTENTIONAL: LTX has no true 720p; "720p" upgraded to 1080p (capability-positive); zero live 720p callers
         "1080p": {"width": 1920, "height": 1080},
         "4k": {"width": 3840, "height": 2160},
         "4K": {"width": 3840, "height": 2160},
@@ -260,8 +260,16 @@ class LTXVideoAPI:
             return output_path
 
         except urllib.request.HTTPError as e:
-            error_body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else str(e)
-            print(f"[LTX] Native generation failed: {e} — {error_body[:500]}")
+            body = e.read().decode("utf-8", "replace")[:500] if hasattr(e, "read") else str(e)
+            if getattr(e, "code", 0) >= 500 and self.fal_key and FAL_AVAILABLE:
+                print(f"[LTX] Native {e.code}; falling back to FAL")
+                return self._fal_generate(image_path, prompt, output_path, num_frames, resolution, camera_motion)
+            print(f"[LTX] Native failed ({getattr(e, 'code', '?')}): {body}")
+            return None
+        except (OSError, json.JSONDecodeError) as e:
+            # Local errors — no fallback (don't mask bugs)
+            print(f"[LTX] Local error (no fallback): {e}")
+            return None
         except Exception as e:
             print(f"[LTX] Native generation failed: {e}")
             # Fall back to FAL if native fails

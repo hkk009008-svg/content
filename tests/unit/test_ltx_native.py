@@ -1,7 +1,6 @@
 # tests/unit/test_ltx_native.py
 """Characterization tests for ltx_native.LTXVideoAPI (offline, mocked fal/urllib).
-Locks in EXISTING behaviour — all tests must PASS.
-Candidate bugs are asserted against ACTUAL behaviour with # CANDIDATE BUG tags.
+Locks in CORRECT behaviour after Part-3 moderate/minor fixes.
 
 NOTE: _native_transition / _download_native_result / _native_request are
 deliberately-kept DORMANT quality levers (not on the live generate_video path).
@@ -114,20 +113,22 @@ def test_no_key_returns_none(tmp_path):
 
 # ---------------------------------------------------------------------------
 # G(ltx)3: resolution "720p" maps to 1080p (1920x1080) via RESOLUTION_MAP
+# DOCUMENTED-INTENTIONAL: LTX has no true 720p; "720p" upgraded to 1080p
+# (capability-positive); zero live 720p callers.
 # ---------------------------------------------------------------------------
 
 def test_resolution_720p_maps_to_1080p_in_fal(monkeypatch, tmp_path):
-    """G(ltx)3: '720p' key in RESOLUTION_MAP maps to width=1920, height=1080,
-    not to a true 720p (1280x720) resolution. Surprising contract.
+    """G(ltx)3: '720p' key in RESOLUTION_MAP maps to width=1920, height=1080.
+    DOCUMENTED-INTENTIONAL: LTX has no true 720p; "720p" upgraded to 1080p
+    (capability-positive); zero live 720p callers.
     """
-    # CANDIDATE BUG (G(ltx)3): RESOLUTION_MAP["720p"] yields 1920x1080 (LTX native
-    # doesn't support true 720p, so 720p is silently upgraded to 1080p).
     assert LTXVideoAPI.RESOLUTION_MAP["720p"] == {"width": 1920, "height": 1080}
 
 
 def test_resolution_720p_forwarded_as_1080p_to_fal_subscribe(monkeypatch, tmp_path):
     """When generate_video is called with resolution='720p' in fal mode, the
     subscribe arguments carry width=1920, height=1080, not 1280x720.
+    DOCUMENTED-INTENTIONAL: LTX has no true 720p; capability-positive upgrade.
     """
     monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
     api = _make_api(fal_key="fal-key")
@@ -149,7 +150,7 @@ def test_resolution_720p_forwarded_as_1080p_to_fal_subscribe(monkeypatch, tmp_pa
 
     args = subscribe_mock.call_args
     subscribe_arguments = args.kwargs.get("arguments") or (args.args[1] if len(args.args) > 1 else {})
-    # CANDIDATE BUG (G(ltx)3): width/height are 1920x1080 for "720p" input
+    # width/height are 1920x1080 for "720p" input (intentional upgrade, see G(ltx)3)
     assert subscribe_arguments["width"] == 1920
     assert subscribe_arguments["height"] == 1080
 
@@ -304,18 +305,14 @@ def test_native_happy_path_writes_output(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# G(ltx)1: native HTTPError → does NOT trigger FAL fallback
+# G(ltx)1 FIXED: native HTTP 5xx → triggers FAL fallback (transient server error)
 # ---------------------------------------------------------------------------
 
-def test_native_http_error_does_not_fallback_to_fal(monkeypatch, tmp_path):
-    """G(ltx)1 (partial): HTTPError is caught in its own 'except HTTPError' clause
-    which has NO fallback call — it prints and implicitly returns None.
-    The FAL fallback only fires from the generic 'except Exception' clause.
-    This is the actual behaviour; the docstring/description suggests fallback
-    should fire on any native failure, but HTTPError is specifically exempt.
+def test_http_5xx_falls_back_to_fal(monkeypatch, tmp_path):
+    """A 5xx HTTPError from the native API triggers the FAL fallback when
+    fal_key is set and FAL_AVAILABLE — transient server errors should be retried
+    via FAL, not silently dropped.
     """
-    # CANDIDATE BUG (G(ltx)1): HTTPError caught without FAL fallback —
-    # only generic Exception triggers the fallback; HTTP-level errors silently return None.
     monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
     api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
     img = tmp_path / "frame.jpg"
@@ -331,7 +328,6 @@ def test_native_http_error_does_not_fallback_to_fal(monkeypatch, tmp_path):
         hdrs=MagicMock(),
         fp=BytesIO(b'{"error":"overloaded"}'),
     )
-    # urlopen must RAISE the error (not return it) so the except clause fires.
     monkeypatch.setattr(
         ltx_native.urllib.request, "urlopen", MagicMock(side_effect=http_error)
     )
@@ -342,58 +338,121 @@ def test_native_http_error_does_not_fallback_to_fal(monkeypatch, tmp_path):
 
     result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
 
-    # HTTPError does NOT trigger FAL fallback — returns None
-    assert result is None
-    subscribe_spy.assert_not_called()  # FAL was never tried
+    # 5xx HTTPError DOES trigger FAL fallback
+    assert result == out
+    subscribe_spy.assert_called_once()
 
 
-# ---------------------------------------------------------------------------
-# G(ltx)1: native generic Exception → FAL fallback fires
-# ---------------------------------------------------------------------------
-
-def test_native_generic_exception_triggers_fal_fallback(monkeypatch, tmp_path):
-    """G(ltx)1 (full path): A non-HTTP exception (e.g. OSError, ValueError)
-    from within _native_generate falls into the generic 'except Exception' clause
-    which DOES trigger the FAL fallback when fal_key and FAL_AVAILABLE.
+def test_http_4xx_does_not_fallback_to_fal(monkeypatch, tmp_path):
+    """A 4xx HTTPError (client error / bad auth) does NOT trigger FAL fallback —
+    it is not a transient error; retrying via FAL would not help.
     """
-    # CANDIDATE BUG (G(ltx)1): generic exceptions from native path trigger FAL fallback
-    # even when the error is local/non-API (over-broad fallback).
     monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
     api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
     img = tmp_path / "frame.jpg"
     img.write_bytes(b"imgdata")
     out = str(tmp_path / "out.mp4")
 
-    # upload_file is called in both native and fal paths —
-    # let it succeed on the first call (native), then on fal call too.
     monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
 
-    # Make urlopen raise a generic OSError (not HTTPError).
+    http_error = urllib.request.HTTPError(
+        url="http://api.ltx.video/v1/image-to-video",
+        code=422,
+        msg="Unprocessable Entity",
+        hdrs=MagicMock(),
+        fp=BytesIO(b'{"error":"bad payload"}'),
+    )
+    monkeypatch.setattr(
+        ltx_native.urllib.request, "urlopen", MagicMock(side_effect=http_error)
+    )
+
+    subscribe_spy = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
+    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_spy)
+    monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
+
+    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
+
+    # 4xx HTTPError does NOT trigger FAL fallback — returns None
+    assert result is None
+    subscribe_spy.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# G(ltx)1 FIXED: native OSError (local error) → does NOT fall back to FAL
+# ---------------------------------------------------------------------------
+
+def test_local_oserror_does_not_fallback_to_fal(monkeypatch, tmp_path):
+    """A local OSError (e.g., file not found, connection refused) does NOT
+    trigger the FAL fallback — local errors are bugs, not transient API failures;
+    burning a FAL call would not help and masks the real issue.
+    """
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"imgdata")
+    out = str(tmp_path / "out.mp4")
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+
+    # OSError after urlopen succeeds (e.g., write failure)
     monkeypatch.setattr(
         ltx_native.urllib.request,
         "urlopen",
-        MagicMock(side_effect=OSError("connection refused")),
+        MagicMock(side_effect=OSError("no space left on device")),
     )
 
-    # FAL fallback succeeds.
+    subscribe_spy = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
+    monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_spy)
+
+    result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
+
+    # Local OSError does NOT trigger FAL fallback — returns None
+    assert result is None
+    subscribe_spy.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# G(ltx)1: native generic unknown Exception → FAL fallback still fires
+# ---------------------------------------------------------------------------
+
+def test_native_generic_exception_triggers_fal_fallback(monkeypatch, tmp_path):
+    """A generic non-HTTP, non-OS exception (e.g. a library bug) from within
+    _native_generate falls into the generic 'except Exception' clause
+    which DOES trigger the FAL fallback when fal_key and FAL_AVAILABLE.
+    """
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"imgdata")
+    out = str(tmp_path / "out.mp4")
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+
+    # A RuntimeError from some library (not HTTPError, not OSError).
+    monkeypatch.setattr(
+        ltx_native.urllib.request,
+        "urlopen",
+        MagicMock(side_effect=RuntimeError("unexpected library error")),
+    )
+
     subscribe_mock = MagicMock(return_value={"video": {"url": "http://cdn/v.mp4"}})
     monkeypatch.setattr(ltx_native.fal_client, "subscribe", subscribe_mock)
     monkeypatch.setattr(ltx_native.urllib.request, "urlretrieve", lambda url, dest: None)
 
     result = api.generate_video(image_path=str(img), prompt="test", output_path=out)
 
-    # FAL fallback fires and returns the path.
+    # Generic exception DOES trigger FAL fallback
     assert result == out
     subscribe_mock.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
-# native HTTPError + no fal_key → None (no fallback possible)
+# native 5xx HTTPError + no fal_key → None (no fallback possible)
 # ---------------------------------------------------------------------------
 
-def test_native_http_error_no_fal_key_returns_none(monkeypatch, tmp_path):
-    """With no fal_key configured, native HTTPError always returns None
-    (the HTTPError branch has no fallback at all)."""
+def test_native_http_5xx_no_fal_key_returns_none(monkeypatch, tmp_path):
+    """With no fal_key configured, a 5xx HTTPError returns None
+    (5xx would qualify for fallback, but there's no FAL key to use)."""
     monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
     api = _make_api(ltx_key="ltx-key")  # no fal_key
     img = tmp_path / "frame.jpg"
@@ -404,12 +463,11 @@ def test_native_http_error_no_fal_key_returns_none(monkeypatch, tmp_path):
 
     http_error = urllib.request.HTTPError(
         url="http://api.ltx.video/v1/image-to-video",
-        code=401,
-        msg="Unauthorized",
+        code=503,
+        msg="Service Unavailable",
         hdrs=MagicMock(),
         fp=BytesIO(b""),
     )
-    # urlopen must RAISE the error (not return it) so the except clause fires.
     monkeypatch.setattr(
         ltx_native.urllib.request, "urlopen", MagicMock(side_effect=http_error)
     )
