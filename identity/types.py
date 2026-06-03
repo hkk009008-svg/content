@@ -26,6 +26,7 @@ class FailureReason(Enum):
     SMALL_FACE_REGION = "small_face_region"
     POOR_LIGHTING = "poor_lighting"
     PASSED = "passed"
+    GENERATED_IMAGE_MISSING = "generated_image_missing"
 
 
 @dataclass
@@ -63,13 +64,14 @@ class IdentityValidationResult:
     Backward-compatible: result.get("passed") and result.get("similarity") work.
     """
     passed: bool
-    overall_score: float                 # weighted average across characters
+    overall_score: Optional[float]       # weighted average across characters; None iff skipped
     character_results: Dict[str, CharacterIdentityResult]
     frames_sampled: int
     video_duration_seconds: float
     shot_type: str                       # "portrait", "medium", "wide", etc.
     threshold_used: float
     metadata: Dict = field(default_factory=dict)
+    skipped: bool = False                # True iff identity could not be checked (no fabricated score)
 
     def get(self, key, default=None):
         """Dict-compatible accessor for backward compatibility."""

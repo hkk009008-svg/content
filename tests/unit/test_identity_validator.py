@@ -899,3 +899,32 @@ class TestDiagnoseFailure:
                                      similarity=0.50)]
         result = IdentityValidator()._diagnose_failure(frames)
         assert result == FailureReason.POOR_LIGHTING
+
+
+# ---------------------------------------------------------------------------
+# Part-3 schema: honest SKIP state + GENERATED_IMAGE_MISSING (spec §3)
+# ---------------------------------------------------------------------------
+
+def test_skipped_result_schema():
+    r = IdentityValidationResult(
+        passed=True, overall_score=None, character_results={},
+        frames_sampled=0, video_duration_seconds=0.0,
+        shot_type="medium", threshold_used=0.7, skipped=True,
+    )
+    assert r.skipped is True
+    assert r.overall_score is None
+    assert r.passed is True
+
+
+def test_skipped_defaults_false():
+    r = IdentityValidationResult(
+        passed=True, overall_score=0.8, character_results={},
+        frames_sampled=1, video_duration_seconds=0.0,
+        shot_type="medium", threshold_used=0.7,
+    )
+    assert r.skipped is False
+    assert r.overall_score == 0.8
+
+
+def test_generated_image_missing_reason_exists():
+    assert FailureReason.GENERATED_IMAGE_MISSING.value == "generated_image_missing"
