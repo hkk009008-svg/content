@@ -49,3 +49,82 @@ def _next_lora_action(attempt: int, best_score: Optional[float], *,
     if attempt + 1 >= budget:                   # retrain budget exhausted
         return LoraAction.ACCEPT if best_score >= baseline else LoraAction.REJECT
     return LoraAction.RETRY_MORE_STEPS if attempt == 0 else LoraAction.RETRY_HIGHER_RANK
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — lazy wrappers + _generate_with_lora
+# ---------------------------------------------------------------------------
+# All quality_max / phase_c_assembly / workflow_selector imports are inside
+# the _qm_* wrappers so that `import prep.lora_quality` stays light and the
+# pure-fn tests never pull the heavy ComfyUI stack.
+
+def _qm_load_max_workflow():
+    from quality_max import _load_max_workflow
+    return _load_max_workflow()
+
+
+def _qm_inject_identity(*a, **k):
+    from quality_max import _inject_identity
+    return _inject_identity(*a, **k)
+
+
+def _qm_inject_conditioning(*a, **k):
+    from quality_max import _inject_conditioning
+    return _inject_conditioning(*a, **k)
+
+
+def _qm_inject_sampling(*a, **k):
+    from quality_max import _inject_sampling
+    return _inject_sampling(*a, **k)
+
+
+def _qm_run_one_candidate(*a, **k):
+    from quality_max import _run_one_candidate
+    return _run_one_candidate(*a, **k)
+
+
+def _make_comfy(url: str):
+    # NOTE: RunPodComfyUI lives in phase_c_assembly (imported into quality_max
+    # at line 60 as `from phase_c_assembly import RunPodComfyUI`); we import
+    # from the canonical source directly.
+    from phase_c_assembly import RunPodComfyUI
+    return RunPodComfyUI(url)
+
+
+def _default_max_params(shot_type: str = "portrait") -> dict:
+    """Tier params baseline — the SAME source generate_ai_broll_max uses
+    (`params = get_max_quality_params(shot_type)`).
+
+    NOTE: get_max_quality_params is in workflow_selector (imported into
+    quality_max at line 57 as `from workflow_selector import ..., get_max_quality_params`);
+    we import from the canonical source directly.
+    """
+    from workflow_selector import get_max_quality_params
+    return dict(get_max_quality_params(shot_type))
+
+
+def _generate_with_lora(lora_path: str, prompt: str, *, strength: float, seed: int,
+                        out_path: str, comfyui_url: str) -> Optional[str]:
+    """ONE honest ComfyUI generation with `lora_path` at `strength`.  No best-of,
+    no ArcFace gating.  Returns image path or None on any infra failure (never
+    raises).
+
+    Assembly order mirrors generate_ai_broll_max:
+      load -> inject_identity -> inject_conditioning -> inject_sampling -> run_one
+    """
+    try:
+        wf = _qm_load_max_workflow()
+        params = {**_default_max_params(),
+                  "lora_strength_model": strength,
+                  "lora_strength_clip": strength,
+                  "seed": seed}
+        # _inject_identity(workflow, char_lora, face_anchor_remote, params, has_character)
+        _qm_inject_identity(wf, lora_path, None, params, True)
+        # _inject_conditioning(workflow, prompt, prev_shot_remote, style_remote, params, has_character)
+        _qm_inject_conditioning(wf, prompt, None, None, params, True)
+        _qm_inject_sampling(wf, params)
+        comfy = _make_comfy(comfyui_url)
+        return _qm_run_one_candidate(comfy, wf, out_path)
+    except Exception as e:
+        print(f"[lora_quality] generation failed ({e}); treating as skip")
+        return None
