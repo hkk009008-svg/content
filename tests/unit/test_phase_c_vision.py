@@ -732,7 +732,8 @@ class TestApplyCorrectionFaceSwapReason:
         The operator clicked "face swap" and deserves to know WHY it did not
         apply (no swapper succeeded), not just that the action failed.
 
-        This is the TDD driver for the G2 caller-side fix in controller.py.
+        Regression guard for the G2 caller-side fix in controller.py
+        (written test-first, ships alongside the fix).
         """
         import domain.project_manager as pm
 
