@@ -114,6 +114,7 @@ _MAX_TIER_KNOB_SCHEMA: Dict[str, Tuple] = {
     "redux_strength":            ("enum", "high", "medium", "low"),
     "hires_fix_enabled":         ("bool",),
     "hires_fix_denoise":         ("numeric", float, 0.2, 0.6),
+    "hires_fix_steps":           ("numeric", int,   5,   40),
     "face_detailer_enabled":     ("bool",),
     "face_detailer_guide_size":  ("enum", 512, 1024, 2048),
     "supir_enabled":             ("bool",),
@@ -608,6 +609,16 @@ def _inject_post_passes(workflow: dict, params: dict, available: Set[str]):
         workflow["950"]["inputs"]["width"] = w
         workflow["950"]["inputs"]["height"] = h
 
+    # Hires-fix Pass-2: run node 901 (refine pass) at a gentler denoise for photorealism.
+    # Baseline points 901's sigmas at node 17 @ denoise=1.0 -> over-processed/painterly.
+    # NOTE: denoise=0.40 is a realism hypothesis pending GPU-pod validation (pod currently
+    # down). The default is wired here; pod-validate before claiming the improvement.
+    if params.get("hires_fix_enabled", True) and "901" in workflow and "17" in workflow:
+        workflow["18"] = copy.deepcopy(workflow["17"])
+        workflow["18"]["inputs"]["denoise"] = params.get("hires_fix_denoise", 0.40)
+        workflow["18"]["inputs"]["steps"] = params.get("hires_fix_steps", 18)
+        workflow["901"]["inputs"]["sigmas"] = ["18", 0]
+
 
 # ---------------------------------------------------------------------------
 # One-shot generation (submit + poll + download)
@@ -751,6 +762,7 @@ def generate_ai_broll_max(
             # Hires-fix pass
             ("hires_fix_enabled",        "hires_fix_enabled"),
             ("hires_fix_denoise",        "hires_fix_denoise"),
+            ("hires_fix_steps",          "hires_fix_steps"),
             # FaceDetailer
             ("face_detailer_enabled",    "face_detailer_enabled"),
             ("face_detailer_guide_size", "face_detailer_guide_size"),
@@ -834,12 +846,6 @@ def generate_ai_broll_max(
     _inject_sampling(workflow, params)
     _inject_latent_source(workflow, init_remote, params)
     _inject_post_passes(workflow, params, available)
-
-    # NOTE: hires-fix Pass-2 (nodes 901/902) is currently NOT injected — the
-    # workflow runs whatever denoise the JSON baseline encodes. Wiring a true
-    # second-pass denoise (via a second BasicScheduler or sigma-scale node) is
-    # tracked separately; today the post-passes (FaceDetailer / ReActor / SUPIR)
-    # carry the quality lift end-of-pipeline.
 
     # ---- Best-of-N adaptive halt loop ----
     n_max = int(params.get("candidate_count", 8))
