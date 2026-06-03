@@ -27,6 +27,7 @@ class FailureReason(Enum):
     POOR_LIGHTING = "poor_lighting"
     PASSED = "passed"
     GENERATED_IMAGE_MISSING = "generated_image_missing"
+    VIDEO_ZERO_FRAMES = "video_zero_frames"
 
 
 @dataclass

@@ -190,7 +190,7 @@ class IdentityValidator:
 
         if total_frames == 0:
             cap.release()
-            return self._missing_output_result(shot_type, threshold)
+            return self._missing_output_result(shot_type, threshold, FailureReason.VIDEO_ZERO_FRAMES)
 
         positions = self._compute_sample_positions(total_frames, fps, shot_type)
 
@@ -704,14 +704,19 @@ class IdentityValidator:
         )
 
     @staticmethod
-    def _missing_output_result(shot_type: str, threshold: float) -> IdentityValidationResult:
-        """FAIL: the generated output (image/video) is missing — a real
-        generation/IO failure that must surface, not silently pass."""
+    def _missing_output_result(
+        shot_type: str,
+        threshold: float,
+        failure_reason: FailureReason = FailureReason.GENERATED_IMAGE_MISSING,
+    ) -> IdentityValidationResult:
+        """FAIL: the generated output (image/video) is missing or unreadable — a real
+        generation/IO failure that must surface, not silently pass.
+        Pass VIDEO_ZERO_FRAMES when the file exists but decoded to 0 frames."""
         return IdentityValidationResult(
             passed=False, overall_score=0.0, character_results={},
             frames_sampled=0, video_duration_seconds=0.0,
             shot_type=shot_type, threshold_used=threshold, skipped=False,
-            metadata={"failure_reason": FailureReason.GENERATED_IMAGE_MISSING.value},
+            metadata={"failure_reason": failure_reason.value},
         )
 
     def _vision_llm_validate_image(
@@ -814,7 +819,7 @@ class IdentityValidator:
 
         if total_frames == 0:
             cap.release()
-            return self._missing_output_result(shot_type, threshold)
+            return self._missing_output_result(shot_type, threshold, FailureReason.VIDEO_ZERO_FRAMES)
 
         # Sample 3 frames: 10%, 50%, 90%
         sample_positions = [0.1, 0.5, 0.9]

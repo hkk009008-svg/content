@@ -342,7 +342,7 @@ class TestValidateVideoAllRefsFail:
 
 
 class TestValidateVideoZeroFrames:
-    """Test case 8: zero frames → passed=False, overall_score=0.0, failure_reason=generated_image_missing."""
+    """Test case 8: zero frames → passed=False, overall_score=0.0, failure_reason=video_zero_frames."""
 
     def test_zero_frames_fails(self):
         ref_emb = _make_embedding(1.0)
@@ -361,12 +361,12 @@ class TestValidateVideoZeroFrames:
         assert result.passed is False
         assert result.overall_score == 0.0
         assert result.frames_sampled == 0
-        # Fixed (Part-3 T4): zero-frame result routed via _missing_output_result,
-        # so failure_reason is populated (same as video-file-missing).
-        assert result.metadata.get("failure_reason") == FailureReason.GENERATED_IMAGE_MISSING.value
+        # Follow-up A: zero-frame video gets precise VIDEO_ZERO_FRAMES reason
+        # (distinct from GENERATED_IMAGE_MISSING used for a genuinely missing file).
+        assert result.metadata.get("failure_reason") == FailureReason.VIDEO_ZERO_FRAMES.value
 
     def test_zero_frames_vision_path_fails_with_missing_reason(self):
-        """Zero frames in the vision-LLM path also routes via _missing_output_result."""
+        """Zero frames in the vision-LLM path also gets VIDEO_ZERO_FRAMES (not GENERATED_IMAGE_MISSING)."""
         mock_cap = _make_mock_cap(total_frames=0)
 
         with patch("identity.validator.DEEPFACE_AVAILABLE", False), \
@@ -381,7 +381,7 @@ class TestValidateVideoZeroFrames:
         assert result.passed is False
         assert result.overall_score == 0.0
         assert result.frames_sampled == 0
-        assert result.metadata.get("failure_reason") == FailureReason.GENERATED_IMAGE_MISSING.value
+        assert result.metadata.get("failure_reason") == FailureReason.VIDEO_ZERO_FRAMES.value
 
 
 class TestValidateVideoLandscape:
