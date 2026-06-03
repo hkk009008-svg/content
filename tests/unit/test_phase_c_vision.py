@@ -5,7 +5,7 @@ post-processing.
 These tests LOCK IN the EXISTING behavior of already-written code.
 They PASS against HEAD.  Where the code does something surprising or buggy,
 each test asserts the ACTUAL current behavior and adds a comment:
-    # CANDIDATE BUG (Gn): <one line>
+    # DOCUMENTED-INTENTIONAL: <one line explaining the design choice>
 
 Offline-only: cv2.VideoCapture, os.path.exists, subprocess, fal_client,
 openai.OpenAI, anthropic.Anthropic, and google.genai are all mocked.
@@ -14,9 +14,11 @@ No GPU, no model weights, no network, no real files, no subprocesses.
 Baseline: 1450 tests collected / 1447 passed / 3 skipped before this file.
 """
 
+import os
 import sys
 import dataclasses
 import json
+import tempfile
 from unittest.mock import MagicMock, patch, call
 
 import pytest
@@ -245,8 +247,10 @@ class TestFaceSwapVideoFrames:
     def test_facefusion_returncode_zero_but_file_missing_returns_none(self):
         """returncode=0 but os.path.exists(output_path) is False → None.
 
-        # CANDIDATE BUG (G2): FaceFusion gate requires BOTH returncode==0 AND
-        # os.path.exists(output_path); a partial write → output silently None.
+        # DOCUMENTED-INTENTIONAL: cascade skip (fal->facefusion->None); caller
+        # surfaces the reason.  FaceFusion gate requires BOTH returncode==0 AND
+        # os.path.exists(output_path); a partial write → cascade falls through
+        # to None, and apply_correction surfaces an explicit warning to the operator.
         """
         mock_fal = MagicMock()
         mock_proc = MagicMock(returncode=0)
@@ -256,7 +260,7 @@ class TestFaceSwapVideoFrames:
              patch.object(pcv.os.path, "exists", return_value=False):
             result = pcv.face_swap_video_frames("/vid.mp4", "/ref.jpg", "/out.mp4")
 
-        # CANDIDATE BUG (G2): returncode==0 but missing output → silent None
+        # DOCUMENTED-INTENTIONAL: cascade skip (fal->facefusion->None); caller surfaces the reason
         assert result is None
 
     def test_facefusion_nonzero_exit_returns_none(self):
@@ -513,8 +517,10 @@ class TestValidateIdentityVision:
     def test_g5_threshold_boundary_07_is_match_true(self):
         """G5: threshold is hardcoded 0.7 (no param); confidence=0.7 → match=True (>=).
 
-        # CANDIDATE BUG (G5): validate_identity_vision threshold is hardcoded 0.7
-        # with no parameter to override it. Caller cannot adjust sensitivity.
+        # DOCUMENTED-INTENTIONAL: advisory match key; prod gate re-thresholds
+        # (validator re-computes matched).  The 0.7 threshold here is advisory —
+        # IdentityValidator (validator.py:~754) re-thresholds on the production path;
+        # this hardcoded value never governs a real gate.
         """
         mock_client = MagicMock()
         mock_resp = MagicMock()
@@ -526,11 +532,18 @@ class TestValidateIdentityVision:
              patch("anthropic.Anthropic", return_value=mock_client):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
-        # CANDIDATE BUG (G5): threshold 0.7 is hardcoded; confidence=0.7 → match=True
+        # DOCUMENTED-INTENTIONAL: advisory match key; prod gate re-thresholds (validator re-computes matched)
         assert result["match"] is True
 
     def test_g5_threshold_boundary_069_is_match_false(self):
-        """G5: confidence=0.69 → match=False (strictly below hardcoded 0.7 threshold)."""
+        """G5: confidence=0.69 → match=False (strictly below advisory 0.7 threshold).
+
+        # DOCUMENTED-INTENTIONAL: advisory match key; prod gate re-thresholds
+        # (validator re-computes matched).  The 0.7 cut-off here is advisory —
+        # production callers use IdentityValidator which re-thresholds via its own
+        # configured threshold (validator.py:~754); the `match` key is never the
+        # gate on the real production path.
+        """
         mock_client = MagicMock()
         mock_resp = MagicMock()
         mock_resp.content[0].text = json.dumps({"confidence": 0.69, "issues": []})
@@ -541,7 +554,7 @@ class TestValidateIdentityVision:
              patch("anthropic.Anthropic", return_value=mock_client):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
-        # CANDIDATE BUG (G5): threshold 0.7 is hardcoded; confidence=0.69 → match=False
+        # DOCUMENTED-INTENTIONAL: advisory match key; prod gate re-thresholds (validator re-computes matched)
         assert result["match"] is False
 
     def test_api_exception_returns_default_pass(self):
@@ -650,3 +663,102 @@ class TestValidateSceneCoherenceVision:
         result = pcv.validate_scene_coherence_vision([])
         assert result["source"] == "default"
         assert result["coherent"] is True
+
+
+# ---------------------------------------------------------------------------
+# apply_correction face_swap caller — surfaces reason when cascade returns None
+# ---------------------------------------------------------------------------
+
+class TestApplyCorrectionFaceSwapReason:
+    """Verifies that the operator face_swap action surfaces a reason when
+    face_swap_video_frames returns None (all cascade paths failed/skipped).
+
+    Uses CinemaPipeline + a real temp project dir (same harness as
+    test_guided_pipeline.py) so no impractical over-mocking is needed.
+    Only face_swap_video_frames is patched → None; everything else is real.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup_temp_project(self, tmp_path):
+        """Create a minimal project with one scene/shot and a motion-take on disk."""
+        import domain.project_manager as pm
+        from cinema_pipeline import CinemaPipeline
+
+        with patch("domain.project_manager.PROJECTS_DIR", str(tmp_path)):
+            project = pm.create_project("FaceSwapReasonTest")
+            scene = pm.make_scene("Scene 1")
+            shot = pm.make_shot("A close-up", shot_id="shot_scene_1_0")
+            scene["shots"] = [shot]
+            scene["num_shots"] = 1
+            scene["characters_present"] = ["char_a"]
+            project["scenes"] = [scene]
+            project["characters"] = [
+                pm.make_character("Alice", "lead", reference_images=[], voice_id="")
+            ]
+            project["characters"][0]["id"] = "char_a"
+            project["characters"][0]["reference_images"] = ["/ref_alice.jpg"]
+
+            # Write fake motion-take asset to disk
+            project_dir = pm.get_project_dir(project["id"])
+            motion_path = os.path.join(project_dir, "shots", shot["id"], "outputs", "motion.mp4")
+            os.makedirs(os.path.dirname(motion_path), exist_ok=True)
+            with open(motion_path, "w") as f:
+                f.write("fake-video")
+
+            keyframe_take = pm.make_take("keyframe", path=motion_path.replace(".mp4", ".jpg"))
+            motion_take = pm.make_take("motion", path=motion_path,
+                                        source_take_id=keyframe_take["id"])
+            shot.update({
+                "plan_status": "approved",
+                "keyframe_takes": [keyframe_take],
+                "approved_keyframe_take_id": keyframe_take["id"],
+                "motion_takes": [motion_take],
+                "approved_motion_take_id": motion_take["id"],
+                "approved_final_take_id": motion_take["id"],
+            })
+            pm.save_project(project)
+
+            with patch("domain.project_manager.PROJECTS_DIR", str(tmp_path)):
+                self._pipeline = CinemaPipeline(project["id"])
+            self._shot_id = shot["id"]
+            self._tmp_path = str(tmp_path)
+            yield
+
+    def test_face_swap_none_result_surfaces_cascade_reason(self):
+        """When face_swap_video_frames returns None, apply_correction must surface
+        a specific reason that the swap cascade could not be applied — not just
+        the generic 'Action failed or not applicable' message.
+
+        The operator clicked "face swap" and deserves to know WHY it did not
+        apply (no swapper succeeded), not just that the action failed.
+
+        This is the TDD driver for the G2 caller-side fix in controller.py.
+        """
+        import domain.project_manager as pm
+
+        # Patch the names as bound in controller.py (imported via
+        # `from phase_c_vision import face_swap_video_frames`), not the
+        # phase_c_vision module namespace, so the mock is actually seen.
+        with patch("domain.project_manager.PROJECTS_DIR", self._tmp_path), \
+             patch("cinema.shots.controller.face_swap_video_frames", return_value=None), \
+             patch("cinema.shots.controller.get_reference_image",
+                   return_value="/ref_alice.jpg"):
+            result = self._pipeline.apply_correction(self._shot_id, "face_swap", {})
+
+        # The cascade returned None — the action must NOT silently succeed.
+        assert result.get("success") is not True, (
+            "face_swap silently reported success when cascade returned None; "
+            "operator has no idea the swap was not applied."
+        )
+        # The error/warning must specifically explain the cascade failure,
+        # not just the generic 'Action X failed or not applicable' fallback.
+        reason = result.get("error") or result.get("warning") or ""
+        assert reason, (
+            f"apply_correction returned {result!r} with no error/warning "
+            "when face_swap_video_frames returned None."
+        )
+        assert "no swapper succeeded" in reason.lower() or "could not be applied" in reason.lower(), (
+            f"Reason '{reason}' is the generic fallback — it does not tell the "
+            "operator that the swap cascade (fal→FaceFusion) produced no output. "
+            "Expected a message like 'face_swap could not be applied (no swapper succeeded)'."
+        )

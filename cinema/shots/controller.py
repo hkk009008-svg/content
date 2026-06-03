@@ -1939,6 +1939,16 @@ class ShotController:
                     result = face_swap_video_frames(str(video_path), primary_ref, out_path)
                     if result:
                         variant["path"] = result
+                    else:
+                        # face_swap_video_frames is a best-effort cascade
+                        # (fal.ai → FaceFusion CLI → skip); None means every
+                        # path failed or was unavailable.  Surface a specific
+                        # reason so the operator knows the swap was not applied,
+                        # rather than receiving the generic action-failed message.
+                        return {
+                            "success": False,
+                            "error": "face_swap could not be applied (no swapper succeeded)",
+                        }
 
             elif action == "lip_sync":
                 chars = scene.get("characters_present", [])

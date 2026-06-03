@@ -331,6 +331,10 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
             raw = raw.strip()
 
         result = json.loads(raw)
+        # `match` is advisory (hardcoded 0.7); production callers re-threshold
+        # via IdentityValidator (validator.py:~754) which re-computes `matched`
+        # using its own configured threshold.  The 0.7 here never governs a
+        # real production gate — it is a convenience key for direct callers only.
         result["match"] = result.get("confidence", 0.0) >= 0.7
         result["source"] = "claude-sonnet"
         status = "MATCH" if result["match"] else "MISMATCH"
