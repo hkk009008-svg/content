@@ -49,8 +49,8 @@ def generate_style_rules(
             if ref:
                 research_context = ref
                 print(f"   [STYLE] Research-enhanced with cinematography reference")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"   [STYLE] web research unavailable; proceeding without it: {e}")
 
     # Additional reference film research if specified
     if use_web_research and reference_films:

@@ -425,3 +425,36 @@ def test_to_str_empty_list():
 def test_to_str_empty_dict():
     from llm.style_director import _to_str
     assert _to_str({}) == ""
+
+
+# ---------------------------------------------------------------------------
+# Follow-up B — web-research failure observability
+# ---------------------------------------------------------------------------
+
+def test_research_exception_logs_warning_and_returns_valid_result(capsys):
+    """When research_cinematography raises, generate_style_rules must:
+    1. Emit the [STYLE] warning line to stdout (observable, not swallowed).
+    2. Still return a valid dict with all 7 required keys (graceful degradation).
+    """
+    fake = _fake_settings(openai_api_key="sk-fake")
+    mock_client = MagicMock()
+    llm_payload = {k: f"v_{k}" for k in _ALL_7_KEYS}
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("Tavily outage")
+
+    with (
+        patch("llm.style_director.settings", new=fake),
+        patch("openai.OpenAI", return_value=mock_client),
+        patch("research_engine.research_cinematography", side_effect=_raise),
+        patch("web_research.run_with_tools", return_value=json.dumps(llm_payload)),
+    ):
+        from llm.style_director import generate_style_rules
+        result = generate_style_rules("TestFilm", use_web_research=True)
+
+    captured = capsys.readouterr()
+    # Warning must be emitted — not silently swallowed.
+    assert "web research unavailable" in captured.out
+    assert "Tavily outage" in captured.out
+    # Graceful degradation: result is still a valid style dict.
+    assert set(result.keys()) == _ALL_7_KEYS
