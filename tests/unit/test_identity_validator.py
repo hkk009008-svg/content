@@ -121,7 +121,7 @@ class TestValidateImageMissingFile:
         assert result.overall_score is None
 
     def test_missing_file_uses_supplied_threshold(self):
-        # The threshold is forwarded to _no_file_result via `threshold or 0.70`.
+        # The threshold is forwarded to _skipped_result via `threshold or 0.70`.
         with patch("identity.validator.os.path.exists", return_value=False):
             validator = IdentityValidator()
             result = validator.validate_image(
@@ -279,12 +279,15 @@ def _make_mock_cap(total_frames: int = 0, fps: float = 24.0):
 
 
 class TestValidateVideoEmptyCharacterConfigs:
-    """Test case 7: empty character_configs → passed=True (uses _no_file_result)."""
+    """Test case 7: empty character_configs → skipped=True, overall_score=None."""
 
     def test_empty_configs_passes_silently(self):
-        # CANDIDATE BUG (G1 variant): empty character_configs uses _no_file_result
-        # which returns passed=True, overall_score=1.0 rather than signaling no work was done.
-        with patch("identity.validator.DEEPFACE_AVAILABLE", True):
+        # Fixed (Part-3 T4): empty character_configs uses _skipped_result
+        # (nothing configured to check = SKIP; shot proceeds, not a failure).
+        # Patch os.path.exists so the video file is "present" (avoids the
+        # missing-video FAIL guard added in the same task).
+        with patch("identity.validator.DEEPFACE_AVAILABLE", True), \
+             patch("identity.validator.os.path.exists", return_value=True):
             validator = IdentityValidator()
             result = validator.validate_video(
                 video_path="/fake.mp4",
@@ -292,7 +295,49 @@ class TestValidateVideoEmptyCharacterConfigs:
                 shot_type="medium",
             )
         assert result.passed is True
-        assert result.overall_score == 1.0
+        assert result.skipped is True
+        assert result.overall_score is None
+
+
+class TestValidateVideoMissingFile:
+    """Test case 7b: video file missing → passed=False, failure_reason=generated_image_missing."""
+
+    def test_missing_video_file_fails(self):
+        with patch("identity.validator.DEEPFACE_AVAILABLE", True), \
+             patch("identity.validator.os.path.exists", return_value=False):
+            validator = IdentityValidator()
+            result = validator.validate_video(
+                video_path="/nonexistent.mp4",
+                character_configs=[{"id": "char_a", "reference_image": "/ref.jpg", "name": "Alice"}],
+                shot_type="medium",
+            )
+        assert result.passed is False
+        assert result.metadata.get("failure_reason") == "generated_image_missing"
+
+
+class TestValidateVideoAllRefsFail:
+    """Test case 7c: refs present in config but all fail to load → skipped=True."""
+
+    def test_all_refs_fail_to_load_skips(self):
+        # os.path.exists: video is present, ref images are missing → ref_embeddings empty → SKIP.
+        mock_cap = _make_mock_cap(total_frames=120, fps=24.0)
+
+        def exists_side_effect(path):
+            return path == "/fake.mp4"  # only the video file exists
+
+        with patch("identity.validator.DEEPFACE_AVAILABLE", True), \
+             patch("identity.validator.os.path.exists", side_effect=exists_side_effect), \
+             patch("identity.validator.cv2.VideoCapture", return_value=mock_cap):
+            validator = IdentityValidator()
+            result = validator.validate_video(
+                video_path="/fake.mp4",
+                character_configs=[{"id": "char_a", "reference_image": "/ref.jpg", "name": "Alice"},
+                                   {"id": "char_b", "reference_image": "/ref2.jpg", "name": "Bob"}],
+                shot_type="medium",
+            )
+        assert result.passed is True
+        assert result.skipped is True
+        assert result.overall_score is None
 
 
 class TestValidateVideoZeroFrames:
@@ -318,22 +363,14 @@ class TestValidateVideoZeroFrames:
 
 
 class TestValidateVideoLandscape:
-    """Test case 9: shot_type='landscape' with nonzero frames → frames_sampled=0.
+    """Test case 9: shot_type='landscape' with nonzero frames → skipped=True (F2 fix).
 
-    The actual behavior diverges from the spec map prediction.
-    When ref files exist, landscape still builds char_frame_results (with empty lists)
-    and _aggregate_character returns matched=False for empty frames → passed=False.
-
-    The spec map predicted passed=True (G2 silent-pass), but that only occurs when
-    character_results is empty (no ref files found → _no_file_result path).
+    Fixed (Part-3 T4): landscape shot_type yields density=0.0 → positions=[] →
+    _skipped_result is returned immediately (no face expected → SKIP, not FAIL).
     """
 
-    def test_landscape_zero_frames_sampled_fails_when_ref_exists(self):
-        # CANDIDATE BUG (G2 — actual behavior): landscape shot_type yields density=0.0 →
-        # positions=[] → char_frame_results[cid]=[] per character → _aggregate_character([])
-        # returns matched=False → passed=False, overall_score=0.0, frames_sampled=0.
-        # This is wrong behavior: a landscape shot should not "fail" identity for having
-        # no faces — faces are not the point of a landscape shot.
+    def test_landscape_zero_frames_sampled_skips_when_ref_exists(self):
+        # Fixed (G2 — Part-3 T4): landscape with refs now returns skipped=True, passed=True.
         ref_emb = _make_embedding(1.0)
         mock_cap = _make_mock_cap(total_frames=120, fps=24.0)
 
@@ -349,17 +386,20 @@ class TestValidateVideoLandscape:
             )
 
         assert result.frames_sampled == 0
-        # Actual behavior: passed=False (not True as the spec map predicted)
-        assert result.passed is False
-        assert result.overall_score == pytest.approx(0.0)
+        assert result.passed is True
+        assert result.skipped is True
+        assert result.overall_score is None
 
     def test_landscape_passes_when_no_ref_files(self):
-        # When ref files don't exist → ref_embeddings is empty → _no_file_result → passed=True.
-        # This is the path where landscape actually silently passes.
+        # When ref files don't exist → ref_embeddings is empty → _skipped_result → passed=True.
+        # Video file itself is present; only ref images are missing.
         mock_cap = _make_mock_cap(total_frames=120, fps=24.0)
 
+        def exists_side_effect(path):
+            return path == "/fake.mp4"  # only the video file exists
+
         with patch("identity.validator.DEEPFACE_AVAILABLE", True), \
-             patch("identity.validator.os.path.exists", return_value=False), \
+             patch("identity.validator.os.path.exists", side_effect=exists_side_effect), \
              patch("identity.validator.cv2.VideoCapture", return_value=mock_cap):
             validator = IdentityValidator()
             result = validator.validate_video(
@@ -369,7 +409,8 @@ class TestValidateVideoLandscape:
             )
 
         assert result.passed is True
-        assert result.overall_score == 1.0
+        assert result.skipped is True
+        assert result.overall_score is None
 
 
 class TestValidateVideoMultiCharacterOneFails:
@@ -822,7 +863,7 @@ class TestThresholdZeroInconsistency:
     G4: validate_video line 153 uses `threshold or get_threshold_for_shot(...)`.
     If threshold=0.0 (falsy), the `or` expression ignores it and picks a default.
     But line 162 uses `if threshold is None` — so 0.0 would NOT be overridden there.
-    This means th (used in _no_file_result and vision path) gets a real value
+    This means th (used in _skipped_result/_missing_output_result and vision path) gets a real value
     while threshold (used in DeepFace path) stays 0.0.
 
     This test documents the ACTUAL behavior: when DEEPFACE_AVAILABLE=True and

@@ -153,8 +153,10 @@ class IdentityValidator:
             max_attempts: Total retries planned.
         """
         th = threshold or get_threshold_for_shot(shot_type, mode, attempt, max_attempts)
+        if not os.path.exists(video_path):
+            return self._missing_output_result(shot_type, th)
         if not character_configs:
-            return self._no_file_result(shot_type, th)
+            return self._skipped_result(shot_type, th)
 
         if not DEEPFACE_AVAILABLE:
             return self._vision_llm_validate_video(
@@ -178,7 +180,7 @@ class IdentityValidator:
                 ref_embeddings[cid] = emb
 
         if not ref_embeddings:
-            return self._no_file_result(shot_type, threshold)
+            return self._skipped_result(shot_type, threshold)
 
         # Open video and compute adaptive sample positions
         cap = cv2.VideoCapture(video_path)
@@ -198,6 +200,10 @@ class IdentityValidator:
             )
 
         positions = self._compute_sample_positions(total_frames, fps, shot_type)
+
+        if not positions:
+            cap.release()
+            return self._skipped_result(shot_type, threshold)
 
         # Per-character frame results
         char_frame_results: Dict[str, List[FrameSample]] = {cid: [] for cid in ref_embeddings}
@@ -693,15 +699,6 @@ class IdentityValidator:
             return +0.05  # Close miss
         else:
             return +0.10  # Clear failure
-
-    @staticmethod
-    def _no_file_result(shot_type: str, threshold: float) -> IdentityValidationResult:
-        """Return a passing result when reference/input files are missing."""
-        return IdentityValidationResult(
-            passed=True, overall_score=1.0, character_results={},
-            frames_sampled=0, video_duration_seconds=0.0,
-            shot_type=shot_type, threshold_used=threshold,
-        )
 
     @staticmethod
     def _skipped_result(shot_type: str, threshold: float) -> IdentityValidationResult:
