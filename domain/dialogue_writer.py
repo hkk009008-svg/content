@@ -154,31 +154,3 @@ Only use tools if they would genuinely improve dialogue quality."""
     except Exception as e:
         print(f"   ⚠️ Dialogue generation failed: {e}")
         return []
-
-
-def format_dialogue_for_voiceover(dialogue_lines: List[dict]) -> List[dict]:
-    """
-    Formats dialogue lines for the multi-character voiceover system.
-    Each line gets the character's voice_id for ElevenLabs TTS.
-    """
-    formatted = []
-    for line in dialogue_lines:
-        formatted.append({
-            "character_id": line["character_id"],
-            "text": line["text"],
-            "delivery": line.get("delivery", "natural"),
-        })
-    return formatted
-
-
-def dialogue_to_narration_text(dialogue_lines: List[dict]) -> str:
-    """Convert dialogue lines to a single narration string for single-voice fallback."""
-    parts = []
-    for line in dialogue_lines:
-        name = line.get("character_name", "")
-        text = line.get("text", "")
-        if name:
-            parts.append(f"{text}")
-        else:
-            parts.append(text)
-    return " ".join(parts)
