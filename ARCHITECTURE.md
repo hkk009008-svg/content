@@ -855,10 +855,15 @@ speedup at workers=4 on a 4-candidate batch: ~3.9× wall-clock. `pool.map`
 yields in submission order so log + scores ordering is stable regardless
 of workers count.
 
-**Halt rule** ([face_validator_gate.py:225-248](face_validator_gate.py:225)):
+**Halt rule** ([face_validator_gate.py:225-248](face_validator_gate.py:225)) — mode
+selected by the `max_halt_rule` config enum, passed as `should_halt(halt_rule=...)`:
 - `n >= halt_min_n (default 4) AND best.composite >= halt_threshold_composite (default 0.92)`
-- OR `n >= halt_max_n (default 8)` (budget)
-- `halt_threshold_arc=0.85` is **informational only** — not gated
+- OR `n >= halt_max_n (default 8)` (budget halt — **unconditional for all modes**)
+- **`composite_only` (default):** `halt_threshold_arc=0.85` is **informational only** — not gated.
+- **`conjunctive`:** also requires `best.arc >= halt_threshold_arc` (the identity floor),
+  auto-satisfied for no-character / no-arc shots (`not has_character or not has_arc`) so
+  landscape shots still early-halt instead of burning the full budget (T4 + Lane-V guard `bf86262`).
+- **`budget_only`:** deferred — falls back to `composite_only` behavior.
 
 **Composite score:** `0.6 * arc + 0.4 * aesthetic`. Missing scores neutral-fall to 0.5.
 
@@ -866,11 +871,19 @@ of workers count.
 `shunk031/aesthetics-predictor-v2-sac-logos-ava1-l14-linearMSE` + CLIP ViT-L/14.
 
 **Workflow injection passes:**
-- `_inject_identity` — LoRA, face_anchor, PuLID weight
+- `_inject_identity` — LoRA, face_anchor, PuLID weight; honors a per-character
+  `char_lora_strength` override on node-700 (`0.0` honored; independent
+  `strength_model`/`strength_clip` fallbacks preserved when unset), threaded from
+  the validated LoRA-gate sweep (see "LoRA quality gate" below)
 - `_inject_conditioning` — prompt, CN strengths, Redux refs
 - `_inject_sampling` — AYS steps, sampler, PAG, **SLG**, **FreeU**, **DetailDaemon**
 - `_inject_latent_source` — EmptyLatent | VAEEncode | LatentBlend
-- `_inject_post_passes` — FaceDetailer, **SUPIR**, final 4K resolution (default 3840×2160)
+- `_inject_post_passes` — FaceDetailer, **SUPIR**, **hires_fix Pass-2** (when
+  `hires_fix_enabled`: node 18 = deepcopy of the node-17 scheduler at gentler
+  denoise [default 0.40] + fewer steps [`hires_fix_steps`, default 18, range 5–40],
+  re-pointing the node-901 refine-pass sigmas — a photorealism lever vs. the old
+  full-denoise=1.0 painterly refine; **pod-unvalidated hypothesis**), final 4K
+  resolution (default 3840×2160)
 
 | Technique | What it does | Default params |
 |---|---|---|
@@ -882,6 +895,21 @@ of workers count.
 
 **No Topaz in the live path.** Operator-side Topaz prep lives in
 `prep/topaz_upscale.py`.
+
+**LoRA quality gate** ([prep/lora_quality.py](prep/lora_quality.py)) — before render,
+`train_character_lora_gated` runs a bounded train→validate→retrain loop (≤3 trains,
+keep-best, reject-if-net-negative). `validate_lora_quality` is the ArcFace oracle: it
+sweeps strength × prompts against the reference and picks the best per-character
+strength, persisted as `char_lora_strengths` (web `api_train_lora` → status
+`record_lora_verdict`; `get_lora_status` surfaces `rejected`/`quality_warning`). The
+render path's `_inject_identity` (above) then bakes each LoRA at its **validated**
+strength instead of the tier default `1.0` — closing the 1.0-over-bake realism gap
+(0.55 beats 1.0; 2026-06-02 char-LoRA finding). Gracefully skips (registers
+unvalidated) when ComfyUI/GPU is unreachable; live threshold/baseline/sweep
+calibration is GPU-pod (Phase-B) work. Status: `pipeline_status.toml::lora_validation
+= wired` (T1, `9f2ace6..6f7df8d`). The old `-1.0` stub in `prep/lora_training.py` is
+gone; `prep/lora_training.py::train_character_lora` is now a pure single-train the gate
+orchestrates.
 
 ### 8.4 Identity-validator integration
 
@@ -1647,4 +1675,8 @@ source & 72 stale line numbers corrected on 2026-05-29 (full sweep,
 cascade updated 2026-06-03 to document the `hedra_native` direct Character-3
 ATTEMPT-0 (`cb31207`). §10.6/§10.7 updated 2026-06-03 to document the
 Veo+overlay dialogue default + `dialogue_voice_mode` (Chunk 4, Task 9;
-anchors scoped to §10.6/§10.7 only — not a whole-file re-verify).*
+anchors scoped to §10.6/§10.7 only — not a whole-file re-verify). §8.3 updated
+2026-06-04 (Lane D) to document T1 (LoRA quality gate + validated
+`char_lora_strength` override), T3 (hires_fix Pass-2 @ denoise 0.40), and T4
+(`conjunctive` identity-floor halt mode); scoped to §8.3 only — not a whole-file
+re-verify.*
