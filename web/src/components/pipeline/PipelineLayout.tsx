@@ -44,7 +44,7 @@ interface Props {
    *  (legacy "advance to next stage" semantics used by SceneExecutionCard). */
   onRestartShot: (shotId: string, positive?: string, negative?: string) => Promise<any>
   onCorrectShot: (shotId: string, action: string, params?: Record<string, any>, takeId?: string) => Promise<any>
-  onDiagnoseShot: (shotId: string, takeId?: string) => Promise<any>
+  onDiagnoseShot: (shotId: string, takeId?: string, deep?: boolean) => Promise<any>
   onProceedToAssembly: () => Promise<any>
   /** Refresh the project from the server (rehydrate state). Used by
    *  ReviewStage's auto-approve rejection flow to clear the badge once
@@ -343,7 +343,7 @@ export default function PipelineLayout({
               onGenerateMotion={onGenerateMotion}
               onApproveFinal={onApproveFinal}
               onCorrect={onCorrectShot}
-              onDiagnose={onDiagnoseShot}
+              onDiagnose={(shotId, takeId, deep) => onDiagnoseShot(shotId, takeId, deep)}
               onRegenerate={onRestartShot}
               onProceedToAssembly={onProceedToAssembly}
               onRefreshProject={onRefreshProject}

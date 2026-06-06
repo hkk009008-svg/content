@@ -43,7 +43,7 @@ interface Props {
   onGenerateMotion: (shotId: string) => Promise<any>
   onApproveFinal: (shotId: string, takeId: string) => Promise<any>
   onCorrect: (shotId: string, action: string, params?: Record<string, any>, takeId?: string) => Promise<any>
-  onDiagnose: (shotId: string, takeId?: string) => Promise<any>
+  onDiagnose: (shotId: string, takeId?: string, deep?: boolean) => Promise<any>
   onRegenerate: (shotId: string, positive?: string, negative?: string) => Promise<any>
   onProceedToAssembly: () => Promise<any>
   /** Refresh project state from the server. Called after a successful
@@ -222,8 +222,9 @@ function ClipCard({
   onRefreshProject: Props['onRefreshProject']
   onIterate?: Props['onIterate']
 }) {
-  const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null)
+  const [diagnosis, setDiagnosis] = useState<any | null>(null)
   const [diagnosing, setDiagnosing] = useState(false)
+  const [deepDiagnosing, setDeepDiagnosing] = useState(false)
   const [loadingAction, setLoadingAction] = useState<string | null>(null)
   const [positivePrompt, setPositivePrompt] = useState(shot.prompt || '')
   const [negativePrompt, setNegativePrompt] = useState(shot.negative_constraints || '')
@@ -302,6 +303,14 @@ function ClipCard({
     const result = await onDiagnose(shot.id, activeTakeId)
     setDiagnosis(result)
     setDiagnosing(false)
+  }
+
+  const handleDeepDiagnose = async () => {
+    if (!activeTakeId) return
+    setDeepDiagnosing(true)
+    const result = await onDiagnose(shot.id, activeTakeId, true)
+    setDiagnosis(result)
+    setDeepDiagnosing(false)
   }
 
   const handleCorrect = async (action: string, params: Record<string, any> = {}) => {
@@ -742,11 +751,19 @@ function ClipCard({
               >
                 {diagnosing ? 'Diagnosing...' : 'Diagnose'}
               </button>
+              <button
+                onClick={handleDeepDiagnose}
+                disabled={!activeTakeId || deepDiagnosing || diagnosis?.deep_available === false}
+                className="rounded border border-editorial-warn/50 px-2 py-1 text-eyebrow-lg text-editorial-warn hover:bg-editorial-warn/10 disabled:opacity-40"
+                title={diagnosis?.deep_available === false ? 'Deep diagnosis not available for this take' : 'Run LLM-powered deep diagnosis'}
+              >
+                {deepDiagnosing ? 'Deep diagnosing...' : 'Deep diagnose'}
+              </button>
             </div>
 
             {(diagnosis?.recommendations?.length || latestDiagnostic?.recommendations?.length) ? (
               <div className="mt-3 rounded border border-editorial-warn/20 bg-editorial-warn/5 px-3 py-2 text-xs">
-                {(diagnosis?.recommendations || latestDiagnostic?.recommendations || []).map((recommendation, index) => (
+                {(diagnosis?.recommendations || latestDiagnostic?.recommendations || []).map((recommendation: { tool: string; reason: string }, index: number) => (
                   <div key={`${recommendation.tool}-${index}`} className="mt-1 flex items-center gap-2">
                     <span className="text-editorial-warn">{recommendation.tool}</span>
                     <span className="text-editorial-ivory-mute">{recommendation.reason}</span>
@@ -754,6 +771,89 @@ function ClipCard({
                 ))}
               </div>
             ) : null}
+
+            {/* Remediation advisory — shown on identity failure, from diagnose result or inline take metadata */}
+            {(() => {
+              const activeTake = activeTakeId
+                ? findTake([...keyframeTakes, ...finalTakes], activeTakeId)
+                : null
+              const advisory = diagnosis?.remediation_advisory ?? activeTake?.metadata?.remediation_advisory
+              if (!advisory) return null
+              return (
+                <div className="mt-3 rounded border border-editorial-warn/30 bg-editorial-warn/5 px-3 py-3 text-xs space-y-2">
+                  <div className="font-semibold uppercase tracking-wide text-editorial-warn text-eyebrow-lg">
+                    Identity Remediation Advisory
+                  </div>
+                  {advisory.failure_reason && (
+                    <div className="text-editorial-ivory-mute">{advisory.failure_reason}</div>
+                  )}
+                  {advisory.suggested_negative_prompt && (
+                    <div className="space-y-1">
+                      <div className="text-editorial-ivory-mute uppercase text-eyebrow tracking-wide">Suggested negative prompt</div>
+                      <code className="block font-mono bg-editorial-ink px-2 py-1.5 rounded text-editorial-ivory break-all whitespace-pre-wrap">
+                        {advisory.suggested_negative_prompt}
+                      </code>
+                      <button
+                        onClick={() => setNegativePrompt(advisory.suggested_negative_prompt)}
+                        className="text-editorial-brass hover:text-editorial-brass-deep underline underline-offset-2"
+                      >
+                        Apply negative prompt
+                      </button>
+                    </div>
+                  )}
+                  {advisory.suggested_pulid_adjustment && (
+                    <div className="text-editorial-ivory-mute">
+                      <span className="text-editorial-warn">PuLID adjustment:</span>{' '}
+                      {typeof advisory.suggested_pulid_adjustment === 'number'
+                        ? `PuLID weight ${advisory.suggested_pulid_adjustment > 0 ? '+' : ''}${advisory.suggested_pulid_adjustment}`
+                        : String(advisory.suggested_pulid_adjustment)}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
+            {/* Deep advisory — LLM diagnosis result */}
+            {diagnosis?.advisory_deep && (
+              <div className="mt-3 rounded border border-editorial-warn/30 bg-editorial-warn/5 px-3 py-3 text-xs space-y-2">
+                <div className="font-semibold uppercase tracking-wide text-editorial-warn text-eyebrow-lg">
+                  Deep Diagnosis
+                  <span className="ml-2 rounded bg-editorial-ink px-1.5 py-0.5 text-editorial-ivory-mute font-normal normal-case tracking-normal">
+                    {diagnosis.advisory_deep.source ?? 'llm'}
+                  </span>
+                </div>
+                {diagnosis.advisory_deep.diagnosis && (
+                  <div className="text-editorial-ivory-mute">{diagnosis.advisory_deep.diagnosis}</div>
+                )}
+                {diagnosis.advisory_deep.prompt_mutation && (
+                  <div className="space-y-1">
+                    <div className="text-editorial-ivory-mute uppercase text-eyebrow tracking-wide">Prompt mutation</div>
+                    <code className="block font-mono bg-editorial-ink px-2 py-1.5 rounded text-editorial-ivory break-all whitespace-pre-wrap">
+                      {diagnosis.advisory_deep.prompt_mutation}
+                    </code>
+                  </div>
+                )}
+                {diagnosis.advisory_deep.mutation_focus && (
+                  <div className="text-editorial-ivory-mute">
+                    <span className="text-editorial-warn">Focus:</span>{' '}
+                    {diagnosis.advisory_deep.mutation_focus}
+                  </div>
+                )}
+                {diagnosis.advisory_deep.decision && (
+                  <div className="text-editorial-ivory-mute">
+                    <span className="text-editorial-warn">Decision:</span>{' '}
+                    {diagnosis.advisory_deep.decision}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Deep error note */}
+            {diagnosis?.deep_error && (
+              <div className="mt-2 text-eyebrow-lg text-editorial-ivory-faint italic">
+                Deep diagnosis unavailable: {diagnosis.deep_error}
+              </div>
+            )}
           </section>
         </div>
       </div>

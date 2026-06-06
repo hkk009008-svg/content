@@ -158,7 +158,7 @@ export default function App() {
           onRegenerateShot={(shotId, positive, negative) => withRefresh(() => regenerateShot(shotId, positive, negative))}
           onRestartShot={(shotId, positive, negative) => withRefresh(() => restartShot(shotId, positive, negative))}
           onCorrectShot={(shotId, action, params, takeId) => withRefresh(() => correctShot(shotId, action, params, takeId))}
-          onDiagnoseShot={(shotId, takeId) => diagnoseShot(shotId, takeId)}
+          onDiagnoseShot={(shotId, takeId, deep) => diagnoseShot(shotId, takeId, deep)}
           onProceedToAssembly={() => withRefresh(() => proceedToAssembly())}
           onRefreshProject={refreshProject}
           onIterate={(shotId, takeId, prose, targetStage, verb, params) =>

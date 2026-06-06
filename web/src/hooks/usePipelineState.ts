@@ -201,9 +201,9 @@ export function usePipelineState(projectId: string | null) {
     return postJson(`/api/projects/${projectId}/shots/${shotId}/correct`, { action, params, take_id: takeId })
   }, [projectId, postJson])
 
-  const diagnoseShot = useCallback(async (shotId: string, takeId?: string) => {
+  const diagnoseShot = useCallback(async (shotId: string, takeId?: string, deep = false) => {
     if (!projectId) return null
-    return postJson(`/api/projects/${projectId}/shots/${shotId}/diagnose`, takeId ? { take_id: takeId } : {})
+    return postJson(`/api/projects/${projectId}/shots/${shotId}/diagnose`, { ...(takeId ? { take_id: takeId } : {}), deep })
   }, [projectId, postJson])
 
   const proceedToAssembly = useCallback(async () => {
