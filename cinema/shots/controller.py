@@ -1912,32 +1912,36 @@ class ShotController:
 
         if deep:
             from config.settings import settings as _settings
-            from cinema.auto_approve import AdvisoryConfig
             deep_available = bool(_settings.anthropic_api_key or _settings.openai_api_key)
             result["deep_available"] = deep_available
             if not deep_available:
                 result["deep_error"] = "No LLM API key configured"
-            elif AdvisoryConfig.from_project(self.project).deep_enabled and image_path and os.path.exists(str(image_path)) and chars:
+            else:
+                # Deep path fully isolated — config read, ref lookup, and the LLM
+                # call are all inside the try so NOTHING here can break the
+                # deterministic result already built above (spec §4.3/§8).
                 try:
+                    from cinema.auto_approve import AdvisoryConfig
                     from llm.chief_director import ChiefDirector
-                    _ref = get_reference_image(self.project, chars[0]) or ""
-                    _deep = ChiefDirector(self.project).evaluate_generation_quality(
-                        image_path=str(image_path),
-                        reference_path=_ref,
-                        identity_result=id_result,
-                        identity_score=result["scores"].get("identity") or 0.0,
-                        shot_prompt=shot.get("prompt", ""),
-                        scene_context=f"{scene.get('title', '')} — {scene.get('action', '')}",
-                        coherence_result=coh,
-                    )
-                    result["advisory_deep"] = {
-                        "diagnosis": _deep.get("diagnosis", ""),
-                        "prompt_mutation": _deep.get("prompt_mutation", ""),
-                        "mutation_focus": _deep.get("mutation_focus", ""),
-                        "decision": _deep.get("decision", ""),
-                        "source": "llm",
-                    }
-                except Exception as _e:   # LLM path fully isolated — never break the panel
+                    if AdvisoryConfig.from_project(self.project).deep_enabled and image_path and os.path.exists(str(image_path)) and chars:
+                        _ref = get_reference_image(self.project, chars[0]) or ""
+                        _deep = ChiefDirector(self.project).evaluate_generation_quality(
+                            image_path=str(image_path),
+                            reference_path=_ref,
+                            identity_result=id_result,
+                            identity_score=result["scores"].get("identity") or 0.0,
+                            shot_prompt=shot.get("prompt", ""),
+                            scene_context=f"{scene.get('title', '')} — {scene.get('action', '')}",
+                            coherence_result=coh,
+                        )
+                        result["advisory_deep"] = {
+                            "diagnosis": _deep.get("diagnosis", ""),
+                            "prompt_mutation": _deep.get("prompt_mutation", ""),
+                            "mutation_focus": _deep.get("mutation_focus", ""),
+                            "decision": _deep.get("decision", ""),
+                            "source": "llm",
+                        }
+                except Exception as _e:
                     result["deep_error"] = str(_e)
 
         self._record_diagnostic(shot_id, {
