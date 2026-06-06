@@ -2071,7 +2071,15 @@ def api_restart_shot(pid, shot_id):
 @app.route("/api/projects/<pid>/shots/<shot_id>/regenerate", methods=["POST"])
 @_project_lock_guard
 def api_regenerate_shot(pid, shot_id):
-    """Regenerate a single shot. Supports positive_prompt and negative_prompt."""
+    """Regenerate a single shot (legacy/compat path).
+
+    Optional body: {positive_prompt} — when set, it replaces the shot's stored
+    prompt before regeneration. negative_prompt is NOT honored on this path:
+    the endpoint reads only positive_prompt (below) and calls
+    ShotController.regenerate_shot, a compatibility wrapper that takes no prompt
+    parameters. For negative_prompt support use POST .../restart
+    (api_restart_shot), which threads it into generate_keyframe_take.
+    """
     pipeline = _get_running_pipeline(pid)
     new_prompt = request.json.get("positive_prompt") if request.is_json else None
 
