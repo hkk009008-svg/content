@@ -210,3 +210,168 @@ class TestKeyframeCostProvenance:
             "(tier-based hardcoded-guess regression)"
         )
         assert call.kwargs["operation"] == "keyframe_generation"
+
+
+class TestRemediationAdvisoryOnFailedKeyframe:
+    """T6: when the identity gate fails, generate_keyframe_take appends
+    take.metadata.remediation_advisory (built by build_remediation_advisory)
+    alongside the existing identity_failure_reason + suggested_pulid_adjustment.
+
+    We drive the method through to the identity-validation branch by:
+    1. Setting primary_reference in continuity_config so primary_ref is set.
+    2. Mocking _get_shared_validator to return a failed IdentityValidationResult.
+    3. Mocking generate_ai_broll to write the fake image so the method proceeds.
+
+    Advisory-only: the method must still return success=True; the advisory
+    is purely informational metadata on the take."""
+
+    def test_advisory_appended_on_identity_gate_failure(self, tmp_path):
+        from identity.types import (
+            CharacterIdentityResult,
+            FailureReason,
+            IdentityValidationResult,
+        )
+        from phase_c_assembly import ImageGenResult
+
+        ctrl, project = _build_keyframe_controller()
+        real_path = str(tmp_path / "kf.jpg")
+        ctrl._take_output_path = MagicMock(return_value=real_path)
+
+        # Provide a primary_reference so identity validation runs
+        ctrl._core.continuity.enhance_shot_prompt.return_value = {
+            "prompt": "base prompt",
+            "continuity_config": {"primary_reference": "/fake/ref.jpg"},
+        }
+
+        # Build a failed identity result with a known failure reason
+        char_diag = CharacterIdentityResult(
+            character_id="char_1",
+            character_name="Alice",
+            best_similarity=0.40,
+            mean_similarity=0.35,
+            min_similarity=0.30,
+            frame_results=[],
+            matched=False,
+            primary_failure_reason=FailureReason.WRONG_PERSON,
+            suggested_pulid_adjustment=0.05,
+        )
+        failed_id_result = IdentityValidationResult(
+            passed=False,
+            overall_score=0.40,
+            character_results={"char_1": char_diag},
+            frames_sampled=1,
+            video_duration_seconds=0.0,
+            shot_type="medium",
+            threshold_used=0.70,
+        )
+
+        def _fake_broll(*args, **kwargs):
+            with open(real_path, "wb") as fh:
+                fh.write(b"img")
+            return ImageGenResult(real_path, "COMFYUI_PULID")
+
+        mock_validator = MagicMock()
+        mock_validator.validate_image.return_value = failed_id_result
+
+        # Intercept _mutate_shot to extract the 'take' dict the mutator closes over.
+        captured_take = {}
+
+        def _capture_mutator(shot_id_arg, mutator_fn):
+            # Call the mutator on a stub; the mutator appends the local `take` dict
+            # to fake_shot["keyframe_takes"] — capture it from there.
+            fake_shot = {}
+            mutator_fn({}, fake_shot)
+            # take was appended to fake_shot["keyframe_takes"][0]
+            captured_take.update(fake_shot["keyframe_takes"][0])
+            return MagicMock()
+
+        ctrl._mutate_shot = _capture_mutator
+
+        with patch("cinema.shots.controller.generate_ai_broll", side_effect=_fake_broll), \
+             patch("phase_c_vision._get_shared_validator", return_value=mock_validator):
+            # We need the shot to have a primary_character so primary_char_id is set
+            project["scenes"][0]["shots"][0]["primary_character"] = "char_1"
+            result = ctrl.generate_keyframe_take(
+                "scene_1", "shot_1_0", positive_prompt="a test prompt"
+            )
+
+        assert result.get("success") is True, f"expected success, got {result}"
+        # Existing diagnostics (pre-T6) must still be present
+        assert captured_take["metadata"]["identity_failure_reason"] == "wrong_person"
+        assert captured_take["metadata"]["suggested_pulid_adjustment"] == 0.05
+        # T6: remediation_advisory must now be populated
+        assert "remediation_advisory" in captured_take["metadata"], (
+            "T6 wire missing: remediation_advisory not set on failed-identity take"
+        )
+        adv = captured_take["metadata"]["remediation_advisory"]
+        assert adv["failure_reason"] == "wrong_person", f"got {adv!r}"
+        assert adv["source"] == "deterministic", f"got {adv!r}"
+
+    def test_no_advisory_when_identity_passes(self, tmp_path):
+        """Passing identity gate must NOT set remediation_advisory."""
+        from identity.types import (
+            CharacterIdentityResult,
+            FailureReason,
+            IdentityValidationResult,
+        )
+        from phase_c_assembly import ImageGenResult
+
+        ctrl, project = _build_keyframe_controller()
+        real_path = str(tmp_path / "kf.jpg")
+        ctrl._take_output_path = MagicMock(return_value=real_path)
+
+        ctrl._core.continuity.enhance_shot_prompt.return_value = {
+            "prompt": "base prompt",
+            "continuity_config": {"primary_reference": "/fake/ref.jpg"},
+        }
+
+        char_diag = CharacterIdentityResult(
+            character_id="char_1",
+            character_name="Alice",
+            best_similarity=0.85,
+            mean_similarity=0.80,
+            min_similarity=0.75,
+            frame_results=[],
+            matched=True,
+            primary_failure_reason=FailureReason.PASSED,
+            suggested_pulid_adjustment=0.0,
+        )
+        passed_id_result = IdentityValidationResult(
+            passed=True,
+            overall_score=0.85,
+            character_results={"char_1": char_diag},
+            frames_sampled=1,
+            video_duration_seconds=0.0,
+            shot_type="medium",
+            threshold_used=0.70,
+        )
+
+        def _fake_broll(*args, **kwargs):
+            with open(real_path, "wb") as fh:
+                fh.write(b"img")
+            return ImageGenResult(real_path, "COMFYUI_PULID")
+
+        mock_validator = MagicMock()
+        mock_validator.validate_image.return_value = passed_id_result
+
+        captured_take = {}
+
+        def _capture_mutator(shot_id_arg, mutator_fn):
+            fake_shot = {}
+            mutator_fn({}, fake_shot)
+            captured_take.update(fake_shot["keyframe_takes"][0])
+            return MagicMock()
+
+        ctrl._mutate_shot = _capture_mutator
+
+        with patch("cinema.shots.controller.generate_ai_broll", side_effect=_fake_broll), \
+             patch("phase_c_vision._get_shared_validator", return_value=mock_validator):
+            project["scenes"][0]["shots"][0]["primary_character"] = "char_1"
+            result = ctrl.generate_keyframe_take(
+                "scene_1", "shot_1_0", positive_prompt="a test prompt"
+            )
+
+        assert result.get("success") is True
+        assert "remediation_advisory" not in captured_take["metadata"], (
+            "advisory must NOT be set when identity passes"
+        )

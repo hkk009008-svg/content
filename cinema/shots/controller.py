@@ -667,6 +667,16 @@ class ShotController:
             if char_diag and not id_result.passed:
                 take["metadata"]["identity_failure_reason"] = char_diag.primary_failure_reason.value
                 take["metadata"]["suggested_pulid_adjustment"] = char_diag.suggested_pulid_adjustment
+                # T6: deterministic remediation advisory (pure; advisory-only).
+                from cinema.auto_approve import AdvisoryConfig
+                from llm.negative_prompts import build_remediation_advisory
+                if AdvisoryConfig.from_project(project).enabled:
+                    _adv = build_remediation_advisory(
+                        char_diag.primary_failure_reason.value,
+                        char_diag.suggested_pulid_adjustment,
+                    )
+                    if _adv:
+                        take["metadata"]["remediation_advisory"] = _adv
 
         take["path"] = img_path
 
