@@ -15,11 +15,13 @@
 #
 # Behavior:
 # - Runs on every PostToolUse: Bash|Write|Edit tool call.
-# - Presence auto-freshness (v5.7 M1): if CLAUDE_SEAT is set, stamps the
-#   seat's presence file (head_at_write + updated) on EVERY call, before
-#   the skip-perf gate, so liveness updates during non-committing work.
-#   The hook NEVER writes `current_task` or `status` (those are agent-owned
-#   per Rule #19).
+# - Presence auto-freshness (v5.7 M1): stamps the seat's presence file
+#   (head_at_write + updated) on EVERY call, before the skip-perf gate, so
+#   liveness updates during non-committing work. Seat resolution: CLAUDE_SEAT
+#   env (preferred) ELSE a per-session marker `.claude/presence-seat.<session-id>`
+#   (hardening 2026-06-06) so a session launched without CLAUDE_SEAT still
+#   stamps presence instead of silently no-opping. The hook NEVER writes
+#   `current_task` or `status` (those are agent-owned per Rule #19).
 # - Skip-perf gate: exits early if HEAD hasn't moved since last run AND
 #   STATE.md still exists on disk. Marker stored at
 #   `.claude/hooks/.last-state-head` (gitignored).
@@ -43,9 +45,22 @@ cd "$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 # (mkdir/mktemp/sed/mv/printf) must NEVER abort the hook under `set -e` before
 # the STATE.md regen below — presence is best-effort, STATE.md is the priority.
 {
-if [ -n "${CLAUDE_SEAT:-}" ]; then
+# Resolve the seat. CLAUDE_SEAT (per-launch env — the documented D-a path,
+# coordination/README.md §"Per-seat launch") wins. FALLBACK (hardening
+# 2026-06-06): if the session was launched WITHOUT CLAUDE_SEAT, read a
+# per-session marker the agent writes at start —
+# `.claude/presence-seat.<session-id>`, keyed by CLAUDE_CODE_SESSION_ID (which
+# the hook inherits) so two concurrent seats can NEVER collide on one file.
+# Root cause this closes: a forgotten CLAUDE_SEAT made presence stamping
+# silently no-op for a whole session, so both seats mis-read each other's
+# liveness (the exact Rule #19/#20 failure observed 2026-06-06).
+_SEAT="${CLAUDE_SEAT:-}"
+if [ -z "$_SEAT" ] && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+  _SEAT=$(cat ".claude/presence-seat.${CLAUDE_CODE_SESSION_ID}" 2>/dev/null || true)
+fi
+if [ -n "$_SEAT" ]; then
   mkdir -p coordination/presence
-  _PF="coordination/presence/${CLAUDE_SEAT}.md"
+  _PF="coordination/presence/${_SEAT}.md"
   _NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   _H=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
   if [ -f "$_PF" ]; then
@@ -54,7 +69,7 @@ if [ -n "${CLAUDE_SEAT:-}" ]; then
         -e "s|^updated:.*|updated: ${_NOW}|" "$_PF" > "$_t" && mv "$_t" "$_PF"
   else
     printf 'seat: %s\nstatus: active\ncurrent_task: (set me when your focus changes)\nhead_at_write: %s\nupdated: %s\n' \
-      "$CLAUDE_SEAT" "$_H" "$_NOW" > "$_PF"
+      "$_SEAT" "$_H" "$_NOW" > "$_PF"
   fi
 fi
 } || true
