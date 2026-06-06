@@ -58,7 +58,10 @@ already exist.
 ### 4.1 Component A — Deterministic advisory (always-on core, $0, no LLM)
 
 A pure builder, **`build_remediation_advisory`**, added to `llm/negative_prompts.py` (co-located with the
-failure→phrase map; alternative placement `cinema/remediation_advisory.py` — confirm import direction during planning):
+failure→phrase map). The `cinema/shots/controller.py` → `llm` import edge this introduces is **already entailed by
+Component B** (`diagnose_clip` must import `ChiefDirector` for the deep path), so it adds no new dependency direction;
+use a **function-level import** at the call sites (mirroring the existing `from phase_c_vision import ...` inside
+`diagnose_clip` at `controller.py:1826`) to sidestep any module-load cycle:
 
 ```python
 def build_remediation_advisory(
@@ -132,11 +135,20 @@ result["advisory_deep"] = {
   `negative_prompt`). Operator submits. *(Confirm during planning that the generate-keyframe endpoint threads
   `negative_prompt` end-to-end; the restart path does not — §9.)*
 
-### 4.5 Config — `AdvisoryConfig.from_project` (mirror `AutoApproveConfig`)
+### 4.5 Config — `AdvisoryConfig.from_project` in `cinema/auto_approve.py` (mirror `AutoApproveConfig`)
 Read `project["global_settings"]["advisory"]`:
 - `enabled: bool = True` — gate the inline persistence + diagnose enrichment.
-- `deep_enabled: bool = True` — gate the LLM button; **auto-false when no Anthropic/OpenAI key is configured**
-  (reuse `ChiefDirector`'s existing key detection).
+- `deep_enabled: bool = True` — operator toggle for the LLM button.
+
+**Key-availability handling (mechanism, resolving spec-review rec):** the **hard safety is the §4.3 fallback** — if
+`deep=True` runs without an LLM key, `ChiefDirector`/`evaluate_generation_quality` raises, we catch it, set
+`deep_error`, and return the deterministic result; a stale flag can never break the panel. Separately, for UX, the
+diagnose/project payload exposes `deep_available: bool` computed by checking LLM-key presence using the **same env
+vars `ChiefDirector.__init__` reads** (resolve the exact var names — Anthropic primary / OpenAI fallback — by reading
+`llm/chief_director.py` `__init__` at **plan task-0**); the frontend disables the Deep-diagnose button when
+`deep_available` is false. `AdvisoryConfig.from_project` does **not** construct a `ChiefDirector` (no heavy init in
+config).
+
 No new score threshold: the advisory keys off the existing identity pass/fail (it fires exactly when the gate already
 says "failed"), so there is nothing new to tune.
 
@@ -152,10 +164,11 @@ says "failed"), so there is nothing new to tune.
 1. `llm/negative_prompts.py` — add `build_remediation_advisory` (+ import `Optional`).
 2. `cinema/shots/controller.py` — inline advisory in `generate_keyframe_take` (~`:670`); enrich + `deep` branch in `diagnose_clip` (`:1791`).
 3. `web_server.py` — `api_diagnose_shot` (`:2138`) read+thread `deep`.
-4. `cinema/auto_approve.py` *or* a small new module — `AdvisoryConfig` (placement mirrors `AutoApproveConfig`).
-5. `web/src/hooks/usePipelineState.ts` (`:204`) — `diagnoseShot(shotId, takeId?, deep?)`.
-6. `web/src/components/pipeline/ReviewStage.tsx` — advisory render + Deep-diagnose button + apply-negative-prompt prefill. Thread the `deep` arg through `App.tsx` / `PipelineLayout.tsx` props.
-7. Tests — see §7.
+4. `cinema/auto_approve.py` — add `AdvisoryConfig` + `.from_project` next to `AutoApproveConfig` (no new module — YAGNI).
+5. `web/src/hooks/usePipelineState.ts` (`:204`) — `diagnoseShot(shotId, takeId?, deep=false)`; POST body includes `deep`.
+6. `web/src/components/pipeline/ReviewStage.tsx` — advisory render + Deep-diagnose button + apply-negative-prompt prefill.
+7. `web/src/App.tsx` + `web/src/components/pipeline/PipelineLayout.tsx` — thread the `deep` arg through the `onDiagnose` / `onDiagnoseShot` prop chain (verify call-site label correctness — CLAUDE.md public-API watchpoint).
+8. Tests — see §7.
 
 ## 7. Testing
 - **Deterministic (no LLM):** unit-test `build_remediation_advisory` (each `FailureReason` → expected phrase; `None` → `None`). Unit-test `diagnose_clip` identity-failure path attaches `remediation_advisory` and the enriched recommendation reason (mock the validator to return a failing `id_result`, as existing tests do).
@@ -185,5 +198,5 @@ says "failed"), so there is nothing new to tune.
 - `ChiefDirector(project)` construction cost / key handling on the deep path — mitigated by `deep_enabled` auto-gating.
 - FE prop-threading churn through `App.tsx`/`PipelineLayout.tsx`/`ReviewStage.tsx` for the new `deep` arg — small but
   spans 3 files; verify call-site label correctness (CLAUDE.md public-API watchpoint).
-- `cinema` → `llm` import edge for `build_remediation_advisory` — confirm acceptable during planning (else place the
-  builder in `cinema/`).
+- `cinema` → `llm` import edge for `build_remediation_advisory` — **resolved**: already entailed by Component B
+  (`diagnose_clip` → `ChiefDirector`); use function-level imports (§4.1). No new dependency direction.
