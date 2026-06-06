@@ -27,6 +27,9 @@ vertex-ai-key.json
 *.wav
 *.aiff
 
+# Brainstorm visual-companion mockups (local, per-machine)
+.superpowers/
+
 # OS metadata
 .DS_Store
 **/.DS_Store
