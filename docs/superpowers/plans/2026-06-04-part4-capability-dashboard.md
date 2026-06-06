@@ -239,8 +239,10 @@ def build_capability_scorecard(project: dict, *, project_dir: str) -> dict:
         liv = (mo or {}).get("metadata", {}).get("lipsync_score") if mo else None
         ident_v.append(idv); coh_v.append(cov); motion_v.append(mov); lip_v.append(liv)
 
-        cas = (mo or kf or {}).get("cascade_metadata", {}) or {}
-        engine = cas.get("engine", (shot.get("target_api") or "")).upper()
+        # per-source: prefer the motion take's cascade, else the keyframe's (don't lose the
+        # keyframe engine when the motion take lacks cascade_metadata). Handles empty-string engine.
+        cas = (mo or {}).get("cascade_metadata") or (kf or {}).get("cascade_metadata") or {}
+        engine = (cas.get("engine") or shot.get("target_api") or "").upper()
         attempts = cas.get("attempts") or []
         silent = bool(cas.get("fallback")) or (len(attempts) > 1)
         if silent: routing["fallback"] += 1
