@@ -171,6 +171,30 @@ class AutoApproveConfig:
         }
 
 
+@dataclass
+class AdvisoryConfig:
+    """Project-scoped flags for the T6 remediation advisory.
+
+    Read from project.json.global_settings.advisory. Unknown sub-keys are
+    silently ignored; missing sub-keys fall back to the defaults.
+    """
+    enabled: bool = True        # gate inline persistence + diagnose enrichment
+    deep_enabled: bool = True   # operator toggle for the opt-in LLM deep diagnosis
+
+    @classmethod
+    def from_project(cls, project: dict) -> "AdvisoryConfig":
+        gs: dict = project.get("global_settings") or {}
+        raw: dict = gs.get("advisory") or {}
+
+        def _get(key: str, default):
+            return raw.get(key, default)
+
+        return cls(
+            enabled=_get("enabled", cls.enabled),
+            deep_enabled=_get("deep_enabled", cls.deep_enabled),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Per-gate rule builders
 # ---------------------------------------------------------------------------
