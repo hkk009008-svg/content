@@ -43,6 +43,7 @@ interface EditorialShellProps {
   onCancel: () => void
   onRefreshProject: () => Promise<void> | void
   onOpenConsole?: () => void   // optional — opens DirectorsConsole when provided
+  onOpenCapability?: () => void  // optional — opens Capability dashboard when provided
   apiBase: string
 }
 
@@ -217,6 +218,7 @@ export default function EditorialShell({
   onCancel,
   onRefreshProject,
   onOpenConsole,
+  onOpenCapability,
   apiBase,
 }: EditorialShellProps) {
   const totalShots = useMemo(
@@ -292,6 +294,15 @@ export default function EditorialShell({
               title="Open the Director's Console — early shell from the new design"
             >
               Director's Console →
+            </button>
+          )}
+          {onOpenCapability && (
+            <button
+              onClick={onOpenCapability}
+              className="font-mono text-eyebrow-lg text-editorial-brass tracking-wide-eyebrow uppercase hover:text-editorial-brass-deep link-editorial"
+              title="Open the Capability dashboard — pipeline scorecard"
+            >
+              Capability →
             </button>
           )}
         </div>

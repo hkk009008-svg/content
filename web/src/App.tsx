@@ -6,6 +6,7 @@ import ProjectSelector from './components/ProjectSelector'
 import PipelineLayout from './components/pipeline/PipelineLayout'
 import EditorialShell from './components/EditorialShell'
 import DirectorsConsole from './components/DirectorsConsole'
+import CapabilityConsole from './components/console/CapabilityConsole'
 
 const API = '/api'
 
@@ -15,7 +16,7 @@ export default function App() {
   const [generating, setGenerating] = useState(false)
   // 'console' is the new Director's Console route — design/directors-console.html
   // brought into the running app as a stub shell. Future slices flesh out the regions.
-  const [mode, setMode] = useState<'setup' | 'pipeline' | 'console'>('setup')
+  const [mode, setMode] = useState<'setup' | 'pipeline' | 'console' | 'capability'>('setup')
 
   const {
     events, latest, isStreaming, start: startSSE, stop: stopSSE,
@@ -106,6 +107,12 @@ export default function App() {
     return <ErrorBoundary><DirectorsConsole project={project} onBack={() => setMode('setup')} /></ErrorBoundary>
   }
 
+  // --- CAPABILITY DASHBOARD ---
+  // Part 4: scorecard view. Toggled via the "Capability →" masthead button.
+  if (mode === 'capability' && project) {
+    return <ErrorBoundary><CapabilityConsole project={project} onBack={() => setMode('setup')} /></ErrorBoundary>
+  }
+
   // --- PIPELINE MODE ---
   if (mode === 'pipeline' && project) {
     const pipelineError =
@@ -184,6 +191,7 @@ export default function App() {
         onCancel={handleCancel}
         onRefreshProject={refreshProject}
         onOpenConsole={() => setMode('console')}
+        onOpenCapability={() => setMode('capability')}
         apiBase={API}
       />
     </ErrorBoundary>

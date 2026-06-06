@@ -484,3 +484,23 @@ export interface AppConfig {
   purpose_tags?: PurposeTag[]
   purpose_api_ranking?: Record<PurposeTag, string[]>                // purpose -> ordered list of API keys
 }
+
+// ── Part 4: Capability Dashboard ────────────────────────────────────────────
+
+export interface CapabilityDimension {
+  key: string; label: string;
+  value: number | null; bar: number | null; pass: boolean | null; n_measured: number;
+}
+
+export interface CapabilityScorecard {
+  project_id: string; tier: string;
+  summary: { shots_total: number; shots_clearing_all_bars: number };
+  dimensions: CapabilityDimension[];
+  routing: { first_try: number; fallback: number; silent_fallback: number };
+  gates: Record<'plan'|'image'|'motion'|'final', { approved: number; vetoed: number; top_vetoes: [string, number][] }>;
+  lora: { char_id: string; strength: number | null; score: number | null; verdict: 'ok'|'warning'|'rejected' }[];
+  components: { id: string; title: string; status: string; note: string }[];
+  per_shot: { shot_id: string; identity: number|null; coherence: number|null; motion: number|null; lipsync: number|null; engine: string }[];
+  provenance: { shot_id: string; engine: string; attempts: string[]; fallback: boolean }[];
+  future_dimensions: string[];
+}
