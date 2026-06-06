@@ -1858,11 +1858,20 @@ class ShotController:
                     char_diag = id_result.character_results.get(chars[0])
                     failure_label = char_diag.primary_failure_reason.value if char_diag else "low_identity"
                     delta = char_diag.suggested_pulid_adjustment if char_diag else 0.0
+                    # T6: structured advisory + negative-prompt-enriched regen reason.
+                    from llm.negative_prompts import build_remediation_advisory, get_negative_prompt_for_failure
+                    _adv = build_remediation_advisory(failure_label, delta)
+                    if _adv:
+                        result["remediation_advisory"] = _adv
+                    _neg = get_negative_prompt_for_failure(failure_label)
+                    _regen_reason = f"Regenerate with PuLID weight +{delta:.2f}"
+                    if _neg:
+                        _regen_reason += f"; add negative prompt: {_neg}"
                     result["recommendations"].append(
                         {"tool": "face_swap", "reason": f"Identity gate failed ({failure_label})"}
                     )
                     result["recommendations"].append(
-                        {"tool": "regenerate", "reason": f"Regenerate with PuLID weight +{delta:.2f}"}
+                        {"tool": "regenerate", "reason": _regen_reason}
                     )
 
         # Motion quality
