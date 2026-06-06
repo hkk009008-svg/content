@@ -467,14 +467,15 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 |---|---|---|
 | `ChiefDirector.validate_shot_prompts` | `llm/chief_director.py:226` | Pre-gen gate against HC1–HC8. Returns `{decision: APPROVED/MODIFIED/REJECTED, violations, shots}`; applies MODIFIED edits in place; ≤1 JSON retry; fail-safe APPROVED on parse failure. |
 | `ChiefDirector._call_llm` | `llm/chief_director.py:82` | Anthropic (`claude-sonnet-4-20250514`) primary, OpenAI (`gpt-4o`) fallback; honors `creative_llm` only if model-family matches active provider. |
-| `ChiefDirector.evaluate_generation_quality` | `llm/chief_director.py:318` | 2×2 (identity × coherence) mutation matrix with negative-prompt enrichment. **Dead code** — zero call sites (see §3.13). |
+| `ChiefDirector.evaluate_generation_quality` | `llm/chief_director.py:336` | 2×2 (identity × coherence) mutation matrix with negative-prompt enrichment. **Wired by T6** — invoked by `cinema/shots/controller.py::diagnose_clip` on the opt-in deep path (`deep=True`); see the remediation-advisory design spec. |
 | `CinemaDirector.translate_intent` / `intent_translator` | `llm/director.py:275` / `:418` | Permissive iteration translator (operator intent overrides HC). Verb DSL (`tighten_framing`/`match_shot`/`shift_emotion`) → `{revised_prompt, params_delta, anchor_refs}`. Called at `cinema/shots/controller.py:1430`. |
 | `LLMEnsemble.competitive_generate` | `llm/ensemble.py:139` | Parallel multi-model gen + judge-pick → `EnsembleResult`. Default rosters per task (`script`/`decompose`/`default`); default judge `claude-sonnet-4`. |
 | `build_anthropic_system_blocks` | `llm/ensemble.py:40` | Wraps system text with `cache_control: ephemeral` for Anthropic prompt caching; callers must pass stable strings. |
 | `optimize_shot_prompt` | `llm/prompt_optimizer.py:355` | UI text → 13-field structured shot spec via ensemble (`task_type="decompose"`); `_coerce_to_valid_keys` sanitizes enums; `_fallback_optimize` is the LLM-free path. |
 | `generate_style_rules` | `llm/style_director.py:12` | **OpenAI-only** 7-key style dict (Tavily-grounded); falls back to `_default_style_rules` if no OpenAI key. Asymmetric with the Anthropic-first directors (see §3.13). |
 | `style_rules_to_prompt_suffix` | `llm/style_director.py:182` | Concatenates color/lighting/photorealism/composition rules into the suffix prepended to every image prompt (`cinema/shots/controller.py:333`). |
-| `get_negative_prompt_for_failure` | `llm/negative_prompts.py:41` | Maps `FailureReason.value` → negative-prompt phrase; used only by `evaluate_generation_quality`. |
+| `get_negative_prompt_for_failure` | `llm/negative_prompts.py:41` | Maps `FailureReason.value` → negative-prompt phrase; used by `evaluate_generation_quality` and `build_remediation_advisory`. |
+| `build_remediation_advisory` | `llm/negative_prompts.py:52` | **Wired by T6** — builds `{failure_label, suggested_negative_prompt, remediation_steps}` advisory dict; called from `generate_keyframe_take` and `diagnose_clip`. |
 
 ### 3.7 Script → Scenes → Dialogue → Research
 
@@ -620,7 +621,7 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 | `pipeline_context.py` vs `cinema/context.py` | top-level vs `cinema/` | 15-line prompt-string loader vs typed `PipelineContext` dataclass. |
 | `headless=True` does NOT use `NullLifecycle` | `cinema/lifecycle.py:70` | Headless still uses `ThreadedLifecycle`; `RunState.headless` makes `_wait_for_gate` raise. `NullLifecycle.wait_for_gate` returns `True` unconditionally — using it would silently skip gate enforcement. |
 | PLAN_REVIEW headless stall (FIXED) | `cinema_pipeline.py:959`, `cinema/auto_approve.py:202` | Without `record_director_review_on_shots`, `_rules_for_plan` always vetoed → headless hang. Now called unconditionally; MODIFIED→APPROVED (cycle-17, `138d7c7`). |
-| `evaluate_generation_quality` is dead code | `llm/chief_director.py:318` | Full 2×2 mutation matrix, **zero call sites**. |
+| `evaluate_generation_quality` wired by T6 | `llm/chief_director.py:336` | Full 2×2 mutation matrix; **now called** by `diagnose_clip(deep=True)` in `cinema/shots/controller.py:1928` (T6, `10a0eb4`). |
 | `style_director` is OpenAI-only | `llm/style_director.py:36` | No Anthropic path — asymmetric with the Anthropic-first ChiefDirector/CinemaDirector. |
 | Veo `reference_images` silently dropped (Bug #4) | `veo_native.py:155` | Vertex rejects image+reference both set; identity comes from the start frame only. `driving_video_path` also unwired on Veo (only Sora wires it). |
 | VEO_NATIVE has no quota guard | `phase_c_ffmpeg.py:265` | The 1800s cooldown TTL is set/checked only by the FAL-proxy `VEO` branch. |
@@ -1462,7 +1463,7 @@ flowchart LR
 | Per-take iteration | `llm/director.py:275` | Claude Sonnet 4 | translates a `DirectorialIntent` into a `revised_prompt` (permissive — operator intent overrides HC firewalls) |
 | Ensemble engine | `llm/ensemble.py:139` | parallel Anthropic/OpenAI/Gemini + judge | `competitive_generate` dispatches all models, judge picks winner |
 
-Two divergences worth flagging honestly (from the LLM digest): `ChiefDirector.evaluate_generation_quality` (`chief_director.py:318`) is fully implemented but has **zero call sites** — it is dead code in the active pipeline. And `style_director` is **asymmetric** with the others (OpenAI-only), so an Anthropic-key-only deployment silently gets hardcoded default style rules. Model selection is steered by `global_settings.creative_llm` and `quality_judge_llm`, but the override is **family-checked, not provider-switching** — setting a `claude-*` model when only OpenAI is configured silently uses the OpenAI default.
+One historical divergence is now resolved: `ChiefDirector.evaluate_generation_quality` (`chief_director.py:336`) is fully implemented and **wired by T6** (`10a0eb4`) — invoked by `cinema/shots/controller.py::diagnose_clip` on the opt-in `deep=True` path. `negative_prompts.build_remediation_advisory` is similarly wired (`8d18e57`), called from both `generate_keyframe_take` and `diagnose_clip`. The remaining open divergence: `style_director` is **asymmetric** with the others (OpenAI-only), so an Anthropic-key-only deployment silently gets hardcoded default style rules. Model selection is steered by `global_settings.creative_llm` and `quality_judge_llm`, but the override is **family-checked, not provider-switching** — setting a `claude-*` model when only OpenAI is configured silently uses the OpenAI default.
 
 ---
 
@@ -1990,7 +1991,7 @@ Confusingly similar, different things: `pipeline_context.py` (15 LOC) loads the 
 
 | Item | Claim | Verified reality |
 |---|---|---|
-| `evaluate_generation_quality` | Active post-gen evaluator | **Dead** — only the definition at `chief_director.py:318`; zero call sites (grep confirmed). Its 2×2 mutation matrix + negative-prompt enrichment are unreachable |
+| `evaluate_generation_quality` | Active post-gen evaluator | **Wired by T6** (`10a0eb4`, 2026-06-06) — definition at `chief_director.py:336`; called by `cinema/shots/controller.py:1928` in `diagnose_clip(deep=True)`. 2×2 mutation matrix + negative-prompt enrichment are now reachable via the opt-in deep diagnosis path. |
 | `reporter.py` | Diagnostic reporter | **Orphan** — the only `generate_report()` caller is its own `if __name__ == "__main__"` block (line 52). Globs from CWD, not project dirs; hardcoded 21/20/20 counts are legacy. Removal candidate |
 | `validate_lora_quality` | LoRA ArcFace gate | **Stub** — returns `LORA_VALIDATION_SKIPPED = -1.0` unconditionally (`prep/lora_training.py:512`); ArcFace gate planned, not implemented |
 | `format_dialogue_for_voiceover`, `dialogue_to_narration_text` | Dialogue helpers | **Zero non-test callers** (`domain/dialogue_writer.py:159,174`); the pipeline uses `audio.dialogue.generate_dialogue_voiceover` directly |

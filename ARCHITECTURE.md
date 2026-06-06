@@ -1406,6 +1406,10 @@ JSON-parse failure → pass-through with `APPROVED` (safety net).
 Decision: `RETRY | ACCEPT_LENIENT | FAIL`. Negative-prompt phrases (from
 `llm.negative_prompts`) appended based on first failing character's reason.
 
+**Wired by T6 (`10a0eb4`, 2026-06-06):** called from
+`cinema/shots/controller.py:1928` inside `diagnose_clip(deep=True)`.
+The opt-in deep path is triggered by `POST /api/projects/<pid>/shots/<shot_id>/diagnose?deep=true`.
+
 ### 13.5 `style_director.py`
 
 **GPT-4o only** ([llm/style_director.py:106](llm/style_director.py:106)).
@@ -1439,8 +1443,11 @@ style_locked_sequence: RUNWAY_GEN4;    lipsync per dialogue need
 49 lines. `NEGATIVE_PROMPT_BY_FAILURE_REASON` dict keyed off
 `identity.types.FailureReason.value` strings. Scope: per-shot, per-take,
 post-failure (reactive vocabulary lookup, not upfront constraint builder).
-Consumer: `ChiefDirector.evaluate_generation_quality` — uses first failing
-character's reason.
+Consumers (as of T6, 2026-06-06):
+- `ChiefDirector.evaluate_generation_quality` — uses first failing character's reason.
+- `build_remediation_advisory` (new, `llm/negative_prompts.py:52`) — called from
+  `generate_keyframe_take` (`cinema/shots/controller.py:672`) and `diagnose_clip`
+  (`cinema/shots/controller.py:1864`); returns `{failure_label, suggested_negative_prompt, remediation_steps}`.
 
 ### 13.8 `config/settings.py`
 

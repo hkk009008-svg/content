@@ -1478,7 +1478,7 @@ Embedded class-level string constant. Contains HC1–HC8 hard constraints, the o
 Primary pre-generation gate. Serializes shots to JSON, calls `_call_llm`. Implements a ≤1-retry loop for `json.JSONDecodeError` (first attempt fails → sends correction appended to user prompt → retries; second failure falls through to parse-fallback). Falls back to `{"decision": "APPROVED", "violations": [], "shots": shots}` on None client or parse failure (fail-safe-for-throughput). Applies in-place modifications to `shots[idx][field]` when `decision == "MODIFIED"`. Appends to `self.diagnostic_log`. Returns `{"decision", "violations", "shots"}`.
 
 **`ChiefDirector.evaluate_generation_quality(image_path, reference_path, identity_result, identity_score, shot_prompt, scene_context, coherence_result)`** — `chief_director.py:318`
-Post-generation evaluator. Implements a 2×2 decision matrix: (identity_passed × coherent) → ACCEPT; (fail × coherent) → identity_only mutation; (pass × incoherent) → style_only mutation; (fail × incoherent) → aggressive mutation. Calls a separate LLM (diagnosis system prompt, different from SYSTEM_PROMPT). Looks up `primary_reason_value` from the first failing character's `failure_reason` and appends the phrase from `get_negative_prompt_for_failure()` to the LLM's `prompt_mutation`. Appends to `diagnostic_log`. Returns `{"decision", "diagnosis", "prompt_mutation", "mutation_level", "mutation_focus"}`. **Note: no call sites found in the current codebase outside this file** — the method exists but is not wired into the active pipeline (verified by grep returning only the definition line).
+Post-generation evaluator. Implements a 2×2 decision matrix: (identity_passed × coherent) → ACCEPT; (fail × coherent) → identity_only mutation; (pass × incoherent) → style_only mutation; (fail × incoherent) → aggressive mutation. Calls a separate LLM (diagnosis system prompt, different from SYSTEM_PROMPT). Looks up `primary_reason_value` from the first failing character's `failure_reason` and appends the phrase from `get_negative_prompt_for_failure()` to the LLM's `prompt_mutation`. Appends to `diagnostic_log`. Returns `{"decision", "diagnosis", "prompt_mutation", "mutation_level", "mutation_focus"}`. **Note: no call sites found in the current codebase outside this file** — the method exists but is not wired into the active pipeline (verified by grep returning only the definition line). *(SUPERSEDED by T6, 2026-06-06: now wired via `diagnose_clip(deep=True)` at `cinema/shots/controller.py:1928` — `10a0eb4`.)*
 
 **`ChiefDirector.get_diagnostic_summary()`** — `chief_director.py:490`
 Returns multi-line string of all entries in `diagnostic_log`.
@@ -1597,7 +1597,7 @@ Safely coerces dict/list/other → string (GPT-4o sometimes returns structured o
 Dict mapping `FailureReason.value` strings to English negative-prompt phrases. Keys: `no_face_detected`, `low_confidence_detection`, `small_face_region`, `face_angle_extreme`, `wrong_person`, `poor_lighting`, `occlusion`. `multiple_faces_ambiguous` intentionally omitted (enum exists, validator never emits it). `passed` not mapped (success sentinel).
 
 **`get_negative_prompt_for_failure(reason: Optional[str])`** — `negative_prompts.py:41`
-Returns phrase or `""` on None/unknown. Called from `ChiefDirector.evaluate_generation_quality` only.
+Returns phrase or `""` on None/unknown. Called from `ChiefDirector.evaluate_generation_quality` and `build_remediation_advisory`. *(SUPERSEDED by T6, 2026-06-06: `build_remediation_advisory` also calls this and is now wired in `generate_keyframe_take` + `diagnose_clip` — `8d18e57`.)*
 
 ---
 
@@ -1613,7 +1613,7 @@ Returns phrase or `""` on None/unknown. Called from `ChiefDirector.evaluate_gene
 
 **OUT:**
 - `validate_shot_prompts` → `{"decision": "APPROVED"|"REJECTED"|"MODIFIED", "violations": [...], "shots": [...]}`; shot dicts modified in-place on MODIFIED
-- `evaluate_generation_quality` → `{"decision": "ACCEPT"|"RETRY"|"ACCEPT_LENIENT"|"FAIL", "diagnosis", "prompt_mutation", "mutation_level", "mutation_focus"}` (currently unconnected — no call sites)
+- `evaluate_generation_quality` → `{"decision": "ACCEPT"|"RETRY"|"ACCEPT_LENIENT"|"FAIL", "diagnosis", "prompt_mutation", "mutation_level", "mutation_focus"}` (currently unconnected — no call sites) *(SUPERSEDED by T6, 2026-06-06: now wired via `diagnose_clip(deep=True)` — `10a0eb4`.)*
 - `translate_intent` → `{"revised_prompt", "params_delta", "anchor_refs"}`; JSONL log written to `data/intent_log/{pid}/`
 - `optimize_shot_prompt` → full shot spec dict (13 fields: `image_prompt`, `video_prompt`, `purpose`, `shot_type`, `suggested_image_api`, `suggested_video_api`, `suggested_lipsync`, `negative_constraints`, `identity_anchor`, `camera`, `lighting`, `color_palette`, `reasoning`)
 - `generate_style_rules` → 7-key style dict written to `project.global_settings.style_rules`
@@ -1696,13 +1696,13 @@ All knobs live in `project.global_settings` (set via `PUT /api/projects/<pid>` �
 5. JSONL log written to `data/intent_log/{pid}/`. Fallback to `intent.prose` on failure.
 
 **Phase E — Post-generation quality evaluation (currently unconnected):**
-`evaluate_generation_quality()` exists at `chief_director.py:318` with full 2×2 mutation matrix logic and negative-prompt enrichment but has **zero call sites** in the current codebase (grep confirmed). The method is implemented but not invoked by any active pipeline path.
+`evaluate_generation_quality()` exists at `chief_director.py:318` with full 2×2 mutation matrix logic and negative-prompt enrichment but has **zero call sites** in the current codebase (grep confirmed). The method is implemented but not invoked by any active pipeline path. *(SUPERSEDED by T6, 2026-06-06: now wired via `diagnose_clip(deep=True)` at `cinema/shots/controller.py:1928` — `10a0eb4`. Line ref :318 also stale → :336.)*
 
 ---
 
 ### Gotchas, divergences & doc-drift
 
-1. **`evaluate_generation_quality` is dead code in the active pipeline.** No call sites found anywhere outside `llm/chief_director.py:318`. The 2×2 mutation matrix, negative-prompt enrichment, and diagnostic logging it implements are fully functional but unreachable from any pipeline path. The old worktree files (`.claude/worktrees/*/chief_director.py:345`) had a different `diagnosis_system` format (f-string template, not the embedded constant), confirming this was substantially rewritten but the calling code was never wired.
+1. **`evaluate_generation_quality` is dead code in the active pipeline.** No call sites found anywhere outside `llm/chief_director.py:318`. The 2×2 mutation matrix, negative-prompt enrichment, and diagnostic logging it implements are fully functional but unreachable from any pipeline path. The old worktree files (`.claude/worktrees/*/chief_director.py:345`) had a different `diagnosis_system` format (f-string template, not the embedded constant), confirming this was substantially rewritten but the calling code was never wired. *(SUPERSEDED by T6, 2026-06-06: now wired via `diagnose_clip(deep=True)` — `10a0eb4`.)*
 
 2. **`style_director` is OpenAI-only** — no Anthropic path, no fallback to Anthropic. If only `ANTHROPIC_API_KEY` is set (no `OPENAI_API_KEY`), `generate_style_rules` falls through to `_default_style_rules` immediately (`style_director.py:38-41`). This is asymmetric with ChiefDirector and CinemaDirector which prefer Anthropic.
 
@@ -1739,7 +1739,7 @@ All knobs live in `project.global_settings` (set via `PUT /api/projects/<pid>` �
 | In-place modification of shots on MODIFIED | `llm/chief_director.py:299-305` |
 | 2×2 mutation matrix in evaluate_generation_quality | `llm/chief_director.py:355-393` |
 | Negative prompt appended to prompt_mutation | `llm/chief_director.py:456-467` |
-| evaluate_generation_quality has no callers | grep result (only `chief_director.py:318` returned) |
+| evaluate_generation_quality has no callers | grep result (only `chief_director.py:318` returned) *(SUPERSEDED by T6, 2026-06-06: caller now at `cinema/shots/controller.py:1928` — `10a0eb4`.)*|
 | creative_llm override with family-match guard | `llm/chief_director.py:100-115`, `llm/director.py:237-261` |
 | CinemaDirector is permissive (overrides HC) | `llm/director.py:18-20`, `director.py:47-60` |
 | S18 verb DSL: KNOWN_VERBS + _build_verb_prefix | `llm/director.py:95-187` |
