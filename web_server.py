@@ -2073,15 +2073,19 @@ def api_restart_shot(pid, shot_id):
 def api_regenerate_shot(pid, shot_id):
     """Regenerate a single shot (legacy/compat path).
 
-    Optional body: {positive_prompt} — when set, it replaces the shot's stored
-    prompt before regeneration. negative_prompt is NOT honored on this path:
-    the endpoint reads only positive_prompt (below) and calls
-    ShotController.regenerate_shot, a compatibility wrapper that takes no prompt
-    parameters. For negative_prompt support use POST .../restart
-    (api_restart_shot), which threads it into generate_keyframe_take.
+    Optional body: {positive_prompt, negative_prompt}.
+    - positive_prompt, when set, replaces the shot's stored prompt before
+      regeneration.
+    - negative_prompt, when set, is threaded into the keyframe regeneration
+      (ShotController.regenerate_shot -> generate_keyframe_take). It is NOT
+      persisted on the shot, and does NOT apply when the shot already has an
+      approved keyframe (regenerate_shot then regenerates the motion take, which
+      has no negative_prompt input). For a clean full restart that always
+      regenerates the keyframe, use POST .../restart (api_restart_shot).
     """
     pipeline = _get_running_pipeline(pid)
     new_prompt = request.json.get("positive_prompt") if request.is_json else None
+    negative_prompt = request.json.get("negative_prompt") if request.is_json else None
 
     def _mutate_project(project: dict):
         # P1-3 part 12 (Mixed-shape conditional): inner validate is required
@@ -2112,12 +2116,12 @@ def api_regenerate_shot(pid, shot_id):
         return jsonify({"error": "Shot not found"}), 404
 
     if pipeline:
-        result = pipeline.regenerate_shot(scene_id, shot_id)
+        result = pipeline.regenerate_shot(scene_id, shot_id, negative_prompt=negative_prompt)
         return jsonify(result)
 
     try:
         temp_pipeline = CinemaPipeline(pid, core=_get_or_build_core(pid), progress_callback=_make_progress_cb(pid))
-        result = temp_pipeline.regenerate_shot(scene_id, shot_id)
+        result = temp_pipeline.regenerate_shot(scene_id, shot_id, negative_prompt=negative_prompt)
         return jsonify(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

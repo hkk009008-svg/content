@@ -1548,15 +1548,29 @@ class ShotController:
             revised_prompt=revised_prompt,
         )
 
-    def regenerate_shot(self, scene_id: str, shot_id: str) -> dict:
-        """Compatibility wrapper for the older regenerate endpoint."""
+    def regenerate_shot(
+        self,
+        scene_id: str,
+        shot_id: str,
+        negative_prompt: Optional[str] = None,
+    ) -> dict:
+        """Compatibility wrapper for the older regenerate endpoint.
+
+        negative_prompt, when provided, is threaded into generate_keyframe_take
+        for the keyframe branch (shot has no approved keyframe yet). It is NOT
+        persisted on the shot, and does NOT apply to the motion branch:
+        generate_motion_take has no negative_prompt parameter and derives any
+        negative from the shot's stored constraints. For a clean full restart
+        that always regenerates the keyframe (and so always honors
+        negative_prompt), use restart_shot (POST /restart).
+        """
         project = self._host._refresh_project_snapshot() or self.project
         _, shot, _ = self._find_shot(shot_id, project, scene_id)
         if not shot:
             return {"success": False, "error": "Shot not found"}
         if shot.get("approved_keyframe_take_id"):
             return self.generate_motion_take(scene_id, shot_id)
-        return self.generate_keyframe_take(scene_id, shot_id)
+        return self.generate_keyframe_take(scene_id, shot_id, negative_prompt=negative_prompt)
 
     def restart_shot(
         self,
