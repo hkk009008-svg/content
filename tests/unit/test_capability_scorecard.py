@@ -61,6 +61,58 @@ class TestScorecardBuilder:
         assert sc["summary"]["shots_clearing_all_bars"] == 0
 
 
+class TestGateRollup:
+    """The gate rollup must reflect the CURRENT decision per (shot, gate) —
+    the latest audit entry — not every historical entry. The audit log is
+    append-only (cinema/auto_approve.py:19) and an operator override appends a
+    2nd entry rather than replacing the first (web_server.py::
+    api_reject_auto_approve). Counting every entry double-counts an
+    overridden approval. This mirrors the client PostRunSummary.tsx
+    (latest-per-gate-per-shot) so the two surfaces can't diverge.
+    """
+
+    @staticmethod
+    def _gates(shots):
+        proj = {"id": "p", "name": "x", "characters": [],
+                "scenes": [{"shots": shots}], "global_settings": {}}
+        return build_capability_scorecard(proj, project_dir="/tmp/x")["gates"]
+
+    def test_override_counts_as_latest_decision_only(self):
+        # image auto-approved @ t0, then user-rejected @ t1 → current state is
+        # vetoed. Must NOT count as both approved AND vetoed.
+        shot = {"id": "s1_01", "auto_approve_audit": [
+            {"gate": "image", "auto_approved": True, "vetoes": [],
+             "rule_names": ["composite_ok"], "timestamp": "2026-06-04T00:00:00Z"},
+            {"gate": "image", "auto_approved": False, "vetoes": ["too soft"],
+             "rule_names": ["user_override"], "timestamp": "2026-06-04T01:00:00Z"},
+        ]}
+        # top_vetoes is Counter.most_common() → list of tuples at the Python
+        # level (jsonify serializes them to JSON arrays over the wire).
+        assert self._gates([shot])["image"] == {
+            "approved": 0, "vetoed": 1, "top_vetoes": [("too soft", 1)]}
+
+    def test_stale_veto_not_counted_when_later_approved(self):
+        # final vetoed @ t0, then approved @ t1 → current state approved; the
+        # stale veto's rule must not leak into top_vetoes.
+        shot = {"id": "s1_01", "auto_approve_audit": [
+            {"gate": "final", "auto_approved": False, "vetoes": ["coherence_floor"],
+             "rule_names": ["coherence_floor"], "timestamp": "2026-06-04T00:00:00Z"},
+            {"gate": "final", "auto_approved": True, "vetoes": [],
+             "rule_names": ["ok"], "timestamp": "2026-06-04T02:00:00Z"},
+        ]}
+        assert self._gates([shot])["final"] == {
+            "approved": 1, "vetoed": 0, "top_vetoes": []}
+
+    def test_dedup_is_per_shot_not_global(self):
+        # Two different shots both approved at the image gate → both count
+        # (guards against a fix that dedups per gate globally).
+        e = {"gate": "image", "auto_approved": True, "vetoes": [],
+             "rule_names": [], "timestamp": "2026-06-04T00:00:00Z"}
+        shots = [{"id": "s1_01", "auto_approve_audit": [dict(e)]},
+                 {"id": "s1_02", "auto_approve_audit": [dict(e)]}]
+        assert self._gates(shots)["image"]["approved"] == 2
+
+
 class TestScorecardEndpoint:
     def _client(self):
         from web_server import app

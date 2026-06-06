@@ -132,10 +132,22 @@ def _gate_rollup(shots: list[dict]) -> dict:
     out = {g: {"approved": 0, "vetoed": 0, "top_vetoes": []} for g in ("plan", "image", "motion", "final")}
     veto_ctr = {g: Counter() for g in out}
     for shot in shots:
+        # The audit log is append-only and an operator override appends a 2nd
+        # entry (web_server.py::api_reject_auto_approve) instead of replacing
+        # the first. Reduce to the CURRENT decision per gate — the latest entry
+        # by timestamp — so an overridden approval is not double-counted as both
+        # approved and vetoed. Strict '>' keeps the first-appended entry on a
+        # timestamp tie, mirroring PostRunSummary.tsx's latest-per-(shot,gate)
+        # semantics so the two surfaces can't silently diverge.
+        latest: dict[str, dict] = {}
         for e in (shot.get("auto_approve_audit") or []):
             g = e.get("gate")
             if g not in out:
                 continue
+            cur = latest.get(g)
+            if cur is None or (e.get("timestamp") or "") > (cur.get("timestamp") or ""):
+                latest[g] = e
+        for g, e in latest.items():
             if e.get("auto_approved"):
                 out[g]["approved"] += 1
             else:
