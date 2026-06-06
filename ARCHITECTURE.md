@@ -128,6 +128,7 @@ two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:1545-1546](web_se
 | Pipeline lifecycle + SSE | 7 | `POST /generate`, `GET /stream`, `POST /cancel`, `POST /pause`, `POST /resume`, `GET /pipeline-state`, `GET /checkpoint` |
 | Gate approvals + shot ops | 12 | `POST /shots/<sid>/plan/approve`, `POST .../keyframes/<take>/approve`, `POST .../final/<take>/approve`, `POST .../restart`, `POST .../regenerate`, `POST .../correct`, `POST .../diagnose` |
 | Assembly + cleanup + cost + files | 8 | `POST /assemble`, `GET /file`, `GET /export`, `POST /api/cleanup-all` |
+| Capability reporting | 1 | `GET .../capability-scorecard` (read-only Part-4 dashboard backend; no pipeline spin) |
 
 ### 3.2 Threading & lifecycle storage
 
@@ -169,10 +170,11 @@ wind down.
 
 ### 3.5 cinema/services.py usage (no-pipeline-spin path)
 
-Two endpoints avoid constructing `CinemaPipeline`:
+Three endpoints avoid constructing `CinemaPipeline`:
 - `GET /api/projects/<pid>/checkpoint` → `checkpoint_info(pid)` ([web_server.py:1511](web_server.py:1511))
 - `GET /api/projects/<pid>/pipeline-state` → `state_snapshot(pid)` only when no
   live pipeline exists ([web_server.py:1976](web_server.py:1976)).
+- `GET /api/projects/<pid>/capability-scorecard` → `build_capability_scorecard(project, project_dir=get_project_dir(pid))` ([cinema/capability_scorecard.py](cinema/capability_scorecard.py)) — **Part-4 Capability dashboard backend** (U1 scorecard dimensions + gate rollup + LoRA + component-status + tier; U2 per-shot scores; U8 cascade provenance). Pure aggregation over the loaded project + per-character `get_lora_status` + `pipeline_status.toml`; reads coherence defensively from `take.metadata` else `shot["diagnostics"]`.
 
 Rationale: instantiating `CinemaPipeline` also instantiates
 `ContinuityEngine + ChiefDirector + LLMEnsemble + CostTracker`, which is heavy
@@ -1679,4 +1681,6 @@ anchors scoped to §10.6/§10.7 only — not a whole-file re-verify). §8.3 upda
 2026-06-04 (Lane D) to document T1 (LoRA quality gate + validated
 `char_lora_strength` override), T3 (hires_fix Pass-2 @ denoise 0.40), and T4
 (`conjunctive` identity-floor halt mode); scoped to §8.3 only — not a whole-file
-re-verify.*
+re-verify. §3.1/§3.5 updated 2026-06-04 (Lane D) to document the read-only
+`capability-scorecard` endpoint + `cinema/capability_scorecard.py` (Part-4
+dashboard backend); scoped to those two subsections only.*
