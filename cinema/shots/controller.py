@@ -668,15 +668,21 @@ class ShotController:
                 take["metadata"]["identity_failure_reason"] = char_diag.primary_failure_reason.value
                 take["metadata"]["suggested_pulid_adjustment"] = char_diag.suggested_pulid_adjustment
                 # T6: deterministic remediation advisory (pure; advisory-only).
-                from cinema.auto_approve import AdvisoryConfig
-                from llm.negative_prompts import build_remediation_advisory
-                if AdvisoryConfig.from_project(project).enabled:
-                    _adv = build_remediation_advisory(
-                        char_diag.primary_failure_reason.value,
-                        char_diag.suggested_pulid_adjustment,
-                    )
-                    if _adv:
-                        take["metadata"]["remediation_advisory"] = _adv
+                # Best-effort: advisory must NEVER break keyframe generation, so any
+                # failure here (import, config read, builder) is swallowed — the take
+                # still carries identity_failure_reason + suggested_pulid_adjustment.
+                try:
+                    from cinema.auto_approve import AdvisoryConfig
+                    from llm.negative_prompts import build_remediation_advisory
+                    if AdvisoryConfig.from_project(project).enabled:
+                        _adv = build_remediation_advisory(
+                            char_diag.primary_failure_reason.value,
+                            char_diag.suggested_pulid_adjustment,
+                        )
+                        if _adv:
+                            take["metadata"]["remediation_advisory"] = _adv
+                except Exception:
+                    logger.exception("T6 remediation advisory failed (non-fatal); continuing")
 
         take["path"] = img_path
 

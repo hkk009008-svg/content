@@ -275,13 +275,20 @@ def should_halt(
         # early-halt and would burn the full N-budget. Mirrors needs_regenerate's
         # has_character/has_arc guard.
         composite_ok = best.composite >= halt_threshold_composite
-        arc_ok = (not has_character) or (not best.has_arc) or best.arc_score >= halt_threshold_arc
+        arc_floor_bypassed = (not has_character) or (not best.has_arc)
+        arc_ok = arc_floor_bypassed or best.arc_score >= halt_threshold_arc
         if composite_ok and arc_ok:
+            # When the floor is bypassed, arc_score may be 0.0 — say so rather than
+            # printing a misleading "arc=0.000 >= 0.85".
+            arc_clause = (
+                "arc floor bypassed: no_identity"
+                if arc_floor_bypassed
+                else f"arc={best.arc_score:.3f} >= {halt_threshold_arc:.2f}"
+            )
             return HaltDecision(
                 halt=True,
                 reason=(f"conjunctive threshold met (composite={best.composite:.3f} >= "
-                        f"{halt_threshold_composite:.2f}, arc={best.arc_score:.3f} >= "
-                        f"{halt_threshold_arc:.2f}, n={n})"),
+                        f"{halt_threshold_composite:.2f}, {arc_clause}, n={n})"),
                 best=best,
             )
         return HaltDecision(
