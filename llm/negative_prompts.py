@@ -47,3 +47,23 @@ def get_negative_prompt_for_failure(reason: Optional[str]) -> str:
     if reason is None:
         return ""
     return NEGATIVE_PROMPT_BY_FAILURE_REASON.get(reason, "")
+
+
+def build_remediation_advisory(
+    failure_reason: Optional[str],
+    suggested_pulid_adjustment: float = 0.0,
+) -> Optional[dict]:
+    """Deterministic remediation advice for a failed take.
+
+    Returns None when there is no failure_reason (take passed, or identity
+    skipped). Otherwise a structured advisory the review UI renders and the
+    operator can act on. Pure — no LLM, no I/O.
+    """
+    if not failure_reason:
+        return None
+    return {
+        "failure_reason": failure_reason,
+        "suggested_negative_prompt": get_negative_prompt_for_failure(failure_reason),
+        "suggested_pulid_adjustment": round(float(suggested_pulid_adjustment or 0.0), 3),
+        "source": "deterministic",
+    }

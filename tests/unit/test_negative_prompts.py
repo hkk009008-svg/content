@@ -94,3 +94,28 @@ def test_mapping_keys_match_live_failure_reason_enum():
         f"these mapping keys are no longer valid FailureReason values: {stale_keys}. "
         f"Either rename them to match identity/types.FailureReason or delete them."
     )
+
+
+from llm.negative_prompts import build_remediation_advisory
+
+
+def test_advisory_none_when_no_failure_reason():
+    assert build_remediation_advisory(None) is None
+    assert build_remediation_advisory("") is None
+
+
+def test_advisory_known_reason_has_negative_prompt():
+    adv = build_remediation_advisory("wrong_person", 0.05)
+    assert adv == {
+        "failure_reason": "wrong_person",
+        "suggested_negative_prompt": "wrong person, different face, identity drift, mismatched features",
+        "suggested_pulid_adjustment": 0.05,
+        "source": "deterministic",
+    }
+
+
+def test_advisory_unknown_reason_empty_negative_prompt():
+    adv = build_remediation_advisory("low_identity", 0.0)
+    assert adv["failure_reason"] == "low_identity"
+    assert adv["suggested_negative_prompt"] == ""   # not in the map -> opt-in empty
+    assert adv["source"] == "deterministic"
