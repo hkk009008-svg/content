@@ -49,6 +49,17 @@ class TestScorecardBuilder:
         sc = build_capability_scorecard(_make_project(), project_dir="/tmp/x")
         assert sc["routing"]["first_try"] >= 1
 
+    def test_unscored_shot_not_counted_as_clearing(self):
+        # A shot that exists but has zero measured scores must NOT count toward
+        # shots_clearing_all_bars (guards the vacuous-truth where the headline would
+        # equal shots_total for an unscored project).
+        proj = {"id": "u", "name": "unscored", "characters": [],
+                "scenes": [{"shots": [{"id": "s1_01", "keyframe_takes": [], "motion_takes": []}]}],
+                "global_settings": {}}
+        sc = build_capability_scorecard(proj, project_dir="/tmp/x")
+        assert sc["summary"]["shots_total"] == 1
+        assert sc["summary"]["shots_clearing_all_bars"] == 0
+
 
 class TestScorecardEndpoint:
     def _client(self):

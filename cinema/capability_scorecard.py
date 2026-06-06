@@ -5,12 +5,14 @@ status; computes per-dimension measured-vs-bar, gate rollup, cascade routing,
 and component-wiring status. No mutation, no Flask.
 """
 from __future__ import annotations
+import logging
 import tomllib
 from collections import Counter
 from pathlib import Path
 from statistics import mean
 from typing import Optional
 
+logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -55,6 +57,7 @@ def build_capability_scorecard(project: dict, *, project_dir: str) -> dict:
         identity_bar = getattr(cfg, "motion_min_identity", 0.6)
         lipsync_bar = float(gs.get("lipsync_validation_threshold", 0.65))
     except Exception:
+        logger.debug("capability scorecard: bar sourcing failed, using defaults", exc_info=True)
         identity_bar, lipsync_bar = 0.6, 0.65
     coherence_bar = float(gs.get("coherence_threshold", 0.6))
 
@@ -108,13 +111,20 @@ def build_capability_scorecard(project: dict, *, project_dir: str) -> dict:
 
 
 def _shots_clearing(shots, dimensions, ident_v, coh_v, motion_v, lip_v, ib, cb, lb) -> int:
+    # A shot counts only if it has >=1 measured bar-bearing dimension AND none of its
+    # measured dimensions fall below bar. An entirely-unscored shot does NOT count
+    # (avoids the vacuous-truth where shots_clearing_all_bars == shots_total for an
+    # unscored project). Motion is excluded (its bar is None / advisory).
     n = 0
     for i in range(len(shots)):
+        measured = 0
         ok = True
         for v, bar in ((ident_v[i], ib), (coh_v[i], cb), (lip_v[i], lb)):
-            if v is not None and v < bar:
-                ok = False
-        n += 1 if ok else 0
+            if v is not None:
+                measured += 1
+                if v < bar:
+                    ok = False
+        n += 1 if (ok and measured > 0) else 0
     return n
 
 
@@ -150,6 +160,7 @@ def _lora_summary(project: dict, project_dir: str) -> list[dict]:
         try:
             st = get_lora_status(project_dir, cid)
         except Exception:
+            logger.debug("capability scorecard: get_lora_status failed for %s", cid, exc_info=True)
             continue
         if st.get("status") in (None, "idle") and st.get("quality_score") is None:
             continue
@@ -165,6 +176,7 @@ def _components() -> list[dict]:
         with open(path, "rb") as f:
             data = tomllib.load(f)
     except Exception:
+        logger.debug("capability scorecard: failed to read pipeline_status.toml", exc_info=True)
         return []
     return [{"id": c.get("id"), "title": c.get("title"), "status": c.get("status"), "note": c.get("note")}
             for c in data.get("component", [])]
