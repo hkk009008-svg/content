@@ -90,7 +90,7 @@ Computes the scorecard server-side and returns one compact JSON. Route is `<pid>
     {"key": "lipsync",   "label": "Lipsync · SyncNet",  "value": 0.66, "bar": 0.65, "pass": true,  "n_measured": 5}
   ],
   "routing":   {"first_try": 16, "fallback": 2, "silent_fallback": 1},
-  "gates":     {"plan": {"approved": 18, "vetoed": 0}, "image": {"approved": 15, "vetoed": 3, "top_vetoes": [["identity_floor", 3]]}, "motion": {…}, "final": {…}},
+  "gates":     {"plan": {"approved": 18, "vetoed": 0, "top_vetoes": []}, "image": {"approved": 15, "vetoed": 3, "top_vetoes": [["identity_floor", 3]]}, "motion": {"approved": 16, "vetoed": 2, "top_vetoes": [["motion_floor", 2]]}, "final": {"approved": 12, "vetoed": 6, "top_vetoes": [["coherence", 4]]}},
   "lora":      [{"char_id": "char_alex", "strength": 0.55, "score": 0.79, "verdict": "ok"}, {"char_id": "char_mia", "strength": 0.60, "score": 0.61, "verdict": "warning"}],
   "components": [{"id": "lora_validation", "status": "wired"}, {"id": "hires_fix", "status": "live"}, {"id": "multi_identity_validation", "status": "stubbed"}],
   "future_dimensions": ["audio_lufs", "format_codec", "pod_health", "budget"]
@@ -130,8 +130,10 @@ score + strength already render).
 ### 6.1 New view wiring
 - Add `'capability'` to the mode union in `App.tsx` (currently `'setup' | 'pipeline' | 'console'`,
   state-driven, no router — verify the enum site at HEAD).
-- New `web/src/components/console/CapabilityConsole.tsx` (sibling of `DirectorsConsole.tsx`),
-  rendered when `mode === 'capability'`.
+- New `web/src/components/console/CapabilityConsole.tsx` — placed alongside the other console
+  widgets (`Telemetry`, `Monitor`, `TakeStrip`) in `components/console/`. (Note: `DirectorsConsole.tsx`
+  itself lives one level up in `components/` — pick the directory deliberately.) Rendered when
+  `mode === 'capability'`.
 - A nav affordance to reach it (mirror the existing "Director's Console →" masthead button pattern
   in `EditorialShell.tsx`), plus a Back affordance.
 
@@ -166,7 +168,11 @@ labels, Fraunces display + JetBrains Mono diagnostics, and the `ui/Button` varia
 
 ## 9. Open questions for the plan
 1. Exact bar constants per dimension — source each from a named existing constant (avoid magic numbers).
-2. Does `result["scores"]["coherence"]` already reach the persisted take in any path? (decides whether 5.2 is a write-add or a plumbing-fix).
+2. Does `result["scores"]["coherence"]` already reach the persisted take in any path? (decides
+   whether 5.2 is a write-add or a plumbing-fix). **Spec-review grep (2026-06-04) suggests
+   transient-only** — written to `result["scores"]`, consumed by the SSE event (`web_services.py:82`),
+   never to `take["metadata"]` — i.e. likely a genuine write-add. Confirm the `result`→`take` flow
+   early; it's on the critical path of §10 step (1).
 3. Nav placement for the new mode — masthead button vs. a tab in the existing nav.
 4. Should the scorecard be per-project-latest or pinned to a specific run? (v1: latest persisted takes.)
 
