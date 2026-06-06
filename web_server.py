@@ -2149,10 +2149,12 @@ def api_correct_shot(pid, shot_id):
 
 @app.route("/api/projects/<pid>/shots/<shot_id>/diagnose", methods=["POST"])
 def api_diagnose_shot(pid, shot_id):
-    """Run quality diagnostics on a clip."""
-    take_id = request.json.get("take_id", "") if request.is_json else ""
+    """Run quality diagnostics on a clip. `deep=true` adds an LLM deep diagnosis."""
+    body = request.json if request.is_json else {}
+    take_id = body.get("take_id", "")
+    deep = bool(body.get("deep", False))
     try:
-        result = _get_stage_pipeline(pid).diagnose_clip(shot_id, take_id=take_id)
+        result = _get_stage_pipeline(pid).diagnose_clip(shot_id, take_id=take_id, deep=deep)
     except ValueError:
         return jsonify({"error": "Project not found"}), 404
     return jsonify(result)
