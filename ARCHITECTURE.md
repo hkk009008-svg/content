@@ -136,7 +136,7 @@ two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:1545-1546](web_se
 | `_progress_queues: dict[pid, Queue]` | no (GIL-atomic `dict.get`) | [web_server.py:71](web_server.py:71) |
 | `_running_pipelines: dict[pid, CinemaPipeline]` | no | [web_server.py:72](web_server.py:72) |
 | `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:108-109](web_server.py:108) |
-| `_lora_training_threads` | `_lora_training_lock` | [web_server.py:685-686](web_server.py:685) |
+| `_lora_training_threads` | `_lora_training_lock` | [web_server.py:695-696](web_server.py:695) |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
 spawned by `POST /generate` ([web_server.py:1505](web_server.py:1505)).
@@ -610,7 +610,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:1344](web_server.py:1344) — uses the
+`api_generate_dialogue` at [web_server.py:1354](web_server.py:1354) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 

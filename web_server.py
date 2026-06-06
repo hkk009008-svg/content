@@ -485,6 +485,16 @@ def api_get_project(pid):
     return jsonify(project)
 
 
+@app.route("/api/projects/<pid>/capability-scorecard", methods=["GET"])
+def api_capability_scorecard(pid):
+    project = load_project(pid)
+    if not project:
+        return jsonify({"error": "Project not found"}), 404
+    from cinema.capability_scorecard import build_capability_scorecard
+    scorecard = build_capability_scorecard(project, project_dir=get_project_dir(pid))
+    return jsonify(scorecard)
+
+
 @app.route("/api/projects/<pid>", methods=["PUT"])
 @_project_lock_guard
 def api_update_project(pid):
