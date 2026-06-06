@@ -1,11 +1,13 @@
-"""Unit tests for Task 4 (T6): diagnose_clip enriches its result with
+"""Unit tests for Task 4 + Task 5 (T6): diagnose_clip enriches its result with
 a structured remediation_advisory and folds the suggested negative prompt
 into the regenerate recommendation when identity validation fails.
+Task 5 adds opt-in LLM deep diagnosis via diagnose_clip(deep=True).
 
 Offline — no GPU, no pod, no API calls.
 """
 from __future__ import annotations
 
+import types
 from unittest.mock import MagicMock, patch
 
 from cinema.shots.controller import ShotController
@@ -190,3 +192,122 @@ class TestDiagnoseClipAdvisory:
         assert not any(r.get("tool") == "face_swap" for r in result["recommendations"]), (
             "face_swap must not appear when identity passes"
         )
+
+
+class TestDiagnoseClipDeep:
+    """T6 Task 5: opt-in LLM deep diagnosis path via deep=True."""
+
+    def test_deep_success(self, tmp_path):
+        """deep=True with a key available: evaluate_generation_quality returns
+        a rich dict that lands in result['advisory_deep']."""
+        ctrl, project, img_path = _build_diagnose_controller(tmp_path)
+        failed_id_result = _build_failed_id_result("char_1")
+
+        mock_validator = MagicMock()
+        mock_validator.validate_image.return_value = failed_id_result
+
+        mock_deep_return = {
+            "decision": "RETRY",
+            "diagnosis": "face drifted",
+            "prompt_mutation": "add X",
+            "mutation_focus": "identity",
+        }
+        mock_cd_instance = MagicMock()
+        mock_cd_instance.evaluate_generation_quality.return_value = mock_deep_return
+        mock_cd_class = MagicMock(return_value=mock_cd_instance)
+
+        fake_settings = types.SimpleNamespace(anthropic_api_key="test-key", openai_api_key="")
+
+        with (
+            patch("cinema.shots.controller.get_reference_image", return_value="/fake/ref.jpg"),
+            patch("phase_c_vision._get_shared_validator", return_value=mock_validator),
+            patch("config.settings.settings", fake_settings),
+            patch("llm.chief_director.ChiefDirector", mock_cd_class),
+        ):
+            result = ctrl.diagnose_clip("shot_1_0", deep=True)
+
+        assert "error" not in result, f"unexpected error: {result.get('error')}"
+        assert result.get("deep_available") is True, "deep_available should be True"
+        assert "advisory_deep" in result, f"advisory_deep missing; result keys: {list(result)}"
+        adv = result["advisory_deep"]
+        assert adv["diagnosis"] == "face drifted", f"got {adv!r}"
+        assert adv["source"] == "llm", f"got {adv!r}"
+        assert adv["decision"] == "RETRY", f"got {adv!r}"
+        # deterministic advisory still present
+        assert "remediation_advisory" in result, "Task 4 deterministic advisory must still be present"
+
+    def test_deep_llm_raises_fallback_intact(self, tmp_path):
+        """If evaluate_generation_quality raises, deep_error is set but
+        the deterministic remediation_advisory from Task 4 is still present."""
+        ctrl, project, img_path = _build_diagnose_controller(tmp_path)
+        failed_id_result = _build_failed_id_result("char_1")
+
+        mock_validator = MagicMock()
+        mock_validator.validate_image.return_value = failed_id_result
+
+        mock_cd_instance = MagicMock()
+        mock_cd_instance.evaluate_generation_quality.side_effect = RuntimeError("boom")
+        mock_cd_class = MagicMock(return_value=mock_cd_instance)
+
+        fake_settings = types.SimpleNamespace(anthropic_api_key="test-key", openai_api_key="")
+
+        with (
+            patch("cinema.shots.controller.get_reference_image", return_value="/fake/ref.jpg"),
+            patch("phase_c_vision._get_shared_validator", return_value=mock_validator),
+            patch("config.settings.settings", fake_settings),
+            patch("llm.chief_director.ChiefDirector", mock_cd_class),
+        ):
+            result = ctrl.diagnose_clip("shot_1_0", deep=True)
+
+        assert "error" not in result, f"unexpected error: {result.get('error')}"
+        assert "deep_error" in result, "deep_error should be set on LLM exception"
+        assert "boom" in result["deep_error"], f"expected 'boom' in deep_error, got {result['deep_error']!r}"
+        # Task 4 deterministic fallback must still be present
+        assert "remediation_advisory" in result, (
+            "deterministic remediation_advisory must survive LLM exception"
+        )
+
+    def test_no_key_sets_deep_error(self, tmp_path):
+        """With both API keys empty, deep_available is False and deep_error is set
+        (no LLM call attempted); deterministic path unaffected."""
+        ctrl, project, img_path = _build_diagnose_controller(tmp_path)
+        failed_id_result = _build_failed_id_result("char_1")
+
+        mock_validator = MagicMock()
+        mock_validator.validate_image.return_value = failed_id_result
+
+        # Frozen dataclass cannot be setattr'd — replace the whole object.
+        fake_settings = types.SimpleNamespace(anthropic_api_key="", openai_api_key="")
+
+        with (
+            patch("cinema.shots.controller.get_reference_image", return_value="/fake/ref.jpg"),
+            patch("phase_c_vision._get_shared_validator", return_value=mock_validator),
+            patch("config.settings.settings", fake_settings),
+        ):
+            result = ctrl.diagnose_clip("shot_1_0", deep=True)
+
+        assert "error" not in result, f"unexpected error: {result.get('error')}"
+        assert result.get("deep_available") is False, f"expected False, got {result.get('deep_available')!r}"
+        assert "deep_error" in result, "deep_error should be set when no key"
+        assert result["deep_error"] == "No LLM API key configured", f"got {result['deep_error']!r}"
+        assert "advisory_deep" not in result, "advisory_deep must not be set with no key"
+
+    def test_no_deep_flag_no_deep_keys(self, tmp_path):
+        """Calling diagnose_clip without deep=True must NOT set any deep_* keys
+        (backward compatibility)."""
+        ctrl, project, img_path = _build_diagnose_controller(tmp_path)
+        failed_id_result = _build_failed_id_result("char_1")
+
+        mock_validator = MagicMock()
+        mock_validator.validate_image.return_value = failed_id_result
+
+        with (
+            patch("cinema.shots.controller.get_reference_image", return_value="/fake/ref.jpg"),
+            patch("phase_c_vision._get_shared_validator", return_value=mock_validator),
+        ):
+            result = ctrl.diagnose_clip("shot_1_0")
+
+        assert "error" not in result
+        assert "deep_available" not in result, "deep_available must not appear without deep=True"
+        assert "advisory_deep" not in result, "advisory_deep must not appear without deep=True"
+        assert "deep_error" not in result, "deep_error must not appear without deep=True"

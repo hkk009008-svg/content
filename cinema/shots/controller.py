@@ -1812,7 +1812,7 @@ class ShotController:
 
         return result
 
-    def diagnose_clip(self, shot_id: str, take_id: str = "") -> dict:
+    def diagnose_clip(self, shot_id: str, take_id: str = "", *, deep: bool = False) -> dict:
         """
         Run all quality analyzers on a clip and return scores + recommendations.
         """
@@ -1836,6 +1836,8 @@ class ShotController:
             "scores": {},
             "recommendations": [],
         }
+        id_result = None   # T6: hoisted so the deep block can reference it even if identity is skipped
+        coh = None         # T6: hoisted so the deep block can reference it even if coherence is skipped
         video_path = candidate.get("path", "") if candidate.get("kind") != "keyframe" else ""
         image_path = candidate.get("path", "") if candidate.get("kind") == "keyframe" else self._host._resolve_take_path(
             shot,
@@ -1907,6 +1909,36 @@ class ShotController:
                     _coherence_floor = _diag_settings.get("coherence_threshold", 0.6)
                     if coh.overall_coherence_score < _coherence_floor:
                         result["recommendations"].append({"tool": "regenerate", "reason": "Low coherence vs previous shot"})
+
+        if deep:
+            from config.settings import settings as _settings
+            from cinema.auto_approve import AdvisoryConfig
+            deep_available = bool(_settings.anthropic_api_key or _settings.openai_api_key)
+            result["deep_available"] = deep_available
+            if not deep_available:
+                result["deep_error"] = "No LLM API key configured"
+            elif AdvisoryConfig.from_project(self.project).deep_enabled and image_path and os.path.exists(str(image_path)) and chars:
+                try:
+                    from llm.chief_director import ChiefDirector
+                    _ref = get_reference_image(self.project, chars[0]) or ""
+                    _deep = ChiefDirector(self.project).evaluate_generation_quality(
+                        image_path=str(image_path),
+                        reference_path=_ref,
+                        identity_result=id_result,
+                        identity_score=result["scores"].get("identity") or 0.0,
+                        shot_prompt=shot.get("prompt", ""),
+                        scene_context=f"{scene.get('title', '')} — {scene.get('action', '')}",
+                        coherence_result=coh,
+                    )
+                    result["advisory_deep"] = {
+                        "diagnosis": _deep.get("diagnosis", ""),
+                        "prompt_mutation": _deep.get("prompt_mutation", ""),
+                        "mutation_focus": _deep.get("mutation_focus", ""),
+                        "decision": _deep.get("decision", ""),
+                        "source": "llm",
+                    }
+                except Exception as _e:   # LLM path fully isolated — never break the panel
+                    result["deep_error"] = str(_e)
 
         self._record_diagnostic(shot_id, {
             "created_at": time.time(),
