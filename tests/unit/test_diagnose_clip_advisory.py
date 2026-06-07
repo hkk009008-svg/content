@@ -211,6 +211,7 @@ class TestDiagnoseClipDeep:
             "diagnosis": "face drifted",
             "prompt_mutation": "add X",
             "mutation_focus": "identity",
+            "visual_findings": "Take shows wrong person vs reference; hair color differs.",
         }
         mock_cd_instance = MagicMock()
         mock_cd_instance.evaluate_generation_quality.return_value = mock_deep_return
@@ -233,6 +234,10 @@ class TestDiagnoseClipDeep:
         assert adv["diagnosis"] == "face drifted", f"got {adv!r}"
         assert adv["source"] == "llm", f"got {adv!r}"
         assert adv["decision"] == "RETRY", f"got {adv!r}"
+        # F5: visual_findings must flow through to advisory_deep
+        assert adv.get("visual_findings") == "Take shows wrong person vs reference; hair color differs.", (
+            f"visual_findings must flow from evaluate result to advisory_deep; got {adv.get('visual_findings')!r}"
+        )
         # deterministic advisory still present
         assert "remediation_advisory" in result, "Task 4 deterministic advisory must still be present"
 

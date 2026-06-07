@@ -97,7 +97,7 @@ class ChiefDirector:
         self.provider = None
         return None
 
-    def _call_llm(self, system_prompt: str, user_prompt: str, *, images: Optional[List[str]] = None) -> str:
+    def _call_llm(self, system_prompt: str, user_prompt: str, *, image_b64s: Optional[List[str]] = None) -> str:
         """Call the LLM with the Chief Director system prompt.
 
         Respects the ``creative_llm`` per-project UI knob. When set, the
@@ -111,16 +111,16 @@ class ChiefDirector:
           ``claude-*``             → anthropic
           ``gpt-*`` / ``o1-*`` / ``o3-*`` / ``o4-*`` → openai
 
-        When ``images`` is provided, each path is encoded to JPEG base64 and
-        attached to the message. On API failure with images, retries once
-        text-only before returning "".
+        ``image_b64s``: pre-encoded JPEG base64 strings (produced by the
+        caller via ``_encode_image_for_llm``). Encoding is NOT done here —
+        this keeps labels and attachments in sync (F1 fix). On API failure
+        with images, retries once text-only before returning "".
         """
         if not self.client:
             return ""
 
-        # Encode images before the provider try-block so PIL failures cannot
-        # be swallowed into the API-failure except path.
-        encoded: List[str] = [b for p in (images or []) if (b := _encode_image_for_llm(p))]
+        # Accept only non-empty b64 strings; caller is responsible for encoding.
+        encoded: List[str] = [b for b in (image_b64s or []) if b]
 
         # Read the creative_llm override from project global_settings.
         override: Optional[str] = None
@@ -128,50 +128,73 @@ class ChiefDirector:
             _gs = self.project.get("global_settings", {})
             override = _gs.get("creative_llm") or None
 
-        try:
-            if self.provider == "anthropic":
-                model_id = "claude-sonnet-4-20250514"
-                if override:
-                    if override.startswith("claude-"):
-                        model_id = override
-                    else:
-                        print(
-                            f"   [DIRECTOR] creative_llm={override!r} doesn't match "
-                            f"Anthropic provider; using default {model_id}"
-                        )
-                if encoded:
-                    user_content: object = (
-                        [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b}} for b in encoded]
-                        + [{"type": "text", "text": user_prompt}]
-                    )
+        if self.provider == "anthropic":
+            model_id = "claude-sonnet-4-20250514"
+            if override:
+                if override.startswith("claude-"):
+                    model_id = override
                 else:
-                    user_content = user_prompt
+                    print(
+                        f"   [DIRECTOR] creative_llm={override!r} doesn't match "
+                        f"Anthropic provider; using default {model_id}"
+                    )
+            if encoded:
+                user_content: object = (
+                    [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b}} for b in encoded]
+                    + [{"type": "text", "text": user_prompt}]
+                )
+            else:
+                user_content = user_prompt
+            try:
                 response = self.client.messages.create(
                     model=model_id,
                     max_tokens=4096,
                     system=build_anthropic_system_blocks(system_prompt),
                     messages=[{"role": "user", "content": user_content}],
                 )
-                return response.content[0].text
-            else:
-                model_id = "gpt-4o"
-                if override:
-                    _openai_prefixes = ("gpt-", "o1-", "o3-", "o4-")
-                    if any(override.startswith(p) for p in _openai_prefixes):
-                        model_id = override
-                    else:
-                        print(
-                            f"   [DIRECTOR] creative_llm={override!r} doesn't match "
-                            f"OpenAI provider; using default {model_id}"
-                        )
+            except Exception as e:
                 if encoded:
-                    user_content_list: List[Dict] = (
-                        [{"type": "text", "text": user_prompt}]
-                        + [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b}"}} for b in encoded]
-                    )
-                    openai_user_msg: object = {"role": "user", "content": user_content_list}
+                    print(f"   [DIRECTOR] LLM call failed with images ({e}); retrying text-only")
+                    try:
+                        response = self.client.messages.create(
+                            model=model_id,
+                            max_tokens=4096,
+                            system=build_anthropic_system_blocks(system_prompt),
+                            messages=[{"role": "user", "content": user_prompt}],
+                        )
+                    except Exception as e2:
+                        print(f"   [DIRECTOR] LLM call failed: {e2}")
+                        return ""
                 else:
-                    openai_user_msg = {"role": "user", "content": user_prompt}
+                    print(f"   [DIRECTOR] LLM call failed: {e}")
+                    return ""
+            # Extract text after the create try-block — extraction errors are NOT
+            # retry-eligible; a second API call would be a spurious double-charge (F2 fix).
+            try:
+                return response.content[0].text
+            except Exception as e_extract:
+                print(f"   [DIRECTOR] LLM response extraction failed: {e_extract}")
+                return ""
+        else:
+            model_id = "gpt-4o"
+            if override:
+                _openai_prefixes = ("gpt-", "o1-", "o3-", "o4-")
+                if any(override.startswith(p) for p in _openai_prefixes):
+                    model_id = override
+                else:
+                    print(
+                        f"   [DIRECTOR] creative_llm={override!r} doesn't match "
+                        f"OpenAI provider; using default {model_id}"
+                    )
+            if encoded:
+                user_content_list: List[Dict] = (
+                    [{"type": "text", "text": user_prompt}]
+                    + [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b}"}} for b in encoded]
+                )
+                openai_user_msg: object = {"role": "user", "content": user_content_list}
+            else:
+                openai_user_msg = {"role": "user", "content": user_prompt}
+            try:
                 response = self.client.chat.completions.create(
                     model=model_id,
                     messages=[
@@ -180,20 +203,10 @@ class ChiefDirector:
                     ],
                     response_format={"type": "json_object"},
                 )
-                return response.choices[0].message.content
-        except Exception as e:
-            if encoded:
-                print(f"   [DIRECTOR] LLM call failed with images ({e}); retrying text-only")
-                try:
-                    if self.provider == "anthropic":
-                        response = self.client.messages.create(
-                            model=model_id,
-                            max_tokens=4096,
-                            system=build_anthropic_system_blocks(system_prompt),
-                            messages=[{"role": "user", "content": user_prompt}],
-                        )
-                        return response.content[0].text
-                    else:
+            except Exception as e:
+                if encoded:
+                    print(f"   [DIRECTOR] LLM call failed with images ({e}); retrying text-only")
+                    try:
                         response = self.client.chat.completions.create(
                             model=model_id,
                             messages=[
@@ -202,12 +215,19 @@ class ChiefDirector:
                             ],
                             response_format={"type": "json_object"},
                         )
-                        return response.choices[0].message.content
-                except Exception as e2:
-                    print(f"   [DIRECTOR] LLM call failed: {e2}")
+                    except Exception as e2:
+                        print(f"   [DIRECTOR] LLM call failed: {e2}")
+                        return ""
+                else:
+                    print(f"   [DIRECTOR] LLM call failed: {e}")
                     return ""
-            print(f"   [DIRECTOR] LLM call failed: {e}")
-            return ""
+            # Extract text after the create try-block — extraction errors are NOT
+            # retry-eligible (F2 fix).
+            try:
+                return response.choices[0].message.content
+            except Exception as e_extract:
+                print(f"   [DIRECTOR] LLM response extraction failed: {e_extract}")
+                return ""
 
     SYSTEM_PROMPT = """<SYSTEM_PERSONA>
 You are "ChiefDirector v2.0" — a strict metacognitive oversight engine for an AI cinema production pipeline.
@@ -448,16 +468,19 @@ When suggesting prompt_mutation for failures:
                 return {"decision": "RETRY", "mutation": None, "mutation_level": 1}
             return {"decision": "ACCEPT", "mutation": None}
 
-        # Collect images to attach (must be after the ACCEPT short-circuit and
-        # the no-client guard so we never encode for a path that won't use them).
-        attach: List[str] = []
+        # Encode images at the evaluate layer so labels match attachments by
+        # construction (F1 fix: encode-once-at-evaluate, pass b64s to _call_llm).
+        attach: List[str] = []   # pre-encoded base64 JPEG strings
         labels: List[str] = []
-        if image_path and os.path.exists(image_path):
-            attach.append(image_path)
-            labels.append(f"Image {len(attach)}: the generated take being evaluated")
-        if reference_path and os.path.exists(reference_path):
-            attach.append(reference_path)
-            labels.append(f"Image {len(attach)}: the character's canonical reference (ground-truth identity)")
+        for _path, _label_suffix in (
+            (image_path, "the generated take being evaluated"),
+            (reference_path, "the character's canonical reference (ground-truth identity)"),
+        ):
+            if _path and os.path.exists(_path):
+                _b64 = _encode_image_for_llm(_path)
+                if _b64 is not None:
+                    attach.append(_b64)
+                    labels.append(f"Image {len(attach)}: {_label_suffix}")
 
         # Build diagnostic context for the LLM
         diagnostics = {}
@@ -542,12 +565,14 @@ When suggesting prompt_mutation for failures:
             '  "diagnosis": "Brief technical reason",\n'
             '  "prompt_mutation": "Specific rewrite instructions",\n'
             '  "mutation_level": 1 | 2 | 3,\n'
-            '  "mutation_focus": "identity" | "style" | "both"\n'
         )
         if attach:
             diagnosis_system += (
-                '  "visual_findings": "1-2 sentences on what you observed comparing the attached images",\n'
+                '  "mutation_focus": "identity" | "style" | "both",\n'
+                '  "visual_findings": "1-2 sentences on what you observed comparing the attached images"\n'
             )
+        else:
+            diagnosis_system += '  "mutation_focus": "identity" | "style" | "both"\n'
         diagnosis_system += "}"
 
         if attach:
@@ -561,7 +586,7 @@ When suggesting prompt_mutation for failures:
                 "a FACE_ANGLE_EXTREME false negative), say so in \"diagnosis\"."
             )
 
-        raw = self._call_llm(diagnosis_system, eval_prompt, images=attach or None)
+        raw = self._call_llm(diagnosis_system, eval_prompt, image_b64s=attach or None)
 
         try:
             result = json.loads(_strip_json_fences(raw))

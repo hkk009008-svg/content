@@ -1945,6 +1945,7 @@ class ShotController:
                             "prompt_mutation": _deep.get("prompt_mutation", ""),
                             "mutation_focus": _deep.get("mutation_focus", ""),
                             "decision": _deep.get("decision", ""),
+                            "visual_findings": _deep.get("visual_findings", ""),
                             "source": "llm",
                         }
                 except Exception as _e:
