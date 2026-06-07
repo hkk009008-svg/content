@@ -419,6 +419,30 @@ class TestEstimateReassemblyCostTTS:
         assert result["tts_lines_to_generate"] == 0
         assert result["estimated_tts_usd"] == 0.0
 
+    def test_action_only_scene_counts_one_line(self, tmp_path):
+        """Action-only scene (characters + action, NO dialogue field) counts a
+        conservative 1 line — _ensure_scene_audio LLM-generates dialogue for
+        these and renders TTS, so omitting them undercounts (spec review SI-1)."""
+        from cinema.screening import estimate_reassembly_cost
+
+        project = self._make_project("scene_action_only", "shot_action_only", [])
+        project["id"] = "proj_action_only_test"
+        # Remove the dialogue field entirely and give the scene an action.
+        del project["scenes"][0]["dialogue"]
+        project["scenes"][0]["action"] = "Two figures argue silently in the rain."
+
+        temp_dir = str(tmp_path / "temp")
+        os.makedirs(temp_dir, exist_ok=True)
+
+        with patch("domain.project_manager.get_project_dir", return_value=str(tmp_path)):
+            result = estimate_reassembly_cost(project)
+
+        assert result["tts_lines_to_generate"] == 1, (
+            "Action-only scenes must count >=1 TTS line (LLM-generated dialogue "
+            "is rendered by _ensure_scene_audio); silent omission was SI-1"
+        )
+        assert result["estimated_tts_usd"] == 0.01
+
 
 # ---------------------------------------------------------------------------
 # 7. Per-line path: content-keyed, lives under dirname(output_path), NOT CWD

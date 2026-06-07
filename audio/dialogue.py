@@ -55,6 +55,10 @@ def dialogue_cache_key(dialogue_lines: list, characters: list, language: str) ->
 
     Never raises on odd input shapes — default=str handles non-serialisable
     values so callers do not need to sanitise before calling.
+
+    Assumption (T-B review note): ``pause_between_lines`` (inter-line
+    silence) is NOT part of the key — all production callers use the
+    default. Fold it into the payload if it ever becomes configurable.
     """
     payload = {
         "lines": dialogue_lines,
@@ -152,8 +156,12 @@ def generate_cartesia(
         r.raise_for_status()
 
         # Cartesia bytes endpoint streams audio bytes in the response body.
-        with open(output_path, "wb") as f:
+        # Atomic publish (T-B quality fold): a kill mid-write must not leave
+        # a partial mp3 — the exists-guard above would cache-hit it forever.
+        _part = output_path + ".part"
+        with open(_part, "wb") as f:
             f.write(r.content)
+        os.replace(_part, output_path)
         print(f"   ✅ Cartesia output: {output_path}")
         return True
 
@@ -546,6 +554,13 @@ def generate_dialogue_voiceover(
                 print(f"   [CARTESIA] failed for line {i+1}; falling back to ElevenLabs")
 
         # ElevenLabs path (default OR Cartesia fallback)
+        # Per-line cache hit — mirrors generate_cartesia's guard (T-B quality
+        # fold). Safe because all line writes below/above are atomic
+        # (.part + os.replace): an existing file is a COMPLETE render.
+        if os.path.exists(temp_path):
+            print(f"   [ELEVENLABS] Cache hit: {temp_path}")
+            temp_files.append(temp_path)
+            continue
         try:
             audio = client.text_to_speech.convert(
                 voice_id=voice_id,
@@ -559,7 +574,9 @@ def generate_dialogue_voiceover(
                     use_speaker_boost=voice_profile.get("speaker_boost", True),
                 ),
             )
-            save(audio, temp_path)
+            _part = temp_path + ".part"
+            save(audio, _part)
+            os.replace(_part, temp_path)
             temp_files.append(temp_path)
             # Best-effort cost tracking — M-B2 closure (cycle-16). Symmetric
             # to Cartesia tracking above; closes the asymmetry noted at
@@ -587,9 +604,12 @@ def generate_dialogue_voiceover(
     try:
         import subprocess
 
-        # Create a concat list file
-        concat_list = "temp_dialogue_concat.txt"
-        silence_file = "temp_silence.mp3"
+        # Control files keyed to the output artifact (T-B quality fold):
+        # the previous CWD-relative shared names ("temp_dialogue_concat.txt")
+        # collide across concurrent assemblies of DIFFERENT projects — the
+        # re-assembly in-flight fence is per-project only.
+        concat_list = f"{output_filename}.concat.txt"
+        silence_file = f"{output_filename}.silence.mp3"
 
         # Generate a short silence file for pauses
         subprocess.run(
@@ -605,11 +625,16 @@ def generate_dialogue_voiceover(
                 if j < len(temp_files) - 1:
                     f.write(f"file '{silence_file}'\n")
 
+        # Atomic publish: encode to .part.mp3 then rename — a kill mid-encode
+        # must not leave a partial scene artifact (the ensure-sites' disk-first
+        # check would cache-hit it forever).
+        _part_out = f"{output_filename}.part.mp3"
         subprocess.run(
             ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
-             "-i", concat_list, "-c:a", "libmp3lame", "-q:a", "2", output_filename],
+             "-i", concat_list, "-c:a", "libmp3lame", "-q:a", "2", _part_out],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
+        os.replace(_part_out, output_filename)
 
         print(f"   ✅ Multi-character dialogue assembled: {output_filename}")
 

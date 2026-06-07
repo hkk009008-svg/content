@@ -61,6 +61,10 @@ from typing import Optional
 # TTS pricing: $0.01 per line — mirrors cost_tracker.py:66 ("ELEVENLABS": 0.01).
 # Imported lazily below in estimate_reassembly_cost rather than at module level
 # to avoid circular-import risk; this constant is the canonical reference.
+# Deliberate single-rate approximation (T-B review note): Cartesia-routed
+# lines actually cost 0.008 (cost_tracker.py "CARTESIA_SONIC_2") — the
+# estimate over-states Korean projects by ~25%; acceptable for a pre-run
+# advisory figure.
 _TTS_COST_PER_LINE_USD = 0.01  # sourced from cost_tracker.py:66
 
 
@@ -595,6 +599,13 @@ def estimate_reassembly_cost(project: dict) -> dict:
                     # use 1 as a conservative lower bound so the estimate is
                     # not zero for LLM-dialogue scenes.
                     tts_lines_to_generate += 1
+        elif characters and scene.get("action"):
+            # Action-only scene: _ensure_scene_audio generates dialogue via
+            # LLM then renders TTS for it (cinema_pipeline.py — the
+            # characters-and-action-no-dialogue branch). Count a conservative
+            # 1 line so these scenes aren't silently omitted from the
+            # estimate (T-B spec review SI-1).
+            tts_lines_to_generate += 1
 
         for shot in scene.get("shots", []) or []:
             if not isinstance(shot, dict):
