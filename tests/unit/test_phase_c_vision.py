@@ -373,7 +373,7 @@ class TestValidateShotQualityVision:
         mock_client.chat.completions.create.return_value = mock_msg
 
         with patch.object(pcv.os.path, "exists", return_value=True), \
-             patch.object(pcv, "_encode_image_base64", return_value="AAAA"), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("openai.OpenAI", return_value=mock_client):
             result = pcv.validate_shot_quality_vision("/img.jpg", "a cinematic shot")
 
@@ -391,7 +391,7 @@ class TestValidateShotQualityVision:
         mock_client.chat.completions.create.return_value = mock_msg
 
         with patch.object(pcv.os.path, "exists", return_value=True), \
-             patch.object(pcv, "_encode_image_base64", return_value="AAAA"), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("openai.OpenAI", return_value=mock_client):
             result = pcv.validate_shot_quality_vision("/img.jpg", "prompt")
 
@@ -408,7 +408,7 @@ class TestValidateShotQualityVision:
         mock_client.chat.completions.create.return_value = mock_msg
 
         with patch.object(pcv.os.path, "exists", return_value=True), \
-             patch.object(pcv, "_encode_image_base64", return_value="AAAA"), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("openai.OpenAI", return_value=mock_client):
             result = pcv.validate_shot_quality_vision("/img.jpg", "prompt")
 
@@ -423,7 +423,7 @@ class TestValidateShotQualityVision:
         mock_client.chat.completions.create.return_value = mock_msg
 
         with patch.object(pcv.os.path, "exists", return_value=True), \
-             patch.object(pcv, "_encode_image_base64", return_value="AAAA"), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("openai.OpenAI", return_value=mock_client):
             result = pcv.validate_shot_quality_vision("/img.jpg", "prompt")
 
@@ -434,7 +434,7 @@ class TestValidateShotQualityVision:
     def test_api_exception_returns_default_pass(self):
         """Exception during OpenAI call → caught, returns default_pass."""
         with patch.object(pcv.os.path, "exists", return_value=True), \
-             patch.object(pcv, "_encode_image_base64", return_value="AAAA"), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("openai.OpenAI", side_effect=RuntimeError("api error")):
             result = pcv.validate_shot_quality_vision("/img.jpg", "prompt")
 
@@ -491,7 +491,7 @@ class TestValidateIdentityVision:
         mock_client.messages.create.return_value = mock_resp
 
         with patch.object(pcv.os.path, "exists", return_value=True), \
-             patch.object(pcv, "_encode_image_base64", return_value="AAAA"), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("anthropic.Anthropic", return_value=mock_client):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
@@ -507,7 +507,7 @@ class TestValidateIdentityVision:
         mock_client.messages.create.return_value = mock_resp
 
         with patch.object(pcv.os.path, "exists", return_value=True), \
-             patch.object(pcv, "_encode_image_base64", return_value="AAAA"), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("anthropic.Anthropic", return_value=mock_client):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
@@ -528,7 +528,7 @@ class TestValidateIdentityVision:
         mock_client.messages.create.return_value = mock_resp
 
         with patch.object(pcv.os.path, "exists", return_value=True), \
-             patch.object(pcv, "_encode_image_base64", return_value="AAAA"), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("anthropic.Anthropic", return_value=mock_client):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
@@ -550,7 +550,7 @@ class TestValidateIdentityVision:
         mock_client.messages.create.return_value = mock_resp
 
         with patch.object(pcv.os.path, "exists", return_value=True), \
-             patch.object(pcv, "_encode_image_base64", return_value="AAAA"), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("anthropic.Anthropic", return_value=mock_client):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
@@ -560,7 +560,7 @@ class TestValidateIdentityVision:
     def test_api_exception_returns_default_pass(self):
         """Exception during Anthropic call → caught, returns default_pass."""
         with patch.object(pcv.os.path, "exists", return_value=True), \
-             patch.object(pcv, "_encode_image_base64", return_value="AAAA"), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("anthropic.Anthropic", side_effect=RuntimeError("api error")):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
@@ -604,7 +604,7 @@ class TestValidateSceneCoherenceVision:
         mock_google, mock_genai = _make_genai_mock({"coherent": True, "issues": []})
 
         with patch.object(pcv.os.path, "exists", return_value=True), \
-             patch.object(pcv, "_encode_image_base64", return_value="AAAA"), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch.dict(sys.modules, {"google": mock_google, "google.genai": mock_genai}):
             pcv.validate_scene_coherence_vision(
                 ["/a.jpg", "/b.jpg", "/c.jpg", "/d.jpg", "/e.jpg"]
@@ -623,7 +623,7 @@ class TestValidateSceneCoherenceVision:
         mock_google, mock_genai = _make_genai_mock({"coherent": True, "issues": []})
 
         with patch.object(pcv.os.path, "exists", return_value=True), \
-             patch.object(pcv, "_encode_image_base64", return_value="AAAA"), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch.dict(sys.modules, {"google": mock_google, "google.genai": mock_genai}):
             result = pcv.validate_scene_coherence_vision(["/a.jpg", "/b.jpg"])
 
@@ -637,7 +637,7 @@ class TestValidateSceneCoherenceVision:
         )
 
         with patch.object(pcv.os.path, "exists", return_value=True), \
-             patch.object(pcv, "_encode_image_base64", return_value="AAAA"), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch.dict(sys.modules, {"google": mock_google, "google.genai": mock_genai}):
             result = pcv.validate_scene_coherence_vision(["/a.jpg", "/b.jpg"])
 
@@ -651,7 +651,7 @@ class TestValidateSceneCoherenceVision:
         mock_google = MagicMock(genai=mock_genai)
 
         with patch.object(pcv.os.path, "exists", return_value=True), \
-             patch.object(pcv, "_encode_image_base64", return_value="AAAA"), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch.dict(sys.modules, {"google": mock_google, "google.genai": mock_genai}):
             result = pcv.validate_scene_coherence_vision(["/a.jpg", "/b.jpg"])
 
@@ -663,6 +663,125 @@ class TestValidateSceneCoherenceVision:
         result = pcv.validate_scene_coherence_vision([])
         assert result["source"] == "default"
         assert result["coherent"] is True
+
+
+# ---------------------------------------------------------------------------
+# encode_image_for_llm failure-contract tests (ticket #3 — oversize+MIME fix)
+# ---------------------------------------------------------------------------
+
+class TestValidateShotQualityVisionEncodeFailure:
+    """encode_image_for_llm returns None → default_pass returned, no API call made."""
+
+    def test_encode_failure_returns_default_pass_no_api_call(self):
+        mock_client = MagicMock()
+        with patch.object(pcv.os.path, "exists", return_value=True), \
+             patch.object(pcv, "encode_image_for_llm", return_value=None), \
+             patch("openai.OpenAI", return_value=mock_client):
+            result = pcv.validate_shot_quality_vision("/img.jpg", "a prompt")
+
+        assert result["source"] == "default"
+        assert result["pass"] is True
+        mock_client.chat.completions.create.assert_not_called()
+
+    def test_openai_payload_uses_jpeg_data_url(self):
+        """The OpenAI data URL must declare image/jpeg regardless of input extension."""
+        mock_client = MagicMock()
+        mock_msg = MagicMock()
+        mock_msg.choices[0].message.content = json.dumps(
+            {"score": 8, "issues": [], "suggestions": []}
+        )
+        mock_client.chat.completions.create.return_value = mock_msg
+
+        with patch.object(pcv.os.path, "exists", return_value=True), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
+             patch("openai.OpenAI", return_value=mock_client):
+            pcv.validate_shot_quality_vision("/img.png", "a prompt")
+
+        call_args = mock_client.chat.completions.create.call_args
+        messages = call_args.kwargs.get("messages") or call_args[1].get("messages") or call_args[0][0]
+        user_msg = next(m for m in messages if m["role"] == "user")
+        content_list = user_msg["content"]
+        image_block = next(
+            b for b in content_list if b.get("type") == "image_url"
+        )
+        url = image_block["image_url"]["url"]
+        assert url.startswith("data:image/jpeg;base64,"), (
+            f"OpenAI payload must declare image/jpeg regardless of input extension; got: {url[:60]}"
+        )
+
+
+class TestValidateIdentityVisionEncodeFailure:
+    """encode_image_for_llm returns None → default_pass, no API call made."""
+
+    def test_encode_failure_ref_returns_default_pass_no_api_call(self):
+        """ref encode fails → default_pass, Anthropic client not called."""
+        mock_client = MagicMock()
+
+        def _encode(path):
+            return None if "ref" in path else "AAAA"
+
+        with patch.object(pcv.os.path, "exists", return_value=True), \
+             patch.object(pcv, "encode_image_for_llm", side_effect=_encode), \
+             patch("anthropic.Anthropic", return_value=mock_client):
+            result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
+
+        assert result["source"] == "default"
+        assert result["match"] is True
+        mock_client.messages.create.assert_not_called()
+
+    def test_encode_failure_gen_returns_default_pass_no_api_call(self):
+        """gen encode fails → default_pass, Anthropic client not called."""
+        mock_client = MagicMock()
+
+        def _encode(path):
+            return None if "gen" in path else "AAAA"
+
+        with patch.object(pcv.os.path, "exists", return_value=True), \
+             patch.object(pcv, "encode_image_for_llm", side_effect=_encode), \
+             patch("anthropic.Anthropic", return_value=mock_client):
+            result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
+
+        assert result["source"] == "default"
+        assert result["match"] is True
+        mock_client.messages.create.assert_not_called()
+
+    def test_anthropic_payload_declares_image_jpeg_for_both_images(self):
+        """Anthropic media_type must be image/jpeg BY CONSTRUCTION (not extension-derived)."""
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.content[0].text = json.dumps({"confidence": 0.9, "issues": []})
+        mock_client.messages.create.return_value = mock_resp
+
+        with patch.object(pcv.os.path, "exists", return_value=True), \
+             patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
+             patch("anthropic.Anthropic", return_value=mock_client):
+            pcv.validate_identity_vision("/ref.png", "/gen.png")
+
+        call_args = mock_client.messages.create.call_args
+        messages = call_args.kwargs.get("messages") or call_args[1].get("messages") or call_args[0][0]
+        user_msg = next(m for m in messages if m["role"] == "user")
+        image_blocks = [b for b in user_msg["content"] if b.get("type") == "image"]
+        assert len(image_blocks) == 2, f"expected 2 image blocks, got {len(image_blocks)}"
+        for blk in image_blocks:
+            assert blk["source"]["media_type"] == "image/jpeg", (
+                f"Anthropic payload must declare image/jpeg; got {blk['source']['media_type']!r}"
+            )
+
+
+class TestValidateSceneCoherenceVisionEncodeFailure:
+    """encode_image_for_llm returns None for some images → fewer than 2 → default_pass."""
+
+    def test_all_encode_failures_return_default_pass_no_api_call(self):
+        mock_google, mock_genai = _make_genai_mock({"coherent": True, "issues": []})
+
+        with patch.object(pcv.os.path, "exists", return_value=True), \
+             patch.object(pcv, "encode_image_for_llm", return_value=None), \
+             patch.dict(sys.modules, {"google": mock_google, "google.genai": mock_genai}):
+            result = pcv.validate_scene_coherence_vision(["/a.jpg", "/b.jpg"])
+
+        assert result["source"] == "default"
+        assert result["coherent"] is True
+        mock_genai.Client.return_value.models.generate_content.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

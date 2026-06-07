@@ -16,30 +16,12 @@ Falls back to GPT-4o if Anthropic unavailable.
 
 import os
 import json
-import base64
 from typing import Optional, List, Dict
 from pipeline_context import PIPELINE_CONTEXT
 from config.settings import settings
 from llm.ensemble import build_anthropic_system_blocks
 from llm.negative_prompts import get_negative_prompt_for_failure
-
-
-def _encode_image_for_llm(path: str) -> "Optional[str]":
-    """Downscale + re-encode to JPEG b64 for vision diagnosis. None on failure."""
-    try:
-        import io
-        from PIL import Image
-        img = Image.open(path).convert("RGB")          # PNG/RGBA/P all -> RGB
-        w, h = img.size
-        if max(w, h) > 1568:                            # Anthropic native res for sonnet-4 gen
-            s = 1568 / max(w, h)
-            img = img.resize((max(1, round(w * s)), max(1, round(h * s))), Image.LANCZOS)
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=90)
-        return base64.b64encode(buf.getvalue()).decode("ascii")
-    except Exception as e:
-        print(f"   [DIRECTOR] image encode failed for {path}: {e}")
-        return None
+from llm.image_encoding import encode_image_for_llm
 
 
 def _strip_json_fences(raw: str) -> str:
@@ -115,7 +97,7 @@ class ChiefDirector:
           ``gpt-*`` / ``o1-*`` / ``o3-*`` / ``o4-*`` → openai
 
         ``image_b64s``: pre-encoded JPEG base64 strings (produced by the
-        caller via ``_encode_image_for_llm``). Encoding is NOT done here —
+        caller via ``encode_image_for_llm``). Encoding is NOT done here —
         this keeps labels and attachments in sync (F1 fix). On API failure
         with images, retries once text-only before returning "".
         """
@@ -480,7 +462,7 @@ When suggesting prompt_mutation for failures:
             (reference_path, "the character's canonical reference (ground-truth identity)"),
         ):
             if _path and os.path.exists(_path):
-                _b64 = _encode_image_for_llm(_path)
+                _b64 = encode_image_for_llm(_path)
                 if _b64 is not None:
                     attach.append(_b64)
                     labels.append(f"Image {len(attach)}: {_label_suffix}")

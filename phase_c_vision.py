@@ -4,6 +4,7 @@ import json
 import base64
 from pipeline_context import PIPELINE_CONTEXT
 from config.settings import settings
+from llm.image_encoding import encode_image_for_llm
 try:
     from deepface import DeepFace
     VISION_AVAILABLE = True
@@ -132,23 +133,12 @@ def quality_control_image(image_path: str, prompt_text: str = "") -> bool:
 # ======================================================================
 # LLM Vision Validators — GPT-4o, Claude, Gemini
 # ======================================================================
-
-def _encode_image_base64(image_path: str) -> str:
-    """Read an image file and return its base64-encoded string."""
-    with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
-
-
-def _image_media_type(image_path: str) -> str:
-    """Infer MIME type from file extension."""
-    ext = os.path.splitext(image_path)[1].lower()
-    return {
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png": "image/png",
-        ".webp": "image/webp",
-        ".gif": "image/gif",
-    }.get(ext, "image/jpeg")
+# Image encoding: all validators use encode_image_for_llm (llm/image_encoding.py)
+# which PIL-opens → converts to RGB → downscales to ≤1568px long-edge →
+# re-encodes as JPEG quality=90.  Media type is image/jpeg BY CONSTRUCTION —
+# all provider payloads hardcode "image/jpeg".  This closes two failure modes:
+#   (1) 4K keyframes up to 20.28 MB b64 exceeding the Anthropic 10 MB/image limit.
+#   (2) Extension-derived MIME was frequently wrong (.jpg files contain PNG bytes).
 
 
 def validate_shot_quality_vision(image_path: str, original_prompt: str) -> dict:
@@ -178,8 +168,10 @@ def validate_shot_quality_vision(image_path: str, original_prompt: str) -> dict:
         from openai import OpenAI
         client = OpenAI(api_key=api_key, timeout=120.0)
 
-        img_b64 = _encode_image_base64(image_path)
-        media_type = _image_media_type(image_path)
+        img_b64 = encode_image_for_llm(image_path)
+        if img_b64 is None:
+            print(f"[VISION-QA] WARNING: Image encode failed: {image_path}")
+            return default_pass
 
         system_prompt = (
             "You are a cinematic shot quality evaluator. Analyze this generated image against "
@@ -209,7 +201,7 @@ def validate_shot_quality_vision(image_path: str, original_prompt: str) -> dict:
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:{media_type};base64,{img_b64}",
+                                "url": f"data:image/jpeg;base64,{img_b64}",
                             },
                         },
                     ],
@@ -270,10 +262,11 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
         from anthropic import Anthropic
         client = Anthropic(api_key=api_key, timeout=120.0)
 
-        ref_b64 = _encode_image_base64(reference_path)
-        gen_b64 = _encode_image_base64(generated_path)
-        ref_media = _image_media_type(reference_path)
-        gen_media = _image_media_type(generated_path)
+        ref_b64 = encode_image_for_llm(reference_path)
+        gen_b64 = encode_image_for_llm(generated_path)
+        if ref_b64 is None or gen_b64 is None:
+            print(f"[VISION-ID] WARNING: Image encode failed (ref={ref_b64 is None}, gen={gen_b64 is None})")
+            return default_pass
 
         system_prompt = (
             "You are an identity verification expert. Compare these two images and determine "
@@ -306,7 +299,7 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
                             "type": "image",
                             "source": {
                                 "type": "base64",
-                                "media_type": ref_media,
+                                "media_type": "image/jpeg",
                                 "data": ref_b64,
                             },
                         },
@@ -314,7 +307,7 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
                             "type": "image",
                             "source": {
                                 "type": "base64",
-                                "media_type": gen_media,
+                                "media_type": "image/jpeg",
                                 "data": gen_b64,
                             },
                         },
@@ -393,14 +386,19 @@ def validate_scene_coherence_vision(shot_images: list[str]) -> dict:
         # Attach images using Gemini's Part format
         image_parts = []
         for img_path in valid_images:
-            img_b64 = _encode_image_base64(img_path)
-            media = _image_media_type(img_path)
+            img_b64 = encode_image_for_llm(img_path)
+            if img_b64 is None:
+                print(f"[VISION-COHERENCE] WARNING: Image encode failed, skipping: {img_path}")
+                continue
             image_parts.append(
                 genai.types.Part.from_bytes(
                     data=base64.b64decode(img_b64),
-                    mime_type=media,
+                    mime_type="image/jpeg",
                 )
             )
+        if len(image_parts) < 2:
+            print("[VISION-COHERENCE] WARNING: Fewer than 2 images encoded successfully")
+            return default_pass
 
         response = client.models.generate_content(
             model="gemini-2.5-flash",

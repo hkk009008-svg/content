@@ -3,7 +3,7 @@ tests/unit/test_chief_director_vision.py
 
 TDD — vision deep-diagnose extension for ChiefDirector.
 
-Covers _encode_image_for_llm helper and the wired images path in _call_llm
+Covers encode_image_for_llm helper and the wired images path in _call_llm
 and evaluate_generation_quality.
 
 Offline — LLM clients mocked; no API keys, no network.
@@ -20,7 +20,8 @@ import pytest
 # PIL is a required dep for max-tier provisioning — assume it's available.
 from PIL import Image
 
-from llm.chief_director import ChiefDirector, _encode_image_for_llm
+from llm.chief_director import ChiefDirector
+from llm.image_encoding import encode_image_for_llm
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
@@ -65,7 +66,7 @@ class TestEncoderExtensionsLie:
         # Save a real PNG into a .jpg filename (the "extensions lie" scenario)
         _save_pil(_tiny_pil_image(), img_path, fmt="PNG")
 
-        b64 = _encode_image_for_llm(str(img_path))
+        b64 = encode_image_for_llm(str(img_path))
         assert b64 is not None, "encode must succeed for a valid image even if extension lies"
         raw = base64.b64decode(b64)
         # JPEG magic bytes
@@ -79,7 +80,7 @@ class TestEncoderDownscale:
         img_path = tmp_path / "large.jpg"
         _save_pil(_tiny_pil_image(size=(4000, 2000)), img_path)
 
-        b64 = _encode_image_for_llm(str(img_path))
+        b64 = encode_image_for_llm(str(img_path))
         assert b64 is not None
         raw = base64.b64decode(b64)
         result_img = Image.open(io.BytesIO(raw))
@@ -94,7 +95,7 @@ class TestEncoderDownscale:
         img_path = tmp_path / "small.jpg"
         _save_pil(_tiny_pil_image(size=(8, 8)), img_path)
 
-        b64 = _encode_image_for_llm(str(img_path))
+        b64 = encode_image_for_llm(str(img_path))
         assert b64 is not None
         raw = base64.b64decode(b64)
         result_img = Image.open(io.BytesIO(raw))
@@ -111,7 +112,7 @@ class TestEncoderRGBA:
         # JPEG cannot store RGBA — save as PNG so the file is a valid RGBA image
         _save_pil(_tiny_pil_image(mode="RGBA"), img_path, fmt="PNG")
 
-        b64 = _encode_image_for_llm(str(img_path))
+        b64 = encode_image_for_llm(str(img_path))
         assert b64 is not None
         raw = base64.b64decode(b64)
         assert raw[:2] == b"\xff\xd8"
@@ -121,7 +122,7 @@ class TestEncoderRGBA:
 
 class TestEncoderMissingFile:
     def test_missing_file_returns_none(self):
-        result = _encode_image_for_llm("/fake/nonexistent/path.jpg")
+        result = encode_image_for_llm("/fake/nonexistent/path.jpg")
         assert result is None
 
 
@@ -131,13 +132,13 @@ class TestCallLLMAnthropicWithImages:
     def test_two_images_produce_image_blocks_then_text(self, tmp_path):
         cd = _make_cd(provider="anthropic")
         # _call_llm now accepts pre-encoded b64 strings (F1: encode-at-evaluate)
-        take_b64 = _encode_image_for_llm(str(tmp_path / "take.jpg")) or ""
-        ref_b64 = _encode_image_for_llm(str(tmp_path / "ref.jpg")) or ""
-        # Use real tiny images so _encode_image_for_llm works; save them first
+        take_b64 = encode_image_for_llm(str(tmp_path / "take.jpg")) or ""
+        ref_b64 = encode_image_for_llm(str(tmp_path / "ref.jpg")) or ""
+        # Use real tiny images so encode_image_for_llm works; save them first
         _save_pil(_tiny_pil_image(color="red"), tmp_path / "take.jpg")
         _save_pil(_tiny_pil_image(color="blue"), tmp_path / "ref.jpg")
-        take_b64 = _encode_image_for_llm(str(tmp_path / "take.jpg"))
-        ref_b64 = _encode_image_for_llm(str(tmp_path / "ref.jpg"))
+        take_b64 = encode_image_for_llm(str(tmp_path / "take.jpg"))
+        ref_b64 = encode_image_for_llm(str(tmp_path / "ref.jpg"))
         assert take_b64 and ref_b64, "fixtures must encode successfully"
 
         cd.client.messages.create.return_value = _anthropic_ok_response()
@@ -183,7 +184,7 @@ class TestCallLLMAnthropicWithImages:
 
 class TestEncoderCorruptFile:
     def test_empty_b64_drops_gracefully(self, tmp_path):
-        """Passing an empty/None b64 (what _encode_image_for_llm returns for
+        """Passing an empty/None b64 (what encode_image_for_llm returns for
         corrupt files) results in text-only call — no image blocks."""
         cd = _make_cd(provider="anthropic")
         cd.client.messages.create.return_value = _anthropic_ok_response()
@@ -207,7 +208,7 @@ class TestCallLLMOpenAIWithImages:
         cd = _make_cd(provider="openai")
         take_path = tmp_path / "take.jpg"
         _save_pil(_tiny_pil_image(), take_path)
-        take_b64 = _encode_image_for_llm(str(take_path))
+        take_b64 = encode_image_for_llm(str(take_path))
         assert take_b64, "fixture must encode successfully"
 
         cd.client.chat.completions.create.return_value = _openai_ok_response()
@@ -260,7 +261,7 @@ class TestCallLLMAnthropicTextOnlyRetry:
         cd = _make_cd(provider="anthropic")
         take_path = tmp_path / "take.jpg"
         _save_pil(_tiny_pil_image(), take_path)
-        take_b64 = _encode_image_for_llm(str(take_path))
+        take_b64 = encode_image_for_llm(str(take_path))
         assert take_b64, "fixture must encode"
 
         ok_resp = _anthropic_ok_response('{"decision":"RETRY"}')
@@ -628,7 +629,7 @@ class TestCallLLMSingleChargeOnExtractionError:
         cd = _make_cd(provider="anthropic")
         take_path = tmp_path / "take.jpg"
         _save_pil(_tiny_pil_image(), take_path)
-        take_b64 = _encode_image_for_llm(str(take_path))
+        take_b64 = encode_image_for_llm(str(take_path))
         assert take_b64
 
         # create succeeds but content is empty — extraction would raise IndexError
@@ -656,7 +657,7 @@ class TestCallLLMOpenAIRetryAndNoRetry:
         cd = _make_cd(provider="openai")
         take_path = tmp_path / "take.jpg"
         _save_pil(_tiny_pil_image(), take_path)
-        take_b64 = _encode_image_for_llm(str(take_path))
+        take_b64 = encode_image_for_llm(str(take_path))
         assert take_b64
 
         ok_resp = _openai_ok_response('{"decision":"RETRY"}')
