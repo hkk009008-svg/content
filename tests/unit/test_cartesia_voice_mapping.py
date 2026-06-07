@@ -49,6 +49,20 @@ class TestResolveCartesiaVoice:
             f"Korean female default should be Seoyun ({SEOYUN_UUID}); got {result!r}"
         )
 
+    def test_iso_code_ko_maps_like_korean(self):
+        """Live-verification regression: real projects store language='ko'
+        (ISO code), which the router routes to Cartesia by prefix — the
+        resolver must normalize the same way, not exact-match the defaults
+        dict key ("Korean"). 'ko' fell to _default → None → skip in prod."""
+        from audio.dialogue import _resolve_cartesia_voice
+
+        for lang in ("ko", "ko_KR", "korean", "KOREAN"):
+            result = _resolve_cartesia_voice(EL_FEMALE_KO, {}, lang)
+            assert result == SEOYUN_UUID, (
+                f"language={lang!r} must map like 'Korean' (router routes it "
+                f"to Cartesia by 'ko' prefix); got {result!r}"
+            )
+
     def test_korean_female_explicit_gender_maps_to_seoyun(self):
         """11labs id + Korean + gender='female' → Seoyun."""
         from audio.dialogue import _resolve_cartesia_voice

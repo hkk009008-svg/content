@@ -257,7 +257,13 @@ def _resolve_cartesia_voice(voice_id: str, char_record: dict, project_lang: str)
     # so a domain import failure degrades to None, never raises.
     try:
         from domain.language_defaults import get_language_defaults
-        lang_defaults = get_language_defaults(project_lang)
+        # Normalize the language the same way the router detects Korean
+        # ('ko' prefix matches 'ko'/'ko_KR'/'korean') — the defaults dict is
+        # keyed by display name ("Korean"), so without this the mapper
+        # misses EXACTLY when the router routes to Cartesia (live-verification
+        # catch: project language 'ko' fell to _default → None → skip).
+        _lang_key = "Korean" if str(project_lang).lower().startswith("ko") else project_lang
+        lang_defaults = get_language_defaults(_lang_key)
         char_gender = (char_record.get("gender") or "").lower()
         if char_gender in {"male", "m", "man"}:
             return lang_defaults.get("cartesia_default_male_voice") or None
