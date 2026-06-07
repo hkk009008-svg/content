@@ -1353,10 +1353,10 @@ Native (silent video). Closed by `b11edd4` (standalone-dialogue mux) +
 **Default rosters** ([llm/ensemble.py:80-84](llm/ensemble.py:80)):
 | Task | Models |
 |---|---|
-| `script` | `["claude-sonnet-4-20250514", "gpt-4o"]` |
-| `decompose` | `["gpt-4o", "claude-sonnet-4-20250514"]` |
-| `default` | `["claude-sonnet-4-20250514", "gpt-4o"]` |
-| Default judge | `claude-sonnet-4-20250514` |
+| `script` | `["claude-sonnet-4-6", "gpt-4o"]` |
+| `decompose` | `["gpt-4o", "claude-sonnet-4-6"]` |
+| `default` | `["claude-sonnet-4-6", "gpt-4o"]` |
+| Default judge | `claude-sonnet-4-6` |
 
 **Provider routing by model name prefix** ([llm/ensemble.py:231-247](llm/ensemble.py:231)):
 - `claude*` → Anthropic

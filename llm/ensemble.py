@@ -78,12 +78,12 @@ class EnsembleResult:
 # ---------------------------------------------------------------------------
 
 _DEFAULT_MODELS: dict[str, list[str]] = {
-    "script": ["claude-sonnet-4-20250514", "gpt-4o"],
-    "decompose": ["gpt-4o", "claude-sonnet-4-20250514"],
-    "default": ["claude-sonnet-4-20250514", "gpt-4o"],
+    "script": ["claude-sonnet-4-6", "gpt-4o"],
+    "decompose": ["gpt-4o", "claude-sonnet-4-6"],
+    "default": ["claude-sonnet-4-6", "gpt-4o"],
 }
 
-_DEFAULT_JUDGE = "claude-sonnet-4-20250514"
+_DEFAULT_JUDGE = "claude-sonnet-4-6"
 
 
 # ---------------------------------------------------------------------------

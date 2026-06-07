@@ -1469,7 +1469,7 @@ Stores project dict, initializes `diagnostic_log: List[Dict]`, calls `_init_clie
 Tries Anthropic first (`settings.anthropic_api_key`), falls back to OpenAI. Sets `self.provider` to `"anthropic"` / `"openai"` / `None`. Returns client or None.
 
 **`ChiefDirector._call_llm(system_prompt, user_prompt)`** — `chief_director.py:82`
-Dispatches to Anthropic (`claude-sonnet-4-20250514` default, `max_tokens=4096`, uses `build_anthropic_system_blocks` for prompt caching) or OpenAI (`gpt-4o` default, `response_format={"type": "json_object"}`). Honors `project.global_settings.creative_llm` override but only if the model prefix matches the active provider (e.g., `claude-*` for Anthropic, `gpt-*`/`o1-*`/`o3-*`/`o4-*` for OpenAI); cross-family override is silently ignored with a log line.
+Dispatches to Anthropic (`claude-sonnet-4-6` default, `max_tokens=4096`, uses `build_anthropic_system_blocks` for prompt caching) or OpenAI (`gpt-4o` default, `response_format={"type": "json_object"}`). Honors `project.global_settings.creative_llm` override but only if the model prefix matches the active provider (e.g., `claude-*` for Anthropic, `gpt-*`/`o1-*`/`o3-*`/`o4-*` for OpenAI); cross-family override is silently ignored with a log line.
 
 **`ChiefDirector.SYSTEM_PROMPT`** — `chief_director.py:147`
 Embedded class-level string constant. Contains HC1–HC8 hard constraints, the output schema (`APPROVED`/`REJECTED`/`MODIFIED` + violations + modifications + quality_score), tripwires T1–T9, quality upgrade rules, and the mutation strategy guide. Appends `PIPELINE_CONTEXT` (loaded from `config/prompts/pipeline_context.md`).
@@ -1497,7 +1497,7 @@ Stores project, calls `_init_client()`, sets `self._log_root = Path("data/intent
 Same Anthropic-first, OpenAI-fallback pattern as ChiefDirector. Sets `self.provider`.
 
 **`CinemaDirector._call_llm(user_prompt)`** — `director.py:230`
-Anthropic: `claude-sonnet-4-20250514`, `max_tokens=2048`, uses `build_anthropic_system_blocks(SYSTEM_PROMPT)`. OpenAI: `gpt-4o`, `response_format={"type": "json_object"}`. Same `creative_llm` override logic. Returns raw text or `""`.
+Anthropic: `claude-sonnet-4-6`, `max_tokens=2048`, uses `build_anthropic_system_blocks(SYSTEM_PROMPT)`. OpenAI: `gpt-4o`, `response_format={"type": "json_object"}`. Same `creative_llm` override logic. Returns raw text or `""`.
 
 **`CinemaDirector.translate_intent(intent, take_context, scene_context)`** — `director.py:275`
 Main entry point. Accepts `DirectorialIntent` Pydantic model or dict. Runs S18 verb DSL: extracts `intent.verb` + `intent.params`, builds a `verb_prefix` block (injected as user-prompt prefix, not system-prompt appendix, so the system block stays stable for caching). Falls back to freeform if verb is None or unknown. Calls `_call_llm`, parses JSON, returns `{"revised_prompt", "params_delta", "anchor_refs"}`. On LLM unavailable or parse failure, returns fallback using `intent.prose` or `take_context["prompt"]`. Calls `_log_intent_call` on all paths.
@@ -1531,10 +1531,10 @@ Eagerly instantiates Anthropic + OpenAI clients. Gemini client is optional (only
 Core public method. Dispatches all models in parallel via `ThreadPoolExecutor(max_workers=len(models))`. Preserves original model ordering after `as_completed`. Calls `_judge`. Returns `EnsembleResult(winner_index, winner_content, scores, candidates, models_used, judge_model, reasoning)`.
 
 Default model rosters (`_DEFAULT_MODELS`, `ensemble.py:80`):
-- `"script"`: `["claude-sonnet-4-20250514", "gpt-4o"]`
-- `"decompose"`: `["gpt-4o", "claude-sonnet-4-20250514"]`
-- `"default"`: `["claude-sonnet-4-20250514", "gpt-4o"]`
-- Default judge: `"claude-sonnet-4-20250514"`
+- `"script"`: `["claude-sonnet-4-6", "gpt-4o"]`
+- `"decompose"`: `["gpt-4o", "claude-sonnet-4-6"]`
+- `"default"`: `["claude-sonnet-4-6", "gpt-4o"]`
+- Default judge: `"claude-sonnet-4-6"`
 
 **`LLMEnsemble._generate_single(model, system_prompt, user_prompt, json_mode, tool_schema)`** — `ensemble.py:224`
 Routes by model prefix: `claude*` → Anthropic, `gpt*`/`o4*` → OpenAI, `gemini*` → Gemini, else → OpenAI-compatible. Returns `(model, output)` or `(model, None)` on exception.
@@ -1655,7 +1655,7 @@ All knobs live in `project.global_settings` (set via `PUT /api/projects/<pid>` �
 
 **To maximize quality/capability:**
 1. Set `quality_judge_llm = "claude-opus"` to use Claude Opus 4 as judge (highest-capability judge; costs more).
-2. Leave `creative_llm = "auto"` (defaults to `claude-sonnet-4-20250514` which is the native provider for ChiefDirector and CinemaDirector).
+2. Leave `creative_llm = "auto"` (defaults to `claude-sonnet-4-6` which is the native provider for ChiefDirector and CinemaDirector).
 3. Pre-provide `style_rules` with hand-crafted values to bypass GPT-4o's style generation (avoids OpenAI dependency).
 4. Set `ANTHROPIC_API_KEY` (primary), `OPENAI_API_KEY` (fallback), and optionally `GEMINI_API_KEY` for Gemini judge option.
 5. Set `TAVILY_API_KEY` for research-grounded style generation.
@@ -1672,8 +1672,8 @@ All knobs live in `project.global_settings` (set via `PUT /api/projects/<pid>` �
 **Phase B — Shot prompt optimization (per shot, during decomposition):**
 1. `cinema/shots/controller.py:~400` calls `optimize_shot_prompt(user_input, characters, location, global_settings, scene_context, ...)`.
 2. `optimize_shot_prompt` builds `LLMEnsemble` (or accepts pre-built), calls `ensemble.competitive_generate(task_type="decompose", ...)`.
-3. Ensemble dispatches `gpt-4o` + `claude-sonnet-4-20250514` in parallel (ThreadPoolExecutor). Each generates a JSON shot spec.
-4. Judge (default: `claude-sonnet-4-20250514`) scores candidates 0–10 on creativity/accuracy/completeness/style; returns winner index.
+3. Ensemble dispatches `gpt-4o` + `claude-sonnet-4-6` in parallel (ThreadPoolExecutor). Each generates a JSON shot spec.
+4. Judge (default: `claude-sonnet-4-6`) scores candidates 0–10 on creativity/accuracy/completeness/style; returns winner index.
 5. `_coerce_to_valid_keys()` sanitizes enum fields. Returns structured spec.
 6. Fallback: if LLM unavailable, `_fallback_optimize()` runs heuristics deterministically.
 
@@ -1731,7 +1731,7 @@ All knobs live in `project.global_settings` (set via `PUT /api/projects/<pid>` �
 | Claim | File:line |
 |---|---|
 | ChiefDirector prefers Anthropic, falls back to OpenAI | `llm/chief_director.py:57-80` |
-| Default model: `claude-sonnet-4-20250514` | `llm/chief_director.py:107` |
+| Default model: `claude-sonnet-4-6` | `llm/chief_director.py:107` |
 | HC1–HC8 hard constraints + tripwires T1–T9 | `llm/chief_director.py:155-211` |
 | APPROVED/MODIFIED/REJECTED output schema | `llm/chief_director.py:178-186` |
 | ≤1 retry on JSONDecodeError in validate_shot_prompts | `llm/chief_director.py:265-276` |
@@ -1815,7 +1815,7 @@ Returns: `List[dict]` — shot records from `make_shot()`.
 Flow: builds char descriptions + location context → optionally calls `research_cinematography()` → computes `target_shots = max(2, min(5, int(duration_seconds / 2.5)))` → calls `_build_cinedecompose_system_prompt` → invokes `web_research.run_with_tools(client, "gpt-4o", ...)` with `max_tool_rounds=2` → parses JSON response (handles bare list, `{"shots":[]}`, single-object, and non-standard key patterns) → validates each shot through `make_shot()` with enum-guard on `camera`, `visual_effect`, `target_api`. Falls back to `_fallback_decompose()` on any exception. Side effect: logs to stdout.
 
 **`competitive_decompose_scene`** — `domain/scene_decomposer.py:617`
-Same params/returns as `decompose_scene`. Runs `LLMEnsemble().competitive_generate(task_type="decompose", ...)` — defaults to GPT-4o vs claude-sonnet-4-20250514 in parallel, judged by claude-sonnet-4-20250514 (`_DEFAULT_JUDGE`, `llm/ensemble.py:86`). On any failure falls back to `decompose_scene()`. Adds `ensemble_winner` and `ensemble_scores` fields to each shot record (`domain/scene_decomposer.py:819-820`).
+Same params/returns as `decompose_scene`. Runs `LLMEnsemble().competitive_generate(task_type="decompose", ...)` — defaults to GPT-4o vs claude-sonnet-4-6 in parallel, judged by claude-sonnet-4-6 (`_DEFAULT_JUDGE`, `llm/ensemble.py:86`). On any failure falls back to `decompose_scene()`. Adds `ensemble_winner` and `ensemble_scores` fields to each shot record (`domain/scene_decomposer.py:819-820`).
 
 **`_fallback_decompose`** — `domain/scene_decomposer.py:837`
 No API key required. Always returns exactly 2 shots: an establishing wide (24mm, `zoom_in_slow`, `AUTO`) and a medium close-up (85mm, `dolly_in_rapid`, `AUTO`). Used when OpenAI is unavailable or on exception.
@@ -3177,7 +3177,7 @@ Wraps `validate_shot_quality_vision`; returns `bool` (pass if score >= 7). Defau
 GPT-4o-Vision scored QC (0–10) against 6 criteria: composition, lighting, face clarity, outfit accuracy, prompt adherence, artifact detection. Returns `{score, issues, pass, suggestions, source}`. Pass threshold: 7/10. Default-passes on any failure.
 
 **`validate_identity_vision`** (`phase_c_vision.py:242`)
-Claude Sonnet (claude-sonnet-4-20250514) compares reference vs generated face. Ignores clothing/background/pose. Returns `{confidence 0.0–1.0, issues, match (bool, threshold 0.7), source}`. Default-passes on missing key/image.
+Claude Sonnet (claude-sonnet-4-6) compares reference vs generated face. Ignores clothing/background/pose. Returns `{confidence 0.0–1.0, issues, match (bool, threshold 0.7), source}`. Default-passes on missing key/image.
 
 **`validate_scene_coherence_vision`** (`phase_c_vision.py:346`)
 Gemini 2.5-flash checks ≤3 consecutive shot images for lighting direction, wardrobe, background, spatial position, and color palette continuity. Returns `{coherent: bool, issues, source}`.
@@ -3562,7 +3562,7 @@ Four modules provide pipeline-wide infrastructure: **cost_tracker.py** (durable 
 Table of per-call USD estimates keyed by API name (uppercase). 20 entries covering video (KLING_NATIVE $0.50, SORA_NATIVE $0.80, VEO_NATIVE $0.30, LTX $0.10, RUNWAY_GEN4 $0.50), image (COMFYUI_PULID $0.04, FLUX_PRO $0.05, POLLINATIONS $0.00, QUALITY_MAX $0.40), and audio (STABILITY_FOLEY $0.03, ELEVENLABS $0.01, SUNO_V5 $0.50, FAL_STABLE_AUDIO $0.10, CARTESIA_SONIC_2 $0.008). These are ±30% estimates; operators must calibrate against invoices.
 
 **`PRICING: dict[str, dict]`** — `cost_tracker.py:76`
-Per-1M-token pricing table for LLMs: Anthropic (claude-sonnet-4-20250514 $3/$15, claude-opus-4-20250918 $5/$25, claude-haiku-4-5 $1/$5), OpenAI (gpt-4.1 $2/$8, gpt-4o $2.50/$10, o4-mini $1.10/$4.40), Google (gemini-2.5-flash $0.30/$2.50, gemini-2.5-pro $1.25/$10).
+Per-1M-token pricing table for LLMs: Anthropic (claude-sonnet-4-6 $3/$15, claude-opus-4-20250918 $5/$25, claude-haiku-4-5 $1/$5), OpenAI (gpt-4.1 $2/$8, gpt-4o $2.50/$10, o4-mini $1.10/$4.40), Google (gemini-2.5-flash $0.30/$2.50, gemini-2.5-pro $1.25/$10).
 
 **`class CostTracker`** — `cost_tracker.py:131`
 Constructor: `CostTracker(db_path="data/experiments.db", budget_usd=None)`. Opens SQLite connection at `db_path`; `budget_usd=None` disables gate. Creates `cost_log` table on first use. Holds `self.spent_usd: float` as in-process accumulator (resets per process — NOT loaded from SQLite on init).

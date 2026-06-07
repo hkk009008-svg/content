@@ -129,7 +129,7 @@ class ChiefDirector:
             override = _gs.get("creative_llm") or None
 
         if self.provider == "anthropic":
-            model_id = "claude-sonnet-4-20250514"
+            model_id = "claude-sonnet-4-6"
             if override:
                 if override.startswith("claude-"):
                     model_id = override

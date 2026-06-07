@@ -75,7 +75,7 @@ export function AdvancedSection({ s, config, project }: Props) {
               )) || (
                 <>
                   <option value="auto">Auto (Router decides)</option>
-                  <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                  <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
                   <option value="gpt-4o">GPT-4o</option>
                 </>
               )}

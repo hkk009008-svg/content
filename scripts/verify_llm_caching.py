@@ -80,7 +80,7 @@ def main() -> int:
     def call_with_stats(label: str, user_prompt: str) -> tuple[int, int]:
         """Make one Anthropic call and return (cache_creation_tokens, cache_read_tokens)."""
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=32,
             system=build_anthropic_system_blocks(system_text),
             messages=[{"role": "user", "content": user_prompt}],

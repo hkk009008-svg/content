@@ -291,7 +291,7 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
         )
 
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-6",
             max_tokens=500,
             system=system_prompt,
             messages=[
