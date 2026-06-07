@@ -1521,6 +1521,13 @@ assume **one shared working tree**; the seats isolate *staging* via per-seat
 make gitignored presence peer-invisible). See `coordination/README.md`
 §"Per-seat launch (D-a)".
 
+Per-seat index freshness is hook-maintained (v5.8): `update-state.sh`
+fast-forwards a seat's `GIT_INDEX_FILE` index to HEAD on peer-commit
+staleness (and only then — staged work is never touched; see the decision
+table in the hook). Manual `git read-tree HEAD` is retired except for the
+mixed case (staged work + peer commit), where `git read-tree -m` remains a
+manual call.
+
 **Beneficiary (per R11): `both`** — symmetric. Both seats owe presence
 maintenance; both gain accurate peer-liveness. No asymmetric-veto path;
 operator consented affirmatively (REPLY `ab9925d`).

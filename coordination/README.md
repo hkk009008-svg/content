@@ -196,9 +196,15 @@ session self-identify its role. `GIT_INDEX_FILE` gives per-seat staging on the
 (gitignored files in the same working dir) — which separate **worktrees** would
 break (they force separate branches + separate working dirs → gitignored
 presence becomes peer-invisible; rejected per operator REPLY `ab9925d`). With
-this live, the `git commit -- <pathspec>` discipline becomes **more
-load-bearing, not less**: each seat's per-seat index does NOT auto-advance
-when the peer commits, so a wholesale `git add . && git commit` would build
-its tree from a stale index and silently revert the peer's changes to files
-this seat never touched. Always commit via pathspec (`git commit -- <files>`)
-or re-sync first (`git read-tree HEAD`).
+this live, the `git commit -- <pathspec>` discipline remains **load-bearing
+for commit SCOPE**: a wholesale `git add . && git commit` can still sweep the
+peer's in-tree changes, so always commit via pathspec (`git commit -- <files>`).
+
+**Index freshness is now hook-maintained (v5.8).** `update-state.sh`
+auto-fast-forwards a seat's stale `GIT_INDEX_FILE` index to HEAD on
+peer-commit staleness — and only then; staged work is never touched (decision
+table in the hook; the manual `git read-tree HEAD` workaround is retired for
+this case). The one case left manual is **mixed** state (you have staged work
+AND the peer moved HEAD): the hook deliberately abstains, so resolve it with
+`git read-tree -m`. The launch seed above (`[ -f … ] || git read-tree HEAD`)
+still stands — the hook needs an existing index to maintain.

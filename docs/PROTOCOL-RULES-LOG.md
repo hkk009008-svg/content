@@ -552,6 +552,46 @@ current conditions, not as a complete protocol.
 | Audit | Scope | Findings doc | Commit |
 |---|---|---|---|
 | Hook script (v2.1 baseline) | `.claude/hooks/update-state.sh` vs v2 §A as amended by v2.1 | [docs/AUDIT-hook-script-v2-2026-05-24.md](AUDIT-hook-script-v2-2026-05-24.md) | `3340d1f` |
+| v5.8 per-seat index auto-refresh | `.claude/hooks/update-state.sh` `_sync_seat_index()` | [docs/PROPOSAL-protocol-bundle-v5.8-2026-06-08.md](PROPOSAL-protocol-bundle-v5.8-2026-06-08.md) | `454e770`+`a614f68` impl + _v5.8 text-ship_ |
+
+### v5.8 — per-seat index auto-refresh (D-a hardening), 2026-06-08
+
+**Mechanism:** `update-state.sh::_sync_seat_index()` fast-forwards a seat's
+stale `GIT_INDEX_FILE` to HEAD on peer-commit staleness, called BEFORE the
+shared skip-perf gate (the committing seat advances the shared `.last-state-head`
+marker first, so gating behind it would skip the sync exactly when needed).
+`git read-tree` fires in exactly one case (C1: index byte-equals the
+last-synced commit's tree, no staged work) — staged-WIP loss excluded by
+construction; the mixed case (C2: staged work + peer commit) stays manual
+(`git read-tree -m`).
+
+**Empirical basis:** D-a stale-index phantom-deletion storms ~4×/session on
+2026-06-07 (peak 1015 status lines; one 600-file skip-worktree-bit variant;
+director hit a 254-file storm independently). The manual `git read-tree HEAD`
+workaround (memory `feedback_da_stale_index_refresh`) was failure-prone.
+
+**Beneficiary (per Rule #11): `both`** — symmetric; both seats' indexes are
+maintained, both lose the manual-resync chore. Operator drafted (PROPOSAL +
+dispatch-claim `03fc21d`, Rule #14 operator-driven Lane B); director reviewed
+the implementation independently (Rule #9 parallel pass — safety property
+verified, 7 awk-extraction tests guarding the real function, suite 1723 green)
+→ CONSENT; director ships the protocol text per Sh partition.
+
+**SHAs:** impl `454e770` (+ Lane V minor-fold `a614f68`: atomic marker write
+via tmp+`mv -f`, C2/D residual comment); operator Lane V ✅ READY / 0-blocking
+at `31d5c96` (the one IMPORTANT was a false positive, disproven by branch
+coverage). Text-ship _v5.8 (this commit; filled next session-close per
+chicken-and-egg precedent)_. Working criteria C1-C4 in PROPOSAL §4 (dogfood at
+v5.9/retro: zero storm reports in next 2 sessions; any staged-WIP-loss incident
+= immediate revert).
+
+**Process note (self-modification gate):** edits to
+`.claude/hooks/update-state.sh` are an *agent-loaded hook* — the harness
+auto-mode classifier treats them as self-modification and **gates them on USER
+authorization per session** (peer-seat concurrence does NOT substitute).
+Observed when the operator's Lane A fold to the hook was blocked until
+user-authorized via AskUserQuestion. Future seats touching this hook should
+expect the gate.
 
 ### Session 2026-05-24-cycle-3 (this conversation)
 
