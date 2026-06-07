@@ -1309,7 +1309,7 @@ practical max; loops in assembly.
 
 ### 12.6 Final-assembly audio mux — engine-dependent voice source
 
-`_assemble_final` ([cinema_pipeline.py:1245](cinema_pipeline.py:1245)) muxes the
+`_assemble_final` ([cinema_pipeline.py:1282](cinema_pipeline.py:1282)) muxes the
 final video's audio with an FFmpeg `amix` filtergraph over up to three sources
 (voice/dialogue + BGM + foley). The **voice source is motion-engine-dependent**:
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Project, CapabilityScorecard, CapabilityDimension } from '../../types/project'
+import type { Project, CapabilityScorecard, CapabilityDimension, ScorecardMedia } from '../../types/project'
 
 interface Props { project: Project | null; onBack: () => void }
 
@@ -59,6 +59,9 @@ function ScorecardGrid({ sc }: { sc: CapabilityScorecard }) {
         ))}
       </div>
 
+      {/* Media conformance tiles (U3) — real when sc.media present, dashed placeholders otherwise */}
+      <MediaConformanceTiles media={sc.media ?? null} />
+
       {/* Future dimensions — greyed / dashed */}
       {sc.future_dimensions.length > 0 && (
         <div className="mt-2 grid grid-cols-4 gap-2">
@@ -68,6 +71,71 @@ function ScorecardGrid({ sc }: { sc: CapabilityScorecard }) {
               <div className="text-console-ink-mute mt-1">— not yet measured</div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Media conformance tiles (U3) ─────────────────────────────────────────────
+
+/** AUDIO LUFS + FORMAT tiles. Renders real data when sc.media is present;
+ *  dashed/greyed placeholders identical to future_dimensions style otherwise. */
+function MediaConformanceTiles({ media }: { media: ScorecardMedia | null }) {
+  const passClass = (pass: boolean | undefined) =>
+    pass === true ? 'text-[#7fd17f]' : pass === false ? 'text-console-accent' : 'text-console-ink-mute'
+
+  if (!media) {
+    // Dashed placeholders — identical style to future_dimensions tiles
+    return (
+      <div className="mt-2 grid grid-cols-4 gap-2">
+        {(['audio_lufs', 'format_codec'] as const).map((fd) => (
+          <div key={fd} className="border border-dashed border-console-rule rounded p-2 opacity-40 font-console-mono text-xs">
+            <div className="text-console-ink-mute uppercase tracking-wider">{fd.replace(/_/g, ' ')}</div>
+            <div className="text-console-ink-mute mt-1">— not yet measured</div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const { lufs, format } = media
+
+  return (
+    <div className="mt-2 grid grid-cols-4 gap-2">
+      {/* AUDIO LUFS tile */}
+      {lufs ? (
+        <div className="border border-console-rule rounded p-2 font-console-mono text-xs">
+          <div className="text-console-ink-mute uppercase tracking-wider mb-1">Audio LUFS</div>
+          <div className={`text-lg font-bold ${passClass(lufs.pass)}`}>
+            {lufs.value.toFixed(2)} LUFS
+          </div>
+          <div className="mt-1 text-console-ink-mute">
+            target {lufs.target} ±{lufs.tolerance}
+          </div>
+        </div>
+      ) : (
+        <div className="border border-dashed border-console-rule rounded p-2 opacity-40 font-console-mono text-xs">
+          <div className="text-console-ink-mute uppercase tracking-wider">Audio LUFS</div>
+          <div className="text-console-ink-mute mt-1">— not measured</div>
+        </div>
+      )}
+
+      {/* FORMAT tile */}
+      {format ? (
+        <div className="border border-console-rule rounded p-2 font-console-mono text-xs">
+          <div className="text-console-ink-mute uppercase tracking-wider mb-1">Format</div>
+          <div className={`text-lg font-bold ${passClass(format.pass)}`}>
+            {format.width ?? '?'}×{format.height ?? '?'}
+          </div>
+          <div className="mt-1 text-console-ink-mute">
+            {format.vcodec ?? '?'}+{format.acodec ?? '?'}
+          </div>
+        </div>
+      ) : (
+        <div className="border border-dashed border-console-rule rounded p-2 opacity-40 font-console-mono text-xs">
+          <div className="text-console-ink-mute uppercase tracking-wider">Format</div>
+          <div className="text-console-ink-mute mt-1">— not measured</div>
         </div>
       )}
     </div>

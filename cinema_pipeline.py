@@ -15,6 +15,7 @@ import subprocess
 from typing import Optional, List
 
 from project_manager import load_project, mutate_project
+from phase_c_ffmpeg import two_pass_loudnorm, probe_final_media
 from scene_decomposer import decompose_scene, update_scene_shots, competitive_decompose_scene
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
@@ -1166,14 +1167,50 @@ class CinemaPipeline:
         Single-pass loudnorm (used inside the BGM mix above) approximates to
         ±1.5 LU of target; the two-pass measure-then-normalize converges to
         ±0.1 LU. Audible on dialogue-heavy content. On failure the original
-        file is left untouched (two_pass_loudnorm returns False)."""
-        from phase_c_ffmpeg import two_pass_loudnorm
+        file is left untouched (two_pass_loudnorm returns False).
+
+        After loudnorm (success or failure), probes the final artifact and
+        persists project["media_report"] via mutate_project. Probe/persist
+        errors are logged as warnings and do NOT affect the assembly outcome.
+        (U3 — Final-media conformance)
+        """
         normed = final_path.replace(".mp4", "_loud.mp4")
-        if two_pass_loudnorm(final_path, normed):
+        normed_ok = two_pass_loudnorm(final_path, normed)
+        if normed_ok:
             os.replace(normed, final_path)
             logger.info(
                 "Two-pass EBU R128 loudnorm applied",
                 extra={"final_path": os.path.basename(final_path)},
+            )
+
+        # ---- U3: probe the artifact and persist media_report ----
+        try:
+            import datetime
+            report = probe_final_media(final_path)
+            if report:
+                report["loudnorm_applied"] = normed_ok
+                report["measured_at"] = (
+                    datetime.datetime.now(datetime.timezone.utc)
+                    .isoformat(timespec="seconds")
+                )
+                _report_snapshot = report  # capture for inner closure
+
+                from domain.models import Project as _Project
+
+                def _persist_media_report(latest_project: dict):
+                    _Project.model_validate(latest_project)
+                    latest_project["media_report"] = _report_snapshot
+
+                mutate_project(
+                    self.project["id"],
+                    _persist_media_report,
+                    timeout=10,
+                    snapshot=self.project,
+                )
+        except Exception:
+            logger.warning(
+                "probe/persist media_report failed — assembly outcome unaffected",
+                exc_info=True,
             )
 
     def _concat_foley_track(self, paths: list[str]) -> Optional[str]:

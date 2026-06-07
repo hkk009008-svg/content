@@ -492,6 +492,29 @@ export interface CapabilityDimension {
   value: number | null; bar: number | null; pass: boolean | null; n_measured: number;
 }
 
+/** U3 — Final-media conformance blocks on the scorecard. Sub-blocks are null
+ *  when the probe half failed (e.g. no audio stream → lufs null). */
+export interface ScorecardMediaLufs {
+  value: number;
+  target: number;
+  tolerance: number;
+  pass: boolean;
+}
+
+export interface ScorecardMediaFormat {
+  width: number | null;
+  height: number | null;
+  vcodec: string | null;
+  acodec: string | null;
+  pass: boolean;
+}
+
+export interface ScorecardMedia {
+  lufs: ScorecardMediaLufs | null;
+  format: ScorecardMediaFormat | null;
+  measured_at: string | null;
+}
+
 export interface CapabilityScorecard {
   project_id: string; tier: string;
   summary: { shots_total: number; shots_clearing_all_bars: number };
@@ -502,5 +525,6 @@ export interface CapabilityScorecard {
   components: { id: string; title: string; status: string; note: string }[];
   per_shot: { shot_id: string; identity: number|null; coherence: number|null; motion: number|null; lipsync: number|null; engine: string }[];
   provenance: { shot_id: string; engine: string; attempts: string[]; fallback: boolean }[];
+  media: ScorecardMedia | null;
   future_dimensions: string[];
 }

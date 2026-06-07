@@ -12,6 +12,15 @@ from pathlib import Path
 from statistics import mean
 from typing import Optional
 
+# U3 — Final-media conformance constants.
+# LUFS pass = abs(value - target) <= tolerance (streaming-platform window,
+# matches two_pass_loudnorm default target).
+LUFS_TARGET: float = -14.0
+LUFS_TOLERANCE: float = 1.0
+EXPECTED_RESOLUTION: tuple = (1920, 1080)
+EXPECTED_VCODEC: str = "h264"
+EXPECTED_ACODEC: str = "aac"
+
 logger = logging.getLogger(__name__)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -43,6 +52,66 @@ def _dimension(key: str, label: str, values: list[float], bar: Optional[float]) 
     value = round(mean(measured), 3) if measured else None
     passed = None if value is None else (True if bar is None else value >= bar)
     return {"key": key, "label": label, "value": value, "bar": bar, "pass": passed, "n_measured": len(measured)}
+
+
+def _build_media_block(project: dict) -> "dict | None":
+    """Build the media conformance block from the persisted media_report.
+
+    Returns a dict with 'lufs', 'format', and 'measured_at' sub-entries, or
+    None when no media_report is present or the report is malformed. Either
+    sub-block may be None independently (partial probe results).
+
+    Pure read — no subprocess, no mutation. Defensive against malformed data.
+    """
+    raw = project.get("media_report")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        logger.debug("capability scorecard: media_report is not a dict — ignoring")
+        return None
+
+    try:
+        # ---- LUFS sub-block ----
+        lufs_block: "dict | None" = None
+        audio = raw.get("audio")
+        if isinstance(audio, dict) and audio.get("integrated_lufs") is not None:
+            value = float(audio["integrated_lufs"])
+            lufs_block = {
+                "value": value,
+                "target": LUFS_TARGET,
+                "tolerance": LUFS_TOLERANCE,
+                "pass": abs(value - LUFS_TARGET) <= LUFS_TOLERANCE,
+            }
+
+        # ---- Format sub-block ----
+        format_block: "dict | None" = None
+        fmt = raw.get("format")
+        if isinstance(fmt, dict):
+            w = fmt.get("width")
+            h = fmt.get("height")
+            vcodec = fmt.get("vcodec")
+            acodec = fmt.get("acodec")
+            resolution_ok = (w, h) == EXPECTED_RESOLUTION
+            codec_ok = (vcodec == EXPECTED_VCODEC and acodec == EXPECTED_ACODEC)
+            format_block = {
+                "width": w,
+                "height": h,
+                "vcodec": vcodec,
+                "acodec": acodec,
+                "pass": resolution_ok and codec_ok,
+            }
+
+        if lufs_block is None and format_block is None:
+            return None
+
+        return {
+            "lufs": lufs_block,
+            "format": format_block,
+            "measured_at": raw.get("measured_at"),
+        }
+    except Exception:
+        logger.debug("capability scorecard: media_report build failed", exc_info=True)
+        return None
 
 
 def build_capability_scorecard(project: dict, *, project_dir: str) -> dict:
@@ -106,7 +175,8 @@ def build_capability_scorecard(project: dict, *, project_dir: str) -> dict:
         "components": _components(),
         "per_shot": per_shot,
         "provenance": provenance,
-        "future_dimensions": ["audio_lufs", "format_codec", "pod_health", "budget"],
+        "media": _build_media_block(project),
+        "future_dimensions": ["pod_health", "budget"],
     }
 
 

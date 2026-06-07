@@ -1108,6 +1108,57 @@ def adjust_speed(video_path: str, output_path: str, factor: float = 1.0) -> str:
         return None
 
 
+def measure_loudness(path: str, target_i: float = -14.0, target_lra: float = 11.0,
+                     target_tp: float = -1.5) -> "dict | None":
+    """Pass-1 EBU R128 loudness measurement via ffmpeg loudnorm print_format=json.
+
+    Runs ffmpeg in measurement-only mode (no output file) and parses the JSON
+    blob that loudnorm prints to stderr. Returns the parsed dict on success
+    (contains at minimum: input_i, input_tp, input_lra, input_thresh,
+    target_offset), or None on any failure (missing file, timeout, no JSON,
+    missing required keys).
+
+    Extracted from two_pass_loudnorm pass-1 (U3 — Final-media conformance).
+    two_pass_loudnorm calls this internally; behavior is identical.
+    """
+    import re
+
+    if not os.path.exists(path):
+        return None
+
+    measure_cmd = [
+        "ffmpeg", "-hide_banner", "-nostats", "-y",
+        "-i", path,
+        "-af", f"loudnorm=I={target_i}:LRA={target_lra}:TP={target_tp}:print_format=json",
+        "-f", "null", "-",
+    ]
+    try:
+        result = subprocess.run(measure_cmd, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        print("   [MEASURE-LOUDNESS] Measurement pass timed out")
+        return None
+
+    stderr = result.stderr or ""
+    # ffmpeg prints the loudnorm JSON near the end of stderr; grab the last
+    # {...} block that contains "input_i". Non-greedy + DOTALL.
+    matches = re.findall(r'\{[^{}]*?"input_i"[^{}]*?\}', stderr, flags=re.DOTALL)
+    if not matches:
+        print("   [MEASURE-LOUDNESS] No measurement JSON in ffmpeg output")
+        return None
+
+    try:
+        measured = json.loads(matches[-1])
+        required = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
+        if not all(k in measured for k in required):
+            print(f"   [MEASURE-LOUDNESS] Measurement JSON missing keys: "
+                  f"{set(required) - set(measured)}")
+            return None
+        return measured
+    except json.JSONDecodeError as e:
+        print(f"   [MEASURE-LOUDNESS] JSON parse failed: {e}")
+        return None
+
+
 def two_pass_loudnorm(
     input_video_path: str,
     output_video_path: str,
@@ -1129,41 +1180,14 @@ def two_pass_loudnorm(
     Returns True if output_video_path was written, False on any failure
     (caller should keep the original input on False).
     """
-    import re
-
     if not os.path.exists(input_video_path):
         return False
 
-    # ---- Pass 1: measure ----
-    measure_cmd = [
-        "ffmpeg", "-hide_banner", "-nostats", "-y",
-        "-i", input_video_path,
-        "-af", f"loudnorm=I={target_i}:LRA={target_lra}:TP={target_tp}:print_format=json",
-        "-f", "null", "-",
-    ]
-    try:
-        result = subprocess.run(measure_cmd, capture_output=True, text=True, timeout=180)
-    except subprocess.TimeoutExpired:
-        print("   [LOUDNORM-2PASS] Measurement pass timed out")
-        return False
-
-    stderr = result.stderr or ""
-    # ffmpeg prints the loudnorm JSON near the end of stderr; grab the last
-    # {...} block that contains "input_i". Non-greedy + DOTALL.
-    matches = re.findall(r'\{[^{}]*?"input_i"[^{}]*?\}', stderr, flags=re.DOTALL)
-    if not matches:
-        print("   [LOUDNORM-2PASS] No measurement JSON in ffmpeg output — skipping 2nd pass")
-        return False
-
-    try:
-        measured = json.loads(matches[-1])
-        # Required keys: input_i, input_tp, input_lra, input_thresh, target_offset
-        required = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
-        if not all(k in measured for k in required):
-            print(f"   [LOUDNORM-2PASS] Measurement JSON missing keys: {set(required) - set(measured)}")
-            return False
-    except json.JSONDecodeError as e:
-        print(f"   [LOUDNORM-2PASS] JSON parse failed: {e}")
+    # ---- Pass 1: measure (delegated to measure_loudness) ----
+    measured = measure_loudness(input_video_path, target_i=target_i,
+                                target_lra=target_lra, target_tp=target_tp)
+    if measured is None:
+        print("   [LOUDNORM-2PASS] Measurement failed — skipping 2nd pass")
         return False
 
     # ---- Pass 2: normalize with measured values ----
@@ -1197,10 +1221,77 @@ def two_pass_loudnorm(
         return False
 
     print(
-        f"   🔊 [LOUDNORM-2PASS] Precise normalization: "
-        f"measured I={measured['input_i']} → target I={target_i}"
+        f"   [LOUDNORM-2PASS] Precise normalization: "
+        f"measured I={measured['input_i']} -> target I={target_i}"
     )
     return True
+
+
+def probe_final_media(path: str) -> "dict | None":
+    """Probe a finished mp4 for format/codec conformance and integrated loudness.
+
+    Runs ffprobe (streams + format JSON) and measure_loudness in sequence.
+    Returns a dict with whichever halves succeeded:
+
+        {
+          "audio": {"integrated_lufs": float, "true_peak_dbtp": float, "lra": float},
+          "format": {"width": int|None, "height": int|None, "vcodec": str|None,
+                     "acodec": str|None, "duration_s": float},
+        }
+
+    Partial results: if exactly one half succeeds, the dict contains only that
+    half. Returns None only when the file is missing or BOTH halves fail.
+
+    Called at assembly-time by cinema_pipeline._apply_final_loudnorm (U3).
+    Pure I/O — no mutation, no Flask.
+    """
+    if not os.path.exists(path):
+        return None
+
+    result: dict = {}
+
+    # ---- Format/codec half (ffprobe) ----
+    try:
+        probe_cmd = [
+            "ffprobe", "-v", "error",
+            "-show_streams", "-show_format",
+            "-of", "json", path,
+        ]
+        probe = subprocess.run(probe_cmd, capture_output=True, text=True,
+                               timeout=60, check=True)
+        probe_data = json.loads(probe.stdout)
+        streams = probe_data.get("streams", [])
+        fmt = probe_data.get("format", {})
+
+        video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
+        audio_stream = next((s for s in streams if s.get("codec_type") == "audio"), None)
+
+        result["format"] = {
+            "width": video_stream.get("width") if video_stream else None,
+            "height": video_stream.get("height") if video_stream else None,
+            "vcodec": video_stream.get("codec_name") if video_stream else None,
+            "acodec": audio_stream.get("codec_name") if audio_stream else None,
+            "duration_s": float(fmt["duration"]) if fmt.get("duration") else None,
+        }
+    except Exception as e:
+        print(f"   [PROBE-FINAL-MEDIA] ffprobe failed: {e}")
+        # format half absent — will be omitted from result
+
+    # ---- Loudness half (measure_loudness) ----
+    measured = measure_loudness(path)
+    if measured is not None:
+        try:
+            result["audio"] = {
+                "integrated_lufs": float(measured["input_i"]),
+                "true_peak_dbtp": float(measured["input_tp"]),
+                "lra": float(measured["input_lra"]),
+            }
+        except (KeyError, ValueError, TypeError) as e:
+            print(f"   [PROBE-FINAL-MEDIA] Loudness result parse failed: {e}")
+
+    if not result:
+        return None
+    return result
 
 
 # ---------------------------------------------------------------------------
