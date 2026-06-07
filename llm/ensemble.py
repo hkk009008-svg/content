@@ -102,9 +102,11 @@ class LLMEnsemble:
 
         self.anthropic_client = anthropic.Anthropic(
             api_key=env_settings.anthropic_api_key,
+            timeout=120.0,
         )
         self.openai_client = openai.OpenAI(
             api_key=env_settings.openai_api_key,
+            timeout=120.0,
         )
 
         # Gemini is optional — only construct the client when a key is

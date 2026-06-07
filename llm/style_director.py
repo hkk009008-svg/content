@@ -89,7 +89,7 @@ Output a JSON object with these exact keys:
 Output ONLY valid JSON."""
 
     try:
-        client = openai.OpenAI(api_key=api_key)
+        client = openai.OpenAI(api_key=api_key, timeout=120.0)
         from web_research import run_with_tools
 
         system_with_tools = system_prompt + """

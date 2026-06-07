@@ -80,7 +80,10 @@ class ChiefDirector:
             try:
                 import anthropic
                 self.provider = "anthropic"
-                return anthropic.Anthropic(api_key=anthropic_key)
+                # 120s request timeout: vision payloads on the diagnosis path
+                # must fail fast inside the controller's blanket try, not hang
+                # for the SDK default 10min x 2 retries (Lane V ticket #2).
+                return anthropic.Anthropic(api_key=anthropic_key, timeout=120.0)
             except ImportError:
                 pass
 
@@ -90,7 +93,7 @@ class ChiefDirector:
             try:
                 from openai import OpenAI
                 self.provider = "openai"
-                return OpenAI(api_key=openai_key)
+                return OpenAI(api_key=openai_key, timeout=120.0)
             except ImportError:
                 pass
 

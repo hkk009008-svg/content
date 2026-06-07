@@ -39,7 +39,7 @@ def generate_dialogue(
         print("❌ OPENAI_API_KEY not set. Cannot generate dialogue.")
         return []
 
-    client = openai.OpenAI(api_key=api_key)
+    client = openai.OpenAI(api_key=api_key, timeout=120.0)
 
     char_descriptions = []
     for c in characters:

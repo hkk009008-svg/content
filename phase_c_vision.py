@@ -176,7 +176,7 @@ def validate_shot_quality_vision(image_path: str, original_prompt: str) -> dict:
 
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=api_key)
+        client = OpenAI(api_key=api_key, timeout=120.0)
 
         img_b64 = _encode_image_base64(image_path)
         media_type = _image_media_type(image_path)
@@ -268,7 +268,7 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
 
     try:
         from anthropic import Anthropic
-        client = Anthropic(api_key=api_key)
+        client = Anthropic(api_key=api_key, timeout=120.0)
 
         ref_b64 = _encode_image_base64(reference_path)
         gen_b64 = _encode_image_base64(generated_path)

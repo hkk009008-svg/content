@@ -455,7 +455,7 @@ def decompose_scene(
         print("❌ OPENAI_API_KEY not set. Cannot decompose scene.")
         return _fallback_decompose(scene, characters, location)
 
-    client = openai.OpenAI(api_key=api_key)
+    client = openai.OpenAI(api_key=api_key, timeout=120.0)
 
     # Build character descriptions for the prompt
     char_descriptions = []

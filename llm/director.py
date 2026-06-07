@@ -212,7 +212,7 @@ class CinemaDirector:
             try:
                 import anthropic
                 self.provider = "anthropic"
-                return anthropic.Anthropic(api_key=env_settings.anthropic_api_key)
+                return anthropic.Anthropic(api_key=env_settings.anthropic_api_key, timeout=120.0)
             except ImportError:
                 pass
 
@@ -220,7 +220,7 @@ class CinemaDirector:
             try:
                 from openai import OpenAI
                 self.provider = "openai"
-                return OpenAI(api_key=env_settings.openai_api_key)
+                return OpenAI(api_key=env_settings.openai_api_key, timeout=120.0)
             except ImportError:
                 pass
 
