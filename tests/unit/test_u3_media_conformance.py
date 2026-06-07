@@ -643,3 +643,35 @@ class TestApplyFinalLoudnormPersistHook:
         assert "measured_at" in report
         # measured_at should be ISO-like
         assert re.match(r"\d{4}-\d{2}-\d{2}T", report["measured_at"])
+
+
+# ---------------------------------------------------------------------------
+# §6 Aspect-ratio-aware format.pass tests
+# ---------------------------------------------------------------------------
+
+class TestMediaBlockAspectAware:
+    """Phase 1: format.pass derives expected dims from project aspect_ratio."""
+
+    def _report(self, w, h):
+        return {"format": {"width": w, "height": h, "vcodec": "h264", "acodec": "aac"},
+                "measured_at": "2026-06-07T00:00:00Z"}
+
+    def test_landscape_project_1920x1080_passes(self):
+        from cinema.capability_scorecard import _build_media_block
+        proj = {"global_settings": {"aspect_ratio": "16:9"}, "media_report": self._report(1920, 1080)}
+        assert _build_media_block(proj)["format"]["pass"] is True
+
+    def test_portrait_project_1080x1920_passes(self):
+        from cinema.capability_scorecard import _build_media_block
+        proj = {"global_settings": {"aspect_ratio": "9:16"}, "media_report": self._report(1080, 1920)}
+        assert _build_media_block(proj)["format"]["pass"] is True
+
+    def test_portrait_project_landscape_file_fails(self):
+        from cinema.capability_scorecard import _build_media_block
+        proj = {"global_settings": {"aspect_ratio": "9:16"}, "media_report": self._report(1920, 1080)}
+        assert _build_media_block(proj)["format"]["pass"] is False
+
+    def test_missing_aspect_defaults_to_landscape(self):
+        from cinema.capability_scorecard import _build_media_block
+        proj = {"global_settings": {}, "media_report": self._report(1920, 1080)}
+        assert _build_media_block(proj)["format"]["pass"] is True

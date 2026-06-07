@@ -12,6 +12,8 @@ from pathlib import Path
 from statistics import mean
 from typing import Optional
 
+from cinema.aspect import resolve_output_dimensions, DEFAULT_ASPECT_RATIO
+
 # U3 — Final-media conformance constants.
 # LUFS pass = abs(value - target) <= tolerance (streaming-platform window,
 # matches two_pass_loudnorm default target).
@@ -91,7 +93,10 @@ def _build_media_block(project: dict) -> "dict | None":
             h = fmt.get("height")
             vcodec = fmt.get("vcodec")
             acodec = fmt.get("acodec")
-            resolution_ok = (w, h) == EXPECTED_RESOLUTION
+            gs = project.get("global_settings", {}) or {}
+            expected_res = resolve_output_dimensions(
+                gs.get("aspect_ratio") or DEFAULT_ASPECT_RATIO)
+            resolution_ok = (w, h) == expected_res
             codec_ok = (vcodec == EXPECTED_VCODEC and acodec == EXPECTED_ACODEC)
             format_block = {
                 "width": w,
