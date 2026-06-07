@@ -74,9 +74,45 @@ if [ -n "$_SEAT" ]; then
 fi
 } || true
 
+# v5.8 — per-seat index auto-refresh (D-a). The peer's commits move shared
+# HEAD but NOT this seat's GIT_INDEX_FILE index; the stale index then shows
+# phantom mass-deletions in `git status`. Fast-forward the index to HEAD
+# when — and ONLY when — the seat has no deliberate staged work to lose.
+# Marker: .claude/hooks/.last-index-sync-<basename of GIT_INDEX_FILE>
+# (CANNOT reuse .last-state-head: it is shared; the committing seat's hook
+# advances it first, which would skip this sync exactly when needed).
+# Decision table ($1 = current HEAD sha):
+#   A. index tree == HEAD tree              -> record marker=HEAD (own commit / already synced)
+#   B. HEAD == marker, index diverged       -> deliberate `git add` since sync — NEVER touch
+#   C1. HEAD != marker, index == marker tree -> pure peer-commit staleness -> read-tree; marker=HEAD
+#   C2. HEAD != marker, index != marker tree -> mixed (staged work + peer commit) -> leave for manual read-tree -m
+#   D. no marker baseline                    -> converge only via A; never guess
+# Safety: read-tree fires ONLY in C1, where the index byte-equals a tree
+# containing no user work — the staged-WIP-loss class is excluded by construction.
+_sync_seat_index() {
+  local head="$1" mark last
+  [ -n "${GIT_INDEX_FILE:-}" ] || return 0
+  [ -f "$GIT_INDEX_FILE" ] || return 0
+  mark=".claude/hooks/.last-index-sync-$(basename "$GIT_INDEX_FILE")"
+  last=$(cat "$mark" 2>/dev/null || echo "")
+  [ "$head" = "$last" ] && return 0
+  if git diff-index --cached --quiet "$head" 2>/dev/null; then
+    printf '%s\n' "$head" > "$mark"
+  elif [ -n "$last" ] \
+       && git rev-parse -q --verify "${last}^{commit}" >/dev/null 2>&1 \
+       && git diff-index --cached --quiet "$last" 2>/dev/null; then
+    git read-tree "$head" && printf '%s\n' "$head" > "$mark"
+  fi
+  return 0
+}
+
 MARKER=".claude/hooks/.last-state-head"
 CURRENT=$(git rev-parse HEAD 2>/dev/null || exit 0)
 LAST=$(cat "$MARKER" 2>/dev/null || echo "")
+
+# v5.8: sync the per-seat index BEFORE the shared skip-perf gate (see
+# _sync_seat_index comment for why the shared marker cannot gate this).
+_sync_seat_index "$CURRENT" || true
 
 # Perf: skip regen if HEAD hasn't moved AND STATE.md exists on disk.
 # Mid-session mailbox writes won't refresh STATE.md until the next HEAD
