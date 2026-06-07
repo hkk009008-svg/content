@@ -1410,6 +1410,16 @@ Decision: `RETRY | ACCEPT_LENIENT | FAIL`. Negative-prompt phrases (from
 `cinema/shots/controller.py:1928` inside `diagnose_clip(deep=True)`.
 The opt-in deep path is triggered by `POST /api/projects/<pid>/shots/<shot_id>/diagnose?deep=true`.
 
+**Vision-grounded (`d974c15`+`a4cb076`, 2026-06-07):** the deep call attaches
+the generated take + the character's canonical reference as images
+(`_encode_image_for_llm`: unconditional PIL re-encode → JPEG q90, long edge
+capped at 1568px — artifact extensions lie repo-wide, so media type is by
+construction, never by extension). Labels are built only from successful
+encodes (`attached_images` in the eval JSON); encode/IO failure degrades to
+the text-only call, and an image-carrying API failure retries once text-only.
+New optional output key `visual_findings` flows into `advisory_deep` for the
+FE Deep-diagnose panel.
+
 ### 13.5 `style_director.py`
 
 **GPT-4o only** ([llm/style_director.py:106](llm/style_director.py:106)).
