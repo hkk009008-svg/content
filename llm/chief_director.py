@@ -16,7 +16,7 @@ Falls back to GPT-4o if Anthropic unavailable.
 
 import os
 import json
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from pipeline_context import PIPELINE_CONTEXT
 from config.settings import settings
 from llm.ensemble import build_anthropic_system_blocks
@@ -412,6 +412,7 @@ When suggesting prompt_mutation for failures:
         shot_prompt: str = "",
         scene_context: str = "",
         coherence_result=None,
+        reference_paths: Optional[List[Tuple[str, str]]] = None,
     ) -> Dict:
         """
         Post-generation evaluation with diagnostic-aware reasoning.
@@ -424,6 +425,12 @@ When suggesting prompt_mutation for failures:
         |              | Identity PASS | Identity FAIL |
         | Coherent     | ACCEPT        | Mutate: identity only |
         | Incoherent   | Mutate: style | Mutate: aggressive    |
+
+        reference_paths: Optional list of (char_label, path) pairs for multi-character shots.
+        When non-empty, SUPERSEDES reference_path (kept for back-compat).
+        Each entry is attached in order after the generated take; label:
+            "Image N: canonical reference for character {label} (ground-truth identity)"
+        Missing/unreadable entries are skipped (encode-on-success-only invariant preserved).
         """
         # Extract score from rich result if available
         if identity_result is not None:
@@ -457,15 +464,35 @@ When suggesting prompt_mutation for failures:
         # construction (F1 fix: encode-once-at-evaluate, pass b64s to _call_llm).
         attach: List[str] = []   # pre-encoded base64 JPEG strings
         labels: List[str] = []
-        for _path, _label_suffix in (
-            (image_path, "the generated take being evaluated"),
-            (reference_path, "the character's canonical reference (ground-truth identity)"),
-        ):
-            if _path and os.path.exists(_path):
-                _b64 = encode_image_for_llm(_path)
+
+        # Always attach the generated take first.
+        if image_path and os.path.exists(image_path):
+            _b64 = encode_image_for_llm(image_path)
+            if _b64 is not None:
+                attach.append(_b64)
+                labels.append(f"Image {len(attach)}: the generated take being evaluated")
+
+        # reference_paths (multi-char) supersedes reference_path (legacy single-char).
+        # Encode-on-success-only: missing or unreadable entries are silently skipped.
+        if reference_paths:
+            for _char_label, _rpath in reference_paths:
+                if _rpath and os.path.exists(_rpath):
+                    _b64 = encode_image_for_llm(_rpath)
+                    if _b64 is not None:
+                        attach.append(_b64)
+                        labels.append(
+                            f"Image {len(attach)}: canonical reference for character"
+                            f" {_char_label} (ground-truth identity)"
+                        )
+        else:
+            # Legacy single-reference path — label preserved byte-for-byte.
+            if reference_path and os.path.exists(reference_path):
+                _b64 = encode_image_for_llm(reference_path)
                 if _b64 is not None:
                     attach.append(_b64)
-                    labels.append(f"Image {len(attach)}: {_label_suffix}")
+                    labels.append(
+                        f"Image {len(attach)}: the character's canonical reference (ground-truth identity)"
+                    )
 
         # Build diagnostic context for the LLM
         diagnostics = {}

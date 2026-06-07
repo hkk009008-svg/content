@@ -1929,11 +1929,22 @@ class ShotController:
                 try:
                     from cinema.auto_approve import AdvisoryConfig
                     from llm.chief_director import ChiefDirector
-                    if AdvisoryConfig.from_project(self.project).deep_enabled and image_path and os.path.exists(str(image_path)) and chars:
-                        _ref = get_reference_image(self.project, chars[0]) or ""
+                    # Use shot-level characters_in_frame for the deep diagnosis —
+                    # these are exactly who is in frame for this shot.
+                    _shot_chars = shot.get("characters_in_frame", [])
+                    if AdvisoryConfig.from_project(self.project).deep_enabled and image_path and os.path.exists(str(image_path)) and _shot_chars:
+                        # Build per-character reference list for multi-char shots.
+                        # Fall back to char id when name key absent.
+                        _char_map = {c["id"]: c.get("name", c["id"]) for c in self.project.get("characters", [])}
+                        _refs = []
+                        for _cid in _shot_chars:
+                            _p = get_reference_image(self.project, _cid)
+                            if _p:
+                                _refs.append((_char_map.get(_cid, _cid), _p))
                         _deep = ChiefDirector(self.project).evaluate_generation_quality(
                             image_path=str(image_path),
-                            reference_path=_ref,
+                            reference_path="",
+                            reference_paths=_refs or None,
                             identity_result=id_result,
                             identity_score=result["scores"].get("identity") or 0.0,
                             shot_prompt=shot.get("prompt", ""),

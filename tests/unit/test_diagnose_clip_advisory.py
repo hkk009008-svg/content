@@ -25,7 +25,7 @@ def _build_diagnose_controller(tmp_path):
     shot = {
         "id": "shot_1_0",
         "plan_status": "approved",
-        "characters_in_frame": [],
+        "characters_in_frame": ["char_1"],
         "camera": "medium",
         "target_api": "AUTO",
         "approved_keyframe_take_id": "take_k1",
@@ -241,7 +241,7 @@ class TestDiagnoseClipDeep:
         # deterministic advisory still present
         assert "remediation_advisory" in result, "Task 4 deterministic advisory must still be present"
 
-        # Vision extension guard: image_path and reference_path must reach evaluate_generation_quality
+        # Vision extension guard: image_path and reference_paths must reach evaluate_generation_quality
         # (the controller's blanket except makes production breakage silent — this is the only guard).
         assert mock_cd_instance.evaluate_generation_quality.called, (
             "evaluate_generation_quality must be called"
@@ -250,16 +250,19 @@ class TestDiagnoseClipDeep:
         assert "image_path" in call_kwargs, (
             f"image_path kwarg must reach evaluate_generation_quality; got kwargs: {list(call_kwargs)}"
         )
-        assert "reference_path" in call_kwargs, (
-            f"reference_path kwarg must reach evaluate_generation_quality; got kwargs: {list(call_kwargs)}"
-        )
         # image_path must be a non-empty string (the keyframe path from the test fixture)
         assert call_kwargs["image_path"], (
             f"image_path must be non-empty; got {call_kwargs['image_path']!r}"
         )
-        # reference_path must be the value returned by get_reference_image mock ("/fake/ref.jpg")
-        assert call_kwargs["reference_path"] == "/fake/ref.jpg", (
-            f"reference_path must be '/fake/ref.jpg'; got {call_kwargs['reference_path']!r}"
+        # Ticket #4: reference_paths (not legacy reference_path) carries the ref.
+        # The single char case produces reference_paths=[("Alice", "/fake/ref.jpg")].
+        ref_paths = call_kwargs.get("reference_paths")
+        assert ref_paths and len(ref_paths) == 1, (
+            f"reference_paths must have 1 entry for single char shot; got {ref_paths}"
+        )
+        assert ref_paths[0][0] == "Alice", f"char label must be 'Alice'; got {ref_paths[0][0]!r}"
+        assert ref_paths[0][1] == "/fake/ref.jpg", (
+            f"ref path must be '/fake/ref.jpg'; got {ref_paths[0][1]!r}"
         )
 
     def test_deep_llm_raises_fallback_intact(self, tmp_path):
@@ -337,3 +340,146 @@ class TestDiagnoseClipDeep:
         assert "deep_available" not in result, "deep_available must not appear without deep=True"
         assert "advisory_deep" not in result, "advisory_deep must not appear without deep=True"
         assert "deep_error" not in result, "deep_error must not appear without deep=True"
+
+
+class TestDiagnoseClipDeepMultiChar:
+    """Ticket #4: deep path sends ALL in-frame characters' references via reference_paths."""
+
+    def _build_two_char_controller(self, tmp_path):
+        """Controller with two characters_in_frame, each with a reference image."""
+        img_path = str(tmp_path / "keyframe.jpg")
+        ref_alice = str(tmp_path / "ref_alice.jpg")
+        ref_bob = str(tmp_path / "ref_bob.jpg")
+        with open(img_path, "wb") as fh:
+            fh.write(b"img")
+        with open(ref_alice, "wb") as fh:
+            fh.write(b"img")
+        with open(ref_bob, "wb") as fh:
+            fh.write(b"img")
+
+        shot = {
+            "id": "shot_1_0",
+            "plan_status": "approved",
+            "characters_in_frame": ["char_alice", "char_bob"],
+            "camera": "medium",
+            "target_api": "AUTO",
+            "approved_keyframe_take_id": "take_k1",
+            "keyframe_takes": [{"id": "take_k1", "kind": "keyframe", "path": img_path}],
+        }
+        scene = {
+            "id": "scene_1",
+            "title": "T",
+            "action": "A",
+            "location_id": "loc_1",
+            "shots": [shot],
+            "characters_present": ["char_alice", "char_bob"],
+        }
+        project = {
+            "id": "proj_1",
+            "scenes": [scene],
+            "characters": [
+                {"id": "char_alice", "name": "Alice"},
+                {"id": "char_bob", "name": "Bob"},
+            ],
+            "objects": [],
+            "locations": [],
+            "global_settings": {},
+        }
+
+        host = MagicMock()
+        host._refresh_project_snapshot.return_value = project
+        host._candidate_take.return_value = {
+            "id": "take_k1", "kind": "keyframe", "path": img_path,
+        }
+        host._resolve_take_path.return_value = img_path
+        host._latest_take.return_value = {"path": img_path}
+
+        lifecycle = MagicMock()
+        runstate = MagicMock()
+        runstate.shot_results = {}
+        core = MagicMock()
+        core.project = project
+        core.project_dir = "/tmp/fake_project"
+
+        ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
+        return ctrl, project, img_path, ref_alice, ref_bob
+
+    def test_deep_multi_char_reference_paths_has_both(self, tmp_path):
+        """deep=True with two characters_in_frame: evaluate_generation_quality must
+        receive reference_paths with both (name, path) pairs in order."""
+        import types
+        ctrl, project, img_path, ref_alice, ref_bob = self._build_two_char_controller(tmp_path)
+
+        from identity.types import (
+            CharacterIdentityResult,
+            FailureReason,
+            IdentityValidationResult,
+        )
+        char_diag = CharacterIdentityResult(
+            character_id="char_alice",
+            character_name="Alice",
+            best_similarity=0.40,
+            mean_similarity=0.35,
+            min_similarity=0.30,
+            frame_results=[],
+            matched=False,
+            primary_failure_reason=FailureReason.WRONG_PERSON,
+            suggested_pulid_adjustment=0.05,
+        )
+        failed_id_result = IdentityValidationResult(
+            passed=False,
+            overall_score=0.40,
+            character_results={"char_alice": char_diag},
+            frames_sampled=1,
+            video_duration_seconds=0.0,
+            shot_type="medium",
+            threshold_used=0.70,
+        )
+
+        mock_validator = MagicMock()
+        mock_validator.validate_image.return_value = failed_id_result
+
+        mock_deep_return = {
+            "decision": "RETRY",
+            "diagnosis": "face drifted",
+            "prompt_mutation": "add X",
+            "mutation_focus": "identity",
+            "visual_findings": "Take shows wrong person.",
+        }
+        mock_cd_instance = MagicMock()
+        mock_cd_instance.evaluate_generation_quality.return_value = mock_deep_return
+        mock_cd_class = MagicMock(return_value=mock_cd_instance)
+
+        fake_settings = types.SimpleNamespace(anthropic_api_key="test-key", openai_api_key="")
+
+        # get_reference_image returns different paths per char_id
+        def _ref_side_effect(project, char_id):
+            return ref_alice if char_id == "char_alice" else ref_bob
+
+        with (
+            patch("cinema.shots.controller.get_reference_image", side_effect=_ref_side_effect),
+            patch("phase_c_vision._get_shared_validator", return_value=mock_validator),
+            patch("config.settings.settings", fake_settings),
+            patch("llm.chief_director.ChiefDirector", mock_cd_class),
+        ):
+            result = ctrl.diagnose_clip("shot_1_0", deep=True)
+
+        assert "error" not in result, f"unexpected error: {result.get('error')}"
+        assert mock_cd_instance.evaluate_generation_quality.called, (
+            "evaluate_generation_quality must be called"
+        )
+        call_kwargs = mock_cd_instance.evaluate_generation_quality.call_args.kwargs
+
+        # reference_paths must be present with both chars
+        assert "reference_paths" in call_kwargs, (
+            f"reference_paths kwarg must be passed; got kwargs: {list(call_kwargs)}"
+        )
+        ref_paths = call_kwargs["reference_paths"]
+        assert ref_paths is not None and len(ref_paths) == 2, (
+            f"reference_paths must have 2 entries; got {ref_paths}"
+        )
+        # Order must match characters_in_frame order: Alice first, Bob second
+        assert ref_paths[0][0] == "Alice", f"first entry label must be 'Alice'; got {ref_paths[0][0]!r}"
+        assert ref_paths[0][1] == ref_alice, f"first entry path must be ref_alice; got {ref_paths[0][1]!r}"
+        assert ref_paths[1][0] == "Bob", f"second entry label must be 'Bob'; got {ref_paths[1][0]!r}"
+        assert ref_paths[1][1] == ref_bob, f"second entry path must be ref_bob; got {ref_paths[1][1]!r}"

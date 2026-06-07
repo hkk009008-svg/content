@@ -688,3 +688,205 @@ class TestCallLLMOpenAIRetryAndNoRetry:
             f"text-only failure must not retry; got {cd.client.messages.create.call_count}"
         )
         assert result == "", f"text-only failure should return ''; got {result!r}"
+
+
+# ─── 18. reference_paths — multi-char variant ────────────────────────────────
+
+class TestEvaluateGenerationQualityMultiRef:
+    """Ticket #4: reference_paths kwarg sends ALL in-frame characters' refs."""
+
+    def _failing_id_result(self):
+        from identity.types import (
+            CharacterIdentityResult,
+            FailureReason,
+            IdentityValidationResult,
+        )
+        char_diag = CharacterIdentityResult(
+            character_id="char_1",
+            character_name="Alice",
+            best_similarity=0.30,
+            mean_similarity=0.25,
+            min_similarity=0.20,
+            frame_results=[],
+            matched=False,
+            primary_failure_reason=FailureReason.WRONG_PERSON,
+            suggested_pulid_adjustment=0.05,
+        )
+        return IdentityValidationResult(
+            passed=False,
+            overall_score=0.30,
+            character_results={"char_1": char_diag},
+            frames_sampled=1,
+            video_duration_seconds=0.0,
+            shot_type="medium",
+            threshold_used=0.70,
+        )
+
+    def _coh_result(self):
+        r = MagicMock()
+        r.overall_coherence_score = 0.3
+        r.color_drift = 0.8
+        r.lighting_consistency = 0.5
+        r.recommendations = []
+        return r
+
+    # (a) two refs + take → _call_llm receives 3 b64s, labels per character
+    def test_two_refs_plus_take_three_b64s_correct_labels(self, tmp_path):
+        """reference_paths with 2 real files → 3 b64s total (take + 2 refs);
+        labels: 'generated take', then per-character canonical labels in order."""
+        cd = _make_cd()
+        take_path = tmp_path / "take.jpg"
+        ref_a_path = tmp_path / "ref_alice.jpg"
+        ref_b_path = tmp_path / "ref_bob.jpg"
+        _save_pil(_tiny_pil_image(color="red"), take_path)
+        _save_pil(_tiny_pil_image(color="blue"), ref_a_path)
+        _save_pil(_tiny_pil_image(color="green"), ref_b_path)
+
+        id_result = self._failing_id_result()
+        coh_result = self._coh_result()
+
+        mock_llm_return = json.dumps({"decision": "RETRY", "diagnosis": "x",
+                                      "prompt_mutation": "y", "mutation_level": 1,
+                                      "mutation_focus": "identity"})
+
+        with patch.object(cd, "_call_llm", return_value=mock_llm_return) as mock_call:
+            cd.evaluate_generation_quality(
+                image_path=str(take_path),
+                reference_path="",  # superseded by reference_paths
+                reference_paths=[("Alice", str(ref_a_path)), ("Bob", str(ref_b_path))],
+                identity_result=id_result,
+                coherence_result=coh_result,
+            )
+
+        assert mock_call.called
+        _args = mock_call.call_args
+        b64s = _args.kwargs.get("image_b64s")
+        assert b64s is not None and len(b64s) == 3, (
+            f"expected 3 b64s (take + 2 refs); got {b64s and len(b64s)}"
+        )
+        assert all(b and len(b) > 10 for b in b64s), "all 3 b64s must be non-empty"
+
+        user_data = json.loads(_args.args[1])
+        labels = user_data.get("attached_images", [])
+        assert len(labels) == 3, f"expected 3 labels; got {labels}"
+        assert "generated take" in labels[0].lower(), f"label[0] must mention 'generated take'; got {labels[0]!r}"
+        assert "Alice" in labels[1], f"label[1] must name 'Alice'; got {labels[1]!r}"
+        assert "canonical reference" in labels[1].lower(), f"label[1] must mention 'canonical reference'; got {labels[1]!r}"
+        assert "Bob" in labels[2], f"label[2] must name 'Bob'; got {labels[2]!r}"
+        assert "canonical reference" in labels[2].lower(), f"label[2] must mention 'canonical reference'; got {labels[2]!r}"
+
+    # (b) one ref missing → 2 b64s, label skips the missing character
+    def test_one_ref_missing_two_b64s_missing_skipped(self, tmp_path):
+        """reference_paths with 1 real + 1 missing path → 2 b64s (take + real);
+        labels skip the character whose file is missing."""
+        cd = _make_cd()
+        take_path = tmp_path / "take.jpg"
+        ref_a_path = tmp_path / "ref_alice.jpg"
+        _save_pil(_tiny_pil_image(color="red"), take_path)
+        _save_pil(_tiny_pil_image(color="blue"), ref_a_path)
+
+        id_result = self._failing_id_result()
+        coh_result = self._coh_result()
+
+        mock_llm_return = json.dumps({"decision": "RETRY", "diagnosis": "x",
+                                      "prompt_mutation": "y", "mutation_level": 1,
+                                      "mutation_focus": "identity"})
+
+        with patch.object(cd, "_call_llm", return_value=mock_llm_return) as mock_call:
+            cd.evaluate_generation_quality(
+                image_path=str(take_path),
+                reference_path="",
+                reference_paths=[("Alice", str(ref_a_path)), ("Bob", "/fake/nonexistent.jpg")],
+                identity_result=id_result,
+                coherence_result=coh_result,
+            )
+
+        _args = mock_call.call_args
+        b64s = _args.kwargs.get("image_b64s")
+        assert b64s is not None and len(b64s) == 2, (
+            f"expected 2 b64s (take + Alice only); got {b64s and len(b64s)}"
+        )
+        user_data = json.loads(_args.args[1])
+        labels = user_data.get("attached_images", [])
+        assert len(labels) == 2, f"expected 2 labels; got {labels}"
+        assert "Alice" in labels[1], f"label[1] must name 'Alice'; got {labels[1]!r}"
+        assert "Bob" not in str(labels), f"Bob's label must not appear (missing file); got {labels}"
+
+    # (c) reference_paths supersedes reference_path when both given
+    def test_reference_paths_supersedes_reference_path(self, tmp_path):
+        """When both reference_path and reference_paths are given, reference_paths wins."""
+        cd = _make_cd()
+        take_path = tmp_path / "take.jpg"
+        ref_a_path = tmp_path / "ref_alice.jpg"
+        ref_legacy_path = tmp_path / "ref_legacy.jpg"
+        _save_pil(_tiny_pil_image(color="red"), take_path)
+        _save_pil(_tiny_pil_image(color="blue"), ref_a_path)
+        _save_pil(_tiny_pil_image(color="green"), ref_legacy_path)
+
+        id_result = self._failing_id_result()
+        coh_result = self._coh_result()
+
+        mock_llm_return = json.dumps({"decision": "RETRY", "diagnosis": "x",
+                                      "prompt_mutation": "y", "mutation_level": 1,
+                                      "mutation_focus": "identity"})
+
+        with patch.object(cd, "_call_llm", return_value=mock_llm_return) as mock_call:
+            cd.evaluate_generation_quality(
+                image_path=str(take_path),
+                reference_path=str(ref_legacy_path),  # should be superseded
+                reference_paths=[("Alice", str(ref_a_path))],
+                identity_result=id_result,
+                coherence_result=coh_result,
+            )
+
+        _args = mock_call.call_args
+        b64s = _args.kwargs.get("image_b64s")
+        # Only 2: take + Alice's ref (NOT legacy ref → that would be 3)
+        assert b64s is not None and len(b64s) == 2, (
+            f"reference_paths must supersede reference_path → 2 b64s; got {len(b64s) if b64s else None}"
+        )
+        user_data = json.loads(_args.args[1])
+        labels = user_data.get("attached_images", [])
+        assert len(labels) == 2, f"expected 2 labels; got {labels}"
+        assert "Alice" in labels[1], f"label[1] must name 'Alice'; got {labels[1]!r}"
+
+    # (d) legacy single reference_path: existing test_both_images_attached_and_system_contains_visual_evidence
+    # in TestEvaluateGenerationQualityWithImages (class test 11) covers this — verified below
+    def test_legacy_single_reference_path_unchanged(self, tmp_path):
+        """reference_paths=None + reference_path (legacy): behaves byte-identical
+        to the existing path — 2 b64s, legacy label text preserved."""
+        cd = _make_cd()
+        take_path = tmp_path / "take.jpg"
+        ref_path = tmp_path / "ref.jpg"
+        _save_pil(_tiny_pil_image(color="red"), take_path)
+        _save_pil(_tiny_pil_image(color="blue"), ref_path)
+
+        id_result = self._failing_id_result()
+        coh_result = self._coh_result()
+
+        mock_llm_return = json.dumps({"decision": "RETRY", "diagnosis": "x",
+                                      "prompt_mutation": "y", "mutation_level": 1,
+                                      "mutation_focus": "identity"})
+
+        with patch.object(cd, "_call_llm", return_value=mock_llm_return) as mock_call:
+            cd.evaluate_generation_quality(
+                image_path=str(take_path),
+                reference_path=str(ref_path),
+                # reference_paths NOT provided (None by default)
+                identity_result=id_result,
+                coherence_result=coh_result,
+            )
+
+        _args = mock_call.call_args
+        b64s = _args.kwargs.get("image_b64s")
+        assert b64s is not None and len(b64s) == 2, (
+            f"legacy path: expected 2 b64s; got {b64s and len(b64s)}"
+        )
+        user_data = json.loads(_args.args[1])
+        labels = user_data.get("attached_images", [])
+        assert len(labels) == 2, f"expected 2 labels for legacy path; got {labels}"
+        assert "generated take" in labels[0].lower()
+        # Legacy label must be EXACTLY preserved
+        assert labels[1] == "Image 2: the character's canonical reference (ground-truth identity)", (
+            f"legacy label must be preserved byte-for-byte; got {labels[1]!r}"
+        )
