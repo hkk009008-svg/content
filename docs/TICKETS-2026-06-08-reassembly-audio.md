@@ -10,6 +10,11 @@ refs verified by Read at `af6ea97`.*
 
 ## T-A — Cartesia TTS receives ElevenLabs voice ids: lane is dead-on-arrival
 
+**STATUS: CLOSED 2026-06-08** — `0276d41` + folds `35b3f95`/`ffabcf2` (the
+'ko'-normalization live catch); merged to main at `c28f9e6`. Live acceptance:
+first-ever Cartesia 200 (`voice=ce9ca2b6…`, no fallback) on `7cddd0c59f6d`.
+Verification-report event `2026-06-07T23-08-17Z`.
+
 **Severity: HIGH** (capability silently degraded — the Korean-prosody lane
 the router selects can never succeed; every routed line burns a guaranteed-400
 HTTP round-trip, then falls back to ElevenLabs, masking the breakage).
@@ -63,6 +68,14 @@ Per-provider voice mapping at the dispatch point (`audio/dialogue.py:~399`):
 ---
 
 ## T-B — Re-assembly silently regenerates paid TTS; cost estimate counts only ffmpeg seconds
+
+**STATUS: CLOSED 2026-06-08** — `516abca` + fold `86090cc` (atomic publishes,
+11labs per-line guard, concat temps off CWD, SI-1 action-only estimate);
+merged to main at `c28f9e6`. Live acceptance: zero-TTS re-assembly
+(`[SCENE-AUDIO] Cache hit`). Documented residuals (conservative str-dialogue
+estimate; LLM-dialogue non-cacheable; one-time migration miss; temp-artifact
+accumulation → future reaper ticket) in verification-report
+`2026-06-07T23-08-17Z`.
 
 **Severity: MEDIUM** (real spend per re-assembly on dialogue projects +
 non-deterministic audio between cuts — regenerated TTS ≠ the takes the
@@ -124,7 +137,7 @@ the old export's −15.09 — the audio bed was genuinely rebuilt, not reused.
 
 ---
 
-*Disposition: both tickets are open for either seat per partition (T-A is a
-provider-lane bug fix; T-B touches assembly + screening + UI — likely
-director-driven per Rule #14 criterion 1/4). Not started: user direction was
-to file, not fix.*
+*Disposition (final): user-directed "do t-a t-b" same session — operator
+implemented both (dispatch-claim `465891e`), sequential Lane B + dual cold
+reviews each + live runtime acceptance; director independently re-verified
+green and FF-merged `c28f9e6` (event `2026-06-07T23-29-45Z`). Both CLOSED.*
