@@ -24,6 +24,24 @@ from llm.ensemble import build_anthropic_system_blocks
 from llm.negative_prompts import get_negative_prompt_for_failure
 
 
+def _encode_image_for_llm(path: str) -> "Optional[str]":
+    """Downscale + re-encode to JPEG b64 for vision diagnosis. None on failure."""
+    try:
+        import io
+        from PIL import Image
+        img = Image.open(path).convert("RGB")          # PNG/RGBA/P all -> RGB
+        w, h = img.size
+        if max(w, h) > 1568:                            # Anthropic native res for sonnet-4 gen
+            s = 1568 / max(w, h)
+            img = img.resize((max(1, round(w * s)), max(1, round(h * s))), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90)
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as e:
+        print(f"   [DIRECTOR] image encode failed for {path}: {e}")
+        return None
+
+
 def _strip_json_fences(raw: str) -> str:
     """Strip ```json … ``` fences that LLMs emit despite instructions.
 
@@ -79,7 +97,7 @@ class ChiefDirector:
         self.provider = None
         return None
 
-    def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
+    def _call_llm(self, system_prompt: str, user_prompt: str, *, images: Optional[List[str]] = None) -> str:
         """Call the LLM with the Chief Director system prompt.
 
         Respects the ``creative_llm`` per-project UI knob. When set, the
@@ -92,9 +110,17 @@ class ChiefDirector:
         Provider family detection:
           ``claude-*``             → anthropic
           ``gpt-*`` / ``o1-*`` / ``o3-*`` / ``o4-*`` → openai
+
+        When ``images`` is provided, each path is encoded to JPEG base64 and
+        attached to the message. On API failure with images, retries once
+        text-only before returning "".
         """
         if not self.client:
             return ""
+
+        # Encode images before the provider try-block so PIL failures cannot
+        # be swallowed into the API-failure except path.
+        encoded: List[str] = [b for p in (images or []) if (b := _encode_image_for_llm(p))]
 
         # Read the creative_llm override from project global_settings.
         override: Optional[str] = None
@@ -113,11 +139,18 @@ class ChiefDirector:
                             f"   [DIRECTOR] creative_llm={override!r} doesn't match "
                             f"Anthropic provider; using default {model_id}"
                         )
+                if encoded:
+                    user_content: object = (
+                        [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b}} for b in encoded]
+                        + [{"type": "text", "text": user_prompt}]
+                    )
+                else:
+                    user_content = user_prompt
                 response = self.client.messages.create(
                     model=model_id,
                     max_tokens=4096,
                     system=build_anthropic_system_blocks(system_prompt),
-                    messages=[{"role": "user", "content": user_prompt}],
+                    messages=[{"role": "user", "content": user_content}],
                 )
                 return response.content[0].text
             else:
@@ -131,16 +164,48 @@ class ChiefDirector:
                             f"   [DIRECTOR] creative_llm={override!r} doesn't match "
                             f"OpenAI provider; using default {model_id}"
                         )
+                if encoded:
+                    user_content_list: List[Dict] = (
+                        [{"type": "text", "text": user_prompt}]
+                        + [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b}"}} for b in encoded]
+                    )
+                    openai_user_msg: object = {"role": "user", "content": user_content_list}
+                else:
+                    openai_user_msg = {"role": "user", "content": user_prompt}
                 response = self.client.chat.completions.create(
                     model=model_id,
                     messages=[
                         {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
+                        openai_user_msg,
                     ],
                     response_format={"type": "json_object"},
                 )
                 return response.choices[0].message.content
         except Exception as e:
+            if encoded:
+                print(f"   [DIRECTOR] LLM call failed with images ({e}); retrying text-only")
+                try:
+                    if self.provider == "anthropic":
+                        response = self.client.messages.create(
+                            model=model_id,
+                            max_tokens=4096,
+                            system=build_anthropic_system_blocks(system_prompt),
+                            messages=[{"role": "user", "content": user_prompt}],
+                        )
+                        return response.content[0].text
+                    else:
+                        response = self.client.chat.completions.create(
+                            model=model_id,
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt},
+                            ],
+                            response_format={"type": "json_object"},
+                        )
+                        return response.choices[0].message.content
+                except Exception as e2:
+                    print(f"   [DIRECTOR] LLM call failed: {e2}")
+                    return ""
             print(f"   [DIRECTOR] LLM call failed: {e}")
             return ""
 
@@ -383,6 +448,17 @@ When suggesting prompt_mutation for failures:
                 return {"decision": "RETRY", "mutation": None, "mutation_level": 1}
             return {"decision": "ACCEPT", "mutation": None}
 
+        # Collect images to attach (must be after the ACCEPT short-circuit and
+        # the no-client guard so we never encode for a path that won't use them).
+        attach: List[str] = []
+        labels: List[str] = []
+        if image_path and os.path.exists(image_path):
+            attach.append(image_path)
+            labels.append(f"Image {len(attach)}: the generated take being evaluated")
+        if reference_path and os.path.exists(reference_path):
+            attach.append(reference_path)
+            labels.append(f"Image {len(attach)}: the character's canonical reference (ground-truth identity)")
+
         # Build diagnostic context for the LLM
         diagnostics = {}
         primary_reason_value: Optional[str] = None
@@ -414,7 +490,7 @@ When suggesting prompt_mutation for failures:
 
         mutation_context = "identity_only" if coherent else ("style_only" if identity_passed else "aggressive")
 
-        eval_prompt = json.dumps({
+        eval_prompt_dict: Dict = {
             "task": "DIAGNOSE_GENERATION_FAILURE",
             "identity_score": identity_score,
             "threshold": threshold,
@@ -425,7 +501,11 @@ When suggesting prompt_mutation for failures:
             "coherence_info": coherence_info,
             "shot_prompt": shot_prompt[:500],
             "scene_context": scene_context[:200],
-        }, indent=2)
+        }
+        if attach:
+            eval_prompt_dict["attached_images"] = labels
+
+        eval_prompt = json.dumps(eval_prompt_dict, indent=2)
 
         diagnosis_system = (
             "You are ChiefDirector diagnosing a generation failure and deciding how to mutate the prompt. "
@@ -463,10 +543,25 @@ When suggesting prompt_mutation for failures:
             '  "prompt_mutation": "Specific rewrite instructions",\n'
             '  "mutation_level": 1 | 2 | 3,\n'
             '  "mutation_focus": "identity" | "style" | "both"\n'
-            "}"
         )
+        if attach:
+            diagnosis_system += (
+                '  "visual_findings": "1-2 sentences on what you observed comparing the attached images",\n'
+            )
+        diagnosis_system += "}"
 
-        raw = self._call_llm(diagnosis_system, eval_prompt)
+        if attach:
+            diagnosis_system += (
+                "\n\nVISUAL EVIDENCE:\n"
+                "One or more images are attached; their roles, in attachment order, are listed under "
+                '"attached_images" in the user JSON. When both the generated take and the character '
+                "reference are attached, compare them directly — facial identity, hair, build, wardrobe, "
+                "lighting, color palette. Ground \"diagnosis\" and \"prompt_mutation\" in what you SEE, "
+                "not only in the numeric scores; if your visual read contradicts a numeric score (e.g. "
+                "a FACE_ANGLE_EXTREME false negative), say so in \"diagnosis\"."
+            )
+
+        raw = self._call_llm(diagnosis_system, eval_prompt, images=attach or None)
 
         try:
             result = json.loads(_strip_json_fences(raw))
@@ -497,14 +592,17 @@ When suggesting prompt_mutation for failures:
                     f"no prompt_mutation in LLM result"
                 )
 
-            self.diagnostic_log.append({
+            diag_entry: Dict = {
                 "stage": "identity_evaluation",
                 "score": identity_score,
                 "coherent": coherent,
                 "decision": result.get("decision"),
                 "diagnosis": result.get("diagnosis"),
                 "mutation_focus": result.get("mutation_focus", mutation_context),
-            })
+            }
+            if result.get("visual_findings"):
+                diag_entry["visual_findings"] = result["visual_findings"]
+            self.diagnostic_log.append(diag_entry)
             return result
         except Exception:
             # A skipped identity has identity_score=None (couldn't be checked):

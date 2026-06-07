@@ -236,6 +236,27 @@ class TestDiagnoseClipDeep:
         # deterministic advisory still present
         assert "remediation_advisory" in result, "Task 4 deterministic advisory must still be present"
 
+        # Vision extension guard: image_path and reference_path must reach evaluate_generation_quality
+        # (the controller's blanket except makes production breakage silent — this is the only guard).
+        assert mock_cd_instance.evaluate_generation_quality.called, (
+            "evaluate_generation_quality must be called"
+        )
+        call_kwargs = mock_cd_instance.evaluate_generation_quality.call_args.kwargs
+        assert "image_path" in call_kwargs, (
+            f"image_path kwarg must reach evaluate_generation_quality; got kwargs: {list(call_kwargs)}"
+        )
+        assert "reference_path" in call_kwargs, (
+            f"reference_path kwarg must reach evaluate_generation_quality; got kwargs: {list(call_kwargs)}"
+        )
+        # image_path must be a non-empty string (the keyframe path from the test fixture)
+        assert call_kwargs["image_path"], (
+            f"image_path must be non-empty; got {call_kwargs['image_path']!r}"
+        )
+        # reference_path must be the value returned by get_reference_image mock ("/fake/ref.jpg")
+        assert call_kwargs["reference_path"] == "/fake/ref.jpg", (
+            f"reference_path must be '/fake/ref.jpg'; got {call_kwargs['reference_path']!r}"
+        )
+
     def test_deep_llm_raises_fallback_intact(self, tmp_path):
         """If evaluate_generation_quality raises, deep_error is set but
         the deterministic remediation_advisory from Task 4 is still present."""
