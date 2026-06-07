@@ -438,11 +438,12 @@ def generate_dialogue_voiceover(
         char_record = char_by_id.get(cid, {})
         provider = _resolve_tts_provider(scene_for_router, char_record, settings)
         cartesia_ok = False
+        cartesia_voice = None  # init outside the branch — a hoisted guard must never NameError (T-A quality fold)
         if provider == "CARTESIA_SONIC_2":
             # Map the voice id to a Cartesia-UUID-shaped id before dispatch.
             # If no mapping exists for this language, skip the HTTP round-trip
             # entirely (guaranteed-400 burn; closes ticket T-A). Log the skip
-            # once per invocation (not per line) via a local set.
+            # once per invocation (not per line) via a local flag.
             cartesia_voice = _resolve_cartesia_voice(voice_id, char_record, project_lang)
             if cartesia_voice is None:
                 if not _cartesia_skip_logged:
