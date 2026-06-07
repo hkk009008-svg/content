@@ -135,9 +135,9 @@ two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:1545-1546](web_se
 | Symbol | Lock? | Lives at |
 |---|---|---|
 | `_progress_queues: dict[pid, Queue]` | no (GIL-atomic `dict.get`) | [web_server.py:71](web_server.py:71) |
-| `_running_pipelines: dict[pid, CinemaPipeline]` | no | [web_server.py:72](web_server.py:72) |
-| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:108-109](web_server.py:108) |
-| `_lora_training_threads` | `_lora_training_lock` | [web_server.py:695-696](web_server.py:695) |
+| `_running_pipelines: dict[pid, CinemaPipeline]` | no | [web_server.py:73](web_server.py:73) |
+| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:110-111](web_server.py:110) |
+| `_lora_training_threads` | `_lora_training_lock` | [web_server.py:704-705](web_server.py:704) |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
 spawned by `POST /generate` ([web_server.py:1505](web_server.py:1505)).
@@ -218,7 +218,7 @@ propagate by reference. Forwarder block at
 
 | Step | What happens | File:line |
 |---|---|---|
-| 1 | `_refresh_project_snapshot()`; early-return if no scenes | [cinema_pipeline.py:432-436](cinema_pipeline.py:432) |
+| 1 | `_refresh_project_snapshot()`; early-return if no scenes | [cinema_pipeline.py:443-447](cinema_pipeline.py:443) |
 | 2 | If `resume=True`: `_restore_from_checkpoint()` + `_rebuild_review_clips` | :876-878 |
 | 3 | STYLE — `generate_style_rules` → persist | :881-914 |
 | 4 | `_ensure_bgm(settings)` (FAL Stable Audio, 47s hard cap) | :916 |
@@ -612,7 +612,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:1354](web_server.py:1354) — uses the
+`api_generate_dialogue` at [web_server.py:1363](web_server.py:1363) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 
@@ -1309,7 +1309,7 @@ practical max; loops in assembly.
 
 ### 12.6 Final-assembly audio mux — engine-dependent voice source
 
-`_assemble_final` ([cinema_pipeline.py:1282](cinema_pipeline.py:1282)) muxes the
+`_assemble_final` ([cinema_pipeline.py:1292](cinema_pipeline.py:1292)) muxes the
 final video's audio with an FFmpeg `amix` filtergraph over up to three sources
 (voice/dialogue + BGM + foley). The **voice source is motion-engine-dependent**:
 
