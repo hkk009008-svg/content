@@ -24,6 +24,7 @@ This module is a leaf consumer: nothing in ``audio/*`` imports it.
 """
 
 import os
+import re
 from typing import TYPE_CHECKING, Optional
 
 import requests
@@ -172,6 +173,44 @@ def _resolve_tts_provider(scene: dict, character: dict, settings_obj) -> str:
     if is_korean and isinstance(settings_obj, dict) and settings_obj.get("cartesia_api_key"):
         return "CARTESIA_SONIC_2"
     return "ELEVENLABS"
+
+
+# ---------------------------------------------------------------------------
+# Cartesia voice id resolver
+# ---------------------------------------------------------------------------
+
+_CARTESIA_UUID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    re.IGNORECASE,
+)
+
+
+def _resolve_cartesia_voice(voice_id: str, char_record: dict, project_lang: str) -> "str | None":
+    """Return a Cartesia-usable voice id, or None to skip the Cartesia lane.
+
+    - voice_id already Cartesia-UUID-shaped (explicit assignment) -> use as-is
+    - else map via language_defaults' cartesia_default_{male,female}_voice
+      (gender from char_record, same male-hint logic as the 11labs fallback)
+    - no mapping for this language -> None (caller skips Cartesia WITHOUT the
+      HTTP round-trip; closes ticket T-A's guaranteed-400 burn)
+    """
+    # Already a Cartesia UUID — use directly without a mapping lookup.
+    if _CARTESIA_UUID_RE.fullmatch(voice_id):
+        return voice_id
+
+    # Not UUID-shaped (ElevenLabs id or similar) — look up the per-language
+    # Cartesia default. Mirror the lazy-import + try/except shape at :366-380
+    # so a domain import failure degrades to None, never raises.
+    try:
+        from domain.language_defaults import get_language_defaults
+        lang_defaults = get_language_defaults(project_lang)
+        char_gender = (char_record.get("gender") or "").lower()
+        if char_gender in {"male", "m", "man"}:
+            return lang_defaults.get("cartesia_default_male_voice") or None
+        else:
+            return lang_defaults.get("cartesia_default_female_voice") or None
+    except Exception:
+        return None
 
 
 def _try_dialogue_mode(
@@ -343,6 +382,9 @@ def generate_dialogue_voiceover(
 
     print(f"🎙️ [CINEMA] Generating multi-character dialogue ({len(dialogue_lines)} lines)...")
 
+    # Log Cartesia-skip once per invocation (not per line) to avoid log spam.
+    _cartesia_skip_logged = False
+
     for i, line in enumerate(dialogue_lines):
         cid = line.get("character_id", "")
         text = line.get("text", "")
@@ -397,17 +439,30 @@ def generate_dialogue_voiceover(
         provider = _resolve_tts_provider(scene_for_router, char_record, settings)
         cartesia_ok = False
         if provider == "CARTESIA_SONIC_2":
-            # Cartesia's language field expects an ISO code; map the project
-            # language name to "ko" when Korean, else pass the raw value
-            # lowercased. The dispatcher already routed correctly upstream
-            # so this is just the API param shape.
-            lang_for_api = "ko" if str(project_lang).lower().startswith("ko") else str(project_lang).lower()[:2] or "en"
-            cartesia_ok = generate_cartesia(
-                text=directed_text,
-                voice_id=voice_id,
-                output_path=temp_path,
-                language=lang_for_api,
-            )
+            # Map the voice id to a Cartesia-UUID-shaped id before dispatch.
+            # If no mapping exists for this language, skip the HTTP round-trip
+            # entirely (guaranteed-400 burn; closes ticket T-A). Log the skip
+            # once per invocation (not per line) via a local set.
+            cartesia_voice = _resolve_cartesia_voice(voice_id, char_record, project_lang)
+            if cartesia_voice is None:
+                if not _cartesia_skip_logged:
+                    print(
+                        f"   [CARTESIA] no Cartesia voice mapping for language={project_lang!r}; "
+                        "skipping Cartesia lane (no HTTP call) — falling back to ElevenLabs"
+                    )
+                    _cartesia_skip_logged = True
+            else:
+                # Cartesia's language field expects an ISO code; map the project
+                # language name to "ko" when Korean, else pass the raw value
+                # lowercased. The dispatcher already routed correctly upstream
+                # so this is just the API param shape.
+                lang_for_api = "ko" if str(project_lang).lower().startswith("ko") else str(project_lang).lower()[:2] or "en"
+                cartesia_ok = generate_cartesia(
+                    text=directed_text,
+                    voice_id=cartesia_voice,
+                    output_path=temp_path,
+                    language=lang_for_api,
+                )
             if cartesia_ok:
                 # Best-effort cost tracking — Cartesia call succeeded; record
                 # spend so cycle-16 Tier C budget reflects Korean dialogue
@@ -433,8 +488,9 @@ def generate_dialogue_voiceover(
                 temp_files.append(temp_path)
                 print(f"   ✅ Line {i+1}: {char_name} ({delivery}) → {temp_path} [Cartesia]")
                 continue
-            # Cartesia failed (False return) — fall through to ElevenLabs
-            print(f"   [CARTESIA] failed for line {i+1}; falling back to ElevenLabs")
+            # Cartesia generate call returned False — fall through to ElevenLabs
+            if cartesia_voice is not None:
+                print(f"   [CARTESIA] failed for line {i+1}; falling back to ElevenLabs")
 
         # ElevenLabs path (default OR Cartesia fallback)
         try:

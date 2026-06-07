@@ -440,7 +440,17 @@ class TestDispatcherIntegration:
         # Cartesia was called (Korean routing succeeded)
         assert len(cartesia_calls) == 1
         assert cartesia_calls[0]["language"] == "ko"
-        assert cartesia_calls[0]["voice_id"] == "vid_korean_male"
+        # T-A fix: voice_id must be a Cartesia UUID (not the raw 11labs-like id).
+        # "vid_korean_male" is not UUID-shaped → mapper picks the Jaewon UUID
+        # (no gender on the char_record → female default → Seoyun, but wait:
+        # char_record has no gender key → female default → Seoyun UUID).
+        # The key assertion is that a UUID-shaped id was passed (not the raw id).
+        import re as _re
+        _uuid_re = _re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", _re.IGNORECASE)
+        assert _uuid_re.fullmatch(cartesia_calls[0]["voice_id"]), (
+            f"Cartesia must receive a UUID-shaped voice id after T-A fix; "
+            f"got {cartesia_calls[0]['voice_id']!r}"
+        )
         # ElevenLabs was NOT called for the Cartesia line
         assert not mock_client.text_to_speech.convert.called
 

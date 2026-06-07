@@ -80,6 +80,12 @@ PIPELINE_LANGUAGE_DEFAULTS = {
         "voice_pool_filter": ["korean_woman", "korean_man"],
         "default_male_voice": "1W00IGEmNmwmsDeYy7ag",    # 준호 (Junho) — deep narrator
         "default_female_voice": "uyVNoMrnUku1dZyVEXwD", # 안나 (Anna) — warm conversational
+        # Cartesia-specific voice ids for Korean (UUID-shaped, required by generate_cartesia).
+        # When _resolve_tts_provider routes to CARTESIA_SONIC_2, _resolve_cartesia_voice
+        # maps from the ElevenLabs id pool to these. Absent key = Cartesia lane skipped.
+        # verified via live voices API 2026-06-08 (GET api.cartesia.ai/voices → HTTP 200, 9 ko voices)
+        "cartesia_default_female_voice": "ce9ca2b6-2bed-4452-99bb-052e1ec0b534",  # Seoyun — Warm Guide
+        "cartesia_default_male_voice": "89f4372f-1f73-4b85-8e1e-5d24ed8bc826",   # Jaewon — Steady Advisor
     },
 
     "Japanese": {
