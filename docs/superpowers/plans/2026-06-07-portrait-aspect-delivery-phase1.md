@@ -24,7 +24,7 @@
 |---|---|---|
 | `cinema/aspect.py` | Create | Single source of truth: aspect→dims resolver + supported-ratio gate + `is_portrait`/`is_supported` |
 | `tests/unit/test_cinema_aspect.py` | Create | Unit tests for the resolver, gate, and the assembly `_normalize_filter` golden string |
-| `cinema_pipeline.py` | Modify (`_assemble_final` ~1334-1341) | `_normalize_filter(w,h)` helper + derive (W,H) from `settings["aspect_ratio"]` |
+| `cinema_pipeline.py` | Modify (`_assemble_final`: insert ~1329, swap `-vf` at 1337) | `_normalize_filter(w,h)` helper + derive (W,H) from `settings["aspect_ratio"]` |
 | `cinema/capability_scorecard.py` | Modify (`_build_media_block` ~90-94) | Derive expected dims from project `aspect_ratio` instead of `EXPECTED_RESOLUTION` |
 | `tests/unit/test_u3_media_conformance.py` | Modify | Scorecard `format.pass` per aspect ratio |
 | `web_server.py` | Modify (`/api/config` :319; PUT ~:514-518) | Gate the dropdown list + reject unsupported aspect on PUT |
@@ -172,9 +172,9 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" \
 - Modify: `cinema_pipeline.py` (add `_normalize_filter`; `_assemble_final` ~1334-1341)
 - Test: `tests/unit/test_cinema_aspect.py` (append)
 
-> **Placement note (plan-vs-spec):** spec §4.2 puts `_normalize_filter` in `cinema_pipeline.py`. Keep it there as a **module-level pure function** (not a method) so the test can `from cinema_pipeline import _normalize_filter` without constructing a pipeline. If importing `cinema_pipeline` in the test proves heavy/side-effectful, move `_normalize_filter` into `cinema/aspect.py` and update the import — report the divergence if so.
+> **Placement (resolved, plan-review):** `_normalize_filter` lives in `cinema_pipeline.py` as a **module-level pure function** (not a method). Importing `cinema_pipeline` in a unit test is safe and idiomatic — 8 existing unit tests already do it (e.g. `tests/unit/test_u3_media_conformance.py`), so `from cinema_pipeline import _normalize_filter` is fine. Do NOT move it to `aspect.py`.
 
-- [ ] **Step 1: Write the failing test** — append to `tests/unit/test_cinema_aspect.py`:
+- [ ] **Step 1: Write the failing test** — append to `tests/unit/test_cinema_aspect.py`. *(The `from cinema_pipeline import _normalize_filter` is intentionally **function-local**, not module-top, so Task 1's 6 tests keep collecting/passing until `_normalize_filter` lands in this task. All tests in this file are module-level functions — 8 total after this step.)*
 
 ```python
 # --- assembly normalize filter (byte-identical 16:9 regression guard) ---
@@ -202,11 +202,13 @@ Expected: FAIL — `ImportError: cannot import name '_normalize_filter'`
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `cinema_pipeline.py`, add the pure helper at module level (near the other module-level helpers, above the pipeline class). Add the import near the top of the file:
+In `cinema_pipeline.py`, add the import with the other cinema imports at **lines 24-32** (after `from cinema.shots.controller import ShotController` at :32):
 
 ```python
 from cinema.aspect import resolve_output_dimensions, DEFAULT_ASPECT_RATIO
 ```
+
+Add the pure helper at module level (near the other module-level helpers, above the pipeline class):
 
 ```python
 def _normalize_filter(w: int, h: int) -> str:
@@ -240,7 +242,7 @@ with (derive dims once, before the loop — `settings` is already a param of `_a
                     "-vf", norm_vf,
 ```
 
-> Place the `out_w, out_h = …` / `norm_vf = …` lines just before the `for clip_path in all_clips:` loop (the loop containing the `ffmpeg … -vf …` command). Do NOT change any other line of the command.
+> **Exact placement (verified):** insert the two derive-dims lines immediately after `all_normalized = []` (line **1329**) and before `for clip_path in all_clips:` (line **1330**). Then replace ONLY the `-vf` literal currently at line **1337** with `"-vf", norm_vf,`. Do NOT change any other line of the command. (`scene_transitions` at :1294 is far above — no confusion.)
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -390,10 +392,12 @@ Expected: FAIL — `aspect_ratios` is the hard-coded 5-list, not `["16:9"]`
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `web_server.py`, add the import (near the top imports):
+In `web_server.py`, add the import next to the existing cinema imports at **lines 55-57** (`from cinema_pipeline import CinemaPipeline` etc.):
 ```python
 from cinema.aspect import SUPPORTED_ASPECT_RATIOS, is_supported
 ```
+*(`jsonify` is already imported at `web_server.py:37` — Task 5's 400 response needs no new import.)*
+
 Replace `/api/config` line 319:
 ```python
         "aspect_ratios": ["16:9", "9:16", "1:1", "21:9", "4:3"],
@@ -431,23 +435,25 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" \
 
 > **Verified context (spec §4.5):** the closure runs `Project.model_validate(project)` then `project["global_settings"].update(...)`. The model is `extra="allow"` → it will NOT reject a bad `aspect_ratio`. A **bespoke** check is required, placed BEFORE the `.update()`, and only when `aspect_ratio` is present (partial updates must stay valid — e.g. editing `language` on a project whose stored aspect is a now-removed `1:1`).
 
-- [ ] **Step 1: Write the failing test** — append:
+- [ ] **Step 1: Write the failing test** — append (reuses the `client` fixture from Task 4 already in this file):
 
 ```python
-def _make_project(tmp_path, monkeypatch, aspect="16:9"):
-    """Create a minimal persisted project and point web_server at it."""
-    import web_server
-    pid = "testpid_aspect"
-    # Reuse the project_manager creation path so persistence shape is real.
+def _make_project(tmp_path, monkeypatch) -> str:
+    """Create a real persisted project under tmp_path; return its pid.
+
+    Verified: domain.project_manager.create_project(name) -> dict (always),
+    pid = dict["id"] (project_manager.py:605-617). _project_dir / _project_file
+    read the module-global PROJECTS_DIR at call time (project_manager.py:48-52),
+    and web_server uses domain.project_manager.mutate_project (same module), so
+    patching PROJECTS_DIR on domain.project_manager is resolved consistently.
+    """
     from domain import project_manager
     monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path), raising=False)
-    proj = project_manager.create_project("aspect-test")  # returns id or dict
-    return proj
+    return project_manager.create_project("aspect-test")["id"]
 
 
 def test_put_rejects_unsupported_aspect_ratio(client, tmp_path, monkeypatch):
-    proj = _make_project(tmp_path, monkeypatch)
-    pid = proj if isinstance(proj, str) else proj.get("id")
+    pid = _make_project(tmp_path, monkeypatch)
     resp = client.put(f"/api/projects/{pid}",
                       json={"global_settings": {"aspect_ratio": "9:16"}})
     assert resp.status_code == 400
@@ -457,8 +463,7 @@ def test_put_rejects_unsupported_aspect_ratio(client, tmp_path, monkeypatch):
 
 
 def test_put_accepts_supported_aspect_ratio(client, tmp_path, monkeypatch):
-    proj = _make_project(tmp_path, monkeypatch)
-    pid = proj if isinstance(proj, str) else proj.get("id")
+    pid = _make_project(tmp_path, monkeypatch)
     resp = client.put(f"/api/projects/{pid}",
                       json={"global_settings": {"aspect_ratio": "16:9"}})
     assert resp.status_code == 200
@@ -467,14 +472,13 @@ def test_put_accepts_supported_aspect_ratio(client, tmp_path, monkeypatch):
 def test_put_without_aspect_ratio_is_unaffected(client, tmp_path, monkeypatch):
     # Backward-compat: editing an unrelated field must NOT trip the aspect gate,
     # even if the project's stored aspect is a now-unsupported value.
-    proj = _make_project(tmp_path, monkeypatch)
-    pid = proj if isinstance(proj, str) else proj.get("id")
+    pid = _make_project(tmp_path, monkeypatch)
     resp = client.put(f"/api/projects/{pid}",
                       json={"global_settings": {"language": "Korean"}})
     assert resp.status_code == 200
 ```
 
-> **Implementer note:** the exact project-creation/persistence fixture may need adjusting to the real `project_manager` API (check `create_project`'s signature + how `api_update_project` loads a project). The behavioral assertions (400 / 200 / 200) are the contract; adapt the fixture plumbing to match the codebase. Report divergence if `create_project` differs.
+> **Verified fixture (plan-review):** `create_project(name)` always returns a dict (`project_manager.py:617`); `["id"]` is the pid. The `monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path))` form works because `_project_dir`/`_project_file`/`mutate_project` resolve `PROJECTS_DIR` from `domain.project_manager` at call time. (Codebase-idiomatic alternative: patch-based mocking with no filesystem, per `tests/unit/test_web_server_auto_approve.py:30-50` — either is acceptable.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -483,10 +487,10 @@ Expected: FAIL — `test_put_rejects_unsupported_aspect_ratio` returns 200 (no v
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `web_server.py` `api_update_project`, add the guard BEFORE the `_mutate_project` mutation runs (validate the incoming payload at the top of the handler, before entering the lock/closure — so a rejected request never mutates). Locate where `data` is parsed; add:
+In `web_server.py` `api_update_project` (verified structure: `@_project_lock_guard`; busy-check at `:501-503`; `data = request.json or {}` at `:505`; `_mutate_project` closure defined `:507`, called `:521`; 404 returned `:522-523` when `mutate_project` returns `None`). There is **no** explicit project-exists check. Add the guard **immediately after `data = request.json or {}` (line 505) and before the `_mutate_project` closure (line 507)**:
 
 ```python
-        incoming_gs = (data or {}).get("global_settings") or {}
+        incoming_gs = data.get("global_settings") or {}
         if "aspect_ratio" in incoming_gs and not is_supported(incoming_gs["aspect_ratio"]):
             return jsonify({
                 "error": "unsupported aspect_ratio",
@@ -495,7 +499,7 @@ In `web_server.py` `api_update_project`, add the guard BEFORE the `_mutate_proje
             }), 400
 ```
 
-> Place this AFTER the project-exists check (so a bad pid still 404s) and BEFORE `_mutate_project`/the `global_settings.update`. Only checks when `aspect_ratio` is present.
+> A bad `pid` still 404s: the guard only rejects when `aspect_ratio` is present-and-unsupported; otherwise the request falls through to `mutate_project`, which returns `None` → 404 at `:522-523`. So `test_put_without_aspect_ratio_is_unaffected` (valid pid, no aspect) reaches mutate normally. Only checks when `aspect_ratio` is present (partial updates stay valid).
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -537,15 +541,15 @@ to:
 
 > Rationale: when `/api/config` hasn't loaded, fall back to the safe default only. The server is the source of truth; this fallback must never offer a ratio the server gates out.
 
-- [ ] **Step 2: Verify the FE gate**
+- [ ] **Step 2: Verify the FE gate** *(run `npm install` first if `web/node_modules` is absent)*
 
-Run: `cd /Users/hyungkoookkim/Content/web && npx tsc --noEmit && npm run build`
+Run (from repo root): `cd web && npx tsc --noEmit && npm run build`
 Expected: tsc clean (0 errors); build succeeds.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /Users/hyungkoookkim/Content && git read-tree HEAD
+git read-tree HEAD
 git commit -m "fix(web): ProductionSection aspect fallback -> ['16:9'] (close gate hole)
 
 The hard-coded ['16:9','9:16','1:1'] fallback bypassed the /api/config gate when
@@ -564,7 +568,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>" \
 - [ ] **Step 1: Full unit suite**
 
 Run: `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit -q`
-Expected: all pass (baseline 1667 + the new aspect/scorecard/web tests; 0 failures). Confirm no existing test regressed — especially `_assemble_final`/U3 tests.
+Expected: **1682 baseline + 16 new = 1698 passed; 0 failures** (new: 6 Task1 + 2 Task2 + 4 Task3 + 1 Task4 + 3 Task5; baseline verified 2026-06-07 via `pytest tests/unit --co -q` → 1682). Confirm no existing test regressed — especially `_assemble_final`/U3 tests.
 
 - [ ] **Step 2: §15 smoke**
 
@@ -573,7 +577,7 @@ Expected: `OK`
 
 - [ ] **Step 3: FE gate**
 
-Run: `cd /Users/hyungkoookkim/Content/web && npx tsc --noEmit && npm run build`
+Run (from repo root): `cd web && npx tsc --noEmit && npm run build`
 Expected: clean.
 
 - [ ] **Step 4: Manual confirmation of the gate property**

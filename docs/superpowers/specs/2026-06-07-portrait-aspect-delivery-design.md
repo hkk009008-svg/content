@@ -106,8 +106,9 @@ dims (no change needed there).
 ### 4.3 `cinema/capability_scorecard.py` (`_build_media_block`)
 *Verified current state:* `EXPECTED_RESOLUTION = (1920, 1080)` (`:20`), compared at
 `:94` (`resolution_ok = (w,h) == EXPECTED_RESOLUTION`); `_build_media_block(project)`
-(`:57`) already has the project dict in scope and reads
-`gs = project.get("global_settings", {})` (`:119`). So a 9:16 project would
+(`:57`) has the project dict in scope but does **not** currently read
+`global_settings` (the `gs = ...` at `:119` is in `build_capability_scorecard`,
+def `:117`, not in `_build_media_block`) — the plan adds that read. So a 9:16 project would
 assemble correctly (after §4.2) yet the scorecard would **false-fail** it against
 1920×1080 — the exact F4 symptom. The plan MUST NOT skip this wiring.
 
