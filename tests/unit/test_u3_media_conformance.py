@@ -314,6 +314,40 @@ class TestProbeFinalMedia:
         assert "format" in result
         assert "audio" not in result
 
+    def test_loudness_RAISE_ffprobe_ok_returns_partial(self, tmp_path):
+        """Lane V F2: measure_loudness RAISING (not just None) must discard only
+        the audio half — the successful ffprobe format half survives."""
+        mp4 = tmp_path / "v.mp4"
+        mp4.write_bytes(b"fake")
+
+        with patch("phase_c_ffmpeg.subprocess.run") as mock_run, \
+             patch("phase_c_ffmpeg.measure_loudness",
+                   side_effect=FileNotFoundError("ffmpeg not found")):
+            mock_run.side_effect = _make_ffprobe_run(FFPROBE_CONFORMANT)
+            from phase_c_ffmpeg import probe_final_media
+            result = probe_final_media(str(mp4))
+
+        assert result is not None
+        assert "format" in result  # partial-results contract honored
+        assert "audio" not in result
+
+    def test_wrong_resolution_surfaced_by_probe(self, tmp_path):
+        """Lane V F1: dedicated probe-level wrong-resolution coverage —
+        probe_final_media surfaces the real (non-conformant) dimensions so the
+        scorecard can mark format.pass False."""
+        mp4 = tmp_path / "v.mp4"
+        mp4.write_bytes(b"fake")
+
+        with patch("phase_c_ffmpeg.subprocess.run") as mock_run, \
+             patch("phase_c_ffmpeg.measure_loudness", return_value=LOUDNESS_OK):
+            mock_run.side_effect = _make_ffprobe_run(FFPROBE_WRONG_RES)
+            from phase_c_ffmpeg import probe_final_media
+            result = probe_final_media(str(mp4))
+
+        assert result is not None
+        assert result["format"]["width"] == 1280
+        assert result["format"]["height"] == 720
+
 
 # ---------------------------------------------------------------------------
 # §6 Scorecard media block tests

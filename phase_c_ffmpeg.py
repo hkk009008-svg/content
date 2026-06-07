@@ -1278,7 +1278,15 @@ def probe_final_media(path: str) -> "dict | None":
         # format half absent — will be omitted from result
 
     # ---- Loudness half (measure_loudness) ----
-    measured = measure_loudness(path)
+    # Defensive: measure_loudness should return None on failure, but guard the
+    # call so an unexpected raise (e.g. ffmpeg binary absent) discards only the
+    # audio half and preserves the ffprobe half — honoring the partial-results
+    # contract (close Lane V F2).
+    try:
+        measured = measure_loudness(path)
+    except Exception as e:
+        print(f"   [PROBE-FINAL-MEDIA] loudness measure raised: {e}")
+        measured = None
     if measured is not None:
         try:
             result["audio"] = {
