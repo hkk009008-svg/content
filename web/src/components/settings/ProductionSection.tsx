@@ -145,7 +145,7 @@ export function ProductionSection({ s, config, project, update, onRefresh }: Pro
       <div>
         <label className={LABEL_CLS}>Aspect Ratio</label>
         <div className="flex gap-1.5">
-          {(config?.aspect_ratios || ['16:9', '9:16', '1:1']).map((ar) => (
+          {(config?.aspect_ratios || ['16:9']).map((ar) => (
             <button
               key={ar}
               type="button"
