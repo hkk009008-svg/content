@@ -19,7 +19,6 @@ from cinema.aspect import resolve_output_dimensions, DEFAULT_ASPECT_RATIO
 # matches two_pass_loudnorm default target).
 LUFS_TARGET: float = -14.0
 LUFS_TOLERANCE: float = 1.0
-EXPECTED_RESOLUTION: tuple = (1920, 1080)
 EXPECTED_VCODEC: str = "h264"
 EXPECTED_ACODEC: str = "aac"
 

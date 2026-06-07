@@ -53,7 +53,7 @@ from domain.scene_decomposer import PURPOSE_TAGS, PURPOSE_API_RANKING, BILLING_P
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
 from cinema_pipeline import CinemaPipeline
-from cinema.aspect import SUPPORTED_ASPECT_RATIOS, is_supported
+from cinema.aspect import SUPPORTED_ASPECT_RATIOS, is_supported, DEFAULT_ASPECT_RATIO
 from cinema.core import PipelineCore, build_pipeline_core
 from cinema.services import state_snapshot, checkpoint_info
 from workflow_selector import WORKFLOW_TEMPLATES
@@ -1474,7 +1474,7 @@ def api_generate_style_rules(pid):
         mood=data.get("mood", settings.get("music_mood", "cinematic")),
         color_palette=data.get("color_palette", settings.get("color_palette", "")),
         music_mood=data.get("music_mood", settings.get("music_mood", "suspense")),
-        aspect_ratio=settings.get("aspect_ratio", "16:9"),
+        aspect_ratio=settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO),
         reference_films=data.get("reference_films", ""),
         use_web_research=data.get("use_web_research", True),
     )

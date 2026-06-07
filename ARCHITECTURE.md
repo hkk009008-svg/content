@@ -134,10 +134,10 @@ two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:1545-1546](web_se
 
 | Symbol | Lock? | Lives at |
 |---|---|---|
-| `_progress_queues: dict[pid, Queue]` | no (GIL-atomic `dict.get`) | [web_server.py:71](web_server.py:71) |
+| `_progress_queues: dict[pid, Queue]` | no (GIL-atomic `dict.get`) | [web_server.py:72](web_server.py:72) |
 | `_running_pipelines: dict[pid, CinemaPipeline]` | no | [web_server.py:73](web_server.py:73) |
-| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:110-111](web_server.py:110) |
-| `_lora_training_threads` | `_lora_training_lock` | [web_server.py:704-705](web_server.py:704) |
+| `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:109-110](web_server.py:109) |
+| `_lora_training_threads` | `_lora_training_lock` | [web_server.py:703-704](web_server.py:703) |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
 spawned by `POST /generate` ([web_server.py:1505](web_server.py:1505)).

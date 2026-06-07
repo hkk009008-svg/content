@@ -60,7 +60,7 @@ def main() -> int:
         )
         return 2
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key, timeout=120.0)
 
     # Pad the system block past the 1024-token minimum cacheable size.
     # ~5 tokens per repetition × 250 reps = ~1250 tokens of filler.

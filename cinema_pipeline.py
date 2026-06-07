@@ -32,7 +32,7 @@ from cinema.runstate import RunState
 from cinema.shots.controller import ShotController
 from cinema.review.controller import ReviewController
 from cinema.checkpoint import CheckpointStore
-from cinema.aspect import resolve_output_dimensions, DEFAULT_ASPECT_RATIO
+from cinema.aspect import resolve_output_dimensions, DEFAULT_ASPECT_RATIO, is_supported
 
 logger = logging.getLogger(__name__)
 
@@ -937,7 +937,7 @@ class CinemaPipeline:
                 mood=settings.get("music_mood", "cinematic"),
                 color_palette=settings.get("color_palette", ""),
                 music_mood=settings.get("music_mood", "suspense"),
-                aspect_ratio=settings.get("aspect_ratio", "16:9"),
+                aspect_ratio=settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO),
             )
             # P1-3 migration template (S10 + part 9 Variant 1; B-006-broad-A) --
             # inner mutator-scope validate under the per-project lock.
@@ -1294,7 +1294,7 @@ class CinemaPipeline:
         Assembles all scene clips into the final video:
         - Hard cuts between all clips (no transitions)
         - Preserves embedded audio from dialogue clips (Omnihuman/Veo)
-        - Normalizes to 1920x1080@30fps WITHOUT forcing duration (preserves natural clip length)
+        - Normalizes to the project aspect_ratio's dims @30fps (16:9 → 1920x1080) WITHOUT forcing duration (preserves natural clip length)
         - Mixes: clip audio (dialogue) + BGM (0.12 vol) + foley (0.20 vol, when available)
         - Foley volume 0.20 > BGM 0.12: environmental beds carry diegetic info
         - Color grading applied globally
@@ -1335,11 +1335,16 @@ class CinemaPipeline:
             extra={"clip_count": len(all_clips)},
         )
 
-        # 2. Normalize clips: 1920x1080@30fps, PRESERVE audio, PRESERVE original duration
+        # 2. Normalize clips: aspect-derived dims @30fps (16:9 → 1920x1080), PRESERVE audio, PRESERVE original duration
         all_normalized = []
         # Phase 1: container dims from the project aspect_ratio (default 16:9).
-        out_w, out_h = resolve_output_dimensions(
-            settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO))
+        # I1 guard: a persisted unsupported ratio (e.g. a stray 9:16 from the
+        # pre-gate /api/config window) must NOT silently flip the container —
+        # fall back to the default so assembly stays inside the gated set.
+        _ar = settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
+        if not is_supported(_ar):
+            _ar = DEFAULT_ASPECT_RATIO
+        out_w, out_h = resolve_output_dimensions(_ar)
         norm_vf = _normalize_filter(out_w, out_h)
         for clip_path in all_clips:
             norm_path = os.path.join(self.temp_dir,

@@ -310,7 +310,7 @@ export default function EditorialShell({
           <span>Reel Nº</span>
           <span className="text-editorial-ivory">{reelNumber}</span>
           <span className="text-editorial-rule-bright">/</span>
-          <span>{project.global_settings?.aspect_ratio || '9:16'}</span>
+          <span>{project.global_settings?.aspect_ratio || '16:9'}</span>
           <span className="text-editorial-rule-bright">/</span>
           <span
             className={
