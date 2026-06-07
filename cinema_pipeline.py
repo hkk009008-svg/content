@@ -32,8 +32,18 @@ from cinema.runstate import RunState
 from cinema.shots.controller import ShotController
 from cinema.review.controller import ReviewController
 from cinema.checkpoint import CheckpointStore
+from cinema.aspect import resolve_output_dimensions, DEFAULT_ASPECT_RATIO
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_filter(w: int, h: int) -> str:
+    """ffmpeg -vf for clip normalization at (w,h): fit-inside + pad + 30fps.
+
+    16:9 (1920,1080) reproduces the historical literal byte-for-byte.
+    """
+    return (f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,fps=30")
 
 
 class CinemaPipeline:
@@ -1327,6 +1337,10 @@ class CinemaPipeline:
 
         # 2. Normalize clips: 1920x1080@30fps, PRESERVE audio, PRESERVE original duration
         all_normalized = []
+        # Phase 1: container dims from the project aspect_ratio (default 16:9).
+        out_w, out_h = resolve_output_dimensions(
+            settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO))
+        norm_vf = _normalize_filter(out_w, out_h)
         for clip_path in all_clips:
             norm_path = os.path.join(self.temp_dir,
                 os.path.basename(clip_path).replace(".mp4", "_norm.mp4"))
@@ -1334,7 +1348,7 @@ class CinemaPipeline:
                 # Normalize resolution + fps without forcing duration or stripping audio
                 cmd = [
                     "ffmpeg", "-y", "-i", clip_path,
-                    "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30",
+                    "-vf", norm_vf,
                     "-c:v", "libx264", "-preset", "fast", "-crf", "20",
                     "-c:a", "aac", "-b:a", "192k",  # Preserve audio
                     "-shortest",

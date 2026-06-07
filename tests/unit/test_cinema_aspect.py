@@ -34,3 +34,21 @@ def test_is_supported_gate_excludes_9_16_until_phase3():
 def test_default_ratio_is_supported_and_known():
     assert DEFAULT_ASPECT_RATIO in SUPPORTED_ASPECT_RATIOS
     assert DEFAULT_ASPECT_RATIO in ASPECT_DIMENSIONS
+
+
+# --- assembly normalize filter (byte-identical 16:9 regression guard) ---
+GOLDEN_16x9 = ("scale=1920:1080:force_original_aspect_ratio=decrease,"
+               "pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30")
+
+
+def test_normalize_filter_16x9_is_byte_identical():
+    from cinema_pipeline import _normalize_filter
+    assert _normalize_filter(1920, 1080) == GOLDEN_16x9
+
+
+def test_normalize_filter_portrait():
+    from cinema_pipeline import _normalize_filter
+    assert _normalize_filter(1080, 1920) == (
+        "scale=1080:1920:force_original_aspect_ratio=decrease,"
+        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2,fps=30"
+    )
