@@ -89,6 +89,9 @@ fi
 #   D. no marker baseline                    -> converge only via A; never guess
 # Safety: read-tree fires ONLY in C1, where the index byte-equals a tree
 # containing no user work — the staged-WIP-loss class is excluded by construction.
+# Known residual (Lane V M-1): in C2/D the index stays stale by design, so
+# STATE.md's working-tree field below still shows the phantom storm until
+# the seat resolves manually (read-tree -m) or converges via A.
 _sync_seat_index() {
   local head="$1" mark last
   [ -n "${GIT_INDEX_FILE:-}" ] || return 0
@@ -96,12 +99,14 @@ _sync_seat_index() {
   mark=".claude/hooks/.last-index-sync-$(basename "$GIT_INDEX_FILE")"
   last=$(cat "$mark" 2>/dev/null || echo "")
   [ "$head" = "$last" ] && return 0
+  # Marker writes go via same-dir tmp + rename (Lane V M-2): a kill mid-write
+  # would otherwise leave an empty marker (self-healing via A, but avoidable).
   if git diff-index --cached --quiet "$head" 2>/dev/null; then
-    printf '%s\n' "$head" > "$mark"
+    printf '%s\n' "$head" > "${mark}.tmp" && mv -f "${mark}.tmp" "$mark"
   elif [ -n "$last" ] \
        && git rev-parse -q --verify "${last}^{commit}" >/dev/null 2>&1 \
        && git diff-index --cached --quiet "$last" 2>/dev/null; then
-    git read-tree "$head" && printf '%s\n' "$head" > "$mark"
+    git read-tree "$head" && printf '%s\n' "$head" > "${mark}.tmp" && mv -f "${mark}.tmp" "$mark"
   fi
   return 0
 }

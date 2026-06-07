@@ -43,8 +43,8 @@ excluded by construction. Side benefits: STATE.md's `git status --porcelain`
 runs post-sync (no more storm leakage into STATE.md); skip-worktree-bit storms
 clear (read-tree rebuilds entries).
 
-Implementation commit: _v5.8 M1 ship_ (filled at ship per chicken-and-egg
-precedent). Tests: `tests/unit/test_index_autosync.py` exercises the REAL
+Implementation commit: `454e770` (Lane V minor-folds M-1/M-2 follow up in the
+same session, user-authorized). Tests: `tests/unit/test_index_autosync.py` exercises the REAL
 function via the awk-extraction pattern (canonical: `test_unread_count.py`,
 v5.7 M2 site `7026863`) across all 5 decision-table cases + the
 no-`GIT_INDEX_FILE` no-op.
