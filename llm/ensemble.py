@@ -116,7 +116,8 @@ class LLMEnsemble:
         gemini_key = env_settings.gemini_api_key or env_settings.google_api_key
         if gemini_key:
             from google import genai  # google-genai SDK, already in env via veo_native
-            self.gemini_client = genai.Client(api_key=gemini_key)
+            from google.genai import types as genai_types
+            self.gemini_client = genai.Client(api_key=gemini_key, http_options=genai_types.HttpOptions(timeout=120_000))
         else:
             self.gemini_client = None
 

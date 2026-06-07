@@ -1932,7 +1932,7 @@ class ShotController:
                     # Use shot-level characters_in_frame for the deep diagnosis —
                     # these are exactly who is in frame for this shot.
                     _shot_chars = shot.get("characters_in_frame", [])
-                    if AdvisoryConfig.from_project(self.project).deep_enabled and image_path and os.path.exists(str(image_path)) and _shot_chars:
+                    if AdvisoryConfig.from_project(self.project).deep_enabled and image_path and os.path.exists(str(image_path)):
                         # Build per-character reference list for multi-char shots.
                         # Fall back to char id when name key absent.
                         _char_map = {c["id"]: c.get("name", c["id"]) for c in self.project.get("characters", [])}

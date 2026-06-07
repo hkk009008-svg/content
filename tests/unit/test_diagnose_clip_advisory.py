@@ -342,6 +342,115 @@ class TestDiagnoseClipDeep:
         assert "deep_error" not in result, "deep_error must not appear without deep=True"
 
 
+class TestDiagnoseClipDeepNoChars:
+    """F2 fix: character-less shots (landscape/establishing) must still receive
+    deep diagnosis — the gate must NOT require characters_in_frame to be non-empty."""
+
+    def _build_no_char_controller(self, tmp_path):
+        """Controller with characters_in_frame=[] — simulates a landscape/establishing shot."""
+        img_path = str(tmp_path / "keyframe.jpg")
+        with open(img_path, "wb") as fh:
+            fh.write(b"img")
+
+        shot = {
+            "id": "shot_1_0",
+            "plan_status": "approved",
+            "characters_in_frame": [],  # no characters
+            "camera": "wide",
+            "target_api": "AUTO",
+            "approved_keyframe_take_id": "take_k1",
+            "keyframe_takes": [{"id": "take_k1", "kind": "keyframe", "path": img_path}],
+        }
+        scene = {
+            "id": "scene_1",
+            "title": "Landscape",
+            "action": "Sweeping mountain vista",
+            "location_id": "loc_1",
+            "shots": [shot],
+            "characters_present": [],
+        }
+        project = {
+            "id": "proj_1",
+            "scenes": [scene],
+            "characters": [],
+            "objects": [],
+            "locations": [],
+            "global_settings": {},
+        }
+
+        host = MagicMock()
+        host._refresh_project_snapshot.return_value = project
+        host._candidate_take.return_value = {
+            "id": "take_k1", "kind": "keyframe", "path": img_path,
+        }
+        host._resolve_take_path.return_value = img_path
+        host._latest_take.return_value = {"path": img_path}
+
+        lifecycle = MagicMock()
+        runstate = MagicMock()
+        runstate.shot_results = {}
+        core = MagicMock()
+        core.project = project
+        core.project_dir = "/tmp/fake_project"
+
+        ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
+        return ctrl, project, img_path
+
+    def test_deep_no_chars_still_calls_evaluate(self, tmp_path):
+        """F2 regression guard: character-less shot + deep=True must call
+        evaluate_generation_quality with reference_paths=None (no chars → no refs).
+
+        Before the F2 fix the gate had `and _shot_chars`, so landscape shots
+        received NO deep diagnosis at all. This test fails on pre-fix code and
+        passes after the fix."""
+        import types as stdlib_types
+
+        ctrl, project, img_path = self._build_no_char_controller(tmp_path)
+
+        mock_deep_return = {
+            "decision": "ACCEPT",
+            "diagnosis": "composition looks good",
+            "prompt_mutation": "",
+            "mutation_focus": "style",
+            "visual_findings": "Lighting is coherent; mountains in frame.",
+        }
+        mock_cd_instance = MagicMock()
+        mock_cd_instance.evaluate_generation_quality.return_value = mock_deep_return
+        mock_cd_class = MagicMock(return_value=mock_cd_instance)
+
+        fake_settings = stdlib_types.SimpleNamespace(anthropic_api_key="test-key", openai_api_key="")
+
+        with (
+            patch("cinema.shots.controller.get_reference_image", return_value=None),
+            patch("config.settings.settings", fake_settings),
+            patch("llm.chief_director.ChiefDirector", mock_cd_class),
+        ):
+            result = ctrl.diagnose_clip("shot_1_0", deep=True)
+
+        assert "error" not in result, f"unexpected error: {result.get('error')}"
+        assert result.get("deep_available") is True, (
+            f"deep_available must be True when key is configured; got {result.get('deep_available')!r}"
+        )
+
+        # F2: evaluate_generation_quality MUST have been called for no-char shots
+        assert mock_cd_instance.evaluate_generation_quality.called, (
+            "F2 regression: evaluate_generation_quality was NOT called for a character-less shot. "
+            "The gate must not require characters_in_frame to be non-empty."
+        )
+
+        call_kwargs = mock_cd_instance.evaluate_generation_quality.call_args.kwargs
+        # reference_paths must be None (empty _refs list → `_refs or None` → None)
+        ref_paths = call_kwargs.get("reference_paths")
+        assert ref_paths is None, (
+            f"reference_paths must be None for character-less shot; got {ref_paths!r}"
+        )
+
+        # advisory_deep should be populated
+        assert "advisory_deep" in result, (
+            f"advisory_deep must be set for character-less deep shot; keys: {list(result)}"
+        )
+
+
 class TestDiagnoseClipDeepMultiChar:
     """Ticket #4: deep path sends ALL in-frame characters' references via reference_paths."""
 

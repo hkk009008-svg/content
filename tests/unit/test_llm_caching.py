@@ -162,6 +162,86 @@ def test_chief_director_system_block_has_cache_control():
     )
 
 
+def test_ensemble_constructor_timeouts():
+    """All three LLMEnsemble clients must be constructed with explicit timeouts.
+
+    - anthropic.Anthropic: timeout=120.0 (seconds, SDK default unit)
+    - openai.OpenAI: timeout=120.0 (seconds, SDK default unit)
+    - google.genai.Client: http_options with timeout=120_000 (milliseconds per
+      google-genai SDK; verified installed: google-genai 2.6.0, HttpOptions.timeout
+      is documented in milliseconds)
+
+    Mocking strategy:
+      - anthropic/openai: same patch("anthropic.Anthropic") / patch("openai.OpenAI")
+        used in the caching tests above.
+      - google.genai.Client: patched at "google.genai.Client" (module-level attribute).
+        We also patch llm.ensemble.env_settings so gemini_api_key is truthy,
+        triggering the conditional import + Client construction.
+      - google.genai.types.HttpOptions: patched so we can capture the call args
+        without requiring the full SDK to construct a real HttpOptions object.
+    """
+    import types as stdlib_types
+
+    fake_env = stdlib_types.SimpleNamespace(
+        anthropic_api_key="fake-anthropic",
+        openai_api_key="fake-openai",
+        gemini_api_key="fake-gemini",
+        google_api_key="",
+    )
+
+    mock_http_options_instance = MagicMock()
+    mock_http_options_cls = MagicMock(return_value=mock_http_options_instance)
+    mock_genai_client_cls = MagicMock()
+
+    with (
+        patch("anthropic.Anthropic", autospec=True) as mock_anthropic_cls,
+        patch("openai.OpenAI", autospec=True) as mock_openai_cls,
+        patch("llm.ensemble.env_settings", fake_env),
+        patch("google.genai.Client", mock_genai_client_cls),
+        patch("google.genai.types.HttpOptions", mock_http_options_cls),
+    ):
+        import importlib
+        import llm.ensemble
+        importlib.reload(llm.ensemble)
+        from llm.ensemble import LLMEnsemble
+        LLMEnsemble()
+
+    # Anthropic: timeout=120.0 (float seconds)
+    assert mock_anthropic_cls.called, "anthropic.Anthropic constructor was not called"
+    anthropic_kwargs = mock_anthropic_cls.call_args.kwargs
+    assert anthropic_kwargs.get("timeout") == 120.0, (
+        f"anthropic.Anthropic must be constructed with timeout=120.0; "
+        f"got timeout={anthropic_kwargs.get('timeout')!r}"
+    )
+
+    # OpenAI: timeout=120.0 (float seconds)
+    assert mock_openai_cls.called, "openai.OpenAI constructor was not called"
+    openai_kwargs = mock_openai_cls.call_args.kwargs
+    assert openai_kwargs.get("timeout") == 120.0, (
+        f"openai.OpenAI must be constructed with timeout=120.0; "
+        f"got timeout={openai_kwargs.get('timeout')!r}"
+    )
+
+    # Gemini: HttpOptions constructed with timeout=120_000 (milliseconds)
+    assert mock_http_options_cls.called, (
+        "google.genai.types.HttpOptions was not called — "
+        "check that the gemini_api_key patch triggered the genai.Client branch"
+    )
+    http_options_kwargs = mock_http_options_cls.call_args.kwargs
+    assert http_options_kwargs.get("timeout") == 120_000, (
+        f"HttpOptions must be constructed with timeout=120_000 (ms); "
+        f"got timeout={http_options_kwargs.get('timeout')!r}"
+    )
+
+    # genai.Client must receive the http_options instance
+    assert mock_genai_client_cls.called, "google.genai.Client was not called"
+    genai_kwargs = mock_genai_client_cls.call_args.kwargs
+    assert genai_kwargs.get("http_options") is mock_http_options_instance, (
+        f"genai.Client must be constructed with http_options=<HttpOptions instance>; "
+        f"got http_options={genai_kwargs.get('http_options')!r}"
+    )
+
+
 def test_judge_system_block_has_cache_control():
     """The _judge method's literal system string must also use cache_control.
 

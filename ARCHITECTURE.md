@@ -1411,14 +1411,18 @@ Decision: `RETRY | ACCEPT_LENIENT | FAIL`. Negative-prompt phrases (from
 The opt-in deep path is triggered by `POST /api/projects/<pid>/shots/<shot_id>/diagnose?deep=true`.
 
 **Vision-grounded (`d974c15`+`a4cb076`, 2026-06-07):** the deep call attaches
-the generated take + the character's canonical reference as images
-(`_encode_image_for_llm`: unconditional PIL re-encode → JPEG q90, long edge
-capped at 1568px — artifact extensions lie repo-wide, so media type is by
-construction, never by extension). Labels are built only from successful
-encodes (`attached_images` in the eval JSON); encode/IO failure degrades to
-the text-only call, and an image-carrying API failure retries once text-only.
-New optional output key `visual_findings` flows into `advisory_deep` for the
-FE Deep-diagnose panel.
+the generated take + ALL in-frame characters' canonical references as images
+(`llm/image_encoding.py::encode_image_for_llm`, shared with phase_c_vision
+validators — unconditional PIL re-encode → JPEG q90, long edge capped at
+1568px; artifact extensions lie repo-wide so media type is by construction,
+never by extension). Per-character labels are built from `reference_paths`
+(list of `(name, path)` tuples, one per in-frame character); only successful
+encodes appear in `attached_images` in the eval JSON. Encode/IO failure
+degrades to the text-only call; an image-carrying API failure retries once
+text-only. New optional output key `visual_findings` flows into `advisory_deep`
+for the FE Deep-diagnose panel. **The gate does not require characters:**
+character-less shots (landscape/establishing) receive deep diagnosis for
+visual_findings and style coherence; `reference_paths` is `None` in that case.
 
 ### 13.5 `style_director.py`
 

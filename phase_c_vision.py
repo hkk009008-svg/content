@@ -368,8 +368,9 @@ def validate_scene_coherence_vision(shot_images: list[str]) -> dict:
 
     try:
         from google import genai
+        from google.genai import types as genai_types
 
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(api_key=api_key, http_options=genai_types.HttpOptions(timeout=120_000))
 
         contents = [
             "These are consecutive shots from the same scene in a film. "
