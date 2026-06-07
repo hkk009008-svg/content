@@ -53,6 +53,11 @@ interface ScreenResponse {
   /** S21: estimated re-assembly wall-clock seconds (~5-90s for typical
    *  projects per Q5 measurement). Shown in the confirm dialog. */
   cost_estimate_seconds?: number
+  /** T-B: number of dialogue lines that would trigger paid TTS on re-assembly
+   *  (i.e., no cached keyed artifact exists for that line set). */
+  tts_lines_to_generate?: number
+  /** T-B: estimated USD cost for TTS regeneration on re-assembly. */
+  estimated_tts_usd?: number
   error?: string
 }
 
@@ -61,6 +66,10 @@ interface ReassembleResponse {
   new_assembled_path: string
   regenerated_shots: string[]
   cost_estimate_seconds: number
+  /** T-B: number of dialogue lines that would trigger paid TTS on re-assembly. */
+  tts_lines_to_generate?: number
+  /** T-B: estimated USD cost for TTS regeneration on re-assembly. */
+  estimated_tts_usd?: number
   skipped: boolean
   note?: string
   error?: string
@@ -464,9 +473,12 @@ export default function ScreeningStage({
   // ── S21: Re-assemble cut ─────────────────────────────────────
   // Dirty-shot count + cost preview come from the /assemble/screen
   // response (S21 extends it with `needs_reassembly` + `cost_estimate_seconds`).
+  // T-B: also surfaces tts_lines_to_generate + estimated_tts_usd.
   // Button is enabled iff onReassemble is wired AND at least one shot is dirty.
   const dirtyShots = data?.needs_reassembly ?? []
   const costEstimate = data?.cost_estimate_seconds ?? 0
+  const ttsLinesToGenerate = data?.tts_lines_to_generate ?? 0
+  const estimatedTtsUsd = data?.estimated_tts_usd ?? 0
   const canReassemble = !!onReassemble && dirtyShots.length > 0
 
   const handleReassemble = useCallback(async () => {
@@ -640,6 +652,14 @@ export default function ScreeningStage({
                 {' · '}
                 <span className="text-editorial-brass">
                   {dirtyShots.length} shot{dirtyShots.length === 1 ? '' : 's'} dirty — re-assemble suggested
+                </span>
+              </>
+            )}
+            {ttsLinesToGenerate > 0 && (
+              <>
+                {' · '}
+                <span className="text-editorial-ivory-mute">
+                  ~${estimatedTtsUsd.toFixed(2)} TTS regen ({ttsLinesToGenerate} line{ttsLinesToGenerate === 1 ? '' : 's'})
                 </span>
               </>
             )}

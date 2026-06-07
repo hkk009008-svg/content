@@ -58,6 +58,11 @@ import logging
 import os
 from typing import Optional
 
+# TTS pricing: $0.01 per line — mirrors cost_tracker.py:66 ("ELEVENLABS": 0.01).
+# Imported lazily below in estimate_reassembly_cost rather than at module level
+# to avoid circular-import risk; this constant is the canonical reference.
+_TTS_COST_PER_LINE_USD = 0.01  # sourced from cost_tracker.py:66
+
 
 logger = logging.getLogger(__name__)
 
@@ -505,20 +510,29 @@ def estimate_reassembly_cost(project: dict) -> dict:
     the estimate).
 
     Returns ``{seconds: float, breakdown: {...}, shot_count: int,
-    total_source_duration_s: float}``. The breakdown dict surfaces the
-    per-stage estimate so the UI can show a tooltip ("normalize: 30s,
-    encode pass: 45s, loudnorm: 10s") without re-doing the math.
+    total_source_duration_s: float, tts_lines_to_generate: int,
+    estimated_tts_usd: float}``. The breakdown dict surfaces the per-stage
+    estimate so the UI can show a tooltip ("normalize: 30s, encode pass: 45s,
+    loudnorm: 10s, TTS: $0.05") without re-doing the math.
 
-    Defensive: an empty project / no scenes returns ``{seconds: floor,
-    ...}`` -- the floor catches "operator clicks re-assemble before
-    anything is assembled," which is itself a no-op but should still
-    estimate as small (not 0, not negative).
+    tts_lines_to_generate and estimated_tts_usd (ticket T-B): counts
+    dialogue lines whose keyed artifact does NOT exist in the project temp dir
+    (i.e., lines that would trigger a fresh paid TTS call on re-assembly).
+    LLM-generated dialogue (non-list) is counted as needing regeneration since
+    the content is nondeterministic and the key cannot be predicted here.
+
+    Defensive: an empty project / no scenes returns ``{seconds: floor, ...}``
+    -- the floor catches "operator clicks re-assemble before anything is
+    assembled," which is itself a no-op but should still estimate as small
+    (not 0, not negative).
     """
     if not isinstance(project, dict):
         return {
             "seconds": _REASSEMBLY_FLOOR_S,
             "shot_count": 0,
             "total_source_duration_s": 0.0,
+            "tts_lines_to_generate": 0,
+            "estimated_tts_usd": 0.0,
             "breakdown": {
                 "normalize_s": 0.0,
                 "duration_bound_s": 0.0,
@@ -526,12 +540,35 @@ def estimate_reassembly_cost(project: dict) -> dict:
             },
         }
 
+    # Derive the project temp dir the same way build_pipeline_core does at
+    # cinema/core.py:92 — os.path.join(project_dir, "temp").
+    pid = project.get("id", "")
+    try:
+        from domain.project_manager import get_project_dir
+        _temp_dir = os.path.join(get_project_dir(pid), "temp") if pid else None
+    except Exception:
+        _temp_dir = None
+
+    # dialogue_cache_key is importable here (audio.dialogue is a leaf; no
+    # circular import risk from cinema.screening importing it lazily).
+    try:
+        from audio.dialogue import dialogue_cache_key as _cache_key
+    except Exception:
+        _cache_key = None
+
+    proj_settings = project.get("global_settings", {}) or {}
+    lang = proj_settings.get("language", "English")
+    characters = project.get("characters", []) or []
+
     shot_count = 0
     total_duration_s = 0.0
+    tts_lines_to_generate = 0
+
     scenes = project.get("scenes") or []
     for scene in scenes:
         if not isinstance(scene, dict):
             continue
+        scene_id = scene.get("id", "")
         scene_fallback = 5.0
         raw = scene.get("duration_seconds")
         if raw is not None:
@@ -539,6 +576,26 @@ def estimate_reassembly_cost(project: dict) -> dict:
                 scene_fallback = float(raw)
             except (TypeError, ValueError):
                 scene_fallback = 5.0
+
+        # Scene-level dialogue TTS estimate (mirrors _ensure_scene_audio logic).
+        scene_dialogue = scene.get("dialogue", "")
+        if scene_dialogue:
+            if isinstance(scene_dialogue, list) and _cache_key and _temp_dir:
+                # Explicit list: can predict the key and check disk.
+                key = _cache_key(scene_dialogue, characters, lang)
+                cached_path = os.path.join(_temp_dir, f"audio_{scene_id}_{key}.mp3")
+                if not os.path.exists(cached_path):
+                    tts_lines_to_generate += len(scene_dialogue)
+            else:
+                # LLM-generated or no cache check available — assume regeneration.
+                if isinstance(scene_dialogue, list):
+                    tts_lines_to_generate += len(scene_dialogue)
+                elif isinstance(scene_dialogue, str):
+                    # Count as 1 generate-dialogue LLM call + unknown lines;
+                    # use 1 as a conservative lower bound so the estimate is
+                    # not zero for LLM-dialogue scenes.
+                    tts_lines_to_generate += 1
+
         for shot in scene.get("shots", []) or []:
             if not isinstance(shot, dict):
                 continue
@@ -561,15 +618,37 @@ def estimate_reassembly_cost(project: dict) -> dict:
                 break
             total_duration_s += take_dur
 
+            # Shot-level dialogue TTS estimate (mirrors _ensure_shot_audio).
+            shot_id = shot.get("id", "")
+            shot_dialogue = shot.get("dialogue")
+            if shot_dialogue:
+                if isinstance(shot_dialogue, str):
+                    shot_dialogue_lines = [{"text": shot_dialogue}]
+                elif isinstance(shot_dialogue, list):
+                    shot_dialogue_lines = shot_dialogue
+                else:
+                    shot_dialogue_lines = None
+
+                if shot_dialogue_lines and _cache_key and _temp_dir:
+                    key = _cache_key(shot_dialogue_lines, characters, lang)
+                    cached_path = os.path.join(_temp_dir, f"audio_{shot_id}_{key}.mp3")
+                    if not os.path.exists(cached_path):
+                        tts_lines_to_generate += len(shot_dialogue_lines)
+                elif shot_dialogue_lines:
+                    tts_lines_to_generate += len(shot_dialogue_lines)
+
     normalize_s = shot_count * _REASSEMBLY_PER_SHOT_OVERHEAD_S
     duration_bound_s = total_duration_s * _REASSEMBLY_DURATION_FACTOR
     raw_total = normalize_s + duration_bound_s
     seconds = max(_REASSEMBLY_FLOOR_S, raw_total)
+    estimated_tts_usd = round(tts_lines_to_generate * _TTS_COST_PER_LINE_USD, 2)
 
     return {
         "seconds": round(seconds, 2),
         "shot_count": shot_count,
         "total_source_duration_s": round(total_duration_s, 2),
+        "tts_lines_to_generate": tts_lines_to_generate,
+        "estimated_tts_usd": estimated_tts_usd,
         "breakdown": {
             "normalize_s": round(normalize_s, 2),
             "duration_bound_s": round(duration_bound_s, 2),

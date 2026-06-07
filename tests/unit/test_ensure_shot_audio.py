@@ -2,10 +2,12 @@
 
 Tests are fully offline — generate_dialogue_voiceover and filesystem
 writes are mocked.  The helper mirrors _ensure_scene_audio but renders
-only the shot's own dialogue line to audio_{shot_id}.mp3.
+only the shot's own dialogue line to audio_{shot_id}_{key}.mp3 (T-B:
+content-keyed path; key derived from dialogue_cache_key).
 
 Coverage:
-  - shot with "dialogue" -> writes audio_<shot_id>.mp3, returns path, caches.
+  - shot with "dialogue" -> writes audio_<shot_id>_<key>.mp3, returns path,
+    caches.
   - Second call with same shot_id returns cached path (no re-render).
   - shot with no/empty "dialogue" -> returns None (scene-level fallback trigger).
   - render failure (generate_dialogue_voiceover returns falsy) -> returns None.
@@ -83,15 +85,20 @@ class TestEnsureShotAudio:
     def test_shot_with_dialogue_returns_path_and_writes_file(self, tmp_path, monkeypatch):
         """
         When shot has a "dialogue" key with text, the helper renders it to
-        audio_{shot_id}.mp3 and returns the path.
+        audio_{shot_id}_{key}.mp3 (T-B content-keyed) and returns the path.
         """
+        from audio.dialogue import dialogue_cache_key
+
         host = _make_host(tmp_path)
 
         shot = {"id": "shot_abc", "dialogue": "Hello, world."}
         scene = {"id": "scene_1"}
         characters = [{"id": "char_1", "name": "Alice"}]
 
-        expected_path = str(tmp_path / "audio_shot_abc.mp3")
+        # Compute the expected keyed path (mirrors _ensure_shot_audio logic)
+        dialogue_lines = [{"text": "Hello, world."}]
+        key = dialogue_cache_key(dialogue_lines, characters, "English")
+        expected_path = str(tmp_path / f"audio_shot_abc_{key}.mp3")
 
         def fake_voiceover(lines, chars, out_path, ctx=None, cost_tracker=None):
             # Simulate writing the mp3.
@@ -110,13 +117,17 @@ class TestEnsureShotAudio:
         A second call with the same shot_id returns the cached path without
         calling generate_dialogue_voiceover again.
         """
+        from audio.dialogue import dialogue_cache_key
+
         host = _make_host(tmp_path)
 
         shot = {"id": "shot_cache", "dialogue": "Cached line."}
         scene = {"id": "scene_1"}
         characters = []
 
-        expected_path = str(tmp_path / "audio_shot_cache.mp3")
+        dialogue_lines = [{"text": "Cached line."}]
+        key = dialogue_cache_key(dialogue_lines, characters, "English")
+        expected_path = str(tmp_path / f"audio_shot_cache_{key}.mp3")
 
         render_count = {"n": 0}
 
@@ -178,13 +189,16 @@ class TestEnsureShotAudio:
 
     def test_cache_hit_skips_rerender_when_file_exists(self, tmp_path):
         """
-        If the audio file already exists on disk (e.g., loaded from checkpoint),
-        no re-render is triggered.
+        If the audio file already exists in the in-memory dict AND on disk
+        (e.g., loaded from checkpoint), no re-render is triggered.
+        The in-memory fast-path accepts any path shape (old or new naming).
         """
         host = _make_host(tmp_path)
 
         shot_id = "shot_preexist"
-        expected_path = str(tmp_path / f"audio_{shot_id}.mp3")
+        # Use the new keyed naming shape to reflect current production behaviour,
+        # but the in-memory fast-path accepts any existing file path.
+        expected_path = str(tmp_path / f"audio_{shot_id}_preexist_key.mp3")
         with open(expected_path, "wb") as f:
             f.write(b"pre-existing")
 

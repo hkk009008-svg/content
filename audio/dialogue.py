@@ -23,6 +23,8 @@ Dependencies (all eager — no cycles):
 This module is a leaf consumer: nothing in ``audio/*`` imports it.
 """
 
+import hashlib
+import json
 import os
 import re
 from typing import TYPE_CHECKING, Optional
@@ -37,6 +39,50 @@ from config.settings import settings
 
 if TYPE_CHECKING:
     from cinema.context import PipelineContext
+
+
+# ---------------------------------------------------------------------------
+# Content-hash key helper (ticket T-B)
+# ---------------------------------------------------------------------------
+
+def dialogue_cache_key(dialogue_lines: list, characters: list, language: str) -> str:
+    """12-hex content key for a rendered dialogue-audio artifact.
+
+    Keyed on what determines the rendered audio: the final dialogue lines,
+    each character's (id, voice_id) assignment, and the project language.
+    Same inputs -> same key -> the artifact on disk is reusable; any edit
+    to a line/voice/language changes the key (ticket T-B).
+
+    Never raises on odd input shapes — default=str handles non-serialisable
+    values so callers do not need to sanitise before calling.
+    """
+    payload = {
+        "lines": dialogue_lines,
+        "voices": sorted(
+            (c.get("id", "") if isinstance(c, dict) else "",
+             c.get("voice_id", "") if isinstance(c, dict) else "")
+            for c in (characters or [])
+        ),
+        "lang": language,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode()
+    ).hexdigest()
+    return digest[:12]
+
+
+def _line_cache_key(text: str, voice_id: str, language: str) -> str:
+    """12-hex content key for a single dialogue line's rendered audio.
+
+    Keyed on the rendered text (post-direction markup), the ORIGINAL
+    (pre-Cartesia-resolved) voice_id so the key is provider-independent,
+    and the project language. Used for per-line temp files (ticket T-B).
+    """
+    payload = {"text": text, "voice_id": voice_id, "lang": language}
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode()
+    ).hexdigest()
+    return digest[:12]
 
 
 # ---------------------------------------------------------------------------
@@ -430,7 +476,13 @@ def generate_dialogue_voiceover(
         voice_profile = get_voice_direction(delivery)
         directed_text = voice_profile["markup"](text) if voice_profile.get("markup") else text
 
-        temp_path = f"temp_dialogue_line_{i}.mp3"
+        # Content-keyed per-line temp: lives in the same dir as output_path
+        # (NOT CWD) so it's project-scoped and reusable across runs with
+        # the same content (ticket T-B change 3). Key uses the ORIGINAL
+        # voice_id (pre-Cartesia resolution) so it is provider-independent.
+        _line_key = _line_cache_key(directed_text, voice_id, project_lang)
+        _out_dir = os.path.dirname(output_filename) or "."
+        temp_path = os.path.join(_out_dir, f"dialogue_line_{_line_key}.mp3")
 
         # Route per-line: language-aware provider selection. Korean +
         # CARTESIA_API_KEY set → Cartesia Sonic 2 (native prosody, low
@@ -561,10 +613,10 @@ def generate_dialogue_voiceover(
 
         print(f"   ✅ Multi-character dialogue assembled: {output_filename}")
 
-        # Cleanup temp files
-        for tf in temp_files:
-            if os.path.exists(tf):
-                os.remove(tf)
+        # Content-keyed per-line files (dialogue_line_<hash>.mp3) are NOT
+        # deleted here — they form the per-line cache that prevents
+        # re-generating identical lines across runs (ticket T-B change 3).
+        # Only clean up the ephemeral concat control files.
         for f in [concat_list, silence_file]:
             if os.path.exists(f):
                 os.remove(f)

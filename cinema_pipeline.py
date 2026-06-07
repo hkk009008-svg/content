@@ -19,7 +19,7 @@ from phase_c_ffmpeg import two_pass_loudnorm, probe_final_media
 from scene_decomposer import decompose_scene, update_scene_shots, competitive_decompose_scene
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
-from audio.dialogue import generate_dialogue_voiceover
+from audio.dialogue import dialogue_cache_key, generate_dialogue_voiceover
 from audio.music import generate_fal_bgm
 from cinema.auto_approve import record_director_review_on_shots
 from cinema.context import PipelineContext
@@ -498,6 +498,7 @@ class CinemaPipeline:
 
     def _ensure_scene_audio(self, scene: dict, characters: list[dict]) -> Optional[str]:
         scene_id = scene.get("id", "")
+        # In-memory fast path: already rendered this session.
         existing = self.scene_audio.get(scene_id)
         if existing and os.path.exists(existing):
             return existing
@@ -514,6 +515,9 @@ class CinemaPipeline:
             if isinstance(dialogue, list):
                 dialogue_lines = dialogue
             else:
+                # LLM-generated dialogue — nondeterministic per run; these won't
+                # cache-hit across fresh instances (different dialogue_lines each
+                # call), but explicit dialogue lists (the common case) do.
                 dialogue_lines = generate_dialogue(scene, characters, scene.get("mood", "neutral"), language=lang)
         else:
             return None
@@ -521,7 +525,18 @@ class CinemaPipeline:
         if not dialogue_lines:
             return None
 
-        output_path = os.path.join(self.temp_dir, f"audio_{scene_id}.mp3")
+        # Disk-first check (ticket T-B): content-keyed output path. If an
+        # artifact with the same key exists on disk, reuse it without calling
+        # generate_dialogue_voiceover again — prevents paid TTS regeneration
+        # on re-assembly when the dialogue/voices/language are unchanged.
+        key = dialogue_cache_key(dialogue_lines, characters, lang)
+        output_path = os.path.join(self.temp_dir, f"audio_{scene_id}_{key}.mp3")
+        if os.path.exists(output_path):
+            print(f"   [SCENE-AUDIO] Cache hit (key={key}): {output_path}")
+            self.scene_audio[scene_id] = output_path
+            self._save_checkpoint()
+            return output_path
+
         # Thread the project's UI settings via PipelineContext so
         # dialogue_mode_enabled, forced_alignment_enabled, and language
         # are honored via get_project_setting — without this the dialogue
@@ -559,6 +574,7 @@ class CinemaPipeline:
         giving the overlay pass a correctly-sized audio clip.
         """
         shot_id = shot.get("id", "")
+        # In-memory fast path: already rendered this session.
         existing = self.shot_audio.get(shot_id)
         if existing and os.path.exists(existing):
             return existing
@@ -579,7 +595,20 @@ class CinemaPipeline:
         if not dialogue_lines:
             return None
 
-        output_path = os.path.join(self.temp_dir, f"audio_{shot_id}.mp3")
+        # Pull project language from settings — mirrors the scene site at
+        # cinema_pipeline.py:_ensure_scene_audio for the same key computation.
+        proj_settings = self.project.get("global_settings", {}) if hasattr(self, "project") else {}
+        lang = proj_settings.get("language", "English")
+
+        # Disk-first check (ticket T-B): content-keyed output path. Mirrors
+        # _ensure_scene_audio exactly — same key function, same check shape.
+        key = dialogue_cache_key(dialogue_lines, characters, lang)
+        output_path = os.path.join(self.temp_dir, f"audio_{shot_id}_{key}.mp3")
+        if os.path.exists(output_path):
+            print(f"   [SHOT-AUDIO] Cache hit (key={key}): {output_path}")
+            self.shot_audio[shot_id] = output_path
+            return output_path
+
         dialogue_ctx = PipelineContext(
             global_settings=dict(self.project.get("global_settings", {})) if self.project else {},
         )

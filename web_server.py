@@ -2265,12 +2265,15 @@ def api_assemble_screen(pid):
         get_needs_reassembly,
         estimate_reassembly_cost,
     )
+    _cost_est = estimate_reassembly_cost(project)
     return jsonify({
         "success": True,
         "assembled_mp4_path": assembled_path,
         "timeline_manifest": manifest,
         "needs_reassembly": get_needs_reassembly(project),
-        "cost_estimate_seconds": estimate_reassembly_cost(project)["seconds"],
+        "cost_estimate_seconds": _cost_est["seconds"],
+        "tts_lines_to_generate": _cost_est["tts_lines_to_generate"],
+        "estimated_tts_usd": _cost_est["estimated_tts_usd"],
     }), 200
 
 
@@ -2436,7 +2439,8 @@ def api_assemble_reassemble(pid):
             return jsonify({"error": "Project not found"}), 404
 
         dirty_shots = get_needs_reassembly(project)
-        cost_estimate = estimate_reassembly_cost(project)["seconds"]
+        _cost_est = estimate_reassembly_cost(project)
+        cost_estimate = _cost_est["seconds"]
 
         # Short-circuit: only_if_changed=true AND no dirty shots -> nothing to do.
         # The operator's UI suppresses the button in this state; the endpoint
@@ -2447,6 +2451,8 @@ def api_assemble_reassemble(pid):
                 "new_assembled_path": "",
                 "regenerated_shots": [],
                 "cost_estimate_seconds": cost_estimate,
+                "tts_lines_to_generate": _cost_est["tts_lines_to_generate"],
+                "estimated_tts_usd": _cost_est["estimated_tts_usd"],
                 "skipped": True,
                 "note": "no dirty shots; assembled mp4 is current",
             }), 200
@@ -2492,6 +2498,8 @@ def api_assemble_reassemble(pid):
                 "error": assembly_result.get("error", "Re-assembly failed"),
                 "regenerated_shots": dirty_shots,
                 "cost_estimate_seconds": cost_estimate,
+                "tts_lines_to_generate": _cost_est["tts_lines_to_generate"],
+                "estimated_tts_usd": _cost_est["estimated_tts_usd"],
             }), 409
 
         # Clear dirty-tracking AFTER successful re-assembly. If we cleared
@@ -2533,6 +2541,8 @@ def api_assemble_reassemble(pid):
             "new_assembled_path": assembly_result.get("final_path", ""),
             "regenerated_shots": dirty_shots,
             "cost_estimate_seconds": cost_estimate,
+            "tts_lines_to_generate": _cost_est["tts_lines_to_generate"],
+            "estimated_tts_usd": _cost_est["estimated_tts_usd"],
             "skipped": False,
         }), 200
     finally:
