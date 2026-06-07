@@ -505,6 +505,14 @@ def api_update_project(pid):
 
     data = request.json or {}
 
+    incoming_gs = data.get("global_settings") or {}
+    if "aspect_ratio" in incoming_gs and not is_supported(incoming_gs["aspect_ratio"]):
+        return jsonify({
+            "error": "unsupported aspect_ratio",
+            "value": incoming_gs["aspect_ratio"],
+            "supported": SUPPORTED_ASPECT_RATIOS,
+        }), 400
+
     def _mutate_project(project: dict):
         # P1-3 part 12 (Variant 1 simplified): inner validate for race
         # protection — Project.model_validate(...) raises ValidationError
