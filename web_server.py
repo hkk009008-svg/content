@@ -53,6 +53,7 @@ from domain.scene_decomposer import PURPOSE_TAGS, PURPOSE_API_RANKING, BILLING_P
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
 from cinema_pipeline import CinemaPipeline
+from cinema.aspect import SUPPORTED_ASPECT_RATIOS, is_supported
 from cinema.core import PipelineCore, build_pipeline_core
 from cinema.services import state_snapshot, checkpoint_info
 from workflow_selector import WORKFLOW_TEMPLATES
@@ -316,7 +317,7 @@ def get_config():
         "music_moods": MUSIC_MOODS,
         "voice_pool": VOICE_POOL,
         "delivery_styles": _get_delivery_styles(),
-        "aspect_ratios": ["16:9", "9:16", "1:1", "21:9", "4:3"],
+        "aspect_ratios": SUPPORTED_ASPECT_RATIOS,
         "pacing_options": ["relaxed", "moderate", "calculated", "fast"],
         "mood_options": [
             "melancholic", "tense", "hopeful", "dark", "cinematic",
