@@ -66,10 +66,10 @@ CapabilityConsole.tsx
      "format": {"width": int, "height": int, "vcodec": str, "acodec": str,
                 "duration_s": float}}
     ```
-    or `None` on any failure (missing file, ffprobe error, no loudness JSON).
-    Partial results are allowed: if ffprobe succeeds but loudness fails (or
-    vice-versa), return the dict with the failed half absent — the scorecard
-    renders each half independently.
+    Partial results: if exactly one half succeeds (ffprobe XOR loudness),
+    return the dict with the failed half absent — the scorecard renders each
+    half independently. Return `None` only when the file is missing or BOTH
+    halves fail.
 
 ### 4.2 `cinema_pipeline.py::_apply_final_loudnorm` — probe + persist
 
@@ -91,9 +91,9 @@ if report:
 
 ### 4.3 `domain/models.py` — schema
 
-Add `media_report: Optional[dict] = None` to `Project` **if** the model rejects
-unknown keys (plan-time grep decides; the inner-validate pattern requires the
-key to be representable either way).
+No change needed: `Project` uses `ConfigDict(extra="allow")` (permissive by
+design; verified at `domain/models.py:9,:29` during spec review), so the new
+`media_report` key passes the inner-validate untouched.
 
 ### 4.4 `cinema/capability_scorecard.py` — `media` block
 
@@ -114,6 +114,9 @@ key to be representable either way).
   constants `EXPECTED_RESOLUTION = (1920, 1080)`, `EXPECTED_VCODEC/ACODEC`.
 - Either half absent from the persisted report → that sub-block is `None`,
   the other still renders (`media` itself only `None` when no report at all).
+- `loudnorm_applied` and the raw `true_peak_dbtp`/`lra`/`duration_s` stay
+  **audit-only on the persisted report** — deliberately NOT in the `media`
+  payload (the off-target LUFS value tells the story; don't widen the contract).
 - Malformed report (non-dict, wrong types) → `media: None` + debug log; never
   raises (mirror the builder's existing defensive style).
 
@@ -149,7 +152,8 @@ key to be representable either way).
   timeout (subprocess mocked). Verify `two_pass_loudnorm` still passes its
   existing tests after the extraction.
 - `probe_final_media`: ffprobe JSON fixtures (conformant, wrong codec, wrong
-  resolution, no audio stream, ffprobe failure, loudness-half failure).
+  resolution, no audio stream, no video stream, ffprobe failure,
+  loudness-half failure, both-halves-fail → `None`).
 - Scorecard `media`: report present/absent/half-present/off-target (−16.2)/
   at-tolerance-edge (−15.0 passes, −15.01 fails)/malformed.
 - Persist hook: probe mocked; assert mutate payload + that probe/persist
@@ -167,8 +171,8 @@ key to be representable either way).
 
 ## 8. Plan-time verifications (Rule #12/#13 carried into the plan)
 
-1. Does `domain.models.Project` reject unknown top-level keys? (`extra=` config /
-   ConfigDict) → decides §4.3.
+1. ~~Does `domain.models.Project` reject unknown top-level keys?~~ RESOLVED at
+   spec review: `ConfigDict(extra="allow")` — §4.3 needs no schema change.
 2. Confirm `api_assemble_reassemble` / `api_assemble_screen` paths reach
    `_apply_final_loudnorm` (web_server.py:2448's loudnorm comment suggests yes) —
    i.e., every producer of `final_cinema.mp4` passes the hook.
