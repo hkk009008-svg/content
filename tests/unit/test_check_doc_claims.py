@@ -1131,6 +1131,47 @@ class TestInlineFix:
         run([str(md)], tmp_path, fix=True)
         assert md.read_text() == "**`f()`** `alpha.py:1` and **`g()`** `beta.py:2`\n"
 
+    # --- Slice 3: en-dash range --fix canonicalizes to ASCII hyphen + shifts both ends ---
+
+    def test_fix_canonicalizes_endash_range_and_shifts(self, tmp_path):
+        _init_repo(tmp_path)
+        # def at 5; cited en-dash range 1–3 (def out of range) -> 5-7 (ASCII), span 2 preserved
+        _commit_py(tmp_path, "alpha.py", "# 1\n# 2\n# 3\n# 4\ndef f():\n    pass\n")
+        md = _write_md(tmp_path, "doc.md", "see **`f()`** `alpha.py:1–3` here\n")
+        remaining = run([str(md)], tmp_path, fix=True)
+        text = md.read_text()
+        assert "`alpha.py:5-7`" in text   # ASCII hyphen, both ends shifted by +4
+        assert "–" not in text            # en-dash canonicalized away
+        assert remaining == []
+
+    def test_fix_endash_range_is_idempotent(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\n# 2\n# 3\n# 4\ndef f():\n    pass\n")  # def at 5
+        md = _write_md(tmp_path, "doc.md", "see **`f()`** `alpha.py:1–3` here\n")
+        run([str(md)], tmp_path, fix=True)
+        first = md.read_text()
+        run([str(md)], tmp_path, fix=True)
+        assert md.read_text() == first
+
+    def test_fix_endash_span_guard_round_trips(self, tmp_path):
+        # ADV-1 span guard: the drifted en-dash occurrence is rewritten at its own span;
+        # a correct neighbor on the same line is left untouched (not clobbered).
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\n# 2\n# 3\n# 4\ndef f():\n    pass\n")  # def at 5
+        _commit_py(tmp_path, "beta.py", "def g():\n    pass\n")                       # def at 1
+        md = _write_md(tmp_path, "doc.md", "**`f()`** `alpha.py:1–3` and **`g()`** `beta.py:1`\n")
+        run([str(md)], tmp_path, fix=True)
+        text = md.read_text()
+        assert "`alpha.py:5-7`" in text
+        assert "`beta.py:1`" in text       # untouched
+
+    def test_shift_display_accepts_endash_link_range(self):
+        # Defensive (markdown-link range path): an en-dash display is shifted AND
+        # canonicalized to ASCII. 0 such anchors exist today; closes a latent bug.
+        from check_doc_claims import _shift_display
+        assert _shift_display("core.py:10–20", 10, 30) == "core.py:30-40"
+        assert _shift_display(":138–140", 138, 200) == ":200-202"
+
     def test_fix_never_touches_fenced_anchor(self, tmp_path):
         _init_repo(tmp_path)
         _commit_py(tmp_path, "alpha.py", "def f():\n    pass\n")        # def at 1

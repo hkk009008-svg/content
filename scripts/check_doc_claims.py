@@ -429,10 +429,12 @@ def _shift_display(display: str, old: int, new: int) -> str:
     Handles a range `:old-B` (start AND end shift by the same delta, preserving
     span → `:new-(B+delta)`) and a bare `:old` (→ `:new`). Works whether or not
     the display carries a filename prefix (e.g. `core.py:75-115` or `:138-140`).
-    Other numbers are left untouched.
+    The range separator is accepted as ASCII hyphen, en-dash, or em-dash on read
+    and always EMITTED as ASCII hyphen (canonicalization). Other numbers are left
+    untouched.
     """
     delta = new - old
-    for rm in re.finditer(r':(\d+)-(\d+)', display):
+    for rm in re.finditer(r':(\d+)[-–—](\d+)', display):
         if int(rm.group(1)) == old:
             end = int(rm.group(2)) + delta
             return display[:rm.start()] + f":{new}-{end}" + display[rm.end():]
