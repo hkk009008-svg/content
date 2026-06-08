@@ -85,7 +85,7 @@ def generate_ai_video(
         for all callers that haven't been updated yet.
     """
     from cinema.context import get_project_setting
-    from cinema.aspect import DEFAULT_ASPECT_RATIO, fal_aspect_ratio
+    from cinema.aspect import DEFAULT_ASPECT_RATIO, fal_aspect_ratio, runway_ratio
     _aspect = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
 
     if attempted_apis is None:
@@ -366,7 +366,7 @@ def generate_ai_video(
                     f"Natural body movement, consistent lighting, photorealistic quality."
                 ),
                 duration=10,
-                ratio="1280:720",
+                ratio=runway_ratio(_aspect, "gen4_turbo"),
             )
             # Poll
             task = client.tasks.retrieve(id=task.id)
@@ -685,7 +685,7 @@ def generate_ai_video(
                     model="gen3a_turbo",
                     prompt_image=data_uri,
                     prompt_text=f"Smooth {camera_motion}. Cinematic lighting.",
-                    ratio="1280:768",
+                    ratio=runway_ratio(_aspect, "gen3a_turbo"),
                     duration=5
                 )
                 print(f"   ↳ Runway Task {video_task.id} queued. Polling...")
