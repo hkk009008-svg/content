@@ -110,7 +110,7 @@ def test_init_succeeds_with_valid_keys():
     """Happy-path construction does not raise and sets access_key/secret_key."""
     api = _make_api()
     assert api.access_key == "ak-test"
-    assert api.secret_key == "sk-test"
+    assert api.secret_key == _TEST_SECRET
     assert api._token is not None  # _generate_token() was called
 
 
