@@ -137,7 +137,135 @@ the old export's −15.09 — the audio bed was genuinely rebuilt, not reused.
 
 ---
 
+## T-C — Temp-artifact reaper: T-B's keyed audio artifacts accumulate unboundedly; the existing cleanup rule for them is dead
+
+**STATUS: OPEN — specced 2026-06-08** (operator deferred-minors batch,
+dispatch-claim `e018c71`; director pre-ack'd as future ticket in the T-B
+residuals above). Spec source: Rule #17 read-only scout + operator Read
+spot-checks (guardrail 2b); file:line refs verified at `5c81ebd`.
+
+**Severity: LOW** (unbounded per-project disk growth only — no spend,
+no correctness impact; but naive fixes are dangerous: a wrong reaper
+defeats the zero-TTS cache T-B exists to provide, or breaks the
+`exists ⇒ complete` atomic-publish invariant — QI-1 class).
+
+### Evidence (the write surface — all under `get_project_dir(pid)/temp/`, cinema/core.py:92)
+
+| Artifact | Writer | Cache-hit guard | Lifetime today |
+|---|---|---|---|
+| `dialogue_line_{12hex}.mp3` per-line TTS | `audio/dialogue.py:497-499` (key `_line_cache_key` :78-89); atomic `.part`+replace both lanes (:161-164 Cartesia, :583-585 11labs) | `:126-128` / `:566-569` | never deleted (deliberate per-line cache, :647-650) |
+| `audio_{scene_id}_{key}.mp3` scene audio | `cinema_pipeline.py:532-533` (key `dialogue_cache_key`, dialogue.py:48-75); atomic publish dialogue.py:637-643 | `cinema_pipeline.py:534-538` | never deleted in standard mode |
+| `audio_{shot_id}_{key}.mp3` shot audio | `cinema_pipeline.py:605-610` (exact scene mirror) | `:607` | never deleted in standard mode |
+| `*.concat.txt`, `*.silence.mp3`, `*.part(.mp3)` control/in-flight files | dialogue.py:617-618 | n/a | removed on success (:651-653) but **leaked on the concat-exception path (:661-664)** and on kill-mid-write |
+
+- **Accumulation drivers** (what changes a key → orphans the old artifact):
+  any dialogue-line dict edit, voice_id change, scene-character add/remove,
+  language change. **Worst driver: LLM-generated dialogue** — fresh key on
+  EVERY full pipeline run (`cinema_pipeline.py:512-521` comment acknowledges
+  "won't cache-hit") → one orphan scene mp3 + N orphan line mp3s per such
+  scene per run, forever.
+- **The intended cleanup is dead:** `cleanup.py:45` rule pattern
+  `temp_dialogue_line_*.mp3` matches NOTHING after T-B's rename to
+  `dialogue_line_*.mp3` (grep: only cleanup.py:45 still carries the old
+  name). Keyed `audio_*.mp3` fall under the `scene_audio` **keep** rule
+  (:51) — reaped only in `aggressive` mode, which nukes the LIVE cache too.
+  Net: nothing reaps keyed artifacts in normal operation.
+- **No mtime refresh on cache hits** — none of the four hit sites touches
+  the file, so an actively-reused artifact looks as old as its creation
+  date. Any age-based policy MUST add touch-on-hit or it reaps live cache.
+
+### Fix direction (recommended: age-based sweep = time-LRU, inside existing machinery)
+
+1. **`cleanup.py`** — add optional `max_age_days` to `CLEANUP_RULES` entries
+   + an age gate in the `cleanup_project` loop (skip when
+   `now - mtime < max_age_days*86400`; age-carrying rules are delete-eligible
+   in standard mode). Rules: REPLACE dead `:45` with
+   `{"pattern": "dialogue_line_*.mp3", "action": "delete", "max_age_days": 14}`;
+   ADD `audio_*.mp3` age-reap; ADD crash-leftover rules `*.part`/`*.part.mp3`
+   and `*.concat.txt`/`*.silence.mp3` with `max_age_days≈1` — the ≥1-day gate
+   is what guarantees the reaper can never touch an in-flight atomic write
+   (preserves `exists ⇒ complete`). Keep `cleanup_project`'s return contract
+   (`files_deleted`/`bytes_freed`/`details`) — consumed by `web_server.py:2565`
+   and `cinema_pipeline.py:910-912`.
+2. **Touch-on-hit** — `os.utime(path, None)` (OSError-tolerant) at ALL FOUR
+   hit sites: `cinema_pipeline.py:534` (scene), `:607` (shot),
+   `audio/dialogue.py:126` (Cartesia line), `:566` (11labs line). Symmetry
+   is mandatory (Rule #13): missing one lane silently un-protects that lane's
+   projects (Cartesia = Korean).
+3. **No new trigger.** The existing post-export auto-cleanup
+   (`cinema_pipeline.py:908-915`, aggressive=False) + manual endpoints become
+   the reaper once rules carry `max_age_days`. Deliberately do NOT sweep at
+   re-assembly start — that's the reap-then-need race; post-success timing is
+   structurally race-free for the current run (just-used artifacts have fresh
+   mtimes).
+
+**Rejected alternatives:** mark-and-sweep (requires re-deriving keys outside
+the writer; the estimator mirror has ALREADY drifted once — see T-D — and a
+drifted mark phase deletes LIVE cache = silent cache defeat); LRU size cap
+(same touch-on-hit prerequisite + sizing machinery for marginal benefit);
+manual-only (already exists; demonstrably didn't prevent accumulation).
+
+### Acceptance
+
+- Backdated `dialogue_line_*.mp3` / `audio_{id}_{key}.mp3` reaped in standard
+  mode; fresh ones survive; `*.part` younger than 1 day SURVIVES (the QI-1
+  invariant test); older `.part`/`.concat.txt`/`.silence.mp3` reaped.
+- Cache hit at each of the 4 sites bumps mtime (regression in
+  `tests/unit/test_dialogue_audio_cache.py`).
+- Reuse-not-defeated: fresh keyed artifact + standard `cleanup_project` →
+  subsequent ensure-site call cache-hits (no TTS call, assert via mock).
+- bgm/foley `keep` rules untouched (bounded cardinality, not accumulation
+  hazards); `aggressive` semantics unchanged (document only).
+
+### Known residual risks (accepted in this design)
+
+Reap-then-need after >N idle days = paid TTS regen, graceful (exists-guards
+regenerate; atomicity prevents poisoning); manual `/cleanup` endpoint vs
+in-flight assembly race is a PRE-EXISTING exposure class (optional hardening:
+make the endpoint respect `_reassembly_in_flight` — out of scope here);
+checkpoint-persisted `scene_audio` paths can dangle post-reap — covered by
+exists-guards (`cinema_pipeline.py:503/579`).
+
+---
+
+## T-D — Estimator computes dialogue cache keys with project-wide characters; writer uses scene-filtered (estimate-only inaccuracy)
+
+**STATUS: OPEN — fix in flight 2026-06-08** (operator deferred-minors batch
+item F, dispatch-claim `e018c71` + this doc; found via Rule #17 guardrail-2b
+spot-check of the T-C scout's side-observation).
+
+**Severity: MEDIUM-low** (T-B's `tts_lines_to_generate` estimate over-counts —
+predicts regen where assembly would cache-hit — whenever a scene's
+`characters_present` is a strict subset of the project's characters; assembly
+itself keys correctly, so no wasted spend, but the estimate UI lies in the
+conservative direction, undermining T-B's cost-visibility purpose).
+
+### Evidence (verified at `5c81ebd`)
+
+- Estimator: `cinema/screening.py:565` — `characters = project.get("characters", [])`
+  feeds `dialogue_cache_key(scene_dialogue, characters, lang)` (:589).
+- Writer: `cinema_pipeline.py:738-741` — filters to
+  `character.get("id") in scene.get("characters_present", [])` before keying.
+- `dialogue_cache_key` (audio/dialogue.py:48-75) hashes sorted
+  `(id, voice_id)` of the PASSED characters → different lists ⇒ different key
+  ⇒ estimator checks a path that was never written.
+
+### Fix direction
+
+Filter `characters` per-scene inside the estimator loop, exact mirror of the
+writer's comprehension; audit the shot-level estimate path for the same
+asymmetry (Rule #13). Regression test asserting estimator and writer produce
+the same key for a subset-characters scene.
+
+### Acceptance
+
+- Multi-char project, scene with subset `characters_present`, artifact on
+  disk under the writer's key → estimate reports 0 lines to generate.
+
+---
+
 *Disposition (final): user-directed "do t-a t-b" same session — operator
 implemented both (dispatch-claim `465891e`), sequential Lane B + dual cold
 reviews each + live runtime acceptance; director independently re-verified
-green and FF-merged `c28f9e6` (event `2026-06-07T23-29-45Z`). Both CLOSED.*
+green and FF-merged `c28f9e6` (event `2026-06-07T23-29-45Z`). Both CLOSED.
+T-C appended 2026-06-08 (operator deferred-minors batch, OPEN).*
