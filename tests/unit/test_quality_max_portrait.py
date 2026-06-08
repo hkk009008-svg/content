@@ -37,10 +37,16 @@ def test_inject_aspect_none_is_noop():
 
 
 def test_inject_aspect_after_post_passes_uses_final_resolution():
-    """Order: _inject_post_passes sets node 950 dims from params (or template
-    default 3840x2160); _inject_aspect then transposes whatever post_passes set.
-    Verifies correct ordering."""
+    """Order contract: _inject_post_passes sets node 950 dims from
+    params["final_resolution"]; _inject_aspect then transposes whatever
+    post_passes set (NOT just the template default). A non-default
+    final_resolution gives the ordering contract teeth — if _inject_aspect
+    ran BEFORE post_passes, node 950 would read the template 3840x2160 and
+    the assertion below (1080x1920) would fail."""
     wf = _load_max_workflow()
-    _inject_post_passes(wf, params={}, available=set())
+    _inject_post_passes(wf, params={"final_resolution": (1920, 1080)}, available=set())
+    # post_passes set node 950 → 1920x1080 (landscape, non-default)
+    assert (wf["950"]["inputs"]["width"], wf["950"]["inputs"]["height"]) == (1920, 1080)
     _inject_aspect(wf, "9:16")
-    assert (wf["950"]["inputs"]["width"], wf["950"]["inputs"]["height"]) == (2160, 3840)
+    # _inject_aspect transposes what post_passes set → 1080x1920
+    assert (wf["950"]["inputs"]["width"], wf["950"]["inputs"]["height"]) == (1080, 1920)

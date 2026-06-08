@@ -736,8 +736,8 @@ def generate_ai_broll_max(
 
     # Read the project's aspect ratio for portrait-aware generation.
     # get_project_setting is None-safe: ctx=None → returns DEFAULT_ASPECT_RATIO.
-    from cinema.context import get_project_setting as _gps
-    aspect_ratio = _gps(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
+    from cinema.context import get_project_setting
+    aspect_ratio = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
 
     # ---- Per-project UI overrides (from ctx.global_settings) ----
     # 7 MaxQualityTier halt knobs — override the shot-type defaults above.
