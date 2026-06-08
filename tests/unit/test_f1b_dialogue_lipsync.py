@@ -887,6 +887,116 @@ class TestGenerateMotionTakeOverlayWiring:
             f"Failed lipsync must write lipsync_score=0.0 to take metadata; got {lipsync_score!r}"
         )
 
+    def _make_native_two_char_project(self) -> dict:
+        """Native-mode dialogue project where characters_in_frame ⊂ characters_present.
+
+        Reachability of T-E Bug site B (controller.py:1475) requires all three:
+          - has_dialogue=True (purpose=dialogue_close_up),
+          - voice_mode='native' (so _f1b_audio stays None — the overlay-only
+            resolver at :1388 is skipped), and
+          - the winning engine has NO native_audio flag (so _should_tag_audio_embedded
+            returns False → audio_embedded unset → the F1b lipsync block runs).
+        target_api='KLING_NATIVE' is pinned (raw_api != 'AUTO' → the else-branch
+        keeps it, with no dialogue-routing override to a native-audio engine), and
+        KLING_NATIVE lacks native_audio in API_REGISTRY (only VEO_NATIVE has it).
+        Two characters present, one in frame → scene-filter vs in-frame-filter on
+        the _ensure_scene_audio chars arg is discriminable.
+        """
+        return {
+            "id": "proj_native_siteB",
+            "characters": [
+                {"id": "char_1", "name": "Alice"},
+                {"id": "char_2", "name": "Bob"},
+            ],
+            "global_settings": {"dialogue_voice_mode": "native"},
+            "scenes": [
+                {
+                    "id": "scene_1",
+                    "title": "Two-hander",
+                    "action": "Alice and Bob talk.",
+                    "characters_present": ["char_1", "char_2"],
+                    "shots": [
+                        {
+                            "id": "shot_1_0",
+                            "prompt": "Close-up of Alice speaking",
+                            "plan_status": "approved",
+                            "target_api": "KLING_NATIVE",  # non-AUTO + no native_audio
+                            "camera": "static",
+                            "characters_in_frame": ["char_1"],  # strict subset
+                            "approved_keyframe_take_id": "kf_t1",
+                            "optimizer_cache": {
+                                "spec": {
+                                    "purpose": "dialogue_close_up",
+                                    "suggested_video_api": "KLING_NATIVE",
+                                }
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def test_native_mode_site_b_passes_scene_filtered_chars(self, tmp_path):
+        """T-E Bug site B (controller.py:1475) — DIRECT pin on the production line.
+
+        In native mode the F1b lipsync fallback resolves scene audio via
+        _ensure_scene_audio, which MUST be keyed with the SCENE-level characters
+        (characters_present), not the in-frame subset — otherwise the
+        dialogue_cache_key diverges from the pipeline writer (paid TTS regen +
+        off-frame lines voiced by the wrong character — the 9aed3ce CRITICAL class).
+
+        This drives the REAL generate_motion_take into the :1475 call site and
+        asserts its chars argument. Reverting :1475 back to an in-frame chars_dicts
+        list turns this test RED (verified by red-phase check at fix time). The
+        pre-existing TestNativeModeLipsyncSceneAudioBugB only exercises the
+        scene_characters helper + site A's _resolve_f1b_audio; this is the missing
+        direct pin on site B's literal call.
+        """
+        project = self._make_native_two_char_project()
+        ctrl, host = self._build_controller(project, tmp_path)
+
+        # Scene-audio fallback returns a real file so the lipsync path proceeds;
+        # the return value is irrelevant to the assertion (we inspect call args).
+        scene_audio = str(tmp_path / "scene_tts.mp3")
+        open(scene_audio, "wb").write(b"fake_scene_audio")
+        host._ensure_scene_audio.return_value = scene_audio
+        ref_image_file = str(tmp_path / "ref_char1.jpg")
+        open(ref_image_file, "wb").write(b"fake_jpg")
+        veo_clip = str(tmp_path / "veo_clip.mp4")
+        open(veo_clip, "wb").write(b"fake_veo")
+        ls_clip = str(tmp_path / "ls_clip.mp4")
+        open(ls_clip, "wb").write(b"fake_ls")
+
+        ctrl._finalize_motion_take = MagicMock(
+            side_effect=lambda scene, shot, take, video_path, **kw: {
+                "success": True, "take": dict(take), "video": video_path, "identity_score": 0.0,
+            }
+        )
+
+        with (
+            patch("cinema.shots.controller.generate_ai_video", return_value=veo_clip),
+            patch("cinema.shots.controller.generate_lip_sync_video", return_value=ls_clip),
+            patch("lip_sync.generate_lip_sync_video", return_value=ls_clip),
+            patch("lip_sync.validate_lipsync_quality", return_value=0.91),
+            patch("cinema.shots.controller.get_reference_image", return_value=ref_image_file),
+            patch("cinema.shots.controller._probe_duration", return_value=3.5),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result.get("success") is True, f"generate_motion_take failed: {result}"
+
+        # Native mode + KLING (no native_audio) + _f1b_audio None → site B is the
+        # ONLY _ensure_scene_audio call in this path.
+        host._ensure_scene_audio.assert_called_once()
+        _scene_arg, chars_arg = host._ensure_scene_audio.call_args.args[:2]
+        passed_ids = {c.get("id") for c in chars_arg}
+        assert passed_ids == {"char_1", "char_2"}, (
+            "T-E Bug site B: _ensure_scene_audio must receive the SCENE-filtered "
+            "characters (characters_present={'char_1','char_2'}); a regression to "
+            f"the in-frame subset would pass only {{'char_1'}}. Got {passed_ids!r}."
+        )
+
 
 class TestAssemblerOverlayInClipDedup:
     """
