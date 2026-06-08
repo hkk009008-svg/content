@@ -646,6 +646,28 @@ class TestCallLLMSingleChargeOnExtractionError:
         )
         assert result == "", f"empty content should return ''; got {result!r}"
 
+    def test_openai_create_ok_empty_choices_one_call_returns_empty(self, tmp_path):
+        """OpenAI: create succeeds, response.choices is an empty list, WITH images
+        attached → extraction IndexError must NOT fire the text-only retry;
+        exactly 1 create call; returns ""."""
+        cd = _make_cd(provider="openai")
+        take_path = tmp_path / "take.jpg"
+        _save_pil(_tiny_pil_image(), take_path)
+        take_b64 = encode_image_for_llm(str(take_path))
+        assert take_b64
+
+        bad_resp = MagicMock()
+        bad_resp.choices = []   # response.choices[0] → IndexError at extraction
+        cd.client.chat.completions.create.return_value = bad_resp
+
+        result = cd._call_llm("sys", "user text", image_b64s=[take_b64])
+
+        assert cd.client.chat.completions.create.call_count == 1, (
+            "extraction errors are NOT retry-eligible (F2): expected exactly one "
+            "create call, the text-only retry must not fire"
+        )
+        assert result == ""
+
 
 # ─── 17. F4 — openai retry path; text-only no-retry ──────────────────────────
 
