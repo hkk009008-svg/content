@@ -822,6 +822,12 @@ function ClipCard({
                     {diagnosis.advisory_deep.source ?? 'llm'}
                   </span>
                 </div>
+                {diagnosis.advisory_deep.visual_findings && (
+                  <div className="space-y-1">
+                    <div className="text-editorial-ivory-mute uppercase text-eyebrow tracking-wide">Visual findings</div>
+                    <div className="text-editorial-ivory-mute">{diagnosis.advisory_deep.visual_findings}</div>
+                  </div>
+                )}
                 {diagnosis.advisory_deep.diagnosis && (
                   <div className="text-editorial-ivory-mute">{diagnosis.advisory_deep.diagnosis}</div>
                 )}
