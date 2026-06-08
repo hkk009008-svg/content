@@ -262,8 +262,63 @@ the same key for a subset-characters scene.
 
 ---
 
+## T-E — Residual in-frame→scene-audio char divergence at two F1b/native sites + char-filter helper extraction (+2 model-id hygiene minors)
+
+**STATUS: OPEN — filed 2026-06-08** (promoted from the `9aed3ce` commit-body
+deferral by the deferred-minors batch's final cross-cutting review, which
+verified both sites verbatim at batch BASE `e018c71` — PRE-EXISTING, not
+introduced by the batch).
+
+**Severity: MEDIUM** (same `dialogue_cache_key`-divergence class as the
+`9aed3ce` CRITICAL: paid TTS regen + off-frame lines voiced by the wrong
+character on multi-char shots where `characters_in_frame ⊂
+characters_present`; the native-mode path is reachable in production).
+
+### Evidence
+
+- `cinema/shots/controller.py:252-257` — `_resolve_f1b_audio` scene-fallback/
+  native paths pass in-frame-derived chars (from `:1373-1377`) to
+  `_ensure_scene_audio`, which keys a SCENE-scoped artifact.
+- `controller.py:1459-1462` — F1b fallback, same shape (chars from
+  `:1447-1453`).
+- Post-batch consistent state everywhere else: scene-audio writers + estimator
+  scene-filtered; shot-audio writer + estimator in-frame-filtered (final
+  cross-cutting review map, batch `e018c71..ff05d8c`).
+
+### Fix direction
+
+Extract shared helpers (per the item-F quality review MINOR-2):
+`scene_characters(chars, scene)` / `shot_characters(chars, shot, scene)` in
+`audio.dialogue` (leaf module, already imported by all callers), then route
+ALL writer + estimator sites through them — kills the 4-site hand-mirror
+drift class structurally. At the two F1b/native sites, decide per-site
+whether the artifact is scene-scoped (→ scene filter, like `9aed3ce`) or
+genuinely shot-scoped; the duration-estimation use of chars at `:1373-1377`
+may legitimately differ from the audio-keying use — separate the two
+concerns when fixing.
+
+### Related hygiene minors (fold here or close separately)
+
+- `cost_tracker.py:80-81` — pricing row for never-valid
+  `claude-opus-4-20250918` (the id item G scrubbed from `ensemble.py`);
+  PRICING lacks `claude-opus-4-8` → latent $0.00-logging if judge
+  cost-tracking lands. Judgment call: pricing-row keys may be kept for
+  historical attribution — add the 4-8 row, decide on the dead row.
+- `web_server.py:373` — catalog label `"Claude Opus 4"` for value
+  `"claude-opus"` is stale; it resolves to Opus 4.8 via `ensemble.py:136`
+  post-G.
+
+### Acceptance
+
+- All `_ensure_scene_audio` callers pass scene-filtered chars (or a
+  documented per-site rationale); all key computations route through the
+  shared helpers; regression tests pin both F1b/native sites.
+
+---
+
 *Disposition (final): user-directed "do t-a t-b" same session — operator
 implemented both (dispatch-claim `465891e`), sequential Lane B + dual cold
 reviews each + live runtime acceptance; director independently re-verified
 green and FF-merged `c28f9e6` (event `2026-06-07T23-29-45Z`). Both CLOSED.
-T-C appended 2026-06-08 (operator deferred-minors batch, OPEN).*
+T-C appended 2026-06-08 (operator deferred-minors batch, OPEN). T-D CLOSED
+same batch (`5a8a0f8`+`e6ae6e3`). T-E appended at batch close (OPEN).*
