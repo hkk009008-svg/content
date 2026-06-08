@@ -778,4 +778,78 @@ class TestPortraitRoutingSafety:
         assert result == output_mp4, (
             f"Expected landscape clip to be accepted; got result={result!r}"
         )
+
+    # ------------------------------------------------------------------
+    # Test 5 (F1 regression): a non-portrait-capable INITIAL target must
+    # be rejected and cascade — never dispatched. Closes the PF-4 gap.
+    # ------------------------------------------------------------------
+    def test_non_portrait_capable_initial_target_rejected_for_portrait(self):
+        """F1: target_api='LTX' (the establishing_shot route; LTX ∉ PORTRAIT_CAPABLE)
+        at a portrait project. The cascade's is_portrait filter only guards the
+        fallback_list — the INITIAL target was dispatched unfiltered, so LTX wrote a
+        landscape clip and the backstop fail-opened on probe failure → landscape
+        accepted. After the top-level pre-dispatch guard, LTX must NEVER be dispatched;
+        the portrait-capable fallback (VEO_NATIVE) wins instead.
+
+        Reproduction faithfulness: probe returns no dims ({"format": {}}) → the
+        backstop fail-opens (accept). WITHOUT the guard, LTX is dispatched first and
+        wins with that fail-open (the F1 harm — landscape leaks). WITH the guard, LTX
+        is skipped, VEO_NATIVE is dispatched, and VEO wins.
+        """
+        output_mp4 = "/tmp/f1_initial_target_out.mp4"
+        _cascade_out = {}
+
+        ltx_mod = MagicMock()
+        ltx_inst = MagicMock()
+        ltx_inst.generate_video.return_value = output_mp4  # would "succeed" if reached
+        ltx_mod.LTXVideoAPI.return_value = ltx_inst
+
+        veo_mod = MagicMock()
+        veo_inst = MagicMock()
+        veo_inst.generate_video.return_value = output_mp4
+        veo_mod.VeoNativeAPI.return_value = veo_inst
+
+        _saved_ltx = sys.modules.pop("ltx_native", None)
+        _saved_veo = sys.modules.pop("veo_native", None)
+        sys.modules.pop("phase_c_ffmpeg", None)
+        sys.modules["ltx_native"] = ltx_mod
+        sys.modules["veo_native"] = veo_mod
+
+        try:
+            # probe returns no dims → _accept_or_reject fail-opens (the F1 condition).
+            with patch("phase_c_ffmpeg.probe_final_media", return_value={"format": {}}):
+                import phase_c_ffmpeg
+                result = phase_c_ffmpeg.generate_ai_video(
+                    image_path="/tmp/f.png",
+                    camera_motion="zoom_in_slow",
+                    target_api="LTX",  # non-portrait-capable INITIAL target
+                    output_mp4=output_mp4,
+                    shot_type="establishing_shot",
+                    video_fallbacks=["LTX", "VEO_NATIVE"],
+                    ctx=_ctx("9:16"),
+                    _cascade_out=_cascade_out,
+                )
+        finally:
+            sys.modules.pop("phase_c_ffmpeg", None)
+            if _saved_ltx is not None:
+                sys.modules["ltx_native"] = _saved_ltx
+            else:
+                sys.modules.pop("ltx_native", None)
+            if _saved_veo is not None:
+                sys.modules["veo_native"] = _saved_veo
+            else:
+                sys.modules.pop("veo_native", None)
+
+        # LTX must never be constructed or called — the pre-dispatch guard drops it.
+        assert not ltx_inst.generate_video.called, (
+            "LTX generate_video was called — non-portrait-capable INITIAL target dispatched (F1)"
+        )
+        assert not ltx_mod.LTXVideoAPI.called, (
+            "LTXVideoAPI was constructed — initial-target portrait guard missing (F1)"
+        )
+        # The portrait-capable fallback must win, not LTX.
+        assert _cascade_out.get("cascade_metadata", {}).get("engine") == "VEO_NATIVE", (
+            f"Expected VEO_NATIVE to win after LTX skipped; got: {_cascade_out}"
+        )
+        assert result == output_mp4
         assert _cascade_out.get("cascade_metadata", {}).get("engine") == "VEO_NATIVE"

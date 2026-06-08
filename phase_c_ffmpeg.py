@@ -213,6 +213,20 @@ def generate_ai_video(
                 print(f"   [VIDEO] {target_api.upper()} disabled by api_engines — delegating to cascade")
                 return try_next_api()
 
+    # Portrait projects: a target that cannot produce 9:16 must NOT be dispatched as the
+    # INITIAL target — skip straight to the cascade (portrait-filtered inside try_next_api).
+    # Mirrors the disabled-engine short-circuit above. Without this guard, a non-portrait-
+    # capable initial target (e.g. establishing_shot → LTX, which is excluded from
+    # PORTRAIT_CAPABLE) is dispatched unfiltered: it writes a landscape clip and the
+    # post-gen backstop is the sole defense — and _accept_or_reject fail-opens on a probe
+    # failure, so the landscape clip is accepted (F1). The retry-pass first_api
+    # (try_next_api's quota-cooldown branch) re-enters generate_ai_video from the top, so
+    # this single guard also closes that path. target_api was already appended to
+    # attempted_apis above, so the cascade correctly skips it.
+    if is_portrait(_aspect) and target_api.upper() not in PORTRAIT_CAPABLE:
+        print(f"   [VIDEO] {target_api.upper()} cannot produce {_aspect} portrait — delegating to portrait-filtered cascade")
+        return try_next_api()
+
     # ═══════════════════════════════════════════════════════════════
     # NATIVE API HANDLERS (priority — direct, no proxy, lower cost)
     # ═══════════════════════════════════════════════════════════════
