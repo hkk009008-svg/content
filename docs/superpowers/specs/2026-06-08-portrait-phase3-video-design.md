@@ -32,6 +32,12 @@ So everything portrait is a **provable 16:9 no-op today**. **Phase 3 makes the
 *video* providers emit true 9:16, validates it on-pod, then appends `"9:16"` to
 the gate** — at which point the whole portrait path goes live end-to-end.
 
+Phase 2's inert-at-16:9 property is **independently verified** by the operator's
+coalesced CC-1 Lane V (Rule #9 second opinion): 5/5 dimensions clean, 0 actionable,
+adversarial whole-dict byte-identity refutation (could not produce a single 16:9
+counterexample) — report `2026-06-08T04-31-45Z`. Phase 3 builds on a confirmed-clean
+foundation, and inherits two forward-carries from that review (§8, §10).
+
 **Ship set (user decision #1):** **Veo, Sora, Kling, Runway.** LTX (native-only,
 pod-gated), Seedance, and Hedra are **deferred/excluded** from portrait (§7).
 
@@ -204,6 +210,11 @@ existing `scripts/_*.py`):
   9:16 clip from a 9:16 keyframe.
 - `ffprobe` the output; assert `height > width` (and ≥ target after upscale where
   applicable).
+- **Image-keyframe enum smoke (operator CC-1 forward-carry SPEC-3):** also run a
+  live FAL **schnell** generation to confirm `image_size="portrait_16_9"` is the
+  correct enum — the Phase-2 unit tests assert the *mapping*, not API *acceptance*.
+  Pairs with the on-pod 9:16 latent validation; cheap insurance against a portrait
+  image-keyframe path that unit-tests-green but API-rejects.
 - Print a **PASS/FAIL table**; exit non-zero on any FAIL.
 - **Hard gate:** the §9-T10 un-gate commit is **blocked until PASS**; the table
   output is pasted into the un-gate commit body (ADR-013 evidence).
@@ -248,9 +259,18 @@ Pre-ship enum checks (decision #5) are verify-then-wire steps inside T3/T4.
 | U8 | `model="gen4"` actually fails today | superseded — fixing proactively (decision 6b) | T5a |
 | U10 | a real 9:16 keyframe reaches the i2v call | open | T6 trace + T7 backstop |
 | LTX | native `ltx-2-3-pro` 9:16; `LTX_API_KEY` in prod | deferred | post-ship pod-validate |
+| SPEC-3 | schnell `image_size="portrait_16_9"` FAL enum (image keyframe) | open — operator CC-1 forward-carry | T9 preflight (live schnell smoke) |
 
 No item resting on `unknown`/low-confidence is treated as `yes` in the ship; each
 is closed in-task or by the preflight before T10.
+
+**Opportunistic cleanups (operator CC-1 forward-carry INFO-1 / PLUMB-5):** if a
+task touches `_inject_aspect` or the production swap sites, fold the cosmetic
+cleanups then (INFO-1: `ins = node.get("inputs", {})` throwaway-dict fallback is
+unreachable-but-harmless → cleaner `node.get("inputs")` + isinstance-continue;
+PLUMB-5: production node-102/Pollinations hardcoded-1344×768 vs max-tier dynamic
+node-read asymmetry — awareness only). **Not worth a standalone commit** on a
+dormant path.
 
 ---
 
