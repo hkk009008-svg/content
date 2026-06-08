@@ -52,9 +52,9 @@ produces 1080×1920 portrait video from every shipped provider, validated by
 Capability flags survived an adversarial verify pass except **LTX** (audit said
 `yes`; verify downgraded to `unknown` — FAL default route is 16:9-locked). The
 director spot-check additionally **corrected U9** (see §10): the claimed
-"ctx-plumbing blocker" is **false** — `controller.py:641` and `:1376` both build
+"ctx-plumbing blocker" is **false** — `cinema/shots/controller.py:641` and `:1376` both build
 `PipelineContext(global_settings=settings)` where `settings = project.get(
-"global_settings", {})` (verified by reading `controller.py:496`, `:1239`,
+"global_settings", {})` (verified by reading `cinema/shots/controller.py:496`, `:1239`,
 `:1376`). The motion `ctx` correctly carries project settings; **no controller
 ctx fix is needed**, and Phase-2 images are unaffected.
 
@@ -118,9 +118,14 @@ churn on the spine.
 
 ### §4.3 Bucket A — native-param providers
 Per the §2 matrix "Phase-3 wiring" column. Key gotchas:
-- **Veo native:** new `aspect_ratio` param is **additive** (default `"16:9"`) →
-  backward-compatible for existing callers. Use `fal_aspect_ratio` (SDK enum),
-  **not** `portrait_swap` (no pixel transpose).
+- **Veo native:** new `aspect_ratio` param is **additive** — append it as the
+  **last** parameter of `generate_video` with default `"16:9"`. Back-compat is
+  **verified, not asserted** (Rule #12): the only `*.generate_video(` callers are
+  the 4 production sites `phase_c_ffmpeg.py:208/249/277/319` (kling/sora/veo/ltx),
+  all **keyword-arg** (e.g. `:277` passes `image_path=…, prompt=…, output_path=…`),
+  plus 3 `scripts/_*.py` dev harnesses (also keyword) — so no positional caller can
+  be shifted. Use `fal_aspect_ratio` (SDK enum), **not** `portrait_swap` (no pixel
+  transpose).
 - **Sora native:** the `:114-118` keyframe **force-resize to landscape** must be
   fixed (apply `portrait_swap` or skip when portrait) or the portrait `size`
   fights a landscape-resized frame.
@@ -129,7 +134,7 @@ Per the §2 matrix "Phase-3 wiring" column. Key gotchas:
 ### §4.4 Bucket B — Kling (keyframe-inherits)
 No payload change (no aspect param exists). Kling i2v inherits aspect from the
 input keyframe. **Keyframe-provenance trace (load-bearing):** confirm a genuine
-9:16 Phase-2 keyframe reaches `source_image` (`controller.py:1405` →
+9:16 Phase-2 keyframe reaches `source_image` (`cinema/shots/controller.py:1405` →
 `generate_ai_video`); add a defensive log/assert if the source image is landscape
 while the project is portrait.
 
@@ -138,15 +143,36 @@ The fallback cascade can silently route a portrait shot to a 16:9-locked provide
 (LTX-fal/Seedance) which emits 16:9 **with no error**. Two coordinated defenses:
 1. **Routing filter:** when `is_portrait(_aspect)`, exclude non-shipped providers
    (LTX-fal, Seedance, Hedra) from the `video_fallbacks` cascade.
-2. **Post-generation aspect backstop:** after a clip is produced, reject it if its
-   orientation ≠ the project aspect (probe dims), so the cascade retries the next
-   provider. Catches **all** silent-landscape paths (Kling keyframe leak, Sora
-   resize, any cascade fall-through). The scorecard remains the final backstop.
+2. **Post-generation aspect backstop:** after a clip is produced, probe its dims
+   (`ffprobe`) and reject it if orientation ≠ the project aspect, converting a
+   *wrong-orientation success* into a cascade advance. **Integration surface:** the
+   cascade in `generate_ai_video` (`phase_c_ffmpeg.py`) — each provider returns its
+   clip via `return result` on success (`:227/:266/:294`) or `try_next_api()` on
+   failure. The success sites are currently **per-provider** (`return result` at
+   `:227/:266/:294`), so the probe must run on **every** provider's success path —
+   either at each `return result` or, preferably, via a **shared helper wrapping the
+   returned clip** so no provider can bypass it (the plan picks the exact factoring,
+   avoiding per-provider duplication). A wrong-orientation clip routes to
+   `try_next_api()` (treated as a provider failure). **Terminal behavior (the reviewer-flagged gap):** if every shipped
+   provider yields wrong orientation, the cascade **exhausts → `return None`
+   (`:170`) → the caller (`cinema/shots/controller.py:1404`) reports "Video
+   generation failed"** — the correct **fail-loud** outcome for a portrait project
+   (never ship a landscape clip). The cascade is bounded by `fallback_list`
+   (finite), so there is **no infinite-retry risk**; and the routing filter (item 1
+   above) keeps only portrait-capable providers in the list, so
+   exhaustion-by-wrong-orientation indicates a provider API regression — which
+   *should* fail loudly. Catches **all** silent-landscape paths (Kling keyframe
+   leak, Sora resize, any cascade fall-through). The scorecard remains the final
+   backstop.
 
-### §4.6 Runway upscale (decision #2)
-Runway tops at 720:1280 / 768:1280. The assembly normalize
+### §4.6 Sub-1080 upscale (decision #2 — Runway, and Sora if 720p)
+Runway tops at 720:1280 / 768:1280; **Sora** native may return 720×1280 portrait if
+`sora-2` lacks a 1080p portrait tier (U6). The assembly normalize
 (`cinema_pipeline.py:1320`, scale filter `:45`) already scales-to-container →
-1080×1920. Verify it upscales correctly; add a test. Likely **no new code**.
+1080×1920, so it covers **any** sub-1080 provider generically. Verify it upscales
+correctly **for both Runway and Sora-720p**; add a test. Likely **no new code** —
+this is the owning task for Acceptance Criterion #1's 1080×1920 guarantee on any
+sub-1080 provider.
 
 ---
 
@@ -177,7 +203,7 @@ Appending it activates **4 already-wired surfaces** (verified):
 3. **Assembly container** — `cinema_pipeline.py:1367-1370` coerces unsupported →
    default today; un-gating lets 9:16 pass → `resolve_output_dimensions("9:16")=
    (1080,1920)`.
-4. **Scorecard** — `capability_scorecard.py:96-98` grades the portrait format pass.
+4. **Scorecard** — `cinema/capability_scorecard.py:96-98` grades the portrait format pass.
 
 These serve **images + container + scorecard**. If the gate opens **before** the
 video providers are aspect-aware, every portrait project regresses to
@@ -234,12 +260,12 @@ un-gate are their **own** commits. ~10 sub-tasks → subagent-driven-development
 | **T1** | `cinema/aspect.py`: add `runway_ratio(aspect, model)` + unit tests | both models × both orientations correct; 16:9 unchanged |
 | **T2** | Threading spine: hoist `_aspect` + import helpers in `generate_ai_video` | `_aspect` available to all branches; 16:9 path byte-identical |
 | **T3** | Veo wiring (native param + thread; fal `:491`) + tests; confirm fal enum spelling | 9:16 → Veo emits portrait; 16:9 refute test passes; new param additive/back-compat |
-| **T4** | Sora wiring (fal `:423`; native dims + **`:114-118` resize fix**) + tests | 9:16 → portrait `size`/clip; landscape force-resize fixed; 16:9 refute test |
+| **T4** | Sora wiring (fal `:423`; native dims + **`:114-118` resize fix**) + tests | 9:16 → portrait `size`/clip; landscape force-resize fixed; 16:9 refute test; **if `sora-2` returns 720p portrait, 1080×1920 is delivered via §4.6/T8 upscale** |
 | **T5a** | **Runway `model="gen4"`→valid SDK model** (separate commit; grep installed SDK enum) | Runway gen4 route uses a valid model; no behavior change to aspect |
 | **T5b** | Runway ratios via `runway_ratio` (`:363`, `:682`) + tests | 9:16 → 720:1280 / 768:1280; 16:9 refute test |
 | **T6** | Kling keyframe-provenance trace + defensive assert + test | confirmed 9:16 keyframe reaches the call; landscape-keyframe-when-portrait logged/caught |
-| **T7** | Portrait routing safety: cascade filter + **post-gen aspect backstop** + tests | portrait cascade excludes LTX-fal/Seedance/Hedra; wrong-orientation clip rejected → cascade retries |
-| **T8** | Runway upscale verification (assembly normalize) + test | 720/768-wide → 1080×1920 verified |
+| **T7** | Portrait routing safety: cascade filter (`phase_c_ffmpeg.py:126-145`) + **post-gen aspect backstop** at the shared success boundary + tests | portrait cascade excludes LTX-fal/Seedance/Hedra; wrong-orientation clip → `try_next_api()`; **all-wrong → cascade exhausts → `None` (fail-loud), bounded (no infinite retry)**; test covers reject-retry + exhaustion paths |
+| **T8** | Sub-1080 upscale verification (assembly normalize) — Runway **and** Sora-720p | 720/768-wide → 1080×1920 verified for both providers |
 | **T9** | `scripts/_phase3_portrait_preflight.py` | PASS/FAIL table per shipped provider; exit code reflects result |
 | **T10** | **Un-gate** — append `"9:16"` to `SUPPORTED_ASPECT_RATIOS` | **GATED on T9 PASS**; evidence in commit body; un-gate is the final commit |
 
@@ -252,7 +278,7 @@ Pre-ship enum checks (decision #5) are verify-then-wire steps inside T3/T4.
 
 | # | Item | Status | Resolved by |
 |---|---|---|---|
-| U9 | ctx threads project aspect to motion | **RESOLVED — FALSE positive** (director spot-check: `controller.py:496/1239/1376` pass project `global_settings`) | this spec §2 |
+| U9 | ctx threads project aspect to motion | **RESOLVED — FALSE positive** (director spot-check: `cinema/shots/controller.py:496/1239/1376` pass project `global_settings`) | this spec §2 |
 | U5 | fal veo3.1 `9:16` enum spelling | open | T3 verify-then-wire |
 | U6 | Sora `sora-2` portrait 1080p tier (vs `sora-2-pro`) | open | T4 (accept+upscale if 720p) |
 | U7 | Runway runtime accepts portrait `ratio` | open | T9 preflight (live) |
