@@ -642,3 +642,73 @@ class TestMutatorVariant1RaceProtection:
         reloaded = project_manager.load_project(valid_project["id"])
         ids = [c["id"] for c in reloaded["characters"]]
         assert char["id"] in ids
+
+
+# ---------------------------------------------------------------------------
+# normalize_project_schema — creative_llm read-time migration (618a6b3 residual)
+# ---------------------------------------------------------------------------
+
+class TestNormalizeCreativeLLMMigration:
+    """Pure-dict, no I/O.  Mirrors VBench-drop test shape in domain/project_manager.py."""
+
+    def _minimal_project(self, creative_llm=None):
+        """Return a minimal project dict with only the keys normalize_project_schema
+        touches, so the only mutation trigger is the creative_llm value."""
+        proj = {
+            "characters": [],
+            "locations": [],
+            "scenes": [],
+            "global_settings": {},
+        }
+        if creative_llm is not None:
+            proj["global_settings"]["creative_llm"] = creative_llm
+        return proj
+
+    def test_retired_sonnet_4_20250514_remapped(self):
+        """claude-sonnet-4-20250514 → claude-sonnet-4-6, changed=True."""
+        from domain.project_manager import normalize_project_schema
+        proj = self._minimal_project("claude-sonnet-4-20250514")
+        changed = normalize_project_schema(proj)
+        assert changed is True
+        assert proj["global_settings"]["creative_llm"] == "claude-sonnet-4-6"
+
+    def test_stale_catalog_claude_sonnet_remapped(self):
+        """claude-sonnet (bare, stale BE catalog value) → claude-sonnet-4-6, changed=True."""
+        from domain.project_manager import normalize_project_schema
+        proj = self._minimal_project("claude-sonnet")
+        changed = normalize_project_schema(proj)
+        assert changed is True
+        assert proj["global_settings"]["creative_llm"] == "claude-sonnet-4-6"
+
+    def test_auto_untouched(self):
+        """creative_llm='auto' is not a retired id — untouched, changed=False."""
+        from domain.project_manager import normalize_project_schema
+        proj = self._minimal_project("auto")
+        changed = normalize_project_schema(proj)
+        assert changed is False
+        assert proj["global_settings"]["creative_llm"] == "auto"
+
+    def test_current_sonnet_4_6_untouched(self):
+        """claude-sonnet-4-6 is already the target — must not be remapped."""
+        from domain.project_manager import normalize_project_schema
+        proj = self._minimal_project("claude-sonnet-4-6")
+        changed = normalize_project_schema(proj)
+        assert changed is False
+        assert proj["global_settings"]["creative_llm"] == "claude-sonnet-4-6"
+
+    def test_gpt4o_untouched(self):
+        """Non-Anthropic model id passes through unchanged."""
+        from domain.project_manager import normalize_project_schema
+        proj = self._minimal_project("gpt-4o")
+        changed = normalize_project_schema(proj)
+        assert changed is False
+        assert proj["global_settings"]["creative_llm"] == "gpt-4o"
+
+    def test_missing_creative_llm_key_no_error(self):
+        """global_settings without creative_llm key — no KeyError, no spurious change."""
+        from domain.project_manager import normalize_project_schema
+        proj = self._minimal_project()  # key absent
+        assert "creative_llm" not in proj["global_settings"]
+        changed = normalize_project_schema(proj)
+        assert changed is False
+        assert "creative_llm" not in proj["global_settings"]

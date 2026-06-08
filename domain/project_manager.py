@@ -537,6 +537,18 @@ def normalize_shot_schema(
     return changed
 
 
+# Map retired / invalid Anthropic model ids that may be persisted in
+# project records' creative_llm setting to their current replacements.
+# Applied read-time by normalize_project_schema so records converge on
+# next save without requiring a bulk migration script.
+_RETIRED_CREATIVE_LLM_IDS = {
+    # 618a6b3 swapped live defaults; records persisted pre-swap 404 after 2026-06-15
+    "claude-sonnet-4-20250514": "claude-sonnet-4-6",
+    # stale BE creative_llm_options value (web_server.py catalog) — never a valid raw API id
+    "claude-sonnet": "claude-sonnet-4-6",
+}
+
+
 def normalize_project_schema(project: Optional[dict]) -> bool:
     if not project:
         return False
@@ -570,6 +582,15 @@ def normalize_project_schema(project: Optional[dict]) -> bool:
         if legacy_key in settings:
             settings.pop(legacy_key, None)
             changed = True
+
+    # Read-time migration: remap retired/invalid creative_llm model ids so
+    # projects persisted before 618a6b3 (or with the stale BE catalog value
+    # "claude-sonnet") resolve to a valid API id before the 2026-06-15
+    # retirement of claude-sonnet-4-20250514 causes 404s in production.
+    _creative = settings.get("creative_llm")
+    if _creative in _RETIRED_CREATIVE_LLM_IDS:
+        settings["creative_llm"] = _RETIRED_CREATIVE_LLM_IDS[_creative]
+        changed = True
 
     seen_shot_ids: set[str] = set()
     for scene_index, scene in enumerate(project["scenes"]):

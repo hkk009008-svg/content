@@ -365,7 +365,7 @@ def get_config():
         ],
         "creative_llm_options": [
             {"value": "auto", "label": "Auto (Router decides)"},
-            {"value": "claude-sonnet", "label": "Claude Sonnet 4"},
+            {"value": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6"},
             {"value": "gpt-4o", "label": "GPT-4o"},
         ],
         "quality_judge_options": [

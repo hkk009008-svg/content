@@ -502,7 +502,7 @@ seeds these `global_settings`:
 "color_drift_sensitivity": 0.3,
 ```
 
-`normalize_project_schema()` ([domain/project_manager.py:540-547](domain/project_manager.py:540))
+`normalize_project_schema()` ([domain/project_manager.py:552-559](domain/project_manager.py:552))
 **actively strips** three legacy keys from any project.json loaded from disk:
 `vbench_overall_threshold`, `temporal_flicker_tolerance`, `regression_sensitivity`.
 
