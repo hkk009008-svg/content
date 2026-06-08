@@ -327,7 +327,20 @@ class MotionRenderPhase:
                 elapsed_s=0.0,
             )
 
-        storyboard_mode = _get_storyboard_mode(self._project)
+        # M-1 (Rule #13 / operator Lane V on the pre-T10 stack): the storyboard
+        # batch path (_run_storyboard_scene → KlingNativeAPI.generate_storyboard)
+        # bypasses generate_ai_video's portrait-capability guard AND the
+        # _accept_or_reject orientation backstops — and generate_storyboard takes
+        # no aspect param. At a portrait project it would emit a landscape
+        # storyboard with no orientation fence. Disqualify the batch path at
+        # portrait so the scene falls through to the GUARDED per-shot
+        # generate_motion_take → generate_ai_video path. Read aspect via the SAME
+        # get_project_setting(ctx, "aspect_ratio") the F1 guard uses
+        # (phase_c_ffmpeg.py:99) so orientation is determined identically.
+        from cinema.aspect import is_portrait, DEFAULT_ASPECT_RATIO
+        from cinema.context import get_project_setting
+        _aspect = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
+        storyboard_mode = _get_storyboard_mode(self._project) and not is_portrait(_aspect)
 
         ok_count = 0
         skip_count = 0

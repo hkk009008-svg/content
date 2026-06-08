@@ -62,6 +62,22 @@ def _make_lifecycle(cancelled: bool = False) -> MagicMock:
     return MagicMock(lifecycle=lc)
 
 
+def _make_ctx(aspect: str | None = None, cancelled: bool = False) -> MagicMock:
+    """ctx mock exposing .lifecycle.is_cancelled() AND get('global_settings').
+
+    Mirrors how the pipeline threads per-project settings: get_project_setting
+    (cinema/context.py) reads ctx.get('global_settings'). aspect=None → no
+    aspect_ratio key → resolves to the landscape default, matching the bare
+    _make_lifecycle() the pre-existing tests pass.
+    """
+    lc = MagicMock()
+    lc.is_cancelled.return_value = cancelled
+    ctx = MagicMock(lifecycle=lc)
+    gs = {"aspect_ratio": aspect} if aspect is not None else {}
+    ctx.get.side_effect = lambda k, d=None: (gs if k == "global_settings" else d)
+    return ctx
+
+
 def _make_shot(shot_id: str, kf_take_id: str = "kf_001", has_final: bool = False) -> dict:
     shot = {
         "id": shot_id,
@@ -312,6 +328,127 @@ class TestIneligibleScenes:
 
         mock_kling.generate_storyboard.assert_called_once()
         gen.generate_motion_take.assert_not_called()
+        assert result.ok is True
+
+
+# ---------------------------------------------------------------------------
+# (M-1) portrait disqualifies the storyboard batch path
+#
+# The storyboard batch path (_run_storyboard_scene → KlingNativeAPI.
+# generate_storyboard) bypasses generate_ai_video's portrait-capability guard
+# AND the _accept_or_reject orientation backstops, and generate_storyboard takes
+# no aspect param. At a portrait project it would emit a landscape storyboard
+# with no orientation fence. The phase must disqualify the batch path at portrait
+# so the scene falls through to the GUARDED per-shot generate_motion_take →
+# generate_ai_video path. (Operator Rule #9 Lane V on the pre-T10 stack, M-1.)
+# ---------------------------------------------------------------------------
+
+class TestPortraitDisqualifiesStoryboard:
+    def test_portrait_skips_storyboard_falls_through_to_per_shot(self, tmp_path):
+        """flag ON + eligible (3 shots, keyframes) but PORTRAIT → no batch path;
+        every shot goes through the guarded per-shot generate_motion_take."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        shots = [_make_shot("s1_0"), _make_shot("s1_1"), _make_shot("s1_2")]
+        scene = _make_scene("scene_1", shots)
+        project = _make_project([scene], storyboard_mode=True)
+
+        kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
+        for p in kf_paths.values():
+            open(p, "w").close()
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+        ctx = _make_ctx(aspect="9:16")  # PORTRAIT
+
+        with patch("kling_native.KlingNativeAPI") as mock_kling_cls, \
+             patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
+            # Fully wire the batch path so that IF it were (wrongly) taken it would
+            # "succeed" — making assert_not_called the sole gate, not an incidental
+            # downstream error.
+            mock_kling = MagicMock()
+            mock_kling.generate_storyboard.return_value = str(tmp_path / "sb.mp4")
+            open(str(tmp_path / "sb.mp4"), "w").close()
+            mock_kling_cls.return_value = mock_kling
+            seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(3)]
+            for p in seg_paths:
+                open(p, "w").close()
+            mock_split.return_value = seg_paths
+
+            phase = MotionRenderPhase(shot_generator=gen, project=project)
+            result = phase.run(ctx)
+
+            # Batch path must NEVER be attempted at portrait.
+            mock_kling_cls.assert_not_called()
+
+        # Fell through to the guarded per-shot path for every shot.
+        assert gen.generate_motion_take.call_count == 3
+        assert result.ok is True
+
+    def test_landscape_still_uses_storyboard(self, tmp_path):
+        """Regression: 16:9 keeps the storyboard batch path — disqualifier is
+        portrait-only."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        shots = [_make_shot("s1_0"), _make_shot("s1_1")]
+        scene = _make_scene("scene_1", shots)
+        project = _make_project([scene], storyboard_mode=True)
+
+        kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
+        for p in kf_paths.values():
+            open(p, "w").close()
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+        ctx = _make_ctx(aspect="16:9")  # LANDSCAPE
+
+        with patch("kling_native.KlingNativeAPI") as mock_kling_cls:
+            mock_kling = MagicMock()
+            mock_kling.generate_storyboard.return_value = str(tmp_path / "sb.mp4")
+            open(str(tmp_path / "sb.mp4"), "w").close()
+            mock_kling_cls.return_value = mock_kling
+            with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
+                seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(2)]
+                for p in seg_paths:
+                    open(p, "w").close()
+                mock_split.return_value = seg_paths
+
+                phase = MotionRenderPhase(shot_generator=gen, project=project)
+                result = phase.run(ctx)
+
+        mock_kling.generate_storyboard.assert_called_once()
+        gen.generate_motion_take.assert_not_called()
+        assert result.ok is True
+
+    def test_no_aspect_defaults_landscape_uses_storyboard(self, tmp_path):
+        """aspect absent → landscape default → storyboard still used (matches the
+        bare _make_lifecycle() the pre-existing tests pass)."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        shots = [_make_shot("s1_0"), _make_shot("s1_1")]
+        scene = _make_scene("scene_1", shots)
+        project = _make_project([scene], storyboard_mode=True)
+
+        kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
+        for p in kf_paths.values():
+            open(p, "w").close()
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+        ctx = _make_ctx(aspect=None)  # no aspect → landscape default
+
+        with patch("kling_native.KlingNativeAPI") as mock_kling_cls:
+            mock_kling = MagicMock()
+            mock_kling.generate_storyboard.return_value = str(tmp_path / "sb.mp4")
+            open(str(tmp_path / "sb.mp4"), "w").close()
+            mock_kling_cls.return_value = mock_kling
+            with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
+                seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(2)]
+                for p in seg_paths:
+                    open(p, "w").close()
+                mock_split.return_value = seg_paths
+
+                phase = MotionRenderPhase(shot_generator=gen, project=project)
+                result = phase.run(ctx)
+
+        mock_kling.generate_storyboard.assert_called_once()
         assert result.ok is True
 
 
