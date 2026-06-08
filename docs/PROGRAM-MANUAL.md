@@ -635,7 +635,7 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 | `_running_cores` not invalidated on settings edit | `web_server.py:109` | Out-of-band `settings.json` edits need a server restart. |
 | Re-assemble must call `_assemble_approved_takes_core` directly | `web_server.py:2418`, `cinema_pipeline.py:685` | Calling the full `assemble_approved_takes()` from a Flask thread during screening deadlocks (the approve signal targets the original pipeline). |
 | Stubbed / zero-caller features | `prep/lora_training.py:512`, `quality_max.py:738`, `cinema/auto_approve.py:693` | `validate_lora_quality` returns −1.0; hires-fix pass-2 denoise not injected; `halt_rule` enum accepted but only `composite_only` dispatched; `summarize_audit` defined but unwired. |
-| `reporter.py` orphan + dead dialogue helpers | `reporter.py:6`, `domain/dialogue_writer.py:159` | `generate_report` has no callers; `format_dialogue_for_voiceover` / `dialogue_to_narration_text` have zero live callers (audio uses raw `generate_dialogue` output). |
+| `reporter.py` orphan + removed dialogue helpers | `reporter.py:6` | `generate_report` has no callers; the dead dialogue helpers `format_dialogue_for_voiceover` / `dialogue_to_narration_text` were **removed** (pruned in `45c2299`; audio uses raw `generate_dialogue` output). |
 
 ---
 

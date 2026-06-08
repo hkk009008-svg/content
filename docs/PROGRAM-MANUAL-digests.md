@@ -408,9 +408,9 @@ pipeline.generate(resume=False)
 - `cinema/screening.py:65-66` — `SCREENING_STAGE_NAME`, `SCREENING_APPROVED_KEY`
 - `cinema/screening.py:84-127` — `_screening_stage_enabled()`
 - `cinema/screening.py:275-284` — `is_screening_approved()`
-- `domain/scene_decomposer.py:1-9` — shim re-export from `domain/scene_decomposer.py`
-- `domain/dialogue_writer.py:1-9` — shim re-export from `domain/dialogue_writer.py`
-- `domain/project_manager.py:1-9` — shim re-export from `domain/project_manager.py`
+- root `scene_decomposer.py` — 9-LOC re-export shim for `domain/scene_decomposer.py`
+- root `dialogue_writer.py` — 9-LOC re-export shim for `domain/dialogue_writer.py`
+- root `project_manager.py` — 9-LOC re-export shim for `domain/project_manager.py`
 
 ---
 
@@ -847,7 +847,7 @@ The phase abstraction decouples the three main per-shot render loops (keyframe g
 
 6. **`PerformanceCapturePhase` gate is auto-skipped only if ALL shots are SKIP**: `cinema_pipeline.py:1038-1043` — the predicate checks `performance_engine == "SKIP" OR not approved_keyframe_take_id`. A single shot that was supposed to get a performance but failed (and landed in `failed_shots`) would keep the gate open. Operator must manually handle.
 
-7. **`motion_render.py` references `cinema/phases/base.py:39`** comments like "F2b" and "Tier F NEW-2" — internal planning terminology from migration slices; these are not external API names.
+7. **Internal planning terms "F2b" / "Tier F NEW-2"** appear as code comments (`cinema/phases/motion_render.py:17` "Storyboard batch path (F2b)"; `cinema/phases/motion_render.py:185` "Tier F NEW-2") — migration-slice terminology, not external API names.
 
 8. **`cinema/services.py` was introduced as Slice 3b/Phase 7 (REFACTOR_HANDOFF §9.2)** — the module docstring mentions this provenance. The contract it implements (`state_snapshot` replaces `CinemaPipeline(pid).get_state()`; `checkpoint_info` replaces `CinemaPipeline(pid).resume_info()`) is stable but the old call-site pattern may appear in older docs.
 
@@ -1775,7 +1775,7 @@ All knobs live in `project.global_settings` (set via `PUT /api/projects/<pid>` �
 | MODIFIED normalizes to APPROVED (cycle-17 decision) | `cinema/auto_approve.py:219-235`; commit `138d7c7` |
 | chief_director_verdict persisted per shot | `cinema/auto_approve.py:243` |
 | LLMEnsemble used in domain/scene_decomposer | `domain/scene_decomposer.py:11,749` |
-| Dual-module shims all 9-LOC re-exports | `domain/scene_decomposer.py:1-9`, `domain/character_manager.py:1-9`, etc. |
+| Dual-module shims all 9-LOC re-exports | root `scene_decomposer.py`, `character_manager.py` (→ `domain/`), etc. |
 | PIPELINE_CONTEXT from config/prompts/pipeline_context.md | `pipeline_context.py:14-16` |
 | research_engine.py and web_research.py exist | `ls` result |
 | _strip_json_fences 3rd copy in ensemble | `llm/ensemble.py:25-27` |
@@ -1835,11 +1835,8 @@ Params: `scene: dict`, `characters: List[dict]`, `mood: str = "neutral"`, `style
 Returns: `List[dict]` — each entry `{"character_id", "character_name", "text", "delivery"}`.
 Flow: builds char descriptions → adds `language_directive` if non-English (instructs native script in `text`, English in `delivery`, no name translation) → calls `web_research.run_with_tools(client, "gpt-4o", ..., max_tool_rounds=2)` → parses response (handles list, `{"lines":}`, `{"dialogue":}`, `{"dialogue_lines":}`, single-object, any-list-value fallbacks) → validates `character_id` against known char IDs. Returns `[]` on exception.
 
-**`format_dialogue_for_voiceover`** — `domain/dialogue_writer.py:159`
-Strips to `{"character_id", "text", "delivery"}` per line. Currently has zero non-test callers (not called by pipeline or web_server; logic absorbed into `audio.dialogue.generate_dialogue_voiceover`).
-
-**`dialogue_to_narration_text`** — `domain/dialogue_writer.py:174`
-Joins all `text` fields with spaces. Zero non-test callers in the working tree.
+**`format_dialogue_for_voiceover`** / **`dialogue_to_narration_text`** — **REMOVED** (pruned in `45c2299`).
+Were dead helpers in `domain/dialogue_writer.py` with zero non-test callers (the former stripped to `{"character_id", "text", "delivery"}` per line; the latter joined `text` fields with spaces). Audio uses raw `generate_dialogue` output via `audio.dialogue.generate_dialogue_voiceover`.
 
 **`get_language_defaults`** — `domain/language_defaults.py:136`
 Returns a copy of `PIPELINE_LANGUAGE_DEFAULTS[language]` or `_default`. Supports: English, Korean, Japanese, Mandarin, `_default` (universal fallback).
@@ -1989,7 +1986,7 @@ List of shot dicts from `make_shot()` (`domain/project_manager.py:262`) with add
 
 **3. `research_engine.py` and `web_research.py` both define `_get_tavily()` and `_get_firecrawl()`.** Two separate module-level singleton caches. If both are imported in the same process, they maintain separate client instances. `research_engine.py` is used for programmatic research calls (direct results to callers); `web_research.py` is used inside LLM tool loops (`run_with_tools`).
 
-**4. Shim doc comment mentions `main.py`, `cleanup.py` as callers.** `main.py` is deleted (confirmed by MEMORY.md). The shim's docstring (`domain/scene_decomposer.py:5`) is stale on this point.
+**4. Shim doc comment mentions `main.py`, `cleanup.py` as callers.** `main.py` is deleted (confirmed by MEMORY.md). The root `scene_decomposer.py` shim's docstring is stale on this point.
 
 **5. `PIPELINE_CONTEXT` includes stale lipsync routing.** `config/prompts/pipeline_context.md:19` says "Dialogue close-up → VEO_NATIVE / Native lip-sync", but `PIPELINE_CONTEXT` section 2 lines 42-44 describe Omnihuman v1.5 as PRIMARY and Veo as OPT-IN only (RAI filter concern). The API routing table (section 1) conflicts with section 2's cascade. Decomposer LLM sees both and must reconcile; the hard-coded `PURPOSE_API_RANKING["dialogue_close_up"]` in code (`domain/scene_decomposer.py:120`) leads with `HEDRA_C3`, not `VEO_NATIVE`.
 
@@ -2005,7 +2002,7 @@ List of shot dicts from `make_shot()` (`domain/project_manager.py:262`) with add
 
 ### Citations
 
-- `domain/scene_decomposer.py:1-9` — shim definition, lists legacy callers (including stale `main.py`)
+- root `scene_decomposer.py` — 9-LOC shim definition, lists legacy callers (including stale `main.py`)
 - `domain/scene_decomposer.py:16-21` — `CAMERA_MOTIONS` list
 - `domain/scene_decomposer.py:23-26` — `VISUAL_EFFECTS` list
 - `domain/scene_decomposer.py:36-91` — `API_REGISTRY` (full registry with modality/best_for/per_shot_cost/status)
@@ -2030,8 +2027,7 @@ List of shot dicts from `make_shot()` (`domain/project_manager.py:262`) with add
 - `domain/dialogue_writer.py:12-156` — `generate_dialogue` (full impl)
 - `domain/dialogue_writer.py:51-58` — `language_directive` construction for non-English
 - `domain/dialogue_writer.py:92-101` — `run_with_tools` call in dialogue
-- `domain/dialogue_writer.py:159-171` — `format_dialogue_for_voiceover` (unused in prod)
-- `domain/dialogue_writer.py:174-184` — `dialogue_to_narration_text` (unused in prod)
+- `format_dialogue_for_voiceover` / `dialogue_to_narration_text` — REMOVED from `domain/dialogue_writer.py` (pruned in `45c2299`; were dead, unused in prod)
 - `domain/language_defaults.py:48-127` — `PIPELINE_LANGUAGE_DEFAULTS` dict (4 languages + `_default`)
 - `domain/language_defaults.py:130-134` — `get_language_defaults`
 - `domain/language_defaults.py:141-148` — `APPLIED_SETTINGS_FIELDS` tuple
