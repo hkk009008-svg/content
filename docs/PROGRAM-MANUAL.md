@@ -132,7 +132,7 @@ One orchestrator — `cinema_pipeline.CinemaPipeline` (`cinema_pipeline.py:38`) 
 - **It never silently produces junk.** Every stage is gated and scored: prompts by the Chief Director, images by ArcFace identity + aesthetic gates, motion by optical-flow fidelity, lip-sync by a SyncNet gate. Failures are diagnosed and routed to rework, not buried.
 - **It degrades gracefully, not catastrophically.** Vendor cascades, LLM provider fallback (Anthropic → OpenAI), and deterministic LLM-free fallbacks (e.g. `_fallback_decompose`) mean a missing API key or a 429 narrows capability rather than killing the run.
 - **It is resumable.** State is checkpointed to disk after every scene (`cinema/checkpoint.py`); a crashed run restarts where it left off.
-- **It is yours to tune.** Nearly every behavior is a per-project knob in `global_settings` — quality tier, identity strictness, auto-approve thresholds, scene transitions, budget cap, LLM/judge model — read through one canonical helper (`get_project_setting`, `cinema/context.py:146`). One file, `config/prompts/pipeline_context.md`, is injected into *every* LLM in the pipeline, so global creative direction is a single edit away.
+- **It is yours to tune.** Nearly every behavior is a per-project knob in `global_settings` — quality tier, identity strictness, auto-approve thresholds, scene transitions, budget cap, LLM/judge model — read through one canonical helper (`get_project_setting`, `cinema/context.py:151`). One file, `config/prompts/pipeline_context.md`, is injected into *every* LLM in the pipeline, so global creative direction is a single edit away.
 - **It tracks the bill.** A SQLite-backed `CostTracker` (`cost_tracker.py`) logs every LLM and API call and can hard-gate generation against a `budget_limit_usd`.
 
 The remainder of this manual documents each of these systems in depth — the orchestration spine, the web/API surface, the phase and gate machinery, the data model, the creative-LLM brains, the video-routing cascade, the image tiers, identity/continuity, post-assembly/audio, and the cross-cutting cost/config/ops layer.
@@ -218,12 +218,12 @@ flowchart TD
 
 | # | Stage | What happens | Primary modules |
 |---|---|---|---|
-| 1 | **STYLE** | Once per run. If `global_settings.style_rules` is empty, `generate_style_rules()` (GPT-4o, optionally Tavily-grounded) produces a 7-key style dict (cinematography, color grading, lighting, photorealism…) persisted to the project. A `style_rules_to_prompt_suffix` is appended to every downstream image prompt. | `llm/style_director.py:12`; called `cinema_pipeline.py:855-893` |
+| 1 | **STYLE** | Once per run. If `global_settings.style_rules` is empty, `generate_style_rules()` (GPT-4o, optionally Tavily-grounded) produces a 7-key style dict (cinematography, color grading, lighting, photorealism…) persisted to the project. A `style_rules_to_prompt_suffix` is appended to every downstream image prompt. | `llm/style_director.py:187`; called `cinema_pipeline.py:855-893` |
 | 2 | **SCENE_DECOMPOSE** | Per scene (only if the scene has no shots yet). Converts scene prose → 2–5 API-routed shot records. `competitive_generation=True` runs GPT-4o vs Claude in parallel with a judge; otherwise single GPT-4o. Each shot gets `prompt`, `camera`, `visual_effect`, `target_api`, `characters_in_frame`. | `domain/scene_decomposer.py:429`/`:617`; called `cinema_pipeline.py:897-962` |
 | 2a | **Research augmentation** | Optional, silently skipped if `TAVILY_API_KEY`/`FIRECRAWL_API_KEY` absent. A GPT-4o tool-loop (`run_with_tools`) injects live cinematography/location/music references into decomposition and dialogue prompts to ground output in real craft. | `research_engine.py:44`, `web_research.py:122` |
 | 2b | **Director review** | `ChiefDirector.validate_shot_prompts` enforces hard constraints HC1–HC8 (identity firewall, schema lock, lighting lock, face-direction) and returns APPROVED / MODIFIED / REJECTED. **Critical:** `record_director_review_on_shots(shots, review)` then writes `shot["director_review"]` — the field the PLAN gate reads. | `llm/chief_director.py:296`; `cinema/auto_approve.py:202`; called `cinema_pipeline.py:959` |
-| 2c | **Dialogue + scene audio** | Per scene, `generate_dialogue` (LLM) → `generate_dialogue_voiceover` (ElevenLabs Dialogue Mode for 2+ speakers, or Cartesia Sonic 2 for Korean) produces an MP3 cached for later mux. BGM is pre-generated upfront. | `audio/dialogue.py:286`; `cinema_pipeline.py:481-524`, `:526` (BGM) |
-| 3 | **KEYFRAME_RENDER** | Per unapproved shot, `generate_keyframe_take` builds the prompt via `ContinuityEngine.enhance_shot_prompt`, optionally optimizes it, then calls `generate_ai_broll`: FLUX-Dev + PuLID on a ComfyUI/RunPod pod is primary; FAL FLUX Kontext → FLUX-Pro → Schnell → Pollinations are cloud fallbacks. The optional **max tier** runs N=8 adaptive best-of with ArcFace+aesthetic scoring, ControlNet, Redux, FaceDetailer, ReActor, and SUPIR 4K upscale. | `phase_c_assembly.py:72`, `quality_max.py:574`; phase wrapper `cinema/phases/keyframe_render.py:68`; called `cinema_pipeline.py:994` |
+| 2c | **Dialogue + scene audio** | Per scene, `generate_dialogue` (LLM) → `generate_dialogue_voiceover` (ElevenLabs Dialogue Mode for 2+ speakers, or Cartesia Sonic 2 for Korean) produces an MP3 cached for later mux. BGM is pre-generated upfront. | `audio/dialogue.py:419`; `cinema_pipeline.py:481-524`, `:526` (BGM) |
+| 3 | **KEYFRAME_RENDER** | Per unapproved shot, `generate_keyframe_take` builds the prompt via `ContinuityEngine.enhance_shot_prompt`, optionally optimizes it, then calls `generate_ai_broll`: FLUX-Dev + PuLID on a ComfyUI/RunPod pod is primary; FAL FLUX Kontext → FLUX-Pro → Schnell → Pollinations are cloud fallbacks. The optional **max tier** runs N=8 adaptive best-of with ArcFace+aesthetic scoring, ControlNet, Redux, FaceDetailer, ReActor, and SUPIR 4K upscale. | `phase_c_assembly.py:74`, `quality_max.py:574`; phase wrapper `cinema/phases/keyframe_render.py:68`; called `cinema_pipeline.py:994` |
 | 4 | **PERFORMANCE_CAPTURE** | Per shot with an approved keyframe, retargets a performance onto the still: ACT_ONE / LIVE_PORTRAIT / VIGGLE, or SKIP (the domain router decides via `route_performance_engine`). Shots routed to SKIP are passed over with no generation. | `cinema/phases/performance.py:35`, `domain/performance.py:103`; called `cinema_pipeline.py:1024` |
 | 5 | **MOTION_RENDER** | Per shot, `generate_motion_take` turns the keyframe into a clip via the **video cascade** (`generate_ai_video`): Kling→Sora→Runway→LTX→Veo→Kling-3.0→…, filtering disabled engines and retrying on total exhaustion. Dialogue shots route first to **Veo native audio** (the only `native_audio=True` engine); non-embedded dialogue clips get a mandatory lip-sync pass. A storyboard batch path (Kling Native) handles 2–6-shot scenes in one call when all keyframes exist. | `phase_c_ffmpeg.py:43`, `cinema/phases/motion_render.py:321`; called `cinema_pipeline.py:1071` |
 | 5a | **Post-processing** | Identity/continuity correction and finish passes happen at take-generation and operator-correction time: face-swap (PixVerse→FaceFusion), lip-sync overlay/generation cascades with a SyncNet gate, RIFE interpolation, SeedVR2/Topaz upscale. Stored as additive `postprocess_variants`. | `phase_c_vision.py:52`, `lip_sync.py:175`/`:468`/`:735`/`:791` |
@@ -236,7 +236,7 @@ flowchart TD
 
 `CinemaPipeline.__init__` (`cinema_pipeline.py:44`) composes the run from four collaborators that all share **one** `RunState` reference: long-lived services live on `PipelineCore` (project dict, dirs, `ContinuityEngine`, `ChiefDirector`, `CostTracker`, `LLMEnsemble`); per-run mutable state on `RunState`; pause/cancel/gate-wait/progress on `ThreadedLifecycle`; and the three controllers `ShotController` / `ReviewController` / `CheckpointStore`. The `headless` flag is set here and read by every gate.
 
-`generate(resume=False)` (`cinema_pipeline.py:844`) then runs the ordered sequence below. Each gate call is the synchronization point between the worker thread and the outside world.
+`generate(resume=False)` (`cinema_pipeline.py:942`) then runs the ordered sequence below. Each gate call is the synchronization point between the worker thread and the outside world.
 
 ```
 generate(resume=False)
@@ -320,9 +320,9 @@ flowchart LR
 
 ### 2.5 Checkpoints and resume
 
-After every scene-loop iteration and after each audio step, `CheckpointStore._save_checkpoint` (`cinema/checkpoint.py:87`) atomically writes `temp/pipeline_state.json` (`tempfile.mkstemp` + `os.replace`), serializing `current_stage`/`scene_id`/`shot_id`, completed scene indices, scene clips/audio/foley, shot results, and failed shots. `generate(resume=True)` calls `_restore_from_checkpoint()` (`cinema/checkpoint.py:163`), which rehydrates `RunState` wholesale and marks any referenced media that has gone missing as `"lost"`. The in-memory `review_clips` manifest is *not* persisted, so resume separately calls `_rebuild_review_clips(project)` (`cinema_pipeline.py:857`). On successful completion `_clear_checkpoint()` removes the file. The web surface exposes resumability read-only via `GET …/checkpoint` → `checkpoint_info()` (`cinema/services.py:100`), which reads the JSON without constructing a pipeline.
+After every scene-loop iteration and after each audio step, `CheckpointStore._save_checkpoint` (`cinema/checkpoint.py:87`) atomically writes `temp/pipeline_state.json` (`tempfile.mkstemp` + `os.replace`), serializing `current_stage`/`scene_id`/`shot_id`, completed scene indices, scene clips/audio/foley, shot results, and failed shots. `generate(resume=True)` calls `_restore_from_checkpoint()` (`cinema/checkpoint.py:163`), which rehydrates `RunState` wholesale and marks any referenced media that has gone missing as `"lost"`. The in-memory `review_clips` manifest is *not* persisted, so resume separately calls `_rebuild_review_clips(project)` (`cinema_pipeline.py:308`). On successful completion `_clear_checkpoint()` removes the file. The web surface exposes resumability read-only via `GET …/checkpoint` → `checkpoint_info()` (`cinema/services.py:100`), which reads the JSON without constructing a pipeline.
 
-> **Re-assembly avoids a deadlock by design.** The SCREENING re-assemble endpoint calls `_assemble_approved_takes_core()` (`cinema_pipeline.py:685`) directly rather than the public `assemble_approved_takes()`. The public method appends the SCREENING gate-wait, and a fresh per-request `CinemaPipeline` constructed in a Flask thread is *not* the instance that `signal_gate` will unblock — calling it there would hang the request (`cinema_pipeline.py:685-753`, gotcha #9 in the orchestration digest).
+> **Re-assembly avoids a deadlock by design.** The SCREENING re-assemble endpoint calls `_assemble_approved_takes_core()` (`cinema_pipeline.py:783`) directly rather than the public `assemble_approved_takes()`. The public method appends the SCREENING gate-wait, and a fresh per-request `CinemaPipeline` constructed in a Flask thread is *not* the instance that `signal_gate` will unblock — calling it there would hang the request (`cinema_pipeline.py:685-753`, gotcha #9 in the orchestration digest).
 
 ### 2.6 One run, narrated end to end
 
@@ -374,7 +374,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `ThreadedLifecycle` | `cinema/lifecycle.py:110` | Event-backed pause/cancel/gate-wait. `wait_for_gate(name, predicate, poll=0.5)`, `signal_gate(name)` for early wake, `check_pause()`. |
 | `NullLifecycle` | `cinema/lifecycle.py:70` | No-op lifecycle whose `wait_for_gate` returns `True` unconditionally. **NOT used by `CinemaPipeline`** — was the deleted CLI's lifecycle. See §3.13 gotcha. |
 | `PipelineContext` | `cinema/context.py:49` | Typed shared state passed INTO phase `.run()` calls (`global_settings`, `lifecycle`, audio paths, `char_lora_paths`, …). Dict-compat layer (`__getitem__`/`.get()`) keeps legacy dict-style phases working. |
-| `get_project_setting(ctx, key, default)` | `cinema/context.py:146` | **Canonical** read path for per-project UI knobs (reads `ctx.global_settings`). Must be used instead of `config.settings.Settings` for any user-tunable setting. |
+| `get_project_setting(ctx, key, default)` | `cinema/context.py:151` | **Canonical** read path for per-project UI knobs (reads `ctx.global_settings`). Must be used instead of `config.settings.Settings` for any user-tunable setting. |
 | `cinema.pipeline.CinemaPipeline` | `cinema/pipeline.py:80` | Generic `run()` over a `list[Phase]`; short-circuits on `ok=False`. NOT the orchestrator. |
 
 ### 3.2 Web / API surface (the user entry point)
@@ -385,16 +385,16 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 | Name | file:line | What it does |
 |---|---|---|
-| `_running_pipelines` (module state) | `web_server.py:72` | pid → live `CinemaPipeline` (or `_PIPELINE_PENDING` sentinel). Single truth for "is generation active?". |
-| `_running_cores` (module state) | `web_server.py:108` | pid → cached `PipelineCore`. Process-lifetime; **not** invalidated on `settings.json` edits. |
-| `_progress_queues` / `_reassembly_in_flight` | `web_server.py:71` / `:124` | Per-pid SSE queue; re-entrancy guard for the re-assemble endpoint (separate from `_running_pipelines` because re-assembly runs while SCREENING occupies it). |
-| `_GATE_STAGES` | `web_server.py:93` | `frozenset` of stages where gate-acting endpoints bypass the busy fence. |
-| `_get_or_build_core(pid)` | `web_server.py:128` | Thread-safe get-or-create of `PipelineCore`; raises `ValueError` on bad pid. |
-| `_get_running_pipeline(pid)` | `web_server.py:144` | Safe reader (returns `None` for sentinel/absent). All callers MUST use this. |
-| `_get_stage_pipeline(pid)` | `web_server.py:183` | Live pipeline if present, else a per-request `CinemaPipeline` sharing the cached core. Used by gate/take/shot endpoints. |
+| `_running_pipelines` (module state) | `web_server.py:73` | pid → live `CinemaPipeline` (or `_PIPELINE_PENDING` sentinel). Single truth for "is generation active?". |
+| `_running_cores` (module state) | `web_server.py:109` | pid → cached `PipelineCore`. Process-lifetime; **not** invalidated on `settings.json` edits. |
+| `_progress_queues` / `_reassembly_in_flight` | `web_server.py:125` / `:124` | Per-pid SSE queue; re-entrancy guard for the re-assemble endpoint (separate from `_running_pipelines` because re-assembly runs while SCREENING occupies it). |
+| `_GATE_STAGES` | `web_server.py:94` | `frozenset` of stages where gate-acting endpoints bypass the busy fence. |
+| `_get_or_build_core(pid)` | `web_server.py:129` | Thread-safe get-or-create of `PipelineCore`; raises `ValueError` on bad pid. |
+| `_get_running_pipeline(pid)` | `web_server.py:145` | Safe reader (returns `None` for sentinel/absent). All callers MUST use this. |
+| `_get_stage_pipeline(pid)` | `web_server.py:184` | Live pipeline if present, else a per-request `CinemaPipeline` sharing the cached core. Used by gate/take/shot endpoints. |
 | `_reject_if_project_busy` / `…_outside_gate` | `web_server.py:225` / `:256` | 409 busy fence; the gate-bypass variant lets iterate/screening/re-assemble through while parked at a gate. |
-| `run_pipeline()` (in `api_generate` thread) | `web_server.py:1454` | Daemon thread: builds pipeline, replaces sentinel, calls `pipeline.generate(resume=…)`. |
-| `api_stream` (SSE) | `web_server.py:1523` | Yields `data: <json>\n\n`; 30s HEARTBEAT; terminates on `None` sentinel. **Single consumer** — no fan-out. |
+| `run_pipeline()` (in `api_generate` thread) | `web_server.py:1508` | Daemon thread: builds pipeline, replaces sentinel, calls `pipeline.generate(resume=…)`. |
+| `api_stream` (SSE) | `web_server.py:1577` | Yields `data: <json>\n\n`; 30s HEARTBEAT; terminates on `None` sentinel. **Single consumer** — no fan-out. |
 | `make_progress_callback(queue)` | `web_services.py:28` | Returns the `progress_cb(stage, detail, percent, …)` that `CinemaPipeline` receives; shapes the event dict and `queue.put`s it. No-op if queue is `None`. |
 
 **Key endpoint families** (all under `/api/projects/<pid>/…`): CRUD for characters (`:532`), objects (`:929`), locations (`:1093`), scenes (`:1234`); scene prep — `generate-dialogue` (`:1312`), `decompose` (`:1348`), `style-rules` (`:1397`); run control — `generate` (`:1454`), `stream` (`:1523`), `cancel` (`:1544`), `pause`/`resume` (`:1945`/`:1955`); gates — plan `approve`/`reject` (`:1574`/`:1586`), keyframe/performance/final `approve` (`:1624`/`:1635`/`:1672`), `iterate` (`:1683`), `reject-auto-approve` (`:1786`); assembly + screening — `assemble` (`:2105`), `assemble/screen` (`:2127`), `screening/approve` (`:2210`), `assemble/re-assemble` (`:2299`); cost/cleanup/export — `cost-live` (`:2500`), `cleanup` (`:2480`), `export` (`:2536`).
@@ -407,7 +407,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 | Name | file:line | What it does |
 |---|---|---|
-| `Phase` (Protocol) | `cinema/phases/base.py:60` | Requires `name: str` + `run(ctx) -> PhaseResult`. `@runtime_checkable`; no inheritance needed. Retry/fallback explicitly NOT part of the contract. |
+| `Phase` (Protocol) | `cinema/phases/base.py:61` | Requires `name: str` + `run(ctx) -> PhaseResult`. `@runtime_checkable`; no inheritance needed. Retry/fallback explicitly NOT part of the contract. |
 | `PhaseResult` | `cinema/phases/base.py:39` | Dataclass `ok / message / elapsed_s`. Orchestrator reads only `ok`. |
 | `KeyframeRenderPhase.run` | `cinema/phases/keyframe_render.py:68` | Iterates shots, skips those with `approved_keyframe_take_id`, calls `generate_keyframe_take`. Polls cancellation per scene+shot. **Partial failures do not fail the phase** (`ok=True` always except missing-config / cancel). |
 | `PerformanceCapturePhase.run` | `cinema/phases/performance.py:35` | Three skip conditions: already-approved performance, `performance_engine=="SKIP"`, or no approved keyframe. Calls `generate_performance_take`. |
@@ -429,15 +429,15 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `ReviewController._gate_satisfied` | `cinema/review/controller.py:224` | Pure predicate: PLAN→all `plan_status=="approved"`; KEYFRAME→all `approved_keyframe_take_id`; PERFORMANCE→all SKIP or `approved_performance_take_id`; REVIEW→all `approved_final_take_id`. |
 | `ReviewController._run_auto_approve_pass` | `cinema/review/controller.py:253` | Per shot calls `check_gate`, mutates approved shots, appends `auto_approve_audit`. Gate→key map; motion key only if `CINEMA_AUTO_APPROVE_MOTION=1`. Never raises. |
 | `ReviewController._wait_for_gate` | `cinema/review/controller.py:507` | Runs auto-approve, then headless → check-once-and-raise, else `lifecycle.wait_for_gate` poll. |
-| `ReviewController.approve_shot_plan` / `approve_take` | `cinema/review/controller.py:633` / `:647` | Human approvals. `approve_take` validates collection membership (a keyframe can't be approved as final) and walks `source_take_id` for `approved_motion_take_id`. |
+| `ReviewController.approve_shot_plan` / `approve_take` | `cinema/review/controller.py:647` / `:647` | Human approvals. `approve_take` validates collection membership (a keyframe can't be approved as final) and walks `source_take_id` for `approved_motion_take_id`. |
 | `AutoApproveConfig` | `cinema/auto_approve.py:71` | All thresholds from `global_settings.auto_approve`. Defaults: `image_min_composite=0.97`/fallback `0.78`, `motion_min_identity=0.85`, `final_min_lipsync=0.8`, `final_require_human_if_upstream_auto=True`. |
-| `record_director_review_on_shots` | `cinema/auto_approve.py:202` | **Writer** of `shot["director_review"]`; called unconditionally after `validate_shot_prompts` (`cinema_pipeline.py:959`). Normalizes MODIFIED→APPROVED (cycle-17). Its absence was the headless-stall root cause. |
-| `_rules_for_plan` | `cinema/auto_approve.py:170` | Two vetoes: decision≠APPROVED; non-empty violations. Reads `director_review`. |
-| `check_gate` | `cinema/auto_approve.py:582` | Public entry; returns `AutoApproveDecision`. Catches all exceptions (`deferred=True` on eval error); returns not-approved if config disabled. |
-| `_screening_stage_enabled` | `cinema/screening.py:84` | Flag: `global_settings.screening_stage_enabled` > `CINEMA_SCREENING_STAGE` env > default ON. |
-| `_build_timeline_manifest` | `cinema/screening.py:157` | Per-shot `{start_s, end_s, take}` list; `verify_files=True` mirrors `_assemble_final`'s on-disk inclusion rule. |
-| `mark_screening_approved` / `mark_shot_needs_reassembly` / `clear_needs_reassembly` | `cinema/screening.py:287` / `:351` / `:401` | Persist `screening_approved`; dirty-track + race-safe clear (`only_shots=` preserves concurrently dirtied shots). |
-| `CheckpointStore._save_checkpoint` / `_restore_from_checkpoint` | `cinema/checkpoint.py:87` / `:163` | Atomic JSON write (mkstemp+`os.replace`) of RunState; rehydrate on resume, marking missing files `"lost"`. |
+| `record_director_review_on_shots` | `cinema/auto_approve.py:235` | **Writer** of `shot["director_review"]`; called unconditionally after `validate_shot_prompts` (`cinema_pipeline.py:959`). Normalizes MODIFIED→APPROVED (cycle-17). Its absence was the headless-stall root cause. |
+| `_rules_for_plan` | `cinema/auto_approve.py:203` | Two vetoes: decision≠APPROVED; non-empty violations. Reads `director_review`. |
+| `check_gate` | `cinema/auto_approve.py:625` | Public entry; returns `AutoApproveDecision`. Catches all exceptions (`deferred=True` on eval error); returns not-approved if config disabled. |
+| `_screening_stage_enabled` | `cinema/screening.py:104` | Flag: `global_settings.screening_stage_enabled` > `CINEMA_SCREENING_STAGE` env > default ON. |
+| `_build_timeline_manifest` | `cinema/screening.py:177` | Per-shot `{start_s, end_s, take}` list; `verify_files=True` mirrors `_assemble_final`'s on-disk inclusion rule. |
+| `mark_screening_approved` / `mark_shot_needs_reassembly` / `clear_needs_reassembly` | `cinema/screening.py:421` / `:351` / `:401` | Persist `screening_approved`; dirty-track + race-safe clear (`only_shots=` preserves concurrently dirtied shots). |
+| `CheckpointStore._save_checkpoint` / `_restore_from_checkpoint` | `cinema/checkpoint.py:163` / `:163` | Atomic JSON write (mkstemp+`os.replace`) of RunState; rehydrate on resume, marking missing files `"lost"`. |
 
 ### 3.5 Domain / State (the data model & persistence)
 
@@ -448,14 +448,14 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | Name | file:line | What it does |
 |---|---|---|
 | `TakeRecord` / `Shot` / `Scene` / `Character` / `Location` / `Project` | `domain/models.py:62 / 82 / 118 / 137 / 155 / 166` | Pydantic models with `extra="allow"`. Several live fields (e.g. `objects`, `performance_engine`, `director_review`, `screening_approved`) are NOT in the models — they exist on the raw dict. See §3.13. |
-| `DirectorialIntent` / `CascadeMetadata` | `domain/models.py:38` / `:26` | Iteration-provenance substrate (`prose`/`verb`/`params`/`target_stage`) and cascade-selection bookkeeping embedded in `TakeRecord`. |
-| `mutate_project(pid, mutator, …)` | `domain/project_manager.py:691` | **The canonical RMW primitive.** Lock → load → normalize → `mutator(latest)` → save-if-changed. `snapshot=` syncs the caller's dict in place. |
-| `load_project` / `save_project` | `domain/project_manager.py:679` / `:667` | Locked read (auto-saves on migration) / atomic validated write. |
+| `DirectorialIntent` / `CascadeMetadata` | `domain/models.py:26` / `:26` | Iteration-provenance substrate (`prose`/`verb`/`params`/`target_stage`) and cascade-selection bookkeeping embedded in `TakeRecord`. |
+| `mutate_project(pid, mutator, …)` | `domain/project_manager.py:712` | **The canonical RMW primitive.** Lock → load → normalize → `mutator(latest)` → save-if-changed. `snapshot=` syncs the caller's dict in place. |
+| `load_project` / `save_project` | `domain/project_manager.py:688` / `:667` | Locked read (auto-saves on migration) / atomic validated write. |
 | `make_take / make_shot / make_character / make_object / make_location / make_scene / make_project` | `domain/project_manager.py:139 / 262 / 158 / 180 / 215 / 236 / 309` | Factories. `new_id()` (`:128`) = `uuid4().hex[:12]` with type prefixes (`char_`/`loc_`/`scene_`/`take_`/`obj_`). |
-| `normalize_shot_schema` / `normalize_project_schema` | `domain/project_manager.py:405` / `:540` | In-place migration: unique shot IDs (collision → `shot_{scene_id}_{idx}`), legacy-field migration, scene re-ordering, VBench-key stripping. |
-| `_validate_project` | `domain/project_manager.py:620` | `Project.model_validate`; warn-only unless `CINEMA_STRICT_SCHEMA=1`. |
+| `normalize_shot_schema` / `normalize_project_schema` | `domain/project_manager.py:552` / `:540` | In-place migration: unique shot IDs (collision → `shot_{scene_id}_{idx}`), legacy-field migration, scene re-ordering, VBench-key stripping. |
+| `_validate_project` | `domain/project_manager.py:641` | `Project.model_validate`; warn-only unless `CINEMA_STRICT_SCHEMA=1`. |
 | Entity + shot-package helpers | `domain/project_manager.py:779–1214` | `add/remove/get` for character/object/location/scene; `ensure_shot_package` + sidecar I/O (`shots/<id>/inputs|outputs`). |
-| `normalize_shot_type` / `FACE_READABLE_SHOTS` | `domain/shot_types.py:34` / `:47` | Alias normalizer (`closeup`→`close_up`); `frozenset({"close_up","portrait","medium"})` used by performance routing. |
+| `normalize_shot_type` / `FACE_READABLE_SHOTS` | `domain/shot_types.py:47` / `:47` | Alias normalizer (`closeup`→`close_up`); `frozenset({"close_up","portrait","medium"})` used by performance routing. |
 
 ### 3.6 LLM brains (the creative-direction layer)
 
@@ -468,12 +468,12 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `ChiefDirector.validate_shot_prompts` | `llm/chief_director.py:296` | Pre-gen gate against HC1–HC8. Returns `{decision: APPROVED/MODIFIED/REJECTED, violations, shots}`; applies MODIFIED edits in place; ≤1 JSON retry; fail-safe APPROVED on parse failure. |
 | `ChiefDirector._call_llm` | `llm/chief_director.py:85` | Anthropic (`claude-sonnet-4-6`) primary, OpenAI (`gpt-4o`) fallback; honors `creative_llm` only if model-family matches active provider. |
 | `ChiefDirector.evaluate_generation_quality` | `llm/chief_director.py:406` | 2×2 (identity × coherence) mutation matrix with negative-prompt enrichment. **Wired by T6** — invoked by `cinema/shots/controller.py::diagnose_clip` on the opt-in deep path (`deep=True`); see the remediation-advisory design spec. **Vision-grounded** (`d974c15`+`a4cb076`) — attaches take + canonical reference images (PIL re-encode → JPEG q90, 1568px long-edge cap) and returns an extra `visual_findings` key surfaced in `advisory_deep`. |
-| `CinemaDirector.translate_intent` / `intent_translator` | `llm/director.py:275` / `:418` | Permissive iteration translator (operator intent overrides HC). Verb DSL (`tighten_framing`/`match_shot`/`shift_emotion`) → `{revised_prompt, params_delta, anchor_refs}`. Called at `cinema/shots/controller.py:1430`. |
+| `CinemaDirector.translate_intent` / `intent_translator` | `llm/director.py:418` / `:418` | Permissive iteration translator (operator intent overrides HC). Verb DSL (`tighten_framing`/`match_shot`/`shift_emotion`) → `{revised_prompt, params_delta, anchor_refs}`. Called at `cinema/shots/controller.py:1430`. |
 | `LLMEnsemble.competitive_generate` | `llm/ensemble.py:139` | Parallel multi-model gen + judge-pick → `EnsembleResult`. Default rosters per task (`script`/`decompose`/`default`); default judge `claude-sonnet-4`. |
 | `build_anthropic_system_blocks` | `llm/ensemble.py:40` | Wraps system text with `cache_control: ephemeral` for Anthropic prompt caching; callers must pass stable strings. |
 | `optimize_shot_prompt` | `llm/prompt_optimizer.py:355` | UI text → 13-field structured shot spec via ensemble (`task_type="decompose"`); `_coerce_to_valid_keys` sanitizes enums; `_fallback_optimize` is the LLM-free path. |
 | `generate_style_rules` | `llm/style_director.py:12` | **OpenAI-only** 7-key style dict (Tavily-grounded); falls back to `_default_style_rules` if no OpenAI key. Asymmetric with the Anthropic-first directors (see §3.13). |
-| `style_rules_to_prompt_suffix` | `llm/style_director.py:182` | Concatenates color/lighting/photorealism/composition rules into the suffix prepended to every image prompt (`cinema/shots/controller.py:333`). |
+| `style_rules_to_prompt_suffix` | `llm/style_director.py:187` | Concatenates color/lighting/photorealism/composition rules into the suffix prepended to every image prompt (`cinema/shots/controller.py:333`). |
 | `get_negative_prompt_for_failure` | `llm/negative_prompts.py:41` | Maps `FailureReason.value` → negative-prompt phrase; used by `evaluate_generation_quality` and `build_remediation_advisory`. |
 | `build_remediation_advisory` | `llm/negative_prompts.py:52` | **Wired by T6** — builds `{failure_label, suggested_negative_prompt, remediation_steps}` advisory dict; called from `generate_keyframe_take` and `diagnose_clip`. |
 
@@ -490,12 +490,12 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `_build_cinedecompose_system_prompt` | `domain/scene_decomposer.py:326` | Single-source CineDecompose prompt: HC1–HC5 (identity firewall, schema/location/lighting lock, face-toward-camera), `[SHOT][SCENE][ACTION][OUTFIT][QUALITY]` schema, `PIPELINE_CONTEXT`. |
 | `update_scene_shots` | `domain/scene_decomposer.py:880` | Persists shots via `mutate_project`. Called by `cinema_pipeline.py:960` and `web_server.py:1388`. |
 | `_fallback_decompose` | `domain/scene_decomposer.py:837` | No-key path; always 2 hardcoded shots (establishing wide + medium CU). |
-| `API_REGISTRY` / `PURPOSE_API_RANKING` / `rank_apis_for_purpose` | `domain/scene_decomposer.py:36` / `:120` / `:283` | 40+ engine capability table; per-purpose ordered API lists; best-first ranking filter. (Also the source of `native_audio` for video routing — §3.8.) |
+| `API_REGISTRY` / `PURPOSE_API_RANKING` / `rank_apis_for_purpose` | `domain/scene_decomposer.py:283` / `:120` / `:283` | 40+ engine capability table; per-purpose ordered API lists; best-first ranking filter. (Also the source of `native_audio` for video routing — §3.8.) |
 | `estimate_short_cost` | `domain/scene_decomposer.py:173` | 60-shot project cost breakdown. |
 | `generate_dialogue` | `domain/dialogue_writer.py:12` | Per-character lines `{character_id, character_name, text, delivery}`; non-English directive keeps `text` native, `delivery` English. |
-| `merge_language_defaults_into_settings` / `get_language_defaults` | `domain/language_defaults.py:151` / `:130` | Per-language pipeline defaults (TTS provider, lipsync priority, validation threshold). English/Korean/Japanese/Mandarin/`_default`. |
+| `merge_language_defaults_into_settings` / `get_language_defaults` | `domain/language_defaults.py:136` / `:130` | Per-language pipeline defaults (TTS provider, lipsync priority, validation threshold). English/Korean/Japanese/Mandarin/`_default`. |
 | `run_with_tools` | `web_research.py:122` | Two-phase GPT-4o tool loop (Tavily/Firecrawl) + final JSON call; logs to `CostTracker`. |
-| `research_cinematography` / `research_location_visual` / `research_music_reference` | `research_engine.py:44` / `:72` / `:94` | Tavily/Firecrawl wrappers; silently return `""`/`[]` if unconfigured. |
+| `research_cinematography` / `research_location_visual` / `research_music_reference` | `research_engine.py:94` / `:72` / `:94` | Tavily/Firecrawl wrappers; silently return `""`/`[]` if unconfigured. |
 
 ### 3.8 Video generation + routing (the API cascade)
 
@@ -513,7 +513,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `classify_shot_type` | `workflow_selector.py:411` | → `portrait/medium/wide/action/landscape`. Note: never returns `close_up` despite a `MOTION_FIDELITY_FLOORS` key for it (§3.13). |
 | `WORKFLOW_TEMPLATES` | `workflow_selector.py:21` | Per-shot-type primary API + fallback list + render params (e.g. portrait→KLING_NATIVE; wide/landscape→LTX; action→SORA_NATIVE). |
 | `VeoNativeAPI.generate_video` | `veo_native.py:138` | Vertex-preferred / Gemini-fallback. **Bug #4:** `reference_images` accepted but dropped (Vertex exclusivity). `driving_video_path` accepted but unwired. Duration clamped to (4,6,8). |
-| `_extract_video_bytes` / `_clamp_image_to_video_duration` | `veo_native.py:85` / `:38` | Inline `video_bytes` (Vertex) vs `files.download` (Gemini); 5s→6 clamp. Cycle-17 native-audio fix path. |
+| `_extract_video_bytes` / `_clamp_image_to_video_duration` | `veo_native.py:38` / `:38` | Inline `video_bytes` (Vertex) vs `files.download` (Gemini); 5s→6 clamp. Cycle-17 native-audio fix path. |
 | `KlingNativeAPI` | `kling_native.py:19` | JWT HS256 auth; `create_image_to_video` (`:86`), `poll_task` (`:170`), `generate_storyboard` (`:310`, ≤6 shots, `face_consistency`). |
 | `SoraNativeAPI.generate_video` / `LTXVideoAPI.generate_video` | `sora_native.py:42` / `ltx_native.py:68` | Sora: durations [4,8,12,16,20], driving-video as `input_reference` (only engine that fully wires it). LTX: native REST preferred, FAL fallback; `_*_transition` methods exist but are dead in the cascade. |
 
@@ -525,17 +525,17 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 | Name | file:line | What it does |
 |---|---|---|
-| `generate_ai_broll` | `phase_c_assembly.py:72` | Priority chain: `quality_max` (if tier=="max") → ComfyUI PuLID → `_fal_flux_fallback`. Dynamic node injection (prompt/latent/seed/PuLID + ControlNet-depth + img2img + IP-Adapter). |
-| `RunPodComfyUI` | `phase_c_assembly.py:32` | ComfyUI REST client (`upload_image`/`queue_prompt`/`get_history`/`get_image`); shared by both tiers. |
-| `_fal_flux_fallback` | `phase_c_assembly.py:415` | FLUX Kontext Max Multi → FLUX-Pro → Schnell → Pollinations. |
-| `ImageGenResult` | `phase_c_assembly.py:15` | `NamedTuple(path, api_name)`; `api_name` is the authoritative backend token. |
-| `generate_ai_broll_max` | `quality_max.py:574` | Max-tier orchestrator: probe → load `pulid_max.json` → optional HiDream swap → prune → 5 inject axes → best-of-N loop → PuLID-boost retry → copy best. |
-| `_probe_node_availability` / `_prune_unavailable` | `quality_max.py:250` / `:340` | One-time `/object_info` probe; strip absent nodes with safe rewires. |
+| `generate_ai_broll` | `phase_c_assembly.py:74` | Priority chain: `quality_max` (if tier=="max") → ComfyUI PuLID → `_fal_flux_fallback`. Dynamic node injection (prompt/latent/seed/PuLID + ControlNet-depth + img2img + IP-Adapter). |
+| `RunPodComfyUI` | `phase_c_assembly.py:34` | ComfyUI REST client (`upload_image`/`queue_prompt`/`get_history`/`get_image`); shared by both tiers. |
+| `_fal_flux_fallback` | `phase_c_assembly.py:438` | FLUX Kontext Max Multi → FLUX-Pro → Schnell → Pollinations. |
+| `ImageGenResult` | `phase_c_assembly.py:17` | `NamedTuple(path, api_name)`; `api_name` is the authoritative backend token. |
+| `generate_ai_broll_max` | `quality_max.py:694` | Max-tier orchestrator: probe → load `pulid_max.json` → optional HiDream swap → prune → 5 inject axes → best-of-N loop → PuLID-boost retry → copy best. |
+| `_probe_node_availability` / `_prune_unavailable` | `quality_max.py:364` / `:340` | One-time `/object_info` probe; strip absent nodes with safe rewires. |
 | `_inject_identity / _inject_conditioning / _inject_sampling / _inject_latent_source / _inject_post_passes` | `quality_max.py:397 / 419 / 453 / 474 / 497` | Wire LoRA+PuLID; prompt+guidance+ControlNet+Redux; AYS steps+sampler+SLG+FreeU; latent source (txt2img / LatentBlend / img2img); FaceDetailer+SUPIR+4K. |
-| `_validate_overlay_value` | `quality_max.py:141` | Clamp/validate 17 ComfyUI + 8 halt UI knobs against `_MAX_TIER_KNOB_SCHEMA`. |
-| `score_candidate` / `should_halt` / `needs_regenerate` | `face_validator_gate.py:168` / `:225` / `:289` | Composite = `0.6·arc + 0.4·aesthetic`; halt on budget or composite≥threshold; regenerate (one PuLID-boost retry) if `arc < floor`. |
-| `get_workflow_params` / `apply_workflow_params` / `get_adaptive_pulid_weight` | `workflow_selector.py:450` / `:501` / `:540` | Per-type params + UI overlays; write into `pulid.json` node map; rolling-stats adaptive PuLID weight. |
-| `generate_keyframe_take` | `cinema/shots/controller.py:314` | Requires `plan_status=="approved"`; `enhance_shot_prompt` → optional optimizer → `generate_ai_broll` → identity validate → append take → record cost. |
+| `_validate_overlay_value` | `quality_max.py:144` | Clamp/validate 17 ComfyUI + 8 halt UI knobs against `_MAX_TIER_KNOB_SCHEMA`. |
+| `score_candidate` / `should_halt` / `needs_regenerate` | `face_validator_gate.py:326` / `:225` / `:289` | Composite = `0.6·arc + 0.4·aesthetic`; halt on budget or composite≥threshold; regenerate (one PuLID-boost retry) if `arc < floor`. |
+| `get_workflow_params` / `apply_workflow_params` / `get_adaptive_pulid_weight` | `workflow_selector.py:540` / `:501` / `:540` | Per-type params + UI overlays; write into `pulid.json` node map; rolling-stats adaptive PuLID weight. |
+| `generate_keyframe_take` | `cinema/shots/controller.py:478` | Requires `plan_status=="approved"`; `enhance_shot_prompt` → optional optimizer → `generate_ai_broll` → identity validate → append take → record cost. |
 
 ### 3.10 Identity / Continuity / Coherence
 
@@ -547,14 +547,14 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 |---|---|---|
 | `ContinuityEngine.enhance_shot_prompt` | `domain/continuity_engine.py:446` | Central shot augmentation: builds enhanced prompt + the `continuity_config` dict (`use_img2img`, `init_image`, `denoise_strength`, seeds, `primary_reference`, `multi_angle_refs`, `identity_anchor`, `pulid_weight_override`). |
 | `ContinuityEngine.validate_shot` | `domain/continuity_engine.py:587` | Delegates to `IdentityValidator.validate_video` for post-gen video identity. |
-| `TemporalConsistencyManager.get_denoise_strength` / `should_use_img2img` | `domain/continuity_engine.py:374` / `:350` | Context-aware denoise (0.30–0.55); img2img only same-scene, `shot_index>0`. |
+| `TemporalConsistencyManager.get_denoise_strength` / `should_use_img2img` | `domain/continuity_engine.py:350` / `:350` | Context-aware denoise (0.30–0.55); img2img only same-scene, `shot_index>0`. |
 | `IdentityValidator.validate_video` | `identity/validator.py:131` | Adaptive sampling (`_compute_sample_positions` `:365`, 3–10 frames by shot type) → `_analyze_frame` (`:408`, GhostFaceNet cosine) → aggregate → `IdentityValidationResult`. |
 | `IdentityValidator.get_rolling_stats` | `identity/validator.py:266` | Window over history → `suggested_pulid_delta` (success<0.5→+0.10, etc.). Drives adaptive PuLID weight. |
-| `SHOT_TYPE_THRESHOLDS` / `get_threshold_for_shot` | `identity/types.py:92` / `:101` | Per-type strict/standard/lenient thresholds; attempt-based interpolation toward lenient. |
-| `make_validator` / `get_shared_validator` | `identity/__init__.py:40` / `:58` | Factory (wires `vision_fallback`) + process-wide singleton. Always use these — bare `IdentityValidator` lacks the fallback. |
+| `SHOT_TYPE_THRESHOLDS` / `get_threshold_for_shot` | `identity/types.py:104` / `:101` | Per-type strict/standard/lenient thresholds; attempt-based interpolation toward lenient. |
+| `make_validator` / `get_shared_validator` | `identity/__init__.py:62` / `:58` | Factory (wires `vision_fallback`) + process-wide singleton. Always use these — bare `IdentityValidator` lacks the fallback. |
 | `assess_coherence` | `coherence_analyzer.py:215` | `overall = (1-color_drift)·0.4 + lighting·0.3 + composition·0.3`; returns `valid=False` if either image fails to load — callers MUST check `valid`. |
-| `create_character_with_images` / `_generate_multi_angle_refs` / `assign_voice` / `build_identity_anchor` | `domain/character_manager.py:104` / `:226` / `:387` / `:477` | Canonical-face pick → FLUX Kontext Max Multi 5 angles → language+gender voice → `"{name}: {traits}"` anchor (injected verbatim, never rephrased). |
-| `create_location_with_images` / `build_location_prompt_fragment` / `get_location_seed` | `domain/location_manager.py:41` / `:117` / `:198` | Location refs (+ optional Tavily research) → verbatim prompt fragment → persistent seed for architectural consistency. |
+| `create_character_with_images` / `_generate_multi_angle_refs` / `assign_voice` / `build_identity_anchor` | `domain/character_manager.py:477` / `:226` / `:387` / `:477` | Canonical-face pick → FLUX Kontext Max Multi 5 angles → language+gender voice → `"{name}: {traits}"` anchor (injected verbatim, never rephrased). |
+| `create_location_with_images` / `build_location_prompt_fragment` / `get_location_seed` | `domain/location_manager.py:198` / `:117` / `:198` | Location refs (+ optional Tavily research) → verbatim prompt fragment → persistent seed for architectural consistency. |
 
 ### 3.11 Performance capture (engine routing + execution)
 
@@ -565,12 +565,12 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | Name | file:line | What it does |
 |---|---|---|
 | `route_performance_engine` | `domain/performance.py:103` | Decision matrix → `ACT_ONE / LIVE_PORTRAIT / VIGGLE / SKIP`: SKIP (no chars/wide) → ACT_ONE (dialogue + face-readable; budget mode → LIVE_PORTRAIT) → VIGGLE (action no-dialogue) → ACT_ONE (remaining dialogue) → SKIP. |
-| `should_capture` / `shot_needs_driving_video` / `driving_video_source` / `precondition_error` | `domain/performance.py:72` / `:94` / `:145` / `:163` | Pure gate (skip no-chars/landscape/wide-no-dialogue); driving-video need + source (`upload`/`tts_auto`/`none`); pre-allocation guard (ACT_ONE needs audio; LP/VIGGLE need driving video). |
+| `should_capture` / `shot_needs_driving_video` / `driving_video_source` / `precondition_error` | `domain/performance.py:163` / `:94` / `:145` / `:163` | Pure gate (skip no-chars/landscape/wide-no-dialogue); driving-video need + source (`upload`/`tts_auto`/`none`); pre-allocation guard (ACT_ONE needs audio; LP/VIGGLE need driving video). |
 | `dispatch` | `performance/_router.py:89` | The single engine entry called by `cinema/shots/controller.py:739`; routes to the per-engine `generate_*` based on the resolved engine. |
 | `generate_act_one_performance` | `performance/act_one.py:46` | Runway Act-One via REST; identity comes from the keyframe + driving audio. |
 | `generate_live_portrait_performance` / `generate_viggle_performance` | `performance/live_portrait.py:43` / `viggle.py:42` | LivePortrait (driving video) and Viggle Mode-A motion retargeting. |
-| `score_motion_fidelity` / `needs_remotion` | `performance/motion_gate.py:141` / `:184` | Optical-flow motion-fidelity score (sample count from `MOTION_GATE_SAMPLES`, read once at module load); remotion advisory. |
-| `validate_performance_take` | `performance/identity_gate.py:93` | 1s-frame ArcFace check via the shared validator; floor `DEFAULT_PERFORMANCE_FLOOR=0.70`. Returns similarity or `None` (inconclusive). |
+| `score_motion_fidelity` / `needs_remotion` | `performance/motion_gate.py:184` / `:184` | Optical-flow motion-fidelity score (sample count from `MOTION_GATE_SAMPLES`, read once at module load); remotion advisory. |
+| `validate_performance_take` | `performance/identity_gate.py:95` | 1s-frame ArcFace check via the shared validator; floor `DEFAULT_PERFORMANCE_FLOOR=0.70`. Returns similarity or `None` (inconclusive). |
 
 ### 3.12 Post-processing / Assembly / Audio
 
@@ -582,15 +582,15 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 |---|---|---|
 | `apply_color_grade` / `two_pass_loudnorm` / `xfade_concat` | `phase_c_ffmpeg.py:1018` / `:1103` / `:1301` | 8 grade presets (`COLOR_GRADE_PRESETS` `:1006`) or LUT; EBU R128 two-pass (-14 LUFS); cross-dissolve (mixed-audio-presence fix at `_build_xfade_filtergraph` `:1232`). |
 | `assess_motion_quality` | `phase_c_ffmpeg.py:894` | Optical-flow → `accept/interpolate/regenerate`. Requires OpenCV. |
-| `face_swap_video_frames` | `phase_c_vision.py:52` | fal PixVerse → FaceFusion CLI (CPU-only providers hardcoded). |
-| `validate_shot_quality_vision` / `validate_identity_vision` / `validate_scene_coherence_vision` | `phase_c_vision.py:153` / `:242` / `:346` | GPT-4o QC (0–10), Claude identity match, Gemini coherence — all default-pass on missing key/image. |
-| `lipsync_overlay` / `lipsync_generation` / `generate_lip_sync_video` | `lip_sync.py:175` / `:468` / `:682` | Overlay cascade (SyncV3→MuseTalk→LatentSync→SyncV2); generation cascade (Hedra→Kling→Omnihuman→Aurora); smart router (`mode="auto"`). SyncNet quality gate via `_sync_gate_settings` (`:427`). |
-| `generate_rife_interpolation` / `upscale_video_seedvr2` | `lip_sync.py:735` / `:791` | Cloud RIFE (FPS multiplier); cloud SeedVR2 upscale (1080p/2160p). |
-| `train_character_lora` / `prepare_character_lora_dataset` | `prep/lora_training.py:376` / `:153` | ai-toolkit subprocess FLUX LoRA training (rank-32 default); `validate_lora_quality` is a **stub** (returns −1.0, §3.13). |
+| `face_swap_video_frames` | `phase_c_vision.py:53` | fal PixVerse → FaceFusion CLI (CPU-only providers hardcoded). |
+| `validate_shot_quality_vision` / `validate_identity_vision` / `validate_scene_coherence_vision` | `phase_c_vision.py:345` / `:242` / `:346` | GPT-4o QC (0–10), Claude identity match, Gemini coherence — all default-pass on missing key/image. |
+| `lipsync_overlay` / `lipsync_generation` / `generate_lip_sync_video` | `lip_sync.py:680` / `:468` / `:682` | Overlay cascade (SyncV3→MuseTalk→LatentSync→SyncV2); generation cascade (Hedra→Kling→Omnihuman→Aurora); smart router (`mode="auto"`). SyncNet quality gate via `_sync_gate_settings` (`:427`). |
+| `generate_rife_interpolation` / `upscale_video_seedvr2` | `lip_sync.py:789` / `:791` | Cloud RIFE (FPS multiplier); cloud SeedVR2 upscale (1080p/2160p). |
+| `train_character_lora` / `prepare_character_lora_dataset` | `prep/lora_training.py:161` / `:153` | ai-toolkit subprocess FLUX LoRA training (rank-32 default); `validate_lora_quality` is a **stub** (returns −1.0, §3.13). |
 | `upscale_with_topaz` | `prep/topaz_upscale.py:75` | Local Topaz CLI wrapper (no-op if CLI absent → caller falls back to SeedVR2). |
-| `generate_dialogue_voiceover` | `audio/dialogue.py:286` | ElevenLabs v3 Dialogue Mode (2+ speakers) or per-line loop; Cartesia Sonic 2 for Korean; optional `.alignment.json` sidecar. |
-| `generate_fal_bgm` / `master_music` | `audio/music.py:279` / `:379` | FAL Stable Audio BGM (25+ vibes); mastering via AU/Pedalboard/ffmpeg presets (`MUSIC_MASTERING_PRESETS` `:32`). |
-| `generate_stability_foley` / `_build_foley_prompt` | `audio/foley.py:109` / `:29` | Stability AI Stable Audio 2.0 foley (15+ environment prompts). |
+| `generate_dialogue_voiceover` | `audio/dialogue.py:419` | ElevenLabs v3 Dialogue Mode (2+ speakers) or per-line loop; Cartesia Sonic 2 for Korean; optional `.alignment.json` sidecar. |
+| `generate_fal_bgm` / `master_music` | `audio/music.py:386` / `:379` | FAL Stable Audio BGM (25+ vibes); mastering via AU/Pedalboard/ffmpeg presets (`MUSIC_MASTERING_PRESETS` `:32`). |
+| `generate_stability_foley` / `_build_foley_prompt` | `audio/foley.py:30` / `:29` | Stability AI Stable Audio 2.0 foley (15+ environment prompts). |
 | `align_audio_to_text` | `audio/alignment.py:217` | WhisperX → vanilla Whisper word timestamps; thread-safe model cache. |
 | `apply_voice_effect` | `audio/effects.py:230` | AU plugin → Pedalboard chain → ffmpeg (13 voice-FX presets). |
 
@@ -602,13 +602,13 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 | Name | file:line | What it does |
 |---|---|---|
-| `CostTracker` | `cost_tracker.py:131` | SQLite ledger (`data/experiments.db`) + budget gate. `spent_usd` is an in-process accumulator (NOT loaded from SQLite on init). |
-| `record_api_call` / `log_llm` | `cost_tracker.py:275` / `:213` | Primary API and LLM logging paths; `log_llm` auto-detects provider from `PRICING` (`:76`) and silently records `$0.00` for unknown models. |
-| `would_exceed` / `is_over_budget` | `cost_tracker.py:335` / `:345` | Pre-call gate (`cinema/shots/controller.py:562`) and post-call gate (triggers `lifecycle.pause()` at `:1014`). |
+| `CostTracker` | `cost_tracker.py:136` | SQLite ledger (`data/experiments.db`) + budget gate. `spent_usd` is an in-process accumulator (NOT loaded from SQLite on init). |
+| `record_api_call` / `log_llm` | `cost_tracker.py:224` / `:213` | Primary API and LLM logging paths; `log_llm` auto-detects provider from `PRICING` (`:76`) and silently records `$0.00` for unknown models. |
+| `would_exceed` / `is_over_budget` | `cost_tracker.py:356` / `:345` | Pre-call gate (`cinema/shots/controller.py:562`) and post-call gate (triggers `lifecycle.pause()` at `:1014`). |
 | `API_COST_USD` | `cost_tracker.py:43` | ±30% per-call USD estimates — operators must calibrate against invoices. |
-| `cleanup_project` / `CLEANUP_RULES` | `cleanup.py:56` / `:34` | Deletes intermediate `temp/` artifacts post-assembly (`cinema_pipeline.py:808`, non-fatal); `aggressive=True` also removes generated media. |
-| `setup_logging` / `_JsonFormatter` | `cinema/logging_config.py:97` / `:68` | Idempotent JSON-line root handler; reads `CINEMA_LOG_LEVEL`. Called before any cinema imports (`web_server.py:29`). |
-| `Settings` / `get_settings` / `_parse_cors_origins` | `config/settings.py:48` / `:136` / `:33` | Frozen dataclass of all env vars; `@lru_cache` singleton. **Only API keys + infra paths belong here**; project UI knobs flow through `get_project_setting`. `CINEMA_*` behavioral flags are read live via `os.environ`, not cached here. |
+| `cleanup_project` / `CLEANUP_RULES` | `cleanup.py:34` / `:34` | Deletes intermediate `temp/` artifacts post-assembly (`cinema_pipeline.py:808`, non-fatal); `aggressive=True` also removes generated media. |
+| `setup_logging` / `_JsonFormatter` | `cinema/logging_config.py:68` / `:68` | Idempotent JSON-line root handler; reads `CINEMA_LOG_LEVEL`. Called before any cinema imports (`web_server.py:29`). |
+| `Settings` / `get_settings` / `_parse_cors_origins` | `config/settings.py:33` / `:136` / `:33` | Frozen dataclass of all env vars; `@lru_cache` singleton. **Only API keys + infra paths belong here**; project UI knobs flow through `get_project_setting`. `CINEMA_*` behavioral flags are read live via `os.environ`, not cached here. |
 | `generate_report` | `reporter.py:6` | Legacy CWD-glob diagnostic printer. **Dead orphan** — zero production callers (ARCHITECTURE.md §17); removal candidate. |
 
 ### Known divergences, dead code, and footguns
@@ -617,11 +617,11 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 
 | Item | Where | Note |
 |---|---|---|
-| Two `CinemaPipeline` classes | `cinema_pipeline.py:44` vs `cinema/pipeline.py:80` | Orchestrator vs generic driver. Path disambiguates. |
+| Two `CinemaPipeline` classes | `cinema_pipeline.py:49` vs `cinema/pipeline.py:80` | Orchestrator vs generic driver. Path disambiguates. |
 | `pipeline_context.py` vs `cinema/context.py` | top-level vs `cinema/` | 15-line prompt-string loader vs typed `PipelineContext` dataclass. |
 | `headless=True` does NOT use `NullLifecycle` | `cinema/lifecycle.py:70` | Headless still uses `ThreadedLifecycle`; `RunState.headless` makes `_wait_for_gate` raise. `NullLifecycle.wait_for_gate` returns `True` unconditionally — using it would silently skip gate enforcement. |
 | PLAN_REVIEW headless stall (FIXED) | `cinema_pipeline.py:959`, `cinema/auto_approve.py:202` | Without `record_director_review_on_shots`, `_rules_for_plan` always vetoed → headless hang. Now called unconditionally; MODIFIED→APPROVED (cycle-17, `138d7c7`). |
-| `evaluate_generation_quality` wired by T6 | `llm/chief_director.py:406` | Full 2×2 mutation matrix; **now called** by `diagnose_clip(deep=True)` in `cinema/shots/controller.py:1928` (T6, `10a0eb4`); vision-grounded since `d974c15` (take + reference images attached to the LLM call). |
+| `evaluate_generation_quality` wired by T6 | `llm/chief_director.py:406` | Full 2×2 mutation matrix; **now called** by `diagnose_clip(deep=True)` in `cinema/shots/controller.py:1836` (T6, `10a0eb4`); vision-grounded since `d974c15` (take + reference images attached to the LLM call). |
 | `style_director` is OpenAI-only | `llm/style_director.py:36` | No Anthropic path — asymmetric with the Anthropic-first ChiefDirector/CinemaDirector. |
 | Veo `reference_images` silently dropped (Bug #4) | `veo_native.py:155` | Vertex rejects image+reference both set; identity comes from the start frame only. `driving_video_path` also unwired on Veo (only Sora wires it). |
 | VEO_NATIVE has no quota guard | `phase_c_ffmpeg.py:265` | The 1800s cooldown TTL is set/checked only by the FAL-proxy `VEO` branch. |
@@ -632,7 +632,7 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 | `EXPERIMENTS_DB_PATH` not wired | `config/settings.py:89` vs `cinema/core.py:113` | Declared in `Settings` but never passed to `CostTracker`; the hardcoded `data/experiments.db` always wins. |
 | `spent_usd` resets per process | `cost_tracker.py:147` | Not loaded from SQLite on init — budget gate is per-run, not cumulative-lifetime. |
 | Single SSE consumer | `web_server.py:1523` | A second `/stream` tab drains the shared queue; both miss events. |
-| `_running_cores` not invalidated on settings edit | `web_server.py:108` | Out-of-band `settings.json` edits need a server restart. |
+| `_running_cores` not invalidated on settings edit | `web_server.py:109` | Out-of-band `settings.json` edits need a server restart. |
 | Re-assemble must call `_assemble_approved_takes_core` directly | `web_server.py:2418`, `cinema_pipeline.py:685` | Calling the full `assemble_approved_takes()` from a Flask thread during screening deadlocks (the approve signal targets the original pipeline). |
 | Stubbed / zero-caller features | `prep/lora_training.py:512`, `quality_max.py:738`, `cinema/auto_approve.py:693` | `validate_lora_quality` returns −1.0; hires-fix pass-2 denoise not injected; `halt_rule` enum accepted but only `composite_only` dispatched; `summarize_audit` defined but unwired. |
 | `reporter.py` orphan + dead dialogue helpers | `reporter.py:6`, `domain/dialogue_writer.py:159` | `generate_report` has no callers; `format_dialogue_for_voiceover` / `dialogue_to_narration_text` have zero live callers (audio uses raw `generate_dialogue` output). |
@@ -646,7 +646,7 @@ This section walks the pipeline stage by stage in execution order, exactly as `C
 Two structural facts shape every stage below and are worth stating once:
 
 - **The real orchestrator is `cinema_pipeline.CinemaPipeline` (`cinema_pipeline.py:38`).** There is a *second, unrelated* class also named `CinemaPipeline` at `cinema/pipeline.py:80` — a generic list-of-`Phase` driver that is **not** wired into the production `generate()` path. Wherever this section says "the orchestrator," it means `cinema_pipeline.py`.
-- **Three render stages are `Phase` objects** (keyframe, performance, motion) implementing the `Phase` Protocol (`cinema/phases/base.py:60`). The **gates between them are not phases** — they are inline `_wait_for_gate(...)` calls in the orchestrator. All three render phases return `PhaseResult(ok=True)` even when individual shots fail (`cinema/phases/keyframe_render.py:105-108`); a stage never aborts the run on per-shot failure. Failed shots are surfaced through the `on_failure` callback into `failed_shots` and the review UI.
+- **Three render stages are `Phase` objects** (keyframe, performance, motion) implementing the `Phase` Protocol (`cinema/phases/base.py:61`). The **gates between them are not phases** — they are inline `_wait_for_gate(...)` calls in the orchestrator. All three render phases return `PhaseResult(ok=True)` even when individual shots fail (`cinema/phases/keyframe_render.py:105-108`); a stage never aborts the run on per-shot failure. Failed shots are surfaced through the `on_failure` callback into `failed_shots` and the review UI.
 
 ### Stage map and progress checkpoints
 
@@ -654,9 +654,9 @@ Two structural facts shape every stage below and are worth stating once:
 |---|---|---|---|---|---|
 | 0 | Style rules + BGM | inline | `generate_style_rules()` / `_ensure_bgm()` | 2% | — |
 | 1 | Scene decomposition | inline loop | `competitive_decompose_scene()` / `decompose_scene()` | — | PLAN_REVIEW (25%) |
-| 2 | Keyframe / image render | `KeyframeRenderPhase` | `keyframe_render.py:68` | 50% | KEYFRAME_REVIEW (55%) |
-| 3 | Performance capture | `PerformanceCapturePhase` | `performance.py:35` | 62% | PERFORMANCE_REVIEW (65%, conditional) |
-| 4 | Motion / video render | `MotionRenderPhase` | `motion_render.py:321` | 80% | REVIEW (82%) |
+| 2 | Keyframe / image render | `KeyframeRenderPhase` | `keyframe_render.py:31` | 50% | KEYFRAME_REVIEW (55%) |
+| 3 | Performance capture | `PerformanceCapturePhase` | `performance.py:19` | 62% | PERFORMANCE_REVIEW (65%, conditional) |
+| 4 | Motion / video render | `MotionRenderPhase` | `motion_render.py:57` | 80% | REVIEW (82%) |
 | 5 | Assembly + audio mix | inline | `assemble_approved_takes()` | up to 95% | SCREENING (95%, optional) |
 | 6 | Cleanup + complete | inline | `cleanup_project()` | 100% | — |
 
@@ -683,27 +683,27 @@ flowchart TD
 
 ### Stage 0 — Style rules and BGM (run setup)
 
-**INPUTS:** `project.global_settings` (`music_mood`, `color_palette`, `aspect_ratio`, pre-existing `style_rules`, `music_mastering`); the project snapshot reloaded from disk by `_refresh_project_snapshot()` (`cinema_pipeline.py:425`).
+**INPUTS:** `project.global_settings` (`music_mood`, `color_palette`, `aspect_ratio`, pre-existing `style_rules`, `music_mastering`); the project snapshot reloaded from disk by `_refresh_project_snapshot()` (`cinema_pipeline.py:443`).
 
 **PROCESSING:**
 1. `generate_style_rules(project_name, mood, color_palette, music_mood, aspect_ratio)` (`llm/style_director.py:12`) produces a 7-key style dict (`director_vision`, `cinematography_rules`, `color_grading_palette`, `lighting_rules`, `sound_design`, `photorealism_rules`, `composition_rules`), persisted via `mutate_project` (`cinema_pipeline.py:855-893`).
-2. `_ensure_bgm(settings)` (`cinema_pipeline.py:526`) generates BGM upfront via `generate_fal_bgm(..., duration=47)`, then optionally masters it via `master_music(..., preset="cinema_master")`.
+2. `_ensure_bgm(settings)` (`cinema_pipeline.py:627`) generates BGM upfront via `generate_fal_bgm(..., duration=47)`, then optionally masters it via `master_music(..., preset="cinema_master")`.
 
-**KEY FUNCTIONS:** `generate_style_rules` (`llm/style_director.py:12`, OpenAI-only — see failure mode); `style_rules_to_prompt_suffix` (`llm/style_director.py:182`, the string appended to every downstream image prompt); `_ensure_bgm` (`cinema_pipeline.py:526`).
+**KEY FUNCTIONS:** `generate_style_rules` (`llm/style_director.py:12`, OpenAI-only — see failure mode); `style_rules_to_prompt_suffix` (`llm/style_director.py:187`, the string appended to every downstream image prompt); `_ensure_bgm` (`cinema_pipeline.py:627`).
 
 **DECISION POINTS:**
 - **Skip style-gen if pre-baked.** If `global_settings.style_rules` is non-empty at run start, the LLM call is skipped entirely (`cinema_pipeline.py:861`). Operators who want determinism can hand-author this dict.
-- **Style director is OpenAI-only.** If only `ANTHROPIC_API_KEY` is set (no OpenAI key), `generate_style_rules` falls through to `_default_style_rules` immediately (`llm/style_director.py:36-42`) — asymmetric with ChiefDirector/CinemaDirector, which prefer Anthropic.
+- **Style director is OpenAI-only.** If only `ANTHROPIC_API_KEY` is set (no OpenAI key), `generate_style_rules` falls through to `_default_style_rules` immediately (`llm/style_director.py:127-133`) — asymmetric with ChiefDirector/CinemaDirector, which prefer Anthropic.
 
 **OUTPUTS:** `project.global_settings.style_rules` persisted; `temp/bgm_*.mp3` (mastered or raw).
 
-**FAILURE MODES + RECOVERY:** Style-gen failure → hardcoded `_default_style_rules` keyed on mood (`llm/style_director.py:122`); the run continues. BGM mastering failure is **non-critical** — logs a WARNING and proceeds with the unmastered track (`cinema_pipeline.py:526-546`).
+**FAILURE MODES + RECOVERY:** Style-gen failure → hardcoded `_default_style_rules` keyed on mood (`llm/style_director.py:127`); the run continues. BGM mastering failure is **non-critical** — logs a WARNING and proceeds with the unmastered track (`cinema_pipeline.py:526-546`).
 
 ---
 
 ### Stage 1 — Scene decomposition (script → shots)
 
-**INPUTS:** Per scene: `scene` dict (`title`, `action`, `dialogue`, `mood`, `duration_seconds`, `characters_present`, `location_id`), the matched `characters` and `location` dicts, `global_settings`, and the `style_rules` from Stage 0. The injected `PIPELINE_CONTEXT` string (`pipeline_context.py:14`, loaded from `config/prompts/pipeline_context.md`) rides along in every LLM system prompt.
+**INPUTS:** Per scene: `scene` dict (`title`, `action`, `dialogue`, `mood`, `duration_seconds`, `characters_present`, `location_id`), the matched `characters` and `location` dicts, `global_settings`, and the `style_rules` from Stage 0. The injected `PIPELINE_CONTEXT` string (`pipeline_context.py:15`, loaded from `config/prompts/pipeline_context.md`) rides along in every LLM system prompt.
 
 **PROCESSING (per scene with empty `shots`):**
 1. **Route:** `use_competitive = settings.get("competitive_generation", True)` (`cinema_pipeline.py:921`).
@@ -711,7 +711,7 @@ flowchart TD
 3. **Validate (ChiefDirector pre-gen gate):** `self.director.validate_shot_prompts(shots, scene)` (`cinema_pipeline.py:936`; `llm/chief_director.py:296`) enforces hard constraints HC1–HC8 and returns `APPROVED` / `MODIFIED` / `REJECTED`.
 4. **Record the verdict — critical:** `record_director_review_on_shots(shots, review)` (`cinema_pipeline.py:959`; `cinema/auto_approve.py:202`) writes `shot["director_review"]` onto every shot. **This call is load-bearing for headless runs** (see failure mode).
 5. **Persist:** `update_scene_shots(project, scene_id, shots)` (`domain/scene_decomposer.py:880`) writes shots under the per-project lock.
-6. **Per-scene dialogue:** `_ensure_scene_audio(scene, chars)` (`cinema_pipeline.py:481`) calls `generate_dialogue` → `generate_dialogue_voiceover`, caching the MP3.
+6. **Per-scene dialogue:** `_ensure_scene_audio(scene, chars)` (`cinema_pipeline.py:499`) calls `generate_dialogue` → `generate_dialogue_voiceover`, caching the MP3.
 7. `_save_checkpoint()` after each scene.
 
 **DECISION POINTS:**
@@ -731,7 +731,7 @@ flowchart TD
 
 The first of five gates. Each gate runs the same machinery (`ReviewController._wait_for_gate`, `cinema/review/controller.py:507`): set `runstate.current_stage`, emit progress, run an **auto-approve pre-screen**, then either block on the operator (web) or fail fast (headless).
 
-**Auto-approve pre-screen** (`_run_auto_approve_pass`, `cinema/review/controller.py:253`): for every unapproved shot, `check_gate("plan", ...)` (`cinema/auto_approve.py:582`) evaluates the plan veto rules (`_rules_for_plan`, `cinema/auto_approve.py:170`):
+**Auto-approve pre-screen** (`_run_auto_approve_pass`, `cinema/review/controller.py:253`): for every unapproved shot, `check_gate("plan", ...)` (`cinema/auto_approve.py:625`) evaluates the plan veto rules (`_rules_for_plan`, `cinema/auto_approve.py:203`):
 - `plan_decision_not_approved` — fires if `director_review.decision != "APPROVED"`.
 - `plan_has_violations` — fires if `director_review.violations` is non-empty.
 
@@ -749,16 +749,16 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 
 **INPUTS:** Approved shot plans. Per shot: `prompt`, `characters_in_frame`, previous shot's approved keyframe (img2img init), `global_settings` (tier, sampler knobs, LoRA/style paths, identity strictness), and the baseline ComfyUI workflow graph (`pulid.json` production / `pulid_max.json` max).
 
-**PROCESSING** (`KeyframeRenderPhase.run`, `cinema/phases/keyframe_render.py:68` → per shot `generate_keyframe_take`, `cinema/shots/controller.py:314`):
+**PROCESSING** (`KeyframeRenderPhase.run`, `cinema/phases/keyframe_render.py:68` → per shot `generate_keyframe_take`, `cinema/shots/controller.py:478`):
 1. Skip shots already carrying `approved_keyframe_take_id`.
 2. Require `shot["plan_status"] == "approved"`.
 3. `ContinuityEngine.enhance_shot_prompt` (`domain/continuity_engine.py:446`) builds the augmented prompt + a `continuity_config` dict (img2img flag, `init_image`, `denoise_strength`, scene/location seed, `pulid_weight_override`, identity anchor, threshold).
 4. Optional `optimize_shot_prompt` (`llm/prompt_optimizer.py:355`) when `prompt_optimizer_enabled=True`, cached on `shot["optimizer_cache"]`.
-5. `generate_ai_broll(...)` (`phase_c_assembly.py:72`) produces the image.
+5. `generate_ai_broll(...)` (`phase_c_assembly.py:74`) produces the image.
 6. Post-gen identity validation: `IdentityValidator.validate_image(...)` (`cinema/shots/controller.py:506`) against `identity_strictness` (default 0.60).
 7. Append take to `shot["keyframe_takes"]`; record cost.
 
-**KEY FUNCTIONS:** `generate_ai_broll` (`phase_c_assembly.py:72`); `enhance_shot_prompt` (`domain/continuity_engine.py:446`); `classify_shot_type` (`workflow_selector.py:411`); `get_workflow_params` / `apply_workflow_params` (`workflow_selector.py:450`/`:501`); `get_adaptive_pulid_weight` (`workflow_selector.py:540`); for max tier `generate_ai_broll_max` (`quality_max.py:574`).
+**KEY FUNCTIONS:** `generate_ai_broll` (`phase_c_assembly.py:74`); `enhance_shot_prompt` (`domain/continuity_engine.py:446`); `classify_shot_type` (`workflow_selector.py:411`); `get_workflow_params` / `apply_workflow_params` (`workflow_selector.py:501`/`:501`); `get_adaptive_pulid_weight` (`workflow_selector.py:540`); for max tier `generate_ai_broll_max` (`quality_max.py:694`).
 
 **DECISION POINTS:**
 
@@ -768,7 +768,7 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 |---|---|---|
 | `"max"` | `quality_max.generate_ai_broll_max` | N=8 adaptive best-of, 4-channel ControlNet, Redux, FaceDetailer, ReActor, SUPIR 4K. Falls through to production on `None`/exception. |
 | `"production"` (default) | ComfyUI + PuLID via `RunPodComfyUI` | Used when `COMFYUI_SERVER_URL` set AND `pulid.json` exists. |
-| (fallback) | `_fal_flux_fallback` | FLUX Kontext Max Multi → FLUX-Pro → FLUX Schnell → Pollinations (`phase_c_assembly.py:415`). |
+| (fallback) | `_fal_flux_fallback` | FLUX Kontext Max Multi → FLUX-Pro → FLUX Schnell → Pollinations (`phase_c_assembly.py:438`). |
 
 *Shot-type → PuLID weight* (production `WORKFLOW_TEMPLATES`, `workflow_selector.py:21`, **verified**):
 
@@ -780,9 +780,9 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 | action | **0.8** | ComfyUI PuLID |
 | landscape | **0.0** | PuLID skipped → FAL |
 
-*Identity thresholds* (`SHOT_TYPE_THRESHOLDS`, `identity/types.py:92`, **verified**): portrait 0.75/0.70/0.60, medium 0.70/0.65/0.55, wide 0.60/0.55/0.45, action 0.65/0.60/0.50, landscape 0.0 (strict/standard/lenient). On retry, the threshold degrades linearly toward `lenient` (`get_threshold_for_shot`, `identity/types.py:101`), preventing infinite retry loops.
+*Identity thresholds* (`SHOT_TYPE_THRESHOLDS`, `identity/types.py:95`, **verified**): portrait 0.75/0.70/0.60, medium 0.70/0.65/0.55, wide 0.60/0.55/0.45, action 0.65/0.60/0.50, landscape 0.0 (strict/standard/lenient). On retry, the threshold degrades linearly toward `lenient` (`get_threshold_for_shot`, `identity/types.py:104`), preventing infinite retry loops.
 
-*Max-tier best-of-N* (`quality_max.py:744`): generate `max_candidate_count` (default 8) candidates in `max_candidate_batch` batches with deterministic seeds (`base_seed + i*1009`); after each batch `should_halt` (`face_validator_gate.py:225`) checks composite ≥ `halt_threshold_composite` (portrait default 0.92) once `n ≥ halt_min_n`; composite = `0.6*ArcFace + 0.4*aesthetic`. If `needs_regenerate` (best ArcFace < `regenerate_floor_arc`, portrait 0.82), one PuLID-boost retry runs (weight += 0.15, capped 1.0).
+*Max-tier best-of-N* (`quality_max.py:744`): generate `max_candidate_count` (default 8) candidates in `max_candidate_batch` batches with deterministic seeds (`base_seed + i*1009`); after each batch `should_halt` (`face_validator_gate.py:227`) checks composite ≥ `halt_threshold_composite` (portrait default 0.92) once `n ≥ halt_min_n`; composite = `0.6*ArcFace + 0.4*aesthetic`. If `needs_regenerate` (best ArcFace < `regenerate_floor_arc`, portrait 0.82), one PuLID-boost retry runs (weight += 0.15, capped 1.0).
 
 *img2img / continuity denoise* (`TemporalConsistencyManager.get_denoise_strength`, `domain/continuity_engine.py:374`): first shot 0.55, location change 0.50, same-location index ≤1 → 0.40, same-location index >1 → 0.30. UI override `continuity_options.img2img_denoise` clamps to **[0.2, 0.6]**.
 
@@ -792,13 +792,13 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 - **Per-shot failure does not fail the phase.** The phase always returns `ok=True`; the failed shot routes through `on_failure` into `failed_shots` for operator rework (`cinema/phases/keyframe_render.py:105-108`).
 - **Max-tier fall-through.** If `generate_ai_broll_max` returns `None` or raises, generation silently falls to the production path (`phase_c_assembly.py:114-143`).
 - **ComfyUI timeout** (600s, `phase_c_assembly.py:365-394`) or pod down → `_fal_flux_fallback`.
-- **Node-availability divergence (max tier).** `_probe_node_availability` returning an empty set causes `_prune_unavailable` to no-op (`quality_max.py:250`); a pod missing custom nodes then fails at *queue* time, not probe time. Documented caveat, not auto-recovered.
+- **Node-availability divergence (max tier).** `_probe_node_availability` returning an empty set causes `_prune_unavailable` to no-op (`quality_max.py:364`); a pod missing custom nodes then fails at *queue* time, not probe time. Documented caveat, not auto-recovered.
 
 ---
 
 ### KEYFRAME_REVIEW gate (55%)
 
-Same machinery as PLAN_REVIEW. Auto-approve runs `_rules_for_image` (`cinema/auto_approve.py:247`): `image_composite_below_threshold` (threshold `image_min_composite=0.97`, or the `image_min_composite_fallback=0.78` bar when any take used a fallback engine), `image_cascade_fallback` (vetoes any cascade-fallback take when `image_veto_on_fallback=True`), `image_over_budget`. On approval, `approved_keyframe_take_id` is set to the highest-composite take (`pick_best_take_by_composite`, `cinema/auto_approve.py:477`). **Gate predicate** (`controller.py:224`): all shots have `approved_keyframe_take_id`. Web operators approve via `POST .../keyframes/<take_id>/approve` → `approve_take(..., "keyframe")` (`cinema/review/controller.py:647`).
+Same machinery as PLAN_REVIEW. Auto-approve runs `_rules_for_image` (`cinema/auto_approve.py:280`): `image_composite_below_threshold` (threshold `image_min_composite=0.97`, or the `image_min_composite_fallback=0.78` bar when any take used a fallback engine), `image_cascade_fallback` (vetoes any cascade-fallback take when `image_veto_on_fallback=True`), `image_over_budget`. On approval, `approved_keyframe_take_id` is set to the highest-composite take (`pick_best_take_by_composite`, `cinema/auto_approve.py:520`). **Gate predicate** (`controller.py:224`): all shots have `approved_keyframe_take_id`. Web operators approve via `POST .../keyframes/<take_id>/approve` → `approve_take(..., "keyframe")` (`cinema/review/controller.py:647`).
 
 ---
 
@@ -808,7 +808,7 @@ Same machinery as PLAN_REVIEW. Auto-approve runs `_rules_for_image` (`cinema/aut
 
 **PROCESSING** (`PerformanceCapturePhase.run`, `cinema/phases/performance.py:35` → `generate_performance_take`): iterate shots, calling the performance engine for each that needs one. Three skip conditions per shot (`cinema/phases/performance.py:63-72`): (1) already has `approved_performance_take_id`; (2) `performance_engine == "SKIP"`; (3) no `approved_keyframe_take_id` (no anchor → motion would also skip). A take can also self-report `result.get("skipped")`.
 
-**KEY FUNCTIONS:** `route_performance_engine` (`domain/performance.py:103`); `precondition_error` (`domain/performance.py:163`); `validate_performance_take` (`performance/identity_gate.py:93`, single-frame ArcFace at 1s, floor 0.70).
+**KEY FUNCTIONS:** `route_performance_engine` (`domain/performance.py:103`); `precondition_error` (`domain/performance.py:163`); `validate_performance_take` (`performance/identity_gate.py:95`, single-frame ArcFace at 1s, floor 0.70).
 
 **DECISION POINTS — engine routing** (`domain/performance.py:103`):
 
@@ -829,11 +829,11 @@ Driving-video mode (`driving_video_source`, `domain/performance.py:145`): `"uplo
 
 ### PERFORMANCE_REVIEW gate (65%, conditional)
 
-**This gate is conditionally skipped.** The orchestrator computes `all_skipped` over the project (`cinema_pipeline.py:1038-1043`): every shot is either `performance_engine == "SKIP"` **or** lacks an approved keyframe. If `all_skipped`, the gate is bypassed with a `PERFORMANCE_SKIPPED_GATE` progress event at 65%; otherwise `_wait_for_gate("PERFORMANCE_REVIEW", ..., 65)` runs (`cinema_pipeline.py:1045`).
+**This gate is conditionally skipped.** The orchestrator computes `all_skipped` over the project (`cinema_pipeline.py:1038-1043`): every shot is either `performance_engine == "SKIP"` **or** lacks an approved keyframe. If `all_skipped`, the gate is bypassed with a `PERFORMANCE_SKIPPED_GATE` progress event at 65%; otherwise `_wait_for_gate("PERFORMANCE_REVIEW", ..., 65)` runs (`cinema_pipeline.py:305`).
 
-> **Divergence flagged (honest note):** the `_gate_satisfied` PERFORMANCE_REVIEW branch carries an inline comment citing the bypass at `cinema_pipeline.py:768-773` (`cinema/review/controller.py`), but the actual all-skipped bypass is at **`cinema_pipeline.py:1038-1058`** (verified). The line-anchor in that comment is stale; the *logic* it describes is correct and mirrors the controller predicate.
+> **Divergence flagged (honest note):** the `_gate_satisfied` PERFORMANCE_REVIEW branch carries an inline comment citing the bypass at `cinema_pipeline.py:302-307` (`cinema/review/controller.py`), but the actual all-skipped bypass is at **`cinema_pipeline.py:1038-1058`** (verified). The line-anchor in that comment is stale; the *logic* it describes is correct and mirrors the controller predicate.
 
-**Auto-approve here is opt-in.** The motion gate map entry is only added when `CINEMA_AUTO_APPROVE_MOTION` is truthy (`1`/`true`/`yes`, case-insensitive; `cinema/auto_approve.py:568`). Without it, PERFORMANCE_REVIEW is always manual even when auto-approve is otherwise enabled. When enabled, `_rules_for_motion` (`cinema/auto_approve.py:307`) checks `motion_min_identity=0.85` and `motion_min_motion_score=0.7`. **Gate predicate** (`controller.py:224`): each shot is SKIP, lacks a keyframe, or has `approved_performance_take_id`.
+**Auto-approve here is opt-in.** The motion gate map entry is only added when `CINEMA_AUTO_APPROVE_MOTION` is truthy (`1`/`true`/`yes`, case-insensitive; `cinema/auto_approve.py:568`). Without it, PERFORMANCE_REVIEW is always manual even when auto-approve is otherwise enabled. When enabled, `_rules_for_motion` (`cinema/auto_approve.py:340`) checks `motion_min_identity=0.85` and `motion_min_motion_score=0.7`. **Gate predicate** (`controller.py:224`): each shot is SKIP, lacks a keyframe, or has `approved_performance_take_id`.
 
 ---
 
@@ -880,11 +880,11 @@ Driving-video mode (`driving_video_source`, `domain/performance.py:145`): `"uplo
 
 ### REVIEW gate (82%)
 
-The last per-shot gate before assembly. `_rebuild_review_clips(project)` builds the in-memory manifest first (`cinema/review/controller.py:606`). Auto-approve runs `_rules_for_final` (`cinema/auto_approve.py:351`) over `postprocess_variants + motion_takes`:
+The last per-shot gate before assembly. `_rebuild_review_clips(project)` builds the in-memory manifest first (`cinema/review/controller.py:606`). Auto-approve runs `_rules_for_final` (`cinema/auto_approve.py:384`) over `postprocess_variants + motion_takes`:
 - `final_lipsync_below_threshold` — dialogue-aware: returns 1.0 (pass) for non-dialogue shots and for `audio_embedded=True` takes; 0.0 for a dialogue shot with no lipsync score and no embedded audio. Threshold `final_min_lipsync=0.8`.
 - `final_upstream_was_auto_approved` — **safety net**: if any earlier gate auto-approved this shot, force human review at REVIEW (`final_require_human_if_upstream_auto=True` by default).
 
-On approval, `approved_final_take_id` (and `approved_motion_take_id` via the `source_take_id` chain) is set to the best take (`pick_best_take_for_final` prefers non-fallback, then highest composite, `cinema/auto_approve.py:508`). **Gate predicate** (`controller.py:224`): all shots have `approved_final_take_id`.
+On approval, `approved_final_take_id` (and `approved_motion_take_id` via the `source_take_id` chain) is set to the best take (`pick_best_take_for_final` prefers non-fallback, then highest composite, `cinema/auto_approve.py:551`). **Gate predicate** (`controller.py:224`): all shots have `approved_final_take_id`.
 
 > **Footgun for unattended runs:** `final_require_human_if_upstream_auto=True` blocks a *fully* headless completion even when every other rule passes — by design. To complete fully unattended, set it to `false` in `global_settings.auto_approve` (after the pipeline is calibrated). This is the single most common headless dead-end after the cycle-17 PLAN fix.
 
@@ -894,22 +894,22 @@ On approval, `approved_final_take_id` (and `approved_motion_take_id` via the `so
 
 **INPUTS:** Approved final takes (collected in scene order), per-scene dialogue MP3s, per-scene foley MP3s, the BGM MP3, and `global_settings` (`mood`, `scene_transitions`, `transition_duration`, `music_mastering`).
 
-**PROCESSING** (`assemble_approved_takes`, `cinema_pipeline.py:755` → `_assemble_approved_takes_core`, `:685` → `_assemble_final`, `:1184`):
+**PROCESSING** (`assemble_approved_takes`, `cinema_pipeline.py:853` → `_assemble_approved_takes_core`, `:685` → `_assemble_final`, `:1184`):
 1. `_refresh_project_snapshot()` then re-assert the REVIEW gate as a guard.
-2. `_build_scene_packages(project)` (`cinema_pipeline.py:608`) resolves each approved take path and collects per-scene audio/foley. **All-embedded detection:** when every approved shot in a scene has `metadata.audio_embedded=True`, standalone TTS is suppressed to avoid double-voice from Veo/Omnihuman.
-3. `_assemble_final(scene_data, bgm_path, settings)` (`cinema_pipeline.py:1184`):
+2. `_build_scene_packages(project)` (`cinema_pipeline.py:709`) resolves each approved take path and collects per-scene audio/foley. **All-embedded detection:** when every approved shot in a scene has `metadata.audio_embedded=True`, standalone TTS is suppressed to avoid double-voice from Veo/Omnihuman.
+3. `_assemble_final(scene_data, bgm_path, settings)` (`cinema_pipeline.py:1315`):
    a. **Normalize** each clip to 1920×1080@30fps (`scale + pad + fps`, `libx264 crf=20`, `aac 192k`).
    b. **Stitch** — hard-cut concat demuxer by default, OR `xfade_concat` cross-dissolve per scene boundary when `scene_transitions=True` (`phase_c_ffmpeg.py:1301`), with transition clamped to `0.4 * min(durations)`.
    c. **Color grade** via `apply_color_grade()` (`phase_c_ffmpeg.py:1018`) using a mood→preset map (`COLOR_GRADE_PRESETS`, `phase_c_ffmpeg.py:1006`).
    d. **Tri-mix audio:** voice (1.0) + BGM (0.12) + foley (0.20). Voice source binds dynamically: `[0:a]` when audio is embedded, else the standalone dialogue MP3; `amix duration=longest` for the standalone path, `first` when embedded.
    e. **Two-pass loudnorm** EBU R128 (`two_pass_loudnorm`, `phase_c_ffmpeg.py:1103`; defaults -14 LUFS / 11 LU / -1.5 dBTP).
 
-**KEY FUNCTIONS:** `_assemble_final` (`cinema_pipeline.py:1184`); `_build_scene_packages` (`:608`); `xfade_concat` / `_build_xfade_filtergraph` (`phase_c_ffmpeg.py:1301`/`:1232`); `apply_color_grade` (`:1018`); `two_pass_loudnorm` (`:1103`).
+**KEY FUNCTIONS:** `_assemble_final` (`cinema_pipeline.py:1315`); `_build_scene_packages` (`:608`); `xfade_concat` / `_build_xfade_filtergraph` (`phase_c_ffmpeg.py:1301`/`:1232`); `apply_color_grade` (`:1018`); `two_pass_loudnorm` (`:1103`).
 
 **DECISION POINTS:**
 - **Stitch mode** — `scene_transitions` (default `False`).
 - **Voice source** — embedded vs standalone, decided per the all-embedded detection.
-- **Re-assembly bypass (S21).** The web re-assemble endpoint calls `_assemble_approved_takes_core()` **directly** (`cinema_pipeline.py:685`), skipping the SCREENING gate-wait — calling the full public `assemble_approved_takes()` from a Flask request thread during screening would deadlock (the gate predicate polls `is_screening_approved()`, which is False by design, and the request's fresh pipeline is not the instance `signal_gate` will unblock).
+- **Re-assembly bypass (S21).** The web re-assemble endpoint calls `_assemble_approved_takes_core()` **directly** (`cinema_pipeline.py:783`), skipping the SCREENING gate-wait — calling the full public `assemble_approved_takes()` from a Flask request thread during screening would deadlock (the gate predicate polls `is_screening_approved()`, which is False by design, and the request's fresh pipeline is not the instance `signal_gate` will unblock).
 
 **OUTPUTS:** `exports/final_cinema.mp4` — 1920×1080@30fps, H.264, AAC, EBU R128 normalized, color-graded, with optional scene transitions and the dialogue+BGM+foley mix. Per-stage intermediates land in `temp/` (`*_norm.mp4`, `stitched.mp4`, `graded.mp4`).
 
@@ -922,9 +922,9 @@ On approval, `approved_final_take_id` (and `approved_motion_take_id` via the `so
 
 ### SCREENING gate (95%, optional) + Stage 6 — Cleanup & complete
 
-**SCREENING gate** (`assemble_approved_takes`, `cinema_pipeline.py:774-805`): runs only if `_screening_stage_enabled()` (`cinema/screening.py:84`; project override > `CINEMA_SCREENING_STAGE` env > default ON). The pipeline emits 95% progress and blocks on `lifecycle.wait_for_gate("SCREENING", predicate)` where the predicate reads `is_screening_approved(project)` (`cinema/screening.py:275`).
+**SCREENING gate** (`assemble_approved_takes`, `cinema_pipeline.py:853-884`): runs only if `_screening_stage_enabled()` (`cinema/screening.py:104`; project override > `CINEMA_SCREENING_STAGE` env > default ON). The pipeline emits 95% progress and blocks on `lifecycle.wait_for_gate("SCREENING", predicate)` where the predicate reads `is_screening_approved(project)` (`cinema/screening.py:295`).
 
-During the wait the operator: hits `POST .../assemble/screen` for the timeline manifest; may iterate individual shots (each iterate marks `mark_shot_needs_reassembly`, `cinema/screening.py:351`); may `POST .../assemble/re-assemble` to re-stitch only dirty shots (`clear_needs_reassembly(only_shots=...)` preserves concurrently-dirtied shots, `cinema/screening.py:401`); and finally `POST .../screening/approve` → `mark_screening_approved` + `lifecycle.signal_gate("SCREENING")` (`web_server.py:2289`) to wake the waiter. **Precondition:** `screening/approve` requires `exports/final_cinema.mp4` to exist, returning 409 otherwise (`web_server.py:2258-2263`).
+During the wait the operator: hits `POST .../assemble/screen` for the timeline manifest; may iterate individual shots (each iterate marks `mark_shot_needs_reassembly`, `cinema/screening.py:371`); may `POST .../assemble/re-assemble` to re-stitch only dirty shots (`clear_needs_reassembly(only_shots=...)` preserves concurrently-dirtied shots, `cinema/screening.py:421`); and finally `POST .../screening/approve` → `mark_screening_approved` + `lifecycle.signal_gate("SCREENING")` (`web_server.py:2289`) to wake the waiter. **Precondition:** `screening/approve` requires `exports/final_cinema.mp4` to exist, returning 409 otherwise (`web_server.py:2258-2263`).
 
 **Cleanup & complete** (`cinema_pipeline.py:806-838`): `cleanup_project(pid, aggressive=False)` purges intermediate temp artifacts (always-delete patterns only; generated media preserved unless `aggressive=True`); `cost_tracker.get_video_cost()` logs the spend breakdown; `_clear_checkpoint()` removes `temp/pipeline_state.json`; a final `COMPLETE` progress event fires at 100%.
 
@@ -932,7 +932,7 @@ During the wait the operator: hits `POST .../assemble/screen` for the timeline m
 
 ---
 
-**Cross-cutting note on the cost gate (assembly-relevant):** the budget gate (`CostTracker.would_exceed` / `is_over_budget`, `cost_tracker.py:335`/`:345`) accounts for video/image generation only. Audio modules (`audio/dialogue.py`, `audio/music.py`, `audio/foley.py`) and performance modules each construct **isolated** `CostTracker()` instances that log to the same SQLite DB but do **not** add to the core tracker's `spent_usd` — so audio API spend runs uncapped, and `spent_usd` resets per process (it is not loaded from SQLite on init). Operators relying on `budget_limit_usd` for hard governance should know it bounds the generation stages, not the full run.
+**Cross-cutting note on the cost gate (assembly-relevant):** the budget gate (`CostTracker.would_exceed` / `is_over_budget`, `cost_tracker.py:356`/`:345`) accounts for video/image generation only. Audio modules (`audio/dialogue.py`, `audio/music.py`, `audio/foley.py`) and performance modules each construct **isolated** `CostTracker()` instances that log to the same SQLite DB but do **not** add to the core tracker's `spent_usd` — so audio API spend runs uncapped, and `spent_usd` resets per process (it is not loaded from SQLite on init). Operators relying on `budget_limit_usd` for hard governance should know it bounds the generation stages, not the full run.
 
 ---
 
@@ -942,7 +942,7 @@ This is the operator's playbook. It assumes you have the server running (see §3
 
 > **Two things to internalize before you start.**
 > 1. **`web_server.py` is the only entry point.** The old CLI (`main.py`) is deleted. Everything you do is an HTTP call to the Flask server (port 8080, `web_server.py:2587`) or a click in the React UI that maps to one. There is no auth layer — CORS is the only access control (`web_server.py:68`), so do not expose it to a hostile network without a reverse proxy.
-> 2. **Per-project quality knobs live in `project["global_settings"]`, set via `PUT /api/projects/<pid>` (`web_server.py:487`).** They are read at runtime through `get_project_setting(ctx, key, default)` (`cinema/context.py:146`), *not* from `config/settings.py`. The `config/settings.py` singleton is for API keys and infra paths only. If a doc tells you to set a creative knob via an env var, it is almost certainly wrong — the only env vars that change pipeline *behavior* are the `CINEMA_*` flags in §5.5.
+> 2. **Per-project quality knobs live in `project["global_settings"]`, set via `PUT /api/projects/<pid>` (`web_server.py:487`).** They are read at runtime through `get_project_setting(ctx, key, default)` (`cinema/context.py:151`), *not* from `config/settings.py`. The `config/settings.py` singleton is for API keys and infra paths only. If a doc tells you to set a creative knob via an env var, it is almost certainly wrong — the only env vars that change pipeline *behavior* are the `CINEMA_*` flags in §5.5.
 
 ### 5.1 End-to-End Operation: From Idea to Final Film
 
@@ -1027,7 +1027,7 @@ flowchart TD
 
 ### 5.2 Quality Tiers: Standard (Production) vs. Max
 
-The single biggest quality switch is `quality_tier` in `global_settings`. It is read at the top of `generate_ai_broll` (`phase_c_assembly.py:117`) and routes keyframe generation down one of two entirely different image pipelines.
+The single biggest quality switch is `quality_tier` in `global_settings`. It is read at the top of `generate_ai_broll` (`phase_c_assembly.py:74`) and routes keyframe generation down one of two entirely different image pipelines.
 
 | | **`"production"`** (default) | **`"max"`** |
 |---|---|---|
@@ -1041,7 +1041,7 @@ The single biggest quality switch is `quality_tier` in `global_settings`. It is 
 
 **How to select it:** `PUT /api/projects/<pid>` with `{"global_settings": {"quality_tier": "max"}}`. Max tier requires `pulid_max.json` present on the pod and the pod running; on any failure or `None` return it transparently falls through to the production path (`phase_c_assembly.py:117`–143), so you never get a hard failure from choosing max.
 
-> **Watch out:** several max-tier knobs are **accepted-but-not-wired** as of this writing. `hires_fix_enabled`/`hires_fix_denoise` are validated and stored but the pass-2 denoise is never injected (`quality_max.py:738`). `max_halt_rule` accepts `composite_only`/`conjunctive`/`budget_only` but `should_halt` only implements composite-only (`face_validator_gate.py:225`). Don't rely on those three to change output; the post-passes (FaceDetailer/SUPIR) carry the quality lift instead.
+> **Watch out:** several max-tier knobs are **accepted-but-not-wired** as of this writing. `hires_fix_enabled`/`hires_fix_denoise` are validated and stored but the pass-2 denoise is never injected (`quality_max.py:738`). `max_halt_rule` accepts `composite_only`/`conjunctive`/`budget_only` but `should_halt` only implements composite-only (`face_validator_gate.py:227`). Don't rely on those three to change output; the post-passes (FaceDetailer/SUPIR) carry the quality lift instead.
 
 ### 5.3 The Capability-Knobs Playbook
 
@@ -1080,7 +1080,7 @@ This is where most of your perceived quality lives. The knobs, in order of impac
 | `img2img_denoise` | 0.35 | 0.2–0.6 | Continuity strength: lower = more consistent with prior shot | `workflow_selector.py:493` |
 | `char_lora_paths` | {} | dict | Per-character trained LoRA `.safetensors` — the single biggest identity lever | digest: image-tiers |
 
-Per-shot identity thresholds also auto-scale by shot type (`SHOT_TYPE_THRESHOLDS`, `identity/types.py:92`): portrait standard 0.70, medium 0.65, wide 0.55, action 0.60, landscape 0.0 (faces aren't gated in landscapes).
+Per-shot identity thresholds also auto-scale by shot type (`SHOT_TYPE_THRESHOLDS`, `identity/types.py:95`): portrait standard 0.70, medium 0.65, wide 0.55, action 0.60, landscape 0.0 (faces aren't gated in landscapes).
 
 **LoRA training** (the highest-quality identity path): `POST .../characters/<cid>/train-lora` (`web_server.py:687`) runs a background ai-toolkit job (FLUX rank-32 fp16, 3000 steps; `prep/lora_training.py:99`). Upload **25–50 varied reference images** first. Poll `GET .../characters/<cid>/lora-status` (`web_server.py:763`). On completion the path lands in `char_lora_paths` and is used by the max-tier LoRA loader.
 
@@ -1178,7 +1178,7 @@ Triggered via `POST .../shots/<sid>/correct` (`web_server.py:2074`) or auto-reco
 2. `coherence_check_enabled=true`, lower `color_drift_sensitivity` to ~0.2, set `coherence_threshold=0.65` explicitly.
 3. Enable `api_engines.KLING_NATIVE.storyboard_mode=true` for 2–6-shot dialogue scenes to get cross-shot `image_references`.
 4. `scene_transitions=true` with `transition_duration≈0.5` for cinematic dissolves.
-5. Hand-author `style_rules` (or generate once and keep) so every shot shares the same color-grade/lighting/photorealism suffix (`style_rules_to_prompt_suffix`, `llm/style_director.py:182`).
+5. Hand-author `style_rules` (or generate once and keep) so every shot shares the same color-grade/lighting/photorealism suffix (`style_rules_to_prompt_suffix`, `llm/style_director.py:187`).
 
 **To maximize dialogue + lip-sync fidelity:**
 1. Set `GOOGLE_CLOUD_PROJECT`; keep `VEO_NATIVE` live and enabled (only native-audio engine).
@@ -1236,7 +1236,7 @@ These are the *only* env vars that alter pipeline behavior (everything else in `
 
 ### 5.7 Global Prompt Control (the master lever)
 
-One file shapes **every** LLM call in the pipeline: `config/prompts/pipeline_context.md`, loaded as `PIPELINE_CONTEXT` (`pipeline_context.py:14`) and injected into the system prompts of ChiefDirector, SceneDecomposer, DialogueWriter, and StyleDirector. Editing it changes API-routing guidance, identity rules, and prompt structure **across the whole pipeline without touching code**. This is the highest-leverage, lowest-effort customization available — but it is also a known source of drift (e.g., its lip-sync routing guidance currently disagrees with the hard-coded `PURPOSE_API_RANKING`; `domain/scene_decomposer.py:121`), so verify any change against the actual router behavior before trusting it.
+One file shapes **every** LLM call in the pipeline: `config/prompts/pipeline_context.md`, loaded as `PIPELINE_CONTEXT` (`pipeline_context.py:15`) and injected into the system prompts of ChiefDirector, SceneDecomposer, DialogueWriter, and StyleDirector. Editing it changes API-routing guidance, identity rules, and prompt structure **across the whole pipeline without touching code**. This is the highest-leverage, lowest-effort customization available — but it is also a known source of drift (e.g., its lip-sync routing guidance currently disagrees with the hard-coded `PURPOSE_API_RANKING`; `domain/scene_decomposer.py:120`), so verify any change against the actual router behavior before trusting it.
 
 ---
 
@@ -1275,8 +1275,8 @@ graph TD
 | Field (on shot, unless noted) | Written by | Read by | What it carries forward |
 |---|---|---|---|
 | `global_settings` (project-level) | Web UI (`PUT /api/projects/<pid>`) | every subsystem via `get_project_setting(ctx, key, default)` | all user-tunable knobs (tier, thresholds, language, `api_engines`, …) |
-| `director_review` | `record_director_review_on_shots` (`cinema/auto_approve.py:202`), called at `cinema_pipeline.py:959` | PLAN_REVIEW auto-approve `_rules_for_plan` (`auto_approve.py:170`) | ChiefDirector's APPROVED/MODIFIED/REJECTED verdict; **MODIFIED is normalized to APPROVED** (the cycle-17 `138d7c7` decision) |
-| `plan_status` | `approve_shot_plan` / auto-approve | PLAN_REVIEW gate predicate (`controller.py:224`) | `"approved"` unlocks keyframe generation |
+| `director_review` | `record_director_review_on_shots` (`cinema/auto_approve.py:235`), called at `cinema_pipeline.py:959` | PLAN_REVIEW auto-approve `_rules_for_plan` (`auto_approve.py:203`) | ChiefDirector's APPROVED/MODIFIED/REJECTED verdict; **MODIFIED is normalized to APPROVED** (the cycle-17 `138d7c7` decision) |
+| `plan_status` | `approve_shot_plan` / auto-approve | PLAN_REVIEW gate predicate (`controller.py:633`) | `"approved"` unlocks keyframe generation |
 | `target_api` | scene decomposer / operator (`PUT .../shots/<id>`) | video cascade routing (`controller.py:1113`) + image routing | which engine to try first; `"AUTO"` triggers smart routing |
 | `approved_keyframe_take_id` | `approve_take(kind="keyframe")` | KeyframeRenderPhase skip-gate, performance/motion `init_image` chain | the anchor still for all downstream video |
 | `performance_engine` | `route_performance_engine` (`domain/performance.py:103`) | PerformanceCapturePhase + gate bypass | `ACT_ONE`/`LIVE_PORTRAIT`/`VIGGLE`/`SKIP`; `"SKIP"` skips the shot and (if all-SKIP) the whole gate |
@@ -1284,9 +1284,9 @@ graph TD
 | `approved_final_take_id` (+ `approved_motion_take_id`) | `approve_take(kind="final")` | REVIEW predicate, `_build_scene_packages` | the clip that goes into final assembly |
 | `metadata.audio_embedded` (on take) | video cascade post-call (`controller.py:1214`) | `_build_scene_packages` / `_assemble_final` audio mix | whether the clip already contains dialogue audio (Veo native) → suppress standalone TTS |
 | `cascade_metadata` (on take) | `_record_video_cascade` (`phase_c_ffmpeg.py:91`) | audit / `audio_embedded` decision | which engine actually won + attempt list |
-| `screening_approved` (project-level) | `mark_screening_approved` (`screening.py:287`) | SCREENING gate predicate | operator sign-off on the assembled cut |
+| `screening_approved` (project-level) | `mark_screening_approved` (`screening.py:307`) | SCREENING gate predicate | operator sign-off on the assembled cut |
 | `needs_reassembly[]` (project-level) | `mark_shot_needs_reassembly` | re-assemble endpoint | shots iterated during screening that need re-stitching |
-| `final_video_path` / `exports/final_cinema.mp4` | `_assemble_final` (`cinema_pipeline.py:1184`) | export endpoint, `screening/approve` precondition | the deliverable |
+| `final_video_path` / `exports/final_cinema.mp4` | `_assemble_final` (`cinema_pipeline.py:1315`) | export endpoint, `screening/approve` precondition | the deliverable |
 
 The crucial architectural property: **takes are append-only history, and "approval" is a pointer.** A shot accumulates many `keyframe_takes`/`motion_takes`; approving one just writes its id into the corresponding `approved_*_take_id` field. The take a downstream stage consumes is always resolved through the approval pointer, never by "latest". This is what makes iteration (regenerate, screen-and-redo) safe — old takes are never destroyed.
 
@@ -1294,7 +1294,7 @@ The crucial architectural property: **takes are append-only history, and "approv
 
 ### 6.2 How each subsystem hands off to the next
 
-The orchestrator's `generate()` method (`cinema_pipeline.py:844`) is the spine. It does **not** hold media in memory and pass it along — instead, each stage **mutates the persisted project dict** (via `mutate_project`) and **re-reads a fresh snapshot** (`_refresh_project_snapshot`, `cinema_pipeline.py:425`) at the next gate boundary. The hand-off medium is the project JSON on disk, not function arguments. `_refresh_project_snapshot` is called 6+ times through `generate()`; critically it **validates before swapping** `self.project` (`cinema_pipeline.py:425`, cycle-11 fix) so a validation failure leaves the in-memory state coherent, and it rebuilds the `ContinuityEngine`'s typed-id-keyed `characters`/`locations` dicts each time.
+The orchestrator's `generate()` method (`cinema_pipeline.py:942`) is the spine. It does **not** hold media in memory and pass it along — instead, each stage **mutates the persisted project dict** (via `mutate_project`) and **re-reads a fresh snapshot** (`_refresh_project_snapshot`, `cinema_pipeline.py:443`) at the next gate boundary. The hand-off medium is the project JSON on disk, not function arguments. `_refresh_project_snapshot` is called 6+ times through `generate()`; critically it **validates before swapping** `self.project` (`cinema_pipeline.py:425`, cycle-11 fix) so a validation failure leaves the in-memory state coherent, and it rebuilds the `ContinuityEngine`'s typed-id-keyed `characters`/`locations` dicts each time.
 
 ```mermaid
 flowchart TD
@@ -1321,9 +1321,9 @@ The hand-off contracts, stage by stage:
 
 1. **Decompose → Director → Plan.** `decompose_scene` (`domain/scene_decomposer.py:429`) or its competitive variant produces shot dicts from `make_shot`. `ChiefDirector.validate_shot_prompts` (`llm/chief_director.py:296`) may modify them in place. `record_director_review_on_shots` then writes `director_review` onto each shot — **this single call is what unblocks the PLAN_REVIEW auto-approve gate**; without it, `_rules_for_plan` always vetoes (the field is absent) and a headless run dead-ends. `update_scene_shots` persists.
 2. **Plan → Keyframe.** Once PLAN_REVIEW clears, `KeyframeRenderPhase.run(ctx)` (`cinema/phases/keyframe_render.py:68`) iterates shots, skipping any with `approved_keyframe_take_id`, and calls `generate_keyframe_take` (delegated to `ShotController`). The keyframe is the anchor still; its identity score lands in `take.metadata.identity_score`.
-3. **Keyframe → Performance.** `PerformanceCapturePhase` (`cinema/phases/performance.py:35`) skips shots that are SKIP-routed, have no approved keyframe, or already have an approved performance take. The performance take (a driving-video / retarget) becomes optional conditioning for the motion stage.
-4. **Performance → Motion.** `MotionRenderPhase` (`cinema/phases/motion_render.py:321`) turns the approved keyframe into a video clip via the cascade (§6.4). It has a **storyboard batch path** (Kling Native, 2–6 unapproved shots all with keyframes) that generates one combined clip and splits it (`split_video_into_segments`), falling through to per-shot on any failure.
-5. **Motion → Review → Assembly.** After motion, `_rebuild_review_clips` builds the in-memory manifest the web UI reads, and the REVIEW gate waits for `approved_final_take_id` on every shot. Then `assemble_approved_takes` resolves those approved takes' paths in `_build_scene_packages` (`cinema_pipeline.py:608`) and `_assemble_final` (`cinema_pipeline.py:1184`) produces `exports/final_cinema.mp4`.
+3. **Keyframe → Performance.** `PerformanceCapturePhase` (`cinema/phases/performance.py:19`) skips shots that are SKIP-routed, have no approved keyframe, or already have an approved performance take. The performance take (a driving-video / retarget) becomes optional conditioning for the motion stage.
+4. **Performance → Motion.** `MotionRenderPhase` (`cinema/phases/motion_render.py:57`) turns the approved keyframe into a video clip via the cascade (§6.4). It has a **storyboard batch path** (Kling Native, 2–6 unapproved shots all with keyframes) that generates one combined clip and splits it (`split_video_into_segments`), falling through to per-shot on any failure.
+5. **Motion → Review → Assembly.** After motion, `_rebuild_review_clips` builds the in-memory manifest the web UI reads, and the REVIEW gate waits for `approved_final_take_id` on every shot. Then `assemble_approved_takes` resolves those approved takes' paths in `_build_scene_packages` (`cinema_pipeline.py:709`) and `_assemble_final` (`cinema_pipeline.py:1315`) produces `exports/final_cinema.mp4`.
 
 A key correctness detail in the final hand-off: **the audio source for assembly depends on which video engine won.** `_build_scene_packages` detects whether every approved take in a scene has `metadata.audio_embedded=True` (Veo/Omnihuman embed dialogue; Kling image2video does not). If all embedded, standalone TTS is suppressed to avoid double-voice; if mixed, TTS is kept for the non-embedded shots and `_assemble_final` binds the voice filtergraph label to the right input index dynamically (the C-B2 fix; digest gotcha #10).
 
@@ -1372,7 +1372,7 @@ stateDiagram-v2
 
 **Auto-approve thresholds** live in `global_settings.auto_approve` (`AutoApproveConfig`, `cinema/auto_approve.py:71`). The veto rules per gate: PLAN (decision-not-APPROVED, has-violations), IMAGE (composite below threshold — dynamic 0.97 PuLID / 0.78 fallback, cascade-fallback, over-budget), MOTION (identity/motion-score floors — **opt-in via `CINEMA_AUTO_APPROVE_MOTION=1`**), FINAL (lipsync floor, and the `final_require_human_if_upstream_auto` safety net). That last default is the most common footgun for unattended runs: if any earlier gate auto-approved a shot, the REVIEW gate forces a human unless you set `final_require_human_if_upstream_auto=false`.
 
-**Checkpointing and resume.** `CheckpointStore` (`cinema/checkpoint.py`) atomically writes `temp/pipeline_state.json` (via `tempfile.mkstemp` + `os.replace`) after **each scene** and after each audio step (`_save_checkpoint`, `checkpoint.py:87`). It serializes the `RunState` fields wholesale: `current_stage/scene_id/shot_id`, `completed_scene_indices`, `scene_clips`, `scene_audio`, `scene_foley`, `foley_audio_paths`, `shot_results`, `failed_shots`. On `generate(resume=True)`, `_restore_from_checkpoint` (`checkpoint.py:163`) rehydrates those fields and marks any referenced file that's gone as `"lost"`. One subtlety: `review_clips` is **not** persisted in the checkpoint — it is rebuilt in-memory by a separate `_rebuild_review_clips` call on resume (`cinema_pipeline.py:857`).
+**Checkpointing and resume.** `CheckpointStore` (`cinema/checkpoint.py`) atomically writes `temp/pipeline_state.json` (via `tempfile.mkstemp` + `os.replace`) after **each scene** and after each audio step (`_save_checkpoint`, `checkpoint.py:87`). It serializes the `RunState` fields wholesale: `current_stage/scene_id/shot_id`, `completed_scene_indices`, `scene_clips`, `scene_audio`, `scene_foley`, `foley_audio_paths`, `shot_results`, `failed_shots`. On `generate(resume=True)`, `_restore_from_checkpoint` (`checkpoint.py:163`) rehydrates those fields and marks any referenced file that's gone as `"lost"`. One subtlety: `review_clips` is **not** persisted in the checkpoint — it is rebuilt in-memory by a separate `_rebuild_review_clips` call on resume (`cinema_pipeline.py:308`).
 
 **Screening (the post-assembly gate).** After `_assemble_final` produces the mp4, if screening is enabled (`CINEMA_SCREENING_STAGE` default ON, overridable per-project) the pipeline parks at the SCREENING gate at 95%. The operator hits `POST .../assemble/screen` to get a timeline manifest, may iterate individual shots (each iterate calls `mark_shot_needs_reassembly`), may call `POST .../assemble/re-assemble` to re-stitch only the dirty shots, and finally `POST .../screening/approve` → `mark_screening_approved` → the gate's predicate flips True. To wake the blocking waiter promptly, the approve endpoint also calls `pipeline.lifecycle.signal_gate(SCREENING_STAGE_NAME)` (`web_server.py:2289`); if the live pipeline object isn't reachable, the 0.5s poll is the fallback (verified `web_server.py:2289-2292`).
 
@@ -1495,15 +1495,15 @@ A critical, easily-mis-stated fact: **headless mode does NOT use `NullLifecycle`
 
 A single Flask process (`web_server.py`, port 8080) drives potentially many projects concurrently. Concurrency safety rests on three mechanisms.
 
-**1. The pipeline registry, `_pipelines_lock`, and the PENDING sentinel.** Module-level `_running_pipelines: dict[pid → CinemaPipeline]` (`web_server.py:72`) is the single truth source for "is generation active?". Because `CinemaPipeline.__init__` is heavy (it builds `ContinuityEngine`, `ChiefDirector`, `LLMEnsemble`, trackers), the server does **not** hold `_pipelines_lock` across the constructor. Instead it does an atomic check-then-reserve: under the lock it places a `_PIPELINE_PENDING` sentinel (`web_server.py:80,1468`), releases the lock, constructs the pipeline outside the lock, then swaps the real object in. Every reader must go through `_get_running_pipeline` (`web_server.py:144`), which treats the sentinel as "absent". The same lock guards popping the pid + its progress queue at run completion.
+**1. The pipeline registry, `_pipelines_lock`, and the PENDING sentinel.** Module-level `_running_pipelines: dict[pid → CinemaPipeline]` (`web_server.py:73`) is the single truth source for "is generation active?". Because `CinemaPipeline.__init__` is heavy (it builds `ContinuityEngine`, `ChiefDirector`, `LLMEnsemble`, trackers), the server does **not** hold `_pipelines_lock` across the constructor. Instead it does an atomic check-then-reserve: under the lock it places a `_PIPELINE_PENDING` sentinel (`web_server.py:80,1468`), releases the lock, constructs the pipeline outside the lock, then swaps the real object in. Every reader must go through `_get_running_pipeline` (`web_server.py:145`), which treats the sentinel as "absent". The same lock guards popping the pid + its progress queue at run completion.
 
-**2. `_running_cores` + `_cores_lock`.** Expensive long-lived services are cached per-process in `_running_cores` (`web_server.py:108`), get-or-created under `_cores_lock` (`web_server.py:128`). Caveat (digest gotcha #3): this cache is **not invalidated on `settings.json` edits** — out-of-band settings changes require a server restart.
+**2. `_running_cores` + `_cores_lock`.** Expensive long-lived services are cached per-process in `_running_cores` (`web_server.py:109`), get-or-created under `_cores_lock` (`web_server.py:110`). Caveat (digest gotcha #3): this cache is **not invalidated on `settings.json` edits** — out-of-band settings changes require a server restart.
 
-**3. `mutate_project` + per-project filelock.** All durable state writes funnel through `mutate_project(pid, mutator)` (`domain/project_manager.py:691`), the canonical read-modify-write primitive: it acquires a per-project `filelock` (`projects/<pid>/project.lock`), loads fresh JSON, normalizes, runs the mutator in place, and writes atomically (`tempfile.mkstemp` + `os.replace`). This serializes concurrent writers to the same project. Two disciplines matter for engineers: external callers already inside a `project_lock()` context must use the unlocked `_save_project_unlocked` (the public `save_project` re-acquires the lock → deadlock), and shot IDs follow `shot_{scene_id}_{shot_index}` which is **not globally unique** — endpoints must always pid-scope (the F1 CRITICAL from cycle-6/S13; this is why CLAUDE.md Rules #5/#13 exist).
+**3. `mutate_project` + per-project filelock.** All durable state writes funnel through `mutate_project(pid, mutator)` (`domain/project_manager.py:712`), the canonical read-modify-write primitive: it acquires a per-project `filelock` (`projects/<pid>/project.lock`), loads fresh JSON, normalizes, runs the mutator in place, and writes atomically (`tempfile.mkstemp` + `os.replace`). This serializes concurrent writers to the same project. Two disciplines matter for engineers: external callers already inside a `project_lock()` context must use the unlocked `_save_project_unlocked` (the public `save_project` re-acquires the lock → deadlock), and shot IDs follow `shot_{scene_id}_{shot_index}` which is **not globally unique** — endpoints must always pid-scope (the F1 CRITICAL from cycle-6/S13; this is why CLAUDE.md Rules #5/#13 exist).
 
-**The busy-fence and gate-bypass.** Generation-mutating endpoints reject 409 if the project is busy (`_reject_if_project_busy`, `web_server.py:225`). But gate-acting endpoints (approve, iterate, screen, re-assemble) must work **while** the worker is parked at a gate, so they use `_reject_if_project_busy_outside_gate` (`web_server.py:256`), which lets calls through when `current_stage` is in `_GATE_STAGES = {PLAN_REVIEW, KEYFRAME_REVIEW, PERFORMANCE_REVIEW, REVIEW, SCREENING}` (`web_server.py:93`). The re-assemble endpoint additionally has its own `_reassembly_in_flight` guard (`web_server.py:124`) — separate from `_running_pipelines` because re-assembly runs *while* the SCREENING gate-waiter still occupies the registry.
+**The busy-fence and gate-bypass.** Generation-mutating endpoints reject 409 if the project is busy (`_reject_if_project_busy`, `web_server.py:226`). But gate-acting endpoints (approve, iterate, screen, re-assemble) must work **while** the worker is parked at a gate, so they use `_reject_if_project_busy_outside_gate` (`web_server.py:257`), which lets calls through when `current_stage` is in `_GATE_STAGES = {PLAN_REVIEW, KEYFRAME_REVIEW, PERFORMANCE_REVIEW, REVIEW, SCREENING}` (`web_server.py:94`). The re-assemble endpoint additionally has its own `_reassembly_in_flight` guard (`web_server.py:125`) — separate from `_running_pipelines` because re-assembly runs *while* the SCREENING gate-waiter still occupies the registry.
 
-**SSE progress queues.** Each in-flight run gets one `queue.Queue` in `_progress_queues` (`web_server.py:71`). The pipeline's `progress_callback` (built by `make_progress_callback`, `web_services.py:28`) shapes each event into a dict (dropping empty/negative fields) and `put`s it. `api_stream` (`web_server.py:1523`) drains the queue, yielding `data: <json>\n\n`, with a 30s `HEARTBEAT` on timeout and an `END`/`None` sentinel to close. Two properties to know:
+**SSE progress queues.** Each in-flight run gets one `queue.Queue` in `_progress_queues` (`web_server.py:72`). The pipeline's `progress_callback` (built by `make_progress_callback`, `web_services.py:28`) shapes each event into a dict (dropping empty/negative fields) and `put`s it. `api_stream` (`web_server.py:1577`) drains the queue, yielding `data: <json>\n\n`, with a 30s `HEARTBEAT` on timeout and an `END`/`None` sentinel to close. Two properties to know:
 
 - **Single consumer, no fan-out.** A second browser tab on the same `/stream` drains from the *same* queue, so both tabs miss events (`web_server.py:1523`). This is a hard limit, not a bug to work around per-client.
 - **Queue-cleanup identity check.** At completion the worker pops the queue only if `_progress_queues.get(pid) is q` (`web_server.py:1501`) — the identity check prevents clobbering a replacement queue created by a concurrent new run for the same pid.
@@ -1665,9 +1665,9 @@ The functions an engineer reaches for most, grouped by task. All `file:line` ref
 
 | Function | Location | What it does |
 |---|---|---|
-| `mutate_project` | `domain/project_manager.py:691` | The canonical read-modify-write primitive: lock → load → normalize → `mutator(project)` → atomic save |
-| `load_project` | `domain/project_manager.py:679` | Lock → read → `normalize_project_schema` (auto-saves if changed) → warn-only validate |
-| `save_project` | `domain/project_manager.py:667` | Validate → filelock → atomic `mkstemp`+`os.replace`. **Do not** call while holding the lock — use the unlocked variant (D-state-1) |
+| `mutate_project` | `domain/project_manager.py:712` | The canonical read-modify-write primitive: lock → load → normalize → `mutator(project)` → atomic save |
+| `load_project` | `domain/project_manager.py:700` | Lock → read → `normalize_project_schema` (auto-saves if changed) → warn-only validate |
+| `save_project` | `domain/project_manager.py:688` | Validate → filelock → atomic `mkstemp`+`os.replace`. **Do not** call while holding the lock — use the unlocked variant (D-state-1) |
 | `make_shot` / `make_project` / `make_take` | `domain/project_manager.py:262 / 309 / 139` | Factories; `make_shot` scaffolds all take lists + performance fields the Pydantic `Shot` model omits |
 | `normalize_shot_schema` | `domain/project_manager.py:405` | Enforces unique shot ID (collision → `shot_{scene_id}_{shot_index}`), migrates legacy fields |
 
@@ -1677,17 +1677,17 @@ The functions an engineer reaches for most, grouped by task. All `file:line` ref
 |---|---|---|
 | `ReviewController._wait_for_gate` | `cinema/review/controller.py:507` | Runs auto-approve pass, then blocks (web) or raises `GateNotSatisfiedError` (headless, line 546) |
 | `ReviewController._gate_satisfied` | `cinema/review/controller.py:224` | Per-gate predicate (plan/keyframe/performance/final approval-ID checks) |
-| `check_gate` | `cinema/auto_approve.py:582` | Public auto-approve entry; returns `AutoApproveDecision`; catches all exceptions → `deferred=True` |
-| `record_director_review_on_shots` | `cinema/auto_approve.py:202` | **Writes** `shot["director_review"]`; called at `cinema_pipeline.py:959`. Without it the PLAN gate hangs headless runs (D-gate-1) |
+| `check_gate` | `cinema/auto_approve.py:625` | Public auto-approve entry; returns `AutoApproveDecision`; catches all exceptions → `deferred=True` |
+| `record_director_review_on_shots` | `cinema/auto_approve.py:235` | **Writes** `shot["director_review"]`; called at `cinema_pipeline.py:959`. Without it the PLAN gate hangs headless runs (D-gate-1) |
 | `approve_shot_plan` / `approve_take` | `cinema/review/controller.py:633 / 647` | Human approval mutations for the four review gates |
-| `mark_screening_approved` | `cinema/screening.py:287` | Sets `screening_approved=True`; unblocks the SCREENING waiter |
+| `mark_screening_approved` | `cinema/screening.py:307` | Sets `screening_approved=True`; unblocks the SCREENING waiter |
 
 #### Image / video generation
 
 | Function | Location | What it does |
 |---|---|---|
-| `generate_ai_broll` | `phase_c_assembly.py:72` | Image-gen dispatch: max-tier → ComfyUI+PuLID → FAL fallback |
-| `generate_ai_broll_max` | `quality_max.py:574` | N=8 adaptive best-of with prune/inject pipeline; returns `ImageGenResult(path, "QUALITY_MAX")` |
+| `generate_ai_broll` | `phase_c_assembly.py:74` | Image-gen dispatch: max-tier → ComfyUI+PuLID → FAL fallback |
+| `generate_ai_broll_max` | `quality_max.py:694` | N=8 adaptive best-of with prune/inject pipeline; returns `ImageGenResult(path, "QUALITY_MAX")` |
 | `generate_ai_video` | `phase_c_ffmpeg.py:43` | Central video routing + fault-tolerant cascade across 9+ engines |
 | `classify_shot_type` | `workflow_selector.py:411` | Returns `portrait\|medium\|wide\|action\|landscape` (note: **never** returns `close_up` — D-video-1) |
 | `get_workflow_params` / `apply_workflow_params` | `workflow_selector.py:450 / 501` | Per-shot-type template + ComfyUI node injection |
@@ -1758,7 +1758,7 @@ Read live via `os.environ.get(...)` at call time — NOT cached in `Settings`. T
 
 | Variable | Class | Default | Truthy form | Effect |
 |---|---|---|---|---|
-| `CINEMA_STRICT_SCHEMA` | A (opt-in) | OFF | `1`/`true`/`TRUE`/`yes` (NOT `"True"`) | `_validate_project` raises instead of warning (`domain/project_manager.py:633`) |
+| `CINEMA_STRICT_SCHEMA` | A (opt-in) | OFF | `1`/`true`/`TRUE`/`yes` (NOT `"True"`) | `_validate_project` raises instead of warning (`domain/project_manager.py:641`) |
 | `CINEMA_AUTO_APPROVE_MOTION` | A (opt-in) | OFF | `1`/`true`/`yes` (case-insensitive) | Wires motion-gate auto-approve into PERFORMANCE_REVIEW (`cinema/auto_approve.py:577`) |
 | `CINEMA_DIRECTORIAL_ITERATION` | B (opt-out) | ON | anything not `0`/`false`/`no`/`off`/`""` | Enables the iterate endpoint (`cinema/shots/controller.py:111`) |
 | `CINEMA_SCREENING_STAGE` | B (opt-out) | ON | anything not `0`/`false`/`no` | Enables SCREENING gate + endpoints (`cinema/screening.py:127`) |
@@ -1793,9 +1793,9 @@ Set via `PUT /api/projects/<pid>` with `{"global_settings": {...}}`. The capabil
 | `coherence_check_enabled` | `True` | Per-shot coherence comparison | keep `True` |
 | `color_drift_sensitivity` | `0.3` | Color-grade recommendation threshold | lower to `0.2` for tight grading |
 
-¹ The domain-state digest reports `prompt_optimizer_enabled: True` as the `make_project` default (`project_manager.py:338`); the image-tier digest's prose said "default False." The scaffolded value is **True** — treat True as authoritative.
+¹ The domain-state digest reports `prompt_optimizer_enabled: True` as the `make_project` default (`project_manager.py:309`); the image-tier digest's prose said "default False." The scaffolded value is **True** — treat True as authoritative.
 
-**Max-tier halt & ComfyUI knobs** (UI: `MaxQualityTierSection.tsx` / `AdvancedSection.tsx`; clamped by `_validate_overlay_value`, `quality_max.py:141`)
+**Max-tier halt & ComfyUI knobs** (UI: `MaxQualityTierSection.tsx` / `AdvancedSection.tsx`; clamped by `_validate_overlay_value`, `quality_max.py:144`)
 
 | Key | Range / default | Effect |
 |---|---|---|
@@ -1926,7 +1926,7 @@ This is the most common operational failure and has three distinct causes — al
 #### Re-assembly deadlock (Flask request hangs)
 
 - **Diagnose:** A re-assemble or screening call never returns; the worker is parked at the SCREENING gate.
-- **Fix:** The re-assemble endpoint must call `_assemble_approved_takes_core()` (`cinema_pipeline.py:685`), NOT the public `assemble_approved_takes()` — the latter appends the SCREENING gate-wait, and the fresh per-request `CinemaPipeline` is not the instance `signal_gate` will unblock (D-9, `web_server.py:2418`). `screening/approve` requires `exports/final_cinema.mp4` to exist or returns 409 (`web_server.py:2258`).
+- **Fix:** The re-assemble endpoint must call `_assemble_approved_takes_core()` (`cinema_pipeline.py:783`), NOT the public `assemble_approved_takes()` — the latter appends the SCREENING gate-wait, and the fresh per-request `CinemaPipeline` is not the instance `signal_gate` will unblock (D-9, `web_server.py:2418`). `screening/approve` requires `exports/final_cinema.mp4` to exist or returns 409 (`web_server.py:2258`).
 
 #### Budget gate doesn't fire
 
@@ -1997,11 +1997,11 @@ Confusingly similar, different things: `pipeline_context.py` (15 LOC) loads the 
 | `format_dialogue_for_voiceover`, `dialogue_to_narration_text` | Dialogue helpers | **Zero non-test callers** (`domain/dialogue_writer.py:159,174`); the pipeline uses `audio.dialogue.generate_dialogue_voiceover` directly |
 | `TemporalConsistencyManager.record_shot_generated` / `reset_scene` | Temporal chaining | **Uncalled in production** — chaining relies on `approved_anchor_image` passed explicitly; the in-memory `last_generated_image` path is functionally dead |
 | `LTX _fal_transition` / `_native_transition` | Keyframe interpolation | **Unreachable from the cascade** — `generate_ai_video` never calls them; only direct `LTXVideoAPI` use reaches them |
-| `summarize_audit` | PostRunSummary endpoint | Defined (`auto_approve.py:693`) but **no web endpoint calls it** |
+| `summarize_audit` | PostRunSummary endpoint | Defined (`auto_approve.py:736`) but **no web endpoint calls it** |
 
 #### `storyboard_mode` — an inter-digest disagreement, resolved (D-12)
 
-The cross-cutting digest's `pipeline_status.toml` summary listed `storyboard_mode` as having "zero callers." This is **stale.** The flag **is** read and wired: `_get_storyboard_mode` at `motion_render.py:54`, consumed at `motion_render.py:330` and `motion_render.py:359` (eligibility `2 ≤ unapproved ≤ 6`). The orchestration and phases digests are correct; treat **storyboard_mode as functional.** (Verified by grep: 3 live read sites in `motion_render.py`.)
+The cross-cutting digest's `pipeline_status.toml` summary listed `storyboard_mode` as having "zero callers." This is **stale.** The flag **is** read and wired: `_get_storyboard_mode` at `motion_render.py:45`, consumed at `motion_render.py:330` and `motion_render.py:359` (eligibility `2 ≤ unapproved ≤ 6`). The orchestration and phases digests are correct; treat **storyboard_mode as functional.** (Verified by grep: 3 live read sites in `motion_render.py`.)
 
 #### Configuration & budget wiring gaps
 
@@ -2034,7 +2034,7 @@ The Pydantic models in `domain/models.py` are validation-only and omit several l
 | D-llm-2 | `style_director` is **OpenAI-only** (no Anthropic path); with only `ANTHROPIC_API_KEY` set it falls straight to `_default_style_rules` |
 | D-llm-3 | `competitive_enabled` is stored from settings but never enforced — `competitive_generate` always runs full competition |
 | D-script-1 | The on-demand decompose endpoint (`web_server.py:1381`) always uses single-model `decompose_scene`, never `competitive_decompose_scene`; only the automated pipeline honors `competitive_generation` |
-| D-script-6 | `competitive_decompose_scene`'s JSON schema description (`scene_decomposer.py:714`) says to include character physical descriptions — contradicting HC1 (identity firewall) that `decompose_scene` correctly enforces; latent prompt-contamination risk in the competitive path |
+| D-script-6 | `competitive_decompose_scene`'s JSON schema description (`scene_decomposer.py:617`) says to include character physical descriptions — contradicting HC1 (identity firewall) that `decompose_scene` correctly enforces; latent prompt-contamination risk in the competitive path |
 | D-driving-video | Only Sora fully wires `driving_video_path`; Veo and Kling accept the param but silently ignore it (SDK `video=`/`image=` mutual exclusivity) |
 | D-veo-refs | Veo `reference_images` are accepted by the call chain but dropped before the SDK call ("Bug #4"); identity comes from the start frame only (`veo_native.py:155`) |
 | D-state-1 | `save_project` acquires its own lock — calling it while already holding `project_lock()` deadlocks; use the unlocked variant inside a held lock |
