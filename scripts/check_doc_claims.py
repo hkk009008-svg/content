@@ -32,11 +32,13 @@ class Drift:
     doc_line: int
     target_file: str
     target_line: int
-    kind: str                    # missing_file | def_drift | out_of_bounds
+    kind: str                    # missing_file | def_drift | out_of_bounds | ambiguous_path
     symbol: Optional[str]
     suggested_line: Optional[int]
     fixable: bool
     message: str
+    style: str = "link"          # "link" | "inline" — which syntax to rewrite on --fix
+    candidates: Optional[list[str]] = None   # ambiguous_path: the colliding tracked relpaths
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +57,21 @@ _BACKTICK_RE = re.compile(r'`([^`]+)`')
 
 # Leading identifier from a backtick token
 _IDENT_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)')
+
+# Inline-backtick anchor: `path:line` or `path:line-line`.
+# The literal backticks ARE part of the match (so the span includes them) →
+# this is what enforces "standalone token": `mod.py:10)` / `mod.py:10 (x)` /
+# `mod.py:10:20` do NOT match. Extension class is letters-only ([A-Za-z]+),
+# matching _ANCHOR_RE, so version tokens (`v1.2:30`) are rejected.
+_INLINE_ANCHOR_RE = re.compile(
+    r'`(?P<file>[A-Za-z0-9_./-]+\.[A-Za-z]+):(?P<line>\d+)(?:-(?P<end>\d+))?`'
+)
+
+# Fenced-code-block markers (``` or ~~~, 3+). A line starting one toggles fence state.
+_FENCE_RE = re.compile(r'^\s*(`{3,}|~{3,})')
+
+# Drift kinds that are advisory (non-fatal; exit-code-neutral).
+ADVISORY_KINDS = {"ambiguous_path"}
 
 # Definition patterns (def / async def / class at any indent, or module-level assignment)
 def _def_lines(source_lines: list[str], symbol: str) -> list[int]:

@@ -33,6 +33,7 @@ from check_doc_claims import (  # noqa: E402
     check_manifest,
     check_sha_refs,
     audit_sha_refs,
+    _INLINE_ANCHOR_RE,
 )
 
 
@@ -78,6 +79,17 @@ def _commit(repo: Path, message: str, *, fname: str = "f.txt") -> str:
     _git(repo, "add", fname)
     _git(repo, "commit", "-q", "-m", message)
     return _git(repo, "rev-parse", "--short=7", "HEAD").stdout.strip()
+
+
+def _commit_py(repo: Path, relpath: str, content: str) -> Path:
+    """Write a .py at relpath (creating dirs), git add + commit it so it appears
+    in `git ls-files`. Returns the absolute path."""
+    p = repo / relpath
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(textwrap.dedent(content))
+    _git(repo, "add", relpath)
+    _git(repo, "commit", "-q", "-m", f"add {relpath}")
+    return p
 
 
 # ---------------------------------------------------------------------------
@@ -872,3 +884,30 @@ class TestShaRefNonGitDir:
             Ref `deadbee` here.
             """)
         assert check_sha_refs([str(md)], tmp_path) == []
+
+
+# ===========================================================================
+# Inline-backtick anchor verifier (Slice 1)
+# ===========================================================================
+
+class TestInlineRegex:
+    def test_matches_bare_and_pathed_and_range(self):
+        def first(s):
+            m = _INLINE_ANCHOR_RE.search(s)
+            return None if not m else (m.group("file"), m.group("line"), m.group("end"))
+        assert first("see `mod.py:10` here") == ("mod.py", "10", None)
+        assert first("see `cinema/shots/controller.py:296` x") == ("cinema/shots/controller.py", "296", None)
+        assert first("range `mod.py:3-9` ok") == ("mod.py", "3", "9")
+
+    def test_rejects_non_file_and_padded_tokens(self):
+        for s in [
+            "`v1.2:30`",          # version token: ext is digits → letters-only ext rejects
+            "`not_a_file:30`",    # no extension
+            "`.py:3`",            # nothing before the dot
+            "`time:30`",          # no extension
+            "`mod.py:10 (note)`", # trailing chars before closing backtick
+            "`mod.py:10)`",       # punctuation before backtick
+            "`mod.py:10:20`",     # double colon
+            "mod.py:10",          # no backticks at all
+        ]:
+            assert _INLINE_ANCHOR_RE.search(s) is None, f"should NOT match: {s!r}"
