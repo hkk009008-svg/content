@@ -19,7 +19,7 @@ from phase_c_ffmpeg import two_pass_loudnorm, probe_final_media
 from scene_decomposer import decompose_scene, update_scene_shots, competitive_decompose_scene
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
-from audio.dialogue import dialogue_cache_key, generate_dialogue_voiceover, scene_characters, shot_characters
+from audio.dialogue import dialogue_cache_key, generate_dialogue_voiceover, scene_characters
 from audio.music import generate_fal_bgm
 from cinema.auto_approve import record_director_review_on_shots
 from cinema.context import PipelineContext

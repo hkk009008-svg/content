@@ -58,7 +58,16 @@ import logging
 import os
 from typing import Optional
 
-from audio.dialogue import scene_characters as _scene_chars, shot_characters as _shot_chars
+# audio.dialogue is a leaf module (no circular-import risk); import the
+# char-filter helpers AND the cache-key fn together at module level. (A prior
+# lazy guard for dialogue_cache_key was dead code: these module-level helper
+# imports already make audio.dialogue a hard dependency of this module, so the
+# guard could never fire — see T-E Lane V.)
+from audio.dialogue import (
+    dialogue_cache_key as _cache_key,
+    scene_characters as _scene_chars,
+    shot_characters as _shot_chars,
+)
 
 # TTS pricing: $0.01 per line — mirrors cost_tracker.py:66 ("ELEVENLABS": 0.01).
 # Imported lazily below in estimate_reassembly_cost rather than at module level
@@ -555,13 +564,6 @@ def estimate_reassembly_cost(project: dict) -> dict:
     except Exception:
         _temp_dir = None
 
-    # dialogue_cache_key is importable here (audio.dialogue is a leaf; no
-    # circular import risk from cinema.screening importing it lazily).
-    try:
-        from audio.dialogue import dialogue_cache_key as _cache_key
-    except Exception:
-        _cache_key = None
-
     proj_settings = project.get("global_settings", {}) or {}
     lang = proj_settings.get("language", "English")
     all_characters = project.get("characters", []) or []
@@ -649,9 +651,11 @@ def estimate_reassembly_cost(project: dict) -> dict:
                     shot_dialogue_lines = None
 
                 if shot_dialogue_lines and _cache_key and _temp_dir:
-                    # Mirror cinema/shots/controller.py:1373-1380: shot-level
-                    # characters filtered by characters_in_frame, falling back
-                    # to the scene's characters_present set (Rule #13 audit).
+                    # Mirror the shot_characters helper (audio/dialogue.py):
+                    # shot-level characters filtered by characters_in_frame,
+                    # falling back to the scene's characters_present set
+                    # (Rule #13 audit). The canonical shot-level derivation now
+                    # lives in the helper rather than inline in controller.py.
                     shot_characters = _shot_chars(all_characters, shot, scene)
                     key = _cache_key(shot_dialogue_lines, shot_characters, lang)
                     cached_path = os.path.join(_temp_dir, f"audio_{shot_id}_{key}.mp3")
