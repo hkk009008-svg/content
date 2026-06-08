@@ -66,20 +66,26 @@ Max geometry lives entirely in `quality_max.py`.
 
 ## 3. Architecture — geometry helper + threading
 
+Aspect is read from the `ctx` that `controller.py` **already threads** into the
+generators (no new param, no `controller.py` edit), then a single pure helper in
+`cinema/aspect.py` decides the geometry — keeping all aspect math in one place:
+
 ```
 global_settings["aspect_ratio"]            (domain/project_manager.py:318, default "16:9")
-        │  controller.py:477 reads global_settings → ctx
-        ▼
-controller.py ──aspect_ratio──► generate_ai_broll(aspect_ratio="16:9")     [phase_c_assembly.py:76]
+        │  controller.py:477  settings = project["global_settings"]
+        │  controller.py:622  ctx = PipelineContext(global_settings=settings)
+        ▼  controller.py:624  generate_ai_broll(..., ctx=ctx)   ← ctx ALREADY threaded today
+generate_ai_broll  [phase_c_assembly.py:72]
+   aspect = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)   ← read here (convention: :189, :306)
                                        │
-            quality_tier=="max"? ──────┤  (:118 branch)
-                  │ no (production)     └──► generate_ai_broll_max(aspect_ratio=...)   [quality_max.py]
-                  ▼                              │
+            quality_tier=="max"? ──────┤  (:118 branch forwards ctx=ctx at :137)
+                  │ no (production)     └──► generate_ai_broll_max(..., ctx=ctx)   [quality_max.py]
+                  ▼                              │   (reads aspect from ctx the same way)
        pulid.json node 102 (768×1344)    pulid_max.json node 102 (576×1024)
        + FAL/Pollinations fallbacks       + node 950 final_resolution (2160×3840)
                   │                              │
-                  └──────────► cinema/aspect.py : portrait_swap(w, h, aspect_ratio) ◄──────────┘
-                                  (→ (h, w) when is_portrait(aspect_ratio), else (w, h))
+                  └──────────► cinema/aspect.py : portrait_swap(w, h, aspect) ◄──────────┘
+                                  (→ (h, w) when is_portrait(aspect), else (w, h))
 ```
 
 The helper is pure, reuses the existing `is_portrait()`, never raises:
@@ -114,18 +120,38 @@ def fal_image_size(aspect_ratio: Optional[str]) -> str:
     return FAL_IMAGE_SIZE.get(aspect_ratio or "", "landscape_16_9")
 ```
 
-### 4.2 Threading — `controller.py` → `generate_ai_broll` → `generate_ai_broll_max`
+### 4.2 Read aspect from the already-threaded `ctx` (no new param, no `controller.py` edit)
 
-- Add `aspect_ratio: str = DEFAULT_ASPECT_RATIO` param to `generate_ai_broll`
-  (`phase_c_assembly.py:76`) and `generate_ai_broll_max` (`quality_max.py`).
-  **Default = "16:9" → no-op for all existing callers** (backward compatible).
-- `controller.py` (~`:477`, where it already reads `global_settings` into `ctx`)
-  passes `global_settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO)`.
-- The `:118` max branch forwards `aspect_ratio` to `generate_ai_broll_max`.
+`controller.py:624` **already** passes `ctx=ctx` into `generate_ai_broll`
+(`ctx = PipelineContext(global_settings=settings)` at `:622`, `settings =
+project["global_settings"]` at `:477`), and the `:118` max branch **already**
+forwards `ctx=ctx` to `generate_ai_broll_max` (`:137`). `generate_ai_broll`
+already reads other project settings from `ctx` (`:189`
+`get_workflow_params(settings=ctx.global_settings…)`, `:306`
+`(ctx.global_settings or {}).get("continuity_options", …)`), and the helper
+`get_project_setting(ctx, key, default)` exists (`cinema/context.py:151`).
 
-*Plan-time confirm (Rule #12): grep all callers of `generate_ai_broll` /
-`generate_ai_broll_max` and confirm the new defaulted param doesn't break a
-positional call site.*
+So Phase 2 reads `aspect_ratio` the same way — **no new parameter and no
+`controller.py` change** (which also removes overlap with the operator's
+in-flight item-B `controller.py` edit):
+
+```python
+# near phase_c_assembly.py:189 (production) and the head of generate_ai_broll_max (max),
+# wherever ctx.global_settings is first consulted:
+aspect_ratio = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
+```
+
+- **Backward compatible:** ctx-less / setting-absent → `DEFAULT_ASPECT_RATIO`
+  ("16:9") → every current landscape call is a literal no-op. Matches the
+  existing `(ctx.global_settings or {}).get(...)` None-safety at `:306`.
+- `aspect_ratio` then feeds `portrait_swap` / `fal_image_size` at the §4.3–4.6 sites.
+- Max reads `aspect_ratio` from its forwarded `ctx` independently (it already has it),
+  so no value needs to cross the `:118` boundary as a new positional/keyword arg.
+
+*Verified this session (was a Rule #12 plan-time confirm): all `generate_ai_broll`
+call sites use keyword args (`controller.py:624`), `ctx` is already threaded to
+both tiers, and `get_project_setting` is the established read path — so there is
+no new-param positional-safety risk because there is no new param.*
 
 ### 4.3 Production ComfyUI — `phase_c_assembly.py:212-213` (node 102)
 
@@ -188,9 +214,11 @@ native 9:16 → assembly (Phase 1 resolver, already wired) composes a true 9:16
 - **Unknown / absent / landscape aspect → 16:9 everywhere.** `portrait_swap` and
   `fal_image_size` default to the landscape value via `is_portrait`/the enum
   `.get`. No new raise path.
-- **Backward compatibility.** The `aspect_ratio` param defaults to `"16:9"`, so
-  every current (landscape) generation is a literal no-op — **zero behavior
-  change** until a project opts into `9:16`.
+- **Backward compatibility.** `aspect_ratio` is read from `ctx` via
+  `get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)` — ctx-less or
+  setting-absent resolves to `"16:9"`, so every current (landscape) generation is
+  a literal no-op — **zero behavior change** until a project opts into `9:16`. No
+  new function parameter is introduced.
 - **Gate stays closed.** Phase 2 does **not** modify `SUPPORTED_ASPECT_RATIOS`;
   `9:16` remains un-selectable in the UI/API. Phase 2 is exercised by passing
   `aspect_ratio="9:16"` directly (tests + a dev harness), never through the
@@ -208,12 +236,11 @@ native 9:16 → assembly (Phase 1 resolver, already wired) composes a true 9:16
   portrait tuples.
 - `fal_image_size`: 16:9 → `landscape_16_9`; 9:16 → `portrait_16_9`; unknown →
   landscape default.
-- Threading: with a mocked `workflow` dict and `aspect_ratio="9:16"`, assert
-  node 102 = (768,1344) production / (576,1024) max, node 950 = (2160,3840),
-  FAL params + Pollinations URL carry portrait values; with `"16:9"` assert all
-  unchanged (no-op proof).
-- Caller-compat: confirm existing `generate_ai_broll` callers pass with the new
-  defaulted param.
+- Threading: with a mocked `ctx` whose `global_settings["aspect_ratio"]="9:16"`,
+  assert node 102 = (768,1344) production / (576,1024) max, node 950 =
+  (2160,3840), FAL params + Pollinations URL carry portrait values; with `"16:9"`
+  (and with `ctx=None`) assert all unchanged (no-op + None-safety proof — makes
+  the `get_project_setting`/`is_portrait` default chain explicit).
 
 **On-pod validation (the empirical proof unit tests can't give):**
 - Generate one production + one max keyframe at `aspect_ratio="9:16"` on the GPU
@@ -238,17 +265,26 @@ director spot-check of load-bearing citations at HEAD `e018c71`:
   parameterized via `params`.
 - ✅ FAL three param shapes: `aspect_ratio` (`:515,:534`) + `image_size`
   (`:555` `landscape_16_9`); Pollinations URL `width=1344&height=768` (`:570`).
-- ✅ `controller.py` does not thread `aspect_ratio` today (0 grep hits).
+- ✅ `controller.py` does not extract `aspect_ratio` today (0 grep hits) — BUT it
+  already builds `ctx = PipelineContext(global_settings=settings)` (`:622`) and
+  passes `ctx=ctx` into `generate_ai_broll` (`:624`), which forwards `ctx=ctx` to
+  `generate_ai_broll_max` (`:137`). `aspect_ratio` is therefore reachable inside
+  both tiers via the existing `ctx` — so §4.2 reads it there, needing **no
+  `controller.py` edit** (verified post-spec-review; corrects the earlier
+  param+controller-edit framing).
+- ✅ Caller positional-arg safety: all `generate_ai_broll` calls use keyword args
+  (`controller.py:624`); moot anyway since §4.2 adds no new param.
 - **Rule #13 symmetric-site audit:** all six geometry sites enumerated above are
   the complete set of image-dimension writers; the `shot_type='portrait'` hits
   at `phase_c_assembly.py:254,:336` are PuLID-strength tuning, **unrelated to
   aspect** (do not conflate — verified).
 
 *Open plan-time confirms (for the implementation plan, not blockers):*
-- Exact caller list of `generate_ai_broll` / `generate_ai_broll_max` (positional
-  arg safety).
 - Whether node-102 max base should be read from the template at runtime vs. a
   named constant.
+- Where exactly inside `generate_ai_broll` / `generate_ai_broll_max` to perform
+  the single `get_project_setting` read (near the existing `ctx.global_settings`
+  consult at `phase_c_assembly.py:189`).
 
 ---
 
@@ -266,19 +302,19 @@ director spot-check of load-bearing citations at HEAD `e018c71`:
 ## 9. Estimated scope (Phase 2)
 
 - `cinema/aspect.py`: +~10 LoC (`portrait_swap` + `fal_image_size`/`FAL_IMAGE_SIZE`).
-- `phase_c_assembly.py`: ~6 sites edited (node 102; FAL ×3; Pollinations) +
-  `aspect_ratio` param + thread to max — ~15-20 LoC.
-- `quality_max.py`: node 102 override + node 950 swap + `aspect_ratio` param —
-  ~10 LoC.
-- `cinema/shots/controller.py`: thread `aspect_ratio` from `global_settings` —
-  ~2-3 LoC.
+- `phase_c_assembly.py`: ~6 sites edited (node 102; FAL ×3; Pollinations) + one
+  `get_project_setting` read of `aspect_ratio` — ~12-15 LoC.
+- `quality_max.py`: node 102 override + node 950 swap + one `get_project_setting`
+  read — ~10 LoC.
+- `cinema/shots/controller.py`: **no edit** — `ctx` (carrying `global_settings`)
+  is already threaded into both tiers (§4.2).
 - Tests: ~1 new unit file (`portrait_swap`/`fal_image_size`/threading), ~60-100
   LoC.
 
-**~40-50 LoC production + tests, backward-compatible, gate untouched.** Small,
-reviewable, single-prerequisite slice. Lane assignment decided at
-writing-plans / dispatch time (the cross-file threading touches
-`controller.py` + `phase_c_assembly.py` + `quality_max.py`, so likely
-director-driven Lane B; note the live overlap with operator's deferred-minors
-batch on `controller.py` — re-verify HEAD + grep their landed hunk before
-dispatch).
+**~30-40 LoC production + tests, backward-compatible, gate untouched.** Small,
+reviewable, single-prerequisite slice. Touches only `cinema/aspect.py` +
+`phase_c_assembly.py` + `quality_max.py` (the ctx-read approach drops the
+`controller.py` edit, so **no overlap** with the operator's in-flight
+deferred-minors `controller.py` work). Lane assignment decided at
+writing-plans / dispatch time; likely director-driven Lane B given the
+multi-file (cross-tier) change. Re-verify HEAD before dispatch regardless.
