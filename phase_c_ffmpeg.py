@@ -84,6 +84,10 @@ def generate_ai_video(
         Empty string disables the feature — preserves existing behavior
         for all callers that haven't been updated yet.
     """
+    from cinema.context import get_project_setting
+    from cinema.aspect import DEFAULT_ASPECT_RATIO
+    _aspect = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
+
     if attempted_apis is None:
         attempted_apis = []
     _api_upper = target_api.upper()
