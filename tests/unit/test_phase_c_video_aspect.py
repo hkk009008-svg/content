@@ -8,7 +8,6 @@ All tests are offline — no Vertex, no network, no spend.
 """
 from __future__ import annotations
 
-import importlib
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -30,7 +29,9 @@ class TestVeoNativeAspect:
     """Drive generate_ai_video(target_api='VEO_NATIVE', ...) and assert that
     veo.generate_video is called with aspect_ratio='9:16' for portrait ctx."""
 
-    def test_veo_native_threads_portrait_aspect(self):
+    def _run_veo_native(self, aspect: str):
+        """Run generate_ai_video(VEO_NATIVE) with the given aspect, return the
+        mock VeoNativeAPI instance whose .generate_video.call_args the tests inspect."""
         mock_inst = MagicMock()
         mock_inst.generate_video.return_value = "/tmp/out.mp4"
         mock_veo_native_mod = MagicMock()
@@ -51,11 +52,16 @@ class TestVeoNativeAspect:
                     target_api="VEO_NATIVE",
                     output_mp4="/tmp/o.mp4",
                     shot_type="portrait",
-                    ctx=_ctx("9:16"),
+                    ctx=_ctx(aspect),
                 )
         finally:
             sys.modules.pop("phase_c_ffmpeg", None)
             sys.modules.pop("veo_native", None)
+
+        return mock_inst
+
+    def test_veo_native_threads_portrait_aspect(self):
+        mock_inst = self._run_veo_native("9:16")
 
         assert mock_inst.generate_video.called, "generate_video was never called"
         call_kwargs = mock_inst.generate_video.call_args.kwargs
@@ -65,28 +71,7 @@ class TestVeoNativeAspect:
 
     def test_veo_native_landscape_keeps_16_9(self):
         """Landscape ctx → aspect_ratio='16:9' (refute — no regression)."""
-        mock_inst = MagicMock()
-        mock_inst.generate_video.return_value = "/tmp/out.mp4"
-        mock_veo_native_mod = MagicMock()
-        mock_veo_native_mod.VeoNativeAPI.return_value = mock_inst
-
-        sys.modules.pop("phase_c_ffmpeg", None)
-        sys.modules["veo_native"] = mock_veo_native_mod
-
-        try:
-            with patch("os.path.exists", return_value=True):
-                import phase_c_ffmpeg
-                phase_c_ffmpeg.generate_ai_video(
-                    image_path="/tmp/f.png",
-                    camera_motion="pan_right",
-                    target_api="VEO_NATIVE",
-                    output_mp4="/tmp/o.mp4",
-                    shot_type="landscape",
-                    ctx=_ctx("16:9"),
-                )
-        finally:
-            sys.modules.pop("phase_c_ffmpeg", None)
-            sys.modules.pop("veo_native", None)
+        mock_inst = self._run_veo_native("16:9")
 
         call_kwargs = mock_inst.generate_video.call_args.kwargs
         assert call_kwargs.get("aspect_ratio") == "16:9", (
@@ -142,15 +127,6 @@ class TestVeoFalAspect:
         assert calls, "fal_client.subscribe was never called"
         # subscribe is called as subscribe(endpoint, arguments={...}, with_logs=...)
         call = calls[0]
-        # Could be positional or keyword — handle both
-        if call.args:
-            endpoint = call.args[0]
-            arguments = call.kwargs.get("arguments", {})
-        else:
-            endpoint = call.kwargs.get("model") or list(call.kwargs.values())[0]
-            arguments = call.kwargs.get("arguments", {})
-
-        # The first positional arg is the endpoint string
         pos_args = call.args
         kw = call.kwargs
         # fal_client.subscribe("endpoint", arguments={...}, with_logs=True)
