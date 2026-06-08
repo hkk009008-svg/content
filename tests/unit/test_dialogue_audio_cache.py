@@ -568,6 +568,129 @@ class TestEstimateReassemblyCostTTS:
             "project-wide character list (pre-fix behavior detected)"
         )
 
+    def _shot_dialogue_project(self, scene_id: str, shot_id: str, shot_dialogue: list) -> dict:
+        """Project for the SHOT-level T-D mirror: two chars project-wide,
+        both present in the scene, but only char_b in the shot's frame."""
+        return {
+            "id": "proj_td_shot",
+            "global_settings": {"language": "English"},
+            "characters": [
+                {"id": "char_a", "voice_id": "voice_a"},
+                {"id": "char_b", "voice_id": "voice_b"},
+            ],
+            "scenes": [
+                {
+                    "id": scene_id,
+                    "duration_seconds": 5.0,
+                    "characters_present": ["char_a", "char_b"],
+                    "shots": [
+                        {
+                            "id": shot_id,
+                            "characters_in_frame": ["char_b"],  # subset of scene
+                            "dialogue": shot_dialogue,
+                            "approved_final_take_id": "take_1",
+                            "motion_takes": [
+                                {"id": "take_1", "metadata": {"duration_s": 5.0}},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+    def test_td_shot_level_in_frame_key_is_cache_hit(self, tmp_path):
+        """T-D fold (quality-review IMPORTANT-1): the SHOT-level estimator must
+        key with in-frame-filtered chars (mirror of controller.py:1373-1380),
+        not the project-wide or scene-wide list."""
+        from cinema.screening import estimate_reassembly_cost
+        from audio.dialogue import dialogue_cache_key
+
+        scene_id, shot_id = "scene_td_shot", "shot_td_shot"
+        shot_dialogue = [{"character_id": "char_b", "text": "B speaks in frame"}]
+        project = self._shot_dialogue_project(scene_id, shot_id, shot_dialogue)
+
+        # Writer keys with the IN-FRAME filter → [char_b] only.
+        in_frame_chars = [{"id": "char_b", "voice_id": "voice_b"}]
+        writer_key = dialogue_cache_key(shot_dialogue, in_frame_chars, "English")
+        temp_dir = str(tmp_path / "temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        with open(os.path.join(temp_dir, f"audio_{shot_id}_{writer_key}.mp3"), "wb") as f:
+            f.write(b"cached-by-shot-writer")
+
+        with patch("domain.project_manager.get_project_dir", return_value=str(tmp_path)):
+            result = estimate_reassembly_cost(project)
+
+        assert result["tts_lines_to_generate"] == 0, (
+            "T-D shot-level: estimator must use in-frame-filtered chars; "
+            f"writer_key={writer_key!r} not recognized as cached"
+        )
+
+    def test_td_shot_level_scene_wide_key_is_not_a_cache_hit(self, tmp_path):
+        """Inverse: artifact keyed with the SCENE-wide list (chars A+B) must NOT
+        count as cached for a shot framing only B — proves the in-frame filter
+        is live at the shot level."""
+        from cinema.screening import estimate_reassembly_cost
+        from audio.dialogue import dialogue_cache_key
+
+        scene_id, shot_id = "scene_td_shot_inv", "shot_td_shot_inv"
+        shot_dialogue = [{"character_id": "char_b", "text": "B speaks in frame"}]
+        project = self._shot_dialogue_project(scene_id, shot_id, shot_dialogue)
+
+        scene_wide = [
+            {"id": "char_a", "voice_id": "voice_a"},
+            {"id": "char_b", "voice_id": "voice_b"},
+        ]
+        wrong_key = dialogue_cache_key(shot_dialogue, scene_wide, "English")
+        temp_dir = str(tmp_path / "temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        with open(os.path.join(temp_dir, f"audio_{shot_id}_{wrong_key}.mp3"), "wb") as f:
+            f.write(b"wrong-key-artifact")
+
+        with patch("domain.project_manager.get_project_dir", return_value=str(tmp_path)):
+            result = estimate_reassembly_cost(project)
+
+        assert result["tts_lines_to_generate"] == len(shot_dialogue), (
+            "T-D shot-level inverse: scene-wide-keyed artifact must not be a hit"
+        )
+
+    def test_td_action_only_scene_empty_characters_counts_zero(self, tmp_path):
+        """T-D fold (quality-review MINOR-3): action-only scene with EMPTY
+        characters_present → estimator counts 0, mirroring the writer's
+        `if characters and not dialogue and action` guard
+        (cinema_pipeline.py:512 returns None on empty filtered chars)."""
+        from cinema.screening import estimate_reassembly_cost
+
+        project = {
+            "id": "proj_td_action_empty",
+            "global_settings": {"language": "English"},
+            "characters": [{"id": "char_a", "voice_id": "voice_a"}],
+            "scenes": [
+                {
+                    "id": "scene_td_action_empty",
+                    "duration_seconds": 5.0,
+                    "characters_present": [],  # nobody present
+                    "action": "Wind moves through the empty street.",
+                    "shots": [
+                        {
+                            "id": "shot_td_action_empty",
+                            "approved_final_take_id": "take_1",
+                            "motion_takes": [
+                                {"id": "take_1", "metadata": {"duration_s": 5.0}},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        with patch("domain.project_manager.get_project_dir", return_value=str(tmp_path)):
+            result = estimate_reassembly_cost(project)
+
+        assert result["tts_lines_to_generate"] == 0, (
+            "action-only scene with no characters_present must estimate 0 "
+            "(writer generates no audio for it)"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 7. Per-line path: content-keyed, lives under dirname(output_path), NOT CWD
