@@ -785,6 +785,194 @@ class TestValidateSceneCoherenceVisionEncodeFailure:
 
 
 # ---------------------------------------------------------------------------
+# Gemini encode→decode round-trip characterization (Item A, dispatch e018c71)
+# ---------------------------------------------------------------------------
+# PIL is a required dep for max-tier provisioning — assume it's available.
+import base64
+import io
+from PIL import Image
+
+from llm.image_encoding import encode_image_for_llm
+
+
+def _gemini_settings():
+    """Settings with a non-empty gemini_api_key (enables Gemini path)."""
+    return dataclasses.replace(_real_settings, gemini_api_key="test-gemini-key")
+
+
+class TestGeminiEncodeDecodeRoundTrip:
+    """Characterization tests for the image encode→decode round-trip used by
+    the Gemini vision lane (phase_c_vision.py:390-398).
+
+    INVARIANTS PINNED:
+      (a) b64 encode/decode step is lossless (round-trip recoverable).
+      (b) Encoder is deterministic in-process (same input → same b64).
+      (c) Decoded payload is always a valid JPEG with mode RGB.
+      (d) Images with long edge > 1568 are downscaled; below threshold are not.
+      (e) Extension lies (PNG bytes in .jpg file) are handled by PIL content-sniff.
+      (f) Missing/corrupt paths return None — no exception escapes.
+
+    Offline-only: no API keys, no network.
+    """
+
+    def test_round_trip_lossless_valid_jpeg(self, tmp_path):
+        """Small PNG (64x48) → encode → b64decode → PIL: JPEG, RGB, size=64x48.
+
+        The image is below the 1568-threshold so no downscale occurs.
+        Output bytes are NEVER identical to input bytes (always re-encoded as
+        JPEG) but the decoded image must be a valid JPEG with correct dimensions.
+        """
+        # Build a 64x48 RGB gradient PNG
+        img = Image.new("RGB", (64, 48))
+        pixels = img.load()
+        for x in range(64):
+            for y in range(48):
+                pixels[x, y] = (x * 4, y * 5, 128)
+        png_path = tmp_path / "gradient.png"
+        img.save(str(png_path), format="PNG")
+
+        b64 = encode_image_for_llm(str(png_path))
+        assert b64 is not None, "encode must succeed for a valid image"
+
+        raw = base64.b64decode(b64)
+        # Must be valid JPEG (magic bytes \xff\xd8)
+        assert raw[:2] == b"\xff\xd8", f"expected JPEG magic bytes, got {raw[:4]!r}"
+
+        decoded = Image.open(io.BytesIO(raw))
+        assert decoded.format == "JPEG", f"expected JPEG, got {decoded.format}"
+        assert decoded.mode == "RGB", f"expected RGB, got {decoded.mode}"
+        assert decoded.size == (64, 48), (
+            f"size must be unchanged (below 1568 threshold): expected (64, 48), got {decoded.size}"
+        )
+
+    def test_deterministic_same_input_same_b64(self, tmp_path):
+        """Two calls on the same file → identical b64 strings (deterministic in-process)."""
+        img = Image.new("RGB", (32, 32), color=(100, 150, 200))
+        path = tmp_path / "solid.png"
+        img.save(str(path), format="PNG")
+
+        b64_first = encode_image_for_llm(str(path))
+        b64_second = encode_image_for_llm(str(path))
+
+        assert b64_first is not None
+        assert b64_first == b64_second, (
+            "encode_image_for_llm must be deterministic in-process"
+        )
+
+    def test_oversize_triggers_downscale_stays_decodable(self, tmp_path):
+        """2000x500 image (long edge 2000 > 1568) → encode → decode → long edge == 1568.
+
+        Expected short edge after downscale: max(1, round(500 * 1568/2000)) == 392.
+        Aspect ratio is preserved using the same scale factor the encoder uses.
+        """
+        img = Image.new("RGB", (2000, 500), color=(80, 120, 200))
+        path = tmp_path / "wide.png"
+        img.save(str(path), format="PNG")
+
+        b64 = encode_image_for_llm(str(path))
+        assert b64 is not None, "encode must succeed for a valid oversized image"
+
+        raw = base64.b64decode(b64)
+        assert raw[:2] == b"\xff\xd8", "downscaled output must still be JPEG"
+
+        decoded = Image.open(io.BytesIO(raw))
+        # Encoder: s = 1568 / max(2000, 500) = 1568/2000
+        # new_w = max(1, round(2000 * s)) = 1568; new_h = max(1, round(500 * s)) = 392
+        expected_w = 1568
+        expected_h = max(1, round(500 * 1568 / 2000))
+        assert decoded.size == (expected_w, expected_h), (
+            f"expected downscaled size ({expected_w}, {expected_h}), got {decoded.size}"
+        )
+
+    def test_extension_lie_png_bytes_in_jpg_filename(self, tmp_path):
+        """PNG bytes written to a .jpg file → encode succeeds (PIL sniffs content).
+
+        The decoded payload must be JPEG — this pins the invariant that the
+        hardcoded mime_type='image/jpeg' at the decode-back site
+        (phase_c_vision.py:395-397) is correct-by-construction.
+        """
+        img = Image.new("RGB", (20, 20), color=(255, 0, 0))
+        liar_path = tmp_path / "liar.jpg"
+        # Save PNG bytes into a .jpg filename
+        img.save(str(liar_path), format="PNG")
+
+        b64 = encode_image_for_llm(str(liar_path))
+        assert b64 is not None, (
+            "encode must succeed for valid image even when extension lies"
+        )
+
+        raw = base64.b64decode(b64)
+        assert raw[:2] == b"\xff\xd8", (
+            "extension-lie input must yield JPEG output — "
+            "hardcoded mime_type='image/jpeg' at decode-back site is correct-by-construction"
+        )
+
+    def test_missing_file_returns_none(self, tmp_path):
+        """Nonexistent path → None; no exception escapes the encoder."""
+        result = encode_image_for_llm(str(tmp_path / "does_not_exist.png"))
+        assert result is None, "missing file must return None, not raise"
+
+    def test_corrupt_file_returns_none(self, tmp_path):
+        """A text file with a .png extension → PIL raises → encoder returns None."""
+        corrupt = tmp_path / "fake.png"
+        corrupt.write_text("this is not an image")
+
+        result = encode_image_for_llm(str(corrupt))
+        assert result is None, "corrupt/non-image file must return None, not raise"
+
+    def test_decode_back_site_mime_type_and_data(self, tmp_path):
+        """Integration: validate_scene_coherence_vision calls Part.from_bytes with
+        data == b64decoded encoder output AND mime_type == 'image/jpeg'.
+
+        This exercises the actual decode-back site at phase_c_vision.py:394-398,
+        confirming the hardcoded mime_type invariant holds end-to-end.
+        """
+        # Build two small images for the coherence call (needs >=2)
+        img = Image.new("RGB", (16, 16), color=(0, 128, 255))
+        path_a = tmp_path / "a.png"
+        path_b = tmp_path / "b.png"
+        img.save(str(path_a), format="PNG")
+        img.save(str(path_b), format="PNG")
+
+        # Compute the expected b64 and decoded bytes from the real encoder
+        b64_a = encode_image_for_llm(str(path_a))
+        b64_b = encode_image_for_llm(str(path_b))
+        assert b64_a is not None and b64_b is not None
+
+        expected_data_a = base64.b64decode(b64_a)
+        expected_data_b = base64.b64decode(b64_b)
+
+        mock_google, mock_genai = _make_genai_mock({"coherent": True, "issues": []})
+        part_calls = []
+
+        def _capture_from_bytes(**kwargs):
+            part_calls.append(kwargs)
+            return MagicMock()
+
+        mock_genai.types.Part.from_bytes.side_effect = _capture_from_bytes
+
+        with patch.object(pcv, "settings", _gemini_settings()), \
+             patch.object(pcv.os.path, "exists", return_value=True), \
+             patch.dict(sys.modules, {"google": mock_google, "google.genai": mock_genai}):
+            pcv.validate_scene_coherence_vision([str(path_a), str(path_b)])
+
+        assert len(part_calls) == 2, (
+            f"expected 2 Part.from_bytes calls (one per image), got {len(part_calls)}"
+        )
+        for call_kwargs in part_calls:
+            assert call_kwargs.get("mime_type") == "image/jpeg", (
+                f"mime_type must be 'image/jpeg'; got {call_kwargs.get('mime_type')!r}"
+            )
+        # Data payloads match the encoder output (order preserved)
+        assert part_calls[0]["data"] == expected_data_a, (
+            "first Part.from_bytes data must equal b64decoded encoder output for path_a"
+        )
+        assert part_calls[1]["data"] == expected_data_b, (
+            "second Part.from_bytes data must equal b64decoded encoder output for path_b"
+        )
+
+
+# ---------------------------------------------------------------------------
 # apply_correction face_swap caller — surfaces reason when cascade returns None
 # ---------------------------------------------------------------------------
 
