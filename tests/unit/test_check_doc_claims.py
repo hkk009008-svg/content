@@ -1397,3 +1397,39 @@ class TestUnclosedFenceWarning:
         check_line_anchors([str(md)], tmp_path)
         err = capsys.readouterr().err
         assert "unclosed fence" not in err.lower()
+
+
+# ---------------------------------------------------------------------------
+# Slice 3: multi-range comma-list anchors (`file:A-B, C-D`) are unparseable by
+# _INLINE_ANCHOR_RE -> warn (don't silently skip), per the ADV-2 principle.
+# ---------------------------------------------------------------------------
+
+class TestMultiRangeWarning:
+    def test_multi_range_anchor_warns_not_silently_skipped(self, tmp_path, capsys):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "mod.py", "def f():\n    pass\n")
+        md = _write_md(tmp_path, "doc.md", "see `mod.py:1–5, 9–12` for details\n")
+        check_line_anchors([str(md)], tmp_path)
+        err = capsys.readouterr().err
+        assert "doc.md" in err
+        assert "multi-range" in err.lower()
+        assert "not verified" in err.lower()
+
+    def test_multi_range_does_not_block_normal_anchor_same_line(self, tmp_path, capsys):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "mod.py", "# 1\n# 2\ndef f():\n    pass\n")  # def at 3
+        md = _write_md(
+            tmp_path, "doc.md",
+            "**`f`** `mod.py:3` plus the batch `mod.py:1–5, 9–12`\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == []                       # the normal `mod.py:3` anchor verified OK
+        assert "multi-range" in capsys.readouterr().err.lower()
+
+    def test_single_range_does_not_trigger_multi_range_warning(self, tmp_path, capsys):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "mod.py", "def f():\n    pass\n")  # def at 1
+        # the `, 9, 12` is PROSE, outside the backticks -> must NOT false-fire
+        md = _write_md(tmp_path, "doc.md", "**`f`** `mod.py:1–5` covers cases 9, 12\n")
+        check_line_anchors([str(md)], tmp_path)
+        assert "multi-range" not in capsys.readouterr().err.lower()

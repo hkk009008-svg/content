@@ -72,6 +72,15 @@ _INLINE_ANCHOR_RE = re.compile(
     r'`(?P<file>[A-Za-z0-9_./-]+\.[A-Za-z]+):(?P<line>\d+)(?:[-–—](?P<end>\d+))?`'
 )
 
+# Multi-range anchor: `path:A-B, C-D` (a comma-list of ranges). The comma precedes
+# the closing backtick, so _INLINE_ANCHOR_RE cannot parse it → such anchors are NOT
+# verified. Detect + warn (never silently skip — the ADV-2 principle). `[^`]*` stays
+# within one backtick pair (it cannot cross the closing backtick), so a single range
+# followed by PROSE commas (`mod.py:1-5` covers 9, 12) does NOT false-fire.
+_MULTIRANGE_RE = re.compile(
+    r'`[A-Za-z0-9_./-]+\.[A-Za-z]+:\d+[-–—]\d+\s*,\s*\d+[-–—]?\d*[^`]*`'
+)
+
 # Fenced-code-block markers (``` or ~~~, 3+). A line starting one toggles fence state.
 _FENCE_RE = re.compile(r'^\s*(`{3,}|~{3,})')
 
@@ -343,12 +352,14 @@ def check_line_anchors(doc_paths: list[str], repo_root: Path) -> list[Drift]:
         doc_lines = full_path.read_text(encoding="utf-8", errors="replace").splitlines()
 
         in_fence = False
+        multirange = 0   # comma-list range anchors (unparseable; warn, don't verify)
         for line_num, line_text in enumerate(doc_lines, 1):
             if _FENCE_RE.match(line_text):
                 in_fence = not in_fence
                 continue
             if in_fence:
                 continue
+            multirange += len(_MULTIRANGE_RE.findall(line_text))
 
             # --- markdown-link anchors (existing behavior) ---
             link_keys = set()
@@ -403,6 +414,14 @@ def check_line_anchors(doc_paths: list[str], repo_root: Path) -> list[Drift]:
                 )
                 if drift is not None:
                     drifts.append(drift)
+
+        # Multi-range comma-list anchors (`file:A-B, C-D`) are unparseable by
+        # _INLINE_ANCHOR_RE; warn rather than silently skip (ADV-2 principle).
+        if multirange:
+            print(f"WARNING: {full_path}: {multirange} multi-range anchor(s) "
+                  f"(e.g. `file.py:A-B, C-D`) were NOT verified — the comma-list "
+                  f"form is unparseable. Split into single-range anchors to verify.",
+                  file=sys.stderr)
 
         # EOF with the fence still open (ADV-2): an unbalanced/stray fence leaves
         # in_fence=True for the rest of the doc, silently skipping every later
