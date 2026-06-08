@@ -1851,7 +1851,9 @@ class ShotController:
         ) or (self._host._latest_take(shot, "keyframe_takes") or {}).get("path", "")
 
         # Identity validation
-        chars = scene.get("characters_present", [])
+        # Align with fe2aa47: prefer in-frame chars so the score is about
+        # the person actually visible, not scene-chars[0] who may be absent.
+        chars = shot.get("characters_in_frame", []) or scene.get("characters_present", [])
         if chars and image_path and os.path.exists(str(image_path)):
             primary_ref = get_reference_image(self.project, chars[0])
             if primary_ref:
@@ -2024,7 +2026,9 @@ class ShotController:
                 _settings = self.project.get("global_settings", {})
                 if not _settings.get("face_swap_enabled", True):
                     return {"success": False, "error": "face_swap disabled in project settings"}
-                chars = scene.get("characters_present", [])
+                # Align with fe2aa47: use in-frame chars so we swap the face
+                # of the person actually visible, not scene-chars[0].
+                chars = shot.get("characters_in_frame", []) or scene.get("characters_present", [])
                 primary_ref = get_reference_image(self.project, chars[0]) if chars else None
                 if video_path and primary_ref:
                     result = face_swap_video_frames(str(video_path), primary_ref, out_path)
@@ -2042,7 +2046,9 @@ class ShotController:
                         }
 
             elif action == "lip_sync":
-                chars = scene.get("characters_present", [])
+                # Align with fe2aa47: use in-frame chars so we sync the lips
+                # of the person actually visible, not scene-chars[0].
+                chars = shot.get("characters_in_frame", []) or scene.get("characters_present", [])
                 primary_ref = get_reference_image(self.project, chars[0]) if chars else None
                 audio_path = self._host._ensure_scene_audio(scene, [c for c in self.project["characters"] if c["id"] in chars])
                 if video_path and primary_ref and audio_path:

@@ -592,3 +592,165 @@ class TestDiagnoseClipDeepMultiChar:
         assert ref_paths[0][1] == ref_alice, f"first entry path must be ref_alice; got {ref_paths[0][1]!r}"
         assert ref_paths[1][0] == "Bob", f"second entry label must be 'Bob'; got {ref_paths[1][0]!r}"
         assert ref_paths[1][1] == ref_bob, f"second entry path must be ref_bob; got {ref_paths[1][1]!r}"
+
+
+class TestDiagnoseClipInFrameAlignment:
+    """fe2aa47 alignment: diagnose_clip identity validation must use in-frame
+    chars (shot.characters_in_frame) rather than scene-level chars_present.
+
+    Tests added as part of deferred-minors batch dispatch-claim e018c71.
+    """
+
+    def _build_diverged_controller(self, tmp_path):
+        """Controller where scene.characters_present=["char_alice","char_bob"]
+        but shot.characters_in_frame=["char_bob"] only — char_alice is NOT in frame."""
+        img_path = str(tmp_path / "keyframe.jpg")
+        with open(img_path, "wb") as fh:
+            fh.write(b"img")
+
+        shot = {
+            "id": "shot_1_0",
+            "plan_status": "approved",
+            "characters_in_frame": ["char_bob"],   # only Bob is in frame
+            "camera": "medium",
+            "target_api": "AUTO",
+            "approved_keyframe_take_id": "take_k1",
+            "keyframe_takes": [{"id": "take_k1", "kind": "keyframe", "path": img_path}],
+        }
+        scene = {
+            "id": "scene_1",
+            "title": "T",
+            "action": "A",
+            "location_id": "loc_1",
+            "shots": [shot],
+            "characters_present": ["char_alice", "char_bob"],  # Alice listed first
+        }
+        project = {
+            "id": "proj_1",
+            "scenes": [scene],
+            "characters": [
+                {"id": "char_alice", "name": "Alice"},
+                {"id": "char_bob", "name": "Bob"},
+            ],
+            "objects": [],
+            "locations": [],
+            "global_settings": {},
+        }
+
+        host = MagicMock()
+        host._refresh_project_snapshot.return_value = project
+        host._candidate_take.return_value = {
+            "id": "take_k1", "kind": "keyframe", "path": img_path,
+        }
+        host._resolve_take_path.return_value = img_path
+        host._latest_take.return_value = {"path": img_path}
+
+        lifecycle = MagicMock()
+        runstate = MagicMock()
+        runstate.shot_results = {}
+        core = MagicMock()
+        core.project = project
+        core.project_dir = "/tmp/fake_project"
+
+        ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
+        return ctrl, project, img_path
+
+    def test_divergence_regression_uses_in_frame_char(self, tmp_path):
+        """Regression: when scene chars[0] (Alice) is NOT in the shot's frame
+        but char_bob IS, validate_image must be called with char_bob — not Alice."""
+        ctrl, project, img_path = self._build_diverged_controller(tmp_path)
+
+        mock_validator = MagicMock()
+        mock_validator.validate_image.return_value = MagicMock(
+            passed=True,
+            overall_score=0.85,
+            character_results={},
+        )
+
+        with (
+            patch("cinema.shots.controller.get_reference_image", return_value="/fake/ref_bob.jpg"),
+            patch("phase_c_vision._get_shared_validator", return_value=mock_validator),
+        ):
+            result = ctrl.diagnose_clip("shot_1_0")
+
+        assert "error" not in result, f"unexpected error: {result.get('error')}"
+        assert mock_validator.validate_image.called, "validate_image must have been called"
+        call_kwargs = mock_validator.validate_image.call_args
+        # character_id must be char_bob (the in-frame char), NOT char_alice
+        actual_char_id = call_kwargs.kwargs.get("character_id") or call_kwargs.args[2]
+        assert actual_char_id == "char_bob", (
+            f"fe2aa47 regression: validate_image called with {actual_char_id!r}; "
+            "expected 'char_bob' (the in-frame character)"
+        )
+
+    def test_fallback_no_characters_in_frame_uses_scene_chars(self, tmp_path):
+        """Legacy project fallback: when shot has no characters_in_frame (or empty
+        list), validation must fall back to scene.characters_present[0]."""
+        img_path = str(tmp_path / "keyframe.jpg")
+        with open(img_path, "wb") as fh:
+            fh.write(b"img")
+
+        shot = {
+            "id": "shot_1_0",
+            "plan_status": "approved",
+            # no characters_in_frame key at all — simulates a legacy project
+            "camera": "medium",
+            "target_api": "AUTO",
+            "approved_keyframe_take_id": "take_k1",
+            "keyframe_takes": [{"id": "take_k1", "kind": "keyframe", "path": img_path}],
+        }
+        scene = {
+            "id": "scene_1",
+            "title": "T",
+            "action": "A",
+            "location_id": "loc_1",
+            "shots": [shot],
+            "characters_present": ["char_alice"],
+        }
+        project = {
+            "id": "proj_1",
+            "scenes": [scene],
+            "characters": [{"id": "char_alice", "name": "Alice"}],
+            "objects": [],
+            "locations": [],
+            "global_settings": {},
+        }
+
+        host = MagicMock()
+        host._refresh_project_snapshot.return_value = project
+        host._candidate_take.return_value = {
+            "id": "take_k1", "kind": "keyframe", "path": img_path,
+        }
+        host._resolve_take_path.return_value = img_path
+        host._latest_take.return_value = {"path": img_path}
+
+        lifecycle = MagicMock()
+        runstate = MagicMock()
+        runstate.shot_results = {}
+        core = MagicMock()
+        core.project = project
+        core.project_dir = "/tmp/fake_project"
+
+        ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
+
+        mock_validator = MagicMock()
+        mock_validator.validate_image.return_value = MagicMock(
+            passed=True,
+            overall_score=0.85,
+            character_results={},
+        )
+
+        with (
+            patch("cinema.shots.controller.get_reference_image", return_value="/fake/ref_alice.jpg"),
+            patch("phase_c_vision._get_shared_validator", return_value=mock_validator),
+        ):
+            result = ctrl.diagnose_clip("shot_1_0")
+
+        assert "error" not in result, f"unexpected error: {result.get('error')}"
+        assert mock_validator.validate_image.called, "validate_image must have been called"
+        call_kwargs = mock_validator.validate_image.call_args
+        actual_char_id = call_kwargs.kwargs.get("character_id") or call_kwargs.args[2]
+        assert actual_char_id == "char_alice", (
+            f"legacy fallback broken: validate_image called with {actual_char_id!r}; "
+            "expected 'char_alice' (scene chars[0] fallback)"
+        )
