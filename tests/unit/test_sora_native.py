@@ -157,14 +157,12 @@ def test_invalid_duration_clamped_to_4(monkeypatch, tmp_path):
 # generate_video — resolution param maps to correct API size (G(sora)2 fixed)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("resolution,expected_size", [
-    ("1080p", "1920x1080"),
-    ("720p", "1280x720"),
-    ("480p", "480x270"),
-])
-def test_resolution_maps_to_size(resolution, expected_size, monkeypatch, tmp_path):
-    """G(sora)2 (fixed): `resolution` param maps to the correct `size` kwarg.
-    RESOLUTION_MAP drives the mapping; 1080p unlocks Sora's max output quality.
+@pytest.mark.parametrize("resolution", ["1080p", "720p", "480p"])
+def test_sora2_clamps_any_resolution_to_720p_landscape(resolution, monkeypatch, tmp_path):
+    """sora-2 supports ONLY the 720p tier (1280x720 / 720x1280 per the API — 1080p and
+    480p both 400). generate_video must clamp ANY requested resolution to 720p for sora-2,
+    so the landscape size= is always '1280x720' (assembly normalize upscales to the project
+    container at render). Caught live: the T9 preflight 400'd on size=1080x1920. Plan U6.
     """
     api = _make_api()
     img_path = _real_jpeg(tmp_path)
@@ -178,10 +176,32 @@ def test_resolution_maps_to_size(resolution, expected_size, monkeypatch, tmp_pat
 
     api.generate_video(image_path=img_path, prompt="test", output_path=out, resolution=resolution)
 
-    call_kwargs = api.client.videos.create_and_poll.call_args
-    actual_size = call_kwargs.kwargs.get("size")
-    assert actual_size == expected_size, (
-        f"resolution={resolution!r} should map to size={expected_size!r}, got {actual_size!r}"
+    actual_size = api.client.videos.create_and_poll.call_args.kwargs.get("size")
+    assert actual_size == "1280x720", (
+        f"sora-2 must clamp resolution={resolution!r} to the 720p tier (1280x720); got {actual_size!r}"
+    )
+
+
+def test_sora2_portrait_clamps_to_720x1280(monkeypatch, tmp_path):
+    """sora-2 portrait (9:16): clamp to 720p AND transpose → size='720x1280' (a supported
+    sora-2 size). Before the fix the code requested '1080x1920', which the live API rejects
+    (T9 preflight FAIL). Assembly normalize upscales 720x1280 → 1080x1920 at render."""
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = str(tmp_path / "out.mp4")
+
+    video_mock = _make_video_mock(status="completed")
+    api.client.videos.create_and_poll.return_value = video_mock
+    api.client.videos.download_content.return_value = _make_download_content()
+
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
+
+    api.generate_video(image_path=img_path, prompt="test", output_path=out,
+                       resolution="1080p", aspect_ratio="9:16")
+
+    actual_size = api.client.videos.create_and_poll.call_args.kwargs.get("size")
+    assert actual_size == "720x1280", (
+        f"sora-2 portrait must be '720x1280' (clamped+transposed, a supported size); got {actual_size!r}"
     )
 
 
@@ -339,11 +359,12 @@ def test_valid_duration_passes_through(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_portrait_swaps_size_and_resize(monkeypatch, tmp_path):
-    """Task 4 / T-portrait-1: aspect_ratio='9:16' causes size to be swapped.
+    """Task 4 / T-portrait-1: aspect_ratio='9:16' causes size to be transposed.
 
-    At 1080p portrait the landscape '1920x1080' must become '1080x1920' in the
-    create_and_poll call. The same swapped dims drive the PIL resize target so
-    only ONE portrait_swap call covers both surfaces.
+    sora-2 clamps to the 720p tier (T9-fix), so a 1080p portrait request becomes
+    '720x1280' (clamp 1080p→720p='1280x720', then portrait_swap transposes to
+    '720x1280' — a supported sora-2 size). One portrait_swap call drives both the
+    API size= and the PIL resize target.
     """
     api = _make_api()
     img_path = _real_jpeg(tmp_path)
@@ -365,16 +386,17 @@ def test_portrait_swaps_size_and_resize(monkeypatch, tmp_path):
 
     call_kwargs = api.client.videos.create_and_poll.call_args
     actual_size = call_kwargs.kwargs.get("size")
-    assert actual_size == "1080x1920", (
-        f"portrait 1080p should map to size='1080x1920'; got {actual_size!r}"
+    assert actual_size == "720x1280", (
+        f"portrait should map to the clamped+transposed size='720x1280'; got {actual_size!r}"
     )
 
 
 def test_landscape_size_unchanged(monkeypatch, tmp_path):
-    """Task 4 / T-portrait-2 (refute): aspect_ratio='16:9' keeps size='1920x1080'.
+    """Task 4 / T-portrait-2 (refute): aspect_ratio='16:9' is NOT transposed.
 
-    Proves no regression for existing landscape calls — portrait_swap is a no-op
-    when aspect is already landscape.
+    portrait_swap is a no-op for landscape; with the sora-2 720p clamp (T9-fix) a
+    1080p landscape request maps to '1280x720' (clamped, not transposed) — a
+    supported sora-2 size. Proves the orientation is preserved for landscape.
     """
     api = _make_api()
     img_path = _real_jpeg(tmp_path)
@@ -396,6 +418,6 @@ def test_landscape_size_unchanged(monkeypatch, tmp_path):
 
     call_kwargs = api.client.videos.create_and_poll.call_args
     actual_size = call_kwargs.kwargs.get("size")
-    assert actual_size == "1920x1080", (
-        f"landscape 1080p should keep size='1920x1080'; got {actual_size!r}"
+    assert actual_size == "1280x720", (
+        f"landscape should map to the clamped (not transposed) size='1280x720'; got {actual_size!r}"
     )

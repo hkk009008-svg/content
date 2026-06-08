@@ -102,6 +102,14 @@ class SoraNativeAPI:
             print(f"[SORA-NATIVE] Invalid duration {duration}s, must be one of {valid_durations}. Defaulting to 4s.")
             duration = 4
 
+        # sora-2 supports ONLY the 720p tier (1280x720 / 720x1280 per the API); 1080p and
+        # 480p requests 400 ("Invalid size for sora-2 model"). Clamp to 720p so the call can't
+        # fail on size — assembly normalize upscales the 720p clip to the project container
+        # (e.g. 1080x1920) at render. sora-2-pro is left unclamped. See plan U6 + T9 preflight.
+        if model == "sora-2" and resolution != "720p":
+            print(f"[SORA-NATIVE] {model} supports only 720p sizes; clamping {resolution}→720p (assembly upscales).")
+            resolution = "720p"
+
         try:
             print(f"[SORA-NATIVE] Generating video — {duration}s, {resolution}, model={model}")
             print(f"[SORA-NATIVE] Prompt: {prompt[:120]}...")
