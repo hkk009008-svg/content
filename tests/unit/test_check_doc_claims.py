@@ -1207,4 +1207,34 @@ class TestResolveInlineTargetAbsentCandidate:
         assert cand == ["x/controller.py", "y/controller.py"]
 
 
-# (BUG 3 — ADV-2 unclosed-fence warning tests land in the next commit.)
+# ---------------------------------------------------------------------------
+# BUG 3 — ADV-2 (MINOR): an unbalanced/stray fence leaves in_fence=True for the
+# rest of the document, silently skipping every later anchor. Must emit a loud
+# stderr WARNING naming the doc.
+# ---------------------------------------------------------------------------
+
+class TestUnclosedFenceWarning:
+    def test_unclosed_fence_emits_stderr_warning(self, tmp_path, capsys):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\ndef f():\n    pass\n")  # def at 2
+        # A real anchor BEFORE the stray fence, then an unclosed fence, then an
+        # anchor that gets silently swallowed. The warning must fire at EOF.
+        md = _write_md(
+            tmp_path, "doc.md",
+            "good **`f()`** `alpha.py:2`\n```\nopen fence never closed\n",
+        )
+        check_line_anchors([str(md)], tmp_path)
+        err = capsys.readouterr().err
+        assert "doc.md" in err
+        assert ("unclosed fence" in err.lower()) or ("not verified" in err.lower())
+
+    def test_balanced_fence_emits_no_warning(self, tmp_path, capsys):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\ndef f():\n    pass\n")
+        md = _write_md(
+            tmp_path, "doc.md",
+            "text\n```\nfenced\n```\nmore **`f()`** `alpha.py:2`\n",
+        )
+        check_line_anchors([str(md)], tmp_path)
+        err = capsys.readouterr().err
+        assert "unclosed fence" not in err.lower()

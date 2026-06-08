@@ -401,6 +401,14 @@ def check_line_anchors(doc_paths: list[str], repo_root: Path) -> list[Drift]:
                 if drift is not None:
                     drifts.append(drift)
 
+        # EOF with the fence still open (ADV-2): an unbalanced/stray fence leaves
+        # in_fence=True for the rest of the doc, silently skipping every later
+        # anchor — the exact phantom-survival this tool exists to prevent. Warn
+        # loudly (we do NOT attempt CommonMark nested-fence close-length matching).
+        if in_fence:
+            print(f"WARNING: {full_path}: unclosed code fence at EOF — anchors after "
+                  f"the last unclosed fence were NOT verified.", file=sys.stderr)
+
     if unresolved_bare and not git_ok:
         print(f"WARNING: {unresolved_bare} bare inline anchor(s) could not be resolved "
               f"(git unavailable — basename index empty). These were skipped, NOT verified.",
