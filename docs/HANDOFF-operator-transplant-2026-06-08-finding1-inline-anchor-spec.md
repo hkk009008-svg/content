@@ -21,15 +21,11 @@ the `superpowers:brainstorming` skill**, at the spec-review loop. **HARD-GATE: d
 start implementation until the user approves the written spec** (brainstorming skill
 rule). Sequence to resume:
 
-1. **Consume the iteration-2 re-review** (`wf_e84e5012-1b4`, doc-completeness +
-   adversarial on spec v2). It was IN-FLIGHT at wrap. **[VERDICT — see §2.3; if the
-   /tmp output is gone (cross-session), re-run a 2-reviewer spec-review on `b294950`
-   confirming the iter-1 fixes, or just proceed to step 2 — the user gate is the real
-   decision point.]**
-2. **User spec-review gate:** ask the user to review
+1. **Spec-review loop is COMPLETE** (both iterations done; verdict in §2.3). Spec is at
+   **v3** (iter-2's 3 MINORs folded). No further internal review needed.
+2. **User spec-review gate (START HERE):** ask the user to review
    `docs/superpowers/specs/2026-06-08-inline-backtick-anchor-verification-design.md`
-   (currently **v2 @ `b294950`**) and approve before planning. If they request changes,
-   fold + re-review.
+   (**v3**) and approve before planning. If they request changes, fold + re-review.
 3. **`writing-plans`** → an implementation plan (Slice 1 = tool + tests via TDD;
    Slice 2 = repo-wide sweep).
 4. **TDD implement** Slice 1, then **run the repo-wide sweep** (Slice 2).
@@ -69,11 +65,16 @@ false-positive** guard. Approach **A — extend in place** (unify anchor iterati
   fix. Operator spot-checked reviewer evidence (count=9/27, ~54 bare anchors, regex) —
   0 hallucinations.
 
-### 2.3 Iteration-2 re-review verdict
-<!-- IN-FLIGHT at wrap (wf_e84e5012-1b4). Fill from the notification if it lands; else
-the next operator re-runs or proceeds to the user gate. -->
-**[PENDING — was running at wrap; consume `wf_e84e5012-1b4` result or proceed to the user
-spec-review gate, which is the actual decision point.]**
+### 2.3 Iteration-2 re-review verdict — COMPLETE (landed just after wrap; folded → spec v3 `<see git>`)
+`wf_e84e5012-1b4` (doc-completeness + adversarial). **All 6 iteration-1 issues confirmed
+RESOLVED** — adversarial verified the BLOCKING symbol-disambiguation against live data
+(1-candidate `controller.py:224` catches drift; 2-candidate `_find_take` safely advises).
+Only **3 NEW MINOR** clarifications, all folded into **spec v3** (this is now the current
+spec): (1) de-dup is reporting-only, `--fix` re-scans both syntaxes per line (§4.5);
+(2) symbol binding hoisted BEFORE resolution or the BLOCKING fix is inert (§4.2 Ordering);
+(3) fence no-regression cited — **0 in-fence anchors** across the doc set, ADR-013 (§7).
+**Spec-review loop is COMPLETE.** Next step is the **user spec-review gate** (ask the user
+to review the spec + approve), then `writing-plans`.
 
 ### 2.4 Implementation surface (already mapped — saves the next operator a read)
 `scripts/check_doc_claims.py` (808 lines): `_ANCHOR_RE` (L48, markdown-link only, ext

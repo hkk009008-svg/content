@@ -2,7 +2,9 @@
 
 - **Date:** 2026-06-08
 - **Author:** operator-seat
-- **Status:** Draft v2 (spec-review iteration 1 folded; pending re-review + user review)
+- **Status:** v3 — spec-review loop COMPLETE (iter-1 + iter-2 folded; iter-2 confirmed
+  all 6 iter-1 issues RESOLVED incl. the BLOCKING, +3 MINOR clarifications folded here).
+  **PENDING the user spec-review gate**, then `writing-plans`.
 - **Skill chain:** brainstorming → (this spec) → writing-plans → subagent-driven implementation
 
 ## 1. Problem
@@ -131,6 +133,14 @@ caught). Only `len(D)∈{0,≥2}` or an unbound symbol yields an advisory. This 
 common case from "silently advised, exit 0" into a real check — without which a drifted
 bare `` `controller.py:1928` `` would re-create the false-green this project exists to kill.
 
+**Ordering (spec-review iter-2 MINOR — load-bearing):** the bound symbol (§4.3) MUST be
+extracted BEFORE resolution, because `_resolve_target` needs it to compute `D`. So
+`check_line_anchors` binds the symbol per §4.3 first, passes it into `_resolve_target`,
+and the SAME bound symbol is reused for the later def-drift check (bind once, no
+double-extraction). If an implementer wires resolution before binding, every bare
+ambiguous anchor falls to the advisory and the BLOCKING fix is silently inert — so this
+ordering is a hard requirement, not an implementation detail.
+
 **git-absent / unusable handling** *(spec-review MINOR):* if the basename index can't be
 built (git missing or `git ls-files` errors) **and** the docs contain bare anchors that
 would need it, emit a **loud warning to stderr** naming the count of un-resolvable bare
@@ -173,6 +183,14 @@ The per-line `sub` rewrites **all** matching `(file,OLD)` occurrences on the lin
 (intentional — same property as the existing link fix; documented). Ranges remain
 non-auto-fixable. Fixes never fire inside a fenced block (§4.1). `ambiguous_path` /
 `missing_file` are never auto-fixed.
+
+**De-dup is reporting-only (spec-review iter-2 MINOR):** the §4.1 de-dup discards a
+duplicate inline match for *counting/reporting* purposes only. At fix time, `_apply_fixes`
+re-scans the raw doc line and rewrites every stale `(file, OLD)` occurrence in BOTH
+syntaxes (`_ANCHOR_RE.sub` AND `_INLINE_ANCHOR_RE.sub` on the line), so the rare
+same-`(file,line)` link+inline construction (`` [`a.py:5`](a.py:5) ``) has both forms
+corrected — the surviving link-style `Drift` does not leave the backtick token stale.
+Test 12 is extended to cover this same-line both-syntaxes case.
 
 ### 4.6 Repo-wide sweep (Slice 2, after the tool ships green)
 
@@ -245,7 +263,11 @@ neither populates `git ls-files` — a helper or per-test commit is required). R
 - **Range anchors spanning a moved block** — auto-fix stays off for ranges (manual).
 - **Backward-compat** — markdown-link semantics, `--sha-refs`, `--show-subjects`, manifest
   path untouched; existing tests stay green (fence-skip only newly affects anchors that
-  were inside fenced blocks — none exist today).
+  were inside fenced blocks — **verified 0 such anchors exist across the doc set**:
+  a fence-state scan for link OR inline `path:line` anchors inside ```` ``` ````/`~~~`
+  blocks over ARCHITECTURE/CLAUDE/AGENTS/DECISIONS/OPERATIONS/README/PROGRAM-MANUAL/
+  digests returned **0** (ADR-013; re-run the scan before Slice 1 lands in case docs
+  changed).
 
 ## 8. Composition with protocol
 
