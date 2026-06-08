@@ -59,6 +59,8 @@ from workflow_selector import classify_shot_type, get_max_quality_params
 # Reuse the existing RunPod client class — no duplication.
 from phase_c_assembly import RunPodComfyUI, ImageGenResult
 
+from cinema.aspect import portrait_swap, DEFAULT_ASPECT_RATIO
+
 
 # ---------------------------------------------------------------------------
 # Caches
@@ -620,6 +622,26 @@ def _inject_post_passes(workflow: dict, params: dict, available: Set[str]):
         workflow["901"]["inputs"]["sigmas"] = ["18", 0]
 
 
+def _inject_aspect(workflow: dict, aspect_ratio: Optional[str]) -> None:
+    """Transpose the max-tier latent + final-scale nodes to portrait when 9:16.
+
+    Reads each node's CURRENT (landscape) width/height and rotates them via
+    portrait_swap, so the tier keeps its tuned pixel budget — just rotated.
+    Node 102 = EmptyLatentImage (1024×576); node 950 = ImageScale final
+    (3840×2160). Landscape / None / unknown → no-op (portrait_swap returns
+    the dims unchanged). Robust to template dim changes (reads, not hardcodes).
+    Must run AFTER _inject_post_passes (which sets node 950's dims).
+    """
+    for node_id in ("102", "950"):
+        node = workflow.get(node_id)
+        if not isinstance(node, dict):
+            continue
+        ins = node.get("inputs", {})
+        w, h = ins.get("width"), ins.get("height")
+        if isinstance(w, int) and isinstance(h, int):
+            ins["width"], ins["height"] = portrait_swap(w, h, aspect_ratio)
+
+
 # ---------------------------------------------------------------------------
 # One-shot generation (submit + poll + download)
 # ---------------------------------------------------------------------------
@@ -711,6 +733,11 @@ def generate_ai_broll_max(
     }
     shot_type = classify_shot_type(shot_info)
     params = get_max_quality_params(shot_type)
+
+    # Read the project's aspect ratio for portrait-aware generation.
+    # get_project_setting is None-safe: ctx=None → returns DEFAULT_ASPECT_RATIO.
+    from cinema.context import get_project_setting as _gps
+    aspect_ratio = _gps(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
 
     # ---- Per-project UI overrides (from ctx.global_settings) ----
     # 7 MaxQualityTier halt knobs — override the shot-type defaults above.
@@ -846,6 +873,7 @@ def generate_ai_broll_max(
     _inject_sampling(workflow, params)
     _inject_latent_source(workflow, init_remote, params)
     _inject_post_passes(workflow, params, available)
+    _inject_aspect(workflow, aspect_ratio)  # transpose nodes 102+950 once; deepcopy loop inherits
 
     # ---- Best-of-N adaptive halt loop ----
     n_max = int(params.get("candidate_count", 8))
