@@ -33,7 +33,12 @@ from kling_native import KlingNativeAPI
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _patched_settings(access_key: str = "ak-test", secret_key: str = "sk-test"):
+# A ≥32-byte HS256 secret keeps jwt.encode from emitting InsecureKeyLengthWarning
+# (the real keys are long; the short "sk-test" dummy tripped the warning on 5 tests).
+_TEST_SECRET = "sk-test" + "x" * 25  # 32 chars
+
+
+def _patched_settings(access_key: str = "ak-test", secret_key: str = _TEST_SECRET):
     """Return a settings replacement with Kling credentials set.
 
     settings is a frozen dataclass singleton — we must replace the whole
@@ -47,7 +52,7 @@ def _patched_settings(access_key: str = "ak-test", secret_key: str = "sk-test"):
     )
 
 
-def _make_api(access_key: str = "ak-test", secret_key: str = "sk-test") -> KlingNativeAPI:
+def _make_api(access_key: str = "ak-test", secret_key: str = _TEST_SECRET) -> KlingNativeAPI:
     """Construct a KlingNativeAPI with patched settings.
 
     TC-7 pattern B: patch the module-level 'settings' BEFORE __init__ runs,
@@ -140,9 +145,8 @@ def test_no_aspect_key_in_i2v_payload(tmp_path):
 
     assert task_id == "task-t1"
 
-    # Grab the JSON body sent to requests.post
-    call_kwargs = mock_requests.post.call_args
-    body = call_kwargs.kwargs.get("json") or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else {})
+    # Grab the JSON body sent to requests.post (prod always passes it as a kwarg)
+    body = mock_requests.post.call_args.kwargs["json"]
 
     # The body must be non-empty (sanity: proves the assertion below is non-vacuous)
     assert body, f"Expected a non-empty JSON body; got: {body!r}"
