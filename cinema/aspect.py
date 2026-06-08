@@ -75,3 +75,16 @@ def fal_aspect_ratio(aspect_ratio: Optional[str]) -> str:
     (and Phase-3 video) routes through is_portrait, not an inline ternary.
     """
     return "9:16" if is_portrait(aspect_ratio) else "16:9"
+
+
+# Runway's ratio is a model-dependent "W:H" string; gen4 family tops at 720-wide
+# portrait, gen3a_turbo at 768-wide. Centralizes the model+orientation choice.
+_RUNWAY_PORTRAIT = {"gen3a_turbo": "768:1280"}
+_RUNWAY_LANDSCAPE = {"gen3a_turbo": "1280:768"}
+
+
+def runway_ratio(aspect_ratio: Optional[str], model: str) -> str:
+    """Runway `ratio` string for the given aspect + model (landscape default)."""
+    if is_portrait(aspect_ratio):
+        return _RUNWAY_PORTRAIT.get(model, "720:1280")
+    return _RUNWAY_LANDSCAPE.get(model, "1280:720")

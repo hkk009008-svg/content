@@ -2,7 +2,7 @@
 from cinema.aspect import (
     resolve_output_dimensions, is_portrait, is_supported,
     ASPECT_DIMENSIONS, DEFAULT_ASPECT_RATIO, SUPPORTED_ASPECT_RATIOS,
-    portrait_swap, fal_image_size, fal_aspect_ratio,
+    portrait_swap, fal_image_size, fal_aspect_ratio, runway_ratio,
 )
 
 
@@ -89,3 +89,17 @@ def test_fal_aspect_ratio_maps_orientation():
     assert fal_aspect_ratio(None) == "16:9"
     assert fal_aspect_ratio("") == "16:9"
     assert fal_aspect_ratio("4:3") == "16:9"
+
+
+# --- Phase 3 helpers: runway_ratio ---
+
+def test_runway_ratio_landscape_is_default():
+    assert runway_ratio("16:9", "gen4_turbo") == "1280:720"
+    assert runway_ratio("16:9", "gen3a_turbo") == "1280:768"
+    assert runway_ratio(None, "gen4_turbo") == "1280:720"
+    assert runway_ratio("4:3", "gen3a_turbo") == "1280:768"
+
+
+def test_runway_ratio_portrait_per_model():
+    assert runway_ratio("9:16", "gen4_turbo") == "720:1280"
+    assert runway_ratio("9:16", "gen3a_turbo") == "768:1280"
