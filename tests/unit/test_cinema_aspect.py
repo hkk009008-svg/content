@@ -2,7 +2,7 @@
 from cinema.aspect import (
     resolve_output_dimensions, is_portrait, is_supported,
     ASPECT_DIMENSIONS, DEFAULT_ASPECT_RATIO, SUPPORTED_ASPECT_RATIOS,
-    portrait_swap, fal_image_size,
+    portrait_swap, fal_image_size, fal_aspect_ratio,
 )
 
 
@@ -81,3 +81,11 @@ def test_fal_image_size_maps_orientation():
     assert fal_image_size("9:16") == "portrait_16_9"
     assert fal_image_size(None) == "landscape_16_9"
     assert fal_image_size("4:3") == "landscape_16_9"
+
+
+def test_fal_aspect_ratio_maps_orientation():
+    assert fal_aspect_ratio("16:9") == "16:9"
+    assert fal_aspect_ratio("9:16") == "9:16"
+    assert fal_aspect_ratio(None) == "16:9"
+    assert fal_aspect_ratio("") == "16:9"
+    assert fal_aspect_ratio("4:3") == "16:9"

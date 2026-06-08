@@ -65,3 +65,13 @@ def portrait_swap(w: int, h: int, aspect_ratio: Optional[str]) -> tuple[int, int
 def fal_image_size(aspect_ratio: Optional[str]) -> str:
     """FAL's named image_size enum for the given aspect ratio (landscape default)."""
     return FAL_IMAGE_SIZE.get(aspect_ratio or "", "landscape_16_9")
+
+
+def fal_aspect_ratio(aspect_ratio: Optional[str]) -> str:
+    """FAL's aspect_ratio string for FLUX Kontext/Pro (landscape default).
+
+    Unlike fal_image_size's named buckets, the Kontext/Pro APIs take a plain
+    "W:H" string. Centralizes the orientation choice so every FAL caller
+    (and Phase-3 video) routes through is_portrait, not an inline ternary.
+    """
+    return "9:16" if is_portrait(aspect_ratio) else "16:9"

@@ -8,7 +8,7 @@ import requests
 from typing import NamedTuple
 
 from config.settings import settings
-from cinema.aspect import portrait_swap, fal_image_size, is_portrait, DEFAULT_ASPECT_RATIO
+from cinema.aspect import portrait_swap, fal_image_size, fal_aspect_ratio, DEFAULT_ASPECT_RATIO
 from cinema.context import get_project_setting
 
 PEXELS_API_KEY = settings.pexels_api_key
@@ -530,7 +530,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                         "prompt": kontext_prompt,
                         "image_urls": image_urls,
                         "guidance_scale": 3.5,
-                        "aspect_ratio": "9:16" if is_portrait(aspect_ratio) else "16:9",
+                        "aspect_ratio": fal_aspect_ratio(aspect_ratio),
                         "output_format": "jpeg",
                         "num_images": 1,
                     },
@@ -549,7 +549,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                 "fal-ai/flux-pro/v1.1-ultra",
                 arguments={
                     "prompt": prompt,
-                    "aspect_ratio": "9:16" if is_portrait(aspect_ratio) else "16:9",
+                    "aspect_ratio": fal_aspect_ratio(aspect_ratio),
                     "output_format": "jpeg",
                     "seed": seed,
                     "num_inference_steps": 32,
