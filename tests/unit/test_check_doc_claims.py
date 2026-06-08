@@ -1208,6 +1208,55 @@ class TestNestedOverlapConvergence:
 
 
 # ---------------------------------------------------------------------------
+# --exclude-target: when fixing, hold back drifts whose target file matches an
+# exclude substring (a source file under concurrent edit by another seat). The
+# stable subset gets fixed; the excluded anchors stay flagged (deferred), and the
+# convergence loop still terminates. Enables a "fix the stable subset now, sweep
+# the in-flight files later" workflow without churning re-drifting anchors.
+# ---------------------------------------------------------------------------
+
+class TestExcludeTargetFilter:
+    def _setup(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "stable.py", "# 1\n# 2\ndef foo():\n    pass\n")       # foo @ 3
+        _commit_py(tmp_path, "phase_c_ffmpeg.py", "# 1\n# 2\n# 3\ndef bar():\n    pass\n")  # bar @ 4
+        return _write_md(
+            tmp_path, "doc.md",
+            "**`foo`** `stable.py:9` and **`bar`** `phase_c_ffmpeg.py:9`\n",
+        )
+
+    def test_excluded_target_deferred_stable_fixed(self, tmp_path):
+        md = self._setup(tmp_path)
+        remaining = run([str(md)], tmp_path, fix=True,
+                        exclude_targets=["phase_c_ffmpeg.py"])
+        # stable.py:9 -> :3 fixed; phase_c_ffmpeg.py:9 held back at :9
+        assert md.read_text() == (
+            "**`foo`** `stable.py:3` and **`bar`** `phase_c_ffmpeg.py:9`\n"
+        )
+        # excluded anchor still flagged as drift (deferred, not fixed)
+        assert any(d.kind == "def_drift" and "phase_c_ffmpeg.py" in d.target_file
+                   for d in remaining)
+        # stable anchor fully resolved (no longer drift)
+        assert not any(d.kind == "def_drift" and "stable.py" in d.target_file
+                       for d in remaining)
+
+    def test_no_exclude_fixes_both(self, tmp_path):
+        md = self._setup(tmp_path)
+        run([str(md)], tmp_path, fix=True)
+        assert md.read_text() == (
+            "**`foo`** `stable.py:3` and **`bar`** `phase_c_ffmpeg.py:4`\n"
+        )
+
+    def test_exclude_run_is_idempotent_and_terminates(self, tmp_path):
+        md = self._setup(tmp_path)
+        run([str(md)], tmp_path, fix=True, exclude_targets=["phase_c_ffmpeg.py"])
+        first = md.read_text()
+        # second pass with the same exclude must not loop or change the excluded anchor
+        run([str(md)], tmp_path, fix=True, exclude_targets=["phase_c_ffmpeg.py"])
+        assert md.read_text() == first
+
+
+# ---------------------------------------------------------------------------
 # BUG 2 — CQ-1 (IMPORTANT): _resolve_inline_target must not crash when a
 # tracked-but-absent basename candidate is read during symbol-disambiguation.
 # git ls-files lists tracked paths even if absent on disk (staged deletion,

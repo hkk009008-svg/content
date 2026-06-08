@@ -944,8 +944,21 @@ def check_sha_refs(doc_paths: list[str], repo_root: Path) -> list[Drift]:
 CHECKERS = [check_line_anchors]
 
 
-def run(doc_paths: list[str], repo_root: Path, fix: bool = False) -> list[Drift]:
-    """Run all enabled checkers; apply fixes when fix=True. Return remaining drift."""
+def run(doc_paths: list[str], repo_root: Path, fix: bool = False,
+        exclude_targets: "Optional[list[str]]" = None) -> list[Drift]:
+    """Run all enabled checkers; apply fixes when fix=True. Return remaining drift.
+
+    exclude_targets: when fixing, hold back any drift whose target file contains one
+    of these substrings (e.g. a source file under active edit by a concurrent seat).
+    Excluded drifts are still DETECTED and remain in the return value — they are
+    simply not auto-fixed — so a sweep can fix the stable subset now and defer
+    in-flight-file anchors (which would only re-drift) to a later pass.
+    """
+    exclude_targets = exclude_targets or []
+
+    def _excluded(d: Drift) -> bool:
+        return bool(exclude_targets) and any(p in (d.target_file or "") for p in exclude_targets)
+
     all_drifts: list[Drift] = []
     for checker in CHECKERS:
         all_drifts.extend(checker(doc_paths, repo_root))
@@ -961,16 +974,18 @@ def run(doc_paths: list[str], repo_root: Path, fix: bool = False) -> list[Drift]
     # each pass lets the deferred anchor settle and be fixed next pass. Bounded so a
     # pathologically non-applying drift cannot spin forever — it surfaces as a warning
     # plus the residual drift in the return value (non-zero exit at the CLI level).
+    # exclude_targets are held back from _apply_fixes AND excluded from the
+    # convergence predicate, so the loop terminates with them still flagged (deferred).
     _MAX_FIX_PASSES = 10
     for _ in range(_MAX_FIX_PASSES):
-        _apply_fixes(all_drifts)
+        _apply_fixes([d for d in all_drifts if not _excluded(d)])
         all_drifts = []
         for checker in CHECKERS:
             all_drifts.extend(checker(doc_paths, repo_root))
         # mirrors _is_fixable (nested in _apply_fixes): a def_drift with a concrete
         # suggested line is the only auto-applyable kind.
         if not any(d.kind == "def_drift" and d.fixable and d.suggested_line is not None
-                   for d in all_drifts):
+                   and not _excluded(d) for d in all_drifts):
             break
     else:
         print(f"WARNING: --fix did not converge after {_MAX_FIX_PASSES} passes; "
@@ -1035,6 +1050,11 @@ def main(argv=None) -> int:
         help="List every cited SHA with its actual commit subject (mis-citation review).",
     )
     parser.add_argument(
+        "--exclude-target", action="append", default=[], metavar="SUBSTR",
+        help="With --fix, skip drifts whose target file contains SUBSTR (repeatable). "
+             "Defers anchors into files under concurrent edit; they stay flagged, not fixed.",
+    )
+    parser.add_argument(
         "docs",
         nargs="*",
         help=(
@@ -1057,7 +1077,7 @@ def main(argv=None) -> int:
     if args.sha_refs:
         return _report_sha_drifts(check_sha_refs(docs, repo_root), len(docs))
 
-    drifts = run(docs, repo_root, fix=args.fix)
+    drifts = run(docs, repo_root, fix=args.fix, exclude_targets=args.exclude_target)
     fatal, advisories = _split_advisories(drifts)
 
     if not fatal and not advisories:
