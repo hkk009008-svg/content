@@ -89,6 +89,69 @@ def _def_lines(source_lines: list[str], symbol: str) -> list[int]:
     return found
 
 
+def _build_basename_index(repo_root: Path) -> "tuple[dict[str, list[str]], bool]":
+    """Map basename -> sorted [tracked relpaths] from `git ls-files`.
+
+    git ls-files is tracked-only, so worktree/venv/dist copies are excluded —
+    the exact trap that would make every basename look ambiguous. Returns
+    (index, git_ok); git_ok=False when git is unavailable/errors (index empty).
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(repo_root), "ls-files"],
+            capture_output=True, text=True, check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return {}, False
+    index: dict[str, list[str]] = {}
+    for rel in out.splitlines():
+        rel = rel.strip()
+        if rel:
+            index.setdefault(Path(rel).name, []).append(rel)
+    for k in index:
+        index[k].sort()
+    return index, True
+
+
+def _resolve_inline_target(
+    token_file: str,
+    symbol: Optional[str],
+    basename_index: "dict[str, list[str]]",
+    repo_root: Path,
+) -> "tuple[Optional[str], Optional[list[str]]]":
+    """Resolve an inline anchor's file token to a tracked relpath.
+
+    Returns (resolved_rel, candidates):
+      (rel, None)        -> resolved to exactly one path; caller checks it.
+      (None, None)       -> skip (0 matches / absolute / parent-relative).
+      (None, [c1, c2..]) -> ambiguous_path advisory (candidates listed).
+    Directory-qualified within-repo tokens pass through as-is; existence
+    (incl. missing_file) is handled downstream by check_anchor.
+    """
+    parts = token_file.split("/")
+    if token_file.startswith("/") or ".." in parts:
+        return None, None                       # absolute / parent-relative -> skip
+    if "/" in token_file:
+        return token_file, None                 # dir-qualified within repo
+    matches = basename_index.get(token_file, [])
+    if len(matches) == 1:
+        return matches[0], None
+    if len(matches) == 0:
+        return None, None                       # not a real tracked file -> skip
+    # Ambiguous (>=2): try symbol-disambiguation.
+    if symbol:
+        defining = [
+            c for c in matches
+            if _def_lines(
+                (repo_root / c).read_text(encoding="utf-8", errors="replace").splitlines(),
+                symbol,
+            )
+        ]
+        if len(defining) == 1:
+            return defining[0], None            # disambiguated -> real check
+    return None, matches                        # truly ambiguous -> advisory
+
+
 # ---------------------------------------------------------------------------
 # Per-anchor check
 # ---------------------------------------------------------------------------

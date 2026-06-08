@@ -34,6 +34,8 @@ from check_doc_claims import (  # noqa: E402
     check_sha_refs,
     audit_sha_refs,
     _INLINE_ANCHOR_RE,
+    _build_basename_index,
+    _resolve_inline_target,
 )
 
 
@@ -911,3 +913,60 @@ class TestInlineRegex:
             "mod.py:10",          # no backticks at all
         ]:
             assert _INLINE_ANCHOR_RE.search(s) is None, f"should NOT match: {s!r}"
+
+
+class TestResolveInlineTarget:
+    def _index(self, repo):
+        idx, ok = _build_basename_index(repo)
+        assert ok is True
+        return idx
+
+    def test_unique_basename_resolves(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "def f():\n    pass\n")
+        idx = self._index(tmp_path)
+        rel, cand = _resolve_inline_target("alpha.py", None, idx, tmp_path)
+        assert rel == "alpha.py" and cand is None
+
+    def test_ambiguous_resolved_by_symbol(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "controller.py", "class Top:\n    pass\n")
+        _commit_py(tmp_path, "domain/controller.py", "def find_take():\n    pass\n")
+        idx = self._index(tmp_path)
+        # symbol find_take is defined only in domain/controller.py → disambiguates
+        rel, cand = _resolve_inline_target("controller.py", "find_take", idx, tmp_path)
+        assert rel == "domain/controller.py" and cand is None
+
+    def test_ambiguous_without_symbol_is_advisory(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "controller.py", "x = 1\n")
+        _commit_py(tmp_path, "domain/controller.py", "y = 2\n")
+        idx = self._index(tmp_path)
+        rel, cand = _resolve_inline_target("controller.py", None, idx, tmp_path)
+        assert rel is None
+        assert cand == ["controller.py", "domain/controller.py"]
+
+    def test_ambiguous_symbol_in_two_candidates_is_advisory(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "controller.py", "def shared():\n    pass\n")
+        _commit_py(tmp_path, "domain/controller.py", "def shared():\n    pass\n")
+        idx = self._index(tmp_path)
+        rel, cand = _resolve_inline_target("controller.py", "shared", idx, tmp_path)
+        assert rel is None and cand == ["controller.py", "domain/controller.py"]
+
+    def test_zero_match_is_skip(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "x = 1\n")
+        idx = self._index(tmp_path)
+        rel, cand = _resolve_inline_target("ghost.py", None, idx, tmp_path)
+        assert rel is None and cand is None
+
+    def test_dir_qualified_passthrough(self, tmp_path):
+        idx = {}  # dir-qualified does not consult the index
+        rel, cand = _resolve_inline_target("cinema/x.py", None, idx, tmp_path)
+        assert rel == "cinema/x.py" and cand is None
+
+    def test_absolute_and_parent_relative_skip(self, tmp_path):
+        idx = {}
+        assert _resolve_inline_target("/etc/x.py", None, idx, tmp_path) == (None, None)
+        assert _resolve_inline_target("../x.py", None, idx, tmp_path) == (None, None)
