@@ -358,7 +358,7 @@ def generate_ai_video(
             data_uri = f"data:image/jpeg;base64,{img_b64}"
 
             task = client.image_to_video.create(
-                model="gen4",
+                model="gen4_turbo",
                 prompt_image=data_uri,
                 prompt_text=(
                     f"Smooth cinematic {camera_motion}. "

@@ -217,3 +217,95 @@ class TestSora2FalAspect:
         assert arguments.get("aspect_ratio") == "16:9", (
             f"Expected aspect_ratio='16:9'; got: {arguments}"
         )
+
+
+# ---------------------------------------------------------------------------
+# TC-7 — RUNWAY_GEN4: generate_ai_video uses a valid SDK model enum value
+# ---------------------------------------------------------------------------
+class TestRunwayGen4Model:
+    """Drive generate_ai_video(target_api='RUNWAY_GEN4', ...) and assert that
+    client.image_to_video.create is called with model in the SDK's valid set.
+
+    The runwayml SDK (v4.14.0) accepts model ∈ {gen4.5, gen4_turbo, veo3.1,
+    veo3.1_fast, veo3, gen3a_turbo}. Bare 'gen4' is NOT in the enum → 400
+    at runtime. The correct model is 'gen4_turbo'.
+    """
+
+    def _run_runway_gen4(self):
+        """Drive generate_ai_video(RUNWAY_GEN4); return the mock RunwayML client.
+
+        The route:
+        1. Imports RunwayML inside the branch — patch via sys.modules.
+        2. Reads open(image_path, "rb") — use a real temp file.
+        3. Polls client.tasks.retrieve in a while loop — mock must return
+           status=="SUCCEEDED" immediately to avoid a 300-second spin.
+        4. On SUCCEEDED reads task.output[0] then calls urllib.request.urlretrieve.
+        """
+        import tempfile
+        import os
+
+        # Build mock task objects: create() returns task_created; retrieve() returns
+        # task_done with status SUCCEEDED so the poll terminates immediately.
+        task_created = MagicMock()
+        task_created.id = "runway-task-001"
+
+        task_done = MagicMock()
+        task_done.status = "SUCCEEDED"
+        task_done.output = ["https://cdn.runway.ml/out.mp4"]
+
+        mock_client = MagicMock()
+        mock_client.image_to_video.create.return_value = task_created
+        mock_client.tasks.retrieve.return_value = task_done
+
+        mock_runway_module = MagicMock()
+        mock_runway_module.RunwayML.return_value = mock_client
+
+        stub_settings = MagicMock()
+        stub_settings.runwayml_api_secret = "rw-test-secret"
+
+        # Write a tiny temp image file so open(image_path,"rb") works
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tf:
+            tf.write(b"\xff\xd8\xff\xe0" + b"\x00" * 12)  # minimal JPEG header
+            tmp_image = tf.name
+
+        sys.modules.pop("phase_c_ffmpeg", None)
+
+        try:
+            with patch.dict("sys.modules", {"runwayml": mock_runway_module}), \
+                 patch("os.path.exists", return_value=True), \
+                 patch("urllib.request.urlretrieve"), \
+                 patch("time.sleep"):
+                import phase_c_ffmpeg
+                phase_c_ffmpeg.settings = stub_settings
+                phase_c_ffmpeg.generate_ai_video(
+                    image_path=tmp_image,
+                    camera_motion="zoom_in_slow",
+                    target_api="RUNWAY_GEN4",
+                    output_mp4="/tmp/runway_out.mp4",
+                    shot_type="portrait",
+                    ctx=_ctx("16:9"),
+                )
+        finally:
+            sys.modules.pop("phase_c_ffmpeg", None)
+            os.unlink(tmp_image)
+
+        return mock_client
+
+    def test_runway_gen4_uses_valid_sdk_model(self):
+        """RUNWAY_GEN4 must call create(..., model=<valid-sdk-enum-value>)."""
+        _VALID_RUNWAY_MODELS = {"gen4.5", "gen4_turbo", "veo3.1", "veo3.1_fast",
+                                "veo3", "gen3a_turbo"}
+        mock_client = self._run_runway_gen4()
+
+        assert mock_client.image_to_video.create.called, (
+            "client.image_to_video.create was never called"
+        )
+        call_kwargs = mock_client.image_to_video.create.call_args.kwargs
+        model_used = call_kwargs.get("model")
+        assert model_used in _VALID_RUNWAY_MODELS, (
+            f"model='{model_used}' is not in the SDK valid set {_VALID_RUNWAY_MODELS}"
+        )
+        # Pin the exact expected value (not just "in set")
+        assert model_used == "gen4_turbo", (
+            f"Expected model='gen4_turbo' specifically; got model='{model_used}'"
+        )
