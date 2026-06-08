@@ -256,6 +256,9 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                 # Inject DepthAnything V2 preprocessor (node 400)
                 remote_depth_src = comfy.upload_image(init_image)
                 workflow["400"] = {
+                    # resolution = DepthAnythingV2 preprocessor working size (longest
+                    # side), aspect-independent — NOT a latent pixel budget, so it is
+                    # intentionally not routed through portrait_swap (node 102 carries dims).
                     "inputs": {"image": remote_depth_src, "resolution": 1344},
                     "class_type": "DepthAnythingV2Preprocessor",
                     "_meta": {"title": "Depth Map (DepthAnything V2)"}

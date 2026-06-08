@@ -735,7 +735,8 @@ def generate_ai_broll_max(
     params = get_max_quality_params(shot_type)
 
     # Read the project's aspect ratio for portrait-aware generation.
-    # get_project_setting is None-safe: ctx=None → returns DEFAULT_ASPECT_RATIO.
+    # Single function-scope import for get_project_setting (None-safe: ctx=None →
+    # returns DEFAULT_ASPECT_RATIO); the conditional override blocks below reuse it.
     from cinema.context import get_project_setting
     aspect_ratio = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
 
@@ -745,7 +746,6 @@ def generate_ai_broll_max(
     # out-of-range inputs, reject unknown enums/wrong types. The JSON API can
     # send any value past the React slider bounds.
     if ctx is not None:
-        from cinema.context import get_project_setting
         for ui_key, param_key in (
             ("max_candidate_count",          "candidate_count"),
             ("max_candidate_batch",          "candidate_batch"),
@@ -898,7 +898,6 @@ def generate_ai_broll_max(
     # feeds get_adaptive_pulid_weight. Pass the project's identity acceptance
     # bar so passed=True means "would have been acceptable as the final shot".
     if ctx is not None:
-        from cinema.context import get_project_setting  # local import shared above
         identity_threshold = float(get_project_setting(ctx, "identity_strictness", 0.60))
     else:
         identity_threshold = 0.60
