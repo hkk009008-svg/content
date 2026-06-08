@@ -1,4 +1,10 @@
 """Phase 1 — cinema/aspect.py: aspect→dims resolver + supported-ratio gate."""
+import json
+import shutil
+import subprocess
+
+import pytest
+
 from cinema.aspect import (
     resolve_output_dimensions, is_portrait, is_supported,
     ASPECT_DIMENSIONS, DEFAULT_ASPECT_RATIO, SUPPORTED_ASPECT_RATIOS,
@@ -111,10 +117,6 @@ def test_runway_ratio_portrait_per_model():
 # smaller source to the 1080×1920 target frame (a skeptic could doubt whether
 # "decrease" upscales at all). They exercise the PRODUCTION function directly.
 
-import shutil
-import subprocess
-import json
-
 _HAS_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 
 
@@ -128,7 +130,7 @@ def _probe_dims(path: str):
             "-of", "json",
             path,
         ],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, check=True, timeout=30,
     )
     data = json.loads(result.stdout)
     stream = data["streams"][0]
@@ -146,11 +148,8 @@ def _make_portrait_clip(path: str, w: int, h: int):
             "-c:v", "libx264", "-preset", "ultrafast",
             path,
         ],
-        check=True,
+        check=True, timeout=60,
     )
-
-
-import pytest
 
 
 @pytest.mark.skipif(not _HAS_FFMPEG, reason="requires ffmpeg+ffprobe")
@@ -172,7 +171,7 @@ def test_normalize_upscales_720x1280_portrait_to_1080x1920(tmp_path):
             "-frames:v", "1",
             out,
         ],
-        check=True,
+        check=True, timeout=60,
     )
 
     width, height = _probe_dims(out)
@@ -201,7 +200,7 @@ def test_normalize_upscales_768x1280_portrait_to_1080x1920(tmp_path):
             "-frames:v", "1",
             out,
         ],
-        check=True,
+        check=True, timeout=60,
     )
 
     width, height = _probe_dims(out)
