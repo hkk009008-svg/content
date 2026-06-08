@@ -2,7 +2,11 @@
 """Phase-3 portrait 9:16 per-provider preflight.
 
 ⚠️  LIVE SPEND — this script makes REAL, PAID API calls to Veo, Sora, Kling,
-Runway, and FAL.  Each call costs ~$0.30–$0.80.  Total expected spend: ~$2–4.
+Runway, and FAL.  Each call costs ~$0.30–$0.80.  Total expected spend: ~$2–4
+(5 video providers + 1 FAL image smoke).  The context pins cascade_retry_limit=0
+so each provider is billed EXACTLY ONCE — without it, a failing provider would
+double-bill (a second call after a 30s quota-cooldown sleep), making a worst-case
+all-fail run cost up to ~2× and stall ~30s per failure.
 
 DO NOT RUN unless you have authorised the spend and all provider API keys are
 set in your environment.  This is a USER-RUN gate, not a CI check.
@@ -95,7 +99,12 @@ def _video_dims(probe: dict) -> tuple[int | None, int | None]:
 
 
 def _make_ctx(aspect: str = "9:16") -> PipelineContext:
-    return PipelineContext(global_settings={"aspect_ratio": aspect})
+    # cascade_retry_limit=0 (PF-1): each provider is pinned via video_fallbacks=[PROVIDER],
+    # so a FAILING provider would otherwise re-enter the quota-cooldown retry pass —
+    # time.sleep(30) + a SECOND billed call to the same provider — doubling spend exactly
+    # in the all-fail case this preflight exists to surface. Pinning the retry limit to 0
+    # bounds each provider to a single billed call (mirrors test_phase_c_video_aspect.py:711).
+    return PipelineContext(global_settings={"aspect_ratio": aspect, "cascade_retry_limit": 0})
 
 
 # ── main ───────────────────────────────────────────────────────────────────────
