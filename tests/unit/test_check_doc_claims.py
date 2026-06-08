@@ -1172,6 +1172,42 @@ class TestInlineFixSameTokenCollision:
 
 
 # ---------------------------------------------------------------------------
+# NC-MINOR-1 (Lane V): a single _apply_fixes pass is span-safe but not always
+# idempotent when a fixable inline anchor is NESTED inside a drifting markdown
+# link's display (overlapping spans). The span/identity guard defers the outer
+# anchor instead of corrupting it; run()'s convergence loop must close it in ONE
+# invocation. (Without the loop, the inner fixes pass 1 and the link stays stale.)
+# ---------------------------------------------------------------------------
+
+class TestNestedOverlapConvergence:
+    # ov_fn def lands at line 25; both the inline `ov.py:9` (in the link display)
+    # and the link target src/ov.py:9 are stale and overlap.
+    _SRC = "# pad\n" * 24 + "def ov_fn():\n    pass\n"
+    _DOC = "Tricky `ov_fn` [see `ov.py:9`](src/ov.py:9) nested anchors.\n"
+    _FIXED = "Tricky `ov_fn` [see `ov.py:25`](src/ov.py:25) nested anchors.\n"
+
+    def test_nested_link_and_inline_converge_in_one_run(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "src/ov.py", self._SRC)
+        md = _write_md(tmp_path, "doc.md", self._DOC)
+        remaining = run([str(md)], tmp_path, fix=True)
+        # Both the nested inline AND the enclosing link end up correct after ONE run.
+        assert md.read_text() == self._FIXED
+        # No fixable drift left behind (the deferred outer anchor was re-detected + fixed).
+        assert [d for d in remaining
+                if d.kind == "def_drift" and d.fixable and d.suggested_line is not None] == []
+
+    def test_nested_overlap_fix_is_idempotent(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "src/ov.py", self._SRC)
+        md = _write_md(tmp_path, "doc.md", self._DOC)
+        run([str(md)], tmp_path, fix=True)
+        first = md.read_text()
+        run([str(md)], tmp_path, fix=True)
+        assert md.read_text() == first
+
+
+# ---------------------------------------------------------------------------
 # BUG 2 — CQ-1 (IMPORTANT): _resolve_inline_target must not crash when a
 # tracked-but-absent basename candidate is read during symbol-disambiguation.
 # git ls-files lists tracked paths even if absent on disk (staged deletion,

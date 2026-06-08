@@ -950,12 +950,34 @@ def run(doc_paths: list[str], repo_root: Path, fix: bool = False) -> list[Drift]
     for checker in CHECKERS:
         all_drifts.extend(checker(doc_paths, repo_root))
 
-    if fix:
-        remaining = _apply_fixes(all_drifts)
-    else:
-        remaining = all_drifts
+    if not fix:
+        return all_drifts
 
-    return remaining
+    # Apply fixes to convergence. A single _apply_fixes pass is span-safe but not
+    # always idempotent: when a fixable anchor's span overlaps another (e.g. an
+    # inline anchor nested inside a drifting markdown-link display), the span/
+    # identity guard in _rewrite_anchor_occurrence DEFERS the outer anchor (leaves
+    # it unfixed) rather than risk a wrong rewrite (NC-MINOR-1). Re-detecting after
+    # each pass lets the deferred anchor settle and be fixed next pass. Bounded so a
+    # pathologically non-applying drift cannot spin forever — it surfaces as a warning
+    # plus the residual drift in the return value (non-zero exit at the CLI level).
+    _MAX_FIX_PASSES = 10
+    for _ in range(_MAX_FIX_PASSES):
+        _apply_fixes(all_drifts)
+        all_drifts = []
+        for checker in CHECKERS:
+            all_drifts.extend(checker(doc_paths, repo_root))
+        # mirrors _is_fixable (nested in _apply_fixes): a def_drift with a concrete
+        # suggested line is the only auto-applyable kind.
+        if not any(d.kind == "def_drift" and d.fixable and d.suggested_line is not None
+                   for d in all_drifts):
+            break
+    else:
+        print(f"WARNING: --fix did not converge after {_MAX_FIX_PASSES} passes; "
+              f"fixable drift remains (possible overlapping/pathological anchors) — "
+              f"re-run --fix or correct by hand.", file=sys.stderr)
+
+    return all_drifts
 
 
 # ---------------------------------------------------------------------------
