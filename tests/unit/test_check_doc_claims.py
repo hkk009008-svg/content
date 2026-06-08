@@ -1125,3 +1125,86 @@ class TestAdvisoryExitNeutral:
         from check_doc_claims import _split_advisories
         fatal, adv = _split_advisories(run([str(md)], tmp_path))
         assert fatal == [] and len(adv) == 1 and adv[0].kind == "ambiguous_path"
+
+
+# ---------------------------------------------------------------------------
+# BUG 1 — ADV-1 (CRITICAL): --fix corrupts a line carrying two same-bare-token,
+# different-resolved-file, same-stale-line inline anchors. The reviewer repro:
+# two committed files a/controller.py (foo@2) + b/controller.py (bar@3); one doc
+# line with **`foo()`** `controller.py:9` and **`bar()`** `controller.py:9`.
+# After --fix, foo must -> :2 (correct) AND bar must -> :3 (correct, NOT :2).
+# A second --fix pass must be a no-op (idempotent).
+# ---------------------------------------------------------------------------
+
+class TestInlineFixSameTokenCollision:
+    def test_two_same_token_anchors_each_get_own_correct_line(self, tmp_path):
+        _init_repo(tmp_path)
+        # foo defined at line 2 of a/controller.py
+        _commit_py(tmp_path, "a/controller.py", "# 1\ndef foo():\n    pass\n")
+        # bar defined at line 3 of b/controller.py
+        _commit_py(tmp_path, "b/controller.py", "# 1\n# 2\ndef bar():\n    pass\n")
+        # both anchors bare `controller.py:9` (stale); symbol disambiguates each.
+        md = _write_md(
+            tmp_path, "doc.md",
+            "**`foo()`** `controller.py:9` and **`bar()`** `controller.py:9`\n",
+        )
+        run([str(md)], tmp_path, fix=True)
+        # foo -> :2 (correct), bar -> :3 (correct, NOT clobbered to :2)
+        assert md.read_text() == (
+            "**`foo()`** `controller.py:2` and **`bar()`** `controller.py:3`\n"
+        )
+
+    def test_same_token_collision_fix_is_idempotent(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "a/controller.py", "# 1\ndef foo():\n    pass\n")
+        _commit_py(tmp_path, "b/controller.py", "# 1\n# 2\ndef bar():\n    pass\n")
+        md = _write_md(
+            tmp_path, "doc.md",
+            "**`foo()`** `controller.py:9` and **`bar()`** `controller.py:9`\n",
+        )
+        run([str(md)], tmp_path, fix=True)
+        first_pass = md.read_text()
+        # Second --fix pass must change nothing (no oscillation, no drift left).
+        remaining = run([str(md)], tmp_path, fix=True)
+        assert md.read_text() == first_pass
+        # And the converged text has zero def_drift remaining.
+        assert [d for d in remaining if d.kind == "def_drift"] == []
+
+
+# ---------------------------------------------------------------------------
+# BUG 2 — CQ-1 (IMPORTANT): _resolve_inline_target must not crash when a
+# tracked-but-absent basename candidate is read during symbol-disambiguation.
+# git ls-files lists tracked paths even if absent on disk (staged deletion,
+# git rm --cached, sparse checkout, mid-rename). An unreadable candidate must
+# be treated as NON-defining (skipped), not raise FileNotFoundError.
+# ---------------------------------------------------------------------------
+
+class TestResolveInlineTargetAbsentCandidate:
+    def test_absent_candidate_does_not_raise(self, tmp_path):
+        _init_repo(tmp_path)
+        # Two tracked controller.py. foo is defined only in present one.
+        _commit_py(tmp_path, "present/controller.py", "# 1\ndef foo():\n    pass\n")
+        _commit_py(tmp_path, "absent/controller.py", "def other():\n    pass\n")
+        idx = {"controller.py": ["absent/controller.py", "present/controller.py"]}
+        # Delete the on-disk file but keep it tracked (git ls-files still lists it).
+        (tmp_path / "absent" / "controller.py").unlink()
+        # Disambiguating on foo must NOT raise FileNotFoundError; it must
+        # gracefully skip the absent candidate and resolve to the present one.
+        rel, cand = _resolve_inline_target("controller.py", "foo", idx, tmp_path)
+        assert rel == "present/controller.py" and cand is None
+
+    def test_all_candidates_absent_is_advisory_not_crash(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "x/controller.py", "def a():\n    pass\n")
+        _commit_py(tmp_path, "y/controller.py", "def b():\n    pass\n")
+        idx = {"controller.py": ["x/controller.py", "y/controller.py"]}
+        (tmp_path / "x" / "controller.py").unlink()
+        (tmp_path / "y" / "controller.py").unlink()
+        # symbol bound but NO candidate is readable -> no disambiguation possible
+        # -> falls through to advisory (truly ambiguous), without raising.
+        rel, cand = _resolve_inline_target("controller.py", "a", idx, tmp_path)
+        assert rel is None
+        assert cand == ["x/controller.py", "y/controller.py"]
+
+
+# (BUG 3 — ADV-2 unclosed-fence warning tests land in the next commit.)

@@ -39,6 +39,8 @@ class Drift:
     message: str
     style: str = "link"          # "link" | "inline" — which syntax to rewrite on --fix
     candidates: Optional[list[str]] = None   # ambiguous_path: the colliding tracked relpaths
+    doc_col: Optional[tuple[int, int]] = None  # (start, end) span of THIS anchor on the
+    # doc line; set at detection so --fix rewrites the exact occurrence (ADV-1).
 
 
 # ---------------------------------------------------------------------------
@@ -140,13 +142,18 @@ def _resolve_inline_target(
         return None, None                       # not a real tracked file -> skip
     # Ambiguous (>=2): try symbol-disambiguation.
     if symbol:
-        defining = [
-            c for c in matches
-            if _def_lines(
-                (repo_root / c).read_text(encoding="utf-8", errors="replace").splitlines(),
-                symbol,
-            )
-        ]
+        defining = []
+        for c in matches:
+            # git ls-files lists TRACKED paths even if absent on disk (staged
+            # deletion, `git rm --cached`, sparse checkout, mid-rename). An
+            # unreadable candidate must NOT abort the run (CQ-1) — treat it as
+            # non-defining (skip), consistent with the advisory fallback below.
+            try:
+                src = (repo_root / c).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            if _def_lines(src.splitlines(), symbol):
+                defining.append(c)
         if len(defining) == 1:
             return defining[0], None            # disambiguated -> real check
     return None, matches                        # truly ambiguous -> advisory
@@ -189,8 +196,14 @@ def check_anchor(
     symbol: Optional[str] = None,
     rebind_symbol: bool = True,
     style: str = "link",
+    doc_col: Optional[tuple[int, int]] = None,
 ) -> Optional[Drift]:
-    """Return a Drift if the anchor is stale, else None."""
+    """Return a Drift if the anchor is stale, else None.
+
+    *doc_col*, when given, is the (start, end) span of this anchor on the doc
+    line; it is stamped onto the returned Drift so --fix can rewrite the exact
+    occurrence by position rather than by a global keyed regex sub (ADV-1).
+    """
 
     # Step 1 — file existence
     read_rel = resolved_rel if resolved_rel is not None else target_file_rel
@@ -207,6 +220,7 @@ def check_anchor(
             fixable=False,
             message=f"target file not found: {target_file_rel}",
             style=style,
+            doc_col=doc_col,
         )
 
     source_lines = target_path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -281,6 +295,7 @@ def check_anchor(
                         f", anchor points at {target_line}"
                     ),
                     style=style,
+                    doc_col=doc_col,
                 )
             return None  # OK — symbol bound correctly
 
@@ -302,6 +317,7 @@ def check_anchor(
                 f"line {target_line} out of bounds (file has {n_lines} lines)"
             ),
             style=style,
+            doc_col=doc_col,
         )
 
     return None  # OK — in bounds, no symbol binding
@@ -341,7 +357,7 @@ def check_line_anchors(doc_paths: list[str], repo_root: Path) -> list[Drift]:
                     doc_path=str(full_path), doc_line_num=line_num,
                     doc_line_text=line_text, target_file_rel=target_file_rel,
                     target_line=target_line, display_text=m.group("display"),
-                    repo_root=repo_root,
+                    repo_root=repo_root, doc_col=(m.start(), m.end()),
                 )
                 if drift is not None:
                     drifts.append(drift)
@@ -380,7 +396,7 @@ def check_line_anchors(doc_paths: list[str], repo_root: Path) -> list[Drift]:
                     doc_line_text=line_text, target_file_rel=token_file,
                     target_line=target_line, display_text=display, repo_root=repo_root,
                     resolved_rel=resolved_rel, symbol=symbol,
-                    rebind_symbol=False, style="inline",
+                    rebind_symbol=False, style="inline", doc_col=(m.start(), m.end()),
                 )
                 if drift is not None:
                     drifts.append(drift)
@@ -416,8 +432,45 @@ def _shift_display(display: str, old: int, new: int) -> str:
     )
 
 
+def _rewrite_anchor_occurrence(occ_text: str, drift: Drift) -> Optional[str]:
+    """Rewrite a SINGLE anchor occurrence (the exact substring spanned by
+    drift.doc_col) from its stale line to drift.suggested_line.
+
+    Returns the rewritten substring, or None if *occ_text* does not match the
+    expected anchor at the expected (file, line) — a span/identity guard so a
+    drifted span never rewrites the wrong token. Matched anchor-form is chosen
+    by drift.style.
+    """
+    old, new = drift.target_line, drift.suggested_line
+    if drift.style == "inline":
+        m = _INLINE_ANCHOR_RE.fullmatch(occ_text)
+        if m is None or m.group("file") != drift.target_file or int(m.group("line")) != old:
+            return None
+        end = m.group("end")
+        body = _shift_display(
+            f"{drift.target_file}:{old}" + (f"-{end}" if end else ""), old, new
+        )
+        return f"`{body}`"
+    # link
+    m = _ANCHOR_RE.fullmatch(occ_text)
+    if m is None or m.group("file") != drift.target_file or int(m.group("line")) != old:
+        return None
+    new_display = _shift_display(m.group("display"), old, new)
+    return f"[{new_display}]({drift.target_file}:{new})"
+
+
 def _apply_fixes(drifts: list[Drift]) -> list[Drift]:
-    """Apply fixable def_drift corrections in-place. Return remaining (unfixed) drifts."""
+    """Apply fixable def_drift corrections in-place. Return remaining (unfixed) drifts.
+
+    Span-based (ADV-1): each fixable drift carries its anchor's (start, end) column
+    span on the doc line (drift.doc_col). On a single doc line we rewrite each
+    occurrence at its own span, processing RIGHT-to-LEFT (descending start column)
+    so a left-side edit never invalidates a still-pending right-side span. This is
+    what keeps two same-bare-token-different-resolved-file anchors on one line each
+    getting their OWN correct new line (a global keyed regex sub would clobber the
+    second). A drift lacking a span (legacy/defensive) falls back to the old global
+    keyed sub for that occurrence only.
+    """
     def _is_fixable(d: Drift) -> bool:
         return d.kind == "def_drift" and d.fixable and d.suggested_line is not None
 
@@ -425,35 +478,65 @@ def _apply_fixes(drifts: list[Drift]) -> list[Drift]:
     unfixed = [d for d in drifts if not _is_fixable(d)]
 
     from collections import defaultdict
-    by_doc: dict[str, list[Drift]] = defaultdict(list)
+    by_line: dict[tuple[str, int], list[Drift]] = defaultdict(list)
     for d in fixable:
-        by_doc[d.doc_path].append(d)
+        by_line[(d.doc_path, d.doc_line)].append(d)
 
-    for doc_path, doc_drifts in by_doc.items():
+    # Group the lines back per-doc so we read/write each file once.
+    docs: dict[str, set[int]] = defaultdict(set)
+    for (doc_path, doc_line) in by_line:
+        docs[doc_path].add(doc_line)
+
+    for doc_path, _line_nums in docs.items():
         path = Path(doc_path)
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
 
-        for drift in doc_drifts:
-            idx = drift.doc_line - 1  # 0-based
-            old, new = drift.target_line, drift.suggested_line
+        for doc_line in sorted(_line_nums):
+            idx = doc_line - 1  # 0-based
+            line_drifts = by_line[(doc_path, doc_line)]
 
-            def _rewrite_link(m, _d=drift, _old=old, _new=new):
-                if m.group("file") != _d.target_file or int(m.group("line")) != _old:
-                    return m.group(0)
-                new_display = _shift_display(m.group("display"), _old, _new)
-                return f"[{new_display}]({_d.target_file}:{_new})"
+            spanned = [d for d in line_drifts if d.doc_col is not None]
+            legacy = [d for d in line_drifts if d.doc_col is None]
 
-            def _rewrite_inline(m, _d=drift, _old=old, _new=new):
-                if m.group("file") != _d.target_file or int(m.group("line")) != _old:
-                    return m.group(0)
-                end = m.group("end")
-                body = _shift_display(f"{_d.target_file}:{_old}" + (f"-{end}" if end else ""), _old, _new)
-                return f"`{body}`"
+            # --- span-based: edit each occurrence by its own column, right-to-left ---
+            # Descending start column → leftward splices keep rightward spans valid.
+            for drift in sorted(spanned, key=lambda d: d.doc_col[0], reverse=True):
+                start, end = drift.doc_col
+                occ = lines[idx][start:end]
+                replacement = _rewrite_anchor_occurrence(occ, drift)
+                if replacement is None:
+                    # Span no longer holds the expected anchor (line content shifted
+                    # out from under us) — leave it for a human, do NOT corrupt.
+                    unfixed.append(drift)
+                    continue
+                lines[idx] = lines[idx][:start] + replacement + lines[idx][end:]
+                print(f"  FIXED  {doc_path}:{doc_line}  "
+                      f"{drift.target_file}:{drift.target_line} → "
+                      f"{drift.target_file}:{drift.suggested_line}")
 
-            lines[idx] = _ANCHOR_RE.sub(_rewrite_link, lines[idx])
-            lines[idx] = _INLINE_ANCHOR_RE.sub(_rewrite_inline, lines[idx])
-            print(f"  FIXED  {doc_path}:{drift.doc_line}  "
-                  f"{drift.target_file}:{old} → {drift.target_file}:{new}")
+            # --- legacy fallback (no span): old global keyed sub for this drift ---
+            for drift in legacy:
+                old, new = drift.target_line, drift.suggested_line
+
+                def _rewrite_link(m, _d=drift, _old=old, _new=new):
+                    if m.group("file") != _d.target_file or int(m.group("line")) != _old:
+                        return m.group(0)
+                    new_display = _shift_display(m.group("display"), _old, _new)
+                    return f"[{new_display}]({_d.target_file}:{_new})"
+
+                def _rewrite_inline(m, _d=drift, _old=old, _new=new):
+                    if m.group("file") != _d.target_file or int(m.group("line")) != _old:
+                        return m.group(0)
+                    end = m.group("end")
+                    body = _shift_display(
+                        f"{_d.target_file}:{_old}" + (f"-{end}" if end else ""), _old, _new
+                    )
+                    return f"`{body}`"
+
+                lines[idx] = _ANCHOR_RE.sub(_rewrite_link, lines[idx])
+                lines[idx] = _INLINE_ANCHOR_RE.sub(_rewrite_inline, lines[idx])
+                print(f"  FIXED  {doc_path}:{doc_line}  "
+                      f"{drift.target_file}:{old} → {drift.target_file}:{new}")
 
         path.write_text("".join(lines), encoding="utf-8")
 
