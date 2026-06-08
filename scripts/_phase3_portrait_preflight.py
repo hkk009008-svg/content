@@ -3,7 +3,8 @@
 
 ⚠️  LIVE SPEND — this script makes REAL, PAID API calls to Veo, Sora, Kling,
 Runway, and FAL.  Each call costs ~$0.30–$0.80.  Total expected spend: ~$2–4
-(5 video providers + 1 FAL image smoke).  The context pins cascade_retry_limit=0
+(4 video providers — Veo, Sora, Kling, Runway — + 1 FAL image smoke = 5 checks).
+The context pins cascade_retry_limit=0
 so each provider is billed EXACTLY ONCE — without it, a failing provider would
 double-bill (a second call after a 30s quota-cooldown sleep), making a worst-case
 all-fail run cost up to ~2× and stall ~30s per failure.
