@@ -798,7 +798,7 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 
 ### KEYFRAME_REVIEW gate (55%)
 
-Same machinery as PLAN_REVIEW. Auto-approve runs `_rules_for_image` (`cinema/auto_approve.py:280`): `image_composite_below_threshold` (threshold `image_min_composite=0.97`, or the `image_min_composite_fallback=0.78` bar when any take used a fallback engine), `image_cascade_fallback` (vetoes any cascade-fallback take when `image_veto_on_fallback=True`), `image_over_budget`. On approval, `approved_keyframe_take_id` is set to the highest-composite take (`pick_best_take_by_composite`, `cinema/auto_approve.py:520`). **Gate predicate** (`controller.py:224`): all shots have `approved_keyframe_take_id`. Web operators approve via `POST .../keyframes/<take_id>/approve` → `approve_take(..., "keyframe")` (`cinema/review/controller.py:647`).
+Same machinery as PLAN_REVIEW. Auto-approve runs `_rules_for_image` (`cinema/auto_approve.py:280`): `image_composite_below_threshold` (threshold `image_min_composite=0.97`, or the `image_min_composite_fallback=0.78` bar when any take used a fallback engine), `image_cascade_fallback` (vetoes any cascade-fallback take when `image_veto_on_fallback=True`), `image_over_budget`. On approval, `approved_keyframe_take_id` is set to the highest-composite take (`pick_best_take_by_composite`, `cinema/auto_approve.py:520`). **Gate predicate** (`cinema/review/controller.py:224`): all shots have `approved_keyframe_take_id`. Web operators approve via `POST .../keyframes/<take_id>/approve` → `approve_take(..., "keyframe")` (`cinema/review/controller.py:647`).
 
 ---
 
@@ -833,7 +833,7 @@ Driving-video mode (`driving_video_source`, `domain/performance.py:145`): `"uplo
 
 > **Divergence flagged (honest note):** the `_gate_satisfied` PERFORMANCE_REVIEW branch carries an inline comment citing the bypass at `cinema_pipeline.py:302-307` (`cinema/review/controller.py`), but the actual all-skipped bypass is at **`cinema_pipeline.py:1038-1058`** (verified). The line-anchor in that comment is stale; the *logic* it describes is correct and mirrors the controller predicate.
 
-**Auto-approve here is opt-in.** The motion gate map entry is only added when `CINEMA_AUTO_APPROVE_MOTION` is truthy (`1`/`true`/`yes`, case-insensitive; `cinema/auto_approve.py:568`). Without it, PERFORMANCE_REVIEW is always manual even when auto-approve is otherwise enabled. When enabled, `_rules_for_motion` (`cinema/auto_approve.py:340`) checks `motion_min_identity=0.85` and `motion_min_motion_score=0.7`. **Gate predicate** (`controller.py:224`): each shot is SKIP, lacks a keyframe, or has `approved_performance_take_id`.
+**Auto-approve here is opt-in.** The motion gate map entry is only added when `CINEMA_AUTO_APPROVE_MOTION` is truthy (`1`/`true`/`yes`, case-insensitive; `cinema/auto_approve.py:568`). Without it, PERFORMANCE_REVIEW is always manual even when auto-approve is otherwise enabled. When enabled, `_rules_for_motion` (`cinema/auto_approve.py:340`) checks `motion_min_identity=0.85` and `motion_min_motion_score=0.7`. **Gate predicate** (`cinema/review/controller.py:224`): each shot is SKIP, lacks a keyframe, or has `approved_performance_take_id`.
 
 ---
 
@@ -872,8 +872,8 @@ Driving-video mode (`driving_video_source`, `domain/performance.py:145`): `"uplo
 
 **FAILURE MODES + RECOVERY:**
 - **Cascade** is the primary recovery: each engine failure calls `try_next_api`, which recurses into the next engine (`phase_c_ffmpeg.py:122-179`).
-- **Dialogue native-audio guarantee is primary-attempt only.** When `has_dialogue=True` the override sets `video_fallbacks=None`, but if VEO_NATIVE itself fails, `try_next_api` falls through to the *default* global list, which includes non-audio engines (`controller.py:1138-1141`). The native-audio guarantee therefore holds only for the first attempt.
-- **Mandatory lipsync pass (F1b).** Post-render, if `has_dialogue=True` AND `not audio_embedded`, `generate_lip_sync_video(mode="auto")` runs (`controller.py:1233`), writing `lipsync_score`. This covers every silent-video engine (Kling/Sora/Runway/LTX produce no audio).
+- **Dialogue native-audio guarantee is primary-attempt only.** When `has_dialogue=True` the override sets `video_fallbacks=None`, but if VEO_NATIVE itself fails, `try_next_api` falls through to the *default* global list, which includes non-audio engines (`cinema/shots/controller.py:1138-1141`). The native-audio guarantee therefore holds only for the first attempt.
+- **Mandatory lipsync pass (F1b).** Post-render, if `has_dialogue=True` AND `not audio_embedded`, `generate_lip_sync_video(mode="auto")` runs (`cinema/shots/controller.py:1233`), writing `lipsync_score`. This covers every silent-video engine (Kling/Sora/Runway/LTX produce no audio).
 - **VEO_NATIVE has no quota cooldown.** The `_VEO_QUOTA_EXHAUSTED_UNTIL` TTL flag is set/checked only on the FAL-proxy `VEO` branch (`phase_c_ffmpeg.py:502-504`); native-Veo quota errors are caught generically and cascade with no cooldown.
 
 ---
@@ -884,7 +884,7 @@ The last per-shot gate before assembly. `_rebuild_review_clips(project)` builds 
 - `final_lipsync_below_threshold` — dialogue-aware: returns 1.0 (pass) for non-dialogue shots and for `audio_embedded=True` takes; 0.0 for a dialogue shot with no lipsync score and no embedded audio. Threshold `final_min_lipsync=0.8`.
 - `final_upstream_was_auto_approved` — **safety net**: if any earlier gate auto-approved this shot, force human review at REVIEW (`final_require_human_if_upstream_auto=True` by default).
 
-On approval, `approved_final_take_id` (and `approved_motion_take_id` via the `source_take_id` chain) is set to the best take (`pick_best_take_for_final` prefers non-fallback, then highest composite, `cinema/auto_approve.py:551`). **Gate predicate** (`controller.py:224`): all shots have `approved_final_take_id`.
+On approval, `approved_final_take_id` (and `approved_motion_take_id` via the `source_take_id` chain) is set to the best take (`pick_best_take_for_final` prefers non-fallback, then highest composite, `cinema/auto_approve.py:551`). **Gate predicate** (`cinema/review/controller.py:224`): all shots have `approved_final_take_id`.
 
 > **Footgun for unattended runs:** `final_require_human_if_upstream_auto=True` blocks a *fully* headless completion even when every other rule passes — by design. To complete fully unattended, set it to `false` in `global_settings.auto_approve` (after the pipeline is calibrated). This is the single most common headless dead-end after the cycle-17 PLAN fix.
 
@@ -1000,7 +1000,7 @@ flowchart TD
 
 | Gate | What you approve | Approve endpoint | Predicate to satisfy (`controller.py`) |
 |---|---|---|---|
-| **PLAN_REVIEW** | Each shot's plan | `POST .../shots/<sid>/plan/approve` (`web_server.py:1574`) | all shots `plan_status=="approved"` (`controller.py:224`) |
+| **PLAN_REVIEW** | Each shot's plan | `POST .../shots/<sid>/plan/approve` (`web_server.py:1574`) | all shots `plan_status=="approved"` (`cinema/review/controller.py:224`) |
 | **KEYFRAME_REVIEW** | The chosen keyframe take | `POST .../keyframes/<take_id>/approve` (`web_server.py:1624`) | all shots have `approved_keyframe_take_id` |
 | **PERFORMANCE_REVIEW** | The performance take (lip/body retarget) | `POST .../performance/<take_id>/approve` (`web_server.py:1635`) | each shot has `approved_performance_take_id` **OR** `performance_engine=="SKIP"` **OR** lacks a keyframe. **Auto-skipped entirely if all shots are SKIP-routed** (`cinema_pipeline.py:1038`). |
 | **REVIEW** | The final motion take | `POST .../final/<take_id>/approve` (`web_server.py:1672`) | all shots have `approved_final_take_id` |
@@ -1019,7 +1019,7 @@ flowchart TD
 | | Interactive (default) | Headless |
 |---|---|---|
 | **How invoked** | `POST /api/projects/<pid>/generate` (the web path) | `CinemaPipeline(pid, headless=True)` in Python (`cinema_pipeline.py:49`) |
-| **Gate behavior** | Worker blocks at each gate, polling the predicate at 0.5 s until you approve (`controller.py:559`) | Each gate is checked **once**; if auto-approve can't clear it, raises `GateNotSatisfiedError` with a per-shot diagnostic (`controller.py:93`, `:553`) — fails fast, never hangs |
+| **Gate behavior** | Worker blocks at each gate, polling the predicate at 0.5 s until you approve (`cinema/review/controller.py:559`) | Each gate is checked **once**; if auto-approve can't clear it, raises `GateNotSatisfiedError` with a per-shot diagnostic (`controller.py:93`, `:553`) — fails fast, never hangs |
 | **Lifecycle** | `ThreadedLifecycle` (event-backed) | Still `ThreadedLifecycle` — **not** `NullLifecycle`. `headless=True` only flips the gate-wait to fail-fast (`cinema/lifecycle.py:70` docstring; this corrects a common doc error) |
 | **Use it for** | Hands-on creative control, shot-by-shot iteration | Unattended batch runs, CI/E2E, overnight renders |
 
@@ -1074,7 +1074,7 @@ This is where most of your perceived quality lives. The knobs, in order of impac
 | Knob | Default | Range | Effect | File |
 |---|---|---|---|---|
 | `ip_adapter_weight` | 0.85 | 0.5–1.0 | PuLID face-lock strength (per-character and per-object) | digest: web-api |
-| `identity_strictness` | 0.60 | — | Threshold for post-keyframe identity validation + N=8 scoring | `domain/project_manager.py:343`, `controller.py:504` |
+| `identity_strictness` | 0.60 | — | Threshold for post-keyframe identity validation + N=8 scoring | `domain/project_manager.py:343`, `cinema/shots/controller.py:504` |
 | `identity_threshold` | 0.55 | 0.4–0.8 | Per-shot face-similarity threshold | digest: web-api |
 | `adaptive_pulid` | True | bool | Self-calibrates PuLID weight from rolling ArcFace stats (`get_adaptive_pulid_weight`) | `domain/continuity_engine.py:535`, `workflow_selector.py:540` |
 | `img2img_denoise` | 0.35 | 0.2–0.6 | Continuity strength: lower = more consistent with prior shot | `workflow_selector.py:493` |
@@ -1123,7 +1123,7 @@ the default since 2026-06-03. This realizes a *consistent character voice* (Veo 
 |---|---|---|---|
 | `coherence_check_enabled` | True | Per-shot color/lighting/composition coherence scoring vs. the prior shot (`assess_coherence`) | `coherence_analyzer.py:215` |
 | `color_drift_sensitivity` | 0.3 | Lower = more aggressive color-correction recommendations | digest: domain-state |
-| `coherence_threshold` | 0.6 (read with fallback; **not** scaffolded by default — set it explicitly) | Overall coherence floor below which a regenerate is recommended | `controller.py:1667` |
+| `coherence_threshold` | 0.6 (read with fallback; **not** scaffolded by default — set it explicitly) | Overall coherence floor below which a regenerate is recommended | `cinema/shots/controller.py:1667` |
 | `scene_transitions` | False | Cross-dissolve between scenes via ffmpeg `xfade` instead of hard cuts | `cinema_pipeline.py:1270` |
 | `transition_duration` | 0.5 s | xfade length; clamped to 0.4× shortest clip | `phase_c_ffmpeg.py:1301` |
 
@@ -1141,7 +1141,7 @@ Location consistency is automatic: each location carries a fixed `seed` and a ve
 | video API | `LTX` ($0.06–0.10/shot) | `SORA_NATIVE`/`VEO_NATIVE` ($0.40–0.80) |
 
 **Budget governance** — three caveats that bite operators:
-1. `budget_limit_usd` only gates **video/image** generation in `ShotController` (`would_exceed`, `is_over_budget`, `controller.py:562`, `:1014`); **audio API costs run uncapped** (audio modules create isolated `CostTracker()` instances — `cost_tracker` digest gotcha #2).
+1. `budget_limit_usd` only gates **video/image** generation in `ShotController` (`would_exceed`, `is_over_budget`, `cinema/shots/controller.py:562`, `:1014`); **audio API costs run uncapped** (audio modules create isolated `CostTracker()` instances — `cost_tracker` digest gotcha #2).
 2. `CostTracker.spent_usd` **resets to 0 each process** — it is not loaded from SQLite on init. A server restart mid-project zeroes the in-memory budget counter (gotcha #3).
 3. `EXPERIMENTS_DB_PATH` is read into settings but **never wired to `CostTracker`** — it always uses `data/experiments.db` (gotcha #1). Setting it does nothing.
 
@@ -1250,7 +1250,7 @@ A note on naming you must internalize before reading further: there are **two un
 
 ### 6.1 The state model: Project → Scene → Shot → Take
 
-Almost everything in this pipeline is a plain Python `dict` describing one **Project**, persisted as JSON at `domain/projects/<pid>/project.json`. Pydantic v2 models (`domain/models.py`) exist, but they are used **only as a warn-only validation net at load/save boundaries** — the live data that flows through every stage is the raw dict, and many runtime fields exist via `extra="allow"` and never appear in the typed model (`domain/models.py:82` for `Shot`; the digest enumerates the missing fields). The canonical home for all factory/CRUD/persistence logic is `domain/project_manager.py` (1214 LOC); the repo-root `project_manager.py` is a **9-line re-export shim** (`project_manager.py:9`) preserved for legacy imports. (This shim pattern repeats across `scene_decomposer.py`, `dialogue_writer.py`, `character_manager.py`, `location_manager.py`, `continuity_engine.py` — top-level is always the shim, `domain/` is always canonical; import from `domain.*` in new code.)
+Almost everything in this pipeline is a plain Python `dict` describing one **Project**, persisted as JSON at `domain/projects/<pid>/project.json`. Pydantic v2 models (`domain/models.py`) exist, but they are used **only as a warn-only validation net at load/save boundaries** — the live data that flows through every stage is the raw dict, and many runtime fields exist via `extra="allow"` and never appear in the typed model (`domain/models.py:82` for `Shot`; the digest enumerates the missing fields). The canonical home for all factory/CRUD/persistence logic is `domain/project_manager.py` (1214 LOC); the repo-root `project_manager.py` is a **9-line re-export shim** (`domain/project_manager.py:9`) preserved for legacy imports. (This shim pattern repeats across `scene_decomposer.py`, `dialogue_writer.py`, `character_manager.py`, `location_manager.py`, `continuity_engine.py` — top-level is always the shim, `domain/` is always canonical; import from `domain.*` in new code.)
 
 The nesting is four levels deep, and the data that carries between stages lives in **specific fields at each level**:
 
@@ -1277,12 +1277,12 @@ graph TD
 | `global_settings` (project-level) | Web UI (`PUT /api/projects/<pid>`) | every subsystem via `get_project_setting(ctx, key, default)` | all user-tunable knobs (tier, thresholds, language, `api_engines`, …) |
 | `director_review` | `record_director_review_on_shots` (`cinema/auto_approve.py:235`), called at `cinema_pipeline.py:959` | PLAN_REVIEW auto-approve `_rules_for_plan` (`auto_approve.py:203`) | ChiefDirector's APPROVED/MODIFIED/REJECTED verdict; **MODIFIED is normalized to APPROVED** (the cycle-17 `138d7c7` decision) |
 | `plan_status` | `approve_shot_plan` / auto-approve | PLAN_REVIEW gate predicate (`controller.py:633`) | `"approved"` unlocks keyframe generation |
-| `target_api` | scene decomposer / operator (`PUT .../shots/<id>`) | video cascade routing (`controller.py:1113`) + image routing | which engine to try first; `"AUTO"` triggers smart routing |
+| `target_api` | scene decomposer / operator (`PUT .../shots/<id>`) | video cascade routing (`cinema/shots/controller.py:1113`) + image routing | which engine to try first; `"AUTO"` triggers smart routing |
 | `approved_keyframe_take_id` | `approve_take(kind="keyframe")` | KeyframeRenderPhase skip-gate, performance/motion `init_image` chain | the anchor still for all downstream video |
 | `performance_engine` | `route_performance_engine` (`domain/performance.py:103`) | PerformanceCapturePhase + gate bypass | `ACT_ONE`/`LIVE_PORTRAIT`/`VIGGLE`/`SKIP`; `"SKIP"` skips the shot and (if all-SKIP) the whole gate |
 | `approved_performance_take_id` | `approve_take(kind="performance")` | PERFORMANCE_REVIEW predicate, motion phase driving-video | retargeted-performance clip |
 | `approved_final_take_id` (+ `approved_motion_take_id`) | `approve_take(kind="final")` | REVIEW predicate, `_build_scene_packages` | the clip that goes into final assembly |
-| `metadata.audio_embedded` (on take) | video cascade post-call (`controller.py:1214`) | `_build_scene_packages` / `_assemble_final` audio mix | whether the clip already contains dialogue audio (Veo native) → suppress standalone TTS |
+| `metadata.audio_embedded` (on take) | video cascade post-call (`cinema/shots/controller.py:1214`) | `_build_scene_packages` / `_assemble_final` audio mix | whether the clip already contains dialogue audio (Veo native) → suppress standalone TTS |
 | `cascade_metadata` (on take) | `_record_video_cascade` (`phase_c_ffmpeg.py:91`) | audit / `audio_embedded` decision | which engine actually won + attempt list |
 | `screening_approved` (project-level) | `mark_screening_approved` (`screening.py:307`) | SCREENING gate predicate | operator sign-off on the assembled cut |
 | `needs_reassembly[]` (project-level) | `mark_shot_needs_reassembly` | re-assemble endpoint | shots iterated during screening that need re-stitching |
@@ -1385,7 +1385,7 @@ Video generation is the most fault-tolerant subsystem because vendor APIs fail, 
 **Resolution → attempt → fallback** flows like this:
 
 1. **Routing (caller side, `ShotController`).** For `target_api == "AUTO"`, the controller checks the optimizer's `suggested_video_api`, else falls to the shot-type template's primary + fallback list (`WORKFLOW_TEMPLATES[shot_type]`, e.g. portrait → `KLING_NATIVE` with fallbacks `RUNWAY_GEN4, SORA_NATIVE, KLING_3_0`). For an explicit `target_api`, it uses that and sets `video_fallbacks = None`.
-2. **Dialogue override (F1a).** If `has_dialogue`, the controller scans `PURPOSE_API_RANKING[purpose]` for the first engine with `native_audio=True AND modality=="video" AND status=="live"` (today: `VEO_NATIVE`) and overrides `target_api` to it — **and sets `video_fallbacks = None`** so a cross-engine fallback can't silently route to a non-native-audio engine and drop the embedded voice (`controller.py:1113`, verified).
+2. **Dialogue override (F1a).** If `has_dialogue`, the controller scans `PURPOSE_API_RANKING[purpose]` for the first engine with `native_audio=True AND modality=="video" AND status=="live"` (today: `VEO_NATIVE`) and overrides `target_api` to it — **and sets `video_fallbacks = None`** so a cross-engine fallback can't silently route to a non-native-audio engine and drop the embedded voice (`cinema/shots/controller.py:1113`, verified).
 3. **Engine-disabled short-circuit.** Before attempting the targeted engine, `generate_ai_video` reads `api_engines` from `ctx`; if the operator set `{ENGINE: {enabled: false}}`, it delegates straight to `try_next_api` (respects "if I disabled X, don't use X even when explicitly targeted").
 4. **Attempt the engine.** Each engine has its own handler branch (native: Kling/Veo/Sora/LTX; FAL-proxy: VEO/SORA_2/KLING_3_0/FAL_SVD; plus Runway). On success, `_record_video_cascade(api_name)` writes `{engine, attempts}` into `_cascade_out["cascade_metadata"]` and returns the path.
 5. **Fallback on failure.** `try_next_api` walks the fallback list (or the default order), **filters out already-attempted engines and `api_engines`-disabled ones**, and recurses into `generate_ai_video` with the next engine.
@@ -1415,7 +1415,7 @@ The **default cascade order** (when no custom `video_fallbacks`) is verified as:
 
 Three cascade caveats engineers must know, all from the digest's gotcha list:
 
-- **Native-audio is only guaranteed on the primary attempt.** Because the dialogue override sets `video_fallbacks=None`, if `VEO_NATIVE` itself fails, `try_next_api` falls through to the **default** list (which contains non-audio engines). The downstream guarantee is instead enforced by the **mandatory F1b lipsync pass** (`controller.py:1233`): after the take is downloaded, if `has_dialogue and not audio_embedded`, the controller runs `generate_lip_sync_video` and writes `lipsync_score`.
+- **Native-audio is only guaranteed on the primary attempt.** Because the dialogue override sets `video_fallbacks=None`, if `VEO_NATIVE` itself fails, `try_next_api` falls through to the **default** list (which contains non-audio engines). The downstream guarantee is instead enforced by the **mandatory F1b lipsync pass** (`cinema/shots/controller.py:1233`): after the take is downloaded, if `has_dialogue and not audio_embedded`, the controller runs `generate_lip_sync_video` and writes `lipsync_score`.
 - **`VEO_NATIVE` has no quota-block guard.** The `_VEO_QUOTA_EXHAUSTED_UNTIL` 30-min cooldown TTL is set/checked only for the **FAL-proxy `VEO`** branch (`phase_c_ffmpeg.py:502`); native-Veo quota errors are caught generically and cascade with no cooldown.
 - **Some engine params are accepted but silently dropped.** Veo's `reference_images`/`multi_angle_refs` (Bug #4 — Vertex rejects image+reference_images together) and `driving_video_path` (SDK `video=`/`image=` mutual exclusivity) are accepted for interface stability but have no effect; only **Sora** fully wires driving-video conditioning (`sora_native.py:77`).
 
@@ -1909,7 +1909,7 @@ Each entry: **symptom → diagnose → fix**, with the source location that gove
 #### Lip-sync prerequisites not met / poor sync
 
 - **Diagnose:** `check_overlay_prerequisites` / `check_generation_prerequisites` return blockers/warnings. Overlay needs video ≥0.5 s, width ≥256 px, audio within 2× duration ratio; generation needs image ≥512×512 and audio ≤60 s (blocker). SyncNet scoring requires the `syncnet_python` package — if absent it falls back to a coarse duration-match heuristic that only catches gross (20 %+) mismatches (D-post-2).
-- **Fix:** For dialogue close-ups, prefer **VEO_NATIVE** (the only engine that generates voice+video together, `audio_embedded=True`, no lipsync pass needed). For non-embedded dialogue takes the mandatory F1b lipsync pass runs automatically (`controller.py:1233`). Raise `lipsync_validation_threshold` to 0.8+ to make the cascade try more engines; for Korean, apply language defaults (stricter 0.70 gate, native-trained engine ordering).
+- **Fix:** For dialogue close-ups, prefer **VEO_NATIVE** (the only engine that generates voice+video together, `audio_embedded=True`, no lipsync pass needed). For non-embedded dialogue takes the mandatory F1b lipsync pass runs automatically (`cinema/shots/controller.py:1233`). Raise `lipsync_validation_threshold` to 0.8+ to make the cascade try more engines; for Korean, apply language defaults (stricter 0.70 gate, native-trained engine ordering).
 
 #### Headless / E2E run hangs or dead-ends at a gate
 

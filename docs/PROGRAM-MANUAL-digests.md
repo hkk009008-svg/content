@@ -408,9 +408,9 @@ pipeline.generate(resume=False)
 - `cinema/screening.py:65-66` — `SCREENING_STAGE_NAME`, `SCREENING_APPROVED_KEY`
 - `cinema/screening.py:84-127` — `_screening_stage_enabled()`
 - `cinema/screening.py:275-284` — `is_screening_approved()`
-- `scene_decomposer.py:1-9` — shim re-export from `domain/scene_decomposer.py`
-- `dialogue_writer.py:1-9` — shim re-export from `domain/dialogue_writer.py`
-- `project_manager.py:1-9` — shim re-export from `domain/project_manager.py`
+- `domain/scene_decomposer.py:1-9` — shim re-export from `domain/scene_decomposer.py`
+- `domain/dialogue_writer.py:1-9` — shim re-export from `domain/dialogue_writer.py`
+- `domain/project_manager.py:1-9` — shim re-export from `domain/project_manager.py`
 
 ---
 
@@ -724,9 +724,9 @@ The phase abstraction decouples the three main per-shot render loops (keyframe g
 
 **`PerformanceCapturePhase`** (`performance.py:19`) — class with `name = "performance_capture"`. Identical shape to `KeyframeRenderPhase`.
 
-**`PerformanceCapturePhase.__init__`** (`performance.py:25-33`) — same three params; `shot_generator` must expose `generate_performance_take(scene_id, shot_id)`.
+**`PerformanceCapturePhase.__init__`** (`cinema/phases/performance.py:25-33`) — same three params; `shot_generator` must expose `generate_performance_take(scene_id, shot_id)`.
 
-**`PerformanceCapturePhase.run`** (`performance.py:35-89`) — Three skip conditions per shot: (1) `shot["approved_performance_take_id"]` is truthy; (2) `(shot["performance_engine"] or "").upper() == "SKIP"` (explicitly routed away by the domain router); (3) `not shot["approved_keyframe_take_id"]` (no anchor image yet — motion would also skip). Calls `self._gen.generate_performance_take(scene_id, shot_id)`. Also handles `result.get("skipped")` — a result can succeed but report itself as skipped (SKIP-engine path returns from within the ShotController). Always returns `ok=True`; partial failures do not fail the phase.
+**`PerformanceCapturePhase.run`** (`cinema/phases/performance.py:35-89`) — Three skip conditions per shot: (1) `shot["approved_performance_take_id"]` is truthy; (2) `(shot["performance_engine"] or "").upper() == "SKIP"` (explicitly routed away by the domain router); (3) `not shot["approved_keyframe_take_id"]` (no anchor image yet — motion would also skip). Calls `self._gen.generate_performance_take(scene_id, shot_id)`. Also handles `result.get("skipped")` — a result can succeed but report itself as skipped (SKIP-engine path returns from within the ShotController). Always returns `ok=True`; partial failures do not fail the phase.
 
 #### `cinema/phases/motion_render.py`
 
@@ -847,7 +847,7 @@ The phase abstraction decouples the three main per-shot render loops (keyframe g
 
 6. **`PerformanceCapturePhase` gate is auto-skipped only if ALL shots are SKIP**: `cinema_pipeline.py:1038-1043` — the predicate checks `performance_engine == "SKIP" OR not approved_keyframe_take_id`. A single shot that was supposed to get a performance but failed (and landed in `failed_shots`) would keep the gate open. Operator must manually handle.
 
-7. **`motion_render.py` references `base.py:109`** comments like "F2b" and "Tier F NEW-2" — internal planning terminology from migration slices; these are not external API names.
+7. **`motion_render.py` references `cinema/phases/base.py:39`** comments like "F2b" and "Tier F NEW-2" — internal planning terminology from migration slices; these are not external API names.
 
 8. **`cinema/services.py` was introduced as Slice 3b/Phase 7 (REFACTOR_HANDOFF §9.2)** — the module docstring mentions this provenance. The contract it implements (`state_snapshot` replaces `CinemaPipeline(pid).get_state()`; `checkpoint_info` replaces `CinemaPipeline(pid).resume_info()`) is stable but the old call-site pattern may appear in older docs.
 
@@ -1067,7 +1067,7 @@ Config is written to `project.json` via `PUT /api/projects/<pid>` with body `{"g
 
 2. **`NullLifecycle` is NOT used by CinemaPipeline**: `lifecycle.py:70` docstring says explicitly it is NOT wired into `CinemaPipeline`. Using `NullLifecycle` in a headless run would silently open all gates (gates return True immediately), bypassing the fail-fast behaviour. Correct headless pattern: `CinemaPipeline(headless=True)` which uses `ThreadedLifecycle` but checks `runstate.headless` in `_wait_for_gate` to raise instead of poll.
 
-3. **PERFORMANCE_REVIEW auto-approve is opt-in via env var**: without `CINEMA_AUTO_APPROVE_MOTION=1`, the motion gate map entry is omitted (`controller.py:280-282`) and the PERFORMANCE_REVIEW gate is always manual. The `_rules_for_motion` function exists and is used when enabled, but the gate is silently not included by default.
+3. **PERFORMANCE_REVIEW auto-approve is opt-in via env var**: without `CINEMA_AUTO_APPROVE_MOTION=1`, the motion gate map entry is omitted (`cinema/review/controller.py:280-282`) and the PERFORMANCE_REVIEW gate is always manual. The `_rules_for_motion` function exists and is used when enabled, but the gate is silently not included by default.
 
 4. **`final_require_human_if_upstream_auto=True` default blocks fully unattended runs**: even with all other auto-approve rules satisfied, if plan or image was auto-approved, the final gate fires `final_upstream_was_auto_approved` and forces human review. This is by design (safety net) but is the most common footgun for unattended E2E runs. Must be set to `false` via `global_settings.auto_approve` to allow fully headless completion.
 
@@ -1306,14 +1306,14 @@ All under `project.global_settings` (set via UI or API; read via `project["globa
 | `music_mood` | `"suspense"` | Music selection | audio phase |
 | `master_seed` | random 6-digit | Reproducibility anchor | various |
 | `budget_limit_usd` | `0` (unlimited) | Spend cap; `0` = no cap | `cinema/core.py:99`, `auto_approve.py:543` |
-| `identity_strictness` | `0.60` | Face-similarity threshold for PuLID/identity gates | `face_validator_gate.py:185`, `shots/controller.py:504`, `quality_max.py:767` |
+| `identity_strictness` | `0.60` | Face-similarity threshold for PuLID/identity gates | `face_validator_gate.py:185`, `cinema/shots/controller.py:504`, `quality_max.py:767` |
 | `creative_llm` | `"auto"` | LLM model for direction/writing (e.g., `"claude-opus"`) | `llm/chief_director.py:114`, `llm/director.py:242` |
 | `quality_judge_llm` | `"auto"` | LLM for quality evaluation | `llm/ensemble.py:126` |
 | `competitive_generation` | `True` | Enables multi-take competition per shot | pipeline |
 | `adaptive_pulid` | `True` | Adapts PuLID weight per shot type | `identity/__init__.py` |
 | `coherence_check_enabled` | `True` | Cross-shot coherence gate | pipeline |
 | `color_drift_sensitivity` | `0.3` | Threshold for color-drift detection | pipeline |
-| `prompt_optimizer_enabled` | `True` | LLM-based shot-prompt rewrite before generation; caches to `shot["optimizer_cache"]` | `shots/controller.py:391` |
+| `prompt_optimizer_enabled` | `True` | LLM-based shot-prompt rewrite before generation; caches to `shot["optimizer_cache"]` | `cinema/shots/controller.py:391` |
 | `max_quality_parallel_workers` | `1` | Parallel best-of workers (up to 4) | `quality_max.py:631` |
 | `auto_approve` | `AutoApproveConfig().to_dict()` | Per-gate auto-approve veto rules | `cinema/auto_approve.py` |
 | `api_engines` | absent (opt-in) | Per-engine config (storyboard mode, duration, face consistency, etc.) | `cinema/phases/motion_render.py`, `phase_c_ffmpeg.py` |
@@ -1426,7 +1426,7 @@ All under `project.global_settings` (set via UI or API; read via `project["globa
 - `domain/performance.py:103` — `route_performance_engine` (decision matrix)
 - `domain/performance.py:145` — `driving_video_source` (Mode A/B/C)
 - `domain/performance.py:163` — `precondition_error`
-- `project_manager.py:9` — shim: `from domain.project_manager import *`
+- `domain/project_manager.py:9` — shim: `from domain.project_manager import *`
 - `cinema/screening.py:66` — `SCREENING_APPROVED_KEY = "screening_approved"`
 - `cinema/screening.py:81` — `NEEDS_REASSEMBLY_KEY = "needs_reassembly"`
 - `cinema/auto_approve.py:202` — `record_director_review_on_shots` writes `shot["director_review"]`
@@ -1630,7 +1630,7 @@ Returns phrase or `""` on None/unknown. Called from `ChiefDirector.evaluate_gene
 | `cinema_pipeline.py` | Calls `services.director.validate_shot_prompts()` at line ~936; calls `record_director_review_on_shots()` at ~959; calls `generate_style_rules()` at ~863 |
 | `cinema/auto_approve.py` | Reads `shot["director_review"]["chief_director_verdict"]` and `shot["director_review"]["decision"]` in plan-gate logic (`auto_approve.py:180,243`); `record_director_review_on_shots` writes these fields |
 | `cinema/shots/controller.py` | Calls `optimize_shot_prompt()` at line ~416; calls `style_rules_to_prompt_suffix()` at ~333; calls `intent_translator()` at ~1471 |
-| `domain/scene_decomposer.py` | Imports `LLMEnsemble` at `scene_decomposer.py:11`; calls `competitive_generate()` at ~749 for competitive scene decomposition |
+| `domain/scene_decomposer.py` | Imports `LLMEnsemble` at `domain/scene_decomposer.py:11`; calls `competitive_generate()` at ~749 for competitive scene decomposition |
 | `domain/models.py` | `DirectorialIntent` Pydantic model at `models.py:38` consumed by `CinemaDirector.translate_intent` |
 | `identity/validator.py` | Produces `IdentityValidationResult` + `FailureReason.value` strings consumed by `evaluate_generation_quality` and `negative_prompts` |
 | `pipeline_context.py` | `PIPELINE_CONTEXT` string (loaded from `config/prompts/pipeline_context.md`) appended to `ChiefDirector.SYSTEM_PROMPT` and `style_director`'s system prompt |
@@ -1775,7 +1775,7 @@ All knobs live in `project.global_settings` (set via `PUT /api/projects/<pid>` �
 | MODIFIED normalizes to APPROVED (cycle-17 decision) | `cinema/auto_approve.py:219-235`; commit `138d7c7` |
 | chief_director_verdict persisted per shot | `cinema/auto_approve.py:243` |
 | LLMEnsemble used in domain/scene_decomposer | `domain/scene_decomposer.py:11,749` |
-| Dual-module shims all 9-LOC re-exports | `scene_decomposer.py:1-9`, `character_manager.py:1-9`, etc. |
+| Dual-module shims all 9-LOC re-exports | `domain/scene_decomposer.py:1-9`, `domain/character_manager.py:1-9`, etc. |
 | PIPELINE_CONTEXT from config/prompts/pipeline_context.md | `pipeline_context.py:14-16` |
 | research_engine.py and web_research.py exist | `ls` result |
 | _strip_json_fences 3rd copy in ensemble | `llm/ensemble.py:25-27` |
@@ -1989,7 +1989,7 @@ List of shot dicts from `make_shot()` (`domain/project_manager.py:262`) with add
 
 **3. `research_engine.py` and `web_research.py` both define `_get_tavily()` and `_get_firecrawl()`.** Two separate module-level singleton caches. If both are imported in the same process, they maintain separate client instances. `research_engine.py` is used for programmatic research calls (direct results to callers); `web_research.py` is used inside LLM tool loops (`run_with_tools`).
 
-**4. Shim doc comment mentions `main.py`, `cleanup.py` as callers.** `main.py` is deleted (confirmed by MEMORY.md). The shim's docstring (`scene_decomposer.py:5`) is stale on this point.
+**4. Shim doc comment mentions `main.py`, `cleanup.py` as callers.** `main.py` is deleted (confirmed by MEMORY.md). The shim's docstring (`domain/scene_decomposer.py:5`) is stale on this point.
 
 **5. `PIPELINE_CONTEXT` includes stale lipsync routing.** `config/prompts/pipeline_context.md:19` says "Dialogue close-up → VEO_NATIVE / Native lip-sync", but `PIPELINE_CONTEXT` section 2 lines 42-44 describe Omnihuman v1.5 as PRIMARY and Veo as OPT-IN only (RAI filter concern). The API routing table (section 1) conflicts with section 2's cascade. Decomposer LLM sees both and must reconcile; the hard-coded `PURPOSE_API_RANKING["dialogue_close_up"]` in code (`domain/scene_decomposer.py:120`) leads with `HEDRA_C3`, not `VEO_NATIVE`.
 
@@ -2005,7 +2005,7 @@ List of shot dicts from `make_shot()` (`domain/project_manager.py:262`) with add
 
 ### Citations
 
-- `scene_decomposer.py:1-9` — shim definition, lists legacy callers (including stale `main.py`)
+- `domain/scene_decomposer.py:1-9` — shim definition, lists legacy callers (including stale `main.py`)
 - `domain/scene_decomposer.py:16-21` — `CAMERA_MOTIONS` list
 - `domain/scene_decomposer.py:23-26` — `VISUAL_EFFECTS` list
 - `domain/scene_decomposer.py:36-91` — `API_REGISTRY` (full registry with modality/best_for/per_shot_cost/status)
@@ -2026,7 +2026,7 @@ List of shot dicts from `make_shot()` (`domain/project_manager.py:262`) with add
 - `domain/scene_decomposer.py:819-820` — ensemble metadata added to shot records
 - `domain/scene_decomposer.py:837-877` — `_fallback_decompose` (2 hardcoded shots)
 - `domain/scene_decomposer.py:880-912` — `update_scene_shots` (mutate_project pattern)
-- `dialogue_writer.py:1-9` — shim
+- `domain/dialogue_writer.py:1-9` — shim
 - `domain/dialogue_writer.py:12-156` — `generate_dialogue` (full impl)
 - `domain/dialogue_writer.py:51-58` — `language_directive` construction for non-English
 - `domain/dialogue_writer.py:92-101` — `run_with_tools` call in dialogue
@@ -2096,7 +2096,7 @@ Transforms a keyframe still image into a cinematic video clip by classifying the
 Central dispatch and cascade. Params: `image_path` (start frame), `camera_motion` (string), `target_api` (engine key), `output_mp4`, `pacing`, `character_id`, `attempted_apis` (dedup list), `multi_angle_refs` (list of paths), `_cascade_retries`, `negative_prompt`, `shot_type`, `video_fallbacks` (override list), `driving_video_path` (performance-capture clip), `has_dialogue` (bool), `ctx` (PipelineContext), `_cascade_out` (dict written by `_record_video_cascade`). Returns `output_mp4 str` on success or `None` on total cascade failure. Side-effects: prints engine routing logs; modifies `_cascade_out["cascade_metadata"]` on success; may update module-global `_VEO_QUOTA_EXHAUSTED_UNTIL`.
 
 #### `_record_video_cascade` — `phase_c_ffmpeg.py:91` (inner)
-Writes `{"engine": winning_engine, "attempts": [...]}` into `_cascade_out["cascade_metadata"]`. Called immediately before every successful engine `return`. Not called on fallback. Enables the caller (`shots/controller.py:1205`) to persist provenance to the take record.
+Writes `{"engine": winning_engine, "attempts": [...]}` into `_cascade_out["cascade_metadata"]`. Called immediately before every successful engine `return`. Not called on fallback. Enables the caller (`cinema/shots/controller.py:1205`) to persist provenance to the take record.
 
 #### `try_next_api` — `phase_c_ffmpeg.py:122` (inner closure)
 Iterates `video_fallbacks` (or the default ordered list) filtering already-attempted engines and optionally filtering by `api_engines.enabled` from `ctx`. On total exhaustion, sleeps 30 s then retries the full cascade up to `MAX_CASCADE_RETRIES` (default 1, overridable via `cascade_retry_limit` project setting). Returns `None` after max retries.
@@ -2200,14 +2200,14 @@ Video-modality entries relevant to this subsystem:
 
 | Subsystem | Connection type | Details |
 |---|---|---|
-| `cinema/shots/controller.py` | Direct call | Primary caller at `controller.py:1186`; builds `PipelineContext`, resolves `target_api` + `video_fallbacks`, passes `driving_video_path` + `has_dialogue`; reads `_cascade_out` post-call |
+| `cinema/shots/controller.py` | Direct call | Primary caller at `cinema/shots/controller.py:1186`; builds `PipelineContext`, resolves `target_api` + `video_fallbacks`, passes `driving_video_path` + `has_dialogue`; reads `_cascade_out` post-call |
 | `domain/scene_decomposer.py` | Import of `API_REGISTRY` + `PURPOSE_API_RANKING` | Controller reads registry at routing time to resolve dialogue override; `try_next_api` reads `api_engines` filter from `ctx` |
 | `workflow_selector.py` | Direct call | Controller calls `classify_shot_type` + `WORKFLOW_TEMPLATES` at `controller.py:1080–1111` to determine `target_api` + `video_fallbacks` before calling `generate_ai_video` |
 | `cinema/context.py` | PipelineContext | `get_project_setting(ctx, "api_engines")` and `cascade_retry_limit` read inside `generate_ai_video:try_next_api` |
 | `config/settings.py` | Module-level import | API keys (`KLING_ACCESS_KEY/SECRET`, `OPENAI_API_KEY`, `FAL_KEY`, `LTX_API_KEY`, `RUNWAYML_API_SECRET`, `SEEDANCE_API_KEY`, `GOOGLE_CLOUD_PROJECT/LOCATION`) |
 | `identity/` + `domain/continuity_engine.py` | Shared data | `multi_angle_refs` passed in from `continuity_config`; `workflow_selector.get_adaptive_pulid_weight` called by `domain/continuity_engine.py:523` |
 | `performance/motion_gate.py` | Post-call | Reads the generated video + `driving_video_path` to score motion fidelity against `MOTION_FIDELITY_FLOORS`; advisory only |
-| `lip_sync.py` | Post-call (F1b) | Called at `controller.py:1233` when `has_dialogue=True` and `not audio_embedded` — mandatory lipsync pass |
+| `lip_sync.py` | Post-call (F1b) | Called at `cinema/shots/controller.py:1233` when `has_dialogue=True` and `not audio_embedded` — mandatory lipsync pass |
 | `cinema/phases/motion_render.py` | Phase wrapper | `MotionRenderPhase.run()` iterates shots and calls the controller's motion-take path; also uses `classify_shot_type` directly at `motion_render.py:232` and `split_video_into_segments` from `phase_c_ffmpeg` at `motion_render.py:118` |
 
 ### User-Facing Surface & Capability Knobs
@@ -2241,14 +2241,14 @@ Video-modality entries relevant to this subsystem:
 
 ### Control & Data Flow
 
-1. **Shot classification**: `classify_shot_type(shot)` → `shot_type` ∈ {portrait, medium, wide, action, landscape} (`controller.py:1083`)
+1. **Shot classification**: `classify_shot_type(shot)` → `shot_type` ∈ {portrait, medium, wide, action, landscape} (`cinema/shots/controller.py:1083`)
 
 2. **API resolution** (`controller.py:1084–1147`):
    - If `shot.target_api == "AUTO"`: check `shot.optimizer_cache.spec.suggested_video_api` → if valid API_REGISTRY key, use it + template fallbacks; else use `WORKFLOW_TEMPLATES[shot_type]["target_api"]` + its fallbacks
    - Dialogue override (F1a): if `has_dialogue=True`, scan `PURPOSE_API_RANKING[purpose]` for first entry where `native_audio=True AND modality=="video" AND status=="live"` → override `target_api` to that engine (currently VEO_NATIVE) and `video_fallbacks = None`
    - If `shot.target_api != "AUTO"`: use raw value, `video_fallbacks = None`
 
-3. **`generate_ai_video` called** (`controller.py:1186`) with resolved `target_api`, `video_fallbacks`, `driving_video_path`, `has_dialogue`, `ctx`, `_cascade_out={}`
+3. **`generate_ai_video` called** (`cinema/shots/controller.py:1186`) with resolved `target_api`, `video_fallbacks`, `driving_video_path`, `has_dialogue`, `ctx`, `_cascade_out={}`
 
 4. **Engine-disabled check** (`phase_c_ffmpeg.py:185–191`): if `ctx.api_engines[target_api].enabled == False`, immediately call `try_next_api()`
 
@@ -2953,7 +2953,7 @@ All knobs live in `project.global_settings` (set via `PUT /api/projects/<pid>` w
 
 | Setting | Default | Effect | Maximize quality with |
 |---|---|---|---|
-| `identity_strictness` | 0.60 | Override threshold for keyframe image validation in `controller.py:504` and N=8 scoring in `quality_max.py:767` | Set to 0.70–0.75 for portrait shots |
+| `identity_strictness` | 0.60 | Override threshold for keyframe image validation in `cinema/shots/controller.py:504` and N=8 scoring in `quality_max.py:767` | Set to 0.70–0.75 for portrait shots |
 | `adaptive_pulid` | True | Enables rolling-stats PuLID weight adjustment. False → static template weight | Keep True; disable only for debugging |
 | `coherence_check_enabled` | True | Enables per-shot `assess_coherence` comparison | Keep True |
 | `color_drift_sensitivity` | 0.3 | Threshold for `adjust_color_prompt` recommendation (higher = more tolerant) | Lower to 0.2 for very tight color grading |
@@ -3021,7 +3021,7 @@ All knobs live in `project.global_settings` (set via `PUT /api/projects/<pid>` w
 
 **`TemporalConsistencyManager.record_shot_generated` / `reset_scene`** — `ContinuityEngine.record_shot_generated` (`line 583`) and `reset_scene` (`line 625`) exist but have NO callers in the production pipeline (verified: `grep -rn "record_shot_generated\|continuity\.reset_scene"` returns only test files and the class definitions themselves). Temporal img2img chaining relies instead on `approved_anchor_image` passed explicitly to `enhance_shot_prompt` via `_resolve_previous_approved_keyframe` in the controller. The in-memory `last_generated_image` mechanism is functionally dead.
 
-**`coherence_threshold`** is read in `controller.py:1667` with a fallback of 0.6, but it is NOT scaffolded in `domain/project_manager.py`'s default `global_settings` dict. Must be set manually via `PUT /api/projects/<pid>`.
+**`coherence_threshold`** is read in `cinema/shots/controller.py:1667` with a fallback of 0.6, but it is NOT scaffolded in `domain/project_manager.py`'s default `global_settings` dict. Must be set manually via `PUT /api/projects/<pid>`.
 
 **`CharacterContinuityTracker` holds dict references** (not model_dump copies) to `project["characters"][i]`. This is intentional (preserves mutation visibility) but means that if upstream code replaces the project dict entirely (as `_refresh_project_snapshot` does in `cinema_pipeline.py:443`), the tracker's `self.characters` becomes stale. The pipeline code re-instantiates the tracker on snapshot reload.
 
@@ -3339,8 +3339,8 @@ Top-level router: AU plugin > Pedalboard chain > FFmpeg filter.
 | `cinema/shots/controller.py` | **Direct call** — imports `face_swap_video_frames`, `generate_lip_sync_video`, `generate_rife_interpolation`, `upscale_video_seedvr2` (`controller.py:92–96`); calls them in `apply_correction` and during mandatory F1b lipsync pass at take generation time |
 | `cinema_pipeline.py` | **Direct call** — `_assemble_final` imports `xfade_concat`, `apply_color_grade` from `phase_c_ffmpeg`; `_apply_final_loudnorm` imports `two_pass_loudnorm`; `_ensure_bgm` calls `master_music`; `_ensure_scene_foley` calls `generate_stability_foley` |
 | `cinema/auto_approve.py` | **Shared state (persisted field)** — reads `take["metadata"]["lipsync_score"]` and `take["metadata"]["audio_embedded"]` to gate auto-approval; `final_min_lipsync` threshold default 0.8 (`auto_approve.py:98`) |
-| `domain/scene_decomposer.py` (API_REGISTRY) | **Direct reference** — `controller.py:1081` imports `API_REGISTRY` to check `native_audio` flag on winning engine; VEO_NATIVE is the only live engine with `native_audio: True` (`scene_decomposer.py:43`) |
-| `phase_c_assembly.py` (image gen) | **Direct import** — `controller.py:90` imports `generate_ai_broll`; used for keyframe generation in Phase B |
+| `domain/scene_decomposer.py` (API_REGISTRY) | **Direct reference** — `cinema/shots/controller.py:1081` imports `API_REGISTRY` to check `native_audio` flag on winning engine; VEO_NATIVE is the only live engine with `native_audio: True` (`domain/scene_decomposer.py:43`) |
+| `phase_c_assembly.py` (image gen) | **Direct import** — `cinema/shots/controller.py:90` imports `generate_ai_broll`; used for keyframe generation in Phase B |
 | `audio/_client.py` | **Shared state (singleton)** — `dialogue.py` imports the ElevenLabs `client` singleton; thread-safe reuse |
 | `config/settings.py` | **Direct reference** — all modules read API keys (`fal_key`, `elevenlabs_api_key`, `cartesia_api_key`, `stability_api_key`, `suno_api_key`, `anthropic_api_key`, `openai_api_key`, `runwayml_api_secret`, `comfyui_server_url`) |
 | `cost_tracker.py` | **Direct call** — `CostTracker().record_api_call()` called in `generate_suno_v5`, `generate_fal_bgm`, `generate_stability_foley`, `generate_dialogue_voiceover` (both ElevenLabs + Cartesia paths), and lipsync paths in `controller.py` |
@@ -3881,7 +3881,7 @@ Parses `WEB_CORS_ORIGINS` value: empty → localhost-only default; comma-separat
 | `CINEMA_SCREENING_STAGE` default-ON (Class B) | `cinema/screening.py:127` |
 | `pipeline_status.toml` stubbed features | `docs/pipeline_status.toml:35-72` |
 | `cleanup.py` imports from root shim | `cleanup.py:30` |
-| root `project_manager.py` is a shim | `project_manager.py:1-9` |
+| root `project_manager.py` is a shim | `domain/project_manager.py:1-9` |
 | `MOTION_GATE_SAMPLES` read at module load | `performance/motion_gate.py:50` |
 | `PERFORMANCE_CACHE_DIR` env checked first, settings as fallback | `performance/_cache.py:27` |
 | OPERATIONS.md §3 env var table | `OPERATIONS.md:85-149` |
