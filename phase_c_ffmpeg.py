@@ -240,6 +240,9 @@ def generate_ai_video(
                 mode="pro",
             )
             if result:
+                # Aspect backstop (also at the other 10 cascade success sites): probe output_mp4 —
+                # the file the provider wrote (result==output_mp4 for native branches; see the
+                # _accept_or_reject caller contract). Wrong orientation → cascade; no-op for landscape.
                 if not _accept_or_reject(output_mp4, _aspect):
                     print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
                     return try_next_api()
@@ -1285,7 +1288,13 @@ def _accept_or_reject(path: str, aspect_ratio) -> bool:
     No-op (always True) when the project is landscape — preserves byte-identical 16:9 behavior.
     For portrait, probe the clip's real dimensions and accept only if its orientation matches.
     On probe failure (file missing / ffprobe error / no dims) ACCEPT with a warning — do NOT
-    strand the pipeline on a flaky probe (the filter is the primary defense; this is the net)."""
+    strand the pipeline on a flaky probe (the filter is the primary defense; this is the net).
+
+    Caller contract: `path` MUST be the file the provider actually wrote. Cascade callers pass
+    `output_mp4` (the uniform local artifact): the 7 download branches write it directly, and the
+    4 native branches (KLING_NATIVE/SORA_NATIVE/VEO_NATIVE/LTX) pass output_path=output_mp4 and
+    return that same path — so probing `output_mp4` is correct today. If a future native provider
+    ignores its output_path and writes elsewhere, probe THAT returned path here instead."""
     from cinema.aspect import is_portrait as _is_portrait
     if not _is_portrait(aspect_ratio):
         return True  # landscape project: never reject (no-op)
