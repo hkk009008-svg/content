@@ -205,6 +205,31 @@ def test_sora2_portrait_clamps_to_720x1280(monkeypatch, tmp_path):
     )
 
 
+def test_clamp_is_sora2_specific_other_models_unclamped(monkeypatch, tmp_path):
+    """The 720p clamp is sora-2-SPECIFIC: a non-sora-2 model passes resolution through
+    UNCHANGED (1080p → '1920x1080'). Guards against the clamp guard silently widening to
+    other tiers without a test. NOTE: this asserts only that OUR clamp does not fire for
+    other models — it does NOT claim sora-2-pro supports 1920x1080 at the API (separate,
+    live concern; we have no sora-2-pro size whitelist to assert)."""
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = str(tmp_path / "out.mp4")
+
+    video_mock = _make_video_mock(status="completed")
+    api.client.videos.create_and_poll.return_value = video_mock
+    api.client.videos.download_content.return_value = _make_download_content()
+
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
+
+    api.generate_video(image_path=img_path, prompt="pro", output_path=out,
+                       resolution="1080p", model="sora-2-pro", aspect_ratio="16:9")
+
+    actual_size = api.client.videos.create_and_poll.call_args.kwargs.get("size")
+    assert actual_size == "1920x1080", (
+        f"non-sora-2 model must NOT be clamped (resolution passes through); got {actual_size!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # generate_video — happy path writes bytes, returns output_path
 # ---------------------------------------------------------------------------
