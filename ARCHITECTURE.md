@@ -811,6 +811,16 @@ Three-priority cascade inside `generate_ai_broll`:
 2. **FAL FLUX Kontext Max Multi** — multi-image refs.
 3. **FLUX-Pro v1.1-ultra → FLUX-schnell → Pollinations** — final fallback chain.
 
+**Portrait (Phase 2).** When the project `aspect_ratio="9:16"` (read once at the
+top of `generate_ai_broll` via `get_project_setting`, None-safe), every path emits
+native 9:16: node 102's latent is transposed (`portrait_swap(1344, 768, …)`
+→ 768×1344); FAL Kontext/Pro send `fal_aspect_ratio(…)`, schnell sends
+`fal_image_size(…)`, Pollinations transposes its URL dims. All geometry lives in
+[cinema/aspect.py](cinema/aspect.py) (the single source of truth);
+16:9 / None / unknown is a byte-identical no-op. The user-facing gate stays closed
+(`SUPPORTED_ASPECT_RATIOS == ["16:9"]`, [cinema/aspect.py:23](cinema/aspect.py:23))
+until Phase 3 wires per-provider 9:16 video.
+
 Each branch returns `ImageGenResult(path, api_name)` naming the backend that
 actually ran (`COMFYUI_PULID` on the pod; `FLUX_KONTEXT`/`FLUX_PRO`/
 `FLUX_SCHNELL`/`POLLINATIONS` down the FAL chain; `QUALITY_MAX` for the max
@@ -836,6 +846,12 @@ quality_max.
 
 Workflow file: [pulid_max.json](pulid_max.json) (cached at module level with
 `_WORKFLOW_LOCK`).
+
+**Portrait (Phase 2).** `_inject_aspect(workflow, aspect_ratio)` transposes node
+102 (EmptyLatentImage 1024×576 → 576×1024) and node 950 (final ImageScale
+3840×2160 → 2160×3840) via `cinema/aspect.py::portrait_swap`, called once after
+`_inject_post_passes` so the best-of-N `copy.deepcopy` fan-out inherits portrait
+dims. 16:9 / ctx-less = no-op (same closed gate as §8.2).
 
 **Adaptive halt loop** ([quality_max.py:784-792](quality_max.py:784)):
 ```
