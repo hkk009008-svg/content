@@ -2050,7 +2050,13 @@ class ShotController:
                 # of the person actually visible, not scene-chars[0].
                 chars = shot.get("characters_in_frame", []) or scene.get("characters_present", [])
                 primary_ref = get_reference_image(self.project, chars[0]) if chars else None
-                audio_path = self._host._ensure_scene_audio(scene, [c for c in self.project["characters"] if c["id"] in chars])
+                # Scene audio is a SCENE-scoped artifact: key it with scene-level
+                # characters exactly like the pipeline writer (cinema_pipeline.py
+                # _build_scene_packages), or the dialogue_cache_key diverges →
+                # paid TTS regen + off-frame lines voiced by the wrong character
+                # (item-B quality-review CRITICAL). Only the ref follows the frame.
+                scene_chars = scene.get("characters_present", [])
+                audio_path = self._host._ensure_scene_audio(scene, [c for c in self.project["characters"] if c["id"] in scene_chars])
                 if video_path and primary_ref and audio_path:
                     _settings = self.project.get("global_settings", {})
                     _lipsync_cascade: dict = {}

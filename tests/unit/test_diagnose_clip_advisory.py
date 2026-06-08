@@ -754,3 +754,72 @@ class TestDiagnoseClipInFrameAlignment:
             f"legacy fallback broken: validate_image called with {actual_char_id!r}; "
             "expected 'char_alice' (scene chars[0] fallback)"
         )
+
+
+class TestApplyCorrectionLipSyncSceneAudio:
+    """Item-B quality-review CRITICAL regression: the lip_sync correction's
+    scene-audio must be keyed by SCENE-level characters (mirroring the
+    pipeline writer), even though the lip/ref target follows the frame.
+    Passing the in-frame subset re-keys dialogue_cache_key → paid TTS regen
+    + off-frame lines voiced by the wrong character + poisoned checkpoint.
+    """
+
+    def _build(self, tmp_path):
+        vid_path = str(tmp_path / "take.mp4")
+        with open(vid_path, "wb") as fh:
+            fh.write(b"vid")
+        shot = {
+            "id": "shot_1_0",
+            "plan_status": "approved",
+            "characters_in_frame": ["char_bob"],   # Bob only in frame
+            "takes": [{"id": "take_v1", "kind": "video", "path": vid_path}],
+        }
+        scene = {
+            "id": "scene_1",
+            "shots": [shot],
+            "characters_present": ["char_alice", "char_bob"],
+        }
+        project = {
+            "id": "proj_1",
+            "scenes": [scene],
+            "characters": [
+                {"id": "char_alice", "name": "Alice"},
+                {"id": "char_bob", "name": "Bob"},
+            ],
+            "objects": [],
+            "locations": [],
+            "global_settings": {},
+        }
+        host = MagicMock()
+        host._refresh_project_snapshot.return_value = project
+        host._candidate_take.return_value = {"id": "take_v1", "kind": "video", "path": vid_path}
+        host._ensure_scene_audio.return_value = str(tmp_path / "audio.mp3")
+        core = MagicMock()
+        core.project = project
+        core.project_dir = str(tmp_path)
+        ctrl = ShotController(core=core, lifecycle=MagicMock(), host=host, runstate=MagicMock())
+        return ctrl, host
+
+    def test_scene_audio_gets_scene_chars_ref_gets_in_frame(self, tmp_path):
+        ctrl, host = self._build(tmp_path)
+        ref_calls = []
+
+        def _fake_ref(project, char_id):
+            ref_calls.append(char_id)
+            return "/fake/ref.jpg"
+
+        with (
+            patch("cinema.shots.controller.get_reference_image", side_effect=_fake_ref),
+            patch("cinema.shots.controller.generate_lip_sync_video", return_value=None),
+        ):
+            ctrl.apply_correction("shot_1_0", "lip_sync")
+
+        # Ref/lip target follows the FRAME (fe2aa47 alignment):
+        assert ref_calls and ref_calls[0] == "char_bob"
+        # Scene audio is keyed by SCENE-level characters — both, not just Bob:
+        assert host._ensure_scene_audio.called, "_ensure_scene_audio must be reached"
+        _scene_arg, char_list = host._ensure_scene_audio.call_args.args[:2]
+        assert [c["id"] for c in char_list] == ["char_alice", "char_bob"], (
+            "scene-audio char list must mirror the pipeline writer "
+            "(scene-filtered), not the in-frame subset"
+        )
