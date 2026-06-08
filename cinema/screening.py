@@ -562,7 +562,7 @@ def estimate_reassembly_cost(project: dict) -> dict:
 
     proj_settings = project.get("global_settings", {}) or {}
     lang = proj_settings.get("language", "English")
-    characters = project.get("characters", []) or []
+    all_characters = project.get("characters", []) or []
 
     shot_count = 0
     total_duration_s = 0.0
@@ -581,12 +581,21 @@ def estimate_reassembly_cost(project: dict) -> dict:
             except (TypeError, ValueError):
                 scene_fallback = 5.0
 
+        # Scene-level characters: mirror cinema_pipeline.py:738-741 exactly —
+        # filter project characters by characters_present (per-scene subset).
+        # Using the project-wide list here would produce a different cache key
+        # from the writer and cause false "not cached" counts (T-D fix).
+        scene_characters = [
+            character for character in all_characters
+            if character.get("id") in scene.get("characters_present", [])
+        ]
+
         # Scene-level dialogue TTS estimate (mirrors _ensure_scene_audio logic).
         scene_dialogue = scene.get("dialogue", "")
         if scene_dialogue:
             if isinstance(scene_dialogue, list) and _cache_key and _temp_dir:
                 # Explicit list: can predict the key and check disk.
-                key = _cache_key(scene_dialogue, characters, lang)
+                key = _cache_key(scene_dialogue, scene_characters, lang)
                 cached_path = os.path.join(_temp_dir, f"audio_{scene_id}_{key}.mp3")
                 if not os.path.exists(cached_path):
                     tts_lines_to_generate += len(scene_dialogue)
@@ -599,7 +608,7 @@ def estimate_reassembly_cost(project: dict) -> dict:
                     # use 1 as a conservative lower bound so the estimate is
                     # not zero for LLM-dialogue scenes.
                     tts_lines_to_generate += 1
-        elif characters and scene.get("action"):
+        elif scene_characters and scene.get("action"):
             # Action-only scene: _ensure_scene_audio generates dialogue via
             # LLM then renders TTS for it (cinema_pipeline.py — the
             # characters-and-action-no-dialogue branch). Count a conservative
@@ -641,7 +650,15 @@ def estimate_reassembly_cost(project: dict) -> dict:
                     shot_dialogue_lines = None
 
                 if shot_dialogue_lines and _cache_key and _temp_dir:
-                    key = _cache_key(shot_dialogue_lines, characters, lang)
+                    # Mirror cinema/shots/controller.py:1373-1380: shot-level
+                    # characters filtered by characters_in_frame, falling back
+                    # to the scene's characters_present set (Rule #13 audit).
+                    chars_in_frame = shot.get("characters_in_frame", []) or scene.get("characters_present", [])
+                    shot_characters = [
+                        c for c in all_characters
+                        if c.get("id") in chars_in_frame
+                    ]
+                    key = _cache_key(shot_dialogue_lines, shot_characters, lang)
                     cached_path = os.path.join(_temp_dir, f"audio_{shot_id}_{key}.mp3")
                     if not os.path.exists(cached_path):
                         tts_lines_to_generate += len(shot_dialogue_lines)

@@ -334,7 +334,12 @@ class TestKeyChangeTriggersRegeneration:
 class TestEstimateReassemblyCostTTS:
 
     def _make_project(self, scene_id: str, shot_id: str, dialogue_lines: list) -> dict:
-        """Build a minimal project dict with one approved shot and explicit dialogue."""
+        """Build a minimal project dict with one approved shot and explicit dialogue.
+
+        The scene includes ``characters_present: ["c1"]`` so the T-D fix's
+        scene-filtered character list resolves to the single project character
+        (matching the writer's behaviour for a scene with one active character).
+        """
         return {
             "id": "proj_test",
             "global_settings": {"language": "English"},
@@ -343,6 +348,7 @@ class TestEstimateReassemblyCostTTS:
                 {
                     "id": scene_id,
                     "duration_seconds": 5.0,
+                    "characters_present": ["c1"],  # T-D: writer filters by this
                     "dialogue": dialogue_lines,
                     "shots": [
                         {
@@ -442,6 +448,125 @@ class TestEstimateReassemblyCostTTS:
             "is rendered by _ensure_scene_audio); silent omission was SI-1"
         )
         assert result["estimated_tts_usd"] == 0.01
+
+    # T-D regression tests: estimator must use scene-filtered characters (not
+    # project-wide) when computing dialogue cache keys, mirroring the writer.
+
+    def test_td_subset_scene_writer_key_is_cache_hit(self, tmp_path):
+        """T-D regression: project has chars A+B; scene only has B present.
+
+        The writer uses scene-filtered [B] when generating the key.
+        A file written at that key path should make the estimator report 0
+        tts_lines_to_generate — i.e., the estimator uses the same key.
+        """
+        from cinema.screening import estimate_reassembly_cost
+        from audio.dialogue import dialogue_cache_key
+
+        scene_id = "scene_td_subset"
+        shot_id = "shot_td_subset"
+        dialogue_lines = [
+            {"character_id": "char_b", "text": "Only B speaks here"},
+        ]
+        # Project has two characters; scene only lists B in characters_present.
+        project = {
+            "id": "proj_td_subset",
+            "global_settings": {"language": "English"},
+            "characters": [
+                {"id": "char_a", "voice_id": "voice_a"},
+                {"id": "char_b", "voice_id": "voice_b"},
+            ],
+            "scenes": [
+                {
+                    "id": scene_id,
+                    "duration_seconds": 5.0,
+                    "characters_present": ["char_b"],  # only B, not A
+                    "dialogue": dialogue_lines,
+                    "shots": [
+                        {
+                            "id": shot_id,
+                            "approved_final_take_id": "take_1",
+                            "motion_takes": [
+                                {"id": "take_1", "metadata": {"duration_s": 5.0}},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        # Write the cached artifact at the WRITER's key path — filtered to [B].
+        scene_filtered_chars = [{"id": "char_b", "voice_id": "voice_b"}]
+        writer_key = dialogue_cache_key(dialogue_lines, scene_filtered_chars, "English")
+        temp_dir = str(tmp_path / "temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        writer_path = os.path.join(temp_dir, f"audio_{scene_id}_{writer_key}.mp3")
+        with open(writer_path, "wb") as f:
+            f.write(b"cached-by-writer")
+
+        with patch("domain.project_manager.get_project_dir", return_value=str(tmp_path)):
+            result = estimate_reassembly_cost(project)
+
+        assert result["tts_lines_to_generate"] == 0, (
+            "T-D: estimator must use scene-filtered chars (writer key == estimator key); "
+            f"writer_key={writer_key!r} was not recognized as cached — "
+            "estimator is still using the project-wide character list"
+        )
+
+    def test_td_wrong_key_is_not_a_cache_hit(self, tmp_path):
+        """T-D inverse regression: file at the OLD wrong (project-wide) key path
+        must NOT be counted as cached — proves the fix actually changed key computation.
+        """
+        from cinema.screening import estimate_reassembly_cost
+        from audio.dialogue import dialogue_cache_key
+
+        scene_id = "scene_td_wrong_key"
+        shot_id = "shot_td_wrong_key"
+        dialogue_lines = [
+            {"character_id": "char_b", "text": "Only B speaks here"},
+        ]
+        project = {
+            "id": "proj_td_wrong_key",
+            "global_settings": {"language": "English"},
+            "characters": [
+                {"id": "char_a", "voice_id": "voice_a"},
+                {"id": "char_b", "voice_id": "voice_b"},
+            ],
+            "scenes": [
+                {
+                    "id": scene_id,
+                    "duration_seconds": 5.0,
+                    "characters_present": ["char_b"],  # only B in scene
+                    "dialogue": dialogue_lines,
+                    "shots": [
+                        {
+                            "id": shot_id,
+                            "approved_final_take_id": "take_1",
+                            "motion_takes": [
+                                {"id": "take_1", "metadata": {"duration_s": 5.0}},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        # Write a file at the OLD wrong key — project-wide [A, B].
+        all_chars = [{"id": "char_a", "voice_id": "voice_a"}, {"id": "char_b", "voice_id": "voice_b"}]
+        old_wrong_key = dialogue_cache_key(dialogue_lines, all_chars, "English")
+        temp_dir = str(tmp_path / "temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        old_path = os.path.join(temp_dir, f"audio_{scene_id}_{old_wrong_key}.mp3")
+        with open(old_path, "wb") as f:
+            f.write(b"wrong-key-artifact")
+
+        with patch("domain.project_manager.get_project_dir", return_value=str(tmp_path)):
+            result = estimate_reassembly_cost(project)
+
+        assert result["tts_lines_to_generate"] == len(dialogue_lines), (
+            "T-D: artifact at OLD project-wide key must NOT count as cached; "
+            f"old_wrong_key={old_wrong_key!r} — estimator is still using the "
+            "project-wide character list (pre-fix behavior detected)"
+        )
 
 
 # ---------------------------------------------------------------------------

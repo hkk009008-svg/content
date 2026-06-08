@@ -230,9 +230,7 @@ exists-guards (`cinema_pipeline.py:503/579`).
 
 ## T-D — Estimator computes dialogue cache keys with project-wide characters; writer uses scene-filtered (estimate-only inaccuracy)
 
-**STATUS: OPEN — fix in flight 2026-06-08** (operator deferred-minors batch
-item F, dispatch-claim `e018c71` + this doc; found via Rule #17 guardrail-2b
-spot-check of the T-C scout's side-observation).
+**STATUS: CLOSED 2026-06-08** — `fix(screening): T-D — estimator mirrors writer's scene-filtered chars in dialogue cache keys` (this commit); scene-level key now uses `characters_present`-filtered list; shot-level key mirrors `characters_in_frame`-or-`characters_present` fallback per Rule #13 audit; 2 regression tests added.
 
 **Severity: MEDIUM-low** (T-B's `tts_lines_to_generate` estimate over-counts —
 predicts regen where assembly would cache-hit — whenever a scene's
