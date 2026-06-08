@@ -8,6 +8,8 @@ import requests
 from typing import NamedTuple
 
 from config.settings import settings
+from cinema.aspect import portrait_swap, fal_image_size, DEFAULT_ASPECT_RATIO
+from cinema.context import get_project_setting
 
 PEXELS_API_KEY = settings.pexels_api_key
 
@@ -180,6 +182,9 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         with open("pulid.json", "r") as f:
             workflow = json.load(f)
 
+        # Read per-project aspect ratio (Phase 2: portrait-aware latent dimensions)
+        aspect_ratio = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
+
         # WORKFLOW SELECTOR — apply shot-type-specific parameters
         try:
             from workflow_selector import classify_shot_type, get_workflow_params, apply_workflow_params
@@ -208,9 +213,12 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         # 1. Inject LLM Text prompt to CLIP node "122"
         workflow["122"]["inputs"]["text"] = prompt
 
-        # 2. Aspect ratio — 16:9 widescreen via EmptyLatentImage node "102"
-        workflow["102"]["inputs"]["width"] = 1344
-        workflow["102"]["inputs"]["height"] = 768
+        # 2. Aspect ratio — native latent dims via EmptyLatentImage node "102"
+        #    portrait_swap transposes 1344×768 → 768×1344 when aspect_ratio=9:16;
+        #    landscape / unknown → unchanged. Phase 2 (portrait keyframe support).
+        _w, _h = portrait_swap(1344, 768, aspect_ratio)
+        workflow["102"]["inputs"]["width"] = _w
+        workflow["102"]["inputs"]["height"] = _h
         workflow["102"]["inputs"]["batch_size"] = 1
 
         # 3. Seed control via RandomNoise node "25"
