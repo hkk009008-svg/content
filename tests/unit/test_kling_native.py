@@ -286,3 +286,44 @@ def test_generate_video_default_poll_timeout_is_300s(tmp_path):
     assert mock_poll.call_args.kwargs.get("timeout") == 300, (
         f"Expected default poll timeout 300s; got {mock_poll.call_args.kwargs.get('timeout')}"
     )
+
+
+def test_generate_video_timeout_override_reaches_poll_task(tmp_path):
+    """An explicit timeout= override must reach poll_task — not strand in **kwargs.
+
+    create_image_to_video has a fixed signature (no **kwargs, no timeout param), so
+    generate_video must pop timeout from kwargs BEFORE calling
+    create_image_to_video(**kwargs). Otherwise a timeout= override lands in that call,
+    raises TypeError, is swallowed by the bare except, and generate_video silently
+    returns None — the opposite of an honored override.
+
+    autospec=True makes the create_image_to_video mock enforce the real signature so
+    this test actually exercises the bug (a plain MagicMock accepts any kwarg and
+    would hide it).
+    """
+    api = _make_api()
+    img_path = _real_png(tmp_path)
+    out_path = str(tmp_path / "out.mp4")
+
+    with (
+        patch.object(api, "create_image_to_video", autospec=True, return_value="task-override-1"),
+        patch.object(api, "poll_task", return_value={
+            "task_result": {"videos": [{"url": "https://example.com/video.mp4"}]}
+        }) as mock_poll,
+        patch.object(api, "download_video", return_value=out_path),
+    ):
+        result = api.generate_video(
+            image_path=img_path,
+            prompt="timeout override test",
+            output_path=out_path,
+            timeout=600,
+        )
+
+    # The override must have reached poll_task, not stranded in create_image_to_video's kwargs.
+    assert result == out_path, (
+        "generate_video returned None — a timeout= override reached "
+        "create_image_to_video(**kwargs) and raised TypeError (pop must precede create)"
+    )
+    assert mock_poll.call_args.kwargs.get("timeout") == 600, (
+        f"Expected override timeout=600 to reach poll_task; got {mock_poll.call_args.kwargs.get('timeout')}"
+    )

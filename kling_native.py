@@ -282,10 +282,13 @@ class KlingNativeAPI:
             The output_path on success, None on failure.
         """
         try:
+            # Pop timeout BEFORE create_image_to_video — it has a fixed signature with no
+            # timeout param (and no **kwargs), so leaving timeout in kwargs would raise
+            # TypeError there and be swallowed into a silent None. Default 300s: Kling i2v
+            # runs ~178-195s; 180 timed out flakily.
+            timeout = kwargs.pop("timeout", 300)
             task_id = self.create_image_to_video(image_path, prompt, **kwargs)
             print(f"[KLING-NATIVE] Task {task_id} queued...")
-
-            timeout = kwargs.pop("timeout", 300)  # Kling i2v runs ~178-195s; 180 timed out flakily
             result = self.poll_task(task_id, timeout=timeout)
 
             # Extract video URL from result
