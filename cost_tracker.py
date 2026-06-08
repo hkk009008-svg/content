@@ -78,7 +78,10 @@ PRICING = {
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
     # Deprecated-model row kept for historical cost entries (retires 2026-06-15):
     "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
-    "claude-opus-4-20250918": {"input": 5.00, "output": 25.00},
+    # claude-opus-4-20250918 row dropped (T-E hygiene): the id never existed at
+    # the API (404'd — see ensemble.py item-G scrub), so no historical cost
+    # entry can reference it; PRICING is consumed at write time only (:246).
+    "claude-opus-4-8": {"input": 5.00, "output": 25.00},
     "claude-haiku-4-5": {"input": 1.00, "output": 5.00},
     # OpenAI
     "gpt-4.1": {"input": 2.00, "output": 8.00},

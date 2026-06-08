@@ -370,7 +370,7 @@ def get_config():
         ],
         "quality_judge_options": [
             {"value": "auto", "label": "Auto (Best available)"},
-            {"value": "claude-opus", "label": "Claude Opus 4"},
+            {"value": "claude-opus", "label": "Claude Opus 4.8"},
             {"value": "gpt-4o", "label": "GPT-4o"},
             {"value": "gemini-pro", "label": "Gemini 2.5 Pro"},
         ],
