@@ -84,7 +84,7 @@ It already **emits** ASCII hyphen (`f":{new}-{end}"`), so widening the read patt
 
 ### 4.3 Multi-range warning (NEW)
 
-After the per-doc anchor loop in `check_line_anchors`, scan for the multi-range shape the anchor regex cannot fully parse — a backtick-delimited `file:N[sep]M` followed by `, K…` before the closing backtick:
+After the per-doc anchor loop in `check_line_anchors` — **insert just before the existing `if in_fence:` EOF warning (~L408), mirroring its placement and indentation** — scan for the multi-range shape the anchor regex cannot fully parse: a backtick-delimited `file:N[sep]M` followed by `, K…` before the closing backtick:
 
 ```python
 _MULTIRANGE_RE = re.compile(r'`[A-Za-z0-9_./-]+\.[A-Za-z]+:\d+[-–—]\d+\s*,\s*\d+[-–—]?\d*[^`]*`')
@@ -116,7 +116,7 @@ Write tests first, watch them fail against current HEAD, then implement:
 1. **en-dash range matches + def-checks.** `` `mod.py:10–20` `` with prose symbol whose def is at 15 → OK (in range); def at 25 → `def_drift`.
 2. **em-dash range matches** likewise (`—`).
 3. **ASCII-hyphen ranges unchanged** (regression) — existing range behavior preserved.
-4. **`--fix` canonicalizes + shifts.** En-dash anchor whose symbol moved → after `--fix`, the anchor reads ASCII hyphen `:new-(end+delta)` with the span preserved.
+4. **`--fix` canonicalizes + shifts.** En-dash anchor whose symbol moved from `old` to `new` → after `--fix` the anchor reads ASCII hyphen `:new-END` where `END = old_end + (new - old)` (the span width is preserved, both endpoints shift by the same delta) — and the separator is normalized `–`→`-`. This test also exercises the ADV-1 span round-trip (§7): the rewritten en-dash span must match the `_rewrite_anchor_occurrence` fullmatch + (file,line) identity guard, so a widened match that no longer holds the expected anchor is left untouched, not corrupted.
 5. **`--fix` idempotency** — running twice yields a stable file (existing convergence loop, exercised on an en-dash input).
 6. **multi-range warning** — a `` `m.py:1-5, 9-12` `` line produces the stderr warning, the multi-range anchor is NOT counted as a silent pass, and a normal anchor on the same line is still verified.
 7. **bounds-only legitimacy** — an en-dash region anchor with no bindable symbol still bounds-checks (in-bounds → OK; past EOF → `out_of_bounds`), confirming the residual is handled, not crashed.
