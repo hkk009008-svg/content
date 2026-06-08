@@ -14,6 +14,7 @@ import mimetypes
 
 import openai
 from config.settings import settings
+from cinema.aspect import portrait_swap
 
 # Maps the public resolution string to the Sora API `size` parameter value.
 # Mirrors the naming convention of ltx_native.RESOLUTION_MAP (sora uses flat
@@ -61,6 +62,7 @@ class SoraNativeAPI:
         model: str = "sora-2",
         resolution: str = "1080p",
         driving_video_path: str = "",
+        aspect_ratio: str = "16:9",
     ) -> str | None:
         """
         Generate video from a start frame image + text prompt using Sora 2.
@@ -79,6 +81,10 @@ class SoraNativeAPI:
                 field — driving the character's motion from the reference clip
                 while still respecting the start-frame composition. Falls
                 through to the still-image path on any access error.
+            aspect_ratio: Project aspect ratio string — "16:9" (default, landscape)
+                or "9:16" (portrait). When portrait, both the PIL resize target
+                and the API ``size=`` parameter are transposed via portrait_swap
+                so the full generation pipeline emits 9:16 output.
 
         Returns:
             output_path on success, None on failure.
@@ -104,9 +110,12 @@ class SoraNativeAPI:
             image_data_url = self._image_to_data_url(image_path)
 
             # Resolve resolution to the API size string, then parse W×H for resize.
+            # Apply portrait_swap once: this drives BOTH the PIL resize target
+            # (below) and the API size= param — one swap covers both surfaces.
             size = RESOLUTION_MAP.get(resolution, RESOLUTION_MAP["720p"])
             w_str, h_str = size.split("x")
-            target_w, target_h = int(w_str), int(h_str)
+            target_w, target_h = portrait_swap(int(w_str), int(h_str), aspect_ratio)
+            size = f"{target_w}x{target_h}"
 
             # Resize image to the target resolution and save as temp file.
             from PIL import Image as PILImage

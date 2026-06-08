@@ -332,3 +332,70 @@ def test_valid_duration_passes_through(monkeypatch, tmp_path):
 
         call_kwargs = api.client.videos.create_and_poll.call_args
         assert call_kwargs.kwargs.get("seconds") == dur, f"duration={dur} should pass through as seconds={dur}"
+
+
+# ---------------------------------------------------------------------------
+# generate_video — portrait aspect swaps size (Task 4)
+# ---------------------------------------------------------------------------
+
+def test_portrait_swaps_size_and_resize(monkeypatch, tmp_path):
+    """Task 4 / T-portrait-1: aspect_ratio='9:16' causes size to be swapped.
+
+    At 1080p portrait the landscape '1920x1080' must become '1080x1920' in the
+    create_and_poll call. The same swapped dims drive the PIL resize target so
+    only ONE portrait_swap call covers both surfaces.
+    """
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = str(tmp_path / "out.mp4")
+
+    video_mock = _make_video_mock(status="completed")
+    api.client.videos.create_and_poll.return_value = video_mock
+    api.client.videos.download_content.return_value = _make_download_content()
+
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
+
+    api.generate_video(
+        image_path=img_path,
+        prompt="portrait test",
+        output_path=out,
+        resolution="1080p",
+        aspect_ratio="9:16",
+    )
+
+    call_kwargs = api.client.videos.create_and_poll.call_args
+    actual_size = call_kwargs.kwargs.get("size")
+    assert actual_size == "1080x1920", (
+        f"portrait 1080p should map to size='1080x1920'; got {actual_size!r}"
+    )
+
+
+def test_landscape_size_unchanged(monkeypatch, tmp_path):
+    """Task 4 / T-portrait-2 (refute): aspect_ratio='16:9' keeps size='1920x1080'.
+
+    Proves no regression for existing landscape calls — portrait_swap is a no-op
+    when aspect is already landscape.
+    """
+    api = _make_api()
+    img_path = _real_jpeg(tmp_path)
+    out = str(tmp_path / "out.mp4")
+
+    video_mock = _make_video_mock(status="completed")
+    api.client.videos.create_and_poll.return_value = video_mock
+    api.client.videos.download_content.return_value = _make_download_content()
+
+    monkeypatch.setattr(sora_native.os.path, "exists", lambda p: p == img_path)
+
+    api.generate_video(
+        image_path=img_path,
+        prompt="landscape test",
+        output_path=out,
+        resolution="1080p",
+        aspect_ratio="16:9",
+    )
+
+    call_kwargs = api.client.videos.create_and_poll.call_args
+    actual_size = call_kwargs.kwargs.get("size")
+    assert actual_size == "1920x1080", (
+        f"landscape 1080p should keep size='1920x1080'; got {actual_size!r}"
+    )

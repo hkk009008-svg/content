@@ -147,3 +147,73 @@ class TestVeoFalAspect:
         assert arguments.get("aspect_ratio") == "16:9", (
             f"Expected aspect_ratio='16:9'; got: {arguments}"
         )
+
+
+# ---------------------------------------------------------------------------
+# TC-6 — SORA_2 fal: generate_ai_video puts fal_aspect_ratio(_aspect) into arguments
+# ---------------------------------------------------------------------------
+class TestSora2FalAspect:
+    """Drive generate_ai_video(target_api='SORA_2', ...) and assert that
+    fal_client.subscribe receives arguments['aspect_ratio']=='9:16' for portrait
+    and '16:9' for landscape (refute).
+    """
+
+    def _run_sora_fal(self, aspect: str):
+        """Run generate_ai_video(SORA_2) with the given aspect, return the captured
+        fal_client.subscribe call_args_list."""
+        stub_fal = MagicMock()
+        # SORA_2 reads result["video"]["url"] — must return VIDEO shape or the branch
+        # will bail to cascade and subscribe never produces the aspect_ratio we want.
+        stub_fal.subscribe.return_value = {"video": {"url": "https://x/sora.mp4"}}
+        stub_fal.upload_file.return_value = "https://cdn.fal.ai/sora-ref.jpg"
+
+        stub_settings = MagicMock()
+        stub_settings.fal_key = "fk-test-key"
+
+        sys.modules.pop("phase_c_ffmpeg", None)
+
+        try:
+            with patch("os.path.exists", return_value=True), \
+                 patch("urllib.request.urlretrieve"), \
+                 patch.dict("sys.modules", {"veo_native": MagicMock()}):
+                import phase_c_ffmpeg
+                phase_c_ffmpeg.fal_client = stub_fal
+                phase_c_ffmpeg.FAL_AVAILABLE = True
+                phase_c_ffmpeg.settings = stub_settings
+                phase_c_ffmpeg.generate_ai_video(
+                    image_path="/tmp/f.png",
+                    camera_motion="zoom_in_slow",
+                    target_api="SORA_2",
+                    output_mp4="/tmp/sora_out.mp4",
+                    shot_type="portrait",
+                    ctx=_ctx(aspect),
+                )
+        finally:
+            sys.modules.pop("phase_c_ffmpeg", None)
+
+        return stub_fal.subscribe.call_args_list
+
+    def test_sora2_fal_portrait_aspect_in_arguments(self):
+        """Portrait ctx → arguments['aspect_ratio'] == '9:16' and endpoint is sora-2."""
+        calls = self._run_sora_fal("9:16")
+        assert calls, "fal_client.subscribe was never called"
+        call = calls[0]
+        pos_args = call.args
+        kw = call.kwargs
+        assert pos_args and pos_args[0] == "fal-ai/sora-2/image-to-video", (
+            f"Wrong fal endpoint; got positional args: {pos_args}"
+        )
+        arguments = kw.get("arguments", {})
+        assert arguments.get("aspect_ratio") == "9:16", (
+            f"Expected aspect_ratio='9:16' in subscribe arguments; got: {arguments}"
+        )
+
+    def test_sora2_fal_landscape_keeps_16_9(self):
+        """Landscape ctx → arguments['aspect_ratio'] == '16:9' (refute)."""
+        calls = self._run_sora_fal("16:9")
+        assert calls, "fal_client.subscribe was never called"
+        kw = calls[0].kwargs
+        arguments = kw.get("arguments", {})
+        assert arguments.get("aspect_ratio") == "16:9", (
+            f"Expected aspect_ratio='16:9'; got: {arguments}"
+        )

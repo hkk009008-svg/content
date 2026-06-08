@@ -264,6 +264,7 @@ def generate_ai_video(
                 duration=sora_duration,
                 resolution="1080p",
                 driving_video_path=driving_video_path,
+                aspect_ratio=fal_aspect_ratio(_aspect),
             )
             if result:
                 _record_video_cascade(target_api.upper())
@@ -425,7 +426,7 @@ def generate_ai_video(
                     arguments={
                         "prompt": sora_prompt,
                         "image_url": start_url,
-                        "aspect_ratio": "16:9",
+                        "aspect_ratio": fal_aspect_ratio(_aspect),
                         "duration": 4,
                     },
                     with_logs=True,
