@@ -103,3 +103,109 @@ def test_runway_ratio_landscape_is_default():
 def test_runway_ratio_portrait_per_model():
     assert runway_ratio("9:16", "gen4_turbo") == "720:1280"
     assert runway_ratio("9:16", "gen3a_turbo") == "768:1280"
+
+
+# --- Real-ffmpeg behavioral tests: normalize upscales sub-1080 portrait clips ---
+# Filter-string correctness is covered by test_normalize_filter_portrait above.
+# These tests prove ffmpeg's force_original_aspect_ratio=decrease UPSCALES a
+# smaller source to the 1080×1920 target frame (a skeptic could doubt whether
+# "decrease" upscales at all). They exercise the PRODUCTION function directly.
+
+import shutil
+import subprocess
+import json
+
+_HAS_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
+
+
+def _probe_dims(path: str):
+    """Return (width, height) of the first video stream in *path*."""
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "json",
+            path,
+        ],
+        capture_output=True, text=True, check=True,
+    )
+    data = json.loads(result.stdout)
+    stream = data["streams"][0]
+    return stream["width"], stream["height"]
+
+
+def _make_portrait_clip(path: str, w: int, h: int):
+    """Synthesise a 1-second yuv420p clip at *w*x*h* via ffmpeg lavfi testsrc."""
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-f", "lavfi",
+            "-i", f"testsrc=size={w}x{h}:duration=1:rate=30",
+            "-pix_fmt", "yuv420p",
+            "-c:v", "libx264", "-preset", "ultrafast",
+            path,
+        ],
+        check=True,
+    )
+
+
+import pytest
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="requires ffmpeg+ffprobe")
+def test_normalize_upscales_720x1280_portrait_to_1080x1920(tmp_path):
+    """720×1280 is exactly 9:16; scale factor 1.5 → 1080×1920 with no padding."""
+    from cinema_pipeline import _normalize_filter
+
+    src = str(tmp_path / "src_720x1280.mp4")
+    out = str(tmp_path / "out_720x1280.mp4")
+
+    _make_portrait_clip(src, 720, 1280)
+
+    vf = _normalize_filter(1080, 1920)  # production filter, not hardcoded
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", src,
+            "-vf", vf,
+            "-frames:v", "1",
+            out,
+        ],
+        check=True,
+    )
+
+    width, height = _probe_dims(out)
+    assert width == 1080 and height == 1920, (
+        f"Expected 1080×1920 after normalize, got {width}×{height} "
+        f"(source was 720×1280; normalize did NOT upscale)"
+    )
+
+
+@pytest.mark.skipif(not _HAS_FFMPEG, reason="requires ffmpeg+ffprobe")
+def test_normalize_upscales_768x1280_portrait_to_1080x1920(tmp_path):
+    """768×1280 is NOT exactly 9:16; scales to 1080×1800 then letterbox-pads to 1080×1920."""
+    from cinema_pipeline import _normalize_filter
+
+    src = str(tmp_path / "src_768x1280.mp4")
+    out = str(tmp_path / "out_768x1280.mp4")
+
+    _make_portrait_clip(src, 768, 1280)
+
+    vf = _normalize_filter(1080, 1920)  # production filter, not hardcoded
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-i", src,
+            "-vf", vf,
+            "-frames:v", "1",
+            out,
+        ],
+        check=True,
+    )
+
+    width, height = _probe_dims(out)
+    assert width == 1080 and height == 1920, (
+        f"Expected 1080×1920 after normalize, got {width}×{height} "
+        f"(source was 768×1280; normalize did NOT produce the correct padded frame)"
+    )
