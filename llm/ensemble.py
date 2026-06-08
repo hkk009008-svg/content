@@ -129,7 +129,11 @@ class LLMEnsemble:
             judge_pref = settings.get("quality_judge_llm", "auto")
             if judge_pref != "auto":
                 judge_map = {
-                    "claude-opus": "claude-opus-4-20250918",
+                    # claude-opus-4-8 is the current Opus alias (verified vs the
+                    # model catalog 2026-06-08; the previous target
+                    # claude-opus-4-20250918 was never a valid API id → 404 at
+                    # judge dispatch).
+                    "claude-opus": "claude-opus-4-8",
                     "gpt-4o": "gpt-4o",
                     "gemini-pro": "gemini-2.5-pro",
                 }

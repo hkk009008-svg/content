@@ -279,3 +279,29 @@ class TestWrongShapeJsonDoesNotCrash:
 
         out = capsys.readouterr().out
         assert "[LLMEnsemble] Judging failed" in out
+
+
+# ─── judge_map model-id validity (deferred-minors item G) ───────────────────
+
+class TestJudgeMapModelIds:
+    """The 'claude-opus' judge alias must resolve to a VALID Anthropic model id.
+
+    Regression for item G (dispatch-claim e018c71): the map previously
+    targeted 'claude-opus-4-20250918', which was never a real release
+    (Opus 4=20250514, 4.1=20250805, 4.5=20251101) — every judge dispatch
+    with quality_judge_llm='claude-opus' 404'd.
+    """
+
+    def test_claude_opus_alias_maps_to_current_opus(self):
+        ens = LLMEnsemble(settings={"quality_judge_llm": "claude-opus"})
+        assert ens.judge_model_override == "claude-opus-4-8"
+
+    def test_no_fabricated_date_suffix_in_override(self):
+        """Guard the failure CLASS: a dated Opus-4 id that matches no known
+        release. Known real date suffixes for opus-4 lines: 20250514 (4.0),
+        20250805 (4.1), 20251101 (4.5)."""
+        ens = LLMEnsemble(settings={"quality_judge_llm": "claude-opus"})
+        override = ens.judge_model_override
+        assert override is not None
+        if "-202" in override:  # dated id → must be a known real release
+            assert override.split("-")[-1] in {"20250514", "20250805", "20251101"}
