@@ -588,7 +588,7 @@ def normalize_project_schema(project: Optional[dict]) -> bool:
     # "claude-sonnet") resolve to a valid API id before the 2026-06-15
     # retirement of claude-sonnet-4-20250514 causes 404s in production.
     _creative = settings.get("creative_llm")
-    if _creative in _RETIRED_CREATIVE_LLM_IDS:
+    if isinstance(_creative, str) and _creative in _RETIRED_CREATIVE_LLM_IDS:
         settings["creative_llm"] = _RETIRED_CREATIVE_LLM_IDS[_creative]
         changed = True
 

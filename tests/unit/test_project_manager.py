@@ -712,3 +712,13 @@ class TestNormalizeCreativeLLMMigration:
         changed = normalize_project_schema(proj)
         assert changed is False
         assert "creative_llm" not in proj["global_settings"]
+
+    def test_unhashable_creative_llm_no_typeerror(self):
+        """Malformed record with a non-str creative_llm (e.g. a list) must not
+        raise inside load_project (quality-review M-1: `in` on the dict hashes
+        the key). Value passes through untouched, changed=False."""
+        from domain.project_manager import normalize_project_schema
+        proj = self._minimal_project(["claude-sonnet"])  # list = unhashable
+        changed = normalize_project_schema(proj)
+        assert changed is False
+        assert proj["global_settings"]["creative_llm"] == ["claude-sonnet"]
