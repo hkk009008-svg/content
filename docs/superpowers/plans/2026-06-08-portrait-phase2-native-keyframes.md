@@ -231,11 +231,15 @@ def test_fal_fallback_portrait_args(tmp_path, monkeypatch):
 ```python
 def test_pollinations_url_portrait(monkeypatch):
     # exercise the Pollinations branch with aspect_ratio="9:16";
-    # assert the constructed URL contains "width=768&height=1344"
+    # stub the HTTP fetch — Pollinations uses urllib (NOT fal_client):
+    #   monkeypatch.setattr("urllib.request.urlopen", <fake returning bytes>)
+    #   (and urlretrieve if the branch downloads via that, per the provenance test)
+    # capture/inspect the constructed URL string; assert it contains
+    # "width=768&height=1344".
     ...
 ```
 
-> **Implementer note:** Match `test_phase_c_assembly_provenance.py`'s exact mocking of the fallback entry point (it already mocks `fal_client` + `urllib.request.urlretrieve`). Reuse that fixture/approach. The three FAL models are distinct `subscribe` calls (Kontext `fal-ai/flux-pro/kontext/max/multi`, Pro `fal-ai/flux-pro/v1.1-ultra`, schnell `fal-ai/flux/schnell`) — assert the right param on whichever the fallback selects, and add a case per model your driving reaches.
+> **Implementer note:** The fallback entry is `_fal_flux_fallback` (`phase_c_assembly.py:417`) — a **standalone, directly-callable** function. `test_phase_c_assembly_provenance.py` already calls it directly with a `stub_fal` fixture (`monkeypatch.setitem(sys.modules, "fal_client", fake)` + `dataclasses.replace(pca.settings, …)` + a `urlretrieve` stub). Reuse that exact fixture: pass `ctx=PipelineContext(global_settings={"aspect_ratio":"9:16"})` and drive each model — Kontext (`fal-ai/flux-pro/kontext/max/multi`, needs `character_image`), Pro (`fal-ai/flux-pro/v1.1-ultra`, `character_image=None`), schnell (`fal-ai/flux/schnell`, reached by a Pro-failure `side_effect`) — asserting `arguments["aspect_ratio"]=="9:16"` (Kontext/Pro) and `arguments["image_size"]=="portrait_16_9"` (schnell). Pollinations is the urllib branch (different stub, as above).
 
 - [ ] **Step 2: Run → FAIL** (`"16:9"` / `"landscape_16_9"` / `width=1344`).
 - [ ] **Step 3: Implement** the four edits above.
