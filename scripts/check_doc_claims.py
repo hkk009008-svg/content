@@ -460,6 +460,13 @@ def _apply_fixes(drifts: list[Drift]) -> list[Drift]:
     return unfixed
 
 
+def _split_advisories(drifts: list[Drift]) -> "tuple[list[Drift], list[Drift]]":
+    """Partition into (fatal, advisory) by kind. Advisories are exit-code-neutral."""
+    fatal = [d for d in drifts if d.kind not in ADVISORY_KINDS]
+    advisory = [d for d in drifts if d.kind in ADVISORY_KINDS]
+    return fatal, advisory
+
+
 # ---------------------------------------------------------------------------
 # Manifest auditing (pipeline_status.toml)
 # ---------------------------------------------------------------------------
@@ -938,35 +945,42 @@ def main(argv=None) -> int:
         return _report_sha_drifts(check_sha_refs(docs, repo_root), len(docs))
 
     drifts = run(docs, repo_root, fix=args.fix)
+    fatal, advisories = _split_advisories(drifts)
 
-    if not drifts:
+    if not fatal and not advisories:
         print(f"{'All' if not args.fix else 'Remaining'} anchors checked — no drift.")
         return 0
 
-    print(f"\n{'='*60}")
-    print(f"DOC-ANCHOR DRIFT REPORT  ({len(drifts)} issue(s))")
-    print(f"{'='*60}")
-    for d in drifts:
-        fix_hint = f"  → suggested: line {d.suggested_line}" if d.suggested_line else ""
-        print(
-            f"  [{d.kind}]  {d.doc_path}:{d.doc_line}"
-            f"  →  {d.target_file}:{d.target_line}"
-            + (f"  (symbol: `{d.symbol}`)" if d.symbol else "")
-            + fix_hint
-        )
-        print(f"    {d.message}")
+    if fatal:
+        print(f"\n{'='*60}")
+        print(f"DOC-ANCHOR DRIFT REPORT  ({len(fatal)} issue(s))")
+        print(f"{'='*60}")
+        for d in fatal:
+            fix_hint = f"  → suggested: line {d.suggested_line}" if d.suggested_line else ""
+            print(
+                f"  [{d.kind}]  {d.doc_path}:{d.doc_line}"
+                f"  →  {d.target_file}:{d.target_line}"
+                + (f"  (symbol: `{d.symbol}`)" if d.symbol else "")
+                + fix_hint
+            )
+            print(f"    {d.message}")
+        fixable_count = sum(1 for d in fatal if d.fixable)
+        if fixable_count:
+            print(f"\n{fixable_count} fixable def_drift(s). Run: "
+                  f".venv/bin/python scripts/check_doc_claims.py --fix")
+        unfixable = [d for d in fatal if not d.fixable]
+        if unfixable:
+            print(f"{len(unfixable)} drift(s) require manual intervention.")
 
-    fixable_count = sum(1 for d in drifts if d.fixable)
-    if fixable_count:
-        print(
-            f"\n{fixable_count} fixable def_drift(s). Run: "
-            f".venv/bin/python scripts/check_doc_claims.py --fix"
-        )
-    unfixable = [d for d in drifts if not d.fixable]
-    if unfixable:
-        print(f"{len(unfixable)} drift(s) require manual intervention.")
+    if advisories:
+        print(f"\n{'-'*60}")
+        print(f"ADVISORIES  ({len(advisories)} ambiguous anchor(s) — exit-neutral)")
+        print(f"{'-'*60}")
+        for d in advisories:
+            print(f"  [{d.kind}]  {d.doc_path}:{d.doc_line}  `{d.target_file}:{d.target_line}`")
+            print(f"    {d.message}")
 
-    return 1
+    return 1 if fatal else 0
 
 
 if __name__ == "__main__":

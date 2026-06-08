@@ -36,6 +36,7 @@ from check_doc_claims import (  # noqa: E402
     _INLINE_ANCHOR_RE,
     _build_basename_index,
     _resolve_inline_target,
+    _split_advisories,
 )
 
 
@@ -1104,3 +1105,23 @@ class TestInlineFix:
         md = _write_md(tmp_path, "doc.md", text)
         run([str(md)], tmp_path, fix=True)
         assert md.read_text() == text   # untouched (fenced -> never a drift -> never fixed)
+
+
+class TestAdvisoryExitNeutral:
+    def test_partition_helper(self):
+        from check_doc_claims import _split_advisories, Drift
+        fatal = Drift("d", 1, "a.py", 2, "def_drift", "f", 4, True, "m")
+        adv = Drift("d", 2, "controller.py", 1, "ambiguous_path", None, None, False, "m",
+                    style="inline", candidates=["controller.py", "domain/controller.py"])
+        f, a = _split_advisories([fatal, adv])
+        assert f == [fatal] and a == [adv]
+
+    def test_advisory_only_is_clean_exit(self, tmp_path, capsys, monkeypatch):
+        # An ambiguous-only doc must not be exit 1. Drive run() + the partition.
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "controller.py", "x = 1\n")
+        _commit_py(tmp_path, "domain/controller.py", "y = 2\n")
+        md = _write_md(tmp_path, "doc.md", "plain `controller.py:1`\n")
+        from check_doc_claims import _split_advisories
+        fatal, adv = _split_advisories(run([str(md)], tmp_path))
+        assert fatal == [] and len(adv) == 1 and adv[0].kind == "ambiguous_path"
