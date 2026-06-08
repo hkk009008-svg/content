@@ -95,6 +95,7 @@ from lip_sync import (
     generate_rife_interpolation,
     upscale_video_seedvr2,
 )
+from audio.dialogue import scene_characters as _scene_characters, shot_characters as _shot_characters
 
 
 def _directorial_iteration_enabled() -> bool:
@@ -233,28 +234,46 @@ def _resolve_f1b_audio(
     host,
     shot: dict,
     scene: dict,
-    characters: list,
+    all_characters: list,
     voice_mode: str,
 ) -> "Optional[str]":
     """Resolve the audio path to feed the F1b lipsync overlay pass.
 
     overlay mode:
       - Try _ensure_shot_audio first (per-shot TTS keyed on this shot's
-        dialogue line).  Falls back to _ensure_scene_audio when the shot
-        has no own line (None return).
+        in-frame characters via ``shot_characters`` helper).  Falls back to
+        ``_ensure_scene_audio`` (scene-scoped artifact, keyed by scene-level
+        characters via ``scene_characters`` helper) when the shot has no own
+        line (None return).
     native mode:
       - Skip _ensure_shot_audio entirely; use _ensure_scene_audio only
         (preserves legacy behaviour for the native escape hatch).
 
+    ``all_characters`` is the project-level character dict list.  Character
+    filtering is derived inside this function — callers must NOT pre-filter,
+    or the wrong subset reaches the scene-scoped artifact.  Scene audio is
+    keyed by SCENE-level chars (cinema_pipeline.py:738-741 mirror); shot
+    audio is keyed by in-frame chars with scene fallback.  Passing the
+    in-frame subset to a scene-scoped artifact re-keys dialogue_cache_key →
+    paid TTS regen + off-frame lines voiced by the wrong character
+    (9aed3ce bug class, ticket T-E).
+
     Returns the resolved audio path string, or None if both sources fail.
     """
     if voice_mode == "overlay":
-        audio = host._ensure_shot_audio(shot, scene, characters)
+        # Shot audio: keyed by in-frame characters (shot_characters helper).
+        shot_chars = _shot_characters(all_characters, shot, scene)
+        audio = host._ensure_shot_audio(shot, scene, shot_chars)
         if audio is None:
-            audio = host._ensure_scene_audio(scene, characters)
+            # Scene audio: SCENE-scoped artifact — must use scene-level chars,
+            # not the in-frame subset, or the cache key diverges → paid regen
+            # + wrong voice (9aed3ce bug class).
+            audio = host._ensure_scene_audio(scene, _scene_characters(all_characters, scene))
         return audio
     # native (or unknown) mode: scene-level TTS only.
-    return host._ensure_scene_audio(scene, characters)
+    # Scene audio is a SCENE-scoped artifact: key with scene-level characters,
+    # not in-frame subset (9aed3ce bug class, ticket T-E Bug site A).
+    return host._ensure_scene_audio(scene, _scene_characters(all_characters, scene))
 
 
 from cinema.lifecycle import LifecycleService
@@ -815,10 +834,7 @@ class ShotController:
         # Audio comes from the scene-level dialogue track (ensured upstream).
         # _ensure_scene_audio(scene, characters) — pass the full scene dict
         # AND the filtered character list, mirroring the caller at line 1491.
-        characters = [
-            c for c in (project.get("characters") or [])
-            if c.get("id") in (scene.get("characters_present") or [])
-        ]
+        characters = _scene_characters(project.get("characters") or [], scene)
         audio_path = ""
         try:
             audio_path = self._host._ensure_scene_audio(scene, characters) or ""
@@ -1370,13 +1386,8 @@ class ShotController:
         _f1b_audio: Optional[str] = None
         _veo_duration: str = "8s"  # default: unchanged for non-dialogue / native
         if has_dialogue and _voice_mode == "overlay":
-            chars_for_duration = shot.get("characters_in_frame", []) or scene.get("characters_present", [])
-            chars_dicts_for_duration = [
-                c for c in self.project.get("characters", [])
-                if c.get("id") in chars_for_duration
-            ]
             _f1b_audio = _resolve_f1b_audio(
-                self._host, shot, scene, chars_dicts_for_duration, _voice_mode
+                self._host, shot, scene, self.project.get("characters", []), _voice_mode
             )
             if _f1b_audio:
                 try:
@@ -1444,13 +1455,10 @@ class ShotController:
         if has_dialogue and not take["metadata"].get("audio_embedded"):
             try:
                 from lip_sync import generate_lip_sync_video, validate_lipsync_quality
+                # chars_for_sync drives the ref/lip target — in-frame chars with
+                # scene fallback (only the visible character's face is synced).
                 chars_for_sync = shot.get("characters_in_frame", []) or scene.get("characters_present", [])
-                # Resolve the character list to full character dicts for _ensure_scene_audio.
                 project_for_sync = self.project
-                chars_dicts = [
-                    c for c in project_for_sync.get("characters", [])
-                    if c.get("id") in chars_for_sync
-                ]
                 # Task 6: reuse the per-shot audio resolved before generate_ai_video
                 # (avoids a redundant _ensure_scene_audio call and guarantees the
                 # overlay uses the same sized audio the Veo clip was sized for).
@@ -1459,7 +1467,14 @@ class ShotController:
                 if _f1b_audio is not None:
                     audio_path_for_sync = _f1b_audio
                 else:
-                    audio_path_for_sync = self._host._ensure_scene_audio(scene, chars_dicts)
+                    # Scene audio is a SCENE-scoped artifact: key with scene-level
+                    # characters (scene_characters helper), not the in-frame subset —
+                    # or the cache key diverges from the pipeline writer → paid TTS
+                    # regen + off-frame lines voiced by the wrong character
+                    # (9aed3ce bug class, ticket T-E Bug site B).
+                    audio_path_for_sync = self._host._ensure_scene_audio(
+                        scene, _scene_characters(project_for_sync.get("characters", []), scene)
+                    )
                 primary_ref_for_sync = (
                     get_reference_image(project_for_sync, chars_for_sync[0])
                     if chars_for_sync else None
@@ -2054,9 +2069,11 @@ class ShotController:
                 # characters exactly like the pipeline writer (cinema_pipeline.py
                 # _build_scene_packages), or the dialogue_cache_key diverges →
                 # paid TTS regen + off-frame lines voiced by the wrong character
-                # (item-B quality-review CRITICAL). Only the ref follows the frame.
-                scene_chars = scene.get("characters_present", [])
-                audio_path = self._host._ensure_scene_audio(scene, [c for c in self.project["characters"] if c["id"] in scene_chars])
+                # (item-B quality-review CRITICAL, 9aed3ce). Only the ref follows
+                # the frame.
+                audio_path = self._host._ensure_scene_audio(
+                    scene, _scene_characters(self.project.get("characters", []), scene)
+                )
                 if video_path and primary_ref and audio_path:
                     _settings = self.project.get("global_settings", {})
                     _lipsync_cascade: dict = {}

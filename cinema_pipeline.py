@@ -19,7 +19,7 @@ from phase_c_ffmpeg import two_pass_loudnorm, probe_final_media
 from scene_decomposer import decompose_scene, update_scene_shots, competitive_decompose_scene
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
-from audio.dialogue import dialogue_cache_key, generate_dialogue_voiceover
+from audio.dialogue import dialogue_cache_key, generate_dialogue_voiceover, scene_characters, shot_characters
 from audio.music import generate_fal_bgm
 from cinema.auto_approve import record_director_review_on_shots
 from cinema.context import PipelineContext
@@ -735,10 +735,7 @@ class CinemaPipeline:
                     all_embedded_count += 1
 
             self.scene_clips[scene_id] = clips
-            characters = [
-                character for character in active_project.get("characters", [])
-                if character.get("id") in scene.get("characters_present", [])
-            ]
+            characters = scene_characters(active_project.get("characters", []), scene)
             # Suppress standalone TTS only when EVERY approved shot is embedded.
             # Mixed-embedded scenes: include TTS to avoid silent non-embedded shots.
             all_shots_embedded = (
@@ -1007,10 +1004,7 @@ class CinemaPipeline:
             self.current_scene_id = scene_id
 
             # --- 2a. Scene decomposition ---
-            chars_in_scene = [
-                c for c in project["characters"]
-                if c["id"] in scene.get("characters_present", [])
-            ]
+            chars_in_scene = scene_characters(project.get("characters", []), scene)
             location = next(
                 (l for l in project["locations"] if l["id"] == scene.get("location_id")),
                 {"description": "an unspecified cinematic location", "prompt_fragment": ""},

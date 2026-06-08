@@ -58,6 +58,8 @@ import logging
 import os
 from typing import Optional
 
+from audio.dialogue import scene_characters as _scene_chars, shot_characters as _shot_chars
+
 # TTS pricing: $0.01 per line — mirrors cost_tracker.py:66 ("ELEVENLABS": 0.01).
 # Imported lazily below in estimate_reassembly_cost rather than at module level
 # to avoid circular-import risk; this constant is the canonical reference.
@@ -585,10 +587,7 @@ def estimate_reassembly_cost(project: dict) -> dict:
         # filter project characters by characters_present (per-scene subset).
         # Using the project-wide list here would produce a different cache key
         # from the writer and cause false "not cached" counts (T-D fix).
-        scene_characters = [
-            character for character in all_characters
-            if character.get("id") in scene.get("characters_present", [])
-        ]
+        scene_characters = _scene_chars(all_characters, scene)
 
         # Scene-level dialogue TTS estimate (mirrors _ensure_scene_audio logic).
         scene_dialogue = scene.get("dialogue", "")
@@ -653,11 +652,7 @@ def estimate_reassembly_cost(project: dict) -> dict:
                     # Mirror cinema/shots/controller.py:1373-1380: shot-level
                     # characters filtered by characters_in_frame, falling back
                     # to the scene's characters_present set (Rule #13 audit).
-                    chars_in_frame = shot.get("characters_in_frame", []) or scene.get("characters_present", [])
-                    shot_characters = [
-                        c for c in all_characters
-                        if c.get("id") in chars_in_frame
-                    ]
+                    shot_characters = _shot_chars(all_characters, shot, scene)
                     key = _cache_key(shot_dialogue_lines, shot_characters, lang)
                     cached_path = os.path.join(_temp_dir, f"audio_{shot_id}_{key}.mp3")
                     if not os.path.exists(cached_path):

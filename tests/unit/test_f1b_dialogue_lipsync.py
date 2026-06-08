@@ -1033,3 +1033,118 @@ class TestAssemblerOverlayInClipDedup:
             "Scene with no audio flags must include TTS; "
             f"got {packages[0]['audio']!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# T-E regression: scene/shot char-filter helpers — bug site A + B
+# ---------------------------------------------------------------------------
+
+
+class TestResolveF1bAudioSceneCharsBugA:
+    """T-E Bug site A regression: _resolve_f1b_audio must receive scene-level
+    characters (scene["characters_present"]-filtered) for _ensure_scene_audio,
+    NOT the in-frame subset passed by the caller.
+
+    Canonical pattern: 9aed3ce (item-B CRITICAL — same class of bug).
+
+    The fix moves character-list derivation INSIDE _resolve_f1b_audio via the
+    new scene_characters / shot_characters helpers, and the caller passes
+    all_characters (project["characters"]) instead of pre-filtering.
+    """
+
+    def _make_host(self, shot_audio=None, scene_audio=None):
+        host = MagicMock()
+        host._ensure_shot_audio.return_value = shot_audio
+        host._ensure_scene_audio.return_value = scene_audio
+        return host
+
+    def test_overlay_scene_fallback_receives_scene_chars_not_in_frame(self, tmp_path):
+        """
+        Bug site A — overlay path, no per-shot line (_ensure_shot_audio returns None):
+        _ensure_scene_audio MUST be called with scene-filtered characters
+        (characters_present), NOT the in-frame subset.
+
+        Without fix: caller passes chars_dicts_for_duration (in-frame filtered)
+        and _resolve_f1b_audio forwards it → wrong key.
+
+        With fix: _resolve_f1b_audio derives scene_characters from all_characters
+        internally → correct key, mirrors cinema_pipeline.py:738-741.
+        """
+        from cinema.shots.controller import _resolve_f1b_audio
+
+        alice = {"id": "char_alice", "name": "Alice", "voice_id": "va"}
+        bob = {"id": "char_bob", "name": "Bob", "voice_id": "vb"}
+        all_characters = [alice, bob]
+
+        shot = {"id": "s1", "characters_in_frame": ["char_bob"]}  # Bob only
+        scene = {"id": "sc1", "characters_present": ["char_alice", "char_bob"]}
+        scene_audio = str(tmp_path / "scene.mp3")
+        host = self._make_host(shot_audio=None, scene_audio=scene_audio)
+
+        result = _resolve_f1b_audio(
+            host, shot, scene, all_characters, voice_mode="overlay"
+        )
+
+        assert result == scene_audio
+        # _ensure_scene_audio must receive BOTH chars (scene-level), not only Bob
+        _scene_arg, chars_arg = host._ensure_scene_audio.call_args.args[:2]
+        char_ids = sorted(c["id"] for c in chars_arg)
+        assert char_ids == ["char_alice", "char_bob"], (
+            f"scene-audio must be keyed by scene-level chars; got {char_ids!r}"
+        )
+
+    def test_overlay_shot_audio_receives_in_frame_chars(self, tmp_path):
+        """
+        Bug site A — overlay path, shot has audio: _ensure_shot_audio MUST be
+        called with IN-FRAME characters (shot_characters helper).
+        """
+        from cinema.shots.controller import _resolve_f1b_audio
+
+        alice = {"id": "char_alice", "name": "Alice", "voice_id": "va"}
+        bob = {"id": "char_bob", "name": "Bob", "voice_id": "vb"}
+        all_characters = [alice, bob]
+
+        shot = {"id": "s1", "dialogue": "Hi.", "characters_in_frame": ["char_bob"]}
+        scene = {"id": "sc1", "characters_present": ["char_alice", "char_bob"]}
+        shot_audio = str(tmp_path / "shot.mp3")
+        host = self._make_host(shot_audio=shot_audio)
+
+        result = _resolve_f1b_audio(
+            host, shot, scene, all_characters, voice_mode="overlay"
+        )
+
+        assert result == shot_audio
+        # _ensure_shot_audio must receive only in-frame chars
+        _s, _sc, chars_arg = host._ensure_shot_audio.call_args.args[:3]
+        char_ids = sorted(c["id"] for c in chars_arg)
+        assert char_ids == ["char_bob"], (
+            f"shot-audio must be keyed by in-frame chars; got {char_ids!r}"
+        )
+
+    def test_native_mode_scene_audio_receives_scene_chars_not_in_frame(self, tmp_path):
+        """
+        Bug site A — native path: _ensure_scene_audio MUST receive scene-filtered
+        characters. Before fix, caller's in-frame list would be forwarded here.
+        """
+        from cinema.shots.controller import _resolve_f1b_audio
+
+        alice = {"id": "char_alice", "name": "Alice", "voice_id": "va"}
+        bob = {"id": "char_bob", "name": "Bob", "voice_id": "vb"}
+        all_characters = [alice, bob]
+
+        shot = {"id": "s1", "characters_in_frame": ["char_bob"]}
+        scene = {"id": "sc1", "characters_present": ["char_alice", "char_bob"]}
+        scene_audio = str(tmp_path / "scene.mp3")
+        host = self._make_host(shot_audio=None, scene_audio=scene_audio)
+
+        result = _resolve_f1b_audio(
+            host, shot, scene, all_characters, voice_mode="native"
+        )
+
+        assert result == scene_audio
+        host._ensure_shot_audio.assert_not_called()
+        _scene_arg, chars_arg = host._ensure_scene_audio.call_args.args[:2]
+        char_ids = sorted(c["id"] for c in chars_arg)
+        assert char_ids == ["char_alice", "char_bob"], (
+            f"native mode: scene-audio must use scene-level chars; got {char_ids!r}"
+        )

@@ -42,6 +42,40 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
+# Character-filter helpers (ticket T-E)
+# ---------------------------------------------------------------------------
+
+def scene_characters(all_characters: list, scene: dict) -> list:
+    """Return the subset of all_characters whose id appears in scene["characters_present"].
+
+    Scene audio is a SCENE-scoped artifact: ``dialogue_cache_key`` hashes the
+    (id, voice_id) pairs of the characters list, so scene audio MUST be keyed
+    with the scene-level character subset — exactly matching the pipeline writer
+    at ``cinema_pipeline.py:738-741``.  Passing a narrower in-frame subset
+    re-keys the artifact → paid TTS regen + off-frame lines voiced via the
+    wrong character (9aed3ce bug class).
+
+    ``or []`` guards are intentional: strictly more robust than
+    ``.get(key, [])`` for the ``None``-valued case.
+    """
+    ids = (scene or {}).get("characters_present") or []
+    return [c for c in (all_characters or []) if c.get("id") in ids]
+
+
+def shot_characters(all_characters: list, shot: dict, scene: dict) -> list:
+    """Return the subset of all_characters visible in this shot.
+
+    Shot audio is a SHOT-scoped artifact keyed by in-frame characters
+    (``shot["characters_in_frame"]``), falling back to the scene's
+    ``characters_present`` when the shot does not carry an in-frame list.
+
+    ``or []`` guards: same rationale as ``scene_characters`` above.
+    """
+    ids = (shot or {}).get("characters_in_frame") or (scene or {}).get("characters_present") or []
+    return [c for c in (all_characters or []) if c.get("id") in ids]
+
+
+# ---------------------------------------------------------------------------
 # Content-hash key helper (ticket T-B)
 # ---------------------------------------------------------------------------
 

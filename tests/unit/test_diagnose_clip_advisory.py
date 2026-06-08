@@ -823,3 +823,122 @@ class TestApplyCorrectionLipSyncSceneAudio:
             "scene-audio char list must mirror the pipeline writer "
             "(scene-filtered), not the in-frame subset"
         )
+
+
+class TestNativeModeLipsyncSceneAudioBugB:
+    """T-E Bug site B regression: in the lipsync F1b fallback path
+    (controller.py:1462, reached when _f1b_audio is None — native-mode dialogue),
+    _ensure_scene_audio must receive SCENE-level characters (scene_characters helper),
+    NOT the in-frame subset built from chars_dicts (controller.py:1450-1452).
+
+    Canonical pattern: 9aed3ce (same bug class — scene-scoped artifact keyed
+    by in-frame chars → paid TTS regen + off-frame lines via wrong character).
+
+    The fix: replace the chars_dicts argument at :1462 with scene_characters
+    helper output; delete the single-purpose chars_dicts local.
+
+    Test approach: call the scene_characters helper directly to confirm the
+    contract, and test the _resolve_f1b_audio native path with the new
+    all_characters signature — both bugs share the same helper contract.
+    """
+
+    def test_scene_characters_helper_filters_by_characters_present(self):
+        """
+        scene_characters(all_characters, scene) must return characters whose id
+        is in scene["characters_present"], ignoring in-frame characters.
+        """
+        from audio.dialogue import scene_characters
+
+        alice = {"id": "char_alice", "name": "Alice"}
+        bob = {"id": "char_bob", "name": "Bob"}
+        carol = {"id": "char_carol", "name": "Carol"}
+        all_chars = [alice, bob, carol]
+
+        scene = {"id": "sc1", "characters_present": ["char_alice", "char_bob"]}
+        result = scene_characters(all_chars, scene)
+
+        assert [c["id"] for c in result] == ["char_alice", "char_bob"], (
+            "scene_characters must filter by characters_present, not in_frame"
+        )
+
+    def test_scene_characters_helper_none_tolerance(self):
+        """scene_characters must not raise on None all_characters or None present list."""
+        from audio.dialogue import scene_characters
+
+        assert scene_characters(None, {"characters_present": ["x"]}) == []
+        assert scene_characters([], None) == []
+        assert scene_characters(None, {}) == []
+
+    def test_shot_characters_helper_uses_in_frame_first(self):
+        """
+        shot_characters(all_characters, shot, scene) must return characters whose
+        id is in shot["characters_in_frame"], falling back to scene["characters_present"]
+        when characters_in_frame is absent or empty.
+        """
+        from audio.dialogue import shot_characters
+
+        alice = {"id": "char_alice", "name": "Alice"}
+        bob = {"id": "char_bob", "name": "Bob"}
+        all_chars = [alice, bob]
+
+        shot = {"id": "s1", "characters_in_frame": ["char_bob"]}
+        scene = {"id": "sc1", "characters_present": ["char_alice", "char_bob"]}
+
+        result = shot_characters(all_chars, shot, scene)
+        assert [c["id"] for c in result] == ["char_bob"], (
+            "shot_characters must use characters_in_frame when present"
+        )
+
+    def test_shot_characters_helper_falls_back_to_scene_present(self):
+        """When characters_in_frame is absent, fall back to scene's characters_present."""
+        from audio.dialogue import shot_characters
+
+        alice = {"id": "char_alice", "name": "Alice"}
+        bob = {"id": "char_bob", "name": "Bob"}
+        all_chars = [alice, bob]
+
+        shot = {"id": "s1"}  # no characters_in_frame
+        scene = {"id": "sc1", "characters_present": ["char_alice", "char_bob"]}
+
+        result = shot_characters(all_chars, shot, scene)
+        assert sorted(c["id"] for c in result) == ["char_alice", "char_bob"], (
+            "shot_characters must fall back to scene characters_present when "
+            "characters_in_frame absent"
+        )
+
+    def test_resolve_f1b_native_passes_scene_chars_via_helper(self, tmp_path):
+        """
+        Bug site B (proxy): _resolve_f1b_audio in native mode must route
+        _ensure_scene_audio through the scene_characters helper (all_characters →
+        scene filter), so the scene-audio cache key mirrors cinema_pipeline.py:738-741.
+
+        This regression is the native-mode sibling of the 9aed3ce CRITICAL:
+        same scene-scoped artifact, same wrong-chars-passed failure mode.
+        With the fix, all callers pass all_characters; helpers derive the
+        right subset internally.
+        """
+        from cinema.shots.controller import _resolve_f1b_audio
+
+        alice = {"id": "char_alice", "name": "Alice", "voice_id": "va"}
+        bob = {"id": "char_bob", "name": "Bob", "voice_id": "vb"}
+        all_characters = [alice, bob]
+
+        shot = {"id": "s1", "characters_in_frame": ["char_bob"]}  # Bob in-frame
+        scene = {"id": "sc1", "characters_present": ["char_alice", "char_bob"]}
+        scene_audio = str(tmp_path / "scene.mp3")
+
+        host = MagicMock()
+        host._ensure_shot_audio.return_value = None
+        host._ensure_scene_audio.return_value = scene_audio
+
+        result = _resolve_f1b_audio(
+            host, shot, scene, all_characters, voice_mode="native"
+        )
+
+        assert result == scene_audio
+        _scene_arg, chars_arg = host._ensure_scene_audio.call_args.args[:2]
+        char_ids = sorted(c["id"] for c in chars_arg)
+        assert char_ids == ["char_alice", "char_bob"], (
+            f"Bug B proxy: native _ensure_scene_audio must receive scene-level chars; "
+            f"got {char_ids!r} — in-frame subset diverges cache key (9aed3ce bug class)"
+        )
