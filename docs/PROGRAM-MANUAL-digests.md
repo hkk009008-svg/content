@@ -2088,13 +2088,13 @@ Transforms a keyframe still image into a cinematic video clip by classifying the
 
 ### Key Functions & Classes
 
-#### `generate_ai_video` — `phase_c_ffmpeg.py:43`
+#### `generate_ai_video` — `phase_c_ffmpeg.py:53`
 Central dispatch and cascade. Params: `image_path` (start frame), `camera_motion` (string), `target_api` (engine key), `output_mp4`, `pacing`, `character_id`, `attempted_apis` (dedup list), `multi_angle_refs` (list of paths), `_cascade_retries`, `negative_prompt`, `shot_type`, `video_fallbacks` (override list), `driving_video_path` (performance-capture clip), `has_dialogue` (bool), `ctx` (PipelineContext), `_cascade_out` (dict written by `_record_video_cascade`). Returns `output_mp4 str` on success or `None` on total cascade failure. Side-effects: prints engine routing logs; modifies `_cascade_out["cascade_metadata"]` on success; may update module-global `_VEO_QUOTA_EXHAUSTED_UNTIL`.
 
-#### `_record_video_cascade` — `phase_c_ffmpeg.py:91` (inner)
+#### `_record_video_cascade` — `phase_c_ffmpeg.py:107` (inner)
 Writes `{"engine": winning_engine, "attempts": [...]}` into `_cascade_out["cascade_metadata"]`. Called immediately before every successful engine `return`. Not called on fallback. Enables the caller (`cinema/shots/controller.py:1205`) to persist provenance to the take record.
 
-#### `try_next_api` — `phase_c_ffmpeg.py:122` (inner closure)
+#### `try_next_api` — `phase_c_ffmpeg.py:138` (inner closure)
 Iterates `video_fallbacks` (or the default ordered list) filtering already-attempted engines and optionally filtering by `api_engines.enabled` from `ctx`. On total exhaustion, sleeps 30 s then retries the full cascade up to `MAX_CASCADE_RETRIES` (default 1, overridable via `cascade_retry_limit` project setting). Returns `None` after max retries.
 
 #### `_veo_quota_blocked` / `_VEO_QUOTA_EXHAUSTED_UNTIL` — `phase_c_ffmpeg.py:22 / 18`
@@ -2141,8 +2141,8 @@ Dict mapping shot type → primary video API + fallback list + ComfyUI render pa
 - `_clamp_image_to_video_duration` (`veo_native.py:38`): valid values are `(4, 6, 8)`. Ties round UP (5→6, 7→8). Any other value is snapped to nearest. 5 s is rejected server-side with INVALID_ARGUMENT.
 - `_build_generate_videos_config` (`veo_native.py:50`): builds `types.GenerateVideosConfig`. Wraps each reference_image in `VideoGenerationReferenceImage(reference_type=ASSET)`.
 
-#### `SoraNativeAPI` — `sora_native.py:20`
-- `generate_video` (`sora_native.py:42`): valid durations `[4, 8, 12, 16, 20]` (invalid defaults to 4); resizes image to 1280×720 via PIL before upload; uses `client.videos.create_and_poll`; downloads via `client.videos.download_content(video.id)` iterating `response.iter_bytes()`.
+#### `SoraNativeAPI` — `sora_native.py:29`
+- `generate_video` (`sora_native.py:56`): valid durations `[4, 8, 12, 16, 20]` (invalid defaults to 4); resizes image to 1280×720 via PIL before upload; uses `client.videos.create_and_poll`; downloads via `client.videos.download_content(video.id)` iterating `response.iter_bytes()`.
 - Driving-video conditioning (`sora_native.py:77–114`): when `driving_video_path` exists, Sora uses it as `input_reference` (video conditioning) instead of the resized still. Still-frame resize always runs as safety net. On any access error, falls through to still-image path.
 - Shutdown warning: OpenAI announced Sora will shut down September 2026 (`sora_native.py:6`).
 
@@ -2294,7 +2294,7 @@ Video-modality entries relevant to this subsystem:
 
 **Sora shutdown planned September 2026** (`sora_native.py:6`): documented as a comment; no automated fallback policy currently in code.
 
-**`FAL_SVD` key renamed** from `"COMFY_UI"` (`phase_c_ffmpeg.py:600–602`): old shot records using `target_api: "COMFY_UI"` will fall through to `try_next_api()` (unknown-key branch at `phase_c_ffmpeg.py:765`).
+**`FAL_SVD` key renamed** from `"COMFY_UI"` (`phase_c_ffmpeg.py:600–602`): old shot records using `target_api: "COMFY_UI"` will fall through to `try_next_api()` (unknown-key branch at `phase_c_ffmpeg.py:138`).
 
 **Kling `poll_task` timeout default mismatch**: `generate_video` kwarg reads `timeout = kwargs.pop("timeout", 180)` (`kling_native.py:288`) but the caller in `phase_c_ffmpeg.py:202` does not pass `timeout` — so Kling native polls for 180 s max (3 min). The storyboard path uses 600 s. The API-level default in `poll_task` is also 600 s, but the `kwargs.pop` in `generate_video` shadows it.
 
@@ -3122,37 +3122,37 @@ The audio side generates dialogue TTS (ElevenLabs multi-turn or per-line; Cartes
 
 #### phase_c_ffmpeg.py
 
-**`generate_ai_video`** (`phase_c_ffmpeg.py:43`)
+**`generate_ai_video`** (`phase_c_ffmpeg.py:53`)
 Routes an image → video to one of 9+ AI video engines. Params: `image_path`, `camera_motion`, `target_api`, `output_mp4`, `pacing`, `character_id`, `attempted_apis` (dedup list), `multi_angle_refs` (up to 6 character reference images), `_cascade_retries`, `negative_prompt` (shot-type-aware auto-built if None), `shot_type`, `video_fallbacks` (custom fallback order list), `driving_video_path` (performance-capture video for Veo/Sora/Runway), `has_dialogue` (triggers native audio on VEO_NATIVE/landscape), `ctx` (PipelineContext for api_engines filter + cascade_retry_limit), `_cascade_out` (mutable dict; written with `cascade_metadata` on success). Returns: `output_mp4` path or `None`. Internally defines `try_next_api()` which reads `ctx.api_engines` to filter cascade; `_record_video_cascade()` writes the winning engine name + attempt list.
 
-**`stitch_modules`** (`phase_c_ffmpeg.py:769`)
+**`stitch_modules`** (`phase_c_ffmpeg.py:832`)
 FFmpeg concat demuxer on a list of normalized MP4 paths → single `final_output` MP4 using `-c copy`. No re-encode. Raises `subprocess.CalledProcessError` on failure.
 
-**`split_video_into_segments`** (`phase_c_ffmpeg.py:795`)
+**`split_video_into_segments`** (`phase_c_ffmpeg.py:858`)
 Splits a combined storyboard MP4 into per-segment clips using `-ss`/`-t` (stream-copy). Last segment runs to EOF to absorb float accumulation drift. Returns list of absolute paths. Used after Kling storyboard generation to recover per-shot clips.
 
-**`assess_motion_quality`** (`phase_c_ffmpeg.py:894`)
+**`assess_motion_quality`** (`phase_c_ffmpeg.py:957`)
 OpenCV Farneback optical-flow analysis on N sampled frames. Returns `{smoothness_score, artifact_frames, frozen_ratio, recommendation: "accept"|"interpolate"|"regenerate"}`. Thresholds: `frozen_ratio > 0.5` → regenerate; `smoothness < 0.4` → interpolate; `artifact_frames > 30% of pairs` → regenerate.
 
-**`COLOR_GRADE_PRESETS`** (`phase_c_ffmpeg.py:1006`)
+**`COLOR_GRADE_PRESETS`** (`phase_c_ffmpeg.py:1069`)
 Dict of 8 named FFmpeg eq/curves filter chains: `warm_cinema`, `cool_noir`, `vibrant`, `desaturated`, `golden_hour`, `moonlight`, `high_contrast`, `pastel`.
 
-**`apply_color_grade`** (`phase_c_ffmpeg.py:1018`)
+**`apply_color_grade`** (`phase_c_ffmpeg.py:1081`)
 Applies a preset filter chain or custom `.cube`/`.3dl` LUT via FFmpeg `lut3d`. Params: `video_path`, `output_path`, `preset` (default `warm_cinema`), `lut_path` (optional). Re-encodes with `libx264 -preset fast`. Returns `output_path` or `None`.
 
-**`adjust_speed`** (`phase_c_ffmpeg.py:1057`)
+**`adjust_speed`** (`phase_c_ffmpeg.py:1120`)
 Speed multiplier via `setpts` (video) + chained `atempo` (audio; handles values outside 0.5–2.0 by chaining). Params: `video_path`, `output_path`, `factor` (0.5 = half-speed/slow-mo, 2.0 = double).
 
-**`two_pass_loudnorm`** (`phase_c_ffmpeg.py:1103`)
+**`two_pass_loudnorm`** (`phase_c_ffmpeg.py:1217`)
 EBU R128 two-pass loudness normalization. Pass 1: measure; parses `loudnorm` JSON from stderr. Pass 2: normalize with measured values (`linear=true`). Defaults: -14 LUFS / 11 LU / -1.5 dBTP (YouTube/Netflix). Video stream copied; only audio re-encoded to AAC 192k. Returns `bool`; caller replaces input file on `True`.
 
-**`_probe_duration`** (`phase_c_ffmpeg.py:1202`) / **`_has_audio_stream`** (`phase_c_ffmpeg.py:1212`)
+**`_probe_duration`** (`phase_c_ffmpeg.py:1389`) / **`_has_audio_stream`** (`phase_c_ffmpeg.py:1399`)
 ffprobe helpers. `_has_audio_stream` detects whether a clip has any audio stream — used by xfade to decide the acrossfade path.
 
-**`_build_xfade_filtergraph`** (`phase_c_ffmpeg.py:1232`)
+**`_build_xfade_filtergraph`** (`phase_c_ffmpeg.py:1419`)
 Builds a chained `xfade`+`acrossfade` filtergraph string. Three audio-presence cases: (a) all inputs have audio → raw acrossfade; (b) no inputs have audio → video-only, `alab=None`; (c) mixed → `anullsrc`-pad silent legs, normalize every leg to `48kHz stereo fltp` before acrossfade (Lane V #25 M1 fix). Returns `(filter_complex, video_label, audio_label)`.
 
-**`xfade_concat`** (`phase_c_ffmpeg.py:1301`)
+**`xfade_concat`** (`phase_c_ffmpeg.py:1488`)
 Public entry point: probes durations, clamps transition to `0.4 * min(durations)`, calls `_build_xfade_filtergraph`, runs single FFmpeg re-encode. Re-encodes to `libx264 -crf 20` + `aac 192k`. Raises on FFmpeg failure (caller falls back to hard-cut concat). Lane V #24 F1: was erroring silently on silent-video inputs; fixed by `_has_audio_stream` guard.
 
 #### phase_c_vision.py
