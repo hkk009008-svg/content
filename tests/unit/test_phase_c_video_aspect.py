@@ -271,8 +271,12 @@ class TestRunwayGen4Model:
         sys.modules.pop("phase_c_ffmpeg", None)
 
         try:
+            # No os.path.exists patch: the RUNWAY_GEN4 branch (phase_c_ffmpeg ~:345-394)
+            # never calls os.path.exists — it only reads open(image_path,"rb"), satisfied
+            # by the real temp file above. A global os.path.exists patch would be an
+            # unscoped footgun (and can't be narrowed to phase_c_ffmpeg.* here, since the
+            # module is imported inside this with-block).
             with patch.dict("sys.modules", {"runwayml": mock_runway_module}), \
-                 patch("os.path.exists", return_value=True), \
                  patch("urllib.request.urlretrieve"), \
                  patch("time.sleep"):
                 import phase_c_ffmpeg
@@ -283,7 +287,7 @@ class TestRunwayGen4Model:
                     target_api="RUNWAY_GEN4",
                     output_mp4="/tmp/runway_out.mp4",
                     shot_type="portrait",
-                    ctx=_ctx("16:9"),
+                    ctx=_ctx("16:9"),  # aspect irrelevant here — Runway ratio threading is T5b
                 )
         finally:
             sys.modules.pop("phase_c_ffmpeg", None)
@@ -293,6 +297,7 @@ class TestRunwayGen4Model:
 
     def test_runway_gen4_uses_valid_sdk_model(self):
         """RUNWAY_GEN4 must call create(..., model=<valid-sdk-enum-value>)."""
+        # Source: runwayml v4.14.0 — types/image_to_video_create_params.py model Literal union
         _VALID_RUNWAY_MODELS = {"gen4.5", "gen4_turbo", "veo3.1", "veo3.1_fast",
                                 "veo3", "gen3a_turbo"}
         mock_client = self._run_runway_gen4()
