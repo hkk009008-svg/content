@@ -1307,7 +1307,7 @@ All under `project.global_settings` (set via UI or API; read via `project["globa
 | `master_seed` | random 6-digit | Reproducibility anchor | various |
 | `budget_limit_usd` | `0` (unlimited) | Spend cap; `0` = no cap | `cinema/core.py:99`, `auto_approve.py:543` |
 | `identity_strictness` | `0.60` | Face-similarity threshold for PuLID/identity gates | `face_validator_gate.py:185`, `shots/controller.py:504`, `quality_max.py:767` |
-| `creative_llm` | `"auto"` | LLM model for direction/writing (e.g., `"claude-opus"`) | `llm/chief_director.py:103`, `llm/director.py:242` |
+| `creative_llm` | `"auto"` | LLM model for direction/writing (e.g., `"claude-opus"`) | `llm/chief_director.py:114`, `llm/director.py:242` |
 | `quality_judge_llm` | `"auto"` | LLM for quality evaluation | `llm/ensemble.py:126` |
 | `competitive_generation` | `True` | Enables multi-take competition per shot | pipeline |
 | `adaptive_pulid` | `True` | Adapts PuLID weight per shot type | `identity/__init__.py` |
@@ -1468,19 +1468,19 @@ Stores project dict, initializes `diagnostic_log: List[Dict]`, calls `_init_clie
 **`ChiefDirector._init_client()`** — `chief_director.py:57`
 Tries Anthropic first (`settings.anthropic_api_key`), falls back to OpenAI. Sets `self.provider` to `"anthropic"` / `"openai"` / `None`. Returns client or None.
 
-**`ChiefDirector._call_llm(system_prompt, user_prompt)`** — `chief_director.py:82`
+**`ChiefDirector._call_llm(system_prompt, user_prompt)`** — `chief_director.py:85`
 Dispatches to Anthropic (`claude-sonnet-4-6` default, `max_tokens=4096`, uses `build_anthropic_system_blocks` for prompt caching) or OpenAI (`gpt-4o` default, `response_format={"type": "json_object"}`). Honors `project.global_settings.creative_llm` override but only if the model prefix matches the active provider (e.g., `claude-*` for Anthropic, `gpt-*`/`o1-*`/`o3-*`/`o4-*` for OpenAI); cross-family override is silently ignored with a log line.
 
-**`ChiefDirector.SYSTEM_PROMPT`** — `chief_director.py:147`
+**`ChiefDirector.SYSTEM_PROMPT`** — `chief_director.py:217`
 Embedded class-level string constant. Contains HC1–HC8 hard constraints, the output schema (`APPROVED`/`REJECTED`/`MODIFIED` + violations + modifications + quality_score), tripwires T1–T9, quality upgrade rules, and the mutation strategy guide. Appends `PIPELINE_CONTEXT` (loaded from `config/prompts/pipeline_context.md`).
 
-**`ChiefDirector.validate_shot_prompts(shots, scene)`** — `chief_director.py:226`
+**`ChiefDirector.validate_shot_prompts(shots, scene)`** — `chief_director.py:296`
 Primary pre-generation gate. Serializes shots to JSON, calls `_call_llm`. Implements a ≤1-retry loop for `json.JSONDecodeError` (first attempt fails → sends correction appended to user prompt → retries; second failure falls through to parse-fallback). Falls back to `{"decision": "APPROVED", "violations": [], "shots": shots}` on None client or parse failure (fail-safe-for-throughput). Applies in-place modifications to `shots[idx][field]` when `decision == "MODIFIED"`. Appends to `self.diagnostic_log`. Returns `{"decision", "violations", "shots"}`.
 
-**`ChiefDirector.evaluate_generation_quality(image_path, reference_path, identity_result, identity_score, shot_prompt, scene_context, coherence_result)`** — `chief_director.py:318`
+**`ChiefDirector.evaluate_generation_quality(image_path, reference_path, identity_result, identity_score, shot_prompt, scene_context, coherence_result)`** — `chief_director.py:406`
 Post-generation evaluator. Implements a 2×2 decision matrix: (identity_passed × coherent) → ACCEPT; (fail × coherent) → identity_only mutation; (pass × incoherent) → style_only mutation; (fail × incoherent) → aggressive mutation. Calls a separate LLM (diagnosis system prompt, different from SYSTEM_PROMPT). Looks up `primary_reason_value` from the first failing character's `failure_reason` and appends the phrase from `get_negative_prompt_for_failure()` to the LLM's `prompt_mutation`. Appends to `diagnostic_log`. Returns `{"decision", "diagnosis", "prompt_mutation", "mutation_level", "mutation_focus"}`. **Note: no call sites found in the current codebase outside this file** — the method exists but is not wired into the active pipeline (verified by grep returning only the definition line). *(SUPERSEDED by T6, 2026-06-06: now wired via `diagnose_clip(deep=True)` at `cinema/shots/controller.py:1928` — `10a0eb4`.)*
 
-**`ChiefDirector.get_diagnostic_summary()`** — `chief_director.py:490`
+**`ChiefDirector.get_diagnostic_summary()`** — `chief_director.py:653`
 Returns multi-line string of all entries in `diagnostic_log`.
 
 **`_strip_json_fences(raw)`** — `chief_director.py:27`
@@ -1696,13 +1696,13 @@ All knobs live in `project.global_settings` (set via `PUT /api/projects/<pid>` �
 5. JSONL log written to `data/intent_log/{pid}/`. Fallback to `intent.prose` on failure.
 
 **Phase E — Post-generation quality evaluation (currently unconnected):**
-`evaluate_generation_quality()` exists at `chief_director.py:318` with full 2×2 mutation matrix logic and negative-prompt enrichment but has **zero call sites** in the current codebase (grep confirmed). The method is implemented but not invoked by any active pipeline path. *(SUPERSEDED by T6, 2026-06-06: now wired via `diagnose_clip(deep=True)` at `cinema/shots/controller.py:1928` — `10a0eb4`. Line ref :318 also stale → :336.)*
+`evaluate_generation_quality()` exists at `chief_director.py:406` with full 2×2 mutation matrix logic and negative-prompt enrichment but has **zero call sites** in the current codebase (grep confirmed). The method is implemented but not invoked by any active pipeline path. *(SUPERSEDED by T6, 2026-06-06: now wired via `diagnose_clip(deep=True)` at `cinema/shots/controller.py:1928` — `10a0eb4`. Line ref :318/:336 also stale → :406.)*
 
 ---
 
 ### Gotchas, divergences & doc-drift
 
-1. **`evaluate_generation_quality` is dead code in the active pipeline.** No call sites found anywhere outside `llm/chief_director.py:318`. The 2×2 mutation matrix, negative-prompt enrichment, and diagnostic logging it implements are fully functional but unreachable from any pipeline path. The old worktree files (`.claude/worktrees/*/chief_director.py:345`) had a different `diagnosis_system` format (f-string template, not the embedded constant), confirming this was substantially rewritten but the calling code was never wired. *(SUPERSEDED by T6, 2026-06-06: now wired via `diagnose_clip(deep=True)` — `10a0eb4`.)*
+1. **`evaluate_generation_quality` is dead code in the active pipeline.** No call sites found anywhere outside `llm/chief_director.py:406`. The 2×2 mutation matrix, negative-prompt enrichment, and diagnostic logging it implements are fully functional but unreachable from any pipeline path. The old worktree files (`.claude/worktrees/*/chief_director.py:345`) had a different `diagnosis_system` format (f-string template, not the embedded constant), confirming this was substantially rewritten but the calling code was never wired. *(SUPERSEDED by T6, 2026-06-06: now wired via `diagnose_clip(deep=True)` — `10a0eb4`.)*
 
 2. **`style_director` is OpenAI-only** — no Anthropic path, no fallback to Anthropic. If only `ANTHROPIC_API_KEY` is set (no `OPENAI_API_KEY`), `generate_style_rules` falls through to `_default_style_rules` immediately (`style_director.py:38-41`). This is asymmetric with ChiefDirector and CinemaDirector which prefer Anthropic.
 
@@ -1710,9 +1710,9 @@ All knobs live in `project.global_settings` (set via `PUT /api/projects/<pid>` �
 
 4. **`competitive_enabled` flag is stored but not enforced** — `LLMEnsemble.__init__` sets `self.competitive_enabled` from `settings["competitive_generation"]` (`ensemble.py:126`) but `competitive_generate()` never checks it. All calls always run full multi-model competition.
 
-5. **`creative_llm` override is family-checked but not provider-switching** — setting `creative_llm = "claude-sonnet-4-5"` when the active provider is OpenAI (e.g., Anthropic key absent) silently uses the OpenAI default instead of switching providers (`chief_director.py:108-115`). Cross-family override is silently ignored with a log line only.
+5. **`creative_llm` override is family-checked but not provider-switching** — setting `creative_llm = "claude-sonnet-4-5"` when the active provider is OpenAI (e.g., Anthropic key absent) silently uses the OpenAI default instead of switching providers (`chief_director.py:116-125`). Cross-family override is silently ignored with a log line only.
 
-6. **`evaluate_generation_quality` negative-prompt enrichment uses only the FIRST failing character** — `primary_reason_value` captures the first non-"passed" failure reason from the character loop (`chief_director.py:379-382`). If multiple characters fail with different reasons, only the first drives the negative prompt addition.
+6. **`evaluate_generation_quality` negative-prompt enrichment uses only the FIRST failing character** — `primary_reason_value` captures the first non-"passed" failure reason from the character loop (`chief_director.py:514-515`). If multiple characters fail with different reasons, only the first drives the negative prompt addition.
 
 7. **`batch_optimize_scene` does not pass `objects` or `intent_notes`** — `prompt_optimizer.py:492-507` calls `optimize_shot_prompt` without the `objects` and `intent_notes` parameters. Product shot classification and per-shot creative direction are unavailable via the batch path.
 
@@ -1731,16 +1731,16 @@ All knobs live in `project.global_settings` (set via `PUT /api/projects/<pid>` �
 | Claim | File:line |
 |---|---|
 | ChiefDirector prefers Anthropic, falls back to OpenAI | `llm/chief_director.py:57-80` |
-| Default model: `claude-sonnet-4-6` | `llm/chief_director.py:107` |
-| HC1–HC8 hard constraints + tripwires T1–T9 | `llm/chief_director.py:155-211` |
-| APPROVED/MODIFIED/REJECTED output schema | `llm/chief_director.py:178-186` |
-| ≤1 retry on JSONDecodeError in validate_shot_prompts | `llm/chief_director.py:265-276` |
-| Parse-fallback APPROVED (fail-safe-for-throughput) | `llm/chief_director.py:283-287` |
-| In-place modification of shots on MODIFIED | `llm/chief_director.py:299-305` |
-| 2×2 mutation matrix in evaluate_generation_quality | `llm/chief_director.py:355-393` |
-| Negative prompt appended to prompt_mutation | `llm/chief_director.py:456-467` |
-| evaluate_generation_quality has no callers | grep result (only `chief_director.py:318` returned) *(SUPERSEDED by T6, 2026-06-06: caller now at `cinema/shots/controller.py:1928` — `10a0eb4`.)*|
-| creative_llm override with family-match guard | `llm/chief_director.py:100-115`, `llm/director.py:237-261` |
+| Default model: `claude-sonnet-4-6` | `llm/chief_director.py:117` |
+| HC1–HC8 hard constraints + tripwires T1–T9 | `llm/chief_director.py:225-281` |
+| APPROVED/MODIFIED/REJECTED output schema | `llm/chief_director.py:248-256` |
+| ≤1 retry on JSONDecodeError in validate_shot_prompts | `llm/chief_director.py:335-345` |
+| Parse-fallback APPROVED (fail-safe-for-throughput) | `llm/chief_director.py:348-357` |
+| In-place modification of shots on MODIFIED | `llm/chief_director.py:387-393` |
+| 2×2 mutation matrix in evaluate_generation_quality | `llm/chief_director.py:454-461` |
+| Negative prompt appended to prompt_mutation | `llm/chief_director.py:613-617` |
+| evaluate_generation_quality has no callers | grep result (only `chief_director.py:406` returned) *(SUPERSEDED by T6, 2026-06-06: caller now at `cinema/shots/controller.py:1928` — `10a0eb4`.)*|
+| creative_llm override with family-match guard | `llm/chief_director.py:110-125`, `llm/director.py:237-261` |
 | CinemaDirector is permissive (overrides HC) | `llm/director.py:18-20`, `director.py:47-60` |
 | S18 verb DSL: KNOWN_VERBS + _build_verb_prefix | `llm/director.py:95-187` |
 | Verb prefix injected as user-prompt prefix (not system) | `llm/director.py:27-31`, `director.py:313` |
