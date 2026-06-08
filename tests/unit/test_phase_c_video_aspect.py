@@ -430,3 +430,352 @@ class TestRunwayGen3aRatio:
         assert call_kwargs.get("ratio") == "1280:768", (
             f"Expected ratio='1280:768' for landscape; got: {call_kwargs}"
         )
+
+
+# ---------------------------------------------------------------------------
+# TC-portrait-routing-safety — cascade filter + backstop (T7)
+# ---------------------------------------------------------------------------
+class TestAcceptOrReject:
+    """Direct unit tests for _accept_or_reject (module-level backstop helper)."""
+
+    def _get_fn(self):
+        sys.modules.pop("phase_c_ffmpeg", None)
+        import phase_c_ffmpeg
+        return phase_c_ffmpeg._accept_or_reject
+
+    def test_landscape_always_accepts(self):
+        """Landscape project: backstop is a no-op — always True regardless of dims."""
+        fn = self._get_fn()
+        # Even if the file would be portrait dims, landscape project accepts
+        assert fn("/any/path.mp4", "16:9") is True
+
+    def test_portrait_portrait_dims_accepts(self):
+        """Portrait project + portrait clip (h>w) → accept."""
+        sys.modules.pop("phase_c_ffmpeg", None)
+        import phase_c_ffmpeg
+        fn = phase_c_ffmpeg._accept_or_reject
+        with patch("phase_c_ffmpeg.probe_final_media",
+                   return_value={"format": {"width": 1080, "height": 1920}}):
+            assert fn("/tmp/clip.mp4", "9:16") is True
+
+    def test_portrait_landscape_dims_rejects(self):
+        """Portrait project + landscape clip (w>h) → reject."""
+        sys.modules.pop("phase_c_ffmpeg", None)
+        import phase_c_ffmpeg
+        fn = phase_c_ffmpeg._accept_or_reject
+        with patch("phase_c_ffmpeg.probe_final_media",
+                   return_value={"format": {"width": 1920, "height": 1080}}):
+            assert fn("/tmp/clip.mp4", "9:16") is False
+
+    def test_portrait_probe_none_accepts(self):
+        """Portrait project + probe returns None → accept (fail-safe, don't strand pipeline)."""
+        sys.modules.pop("phase_c_ffmpeg", None)
+        import phase_c_ffmpeg
+        fn = phase_c_ffmpeg._accept_or_reject
+        with patch("phase_c_ffmpeg.probe_final_media", return_value=None):
+            assert fn("/tmp/clip.mp4", "9:16") is True
+
+    def test_portrait_missing_format_key_accepts(self):
+        """Portrait project + probe returns dict without 'format' key → accept (fail-safe)."""
+        sys.modules.pop("phase_c_ffmpeg", None)
+        import phase_c_ffmpeg
+        fn = phase_c_ffmpeg._accept_or_reject
+        with patch("phase_c_ffmpeg.probe_final_media", return_value={"audio": {}}):
+            assert fn("/tmp/clip.mp4", "9:16") is True
+
+    def test_portrait_none_dims_accepts(self):
+        """Portrait project + probe has format but w/h are None → accept (fail-safe)."""
+        sys.modules.pop("phase_c_ffmpeg", None)
+        import phase_c_ffmpeg
+        fn = phase_c_ffmpeg._accept_or_reject
+        with patch("phase_c_ffmpeg.probe_final_media",
+                   return_value={"format": {"width": None, "height": None}}):
+            assert fn("/tmp/clip.mp4", "9:16") is True
+
+
+class TestPortraitRoutingSafety:
+    """TC-portrait-routing-safety: cascade filter + backstop for 9:16 portrait projects.
+
+    Tests:
+    1. filter-exclude: LTX dropped from cascade for portrait ctx
+    2. backstop reject-retry: landscape-dim clip rejected, cascades to portrait-dim winner
+    3. terminal-fail-loud: all clips landscape-dim → None returned (no leak)
+    4. 16:9 refute: landscape project → probe never consulted, clip accepted
+    """
+
+    # ------------------------------------------------------------------
+    # Shared helper: build a stub that writes output_mp4 and returns it
+    # (simulates a "successful" provider). The caller patches probe.
+    # ------------------------------------------------------------------
+    def _kling_native_stub(self, output_path):
+        """Return a KlingNativeAPI mock that writes output_mp4 and returns it."""
+        mock_inst = MagicMock()
+        mock_inst.generate_video.return_value = output_path
+        mock_mod = MagicMock()
+        mock_mod.KlingNativeAPI.return_value = mock_inst
+        return mock_mod
+
+    def _sora_native_stub(self, output_path):
+        """Return a SoraNativeAPI mock that writes output_path and returns it."""
+        mock_inst = MagicMock()
+        mock_inst.generate_video.return_value = output_path
+        mock_mod = MagicMock()
+        mock_mod.SoraNativeAPI.return_value = mock_inst
+        return mock_mod
+
+    def _veo_native_stub(self, output_path):
+        """Return a VeoNativeAPI mock that returns output_path."""
+        mock_inst = MagicMock()
+        mock_inst.generate_video.return_value = output_path
+        mock_mod = MagicMock()
+        mock_mod.VeoNativeAPI.return_value = mock_inst
+        return mock_mod
+
+    def _ltx_stub(self, output_path):
+        """Return an LTXVideoAPI mock that returns output_path."""
+        mock_inst = MagicMock()
+        mock_inst.generate_video.return_value = output_path
+        mock_mod = MagicMock()
+        mock_mod.LTXVideoAPI.return_value = mock_inst
+        return mock_mod
+
+    # ------------------------------------------------------------------
+    # Test 1: filter-exclude — LTX never called for portrait ctx
+    # ------------------------------------------------------------------
+    def test_filter_exclude_ltx_for_portrait(self):
+        """Portrait ctx, fallbacks=[VEO_NATIVE, LTX, SORA_NATIVE]:
+        VEO_NATIVE stub fails (returns None) → cascade; LTX MUST be dropped by
+        the portrait filter → SORA_NATIVE is reached instead."""
+        output_mp4 = "/tmp/filter_test_out.mp4"
+        _cascade_out = {}
+
+        veo_mod = MagicMock()
+        veo_inst = MagicMock()
+        veo_inst.generate_video.return_value = None  # VEO fails
+        veo_mod.VeoNativeAPI.return_value = veo_inst
+
+        ltx_mod = MagicMock()
+        ltx_inst = MagicMock()
+        ltx_inst.generate_video.return_value = None  # LTX stub — should never be called
+        ltx_mod.LTXVideoAPI.return_value = ltx_inst
+
+        sora_mod = MagicMock()
+        sora_inst = MagicMock()
+        sora_inst.generate_video.return_value = output_mp4  # SORA succeeds
+        sora_mod.SoraNativeAPI.return_value = sora_inst
+
+        _saved_veo = sys.modules.pop("veo_native", None)
+        _saved_ltx = sys.modules.pop("ltx_native", None)
+        _saved_sora = sys.modules.pop("sora_native", None)
+        sys.modules.pop("phase_c_ffmpeg", None)
+        sys.modules["veo_native"] = veo_mod
+        sys.modules["ltx_native"] = ltx_mod
+        sys.modules["sora_native"] = sora_mod
+
+        try:
+            with patch("phase_c_ffmpeg.probe_final_media",
+                       return_value={"format": {"width": 1080, "height": 1920}}):
+                import phase_c_ffmpeg
+                result = phase_c_ffmpeg.generate_ai_video(
+                    image_path="/tmp/f.png",
+                    camera_motion="zoom_in_slow",
+                    target_api="VEO_NATIVE",
+                    output_mp4=output_mp4,
+                    shot_type="portrait",
+                    video_fallbacks=["VEO_NATIVE", "LTX", "SORA_NATIVE"],
+                    ctx=_ctx("9:16"),
+                    _cascade_out=_cascade_out,
+                )
+        finally:
+            sys.modules.pop("phase_c_ffmpeg", None)
+            # Restore original modules (not just pop) so sibling test files that imported
+            # these modules at collection time keep a consistent module identity.
+            if _saved_veo is not None:
+                sys.modules["veo_native"] = _saved_veo
+            else:
+                sys.modules.pop("veo_native", None)
+            if _saved_ltx is not None:
+                sys.modules["ltx_native"] = _saved_ltx
+            else:
+                sys.modules.pop("ltx_native", None)
+            if _saved_sora is not None:
+                sys.modules["sora_native"] = _saved_sora
+            else:
+                sys.modules.pop("sora_native", None)
+
+        # LTX must never have been constructed/called
+        assert not ltx_inst.generate_video.called, (
+            "LTX generate_video was called — portrait filter failed to drop LTX"
+        )
+        assert not ltx_mod.LTXVideoAPI.called, (
+            "LTXVideoAPI was constructed — portrait filter failed to drop LTX from cascade"
+        )
+        # SORA_NATIVE must be the winner
+        assert _cascade_out.get("cascade_metadata", {}).get("engine") == "SORA_NATIVE", (
+            f"Expected SORA_NATIVE to win; got: {_cascade_out}"
+        )
+
+    # ------------------------------------------------------------------
+    # Test 2: backstop reject-retry
+    # ------------------------------------------------------------------
+    def test_backstop_rejects_landscape_clip_and_cascades(self):
+        """Portrait ctx, fallbacks=[VEO_NATIVE, SORA_NATIVE]: both stubs succeed
+        (return output_mp4), but probe returns landscape dims for VEO_NATIVE and
+        portrait dims for SORA_NATIVE. Assert SORA_NATIVE wins."""
+        output_mp4 = "/tmp/backstop_test_out.mp4"
+        _cascade_out = {}
+
+        veo_mod = MagicMock()
+        veo_inst = MagicMock()
+        veo_inst.generate_video.return_value = output_mp4
+        veo_mod.VeoNativeAPI.return_value = veo_inst
+
+        sora_mod = MagicMock()
+        sora_inst = MagicMock()
+        sora_inst.generate_video.return_value = output_mp4
+        sora_mod.SoraNativeAPI.return_value = sora_inst
+
+        # First probe call (VEO_NATIVE's clip) → landscape; second (SORA_NATIVE's) → portrait
+        probe_side_effect = [
+            {"format": {"width": 1920, "height": 1080}},  # VEO: landscape → reject
+            {"format": {"width": 1080, "height": 1920}},  # SORA: portrait → accept
+        ]
+
+        _saved_veo = sys.modules.pop("veo_native", None)
+        _saved_sora = sys.modules.pop("sora_native", None)
+        sys.modules.pop("phase_c_ffmpeg", None)
+        sys.modules["veo_native"] = veo_mod
+        sys.modules["sora_native"] = sora_mod
+
+        try:
+            with patch("phase_c_ffmpeg.probe_final_media", side_effect=probe_side_effect):
+                import phase_c_ffmpeg
+                result = phase_c_ffmpeg.generate_ai_video(
+                    image_path="/tmp/f.png",
+                    camera_motion="zoom_in_slow",
+                    target_api="VEO_NATIVE",
+                    output_mp4=output_mp4,
+                    shot_type="portrait",
+                    video_fallbacks=["VEO_NATIVE", "SORA_NATIVE"],
+                    ctx=_ctx("9:16"),
+                    _cascade_out=_cascade_out,
+                )
+        finally:
+            sys.modules.pop("phase_c_ffmpeg", None)
+            if _saved_veo is not None:
+                sys.modules["veo_native"] = _saved_veo
+            else:
+                sys.modules.pop("veo_native", None)
+            if _saved_sora is not None:
+                sys.modules["sora_native"] = _saved_sora
+            else:
+                sys.modules.pop("sora_native", None)
+
+        assert _cascade_out.get("cascade_metadata", {}).get("engine") == "SORA_NATIVE", (
+            f"Expected SORA_NATIVE to win after VEO rejected; got: {_cascade_out}"
+        )
+        assert result == output_mp4
+
+    # ------------------------------------------------------------------
+    # Test 3: terminal fail-loud — returns None
+    # ------------------------------------------------------------------
+    def test_terminal_fail_loud_all_landscape(self):
+        """Portrait ctx, all providers succeed but all probes return landscape dims →
+        generate_ai_video returns None (no landscape clip leaks)."""
+        output_mp4 = "/tmp/failall_test_out.mp4"
+
+        veo_mod = MagicMock()
+        veo_inst = MagicMock()
+        veo_inst.generate_video.return_value = output_mp4
+        veo_mod.VeoNativeAPI.return_value = veo_inst
+
+        sora_mod = MagicMock()
+        sora_inst = MagicMock()
+        sora_inst.generate_video.return_value = output_mp4
+        sora_mod.SoraNativeAPI.return_value = sora_inst
+
+        landscape_probe = {"format": {"width": 1920, "height": 1080}}
+
+        _saved_veo = sys.modules.pop("veo_native", None)
+        _saved_sora = sys.modules.pop("sora_native", None)
+        sys.modules.pop("phase_c_ffmpeg", None)
+        sys.modules["veo_native"] = veo_mod
+        sys.modules["sora_native"] = sora_mod
+
+        try:
+            with patch("phase_c_ffmpeg.probe_final_media", return_value=landscape_probe), \
+                 patch("time.sleep"):
+                import phase_c_ffmpeg
+                ctx = _ctx("9:16")
+                # Set cascade_retry_limit=0 to prevent indefinite retry loop
+                ctx.global_settings["cascade_retry_limit"] = 0
+                result = phase_c_ffmpeg.generate_ai_video(
+                    image_path="/tmp/f.png",
+                    camera_motion="zoom_in_slow",
+                    target_api="VEO_NATIVE",
+                    output_mp4=output_mp4,
+                    shot_type="portrait",
+                    video_fallbacks=["VEO_NATIVE", "SORA_NATIVE"],
+                    ctx=ctx,
+                )
+        finally:
+            sys.modules.pop("phase_c_ffmpeg", None)
+            if _saved_veo is not None:
+                sys.modules["veo_native"] = _saved_veo
+            else:
+                sys.modules.pop("veo_native", None)
+            if _saved_sora is not None:
+                sys.modules["sora_native"] = _saved_sora
+            else:
+                sys.modules.pop("sora_native", None)
+
+        assert result is None, (
+            f"Expected None when all portrait probes fail; got: {result!r}"
+        )
+
+    # ------------------------------------------------------------------
+    # Test 4: 16:9 refute — probe never consulted, landscape clip accepted
+    # ------------------------------------------------------------------
+    def test_landscape_ctx_probe_never_consulted(self):
+        """Landscape ctx: backstop is a no-op. Provider succeeds with a landscape clip
+        (w>h), probe_final_media is NOT called for rejection purposes, clip is accepted."""
+        output_mp4 = "/tmp/landscape_refute_out.mp4"
+        _cascade_out = {}
+
+        veo_mod = MagicMock()
+        veo_inst = MagicMock()
+        veo_inst.generate_video.return_value = output_mp4
+        veo_mod.VeoNativeAPI.return_value = veo_inst
+
+        _saved_veo = sys.modules.pop("veo_native", None)
+        sys.modules.pop("phase_c_ffmpeg", None)
+        sys.modules["veo_native"] = veo_mod
+
+        try:
+            with patch("phase_c_ffmpeg.probe_final_media") as mock_probe:
+                import phase_c_ffmpeg
+                result = phase_c_ffmpeg.generate_ai_video(
+                    image_path="/tmp/f.png",
+                    camera_motion="zoom_in_slow",
+                    target_api="VEO_NATIVE",
+                    output_mp4=output_mp4,
+                    shot_type="medium",
+                    video_fallbacks=["VEO_NATIVE"],
+                    ctx=_ctx("16:9"),
+                    _cascade_out=_cascade_out,
+                )
+        finally:
+            sys.modules.pop("phase_c_ffmpeg", None)
+            if _saved_veo is not None:
+                sys.modules["veo_native"] = _saved_veo
+            else:
+                sys.modules.pop("veo_native", None)
+
+        # probe_final_media must NOT be called (backstop short-circuits for landscape)
+        assert not mock_probe.called, (
+            "probe_final_media was called for a landscape project — backstop is not a no-op!"
+        )
+        assert result == output_mp4, (
+            f"Expected landscape clip to be accepted; got result={result!r}"
+        )
+        assert _cascade_out.get("cascade_metadata", {}).get("engine") == "VEO_NATIVE"

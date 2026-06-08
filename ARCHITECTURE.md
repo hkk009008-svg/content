@@ -1018,7 +1018,7 @@ fallback_list = [
 **TTL-based** (commit `feccf61`):
 - Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:18](phase_c_ffmpeg.py:18))
 - TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:19](phase_c_ffmpeg.py:19))
-- Check: `_veo_quota_blocked()` ([:22-28](phase_c_ffmpeg.py:22))
+- Check: `_veo_quota_blocked()` ([:32-38](phase_c_ffmpeg.py:32))
 - Set on 429/quota error ([:503-506](phase_c_ffmpeg.py:503))
 - Gates only the `VEO` (FAL) branch — NOT `VEO_NATIVE`
 

@@ -18,6 +18,16 @@ if TYPE_CHECKING:
 _VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0
 _VEO_QUOTA_TTL_S: int = 1800  # 30 minutes — Google Veo quotas typically reset hourly
 
+# Providers that can produce 9:16 portrait video (aspect-aware via Phase-3 T3-T6, or
+# keyframe-driven). Portrait projects filter the cascade to this set. EXCLUDED:
+# LTX (native-only/pod-gated, not aspect-wired), FAL_SVD (not aspect-wired), SEEDANCE
+# (intentionally left 16:9). Note: the Kling dispatch keys are KLING_NATIVE + KLING_3_0
+# (there is no bare "KLING"); there is no Hedra branch in this module.
+PORTRAIT_CAPABLE = frozenset({
+    "VEO_NATIVE", "VEO", "SORA_NATIVE", "SORA_2",
+    "KLING_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "RUNWAY",
+})
+
 
 def _veo_quota_blocked() -> bool:
     """True if a recent VEO 429 means we should still cascade past VEO.
@@ -85,7 +95,7 @@ def generate_ai_video(
         for all callers that haven't been updated yet.
     """
     from cinema.context import get_project_setting
-    from cinema.aspect import DEFAULT_ASPECT_RATIO, fal_aspect_ratio, runway_ratio
+    from cinema.aspect import DEFAULT_ASPECT_RATIO, fal_aspect_ratio, runway_ratio, is_portrait
     _aspect = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
 
     if attempted_apis is None:
@@ -146,6 +156,9 @@ def generate_ai_video(
                     api for api in fallback_list
                     if _api_engines.get(api, {}).get("enabled", True) is not False
                 ]
+
+        if is_portrait(_aspect):
+            fallback_list = [api for api in fallback_list if api.upper() in PORTRAIT_CAPABLE]
 
         for api in fallback_list:
             if api not in attempted_apis:
@@ -227,6 +240,9 @@ def generate_ai_video(
                 mode="pro",
             )
             if result:
+                if not _accept_or_reject(output_mp4, _aspect):
+                    print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                    return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
             return try_next_api()
@@ -267,6 +283,9 @@ def generate_ai_video(
                 aspect_ratio=fal_aspect_ratio(_aspect),
             )
             if result:
+                if not _accept_or_reject(output_mp4, _aspect):
+                    print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                    return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
             return try_next_api()
@@ -296,6 +315,9 @@ def generate_ai_video(
                 aspect_ratio=fal_aspect_ratio(_aspect),
             )
             if result:
+                if not _accept_or_reject(output_mp4, _aspect):
+                    print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                    return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
             return try_next_api()
@@ -335,6 +357,9 @@ def generate_ai_video(
                 resolution=ltx_resolution,
             )
             if result:
+                if not _accept_or_reject(output_mp4, _aspect):
+                    print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                    return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
             return try_next_api()
@@ -383,6 +408,9 @@ def generate_ai_video(
                 video_url = task.output[0] if isinstance(task.output, list) else task.output
                 urllib.request.urlretrieve(video_url, output_mp4)
                 print(f"   [RUNWAY-GEN4] Success: {output_mp4}")
+                if not _accept_or_reject(output_mp4, _aspect):
+                    print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                    return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return output_mp4
 
@@ -436,6 +464,9 @@ def generate_ai_video(
                 if video_url:
                     urllib.request.urlretrieve(video_url, output_mp4)
                     print(f"   [SORA2] Success: {output_mp4}")
+                    if not _accept_or_reject(output_mp4, _aspect):
+                        print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                        return try_next_api()
                     _record_video_cascade(target_api.upper())
                     return output_mp4
 
@@ -506,6 +537,9 @@ def generate_ai_video(
                 if video_url:
                     urllib.request.urlretrieve(video_url, output_mp4)
                     print(f"   [VEO] Success: {output_mp4}")
+                    if not _accept_or_reject(output_mp4, _aspect):
+                        print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                        return try_next_api()
                     _record_video_cascade(target_api.upper())
                     return output_mp4
 
@@ -592,6 +626,9 @@ def generate_ai_video(
                     if video_url:
                         urllib.request.urlretrieve(video_url, output_mp4)
                         print(f"   [KLING] Success: {output_mp4}")
+                        if not _accept_or_reject(output_mp4, _aspect):
+                            print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                            return try_next_api()
                         _record_video_cascade(target_api.upper())
                         return output_mp4
 
@@ -658,6 +695,9 @@ def generate_ai_video(
                 if video_url:
                     import urllib.request
                     urllib.request.urlretrieve(video_url, output_mp4)
+                    if not _accept_or_reject(output_mp4, _aspect):
+                        print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                        return try_next_api()
                     _record_video_cascade(target_api.upper())
                     return output_mp4
                 return try_next_api()
@@ -693,6 +733,9 @@ def generate_ai_video(
                 final_video_url = completed_task.output[0]
                 import urllib.request
                 urllib.request.urlretrieve(final_video_url, output_mp4)
+                if not _accept_or_reject(output_mp4, _aspect):
+                    print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                    return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return output_mp4
             except Exception as e:
@@ -761,6 +804,9 @@ def generate_ai_video(
                             import urllib.request
                             urllib.request.urlretrieve(video_url, output_mp4)
                             print(f"   ✅ Seedance video downloaded: {output_mp4}")
+                            if not _accept_or_reject(output_mp4, _aspect):
+                                print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                                return try_next_api()
                             _record_video_cascade(target_api.upper())
                             return output_mp4
                         break
@@ -1231,6 +1277,25 @@ def two_pass_loudnorm(
         f"measured I={measured['input_i']} -> target I={target_i}"
     )
     return True
+
+
+def _accept_or_reject(path: str, aspect_ratio) -> bool:
+    """Post-generation aspect backstop. Return True to ACCEPT the clip, False to reject (→ cascade).
+
+    No-op (always True) when the project is landscape — preserves byte-identical 16:9 behavior.
+    For portrait, probe the clip's real dimensions and accept only if its orientation matches.
+    On probe failure (file missing / ffprobe error / no dims) ACCEPT with a warning — do NOT
+    strand the pipeline on a flaky probe (the filter is the primary defense; this is the net)."""
+    from cinema.aspect import is_portrait as _is_portrait
+    if not _is_portrait(aspect_ratio):
+        return True  # landscape project: never reject (no-op)
+    probed = probe_final_media(path)
+    fmt = (probed or {}).get("format") or {}
+    w, h = fmt.get("width"), fmt.get("height")
+    if not w or not h:
+        print(f"   [ASPECT-BACKSTOP] could not probe dims for {path} — accepting (probe unavailable)")
+        return True
+    return (h > w) == _is_portrait(aspect_ratio)  # portrait file iff portrait project
 
 
 def probe_final_media(path: str) -> "dict | None":
