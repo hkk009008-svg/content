@@ -255,3 +255,34 @@ def test_generate_video_delegates_to_create_image_to_video(tmp_path):
     create_args = mock_create.call_args
     assert create_args.args[0] == img_path or create_args.kwargs.get("image_path") == img_path
     assert "delegation test" in (create_args.args[1:] + tuple(create_args.kwargs.values()))
+
+
+def test_generate_video_default_poll_timeout_is_300s(tmp_path):
+    """generate_video defaults the poll timeout to 300s.
+
+    Kling image-to-video jobs run ~178-195s; the prior 180s default timed out
+    flakily on the slow tail (T9 portrait preflight run-2 hit a KLING timeout at
+    180s after taking 178s on run-1). 300s gives operational headroom while still
+    bounding a genuinely-stuck job. Callers may still override via timeout=...
+    """
+    api = _make_api()
+    img_path = _real_png(tmp_path)
+    out_path = str(tmp_path / "out.mp4")
+
+    with (
+        patch.object(api, "create_image_to_video", return_value="task-timeout-1"),
+        patch.object(api, "poll_task", return_value={
+            "task_result": {"videos": [{"url": "https://example.com/video.mp4"}]}
+        }) as mock_poll,
+        patch.object(api, "download_video", return_value=out_path),
+    ):
+        api.generate_video(
+            image_path=img_path,
+            prompt="timeout default test",
+            output_path=out_path,
+        )
+
+    # No explicit timeout kwarg → the default must be 300s.
+    assert mock_poll.call_args.kwargs.get("timeout") == 300, (
+        f"Expected default poll timeout 300s; got {mock_poll.call_args.kwargs.get('timeout')}"
+    )
