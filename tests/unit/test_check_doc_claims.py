@@ -1045,6 +1045,39 @@ class TestInlineAnchorsE2E:
         md = self._doc(tmp_path, "block **`f()`** `alpha.py:1-3`\n")
         assert check_line_anchors([str(md)], tmp_path) == []  # def within range -> ok
 
+    # --- Slice 3: en-dash / em-dash range separators (were INVISIBLE to the regex) ---
+
+    def test_inline_endash_range_in_range_no_drift(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\ndef f():\n    pass\n")  # def at 2, inside 1-3
+        md = self._doc(tmp_path, "block **`f()`** `alpha.py:1–3`\n")  # EN-DASH separator
+        assert check_line_anchors([str(md)], tmp_path) == []  # def within range -> ok
+
+    def test_inline_endash_range_out_of_range_is_drift(self, tmp_path):
+        _init_repo(tmp_path)
+        # def at 5, OUTSIDE the cited en-dash range 1–3 -> def_drift (was INVISIBLE pre-fix)
+        _commit_py(tmp_path, "alpha.py", "# 1\n# 2\n# 3\n# 4\ndef f():\n    pass\n")
+        md = self._doc(tmp_path, "block **`f()`** `alpha.py:1–3`\n")  # EN-DASH separator
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1
+        assert drifts[0].kind == "def_drift"
+        assert drifts[0].target_line == 1
+        assert drifts[0].suggested_line == 5
+
+    def test_inline_emdash_range_matches(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\n# 2\n# 3\n# 4\ndef f():\n    pass\n")  # def at 5
+        md = self._doc(tmp_path, "block **`f()`** `alpha.py:1—3`\n")  # EM-DASH (defensive)
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1 and drifts[0].kind == "def_drift"
+
+    def test_inline_ascii_hyphen_range_still_works(self, tmp_path):
+        # Regression guard alongside test_inline_range_anchor: ASCII hyphen unaffected.
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\ndef f():\n    pass\n")  # def at 2, inside 1-3
+        md = self._doc(tmp_path, "block **`f()`** `alpha.py:1-3`\n")  # ASCII hyphen
+        assert check_line_anchors([str(md)], tmp_path) == []
+
     def test_link_and_inline_same_line_distinct_both_checked(self, tmp_path):
         _init_repo(tmp_path)
         _commit_py(tmp_path, "alpha.py", "# 1\n# 2\ndef f():\n    pass\n")  # def at 3

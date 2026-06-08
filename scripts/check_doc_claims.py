@@ -60,13 +60,16 @@ _BACKTICK_RE = re.compile(r'`([^`]+)`')
 # Leading identifier from a backtick token
 _IDENT_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)')
 
-# Inline-backtick anchor: `path:line` or `path:line-line`.
+# Inline-backtick anchor: `path:line` or `path:line-line` (range).
+# The range separator accepts ASCII hyphen, en-dash (–, U+2013), and em-dash
+# (—, U+2014) — the docs use en-dashes heavily and an ASCII-only class made
+# those range anchors INVISIBLE (Slice 3). --fix canonicalizes to ASCII hyphen.
 # The literal backticks ARE part of the match (so the span includes them) →
 # this is what enforces "standalone token": `mod.py:10)` / `mod.py:10 (x)` /
 # `mod.py:10:20` do NOT match. Extension class is letters-only ([A-Za-z]+),
 # matching _ANCHOR_RE, so version tokens (`v1.2:30`) are rejected.
 _INLINE_ANCHOR_RE = re.compile(
-    r'`(?P<file>[A-Za-z0-9_./-]+\.[A-Za-z]+):(?P<line>\d+)(?:-(?P<end>\d+))?`'
+    r'`(?P<file>[A-Za-z0-9_./-]+\.[A-Za-z]+):(?P<line>\d+)(?:[-–—](?P<end>\d+))?`'
 )
 
 # Fenced-code-block markers (``` or ~~~, 3+). A line starting one toggles fence state.
