@@ -164,11 +164,17 @@ def check_anchor(
     target_line: int,
     display_text: str,
     repo_root: Path,
+    *,
+    resolved_rel: Optional[str] = None,
+    symbol: Optional[str] = None,
+    rebind_symbol: bool = True,
+    style: str = "link",
 ) -> Optional[Drift]:
     """Return a Drift if the anchor is stale, else None."""
 
     # Step 1 — file existence
-    target_path = repo_root / target_file_rel
+    read_rel = resolved_rel if resolved_rel is not None else target_file_rel
+    target_path = repo_root / read_rel
     if not target_path.exists():
         return Drift(
             doc_path=doc_path,
@@ -180,42 +186,45 @@ def check_anchor(
             suggested_line=None,
             fixable=False,
             message=f"target file not found: {target_file_rel}",
+            style=style,
         )
 
     source_lines = target_path.read_text(encoding="utf-8", errors="replace").splitlines()
 
     # Step 2 — symbol binding
-    # Find all backtick tokens on the doc line
-    backtick_tokens = list(_BACKTICK_RE.finditer(doc_line_text))
+    if rebind_symbol:
+        # Find all backtick tokens on the doc line
+        backtick_tokens = list(_BACKTICK_RE.finditer(doc_line_text))
 
-    # Find position of the anchor link in the line to pick nearest backtick
-    anchor_match = None
-    for m in _ANCHOR_RE.finditer(doc_line_text):
-        if (m.group("file") == target_file_rel and
-                int(m.group("line")) == target_line):
-            anchor_match = m
-            break
+        # Find position of the anchor link in the line to pick nearest backtick
+        anchor_match = None
+        for m in _ANCHOR_RE.finditer(doc_line_text):
+            if (m.group("file") == target_file_rel and
+                    int(m.group("line")) == target_line):
+                anchor_match = m
+                break
 
-    symbol = None
-    if anchor_match and backtick_tokens:
-        anchor_start = anchor_match.start()
-        # Prefer token immediately before anchor; fall back to after
-        before = [t for t in backtick_tokens if t.end() <= anchor_start]
-        after = [t for t in backtick_tokens if t.start() >= anchor_match.end()]
-        candidate = before[-1] if before else (after[0] if after else None)
+        symbol = None
+        if anchor_match and backtick_tokens:
+            anchor_start = anchor_match.start()
+            # Prefer token immediately before anchor; fall back to after
+            before = [t for t in backtick_tokens if t.end() <= anchor_start]
+            after = [t for t in backtick_tokens if t.start() >= anchor_match.end()]
+            candidate = before[-1] if before else (after[0] if after else None)
 
-        if candidate:
-            token_text = candidate.group(1)
-            ident_match = _IDENT_RE.match(token_text)
-            if ident_match:
-                ident = ident_match.group(1)
-                # Dotted/attribute skip: char immediately after ident in token
-                pos_after = ident_match.end()
-                if pos_after < len(token_text) and token_text[pos_after] == '.':
-                    # Dotted — skip symbol binding, fall through to bounds
-                    pass
-                else:
-                    symbol = ident
+            if candidate:
+                token_text = candidate.group(1)
+                ident_match = _IDENT_RE.match(token_text)
+                if ident_match:
+                    ident = ident_match.group(1)
+                    # Dotted/attribute skip: char immediately after ident in token
+                    pos_after = ident_match.end()
+                    if pos_after < len(token_text) and token_text[pos_after] == '.':
+                        # Dotted — skip symbol binding, fall through to bounds
+                        pass
+                    else:
+                        symbol = ident
+    # else: use the `symbol` parameter as-is (pre-bound by check_line_anchors).
 
     if symbol is not None:
         def_line_list = _def_lines(source_lines, symbol)
@@ -251,6 +260,7 @@ def check_anchor(
                         f"`{symbol}` def is at line {def_line_list[0] if len(def_line_list)==1 else def_line_list}"
                         f", anchor points at {target_line}"
                     ),
+                    style=style,
                 )
             return None  # OK — symbol bound correctly
 
@@ -271,6 +281,7 @@ def check_anchor(
             message=(
                 f"line {target_line} out of bounds (file has {n_lines} lines)"
             ),
+            style=style,
         )
 
     return None  # OK — in bounds, no symbol binding

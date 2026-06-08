@@ -970,3 +970,24 @@ class TestResolveInlineTarget:
         idx = {}
         assert _resolve_inline_target("/etc/x.py", None, idx, tmp_path) == (None, None)
         assert _resolve_inline_target("../x.py", None, idx, tmp_path) == (None, None)
+
+
+class TestCheckAnchorInlineParams:
+    def test_resolved_rel_and_bound_symbol(self, tmp_path):
+        # Source lives at domain/controller.py; doc writes the bare token controller.py.
+        src = tmp_path / "domain" / "controller.py"
+        src.parent.mkdir(parents=True)
+        src.write_text("# l1\n# l2\ndef find_take():\n    pass\n")  # def at line 3
+        line_text = "**`find_take()`** — `controller.py:2`"  # anchor says 2, stale
+        drift = check_anchor(
+            doc_path="d.md", doc_line_num=1, doc_line_text=line_text,
+            target_file_rel="controller.py", target_line=2,
+            display_text="controller.py:2", repo_root=tmp_path,
+            resolved_rel="domain/controller.py", symbol="find_take",
+            rebind_symbol=False, style="inline",
+        )
+        assert drift is not None
+        assert drift.kind == "def_drift"
+        assert drift.suggested_line == 3
+        assert drift.target_file == "controller.py"   # WRITTEN token, not resolved path
+        assert drift.style == "inline"
