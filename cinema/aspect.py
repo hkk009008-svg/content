@@ -46,3 +46,22 @@ def is_portrait(aspect_ratio: Optional[str]) -> bool:
 def is_supported(aspect_ratio: Optional[str]) -> bool:
     """True when ``aspect_ratio`` is a currently-offered ratio (the gate)."""
     return aspect_ratio in SUPPORTED_ASPECT_RATIOS
+
+
+# FAL image_size is a named bucket, not pixel dims — map by orientation.
+FAL_IMAGE_SIZE: dict[str, str] = {"16:9": "landscape_16_9", "9:16": "portrait_16_9"}
+
+
+def portrait_swap(w: int, h: int, aspect_ratio: Optional[str]) -> tuple[int, int]:
+    """Transpose (w, h) → (h, w) when ``aspect_ratio`` resolves to portrait.
+
+    Lets each generation path keep its own tuned pixel budget, just rotated.
+    Unknown / None / landscape → unchanged. Never raises (delegates to
+    is_portrait → resolve_output_dimensions, which defaults to 16:9).
+    """
+    return (h, w) if is_portrait(aspect_ratio) else (w, h)
+
+
+def fal_image_size(aspect_ratio: Optional[str]) -> str:
+    """FAL's named image_size enum for the given aspect ratio (landscape default)."""
+    return FAL_IMAGE_SIZE.get(aspect_ratio or "", "landscape_16_9")
