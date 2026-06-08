@@ -320,7 +320,13 @@ class TestRunwayGen4Model:
         )
 
     def test_runway_gen4_portrait_ratio(self):
-        """TC-4: RUNWAY_GEN4 portrait ctx → ratio=='720:1280'."""
+        """TC-4: RUNWAY_GEN4 portrait ctx → ratio=='720:1280'.
+
+        Note: gen4_turbo is NOT a key in cinema.aspect._RUNWAY_PORTRAIT (which only
+        special-cases gen3a_turbo→'768:1280'); runway_ratio falls to its portrait
+        default '720:1280'. If a contributor adds a gen4_turbo entry there, this test
+        will (correctly) flag the change.
+        """
         mock_client = self._run_runway_gen4(aspect="9:16")
         call_kwargs = mock_client.image_to_video.create.call_args.kwargs
         assert call_kwargs.get("ratio") == "720:1280", (
