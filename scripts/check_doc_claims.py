@@ -152,6 +152,26 @@ def _resolve_inline_target(
     return None, matches                        # truly ambiguous -> advisory
 
 
+def _bind_inline_symbol(line_text: str, anchor_start: int) -> Optional[str]:
+    """Bind the symbol for an inline anchor: the nearest backtick token that ENDS
+    before `anchor_start` (preceding-only — drop the markdown-link after-fallback,
+    since the inline convention is symbol-precedes-anchor). Excludes the anchor's
+    own backtick span by construction (we only consider tokens ending <= anchor_start).
+    Returns the leading identifier, or None (incl. the dotted-attribute skip)."""
+    preceding = [t for t in _BACKTICK_RE.finditer(line_text) if t.end() <= anchor_start]
+    if not preceding:
+        return None
+    token_text = preceding[-1].group(1)
+    ident_match = _IDENT_RE.match(token_text)
+    if not ident_match:
+        return None
+    ident = ident_match.group(1)
+    pos_after = ident_match.end()
+    if pos_after < len(token_text) and token_text[pos_after] == ".":
+        return None  # dotted/attribute -> no symbol bind (falls through to bounds)
+    return ident
+
+
 # ---------------------------------------------------------------------------
 # Per-anchor check
 # ---------------------------------------------------------------------------
@@ -292,36 +312,83 @@ def check_anchor(
 # ---------------------------------------------------------------------------
 
 def check_line_anchors(doc_paths: list[str], repo_root: Path) -> list[Drift]:
-    """Check all line-anchors in the given markdown docs. Returns list of Drift."""
+    """Check all line-anchors (markdown-link AND inline-backtick) in the given docs."""
     drifts: list[Drift] = []
+    basename_index, git_ok = _build_basename_index(repo_root)
+    unresolved_bare = 0   # for the git-absent warning
 
     for doc_path in doc_paths:
         full_path = Path(doc_path) if Path(doc_path).is_absolute() else repo_root / doc_path
         if not full_path.exists():
-            # Can't check a non-existent doc — skip silently
             continue
+        doc_lines = full_path.read_text(encoding="utf-8", errors="replace").splitlines()
 
-        doc_text = full_path.read_text(encoding="utf-8", errors="replace")
-        doc_lines = doc_text.splitlines()
-
+        in_fence = False
         for line_num, line_text in enumerate(doc_lines, 1):
+            if _FENCE_RE.match(line_text):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+
+            # --- markdown-link anchors (existing behavior) ---
+            link_keys = set()
             for m in _ANCHOR_RE.finditer(line_text):
-                display = m.group("display")
                 target_file_rel = m.group("file")
                 target_line = int(m.group("line"))
-
+                link_keys.add((target_file_rel, target_line))
                 drift = check_anchor(
-                    doc_path=str(full_path),
-                    doc_line_num=line_num,
-                    doc_line_text=line_text,
-                    target_file_rel=target_file_rel,
-                    target_line=target_line,
-                    display_text=display,
+                    doc_path=str(full_path), doc_line_num=line_num,
+                    doc_line_text=line_text, target_file_rel=target_file_rel,
+                    target_line=target_line, display_text=m.group("display"),
                     repo_root=repo_root,
                 )
                 if drift is not None:
                     drifts.append(drift)
 
+            # --- inline-backtick anchors (new) ---
+            for m in _INLINE_ANCHOR_RE.finditer(line_text):
+                token_file = m.group("file")
+                target_line = int(m.group("line"))
+                # de-dup: skip an inline match whose (file,line) equals a link on the
+                # same line (rare; correctness guard, not a span-inside heuristic).
+                if (token_file, target_line) in link_keys:
+                    continue
+                # ORDERING: bind symbol BEFORE resolution (resolution needs it).
+                symbol = _bind_inline_symbol(line_text, m.start())
+                resolved_rel, candidates = _resolve_inline_target(
+                    token_file, symbol, basename_index, repo_root)
+                if candidates is not None:
+                    drifts.append(Drift(
+                        doc_path=str(full_path), doc_line=line_num,
+                        target_file=token_file, target_line=target_line,
+                        kind="ambiguous_path", symbol=symbol, suggested_line=None,
+                        fixable=False,
+                        message=(f"`{token_file}` is ambiguous ({len(candidates)} tracked "
+                                 f"matches): {', '.join(candidates)} — qualify with a directory"),
+                        style="inline", candidates=candidates,
+                    ))
+                    continue
+                if resolved_rel is None:
+                    if "/" not in token_file and not git_ok:
+                        unresolved_bare += 1
+                    continue
+                end = m.group("end")
+                display = f"{token_file}:{target_line}" + (f"-{end}" if end else "")
+                drift = check_anchor(
+                    doc_path=str(full_path), doc_line_num=line_num,
+                    doc_line_text=line_text, target_file_rel=token_file,
+                    target_line=target_line, display_text=display, repo_root=repo_root,
+                    resolved_rel=resolved_rel, symbol=symbol,
+                    rebind_symbol=False, style="inline",
+                )
+                if drift is not None:
+                    drifts.append(drift)
+
+    if unresolved_bare and not git_ok:
+        print(f"WARNING: {unresolved_bare} bare inline anchor(s) could not be resolved "
+              f"(git unavailable — basename index empty). These were skipped, NOT verified.",
+              file=sys.stderr)
     return drifts
 
 

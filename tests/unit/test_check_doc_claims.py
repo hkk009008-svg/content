@@ -991,3 +991,91 @@ class TestCheckAnchorInlineParams:
         assert drift.suggested_line == 3
         assert drift.target_file == "controller.py"   # WRITTEN token, not resolved path
         assert drift.style == "inline"
+
+
+class TestInlineAnchorsE2E:
+    def _doc(self, repo, text):
+        return _write_md(repo, "doc.md", text)
+
+    def test_inline_correct_no_drift(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\ndef f():\n    pass\n")  # def at 2
+        md = self._doc(tmp_path, "see **`f()`** `alpha.py:2`\n")
+        assert check_line_anchors([str(md)], tmp_path) == []
+
+    def test_inline_def_drift_detected(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\n# 2\n# 3\ndef f():\n    pass\n")  # def at 4
+        md = self._doc(tmp_path, "see **`f()`** `alpha.py:2`\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1
+        assert drifts[0].kind == "def_drift" and drifts[0].style == "inline"
+        assert drifts[0].suggested_line == 4 and drifts[0].target_file == "alpha.py"
+
+    def test_bare_ambiguous_with_symbol_detects_drift(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "controller.py", "class Top:\n    pass\n")
+        _commit_py(tmp_path, "domain/controller.py", "# 1\n# 2\ndef find_take():\n    pass\n")  # def at 3
+        md = self._doc(tmp_path, "**`find_take()`** — `controller.py:1` stale\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1
+        assert drifts[0].kind == "def_drift" and drifts[0].suggested_line == 3
+
+    def test_bare_ambiguous_no_symbol_is_advisory(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "controller.py", "x = 1\n")
+        _commit_py(tmp_path, "domain/controller.py", "y = 2\n")
+        md = self._doc(tmp_path, "plain `controller.py:1` with no symbol\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1
+        d = drifts[0]
+        assert d.kind == "ambiguous_path" and d.fixable is False
+        assert d.candidates == ["controller.py", "domain/controller.py"]
+
+    def test_bare_unresolvable_skipped(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "x = 1\n")
+        md = self._doc(tmp_path, "ghost `ghost.py:9` not real\n")
+        assert check_line_anchors([str(md)], tmp_path) == []
+
+    def test_inline_range_anchor(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\ndef f():\n    pass\n")  # def at 2, inside 1-3
+        md = self._doc(tmp_path, "block **`f()`** `alpha.py:1-3`\n")
+        assert check_line_anchors([str(md)], tmp_path) == []  # def within range -> ok
+
+    def test_link_and_inline_same_line_distinct_both_checked(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\n# 2\ndef f():\n    pass\n")  # def at 3
+        # inline says 1 (stale), link says 2 (stale) — DISTINCT (file,line) -> both drift.
+        # Each anchor gets its OWN nearest-preceding symbol token so binding is
+        # unambiguous (the existing nearest-backtick rule binds to the closest token).
+        md = self._doc(tmp_path, "**`f`** `alpha.py:1` then `f` [f](alpha.py:2)\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 2
+        assert {d.style for d in drifts} == {"inline", "link"}
+
+    def test_link_and_inline_same_target_deduped(self, tmp_path):
+        # Spec test 8, same-(file,line) sub-case: link + inline pointing at the
+        # IDENTICAL (file,line) -> the inline is de-duped, only the link drifts.
+        # The link gets its own nearest-preceding symbol token so it binds + drifts.
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\n# 2\n# 3\n# 4\ndef f():\n    pass\n")  # def at 5
+        # both anchors say alpha.py:3 (stale) -> exactly ONE drift (the link's)
+        md = self._doc(tmp_path, "**`f`** `alpha.py:3` see `f` [f](alpha.py:3)\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1
+        assert drifts[0].style == "link" and drifts[0].suggested_line == 5
+
+    def test_fenced_anchor_not_flagged(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\ndef f():\n    pass\n")  # def at 2
+        md = self._doc(tmp_path, "```\nexample **`f()`** `alpha.py:999`\n```\n")
+        assert check_line_anchors([str(md)], tmp_path) == []  # inside fence -> skipped
+
+    def test_inline_out_of_bounds_no_symbol(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "x = 1\ny = 2\n")  # 2 lines
+        md = self._doc(tmp_path, "plain `alpha.py:99` overflow\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1 and drifts[0].kind == "out_of_bounds"
