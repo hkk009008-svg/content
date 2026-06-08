@@ -8,7 +8,7 @@ import requests
 from typing import NamedTuple
 
 from config.settings import settings
-from cinema.aspect import portrait_swap, fal_image_size, DEFAULT_ASPECT_RATIO
+from cinema.aspect import portrait_swap, fal_image_size, is_portrait, DEFAULT_ASPECT_RATIO
 from cinema.context import get_project_setting
 
 PEXELS_API_KEY = settings.pexels_api_key
@@ -148,6 +148,13 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
 
     mode = "img2img" if init_image else "txt2img"
 
+    # Read per-project aspect ratio early — must be in scope at ALL six
+    # _fal_flux_fallback call sites (including early-return and except paths).
+    # Phase 2: portrait-aware latent dimensions + FAL/Pollinations orientation.
+    # get_project_setting is a safe dict lookup with a default (never raises,
+    # handles ctx=None), so it is safe to call here outside the try block.
+    aspect_ratio = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
+
     # ----- Backend selection (PRIORITY order) -----
     # The previous implementation relied on a confusing if/elif/else where
     # only branch #1 fell through to the ComfyUI path below, and the
@@ -165,10 +172,12 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                 character_image=character_image,
                 multi_angle_refs=multi_angle_refs,
                 identity_anchor=identity_anchor,
+                aspect_ratio=aspect_ratio,
             )
         return _fal_flux_fallback(
             prompt, output_filename, seed,
             character_image=character_image,
+            aspect_ratio=aspect_ratio,
         )
 
     # PRIORITY 1: ComfyUI + PuLID on RunPod RTX 4090 (fastest + strongest face-lock)
@@ -177,13 +186,11 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
     try:
         if not os.path.exists("pulid.json"):
             print("   [WARN] pulid.json missing — using Kontext fallback")
-            return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image)
+            return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
+                                      aspect_ratio=aspect_ratio)
 
         with open("pulid.json", "r") as f:
             workflow = json.load(f)
-
-        # Read per-project aspect ratio (Phase 2: portrait-aware latent dimensions)
-        aspect_ratio = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
 
         # WORKFLOW SELECTOR — apply shot-type-specific parameters
         try:
@@ -204,7 +211,8 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             # Skip ComfyUI entirely for landscape shots (no face-lock needed)
             if shot_type == "landscape" and character_image:
                 print(f"   [WORKFLOW] Landscape detected — skipping PuLID, using Kontext")
-                return _fal_flux_fallback(prompt, output_filename, seed, character_image=None)
+                return _fal_flux_fallback(prompt, output_filename, seed, character_image=None,
+                                          aspect_ratio=aspect_ratio)
         except ImportError:
             pass  # workflow_selector not available — use defaults
 
@@ -397,11 +405,13 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             time.sleep(2)
 
         print("   [WARN] ComfyUI timed out or crashed. Falling back to FAL FLUX...")
-        return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image)
+        return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
+                                  aspect_ratio=aspect_ratio)
 
     except Exception as e:
         print(f"   [WARN] ComfyUI error: {e}. Falling back to FAL FLUX...")
-        return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image)
+        return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
+                                  aspect_ratio=aspect_ratio)
 
 
 def _parse_structured_prompt(prompt: str) -> dict:
@@ -423,7 +433,7 @@ def _parse_structured_prompt(prompt: str) -> dict:
 
 
 def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
-                       multi_angle_refs=None, identity_anchor=""):
+                       multi_angle_refs=None, identity_anchor="", aspect_ratio=None):
     """
     Image generator using FAL.ai FLUX Kontext Max Multi for identity preservation.
 
@@ -520,7 +530,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                         "prompt": kontext_prompt,
                         "image_urls": image_urls,
                         "guidance_scale": 3.5,
-                        "aspect_ratio": "16:9",
+                        "aspect_ratio": "9:16" if is_portrait(aspect_ratio) else "16:9",
                         "output_format": "jpeg",
                         "num_images": 1,
                     },
@@ -539,7 +549,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                 "fal-ai/flux-pro/v1.1-ultra",
                 arguments={
                     "prompt": prompt,
-                    "aspect_ratio": "16:9",
+                    "aspect_ratio": "9:16" if is_portrait(aspect_ratio) else "16:9",
                     "output_format": "jpeg",
                     "seed": seed,
                     "num_inference_steps": 32,
@@ -560,7 +570,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                 "fal-ai/flux/schnell",
                 arguments={
                     "prompt": prompt,
-                    "image_size": "landscape_16_9",
+                    "image_size": fal_image_size(aspect_ratio),
                     "num_inference_steps": 4,
                     "seed": seed,
                 },
@@ -575,7 +585,8 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
         # Last resort: Pollinations (free, lower quality)
         import urllib.parse
         encoded = urllib.parse.quote(prompt)
-        poll_url = f"https://image.pollinations.ai/prompt/{encoded}?width=1344&height=768&nologo=True&model=flux&seed={seed or 42}"
+        _pw, _ph = portrait_swap(1344, 768, aspect_ratio)
+        poll_url = f"https://image.pollinations.ai/prompt/{encoded}?width={_pw}&height={_ph}&nologo=True&model=flux&seed={seed or 42}"
         img_data = urllib.request.urlopen(poll_url).read()
         if len(img_data) > 5000:
             with open(output_filename, "wb") as f:

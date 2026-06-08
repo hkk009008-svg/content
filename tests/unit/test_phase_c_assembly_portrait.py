@@ -1,8 +1,12 @@
-"""Portrait Phase 2 — production ComfyUI node-102 latent transpose.
+"""Portrait Phase 2 — production ComfyUI node-102 latent transpose + FAL/Pollinations orientation.
 
 Verifies that `generate_ai_broll` reads `aspect_ratio` from
 `ctx.global_settings` and transposes node 102's width/height via
 `portrait_swap` when `aspect_ratio="9:16"`.
+
+Also verifies that `_fal_flux_fallback` emits 9:16 for Kontext, Pro,
+schnell, and Pollinations when called with `aspect_ratio="9:16"`, and
+stays landscape when called with None/"16:9".
 
 Offline: ComfyUI I/O is fully stubbed; no pod, no GPU, no network.
 """
@@ -12,6 +16,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import sys
+import urllib.request
 from unittest.mock import MagicMock
 
 import pytest
@@ -151,3 +156,185 @@ class TestProductionNode102Portrait:
         node102 = captured["102"]["inputs"]
         assert node102["width"] == 1344, f"expected width=1344 for no-ctx default, got {node102['width']}"
         assert node102["height"] == 768, f"expected height=768 for no-ctx default, got {node102['height']}"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Task 3: FAL Kontext / Pro / schnell / Pollinations orientation
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def stub_fal_portrait(monkeypatch):
+    """Stub fal_client + urlretrieve so _fal_flux_fallback runs offline.
+
+    Returns the fake fal_client MagicMock so individual tests can inspect
+    calls or inject side_effects.
+    """
+    fake = MagicMock()
+    fake.upload_file.return_value = "https://fake/upload"
+    fake.subscribe.return_value = {"images": [{"url": "https://fake/image.jpg"}]}
+    monkeypatch.setitem(sys.modules, "fal_client", fake)
+    monkeypatch.setattr(
+        pca, "settings", dataclasses.replace(pca.settings, fal_key="test-key")
+    )
+
+    def _fake_retrieve(url, filename):
+        with open(filename, "wb") as fh:
+            fh.write(b"jpeg-bytes")
+
+    monkeypatch.setattr(urllib.request, "urlretrieve", _fake_retrieve)
+    return fake
+
+
+class TestFalFallbackPortraitOrientation:
+    """_fal_flux_fallback emits 9:16 for all model paths when aspect_ratio='9:16'."""
+
+    # ------------------------------------------------------------------
+    # Portrait tests
+    # ------------------------------------------------------------------
+
+    def test_kontext_portrait_aspect_ratio(self, stub_fal_portrait, tmp_path):
+        """Kontext path: aspect_ratio='9:16' → FAL arguments['aspect_ratio']=='9:16'."""
+        char = tmp_path / "face.jpg"
+        char.write_bytes(b"face")
+        out = str(tmp_path / "out.jpg")
+
+        pca._fal_flux_fallback("a prompt", out, seed=1, character_image=str(char),
+                               aspect_ratio="9:16")
+
+        # The FIRST subscribe call is Kontext.
+        call_args = stub_fal_portrait.subscribe.call_args_list[0]
+        arguments = call_args[1]["arguments"] if "arguments" in call_args[1] else call_args[0][1]
+        assert arguments["aspect_ratio"] == "9:16", (
+            f"Kontext portrait: expected aspect_ratio='9:16', got {arguments.get('aspect_ratio')!r}"
+        )
+
+    def test_pro_portrait_aspect_ratio(self, stub_fal_portrait, tmp_path):
+        """Pro path (no character_image): aspect_ratio='9:16' → FAL arguments['aspect_ratio']=='9:16'."""
+        out = str(tmp_path / "out.jpg")
+
+        pca._fal_flux_fallback("a prompt", out, seed=1, character_image=None,
+                               aspect_ratio="9:16")
+
+        call_args = stub_fal_portrait.subscribe.call_args_list[0]
+        arguments = call_args[1]["arguments"] if "arguments" in call_args[1] else call_args[0][1]
+        assert arguments["aspect_ratio"] == "9:16", (
+            f"Pro portrait: expected aspect_ratio='9:16', got {arguments.get('aspect_ratio')!r}"
+        )
+
+    def test_schnell_portrait_image_size(self, stub_fal_portrait, tmp_path):
+        """schnell path: aspect_ratio='9:16' → FAL arguments['image_size']=='portrait_16_9'."""
+        # Pro fails, schnell succeeds.
+        stub_fal_portrait.subscribe.side_effect = [
+            RuntimeError("pro down"),
+            {"images": [{"url": "https://fake/schnell.jpg"}]},
+        ]
+        out = str(tmp_path / "out.jpg")
+
+        pca._fal_flux_fallback("a prompt", out, seed=1, character_image=None,
+                               aspect_ratio="9:16")
+
+        # 2nd subscribe call is schnell.
+        call_args = stub_fal_portrait.subscribe.call_args_list[1]
+        arguments = call_args[1]["arguments"] if "arguments" in call_args[1] else call_args[0][1]
+        assert arguments["image_size"] == "portrait_16_9", (
+            f"schnell portrait: expected image_size='portrait_16_9', got {arguments.get('image_size')!r}"
+        )
+
+    def test_pollinations_portrait_url(self, stub_fal_portrait, tmp_path, monkeypatch):
+        """Pollinations URL: aspect_ratio='9:16' → width=768&height=1344."""
+        stub_fal_portrait.subscribe.side_effect = RuntimeError("fal down")
+
+        captured_urls = []
+
+        class _Resp:
+            def read(self_inner):
+                return b"x" * 6000
+
+        def _fake_urlopen(url):
+            captured_urls.append(url)
+            return _Resp()
+
+        monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+        out = str(tmp_path / "out.jpg")
+
+        pca._fal_flux_fallback("a prompt", out, seed=1, character_image=None,
+                               aspect_ratio="9:16")
+
+        assert captured_urls, "urlopen was not called — Pollinations path not reached"
+        url = captured_urls[0]
+        assert "width=768" in url, f"Pollinations portrait URL should contain width=768, got: {url}"
+        assert "height=1344" in url, f"Pollinations portrait URL should contain height=1344, got: {url}"
+
+    # ------------------------------------------------------------------
+    # Landscape regression (None / "16:9" must produce landscape values)
+    # ------------------------------------------------------------------
+
+    def test_kontext_landscape_regression(self, stub_fal_portrait, tmp_path):
+        """aspect_ratio=None → Kontext stays at '16:9'."""
+        char = tmp_path / "face.jpg"
+        char.write_bytes(b"face")
+        out = str(tmp_path / "out.jpg")
+
+        pca._fal_flux_fallback("a prompt", out, seed=1, character_image=str(char),
+                               aspect_ratio=None)
+
+        call_args = stub_fal_portrait.subscribe.call_args_list[0]
+        arguments = call_args[1]["arguments"] if "arguments" in call_args[1] else call_args[0][1]
+        assert arguments["aspect_ratio"] == "16:9", (
+            f"Kontext landscape regression: expected '16:9', got {arguments.get('aspect_ratio')!r}"
+        )
+
+    def test_pro_landscape_regression(self, stub_fal_portrait, tmp_path):
+        """aspect_ratio='16:9' → Pro stays at '16:9'."""
+        out = str(tmp_path / "out.jpg")
+
+        pca._fal_flux_fallback("a prompt", out, seed=1, character_image=None,
+                               aspect_ratio="16:9")
+
+        call_args = stub_fal_portrait.subscribe.call_args_list[0]
+        arguments = call_args[1]["arguments"] if "arguments" in call_args[1] else call_args[0][1]
+        assert arguments["aspect_ratio"] == "16:9", (
+            f"Pro landscape regression: expected '16:9', got {arguments.get('aspect_ratio')!r}"
+        )
+
+    def test_schnell_landscape_regression(self, stub_fal_portrait, tmp_path):
+        """aspect_ratio=None → schnell stays at 'landscape_16_9'."""
+        stub_fal_portrait.subscribe.side_effect = [
+            RuntimeError("pro down"),
+            {"images": [{"url": "https://fake/schnell.jpg"}]},
+        ]
+        out = str(tmp_path / "out.jpg")
+
+        pca._fal_flux_fallback("a prompt", out, seed=1, character_image=None,
+                               aspect_ratio=None)
+
+        call_args = stub_fal_portrait.subscribe.call_args_list[1]
+        arguments = call_args[1]["arguments"] if "arguments" in call_args[1] else call_args[0][1]
+        assert arguments["image_size"] == "landscape_16_9", (
+            f"schnell landscape regression: expected 'landscape_16_9', got {arguments.get('image_size')!r}"
+        )
+
+    def test_pollinations_landscape_regression(self, stub_fal_portrait, tmp_path, monkeypatch):
+        """aspect_ratio=None → Pollinations URL stays width=1344&height=768."""
+        stub_fal_portrait.subscribe.side_effect = RuntimeError("fal down")
+
+        captured_urls = []
+
+        class _Resp:
+            def read(self_inner):
+                return b"x" * 6000
+
+        def _fake_urlopen(url):
+            captured_urls.append(url)
+            return _Resp()
+
+        monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+        out = str(tmp_path / "out.jpg")
+
+        pca._fal_flux_fallback("a prompt", out, seed=1, character_image=None,
+                               aspect_ratio=None)
+
+        assert captured_urls, "urlopen was not called"
+        url = captured_urls[0]
+        assert "width=1344" in url, f"Pollinations landscape URL should have width=1344, got: {url}"
+        assert "height=768" in url, f"Pollinations landscape URL should have height=768, got: {url}"
