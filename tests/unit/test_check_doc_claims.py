@@ -1079,3 +1079,28 @@ class TestInlineAnchorsE2E:
         md = self._doc(tmp_path, "plain `alpha.py:99` overflow\n")
         drifts = check_line_anchors([str(md)], tmp_path)
         assert len(drifts) == 1 and drifts[0].kind == "out_of_bounds"
+
+
+class TestInlineFix:
+    def test_fix_rewrites_inline_to_backtick(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\n# 2\n# 3\ndef f():\n    pass\n")  # def at 4
+        md = _write_md(tmp_path, "doc.md", "see **`f()`** `alpha.py:2` here\n")
+        run([str(md)], tmp_path, fix=True)
+        assert md.read_text() == "see **`f()`** `alpha.py:4` here\n"   # backtick form, not a link
+
+    def test_fix_multiple_inline_on_one_line(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "def f():\n    pass\n")        # def at 1
+        _commit_py(tmp_path, "beta.py", "# 1\ndef g():\n    pass\n")    # def at 2
+        md = _write_md(tmp_path, "doc.md", "**`f()`** `alpha.py:9` and **`g()`** `beta.py:9`\n")
+        run([str(md)], tmp_path, fix=True)
+        assert md.read_text() == "**`f()`** `alpha.py:1` and **`g()`** `beta.py:2`\n"
+
+    def test_fix_never_touches_fenced_anchor(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "def f():\n    pass\n")        # def at 1
+        text = "```\n**`f()`** `alpha.py:999`\n```\n"
+        md = _write_md(tmp_path, "doc.md", text)
+        run([str(md)], tmp_path, fix=True)
+        assert md.read_text() == text   # untouched (fenced -> never a drift -> never fixed)

@@ -437,14 +437,21 @@ def _apply_fixes(drifts: list[Drift]) -> list[Drift]:
             idx = drift.doc_line - 1  # 0-based
             old, new = drift.target_line, drift.suggested_line
 
-            def _rewrite(m: "re.Match", _d: Drift = drift, _old: int = old, _new: int = new) -> str:
-                # Only rewrite the one anchor this drift refers to (file + line).
+            def _rewrite_link(m, _d=drift, _old=old, _new=new):
                 if m.group("file") != _d.target_file or int(m.group("line")) != _old:
                     return m.group(0)
                 new_display = _shift_display(m.group("display"), _old, _new)
                 return f"[{new_display}]({_d.target_file}:{_new})"
 
-            lines[idx] = _ANCHOR_RE.sub(_rewrite, lines[idx])
+            def _rewrite_inline(m, _d=drift, _old=old, _new=new):
+                if m.group("file") != _d.target_file or int(m.group("line")) != _old:
+                    return m.group(0)
+                end = m.group("end")
+                body = _shift_display(f"{_d.target_file}:{_old}" + (f"-{end}" if end else ""), _old, _new)
+                return f"`{body}`"
+
+            lines[idx] = _ANCHOR_RE.sub(_rewrite_link, lines[idx])
+            lines[idx] = _INLINE_ANCHOR_RE.sub(_rewrite_inline, lines[idx])
             print(f"  FIXED  {doc_path}:{drift.doc_line}  "
                   f"{drift.target_file}:{old} → {drift.target_file}:{new}")
 
