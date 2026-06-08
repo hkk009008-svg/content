@@ -85,7 +85,7 @@ def generate_ai_video(
         for all callers that haven't been updated yet.
     """
     from cinema.context import get_project_setting
-    from cinema.aspect import DEFAULT_ASPECT_RATIO
+    from cinema.aspect import DEFAULT_ASPECT_RATIO, fal_aspect_ratio
     _aspect = get_project_setting(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)
 
     if attempted_apis is None:
@@ -292,6 +292,7 @@ def generate_ai_video(
                 generate_audio=(shot_type == "landscape" or dialogue_native_audio),  # Environments + native-mode dialogue
                 driving_video_path=driving_video_path,
                 duration=duration,
+                aspect_ratio=fal_aspect_ratio(_aspect),
             )
             if result:
                 _record_video_cascade(target_api.upper())
@@ -492,7 +493,7 @@ def generate_ai_video(
                     arguments={
                         "prompt": veo_prompt,
                         "image_urls": image_urls,
-                        "aspect_ratio": "16:9",
+                        "aspect_ratio": fal_aspect_ratio(_aspect),
                         "duration": duration,
                         "resolution": "720p",
                         "generate_audio": False,

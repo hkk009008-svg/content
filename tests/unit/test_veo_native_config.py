@@ -299,3 +299,73 @@ def test_generate_video_surfaces_operation_error(capsys):
     out = capsys.readouterr().out
     assert "Generation error" in out
     assert "Unsupported output video duration" in out
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — generate_video() must accept and thread aspect_ratio into the config
+# RED: today generate_video has no aspect_ratio param → TypeError or it's dropped
+# ---------------------------------------------------------------------------
+def test_generate_video_threads_portrait_aspect_ratio():
+    """generate_video(..., aspect_ratio='9:16') must cause the built config to
+    carry aspect_ratio == '9:16'. Today generate_video has no such parameter,
+    so calling it raises TypeError (missing or unexpected keyword argument).
+    After the fix, the config must carry the caller-supplied value."""
+    api = VeoNativeAPI.__new__(VeoNativeAPI)
+    api._model = "veo-3.1-generate-001"
+    captured = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return _completed_operation()
+
+    api.client = MagicMock()
+    api.client.models.generate_videos.side_effect = _capture
+    api.client.operations.get.side_effect = lambda o: o
+    api.client.files.download.return_value = b"\x00\x00"
+
+    fake_img = types.Image(gcs_uri="gs://x/y.png")
+    with patch("veo_native.os.path.exists", return_value=True), \
+         patch("veo_native.os.path.getsize", return_value=10), \
+         patch("google.genai.types.Image.from_file", return_value=fake_img), \
+         patch("builtins.open", mock_open()):
+        result = api.generate_video(
+            image_path="/tmp/frame.png",
+            prompt="portrait test",
+            output_path="/tmp/out.mp4",
+            aspect_ratio="9:16",
+        )
+
+    assert result == "/tmp/out.mp4"
+    cfg = captured["config"]
+    assert cfg.aspect_ratio == "9:16"
+
+
+def test_generate_video_defaults_aspect_ratio_to_16_9():
+    """Without aspect_ratio kwarg, the config must default to '16:9' (landscape).
+    Keeps the existing landscape baseline green."""
+    api = VeoNativeAPI.__new__(VeoNativeAPI)
+    api._model = "veo-3.1-generate-001"
+    captured = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return _completed_operation()
+
+    api.client = MagicMock()
+    api.client.models.generate_videos.side_effect = _capture
+    api.client.operations.get.side_effect = lambda o: o
+    api.client.files.download.return_value = b"\x00\x00"
+
+    fake_img = types.Image(gcs_uri="gs://x/y.png")
+    with patch("veo_native.os.path.exists", return_value=True), \
+         patch("veo_native.os.path.getsize", return_value=10), \
+         patch("google.genai.types.Image.from_file", return_value=fake_img), \
+         patch("builtins.open", mock_open()):
+        api.generate_video(
+            image_path="/tmp/frame.png",
+            prompt="landscape test",
+            output_path="/tmp/out.mp4",
+        )
+
+    cfg = captured["config"]
+    assert cfg.aspect_ratio == "16:9"

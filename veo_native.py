@@ -145,6 +145,7 @@ class VeoNativeAPI:
         resolution: str = "720p",
         generate_audio: bool = False,
         driving_video_path: str = "",
+        aspect_ratio: str = "16:9",
     ) -> str | None:
         """
         Generate video from a start frame image + text prompt using Veo 3.1.
@@ -210,6 +211,7 @@ class VeoNativeAPI:
                 duration=duration,
                 resolution=resolution,
                 reference_images=None,
+                aspect_ratio=aspect_ratio,
             )
 
             generate_kwargs = {
