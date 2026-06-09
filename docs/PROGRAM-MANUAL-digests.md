@@ -2132,7 +2132,7 @@ Dict mapping shot type → primary video API + fallback list + ComfyUI render pa
 - `create_image_to_video` (`kling_native.py:86`): base64-encodes image; submits to `POST /v1/videos/image2video`. Params: `duration` (str, default `"5"`), `mode` (`"pro"`), `model_name` (`"kling-v1-6"`), `face_consistency` (bool), `image_references` (list → body as `image_reference`). Returns `task_id`.
 - `poll_task` (`kling_native.py:170`): exponential backoff `[3,5,8,12,15]` s, 600-s timeout. Raises `RuntimeError` on `"failed"`, `TimeoutError` on timeout.
 - `generate_video` (`kling_native.py:264`): convenience wrapper — create → poll (180-s default timeout from kwarg) → download → return path.
-- `generate_storyboard` (`kling_native.py:310`): up to 6 shots, 15 s total, distributes durations, sets `face_consistency: True`, posts `multi_prompt`. 600-s poll timeout.
+- `generate_storyboard` (`kling_native.py:313`): up to 6 shots, 15 s total, distributes durations, sets `face_consistency: True`, posts `multi_prompt`. 600-s poll timeout.
 
 #### `VeoNativeAPI` — `veo_native.py:105`
 - `__init__` (`veo_native.py:112`): tries Vertex AI (`genai.Client(vertexai=True, project=..., location=...)`); on failure falls back to Gemini API (`genai.Client(api_key=...)`). Model: `"veo-3.1-generate-001"` (Vertex) or `"veo-3.1-generate-preview"` (Gemini). Records `self._backend`.
@@ -2198,7 +2198,7 @@ Video-modality entries relevant to this subsystem:
 |---|---|---|
 | `cinema/shots/controller.py` | Direct call | Primary caller at `cinema/shots/controller.py:1186`; builds `PipelineContext`, resolves `target_api` + `video_fallbacks`, passes `driving_video_path` + `has_dialogue`; reads `_cascade_out` post-call |
 | `domain/scene_decomposer.py` | Import of `API_REGISTRY` + `PURPOSE_API_RANKING` | Controller reads registry at routing time to resolve dialogue override; `try_next_api` reads `api_engines` filter from `ctx` |
-| `workflow_selector.py` | Direct call | Controller calls `classify_shot_type` + `WORKFLOW_TEMPLATES` at `controller.py:1080–1111` to determine `target_api` + `video_fallbacks` before calling `generate_ai_video` |
+| `workflow_selector.py` | Direct call | Controller calls `classify_shot_type` + `WORKFLOW_TEMPLATES` at `cinema/shots/controller.py:1080–1111` to determine `target_api` + `video_fallbacks` before calling `generate_ai_video` |
 | `cinema/context.py` | PipelineContext | `get_project_setting(ctx, "api_engines")` and `cascade_retry_limit` read inside `generate_ai_video:try_next_api` |
 | `config/settings.py` | Module-level import | API keys (`KLING_ACCESS_KEY/SECRET`, `OPENAI_API_KEY`, `FAL_KEY`, `LTX_API_KEY`, `RUNWAYML_API_SECRET`, `SEEDANCE_API_KEY`, `GOOGLE_CLOUD_PROJECT/LOCATION`) |
 | `identity/` + `domain/continuity_engine.py` | Shared data | `multi_angle_refs` passed in from `continuity_config`; `workflow_selector.get_adaptive_pulid_weight` called by `domain/continuity_engine.py:523` |
@@ -2239,7 +2239,7 @@ Video-modality entries relevant to this subsystem:
 
 1. **Shot classification**: `classify_shot_type(shot)` → `shot_type` ∈ {portrait, medium, wide, action, landscape} (`cinema/shots/controller.py:1083`)
 
-2. **API resolution** (`controller.py:1084–1147`):
+2. **API resolution** (`cinema/shots/controller.py:1084–1147`):
    - If `shot.target_api == "AUTO"`: check `shot.optimizer_cache.spec.suggested_video_api` → if valid API_REGISTRY key, use it + template fallbacks; else use `WORKFLOW_TEMPLATES[shot_type]["target_api"]` + its fallbacks
    - Dialogue override (F1a): if `has_dialogue=True`, scan `PURPOSE_API_RANKING[purpose]` for first entry where `native_audio=True AND modality=="video" AND status=="live"` → override `target_api` to that engine (currently VEO_NATIVE) and `video_fallbacks = None`
    - If `shot.target_api != "AUTO"`: use raw value, `video_fallbacks = None`
@@ -2282,7 +2282,7 @@ Video-modality entries relevant to this subsystem:
 
 **Default cascade order includes both native and FAL-proxy duplicates** (`phase_c_ffmpeg.py:128–130`): `["KLING_NATIVE", "SORA_NATIVE", "RUNWAY_GEN4", "LTX", "VEO_NATIVE", "KLING_3_0", "SORA_2", "VEO", "RUNWAY"]` — VEO_NATIVE and VEO (FAL) are separate cascade members. If VEO_NATIVE fails, VEO (FAL) is a later fallback.
 
-**Dialogue routing override drops fallbacks** (`controller.py:1138–1141`): when `has_dialogue=True`, `video_fallbacks` is set to `None` to prevent cross-engine fallback to non-native-audio engines. If VEO_NATIVE fails, `try_next_api()` falls through to the default global list which includes non-audio engines — the native-audio guarantee is only on the primary attempt.
+**Dialogue routing override drops fallbacks** (`cinema/shots/controller.py:1138–1141`): when `has_dialogue=True`, `video_fallbacks` is set to `None` to prevent cross-engine fallback to non-native-audio engines. If VEO_NATIVE fails, `try_next_api()` falls through to the default global list which includes non-audio engines — the native-audio guarantee is only on the primary attempt.
 
 **LTX `_fal_transition` / `_native_transition` are dead code** in the cascade: `ltx_native.py:157, 273` implement keyframe interpolation (start + end frame) but nothing in `generate_ai_video` calls them. They can only be reached by direct use of `LTXVideoAPI`.
 
@@ -2305,10 +2305,10 @@ Video-modality entries relevant to this subsystem:
 | Claim | File:Line |
 |---|---|
 | `_VEO_QUOTA_EXHAUSTED_UNTIL` module-level state, TTL 1800 s | `phase_c_ffmpeg.py:18–19` |
-| `_veo_quota_blocked` function | `phase_c_ffmpeg.py:22–28` |
+| `_veo_quota_blocked` function | `phase_c_ffmpeg.py:32-38` |
 | `generate_ai_video` signature | `phase_c_ffmpeg.py:43–60` |
 | Shot-type negative-prompt tailoring | `phase_c_ffmpeg.py:103–118` |
-| `_record_video_cascade` inner function | `phase_c_ffmpeg.py:91–101` |
+| `_record_video_cascade` inner function | `phase_c_ffmpeg.py:107-117` |
 | `try_next_api` closure + default cascade order | `phase_c_ffmpeg.py:122–179` |
 | `api_engines` filter in `try_next_api` | `phase_c_ffmpeg.py:135–142` |
 | `MAX_CASCADE_RETRIES` default + `cascade_retry_limit` override | `phase_c_ffmpeg.py:158–166` |
@@ -2327,7 +2327,7 @@ Video-modality entries relevant to this subsystem:
 | FAL_SVD renamed from COMFY_UI | `phase_c_ffmpeg.py:600–602` |
 | RUNWAY (legacy) `gen3a_turbo` | `phase_c_ffmpeg.py:658–689` |
 | SEEDANCE speculative API endpoint | `phase_c_ffmpeg.py:691–763` |
-| Unknown API → `try_next_api()` | `phase_c_ffmpeg.py:765–767` |
+| Unknown API → `try_next_api()` | `phase_c_ffmpeg.py:138-140` |
 | `WORKFLOW_TEMPLATES` dict (shot types, primary APIs, fallback lists) | `workflow_selector.py:21–109` |
 | Dialogue note — VEO_NATIVE → Kling Lip Sync → Omnihuman | `workflow_selector.py:104–108` |
 | `SHOT_TYPE_KEYWORDS` keyword tables | `workflow_selector.py:112–133` |
@@ -2350,7 +2350,7 @@ Video-modality entries relevant to this subsystem:
 | `KlingNativeAPI.__init__` raises on missing keys | `kling_native.py:36–39` |
 | JWT token generation / 30-min expiry / 5-min cache threshold | `kling_native.py:46–72` |
 | `create_image_to_video` `image_reference` param | `kling_native.py:86–168` |
-| `poll_task` exponential backoff schedule | `kling_native.py:190–233` |
+| `poll_task` exponential backoff schedule | `kling_native.py:170-213` |
 | `generate_video` 180-s timeout kwarg pop | `kling_native.py:264` |
 | `generate_storyboard` 6-shot cap, 15-s total, `multi_prompt` | `kling_native.py:310–446` |
 | Sora shutdown Sep 2026 warning | `sora_native.py:6` |
@@ -2360,10 +2360,10 @@ Video-modality entries relevant to this subsystem:
 | LTX `CAMERA_MOTIONS` 15-item list | `ltx_native.py:42–47` |
 | LTX `_native_generate` → bytes direct, no poll | `ltx_native.py:201–271` |
 | LTX `_fal_transition` / `_native_transition` (unused in cascade) | `ltx_native.py:157–195, 273–305` |
-| `get_ltx_client` singleton | `ltx_native.py:348–353` |
+| `get_ltx_client` singleton | `ltx_native.py:363-368` |
 | `API_REGISTRY` full dict | `domain/scene_decomposer.py:36–91` |
 | `VEO_NATIVE native_audio=True` | `domain/scene_decomposer.py:43` |
-| `PURPOSE_API_RANKING` | `domain/scene_decomposer.py:121–141` |
+| `PURPOSE_API_RANKING` | `domain/scene_decomposer.py:120-140` |
 | Controller: `classify_shot_type` call | `cinema/shots/controller.py:1083` |
 | Controller: dialogue override logic (F1a) | `cinema/shots/controller.py:1113–1144` |
 | Controller: `generate_ai_video` call site | `cinema/shots/controller.py:1186–1201` |
@@ -2679,7 +2679,7 @@ All knobs write into `project["global_settings"]` via `PUT /api/projects/<pid>` 
 | IP-Adapter injection (nodes 410–411), rewire 17/22 | `phase_c_assembly.py:318–354` |
 | ComfyUI polling loop, 600s timeout | `phase_c_assembly.py:365–394` |
 | `_fal_flux_fallback` Kontext prompt architecture | `phase_c_assembly.py:415–521` |
-| `_parse_structured_prompt` | `phase_c_assembly.py:397–412` |
+| `_parse_structured_prompt` | `phase_c_assembly.py:420-435` |
 | `ImageGenResult` NamedTuple | `phase_c_assembly.py:15–29` |
 | `RunPodComfyUI` class | `phase_c_assembly.py:32–71` |
 | `_MAX_TIER_KNOB_SCHEMA` (17+8 knobs) | `quality_max.py:100–138` |
@@ -2689,12 +2689,12 @@ All knobs write into `project["global_settings"]` via `PUT /api/projects/<pid>` 
 | `_probe_node_availability` | `quality_max.py:250–283` |
 | `_upload_with_cache` | `quality_max.py:295–315` |
 | `_prune_node` / `_prune_unavailable` | `quality_max.py:322–394` |
-| `_inject_identity` | `quality_max.py:397–417` |
-| `_inject_conditioning` (CN channel wiring) | `quality_max.py:419–446` |
-| `_inject_sampling` | `quality_max.py:453–471` |
-| `_inject_latent_source` (LatentBlend ratio 0.15) | `quality_max.py:474–494` |
-| `_inject_post_passes` (FaceDetailer, SUPIR, 4K) | `quality_max.py:497–523` |
-| `generate_ai_broll_max` entry point | `quality_max.py:574–599` |
+| `_inject_identity` | `quality_max.py:461-481` |
+| `_inject_conditioning` (CN channel wiring) | `quality_max.py:509-536` |
+| `_inject_sampling` | `quality_max.py:543-561` |
+| `_inject_latent_source` (LatentBlend ratio 0.15) | `quality_max.py:564-584` |
+| `_inject_post_passes` (FaceDetailer, SUPIR, 4K) | `quality_max.py:587-613` |
+| `generate_ai_broll_max` entry point | `quality_max.py:694-719` |
 | UI overlay application (7 halt + 17 ComfyUI knobs) | `quality_max.py:621–690` |
 | Best-of-N loop, parallel workers, seed spread | `quality_max.py:744–821` |
 | PuLID-boost retry logic | `quality_max.py:829–852` |
@@ -2708,10 +2708,10 @@ All knobs write into `project["global_settings"]` via `PUT /api/projects/<pid>` 
 | `CandidateScore` dataclass, DEFAULT_WEIGHTS | `face_validator_gate.py:153–165` |
 | `score_candidate` | `face_validator_gate.py:168–211` |
 | `should_halt` (composite-only rule) | `face_validator_gate.py:225–279` |
-| `needs_regenerate` | `face_validator_gate.py:289–304` |
+| `needs_regenerate` | `face_validator_gate.py:326-341` |
 | `KeyframeRenderPhase.run` | `cinema/phases/keyframe_render.py:68–109` |
 | `generate_keyframe_take` (plan gate, continuity wiring, optimizer, call) | `cinema/shots/controller.py:314–568` |
-| `_resolve_previous_approved_keyframe` | `cinema/shots/controller.py:303–308` |
+| `_resolve_previous_approved_keyframe` | `cinema/shots/controller.py:467-472` |
 | `approve_take` (`approved_keyframe_take_id` write) | `cinema/review/controller.py:647–686` |
 | `enhance_shot_prompt` (continuity_config construction) | `domain/continuity_engine.py:446–581` |
 | `TemporalConsistencyManager.should_use_img2img`, `get_denoise_strength` | `domain/continuity_engine.py:350–416` |
@@ -3033,7 +3033,7 @@ All knobs live in `project.global_settings` (set via `PUT /api/projects/<pid>` w
 
 ### Citations
 
-- `continuity_engine.py:1–9` — shim declaration
+- `./continuity_engine.py:1–9` — shim declaration (root re-export shim; `./` disambiguates from `domain/continuity_engine.py`)
 - `domain/continuity_engine.py:1–11` — module docstring listing 4 subsystems
 - `domain/continuity_engine.py:35–63` — `CharacterContinuityTracker.__init__`
 - `domain/continuity_engine.py:65–95` — `build_character_prompt_fragment`
@@ -3125,34 +3125,34 @@ The audio side generates dialogue TTS (ElevenLabs multi-turn or per-line; Cartes
 **`generate_ai_video`** (`phase_c_ffmpeg.py:53`)
 Routes an image → video to one of 9+ AI video engines. Params: `image_path`, `camera_motion`, `target_api`, `output_mp4`, `pacing`, `character_id`, `attempted_apis` (dedup list), `multi_angle_refs` (up to 6 character reference images), `_cascade_retries`, `negative_prompt` (shot-type-aware auto-built if None), `shot_type`, `video_fallbacks` (custom fallback order list), `driving_video_path` (performance-capture video for Veo/Sora/Runway), `has_dialogue` (triggers native audio on VEO_NATIVE/landscape), `ctx` (PipelineContext for api_engines filter + cascade_retry_limit), `_cascade_out` (mutable dict; written with `cascade_metadata` on success). Returns: `output_mp4` path or `None`. Internally defines `try_next_api()` which reads `ctx.api_engines` to filter cascade; `_record_video_cascade()` writes the winning engine name + attempt list.
 
-**`stitch_modules`** (`phase_c_ffmpeg.py:832`)
+**`stitch_modules`** (`phase_c_ffmpeg.py:846`)
 FFmpeg concat demuxer on a list of normalized MP4 paths → single `final_output` MP4 using `-c copy`. No re-encode. Raises `subprocess.CalledProcessError` on failure.
 
-**`split_video_into_segments`** (`phase_c_ffmpeg.py:858`)
+**`split_video_into_segments`** (`phase_c_ffmpeg.py:872`)
 Splits a combined storyboard MP4 into per-segment clips using `-ss`/`-t` (stream-copy). Last segment runs to EOF to absorb float accumulation drift. Returns list of absolute paths. Used after Kling storyboard generation to recover per-shot clips.
 
-**`assess_motion_quality`** (`phase_c_ffmpeg.py:957`)
+**`assess_motion_quality`** (`phase_c_ffmpeg.py:971`)
 OpenCV Farneback optical-flow analysis on N sampled frames. Returns `{smoothness_score, artifact_frames, frozen_ratio, recommendation: "accept"|"interpolate"|"regenerate"}`. Thresholds: `frozen_ratio > 0.5` → regenerate; `smoothness < 0.4` → interpolate; `artifact_frames > 30% of pairs` → regenerate.
 
-**`COLOR_GRADE_PRESETS`** (`phase_c_ffmpeg.py:1069`)
+**`COLOR_GRADE_PRESETS`** (`phase_c_ffmpeg.py:1083`)
 Dict of 8 named FFmpeg eq/curves filter chains: `warm_cinema`, `cool_noir`, `vibrant`, `desaturated`, `golden_hour`, `moonlight`, `high_contrast`, `pastel`.
 
-**`apply_color_grade`** (`phase_c_ffmpeg.py:1081`)
+**`apply_color_grade`** (`phase_c_ffmpeg.py:1095`)
 Applies a preset filter chain or custom `.cube`/`.3dl` LUT via FFmpeg `lut3d`. Params: `video_path`, `output_path`, `preset` (default `warm_cinema`), `lut_path` (optional). Re-encodes with `libx264 -preset fast`. Returns `output_path` or `None`.
 
-**`adjust_speed`** (`phase_c_ffmpeg.py:1120`)
+**`adjust_speed`** (`phase_c_ffmpeg.py:1134`)
 Speed multiplier via `setpts` (video) + chained `atempo` (audio; handles values outside 0.5–2.0 by chaining). Params: `video_path`, `output_path`, `factor` (0.5 = half-speed/slow-mo, 2.0 = double).
 
-**`two_pass_loudnorm`** (`phase_c_ffmpeg.py:1217`)
+**`two_pass_loudnorm`** (`phase_c_ffmpeg.py:1231`)
 EBU R128 two-pass loudness normalization. Pass 1: measure; parses `loudnorm` JSON from stderr. Pass 2: normalize with measured values (`linear=true`). Defaults: -14 LUFS / 11 LU / -1.5 dBTP (YouTube/Netflix). Video stream copied; only audio re-encoded to AAC 192k. Returns `bool`; caller replaces input file on `True`.
 
-**`_probe_duration`** (`phase_c_ffmpeg.py:1389`) / **`_has_audio_stream`** (`phase_c_ffmpeg.py:1399`)
+**`_probe_duration`** (`phase_c_ffmpeg.py:1403`) / **`_has_audio_stream`** (`phase_c_ffmpeg.py:1413`)
 ffprobe helpers. `_has_audio_stream` detects whether a clip has any audio stream — used by xfade to decide the acrossfade path.
 
-**`_build_xfade_filtergraph`** (`phase_c_ffmpeg.py:1419`)
+**`_build_xfade_filtergraph`** (`phase_c_ffmpeg.py:1433`)
 Builds a chained `xfade`+`acrossfade` filtergraph string. Three audio-presence cases: (a) all inputs have audio → raw acrossfade; (b) no inputs have audio → video-only, `alab=None`; (c) mixed → `anullsrc`-pad silent legs, normalize every leg to `48kHz stereo fltp` before acrossfade (Lane V #25 M1 fix). Returns `(filter_complex, video_label, audio_label)`.
 
-**`xfade_concat`** (`phase_c_ffmpeg.py:1488`)
+**`xfade_concat`** (`phase_c_ffmpeg.py:1502`)
 Public entry point: probes durations, clamps transition to `0.4 * min(durations)`, calls `_build_xfade_filtergraph`, runs single FFmpeg re-encode. Re-encodes to `libx264 -crf 20` + `aac 192k`. Raises on FFmpeg failure (caller falls back to hard-cut concat). Lane V #24 F1: was erroring silently on silent-video inputs; fixed by `_has_audio_stream` guard.
 
 #### phase_c_vision.py
@@ -3332,7 +3332,7 @@ Top-level router: AU plugin > Pedalboard chain > FFmpeg filter.
 
 | Connection | Mechanism |
 |---|---|
-| `cinema/shots/controller.py` | **Direct call** — imports `face_swap_video_frames`, `generate_lip_sync_video`, `generate_rife_interpolation`, `upscale_video_seedvr2` (`controller.py:92–96`); calls them in `apply_correction` and during mandatory F1b lipsync pass at take generation time |
+| `cinema/shots/controller.py` | **Direct call** — imports `face_swap_video_frames`, `generate_lip_sync_video`, `generate_rife_interpolation`, `upscale_video_seedvr2` (`cinema/shots/controller.py:92–96`); calls them in `apply_correction` and during mandatory F1b lipsync pass at take generation time |
 | `cinema_pipeline.py` | **Direct call** — `_assemble_final` imports `xfade_concat`, `apply_color_grade` from `phase_c_ffmpeg`; `_apply_final_loudnorm` imports `two_pass_loudnorm`; `_ensure_bgm` calls `master_music`; `_ensure_scene_foley` calls `generate_stability_foley` |
 | `cinema/auto_approve.py` | **Shared state (persisted field)** — reads `take["metadata"]["lipsync_score"]` and `take["metadata"]["audio_embedded"]` to gate auto-approval; `final_min_lipsync` threshold default 0.8 (`auto_approve.py:98`) |
 | `domain/scene_decomposer.py` (API_REGISTRY) | **Direct reference** — `cinema/shots/controller.py:1081` imports `API_REGISTRY` to check `native_audio` flag on winning engine; VEO_NATIVE is the only live engine with `native_audio: True` (`domain/scene_decomposer.py:43`) |
