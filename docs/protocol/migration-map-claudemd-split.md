@@ -57,38 +57,38 @@ Columns:
 
 | Source file | Source heading + line range | Destination | Root stub (ID) | Grep anchor (unique phrase) | Preserved? |
 |---|---|---|---|---|---|
-| CLAUDE.md | `# Session-start protocol (read me first)` L1–30 | `docs/protocol/claude/core.md` (detail) | `STAYS (R-TRUTH verbatim + R-START stub)` | `Trust the code; update the prose when it diverges` | ✗ (not yet relocated) |
+| CLAUDE.md | `# Session-start protocol (read me first)` L1–30 | `docs/protocol/claude/core.md` (detail) | `STAYS (R-TRUTH verbatim + R-START stub)` | `Trust the code; update the prose when it diverges` | ✓ (added; root copy retained) |
 | CLAUDE.md | `# The user-principal's intent for this program (read PROGRAM-MANUAL.md)` L31–52 | STAYS in root (short pointer) | `STAYS (short pointer)` | `capability-maximization user manual` | ✗ (not yet relocated) |
 | CLAUDE.md | `# Repo doc map` L53–71 | STAYS in root (router index; update with new protocol docs) | `STAYS (router index)` | `GitNexus MCP integration was auto-documented` | ✗ (not yet relocated) |
 | CLAUDE.md | `# Impact analysis before editing` L72–91 | STAYS in root (full) | `STAYS (R-IMPACT, full)` | `de-facto method across every session to date` | ✗ (not yet relocated) |
-| CLAUDE.md | `# Verification discipline for factual claims` L92–101 | `docs/protocol/claude/core.md` (full body incl. 24-vs-1 origin) | `STAYS (R-EVIDENCE short stub)` | `session memory trusted over filesystem` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Rule 1 — No inventory claim without verification output` L102–113 | `docs/protocol/claude/core.md` | `STAYS (R-EVIDENCE short stub)` | `The shell never lies about what it ran` (Rule 2 section, part of R-EVIDENCE block) | ✗ (not yet relocated) |
-| CLAUDE.md | `## Rule 2 — Scoped output stays scoped` L114–124 | `docs/protocol/claude/core.md` | `STAYS (R-EVIDENCE short stub)` | `The shell never lies about what it ran` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Rule 3 — Pre-commit trip-wire for strategic docs` L125–135 | `docs/protocol/claude/core.md` | `STAYS (R-EVIDENCE short stub)` | `24-vs-1 test error` | ✗ (not yet relocated) |
-| CLAUDE.md | `## When you cannot comply` L136–145 | `docs/protocol/claude/core.md` | `—` | `Authority and verification travel together` | ✗ (not yet relocated) |
-| CLAUDE.md | `## When does this apply?` L146–158 | `docs/protocol/claude/core.md` | `—` | `specific factual claims = verification required` | ✗ (not yet relocated) |
-| CLAUDE.md | `## When you change something` L159–171 | `docs/protocol/claude/core.md` | `—` | `don't implement in main context` | ✗ (not yet relocated) |
-| CLAUDE.md | `# Working a Multi-Task Plan` L172–184 | `docs/protocol/claude/orchestration.md` | `R-ORCH (trigger stub)` | `1M / 2M+ token` | ✗ (not yet relocated) |
-| CLAUDE.md | `## When to invoke` L185–193 | `docs/protocol/claude/orchestration.md` | `—` | `orchestration overhead isn't worth it` | ✗ (not yet relocated) |
-| CLAUDE.md | `## The per-task loop (sequential, never parallel)` L194–213 | `docs/protocol/claude/orchestration.md` | `—` | `Dispatch spec compliance reviewer` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Delegation heuristics — Lane A / B / C` L214–251 | `docs/protocol/claude/orchestration.md` | `—` | `Lane A — execute in main context` | ✗ (not yet relocated) |
+| CLAUDE.md | `# Verification discipline for factual claims` L92–101 | `docs/protocol/claude/core.md` (full body incl. 24-vs-1 origin) | `STAYS (R-EVIDENCE short stub)` | `session memory trusted over filesystem` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Rule 1 — No inventory claim without verification output` L102–113 | `docs/protocol/claude/core.md` | `STAYS (R-EVIDENCE short stub)` | `The shell never lies about what it ran` (Rule 2 section, part of R-EVIDENCE block) | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Rule 2 — Scoped output stays scoped` L114–124 | `docs/protocol/claude/core.md` | `STAYS (R-EVIDENCE short stub)` | `The shell never lies about what it ran` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Rule 3 — Pre-commit trip-wire for strategic docs` L125–135 | `docs/protocol/claude/core.md` | `STAYS (R-EVIDENCE short stub)` | `24-vs-1 test error` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## When you cannot comply` L136–145 | `docs/protocol/claude/core.md` | `—` | `Authority and verification travel together` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## When does this apply?` L146–158 | `docs/protocol/claude/core.md` | `—` | `specific factual claims = verification required` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## When you change something` L159–171 | `docs/protocol/claude/core.md` | `—` | `don't implement in main context` | ✓ (added; root copy retained) |
+| CLAUDE.md | `# Working a Multi-Task Plan` L172–184 | `docs/protocol/claude/orchestration.md` | `R-ORCH (trigger stub)` | `1M / 2M+ token` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## When to invoke` L185–193 | `docs/protocol/claude/orchestration.md` | `—` | `orchestration overhead isn't worth it` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## The per-task loop (sequential, never parallel)` L194–213 | `docs/protocol/claude/orchestration.md` | `—` | `Dispatch spec compliance reviewer` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Delegation heuristics — Lane A / B / C` L214–251 | `docs/protocol/claude/orchestration.md` | `—` | `Lane A — execute in main context` | ✓ (added; root copy retained) |
 | CLAUDE.md | `## Implementer prompt template` L252–319 | `docs/templates/claude/implementer.md` | `—` | `A good implementer prompt is 80-150 lines and lets the subagent act` | ✓ (added; root copy retained) |
 | CLAUDE.md | `## Hardening notes — provenance for the implementer-template additions` L320–352 | `docs/templates/claude/implementer.md` | `—` | `do NOT trim these` | ✓ (added; root copy retained) |
 | CLAUDE.md | `## Spec reviewer prompt template` L353–381 | `docs/templates/claude/reviewer.md` | `—` | `reviewing whether Task` | ✓ (added; root copy retained) |
 | CLAUDE.md | `## Code quality reviewer prompt template` L382–403 | `docs/templates/claude/reviewer.md` | `—` | `Report: Strengths, Issues (Critical / Important / Minor)` | ✓ (added; root copy retained) |
-| CLAUDE.md | `## Plan vs. source — the divergence rule` L404–419 | `docs/protocol/claude/orchestration.md` | `—` | `motion_floor_for` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Commit discipline for reviewability` L420–435 | `docs/protocol/claude/orchestration.md` | `—` | `Baseline commit first` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Context hygiene (the long-session rule)` L436–451 | `docs/protocol/claude/orchestration.md` | `—` | `Summaries in main, full content in subagents` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Compaction signals and what to do` L452–480 | `docs/protocol/claude/orchestration.md` | `—` | `Commit pending work immediately` | ✗ (not yet relocated) |
-| CLAUDE.md | `## AskUserQuestion discipline` L481–491 | `docs/protocol/claude/orchestration.md` (body); root keeps `## Claude Code mechanics` stub | `STAYS (short stub in ## Claude Code mechanics block)` | `Are reversible only with effort (renaming a public API` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Background work` L492–501 | `docs/protocol/claude/orchestration.md` (body); root keeps `## Claude Code mechanics` stub | `STAYS (short stub in ## Claude Code mechanics block)` | `poll a background task you started` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Pre-existing failures` L502–512 | `docs/protocol/claude/orchestration.md` | `—` | `mark it \`xfail\` (or tighten tolerance) early in the branch if` | ✗ (not yet relocated) |
+| CLAUDE.md | `## Plan vs. source — the divergence rule` L404–419 | `docs/protocol/claude/orchestration.md` | `—` | `motion_floor_for` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Commit discipline for reviewability` L420–435 | `docs/protocol/claude/orchestration.md` | `—` | `Baseline commit first` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Context hygiene (the long-session rule)` L436–451 | `docs/protocol/claude/orchestration.md` | `—` | `Summaries in main, full content in subagents` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Compaction signals and what to do` L452–480 | `docs/protocol/claude/orchestration.md` | `—` | `Commit pending work immediately` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## AskUserQuestion discipline` L481–491 | `docs/protocol/claude/orchestration.md` (body); root keeps `## Claude Code mechanics` stub | `STAYS (short stub in ## Claude Code mechanics block)` | `Are reversible only with effort (renaming a public API` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Background work` L492–501 | `docs/protocol/claude/orchestration.md` (body); root keeps `## Claude Code mechanics` stub | `STAYS (short stub in ## Claude Code mechanics block)` | `poll a background task you started` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Pre-existing failures` L502–512 | `docs/protocol/claude/orchestration.md` | `—` | `mark it \`xfail\` (or tighten tolerance) early in the branch if` | ✓ (added; root copy retained) |
 | CLAUDE.md | `## Quality vs. throughput watchpoints` L513–530 | `docs/protocol/claude/failure-modes.md` | `—` | `throughput optimization is "ship when the code quality reviewer says approve"` | ✓ (added; root copy retained) |
 | CLAUDE.md | `## Failure modes and false positives observed` L531–591 | `docs/protocol/claude/failure-modes.md` | `—` | `Spec reviewer flagged two missing requirements in a render component` | ✓ (added; root copy retained) |
 | CLAUDE.md | `### Reviewer false positives` L536–564 | `docs/protocol/claude/failure-modes.md` | `—` | `automated security warnings can be wrong about instruction-following` | ✓ (added; root copy retained) |
 | CLAUDE.md | `### Tool and environment failure modes` L565–584 | `docs/protocol/claude/failure-modes.md` | `—` | `File has not been read yet` | ✓ (added; root copy retained) |
 | CLAUDE.md | `### Detection pattern` L585–591 | `docs/protocol/claude/failure-modes.md` | `—` | `do a quick targeted verification (single` | ✓ (added; root copy retained) |
-| CLAUDE.md | `## When NOT to use this pattern` L592–601 | `docs/protocol/claude/orchestration.md` | `—` | `Tasks with constant operator feedback` | ✗ (not yet relocated) |
+| CLAUDE.md | `## When NOT to use this pattern` L592–601 | `docs/protocol/claude/orchestration.md` | `—` | `Tasks with constant operator feedback` | ✓ (added; root copy retained) |
 | CLAUDE.md | `# Director-Operator Concurrent Operation` L602–605 | `docs/protocol/claude/director-operator.md` | `pointer` | `two parallel Claude sessions by design` | ✓ (added; root copy retained) |
 | CLAUDE.md | `## Two-seat team model (Protocol Bundle v5)` L606–646 | `docs/protocol/claude/director-operator.md` | `pointer` | `specialization is cognitive-load distribution, not hierarchy` | ✓ (added; root copy retained) |
 | CLAUDE.md | `## Role partition` L647–726 | `docs/protocol/claude/director-operator.md` | `pointer` | `Strategic-seat-default` | ✓ (added; root copy retained) |
@@ -141,30 +141,30 @@ embedded inside each Rule #N section body. They relocate to
 | Source file | Source heading + line range | Destination | Root stub (ID) | Grep anchor (unique phrase) | Preserved? |
 |---|---|---|---|---|---|
 | AGENTS.md | `# About this document` L1–20 | STAYS in AGENTS.md router (self-identity intro) | `STAYS (AGENTS router)` | `agent-agnostic root` | ✗ (not yet relocated) |
-| AGENTS.md | `# Session-start protocol (read me first)` L21–51 | `docs/protocol/agents/core.md` | `STAYS (R-TRUTH verbatim + R-START stub)` | `Trust the code; update the prose when it diverges` | ✗ (not yet relocated) |
+| AGENTS.md | `# Session-start protocol (read me first)` L21–51 | `docs/protocol/agents/core.md` | `STAYS (R-TRUTH verbatim + R-START stub)` | `Trust the code; update the prose when it diverges` | ✓ (added; root copy retained) |
 | AGENTS.md | `# The user-principal's intent for this program (read PROGRAM-MANUAL.md)` L52–73 | STAYS in AGENTS.md router (short pointer) | `STAYS (short pointer)` | `capability-maximization user manual` | ✗ (not yet relocated) |
 | AGENTS.md | `# Repo doc map` L74–92 | STAYS in root (router index; update with new protocol docs) | `STAYS (router index)` | `GitNexus MCP integration was auto-documented` | ✗ (not yet relocated) |
 | AGENTS.md | `# Impact analysis before editing` L93–112 | STAYS in AGENTS.md router (full) | `STAYS (R-IMPACT, full)` | `de-facto method across every session to date` | ✗ (not yet relocated) |
-| AGENTS.md | `# Verification discipline for factual claims` L113–122 | `docs/protocol/agents/core.md` | `STAYS (R-EVIDENCE short stub)` | `session memory trusted over filesystem` | ✗ (not yet relocated) |
-| AGENTS.md | `## Rule 1 — No inventory claim without verification output` L123–134 | `docs/protocol/agents/core.md` | `STAYS (R-EVIDENCE short stub)` | `Just trust me` is not acceptable | ✗ (not yet relocated) |
-| AGENTS.md | `## Rule 2 — Scoped output stays scoped` L135–145 | `docs/protocol/agents/core.md` | `STAYS (R-EVIDENCE short stub)` | `The shell never lies about what it ran` | ✗ (not yet relocated) |
-| AGENTS.md | `## Rule 3 — Pre-commit trip-wire for strategic docs` L146–156 | `docs/protocol/agents/core.md` | `STAYS (R-EVIDENCE short stub)` | `24-vs-1 test error` | ✗ (not yet relocated) |
-| AGENTS.md | `## When you cannot comply` L157–166 | `docs/protocol/agents/core.md` | `—` | `Authority and verification travel together` | ✗ (not yet relocated) |
-| AGENTS.md | `## When does this apply?` L167–179 | `docs/protocol/agents/core.md` | `—` | `specific factual claims = verification required` | ✗ (not yet relocated) |
-| AGENTS.md | `## When you change something` L180–192 | `docs/protocol/agents/core.md` | `—` | `don't implement in main context — orchestrate` | ✗ (not yet relocated) |
-| AGENTS.md | `# Multi-task orchestration` L193–210 | `docs/protocol/agents/orchestration.md` | `R-ORCH (trigger stub)` | `1M / 2M+ token` | ✗ (not yet relocated) |
-| AGENTS.md | `## When to invoke` L211–218 | `docs/protocol/agents/orchestration.md` | `—` | `orchestration overhead isn't worth it` | ✗ (not yet relocated) |
-| AGENTS.md | `## The per-task loop (sequential, never parallel)` L219–245 | `docs/protocol/agents/orchestration.md` | `—` | `Dispatch spec compliance reviewer` | ✗ (not yet relocated) |
-| AGENTS.md | `## Delegation heuristics — Lane A / B / C` L246–285 | `docs/protocol/agents/orchestration.md` | `—` | `Lane A — execute in main context` | ✗ (not yet relocated) |
+| AGENTS.md | `# Verification discipline for factual claims` L113–122 | `docs/protocol/agents/core.md` | `STAYS (R-EVIDENCE short stub)` | `session memory trusted over filesystem` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Rule 1 — No inventory claim without verification output` L123–134 | `docs/protocol/agents/core.md` | `STAYS (R-EVIDENCE short stub)` | `Just trust me` is not acceptable | ✓ (added; root copy retained) |
+| AGENTS.md | `## Rule 2 — Scoped output stays scoped` L135–145 | `docs/protocol/agents/core.md` | `STAYS (R-EVIDENCE short stub)` | `The shell never lies about what it ran` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Rule 3 — Pre-commit trip-wire for strategic docs` L146–156 | `docs/protocol/agents/core.md` | `STAYS (R-EVIDENCE short stub)` | `24-vs-1 test error` | ✓ (added; root copy retained) |
+| AGENTS.md | `## When you cannot comply` L157–166 | `docs/protocol/agents/core.md` | `—` | `Authority and verification travel together` | ✓ (added; root copy retained) |
+| AGENTS.md | `## When does this apply?` L167–179 | `docs/protocol/agents/core.md` | `—` | `specific factual claims = verification required` | ✓ (added; root copy retained) |
+| AGENTS.md | `## When you change something` L180–192 | `docs/protocol/agents/core.md` | `—` | `don't implement in main context — orchestrate` | ✓ (added; root copy retained) |
+| AGENTS.md | `# Multi-task orchestration` L193–210 | `docs/protocol/agents/orchestration.md` | `R-ORCH (trigger stub)` | `1M / 2M+ token` | ✓ (added; root copy retained) |
+| AGENTS.md | `## When to invoke` L211–218 | `docs/protocol/agents/orchestration.md` | `—` | `orchestration overhead isn't worth it` | ✓ (added; root copy retained) |
+| AGENTS.md | `## The per-task loop (sequential, never parallel)` L219–245 | `docs/protocol/agents/orchestration.md` | `—` | `Dispatch spec compliance reviewer` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Delegation heuristics — Lane A / B / C` L246–285 | `docs/protocol/agents/orchestration.md` | `—` | `Lane A — execute in main context` | ✓ (added; root copy retained) |
 | AGENTS.md | `## Prompt template (for Lane B implementers)` L286–354 | `docs/templates/agents/implementer.md` | `—` | `A good implementer prompt is 80-150 lines and includes` | ✓ (added; root copy retained) |
 | AGENTS.md | `## Hardening notes — provenance for the implementer-template additions` L355–379 | `docs/templates/agents/implementer.md` | `—` | `Carry them forward in future dispatches; if you trim the template, do NOT trim these` | ✓ (added; root copy retained) |
-| AGENTS.md | `## Plan vs. source — the divergence rule` L380–394 | `docs/protocol/agents/orchestration.md` | `—` | `motion_floor_for` | ✗ (not yet relocated) |
-| AGENTS.md | `## Commit discipline for reviewability` L395–408 | `docs/protocol/agents/orchestration.md` | `—` | `Baseline commit first` | ✗ (not yet relocated) |
-| AGENTS.md | `## Context hygiene (the long-session rule)` L409–424 | `docs/protocol/agents/orchestration.md` | `—` | `Summaries in main, full content in subagents` | ✗ (not yet relocated) |
-| AGENTS.md | `## Compaction signals and what to do` L425–447 | `docs/protocol/agents/orchestration.md` | `—` | `Commit pending work immediately` | ✗ (not yet relocated) |
+| AGENTS.md | `## Plan vs. source — the divergence rule` L380–394 | `docs/protocol/agents/orchestration.md` | `—` | `motion_floor_for` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Commit discipline for reviewability` L395–408 | `docs/protocol/agents/orchestration.md` | `—` | `Baseline commit first` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Context hygiene (the long-session rule)` L409–424 | `docs/protocol/agents/orchestration.md` | `—` | `Summaries in main, full content in subagents` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Compaction signals and what to do` L425–447 | `docs/protocol/agents/orchestration.md` | `—` | `Commit pending work immediately` | ✓ (added; root copy retained) |
 | AGENTS.md | `## Quality vs. throughput watchpoints` L448–465 | `docs/protocol/agents/failure-modes.md` | `—` | `checking the right things` | ✓ (added; root copy retained) |
 | AGENTS.md | `## Failure modes and false positives` L466–521 | `docs/protocol/agents/failure-modes.md` | `—` | `Fresh instance "tool X not available"` | ✓ (added; root copy retained) |
-| AGENTS.md | `## When NOT to orchestrate` L522–532 | `docs/protocol/agents/orchestration.md` | `—` | `Tasks needing constant operator feedback` | ✗ (not yet relocated) |
+| AGENTS.md | `## When NOT to orchestrate` L522–532 | `docs/protocol/agents/orchestration.md` | `—` | `Tasks needing constant operator feedback` | ✓ (added; root copy retained) |
 | AGENTS.md | `# Director-Operator Concurrent Operation` L533–536 | `docs/protocol/agents/director-operator.md` | `pointer` | `two parallel agent sessions by design` | ✓ (added; root copy retained) |
 | AGENTS.md | `## Two-seat team model (Protocol Bundle v5)` L537–572 | `docs/protocol/agents/director-operator.md` | `pointer` | `specialization is cognitive-load distribution, not hierarchy` | ✓ (added; root copy retained) |
 | AGENTS.md | `## Role partition` L573–639 | `docs/protocol/agents/director-operator.md` | `pointer` | `Strategic-seat-default` | ✓ (added; root copy retained) |
