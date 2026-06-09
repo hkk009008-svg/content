@@ -1540,6 +1540,44 @@ class TestMultiRangeVerification:
         drifts = check_line_anchors([str(md)], tmp_path)
         assert len(drifts) == 1 and drifts[0].kind == "missing_file"
 
+    # --- TQ-2 (Lane V): test_multi_range_drift_is_not_autofixed (above) passes
+    # for the WRONG reason — the inline-rewrite path no-ops on comma-list tokens
+    # regardless of `fixable`, so it would still pass even if the multi-range
+    # Drift were mutated to fixable=True. This test asserts the property DIRECTLY
+    # at the source: the Drift returned by check_multirange_anchor MUST have
+    # fixable is False AND suggested_line is None (multi-range --fix is out of
+    # scope). It FAILS if check_multirange_anchor's def_drift were given
+    # fixable=True / a suggested line.
+    def test_check_multirange_anchor_drift_is_never_fixable(self, tmp_path):
+        from check_doc_claims import check_multirange_anchor
+
+        _init_repo(tmp_path)
+        # def f at line 9, well outside the cited terms 1-2 / 3-5 -> def_drift.
+        _commit_py(
+            tmp_path, "mod.py",
+            "# 1\n# 2\n# 3\n# 4\n# 5\n# 6\n# 7\n# 8\ndef f():\n    pass\n",  # def @ 9
+        )
+        drift = check_multirange_anchor(
+            doc_path="d.md", doc_line_num=1,
+            doc_line_text="**`f`** `mod.py:1-2, 3-5`",
+            token_file="mod.py", terms_text="1-2, 3-5", repo_root=tmp_path,
+            resolved_rel="mod.py", symbol="f",
+        )
+        assert drift is not None
+        assert drift.kind == "def_drift"
+        assert drift.fixable is False, "multi-range def_drift must be non-fixable"
+        assert drift.suggested_line is None, "multi-range drift must not suggest a line"
+
+        # And the no-symbol out_of_bounds variant is likewise non-fixable.
+        oob = check_multirange_anchor(
+            doc_path="d.md", doc_line_num=1,
+            doc_line_text="batch `mod.py:2, 99`",
+            token_file="mod.py", terms_text="2, 99", repo_root=tmp_path,
+            resolved_rel="mod.py", symbol=None,
+        )
+        assert oob is not None and oob.kind == "out_of_bounds"
+        assert oob.fixable is False and oob.suggested_line is None
+
 
 # ---------------------------------------------------------------------------
 # COMMIT 1 — positional symbol<->anchor binding for compound multi-symbol cells.
@@ -1602,6 +1640,40 @@ class TestPositionalCompoundBinding:
         assert d.target_line == 3
         assert d.suggested_line == 5
 
+    # --- C-2 (Lane V): the positional map is ALSO wired at the markdown-LINK
+    # path (link_pos_map, with symbol=pos_sym / rebind_symbol=pos_sym is None),
+    # but had ZERO test coverage — every positional test used inline-backtick or
+    # path-less-continuation anchors. This mirrors
+    # test_compound_second_symbol_stale_attributed_to_second but builds the
+    # compound anchor column from markdown LINK anchors `[disp](file:line)`. A
+    # genuinely-stale SECOND link anchor must attribute to the SECOND symbol
+    # (proving positional, not nearest-before). FAILS if link_pos_map were
+    # dropped (the link path would fall back to check_anchor's nearest-before
+    # rebind, which binds the second anchor to the LAST symbol token).
+    def test_compound_link_anchors_second_symbol_stale_attributed_to_second(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "lip_sync.py",
+            "def a_fn():\n    pass\n"          # line 1
+            "# 3\n# 4\n"
+            "def b_fn():\n    pass\n"          # line 5  (link cites :3 -> stale)
+            "def c_fn():\n    pass\n",         # line 7
+        )
+        # Symbol column = 3 backtick idents; anchor column = 3 markdown LINKS.
+        md = _write_md(
+            tmp_path, "doc.md",
+            "| `a_fn` / `b_fn` / `c_fn` | "
+            "[a](lip_sync.py:1) / [b](lip_sync.py:3) / [c](lip_sync.py:7) | d |\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"expected exactly 1 drift, got: {drifts}"
+        d = drifts[0]
+        assert d.kind == "def_drift"
+        assert d.style == "link", f"must be the link path, got style={d.style}"
+        assert d.symbol == "b_fn", f"must attribute to 2nd symbol, got {d.symbol}"
+        assert d.target_line == 3
+        assert d.suggested_line == 5
+
     def test_compound_out_of_order_anchors_positional(self, tmp_path):
         """Real-doc shape (PROGRAM-MANUAL.md:586): anchors out of symbol order.
         `q / id / coh | :5 / :3 / :7` where defs are q@5, id@3, coh@7 but anchors
@@ -1660,16 +1732,44 @@ class TestPositionalCompoundBinding:
         assert drifts[0].symbol == "f"
         assert drifts[0].suggested_line == 4
 
-    def test_idents_anchors_count_mismatch_falls_back(self, tmp_path):
-        """When ident count != anchor count, fall back to nearest-before (irregular
-        line). Here 2 idents but only 1 anchor on the line -> nearest-before binds
-        the anchor to the closest preceding ident (`f` -> the def check)."""
+    def test_single_anchor_line_short_circuits_to_nearest_before(self, tmp_path):
+        """N<=1 anchor on the line -> _positional_symbol_map short-circuits
+        (`if len(anchors) <= 1: return {}`) -> nearest-before binds the lone
+        anchor to the closest preceding ident (`f` -> the def check). Clean."""
         _init_repo(tmp_path)
         _commit_py(tmp_path, "alpha.py", "# 1\ndef f():\n    pass\n")  # def at 2
         # `g` is mentioned (no anchor for it); only `alpha.py:2` is an anchor.
         md = _write_md(tmp_path, "doc.md", "`g` calls **`f`** at `alpha.py:2` ok\n")
         drifts = check_line_anchors([str(md)], tmp_path)
         assert drifts == [], f"nearest-before should bind f@2 -> clean, got: {drifts}"
+
+    # --- TQ-3 (Lane V): the prior count-mismatch test used a 1-anchor fixture,
+    # so _positional_symbol_map short-circuits at `if len(anchors) <= 1: return
+    # {}` BEFORE the per-column count-mismatch guard (`len(sym_idents) !=
+    # len(col_anchors)`) is ever reached. This fixture has a column with N>1
+    # anchors (2) but a DIFFERENT ident count in the symbol column (3), so the
+    # count-mismatch branch IS exercised: it must fall back to nearest-before
+    # (NOT positionally pair the first 2 of 3 idents). Under nearest-before both
+    # col-2 anchors bind to symC (the closest preceding bindable ident; the
+    # anchor token `f.py:5` is dotted -> not a bindable ident), and symC IS at
+    # line 5 -> ZERO drift. FAILS if the count-mismatch guard is deleted (then
+    # the 2 anchors would positionally pair to symA@1 / symB@3 -> two def_drifts).
+    def test_count_mismatch_column_falls_back_to_nearest_before(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "f.py",
+            "def symA():\n    pass\n"   # line 1
+            "def symB():\n    pass\n"   # line 3
+            "def symC():\n    pass\n",  # line 5
+        )
+        # col1 = 3 idents (symA/symB/symC); col2 = 2 anchors (`f.py:5` + cont `:5`).
+        content = "| `symA` / `symB` / `symC` | `f.py:5` / `:5` | desc |\n"
+        md = _write_md(tmp_path, "doc.md", content)
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], (
+            f"count mismatch (3 idents vs 2 anchors) must fall back to "
+            f"nearest-before (both -> symC@5, clean), got: {drifts}"
+        )
 
     def test_continuation_anchor_no_same_line_path_stays_inert(self, tmp_path):
         """A path-less `:N` token with NO preceding same-line full anchor (file is
