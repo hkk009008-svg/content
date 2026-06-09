@@ -1620,16 +1620,15 @@ script, the local check + CI move together.
 
 ## 16. Known bugs & latent issues
 
-> Test suite state (verified 2026-05-29 cycle-17):
-> **1229 pass / 3 skip / 0 fail** in `tests/unit/`. The 3 skips below are
-> the only known stragglers. Run `.venv/bin/python -m pytest tests/unit/ -q`
-> to verify.
+> Test suite state (verified 2026-06-09 at `8b0da35`):
+> **1920 pass / 0 skip / 0 fail** in `tests/unit/`. Run
+> `.venv/bin/python -m pytest tests/unit/ -q` to verify.
 
 | Severity | Issue | Location |
 |---|---|---|
-| Low | 3 documented `@unittest.skip` tests in `test_project_persistence.py`. Mock setup hasn't caught up with `project_manager`/`character_manager`/`location_manager` refactors. Mock-only updates, not behavior changes. | `tests/unit/test_project_persistence.py:139,203,232` |
-| Cosmetic | BGM duration hard-coded to 47s with no comment. | `cinema_pipeline.py:523` |
-| ~~Cosmetic~~ Resolved 2026-05-26 (`9c749b7`) | ~~`datetime.utcnow()` deprecation warnings — migrated to `datetime.now(timezone.utc)` with `.replace("+00:00", "Z")` to preserve existing project.json timestamp suffix shape.~~ | ~~`domain/project_manager.py:133,924`~~ |
+| ~~Low~~ Resolved 2026-06-09 (T11) | ~~3 documented `@unittest.skip` tests in `test_project_persistence.py` (mock setup behind the `project_manager`/`character_manager`/`location_manager` refactors). Un-skipped via the `domain.*` namespace fix — verified 2026-06-09: no `skip` decorators remain in the file.~~ | ~~`tests/unit/test_project_persistence.py`~~ |
+| Cosmetic | BGM duration hard-coded to 47s — the `47` magic number has no rationale comment. | `cinema_pipeline.py:632` |
+| ~~Cosmetic~~ Resolved 2026-05-26 (`9c749b7`) | ~~`datetime.utcnow()` deprecation warnings — migrated to `datetime.now(timezone.utc)` with `.replace("+00:00", "Z")` to preserve existing project.json timestamp suffix shape.~~ | ~~`domain/project_manager.py`~~ |
 
 ---
 
