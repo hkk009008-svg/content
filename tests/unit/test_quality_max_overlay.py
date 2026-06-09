@@ -37,9 +37,10 @@ class TestNumericClamping:
     def test_hires_fix_denoise_clamps_below_safety_floor(self):
         # Pod-validated 2026-06-09 (Novita RTX 6000 Ada): hires_fix_denoise=0.25
         # catastrophically disintegrates the image (arc ~0.48 vs ~0.83 at 0.40).
-        # The schema floor was raised 0.2 -> 0.40 so a UI/ctx-sent sub-floor value
-        # (the React slider at AdvancedSection.tsx min={0.2} can express it) is
-        # clamped up to the safe default rather than reaching node 18 raw.
+        # The schema floor was raised 0.2 -> 0.40 so a sub-floor value (legacy
+        # persisted settings, or a hand-built ctx payload — the React slider min
+        # is now 0.4 too) is clamped up to the safe default rather than reaching
+        # node 18 raw.
         accepted, warning = _validate_overlay_value("hires_fix_denoise", 0.25)
         assert accepted == pytest.approx(0.40)
         assert warning is not None and "below" in warning

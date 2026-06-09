@@ -195,9 +195,9 @@ export interface GlobalSettings {
   redux_strength?: ReduxStrength            // FLUX Redux style strength, default 'high'
   ays_steps?: number                        // Align Your Steps step count, 15-40, default 28
   hires_fix_enabled?: boolean               // 1.5x latent upscale + 2nd pass, default true
-  hires_fix_denoise?: number                // 0.2-0.6, default 0.40
+  hires_fix_denoise?: number                // 0.4-0.6, default 0.40 (backend floors at 0.40 — pod-proven 0.25 disintegrates)
   supir_enabled?: boolean                   // SUPIR 4x upscale on hero shots, default true
-  supir_steps?: number                      // 20-100, default 50
+  supir_steps?: number                      // 20-100, default 40 (all 5 MAX_QUALITY_TEMPLATES ship 40)
   face_detailer_enabled?: boolean           // default true for portrait/medium/action
   face_detailer_guide_size?: number         // 512/1024/2048, default 1024
 

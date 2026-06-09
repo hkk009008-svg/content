@@ -308,7 +308,7 @@ function MaxTierComfyControls({ s, update }: { s: any; update: (k: string, v: an
               <span className="font-mono">Pass 2 denoise</span>
               <span className="text-editorial-brass font-bold">{(s.hires_fix_denoise ?? 0.40).toFixed(2)}</span>
             </div>
-            <input type="range" min={0.2} max={0.6} step={0.05}
+            <input type="range" min={0.4} max={0.6} step={0.05}
               value={s.hires_fix_denoise ?? 0.40}
               onChange={e => update('hires_fix_denoise', parseFloat(e.target.value))}
               aria-label="Pass 2 denoise"
@@ -361,10 +361,10 @@ function MaxTierComfyControls({ s, update }: { s: any; update: (k: string, v: an
           <div>
             <div className="flex justify-between text-eyebrow-sm text-editorial-ivory-mute mb-0.5">
               <span className="font-mono">SUPIR steps</span>
-              <span className="text-editorial-brass font-bold">{s.supir_steps ?? 50}</span>
+              <span className="text-editorial-brass font-bold">{s.supir_steps ?? 40}</span>
             </div>
             <input type="range" min={20} max={100} step={5}
-              value={s.supir_steps ?? 50}
+              value={s.supir_steps ?? 40}
               onChange={e => update('supir_steps', parseInt(e.target.value))}
               aria-label="SUPIR steps"
               className="w-full accent-editorial-brass h-1" />

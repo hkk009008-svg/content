@@ -7,9 +7,11 @@ over-processes into painterly output.
 T3 inserts node 18 as a deepcopy of node 17 with gentler denoise (default
 0.40) and re-points 901's sigmas to node 18 when hires_fix is enabled.
 
-NOTE: denoise=0.40 is a realism HYPOTHESIS — the value is wired but has
-NOT been GPU-pod validated (pod currently down). Tests verify wire
-correctness, not image quality.
+NOTE: denoise=0.40 was pod-validated 2026-06-09 (Novita RTX 6000 Ada):
+0.40 fires and holds identity (arc ~0.83 @ 4K); 0.25 catastrophically
+disintegrates, so the overlay floors hires_fix_denoise at 0.40
+(quality_max.py MAX_PARAM_SPECS). Tests verify wire correctness, not
+image quality.
 """
 from __future__ import annotations
 

@@ -110,7 +110,7 @@ export const PRODUCTION_PRESETS: ProductionPreset[] = [
       hires_fix_enabled: true,
       hires_fix_denoise: 0.40,
       supir_enabled: true,
-      supir_steps: 50,
+      supir_steps: 40,
       face_detailer_enabled: true,
       face_detailer_guide_size: 1024,
       // Identity safety net stays tight
