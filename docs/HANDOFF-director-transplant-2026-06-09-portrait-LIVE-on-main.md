@@ -11,24 +11,43 @@ follow-up open: lip_sync portrait-fencing (the M-1 twin).**
 | Fact | Value | How verified |
 |---|---|---|
 | Branch | `feat/max-tier-provisioning` | `git status` |
-| HEAD | **`05c710e`** | `git rev-parse HEAD` |
-| `origin/main` | **`05c710e`** ⭐ MERGED (was `a0480f5`) | `git rev-parse origin/main` |
-| `origin/feat` | `05c710e` (synced) | `git rev-parse origin/feat/...` |
+| HEAD | **`1870e59`** | `git rev-parse HEAD` |
+| `origin/main` | **`1870e59`** ⭐ MERGED (was `a0480f5`; T10 arc + lip_sync M-1-twin) | `git rev-parse origin/main` |
+| `origin/feat` | `1870e59` (synced) | `git rev-parse origin/feat/...` |
 | Gate `cinema/aspect.py:25` | `SUPPORTED_ASPECT_RATIOS = ["16:9", "9:16"]` — **OPEN, portrait LIVE** | `sed -n 25p cinema/aspect.py` |
-| Suite | **1920 passed / 0 failed / 2 skipped** | `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/ -q` |
+| Suite | **1923 passed / 0 failed / 2 skipped** | `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/ -q` |
 | `ci_smoke` | **exit 0** | `env -u GIT_INDEX_FILE .venv/bin/python scripts/ci_smoke.py` |
 | Mailbox (director) | **0 unread**; cursor `00:53:45Z` | consumed operator's wrap |
 | Both seats | wrapping/offline at wrap (user said "handoff" to both) | `coordination/presence/*.md` |
 
 **The whole Phase-1→3 portrait arc + the operator's Slice-3 verifier work are now on
-`main` (clean FF `a0480f5..05c710e`).** Nothing owed either direction.
+`main`** (FF `a0480f5..05c710e`), plus the lip_sync M-1-twin fix (`05c710e..1870e59`). The
+ONE open item is the operator's cold Lane V on `dd78208` (§1) — released, awaiting their next
+session. Otherwise nothing owed either direction.
 
 ---
 
-## 1. ⭐ #1 PICKUP — lip_sync portrait-fencing (the M-1 twin; MINOR, tracked)
+## 1. ⭐ #1 PICKUP — operator's cold Lane V on the lip_sync fix `dd78208` (the LAST open item)
 
-My Rule #17 final review surfaced a PRE-EXISTING defensive-symmetry gap (the operator's
-diff-scoped Lane V correctly didn't flag it — it's outside the T10/M-1 diffs):
+**UPDATE (same session): the lip_sync M-1-twin is CLOSED + MERGED.** `fix(lipsync)` **`dd78208`**
+(merged to `main` at `1870e59`) added the orientation backstop — reused `_accept_or_reject`
+(`phase_c_ffmpeg.py:1299`) inside `_gate_or_stash`, so all 4 lipsync engines are fenced at
+portrait; landscape no-op (byte-identical); 3 TDD tests (`TestLipsyncOrientationBackstop`),
+GUARD-PROVEN via mutation. Chose the backstop over threading aspect because those FAL avatar
+endpoints take no aspect param. Suite 1923/0, ci_smoke exit 0.
+
+**The one remaining open item:** the **operator's cold Rule #9 Lane V on `dd78208`** — released
+(mailbox `2026-06-09T01-42-45Z`) but the operator was offline; it awaits their next session. Any
+finding → standalone `fix:` on `main` per Rule #15. With that pass, the portrait arc is fully
+cross-seat reviewed. (The fix was already merged to live `main` per user direction "merge now"
+after my TDD+mutation verification; the operator's Lane V is the post-merge safety net.)
+
+---
+
+### (historical) the original finding — what `dd78208` closed
+
+My Rule #17 final review surfaced this PRE-EXISTING defensive-symmetry gap (the operator's
+diff-scoped Lane V correctly didn't flag it — it was outside the T10/M-1 diffs):
 
 - **`lip_sync.py:579` (Kling) / `:600` (Omnihuman v1.5) / `:624` (Aurora)** call FAL
   providers **directly** (not via `generate_ai_video`), pass **no aspect param**, and have
