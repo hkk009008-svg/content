@@ -1,3 +1,14 @@
+> **ARCHIVED DRAFT — never accepted; superseded by `DECISIONS.md` ADR-002.**
+> This 2026-05-23 draft proposes an event-driven FSM for the operator review
+> gates ("no more polling-sleep loops"). The accepted decision is the opposite:
+> `DECISIONS.md` ADR-002 "Predicate-poll gate model (not event-driven)"
+> (`LifecycleService.wait_for_gate(name, predicate, poll_interval=0.5)`), which
+> is what the code implements (`cinema/review/controller.py`). The draft also
+> predates the ReviewController extraction (it cites gates inline in
+> `cinema_pipeline.py`). It landed accidentally via the wholesale commit
+> `cd001ec` (2026-06-10) and was archived by operator Lane V the same day to
+> stop it shadowing the canonical ADR log. Kept for the UX analysis only.
+
 # ADR-0002: Operator Review Gate UX
 
 **Status:** Proposed
