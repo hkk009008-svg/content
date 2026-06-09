@@ -1982,7 +1982,7 @@ List of shot dicts from `make_shot()` (`domain/project_manager.py:262`) with add
 
 **1. `api_decompose_scene` never uses competitive path.** The HTTP endpoint at `web_server.py:1400` calls `decompose_scene()` directly, not `competitive_decompose_scene()`. Only the automated pipeline (`cinema_pipeline.py:921-932`) respects `competitive_generation`. On-demand decompose via UI is always single-model.
 
-**2. `format_dialogue_for_voiceover` and `dialogue_to_narration_text` are dead code.** Defined at `domain/dialogue_writer.py:159,174`; zero callers in the working tree outside tests. The pipeline uses `audio.dialogue.generate_dialogue_voiceover` directly with raw `generate_dialogue` output.
+**2. `format_dialogue_for_voiceover` and `dialogue_to_narration_text` were removed.** These dialogue helpers (formerly in `domain/dialogue_writer.py`) had zero callers outside tests and have since been deleted (2026-06-09; grep-verified zero occurrences). The pipeline uses `audio.dialogue.generate_dialogue_voiceover` directly with raw `generate_dialogue` output.
 
 **3. `research_engine.py` and `web_research.py` both define `_get_tavily()` and `_get_firecrawl()`.** Two separate module-level singleton caches. If both are imported in the same process, they maintain separate client instances. `research_engine.py` is used for programmatic research calls (direct results to callers); `web_research.py` is used inside LLM tool loops (`run_with_tools`).
 
@@ -2427,7 +2427,7 @@ FAL.ai priority chain: (1) FLUX Kontext Max Multi (up to 6 face refs, structured
 
 Parses `[SHOT][SCENE][ACTION][OUTFIT][QUALITY]` tagged sections from prompt. Returns dict of sections; falls back to full prompt as `SCENE` if no tags found.
 
-#### `generate_ai_broll_max` — `quality_max.py:700`
+#### `generate_ai_broll_max` — `quality_max.py:701`
 
 Max-tier entry. Steps: classify shot → `get_max_quality_params` → apply UI overrides (7 halt knobs + 17 ComfyUI knobs via `_validate_overlay_value`) → probe pod `/object_info` → load `pulid_max.json` → optionally swap to HiDream-I1 → prune unavailable nodes → upload/cache refs → inject all axes → best-of-N loop → PuLID-boost retry if identity floor missed → `shutil.copyfile` best to output. Returns `ImageGenResult(path, "QUALITY_MAX")`.
 
