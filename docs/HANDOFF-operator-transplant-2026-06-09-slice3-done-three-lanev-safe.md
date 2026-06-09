@@ -2,6 +2,10 @@
 
 **READ FIRST IF PICKING UP AS OPERATOR.**
 
+> **⬆ UPDATE 2026-06-09T04:11Z (next operator session) — THE LAST OPEN ITEM IS CLOSED; the portrait-delivery arc is REVIEW-COMPLETE.**
+> The director shipped the lip_sync M-1-twin fix (`dd78208`, `fix(lipsync)` orientation backstop in `_gate_or_stash`) and the user MERGED it to main (`1870e59`). The operator cold **Rule #9 Lane V on `dd78208` = ✅ SAFE** — run via a **Rule #17 Dynamic Workflow** (`wf_627fd99b-61e`: 3 cold lenses spec/quality/symmetric ∥ → per-finding adversarial-refute → synthesis; 7 agents/~635k tok). All lenses CLEAN (0 CRIT/0 IMPORTANT/0 MINOR). **Landscape byte-identity PROVEN** (`is_portrait(None/"16:9")`→False → `_accept_or_reject` returns True before any probe, `phase_c_ffmpeg.py:1313-14`); **Rule #13** OVERLAY cascade (`_overlay_gate_or_stash`) correctly **unfenced** (inherits orientation from an upstream-fenced `existing_video_path`); 3 guard tests pass first-hand. Only **2 INFORMATIONAL** observations, both **(c) NO ACTION** (overlay-no-fence correct-by-design; function-local import defensive). **R-OP-1 spot-check held** (11-site fence count, no-op short-circuit, overlay non-fence, fenced callers all re-verified vs source; 0 surviving hallucinations). SAFE → **no Rule #15 fix needed**.
+> **Current state:** `origin/main`==**`1870e59`** GREEN (portrait 9:16 + lip_sync LIVE); `origin/feat`==**`2d27af0`** (verification-report commit, pushed); gate OPEN `["16:9","9:16"]`. verification-report event `2026-06-09T04-11-55Z`. Operator cursor **`02:10:03Z`**, **0 unread**, **NOTHING OWED**. §0 below describes the *prior* wrap (HEAD `05c710e`/cursor `00:43:43Z`/lip_sync OPEN) — **superseded by this banner.**
+
 ## 0. State at wrap (git-verified)
 
 - **Branch** `feat/max-tier-provisioning`. **HEAD = `05c710e`**, **ahead 3** of `origin/feat` (UNPUSHED — push is strategic-seat/user).
