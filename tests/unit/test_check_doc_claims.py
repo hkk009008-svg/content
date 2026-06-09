@@ -1405,46 +1405,140 @@ class TestUnclosedFenceWarning:
 # ---------------------------------------------------------------------------
 
 class TestMultiRangeWarning:
-    def test_multi_range_anchor_warns_not_silently_skipped(self, tmp_path, capsys):
+    """COMMIT 2 updated these: the parseable comma-list form is now VERIFIED (a
+    bounds/def check), so the 'NOT verified' warning no longer fires for it. The
+    warning is retained only for any UNparseable residue (none today)."""
+
+    def test_multi_range_in_bounds_no_warning_no_drift(self, tmp_path, capsys):
+        # `mod.py:1–5, 9–12`, no bound symbol -> each term in-bounds -> verified
+        # clean, and the 'NOT verified' warning must NOT fire (it IS verified now).
         _init_repo(tmp_path)
-        _commit_py(tmp_path, "mod.py", "def f():\n    pass\n")
+        _commit_py(tmp_path, "mod.py", "".join(f"# {i}\n" for i in range(1, 20)))  # 19 lines
         md = _write_md(tmp_path, "doc.md", "see `mod.py:1–5, 9–12` for details\n")
-        check_line_anchors([str(md)], tmp_path)
+        drifts = check_line_anchors([str(md)], tmp_path)
         err = capsys.readouterr().err
-        assert "doc.md" in err
-        assert "multi-range" in err.lower()
-        assert "not verified" in err.lower()
+        assert drifts == []                       # all terms in bounds
+        assert "not verified" not in err.lower()  # verified now, no warning
 
     def test_multi_range_does_not_block_normal_anchor_same_line(self, tmp_path, capsys):
         _init_repo(tmp_path)
-        _commit_py(tmp_path, "mod.py", "# 1\n# 2\ndef f():\n    pass\n")  # def at 3
+        _commit_py(tmp_path, "mod.py", "".join(f"# {i}\n" for i in range(1, 20)) +
+                   "def f():\n    pass\n")  # 19 comment lines, def f at 20... adjust below
+        # def f() lands at line 20; cite it; the multi-range terms are all in-bounds.
         md = _write_md(
             tmp_path, "doc.md",
-            "**`f`** `mod.py:3` plus the batch `mod.py:1–5, 9–12`\n",
+            "**`f`** `mod.py:20` plus the batch `mod.py:1–5, 9–12`\n",
         )
         drifts = check_line_anchors([str(md)], tmp_path)
-        assert drifts == []                       # the normal `mod.py:3` anchor verified OK
-        assert "multi-range" in capsys.readouterr().err.lower()
+        assert drifts == []                       # normal anchor OK + multirange in-bounds
+        assert "not verified" not in capsys.readouterr().err.lower()
 
-    def test_single_range_does_not_trigger_multi_range_warning(self, tmp_path, capsys):
+    def test_single_range_is_not_a_multi_range(self, tmp_path, capsys):
         _init_repo(tmp_path)
         _commit_py(tmp_path, "mod.py", "def f():\n    pass\n")  # def at 1
-        # the `, 9, 12` is PROSE, outside the backticks -> must NOT false-fire
+        # the `, 9, 12` is PROSE, outside the backticks -> a single-range anchor,
+        # verified by the normal inline path; no multi-range warning.
         md = _write_md(tmp_path, "doc.md", "**`f`** `mod.py:1–5` covers cases 9, 12\n")
         check_line_anchors([str(md)], tmp_path)
         assert "multi-range" not in capsys.readouterr().err.lower()
 
-    def test_bare_number_comma_list_also_warns(self, tmp_path, capsys):
-        # `file:N,M` (comma-list whose FIRST entry is a bare line, no leading range)
-        # is ALSO unparseable by _INLINE_ANCHOR_RE -> must warn, not silently skip.
-        # Real such anchors are live in ARCHITECTURE.md/OPERATIONS.md (cold-review finding).
+
+# ---------------------------------------------------------------------------
+# COMMIT 2 — verify multi-range comma-list anchors (`path:A-B, C-D` / `path:N, M`).
+#
+# Previously these were only COUNTED for a warning ("NOT verified"). Now they are
+# verified: a comma-list of bare lines and/or ranges. If a symbol is bound, its
+# def must fall within ONE term; if no symbol, each term must be in-bounds.
+# Multi-range --fix is OUT of scope: drift is report-only (non-fixable).
+# ---------------------------------------------------------------------------
+
+class TestMultiRangeVerification:
+    def test_bound_symbol_def_within_a_term_no_drift(self, tmp_path):
+        """Symbol def at line 3; multi-range `mod.py:1-2, 3-5` -> 3 is in the
+        second term -> no drift."""
         _init_repo(tmp_path)
-        _commit_py(tmp_path, "mod.py", "def f():\n    pass\n")
-        md = _write_md(tmp_path, "doc.md", "see `mod.py:133,924` and `mod.py:139,203,232`\n")
-        check_line_anchors([str(md)], tmp_path)
-        err = capsys.readouterr().err
-        assert "2 multi-range" in err.lower()   # both bare-number comma-lists counted
-        assert "not verified" in err.lower()
+        _commit_py(tmp_path, "mod.py", "# 1\n# 2\ndef f():\n    pass\n")  # def at 3
+        md = _write_md(tmp_path, "doc.md", "**`f`** `mod.py:1-2, 3-5`\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"def 3 is within term 3-5, expected no drift: {drifts}"
+
+    def test_bound_symbol_def_outside_all_terms_is_drift(self, tmp_path):
+        """Symbol def at line 9; multi-range `mod.py:1-2, 3-5` -> 9 in NO term ->
+        def_drift, NON-fixable (multi-range --fix out of scope)."""
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "mod.py",
+            "# 1\n# 2\n# 3\n# 4\n# 5\n# 6\n# 7\n# 8\ndef f():\n    pass\n",  # def at 9
+        )
+        md = _write_md(tmp_path, "doc.md", "**`f`** `mod.py:1-2, 3-5`\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"expected 1 drift, got: {drifts}"
+        d = drifts[0]
+        assert d.kind == "def_drift"
+        assert d.symbol == "f"
+        assert d.fixable is False, "multi-range drift must be non-fixable"
+        assert d.suggested_line is None
+
+    def test_bound_symbol_bare_line_term_match_no_drift(self, tmp_path):
+        """Bare-line comma-list `mod.py:3, 9`; symbol def at 3 -> matches first
+        bare term -> no drift."""
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "mod.py", "# 1\n# 2\ndef f():\n    pass\n"
+                   "# 5\n# 6\n# 7\n# 8\n# 9\n")  # def at 3, file has 9 lines
+        md = _write_md(tmp_path, "doc.md", "**`f`** `mod.py:3, 9`\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"def 3 == first bare term, expected no drift: {drifts}"
+
+    def test_no_symbol_all_terms_in_bounds_no_drift(self, tmp_path):
+        """No bound symbol; comma-list `mod.py:2, 4-5` with a 6-line file ->
+        each term in bounds -> no drift."""
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "mod.py", "".join(f"# {i}\n" for i in range(1, 7)))  # 6 lines
+        md = _write_md(tmp_path, "doc.md", "the batch sites `mod.py:2, 4-5`\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"all terms in bounds, expected no drift: {drifts}"
+
+    def test_no_symbol_term_out_of_bounds_is_drift(self, tmp_path):
+        """No bound symbol; one comma-term exceeds the file length -> out_of_bounds,
+        non-fixable."""
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "mod.py", "".join(f"# {i}\n" for i in range(1, 6)))  # 5 lines
+        md = _write_md(tmp_path, "doc.md", "the batch sites `mod.py:2, 99`\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"expected 1 drift, got: {drifts}"
+        d = drifts[0]
+        assert d.kind == "out_of_bounds"
+        assert d.fixable is False
+
+    def test_endash_range_term_parsed(self, tmp_path):
+        """En-dash range term `mod.py:1–2, 8–9` (no symbol) -> bounds-checked
+        (the dash variants are accepted like the single-range form)."""
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "mod.py", "".join(f"# {i}\n" for i in range(1, 11)))  # 10 lines
+        md = _write_md(tmp_path, "doc.md", "see `mod.py:1–2, 8–9`\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"en-dash terms in bounds, expected no drift: {drifts}"
+
+    def test_multi_range_drift_is_not_autofixed(self, tmp_path):
+        """run(fix=True) must NOT rewrite a multi-range drift (out of scope)."""
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "mod.py", "".join(f"# {i}\n" for i in range(1, 6)))  # 5 lines
+        content = "the batch sites `mod.py:2, 99`\n"
+        md = _write_md(tmp_path, "doc.md", content)
+        remaining = run([str(md)], tmp_path, fix=True)
+        assert md.read_text() == content, "multi-range anchor must be left untouched by --fix"
+        assert len(remaining) == 1 and remaining[0].kind == "out_of_bounds"
+
+    def test_multi_range_missing_file_is_drift(self, tmp_path):
+        """Comma-list on a non-existent file -> missing_file (best-effort), no crash."""
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "real.py", "x = 1\n")
+        # ghost.py is not tracked -> resolve skips -> no drift (consistent with the
+        # single-inline 'bare unresolvable skipped' behavior). Dir-qualified missing
+        # file IS reported, mirroring check_anchor.
+        md = _write_md(tmp_path, "doc.md", "see `sub/ghost.py:2, 5`\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1 and drifts[0].kind == "missing_file"
 
 
 # ---------------------------------------------------------------------------

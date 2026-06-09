@@ -88,13 +88,41 @@ _CONTINUATION_ANCHOR_RE = re.compile(
 # Multi-range anchor: a backtick token citing a comma-list of lines and/or ranges —
 # `path:A-B, C-D` (ranges) OR `path:N, M` (bare lines, e.g. project_manager.py:133,924).
 # The comma precedes the closing backtick, so _INLINE_ANCHOR_RE cannot parse EITHER
-# shape → such anchors are NOT verified. Detect + warn (never silently skip — the
-# ADV-2 principle). The first comma-term may be a bare line OR a range; `[^`]*` stays
-# within one backtick pair (cannot cross the closing backtick), so a single anchor
-# followed by PROSE commas (`mod.py:1-5` covers 9, 12) does NOT false-fire.
+# shape. These ARE verified now (Commit 2): a bound symbol's def must fall within ONE
+# comma-term; with no symbol, every term must be in-bounds. Multi-range --fix is OUT
+# of scope -> drift is report-only (non-fixable). The first comma-term may be a bare
+# line OR a range; `[^`]*` stays within one backtick pair (cannot cross the closing
+# backtick), so a single anchor followed by PROSE commas (`mod.py:1-5` covers 9, 12)
+# does NOT false-fire. Named groups capture file + the raw term-list for parsing.
 _MULTIRANGE_RE = re.compile(
-    r'`[A-Za-z0-9_./-]+\.[A-Za-z]+:\d+(?:[-–—]\d+)?\s*,\s*\d+[-–—]?\d*[^`]*`'
+    r'`(?P<file>[A-Za-z0-9_./-]+\.[A-Za-z]+):'
+    r'(?P<terms>\d+(?:[-–—]\d+)?\s*,\s*\d+[-–—]?\d*[^`]*)`'
 )
+
+
+def _parse_multirange_terms(terms_text: str) -> "Optional[list[tuple[int, int]]]":
+    """Parse a comma-list of bare lines and/or ranges into [(lo, hi), ...].
+
+    Each term is `N` (-> (N, N)) or `A-B` (ASCII hyphen / en-dash / em-dash ->
+    (A, B)). Returns None if ANY term is unparseable (so the caller can fall back
+    to the 'NOT verified' warning rather than silently mis-verifying). Whitespace
+    around commas and terms is tolerated; a trailing empty term is ignored.
+    """
+    terms: "list[tuple[int, int]]" = []
+    raw = terms_text.strip().rstrip(",").strip()
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        m = re.fullmatch(r'(\d+)(?:[-–—](\d+))?', chunk)
+        if not m:
+            return None  # an unparseable term -> bail (keep the warning path)
+        lo = int(m.group(1))
+        hi = int(m.group(2)) if m.group(2) else lo
+        if hi < lo:
+            lo, hi = hi, lo
+        terms.append((lo, hi))
+    return terms or None
 
 # Fenced-code-block markers (``` or ~~~, 3+). A line starting one toggles fence state.
 _FENCE_RE = re.compile(r'^\s*(`{3,}|~{3,})')
@@ -478,6 +506,82 @@ def check_anchor(
     return None  # OK — in bounds, no symbol binding
 
 
+def check_multirange_anchor(
+    doc_path: str,
+    doc_line_num: int,
+    doc_line_text: str,
+    token_file: str,
+    terms_text: str,
+    repo_root: Path,
+    *,
+    resolved_rel: Optional[str],
+    symbol: Optional[str],
+) -> Optional[Drift]:
+    """Verify a comma-list multi-range anchor (`path:A-B, C-D` / `path:N, M`).
+
+    Semantics (mirrors the single-range logic in check_anchor):
+      * If *symbol* is bound and HAS def lines: OK iff some def line falls within
+        ONE comma-term; else def_drift (report-only — fixable=False, since
+        multi-range --fix is out of scope).
+      * If no symbol (or no def lines): every term must be in-bounds (1..n);
+        any out-of-range term -> out_of_bounds (non-fixable).
+      * Missing file -> missing_file.
+
+    Returns a Drift on a problem, else None. NEVER returns a fixable drift, so
+    _apply_fixes (which requires fixable=True) leaves multi-range anchors alone.
+    """
+    read_rel = resolved_rel if resolved_rel is not None else token_file
+    target_path = repo_root / read_rel
+    if not target_path.exists():
+        return Drift(
+            doc_path=doc_path, doc_line=doc_line_num, target_file=token_file,
+            target_line=0, kind="missing_file", symbol=None, suggested_line=None,
+            fixable=False, message=f"target file not found: {token_file}",
+            style="inline",
+        )
+
+    terms = _parse_multirange_terms(terms_text)
+    if terms is None:
+        return None  # unparseable -> caller keeps the 'NOT verified' warning
+
+    source_lines = target_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    n_lines = len(source_lines)
+
+    if symbol is not None:
+        def_line_list = _def_lines(source_lines, symbol)
+        if def_line_list:
+            if any(lo <= d <= hi for d in def_line_list for (lo, hi) in terms):
+                return None  # a def falls within one term -> OK
+            return Drift(
+                doc_path=doc_path, doc_line=doc_line_num, target_file=token_file,
+                target_line=terms[0][0], kind="def_drift", symbol=symbol,
+                suggested_line=None, fixable=False,
+                message=(
+                    f"`{symbol}` def is at line "
+                    f"{def_line_list[0] if len(def_line_list) == 1 else def_line_list}"
+                    f", multi-range anchor cites {terms_text.strip()} "
+                    f"(none contains the def)"
+                ),
+                style="inline",
+            )
+        # 0 def lines -> fall through to bounds-check each term.
+
+    # No symbol (or no def): every term must be in-bounds.
+    for (lo, hi) in terms:
+        if lo < 1 or hi > n_lines:
+            return Drift(
+                doc_path=doc_path, doc_line=doc_line_num, target_file=token_file,
+                target_line=lo, kind="out_of_bounds", symbol=symbol,
+                suggested_line=None, fixable=False,
+                message=(
+                    f"multi-range term {lo}" + (f"-{hi}" if hi != lo else "")
+                    + f" out of bounds (file has {n_lines} lines)"
+                ),
+                style="inline",
+            )
+    return None  # all terms in bounds
+
+
 # ---------------------------------------------------------------------------
 # Main checker
 # ---------------------------------------------------------------------------
@@ -495,14 +599,13 @@ def check_line_anchors(doc_paths: list[str], repo_root: Path) -> list[Drift]:
         doc_lines = full_path.read_text(encoding="utf-8", errors="replace").splitlines()
 
         in_fence = False
-        multirange = 0   # comma-list range anchors (unparseable; warn, don't verify)
+        multirange_unparseable = 0   # comma-list anchors that could NOT be verified
         for line_num, line_text in enumerate(doc_lines, 1):
             if _FENCE_RE.match(line_text):
                 in_fence = not in_fence
                 continue
             if in_fence:
                 continue
-            multirange += len(_MULTIRANGE_RE.findall(line_text))
 
             # --- markdown-link anchors (existing behavior) ---
             # Positional symbol binding (compound multi-symbol rows): when the line
@@ -579,12 +682,51 @@ def check_line_anchors(doc_paths: list[str], repo_root: Path) -> list[Drift]:
                 if drift is not None:
                     drifts.append(drift)
 
-        # Multi-range comma-list anchors (`file:A-B, C-D`) are unparseable by
-        # _INLINE_ANCHOR_RE; warn rather than silently skip (ADV-2 principle).
-        if multirange:
-            print(f"WARNING: {full_path}: {multirange} multi-range anchor(s) "
-                  f"(e.g. `file.py:A-B, C-D`) were NOT verified — the comma-list "
-                  f"form is unparseable. Split into single-range anchors to verify.",
+            # --- multi-range comma-list anchors (`file:A-B, C-D` / `file:N, M`) ---
+            # Verified now (Commit 2): a bound symbol's def must fall within ONE
+            # comma-term; with no symbol every term must be in-bounds. Report-only
+            # (never fixable). A term that fails to parse, or a bare basename that
+            # can't be resolved, keeps the legacy 'NOT verified' warning.
+            for m in _MULTIRANGE_RE.finditer(line_text):
+                token_file = m.group("file")
+                terms_text = m.group("terms")
+                mr_symbol = _bind_inline_symbol(line_text, m.start())
+                resolved_rel, candidates = _resolve_inline_target(
+                    token_file, mr_symbol, basename_index, repo_root)
+                if candidates is not None:
+                    drifts.append(Drift(
+                        doc_path=str(full_path), doc_line=line_num,
+                        target_file=token_file, target_line=0,
+                        kind="ambiguous_path", symbol=mr_symbol, suggested_line=None,
+                        fixable=False,
+                        message=(f"`{token_file}` is ambiguous ({len(candidates)} tracked "
+                                 f"matches): {', '.join(candidates)} — qualify with a directory"),
+                        style="inline", candidates=candidates,
+                    ))
+                    continue
+                if resolved_rel is None:
+                    # Unresolved bare basename (not a tracked file, or git absent):
+                    # cannot verify -> keep the warning rather than silently skip.
+                    multirange_unparseable += 1
+                    continue
+                if _parse_multirange_terms(terms_text) is None:
+                    multirange_unparseable += 1  # a term failed to parse
+                    continue
+                drift = check_multirange_anchor(
+                    doc_path=str(full_path), doc_line_num=line_num,
+                    doc_line_text=line_text, token_file=token_file,
+                    terms_text=terms_text, repo_root=repo_root,
+                    resolved_rel=resolved_rel, symbol=mr_symbol,
+                )
+                if drift is not None:
+                    drifts.append(drift)
+
+        # Any multi-range anchors we could NOT verify (unparseable terms / unresolved
+        # bare basename) still warn rather than silently skip (ADV-2 principle).
+        if multirange_unparseable:
+            print(f"WARNING: {full_path}: {multirange_unparseable} multi-range anchor(s) "
+                  f"(e.g. `file.py:A-B, C-D`) could NOT be verified — unparseable terms "
+                  f"or unresolved file. Split into single-range anchors to verify.",
                   file=sys.stderr)
 
         # EOF with the fence still open (ADV-2): an unbalanced/stray fence leaves
