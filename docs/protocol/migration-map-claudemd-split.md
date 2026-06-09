@@ -83,38 +83,38 @@ Columns:
 | CLAUDE.md | `## AskUserQuestion discipline` L481–491 | `docs/protocol/claude/orchestration.md` (body); root keeps `## Claude Code mechanics` stub | `STAYS (short stub in ## Claude Code mechanics block)` | `Are reversible only with effort (renaming a public API` | ✗ (not yet relocated) |
 | CLAUDE.md | `## Background work` L492–501 | `docs/protocol/claude/orchestration.md` (body); root keeps `## Claude Code mechanics` stub | `STAYS (short stub in ## Claude Code mechanics block)` | `poll a background task you started` | ✗ (not yet relocated) |
 | CLAUDE.md | `## Pre-existing failures` L502–512 | `docs/protocol/claude/orchestration.md` | `—` | `mark it \`xfail\` (or tighten tolerance) early in the branch if` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Quality vs. throughput watchpoints` L513–530 | `docs/protocol/claude/failure-modes.md` | `—` | `throughput optimization is "ship when the code quality reviewer says approve"` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Failure modes and false positives observed` L531–591 | `docs/protocol/claude/failure-modes.md` | `—` | `Spec reviewer flagged two missing requirements in a render component` | ✗ (not yet relocated) |
-| CLAUDE.md | `### Reviewer false positives` L536–564 | `docs/protocol/claude/failure-modes.md` | `—` | `automated security warnings can be wrong about instruction-following` | ✗ (not yet relocated) |
-| CLAUDE.md | `### Tool and environment failure modes` L565–584 | `docs/protocol/claude/failure-modes.md` | `—` | `File has not been read yet` | ✗ (not yet relocated) |
-| CLAUDE.md | `### Detection pattern` L585–591 | `docs/protocol/claude/failure-modes.md` | `—` | `do a quick targeted verification (single` | ✗ (not yet relocated) |
+| CLAUDE.md | `## Quality vs. throughput watchpoints` L513–530 | `docs/protocol/claude/failure-modes.md` | `—` | `throughput optimization is "ship when the code quality reviewer says approve"` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Failure modes and false positives observed` L531–591 | `docs/protocol/claude/failure-modes.md` | `—` | `Spec reviewer flagged two missing requirements in a render component` | ✓ (added; root copy retained) |
+| CLAUDE.md | `### Reviewer false positives` L536–564 | `docs/protocol/claude/failure-modes.md` | `—` | `automated security warnings can be wrong about instruction-following` | ✓ (added; root copy retained) |
+| CLAUDE.md | `### Tool and environment failure modes` L565–584 | `docs/protocol/claude/failure-modes.md` | `—` | `File has not been read yet` | ✓ (added; root copy retained) |
+| CLAUDE.md | `### Detection pattern` L585–591 | `docs/protocol/claude/failure-modes.md` | `—` | `do a quick targeted verification (single` | ✓ (added; root copy retained) |
 | CLAUDE.md | `## When NOT to use this pattern` L592–601 | `docs/protocol/claude/orchestration.md` | `—` | `Tasks with constant operator feedback` | ✗ (not yet relocated) |
-| CLAUDE.md | `# Director-Operator Concurrent Operation` L602–605 | `docs/protocol/claude/director-operator.md` | `pointer` | `two parallel Claude sessions by design` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Two-seat team model (Protocol Bundle v5)` L606–646 | `docs/protocol/claude/director-operator.md` | `pointer` | `specialization is cognitive-load distribution, not hierarchy` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Role partition` L647–726 | `docs/protocol/claude/director-operator.md` | `pointer` | `Strategic-seat-default` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Signaling: narrate before acting on shared tasks` L727–745 | `docs/protocol/claude/director-operator.md` | `pointer` | `Dispatching parallel reviewers` | ✗ (not yet relocated) |
-| CLAUDE.md | `## State-asserting writes: gate on \`git log --oneline -5\`` L746–759 | `docs/protocol/claude/director-operator.md` | `pointer` | `State-asserting writes` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Race-acknowledging commit bodies` L760–771 | `docs/protocol/claude/director-operator.md` | `pointer` | `name the shift in the commit body` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Pre-commit re-verify (Rule #7)` L772–798 | `docs/protocol/claude/director-operator.md` | `pointer` | `Monitor.tsx shipped during operator's` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Mailbox events have authority equal to user-relayed signals (Rule #8)` L799–858 | `docs/protocol/claude/director-operator.md` | `pointer` | `Session-bootstrap awareness gate` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Independent reviewer convention (Rule #9)` L859–940 | `docs/protocol/claude/director-operator.md` | `pointer` | `second-opinion convention` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Joint-team mode (Rule #10)` L941–972 | `docs/protocol/claude/director-operator.md` | `pointer` | `co-agent mode` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Codification bias check (Rule #11)` L973–1002 | `docs/protocol/claude/director-operator.md` | `pointer` | `primary beneficiary` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Brief-level grep-the-writes discipline (Rule #12)` L1003–1051 | `docs/protocol/claude/director-operator.md` (full body) | `STAYS (short stub)` | `type-declaration is not write-evidence` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Symmetric-endpoint audit discipline (Rule #13)` L1052–1112 | `docs/protocol/claude/director-operator.md` (full body) | `STAYS (short stub)` | `a new defense names what existing endpoints` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Operator-driven Lane B template + selection criteria (Rule #14)` L1113–1347 | `docs/protocol/claude/director-operator.md` | `pointer` | `when operator-seat may dispatch Lane B` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Cross-seat fix-on-received-findings convention (Rule #15)` L1348–1553 | `docs/protocol/claude/director-operator.md` | `pointer` | `when one seat closes the other seat's Lane V finding` | ✗ (not yet relocated) |
-| CLAUDE.md | `## User-direction without owner-spec (Rule #16)` L1554–1632 | `docs/protocol/claude/director-operator.md` | `pointer` | `complementary-parallel work with mandatory convergence` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Workflow-assisted analysis lanes (Rule #17)` L1633–1736 | `docs/protocol/claude/director-operator.md` | `pointer` | `read-analysis multiplier, not an implementation engine` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Doc-maintenance as a verifier-scoped dispatch pattern (Rule #18)` L1737–1846 | `docs/protocol/claude/director-operator.md` | `pointer` | `librarian wielding the verifier` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Live-presence-over-inferred-idle (Rule #19)` L1847–1906 | `docs/protocol/claude/director-operator.md` | `pointer` | `read the peer's presence; don't infer liveness` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Shared-state-accuracy (Rule #20)` L1907–1940 | `docs/protocol/claude/director-operator.md` | `pointer` | `awareness gate computes truth; it does not trust a stale snapshot` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Disagreement protocol (v5)` L1941–1984 | `docs/protocol/claude/director-operator.md` | `pointer` | `2-cycle limit` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Emergency handling protocol (v5)` L1985–2039 | `docs/protocol/claude/director-operator.md` | `pointer` | `Production-affecting OR user-data-integrity issue` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Git is the tiebreaker` L2040–2050 | `docs/protocol/claude/director-operator.md` | `pointer` | `first commit to land wins` | ✗ (not yet relocated) |
-| CLAUDE.md | `## When the other party is offline` L2051–2062 | `docs/protocol/claude/director-operator.md` | `pointer` | `takes the full loop unilaterally` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Phase taxonomy (Protocol Bundle v4)` L2063–2089 | `docs/protocol/claude/director-operator.md` | `pointer` | `Detection is hybrid: explicit` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Adjacent-useful work when you can't claim the loop` L2090–2111 | `docs/protocol/claude/director-operator.md` | `pointer` | `Standby OR work on pre-listed operator-claimable backlog` | ✗ (not yet relocated) |
+| CLAUDE.md | `# Director-Operator Concurrent Operation` L602–605 | `docs/protocol/claude/director-operator.md` | `pointer` | `two parallel Claude sessions by design` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Two-seat team model (Protocol Bundle v5)` L606–646 | `docs/protocol/claude/director-operator.md` | `pointer` | `specialization is cognitive-load distribution, not hierarchy` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Role partition` L647–726 | `docs/protocol/claude/director-operator.md` | `pointer` | `Strategic-seat-default` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Signaling: narrate before acting on shared tasks` L727–745 | `docs/protocol/claude/director-operator.md` | `pointer` | `Dispatching parallel reviewers` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## State-asserting writes: gate on \`git log --oneline -5\`` L746–759 | `docs/protocol/claude/director-operator.md` | `pointer` | `State-asserting writes` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Race-acknowledging commit bodies` L760–771 | `docs/protocol/claude/director-operator.md` | `pointer` | `name the shift in the commit body` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Pre-commit re-verify (Rule #7)` L772–798 | `docs/protocol/claude/director-operator.md` | `pointer` | `Monitor.tsx shipped during operator's` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Mailbox events have authority equal to user-relayed signals (Rule #8)` L799–858 | `docs/protocol/claude/director-operator.md` | `pointer` | `Session-bootstrap awareness gate` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Independent reviewer convention (Rule #9)` L859–940 | `docs/protocol/claude/director-operator.md` | `pointer` | `second-opinion convention` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Joint-team mode (Rule #10)` L941–972 | `docs/protocol/claude/director-operator.md` | `pointer` | `co-agent mode` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Codification bias check (Rule #11)` L973–1002 | `docs/protocol/claude/director-operator.md` | `pointer` | `primary beneficiary` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Brief-level grep-the-writes discipline (Rule #12)` L1003–1051 | `docs/protocol/claude/director-operator.md` (full body) | `STAYS (short stub)` | `type-declaration is not write-evidence` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Symmetric-endpoint audit discipline (Rule #13)` L1052–1112 | `docs/protocol/claude/director-operator.md` (full body) | `STAYS (short stub)` | `a new defense names what existing endpoints` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Operator-driven Lane B template + selection criteria (Rule #14)` L1113–1347 | `docs/protocol/claude/director-operator.md` | `pointer` | `when operator-seat may dispatch Lane B` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Cross-seat fix-on-received-findings convention (Rule #15)` L1348–1553 | `docs/protocol/claude/director-operator.md` | `pointer` | `when one seat closes the other seat's Lane V finding` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## User-direction without owner-spec (Rule #16)` L1554–1632 | `docs/protocol/claude/director-operator.md` | `pointer` | `complementary-parallel work with mandatory convergence` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Workflow-assisted analysis lanes (Rule #17)` L1633–1736 | `docs/protocol/claude/director-operator.md` | `pointer` | `read-analysis multiplier, not an implementation engine` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Doc-maintenance as a verifier-scoped dispatch pattern (Rule #18)` L1737–1846 | `docs/protocol/claude/director-operator.md` | `pointer` | `librarian wielding the verifier` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Live-presence-over-inferred-idle (Rule #19)` L1847–1906 | `docs/protocol/claude/director-operator.md` | `pointer` | `read the peer's presence; don't infer liveness` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Shared-state-accuracy (Rule #20)` L1907–1940 | `docs/protocol/claude/director-operator.md` | `pointer` | `awareness gate computes truth; it does not trust a stale snapshot` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Disagreement protocol (v5)` L1941–1984 | `docs/protocol/claude/director-operator.md` | `pointer` | `2-cycle limit` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Emergency handling protocol (v5)` L1985–2039 | `docs/protocol/claude/director-operator.md` | `pointer` | `Production-affecting OR user-data-integrity issue` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Git is the tiebreaker` L2040–2050 | `docs/protocol/claude/director-operator.md` | `pointer` | `first commit to land wins` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## When the other party is offline` L2051–2062 | `docs/protocol/claude/director-operator.md` | `pointer` | `takes the full loop unilaterally` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Phase taxonomy (Protocol Bundle v4)` L2063–2089 | `docs/protocol/claude/director-operator.md` | `pointer` | `Detection is hybrid: explicit` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Adjacent-useful work when you can't claim the loop` L2090–2111 | `docs/protocol/claude/director-operator.md` | `pointer` | `Standby OR work on pre-listed operator-claimable backlog` | ✓ (added; root copy retained) |
 
 ### CLAUDE.md — Rule provenance fragments
 
@@ -124,15 +124,15 @@ embedded inside each Rule #N section body. They relocate to
 
 | Source file | Source heading + line range | Destination | Root stub (ID) | Grep anchor (unique phrase) | Preserved? |
 |---|---|---|---|---|---|
-| CLAUDE.md | Rule #12 provenance fragment (within L1003–1051) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`8ab0bbb\` (Protocol Bundle v5.1 ship; filled per` | ✗ (not yet relocated) |
-| CLAUDE.md | Rule #13 provenance fragment (within L1052–1112) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`8ab0bbb\` (Protocol Bundle v5.1 ship; filled per` | ✗ (not yet relocated) |
-| CLAUDE.md | Rule #14 provenance fragment (within L1113–1347) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`61cac6d\` (Protocol Bundle v5.2 ship; filled per chicken-and-egg` | ✗ (not yet relocated) |
-| CLAUDE.md | Rule #15 provenance fragment (within L1348–1553) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`24c145a\` (Protocol Bundle v5.3 ship; filled per chicken-and-` | ✗ (not yet relocated) |
-| CLAUDE.md | Rule #16 provenance fragment (within L1554–1632) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`7773502\` (Protocol Bundle` | ✗ (not yet relocated) |
-| CLAUDE.md | Rule #17 provenance fragment (within L1633–1736) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`52658eb\` (Protocol Bundle v5.5 ship; filled` | ✗ (not yet relocated) |
-| CLAUDE.md | Rule #18 provenance fragment (within L1737–1846) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`4eecb72\` (Protocol Bundle v5.6 ship; filled per` | ✗ (not yet relocated) |
-| CLAUDE.md | Rule #19 provenance fragment (within L1847–1906) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`cec6d72\` (filled next session-close per` | ✗ (not yet relocated) |
-| CLAUDE.md | Rule #20 provenance fragment (within L1907–1940) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`cec6d72\` (filled next session-close).` | ✗ (not yet relocated) |
+| CLAUDE.md | Rule #12 provenance fragment (within L1003–1051) | `docs/protocol/claude/director-operator.md (within Rule #12 body)` | `—` | `Codified SHA: \`8ab0bbb\` (Protocol Bundle v5.1 ship; filled per` | ✓ (preserved verbatim within Rule body) |
+| CLAUDE.md | Rule #13 provenance fragment (within L1052–1112) | `docs/protocol/claude/director-operator.md (within Rule #13 body)` | `—` | `Codified SHA: \`8ab0bbb\` (Protocol Bundle v5.1 ship; filled per` | ✓ (preserved verbatim within Rule body) |
+| CLAUDE.md | Rule #14 provenance fragment (within L1113–1347) | `docs/protocol/claude/director-operator.md (within Rule #14 body)` | `—` | `Codified SHA: \`61cac6d\` (Protocol Bundle v5.2 ship; filled per chicken-and-egg` | ✓ (preserved verbatim within Rule body) |
+| CLAUDE.md | Rule #15 provenance fragment (within L1348–1553) | `docs/protocol/claude/director-operator.md (within Rule #15 body)` | `—` | `Codified SHA: \`24c145a\` (Protocol Bundle v5.3 ship; filled per chicken-and-` | ✓ (preserved verbatim within Rule body) |
+| CLAUDE.md | Rule #16 provenance fragment (within L1554–1632) | `docs/protocol/claude/director-operator.md (within Rule #16 body)` | `—` | `Codified SHA: \`7773502\` (Protocol Bundle` | ✓ (preserved verbatim within Rule body) |
+| CLAUDE.md | Rule #17 provenance fragment (within L1633–1736) | `docs/protocol/claude/director-operator.md (within Rule #17 body)` | `—` | `Codified SHA: \`52658eb\` (Protocol Bundle v5.5 ship; filled` | ✓ (preserved verbatim within Rule body) |
+| CLAUDE.md | Rule #18 provenance fragment (within L1737–1846) | `docs/protocol/claude/director-operator.md (within Rule #18 body)` | `—` | `Codified SHA: \`4eecb72\` (Protocol Bundle v5.6 ship; filled per` | ✓ (preserved verbatim within Rule body) |
+| CLAUDE.md | Rule #19 provenance fragment (within L1847–1906) | `docs/protocol/claude/director-operator.md (within Rule #19 body)` | `—` | `Codified SHA: \`cec6d72\` (filled next session-close per` | ✓ (preserved verbatim within Rule body) |
+| CLAUDE.md | Rule #20 provenance fragment (within L1907–1940) | `docs/protocol/claude/director-operator.md (within Rule #20 body)` | `—` | `Codified SHA: \`cec6d72\` (filled next session-close).` | ✓ (preserved verbatim within Rule body) |
 
 ---
 
@@ -162,50 +162,50 @@ embedded inside each Rule #N section body. They relocate to
 | AGENTS.md | `## Commit discipline for reviewability` L395–408 | `docs/protocol/agents/orchestration.md` | `—` | `Baseline commit first` | ✗ (not yet relocated) |
 | AGENTS.md | `## Context hygiene (the long-session rule)` L409–424 | `docs/protocol/agents/orchestration.md` | `—` | `Summaries in main, full content in subagents` | ✗ (not yet relocated) |
 | AGENTS.md | `## Compaction signals and what to do` L425–447 | `docs/protocol/agents/orchestration.md` | `—` | `Commit pending work immediately` | ✗ (not yet relocated) |
-| AGENTS.md | `## Quality vs. throughput watchpoints` L448–465 | `docs/protocol/agents/failure-modes.md` | `—` | `checking the right things` | ✗ (not yet relocated) |
-| AGENTS.md | `## Failure modes and false positives` L466–521 | `docs/protocol/agents/failure-modes.md` | `—` | `Fresh instance "tool X not available"` | ✗ (not yet relocated) |
+| AGENTS.md | `## Quality vs. throughput watchpoints` L448–465 | `docs/protocol/agents/failure-modes.md` | `—` | `checking the right things` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Failure modes and false positives` L466–521 | `docs/protocol/agents/failure-modes.md` | `—` | `Fresh instance "tool X not available"` | ✓ (added; root copy retained) |
 | AGENTS.md | `## When NOT to orchestrate` L522–532 | `docs/protocol/agents/orchestration.md` | `—` | `Tasks needing constant operator feedback` | ✗ (not yet relocated) |
-| AGENTS.md | `# Director-Operator Concurrent Operation` L533–536 | `docs/protocol/agents/director-operator.md` | `pointer` | `two parallel agent sessions by design` | ✗ (not yet relocated) |
-| AGENTS.md | `## Two-seat team model (Protocol Bundle v5)` L537–572 | `docs/protocol/agents/director-operator.md` | `pointer` | `specialization is cognitive-load distribution, not hierarchy` | ✗ (not yet relocated) |
-| AGENTS.md | `## Role partition` L573–639 | `docs/protocol/agents/director-operator.md` | `pointer` | `Strategic-seat-default` | ✗ (not yet relocated) |
-| AGENTS.md | `## Signaling: narrate before acting on shared tasks` L640–654 | `docs/protocol/agents/director-operator.md` | `pointer` | `Dispatching parallel reviewers` | ✗ (not yet relocated) |
-| AGENTS.md | `## State-asserting writes: gate on \`git log --oneline -5\`` L655–668 | `docs/protocol/agents/director-operator.md` | `pointer` | `State-asserting writes` | ✗ (not yet relocated) |
-| AGENTS.md | `## Race-acknowledging commit bodies` L669–680 | `docs/protocol/agents/director-operator.md` | `pointer` | `name the shift in the commit body` | ✗ (not yet relocated) |
-| AGENTS.md | `## Pre-commit re-verify (Rule #7)` L681–707 | `docs/protocol/agents/director-operator.md` | `pointer` | `Monitor.tsx shipped during operator's` | ✗ (not yet relocated) |
-| AGENTS.md | `## Mailbox events have authority equal to user-relayed signals (Rule #8)` L708–767 | `docs/protocol/agents/director-operator.md` | `pointer` | `Session-bootstrap awareness gate` | ✗ (not yet relocated) |
-| AGENTS.md | `## Independent reviewer convention (Rule #9)` L768–843 | `docs/protocol/agents/director-operator.md` | `pointer` | `second-opinion convention` | ✗ (not yet relocated) |
-| AGENTS.md | `## Joint-team mode (Rule #10)` L844–862 | `docs/protocol/agents/director-operator.md` | `pointer` | `co-agent mode` | ✗ (not yet relocated) |
-| AGENTS.md | `## Codification bias check (Rule #11)` L863–884 | `docs/protocol/agents/director-operator.md` | `pointer` | `primary beneficiary` | ✗ (not yet relocated) |
-| AGENTS.md | `## Brief-level grep-the-writes discipline (Rule #12)` L885–920 | `docs/protocol/agents/director-operator.md` (full body) | `STAYS (short stub in AGENTS router)` | `type-declaration is not write-evidence` | ✗ (not yet relocated) |
-| AGENTS.md | `## Symmetric-endpoint audit discipline (Rule #13)` L921–966 | `docs/protocol/agents/director-operator.md` (full body) | `STAYS (short stub in AGENTS router)` | `a new defense names what existing endpoints` | ✗ (not yet relocated) |
-| AGENTS.md | `## Operator-driven Lane B template + selection criteria (Rule #14)` L967–1076 | `docs/protocol/agents/director-operator.md` | `pointer` | `when operator-seat may dispatch Lane B` | ✗ (not yet relocated) |
-| AGENTS.md | `## Cross-seat fix-on-received-findings convention (Rule #15)` L1077–1190 | `docs/protocol/agents/director-operator.md` | `pointer` | `when one seat closes the other seat's Lane V finding` | ✗ (not yet relocated) |
-| AGENTS.md | `## User-direction without owner-spec (Rule #16)` L1191–1269 | `docs/protocol/agents/director-operator.md` | `pointer` | `complementary-parallel work with mandatory convergence` | ✗ (not yet relocated) |
-| AGENTS.md | `## Workflow-assisted analysis lanes (Rule #17)` L1270–1373 | `docs/protocol/agents/director-operator.md` | `pointer` | `read-analysis multiplier, not an implementation engine` | ✗ (not yet relocated) |
-| AGENTS.md | `## Doc-maintenance as a verifier-scoped dispatch pattern (Rule #18)` L1374–1483 | `docs/protocol/agents/director-operator.md` | `pointer` | `librarian wielding the verifier` | ✗ (not yet relocated) |
-| AGENTS.md | `## Live-presence-over-inferred-idle (Rule #19)` L1484–1543 | `docs/protocol/agents/director-operator.md` | `pointer` | `read the peer's presence; don't infer liveness` | ✗ (not yet relocated) |
-| AGENTS.md | `## Shared-state-accuracy (Rule #20)` L1544–1577 | `docs/protocol/agents/director-operator.md` | `pointer` | `awareness gate computes truth; it does not trust a stale snapshot` | ✗ (not yet relocated) |
-| AGENTS.md | `## Disagreement protocol (v5)` L1578–1595 | `docs/protocol/agents/director-operator.md` | `pointer` | `2-cycle limit` | ✗ (not yet relocated) |
-| AGENTS.md | `## Emergency handling protocol (v5)` L1596–1618 | `docs/protocol/agents/director-operator.md` | `pointer` | `Production-affecting OR user-data-integrity issue` | ✗ (not yet relocated) |
-| AGENTS.md | `## Git is the tiebreaker` L1619–1628 | `docs/protocol/agents/director-operator.md` | `pointer` | `The other's subagent output is discarded` | ✗ (not yet relocated) |
-| AGENTS.md | `## When the other party is offline` L1629–1634 | `docs/protocol/agents/director-operator.md` | `pointer` | `takes the full loop unilaterally` | ✗ (not yet relocated) |
-| AGENTS.md | `## Phase taxonomy (Protocol Bundle v4)` L1635–1661 | `docs/protocol/agents/director-operator.md` | `pointer` | `Standby OR work on pre-listed operator-claimable backlog` | ✗ (not yet relocated) |
-| AGENTS.md | `## Adjacent-useful work when you can't claim the loop` L1662–1673 | `docs/protocol/agents/director-operator.md` | `pointer` | `nor dispatch a duplicate reviewer` | ✗ (not yet relocated) |
+| AGENTS.md | `# Director-Operator Concurrent Operation` L533–536 | `docs/protocol/agents/director-operator.md` | `pointer` | `two parallel agent sessions by design` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Two-seat team model (Protocol Bundle v5)` L537–572 | `docs/protocol/agents/director-operator.md` | `pointer` | `specialization is cognitive-load distribution, not hierarchy` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Role partition` L573–639 | `docs/protocol/agents/director-operator.md` | `pointer` | `Strategic-seat-default` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Signaling: narrate before acting on shared tasks` L640–654 | `docs/protocol/agents/director-operator.md` | `pointer` | `Dispatching parallel reviewers` | ✓ (added; root copy retained) |
+| AGENTS.md | `## State-asserting writes: gate on \`git log --oneline -5\`` L655–668 | `docs/protocol/agents/director-operator.md` | `pointer` | `State-asserting writes` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Race-acknowledging commit bodies` L669–680 | `docs/protocol/agents/director-operator.md` | `pointer` | `name the shift in the commit body` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Pre-commit re-verify (Rule #7)` L681–707 | `docs/protocol/agents/director-operator.md` | `pointer` | `Monitor.tsx shipped during operator's` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Mailbox events have authority equal to user-relayed signals (Rule #8)` L708–767 | `docs/protocol/agents/director-operator.md` | `pointer` | `Session-bootstrap awareness gate` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Independent reviewer convention (Rule #9)` L768–843 | `docs/protocol/agents/director-operator.md` | `pointer` | `second-opinion convention` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Joint-team mode (Rule #10)` L844–862 | `docs/protocol/agents/director-operator.md` | `pointer` | `co-agent mode` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Codification bias check (Rule #11)` L863–884 | `docs/protocol/agents/director-operator.md` | `pointer` | `primary beneficiary` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Brief-level grep-the-writes discipline (Rule #12)` L885–920 | `docs/protocol/agents/director-operator.md` (full body) | `STAYS (short stub in AGENTS router)` | `type-declaration is not write-evidence` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Symmetric-endpoint audit discipline (Rule #13)` L921–966 | `docs/protocol/agents/director-operator.md` (full body) | `STAYS (short stub in AGENTS router)` | `a new defense names what existing endpoints` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Operator-driven Lane B template + selection criteria (Rule #14)` L967–1076 | `docs/protocol/agents/director-operator.md` | `pointer` | `when operator-seat may dispatch Lane B` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Cross-seat fix-on-received-findings convention (Rule #15)` L1077–1190 | `docs/protocol/agents/director-operator.md` | `pointer` | `when one seat closes the other seat's Lane V finding` | ✓ (added; root copy retained) |
+| AGENTS.md | `## User-direction without owner-spec (Rule #16)` L1191–1269 | `docs/protocol/agents/director-operator.md` | `pointer` | `complementary-parallel work with mandatory convergence` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Workflow-assisted analysis lanes (Rule #17)` L1270–1373 | `docs/protocol/agents/director-operator.md` | `pointer` | `read-analysis multiplier, not an implementation engine` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Doc-maintenance as a verifier-scoped dispatch pattern (Rule #18)` L1374–1483 | `docs/protocol/agents/director-operator.md` | `pointer` | `librarian wielding the verifier` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Live-presence-over-inferred-idle (Rule #19)` L1484–1543 | `docs/protocol/agents/director-operator.md` | `pointer` | `read the peer's presence; don't infer liveness` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Shared-state-accuracy (Rule #20)` L1544–1577 | `docs/protocol/agents/director-operator.md` | `pointer` | `awareness gate computes truth; it does not trust a stale snapshot` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Disagreement protocol (v5)` L1578–1595 | `docs/protocol/agents/director-operator.md` | `pointer` | `2-cycle limit` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Emergency handling protocol (v5)` L1596–1618 | `docs/protocol/agents/director-operator.md` | `pointer` | `Production-affecting OR user-data-integrity issue` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Git is the tiebreaker` L1619–1628 | `docs/protocol/agents/director-operator.md` | `pointer` | `The other's subagent output is discarded` | ✓ (added; root copy retained) |
+| AGENTS.md | `## When the other party is offline` L1629–1634 | `docs/protocol/agents/director-operator.md` | `pointer` | `takes the full loop unilaterally` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Phase taxonomy (Protocol Bundle v4)` L1635–1661 | `docs/protocol/agents/director-operator.md` | `pointer` | `Standby OR work on pre-listed operator-claimable backlog` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Adjacent-useful work when you can't claim the loop` L1662–1673 | `docs/protocol/agents/director-operator.md` | `pointer` | `nor dispatch a duplicate reviewer` | ✓ (added; root copy retained) |
 | AGENTS.md | `# Coordinating with CLAUDE.md` L1674–1698 | STAYS in AGENTS.md router | `STAYS (AGENTS router)` | `sibling documents. They share` | ✗ (not yet relocated) |
 
 ### AGENTS.md — Rule provenance fragments
 
 | Source file | Source heading + line range | Destination | Root stub (ID) | Grep anchor (unique phrase) | Preserved? |
 |---|---|---|---|---|---|
-| AGENTS.md | Rule #12 provenance fragment (within L885–920) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`8ab0bbb\` (Protocol Bundle v5.1 ship; chicken-and-egg` | ✗ (not yet relocated) |
-| AGENTS.md | Rule #13 provenance fragment (within L921–966) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`8ab0bbb\` (Protocol Bundle v5.1 ship; chicken-and-egg` | ✗ (not yet relocated) |
-| AGENTS.md | Rule #14 provenance fragment (within L967–1076) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`61cac6d\` (Protocol Bundle v5.2 ship; chicken-and-egg` | ✗ (not yet relocated) |
-| AGENTS.md | Rule #15 provenance fragment (within L1077–1190) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`24c145a\` (Protocol Bundle v5.3 ship; chicken-and-egg` | ✗ (not yet relocated) |
-| AGENTS.md | Rule #16 provenance fragment (within L1191–1269) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`7773502\` (Protocol Bundle` | ✗ (not yet relocated) |
-| AGENTS.md | Rule #17 provenance fragment (within L1270–1373) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`52658eb\` (Protocol Bundle v5.5 ship; filled` | ✗ (not yet relocated) |
-| AGENTS.md | Rule #18 provenance fragment (within L1374–1483) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`4eecb72\` (Protocol Bundle v5.6 ship; filled per` | ✗ (not yet relocated) |
-| AGENTS.md | Rule #19 provenance fragment (within L1484–1543) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`cec6d72\` (filled next session-close per` | ✗ (not yet relocated) |
-| AGENTS.md | Rule #20 provenance fragment (within L1544–1577) | `docs/PROTOCOL-RULES-LOG.md` | `—` | `Codified SHA: \`cec6d72\` (filled next session-close).` | ✗ (not yet relocated) |
+| AGENTS.md | Rule #12 provenance fragment (within L885–920) | `docs/protocol/agents/director-operator.md (within Rule #12 body)` | `—` | `Codified SHA: \`8ab0bbb\` (Protocol Bundle v5.1 ship; chicken-and-egg` | ✓ (preserved verbatim within Rule body) |
+| AGENTS.md | Rule #13 provenance fragment (within L921–966) | `docs/protocol/agents/director-operator.md (within Rule #13 body)` | `—` | `Codified SHA: \`8ab0bbb\` (Protocol Bundle v5.1 ship; chicken-and-egg` | ✓ (preserved verbatim within Rule body) |
+| AGENTS.md | Rule #14 provenance fragment (within L967–1076) | `docs/protocol/agents/director-operator.md (within Rule #14 body)` | `—` | `Codified SHA: \`61cac6d\` (Protocol Bundle v5.2 ship; chicken-and-egg` | ✓ (preserved verbatim within Rule body) |
+| AGENTS.md | Rule #15 provenance fragment (within L1077–1190) | `docs/protocol/agents/director-operator.md (within Rule #15 body)` | `—` | `Codified SHA: \`24c145a\` (Protocol Bundle v5.3 ship; chicken-and-egg` | ✓ (preserved verbatim within Rule body) |
+| AGENTS.md | Rule #16 provenance fragment (within L1191–1269) | `docs/protocol/agents/director-operator.md (within Rule #16 body)` | `—` | `Codified SHA: \`7773502\` (Protocol Bundle` | ✓ (preserved verbatim within Rule body) |
+| AGENTS.md | Rule #17 provenance fragment (within L1270–1373) | `docs/protocol/agents/director-operator.md (within Rule #17 body)` | `—` | `Codified SHA: \`52658eb\` (Protocol Bundle v5.5 ship; filled` | ✓ (preserved verbatim within Rule body) |
+| AGENTS.md | Rule #18 provenance fragment (within L1374–1483) | `docs/protocol/agents/director-operator.md (within Rule #18 body)` | `—` | `Codified SHA: \`4eecb72\` (Protocol Bundle v5.6 ship; filled per` | ✓ (preserved verbatim within Rule body) |
+| AGENTS.md | Rule #19 provenance fragment (within L1484–1543) | `docs/protocol/agents/director-operator.md (within Rule #19 body)` | `—` | `Codified SHA: \`cec6d72\` (filled next session-close per` | ✓ (preserved verbatim within Rule body) |
+| AGENTS.md | Rule #20 provenance fragment (within L1544–1577) | `docs/protocol/agents/director-operator.md (within Rule #20 body)` | `—` | `Codified SHA: \`cec6d72\` (filled next session-close).` | ✓ (preserved verbatim within Rule body) |
 
 ---
 
