@@ -347,6 +347,13 @@ def _build_cinedecompose_system_prompt(
     a new variable, extend this signature; both call sites already pass
     the same locals.
     """
+    # R4 orientation descriptor: derive from the project aspect so a 9:16
+    # (portrait) project is NOT told "widescreen" — a hardcoded landscape word
+    # biases gpt-4o's shot framing horizontal for a vertical deliverable
+    # (final-review M-1, surfaced by the T10 gate opening 9:16 as a live ratio).
+    from cinema.aspect import is_portrait, DEFAULT_ASPECT_RATIO
+    _aspect = global_settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
+    _aspect_orientation = "vertical (portrait)" if is_portrait(_aspect) else "widescreen"
     return f"""<SYSTEM_PERSONA>
 You are "CineDecompose v1.0". You operate as a strict cinematic shot decomposition engine.
 Your singular purpose is to decompose scenes into exactly {target_shots} technically precise shot descriptions.
@@ -416,7 +423,7 @@ Weather: {loc_weather}
 R1. Shots follow physical logic — characters do not teleport between shots.
 R2. Camera angles are physically achievable and cinematic.
 R3. Every shot specifies environmental Foley sound effects in scene_foley field.
-R4. Aspect ratio: {global_settings.get('aspect_ratio', '16:9')} widescreen.
+R4. Aspect ratio: {_aspect} {_aspect_orientation}.
 R5. Set target_api intelligently using the API EXPERTISE below. Do NOT default to "AUTO" — pick the best API for each shot.
 R6. In [OUTFIT], describe ONLY clothing and accessories — NEVER hair, face, body, or physical traits.
 </ADDITIONAL_RULES>

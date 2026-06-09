@@ -525,8 +525,8 @@ at [domain/project_manager.py:71](domain/project_manager.py:71).
 
 | Function | Provider | Tooling |
 |---|---|---|
-| `decompose_scene` ([domain/scene_decomposer.py:429](domain/scene_decomposer.py:429)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
-| `competitive_decompose_scene` ([domain/scene_decomposer.py:617](domain/scene_decomposer.py:617)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
+| `decompose_scene` ([domain/scene_decomposer.py:436](domain/scene_decomposer.py:436)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
+| `competitive_decompose_scene` ([domain/scene_decomposer.py:624](domain/scene_decomposer.py:624)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
 
 **Persona:** CineDecompose v1.0 with 5 hard constraints:
 - HC1 IDENTITY_FIREWALL — LLM must NEVER describe face/hair/skin/eye color
