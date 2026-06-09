@@ -72,6 +72,19 @@ _INLINE_ANCHOR_RE = re.compile(
     r'`(?P<file>[A-Za-z0-9_./-]+\.[A-Za-z]+):(?P<line>\d+)(?:[-–—](?P<end>\d+))?`'
 )
 
+# Path-LESS continuation anchor: a bare `:line` / `:line-line` backtick token
+# that INHERITS its file from the nearest preceding full inline anchor ON THE
+# SAME LINE.  Compound doc cells write the filename once and continue with bare
+# colons: `lip_sync.py:177` / `:470` / `:697`.  The 2nd/3rd terms carry no path,
+# so _INLINE_ANCHOR_RE (which REQUIRES path.ext) never saw them — they were
+# silently unverified.  A continuation anchor is only promoted when a same-line
+# full anchor precedes it (see _ordered_line_anchors); a bare `:N` whose file is
+# established by a markdown LINK on a *previous* line (ARCHITECTURE.md bullet
+# lists) has no same-line full anchor and stays inert, exactly as before.
+_CONTINUATION_ANCHOR_RE = re.compile(
+    r'`:(?P<line>\d+)(?:[-–—](?P<end>\d+))?`'
+)
+
 # Multi-range anchor: a backtick token citing a comma-list of lines and/or ranges —
 # `path:A-B, C-D` (ranges) OR `path:N, M` (bare lines, e.g. project_manager.py:133,924).
 # The comma precedes the closing backtick, so _INLINE_ANCHOR_RE cannot parse EITHER
@@ -191,6 +204,134 @@ def _bind_inline_symbol(line_text: str, anchor_start: int) -> Optional[str]:
     if pos_after < len(token_text) and token_text[pos_after] == ".":
         return None  # dotted/attribute -> no symbol bind (falls through to bounds)
     return ident
+
+
+def _ident_token(token_text: str) -> Optional[str]:
+    """Return the bare leading identifier of a backtick token, or None when the
+    token is not a bindable bare identifier (dotted/attribute, or non-identifier).
+    Mirrors _bind_inline_symbol's identifier rule but operates on the token text."""
+    ident_match = _IDENT_RE.match(token_text)
+    if not ident_match:
+        return None
+    pos_after = ident_match.end()
+    if pos_after < len(token_text) and token_text[pos_after] == ".":
+        return None  # dotted/attribute
+    return ident_match.group(1)
+
+
+def _ordered_line_anchors(line_text: str) -> "list[dict]":
+    """Return every inline anchor on *line_text* in left-to-right source order.
+
+    Each entry is a dict: {start, end, file, line, end_line (Optional[int])}.
+    Includes both full inline anchors (`path.py:N`) AND path-less continuation
+    anchors (`:N`) that inherit the file of the nearest preceding FULL anchor on
+    the SAME line (compound-cell form `path.py:177` / `:470` / `:697`). A
+    continuation anchor with no preceding same-line full anchor is dropped (it
+    stays inert, matching pre-positional behavior — see _CONTINUATION_ANCHOR_RE).
+    """
+    fulls = []
+    for m in _INLINE_ANCHOR_RE.finditer(line_text):
+        fulls.append({
+            "start": m.start(), "end": m.end(),
+            "file": m.group("file"), "line": int(m.group("line")),
+            "end_line": int(m.group("end")) if m.group("end") else None,
+        })
+    full_spans = [(f["start"], f["end"]) for f in fulls]
+    conts = []
+    for m in _CONTINUATION_ANCHOR_RE.finditer(line_text):
+        # Skip if this `:N` span is actually the tail of a full anchor match
+        # (defensive — the two regexes shouldn't overlap, but be safe).
+        if any(s <= m.start() < e for s, e in full_spans):
+            continue
+        # Inherit the file from the nearest preceding FULL anchor on this line.
+        preceding = [f for f in fulls if f["end"] <= m.start()]
+        if not preceding:
+            continue  # no same-line file context -> stays inert
+        inherited = preceding[-1]["file"]
+        conts.append({
+            "start": m.start(), "end": m.end(),
+            "file": inherited, "line": int(m.group("line")),
+            "end_line": int(m.group("end")) if m.group("end") else None,
+        })
+    return sorted(fulls + conts, key=lambda a: a["start"])
+
+
+def _column_of(pos: int, bar_positions: "list[int]") -> int:
+    """Markdown-table column index of a source position (0-based). With no
+    pipes the whole line is column 0 — non-table lines are one logical column."""
+    c = 0
+    for b in bar_positions:
+        if pos > b:
+            c += 1
+        else:
+            break
+    return c
+
+
+def _positional_symbol_map(line_text: str, anchors: "list[dict]") -> "dict[int, str]":
+    """Column-scoped positional pairing for compound multi-symbol cells.
+
+    The compound shape this fixes is a markdown-table row whose symbol column
+    lists N>1 backtick identifiers and whose anchor column lists the SAME N
+    anchors, all symbols preceding all anchors:
+
+        | `symA` / `symB` / `symC` | `path.py:1` / `:3` / `:5` | description |
+
+    The nearest-backtick heuristic mis-binds here (binds `:1` to `symC`); this
+    pairs the k-th anchor to the k-th identifier of the symbol column.
+
+    Returns {anchor_start: symbol} for the anchors it can pair; an empty/partial
+    map leaves the rest to the caller's nearest-before fallback. The rule is
+    COLUMN-SCOPED (not whole-line) so prose-backtick tokens in OTHER table
+    columns (e.g. `mode="auto"` in a description cell) do not pollute the count.
+
+    For a non-table line (no pipes) the whole line is one column, so this
+    degenerates to: pair iff #idents == #anchors and N>1 — matching the simple
+    whole-line rule for the rare non-table compound line.
+    """
+    if len(anchors) <= 1:
+        return {}
+    bars = [m.start() for m in re.finditer(r'\|', line_text)]
+    anchor_spans = [(a["start"], a["end"]) for a in anchors]
+
+    # All bindable identifier tokens (excluding the anchor tokens themselves),
+    # grouped by table column.
+    idents_by_col: "dict[int, list[tuple[int, str]]]" = {}
+    for m in _BACKTICK_RE.finditer(line_text):
+        if any(s <= m.start() < e for s, e in anchor_spans):
+            continue  # this token IS an anchor
+        ident = _ident_token(m.group(1))
+        if ident is None:
+            continue
+        col = _column_of(m.start(), bars)
+        idents_by_col.setdefault(col, []).append((m.start(), ident))
+
+    # Group anchors by column.
+    anchors_by_col: "dict[int, list[dict]]" = {}
+    for a in anchors:
+        anchors_by_col.setdefault(_column_of(a["start"], bars), []).append(a)
+
+    mapping: "dict[int, str]" = {}
+    for acol, col_anchors in anchors_by_col.items():
+        if len(col_anchors) <= 1:
+            continue  # single anchor in this column -> nearest-before is correct
+        # The symbol column is the nearest PRECEDING column that has identifiers
+        # (col acol-1, acol-2, ...); same-column idents count too when there is
+        # no preceding ident column (rare; degenerates to whole-line for acol=0).
+        sym_idents = None
+        for c in range(acol - 1, -1, -1):
+            if idents_by_col.get(c):
+                sym_idents = idents_by_col[c]
+                break
+        if sym_idents is None:
+            sym_idents = idents_by_col.get(acol)
+        if not sym_idents or len(sym_idents) != len(col_anchors):
+            continue  # count mismatch -> don't pair this column (nearest-before)
+        ordered_anchors = sorted(col_anchors, key=lambda a: a["start"])
+        ordered_idents = sorted(sym_idents, key=lambda t: t[0])
+        for i, a in enumerate(ordered_anchors):
+            mapping[a["start"]] = ordered_idents[i][1]
+    return mapping
 
 
 # ---------------------------------------------------------------------------
@@ -364,30 +505,51 @@ def check_line_anchors(doc_paths: list[str], repo_root: Path) -> list[Drift]:
             multirange += len(_MULTIRANGE_RE.findall(line_text))
 
             # --- markdown-link anchors (existing behavior) ---
+            # Positional symbol binding (compound multi-symbol rows): when the line
+            # carries N>1 identifier tokens and exactly N link anchors, pair the
+            # k-th anchor to the k-th identifier in source order. Otherwise the map
+            # is empty and check_anchor's nearest-before rebind applies as before.
+            link_matches = list(_ANCHOR_RE.finditer(line_text))
+            link_anchor_dicts = [{"start": m.start(), "end": m.end(),
+                                  "file": m.group("file"),
+                                  "line": int(m.group("line"))} for m in link_matches]
+            link_pos_map = _positional_symbol_map(line_text, link_anchor_dicts)
             link_keys = set()
-            for m in _ANCHOR_RE.finditer(line_text):
+            for m in link_matches:
                 target_file_rel = m.group("file")
                 target_line = int(m.group("line"))
                 link_keys.add((target_file_rel, target_line))
+                pos_sym = link_pos_map.get(m.start())
                 drift = check_anchor(
                     doc_path=str(full_path), doc_line_num=line_num,
                     doc_line_text=line_text, target_file_rel=target_file_rel,
                     target_line=target_line, display_text=m.group("display"),
                     repo_root=repo_root, doc_col=(m.start(), m.end()),
+                    symbol=pos_sym,
+                    rebind_symbol=pos_sym is None,
                 )
                 if drift is not None:
                     drifts.append(drift)
 
-            # --- inline-backtick anchors (new) ---
-            for m in _INLINE_ANCHOR_RE.finditer(line_text):
-                token_file = m.group("file")
-                target_line = int(m.group("line"))
+            # --- inline-backtick anchors (full + path-less continuation) ---
+            # Iterate the full ordered anchor list so compound-cell continuation
+            # anchors (`:470` inheriting `lip_sync.py` from `lip_sync.py:177`) are
+            # verified, and apply the positional symbol map so the k-th anchor binds
+            # to the k-th identifier (fixing the nearest-before mis-binding).
+            inline_anchors = _ordered_line_anchors(line_text)
+            inline_pos_map = _positional_symbol_map(line_text, inline_anchors)
+            for a in inline_anchors:
+                token_file = a["file"]
+                target_line = a["line"]
+                anchor_start = a["start"]
                 # de-dup: skip an inline match whose (file,line) equals a link on the
                 # same line (rare; correctness guard, not a span-inside heuristic).
                 if (token_file, target_line) in link_keys:
                     continue
-                # ORDERING: bind symbol BEFORE resolution (resolution needs it).
-                symbol = _bind_inline_symbol(line_text, m.start())
+                # Symbol: positional pairing when the line matched; else nearest-before.
+                symbol = inline_pos_map.get(anchor_start)
+                if symbol is None:
+                    symbol = _bind_inline_symbol(line_text, anchor_start)
                 resolved_rel, candidates = _resolve_inline_target(
                     token_file, symbol, basename_index, repo_root)
                 if candidates is not None:
@@ -405,14 +567,14 @@ def check_line_anchors(doc_paths: list[str], repo_root: Path) -> list[Drift]:
                     if "/" not in token_file and not git_ok:
                         unresolved_bare += 1
                     continue
-                end = m.group("end")
+                end = a["end_line"]
                 display = f"{token_file}:{target_line}" + (f"-{end}" if end else "")
                 drift = check_anchor(
                     doc_path=str(full_path), doc_line_num=line_num,
                     doc_line_text=line_text, target_file_rel=token_file,
                     target_line=target_line, display_text=display, repo_root=repo_root,
                     resolved_rel=resolved_rel, symbol=symbol,
-                    rebind_symbol=False, style="inline", doc_col=(m.start(), m.end()),
+                    rebind_symbol=False, style="inline", doc_col=(a["start"], a["end"]),
                 )
                 if drift is not None:
                     drifts.append(drift)
@@ -478,13 +640,24 @@ def _rewrite_anchor_occurrence(occ_text: str, drift: Drift) -> Optional[str]:
     old, new = drift.target_line, drift.suggested_line
     if drift.style == "inline":
         m = _INLINE_ANCHOR_RE.fullmatch(occ_text)
-        if m is None or m.group("file") != drift.target_file or int(m.group("line")) != old:
-            return None
-        end = m.group("end")
-        body = _shift_display(
-            f"{drift.target_file}:{old}" + (f"-{end}" if end else ""), old, new
-        )
-        return f"`{body}`"
+        if m is not None and m.group("file") == drift.target_file and int(m.group("line")) == old:
+            end = m.group("end")
+            body = _shift_display(
+                f"{drift.target_file}:{old}" + (f"-{end}" if end else ""), old, new
+            )
+            return f"`{body}`"
+        # Path-less continuation anchor (`:N` / `:A-B`): the file is inherited
+        # from a preceding same-line full anchor, so the occurrence carries NO
+        # filename. Rewrite preserving the path-less form (do NOT inject the
+        # inherited file — that would corrupt the compound cell's continuation
+        # syntax). Identity guard is the line number only (the file was already
+        # validated at detection time via the inherited context).
+        cm = _CONTINUATION_ANCHOR_RE.fullmatch(occ_text)
+        if cm is not None and int(cm.group("line")) == old:
+            end = cm.group("end")
+            body = _shift_display(f":{old}" + (f"-{end}" if end else ""), old, new)
+            return f"`{body}`"
+        return None
     # link
     m = _ANCHOR_RE.fullmatch(occ_text)
     if m is None or m.group("file") != drift.target_file or int(m.group("line")) != old:

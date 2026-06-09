@@ -1445,3 +1445,145 @@ class TestMultiRangeWarning:
         err = capsys.readouterr().err
         assert "2 multi-range" in err.lower()   # both bare-number comma-lists counted
         assert "not verified" in err.lower()
+
+
+# ---------------------------------------------------------------------------
+# COMMIT 1 — positional symbol<->anchor binding for compound multi-symbol cells.
+#
+# In a compound cell like `| symA / symB / symC | path.py:111 / :222 / :333 |`,
+# ALL symbols precede ALL anchors. The nearest-backtick-before heuristic binds
+# the FIRST anchor (:111) to symC (the last symbol) and the path-less
+# continuation anchors (:222 / :333) are INVISIBLE to _INLINE_ANCHOR_RE
+# (no path prefix), so they were never verified at all. Consequences on real
+# data: --fix CORRUPTS such lines and the tool FALSE-FLAGS correct lines.
+#
+# The fix: when a line has N backtick-identifier tokens and exactly N anchor
+# tokens (full inline anchors + path-less continuation anchors that inherit the
+# nearest preceding full anchor's file ON THE SAME LINE), in left-to-right
+# order, bind the k-th anchor to the k-th identifier. Counts must match AND
+# N > 1; otherwise fall back to the existing nearest-before heuristic (so
+# single-symbol/single-anchor lines and irregular/prose lines do NOT regress).
+# ---------------------------------------------------------------------------
+
+class TestPositionalCompoundBinding:
+    def test_compound_three_symbols_all_correct_no_drift(self, tmp_path):
+        """`symA / symB / symC | path.py:1 / :3 / :5` where each def IS the cited
+        line -> ZERO drift. Nearest-before wrongly flagged this (it bound :1 to
+        symC); positional binds :1->symA, :3->symB, :5->symC."""
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "lip_sync.py",
+            "def a_fn():\n    pass\n"          # line 1
+            "def b_fn():\n    pass\n"          # line 3
+            "def c_fn():\n    pass\n",         # line 5
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "| `a_fn` / `b_fn` / `c_fn` | `lip_sync.py:1` / `:3` / `:5` | desc |\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"expected no drift (positional), got: {drifts}"
+
+    def test_compound_second_symbol_stale_attributed_to_second(self, tmp_path):
+        """Second anchor genuinely stale -> exactly ONE drift, attributed to the
+        SECOND symbol, suggesting the SECOND symbol's real def (proves positional,
+        not nearest-before)."""
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "lip_sync.py",
+            "def a_fn():\n    pass\n"          # line 1
+            "# 3\n# 4\n"
+            "def b_fn():\n    pass\n"          # line 5  (cited :3 is stale)
+            "def c_fn():\n    pass\n",         # line 7
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "| `a_fn` / `b_fn` / `c_fn` | `lip_sync.py:1` / `:3` / `:7` | desc |\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"expected exactly 1 drift, got: {drifts}"
+        d = drifts[0]
+        assert d.kind == "def_drift"
+        assert d.symbol == "b_fn", f"must attribute to 2nd symbol, got {d.symbol}"
+        assert d.target_line == 3
+        assert d.suggested_line == 5
+
+    def test_compound_out_of_order_anchors_positional(self, tmp_path):
+        """Real-doc shape (PROGRAM-MANUAL.md:586): anchors out of symbol order.
+        `q / id / coh | :5 / :3 / :7` where defs are q@5, id@3, coh@7 but anchors
+        are written :5/:3/:7 IN THAT ORDER -> positional pairs q<->:5, id<->:3,
+        coh<->:7 -> all correct -> no drift."""
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "phase_c_vision.py",
+            "# 1\n# 2\n"
+            "def id_fn():\n    pass\n"         # line 3
+            "def q_fn():\n    pass\n"          # line 5
+            "def coh_fn():\n    pass\n",       # line 7
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "| `q_fn` / `id_fn` / `coh_fn` | `phase_c_vision.py:5` / `:3` / `:7` | d |\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"expected no drift (out-of-order positional), got: {drifts}"
+
+    def test_compound_fix_rewrites_correct_anchor(self, tmp_path):
+        """--fix on a compound cell with ONE stale anchor must rewrite the CORRECT
+        (positionally-paired) anchor and leave the correct anchors untouched."""
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "lip_sync.py",
+            "def a_fn():\n    pass\n"          # line 1
+            "# 3\n# 4\n"
+            "def b_fn():\n    pass\n"          # line 5  (cited :3 stale -> should become :5)
+            "def c_fn():\n    pass\n",         # line 7
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "| `a_fn` / `b_fn` / `c_fn` | `lip_sync.py:1` / `:3` / `:7` | desc |\n",
+        )
+        remaining = run([str(md)], tmp_path, fix=True)
+        text = md.read_text()
+        # The 2nd anchor (which was path-less :3) is rewritten to :5.
+        assert "`:5`" in text, f"2nd anchor should be fixed to :5, got: {text!r}"
+        # The first (full) anchor and the third stay correct/untouched.
+        assert "`lip_sync.py:1`" in text, f"1st anchor clobbered: {text!r}"
+        assert "`:7`" in text, f"3rd anchor clobbered: {text!r}"
+        # No stale :3 left behind.
+        assert "`:3`" not in text, f"stale :3 survived: {text!r}"
+        assert [d for d in remaining if d.kind == "def_drift"] == []
+
+    def test_single_symbol_anchor_no_regression(self, tmp_path):
+        """N=1 line: positional must degenerate to nearest-before (no behavior
+        change). Single stale symbol+anchor still drifts correctly."""
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\n# 2\n# 3\ndef f():\n    pass\n")  # def at 4
+        md = _write_md(tmp_path, "doc.md", "see **`f()`** `alpha.py:2`\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1
+        assert drifts[0].kind == "def_drift"
+        assert drifts[0].symbol == "f"
+        assert drifts[0].suggested_line == 4
+
+    def test_idents_anchors_count_mismatch_falls_back(self, tmp_path):
+        """When ident count != anchor count, fall back to nearest-before (irregular
+        line). Here 2 idents but only 1 anchor on the line -> nearest-before binds
+        the anchor to the closest preceding ident (`f` -> the def check)."""
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "alpha.py", "# 1\ndef f():\n    pass\n")  # def at 2
+        # `g` is mentioned (no anchor for it); only `alpha.py:2` is an anchor.
+        md = _write_md(tmp_path, "doc.md", "`g` calls **`f`** at `alpha.py:2` ok\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"nearest-before should bind f@2 -> clean, got: {drifts}"
+
+    def test_continuation_anchor_no_same_line_path_stays_inert(self, tmp_path):
+        """A path-less `:N` token with NO preceding same-line full anchor (file is
+        only on a PREVIOUS line, e.g. ARCHITECTURE.md bullet lists) must NOT be
+        promoted to a verifiable anchor -> no drift, no crash."""
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "controller.py", "# 1\ndef f():\n    pass\n")
+        # `:999` is path-less and there is no full inline anchor earlier on THIS line.
+        md = _write_md(tmp_path, "doc.md", "- `_helper` (`:999`) — does a thing.\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"orphan continuation anchor must stay inert, got: {drifts}"
