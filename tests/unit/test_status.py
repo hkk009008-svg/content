@@ -25,7 +25,8 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from status import count_unread, latest_adr, render, render_manifest  # noqa: E402
+import status  # noqa: E402  (module handle for monkeypatching _REPO_ROOT/_collect_all)
+from status import count_unread, latest_adr, main, render, render_manifest  # noqa: E402
 
 
 # ===========================================================================
@@ -388,3 +389,76 @@ class TestRenderManifest:
         out = render(data)
         assert "Pipeline status" in out
         assert "final_assembly" in out
+
+
+# ===========================================================================
+# mailbox-unread subcommand:  status.py mailbox-unread <seat>
+# ===========================================================================
+
+
+class TestMailboxUnreadSubcommand:
+    """`status.py mailbox-unread <seat>` prints just the LIVE unread count for
+    one seat — the focused instrument Rule #20.1 live-recompute should call
+    instead of hand-rolled `ls|awk`. It reuses the canonical count_unread (no
+    second copy of the logic) and skips the heavy dashboard (no ComfyUI pod
+    probe / doc reads)."""
+
+    def _seed(self, tmp_path, operator_cursor="2026-06-09T00:30:00Z"):
+        sent = tmp_path / "coordination" / "mailbox" / "sent"
+        seen = tmp_path / "coordination" / "mailbox" / "seen"
+        sent.mkdir(parents=True)
+        seen.mkdir(parents=True)
+        # two to-operator events AFTER the cursor + one to-director (excluded for operator)
+        for name in (
+            "2026-06-09T01-00-00Z-director-to-operator-coordination.md",
+            "2026-06-09T02-00-00Z-director-to-operator-coordination.md",
+            "2026-06-09T03-00-00Z-operator-to-director-verification-report.md",
+        ):
+            (sent / name).write_text("x", encoding="utf-8")
+        (seen / "operator.txt").write_text(operator_cursor + "\n", encoding="utf-8")
+        (seen / "director.txt").write_text("2026-06-09T00:00:00Z\n", encoding="utf-8")
+        return sent
+
+    def test_prints_live_unread_count_for_seat(self, tmp_path, monkeypatch, capsys):
+        self._seed(tmp_path)
+        monkeypatch.setattr(status, "_REPO_ROOT", tmp_path)
+        rc = main(["mailbox-unread", "operator"])
+        assert rc == 0
+        assert capsys.readouterr().out.strip() == "2"
+
+    def test_count_matches_canonical_count_unread(self, tmp_path, monkeypatch, capsys):
+        sent = self._seed(tmp_path)
+        monkeypatch.setattr(status, "_REPO_ROOT", tmp_path)
+        main(["mailbox-unread", "director"])
+        printed = capsys.readouterr().out.strip()
+        names = [p.name for p in sent.iterdir()]
+        assert printed == str(count_unread("2026-06-09T00:00:00Z", names, "director"))
+
+    def test_skips_dashboard_path(self, tmp_path, monkeypatch, capsys):
+        """Must NOT call the heavy _collect_all (pod probe / doc reads): make it
+        raise and confirm the subcommand still succeeds."""
+        self._seed(tmp_path)
+        monkeypatch.setattr(status, "_REPO_ROOT", tmp_path)
+
+        def _boom(*a, **k):
+            raise AssertionError("dashboard path must not run for mailbox-unread")
+
+        monkeypatch.setattr(status, "_collect_all", _boom)
+        rc = main(["mailbox-unread", "operator"])
+        assert rc == 0
+        assert capsys.readouterr().out.strip() == "2"
+
+    def test_invalid_seat_errors(self, tmp_path, monkeypatch):
+        self._seed(tmp_path)
+        monkeypatch.setattr(status, "_REPO_ROOT", tmp_path)
+        with pytest.raises(SystemExit):
+            main(["mailbox-unread", "bogus"])
+
+    def test_no_subcommand_still_runs_dashboard(self, tmp_path, monkeypatch, capsys):
+        """Back-compat: no subcommand → existing dashboard behavior is preserved."""
+        monkeypatch.setattr(status, "_REPO_ROOT", tmp_path)
+        monkeypatch.setattr(status, "_collect_all", lambda root: {"_stub": True})
+        monkeypatch.setattr(status, "render", lambda data: "DASHBOARD\n")
+        rc = main([])
+        assert rc == 0
+        assert "DASHBOARD" in capsys.readouterr().out
