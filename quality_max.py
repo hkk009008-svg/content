@@ -601,12 +601,13 @@ def _inject_post_passes(workflow: dict, params: dict, available: Set[str]):
         if "950" in workflow:
             workflow["950"]["inputs"]["image"] = [feed_node, 0]
     elif "502" in workflow:
-        workflow["502"]["inputs"]["steps"] = params.get("supir_steps", 50)
-        # Fallback default 2.8 mirrors MAX_QUALITY_TEMPLATES; never reached on the production
-        # path (templates always carry supir_cfg_scale). Clean same-base A/B 2026-06-09 (seed
-        # 741305880): cfg 2.8 arc 0.7939 >= 2.0 arc 0.7886, and 4.0 is sweep-disfavored — so
-        # the unreachable default tracks 2.8, not an arbitrary 4.0. (Templates stay 2.8: the
-        # A/B gave no evidence to lower them.)
+        # Dead fallbacks mirror MAX_QUALITY_TEMPLATES (steps 40, cfg 2.8); never reached on the
+        # production path (templates always carry these keys). Clean same-base A/B 2026-06-09
+        # (seed 741305880): cfg 2.8 arc 0.7939 >= 2.0 arc 0.7886; 4.0 sweep-disfavored. Aligning
+        # the unreachable defaults to the real template values (not an arbitrary 50/4.0) kills the
+        # footgun a hand-built param dict would otherwise hit. (Templates unchanged: the A/B gave
+        # no evidence to lower cfg.)
+        workflow["502"]["inputs"]["steps"] = params.get("supir_steps", 40)
         workflow["502"]["inputs"]["cfg_scale_start"] = params.get("supir_cfg_scale", 2.8)
         workflow["502"]["inputs"]["cfg_scale_end"] = params.get("supir_cfg_scale", 2.8)
 
