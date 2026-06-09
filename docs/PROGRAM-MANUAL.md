@@ -2,6 +2,9 @@
 
 *A comprehensive macro + micro guide to the program: what it is, how it flows end to end, every subsystem and its key functions, and how to operate it to extract its full capability when generating AI video.*
 
+> **Pull-on-demand only.** Do not load this manual at session start. Before using
+> or maintaining it, read [`docs/protocol/program-manual-guide.md`](protocol/program-manual-guide.md).
+>
 > **Provenance.** Generated 2026-05-30 by a read-only deep-research workflow (**Rule #17** — workflow-assisted analysis lanes; rule body now in `docs/protocol/claude/director-operator.md`). 12 parallel subagents mapped each subsystem directly against the live source; 7 synthesized these sections; every `file:line` claim was verified by the mapping agents and a sample was independently spot-checked before assembly. Accurate at HEAD `910f393` on 2026-05-30. **When a line number no longer matches, grep the symbol name — the function/class is the load-bearing reference, not the exact line.**
 >
 > **Where this fits in the docs.** This is the *narrative + operating* layer. The canonical verified-truth reference is [ARCHITECTURE.md](../ARCHITECTURE.md); run/configure/troubleshoot lives in [OPERATIONS.md](../OPERATIONS.md); design rationale is in [DECISIONS.md](../DECISIONS.md). If any fact here disagrees with `ARCHITECTURE.md`, that file wins.

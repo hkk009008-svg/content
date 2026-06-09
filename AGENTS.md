@@ -43,6 +43,9 @@ you know the task*. Everything task-specific lives in linked docs, pulled on dem
 - Read a linked doc only when its trigger fires.
 - When dispatching a subagent, include only the relevant rule IDs + template
   slice — never inherited doctrine.
+- `docs/PROGRAM-MANUAL.md` is pull-on-demand only — read
+  `docs/protocol/program-manual-guide.md` before using/maintaining it; never load
+  the full manual at session start.
 
 ## R-START — session-start checklist
 Scope: both
