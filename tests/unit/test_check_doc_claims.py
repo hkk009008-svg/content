@@ -1681,3 +1681,73 @@ class TestPositionalCompoundBinding:
         md = _write_md(tmp_path, "doc.md", "- `_helper` (`:999`) — does a thing.\n")
         drifts = check_line_anchors([str(md)], tmp_path)
         assert drifts == [], f"orphan continuation anchor must stay inert, got: {drifts}"
+
+    # --- C-1 (Lane V): one symbol column must NOT be reused across TWO anchor
+    # columns. Row shape `| N-symbols | N-anchors-A | N-anchors-B |`: anchor
+    # column B walks back to the nearest preceding IDENT column, but column A
+    # holds only anchors (excluded from idents), so B lands on the SAME symbol
+    # column as A -> B's anchors mis-bound to A's symbols. At HEAD this emits a
+    # fixable def_drift on the WRONG (col-3) anchors and --fix CORRUPTS them.
+    # After the fix: col-3 anchors get NO positional symbol (their nearest-
+    # preceding non-empty column is itself an anchor column) -> bounds-only ->
+    # in-bounds -> ZERO def_drift -> --fix leaves the line BYTE-IDENTICAL.
+    def test_two_anchor_columns_one_symbol_column_no_corruption(self, tmp_path):
+        _init_repo(tmp_path)
+        # fa1 def@1, fa2 def@3, plus defs at 5 and 7 — so the mis-bound col-3
+        # anchors (:5/:7) would (at HEAD) be "fixed" to fa1@1 / fa2@3, destroying
+        # the citation. The col-3 anchors are ALSO valid bounds-wise (file has
+        # >=7 lines) so post-fix they must stay in-bounds with no drift.
+        _commit_py(
+            tmp_path, "a.py",
+            "def fa1():\n    pass\n"   # line 1
+            "def fa2():\n    pass\n"   # line 3
+            "def gb():\n    pass\n"    # line 5
+            "def gb2():\n    pass\n",  # line 7
+        )
+        content = "| `fa1` / `fa2` | `a.py:1` / `:3` | `a.py:5` / `:7` | d |\n"
+        md = _write_md(tmp_path, "doc.md", content)
+        # No def_drift may be attributed to fa1/fa2 for the col-3 anchors (:5/:7).
+        drifts = check_line_anchors([str(md)], tmp_path)
+        misbound = [d for d in drifts
+                    if d.kind == "def_drift" and d.symbol in ("fa1", "fa2")
+                    and d.target_line in (5, 7)]
+        assert misbound == [], (
+            f"col-3 anchors must NOT be bound to col-1 symbols, got: {misbound}"
+        )
+        # --fix must leave the line byte-identical (no corruption of col-3).
+        run([str(md)], tmp_path, fix=True)
+        assert md.read_text() == content, (
+            f"--fix corrupted the line (C-1): {md.read_text()!r}"
+        )
+
+    # --- TQ-1 (Lane V): exercise the COLUMN-SCOPING. Every existing positional
+    # fixture uses a plain description cell with no backtick token, so
+    # `_column_of`/`idents_by_col` is never tested — mutating `_column_of` to
+    # `return 0` (whole-line mode) leaves them all green yet false-flags the real
+    # PROGRAM-MANUAL.md:587 (whose description column carries `mode="auto"` +
+    # `_helper` prose backticks). This fixture mirrors 587: a compound cell whose
+    # description column has prose backticks that must NOT pollute the symbol-
+    # column count. All anchors correct -> ZERO drift; FAILS under `_column_of ->
+    # return 0` (the prose backticks would inflate the whole-line ident count and
+    # break the positional pairing -> false def_drift).
+    def test_compound_with_prose_backticks_in_description_column(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "f.py",
+            "def symA():\n    pass\n"   # line 1
+            "def symB():\n    pass\n"   # line 3
+            "def symC():\n    pass\n"   # line 5
+            "def _helper():\n    pass\n",  # line 7
+        )
+        # Mirrors 587: symbol column (3 idents) | anchor column (3) | description
+        # carrying `mode="auto"` + a trailing `_helper` continuation pair (:7).
+        content = (
+            '| `symA` / `symB` / `symC` | `f.py:1` / `:3` / `:5` | '
+            'router (`mode="auto"`) gate `_helper` (`:7`) |\n'
+        )
+        md = _write_md(tmp_path, "doc.md", content)
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], (
+            f"prose backticks in the description column must not pollute the "
+            f"column-scoped positional count, got: {drifts}"
+        )

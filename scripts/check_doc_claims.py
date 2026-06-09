@@ -344,14 +344,22 @@ def _positional_symbol_map(line_text: str, anchors: "list[dict]") -> "dict[int, 
         if len(col_anchors) <= 1:
             continue  # single anchor in this column -> nearest-before is correct
         # The symbol column is the nearest PRECEDING column that has identifiers
-        # (col acol-1, acol-2, ...); same-column idents count too when there is
-        # no preceding ident column (rare; degenerates to whole-line for acol=0).
+        # (col acol-1, acol-2, ...) — BUT only if no anchor column intervenes
+        # (C-1). An anchor column may be consumed by at most ONE anchor column
+        # (its nearest following anchor column): if the walk-back hits another
+        # anchor column before any ident column, THIS column shares its symbols
+        # with that earlier anchor column, so we leave it to nearest-before/bounds
+        # (no positional entry) rather than re-binding to an already-consumed
+        # symbol column. Same-column idents still count for acol=0 (the rare
+        # non-table whole-line compound line — no preceding column to walk).
         sym_idents = None
         for c in range(acol - 1, -1, -1):
             if idents_by_col.get(c):
                 sym_idents = idents_by_col[c]
                 break
-        if sym_idents is None:
+            if c in anchors_by_col:
+                break  # intervening anchor column -> this column shares its symbols
+        if sym_idents is None and acol == 0:
             sym_idents = idents_by_col.get(acol)
         if not sym_idents or len(sym_idents) != len(col_anchors):
             continue  # count mismatch -> don't pair this column (nearest-before)
