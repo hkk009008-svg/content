@@ -817,9 +817,10 @@ native 9:16: node 102's latent is transposed (`portrait_swap(1344, 768, …)`
 → 768×1344); FAL Kontext/Pro send `fal_aspect_ratio(…)`, schnell sends
 `fal_image_size(…)`, Pollinations transposes its URL dims. All geometry lives in
 [cinema/aspect.py](cinema/aspect.py) (the single source of truth);
-16:9 / None / unknown is a byte-identical no-op. The user-facing gate stays closed
-(`SUPPORTED_ASPECT_RATIOS == ["16:9"]`, [cinema/aspect.py:23](cinema/aspect.py:23))
-until Phase 3 wires per-provider 9:16 video.
+16:9 / None / unknown is a byte-identical no-op. The user-facing gate is now OPEN
+(`SUPPORTED_ASPECT_RATIOS == ["16:9", "9:16"]`, [cinema/aspect.py:25](cinema/aspect.py:25)):
+T10 un-gated 9:16 after Phase 3 wired per-provider native video (Veo/Sora/Kling/
+Runway) and a live preflight confirmed all 5 providers emit a valid 9:16.
 
 Each branch returns `ImageGenResult(path, api_name)` naming the backend that
 actually ran (`COMFYUI_PULID` on the pod; `FLUX_KONTEXT`/`FLUX_PRO`/
@@ -851,7 +852,7 @@ Workflow file: [pulid_max.json](pulid_max.json) (cached at module level with
 102 (EmptyLatentImage 1024×576 → 576×1024) and node 950 (final ImageScale
 3840×2160 → 2160×3840) via `cinema/aspect.py::portrait_swap`, called once after
 `_inject_post_passes` so the best-of-N `copy.deepcopy` fan-out inherits portrait
-dims. 16:9 / ctx-less = no-op (same closed gate as §8.2).
+dims. 16:9 / ctx-less = no-op (same gate as §8.2 — now OPEN post-T10).
 
 **Adaptive halt loop** ([quality_max.py:784-792](quality_max.py:784)):
 ```

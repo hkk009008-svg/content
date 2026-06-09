@@ -19,8 +19,10 @@ ASPECT_DIMENSIONS: dict[str, tuple[int, int]] = {
 }
 DEFAULT_ASPECT_RATIO = "16:9"
 
-# The GATE. Phase 3's final task appends "9:16" once native generation lands.
-SUPPORTED_ASPECT_RATIOS: list[str] = ["16:9"]
+# The GATE. T10 (Phase 3) un-gated 9:16 once per-provider native portrait
+# generation landed AND a live preflight confirmed all 5 providers produce a
+# valid 9:16 (Veo/Sora/Kling/Runway video + FAL image).
+SUPPORTED_ASPECT_RATIOS: list[str] = ["16:9", "9:16"]
 
 
 def resolve_output_dimensions(aspect_ratio: Optional[str]) -> tuple[int, int]:

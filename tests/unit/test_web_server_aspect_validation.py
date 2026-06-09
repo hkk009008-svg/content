@@ -17,7 +17,7 @@ def test_config_aspect_ratios_is_gated(client):
     resp = client.get("/api/config")
     assert resp.status_code == 200
     data = json.loads(resp.data)
-    assert data["aspect_ratios"] == SUPPORTED_ASPECT_RATIOS  # ["16:9"] until Phase 3
+    assert data["aspect_ratios"] == SUPPORTED_ASPECT_RATIOS  # ["16:9", "9:16"] post-T10
 
 
 def _make_project(tmp_path, monkeypatch) -> str:
@@ -33,9 +33,10 @@ def _make_project(tmp_path, monkeypatch) -> str:
 
 
 def test_put_rejects_unsupported_aspect_ratio(client, tmp_path, monkeypatch):
+    # 4:3 stays unsupported post-T10 → the 400-rejection path is still covered.
     pid = _make_project(tmp_path, monkeypatch)
     resp = client.put(f"/api/projects/{pid}",
-                      json={"global_settings": {"aspect_ratio": "9:16"}})
+                      json={"global_settings": {"aspect_ratio": "4:3"}})
     assert resp.status_code == 400
     body = json.loads(resp.data)
     assert "aspect_ratio" in (body.get("error", "") + str(body))
@@ -47,6 +48,18 @@ def test_put_accepts_supported_aspect_ratio(client, tmp_path, monkeypatch):
     resp = client.put(f"/api/projects/{pid}",
                       json={"global_settings": {"aspect_ratio": "16:9"}})
     assert resp.status_code == 200
+
+
+def test_put_accepts_9_16_after_ungate(client, tmp_path, monkeypatch):
+    """T10: 9:16 is now un-gated → a portrait PUT persists (no 400)."""
+    pid = _make_project(tmp_path, monkeypatch)
+    resp = client.put(f"/api/projects/{pid}",
+                      json={"global_settings": {"aspect_ratio": "9:16"}})
+    assert resp.status_code == 200
+    # Persisted on the project record.
+    from domain import project_manager
+    proj = project_manager.load_project(pid)
+    assert proj["global_settings"]["aspect_ratio"] == "9:16"
 
 
 def test_put_without_aspect_ratio_is_unaffected(client, tmp_path, monkeypatch):

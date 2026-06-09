@@ -32,9 +32,11 @@ def test_is_portrait():
     assert is_portrait(None) is False
 
 
-def test_is_supported_gate_excludes_9_16_until_phase3():
+def test_is_supported_gate_includes_9_16():
+    # T10 (Phase 3): portrait un-gated — 9:16 is now a supported delivery ratio.
+    # Any other unlisted ratio (e.g. 4:3) remains unsupported.
     assert is_supported("16:9") is True
-    assert is_supported("9:16") is False
+    assert is_supported("9:16") is True
     assert is_supported("4:3") is False
 
 
