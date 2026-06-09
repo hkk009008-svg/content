@@ -24,6 +24,8 @@ from audio.effects import (
 )
 from typing import Optional
 
+from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S
+
 
 # ---------------------------------------------------------------------------
 # Mastering presets
@@ -344,6 +346,7 @@ def generate_fal_bgm(music_vibe: str, output_filename: str, duration: int = 42, 
 
         result = fal_client.subscribe(
             "fal-ai/stable-audio", # Top tier ambient/music generation
+            client_timeout=FAL_TIMEOUT_VIDEO_S,
             arguments={
                 "prompt": prompt,
                 "seconds_total": duration

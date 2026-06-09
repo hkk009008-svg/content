@@ -9,6 +9,7 @@ from typing import NamedTuple
 
 from config.settings import settings
 from cinema.aspect import portrait_swap, fal_image_size, fal_aspect_ratio, DEFAULT_ASPECT_RATIO
+from cinema.fal_limits import FAL_TIMEOUT_IMAGE_S
 from cinema.context import get_project_setting
 
 PEXELS_API_KEY = settings.pexels_api_key
@@ -529,6 +530,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
 
                 result = fal_client.subscribe(
                     "fal-ai/flux-pro/kontext/max/multi",
+                    client_timeout=FAL_TIMEOUT_IMAGE_S,
                     arguments={
                         "prompt": kontext_prompt,
                         "image_urls": image_urls,
@@ -550,6 +552,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
         try:
             result = fal_client.subscribe(
                 "fal-ai/flux-pro/v1.1-ultra",
+                client_timeout=FAL_TIMEOUT_IMAGE_S,
                 arguments={
                     "prompt": prompt,
                     "aspect_ratio": fal_aspect_ratio(aspect_ratio),
@@ -571,6 +574,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
             import fal_client
             result = fal_client.subscribe(
                 "fal-ai/flux/schnell",
+                client_timeout=FAL_TIMEOUT_IMAGE_S,
                 arguments={
                     "prompt": prompt,
                     "image_size": fal_image_size(aspect_ratio),

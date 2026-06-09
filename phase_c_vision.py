@@ -4,6 +4,7 @@ import json
 import base64
 from pipeline_context import PIPELINE_CONTEXT
 from config.settings import settings
+from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S
 from llm.image_encoding import encode_image_for_llm
 try:
     from deepface import DeepFace
@@ -67,6 +68,7 @@ def face_swap_video_frames(video_path, reference_image, output_path):
 
             result = fal_client.subscribe(
                 "fal-ai/pixverse/swap",
+                client_timeout=FAL_TIMEOUT_VIDEO_S,
                 arguments={
                     "video_url": video_url,
                     "swap_image_url": face_url,

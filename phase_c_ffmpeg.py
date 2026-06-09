@@ -6,6 +6,7 @@ import json
 import subprocess
 from typing import TYPE_CHECKING, Optional
 from config.settings import settings
+from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S
 
 if TYPE_CHECKING:
     from cinema.context import PipelineContext
@@ -468,6 +469,7 @@ def generate_ai_video(
 
                 result = fal_client.subscribe(
                     "fal-ai/sora-2/image-to-video",
+                    client_timeout=FAL_TIMEOUT_VIDEO_S,
                     arguments={
                         "prompt": sora_prompt,
                         "image_url": start_url,
@@ -539,6 +541,7 @@ def generate_ai_video(
 
                 result = fal_client.subscribe(
                     "fal-ai/veo3.1/reference-to-video",
+                    client_timeout=FAL_TIMEOUT_VIDEO_S,
                     arguments={
                         "prompt": veo_prompt,
                         "image_urls": image_urls,
@@ -635,6 +638,7 @@ def generate_ai_video(
 
                     result = fal_client.subscribe(
                         "fal-ai/kling-video/v3/pro/image-to-video",
+                        client_timeout=FAL_TIMEOUT_VIDEO_S,
                         arguments=args,
                         with_logs=True,
                     )
@@ -701,6 +705,7 @@ def generate_ai_video(
 
                 result = fal_client.subscribe(
                     "fal-ai/fast-svd",
+                    client_timeout=FAL_TIMEOUT_VIDEO_S,
                     arguments={
                         "image_url": base_img_url,
                         "motion_bucket_id": 127,
@@ -813,7 +818,13 @@ def generate_ai_video(
                 poll_url = f"https://api.seedance.ai/v1/video/status/{task_id}"
                 for _ in range(120):  # 10 min max
                     time.sleep(5)
-                    poll_resp = requests.get(poll_url, headers=headers).json()
+                    try:
+                        poll_resp = requests.get(poll_url, headers=headers, timeout=30).json()
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+                        # One stalled status poll must not abandon a job that
+                        # may still be completing remotely (paid work); the
+                        # 120x5s loop is the real deadline.
+                        continue
                     status = poll_resp.get("status", "")
                     if status in ("completed", "success"):
                         video_url = poll_resp.get("video_url") or poll_resp.get("output", {}).get("video_url")

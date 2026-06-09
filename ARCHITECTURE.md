@@ -1014,11 +1014,23 @@ fallback_list = [
 `FAL_SVD` and `SEEDANCE` are reachable only via explicit `target_api=` or the
 `action` cascade.
 
+**FAL client timeouts (2026-06-10):** every production `fal_client.subscribe`
+call — the inline engines above plus lipsync, LTX, assembly FLUX fallbacks,
+vision swap, music, character refs, and Hedra driving video — passes
+`client_timeout` from [cinema/fal_limits.py](cinema/fal_limits.py)
+(video 600s / talking-head generation 1800s / image 180s; fal_client 1.0.0
+waits **indefinitely** without it, and on expiry it cancels the remote job and
+raises `FalClientTimeoutError`, which the provider cascades route around).
+AST-enforced for all current and future call sites by
+[tests/unit/test_fal_subscribe_timeouts.py](tests/unit/test_fal_subscribe_timeouts.py).
+The Seedance status poll retries transient per-iteration timeouts
+(`requests.get(..., timeout=30)`; the 120×5s loop is the deadline).
+
 ### 9.6 VEO quota gate
 
 **TTL-based** (commit `feccf61`):
-- Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:18](phase_c_ffmpeg.py:18))
-- TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:19](phase_c_ffmpeg.py:19))
+- Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:19](phase_c_ffmpeg.py:19))
+- TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:20](phase_c_ffmpeg.py:20))
 - Check: `_veo_quota_blocked()` ([:32-38](phase_c_ffmpeg.py:32))
 - Set on 429/quota error ([:503-506](phase_c_ffmpeg.py:503))
 - Gates only the `VEO` (FAL) branch — NOT `VEO_NATIVE`

@@ -34,6 +34,7 @@ IDENTITY_THRESHOLD = 0.70
 IDENTITY_THRESHOLD_LENIENT = 0.55
 
 from config.settings import settings
+from cinema.fal_limits import FAL_TIMEOUT_IMAGE_S
 from domain.project_manager import (
     make_character, add_character, save_project, get_project_dir, get_character
 )
@@ -300,6 +301,7 @@ def _generate_multi_angle_refs(
             # Max Multi uses AuraFace embeddings — strongest identity lock available
             result = fal_client.subscribe(
                 "fal-ai/flux-pro/kontext/max/multi",
+                client_timeout=FAL_TIMEOUT_IMAGE_S,
                 arguments={
                     "prompt": (
                         f"PRESERVE IDENTITY: Keep this exact person's face, hair, skin, "

@@ -11,6 +11,7 @@ import base64
 import urllib.request
 import time
 from config.settings import settings
+from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S
 
 try:
     import fal_client
@@ -139,6 +140,7 @@ class LTXVideoAPI:
                 self.FAL_MODEL_ID,
                 arguments=arguments,
                 with_logs=True,
+                client_timeout=FAL_TIMEOUT_VIDEO_S,
             )
 
             video_url = result.get("video", {}).get("url")
@@ -179,6 +181,7 @@ class LTXVideoAPI:
                 self.FAL_MODEL_ID,
                 arguments=arguments,
                 with_logs=True,
+                client_timeout=FAL_TIMEOUT_VIDEO_S,
             )
 
             video_url = result.get("video", {}).get("url")

@@ -17,6 +17,7 @@ import os
 from typing import Optional, Tuple
 
 from config.settings import settings
+from cinema.fal_limits import FAL_TIMEOUT_TALKING_HEAD_S
 from performance._net import safe_download
 from performance._poll import poll_task
 
@@ -65,6 +66,7 @@ def _synth_via_hedra(
             audio_url = fal_client.upload_file(audio_path)
             result = fal_client.subscribe(
                 "fal-ai/hedra/character-3",
+                client_timeout=FAL_TIMEOUT_TALKING_HEAD_S,
                 arguments={
                     "image_url": image_url,
                     "audio_url": audio_url,

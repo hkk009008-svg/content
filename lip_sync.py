@@ -29,6 +29,7 @@ from performance._net import safe_download
 from typing import Optional, Dict, List
 from dataclasses import dataclass
 from config.settings import settings as ENV_SETTINGS
+from cinema.fal_limits import FAL_TIMEOUT_TALKING_HEAD_S, FAL_TIMEOUT_VIDEO_S
 
 try:
     import fal_client
@@ -255,6 +256,7 @@ def lipsync_overlay(
         print(f"   [LIPSYNC-OVERLAY] sync.so v3: best generalist...")
         result = fal_client.subscribe(
             "fal-ai/sync-lipsync/v3",
+            client_timeout=FAL_TIMEOUT_VIDEO_S,
             arguments={
                 "video_url": video_url,
                 "audio_url": audio_url,
@@ -278,6 +280,7 @@ def lipsync_overlay(
         print(f"   [LIPSYNC-OVERLAY] MuseTalk: mouth-only overlay...")
         result = fal_client.subscribe(
             "fal-ai/musetalk",
+            client_timeout=FAL_TIMEOUT_VIDEO_S,
             arguments={
                 "source_video_url": video_url,
                 "audio_url": audio_url,
@@ -299,6 +302,7 @@ def lipsync_overlay(
         print(f"   [LIPSYNC-OVERLAY] LatentSync fallback...")
         result = fal_client.subscribe(
             "fal-ai/latentsync",
+            client_timeout=FAL_TIMEOUT_VIDEO_S,
             arguments={
                 "video_url": video_url,
                 "audio_url": audio_url,
@@ -320,6 +324,7 @@ def lipsync_overlay(
         print(f"   [LIPSYNC-OVERLAY] Sync Lipsync v2 fallback (premium)...")
         result = fal_client.subscribe(
             "fal-ai/sync-lipsync/v2",
+            client_timeout=FAL_TIMEOUT_VIDEO_S,
             arguments={
                 "video_url": video_url,
                 "audio_url": audio_url,
@@ -595,6 +600,7 @@ def lipsync_generation(
         print(f"   [LIPSYNC-GEN] Kling native lip sync...")
         result = fal_client.subscribe(
             "fal-ai/kling-video/lipsync/audio-to-video",
+            client_timeout=FAL_TIMEOUT_TALKING_HEAD_S,
             arguments={
                 "image_url": image_url,
                 "audio_url": audio_url,
@@ -616,6 +622,7 @@ def lipsync_generation(
         print(f"   [LIPSYNC-GEN] Omnihuman v1.5: full-body talking video ({resolution})...")
         result = fal_client.subscribe(
             "fal-ai/bytedance/omnihuman/v1.5",
+            client_timeout=FAL_TIMEOUT_TALKING_HEAD_S,
             arguments={
                 "image_url": image_url,
                 "audio_url": audio_url,
@@ -640,6 +647,7 @@ def lipsync_generation(
         print(f"   [LIPSYNC-GEN] Creatify Aurora fallback...")
         result = fal_client.subscribe(
             "fal-ai/creatify/aurora",
+            client_timeout=FAL_TIMEOUT_TALKING_HEAD_S,
             arguments={
                 "image_url": image_url,
                 "audio_url": audio_url,
@@ -780,6 +788,7 @@ def generate_rife_interpolation(
 
         result = fal_client.subscribe(
             "fal-ai/rife/video",
+            client_timeout=FAL_TIMEOUT_VIDEO_S,
             arguments={
                 "video_url": video_url,
                 "num_frames": num_frames,
@@ -834,6 +843,7 @@ def upscale_video_seedvr2(
 
         result = fal_client.subscribe(
             "fal-ai/seedvr/upscale/video",
+            client_timeout=FAL_TIMEOUT_VIDEO_S,
             arguments={
                 "video_url": video_url,
                 "upscale_mode": "target",

@@ -112,7 +112,9 @@ class TestFalBgmCostTrackerThreading:
         fal_mod = _stub("fal_client")
         audio_content = b"ID3-FAKE-BGM"
 
-        def _fake_subscribe(endpoint, arguments=None):
+        def _fake_subscribe(endpoint, arguments=None, **kwargs):
+            # **kwargs absorbs client_timeout (mandatory per
+            # tests/unit/test_fal_subscribe_timeouts.py) and any future options.
             return {"audio_file": {"url": url}}
 
         fal_mod.subscribe = _fake_subscribe
