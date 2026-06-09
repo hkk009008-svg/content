@@ -2284,7 +2284,7 @@ Video-modality entries relevant to this subsystem:
 
 **Dialogue routing override drops fallbacks** (`cinema/shots/controller.py:1138–1141`): when `has_dialogue=True`, `video_fallbacks` is set to `None` to prevent cross-engine fallback to non-native-audio engines. If VEO_NATIVE fails, `try_next_api()` falls through to the default global list which includes non-audio engines — the native-audio guarantee is only on the primary attempt.
 
-**LTX `_fal_transition` / `_native_transition` are dead code** in the cascade: `ltx_native.py:157, 273` implement keyframe interpolation (start + end frame) but nothing in `generate_ai_video` calls them. They can only be reached by direct use of `LTXVideoAPI`.
+**LTX `_fal_transition` / `_native_transition` are dead code** in the cascade: `ltx_native.py:157, 288` implement keyframe interpolation (start + end frame) but nothing in `generate_ai_video` calls them. They can only be reached by direct use of `LTXVideoAPI`.
 
 **RUNWAY (Runway) does NOT have a dedicated native module**: there is no `runway_native.py`. The `RUNWAY_GEN4` branch imports `runwayml` SDK inline at `phase_c_ffmpeg.py:334`; the legacy `RUNWAY` branch also does so inline at `phase_c_ffmpeg.py:663`. Both use the `runwayml` pip package directly — no wrapper class exists.
 

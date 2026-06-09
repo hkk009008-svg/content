@@ -1019,7 +1019,7 @@ flowchart TD
 | | Interactive (default) | Headless |
 |---|---|---|
 | **How invoked** | `POST /api/projects/<pid>/generate` (the web path) | `CinemaPipeline(pid, headless=True)` in Python (`cinema_pipeline.py:49`) |
-| **Gate behavior** | Worker blocks at each gate, polling the predicate at 0.5 s until you approve (`cinema/review/controller.py:559`) | Each gate is checked **once**; if auto-approve can't clear it, raises `GateNotSatisfiedError` with a per-shot diagnostic (`controller.py:93`, `:553`) — fails fast, never hangs |
+| **Gate behavior** | Worker blocks at each gate, polling the predicate at 0.5 s until you approve (`cinema/review/controller.py:559`) | Each gate is checked **once**; if auto-approve can't clear it, raises `GateNotSatisfiedError` with a per-shot diagnostic (`cinema/review/controller.py:93`, `:553`) — fails fast, never hangs |
 | **Lifecycle** | `ThreadedLifecycle` (event-backed) | Still `ThreadedLifecycle` — **not** `NullLifecycle`. `headless=True` only flips the gate-wait to fail-fast (`cinema/lifecycle.py:70` docstring; this corrects a common doc error) |
 | **Use it for** | Hands-on creative control, shot-by-shot iteration | Unattended batch runs, CI/E2E, overnight renders |
 
@@ -1172,7 +1172,7 @@ Triggered via `POST .../shots/<sid>/correct` (`web_server.py:2074`) or auto-reco
 2. Put an **explicit backdrop in the positive prompt** (the shot/scene prompt), e.g. `"plain neutral grey seamless studio backdrop"` or `"softly-lit plain interior wall"`. Leaving the background unspecified lets FLUX hallucinate smeary depth and stray figures.
 3. Add a **people-exclusion negative** via the shot's `negative_constraints` (threaded into `generate_keyframe_take` at `cinema/shots/controller.py:623`→`:478`), e.g. `"other people, crowd, bystanders, extra faces, background figures, duplicated person"`.
 4. For the recurring **neck/collarbone elongation** artifact seen on-pod, add its term to the same `negative_constraints`: `"deformed neck, elongated neck, distorted collarbone"`.
-5. Keep the photoreal suffix consistent across every shot via `style_rules.photorealism_rules` (`llm/style_director.py:143`) → `style_rules_to_prompt_suffix` (`:187`, applied at `controller.py:497`) so the background treatment doesn't drift shot-to-shot.
+5. Keep the photoreal suffix consistent across every shot via `style_rules.photorealism_rules` (`llm/style_director.py:143`) → `style_rules_to_prompt_suffix` (`:187`, applied at `cinema/shots/controller.py:497`) so the background treatment doesn't drift shot-to-shot.
 6. **On-pod confirmation (2026-06-09):** explicit clean backdrop + people-exclusion negative yielded a clean 4K background with identity intact (arc 0.829). SUPIR cfg and hires-fix are *upscalers* — they do not author the background; the prompt does.
 
 **To maximize motion realism in action shots:**
@@ -1503,7 +1503,7 @@ A critical, easily-mis-stated fact: **headless mode does NOT use `NullLifecycle`
 
 A single Flask process (`web_server.py`, port 8080) drives potentially many projects concurrently. Concurrency safety rests on three mechanisms.
 
-**1. The pipeline registry, `_pipelines_lock`, and the PENDING sentinel.** Module-level `_running_pipelines: dict[pid → CinemaPipeline]` (`web_server.py:73`) is the single truth source for "is generation active?". Because `CinemaPipeline.__init__` is heavy (it builds `ContinuityEngine`, `ChiefDirector`, `LLMEnsemble`, trackers), the server does **not** hold `_pipelines_lock` across the constructor. Instead it does an atomic check-then-reserve: under the lock it places a `_PIPELINE_PENDING` sentinel (`web_server.py:80,1468`), releases the lock, constructs the pipeline outside the lock, then swaps the real object in. Every reader must go through `_get_running_pipeline` (`web_server.py:145`), which treats the sentinel as "absent". The same lock guards popping the pid + its progress queue at run completion.
+**1. The pipeline registry, `_pipelines_lock`, and the PENDING sentinel.** Module-level `_running_pipelines: dict[pid → CinemaPipeline]` (`web_server.py:73`) is the single truth source for "is generation active?". Because `CinemaPipeline.__init__` is heavy (it builds `ContinuityEngine`, `ChiefDirector`, `LLMEnsemble`, trackers), the server does **not** hold `_pipelines_lock` across the constructor. Instead it does an atomic check-then-reserve: under the lock it places a `_PIPELINE_PENDING` sentinel (`web_server.py:81,1521`), releases the lock, constructs the pipeline outside the lock, then swaps the real object in. Every reader must go through `_get_running_pipeline` (`web_server.py:145`), which treats the sentinel as "absent". The same lock guards popping the pid + its progress queue at run completion.
 
 **2. `_running_cores` + `_cores_lock`.** Expensive long-lived services are cached per-process in `_running_cores` (`web_server.py:109`), get-or-created under `_cores_lock` (`web_server.py:110`). Caveat (digest gotcha #3): this cache is **not invalidated on `settings.json` edits** — out-of-band settings changes require a server restart.
 
