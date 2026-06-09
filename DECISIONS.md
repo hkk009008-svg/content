@@ -784,6 +784,46 @@ Each entry is **dated and immutable** — supersession is tracked via the
 
 ---
 
+## ADR-021 — Aspect backstop `_accept_or_reject` fails OPEN on probe failure
+
+- **Date:** 2026-06-10
+- **Status:** Accepted (records the in-force behavior shipped with the portrait
+  backstop arc incl. the lip_sync fence `dd78208`; an explicit ADR was requested
+  by the cycle-18 reassessment `wf_198f53fe-7aa` because fail-open on a gate
+  looked accidental without a recorded rationale)
+- **Context:** Portrait delivery added a post-generation orientation backstop —
+  `_accept_or_reject` (phase_c_ffmpeg.py, used by the video cascade and the
+  lip_sync FAL paths): probe the produced clip's real dimensions; wrong
+  orientation → reject → cascade to the next provider. The probe itself
+  (`probe_final_media` → ffprobe) can fail for environmental reasons: missing
+  binary, truncated file, codec quirks. Decision point: on probe failure,
+  accept the clip (fail-open) or reject it (fail-closed)?
+- **Decision:** **Fail OPEN** — accept with a printed
+  `[ASPECT-BACKSTOP] … accepting (probe unavailable)` warning when dimensions
+  cannot be read. Layered-defense reasoning: the PRIMARY portrait defense is
+  upstream (the `PORTRAIT_CAPABLE` filter, per-provider native 9:16 request
+  args, and the pre-dispatch guard on the initial target); the backstop is a
+  net for the residual case of a portrait-capable provider returning landscape
+  anyway. A fail-closed backstop converts probe flakiness into SYSTEMATIC
+  rejection — every provider's output rejected for the same environmental
+  reason — cascade exhaustion, and the run dies on an environment issue, not a
+  content issue. The worst case of fail-open is one wrong-orientation clip
+  reaching operator review: visible, recoverable per-shot.
+- **Consequences:**
+  - +: Probe flakiness cannot strand a run; landscape byte-identity preserved
+    (`is_portrait` False short-circuits before any probe).
+  - −: When ffprobe is genuinely unavailable, orientation enforcement degrades
+    to upstream-only; each occurrence is marked by the warning line.
+  - −: Fail-open on a gate is an exception to the repo's general fail-fast
+    posture. Scope-bounded HERE (environmental probe of orientation only) —
+    NOT precedent for identity/quality gates, which gate on computed scores,
+    not environment probes.
+- **Cross-ref:** ARCHITECTURE.md §9 (video cascade + FAL timeout policy),
+  §8.2/8.3 (portrait); `_accept_or_reject` docstring (caller contract);
+  lip_sync orientation fence `dd78208`; pre-dispatch guard `46e3b87`.
+
+---
+
 *To add a new decision: copy the template below, increment the ADR
 number, fill in Context / Decision / Consequences, and append at the
 bottom. Do not edit prior entries — supersede via Status field instead.*
