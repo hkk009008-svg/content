@@ -1015,6 +1015,60 @@ class ShotController:
             "engine": engine,
         }
 
+    def _validate_take_identity(
+        self,
+        video_path: str,
+        shot: dict,
+        cc: dict,
+        settings: dict,
+        resolved_shot_type: str,
+        take: dict,
+    ) -> float:
+        """Step 1 of _finalize_motion_take: continuity / identity validation.
+
+        Validates EVERY character in frame. The previous inline block passed
+        ``[chars_in_frame[0]]`` — a slice carried over through the
+        ShotController extraction (4db9b8a) with no recorded decision behind
+        it, which let a second character's identity drift through unchecked.
+        ``ContinuityEngine.validate_shot`` builds one config per character
+        that has a registered reference image (background extras without
+        refs are skipped, so they cannot false-fail), and the validator
+        averages per-character best similarities into ``overall_score``.
+
+        Records ``identity_score`` plus per-character outcomes
+        (``identity_per_char``, ``identity_all_matched``) in take metadata
+        for operator review; returns the score (0.0 when skipped).
+        """
+        identity_score = 0.0
+        primary_ref = cc.get("primary_reference")
+        chars_in_frame = shot.get("characters_in_frame", [])
+        if not (chars_in_frame and primary_ref):
+            return identity_score
+        vid_result = self.continuity.validate_shot(
+            video_path,
+            list(chars_in_frame),
+            shot_type=resolved_shot_type,
+            mode="standard",
+            attempt=0,
+            max_attempts=settings.get("identity_retry_max", 3),
+        )
+        identity_score = (vid_result.overall_score
+                          if hasattr(vid_result, "overall_score") and vid_result.overall_score is not None
+                          else 0.0)
+        take["metadata"]["identity_score"] = identity_score
+        char_results = getattr(vid_result, "character_results", None) or {}
+        per_char = {
+            cid: round(cr.best_similarity, 4)
+            for cid, cr in char_results.items()
+            if hasattr(cr, "best_similarity")
+        }
+        if per_char:
+            take["metadata"]["identity_per_char"] = per_char
+            take["metadata"]["identity_all_matched"] = all(
+                getattr(cr, "matched", False) for cr in char_results.values()
+            )
+        return identity_score
+
     def _finalize_motion_take(
         self,
         scene: dict,
@@ -1061,23 +1115,10 @@ class ShotController:
         shot_id = shot.get("id", "")
         scene_id = scene.get("id", "")
 
-        # 1. Identity / continuity validation
-        identity_score = 0.0
-        primary_ref = cc.get("primary_reference")
-        chars_in_frame = shot.get("characters_in_frame", [])
-        if chars_in_frame and primary_ref:
-            vid_result = self.continuity.validate_shot(
-                video_path,
-                [chars_in_frame[0]],
-                shot_type=resolved_shot_type,
-                mode="standard",
-                attempt=0,
-                max_attempts=settings.get("identity_retry_max", 3),
-            )
-            identity_score = (vid_result.overall_score
-                              if hasattr(vid_result, "overall_score") and vid_result.overall_score is not None
-                              else 0.0)
-            take["metadata"]["identity_score"] = identity_score
+        # 1. Identity / continuity validation (all characters in frame)
+        identity_score = self._validate_take_identity(
+            video_path, shot, cc, settings, resolved_shot_type, take,
+        )
 
         # 2. Motion fidelity gate
         if driving_video_path and os.path.exists(driving_video_path):
