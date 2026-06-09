@@ -584,8 +584,8 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `assess_motion_quality` | `phase_c_ffmpeg.py:971` | Optical-flow → `accept/interpolate/regenerate`. Requires OpenCV. |
 | `face_swap_video_frames` | `phase_c_vision.py:53` | fal PixVerse → FaceFusion CLI (CPU-only providers hardcoded). |
 | `validate_shot_quality_vision` / `validate_identity_vision` / `validate_scene_coherence_vision` | `phase_c_vision.py:345` / `:242` / `:346` | GPT-4o QC (0–10), Claude identity match, Gemini coherence — all default-pass on missing key/image. |
-| `lipsync_overlay` / `lipsync_generation` / `generate_lip_sync_video` | `lip_sync.py:680` / `:468` / `:682` | Overlay cascade (SyncV3→MuseTalk→LatentSync→SyncV2); generation cascade (Hedra→Kling→Omnihuman→Aurora); smart router (`mode="auto"`). SyncNet quality gate via `_sync_gate_settings` (`:427`). |
-| `generate_rife_interpolation` / `upscale_video_seedvr2` | `lip_sync.py:789` / `:791` | Cloud RIFE (FPS multiplier); cloud SeedVR2 upscale (1080p/2160p). |
+| `lipsync_overlay` / `lipsync_generation` / `generate_lip_sync_video` | `lip_sync.py:177` / `:470` / `:697` | Overlay cascade (SyncV3→MuseTalk→LatentSync→SyncV2); generation cascade (Hedra→Kling→Omnihuman→Aurora); smart router (`mode="auto"`). SyncNet quality gate via `_sync_gate_settings` (`:429`). |
+| `generate_rife_interpolation` / `upscale_video_seedvr2` | `lip_sync.py:750` / `:806` | Cloud RIFE (FPS multiplier); cloud SeedVR2 upscale (1080p/2160p). |
 | `train_character_lora` / `prepare_character_lora_dataset` | `prep/lora_training.py:161` / `:153` | ai-toolkit subprocess FLUX LoRA training (rank-32 default); `validate_lora_quality` is a **stub** (returns −1.0, §3.13). |
 | `upscale_with_topaz` | `prep/topaz_upscale.py:75` | Local Topaz CLI wrapper (no-op if CLI absent → caller falls back to SeedVR2). |
 | `generate_dialogue_voiceover` | `audio/dialogue.py:419` | ElevenLabs v3 Dialogue Mode (2+ speakers) or per-line loop; Cartesia Sonic 2 for Korean; optional `.alignment.json` sidecar. |

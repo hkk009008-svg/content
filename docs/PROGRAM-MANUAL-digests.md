@@ -3201,16 +3201,16 @@ Reads `lipsync_quality_validation` (bool) and `lipsync_validation_threshold` (fl
 **`lipsync_generation`** (`lip_sync.py:470`)
 Mode 2 — full talking-head from still image + audio. Cascade: Hedra Character-3 → Kling native lip sync → Omnihuman v1.5 → Creatify Aurora. Same SyncNet gate + best-of-failed recovery as overlay. Params: `resolution` ("720p"/"1080p"), `turbo` (bool), `settings` (project global_settings dict), `_cascade_out`.
 
-**`generate_lip_sync_video`** (`lip_sync.py:680`)
+**`generate_lip_sync_video`** (`lip_sync.py:697`)
 Smart router. If `existing_video_path` present → overlay mode; else → generation mode. `mode` param: "auto" | "overlay" | "generation".
 
-**`generate_rife_interpolation`** (`lip_sync.py:733`)
+**`generate_rife_interpolation`** (`lip_sync.py:750`)
 Cloud RIFE via `fal-ai/rife/video`. Params: `num_frames` (1–4; 2 = 3× FPS), `use_scene_detection` (prevent smearing at cuts). Returns output path or `None`.
 
-**`upscale_video_seedvr2`** (`lip_sync.py:789`)
+**`upscale_video_seedvr2`** (`lip_sync.py:806`)
 Cloud upscale via `fal-ai/seedvr/upscale/video`. Params: `target_resolution` ("1080p", "2160p"). `noise_scale=0.1`, `output_quality="high"`, `output_format="X264 (.mp4)"`. Temporally consistent (no frame-to-frame flicker). Returns output path or `None`.
 
-**`extract_last_frame`** (`lip_sync.py:845`)
+**`extract_last_frame`** (`lip_sync.py:862`)
 FFmpeg `sseof -0.1` to extract last frame as JPEG for shot chaining.
 
 #### phase_c_assembly.py
