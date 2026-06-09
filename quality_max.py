@@ -115,7 +115,7 @@ _MAX_TIER_KNOB_SCHEMA: Dict[str, Tuple] = {
     # Redux + Hires fix + FaceDetailer + SUPIR
     "redux_strength":            ("enum", "high", "medium", "low"),
     "hires_fix_enabled":         ("bool",),
-    "hires_fix_denoise":         ("numeric", float, 0.2, 0.6),
+    "hires_fix_denoise":         ("numeric", float, 0.40, 0.6),  # floor 0.40: pod proved 0.25 disintegrates (2026-06-09)
     "hires_fix_steps":           ("numeric", int,   5,   40),
     "face_detailer_enabled":     ("bool",),
     "face_detailer_guide_size":  ("enum", 512, 1024, 2048),
