@@ -1167,6 +1167,14 @@ Triggered via `POST .../shots/<sid>/correct` (`web_server.py:2074`) or auto-reco
 5. Max-tier: `face_detailer_enabled=true`, `face_detailer_guide_size=1024`, `max_halt_threshold_composite=0.95`, `max_halt_min_n=4`.
 6. Keep `img2img_denoise` low (0.2–0.3) for consecutive same-scene shots so the prior approved keyframe anchors identity.
 
+**To get a clean, controlled background (no smear, no stray figures):**
+1. Understand the cause first: the painterly "background smear" is the **base FLUX+PuLID generation reacting to an under-specified backdrop**, *not* a post-pass artifact. The SUPIR upscaler and hires-fix pass leave it unchanged — **validated on-pod 2026-06-09** (varying `supir_cfg_scale`/`hires_fix_denoise` does not alter the background). Fix it at the prompt, not by tuning post-passes.
+2. Put an **explicit backdrop in the positive prompt** (the shot/scene prompt), e.g. `"plain neutral grey seamless studio backdrop"` or `"softly-lit plain interior wall"`. Leaving the background unspecified lets FLUX hallucinate smeary depth and stray figures.
+3. Add a **people-exclusion negative** via the shot's `negative_constraints` (threaded into `generate_keyframe_take` at `cinema/shots/controller.py:623`→`:653`), e.g. `"other people, crowd, bystanders, extra faces, background figures, duplicated person"`.
+4. For the recurring **neck/collarbone elongation** artifact seen on-pod, add its term to the same `negative_constraints`: `"deformed neck, elongated neck, distorted collarbone"`.
+5. Keep the photoreal suffix consistent across every shot via `style_rules.photorealism_rules` (`llm/style_director.py:143`) → `style_rules_to_prompt_suffix` (`:187`, applied at `controller.py:497`) so the background treatment doesn't drift shot-to-shot.
+6. **On-pod confirmation (2026-06-09):** explicit clean backdrop + people-exclusion negative yielded a clean 4K background with identity intact (arc 0.829). SUPIR cfg and hires-fix are *upscalers* — they do not author the background; the prompt does.
+
 **To maximize motion realism in action shots:**
 1. Let `classify_shot_type` route to `action` → primary `SORA_NATIVE` (best physics).
 2. Don't pin `target_api` unless you must; keep the fallback cascade alive.
