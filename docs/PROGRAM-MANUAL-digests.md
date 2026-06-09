@@ -1809,18 +1809,18 @@ This subsystem converts user-defined scenes (title, action, mood, dialogue, dura
 **`_build_cinedecompose_system_prompt`** — `domain/scene_decomposer.py:326`
 Single-source-of-truth builder for the CineDecompose v1.0 system prompt. Accepts: `target_shots`, `char_descriptions`, `loc_description`, `loc_lighting`, `loc_time`, `loc_weather`, `style_ctx`, `research_ctx`, `global_settings`. Returns a multi-section f-string embedding HC1-HC5 hard constraints, four tripwires, `OUTPUT_SCHEMA` with five mandatory section labels (`[SHOT][SCENE][ACTION][OUTFIT][QUALITY]`), an example, `SCENE_DATA`, `ADDITIONAL_RULES` (including R5: "Do NOT default to AUTO — pick the best API for each shot"), and `PIPELINE_CONTEXT`. Extracted at Bundle-B 2.3 to eliminate the prior ~150 LOC duplication between `decompose_scene` and `competitive_decompose_scene`.
 
-**`decompose_scene`** — `domain/scene_decomposer.py:429`
+**`decompose_scene`** — `domain/scene_decomposer.py:436`
 Params: `scene: dict`, `characters: List[dict]`, `location: dict`, `global_settings: dict`, `style_rules: Optional[dict]`.
 Returns: `List[dict]` — shot records from `make_shot()`.
 Flow: builds char descriptions + location context → optionally calls `research_cinematography()` → computes `target_shots = max(2, min(5, int(duration_seconds / 2.5)))` → calls `_build_cinedecompose_system_prompt` → invokes `web_research.run_with_tools(client, "gpt-4o", ...)` with `max_tool_rounds=2` → parses JSON response (handles bare list, `{"shots":[]}`, single-object, and non-standard key patterns) → validates each shot through `make_shot()` with enum-guard on `camera`, `visual_effect`, `target_api`. Falls back to `_fallback_decompose()` on any exception. Side effect: logs to stdout.
 
-**`competitive_decompose_scene`** — `domain/scene_decomposer.py:617`
+**`competitive_decompose_scene`** — `domain/scene_decomposer.py:624`
 Same params/returns as `decompose_scene`. Runs `LLMEnsemble().competitive_generate(task_type="decompose", ...)` — defaults to GPT-4o vs claude-sonnet-4-6 in parallel, judged by claude-sonnet-4-6 (`_DEFAULT_JUDGE`, `llm/ensemble.py:86`). On any failure falls back to `decompose_scene()`. Adds `ensemble_winner` and `ensemble_scores` fields to each shot record (`domain/scene_decomposer.py:819-820`).
 
-**`_fallback_decompose`** — `domain/scene_decomposer.py:837`
+**`_fallback_decompose`** — `domain/scene_decomposer.py:844`
 No API key required. Always returns exactly 2 shots: an establishing wide (24mm, `zoom_in_slow`, `AUTO`) and a medium close-up (85mm, `dolly_in_rapid`, `AUTO`). Used when OpenAI is unavailable or on exception.
 
-**`update_scene_shots`** — `domain/scene_decomposer.py:880`
+**`update_scene_shots`** — `domain/scene_decomposer.py:887`
 Params: `project: dict`, `scene_id: str`, `shots: list[dict]`, `timeout: float = 10`. Uses `mutate_project` lock pattern (P1-3 migration; validates via `Project.model_validate` then mutates `latest_project["scenes"][i]["shots"]` and `["num_shots"]` in place). Called by `cinema_pipeline.py:960` and `web_server.py:1388`.
 
 **`_build_cinedecompose_system_prompt` hard constraints summary:**
@@ -1922,7 +1922,7 @@ List of shot dicts from `make_shot()` (`domain/project_manager.py:262`) with add
 | `cinema_pipeline.py` | Direct call | `decompose_scene` / `competitive_decompose_scene` at `cinema_pipeline.py:924,930,932,952`; `generate_dialogue` at `cinema_pipeline.py:494,499`; `update_scene_shots` at `cinema_pipeline.py:960` |
 | `web_server.py` | Direct call | `api_decompose_scene` at `web_server.py:1400` calls `decompose_scene`; `api_generate_dialogue` at `web_server.py:1363` calls `generate_dialogue`; `api_apply_language_defaults` at `web_server.py:388` calls `merge_language_defaults_into_settings` |
 | `llm/ensemble.py` (`LLMEnsemble`) | Direct call | `competitive_decompose_scene` instantiates `LLMEnsemble()` and calls `competitive_generate(task_type="decompose")` at `domain/scene_decomposer.py:749-755` |
-| `domain/project_manager.py` (`make_shot`, `mutate_project`) | Direct call | `make_shot` at `domain/scene_decomposer.py:593,807`; `mutate_project` via `update_scene_shots` at `domain/scene_decomposer.py:880` |
+| `domain/project_manager.py` (`make_shot`, `mutate_project`) | Direct call | `make_shot` at `domain/scene_decomposer.py:593,807`; `mutate_project` via `update_scene_shots` at `domain/scene_decomposer.py:887` |
 | `cinema/auto_approve.py` | Persisted field | `record_director_review_on_shots` writes `director_review` onto shot dicts (`cinema_pipeline.py:959`) so the PLAN_REVIEW gate reads it |
 | `llm/style_director.py` | Upstream provider | Generates `style_rules` that get passed into `decompose_scene` as `style_ctx`; also calls `research_cinematography` at `llm/style_director.py:47-49` |
 | `domain/location_manager.py` | Calls research | `research_location_visual` at `domain/location_manager.py:89-90` |
@@ -1990,7 +1990,7 @@ List of shot dicts from `make_shot()` (`domain/project_manager.py:262`) with add
 
 **5. `PIPELINE_CONTEXT` includes stale lipsync routing.** `config/prompts/pipeline_context.md:19` says "Dialogue close-up → VEO_NATIVE / Native lip-sync", but `PIPELINE_CONTEXT` section 2 lines 42-44 describe Omnihuman v1.5 as PRIMARY and Veo as OPT-IN only (RAI filter concern). The API routing table (section 1) conflicts with section 2's cascade. Decomposer LLM sees both and must reconcile; the hard-coded `PURPOSE_API_RANKING["dialogue_close_up"]` in code (`domain/scene_decomposer.py:120`) leads with `HEDRA_C3`, not `VEO_NATIVE`.
 
-**6. Shot JSON schema description in `competitive_decompose_scene` differs from `decompose_scene`.** At `domain/scene_decomposer.py:429`, the `prompt` field description says "including ALL character physical descriptions and FULL location description" — contradicting HC1 (identity firewall). The `decompose_scene` version at `domain/scene_decomposer.py:429` correctly says "leaving facial identity to reference locking". This is a latent prompt contamination risk in the competitive path's schema.
+**6. Shot JSON schema description in `competitive_decompose_scene` differs from `decompose_scene`.** At `domain/scene_decomposer.py:436`, the `prompt` field description says "including ALL character physical descriptions and FULL location description" — contradicting HC1 (identity firewall). The `decompose_scene` version at `domain/scene_decomposer.py:436` correctly says "leaving facial identity to reference locking". This is a latent prompt contamination risk in the competitive path's schema.
 
 **7. Research augmentation is silently no-op.** Both decompose paths wrap `research_cinematography()` in `except (ImportError, RuntimeError)` and continue. If Tavily fails mid-call (network error returns non-RuntimeError), the exception is swallowed and no research context is added with no warning at the call site (only Tavily's own print at `research_engine.py:64-67`).
 
