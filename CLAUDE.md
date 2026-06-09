@@ -1962,7 +1962,14 @@ when the actionable count was 1.
    **content** timestamp — rather than trusting STATE.md's possibly-frozen
    field. STATE.md is a convenience cache; the gate verifies. (The M2 hook fix,
    operator-shipped, makes STATE.md's own field correct; the gate verifies
-   regardless.)
+   regardless.) **Advisory (2026-06-09, operator-drafted, director-consented):
+   the live recompute SHOULD use `scripts/status.py mailbox-unread <seat>`
+   (`3fa29c9`) over a hand-rolled `ls | awk`. The hand-rolled form had two
+   proven sharp edges this session — it counted both directions (incl. the
+   role's own sends) and compared file-mtime instead of the cursor's *content*
+   timestamp. The tool encapsulates the correct `*-to-<me>-*` + content-timestamp
+   comparison this rule specifies; SHOULD not MUST (a correct hand-rolled
+   equivalent remains valid).
 2. **Until M2 is live, reconcile STATE.md against the filesystem** before acting
    on its count (Rule #8 §F "filesystem wins" as a positive step, not a
    fallback).
