@@ -142,9 +142,9 @@ embedded inside each Rule #N section body. They relocate to
 |---|---|---|---|---|---|
 | AGENTS.md | `# About this document` L1–20 | STAYS in AGENTS.md router (self-identity intro) | `STAYS (AGENTS router)` | `agent-agnostic root` | ✗ (not yet relocated) |
 | AGENTS.md | `# Session-start protocol (read me first)` L21–51 | `docs/protocol/agents/core.md` | `STAYS (R-TRUTH verbatim + R-START stub)` | `Trust the code; update the prose when it diverges` | ✗ (not yet relocated) |
-| AGENTS.md | `# The user-principal's intent for this program (read PROGRAM-MANUAL.md)` L52–73 | STAYS in root (short pointer; identical body — shared dest) | `STAYS (short pointer)` | `capability-maximization user manual` | ✗ (not yet relocated) |
+| AGENTS.md | `# The user-principal's intent for this program (read PROGRAM-MANUAL.md)` L52–73 | STAYS in AGENTS.md router (short pointer) | `STAYS (short pointer)` | `capability-maximization user manual` | ✗ (not yet relocated) |
 | AGENTS.md | `# Repo doc map` L74–92 | STAYS in root (router index; update with new protocol docs) | `STAYS (router index)` | `GitNexus MCP integration was auto-documented` | ✗ (not yet relocated) |
-| AGENTS.md | `# Impact analysis before editing` L93–112 | STAYS in root (full; identical body — shared dest) | `STAYS (R-IMPACT, full)` | `de-facto method across every session to date` | ✗ (not yet relocated) |
+| AGENTS.md | `# Impact analysis before editing` L93–112 | STAYS in AGENTS.md router (full) | `STAYS (R-IMPACT, full)` | `de-facto method across every session to date` | ✗ (not yet relocated) |
 | AGENTS.md | `# Verification discipline for factual claims` L113–122 | `docs/protocol/agents/core.md` | `STAYS (R-EVIDENCE short stub)` | `session memory trusted over filesystem` | ✗ (not yet relocated) |
 | AGENTS.md | `## Rule 1 — No inventory claim without verification output` L123–134 | `docs/protocol/agents/core.md` | `STAYS (R-EVIDENCE short stub)` | `Just trust me` is not acceptable | ✗ (not yet relocated) |
 | AGENTS.md | `## Rule 2 — Scoped output stays scoped` L135–145 | `docs/protocol/agents/core.md` | `STAYS (R-EVIDENCE short stub)` | `The shell never lies about what it ran` | ✗ (not yet relocated) |
