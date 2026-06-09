@@ -72,10 +72,10 @@ Columns:
 | CLAUDE.md | `## When to invoke` L185–193 | `docs/protocol/claude/orchestration.md` | `—` | `orchestration overhead isn't worth it` | ✗ (not yet relocated) |
 | CLAUDE.md | `## The per-task loop (sequential, never parallel)` L194–213 | `docs/protocol/claude/orchestration.md` | `—` | `Dispatch spec compliance reviewer` | ✗ (not yet relocated) |
 | CLAUDE.md | `## Delegation heuristics — Lane A / B / C` L214–251 | `docs/protocol/claude/orchestration.md` | `—` | `Lane A — execute in main context` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Implementer prompt template` L252–319 | `docs/templates/claude/implementer.md` | `—` | `A good implementer prompt is 80-150 lines and lets the subagent act` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Hardening notes — provenance for the implementer-template additions` L320–352 | `docs/templates/claude/implementer.md` | `—` | `do NOT trim these` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Spec reviewer prompt template` L353–381 | `docs/templates/claude/reviewer.md` | `—` | `reviewing whether Task` | ✗ (not yet relocated) |
-| CLAUDE.md | `## Code quality reviewer prompt template` L382–403 | `docs/templates/claude/reviewer.md` | `—` | `Report: Strengths, Issues (Critical / Important / Minor)` | ✗ (not yet relocated) |
+| CLAUDE.md | `## Implementer prompt template` L252–319 | `docs/templates/claude/implementer.md` | `—` | `A good implementer prompt is 80-150 lines and lets the subagent act` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Hardening notes — provenance for the implementer-template additions` L320–352 | `docs/templates/claude/implementer.md` | `—` | `do NOT trim these` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Spec reviewer prompt template` L353–381 | `docs/templates/claude/reviewer.md` | `—` | `reviewing whether Task` | ✓ (added; root copy retained) |
+| CLAUDE.md | `## Code quality reviewer prompt template` L382–403 | `docs/templates/claude/reviewer.md` | `—` | `Report: Strengths, Issues (Critical / Important / Minor)` | ✓ (added; root copy retained) |
 | CLAUDE.md | `## Plan vs. source — the divergence rule` L404–419 | `docs/protocol/claude/orchestration.md` | `—` | `motion_floor_for` | ✗ (not yet relocated) |
 | CLAUDE.md | `## Commit discipline for reviewability` L420–435 | `docs/protocol/claude/orchestration.md` | `—` | `Baseline commit first` | ✗ (not yet relocated) |
 | CLAUDE.md | `## Context hygiene (the long-session rule)` L436–451 | `docs/protocol/claude/orchestration.md` | `—` | `Summaries in main, full content in subagents` | ✗ (not yet relocated) |
@@ -156,8 +156,8 @@ embedded inside each Rule #N section body. They relocate to
 | AGENTS.md | `## When to invoke` L211–218 | `docs/protocol/agents/orchestration.md` | `—` | `orchestration overhead isn't worth it` | ✗ (not yet relocated) |
 | AGENTS.md | `## The per-task loop (sequential, never parallel)` L219–245 | `docs/protocol/agents/orchestration.md` | `—` | `Dispatch spec compliance reviewer` | ✗ (not yet relocated) |
 | AGENTS.md | `## Delegation heuristics — Lane A / B / C` L246–285 | `docs/protocol/agents/orchestration.md` | `—` | `Lane A — execute in main context` | ✗ (not yet relocated) |
-| AGENTS.md | `## Prompt template (for Lane B implementers)` L286–354 | `docs/templates/agents/implementer.md` | `—` | `A good implementer prompt is 80-150 lines and includes` | ✗ (not yet relocated) |
-| AGENTS.md | `## Hardening notes — provenance for the implementer-template additions` L355–379 | `docs/templates/agents/implementer.md` | `—` | `Carry them forward in future dispatches; if you trim the template, do NOT trim these` | ✗ (not yet relocated) |
+| AGENTS.md | `## Prompt template (for Lane B implementers)` L286–354 | `docs/templates/agents/implementer.md` | `—` | `A good implementer prompt is 80-150 lines and includes` | ✓ (added; root copy retained) |
+| AGENTS.md | `## Hardening notes — provenance for the implementer-template additions` L355–379 | `docs/templates/agents/implementer.md` | `—` | `Carry them forward in future dispatches; if you trim the template, do NOT trim these` | ✓ (added; root copy retained) |
 | AGENTS.md | `## Plan vs. source — the divergence rule` L380–394 | `docs/protocol/agents/orchestration.md` | `—` | `motion_floor_for` | ✗ (not yet relocated) |
 | AGENTS.md | `## Commit discipline for reviewability` L395–408 | `docs/protocol/agents/orchestration.md` | `—` | `Baseline commit first` | ✗ (not yet relocated) |
 | AGENTS.md | `## Context hygiene (the long-session rule)` L409–424 | `docs/protocol/agents/orchestration.md` | `—` | `Summaries in main, full content in subagents` | ✗ (not yet relocated) |
