@@ -43,8 +43,7 @@ Details: docs/protocol/claude/core.md
 # The user-principal's intent for this program (read PROGRAM-MANUAL.md)
 
 **The user-principal has designated [docs/PROGRAM-MANUAL.md](docs/PROGRAM-MANUAL.md)
-(with the dense per-subsystem research in
-[docs/PROGRAM-MANUAL-digests.md](docs/PROGRAM-MANUAL-digests.md)) as the canonical
+as the canonical
 expression of their intent for this program.** Read it early to internalize *what we
 build* — turning a script/idea into finished, photorealistic cinematic video with
 synced audio (manual §1–§2) — and *how the user wants it driven*: to realize the
@@ -60,7 +59,6 @@ Keep the manual true as the code evolves (same staleness discipline as `ARCHITEC
 | Get oriented (purpose + quick start) | [README.md](README.md) |
 | Understand the code (verified truth — what's where, what does what) | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Learn the whole program + how to operate it for maximum capability | [docs/PROGRAM-MANUAL.md](docs/PROGRAM-MANUAL.md) |
-| Dig into the per-subsystem raw research | [docs/PROGRAM-MANUAL-digests.md](docs/PROGRAM-MANUAL-digests.md) |
 | Run / configure / troubleshoot | [OPERATIONS.md](OPERATIONS.md) |
 | See WHY the architecture is shaped this way (ADR log) | [DECISIONS.md](DECISIONS.md) |
 | Full process detail (core / orchestration / director-operator / failure-modes) | [docs/protocol/claude/](docs/protocol/claude/) |

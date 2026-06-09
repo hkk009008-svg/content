@@ -16,7 +16,6 @@ This is a single-operator, single-machine tool. Not a multi-tenant SaaS.
 |---|---|
 | Understand the codebase (entry, orchestrator, phases, gates, all subsystems) | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Learn the whole program end-to-end + drive it to max capability (macro + micro + user manual) | [docs/PROGRAM-MANUAL.md](docs/PROGRAM-MANUAL.md) |
-| Dig into the per-subsystem raw research (file:line detail behind the manual) | [docs/PROGRAM-MANUAL-digests.md](docs/PROGRAM-MANUAL-digests.md) |
 | Run it locally / set up env / troubleshoot | [OPERATIONS.md](OPERATIONS.md) |
 | See WHY the architecture is shaped this way (settled decisions) | [DECISIONS.md](DECISIONS.md) |
 | Strategic direction + open critique from current leadership | [docs/STRATEGIC_REVIEW-2026-05-24.md](docs/STRATEGIC_REVIEW-2026-05-24.md) |
