@@ -18,6 +18,10 @@ def test_config_aspect_ratios_is_gated(client):
     assert resp.status_code == 200
     data = json.loads(resp.data)
     assert data["aspect_ratios"] == SUPPORTED_ASPECT_RATIOS  # ["16:9", "9:16"] post-T10
+    # Value-pin (not just the variable-equality, which is tautological vs the
+    # endpoint's own global): the frontend must actually be offered both ratios.
+    assert "16:9" in data["aspect_ratios"]
+    assert "9:16" in data["aspect_ratios"]
 
 
 def _make_project(tmp_path, monkeypatch) -> str:

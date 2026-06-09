@@ -410,6 +410,63 @@ class TestAssembleFinalFoleyMix(GuidedPipelineTestCase):
         self.assertIn("amix=inputs=2", mix_filter)
         self.assertNotIn("amix=inputs=3", mix_filter)
 
+    # --- I1 guard / portrait container regression (final-review IMPORTANT) ---
+    # T10 flipped the I1 guard's meaning (cinema_pipeline.py:1367-1371): once 9:16
+    # became supported, this chokepoint is what makes a portrait project assemble
+    # into a 1080x1920 container. These pin that decision so a mutation that
+    # letterboxed every portrait as 16:9 can't pass green.
+    def _capture_normalize_vf(self, settings):
+        """Run _assemble_final with ffmpeg mocked; return the normalize -vf string
+        (the captured command whose -vf carries the scale=...pad=... container)."""
+        pipeline, _, _ = self._make_pipeline_with_clips(None, foley_paths=[])
+        captured_cmds = []
+
+        def fake_run(cmd, **kwargs):
+            captured_cmds.append(list(cmd))
+            m = mock.MagicMock()
+            m.returncode = 0
+            return m
+
+        os.makedirs(pipeline.temp_dir, exist_ok=True)
+        os.makedirs(pipeline.export_dir, exist_ok=True)
+        open(os.path.join(pipeline.temp_dir, "stitched.mp4"), "wb").close()
+        fake_bgm = os.path.join(pipeline.temp_dir, "bgm.mp3")
+        open(fake_bgm, "wb").close()
+        fake_clip = os.path.join(pipeline.temp_dir, "clip.mp4")
+        open(fake_clip, "wb").close()
+        scene_data = [{"scene_id": "s1", "clips": [fake_clip]}]
+
+        with mock.patch("subprocess.run", side_effect=fake_run), \
+             mock.patch.object(pipeline, "_apply_final_loudnorm"):
+            pipeline._assemble_final(scene_data, fake_bgm, settings)
+
+        for c in captured_cmds:
+            if "-vf" in c:
+                vf = str(c[c.index("-vf") + 1])
+                if "scale=" in vf and "pad=" in vf:
+                    return vf
+        return None
+
+    def test_assemble_9_16_uses_portrait_container(self):
+        """A 9:16 project normalizes clips to a 1080x1920 portrait container."""
+        vf = self._capture_normalize_vf({"aspect_ratio": "9:16"})
+        self.assertIsNotNone(vf, "no normalize -vf command captured")
+        self.assertIn("scale=1080:1920", vf)
+        self.assertIn("pad=1080:1920", vf)
+
+    def test_assemble_16_9_uses_landscape_container(self):
+        """16:9 stays the 1920x1080 landscape container (byte-identity)."""
+        vf = self._capture_normalize_vf({"aspect_ratio": "16:9"})
+        self.assertIsNotNone(vf)
+        self.assertIn("scale=1920:1080", vf)
+
+    def test_assemble_unsupported_ratio_falls_back_to_default(self):
+        """I1 guard: an unsupported persisted ratio (4:3) falls back to the
+        16:9 default container, never a 4:3/garbage container."""
+        vf = self._capture_normalize_vf({"aspect_ratio": "4:3"})
+        self.assertIsNotNone(vf)
+        self.assertIn("scale=1920:1080", vf)
+
     def test_assemble_final_with_foley_cmd_uses_amix_inputs_3(self):
         """With foley paths, the primary mix command uses amix=inputs=3 and includes foley input."""
         pipeline, _, _ = self._make_pipeline_with_clips(None, foley_paths=None)
