@@ -389,7 +389,7 @@ layers operate; post-codification Lane V catches of symbol-divergence
 are working two-layer defense, not broken codification.
 
 **Codified SHA:** `8ab0bbb` (Protocol Bundle v5.1 ship; chicken-and-egg
-precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1
+precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `7da49ed` / v4.1
 `509db7c` / v5 `d66690f`). Empirical basis: Lane V #6 F1 (N=1;
 closed `6c1171a`) + Lane V #8 spec-reviewer prompt preventive (N=2;
 0 divergences). Beneficiary: `director-seat` (constrains brief-writing);
@@ -544,7 +544,7 @@ veto path needed; operator-seat consented affirmatively in v5.2 REPLY
 (`dea6401`) per v5.1 explicit-consent customary path.
 
 **Codified SHA:** `61cac6d` (Protocol Bundle v5.2 ship; chicken-and-egg
-precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1
+precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `7da49ed` / v4.1
 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb`). Empirical basis: N=2 —
 **B-005** (cycle-11, `c296105`; 10 sites in `domain/project_manager.py`;
 142 prod LoC; ~295k subagent tokens; Lane V #11 ✅) + **B-006-broad-A**
@@ -602,7 +602,7 @@ cycle or user escalation.
 1. **Subject:** loose format (Q3 silent-accept) — reference Lane V #
    OR finding ID somewhere in the commit text. Examples: `fix(web):
    close Lane V #12 I1 — discriminate ValidationError...` (`442e154`);
-   `fix(web): close M-3 — use logger.error...` (`336403d`).
+   `fix(web): close M-3 — use logger.error with stack trace at api_train_lora::_runner exception handler` (`336403d`).
 2. **Body:** cite operator's disposition + chosen option (a/b/c) +
    brief why.
 3. **Race-ack** per Rule #5 + #7.
@@ -656,7 +656,7 @@ needed. Director-seat consented affirmatively in v5.3 REPLY
 (`3a0e433`); operator-seat consented in proposal sign-off (`dc7df5d`).
 
 **Codified SHA:** `24c145a` (Protocol Bundle v5.3 ship; chicken-and-egg
-precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `d90036b` / v4.1
+precedent — v2 `3e57ddf` / v3 `d8f2407` / v4 `7da49ed` / v4.1
 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2 `61cac6d`). Empirical
 basis: N=2 — **`442e154`** (cycle-12; director closes operator's Lane
 V #12 I1; IMPORTANT-advisory; intra-cycle close ~minutes) + **`336403d`**
@@ -832,6 +832,45 @@ ALL five guardrails:
   wall-clock/context vs. manual Lane C, and did the evidence-citation +
   spot-check hold?
 
+**v5.6 dogfood retro — C4 DISCHARGED (2026-06-09).** The forward-looking
+v5.5 codification has now been exercised across an **~18-run arc** (not
+N=1): the runtime crossed the 2.1.154 gate mid-arc and both seats adopted
+workflows for read-analysis. Evidence (per Rule #1 — cite, don't assert):
+- `claude --version` → `2.1.169 (Claude Code)` (≥ 2.1.154 → hard-gate
+  SATISFIED).
+- Distinct `wf_*` IDs referenced this arc:
+  `grep -rhoE 'wf_[a-z0-9]{6,}(-[a-z0-9]+)?' docs/ coordination/ | sort -u
+  | wc -l` → **20 strings**, of which `wf_params` is a non-run token and
+  `wf_36dc3739` / `wf_36dc3739-2b2` double-count one run ⇒ **~17–18
+  distinct workflow runs** referenced across this arc's handoffs + mailbox.
+
+C4's four questions, answered:
+1. **Saved wall-clock/context vs. manual Lane C?** Yes. The pod
+   reassessment (`wf_198f53fe-7aa`: 6 cold investigators + synthesis), the
+   final portrait review (`wf_36dc3739`), the Phase-3 audit
+   (`wf_d41e2e96-631`), the cascade survey (`wf_2bca4fc8`), and the Kling
+   self-review (`wf_d8e2efb1-ca7`) each compressed a multi-file fan-out
+   into one synthesized report — main-context cost stayed report-sized,
+   not all-files-sized (the ~20× compression Rule #17 targets).
+2. **Evidence-citation held?** Yes — reports cited file:line.
+3. **R-OP-1 spot-check held?** Yes (e.g. `wf_198f53fe-7aa` citations
+   spot-checked 6/6; the operator's first workflow-use `wf_627fd99b-61e`
+   Lane V held its 3 cold lenses).
+4. **Read-only adherence (C3)?** Yes — zero workflow run landed code; all
+   code landed via subagent-driven-development / direct commits per
+   guardrail 1.
+
+**One honest counter-datapoint (sharpens C2, not a failure of #17).** This
+session's start caught that the *pod-validation handoff's* follow-up
+sketches (#2 SUPIR-cfg "4.0→2.0"; #3 hires-floor line) had drifted from
+source — `MAX_QUALITY_TEMPLATES` is already at `2.8`, and the floor change
+collides with live `test_hires_fix_pass2` cases (`0.25`/`0.30`). That was a
+*handoff* report, not a Rule #17 workflow output, but the lesson is
+identical: **any synthesized report's claims must survive the launching
+seat's spot-check (guardrail 2 / C2) before re-entering the protocol.**
+Verdict: Rule #17 is **net-positive and retained as-is**; no v5.6 amendment
+to the rule body is warranted.
+
 **Beneficiary (per R11): `both` seats.** Director gains scaled
 blast-radius/impact analysis before Lane B; operator gains scaled Lane S
 scouting + Rule #12/#13 audits. Symmetric — no asymmetric-veto path.
@@ -840,10 +879,13 @@ scouting + Rule #12/#13 audits. Symmetric — no asymmetric-veto path.
 per chicken-and-egg precedent — v2 `3e57ddf` / v3 `d8f2407` / v4
 `7da49ed` / v4.1 `509db7c` / v5 `d66690f` / v5.1 `8ab0bbb` / v5.2
 `61cac6d` / v5.3 `24c145a` / v5.4 `7773502`). **Forward-looking
-codification:** the feature is unavailable in the current runtime
-(`claude --version` 2.1.74 / session 2.1.149, both < 2.1.154), so this
-ratifies the integration *shape* + guardrails ahead of activation; the
-first dogfood datapoint (C4) lands at v5.6 after the env updates.
+codification (at v5.5 ship, 2026-05-29):** the feature was unavailable in
+the *then-current* runtime (`claude --version` 2.1.74 / session 2.1.149,
+both < 2.1.154), so v5.5 ratified the integration *shape* + guardrails
+ahead of activation. **Activation + dogfood (2026-06-09):** the runtime is
+now **2.1.169** (≥ 2.1.154 → hard-gate SATISFIED) and the feature has been
+used **~18× across this arc** by both seats — the C4 dogfood retro is
+DISCHARGED above (verdict: net-positive, retained as-is).
 Director-originated proposal (`2026-05-29T01-19-08Z`, per user
 direction); operator-seat consented affirmatively + added R-OP-1 (folded
 into guardrail 2 + C2) in REPLY `afb2c75`
@@ -1035,7 +1077,14 @@ when the actionable count was 1.
    **content** timestamp — rather than trusting STATE.md's possibly-frozen
    field. STATE.md is a convenience cache; the gate verifies. (The M2 hook fix,
    operator-shipped, makes STATE.md's own field correct; the gate verifies
-   regardless.)
+   regardless.) **Advisory (2026-06-09, operator-drafted, director-consented):**
+   the live recompute SHOULD use `scripts/status.py mailbox-unread <seat>`
+   (`3fa29c9`) over a hand-rolled `ls | awk`. The hand-rolled form had two
+   proven sharp edges this session — it counted both directions (incl. the
+   role's own sends) and compared file-mtime instead of the cursor's *content*
+   timestamp. The tool encapsulates the correct `*-to-<me>-*` + content-timestamp
+   comparison this rule specifies; SHOULD not MUST (a correct hand-rolled
+   equivalent remains valid).
 2. **Until M2 is live, reconcile STATE.md against the filesystem** before acting
    on its count (Rule #8 §F "filesystem wins" as a positive step, not a
    fallback).
