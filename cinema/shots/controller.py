@@ -1065,7 +1065,9 @@ class ShotController:
         if per_char:
             take["metadata"]["identity_per_char"] = per_char
             take["metadata"]["identity_all_matched"] = all(
-                getattr(cr, "matched", False) for cr in char_results.values()
+                getattr(cr, "matched", False)
+                for cr in char_results.values()
+                if hasattr(cr, "best_similarity")
             )
         return identity_score
 

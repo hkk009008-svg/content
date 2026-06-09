@@ -1031,8 +1031,8 @@ The Seedance status poll retries transient per-iteration timeouts
 **TTL-based** (commit `feccf61`):
 - Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:19](phase_c_ffmpeg.py:19))
 - TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:20](phase_c_ffmpeg.py:20))
-- Check: `_veo_quota_blocked()` ([:32-38](phase_c_ffmpeg.py:32))
-- Set on 429/quota error ([:503-506](phase_c_ffmpeg.py:503))
+- Check: `_veo_quota_blocked()` ([:33-39](phase_c_ffmpeg.py:33))
+- Set on 429/quota error ([:569-572](phase_c_ffmpeg.py:571))
 - Gates only the `VEO` (FAL) branch — NOT `VEO_NATIVE`
 
 ### 9.7 Helper functions in `phase_c_ffmpeg.py`

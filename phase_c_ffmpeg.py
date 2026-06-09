@@ -816,7 +816,7 @@ def generate_ai_video(
 
                 # Poll for completion
                 poll_url = f"https://api.seedance.ai/v1/video/status/{task_id}"
-                for _ in range(120):  # 10 min max
+                for _ in range(120):  # 120 polls ~= 10 min nominal; bounded ~70 min worst-case (5s sleep + 30s req timeout/iter)
                     time.sleep(5)
                     try:
                         poll_resp = requests.get(poll_url, headers=headers, timeout=30).json()
