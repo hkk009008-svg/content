@@ -736,7 +736,18 @@ def check_manifest(
 
 # Default doc set for SHA-ref checking — the SHA-dense docs (anchors default to
 # ARCHITECTURE.md only).  README/OPERATIONS carry no SHA citations.
-SHA_DEFAULT_DOCS = ["CLAUDE.md", "DECISIONS.md", "ARCHITECTURE.md"]
+# NOTE: the per-rule "Codified SHA:" provenance that used to live in CLAUDE.md /
+# AGENTS.md was relocated to docs/protocol/{claude,agents}/director-operator.md by
+# the operative/provenance split (manifest: docs/protocol/migration-map-claudemd-split.md);
+# those files are included here so --sha-refs still covers the relocated provenance.
+SHA_DEFAULT_DOCS = [
+    "CLAUDE.md",
+    "AGENTS.md",
+    "DECISIONS.md",
+    "ARCHITECTURE.md",
+    "docs/protocol/claude/director-operator.md",
+    "docs/protocol/agents/director-operator.md",
+]
 
 # A backtick token's contents that look like a git short/long SHA (lowercase hex,
 # 7-40 chars).  All real citations are 7-char; the wider bound is future-proofing.
@@ -1085,7 +1096,9 @@ def main(argv=None) -> int:
         nargs="*",
         help=(
             "Markdown doc(s) to check (relative to repo root). Default: ARCHITECTURE.md "
-            "for anchors; CLAUDE.md DECISIONS.md ARCHITECTURE.md for --sha-refs/--show-subjects."
+            "for anchors; for --sha-refs/--show-subjects the SHA-dense set "
+            "(CLAUDE.md, AGENTS.md, DECISIONS.md, ARCHITECTURE.md, and the relocated "
+            "docs/protocol/{claude,agents}/director-operator.md provenance)."
         ),
     )
     args = parser.parse_args(argv)
