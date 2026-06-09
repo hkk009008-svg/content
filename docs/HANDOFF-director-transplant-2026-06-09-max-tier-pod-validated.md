@@ -6,7 +6,9 @@ session by the operator, see "Operator parallel work" below).
 
 ## Ground truth (verified this wrap)
 
-- **HEAD == origin/feat == `5214bf0`** (all operator commits this session; director shipped NO repo commits — work was pod gens + reads).
+- **HEAD == `e5a810c`** (this handoff commit) — local **ahead 2** of origin/feat `5214bf0` (push USER-gated). Director's ONLY repo commit this session = this handoff; all prior work was pod gens + reads.
+- **Rule #5 race-ack:** intervening **`4d68c86`** = operator `fix(tooling)` (doc-verifier positional symbol-anchor binding) landed in the shared tree DURING this handoff write; `read-tree HEAD` picked it up so this commit sits on top. Operator may still be live.
+- **origin/feat == `5214bf0`** (pushed); `4d68c86` + `e5a810c` are local/unpushed.
 - **origin/main == `1870e59` GREEN** (portrait 9:16 + lip_sync M-1-twin live).
 - gate OPEN `["16:9","9:16"]` (`cinema/aspect.py:25`).
 - **§15 ci_smoke OK** at `5214bf0`.
