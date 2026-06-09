@@ -2409,7 +2409,7 @@ Priority chain:
 2. If `COMFYUI_SERVER_URL` set AND `pulid.json` exists: use `RunPodComfyUI` + dynamic injection (steps 1–5c below).
 3. Else: `_fal_flux_fallback`.
 
-Notable: landscape shots skip PuLID entirely and route to `_fal_flux_fallback` with `character_image=None` (`phase_c_assembly.py:198–200`). No-character shots strip all PuLID nodes (97/99/100/101/93) and rewire PAG (node 301) directly to UNETLoader (node 112) (`phase_c_assembly.py:227–231`).
+Notable: landscape shots skip PuLID entirely and route to `_fal_flux_fallback` with `character_image=None` (`phase_c_assembly.py:438-440`). No-character shots strip all PuLID nodes (97/99/100/101/93) and rewire PAG (node 301) directly to UNETLoader (node 112) (`phase_c_assembly.py:227–231`).
 
 #### `RunPodComfyUI` — `phase_c_assembly.py:34`
 
@@ -2427,7 +2427,7 @@ FAL.ai priority chain: (1) FLUX Kontext Max Multi (up to 6 face refs, structured
 
 Parses `[SHOT][SCENE][ACTION][OUTFIT][QUALITY]` tagged sections from prompt. Returns dict of sections; falls back to full prompt as `SCENE` if no tags found.
 
-#### `generate_ai_broll_max` — `quality_max.py:694`
+#### `generate_ai_broll_max` — `quality_max.py:700`
 
 Max-tier entry. Steps: classify shot → `get_max_quality_params` → apply UI overrides (7 halt knobs + 17 ComfyUI knobs via `_validate_overlay_value`) → probe pod `/object_info` → load `pulid_max.json` → optionally swap to HiDream-I1 → prune unavailable nodes → upload/cache refs → inject all axes → best-of-N loop → PuLID-boost retry if identity floor missed → `shutil.copyfile` best to output. Returns `ImageGenResult(path, "QUALITY_MAX")`.
 
@@ -3013,7 +3013,7 @@ All knobs live in `project.global_settings` (set via `PUT /api/projects/<pid>` w
 
 **`generate_characters.py` is a legacy standalone script**, not integrated into the pipeline. It reads a `characters.json` file at the repo root (does not exist in normal pipeline operation) and generates face images via `fal-ai/flux-pro/v1.1-ultra`. The pipeline uses `domain/character_manager.create_character_with_images` instead.
 
-**`validate_multi_identity` on `CharacterContinuityTracker`** (`domain/continuity_engine.py:35`) is superseded by `ContinuityEngine.validate_shot` → `IdentityValidator.validate_video`. The legacy method is still present but `IdentityValidator.__init__` docstring at `identity/validator.py:45` explicitly names it as replaced.
+**`validate_multi_identity` on `CharacterContinuityTracker`** (`domain/continuity_engine.py:118`) is superseded by `ContinuityEngine.validate_shot` → `IdentityValidator.validate_video`. The legacy method is still present but `IdentityValidator.__init__` docstring at `identity/validator.py:45` explicitly names it as replaced.
 
 **`TemporalConsistencyManager.record_shot_generated` / `reset_scene`** — `ContinuityEngine.record_shot_generated` (`line 583`) and `reset_scene` (`line 625`) exist but have NO callers in the production pipeline (verified: `grep -rn "record_shot_generated\|continuity\.reset_scene"` returns only test files and the class definitions themselves). Temporal img2img chaining relies instead on `approved_anchor_image` passed explicitly to `enhance_shot_prompt` via `_resolve_previous_approved_keyframe` in the controller. The in-memory `last_generated_image` mechanism is functionally dead.
 
