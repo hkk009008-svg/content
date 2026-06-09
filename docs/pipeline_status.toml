@@ -60,9 +60,9 @@ note = "§10 F-A.3: zero callers; per-shot optimization currently loses cross-sh
 [[component]]
 id = "hires_fix"
 title = "Hi-res-fix upscale passes in max-tier image gen"
-status = "stubbed"
+status = "wired"
 anchor = "quality_max.py:_inject_post_passes"
-note = "§10 F-B.3: hires_fix nodes (900/901/902) are always pruned by _inject_post_passes regardless of `hires_fix_enabled`. Wire candidate, needs pod node verify (brief P2-1)."
+note = "Pod-VALIDATED 2026-06-09 (Novita RTX 6000 Ada, all 13 critical custom-node classes present): hires-fix Pass-2 FIRES on the real production path — _inject_post_passes (:614-622) creates node 18 @ denoise 0.40/18 steps and points 901.sigmas->[18,0]; 4K master via node 950. The prior 'always pruned by _inject_post_passes regardless of hires_fix_enabled' claim was FALSE: _inject_post_passes ACTIVATES (not prunes) 900/901/902 when hires_fix_enabled (default True) AND nodes 901/17 are present; pruning of 900/901/902 happens only in _prune_unavailable (:436-454) when the node class is missing. Resolves the §8.3 doc-contradiction in ARCHITECTURE.md's favor. Sweep: denoise 0.40 arc~0.83 (safe); 0.25 disintegrates arc~0.48 (validation-floor hardening tracked separately)."
 
 [[component]]
 id = "multi_identity_validation"

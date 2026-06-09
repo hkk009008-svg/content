@@ -613,8 +613,9 @@ def _inject_post_passes(workflow: dict, params: dict, available: Set[str]):
 
     # Hires-fix Pass-2: run node 901 (refine pass) at a gentler denoise for photorealism.
     # Baseline points 901's sigmas at node 17 @ denoise=1.0 -> over-processed/painterly.
-    # NOTE: denoise=0.40 is a realism hypothesis pending GPU-pod validation (pod currently
-    # down). The default is wired here; pod-validate before claiming the improvement.
+    # POD-VALIDATED 2026-06-09 (Novita RTX 6000 Ada): denoise=0.40 fires + holds identity
+    # (arc ~0.83, 4K master); the floor matters -> denoise=0.25 catastrophically
+    # disintegrates (arc ~0.48). See docs/pipeline_status.toml [hires_fix] (status=wired).
     if params.get("hires_fix_enabled", True) and "901" in workflow and "17" in workflow:
         workflow["18"] = copy.deepcopy(workflow["17"])
         workflow["18"]["inputs"]["denoise"] = params.get("hires_fix_denoise", 0.40)
