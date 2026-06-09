@@ -9,6 +9,7 @@
 ---
 
 # Director-Operator Concurrent Operation
+*Router handles: `R-BRIEF` (composes with Rule #12) and `R-PID` (Rule #13) route here from AGENTS.md.*
 
 This project runs two parallel agent sessions by design.
 

@@ -10,6 +10,7 @@
 ---
 
 # Working a Multi-Task Plan
+*Router handle: `R-ORCH` (stub in CLAUDE.md routes here).*
 
 When the user points you at a written plan (e.g., `docs/superpowers/plans/*.md`)
 with ≥5 sub-tasks, or you've drafted one yourself with comparable scope, you

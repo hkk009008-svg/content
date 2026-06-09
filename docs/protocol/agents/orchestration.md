@@ -10,6 +10,7 @@
 ---
 
 # Multi-task orchestration
+*Router handle: `R-ORCH` (stub in AGENTS.md routes here).*
 
 When you encounter a written plan (e.g., `docs/superpowers/plans/*.md`)
 with ≥5 sub-tasks, or you've drafted one with comparable scope, the
@@ -22,7 +23,7 @@ on. Your main context grows linearly with the number of tasks, not with
 the volume of work — which is what prevents quality degradation across
 long (1M / 2M+ token) sessions.
 
-**Claude Code:** see `CLAUDE.md` § "Working a Multi-Task Plan" for the
+**Claude Code:** see `docs/protocol/claude/orchestration.md` § "Working a Multi-Task Plan" for the
 tool-specific implementation (Agent subagent dispatch, prompt templates,
 `superpowers:subagent-driven-development` skill, TaskCreate tracking).
 Everything below is the universal principle set.

@@ -10,6 +10,7 @@
 ---
 
 # Session-start protocol (read me first)
+*Router handle: `R-START` (stub in CLAUDE.md routes here).*
 
 **Truth lives in `ARCHITECTURE.md` at the repo root.** This file (CLAUDE.md)
 is the *process layer* — the impact-analysis method, multi-task orchestration, session
@@ -40,6 +41,7 @@ Concrete protocol at session start (≤2 minutes):
 Trust the code; update the prose when it diverges.
 
 # Verification discipline for factual claims
+*Router handle: `R-EVIDENCE` (stub in CLAUDE.md routes here).*
 
 Codified 2026-05-24 after a director-level inventory error: STRATEGIC_REVIEW
 and HANDOFF both claimed "only one unit test file" when there were 24. The
