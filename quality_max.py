@@ -602,8 +602,13 @@ def _inject_post_passes(workflow: dict, params: dict, available: Set[str]):
             workflow["950"]["inputs"]["image"] = [feed_node, 0]
     elif "502" in workflow:
         workflow["502"]["inputs"]["steps"] = params.get("supir_steps", 50)
-        workflow["502"]["inputs"]["cfg_scale_start"] = params.get("supir_cfg_scale", 4.0)
-        workflow["502"]["inputs"]["cfg_scale_end"] = params.get("supir_cfg_scale", 4.0)
+        # Fallback default 2.8 mirrors MAX_QUALITY_TEMPLATES; never reached on the production
+        # path (templates always carry supir_cfg_scale). Clean same-base A/B 2026-06-09 (seed
+        # 741305880): cfg 2.8 arc 0.7939 >= 2.0 arc 0.7886, and 4.0 is sweep-disfavored — so
+        # the unreachable default tracks 2.8, not an arbitrary 4.0. (Templates stay 2.8: the
+        # A/B gave no evidence to lower them.)
+        workflow["502"]["inputs"]["cfg_scale_start"] = params.get("supir_cfg_scale", 2.8)
+        workflow["502"]["inputs"]["cfg_scale_end"] = params.get("supir_cfg_scale", 2.8)
 
     # Final downsample resolution
     if "950" in workflow:
