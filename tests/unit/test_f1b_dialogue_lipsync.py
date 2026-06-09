@@ -1258,3 +1258,63 @@ class TestResolveF1bAudioSceneCharsBugA:
         assert char_ids == ["char_alice", "char_bob"], (
             f"native mode: scene-audio must use scene-level chars; got {char_ids!r}"
         )
+
+
+class TestLipsyncOrientationBackstop:
+    """M-1 twin: lipsync_generation must reject a wrong-orientation engine output
+    at a portrait project. The FAL avatar endpoints (Kling/Omnihuman/Aurora) take
+    no aspect param and the SyncNet gate scores lip-sync quality, not orientation,
+    so without the _accept_or_reject fence a portrait project could keep a landscape
+    avatar clip. Landscape is a no-op (byte-identical)."""
+
+    def _run(self, tmp_path, aspect, probe_dims):
+        out = str(tmp_path / "ls.mp4")
+        # input files (not actually read — uploads + prereqs are mocked)
+        open(str(tmp_path / "face.jpg"), "wb").close()
+        open(str(tmp_path / "a.wav"), "wb").close()
+
+        def _fake_download(url, path, *a, **k):
+            open(path, "wb").close()
+            return path
+
+        fake_fal = MagicMock()
+        fake_fal.upload_file.return_value = "http://fake/upload"
+        fake_fal.subscribe.return_value = {"video": {"url": "http://fake/vid"}}
+
+        prereq = types.SimpleNamespace(passed=True, warnings=[], blockers=[])
+        hedra = MagicMock()
+        hedra.return_value.generate_talking_head.return_value = None  # Hedra no output → reach the FAL engines
+
+        with patch("lip_sync.FAL_AVAILABLE", True), \
+             patch("lip_sync.ENV_SETTINGS", types.SimpleNamespace(fal_key="k")), \
+             patch("lip_sync.check_generation_prerequisites", return_value=prereq), \
+             patch("lip_sync.fal_client", fake_fal), \
+             patch("lip_sync.safe_download", side_effect=_fake_download), \
+             patch("lip_sync._HedraAPI", hedra), \
+             patch("lip_sync.validate_lipsync_quality", return_value=0.91), \
+             patch("phase_c_ffmpeg.probe_final_media",
+                   return_value={"format": {"width": probe_dims[0], "height": probe_dims[1]}}):
+            from lip_sync import lipsync_generation
+            return lipsync_generation(
+                character_image_path=str(tmp_path / "face.jpg"),
+                audio_path=str(tmp_path / "a.wav"),
+                output_path=out,
+                settings=({"aspect_ratio": aspect} if aspect else None),
+            ), out
+
+    def test_portrait_rejects_landscape_output_returns_none(self, tmp_path):
+        """9:16 project, every engine yields a LANDSCAPE clip → all rejected →
+        None (a wrong-orientation clip must never be kept / win best-of-failed)."""
+        result, _out = self._run(tmp_path, "9:16", probe_dims=(1920, 1080))
+        assert result is None
+
+    def test_portrait_keeps_portrait_output(self, tmp_path):
+        """9:16 project, engine yields a PORTRAIT clip → accepted."""
+        result, out = self._run(tmp_path, "9:16", probe_dims=(1080, 1920))
+        assert result == out
+
+    def test_landscape_backstop_is_noop(self, tmp_path):
+        """No aspect (landscape) → backstop is a no-op → engine accepted regardless
+        of dims (byte-identical to pre-fix behavior)."""
+        result, out = self._run(tmp_path, None, probe_dims=(1920, 1080))
+        assert result == out

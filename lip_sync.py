@@ -509,6 +509,10 @@ def lipsync_generation(
     # `lipsync_validation_threshold` is honored.
     import shutil as _shutil
     gate_enabled, gate_threshold = _sync_gate_settings(settings)
+    # M-1 twin orientation backstop: the project aspect, read the same way
+    # _sync_gate_settings reads its keys (settings IS the global_settings dict).
+    # None/16:9 → the backstop below is a no-op (byte-identical landscape).
+    _aspect = (settings or {}).get("aspect_ratio")
     candidates: list = []  # list of (score, stash_path, engine_name)
     gen_attempts: list = []  # track engine names tried in order (Session 6 P2-3)
 
@@ -519,6 +523,19 @@ def lipsync_generation(
         the failed candidate so we can pick the best-of-failed at the end.
         """
         gen_attempts.append(engine_name)
+        # M-1 twin: orientation backstop. These FAL avatar endpoints take no aspect
+        # param (only Hedra threads one), and the SyncNet gate below scores lip-sync
+        # quality, NOT orientation — so without this, a portrait project could keep a
+        # wrong-orientation avatar clip. Reuse the SAME _accept_or_reject fence the
+        # per-shot video path uses: landscape → unconditional accept (no-op,
+        # byte-identical); portrait → reject a non-portrait clip and fall through to
+        # the next engine. Do NOT stash an orientation-rejected clip — a landscape
+        # clip must never win the best-of-failed fallback for a portrait deliverable.
+        from phase_c_ffmpeg import _accept_or_reject
+        if not _accept_or_reject(output_path, _aspect):
+            print(f"   [LIPSYNC-ORIENT] {engine_name} produced wrong orientation for "
+                  f"{_aspect} — rejecting → next engine")
+            return False
         if not gate_enabled:
             if _cascade_out is not None:
                 _cascade_out["cascade_metadata"] = {
