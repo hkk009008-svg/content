@@ -536,6 +536,42 @@ mid-cycle is OPTIONAL — established cadence is at cycle-close, but
 cycle-14 mid-cycle audit was triggered by user direction "n=2"
 during ongoing substrate work and produced this subsection.
 
+### Candidate #9 — Rule #19 mitigation (d): current_task describes ACTIVITY, not cached volatile shared-state
+
+- **Refines:** Rule #19 (live-presence-over-inferred-idle; codified `cec6d72`).
+  Rule #19's existing `current_task`-rot guard (CLAUDE.md ~:1873-1879) targets the
+  OPPOSITE failure — `current_task` UNCHANGED / semantically stale. This candidate
+  covers the inverse: a `current_task` that DID change (fresh file, fresh `updated`)
+  yet embeds a STALE volatile value.
+- **N=1 instance:** 2026-06-09 (post-portrait-arc; both seats live in parallel via
+  user "continue as operator" / "continue as director"). `director.md current_task`
+  — fresh (status:active, `updated` within seconds) — embedded TWO stale volatile
+  claims: "director 0 unread (cursor 00:53:45Z)" (actually ≥1 unread; verified live
+  via `status.py mailbox-unread director`) AND "operator 3 unread (offline)"
+  (operator was LIVE at 0 unread — the exact inferred-idle error Rule #19 set out to
+  kill, re-introduced by caching the PEER's liveness into one's OWN `current_task`).
+  Surfaced by operator; ping `2026-06-09T04-42-44Z-operator-to-director-coordination.md`.
+- **Current N count:** 1 (originating 2026-06-09).
+- **REALIZED-HARM emergence criterion (the N=2 trigger):** a SECOND instance where a
+  seat takes a **wrong action** off a peer-status or count value frozen into presence
+  prose — NOT merely a stale value that caused no action (this session's harm was
+  latent only: the operator caught it before any mis-action). Latent stale values
+  alone do NOT advance N.
+- **Codifiable shape (when N=2):** a single principle-clause as Rule #19 mitigation
+  (d) — NOT an enumerated-list ban (which rots; the next volatile quantity not on the
+  list slips through): *"current_task describes THIS seat's own ACTIVITY; never assert
+  the peer's liveness or freeze any volatile shared-state value (unread N, ahead/behind)
+  — recompute those live at read-time."* Actionable only once live-recompute is cheap;
+  that prerequisite is now satisfied (`status.py mailbox-unread <seat>`, shipped `3fa29c9`).
+- **Beneficiary (Rule #11):** both (symmetric — either seat can freeze a stale
+  count / peer-status into its own `current_task`).
+- **Provenance:** protocol-upgrade analysis workflow `wf_9c032336-468` (operator,
+  2026-06-09); the adversarial-critique pass downgraded this from "codify-now" to
+  N=1-file per the N=2 floor, explicitly resisting bundling it with the (distinct,
+  computation-not-caching) instrument candidate to manufacture N. (The dated
+  "across all 5 candidates" net-status note above is a cycle-14 snapshot, left as
+  historical; this is candidate #9.)
+
 ## Invocation log
 
 **Note on plateau interpretation (per Protocol Bundle v3 §Minor):** Rule

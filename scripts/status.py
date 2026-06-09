@@ -480,6 +480,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         description="Print a live status snapshot of the repo.",
     )
     parser.add_argument(
+        "command",
+        nargs="?",
+        default=None,
+        help="optional subcommand: 'mailbox-unread' (print one seat's live unread count)",
+    )
+    parser.add_argument(
+        "seat",
+        nargs="?",
+        default=None,
+        help="seat for 'mailbox-unread': operator | director",
+    )
+    parser.add_argument(
         "--write",
         action="store_true",
         help="Also write the report to STATUS.md at the repo root.",
@@ -487,6 +499,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     repo_root = _REPO_ROOT
+
+    # Focused subcommand: print just one seat's LIVE unread count and exit.
+    # Reuses the canonical count_unread (via collect_mailbox) — one source of
+    # truth, no second copy of the logic — and skips the heavy dashboard (no
+    # ComfyUI pod probe / doc reads). This is the instrument Rule #20.1
+    # live-recompute should call instead of a hand-rolled `ls|awk` (which has
+    # two proven sharp edges: full-filename-vs-bare-prefix over-count, and
+    # field-split capturing trailing text).
+    if args.command == "mailbox-unread":
+        if args.seat not in ("operator", "director"):
+            parser.error("mailbox-unread requires a seat: operator | director")
+        print(collect_mailbox(repo_root)[f"mailbox_{args.seat}_unread"])
+        return 0
+    if args.command is not None:
+        parser.error(f"unknown command: {args.command!r}")
+
     data = _collect_all(repo_root)
     report = render(data)
 

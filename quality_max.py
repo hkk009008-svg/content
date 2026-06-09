@@ -115,7 +115,7 @@ _MAX_TIER_KNOB_SCHEMA: Dict[str, Tuple] = {
     # Redux + Hires fix + FaceDetailer + SUPIR
     "redux_strength":            ("enum", "high", "medium", "low"),
     "hires_fix_enabled":         ("bool",),
-    "hires_fix_denoise":         ("numeric", float, 0.2, 0.6),
+    "hires_fix_denoise":         ("numeric", float, 0.40, 0.6),  # floor 0.40: pod proved 0.25 disintegrates (2026-06-09)
     "hires_fix_steps":           ("numeric", int,   5,   40),
     "face_detailer_enabled":     ("bool",),
     "face_detailer_guide_size":  ("enum", 512, 1024, 2048),
@@ -601,9 +601,15 @@ def _inject_post_passes(workflow: dict, params: dict, available: Set[str]):
         if "950" in workflow:
             workflow["950"]["inputs"]["image"] = [feed_node, 0]
     elif "502" in workflow:
-        workflow["502"]["inputs"]["steps"] = params.get("supir_steps", 50)
-        workflow["502"]["inputs"]["cfg_scale_start"] = params.get("supir_cfg_scale", 4.0)
-        workflow["502"]["inputs"]["cfg_scale_end"] = params.get("supir_cfg_scale", 4.0)
+        # Dead fallbacks mirror MAX_QUALITY_TEMPLATES (steps 40, cfg 2.8); never reached on the
+        # production path (templates always carry these keys). Clean same-base A/B 2026-06-09
+        # (seed 741305880): cfg 2.8 arc 0.7939 >= 2.0 arc 0.7886; 4.0 sweep-disfavored. Aligning
+        # the unreachable defaults to the real template values (not an arbitrary 50/4.0) kills the
+        # footgun a hand-built param dict would otherwise hit. (Templates unchanged: the A/B gave
+        # no evidence to lower cfg.)
+        workflow["502"]["inputs"]["steps"] = params.get("supir_steps", 40)
+        workflow["502"]["inputs"]["cfg_scale_start"] = params.get("supir_cfg_scale", 2.8)
+        workflow["502"]["inputs"]["cfg_scale_end"] = params.get("supir_cfg_scale", 2.8)
 
     # Final downsample resolution
     if "950" in workflow:
@@ -613,8 +619,9 @@ def _inject_post_passes(workflow: dict, params: dict, available: Set[str]):
 
     # Hires-fix Pass-2: run node 901 (refine pass) at a gentler denoise for photorealism.
     # Baseline points 901's sigmas at node 17 @ denoise=1.0 -> over-processed/painterly.
-    # NOTE: denoise=0.40 is a realism hypothesis pending GPU-pod validation (pod currently
-    # down). The default is wired here; pod-validate before claiming the improvement.
+    # POD-VALIDATED 2026-06-09 (Novita RTX 6000 Ada): denoise=0.40 fires + holds identity
+    # (arc ~0.83, 4K master); the floor matters -> denoise=0.25 catastrophically
+    # disintegrates (arc ~0.48). See docs/pipeline_status.toml [hires_fix] (status=wired).
     if params.get("hires_fix_enabled", True) and "901" in workflow and "17" in workflow:
         workflow["18"] = copy.deepcopy(workflow["17"])
         workflow["18"]["inputs"]["denoise"] = params.get("hires_fix_denoise", 0.40)

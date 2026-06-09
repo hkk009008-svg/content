@@ -121,10 +121,18 @@ class TestHiresFixPass2Enabled:
 
 class TestHiresFixPass2CustomParams:
     def test_custom_denoise_honored(self):
-        """hires_fix_denoise=0.25 written to node 18."""
+        """A custom in-range hires_fix_denoise is written verbatim to node 18.
+
+        Was 0.25 before 2026-06-09; the pod proved 0.25 catastrophically
+        disintegrates the image, so the overlay schema floor is now 0.40 and this
+        'custom value honored by the inject path' test uses a safe in-range value.
+        _inject_post_passes itself intentionally has NO validation (that lives in
+        the overlay layer, _validate_overlay_value) — so the honored-passthrough
+        semantics of the node-18 write remain under test here.
+        """
         wf = _make_baseline_workflow()
-        _inject(wf, {"hires_fix_enabled": True, "hires_fix_denoise": 0.25})
-        assert wf["18"]["inputs"]["denoise"] == pytest.approx(0.25)
+        _inject(wf, {"hires_fix_enabled": True, "hires_fix_denoise": 0.45})
+        assert wf["18"]["inputs"]["denoise"] == pytest.approx(0.45)
 
     def test_custom_steps_honored(self):
         """hires_fix_steps=12 written to node 18."""
