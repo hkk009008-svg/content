@@ -72,13 +72,15 @@ _INLINE_ANCHOR_RE = re.compile(
     r'`(?P<file>[A-Za-z0-9_./-]+\.[A-Za-z]+):(?P<line>\d+)(?:[-–—](?P<end>\d+))?`'
 )
 
-# Multi-range anchor: `path:A-B, C-D` (a comma-list of ranges). The comma precedes
-# the closing backtick, so _INLINE_ANCHOR_RE cannot parse it → such anchors are NOT
-# verified. Detect + warn (never silently skip — the ADV-2 principle). `[^`]*` stays
-# within one backtick pair (it cannot cross the closing backtick), so a single range
+# Multi-range anchor: a backtick token citing a comma-list of lines and/or ranges —
+# `path:A-B, C-D` (ranges) OR `path:N, M` (bare lines, e.g. project_manager.py:133,924).
+# The comma precedes the closing backtick, so _INLINE_ANCHOR_RE cannot parse EITHER
+# shape → such anchors are NOT verified. Detect + warn (never silently skip — the
+# ADV-2 principle). The first comma-term may be a bare line OR a range; `[^`]*` stays
+# within one backtick pair (cannot cross the closing backtick), so a single anchor
 # followed by PROSE commas (`mod.py:1-5` covers 9, 12) does NOT false-fire.
 _MULTIRANGE_RE = re.compile(
-    r'`[A-Za-z0-9_./-]+\.[A-Za-z]+:\d+[-–—]\d+\s*,\s*\d+[-–—]?\d*[^`]*`'
+    r'`[A-Za-z0-9_./-]+\.[A-Za-z]+:\d+(?:[-–—]\d+)?\s*,\s*\d+[-–—]?\d*[^`]*`'
 )
 
 # Fenced-code-block markers (``` or ~~~, 3+). A line starting one toggles fence state.

@@ -1433,3 +1433,15 @@ class TestMultiRangeWarning:
         md = _write_md(tmp_path, "doc.md", "**`f`** `mod.py:1–5` covers cases 9, 12\n")
         check_line_anchors([str(md)], tmp_path)
         assert "multi-range" not in capsys.readouterr().err.lower()
+
+    def test_bare_number_comma_list_also_warns(self, tmp_path, capsys):
+        # `file:N,M` (comma-list whose FIRST entry is a bare line, no leading range)
+        # is ALSO unparseable by _INLINE_ANCHOR_RE -> must warn, not silently skip.
+        # Real such anchors are live in ARCHITECTURE.md/OPERATIONS.md (cold-review finding).
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "mod.py", "def f():\n    pass\n")
+        md = _write_md(tmp_path, "doc.md", "see `mod.py:133,924` and `mod.py:139,203,232`\n")
+        check_line_anchors([str(md)], tmp_path)
+        err = capsys.readouterr().err
+        assert "2 multi-range" in err.lower()   # both bare-number comma-lists counted
+        assert "not verified" in err.lower()
