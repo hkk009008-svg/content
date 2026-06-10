@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# consume-events — advance a role's mailbox cursor (seen/<role>.txt) to the
+# newest event addressed to it (or an explicit --to target), and stage the
+# cursor file (explicit pathspec; never commits).
+#
+#   usage: consume-events <director|operator> [--to <ISO-UTC timestamp>]
+#
+# This is the ONLY sanctioned writer of seen/*.txt under protocol v6.0: the
+# cursor file is the single source of truth, and the advance rides the seat's
+# next substantive commit (cursor folding). Refuses regressions and targets
+# that match no real event — the two ways hand-edited cursors went wrong.
+set -euo pipefail
+
+ROLE=${1:-}
+case "$ROLE" in director|operator) ;; *)
+  echo "usage: consume-events <director|operator> [--to <timestamp>]" >&2; exit 2;; esac
+shift
+TARGET=""
+if [ "${1:-}" = "--to" ]; then
+  TARGET=${2:?--to needs a timestamp}
+  case "$TARGET" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]-[0-9][0-9]-[0-9][0-9]Z) ;;
+    *) echo "consume-events: malformed --to timestamp: $TARGET" >&2; exit 2;;
+  esac
+fi
+
+ROOT=$(git rev-parse --show-toplevel)
+SENT="$ROOT/coordination/mailbox/sent"
+SEEN="$ROOT/coordination/mailbox/seen/$ROLE.txt"
+CUR=$(head -1 "$SEEN")
+
+dash()  { echo "${1:0:11}$(echo "${1:11:8}" | tr ':' '-')Z"; }
+colon() { echo "${1:0:11}$(echo "${1:11:8}" | tr '-' ':')Z"; }
+
+addressed() { ls "$SENT" 2>/dev/null | grep -E -- "-to-$ROLE-" | sort; }
+
+if [ -n "$TARGET" ]; then
+  TD=$(dash "$TARGET")
+  addressed | grep -q "^$TD-" || {
+    echo "consume-events: no event at $(colon "$TD") addressed to $ROLE" >&2; exit 2; }
+else
+  NEWEST=$(addressed | tail -1 | cut -c1-20)
+  if [ -z "$NEWEST" ]; then
+    echo "consume-events: no events addressed to $ROLE (no-op)"; exit 0
+  fi
+  TD=$NEWEST
+fi
+
+CURD=$(dash "$CUR")
+if [ "$TD" = "$CURD" ]; then
+  echo "cursor $ROLE: already at $(colon "$TD") (no-op)"; exit 0
+fi
+if [ "$TD" \< "$CURD" ]; then
+  echo "consume-events: refusing cursor regression $CUR -> $(colon "$TD")" >&2; exit 2
+fi
+
+NEW=$(colon "$TD")
+printf '%s\n' "$NEW" > "$SEEN"
+git -C "$ROOT" add -- "coordination/mailbox/seen/$ROLE.txt"
+UNREAD=$(addressed | cut -c1-20 | awk -v c="$TD" '$0 > c' | wc -l | tr -d ' ')
+echo "cursor $ROLE: $CUR -> $NEW; unread now: $UNREAD (staged; fold into your next substantive commit)"

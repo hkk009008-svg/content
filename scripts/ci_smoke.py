@@ -148,6 +148,25 @@ def main() -> int:
                 f" (sha: {_sd.symbol}) — {_sd.message}"
             )
 
+    # Coordination-state gate (protocol v6.0, § check_coordination).
+    # FATAL (broken cursor / filename-convention violation) hard-fails locally,
+    # warns in CI; ADVISORY warns everywhere; INFO (unread counts) is silent
+    # here — the CLI prints it.
+    import check_coordination as _cc
+
+    _coord_issues = _cc.run(_repo_root / "coordination")
+    _coord_fatal = [_i for _i in _coord_issues if _i.severity == "FATAL"]
+    _coord_adv = [_i for _i in _coord_issues if _i.severity == "ADVISORY"]
+    for _i in _coord_adv:
+        print(f"WARNING: coordination ADVISORY [{_i.kind}] {_i.path} — {_i.message}")
+    if _coord_fatal:
+        for _i in _coord_fatal:
+            print(f"COORDINATION FATAL [{_i.kind}] {_i.path} — {_i.message}")
+        if not os.environ.get("CI"):
+            print("\nRun: .venv/bin/python scripts/check_coordination.py")
+            return 1
+        print("WARNING: coordination FATALs are non-blocking in CI")
+
     print("OK")
     return 0
 
