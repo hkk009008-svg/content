@@ -439,6 +439,71 @@ def _parse_structured_prompt(prompt: str) -> dict:
     return sections
 
 
+def _allocate_ref_slots(primary_refs, secondary_chars, cap=6):
+    """Partition the Kontext image_urls budget across characters (P1-1 spec §3a).
+
+    FIXED shares, CONTIGUOUS slots: primary takes up to 3 (up to `cap` when no
+    secondaries); the first secondary up to 2 (canonical first, then angles);
+    the second secondary up to 1. The cap is a ceiling, not a quota — thin
+    secondaries leave it unfilled rather than reordering slots (the primary's
+    @ImageN indices must stay 1..k). Returns (ordered file paths, slot_map)
+    with 1-based @ImageN indices per char_id ('primary' for the primary).
+    """
+    n_secondary = len(secondary_chars)
+    primary_take = min(len(primary_refs), 3 if n_secondary else cap)
+    paths = list(primary_refs[:primary_take])
+    slot_map = {"primary": list(range(1, len(paths) + 1))}
+    for i, entry in enumerate(secondary_chars):
+        share = 2 if i == 0 else 1
+        char_paths = ([entry["reference"]]
+                      + list(entry.get("multi_angle_refs") or []))[:share]
+        start = len(paths) + 1
+        paths.extend(char_paths)
+        slot_map[entry["char_id"]] = list(range(start, start + len(char_paths)))
+    return paths, slot_map
+
+
+def _build_multichar_kontext_prompt(sections, char_blocks):
+    """Per-character @ImageN PRESERVE blocks + shared scene/constraints/quality.
+
+    char_blocks: [(first_slot_index, identity_anchor), ...] — one per character,
+    primary first. Single-char shots NEVER reach this function (early return in
+    _fal_flux_fallback keeps the golden-snapshot path untouched).
+    """
+    scene_desc = sections.get("SCENE", "")
+    action_desc = sections.get("ACTION", "facing the camera")
+    outfit_desc = sections.get("OUTFIT", "")
+    shot_desc = sections.get("SHOT", "Medium shot, 85mm lens")
+
+    parts = []
+    for slot, anchor in char_blocks:
+        who = anchor or "the person in this reference"
+        parts.append(
+            f"PRESERVE IDENTITY: The person from @Image{slot} is {who}. "
+            f"Keep this EXACT face, hair, glasses, eye color, skin tone unchanged."
+        )
+    parts.append(f"CHANGE BACKGROUND: {scene_desc}.")
+    if outfit_desc:
+        parts.append(f"CHANGE OUTFIT: {outfit_desc}.")
+    parts.append(f"SET POSE: {action_desc}.")
+    parts.append(f"SET CAMERA: {shot_desc}.")
+    tokens = ", ".join(f"@Image{slot}" for slot, _ in char_blocks)
+    parts.append(
+        f"CONSTRAINTS: Do NOT alter facial features, hairstyle, glasses, or skin. "
+        f"Do NOT generate a different person. Do NOT blend or average the faces. "
+        f"Do NOT transfer clothing between people — each person keeps their own "
+        f"outfit. "
+        f"Each output face MUST match its own reference ({tokens}) exactly."
+    )
+    parts.append(
+        "QUALITY: Photorealistic, visible skin pores and subsurface scattering, "
+        "shallow depth of field with circular bokeh, natural film grain ISO 400, "
+        "volumetric atmospheric lighting, micro-detail in fabric texture, "
+        "no AI artifacts, no smooth plastic skin, no over-saturated colors."
+    )
+    return " ".join(parts)
+
+
 def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                        multi_angle_refs=None, identity_anchor="", aspect_ratio=None):
     """
