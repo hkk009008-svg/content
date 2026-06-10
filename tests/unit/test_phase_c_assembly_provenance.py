@@ -103,6 +103,76 @@ class TestFalFallbackProvenance:
         assert res is None
 
 
+class TestKontextFailureProvenance:
+    """V-1 pin (spec AC6 / Lane-V V-6): Kontext failure with secondaries falls
+    back with the ORIGINAL prompt — the multi-char rewrite must never escape the
+    Kontext try-block (phase_c_assembly passes `prompt`, not `kontext_prompt`,
+    to the FLUX-Pro fallback)."""
+
+    def test_kontext_failure_with_secondaries_falls_back_with_original_prompt(
+        self, monkeypatch, tmp_path
+    ):
+        """When the Kontext subscribe raises and secondary_char_refs were passed,
+        the FLUX-Pro fallback receives the ORIGINAL prompt (no @Image in it)
+        and result.api_name == FLUX_PRO."""
+        fake = MagicMock()
+        fake.upload_file.return_value = "https://fake/upload"
+        # 1st subscribe call → Kontext endpoint raises; 2nd → FLUX-Pro succeeds
+        flux_pro_captured: dict = {}
+
+        def _subscribe(endpoint, **kwargs):
+            if "kontext" in endpoint:
+                raise RuntimeError("kontext down for test")
+            flux_pro_captured["endpoint"] = endpoint
+            flux_pro_captured["arguments"] = kwargs.get("arguments", {})
+            return {"images": [{"url": "https://fake/fluxpro.jpg"}]}
+
+        fake.subscribe.side_effect = _subscribe
+        monkeypatch.setitem(sys.modules, "fal_client", fake)
+        monkeypatch.setattr(
+            pca, "settings",
+            dataclasses.replace(pca.settings, fal_key="test-key"),
+        )
+
+        def _fake_retrieve(url, filename):
+            with open(filename, "wb") as fh:
+                fh.write(b"jpeg-bytes")
+
+        monkeypatch.setattr(urllib.request, "urlretrieve", _fake_retrieve)
+
+        char = tmp_path / "face.jpg"
+        char.write_bytes(b"face")
+        secondary = tmp_path / "secondary.jpg"
+        secondary.write_bytes(b"sec")
+        out = str(tmp_path / "out.jpg")
+        original_prompt = "A rooftop scene at golden hour"
+
+        result = pca._fal_flux_fallback(
+            original_prompt,
+            out,
+            character_image=str(char),
+            identity_anchor="a woman with auburn hair",
+            secondary_char_refs=[{
+                "char_id": "char_b",
+                "reference": str(secondary),
+                "multi_angle_refs": [],
+                "identity_anchor": "a man with a grey beard",
+            }],
+        )
+
+        assert result is not None
+        assert result.api_name == "FLUX_PRO"
+        # V-1 invariant: FLUX-Pro received the ORIGINAL prompt, not the @ImageN rewrite
+        captured_prompt = flux_pro_captured["arguments"]["prompt"]
+        assert captured_prompt == original_prompt, (
+            f"V-1 VIOLATED: FLUX-Pro received rewritten prompt.\n"
+            f"Expected: {original_prompt!r}\nGot: {captured_prompt!r}"
+        )
+        assert "@Image" not in captured_prompt, (
+            f"V-1 VIOLATED: @ImageN token escaped the Kontext try-block: {captured_prompt!r}"
+        )
+
+
 class TestImageGenResultShape:
     """`ImageGenResult` is a lightweight, backward-compatible carrier."""
 

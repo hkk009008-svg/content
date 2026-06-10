@@ -548,7 +548,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 |---|---|---|
 | `generate_ai_broll` | `phase_c_assembly.py:75` | Priority chain: `quality_max` (if tier=="max") → ComfyUI PuLID → `_fal_flux_fallback`. Dynamic node injection (prompt/latent/seed/PuLID + ControlNet-depth + img2img + IP-Adapter). |
 | `RunPodComfyUI` | `phase_c_assembly.py:35` | ComfyUI REST client (`upload_image`/`queue_prompt`/`get_history`/`get_image`); shared by both tiers. |
-| `_fal_flux_fallback` | `phase_c_assembly.py:442` | FLUX Kontext Max Multi → FLUX-Pro → Schnell → Pollinations. |
+| `_fal_flux_fallback` | `phase_c_assembly.py:510` | FLUX Kontext Max Multi → FLUX-Pro → Schnell → Pollinations. |
 | `ImageGenResult` | `phase_c_assembly.py:18` | `NamedTuple(path, api_name)`; `api_name` is the authoritative backend token. |
 | `generate_ai_broll_max` | `quality_max.py:701` | Max-tier orchestrator: probe → load `pulid_max.json` → optional HiDream swap → prune → 5 inject axes → best-of-N loop → PuLID-boost retry → copy best. |
 | `_probe_node_availability` | `quality_max.py:253` | One-time `/object_info` probe. |
@@ -821,7 +821,7 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 |---|---|---|
 | `"max"` | `quality_max.generate_ai_broll_max` | N=8 adaptive best-of, 4-channel ControlNet, Redux, FaceDetailer, ReActor, SUPIR 4K. Falls through to production on `None`/exception. |
 | `"production"` (default) | ComfyUI + PuLID via `RunPodComfyUI` | Used when `COMFYUI_SERVER_URL` set AND `pulid.json` exists. |
-| (fallback) | `_fal_flux_fallback` | FLUX Kontext Max Multi → FLUX-Pro → FLUX Schnell → Pollinations (`phase_c_assembly.py:442`). |
+| (fallback) | `_fal_flux_fallback` | FLUX Kontext Max Multi → FLUX-Pro → FLUX Schnell → Pollinations (`phase_c_assembly.py:510`). |
 
 *Shot-type → PuLID weight* (production `WORKFLOW_TEMPLATES`, `workflow_selector.py:21`, **verified**):
 

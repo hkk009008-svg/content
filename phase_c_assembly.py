@@ -106,8 +106,9 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         characters: List of character config dicts
         quality_tier: "production" | "max" — selects the generation pipeline.
         char_lora_path: (max tier only) Path to per-character LoRA .safetensors.
-        secondary_char_refs: P1-1 slice 1: consumed by the Kontext fallback —
-            wiring lands behind the S1 gate. Accepted and unused until Task 8.
+        secondary_char_refs: P1-1 slice 1: additional character entries forwarded
+            to _fal_flux_fallback; each entry has char_id, reference, multi_angle_refs,
+            identity_anchor. None / [] takes the single-char (golden) path.
         style_reference: (max tier only) Path to style-board reference image.
         shot_hint: (max tier only) Pre-classified shot dict; bypasses re-classification.
 
@@ -177,11 +178,13 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                 multi_angle_refs=multi_angle_refs,
                 identity_anchor=identity_anchor,
                 aspect_ratio=aspect_ratio,
+                secondary_char_refs=secondary_char_refs,
             )
         return _fal_flux_fallback(
             prompt, output_filename, seed,
             character_image=character_image,
             aspect_ratio=aspect_ratio,
+            secondary_char_refs=None,
         )
 
     # PRIORITY 1: ComfyUI + PuLID on RunPod RTX 4090 (fastest + strongest face-lock)
@@ -191,7 +194,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         if not os.path.exists("pulid.json"):
             print("   [WARN] pulid.json missing — using Kontext fallback")
             return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
-                                      aspect_ratio=aspect_ratio)
+                                      aspect_ratio=aspect_ratio, secondary_char_refs=None)
 
         with open("pulid.json", "r") as f:
             workflow = json.load(f)
@@ -216,7 +219,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             if shot_type == "landscape" and character_image:
                 print(f"   [WORKFLOW] Landscape detected — skipping PuLID, using Kontext")
                 return _fal_flux_fallback(prompt, output_filename, seed, character_image=None,
-                                          aspect_ratio=aspect_ratio)
+                                          aspect_ratio=aspect_ratio, secondary_char_refs=None)
         except ImportError:
             pass  # workflow_selector not available — use defaults
 
@@ -413,12 +416,12 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
 
         print("   [WARN] ComfyUI timed out or crashed. Falling back to FAL FLUX...")
         return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
-                                  aspect_ratio=aspect_ratio)
+                                  aspect_ratio=aspect_ratio, secondary_char_refs=None)
 
     except Exception as e:
         print(f"   [WARN] ComfyUI error: {e}. Falling back to FAL FLUX...")
         return _fal_flux_fallback(prompt, output_filename, seed, character_image=character_image,
-                                  aspect_ratio=aspect_ratio)
+                                  aspect_ratio=aspect_ratio, secondary_char_refs=None)
 
 
 def _parse_structured_prompt(prompt: str) -> dict:
@@ -505,7 +508,8 @@ def _build_multichar_kontext_prompt(sections, char_blocks):
 
 
 def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
-                       multi_angle_refs=None, identity_anchor="", aspect_ratio=None):
+                       multi_angle_refs=None, identity_anchor="", aspect_ratio=None,
+                       secondary_char_refs=None):
     """
     Image generator using FAL.ai FLUX Kontext Max Multi for identity preservation.
 
@@ -527,74 +531,108 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
         # PRIORITY 1: FLUX Kontext Max Multi (strongest identity — up to 9 refs)
         if character_image and os.path.exists(character_image):
             try:
-                # Collect all reference image URLs
-                image_urls = []
-                refs_to_upload = []
-
-                if multi_angle_refs and len(multi_angle_refs) > 0:
-                    refs_to_upload = [r for r in multi_angle_refs if os.path.exists(r)]
+                if secondary_char_refs:
+                    # P1-1 multi-char branch (S1-gated). Existence-filter refs the
+                    # same way the single-char path does, allocate slots, address
+                    # each character by its first slot.
+                    primary_refs = [r for r in (multi_angle_refs or []) if os.path.exists(r)] \
+                        or [character_image]
+                    live_secondaries = [
+                        e for e in secondary_char_refs if os.path.exists(e["reference"])
+                    ]
+                    ref_paths, slot_map = _allocate_ref_slots(primary_refs, live_secondaries)
+                    image_urls = []
+                    for ref_path in ref_paths:
+                        try:
+                            image_urls.append(fal_client.upload_file(ref_path))
+                        except Exception:
+                            pass
+                    sections = _parse_structured_prompt(prompt)
+                    char_blocks = [(slot_map["primary"][0], identity_anchor)]
+                    char_blocks += [
+                        (slot_map[e["char_id"]][0], e.get("identity_anchor", ""))
+                        for e in live_secondaries if e["char_id"] in slot_map
+                    ]
+                    kontext_prompt = _build_multichar_kontext_prompt(sections, char_blocks)
+                    print(f"   [KONTEXT] Multi-char ({len(image_urls)} refs, "
+                          f"{len(char_blocks)} identities)")
+                    if not image_urls:
+                        # all uploads failed — degrade to single-char via the
+                        # multichar builder (1 block); do not crash the take
+                        image_urls = [fal_client.upload_file(character_image)]
+                        kontext_prompt = _build_multichar_kontext_prompt(
+                            _parse_structured_prompt(prompt),
+                            [(1, identity_anchor)],
+                        )
                 else:
-                    refs_to_upload = [character_image]
+                    # Collect all reference image URLs
+                    image_urls = []
+                    refs_to_upload = []
 
-                for ref_path in refs_to_upload[:6]:  # Up to 6 refs for max identity
-                    try:
-                        image_urls.append(fal_client.upload_file(ref_path))
-                    except Exception:
-                        pass
+                    if multi_angle_refs and len(multi_angle_refs) > 0:
+                        refs_to_upload = [r for r in multi_angle_refs if os.path.exists(r)]
+                    else:
+                        refs_to_upload = [character_image]
 
-                if not image_urls:
-                    image_urls = [fal_client.upload_file(character_image)]
+                    for ref_path in refs_to_upload[:6]:  # Up to 6 refs for max identity
+                        try:
+                            image_urls.append(fal_client.upload_file(ref_path))
+                        except Exception:
+                            pass
 
-                # Parse structured sections from the prompt
-                sections = _parse_structured_prompt(prompt)
-                scene_desc = sections.get("SCENE", prompt[:200])
-                action_desc = sections.get("ACTION", "facing the camera")
-                outfit_desc = sections.get("OUTFIT", "")
-                shot_desc = sections.get("SHOT", "Medium shot, 85mm lens")
+                    if not image_urls:
+                        image_urls = [fal_client.upload_file(character_image)]
 
-                print(f"   [KONTEXT] Max Multi ({len(image_urls)} refs): scene='{scene_desc[:50]}...'")
+                    # Parse structured sections from the prompt
+                    sections = _parse_structured_prompt(prompt)
+                    scene_desc = sections.get("SCENE", prompt[:200])
+                    action_desc = sections.get("ACTION", "facing the camera")
+                    outfit_desc = sections.get("OUTFIT", "")
+                    shot_desc = sections.get("SHOT", "Medium shot, 85mm lens")
 
-                # BUILD KONTEXT PROMPT — audit-grade structured prompt
-                # Architecture: PRESERVE → CHANGE → CONSTRAIN
-                # Rule: identity tokens go FIRST (early attention priority)
+                    print(f"   [KONTEXT] Max Multi ({len(image_urls)} refs): scene='{scene_desc[:50]}...'")
 
-                parts = []
+                    # BUILD KONTEXT PROMPT — audit-grade structured prompt
+                    # Architecture: PRESERVE → CHANGE → CONSTRAIN
+                    # Rule: identity tokens go FIRST (early attention priority)
 
-                # BLOCK 1: IDENTITY PRESERVATION (highest priority tokens)
-                if identity_anchor:
+                    parts = []
+
+                    # BLOCK 1: IDENTITY PRESERVATION (highest priority tokens)
+                    if identity_anchor:
+                        parts.append(
+                            f"PRESERVE IDENTITY: The person from @Image1 is {identity_anchor}. "
+                            f"Keep this EXACT face, hair, glasses, eye color, skin tone unchanged."
+                        )
+                    else:
+                        parts.append(
+                            "PRESERVE IDENTITY: Keep the exact same person from @Image1. "
+                            "Do not change face, hair, or any physical features."
+                        )
+
+                    # BLOCK 2: SURGICAL CHANGES (only what differs from reference)
+                    parts.append(f"CHANGE BACKGROUND: {scene_desc}.")
+                    if outfit_desc:
+                        parts.append(f"CHANGE OUTFIT: {outfit_desc}.")
+                    parts.append(f"SET POSE: {action_desc}.")
+                    parts.append(f"SET CAMERA: {shot_desc}.")
+
+                    # BLOCK 3: HARD CONSTRAINTS (reinforcement)
                     parts.append(
-                        f"PRESERVE IDENTITY: The person from @Image1 is {identity_anchor}. "
-                        f"Keep this EXACT face, hair, glasses, eye color, skin tone unchanged."
+                        "CONSTRAINTS: Do NOT alter facial features, hairstyle, glasses, or skin. "
+                        "Do NOT generate a different person. "
+                        "The face in the output MUST match @Image1 exactly."
                     )
-                else:
+
+                    # BLOCK 4: QUALITY (perceptual tokens FLUX actually understands)
                     parts.append(
-                        "PRESERVE IDENTITY: Keep the exact same person from @Image1. "
-                        "Do not change face, hair, or any physical features."
+                        "QUALITY: Photorealistic, visible skin pores and subsurface scattering, "
+                        "shallow depth of field with circular bokeh, natural film grain ISO 400, "
+                        "volumetric atmospheric lighting, micro-detail in fabric texture, "
+                        "no AI artifacts, no smooth plastic skin, no over-saturated colors."
                     )
 
-                # BLOCK 2: SURGICAL CHANGES (only what differs from reference)
-                parts.append(f"CHANGE BACKGROUND: {scene_desc}.")
-                if outfit_desc:
-                    parts.append(f"CHANGE OUTFIT: {outfit_desc}.")
-                parts.append(f"SET POSE: {action_desc}.")
-                parts.append(f"SET CAMERA: {shot_desc}.")
-
-                # BLOCK 3: HARD CONSTRAINTS (reinforcement)
-                parts.append(
-                    "CONSTRAINTS: Do NOT alter facial features, hairstyle, glasses, or skin. "
-                    "Do NOT generate a different person. "
-                    "The face in the output MUST match @Image1 exactly."
-                )
-
-                # BLOCK 4: QUALITY (perceptual tokens FLUX actually understands)
-                parts.append(
-                    "QUALITY: Photorealistic, visible skin pores and subsurface scattering, "
-                    "shallow depth of field with circular bokeh, natural film grain ISO 400, "
-                    "volumetric atmospheric lighting, micro-detail in fabric texture, "
-                    "no AI artifacts, no smooth plastic skin, no over-saturated colors."
-                )
-
-                kontext_prompt = " ".join(parts)
+                    kontext_prompt = " ".join(parts)
 
                 result = fal_client.subscribe(
                     "fal-ai/flux-pro/kontext/max/multi",
