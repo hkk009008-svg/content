@@ -269,8 +269,11 @@ class TestContinuityEngineSecondaryChars:
         )
         sec = enhanced["continuity_config"]["secondary_chars"]
         assert [c["char_id"] for c in sec] == ["char_b"]
-        assert sec[0]["reference"]            # the registered ref path
-        assert "identity_anchor" in sec[0] and "multi_angle_refs" in sec[0]
+        # Exact values — a reference/anchor swap or a dropped angle list must
+        # fail loud (Task 7's allocator consumes these verbatim).
+        assert sec[0]["reference"] == "/ref/char_b.jpg"
+        assert sec[0]["multi_angle_refs"] == ["/angles/char_b_front.jpg"]
+        assert isinstance(sec[0]["identity_anchor"], str)
 
     def test_secondary_chars_skips_unregistered(self, engine_two_chars_b_unregistered):
         enhanced = engine_two_chars_b_unregistered.enhance_shot_prompt(

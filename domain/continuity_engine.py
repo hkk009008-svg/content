@@ -576,8 +576,8 @@ class ContinuityEngine:
             )
 
         # P1-1: per-character identity assets for chars beyond the primary.
-        # Same existence guard as validation (validate_shot skips unregistered
-        # chars at :606-610) — generation mirrors the skip, never fails on it.
+        # Same existence guard as validation (validate_shot's `if ref:` skip of
+        # unregistered chars) — generation mirrors the skip, never fails on it.
         for cid in chars_in_frame[1:]:
             ref = self.character_tracker.get_reference_for_pulid(cid)
             if not ref:
