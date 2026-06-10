@@ -234,7 +234,7 @@ class ReviewController:
             # A shot is satisfied for PERFORMANCE_REVIEW iff it doesn't need a
             # performance (SKIP engine or no keyframe approved) OR the operator
             # has explicitly approved a performance take. Mirrors the orchestrator's
-            # all_skipped bypass at cinema_pipeline.py:768-773, extended with the
+            # all_skipped bypass at cinema_pipeline.py:1133-1140, extended with the
             # explicit-approval branch.
             return all(
                 (shot.get("performance_engine") or "").upper() == "SKIP"

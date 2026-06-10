@@ -884,7 +884,7 @@ Driving-video mode (`driving_video_source`, `domain/performance.py:145`): `"uplo
 
 **This gate is conditionally skipped.** The orchestrator computes `all_skipped` over the project (`cinema_pipeline.py:1133`): every shot is either `performance_engine == "SKIP"` **or** lacks an approved keyframe. If `all_skipped`, the gate is bypassed with a `PERFORMANCE_SKIPPED_GATE` progress event at 65%; otherwise the `PERFORMANCE_REVIEW` gate-wait runs at `cinema_pipeline.py:1140`.
 
-> **Divergence flagged (honest note):** the `_gate_satisfied` PERFORMANCE_REVIEW branch carries an inline comment citing the bypass at `cinema_pipeline.py:768-773` (`cinema/review/controller.py`), but the actual all-skipped bypass is at **`cinema_pipeline.py:1133-1140`** (verified). The line-anchor in that comment is stale; the *logic* it describes is correct and mirrors the controller predicate.
+> **Cross-reference:** the `_gate_satisfied` PERFORMANCE_REVIEW branch (`cinema/review/controller.py:233-246`) carries an inline comment pointing at the orchestrator's all-skipped bypass at `cinema_pipeline.py:1133-1140`; the predicate logic mirrors that bypass, extended with the explicit-approval branch. (A previously-flagged stale line-cite in that comment was fixed in the same touch as this note.)
 
 **Auto-approve here is opt-in.** The motion gate map entry is only added when `CINEMA_AUTO_APPROVE_MOTION` is truthy (`1`/`true`/`yes`, case-insensitive; `cinema/auto_approve.py:620`). Without it, PERFORMANCE_REVIEW is always manual even when auto-approve is otherwise enabled. When enabled, `_rules_for_motion` (`cinema/auto_approve.py:340`) checks `motion_min_identity=0.85` and `motion_min_motion_score=0.7`. **Gate predicate** (`cinema/review/controller.py:224`): each shot is SKIP, lacks a keyframe, or has `approved_performance_take_id`.
 
@@ -947,17 +947,17 @@ On approval, `approved_final_take_id` (and `approved_motion_take_id` via the `so
 
 **INPUTS:** Approved final takes (collected in scene order), per-scene dialogue MP3s, per-scene foley MP3s, the BGM MP3, and `global_settings` (`mood`, `scene_transitions`, `transition_duration`, `music_mastering`).
 
-**PROCESSING** (`assemble_approved_takes`, `cinema_pipeline.py:853` → `_assemble_approved_takes_core`, `:783` → `_assemble_final`, `:1315`):
+**PROCESSING** (`assemble_approved_takes`, `cinema_pipeline.py:853` → `_assemble_approved_takes_core`, `:783` → `_assemble_final`, `:1323`):
 1. `_refresh_project_snapshot()` then re-assert the REVIEW gate as a guard.
 2. `_build_scene_packages(project)` (`cinema_pipeline.py:709`) resolves each approved take path and collects per-scene audio/foley. **All-embedded detection:** when every approved shot in a scene has `metadata.audio_embedded=True`, standalone TTS is suppressed to avoid double-voice from Veo/Omnihuman.
-3. `_assemble_final(scene_data, bgm_path, settings)` (`cinema_pipeline.py:1315`):
+3. `_assemble_final(scene_data, bgm_path, settings)` (`cinema_pipeline.py:1323`):
    a. **Normalize** each clip to 1920×1080@30fps (`scale + pad + fps`, `libx264 crf=20`, `aac 192k`).
    b. **Stitch** — hard-cut concat demuxer by default, OR `xfade_concat` cross-dissolve per scene boundary when `scene_transitions=True` (`phase_c_ffmpeg.py:1513`), with transition clamped to `0.4 * min(durations)`.
    c. **Color grade** via `apply_color_grade()` (`phase_c_ffmpeg.py:1106`) using a mood→preset map (`COLOR_GRADE_PRESETS`, `phase_c_ffmpeg.py:1094`).
    d. **Tri-mix audio:** voice (1.0) + BGM (0.12) + foley (0.20). Voice source binds dynamically: `[0:a]` when audio is embedded, else the standalone dialogue MP3; `amix duration=longest` for the standalone path, `first` when embedded.
    e. **Two-pass loudnorm** EBU R128 (`two_pass_loudnorm`, `phase_c_ffmpeg.py:1242`; defaults -14 LUFS / 11 LU / -1.5 dBTP).
 
-**KEY FUNCTIONS:** `_assemble_final` (`cinema_pipeline.py:1315`); `_build_scene_packages` (`:709`); `xfade_concat` (`phase_c_ffmpeg.py:1513`) / `_build_xfade_filtergraph` (`:1444`); `apply_color_grade` (`phase_c_ffmpeg.py:1106`); `two_pass_loudnorm` (`phase_c_ffmpeg.py:1242`).
+**KEY FUNCTIONS:** `_assemble_final` (`cinema_pipeline.py:1323`); `_build_scene_packages` (`:709`); `xfade_concat` (`phase_c_ffmpeg.py:1513`) / `_build_xfade_filtergraph` (`:1444`); `apply_color_grade` (`phase_c_ffmpeg.py:1106`); `two_pass_loudnorm` (`phase_c_ffmpeg.py:1242`).
 
 **DECISION POINTS:**
 - **Stitch mode** — `scene_transitions` (default `False`).
@@ -1347,7 +1347,7 @@ graph TD
 | `cascade_metadata` (on take) | `_record_video_cascade` (`phase_c_ffmpeg.py:108`) | audit / `audio_embedded` decision | which engine actually won + attempt list |
 | `screening_approved` (project-level) | `mark_screening_approved` (`screening.py:307`) | SCREENING gate predicate | operator sign-off on the assembled cut |
 | `needs_reassembly[]` (project-level) | `mark_shot_needs_reassembly` | re-assemble endpoint | shots iterated during screening that need re-stitching |
-| `final_video_path` / `exports/final_cinema.mp4` | `_assemble_final` (`cinema_pipeline.py:1315`) | export endpoint, `screening/approve` precondition | the deliverable |
+| `final_video_path` / `exports/final_cinema.mp4` | `_assemble_final` (`cinema_pipeline.py:1323`) | export endpoint, `screening/approve` precondition | the deliverable |
 
 The crucial architectural property: **takes are append-only history, and "approval" is a pointer.** A shot accumulates many `keyframe_takes`/`motion_takes`; approving one just writes its id into the corresponding `approved_*_take_id` field. The take a downstream stage consumes is always resolved through the approval pointer, never by "latest". This is what makes iteration (regenerate, screen-and-redo) safe — old takes are never destroyed.
 
@@ -1384,7 +1384,7 @@ The hand-off contracts, stage by stage:
 2. **Plan → Keyframe.** Once PLAN_REVIEW clears, `KeyframeRenderPhase.run(ctx)` (`cinema/phases/keyframe_render.py:68`) iterates shots, skipping any with `approved_keyframe_take_id`, and calls `generate_keyframe_take` (delegated to `ShotController`). The keyframe is the anchor still; its identity score lands in `take.metadata.identity_score`.
 3. **Keyframe → Performance.** `PerformanceCapturePhase` (`cinema/phases/performance.py:19`) skips shots that are SKIP-routed, have no approved keyframe, or already have an approved performance take. The performance take (a driving-video / retarget) becomes optional conditioning for the motion stage.
 4. **Performance → Motion.** `MotionRenderPhase` (`cinema/phases/motion_render.py:57`) turns the approved keyframe into a video clip via the cascade (§6.4). It has a **storyboard batch path** (Kling Native, non-portrait aspect only — M-1 guard, 2–6 unapproved shots all with keyframes) that generates one combined clip and splits it (`split_video_into_segments`), falling through to per-shot on any failure.
-5. **Motion → Review → Assembly.** After motion, `_rebuild_review_clips` builds the in-memory manifest the web UI reads, and the REVIEW gate waits for `approved_final_take_id` on every shot. Then `assemble_approved_takes` resolves those approved takes' paths in `_build_scene_packages` (`cinema_pipeline.py:709`) and `_assemble_final` (`cinema_pipeline.py:1315`) produces `exports/final_cinema.mp4`.
+5. **Motion → Review → Assembly.** After motion, `_rebuild_review_clips` builds the in-memory manifest the web UI reads, and the REVIEW gate waits for `approved_final_take_id` on every shot. Then `assemble_approved_takes` resolves those approved takes' paths in `_build_scene_packages` (`cinema_pipeline.py:709`) and `_assemble_final` (`cinema_pipeline.py:1323`) produces `exports/final_cinema.mp4`.
 
 A key correctness detail in the final hand-off: **the audio source for assembly depends on which video engine won.** `_build_scene_packages` detects whether every approved take in a scene has `metadata.audio_embedded=True` (Veo/Omnihuman embed dialogue; Kling image2video does not). If all embedded, standalone TTS is suppressed to avoid double-voice; if mixed, TTS is kept for the non-embedded shots and `_assemble_final` binds the voice filtergraph label to the right input index dynamically (the C-B2 fix).
 
@@ -1477,7 +1477,7 @@ The **default cascade order** (when no custom `video_fallbacks`) is verified as:
 Three cascade caveats engineers must know:
 
 - **Native-audio is only guaranteed on the primary attempt.** When the dialogue override nulls `video_fallbacks` (native mode; the overlay default keeps the template list), if `VEO_NATIVE` itself fails, `try_next_api` falls through to the **default** list (which contains non-audio engines). The downstream guarantee is instead enforced by the **mandatory F1b lipsync pass** (`cinema/shots/controller.py:1528`): after the take is downloaded, if `has_dialogue and not audio_embedded`, the controller runs `generate_lip_sync_video` and writes `lipsync_score`.
-- **`VEO_NATIVE` has no quota-block guard.** The `_VEO_QUOTA_EXHAUSTED_UNTIL` 30-min cooldown TTL is set/checked only for the **FAL-proxy `VEO`** branch (`phase_c_ffmpeg.py:502`); native-Veo quota errors are caught generically and cascade with no cooldown.
+- **`VEO_NATIVE` has no quota-block guard.** The `_VEO_QUOTA_EXHAUSTED_UNTIL` 30-min cooldown TTL is set/checked only for the **FAL-proxy `VEO`** branch (`phase_c_ffmpeg.py:502-504`); native-Veo quota errors are caught generically and cascade with no cooldown.
 - **Some engine params are accepted but silently dropped.** Veo's `reference_images`/`multi_angle_refs` (Bug #4 — Vertex rejects image+reference_images together) and `driving_video_path` (SDK `video=`/`image=` mutual exclusivity) are accepted for interface stability but have no effect; only **Sora** fully wires driving-video conditioning (`sora_native.py:77`).
 
 The same `try_next_api`-style fault tolerance recurs in the **image** path (ComfyUI+PuLID → FAL FLUX Kontext → FLUX-Pro → Schnell → Pollinations, `phase_c_assembly.py:415`), the **lipsync** path (SyncV3 → MuseTalk → LatentSync → SyncV2 for overlay; Hedra → Kling → Omnihuman → Aurora for generation, `lip_sync.py`), and the **TTS/BGM** paths. The pattern — ordered list, skip-on-failure, best-of-failed recovery, provenance written to a cascade dict — is the project's house style for any external dependency.
