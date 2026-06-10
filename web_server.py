@@ -785,6 +785,12 @@ def api_train_lora(pid, cid):
                         # doesn't apply to the re-trained-but-unvalidated LoRA — keep
                         # char_lora_strengths and char_lora_paths in lockstep.
                         settings.get("char_lora_strengths", {}).pop(cid, None)
+                    if result.get("trigger_token"):
+                        settings.setdefault("char_lora_triggers", {})[cid] = result["trigger_token"]
+                    else:
+                        # lockstep with strengths: a re-trained LoRA without a
+                        # known trigger must not inherit a stale token.
+                        settings.get("char_lora_triggers", {}).pop(cid, None)
                     return MutationResult(True, save=True)
                 try:
                     mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT)

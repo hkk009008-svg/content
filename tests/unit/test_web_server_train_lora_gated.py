@@ -340,3 +340,89 @@ def test_skip_retrain_pops_stale_strength(client):
         f"stale char_lora_strengths[{_CID!r}] must be popped on skip-retrain; "
         f"got {settings.get('char_lora_strengths')!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — char_lora_triggers persistence (spec §3(b) prerequisite)
+# ---------------------------------------------------------------------------
+
+def test_accept_with_trigger_writes_trigger(client):
+    """
+    A result carrying trigger_token="TOKx" lands in
+    global_settings.char_lora_triggers[cid] (in lockstep with paths/strengths).
+    """
+    project = _make_project()
+
+    def fake_gated(project_dir, char, *, config_overrides=None):
+        return {
+            "success": True,
+            "lora_path": "/l/c1.safetensors",
+            "best_strength": 0.55,
+            "rejected": False,
+            "quality_warning": False,
+            "quality_score": 0.74,
+            "skipped": False,
+            "attempts": 1,
+            "trigger_token": "TOKx",
+        }
+
+    def fake_mutate(pid, mutator_fn, timeout=None):
+        return mutator_fn(project)
+
+    with (
+        patch("web_server.load_project", return_value=project),
+        patch("web_server.get_project_dir", return_value="/proj/t6"),
+        patch("web_server.mutate_project", side_effect=fake_mutate),
+        patch("prep.lora_quality.train_character_lora_gated", side_effect=fake_gated),
+    ):
+        resp = _post_train(client)
+        assert resp.status_code == 202, resp.data
+        _wait_for_runner()
+
+    settings = project.get("global_settings", {})
+    triggers = settings.get("char_lora_triggers", {})
+    assert triggers.get(_CID) == "TOKx", (
+        f"char_lora_triggers[{_CID!r}] expected 'TOKx'; settings={settings!r}"
+    )
+
+
+def test_accept_without_trigger_pops_stale_trigger(client):
+    """
+    A result WITHOUT trigger_token must pop any stale char_lora_triggers[cid]
+    entry — lockstep with the strengths pattern.
+    """
+    project = _make_project()
+    # Pre-seed a stale trigger from an earlier train
+    project["global_settings"]["char_lora_triggers"] = {_CID: "TOKold"}
+
+    def fake_gated(project_dir, char, *, config_overrides=None):
+        return {
+            "success": True,
+            "lora_path": "/l/c2.safetensors",
+            "best_strength": 0.60,
+            "rejected": False,
+            "quality_warning": False,
+            "quality_score": 0.80,
+            "skipped": False,
+            "attempts": 1,
+            # No trigger_token key
+        }
+
+    def fake_mutate(pid, mutator_fn, timeout=None):
+        return mutator_fn(project)
+
+    with (
+        patch("web_server.load_project", return_value=project),
+        patch("web_server.get_project_dir", return_value="/proj/t6"),
+        patch("web_server.mutate_project", side_effect=fake_mutate),
+        patch("prep.lora_quality.train_character_lora_gated", side_effect=fake_gated),
+    ):
+        resp = _post_train(client)
+        assert resp.status_code == 202, resp.data
+        _wait_for_runner()
+
+    settings = project.get("global_settings", {})
+    assert _CID not in settings.get("char_lora_triggers", {}), (
+        f"stale char_lora_triggers[{_CID!r}] must be popped when result has no trigger_token; "
+        f"got {settings.get('char_lora_triggers')!r}"
+    )
