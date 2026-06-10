@@ -100,6 +100,26 @@ def main() -> int:
             )
             return 1
 
+    # PROGRAM-MANUAL anchor-drift WARN (never a hard-fail): the ungated manual
+    # decays at code-churn rate (STRATEGIC_REVIEW-2026-06-10 NF-5 / P2-2 —
+    # warn-in-smoke + fix-on-touch). The hard gate above stays
+    # ARCHITECTURE.md-only by design. Advisory kinds (ambiguous_path etc.)
+    # are excluded — they are exit-neutral in the CLI too.
+    _manual_drifts, _ = _cdc._split_advisories(
+        _cdc.run(["docs/PROGRAM-MANUAL.md"], _repo_root)
+    )
+    if _manual_drifts:
+        _mn = len(_manual_drifts)
+        print(
+            f"WARNING: {_mn} doc-anchor drift(s) in docs/PROGRAM-MANUAL.md "
+            f"(advisory; fix-on-touch: .venv/bin/python "
+            f"scripts/check_doc_claims.py --fix docs/PROGRAM-MANUAL.md)"
+        )
+        for _d in _manual_drifts[:5]:
+            print(f"  [{_d.kind}] {_d.target_file}:{_d.target_line} — {_d.message}")
+        if _mn > 5:
+            print(f"  ... and {_mn - 5} more")
+
     # Manifest drift WARN (never a hard-fail — manifest is not auto-fixable).
     _manifest_drifts = _cdc.check_manifest(
         _repo_root / "docs" / "pipeline_status.toml", _repo_root
