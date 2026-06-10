@@ -7,7 +7,8 @@ registered strength 0.55, TOKwoman trigger prepended via _assemble_max_prompt.
 PRE-FLIGHT aborts if the LoRA is not yet in the pod's LoraLoader options
 (Phase 1 placement not done).
 
-Run: .venv/bin/python scripts/_max_lora_live_check.py
+Run: PYTHONPATH=. .venv/bin/python scripts/_max_lora_live_check.py
+(repo root on the path — quality_max lives at root, not scripts/)
 """
 import copy
 import time
