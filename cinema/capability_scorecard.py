@@ -159,6 +159,14 @@ def build_capability_scorecard(project: dict, *, project_dir: str) -> dict:
 
         per_shot.append({"shot_id": shot.get("id"), "identity": idv, "coherence": cov,
                          "motion": mov, "lipsync": liv, "engine": engine})
+        kf_md = (kf or {}).get("metadata", {})
+        if kf_md.get("identity_strategy"):
+            strat = kf_md["identity_strategy"]
+            per_shot[-1]["identity_multi"] = {
+                "mechanism": strat.get("mechanism_tag"),
+                "per_char": kf_md.get("identity_per_char", {}),
+                "unconditioned": strat.get("unconditioned_chars", []),
+            }
         provenance.append({"shot_id": shot.get("id"), "engine": engine,
                            "attempts": attempts, "fallback": bool(cas.get("fallback"))})
 

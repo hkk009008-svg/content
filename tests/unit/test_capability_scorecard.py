@@ -113,6 +113,46 @@ class TestGateRollup:
         assert self._gates(shots)["image"]["approved"] == 2
 
 
+class TestIdentityMulti:
+    """Scorecard per_shot entry surfaces identity_strategy as identity_multi."""
+
+    @staticmethod
+    def _project_with_shot(kf_metadata: dict) -> dict:
+        """Minimal project with one shot whose approved keyframe take has kf_metadata."""
+        shot = {
+            "id": "s1_01",
+            "keyframe_takes": [{"id": "k1", "kind": "keyframe", "metadata": kf_metadata}],
+            "motion_takes": [],
+            "approved_keyframe_take_id": "k1",
+        }
+        return {"id": "p1", "name": "x", "characters": [],
+                "scenes": [{"shots": [shot]}], "global_settings": {}}
+
+    def test_per_shot_identity_multi_surfaces_promise_and_scores(self):
+        proj = self._project_with_shot({
+            "identity_score": 0.8,
+            "identity_per_char": {"char_a": 0.8, "char_b": 0.55},
+            "identity_strategy": {
+                "mechanism_tag": "KONTEXT_MULTI_CHAR",
+                "primary_char_id": "char_a",
+                "conditioned_chars": [{"char_id": "char_a"}, {"char_id": "char_b"}],
+                "unconditioned_chars": ["char_c"],
+            },
+        })
+        card = build_capability_scorecard(proj, project_dir="/tmp/x")
+        entry = card["per_shot"][0]
+        assert entry["identity_multi"] == {
+            "mechanism": "KONTEXT_MULTI_CHAR",
+            "per_char": {"char_a": 0.8, "char_b": 0.55},
+            "unconditioned": ["char_c"],
+        }
+
+    def test_per_shot_identity_multi_absent_for_legacy_takes(self):
+        proj = self._project_with_shot({"identity_score": 0.8})
+        card = build_capability_scorecard(proj, project_dir="/tmp/x")
+        assert "identity_multi" not in card["per_shot"][0]
+
+
 class TestScorecardEndpoint:
     def _client(self):
         from web_server import app
