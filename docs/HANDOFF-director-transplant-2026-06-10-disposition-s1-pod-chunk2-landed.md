@@ -6,9 +6,9 @@ operator-verified FAITHFUL).
 
 ## Ground truth (verified at wrap, 2026-06-10T18:30Z)
 
-- **HEAD == `dec8753`** (Task 6 — controller wire-up; the last commit of this
-  session). **origin/main == `38e54ac`** — local ahead ~20 commits, **push
-  USER-gated as always.** Working tree + per-seat index clean at wrap
+- **HEAD == `cde4208`** (this wrap commit; Task 6 = `dec8753` immediately
+  below it). **PUSHED post-wrap on user "push": origin/main == `cde4208`,
+  CI run `27297720785` GREEN.** Working tree + per-seat index clean
   (`git read-tree HEAD` run solo after the operator went offline).
 - Suite: **2042 passed / 0 failed / 2 skipped at `dec8753`** (Task-6
   implementer's full run; their smoke OK; my own smoke OK again at wrap).
