@@ -24,6 +24,10 @@ Kontext multi-char branch (Tasks 7–8); everything else lands regardless of S1'
 
 **Spec:** docs/SPEC-P1-1-multichar-generation-identity-2026-06-10.md (REVIEWED). Read
 §1–§3 before starting. Citations below were verified at HEAD `fa3bf8c`, 2026-06-10.
+**Lane-V disposition folded 2026-06-11** (operator report 2026-06-10T16:25:00Z,
+commit `7878d62`): V-5 `multi_angle_refs` carried through `CharIdentitySpec`
+(Tasks 4/5/6), V-2 derived `mechanism_actually_used` (Task 6), V-3/V-4 S1
+criteria (Task 2), V-6 provenance-test step (Task 8), M-3/M-4/M-5 corrections.
 
 **Session discipline (repo-specific, read first):**
 - The operator seat may be LIVE in the same worktree. Before every commit:
@@ -33,8 +37,10 @@ Kontext multi-char branch (Tasks 7–8); everything else lands regardless of S1'
   GIT_INDEX_FILE breaks temp-repo tests otherwise).
 - If `git status` shows changes you didn't make: STOP, run `git log --oneline -3`
   and check `coordination/presence/` before attributing or proceeding.
-- Suite baseline at plan time: **2020 passed / 0 failed**; smoke
-  `.venv/bin/python scripts/ci_smoke.py` → OK. Both must hold after every task.
+- Suite baseline: **2021 passed / 0 failed / 2 skipped** (operator full run at
+  `5d7353e`; the original "2020" here predated the pin test added in `fa3bf8c` —
+  Lane-V M-3); smoke `.venv/bin/python scripts/ci_smoke.py` → OK. Both must hold
+  after every task.
 
 ---
 
@@ -50,10 +56,11 @@ exact prompt FIRST so every later task is checked against it.
 - Reference (do not modify): `phase_c_assembly.py:439-546` (`_fal_flux_fallback`),
   `tests/unit/test_phase_c_assembly_provenance.py` (existing monkeypatch pattern —
   mirror its fixture approach per R-BRIEF; if its pattern differs from the code below,
-  the sibling file wins. Known divergence at plan time: the sibling injects a
-  MagicMock via `monkeypatch.setitem(sys.modules, "fal_client", …)` and uses
-  `dataclasses.replace(pca.settings, fal_key=…)` — both that pattern and the code
-  below work; pick the sibling's).
+  the sibling file wins. The settings patch below already uses the sibling's
+  `dataclasses.replace` pattern (Lane-V M-4). Remaining known divergence: the
+  sibling injects a MagicMock via `monkeypatch.setitem(sys.modules, "fal_client",
+  …)` while the code below monkeypatches the real `fal_client` module's
+  attributes — both work; pick the sibling's if they conflict).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -64,8 +71,8 @@ P1-1 slice 1 adds a multi-character branch to _fal_flux_fallback behind an
 early-return. This snapshot pins the single-char prompt so the branch cannot
 drift it by a byte. Captured from phase_c_assembly.py:493-529 at fa3bf8c.
 """
+import dataclasses
 import os
-from types import SimpleNamespace
 
 import pytest
 
@@ -92,7 +99,8 @@ def fal_capture(monkeypatch, tmp_path):
         "urllib.request.urlretrieve", lambda url, fn: open(fn, "wb").close()
     )
     monkeypatch.setattr(
-        phase_c_assembly, "settings", SimpleNamespace(fal_key="test-key")
+        phase_c_assembly, "settings",
+        dataclasses.replace(phase_c_assembly.settings, fal_key="test-key"),
     )
     return captured
 
@@ -165,22 +173,28 @@ git commit -m "test(p1-1): golden snapshot of the single-char Kontext prompt" --
 ```python
 """S1 spike — does fal-ai/flux-pro/kontext/max/multi separate two identities?
 
-Four calls sharing one scene (spec §6):
+Five calls sharing one scene (spec §6; criteria revised per Lane-V V-3/V-4):
   1. baseline : primary face only, today's single-char prompt shape
   2. control  : NO secondary ref — both characters text-described (the floor)
-  3. multi-a  : both faces in image_urls, @Image1/@Image2 PRESERVE blocks
-  4. multi-b  : repeat of 3 (variance check; Kontext has no seed parameter)
+  3-5. multi_a/b/c : both faces in image_urls, @Image1/@Image2 PRESERVE blocks
+       (N=3 — this tier is unseeded; N=1-2 can NO-GO on output variance alone)
 
 Scores every output against both refs with the shared GhostFaceNet validator and
-prints the go/no-go verdict:
+prints the verdict. Per-arm GO:
   GO     : secondary >= control_secondary + 0.10
-           AND secondary >= lenient threshold for --shot-type
+           AND secondary >= 0.45 (S1_SECONDARY_FLOOR — the bottom of spec
+           §3(a)'s projected 0.45-0.60 band; the per-shot-type lenient
+           threshold is printed as ADVISORY context, never gated on — V-3)
            AND |primary - baseline_primary| <= 0.05
-  NO-GO  : blend signal — both faces in the 0.40-0.50 band — or any GO clause fails.
+           AND no blend signal (both faces of the arm in the 0.40-0.50 band;
+           blend deliberately OVERRIDES the floor in the [0.45, 0.50) overlap —
+           both-faces-in-band means the lift is an averaging artifact)
+Overall S1 verdict = MAJORITY of the three multi arms (>= 2/3 GO).
 
-DRY-RUN by default (prints the four payloads, no spend). --live costs ~4 x $0.04
-(flat-rate assumption unverified — read the real price off the FAL dashboard while
-the calls are visible there, spec §4).
+DRY-RUN by default (prints the five payloads, no spend). --live costs ~5 x $0.04
+~= $0.20 (flat-rate assumption unverified; the control call rides
+fal-ai/flux-pro/v1.1-ultra whose price may differ — read the real per-call
+prices off the FAL dashboard while the calls are visible there, spec §4).
 """
 import argparse
 import json
@@ -191,6 +205,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cinema.fal_limits import FAL_TIMEOUT_IMAGE_S
 from identity.types import get_threshold_for_shot
+
+# V-3: absolute go-floor — bottom of spec §3(a)'s projected band (numerically the
+# wide-shot lenient threshold, identity/types.py:98). The --shot-type lenient
+# threshold sits INSIDE the projected band and would false-veto a real lift.
+S1_SECONDARY_FLOOR = 0.45
 
 
 def build_prompts(scene: str, anchor_a: str, anchor_b: str) -> dict:
@@ -242,7 +261,7 @@ def main() -> int:
                     choices=["portrait", "medium", "wide", "action"])
     ap.add_argument("--outdir", default="logs/s1_kontext_multichar")
     ap.add_argument("--live", action="store_true",
-                    help="actually call FAL (~4 x $0.04). Default: dry-run.")
+                    help="actually call FAL (~5 x $0.04 ~= $0.20). Default: dry-run.")
     args = ap.parse_args()
 
     prompts = build_prompts(args.scene, args.anchor_a, args.anchor_b)
@@ -251,12 +270,13 @@ def main() -> int:
         ("control", prompts["control"], []),
         ("multi_a", prompts["multi"], [args.char_a, args.char_b]),
         ("multi_b", prompts["multi"], [args.char_a, args.char_b]),
+        ("multi_c", prompts["multi"], [args.char_a, args.char_b]),
     ]
 
     if not args.live:
         for name, prompt, refs in calls:
             print(f"--- {name} (refs: {len(refs)}) ---\n{prompt}\n")
-        print("DRY RUN — re-run with --live to spend (~$0.16).")
+        print("DRY RUN — re-run with --live to spend (~$0.20).")
         return 0
 
     import fal_client
@@ -293,18 +313,23 @@ def main() -> int:
     base_a = results["baseline"]["score_a"]
     ctrl_b = results["control"]["score_b"]
     verdicts = []
-    for name in ("multi_a", "multi_b"):
+    for name in ("multi_a", "multi_b", "multi_c"):
         a, b = results[name]["score_a"], results[name]["score_b"]
         blend = 0.40 <= a <= 0.50 and 0.40 <= b <= 0.50
-        go = (b >= ctrl_b + 0.10) and (b >= lenient) and (abs(a - base_a) <= 0.05) \
-            and not blend
+        go = (b >= ctrl_b + 0.10) and (b >= S1_SECONDARY_FLOOR) \
+            and (abs(a - base_a) <= 0.05) and not blend
         verdicts.append(go)
         print(f"{name}: {'GO' if go else 'NO-GO'}"
               f" (b vs control+0.10: {b:.3f} vs {ctrl_b + 0.10:.3f};"
-              f" lenient[{args.shot_type}]={lenient}; |a-base|={abs(a - base_a):.3f};"
-              f" blend={blend})")
+              f" floor={S1_SECONDARY_FLOOR};"
+              f" advisory lenient[{args.shot_type}]={lenient} — not gated;"
+              f" |a-base|={abs(a - base_a):.3f}; blend={blend})")
     print(json.dumps(results, indent=1))
-    print("S1 VERDICT:", "GO" if all(verdicts) else "NO-GO",
+    spread = [round(results[n]["score_b"], 3)
+              for n in ("multi_a", "multi_b", "multi_c")]
+    print("S1 VERDICT:", "GO" if sum(verdicts) >= 2 else "NO-GO",
+          f"(majority of 3 arms; secondary spread {spread} — V-4: N=3 has power"
+          " for separation-vs-blend, not fine threshold effects)",
           "— record in spec §6 + ARCHITECTURE-adjacent ADR per spec AC5")
     return 0
 
@@ -317,7 +342,8 @@ if __name__ == "__main__":
 
 Run: `.venv/bin/python scripts/_test_kontext_multi_char.py --char-a logs/s1_a.jpg --char-b logs/s1_b.jpg`
 (any two existing face image paths work for the dry-run; it only prints prompts)
-Expected: four prompt payloads printed; exits 0; "DRY RUN" line.
+Expected: five prompt payloads printed (multi_a/b/c carry the same prompt string —
+N=3 runs of one design); exits 0; "DRY RUN" line.
 
 - [ ] **Step 3: Commit the script (pathspec)**
 
@@ -326,7 +352,7 @@ git add scripts/_test_kontext_multi_char.py
 git commit -m "feat(p1-1): S1 spike script — Kontext multi-identity go/no-go (dry-run default)" -- scripts/_test_kontext_multi_char.py
 ```
 
-- [ ] **Step 4: LIVE run — STOP: user-gated spend (~$0.16)**
+- [ ] **Step 4: LIVE run — STOP: user-gated spend (~$0.20)**
 
 Confirm the user has approved S1 (spec §10 Q1 / the Session-4 go). Pick two refs of
 DIFFERENT people: char A = Aria's canonical from project `cfd3f0967eb3`; char B = any
@@ -445,7 +471,8 @@ def test_to_metadata_dict_is_json_safe_and_complete():
             CharIdentitySpec(char_id="char_a", reference="/r/a.jpg",
                              identity_anchor="anchor a", fidelity="reference"),
             CharIdentitySpec(char_id="char_b", reference="/r/b.jpg",
-                             identity_anchor="anchor b", fidelity="reference"),
+                             identity_anchor="anchor b", fidelity="reference",
+                             multi_angle_refs=("/r/b1.jpg",)),
         ],
         unconditioned_chars=["char_c"],
     )
@@ -455,6 +482,10 @@ def test_to_metadata_dict_is_json_safe_and_complete():
     assert md["mechanism_tag"] == "KONTEXT_MULTI_CHAR"
     assert [c["char_id"] for c in md["conditioned_chars"]] == ["char_a", "char_b"]
     assert md["unconditioned_chars"] == ["char_c"]
+    # V-5 pin: multi_angle_refs must survive the to_dict chain — Task 7's
+    # allocator reads it off these dicts via Task 6's kwarg; without it,
+    # secondaries can never fill their allocated slots.
+    assert md["conditioned_chars"][1]["multi_angle_refs"] == ["/r/b1.jpg"]
 ```
 
 - [ ] **Step 2: Run — expect FAIL** (ModuleNotFoundError)
@@ -485,10 +516,14 @@ class CharIdentitySpec:
     reference: str
     identity_anchor: str = ""
     fidelity: str = "reference"  # slice 1: reference | pulid; slice 2 adds lora
+    # V-5: angle refs ride the spec through to_dict() -> generate_ai_broll ->
+    # the slot allocator; a tuple (not list) keeps the frozen dataclass hashable.
+    multi_angle_refs: tuple = ()
 
     def to_dict(self) -> dict:
         return {"char_id": self.char_id, "reference": self.reference,
-                "identity_anchor": self.identity_anchor, "fidelity": self.fidelity}
+                "identity_anchor": self.identity_anchor, "fidelity": self.fidelity,
+                "multi_angle_refs": list(self.multi_angle_refs)}
 
 
 @dataclass
@@ -535,7 +570,8 @@ SETTINGS_NO_LORA = {"quality_tier": "production"}
 CC_TWO_REGISTERED = {
     "primary_reference": "/r/a.jpg", "identity_anchor": "anchor a",
     "secondary_chars": [{"char_id": "char_b", "reference": "/r/b.jpg",
-                         "multi_angle_refs": [], "identity_anchor": "anchor b"}],
+                         "multi_angle_refs": ["/r/b1.jpg"],
+                         "identity_anchor": "anchor b"}],
 }
 CC_PRIMARY_ONLY = {"primary_reference": "/r/a.jpg", "identity_anchor": "anchor a",
                    "secondary_chars": []}
@@ -566,6 +602,9 @@ def test_two_char_production_with_refs_is_kontext_multi():
                                    SETTINGS_NO_LORA, CC_TWO_REGISTERED)
     assert s.mechanism_tag == "KONTEXT_MULTI_CHAR"
     assert [c.char_id for c in s.conditioned_chars] == ["char_a", "char_b"]
+    # V-5: the router must carry the secondary's angle refs into the spec —
+    # they feed the slot allocator downstream.
+    assert s.conditioned_chars[1].multi_angle_refs == ("/r/b1.jpg",)
 
 
 def test_two_char_max_tier_is_max_primary_only_with_secondary_unconditioned():
@@ -639,6 +678,7 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
     conditioned = [CharIdentitySpec(
         char_id=primary_char_id, reference=primary_ref,
         identity_anchor=cc.get("identity_anchor", ""),
+        multi_angle_refs=tuple(cc.get("multi_angle_refs") or ()),
         fidelity="pulid" if quality_tier == "max" else "reference",
     )]
     conditioned_ids = {primary_char_id}
@@ -651,6 +691,10 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
             conditioned.append(CharIdentitySpec(
                 char_id=entry["char_id"], reference=entry["reference"],
                 identity_anchor=entry.get("identity_anchor", ""),
+                # V-5: without this, the Task-7 allocator's
+                # entry.get("multi_angle_refs") is ALWAYS empty via this path
+                # and secondaries can never fill their 2 slots.
+                multi_angle_refs=tuple(entry.get("multi_angle_refs") or ()),
                 fidelity="reference",
             ))
             conditioned_ids.add(entry["char_id"])
@@ -736,8 +780,9 @@ Three requirements the sibling's pattern makes easy to miss (each crashes the te
 if skipped — verified against the real code paths):
 1. `generate_keyframe_take` → `_mutate_shot(save=True)` → `mutate_project` does
    DISK I/O under `PROJECTS_DIR`. Note the sibling's `_project_on_disk` is a plain
-   context manager taking a `str` dir (test_cross_controller.py:442), NOT a pytest
-   fixture — in a pytest-fixture file the simpler route is a direct
+   context manager taking `(tmpdir, project)` — two params
+   (test_cross_controller.py:441-442; characterization corrected per Lane-V M-5),
+   NOT a pytest fixture — in a pytest-fixture file the simpler route is a direct
    `monkeypatch.setattr(domain.project_manager, "PROJECTS_DIR", str(tmp_path /
    "projects"))` with the project JSON pre-written there. Pick that.
 2. `_mutate_shot` runs `Project.model_validate(self.project)` first — copy the
@@ -773,6 +818,9 @@ def test_two_char_take_promises_kontext_multi_and_forwards_refs(
     assert md["mechanism_tag"] == "KONTEXT_MULTI_CHAR"
     sent = captured["kwargs"]["secondary_char_refs"]
     assert [c["char_id"] for c in sent] == ["char_b"]
+    assert "multi_angle_refs" in sent[0]   # V-5: field survives the to_dict chain
+    # V-2: derived actual — multi-char emission on a successful Kontext call
+    assert take["metadata"]["mechanism_actually_used"] == "FLUX_KONTEXT_MULTI_CHAR"
 ```
 
 - [ ] **Step 2: Run — expect FAIL** (no `identity_strategy` key)
@@ -806,7 +854,15 @@ fallback — wiring lands behind the S1 gate"), and forward it to nothing yet.
 After the result returns (:663):
 
 ```python
-        take["metadata"]["mechanism_actually_used"] = result.api_name if result else None
+        actual = result.api_name if result else None
+        if actual == "FLUX_KONTEXT" and strategy.secondary_specs:
+            # V-2 / spec §3(d): api_name is backend-granular — a successful
+            # Kontext call looks identical for multi-char and primary-only, so
+            # derive the actual from api_name x what the strategy emitted.
+            # This records EMISSION, not server honoring; S1 + per-char
+            # validation cover the latter.
+            actual = "FLUX_KONTEXT_MULTI_CHAR"
+        take["metadata"]["mechanism_actually_used"] = actual
 ```
 
 (Place it after the existing `if not result` early-return so the failure path is
@@ -932,8 +988,9 @@ def _allocate_ref_slots(primary_refs, secondary_chars, cap=6):
 ```
 
 (This is the FINAL allocator — fixed shares 3/2/1, never more than 6 with the
-router's 2-secondary cap. The spec's §3(a) "primary keeps any remainder" phrasing
-is superseded by this rule; Task 12 syncs that wording — truth flows code→doc.)
+router's 2-secondary cap. Spec §3(a) now states this same fixed-share rule —
+the wording was synced at the 2026-06-11 Lane-V disposition (V-7), so no Task-12
+sync remains for it.)
 
 ```python
 def _build_multichar_kontext_prompt(sections, char_blocks):
@@ -988,7 +1045,10 @@ git commit -m "feat(p1-1): Kontext slot allocator + multi-char prompt builder (S
   path untouched; `generate_ai_broll` forwards the kwarg to every
   `_fal_flux_fallback` call site (`grep -n '_fal_flux_fallback(' phase_c_assembly.py`
   — update ALL hits; while in the signature, audit the `ctx` note from spec §3(a))
-- Test: `tests/unit/test_kontext_multichar.py` + the Task-1 snapshot must stay green
+- Test: `tests/unit/test_kontext_multichar.py` + the Task-1 snapshot must stay
+  green; EXTEND `tests/unit/test_phase_c_assembly_provenance.py` (spec AC6 —
+  Lane-V V-6: this extension was named by the spec but never implemented by any
+  task; it lands here, in the same task that touches the signature)
 
 - [ ] **Step 1: Write the failing test.** Pytest does NOT resolve fixtures across
 test modules: either move `fal_capture` from Task 1's file into
@@ -1021,6 +1081,21 @@ def test_empty_secondary_refs_is_byte_identical_to_single_char(fal_capture, tmp_
     # …same body as the Task-1 snapshot test, with secondary_char_refs=[] —
     # asserts the SAME golden string. Import the golden constant from the
     # snapshot test module rather than duplicating it.
+```
+
+And in `tests/unit/test_phase_c_assembly_provenance.py` (spec AC6 / Lane-V V-6 —
+mirror that file's existing fixture pattern, R-BRIEF):
+
+```python
+def test_kontext_failure_with_secondaries_falls_back_with_original_prompt(...):
+    """V-1 pin: when the Kontext call raises and secondary_char_refs were passed,
+    the FLUX-Pro fallback receives the ORIGINAL prompt — the @ImageN multi-char
+    rewrite must never escape the Kontext try-block (phase_c_assembly.py:557
+    passes `prompt`, not `kontext_prompt`)."""
+    # Arrange: subscribe raises on the 'kontext' endpoint, succeeds on
+    # 'flux-pro/v1.1-ultra'; capture the flux-pro call's arguments.
+    # Assert: captured prompt == the original prompt argument (no "@Image" in it);
+    #         result.api_name == "FLUX_PRO".
 ```
 
 - [ ] **Step 2: Run — expect FAIL** (unexpected kwarg)
@@ -1098,7 +1173,7 @@ update them anyway so the signature stays coherent.
 ```bash
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_kontext_multichar.py tests/unit/test_kontext_prompt_snapshot.py tests/unit/test_phase_c_assembly_provenance.py -q
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/ -q
-git commit -m "feat(p1-1): multi-character Kontext keyframes — secondary refs + @ImageN addressing" -- phase_c_assembly.py tests/unit/test_kontext_multichar.py
+git commit -m "feat(p1-1): multi-character Kontext keyframes — secondary refs + @ImageN addressing" -- phase_c_assembly.py tests/unit/test_kontext_multichar.py tests/unit/test_phase_c_assembly_provenance.py
 ```
 
 ### Task 9: Per-character keyframe validation (`identity_per_char`)
@@ -1118,6 +1193,16 @@ def test_identity_per_char_written_for_conditioned_only(controller_two_chars, ca
     per_char = take["metadata"]["identity_per_char"]
     assert set(per_char) == {"char_a", "char_b"}      # conditioned chars only
     assert take["metadata"]["identity_score"] == per_char["char_a"]  # scalar = primary, unchanged
+
+
+def test_single_char_identity_per_char_pins_scalar_convention(
+        controller_one_char, captured):
+    """INFO-3 pin: a single-char shot gets identity_per_char == {primary: scalar}
+    and the identity_score scalar itself is byte-unchanged."""
+    controller_one_char.generate_keyframe_take("scene_1", "shot_1")
+    take = _latest_keyframe_take(controller_one_char, "shot_1")
+    assert take["metadata"]["identity_per_char"] == \
+        {"char_a": take["metadata"]["identity_score"]}
 ```
 
 - [ ] **Step 2: Run — expect FAIL**
@@ -1286,14 +1371,14 @@ git commit -m "feat(p1-1): register Aria LoRA (manual strength 0.55 + TOKwoman t
 **Files:**
 - Modify: `ARCHITECTURE.md` §8.2 (production-tier cascade — note per-character
   Kontext conditioning + the identity_strategy promise metadata, with file:line
-  anchors), spec §6 (S1 measured scores) and §3(a) (if the implemented slot rule
-  diverged from the spec wording — truth flows code→doc)
+  anchors), spec §6 (S1 measured scores; the §3(a) slot-rule wording was already
+  synced at the 2026-06-11 Lane-V disposition — only re-sync if implementation
+  diverges further)
 - Reference: R-START rule — doc fixes ride the same session as the code
 
 - [ ] **Step 1: Update ARCHITECTURE.md §8.2** with the new data flow (2-4 sentences +
 anchors: `_resolve_identity_strategy`, `secondary_chars`, `_allocate_ref_slots`,
-`identity_per_char`). Also sync spec §3(a)'s "primary keeps any remainder" phrasing
-to the implemented fixed-share rule (Task 7). Run the doc verifier:
+`identity_per_char`). Run the doc verifier:
 
 Run: `.venv/bin/python scripts/check_doc_claims.py` (standalone `__main__` works;
 ci_smoke imports it as a module — either route is fine) — expect zero drifts.
@@ -1302,7 +1387,7 @@ ci_smoke imports it as a module — either route is fine) — expect zero drifts
 
 - [ ] **Step 3: Full suite + smoke one last time**
 
-Run: `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/ -q` → N passed / 0 failed (N ≥ 2020 + new tests)
+Run: `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/ -q` → N passed / 0 failed (N ≥ 2021 + new tests)
 Run: `.venv/bin/python scripts/ci_smoke.py` → OK
 
 - [ ] **Step 4: Commit (pathspec), update the handoff per the session-wrap ritual**

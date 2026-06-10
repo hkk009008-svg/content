@@ -2,7 +2,10 @@
 
 **Status:** REVIEWED (Session 3 of the STRATEGIC_REVIEW-2026-06-10 roadmap; adversarial
 review `wf_a0a0a76a-9ff` — 76 claims checked, 48 findings folded; 1 reviewer finding
-refuted with evidence, noted inline).
+refuted with evidence, noted inline). **Operator cold Lane V folded** (4-lens workflow
+`wf_c29cf61f-259`, report 2026-06-10T16:25:00Z, commit `7878d62`): 7 IMPORTANT +
+5 MINOR + 3 INFO disposed in this revision — V-1/V-3/V-5/INFO-2 re-verified firsthand
+at disposition time.
 **Author:** director seat, 2026-06-10.
 **Inputs:** 7-reader / 4-designer workflow `wf_69d94c15-fa6` (Sonnet subagents per the
 standing user directive) + director firsthand verification of every load-bearing claim
@@ -26,7 +29,7 @@ recommends a sequencing that **deviates from the strategic review's "(b) first w
 LoRAs exist"** — because ground truth invalidated that premise (§2). Recommended:
 
 - **Slice 1 (Session 4, pod-independent):** the identity-strategy router (d) +
-  multi-character Kontext keyframes (a), gated by spike **S1** (~$0.16, no pod),
+  multi-character Kontext keyframes (a), gated by spike **S1** (~$0.20, no pod),
   plus the Aria LoRA registration (§7.3, ~10 min, pod-independent) **in parallel**.
   This upgrades the path that is actually live today (pod terminated → every
   keyframe goes through the FAL fallback) and makes generation *accountable*
@@ -108,10 +111,13 @@ straight to Kontext. Mechanism (a) upgrades the path current output actually use
 
 ### 3(d) — The identity-strategy router + promise metadata (the symmetry layer)
 
-A pure decision function `_resolve_identity_strategy(in_frame, quality_tier,
-settings, project, continuity_config)` in cinema/shots/controller.py, replacing the
-primary-only **asset derivation** at controller.py:544-549 (`in_frame`,
-`primary_char_id`, `char_lora_path`, `char_lora_strength`). `quality_tier` (:539)
+A pure decision function `_resolve_identity_strategy(shot, quality_tier, settings,
+cc)` in cinema/shots/controller.py — `shot` carries `characters_in_frame` +
+`primary_character`; `cc` is the continuity_config dict; signature canon = the
+implementation plan's (Lane-V V-7: an earlier draft listed a `project` param the
+design never uses) — replacing the primary-only **asset derivation** at
+controller.py:544-549 (`in_frame`, `primary_char_id`, `char_lora_path`,
+`char_lora_strength`). `quality_tier` (:539)
 and `style_reference` (:550-551) are inputs TO the resolver, not outputs of it —
 they stay where they are. The router's justification is promise-metadata symmetry,
 not detangling: the controller-side code is already a clean dict read
@@ -134,12 +140,24 @@ in controller.py, the type does not):
   must reproduce today's exact asset bundle.**
 
 Written to `take["metadata"]["identity_strategy"]` BEFORE generation; after the
-result returns, `mechanism_actually_used` is recorded from `result.api_name`
-(the cascade winner can differ from the promise — e.g. Kontext timeout →
-FLUX-Pro no-face-lock). The controller call site at controller.py:643 passes
-`secondary_char_refs=cc.get("secondary_chars")` into `generate_ai_broll` — this
-wire-up is the load-bearing line that makes (a) do anything at runtime; the kwarg
-is None-safe (no-op for single-char shots). Post-generation keyframe validation
+result returns, `mechanism_actually_used` is **derived from `result.api_name` ×
+the strategy** (Lane-V V-2): api_name alone is backend-granular
+(`FLUX_KONTEXT`/`FLUX_PRO`/`QUALITY_MAX`) and cannot distinguish a multi-char
+Kontext call from a primary-only one — record `FLUX_KONTEXT_MULTI_CHAR` when
+api_name is `FLUX_KONTEXT` AND the strategy emitted secondary blocks, else the
+raw api_name. The downgrade direction stays visible either way (the cascade
+winner can differ from the promise — e.g. Kontext timeout → FLUX-Pro
+no-face-lock). Honesty boundary: the derived value records what was EMITTED,
+not what the server honored — a silent server-side `@Image2`-ignore is
+undetectable in metadata by construction; S1 plus per-char validation exist to
+catch exactly that. The controller call site at controller.py:643 passes
+`secondary_char_refs=[c.to_dict() for c in strategy.secondary_specs] or None`
+into `generate_ai_broll` — the POST-resolution, post-cap list (≤2 secondaries,
+the Kontext-tier cap the router applies), NOT the raw `cc.get("secondary_chars")`
+list, which would bypass the cap and could overflow the 6-ref budget on 3+-char
+shots (the allocator does not re-cap). This wire-up is the load-bearing line that
+makes (a) do anything at runtime; the kwarg is None-safe (no-op for single-char
+shots). Post-generation keyframe validation
 loops over `conditioned_chars` (today it scores only the primary,
 controller.py:666-704) and writes `take["metadata"]["identity_per_char"]` — the
 SAME key name the motion take uses (controller.py:1060-1066); keyframe and motion
@@ -176,8 +194,11 @@ characters, addressed per-character in the prompt:
   untouched>` — byte-equivalence with today's prompt is guaranteed by construction,
   not by test assertion (review verdict: a unified 1-to-N code path cannot
   credibly promise byte-identity).
-- For the multi-char branch: a slot allocator partitions the 6-ref budget
-  (primary 3 / secondary-1 2 / secondary-2 1; primary keeps any remainder) and
+- For the multi-char branch: a slot allocator partitions the 6-ref budget with
+  **FIXED shares and CONTIGUOUS slots** (primary 3 / secondary-1 2 /
+  secondary-2 1; primary takes up to 6 only when no secondaries exist; thin
+  secondaries leave the cap unfilled rather than reordering slots — the cap is
+  a ceiling, not a quota; canon = the plan's Task-7 allocator, Lane-V V-7) and
   returns a `slot_map: {char_id: [@ImageN indices]}`. **Hard cap: 2 secondaries**
   — characters beyond the cap are moved to `unconditioned_chars` by the router
   (this is a Kontext-tier limit, recorded in the strategy metadata, not a general
@@ -187,11 +208,16 @@ characters, addressed per-character in the prompt:
 - Existing prompt discipline holds: never pass raw character descriptions to
   Kontext (phase_c_assembly.py:447) — the per-char block uses the short
   `identity_anchor`, not trait dumps.
-- Cascade interaction: on Kontext failure, `_fal_flux_fallback` falls through to
-  FLUX-Pro with the SAME prompt (phase_c_assembly.py:547-568) — `@ImageN` tokens
-  are inert on a non-Kontext model, so secondaries degrade to today's text-only
-  behavior; acceptable, but the implementer should confirm no prompt-parsing side
-  effects from the structured blocks.
+- Cascade interaction (corrected by Lane-V V-1; re-verified at disposition): the
+  Kontext rewrite (`kontext_prompt`) is scoped INSIDE the Kontext try-block — on
+  Kontext failure the FLUX-Pro fallback passes the **ORIGINAL `prompt`**
+  (phase_c_assembly.py:557), so `@ImageN` tokens never reach FLUX-Pro today. The
+  multi-char branch MUST preserve that: never forward the token-bearing
+  multi-char prompt to the fallback (pinned by a provenance test, plan Task 8).
+  Secondaries therefore degrade to today's text-only behavior on fallback —
+  acceptable. Known asymmetry: the fallback passes `seed`
+  (phase_c_assembly.py:560); the Kontext call passes none (the §3(d) retake
+  note).
 
 **Fidelity ceiling:** 2 (max 3) simultaneous characters; secondary identity is
 reference-conditioned only (no LoRA on this tier) — expected GhostFaceNet ~0.45-0.60
@@ -218,7 +244,13 @@ the static JSON and are injected only when secondaries exist, so **no prune-rule
 changes are needed**; LoraLoader is a core node present on any ComfyUI. The
 injector simply does not inject for absent secondaries. (The first-draft "state
 handoff" between injector and pruner is withdrawn — review caught that the call
-order makes it unnecessary AND impossible as drafted.)
+order makes it unnecessary AND impossible as drafted.) Asymmetric case to design
+for in slice 2 (Lane-V INFO-2; verified at disposition): when a SECONDARY has a
+LoRA but the primary has none, there is no node 700 to chain from —
+`_inject_identity` prunes 700 entirely on the LoRA-less-primary path
+(quality_max.py:494) and rewires consumers to the base loaders (100.model←112,
+122/600.clip←11, :495-500) — so node 701 must chain from 112 (model) / 11 (clip)
+directly. Live the moment Aria registers and a pod exists.
 
 - Controller side: collect `secondary_char_loras = [(cid, path, strength), …]` for
   all in-frame chars with a registered LoRA (controller.py:540-549 generalized).
@@ -295,10 +327,10 @@ spike session, 1 regional/polish) — the natural Slice 2/3.
 
 | Item | Estimate | Basis |
 |---|---|---|
-| Kontext multi-char keyframe | $0.04/call | cost_tracker.py:59 `FLUX_KONTEXT` — repo estimate; per-input-image surcharge **unverified**. If FAL bills per ref, today's single-char 6-ref calls are ALSO mispriced against this entry (and the multi-char slot cap of 3 primary refs could even lower single-call cost). S1 reads the real price off the FAL dashboard; update `FLUX_KONTEXT` after S1 regardless of the spike's go/no-go. Multi currently logs under the same key as single (verified: phase_c_assembly.py:546). |
+| Kontext multi-char keyframe | $0.04/call | cost_tracker.py:59 `FLUX_KONTEXT` — repo estimate; per-input-image surcharge **unverified**. If FAL bills per ref, today's single-char 6-ref calls are ALSO mispriced against this entry (and the multi-char slot cap of 3 primary refs could even lower single-call cost). S1 reads the real price off the FAL dashboard; update `FLUX_KONTEXT` after S1 regardless of the spike's go/no-go. Multi logs under the same key as single — the record site is controller.py:744-751, keyed by `result.api_name` (cite corrected per Lane-V M-2; phase_c_assembly.py:546 is where the `FLUX_KONTEXT` name originates, not where cost is logged). |
 | Max-tier multi-LoRA shot | $0.40/shot | cost_tracker.py:63 `QUALITY_MAX`; same pod call, no new billing unit |
 | Max-tier dual-PuLID shot | ~$0.44-0.51/shot | **extrapolation**: QUALITY_MAX $0.40 + 10-27% overhead; N=8 timing unmeasured (the 8.5-min benchmark was N=1) — add `QUALITY_MAX_MULTI` ≈ $0.50 to API_COST_USD when Pass B ships |
-| Spike S1 (@Image2 behavior) | ~$0.08-0.16 | 2-4 Kontext calls @ $0.04 (incl. the single-char baseline + text-only control, §6); lower-bound contingent on flat-rate pricing — the same unverified assumption the row above flags |
+| Spike S1 (@Image2 behavior) | ~$0.20 | 5 calls @ ~$0.04: single-char baseline + 3 multi-char arms on the Kontext endpoint (N=3 variance design per Lane-V V-4, §6) + 1 text-only control on `fal-ai/flux-pro/v1.1-ultra`, whose price may differ; contingent on flat-rate pricing — the same unverified assumption the row above flags |
 | Spike S2/S3 pod session | ~$0.50-1.20 | **assumes 1-4 h total billed pod uptime** (spin-up + development + idle + N=1 runs @ $0.30/hr) — generation cycles alone would be ~$0.36; the range prices the session, not the renders |
 | LoRA training (prereq) | **uninstrumented** | zero API_COST_USD entry / record_api_call anywhere under prep/ (verified) — must be priced before slice 2 makes training routine |
 
@@ -323,19 +355,33 @@ scope.
 
 ## 6. Spikes, with go/no-go criteria
 
-- **S1 — Kontext multi-identity behavior** (gates (a); no pod; ~$0.08-0.16; run
+- **S1 — Kontext multi-identity behavior** (gates (a); no pod; ~$0.20; run
   BEFORE slice-1 implementation commits to the prompt-per-char design). Script
-  (`scripts/_test_kontext_multi_char.py`), four calls sharing one scene prompt:
+  (`scripts/_test_kontext_multi_char.py`), five calls sharing one scene prompt:
   (1) single-char baseline (primary only — today's shape); (2) **text-only
   control** (both characters described, no secondary ref) to measure the floor the
-  mechanism must beat; (3-4) two-char calls with both faces in `image_urls` +
-  `@Image1`/`@Image2` blocks. Score every output face with the shared GhostFaceNet
-  validator. **Go:** secondary ≥ (text-only control + 0.10) AND ≥ the lenient
-  threshold for the test shot type (identity/types.py:95-101), AND primary within
-  0.05 of its single-char baseline. **Blend signal = no-go:** both faces scoring
-  in the 0.40-0.50 band (faces averaged rather than separated). On no-go, (a)
-  reduces to interleaved-refs-without-addressing; re-scope slice 1 to router (d) +
-  per-char validation only, and record the finding. Also read the actual
+  mechanism must beat; (3-5) **three identical two-char calls** with both faces in
+  `image_urls` + `@Image1`/`@Image2` blocks — N=3 on the multi arms because this
+  tier is unseeded (§3(d) retake note) and N=1-2 can NO-GO on output variance
+  alone (Lane-V V-4); the verdict is per-arm, decided by **majority (≥2/3)**.
+  Score every output face with the shared GhostFaceNet validator. **Go (per
+  arm):** secondary ≥ (text-only control + 0.10) AND secondary ≥ **0.45** — the
+  absolute floor at the bottom of §3(a)'s projected 0.45-0.60 band (numerically
+  the wide-shot lenient threshold, identity/types.py:98). The per-shot-type
+  lenient threshold (0.55 for medium, :97) sits INSIDE the projected band and
+  would false-veto a real reference-grade lift (Lane-V V-3), so it is recorded
+  as ADVISORY context with the result, not gated on — slice 2 is what raises
+  the fidelity ceiling to production thresholds. AND primary within 0.05 of its
+  single-char baseline. **Blend signal = no-go:** both faces of the same arm
+  scoring in the 0.40-0.50 band (faces averaged rather than separated). The
+  blend check deliberately OVERRIDES the floor in the [0.45, 0.50) overlap
+  zone: a secondary there is GO only if the primary sits outside the blend
+  band — when both faces land in it, the apparent lift is an averaging
+  artifact, not identity transfer. **Power
+  limit, acknowledged (V-4):** N=3 distinguishes separation-vs-blend, not fine
+  threshold effects — record the per-arm spread alongside the verdict. On no-go,
+  (a) reduces to interleaved-refs-without-addressing; re-scope slice 1 to router
+  (d) + per-char validation only, and record the finding. Also read the actual
   multi-call price off the FAL dashboard while there.
 - **S2 — dual-PuLID VRAM + composition** (gates (c) Pass B; pod). Measure peak
   VRAM of the current single-char N=8+SUPIR run first (never measured), then inject
@@ -350,7 +396,7 @@ scope.
 
 **7.1 Slice 1 (Session 4): (d) + (a), S1 first, §7.3 in parallel.** Rationale: it
 conditions the tier that generates every keyframe TODAY (pod down), needs no spend
-decision beyond ~$0.16, establishes the promise/accountability schema all later
+decision beyond ~$0.20, establishes the promise/accountability schema all later
 mechanisms reuse, and is the only slice whose acceptance can be demonstrated
 end-to-end this week. ~2 sessions including S1.
 
@@ -372,8 +418,9 @@ spin-up cost).
 **7.3 Prerequisite, folded into slice 1 (~10 min, pod-independent):** register the
 existing Aria LoRA — `logs/char_lora_fal_v2.safetensors` → `char_lora_paths` via
 the established mutate shape (web_server.py:779-787). Two corrections from review:
-(i) **no machine-readable validated strength exists** — the v2 sweep in
-`logs/_test_v2_sweep.log` covered only {0.55, 0.65, 0.70}, never the full
+(i) **no machine-readable validated strength exists** — the v2 sweep covered only
+{0.55, 0.70} in `logs/_test_v2_sweep.log` plus 0.65 in `logs/_test_v2_s065.log`
+(evidence split across files, Lane-V M-1), never the full
 [0.45, 0.55, 0.7, 1.0] sweep, and no argmax/best_strength was persisted anywhere;
 registration must supply the strength MANUALLY (0.55, the best performer of the
 partial sweep and the 2026-06-02 finding) or `char_lora_strengths` stays unset.
@@ -407,13 +454,17 @@ Slice 1 (per the §15 smoke + suite discipline; all tests green throughout):
    `identity_strategy.mechanism_tag == "KONTEXT_MULTI_CHAR"`.
 3. `identity_per_char` written on keyframe takes for every conditioned char;
    unconditioned chars unscored (no false-fails); scorecard surfaces
-   `identity_multi`.
-4. `mechanism_actually_used` reflects the cascade winner on fallback.
+   `identity_multi`. Single-char shots: `identity_per_char == {primary:
+   identity_score}` — the scalar convention is pinned unchanged (Lane-V INFO-3).
+4. `mechanism_actually_used` reflects the cascade winner on fallback AND
+   distinguishes multi-char from primary-only emission on a successful Kontext
+   call (derived api_name × strategy, §3(d); Lane-V V-2).
 5. S1 result recorded in the spec/ADR with the measured scores, whichever way it
    goes.
 6. Existing tests named for extension: `test_phase_c_assembly_provenance.py`
    (calls `_fal_flux_fallback` with the current signature — extend for the new
-   kwarg), `test_continuity_engine.py` (continuity_config gains
+   kwarg; the extension is an explicit plan Task-8 step covering the V-1
+   fallback-keeps-original-prompt pin, per Lane-V V-6), `test_continuity_engine.py` (continuity_config gains
    `secondary_chars`), `test_capability_scorecard.py` (`identity_multi`), plus new
    strategy-resolver tests over the decision matrix (in_frame × tier × asset
    availability).
@@ -452,14 +503,23 @@ audit across the post-prune wiring), live two-char pod render with both arc scor
 
 ## 10. Questions for the user-principal
 
-1. **Slice-1 go:** approve S1 (~$0.08-0.16 FAL spend) + the (d)+(a) implementation
-   + Aria registration as Session 4? (§7.1; the review's (b)-first order is not
-   executable as written.)
+1. **Slice-1 go:** approve S1 (~$0.20 FAL spend, 5 calls with the N=3 variance
+   design) + the (d)+(a) implementation + Aria registration as Session 4? (§7.1;
+   the review's (b)-first order is not executable as written. S1's go/no-go
+   criteria were revised per operator Lane-V V-3/V-4 BEFORE this ask was put to
+   you — the go-floor now sits at the absolute bottom (0.45) of the projected
+   0.45-0.60 band rather than inside it at 0.55, eliminating the false-veto bias
+   for real lifts in 0.45-0.55, and the verdict is majority-of-3 rather than
+   all-of-1-2.)
 2. **Pod session:** green-light a pod restart for S2/S3 (~$0.50-1.20, assumes 1-4 h
    uptime), ideally bundled with the P1-2 over-cook spike?
 
 ---
-*Last verified: 2026-06-10 (director Session 3). Drafted against HEAD `17ecf59`;
+*Last verified: 2026-06-11 (director disposition session). Drafted against HEAD `17ecf59`;
 review pass `wf_a0a0a76a-9ff` (76 claims checked) folded against HEAD `fa3bf8c`
 (delta from 17ecf59 touches only the doc verifier + its tests, no production code).
+Operator cold Lane V (`wf_c29cf61f-259`, 16:25:00Z report) disposed 2026-06-11:
+V-1..V-7 + M-1/M-2 + INFO-2/INFO-3 folded here, V-5/V-6 + M-3/M-4/M-5 in the plan;
+INFO-1 was already recorded in §9. V-1/V-3/V-5/INFO-2 cites re-verified firsthand
+against HEAD `008787d` at disposition time.
 Implementation plan: docs/superpowers/plans/2026-06-10-p1-1-slice1-router-kontext-multichar.md.*
