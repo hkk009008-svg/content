@@ -286,13 +286,16 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
     """
     from cinema.shots.strategy import (
         IdentityStrategy, CharIdentitySpec,
-        PRIMARY_ONLY, KONTEXT_MULTI_CHAR, MAX_TIER_PRIMARY_ONLY, NO_IDENTITY_ASSET,
+        PRIMARY_ONLY, KONTEXT_MULTI_CHAR, MAX_TIER_PRIMARY_ONLY, MAX_TIER_MULTI_LORA,
+        NO_IDENTITY_ASSET,
     )
     in_frame = shot.get("characters_in_frame") or []
     primary_char_id = shot.get("primary_character") or (in_frame[0] if in_frame else "")
     char_lora_paths = settings.get("char_lora_paths", {}) or {}
     char_lora_path = char_lora_paths.get(primary_char_id) or None
     char_lora_strength = (settings.get("char_lora_strengths", {}) or {}).get(primary_char_id)
+    char_lora_triggers = settings.get("char_lora_triggers", {}) or {}
+    char_lora_trigger = char_lora_triggers.get(primary_char_id) or None
     primary_ref = cc.get("primary_reference")
     secondary = cc.get("secondary_chars") or []
 
@@ -302,6 +305,7 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
             primary_char_id=primary_char_id,
             char_lora_path=char_lora_path,
             char_lora_strength=char_lora_strength,
+            char_lora_trigger=char_lora_trigger,
             unconditioned_chars=list(in_frame),
         )
 
@@ -314,7 +318,25 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
     conditioned_ids = {primary_char_id}
 
     if quality_tier == "max":
-        tag = MAX_TIER_PRIMARY_ONLY          # slice 2 lifts this to MULTI_LORA
+        # P1-1 slice 2 (§3b + §3c-A): same registered-ref gate + 2-cap as the
+        # Kontext arm; per-secondary LoRA assets looked up exactly like the
+        # primary's (settings dicts keyed by char_id). A LoRA-less secondary
+        # still rides as fidelity="reference" — the ReActor rescue swaps its
+        # face from the canonical even without a LoRA.
+        for entry in secondary[:2]:
+            sec_id = entry["char_id"]
+            sec_lora = char_lora_paths.get(sec_id) or None
+            conditioned.append(CharIdentitySpec(
+                char_id=sec_id, reference=entry["reference"],
+                identity_anchor=entry.get("identity_anchor", ""),
+                multi_angle_refs=tuple(entry.get("multi_angle_refs") or ()),
+                fidelity="lora" if sec_lora else "reference",
+                lora_path=sec_lora,
+                lora_strength=(settings.get("char_lora_strengths", {}) or {}).get(sec_id),
+                trigger=char_lora_triggers.get(sec_id),
+            ))
+            conditioned_ids.add(sec_id)
+        tag = MAX_TIER_MULTI_LORA if len(conditioned) > 1 else MAX_TIER_PRIMARY_ONLY
     elif secondary:
         # Kontext-tier cap: 2 secondaries (spec §3a); overflow degrades to text-only.
         for entry in secondary[:2]:
@@ -337,6 +359,7 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
         primary_char_id=primary_char_id,
         char_lora_path=char_lora_path,
         char_lora_strength=char_lora_strength,
+        char_lora_trigger=char_lora_trigger,
         conditioned_chars=conditioned,
         unconditioned_chars=[c for c in in_frame if c not in conditioned_ids],
     )

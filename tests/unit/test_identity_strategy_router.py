@@ -54,12 +54,59 @@ def test_two_char_production_with_refs_is_kontext_multi():
     assert s.conditioned_chars[1].multi_angle_refs == ("/r/b1.jpg",)
 
 
-def test_two_char_max_tier_is_max_primary_only_with_secondary_unconditioned():
+def test_two_char_max_tier_promises_multi_lora_with_secondary_conditioned():
+    # slice 2: registered-ref secondary is CONDITIONED on max (ReActor rescue
+    # at minimum; LoRA chain when one is registered for it).
     s = _resolve_identity_strategy(_shot(["char_a", "char_b"]), "max",
                                    SETTINGS_NO_LORA, CC_TWO_REGISTERED)
+    assert s.mechanism_tag == "MAX_TIER_MULTI_LORA"
+    assert [c.char_id for c in s.conditioned_chars] == ["char_a", "char_b"]
+    sec = s.conditioned_chars[1]
+    assert sec.fidelity == "reference"     # no LoRA registered for char_b here
+    assert sec.lora_path is None
+    assert s.unconditioned_chars == []
+
+
+def test_max_tier_secondary_with_lora_gets_lora_fidelity_and_assets():
+    settings = {"quality_tier": "max",
+                "char_lora_paths": {"char_b": "/l/b.safetensors"},
+                "char_lora_strengths": {"char_b": 0.7},
+                "char_lora_triggers": {"char_b": "TOKman"}}
+    s = _resolve_identity_strategy(_shot(["char_a", "char_b"]), "max",
+                                   settings, CC_TWO_REGISTERED)
+    sec = s.conditioned_chars[1]
+    assert sec.fidelity == "lora"
+    assert sec.lora_path == "/l/b.safetensors"
+    assert sec.lora_strength == 0.7
+    assert sec.trigger == "TOKman"
+
+
+def test_max_tier_single_char_stays_primary_only():
+    s = _resolve_identity_strategy(_shot(["char_a"]), "max",
+                                   SETTINGS_NO_LORA, CC_PRIMARY_ONLY)
     assert s.mechanism_tag == "MAX_TIER_PRIMARY_ONLY"
-    assert [c.char_id for c in s.conditioned_chars] == ["char_a"]
-    assert s.unconditioned_chars == ["char_b"]
+    assert s.unconditioned_chars == []
+
+
+def test_max_tier_secondary_cap_two_overflow_unconditioned():
+    cc = dict(CC_TWO_REGISTERED)
+    cc["secondary_chars"] = [
+        {"char_id": f"char_{i}", "reference": f"/r/{i}.jpg",
+         "multi_angle_refs": [], "identity_anchor": ""} for i in "bcd"
+    ]
+    s = _resolve_identity_strategy(_shot(["char_a", "char_b", "char_c", "char_d"]),
+                                   "max", SETTINGS_NO_LORA, cc)
+    assert len(s.conditioned_chars) == 3
+    assert s.unconditioned_chars == ["char_d"]
+
+
+def test_primary_trigger_rides_strategy():
+    settings = {"quality_tier": "max",
+                "char_lora_paths": {"char_a": "/l/a.safetensors"},
+                "char_lora_triggers": {"char_a": "TOKwoman"}}
+    s = _resolve_identity_strategy(_shot(["char_a"]), "max", settings,
+                                   CC_PRIMARY_ONLY)
+    assert s.char_lora_trigger == "TOKwoman"
 
 
 def test_char_absent_from_secondary_chars_is_unconditioned():
