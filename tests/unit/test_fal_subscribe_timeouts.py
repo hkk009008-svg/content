@@ -52,6 +52,103 @@ def _fal_subscribe_calls(tree: ast.AST):
             yield node
 
 
+def _subscribe_misuse(tree: ast.AST):
+    """R1: `fal_client.subscribe` referenced anywhere except as a direct
+    call's func — `sub = fal_client.subscribe`, `runner(fal_client.subscribe)`
+    — dodges the call-site scan while keeping the untimed behavior."""
+    call_funcs = {
+        id(node.func) for node in ast.walk(tree) if isinstance(node, ast.Call)
+    }
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "subscribe"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "fal_client"
+            and id(node) not in call_funcs
+        ):
+            yield node
+
+
+def _fal_client_aliases(tree: ast.AST):
+    """R2: a bare `fal_client` Name outside attribute-receiver position —
+    `fc = fal_client`, `self.client = fal_client`, passing the module —
+    creates an alias the receiver-keyed scans can never see."""
+    receiver_ids = {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+    }
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Name)
+            and node.id == "fal_client"
+            and id(node) not in receiver_ids
+        ):
+            yield node
+
+
+def _local_fal_timeout_defs(tree: ast.AST):
+    """R3a: a FAL_TIMEOUT_*-named assignment in a production module —
+    `FAL_TIMEOUT_HACK = None` satisfies the lexical named-bound check
+    while reinstating the indefinite hang."""
+    for node in ast.walk(tree):
+        targets = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        for t in targets:
+            if isinstance(t, ast.Name) and t.id.startswith("FAL_TIMEOUT_"):
+                yield t
+
+
+def _limits_imports(tree: ast.AST) -> set:
+    return {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "cinema.fal_limits"
+        for alias in node.names
+    }
+
+
+def _unprovenanced_timeouts(tree: ast.AST):
+    """R3b: client_timeout=FAL_TIMEOUT_X is valid only when X is imported
+    from cinema.fal_limits in the same module (spelling is not provenance)."""
+    imported = _limits_imports(tree)
+    for call in _fal_subscribe_calls(tree):
+        for kw in call.keywords:
+            if kw.arg != "client_timeout":
+                continue
+            v = kw.value
+            if (
+                isinstance(v, ast.Name)
+                and v.id.startswith("FAL_TIMEOUT_")
+                and v.id not in imported
+            ):
+                yield v
+
+
+def _non_positive_limit_defs(tree: ast.AST):
+    """R4: in the limits module itself, every module-level FAL_TIMEOUT_*
+    must be a positive numeric literal — `FAL_TIMEOUT_DISABLED = None`
+    in fal_limits.py would poison every importer at once."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        for t in node.targets:
+            if isinstance(t, ast.Name) and t.id.startswith("FAL_TIMEOUT_"):
+                v = node.value
+                ok = (
+                    isinstance(v, ast.Constant)
+                    and isinstance(v.value, (int, float))
+                    and not isinstance(v.value, bool)
+                    and v.value > 0
+                )
+                if not ok:
+                    yield t
+
+
 class TestFalSubscribeClientTimeout:
     def test_every_production_subscribe_passes_client_timeout(self):
         violations = []
@@ -115,13 +212,16 @@ class TestFalLimits:
         assert FAL_TIMEOUT_IMAGE_S < FAL_TIMEOUT_VIDEO_S < FAL_TIMEOUT_TALKING_HEAD_S
 
     def test_production_sites_use_named_bounds_not_magic_numbers(self):
-        # client_timeout must reference a FAL_TIMEOUT_* name (directly or via
-        # attribute) — not an inline literal, and not an arbitrary variable
-        # that could be bound to None and silently reinstate the indefinite
-        # hang this suite exists to prevent.
+        # client_timeout must be a FAL_TIMEOUT_* NAME IMPORTED FROM
+        # cinema.fal_limits — not an inline literal, not an attribute form
+        # (no production user exists; dropping the allowance closes a dodge),
+        # and not a same-spelling local that could be bound to None and
+        # silently reinstate the indefinite hang this suite exists to prevent.
         offenders = []
         for path in _production_py_files():
-            for call in _fal_subscribe_calls(_parsed(path)):
+            tree = _parsed(path)
+            imported = _limits_imports(tree)
+            for call in _fal_subscribe_calls(tree):
                 for kw in call.keywords:
                     if kw.arg != "client_timeout":
                         continue
@@ -129,17 +229,156 @@ class TestFalLimits:
                     named_ok = (
                         isinstance(value, ast.Name)
                         and value.id.startswith("FAL_TIMEOUT_")
-                    ) or (
-                        isinstance(value, ast.Attribute)
-                        and value.attr.startswith("FAL_TIMEOUT_")
+                        and value.id in imported
                     )
                     if not named_ok:
                         offenders.append(
                             f"{path.relative_to(REPO_ROOT)}:{call.lineno}"
                         )
         assert offenders == [], (
-            "client_timeout must be a FAL_TIMEOUT_* name from "
-            "cinema/fal_limits.py: " + ", ".join(offenders)
+            "client_timeout must be a FAL_TIMEOUT_* name imported from "
+            "cinema.fal_limits: " + ", ".join(offenders)
+        )
+
+
+class TestGuardDodgeRules:
+    """Closes the adversarial-developer dodges the base guard misses
+    (operator latents, 23:42:25Z report): assignment-aliasing of the
+    function or the module, and FAL_TIMEOUT_*-named values without
+    provenance from cinema/fal_limits.py. Synthetic snippets double as
+    mutation tests: every dodge shape must be DETECTED, every legit
+    shape must pass."""
+
+    # --- R1: `fal_client.subscribe` outside direct-call position ---
+
+    def test_r1_detects_assignment_alias(self):
+        tree = ast.parse(
+            "import fal_client\n"
+            "sub = fal_client.subscribe\n"
+            "sub(arg)\n"
+        )
+        assert len(list(_subscribe_misuse(tree))) == 1
+
+    def test_r1_detects_callback_pass(self):
+        tree = ast.parse(
+            "import fal_client\n"
+            "runner(fal_client.subscribe)\n"
+        )
+        assert len(list(_subscribe_misuse(tree))) == 1
+
+    def test_r1_passes_direct_call(self):
+        tree = ast.parse(
+            "import fal_client\n"
+            "fal_client.subscribe(m, client_timeout=FAL_TIMEOUT_VIDEO_S)\n"
+        )
+        assert list(_subscribe_misuse(tree)) == []
+
+    def test_r1_repo_clean(self):
+        offenders = [
+            f"{p.relative_to(REPO_ROOT)}:{n.lineno}"
+            for p in _production_py_files()
+            for n in _subscribe_misuse(_parsed(p))
+        ]
+        assert offenders == [], (
+            "`fal_client.subscribe` referenced outside a direct call "
+            "(alias dodge): " + ", ".join(offenders)
+        )
+
+    # --- R2: aliasing the module object itself ---
+
+    def test_r2_detects_module_alias(self):
+        tree = ast.parse("import fal_client\nfc = fal_client\n")
+        assert len(list(_fal_client_aliases(tree))) == 1
+
+    def test_r2_detects_attribute_stash(self):
+        tree = ast.parse("import fal_client\nself.client = fal_client\n")
+        assert len(list(_fal_client_aliases(tree))) == 1
+
+    def test_r2_passes_attribute_access(self):
+        tree = ast.parse(
+            "import fal_client\n"
+            "fal_client.upload_file(p)\n"
+            "fal_client.subscribe(m, client_timeout=FAL_TIMEOUT_VIDEO_S)\n"
+        )
+        assert list(_fal_client_aliases(tree)) == []
+
+    def test_r2_repo_clean(self):
+        offenders = [
+            f"{p.relative_to(REPO_ROOT)}:{n.lineno}"
+            for p in _production_py_files()
+            for n in _fal_client_aliases(_parsed(p))
+        ]
+        assert offenders == [], (
+            "bare `fal_client` aliased/passed (module-alias dodge): "
+            + ", ".join(offenders)
+        )
+
+    # --- R3: FAL_TIMEOUT_* provenance ---
+
+    def test_r3_detects_local_fal_timeout_assignment(self):
+        tree = ast.parse("FAL_TIMEOUT_HACK = None\n")
+        assert len(list(_local_fal_timeout_defs(tree))) == 1
+
+    def test_r3_passes_import_from_limits(self):
+        tree = ast.parse(
+            "from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S\n"
+            "import fal_client\n"
+            "fal_client.subscribe(m, client_timeout=FAL_TIMEOUT_VIDEO_S)\n"
+        )
+        assert list(_local_fal_timeout_defs(tree)) == []
+        assert list(_unprovenanced_timeouts(tree)) == []
+
+    def test_r3_detects_unimported_timeout_name(self):
+        # Name is FAL_TIMEOUT_-shaped but never imported from
+        # cinema.fal_limits — lexically passes the old check, fails now.
+        tree = ast.parse(
+            "import fal_client\n"
+            "FAL_TIMEOUT_LOCAL = None\n"
+            "fal_client.subscribe(m, client_timeout=FAL_TIMEOUT_LOCAL)\n"
+        )
+        assert len(list(_unprovenanced_timeouts(tree))) == 1
+
+    def test_r3_repo_clean(self):
+        local_defs = [
+            f"{p.relative_to(REPO_ROOT)}:{n.lineno}"
+            for p in _production_py_files()
+            if p.name != "fal_limits.py"
+            for n in _local_fal_timeout_defs(_parsed(p))
+        ]
+        assert local_defs == [], (
+            "FAL_TIMEOUT_* assigned outside cinema/fal_limits.py: "
+            + ", ".join(local_defs)
+        )
+        unprov = [
+            f"{p.relative_to(REPO_ROOT)}:{n.lineno}"
+            for p in _production_py_files()
+            for n in _unprovenanced_timeouts(_parsed(p))
+        ]
+        assert unprov == [], (
+            "client_timeout uses a FAL_TIMEOUT_* name not imported from "
+            "cinema.fal_limits: " + ", ".join(unprov)
+        )
+
+    # --- R4: the limits module itself defines positive numeric literals ---
+
+    def test_r4_detects_none_valued_limit(self):
+        tree = ast.parse("FAL_TIMEOUT_DISABLED = None\n")
+        assert len(list(_non_positive_limit_defs(tree))) == 1
+
+    def test_r4_detects_zero_limit(self):
+        tree = ast.parse("FAL_TIMEOUT_ZERO = 0\n")
+        assert len(list(_non_positive_limit_defs(tree))) == 1
+
+    def test_r4_passes_positive_literal(self):
+        tree = ast.parse("FAL_TIMEOUT_VIDEO_S = 600\n")
+        assert list(_non_positive_limit_defs(tree)) == []
+
+    def test_r4_real_limits_module_clean(self):
+        tree = _parsed(REPO_ROOT / "cinema" / "fal_limits.py")
+        offenders = [n.lineno for n in _non_positive_limit_defs(tree)]
+        assert offenders == [], (
+            f"non-positive/non-literal FAL_TIMEOUT_* in fal_limits.py "
+            f"at lines {offenders}"
         )
 
 
