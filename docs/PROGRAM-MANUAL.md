@@ -1761,7 +1761,7 @@ The functions an engineer reaches for most, grouped by task. All `file:line` ref
 | `ContinuityEngine.enhance_shot_prompt` | `domain/continuity_engine.py:446` | Builds enhanced prompt + `continuity_config` (img2img, seed, refs, thresholds) |
 | `IdentityValidator.validate_video` | `identity/validator.py:133` | Adaptive 3–10 frame sampling, GhostFaceNet cosine similarity |
 | `IdentityValidator.get_rolling_stats` | `identity/validator.py:267` | Window-10 history → `suggested_pulid_delta` feedback |
-| `score_candidate` / `should_halt` | `face_validator_gate.py:168 / 225` | Composite = `0.6·arc + 0.4·aesthetic`; halt when `n≥min_n AND best≥threshold` |
+| `score_candidate` / `should_halt` | `face_validator_gate.py:170 / 227` | Composite = `0.6·arc + 0.4·aesthetic`; halt when `n≥min_n AND best≥threshold` |
 | `assess_coherence` | `coherence_analyzer.py:215` | `overall = (1-color_drift)·0.4 + lighting·0.3 + composition·0.3`; check `result.valid` first |
 | `two_pass_loudnorm` | `phase_c_ffmpeg.py:1242` | EBU R128 normalize to −14 LUFS / −1.5 dBTP |
 | `xfade_concat` | `phase_c_ffmpeg.py:1513` | Cross-dissolve stitch; handles mixed audio-presence legs (Lane V #24/#25 fixes) |

@@ -124,6 +124,31 @@ def _parse_multirange_terms(terms_text: str) -> "Optional[list[tuple[int, int]]]
         terms.append((lo, hi))
     return terms or None
 
+# Slash-list anchor: ONE backtick token citing slash-separated BARE lines —
+# `path:N / M / P` (PROGRAM-MANUAL compound table rows write the filename once
+# and continue with slashes INSIDE the same token, e.g.
+# `quality_max.py:461 / 509 / 543 / 564 / 587`). _INLINE_ANCHOR_RE requires the
+# closing backtick right after the first number, _CONTINUATION_ANCHOR_RE wants
+# separate `:N` tokens, _MULTIRANGE_RE wants commas — so these cells were
+# silently unverified (PROGRAM-MANUAL:556 drifted +20 under a green gate; Lane V
+# slice-2 Chunk-1 find). Each term becomes a positional anchor (k-th term pairs
+# with the k-th symbol of the row's symbol cell via _positional_symbol_map);
+# unpaired terms are bounds-only, NEVER nearest-before (nearest-before would
+# bind the cell's last symbol to every term and --fix would corrupt correct
+# rows). Terms are bare lines only — no ranges (none exist in the real rows);
+# a slash cell with a range term fails strict parse and WARNS via
+# _SLASHLIST_LOOSE_RE (ADV-2: warn, don't silently skip).
+_SLASHLIST_ANCHOR_RE = re.compile(
+    r'`(?P<file>[A-Za-z0-9_./-]+\.[A-Za-z]+):(?P<terms>\d+(?:\s*/\s*\d+)+)`'
+)
+
+# Loose probe for the warning path: a backtick token with a file:line prefix and
+# a digit/digit slash somewhere after the colon that the STRICT regex (and
+# multirange, for comma cells) did not claim.
+_SLASHLIST_LOOSE_RE = re.compile(
+    r'`[A-Za-z0-9_./-]+\.[A-Za-z]+:[^`]*\d\s*/\s*\d[^`]*`'
+)
+
 # Fenced-code-block markers (``` or ~~~, 3+). A line starting one toggles fence state.
 _FENCE_RE = re.compile(r'^\s*(`{3,}|~{3,})')
 
@@ -420,6 +445,31 @@ def _ident_token(token_text: str) -> Optional[str]:
     return ident_match.group(1)
 
 
+def _ident_tokens(token_text: str, text_start: int) -> "list[tuple[int, str]]":
+    """Positions + idents a backtick token contributes to positional pairing.
+
+    A token of slash-separated BARE idents (`make_take / make_shot / ...` —
+    the single-token compound symbol cell, PROGRAM-MANUAL:556/:464 shape)
+    contributes EACH ident at its own in-line position, so a slash-list anchor
+    cell of the same arity pairs positionally. Any segment that is not a bare
+    identifier (dotted, prose, empty) demotes the whole token to the
+    single-ident rule (_ident_token) — conservative: a half-parseable cell must
+    not fabricate a count match. *text_start* is the position of the token TEXT
+    (after the opening backtick) on the doc line."""
+    if "/" in token_text:
+        segs = [s.strip() for s in token_text.split("/")]
+        if len(segs) > 1 and all(re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', s) for s in segs):
+            out: "list[tuple[int, str]]" = []
+            pos = 0
+            for s in segs:
+                at = token_text.index(s, pos)
+                out.append((text_start + at, s))
+                pos = at + len(s)
+            return out
+    ident = _ident_token(token_text)
+    return [(text_start, ident)] if ident is not None else []
+
+
 def _ordered_line_anchors(line_text: str) -> "list[dict]":
     """Return every inline anchor on *line_text* in left-to-right source order.
 
@@ -454,7 +504,21 @@ def _ordered_line_anchors(line_text: str) -> "list[dict]":
             "file": inherited, "line": int(m.group("line")),
             "end_line": int(m.group("end")) if m.group("end") else None,
         })
-    return sorted(fulls + conts, key=lambda a: a["start"])
+    # Slash-list expansion: ONE backtick token `path:N / M / P` becomes one
+    # positional anchor PER TERM. Each anchor's span is the term's DIGITS only
+    # (so --fix rewrites the number in place, preserving prefix/separators).
+    # Cannot overlap the other shapes: inline needs the closing backtick right
+    # after the number, continuation needs a `:N` token, multirange needs commas.
+    slashes = []
+    for m in _SLASHLIST_ANCHOR_RE.finditer(line_text):
+        terms_start = m.start("terms")
+        for tm in re.finditer(r'\d+', m.group("terms")):
+            slashes.append({
+                "start": terms_start + tm.start(), "end": terms_start + tm.end(),
+                "file": m.group("file"), "line": int(tm.group(0)),
+                "end_line": None, "style": "slash",
+            })
+    return sorted(fulls + conts + slashes, key=lambda a: a["start"])
 
 
 def _column_of(pos: int, bar_positions: "list[int]") -> int:
@@ -501,11 +565,13 @@ def _positional_symbol_map(line_text: str, anchors: "list[dict]") -> "dict[int, 
     for m in _BACKTICK_RE.finditer(line_text):
         if any(s <= m.start() < e for s, e in anchor_spans):
             continue  # this token IS an anchor
-        ident = _ident_token(m.group(1))
-        if ident is None:
-            continue
-        col = _column_of(m.start(), bars)
-        idents_by_col.setdefault(col, []).append((m.start(), ident))
+        # NOTE a slash-list anchor token is NOT excluded by the span check
+        # (its per-term spans start after the backtick) — but its text begins
+        # `file.ext:`, so _ident_tokens demotes to _ident_token, which returns
+        # None on the dotted file prefix. It contributes no idents.
+        for ipos, ident in _ident_tokens(m.group(1), m.start(1)):
+            col = _column_of(ipos, bars)
+            idents_by_col.setdefault(col, []).append((ipos, ident))
 
     # Group anchors by column.
     anchors_by_col: "dict[int, list[dict]]" = {}
@@ -835,6 +901,7 @@ def check_line_anchors(
 
         in_fence = False
         multirange_unparseable = 0   # comma-list anchors that could NOT be verified
+        slashlist_unparseable = 0    # slash-list anchors that could NOT be verified
         for line_num, line_text in enumerate(doc_lines, 1):
             if _FENCE_RE.match(line_text):
                 in_fence = not in_fence
@@ -885,9 +952,14 @@ def check_line_anchors(
                 # same line (rare; correctness guard, not a span-inside heuristic).
                 if (token_file, target_line) in link_keys:
                     continue
-                # Symbol: positional pairing when the line matched; else nearest-before.
+                a_style = a.get("style", "inline")
+                # Symbol: positional pairing when the line matched; else
+                # nearest-before — EXCEPT slash-list terms, which are
+                # positional-or-bounds-only: nearest-before would bind the
+                # cell's last symbol to EVERY term, and --fix would then
+                # rewrite correct terms to that symbol's def (corruption).
                 symbol = inline_pos_map.get(anchor_start)
-                if symbol is None:
+                if symbol is None and a_style != "slash":
                     symbol = _bind_inline_symbol(line_text, anchor_start)
                 resolved_rel, candidates = _resolve_inline_target(
                     token_file, symbol, basename_index, repo_root)
@@ -913,8 +985,9 @@ def check_line_anchors(
                     doc_line_text=line_text, target_file_rel=token_file,
                     target_line=target_line, display_text=display, repo_root=repo_root,
                     resolved_rel=resolved_rel, symbol=symbol,
-                    rebind_symbol=False, style="inline", doc_col=(a["start"], a["end"]),
-                    symbol_fallback=inline_pos_map.get(anchor_start) is None,
+                    rebind_symbol=False, style=a_style, doc_col=(a["start"], a["end"]),
+                    symbol_fallback=(a_style != "slash"
+                                     and inline_pos_map.get(anchor_start) is None),
                     unbound_sink=unbound_sink,
                 )
                 if drift is not None:
@@ -959,12 +1032,32 @@ def check_line_anchors(
                 if drift is not None:
                     drifts.append(drift)
 
+            # --- slash-list loose probe (ADV-2: warn, don't silently skip) ---
+            # A slash-ish anchor token the STRICT regex could not parse (range
+            # term, non-numeric segment) would otherwise vanish exactly the way
+            # whole slash cells did pre-slash-support. Spans already claimed by
+            # the strict slash regex or by multirange (comma cells) are fine.
+            claimed_spans = (
+                [(m.start(), m.end()) for m in _SLASHLIST_ANCHOR_RE.finditer(line_text)]
+                + [(m.start(), m.end()) for m in _MULTIRANGE_RE.finditer(line_text)]
+            )
+            for m in _SLASHLIST_LOOSE_RE.finditer(line_text):
+                if any(s <= m.start() < e for s, e in claimed_spans):
+                    continue
+                slashlist_unparseable += 1
+
         # Any multi-range anchors we could NOT verify (unparseable terms / unresolved
         # bare basename) still warn rather than silently skip (ADV-2 principle).
         if multirange_unparseable:
             print(f"WARNING: {full_path}: {multirange_unparseable} multi-range anchor(s) "
                   f"(e.g. `file.py:A-B, C-D`) could NOT be verified — unparseable terms "
                   f"or unresolved file. Split into single-range anchors to verify.",
+                  file=sys.stderr)
+        if slashlist_unparseable:
+            print(f"WARNING: {full_path}: {slashlist_unparseable} slash-list anchor(s) "
+                  f"(e.g. `file.py:N / M`) could NOT be verified — non-bare term "
+                  f"(slash lists take bare line numbers only; no ranges). Use bare "
+                  f"numbers or split into single anchors.",
                   file=sys.stderr)
 
         # EOF with the fence still open (ADV-2): an unbalanced/stray fence leaves
@@ -1018,6 +1111,13 @@ def _rewrite_anchor_occurrence(occ_text: str, drift: Drift) -> Optional[str]:
     by drift.style.
     """
     old, new = drift.target_line, drift.suggested_line
+    if drift.style == "slash":
+        # A slash-list term's span is its DIGITS only — rewrite the number in
+        # place (prefix/separators live outside the span). Identity guard:
+        # the span must hold exactly the stale number.
+        if re.fullmatch(r'\d+', occ_text) and int(occ_text) == old:
+            return str(new)
+        return None
     if drift.style == "inline":
         m = _INLINE_ANCHOR_RE.fullmatch(occ_text)
         if m is not None and m.group("file") == drift.target_file and int(m.group("line")) == old:

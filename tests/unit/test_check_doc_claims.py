@@ -2282,3 +2282,145 @@ class TestUsageCiteAcceptance:
         )
         drifts2 = check_line_anchors([str(md2)], tmp_path)
         assert len(drifts2) == 1, f"cite past real extent must drift, got: {drifts2}"
+
+
+class TestSlashListAnchors:
+    """Single-token slash-list anchor cells: `path.py:N / M / P`.
+
+    The real rows (8x, all PROGRAM-MANUAL.md, e.g. :556) write the filename ONCE
+    inside one backtick token and continue with slash-separated bare line
+    numbers. None of _INLINE_ANCHOR_RE (closing backtick required right after
+    the first number), _CONTINUATION_ANCHOR_RE (separate `:N` tokens), or
+    _MULTIRANGE_RE (comma separators) matched, so the whole cell was silently
+    unverified — the Convention-#4 blind spot found by Lane V on slice-2
+    Chunk 1 (PROGRAM-MANUAL:556 drifted +20 lines and the gate stayed green).
+
+    Contract: each term is a positional anchor (k-th term pairs with the k-th
+    symbol of the row's symbol cell — which may be ONE token of slashed idents
+    OR separate backtick tokens); a term that cannot be positionally paired is
+    bounds-only, NEVER nearest-before (nearest-before would bind the cell's
+    last symbol to every term and --fix would corrupt correct rows).
+    """
+
+    def test_slashlist_single_token_symbols_all_correct_no_drift(self, tmp_path):
+        """PROGRAM-MANUAL:556 shape: symbol cell is ONE backtick token of slashed
+        idents; anchor cell is ONE token `file:1 / 3 / 5`; every def IS the cited
+        line -> ZERO drift (today the cell is invisible, so this also passes
+        pre-change — the load-bearing RED is the stale-term test below)."""
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "quality_max.py",
+            "def a_fn():\n    pass\n"          # line 1
+            "def b_fn():\n    pass\n"          # line 3
+            "def c_fn():\n    pass\n",         # line 5
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "| `a_fn / b_fn / c_fn` | `quality_max.py:1 / 3 / 5` | desc |\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"expected no drift, got: {drifts}"
+
+    def test_slashlist_stale_term_attributed_positionally(self, tmp_path):
+        """PROGRAM-MANUAL:458 shape (symbols as SEPARATE backtick tokens): the
+        2nd term is stale -> exactly ONE def_drift, attributed to the 2nd symbol
+        with the 2nd symbol's real def suggested, fixable, style='slash'."""
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "mod.py",
+            "def a_fn():\n    pass\n"          # line 1
+            "# 3\n# 4\n"
+            "def b_fn():\n    pass\n"          # line 5  (cited 3 is stale)
+            "def c_fn():\n    pass\n",         # line 7
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "| `a_fn` / `b_fn` / `c_fn` | `mod.py:1 / 3 / 7` | d |\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"expected exactly 1 drift, got: {drifts}"
+        d = drifts[0]
+        assert d.kind == "def_drift"
+        assert d.symbol == "b_fn", f"must attribute to 2nd symbol, got {d.symbol}"
+        assert d.target_line == 3
+        assert d.suggested_line == 5
+        assert d.fixable is True
+        assert d.style == "slash", f"slash-term style expected, got {d.style}"
+
+    def test_slashlist_fix_rewrites_only_stale_term(self, tmp_path):
+        """--fix rewrites ONLY the stale term's digits in place; the file prefix,
+        separators, and correct terms are byte-identical."""
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "mod.py",
+            "def a_fn():\n    pass\n"          # line 1
+            "# 3\n# 4\n"
+            "def b_fn():\n    pass\n"          # line 5
+            "def c_fn():\n    pass\n",         # line 7
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "| `a_fn` / `b_fn` / `c_fn` | `mod.py:1 / 3 / 7` | d |\n",
+        )
+        remaining = run([str(md)], tmp_path, fix=True)
+        text = md.read_text()
+        assert "`mod.py:1 / 5 / 7`" in text, f"stale term not fixed in place: {text!r}"
+        assert [d for d in remaining if d.kind == "def_drift"] == []
+
+    def test_slashlist_no_nearest_before_fallback_corruption(self, tmp_path):
+        """THE safety pin. Count-mismatch column (a dotted token contributes no
+        ident -> 1 ident vs 2 terms) must NOT nearest-before-bind the surviving
+        ident to every term: term 1 cites a correct USAGE line (3) of the dotted
+        method; binding `real_fn` (def at 1) to it would emit a fixable drift and
+        --fix would rewrite the CORRECT 3 into 1 (corruption). Expected: zero
+        def_drift — unpaired slash terms are bounds-only."""
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "mod.py",
+            "def real_fn():\n    pass\n"       # line 1
+            "value = 42\n",                    # line 3
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "| `Klass.method` / `real_fn` | `mod.py:3 / 1` | d |\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert [d for d in drifts if d.kind == "def_drift"] == [], (
+            f"unpaired slash terms must be bounds-only, got: {drifts}"
+        )
+
+    def test_slashlist_term_out_of_bounds_is_drift(self, tmp_path):
+        """A term past EOF is still caught (bounds check applies per term even
+        with no symbol pairing — symbol column here is prose, no backticks)."""
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "mod.py",
+            "def a_fn():\n    pass\n",         # 2 lines total
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "| factories | `mod.py:1 / 99` | d |\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"expected exactly 1 drift, got: {drifts}"
+        assert drifts[0].kind == "out_of_bounds"
+        assert drifts[0].target_line == 99
+        assert drifts[0].fixable is False
+
+    def test_slashlist_malformed_terms_warn_not_silent(self, tmp_path, capsys):
+        """ADV-2 principle: a slash-ish cell the strict regex cannot parse (range
+        term) must WARN on stderr rather than silently skip."""
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "mod.py",
+            "def a_fn():\n    pass\n"
+            "def b_fn():\n    pass\n",
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "| `a_fn` | `mod.py:1-2 / 3` | d |\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        err = capsys.readouterr().err
+        assert "slash" in err.lower(), f"expected a slash-list warning, got: {err!r}"
+        assert [d for d in drifts if d.kind == "def_drift"] == []
