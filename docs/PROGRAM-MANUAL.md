@@ -203,7 +203,7 @@ flowchart TD
         NORM --> STITCH["stitch: hard-cut concat<br/>OR xfade cross-dissolve"]
         STITCH --> GRADE["color grade (mood preset / LUT)"]
         GRADE --> MIX["3-track mix: voice 1.0 + BGM 0.12 + foley 0.20"]
-        MIX --> LOUD["two-pass EBU R128 loudnorm<br/>_assemble_final (1315)"]
+        MIX --> LOUD["two-pass EBU R128 loudnorm<br/>_assemble_final (1323)"]
     end
 
     LOUD --> G5{{"GATE 5: SCREENING<br/>cinema_pipeline.py:872-905<br/>(iterate + re-assemble loop)"}}
@@ -271,7 +271,7 @@ generate(resume=False)
  │
  └─ assemble_approved_takes()                                       (853)
       ├─ _assemble_approved_takes_core()                            (783)
-      │    └─ _assemble_final(scene_data, bgm, settings)            (1315)  → exports/final_cinema.mp4
+      │    └─ _assemble_final(scene_data, bgm, settings)            (1323)  → exports/final_cinema.mp4
       ├─ ╔═ GATE 5 ═╗ wait_for_gate("SCREENING", …)                 (872-905)  ~95%  (if enabled)
       ├─ cleanup_project(); cost_tracker.get_video_cost()
       └─ progress("COMPLETE", final_path, 100%)
@@ -360,7 +360,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 **Role:** `cinema_pipeline.CinemaPipeline` is the sole run driver. It owns the ordered gate sequence and `generate()` main loop, composes the three controllers (shot / review / checkpoint) over one shared `RunState`, and performs final assembly. Long-lived dependencies live on `PipelineCore`; per-run mutable state on `RunState`; pause/cancel/gate mechanics on `ThreadedLifecycle`.
 
-**Canonical modules:** `cinema_pipeline.py` (1669 LOC, the orchestrator), `cinema/core.py`, `cinema/runstate.py`, `cinema/lifecycle.py`, `cinema/context.py`, `pipeline_context.py` (top-level LLM-prompt loader), `cinema/pipeline.py` (generic driver, not the orchestrator).
+**Canonical modules:** `cinema_pipeline.py` (1677 LOC, the orchestrator), `cinema/core.py`, `cinema/runstate.py`, `cinema/lifecycle.py`, `cinema/context.py`, `pipeline_context.py` (top-level LLM-prompt loader), `cinema/pipeline.py` (generic driver, not the orchestrator).
 
 | Name | file:line | What it does |
 |---|---|---|
@@ -368,7 +368,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `CinemaPipeline.generate` | `cinema_pipeline.py:942` | Main production loop. Ordered: refresh snapshot → style rules → BGM → per-scene decompose+director-review → PLAN_REVIEW gate → keyframe phase → KEYFRAME_REVIEW gate → performance phase → (conditional) PERFORMANCE_REVIEW gate → motion phase → REVIEW gate → assemble. Returns `final_cinema.mp4` path or `None`. |
 | `CinemaPipeline.assemble_approved_takes` | `cinema_pipeline.py:853` | Full assembly: core assembly → SCREENING gate wait (if enabled) → cleanup → cost summary → COMPLETE at 100%. |
 | `CinemaPipeline._assemble_approved_takes_core` | `cinema_pipeline.py:783` | Steps 1–5 only (refresh → REVIEW guard → scene packages → previews → `_assemble_final`). Called directly by the re-assemble endpoint to **avoid SCREENING-gate deadlock** on a Flask thread. |
-| `CinemaPipeline._assemble_final` | `cinema_pipeline.py:1315` | ffmpeg: normalize 1920×1080@30 → stitch (hard-cut or xfade) → color grade → 3-track audio mix (voice/BGM/foley) → two-pass loudnorm → `exports/final_cinema.mp4`. |
+| `CinemaPipeline._assemble_final` | `cinema_pipeline.py:1323` | ffmpeg: normalize 1920×1080@30 → stitch (hard-cut or xfade) → color grade → 3-track audio mix (voice/BGM/foley) → two-pass loudnorm → `exports/final_cinema.mp4`. |
 | `CinemaPipeline._refresh_project_snapshot` | `cinema_pipeline.py:443` | `load_project` → `Project.model_validate` **before** swapping `self.project` (validate-before-swap keeps state coherent on failure) → rebuilds continuity trackers. Called 6+ times at gate boundaries. |
 | `CinemaPipeline._build_scene_packages` | `cinema_pipeline.py:709` | Resolves approved take paths per scene; detects "all shots `audio_embedded`" to suppress double-voice TTS. |
 | `build_pipeline_core` | `cinema/core.py:75` | Factory: loads project, mkdirs, constructs `PipelineCore(project, dirs, ContinuityEngine, ChiefDirector, CostTracker, LLMEnsemble)`. Raises `ValueError` if project absent. |
@@ -384,7 +384,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 **Role:** `web_server.py` is the sole human-facing entry — a Flask server (port 8080) that serves the React SPA, exposes the full REST API for project/character/location/scene/shot CRUD and pipeline control, and streams progress via SSE. `web_services.py` holds the pure, unit-testable SSE-event shaper.
 
-**Canonical modules:** `web_server.py` (2664 LOC), `web_services.py` (114 LOC). Read endpoints without constructing a pipeline come from `cinema/services.py` (§3.3).
+**Canonical modules:** `web_server.py` (2664 LOC), `web_services.py` (121 LOC). Read endpoints without constructing a pipeline come from `cinema/services.py` (§3.3).
 
 | Name | file:line | What it does |
 |---|---|---|
@@ -646,7 +646,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 **Role:** pipeline-wide infrastructure — durable spend ledger + budget gate, file-lifecycle cleanup, structured JSON logging, and the single env-var settings singleton.
 
-**Canonical modules:** `cost_tracker.py` (544 LOC), `cleanup.py` (154 LOC), `cinema/logging_config.py` (114 LOC), `config/settings.py` (141 LOC). (`reporter.py`, the legacy diagnostic orphan, has since been deleted.)
+**Canonical modules:** `cost_tracker.py` (551 LOC), `cleanup.py` (154 LOC), `cinema/logging_config.py` (114 LOC), `config/settings.py` (141 LOC). (`reporter.py`, the legacy diagnostic orphan, has since been deleted.)
 
 | Name | file:line | What it does |
 |---|---|---|
@@ -1606,14 +1606,14 @@ The pipeline's single entry point is `web_server.py` → `cinema_pipeline.py`; t
 | Path | LOC | Role |
 |---|---|---|
 | `web_server.py` | 2664 | Flask app (port 8080), the **sole** human entry point: REST CRUD, SSE progress stream, pipeline control, module-level concurrency state |
-| `cinema_pipeline.py` | 1669 | `CinemaPipeline` — the real orchestrator. Owns `generate()`, the 12-stage gate sequence, `_assemble_final`, scene-audio/foley/BGM helpers, checkpoint delegation |
+| `cinema_pipeline.py` | 1677 | `CinemaPipeline` — the real orchestrator. Owns `generate()`, the 12-stage gate sequence, `_assemble_final`, scene-audio/foley/BGM helpers, checkpoint delegation |
 | `cinema/core.py` | 115 | `PipelineCore` + `build_pipeline_core()` — long-lived services (project dict, dirs, `ContinuityEngine`, `ChiefDirector`, `CostTracker`, `LLMEnsemble`) |
 | `cinema/runstate.py` | 157 | `RunState` dataclass — the single shared home for per-run mutable state; one instance, shared by all three controllers |
 | `cinema/lifecycle.py` | 208 | `LifecycleService` protocol + `NullLifecycle` (no-op, **not** wired into `CinemaPipeline`) + `ThreadedLifecycle` (interactive, event-backed) |
 | `cinema/context.py` | 181 | `PipelineContext` dataclass passed into phases; `get_project_setting()` canonical knob reader |
 | `cinema/pipeline.py` | 114 | A **second, unrelated** `CinemaPipeline` — a generic list-of-`Phase` driver; NOT the orchestrator (see divergence D-1) |
 | `pipeline_context.py` | 15 | Loads `config/prompts/pipeline_context.md` into `PIPELINE_CONTEXT`, injected into every LLM system prompt |
-| `web_services.py` | 114 | Pure SSE-event builder `make_progress_callback` (factored out for unit-testability) |
+| `web_services.py` | 121 | Pure SSE-event builder `make_progress_callback` (factored out for unit-testability) |
 
 #### Phases
 
@@ -1717,7 +1717,7 @@ The functions an engineer reaches for most, grouped by task. All `file:line` ref
 | `CinemaPipeline.generate` | `cinema_pipeline.py:942` | Main loop; `resume=True` restores checkpoint. Returns `final_cinema.mp4` path or `None` |
 | `CinemaPipeline.assemble_approved_takes` | `cinema_pipeline.py:853` | Full assembly + SCREENING gate + cleanup + cost summary |
 | `CinemaPipeline._assemble_approved_takes_core` | `cinema_pipeline.py:783` | Assembly WITHOUT the SCREENING gate-wait — called by the re-assemble endpoint to avoid Flask-thread deadlock (D-9) |
-| `CinemaPipeline._assemble_final` | `cinema_pipeline.py:1315` | normalize → stitch → color grade → 3-track audio mix → EBU R128 loudnorm |
+| `CinemaPipeline._assemble_final` | `cinema_pipeline.py:1323` | normalize → stitch → color grade → 3-track audio mix → EBU R128 loudnorm |
 | `CinemaPipeline._refresh_project_snapshot` | `cinema_pipeline.py:443` | `load_project` → **validate-before-swap** → rebuild trackers (cycle-11 correctness fix) |
 | `build_pipeline_core` | `cinema/core.py:75` | Factory; constructs `CostTracker(budget_usd=…)` (note: **no** `db_path` — see D-config-1) |
 

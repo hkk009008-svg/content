@@ -44,8 +44,8 @@ export default function App() {
   // P1-3: sticky BUDGET_EXCEEDED halt. Owned HERE (not in a mode shell)
   // because starting a run unmounts EditorialShell and the gate fires
   // mid-run while the operator is in PipelineLayout — both render it.
-  // Not keyed on `latest`: the phase abort emits MOTION_DONE right after
-  // the halt, which would flash a latest-keyed banner away.
+  // Not keyed on `latest`: the phase abort emits MOTION_HALTED right after
+  // the halt event, which would flash a latest-keyed banner away.
   const [budgetHalt, setBudgetHalt] = useState<ProgressEvent | null>(null)
   useEffect(() => {
     if (latest?.stage === 'BUDGET_EXCEEDED') setBudgetHalt(latest)

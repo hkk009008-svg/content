@@ -3,7 +3,7 @@ import type { ProgressEvent } from '../types/project'
 /** Budget-halt banner — sticky surface for BUDGET_EXCEEDED (P1-3).
  *
  *  Owned by App.tsx state, NOT keyed on `latest`: the motion-phase abort
- *  emits MOTION_DONE immediately after the halt event, which would flash a
+ *  emits MOTION_HALTED immediately after the halt event, which would flash a
  *  latest-keyed banner away. Rendered in BOTH PipelineLayout (where the
  *  operator actually is when the per-take gate fires mid-run) and
  *  EditorialShell (setup mode) — the wf_9877b1d1 review found the original
