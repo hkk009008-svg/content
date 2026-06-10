@@ -2,6 +2,11 @@
 
 Tasks 5 and 6 will extend this file with router (_resolve_identity_strategy) tests.
 """
+import json
+import os
+
+import pytest
+
 from cinema.shots.strategy import (
     IdentityStrategy, CharIdentitySpec,
     PRIMARY_ONLY, KONTEXT_MULTI_CHAR, MAX_TIER_PRIMARY_ONLY, NO_IDENTITY_ASSET,
@@ -108,3 +113,233 @@ def test_to_metadata_dict_is_json_safe_and_complete():
     # allocator reads it off these dicts via Task 6's kwarg; without it,
     # secondaries can never fill their allocated slots.
     assert md["conditioned_chars"][1]["multi_angle_refs"] == ["/r/b1.jpg"]
+
+
+# ---------------------------------------------------------------------------
+# Task 6: controller integration tests — identity_strategy promise + actual
+# ---------------------------------------------------------------------------
+
+from cinema.lifecycle import NullLifecycle
+from cinema.runstate import RunState
+from cinema.review.controller import ReviewController
+from cinema.checkpoint import CheckpointStore
+from cinema.shots.controller import ShotController
+import domain.project_manager as dpm
+
+
+class StubContinuity:
+    """enhance_shot_prompt stand-in: returns a canned continuity_config."""
+
+    def __init__(self, secondary_chars):
+        self._sec = secondary_chars
+
+    def enhance_shot_prompt(self, shot, scene, prev_shot, shot_index,
+                            approved_anchor_image=None):
+        return {"prompt": "stub prompt", "continuity_config": {
+            "primary_reference": "/r/a.jpg", "identity_anchor": "anchor a",
+            "multi_angle_refs": [], "secondary_chars": self._sec,
+            "scene_seed": 1, "use_img2img": False, "identity_threshold": 0.65,
+        }}
+
+
+class _FakeCore:
+    """Minimal PipelineCore stand-in (mirrors test_cross_controller.FakeCore)."""
+
+    def __init__(self, project: dict, project_dir: str):
+        self.project = project
+        self.project_dir = project_dir
+        self.temp_dir = project_dir
+        self.export_dir = project_dir
+        self.continuity = None
+        self.director = None
+        self.vbench = None
+        self.cost_tracker = None
+        self.ensemble = None
+
+
+class _WiredHost:
+    """Implements all three ControllerHost protocols (mirrors test_cross_controller.WiredHost)."""
+
+    def __init__(self, core: _FakeCore, lifecycle, runstate: RunState):
+        self._core = core
+        self._lifecycle = lifecycle
+        self._runstate = runstate
+        self._shot_ctrl = ShotController(core, lifecycle, self, runstate)
+        self._review_ctrl = ReviewController(core, lifecycle, self, runstate)
+        self._checkpoint = CheckpointStore(core, lifecycle, runstate)
+
+    # -- ShotControllerHost surface --
+    def _refresh_project_snapshot(self, timeout: float = 10):
+        return None
+
+    def _rebuild_review_clips(self, project=None):
+        return self._review_ctrl._rebuild_review_clips(project)
+
+    def _candidate_take(self, shot):
+        return self._review_ctrl._candidate_take(shot)
+
+    def _resolve_take_path(self, shot, take_id):
+        return self._review_ctrl._resolve_take_path(shot, take_id)
+
+    def _latest_take(self, shot, collection_name):
+        return self._review_ctrl._latest_take(shot, collection_name)
+
+    def _save_checkpoint(self, completed_scene_idx: int = -1):
+        return self._checkpoint._save_checkpoint(completed_scene_idx)
+
+    def _ensure_scene_audio(self, scene, characters):
+        return None
+
+    # -- ReviewControllerHost surface --
+    def _find_take(self, shot, take_id):
+        return self._shot_ctrl._find_take(shot, take_id)
+
+    def _mutate_shot(self, shot_id, mutator, timeout: float = 10):
+        return self._shot_ctrl._mutate_shot(shot_id, mutator, timeout)
+
+    def resume(self):
+        self._lifecycle.resume()
+
+
+def _make_project(tmpdir: str, characters_in_frame: list) -> dict:
+    """Minimal valid project dict with one scene + one shot.
+
+    Shot fields copied verbatim from test_cross_controller._sample_project to
+    satisfy Project.model_validate.
+    """
+    return {
+        "id": "test_identity_project",
+        "global_settings": {"quality_tier": "production"},
+        "scenes": [
+            {
+                "id": "scene_1",
+                "shots": [
+                    {
+                        "id": "shot_1",
+                        "plan_status": "approved",
+                        "characters_in_frame": characters_in_frame,
+                        "keyframe_takes": [],
+                        "motion_takes": [],
+                        "postprocess_variants": [],
+                        "approved_keyframe_take_id": "",
+                        "approved_final_take_id": "",
+                    },
+                ],
+            }
+        ],
+        "characters": [],
+        "locations": [],
+    }
+
+
+def _build_host(tmp_path, secondary_chars, characters_in_frame):
+    """Construct a _WiredHost with StubContinuity wired in."""
+    project = _make_project(str(tmp_path), characters_in_frame)
+    core = _FakeCore(project, str(tmp_path))
+    lifecycle = NullLifecycle()
+    runstate = RunState()
+    host = _WiredHost(core, lifecycle, runstate)
+    # Set continuity AFTER constructing _WiredHost (FakeCore.__init__ sets it to None).
+    # ShotController.continuity is a property proxying self._core.continuity,
+    # so setting core.continuity is sufficient.
+    core.continuity = StubContinuity(secondary_chars)
+    return host
+
+
+@pytest.fixture
+def captured(monkeypatch, tmp_path):
+    """Record generate_ai_broll kwargs; return a fake success."""
+    box = {}
+
+    def fake_broll(prompt, output_filename, **kwargs):
+        box["kwargs"] = kwargs
+        open(output_filename, "wb").close()  # satisfy the exists() guard
+        from phase_c_assembly import ImageGenResult
+        return ImageGenResult(output_filename, "FLUX_KONTEXT")
+
+    monkeypatch.setattr("cinema.shots.controller.generate_ai_broll", fake_broll)
+    return box
+
+
+@pytest.fixture
+def _stub_validator(monkeypatch):
+    """Stub phase_c_vision._get_shared_validator — validation runs on the success path."""
+
+    class _FakeValidateResult:
+        overall_score = 0.8
+        passed = True
+        character_results = {}
+
+    class _FakeValidator:
+        def validate_image(self, *args, **kwargs):
+            return _FakeValidateResult()
+
+    monkeypatch.setattr("phase_c_vision._get_shared_validator", lambda: _FakeValidator())
+
+
+@pytest.fixture
+def controller_one_char(monkeypatch, tmp_path, captured, _stub_validator):
+    """Host/controller with a single-character shot (no secondaries)."""
+    # Monkeypatch PROJECTS_DIR so _mutate_shot disk I/O targets tmp_path
+    proj_root = str(tmp_path / "projects")
+    os.makedirs(proj_root, exist_ok=True)
+    host = _build_host(tmp_path, secondary_chars=[], characters_in_frame=["char_a"])
+    # Write project JSON to disk so mutate_project can load it
+    project = host._core.project
+    proj_dir = os.path.join(proj_root, project["id"])
+    os.makedirs(proj_dir, exist_ok=True)
+    with open(os.path.join(proj_dir, "project.json"), "w") as f:
+        json.dump(project, f)
+    monkeypatch.setattr(dpm, "PROJECTS_DIR", proj_root)
+    return host._shot_ctrl
+
+
+@pytest.fixture
+def controller_two_chars(monkeypatch, tmp_path, captured, _stub_validator):
+    """Host/controller with a two-character shot (char_b as secondary)."""
+    proj_root = str(tmp_path / "projects")
+    os.makedirs(proj_root, exist_ok=True)
+    secondary = [{"char_id": "char_b", "reference": "/r/b.jpg",
+                  "multi_angle_refs": [], "identity_anchor": "anchor b"}]
+    host = _build_host(tmp_path, secondary_chars=secondary,
+                       characters_in_frame=["char_a", "char_b"])
+    project = host._core.project
+    proj_dir = os.path.join(proj_root, project["id"])
+    os.makedirs(proj_dir, exist_ok=True)
+    with open(os.path.join(proj_dir, "project.json"), "w") as f:
+        json.dump(project, f)
+    monkeypatch.setattr(dpm, "PROJECTS_DIR", proj_root)
+    return host._shot_ctrl
+
+
+def _latest_keyframe_take(controller, shot_id):
+    for scene in controller.project["scenes"]:
+        for shot in scene["shots"]:
+            if shot["id"] == shot_id:
+                return shot["keyframe_takes"][-1]
+    raise AssertionError(f"no keyframe take on {shot_id}")
+
+
+def test_single_char_take_metadata_and_kwargs_unchanged(controller_one_char, captured):
+    res = controller_one_char.generate_keyframe_take("scene_1", "shot_1")
+    assert res["success"]
+    take = _latest_keyframe_take(controller_one_char, "shot_1")
+    assert take["metadata"]["identity_strategy"]["mechanism_tag"] == "PRIMARY_ONLY"
+    assert take["metadata"]["mechanism_actually_used"] == "FLUX_KONTEXT"
+    # exact same kwargs today's code sends — zero regression
+    assert captured["kwargs"]["char_lora_path"] is None
+    assert "secondary_char_refs" not in captured["kwargs"] or \
+        captured["kwargs"]["secondary_char_refs"] is None
+
+
+def test_two_char_take_promises_kontext_multi_and_forwards_refs(
+        controller_two_chars, captured):
+    controller_two_chars.generate_keyframe_take("scene_1", "shot_1")
+    take = _latest_keyframe_take(controller_two_chars, "shot_1")
+    md = take["metadata"]["identity_strategy"]
+    assert md["mechanism_tag"] == "KONTEXT_MULTI_CHAR"
+    sent = captured["kwargs"]["secondary_char_refs"]
+    assert [c["char_id"] for c in sent] == ["char_b"]
+    assert "multi_angle_refs" in sent[0]  # V-5: field survives the to_dict chain
+    # V-2: derived actual — multi-char emission on a successful Kontext call
+    assert take["metadata"]["mechanism_actually_used"] == "FLUX_KONTEXT_MULTI_CHAR"

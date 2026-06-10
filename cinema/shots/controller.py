@@ -603,16 +603,11 @@ class ShotController:
         # 'production', the kwargs default to None/'production' and behavior is
         # identical to before.
         quality_tier = settings.get("quality_tier", "production")
-        char_lora_paths = settings.get("char_lora_paths", {}) or {}
-        # Pick the LoRA for the primary character in this shot. Prefer the
-        # explicit primary_character field; otherwise take the first entry in
-        # characters_in_frame; otherwise empty string (which yields no LoRA).
-        in_frame = shot.get("characters_in_frame") or []
-        primary_char_id = shot.get("primary_character") or (in_frame[0] if in_frame else "")
-        char_lora_path = char_lora_paths.get(primary_char_id) or None
-        # Per-character LoRA strength validated at train-time (Task 7).
-        # None → tier default (e.g. 1.0) in _inject_identity. Backward-compat.
-        char_lora_strength = (settings.get("char_lora_strengths", {}) or {}).get(primary_char_id)
+        strategy = _resolve_identity_strategy(shot, quality_tier, settings, cc)
+        primary_char_id = strategy.primary_char_id
+        char_lora_path = strategy.char_lora_path
+        char_lora_strength = strategy.char_lora_strength
+        take["metadata"]["identity_strategy"] = strategy.to_metadata_dict()
         style_refs = settings.get("style_reference_paths", []) or []
         style_reference = style_refs[0] if style_refs else None
 
@@ -721,6 +716,7 @@ class ShotController:
             char_lora_path=char_lora_path,
             char_lora_strength=char_lora_strength,
             style_reference=style_reference,
+            secondary_char_refs=[c.to_dict() for c in strategy.secondary_specs] or None,
             shot_hint={"prompt": full_prompt, "characters_in_frame": shot.get("characters_in_frame", []),
                        "camera": shot.get("camera", ""),
                        "image_api": _image_api_hint},
@@ -728,6 +724,16 @@ class ShotController:
         )
         if not result or not os.path.exists(img_path):
             return {"success": False, "error": "Image generation failed"}
+
+        actual = result.api_name if result else None
+        if actual == "FLUX_KONTEXT" and strategy.secondary_specs:
+            # V-2 / spec §3(d): api_name is backend-granular — a successful
+            # Kontext call looks identical for multi-char and primary-only, so
+            # derive the actual from api_name x what the strategy emitted.
+            # This records EMISSION, not server honoring; S1 + per-char
+            # validation cover the latter.
+            actual = "FLUX_KONTEXT_MULTI_CHAR"
+        take["metadata"]["mechanism_actually_used"] = actual
 
         identity_score = 0.0
         if primary_ref:

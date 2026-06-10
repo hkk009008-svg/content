@@ -78,6 +78,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                        pulid_weight_override=None, negative_prompt="",
                        quality_tier="production", char_lora_path=None,
                        char_lora_strength=None,
+                       secondary_char_refs=None,
                        style_reference=None, shot_hint=None, ctx=None):
     """
     Generates a cinematic image with face-identity preservation.
@@ -105,6 +106,8 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         characters: List of character config dicts
         quality_tier: "production" | "max" — selects the generation pipeline.
         char_lora_path: (max tier only) Path to per-character LoRA .safetensors.
+        secondary_char_refs: P1-1 slice 1: consumed by the Kontext fallback —
+            wiring lands behind the S1 gate. Accepted and unused until Task 8.
         style_reference: (max tier only) Path to style-board reference image.
         shot_hint: (max tier only) Pre-classified shot dict; bypasses re-classification.
 
