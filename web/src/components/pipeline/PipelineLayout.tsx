@@ -8,6 +8,7 @@ import ReviewStage from './ReviewStage'
 import ScreeningStage from './ScreeningStage'
 import GenerationPanel from '../GenerationPanel'
 import Filmstrip from './Filmstrip'
+import BudgetHaltBanner from '../BudgetHaltBanner'
 import { ErrorState, LoadingState } from '../ui'
 
 export interface PipelineError {
@@ -80,6 +81,10 @@ interface Props {
   pipelineError?: PipelineError | null
   /** Optional system-level "awaiting backend" placeholder. */
   pipelineLoadingLabel?: string | null
+  /** P1-3: sticky BUDGET_EXCEEDED halt (owned by App.tsx so it survives
+   *  mode switches; the gate fires mid-run while the operator is HERE). */
+  budgetHalt?: ProgressEvent | null
+  onDismissBudgetHalt?: () => void
 }
 
 /* ─── Helpers ─────────────────────────────────────────────────── */
@@ -166,6 +171,7 @@ export default function PipelineLayout({
   onRegenerateShot, onRestartShot, onCorrectShot, onDiagnoseShot, onProceedToAssembly,
   onRefreshProject, onIterate, onApproveFinalCut, onReassemble,
   pipelineError, pipelineLoadingLabel,
+  budgetHalt, onDismissBudgetHalt,
 }: Props) {
   const isComplete = latest?.stage === 'COMPLETE' || latest?.stage === 'DONE'
 
@@ -230,6 +236,10 @@ export default function PipelineLayout({
         onPause={onPause}
         onResume={onResume}
       />
+
+      {budgetHalt && onDismissBudgetHalt && (
+        <BudgetHaltBanner event={budgetHalt} onDismiss={onDismissBudgetHalt} />
+      )}
 
       {/* ── Hero band — the editorial moment ────────────────────── */}
       <section className="px-12 pt-16 pb-12 border-b border-editorial-curtain relative">

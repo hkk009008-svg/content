@@ -101,11 +101,18 @@ def make_progress_callback(progress_queue: Optional[queue.Queue]) -> Callable:
         # json.dumps()'s every event — ONE non-serializable value would
         # kill the whole SSE stream, so unserializable extras drop here.
         for key, value in kwargs.items():
-            if key in event or value is None or value == "":
+            # isinstance before == so an exotic __eq__ (raising, or
+            # returning a non-bool like a pandas Series) never runs —
+            # pre-lift, ALL extras were discarded, so no producer ever
+            # guarded against this filter touching its values.
+            if key in event or value is None or (isinstance(value, str) and value == ""):
                 continue
             try:
-                json.dumps(value)
-            except (TypeError, ValueError):
+                # allow_nan=False: json.dumps would otherwise serialize
+                # NaN/Infinity into tokens the browser's JSON.parse rejects
+                # — killing that whole event client-side, not just the field.
+                json.dumps(value, allow_nan=False)
+            except (TypeError, ValueError, RecursionError):
                 continue
             event[key] = value
         if progress_queue is not None:

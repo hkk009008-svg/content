@@ -1168,7 +1168,15 @@ class CinemaPipeline:
             project=project,
             on_failure=_on_motion_fail,
         ).run(ctx)
-        self.progress("MOTION_DONE", motion_result.message, 80)
+        # An aborted phase (budget halt, cancel) must NOT announce
+        # MOTION_DONE at 80% — that event replaces `latest` in the UI and
+        # masks the halt the operator needs to see (operator Lane V K2
+        # residual, promoted by N3). No FE consumer keys on MOTION_DONE
+        # (grep-verified), so the conditional is additive.
+        if motion_result.ok:
+            self.progress("MOTION_DONE", motion_result.message, 80)
+        else:
+            self.progress("MOTION_HALTED", motion_result.message, 72)
         if self.lifecycle.is_cancelled():
             self.progress("CANCELLED", "Pipeline cancelled by user", 0)
             return None

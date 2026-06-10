@@ -53,7 +53,12 @@ export default function GenerationPanel({ project, events, latest, isGenerating 
               style={{ width: `${Math.min(100, latest.percent)}%` }}
             />
           </div>
-          <p className="text-eyebrow text-editorial-ivory-mute mt-1">{latest.detail}</p>
+          <p className="text-eyebrow text-editorial-ivory-mute mt-1">
+            {latest.detail}
+            {latest.engine && (
+              <span className="ml-2 font-mono text-editorial-ivory">via {latest.engine}</span>
+            )}
+          </p>
         </div>
       )}
 
@@ -76,6 +81,13 @@ export default function GenerationPanel({ project, events, latest, isGenerating 
               {e.stage}
             </span>
             <span className="text-editorial-ivory-mute truncate">{e.detail}</span>
+            {/* P1-3 (NF-3): the engine being tried — MOTION events carry
+                percent=-1, so the progress block above is hidden during the
+                exact wait this field exists for; the log line is the
+                pipeline-mode surface. */}
+            {e.engine && (
+              <span className="font-mono text-editorial-ivory shrink-0">via {e.engine}</span>
+            )}
             {e.percent >= 0 && (
               <span className="text-editorial-ivory-mute ml-auto shrink-0">{Math.round(e.percent)}%</span>
             )}

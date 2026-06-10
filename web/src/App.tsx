@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { Project, AppConfig } from './types/project'
+import type { Project, AppConfig, ProgressEvent } from './types/project'
 import { usePipelineState } from './hooks/usePipelineState'
 import { ErrorBoundary } from './components/ui'
 import ProjectSelector from './components/ProjectSelector'
@@ -41,9 +41,20 @@ export default function App() {
     if (project) await loadProject(project.id)
   }, [project, loadProject])
 
+  // P1-3: sticky BUDGET_EXCEEDED halt. Owned HERE (not in a mode shell)
+  // because starting a run unmounts EditorialShell and the gate fires
+  // mid-run while the operator is in PipelineLayout — both render it.
+  // Not keyed on `latest`: the phase abort emits MOTION_DONE right after
+  // the halt, which would flash a latest-keyed banner away.
+  const [budgetHalt, setBudgetHalt] = useState<ProgressEvent | null>(null)
+  useEffect(() => {
+    if (latest?.stage === 'BUDGET_EXCEEDED') setBudgetHalt(latest)
+  }, [latest])
+
   const handleGenerate = async () => {
     if (!project) return
     setGenerating(true)
+    setBudgetHalt(null) // new run: the previous halt is history
     setMode('pipeline')  // Switch to pipeline view
     await fetch(`${API}/projects/${project.id}/generate`, { method: 'POST' })
     startSSE()
@@ -144,6 +155,8 @@ export default function App() {
           failedShots={failedShots}
           pipelineError={pipelineError}
           pipelineLoadingLabel={pipelineLoadingLabel}
+          budgetHalt={budgetHalt}
+          onDismissBudgetHalt={() => setBudgetHalt(null)}
           onBack={handleBackToSetup}
           onCancel={handleCancel}
           onPause={pausePipeline}
@@ -193,6 +206,8 @@ export default function App() {
         onOpenConsole={() => setMode('console')}
         onOpenCapability={() => setMode('capability')}
         apiBase={API}
+        budgetHalt={budgetHalt}
+        onDismissBudgetHalt={() => setBudgetHalt(null)}
       />
     </ErrorBoundary>
   )

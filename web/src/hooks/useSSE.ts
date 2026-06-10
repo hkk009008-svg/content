@@ -82,6 +82,10 @@ export function useSSE(projectId: string | null) {
     if (!projectId || sourceRef.current) return
     clearRetry()
     setEvents([])
+    // Without this, the previous run's last event (stage/detail/engine)
+    // leaks into the new run's UI until the first event arrives — e.g. a
+    // stale 'VIA <engine>' marquee fragment after a cancel (wf_9877b1d1).
+    setLatest(null)
     setIsStreaming(true)
     attemptRef.current = 0
     stoppedRef.current = false

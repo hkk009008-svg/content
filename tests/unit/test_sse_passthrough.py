@@ -62,6 +62,28 @@ class TestKwargPassthrough:
         assert ev["engine"] == "VEO_NATIVE"
         json.dumps(ev)  # the emitted event is stream-safe
 
+    def test_exotic_eq_value_dropped_not_fatal(self):
+        """A kwarg whose __eq__ raises (or returns a non-bool, e.g. a pandas
+        Series) must be dropped, not crash the producer thread — the
+        pre-lift bridge silently discarded ALL extras, so no producer ever
+        guarded against this."""
+        class ExplosiveEq:
+            def __eq__(self, other):
+                raise RuntimeError("__eq__ exploded")
+
+        ev = _emit(engine="VEO_NATIVE", weird=ExplosiveEq())
+        assert "weird" not in ev
+        assert ev["engine"] == "VEO_NATIVE"
+
+    def test_nan_and_infinity_dropped(self):
+        """json.dumps serializes NaN/Infinity to invalid JSON that the
+        browser's JSON.parse rejects — the whole event would vanish in the
+        client's catch{}. Drop the offending extra at the bridge instead."""
+        ev = _emit(engine="VEO_NATIVE", spent=float("nan"), budget=float("inf"))
+        assert "spent" not in ev
+        assert "budget" not in ev
+        assert ev["engine"] == "VEO_NATIVE"
+
     def test_named_fields_unchanged(self):
         """The existing 17-field contract is untouched by the lift."""
         q = queue.Queue()

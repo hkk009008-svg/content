@@ -150,11 +150,12 @@ wind down.
 - `_ensure_progress_queue(pid)` creates a `queue.Queue` keyed by project.
 - Pipeline thread builds a callback via
   `web_services.make_progress_callback(q)` and passes it into `CinemaPipeline`.
-- `GET /api/projects/<pid>/stream` opens an EventSource. Generator at
-  [web_server.py:1530-1544](web_server.py:1530) does `q.get(timeout=30)`;
-  on timeout emits HEARTBEAT, on `None` sentinel emits END and breaks.
+- `GET /api/projects/<pid>/stream` opens an EventSource. Generator inside
+  `api_stream` ([web_server.py:1577](web_server.py:1577)) does
+  `q.get(timeout=30)`; on timeout emits HEARTBEAT, on `None` sentinel
+  emits END and breaks.
 - Pipeline thread writes `None` to the queue in `finally`
-  ([web_server.py:1503](web_server.py:1503)) after success or error.
+  ([web_server.py:1556](web_server.py:1556)) after success or error.
 - **Queue is released on run completion** (Bundle-C 3.2, 2026-05-24) —
   the `run_pipeline` daemon's `finally` block now pops `_progress_queues[pid]`
   after sending the `None` sentinel, gated on identity-check to avoid racing
@@ -1338,7 +1339,7 @@ practical max; loops in assembly.
 
 ### 12.6 Final-assembly audio mux — engine-dependent voice source
 
-`_assemble_final` ([cinema_pipeline.py:1315](cinema_pipeline.py:1315)) muxes the
+`_assemble_final` ([cinema_pipeline.py:1323](cinema_pipeline.py:1323)) muxes the
 final video's audio with an FFmpeg `amix` filtergraph over up to three sources
 (voice/dialogue + BGM + foley). The **voice source is motion-engine-dependent**:
 
@@ -1632,9 +1633,12 @@ script, the local check + CI move together.
 
 ## 16. Known bugs & latent issues
 
-> Test suite state (verified 2026-06-10, Session-2 P1-3 applied):
-> **1989 pass / 0 skip / 0 fail** in `tests/unit/`. Run
-> `.venv/bin/python -m pytest tests/unit/ -q` to verify.
+> Test suite state (verified 2026-06-10, Session-2 P1-3 + review
+> dispositions applied): **1869 pass / 0 fail** with
+> `--ignore=tests/unit/test_check_doc_claims.py` — that file was the other
+> seat's in-flight TDD WIP (RED by design) in the shared tree at
+> verification time; its committed blob was green at their last clean run.
+> Run `.venv/bin/python -m pytest tests/unit/ -q` to verify.
 
 | Severity | Issue | Location |
 |---|---|---|
@@ -1648,7 +1652,7 @@ script, the local check + CI move together.
 
 - **`main.py`** — already deleted. Root-shim docstrings still mention it.
 - **Root-level module status** (verified 2026-05-29 via `grep -rn 'import <mod>' --include='*.py'`, excluding tests/worktrees):
-  - **Load-bearing — do NOT delete without grep:** `research_engine.py` + `web_research.py` (imported by `scene_decomposer.py` / `dialogue_writer.py` / `style_director.py`); `cleanup.py` (`web_server.py`, `cinema_pipeline.py`); `web_services.py` (`web_server.py:59`); `coherence_analyzer.py` (`cinema/shots/controller.py`).
+  - **Load-bearing — do NOT delete without grep:** `research_engine.py` + `web_research.py` (imported by `scene_decomposer.py` / `dialogue_writer.py` / `style_director.py`); `cleanup.py` (`web_server.py`, `cinema_pipeline.py`); `web_services.py` (`web_server.py:60`); `coherence_analyzer.py` (`cinema/shots/controller.py`).
   - *(`reporter.py` was here as a true-orphan candidate; pruned 2026-06-03.)*
 
 ---

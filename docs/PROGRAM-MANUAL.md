@@ -384,7 +384,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 **Role:** `web_server.py` is the sole human-facing entry — a Flask server (port 8080) that serves the React SPA, exposes the full REST API for project/character/location/scene/shot CRUD and pipeline control, and streams progress via SSE. `web_services.py` holds the pure, unit-testable SSE-event shaper.
 
-**Canonical modules:** `web_server.py` (2664 LOC), `web_services.py` (97 LOC). Read endpoints without constructing a pipeline come from `cinema/services.py` (§3.3).
+**Canonical modules:** `web_server.py` (2664 LOC), `web_services.py` (114 LOC). Read endpoints without constructing a pipeline come from `cinema/services.py` (§3.3).
 
 | Name | file:line | What it does |
 |---|---|---|
