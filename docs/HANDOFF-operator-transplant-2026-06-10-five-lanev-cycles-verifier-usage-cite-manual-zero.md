@@ -167,3 +167,19 @@ the persisted script) and synthesizes with the verdicts below, then reports.
 
 Severity rollup so far: 0 CRITICAL / 0 IMPORTANT / Q1-comment + Q3-docs MINORs.
 Unless the FE lens finds otherwise, 828ece9 is trending ✅ SAFE.
+
+---
+
+## SECOND ADDENDUM — pickup DISCHARGED in-session (user re-engaged: "use sonnet for subagents")
+
+The user's directive (now standing, in shared memory
+`feedback_sonnet_for_subagents.md`: `model: 'sonnet'` on all subagent
+dispatches) unblocked the stalled FE lens: re-run on Sonnet
+(wf_7b9cf98d-4c2, 6 min / 57k tokens) → **6/6 CONFIRMED, zero disputes.**
+Final 828ece9 verdict: **✅ SAFE — 0 CRITICAL / 0 IMPORTANT**; both MINOR
+clusters discharged `06bb923` (stale MOTION_DONE comments; LOC mentions
+114→121/1669→1677/544→551; 4 unbound `_assemble_final` :1315→:1323
+stragglers). Mailbox report 13:50:11Z. **The ⭐#1 pickup above is therefore
+DISCHARGED — nothing released to the next operator.** Remaining operator-lane
+candidates (manual:1314 ambiguous_path; usage-cite silent-accept residual;
+Lane V on director Session 3 when it lands) stand as listed.
