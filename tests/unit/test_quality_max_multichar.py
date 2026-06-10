@@ -357,7 +357,7 @@ def test_phase_c_assembly_production_tier_does_not_call_max():
         else:
             sys.modules["quality_max"] = old_qm
 
-    mock_max.assert_not_called(), (
+    assert mock_max.call_count == 0, (
         f"generate_ai_broll_max must NOT be called for quality_tier='production'; "
         f"was called {mock_max.call_count} time(s)"
     )
