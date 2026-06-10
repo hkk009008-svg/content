@@ -775,6 +775,18 @@ class ShotController:
                 except Exception:
                     logger.exception("T6 remediation advisory failed (non-fatal); continuing")
 
+            # P1-1: score every conditioned character; unconditioned chars are never
+            # scored (a low score on them would be expected, not a generation failure).
+            per_char = {primary_char_id: identity_score}
+            for spec_c in strategy.secondary_specs:
+                sec_result = _get_shared_validator().validate_image(
+                    img_path, spec_c.reference,
+                    character_id=spec_c.char_id,
+                    threshold=threshold,
+                )
+                per_char[spec_c.char_id] = sec_result.overall_score
+            take["metadata"]["identity_per_char"] = per_char
+
         take["path"] = img_path
 
         # S16: populate directorial iteration provenance when supplied.

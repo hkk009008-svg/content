@@ -359,3 +359,25 @@ def test_two_char_take_promises_kontext_multi_and_forwards_refs(
     assert sent[0]["multi_angle_refs"] == ["/r/b1.jpg"]
     # V-2: derived actual — multi-char emission on a successful Kontext call
     assert take["metadata"]["mechanism_actually_used"] == "FLUX_KONTEXT_MULTI_CHAR"
+
+
+# ---------------------------------------------------------------------------
+# Task 9: per-character keyframe validation (identity_per_char)
+# ---------------------------------------------------------------------------
+
+def test_identity_per_char_written_for_conditioned_only(controller_two_chars, captured):
+    controller_two_chars.generate_keyframe_take("scene_1", "shot_1")
+    take = _latest_keyframe_take(controller_two_chars, "shot_1")
+    per_char = take["metadata"]["identity_per_char"]
+    assert set(per_char) == {"char_a", "char_b"}      # conditioned chars only
+    assert take["metadata"]["identity_score"] == per_char["char_a"]  # scalar = primary, unchanged
+
+
+def test_single_char_identity_per_char_pins_scalar_convention(
+        controller_one_char, captured):
+    """INFO-3 pin: a single-char shot gets identity_per_char == {primary: scalar}
+    and the identity_score scalar itself is byte-unchanged."""
+    controller_one_char.generate_keyframe_take("scene_1", "shot_1")
+    take = _latest_keyframe_take(controller_one_char, "shot_1")
+    assert take["metadata"]["identity_per_char"] == \
+        {"char_a": take["metadata"]["identity_score"]}
