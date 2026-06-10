@@ -1851,3 +1851,181 @@ class TestPositionalCompoundBinding:
             f"prose backticks in the description column must not pollute the "
             f"column-scoped positional count, got: {drifts}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Def-aware fallback binding (Step 2.5) — when the nearest/bound token has no
+# def in the target file, the binder retries the line's OTHER identifier
+# tokens by distance instead of silently degrading to bounds-only. Positional
+# pairing stays authoritative (never overridden by fallback).
+# ---------------------------------------------------------------------------
+
+class TestDefAwareFallbackBinding:
+    def _mod(self, tmp_path):
+        # target_fn defs at line 1; 10 lines total so :5 is in-bounds.
+        return _commit_py(
+            tmp_path, "mod.py",
+            "def target_fn(some_arg=None):\n"   # line 1
+            "    pass\n"
+            "# filler\n# filler\n# filler\n# filler\n"
+            "# filler\n# filler\n# filler\n# filler\n",
+        )
+
+    def test_nearest_nondef_token_falls_back_to_def_token(self, tmp_path):
+        # `some_arg` (nearest-before, no def in mod.py) must not eat the
+        # binding; `target_fn` (farther) binds and the stale :5 is caught.
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- `target_fn` accepts a `some_arg` default (`mod.py:5`)\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"expected fallback def_drift, got: {drifts}"
+        assert drifts[0].kind == "def_drift"
+        assert drifts[0].symbol == "target_fn"
+        assert drifts[0].suggested_line == 1
+
+    def test_fallback_bound_anchor_correct_no_drift(self, tmp_path):
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- `target_fn` accepts a `some_arg` default (`mod.py:1`)\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"correct fallback-bound anchor must pass, got: {drifts}"
+
+    def test_positional_pairing_not_overridden_by_fallback(self, tmp_path):
+        # 2 idents / 2 anchors -> positional pairing applies; `beta` has no def
+        # so its anchor stays bounds-only. The fallback must NOT rebind it to
+        # `alpha` (which would false-fire a def_drift on :5).
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "mod.py",
+            "def alpha():\n    pass\n# c\n# c\n# c\n# c\n",  # alpha at 1; 6 lines
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "| `alpha` / `beta` | `mod.py:1` / `:5` | row |\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], (
+            f"positional pairing must stay authoritative (no fallback), got: {drifts}"
+        )
+
+    def test_fallback_works_for_markdown_link_anchor(self, tmp_path):
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- `target_fn` clamps the `retries` knob [here](mod.py:5)\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"expected link-style fallback def_drift, got: {drifts}"
+        assert drifts[0].symbol == "target_fn"
+        assert drifts[0].suggested_line == 1
+
+    def test_inline_fallback_is_preceding_only(self, tmp_path):
+        # Inline convention is symbol-precedes-anchor; a def token AFTER the
+        # inline anchor must not be bound by the fallback.
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- set via (`mod.py:5`) inside `target_fn`\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], (
+            f"inline fallback must stay preceding-only (bounds pass), got: {drifts}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Unbound-anchor audit sink (--list-unbound) — anchors that pass bounds-only
+# (no symbol bound, or 0 defs after fallback) are recorded with the enclosing
+# def at the cited line, so periodic sweeps can eyeball silent-degrade anchors.
+# ---------------------------------------------------------------------------
+
+class TestUnboundAuditSink:
+    def _mod(self, tmp_path):
+        return _commit_py(
+            tmp_path, "mod.py",
+            "class Holder:\n"            # 1
+            "    def method_a(self):\n"  # 2
+            "        x = 1\n"            # 3
+            "        return x\n"         # 4
+            "\n"                         # 5
+            "def top_fn():\n"            # 6
+            "    y = 2\n"                # 7
+            "    return y\n",            # 8
+        )
+
+    def test_bound_anchor_not_listed(self, tmp_path):
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(tmp_path, "doc.md", "- `top_fn` def (`mod.py:6`)\n")
+        sink: list = []
+        drifts = check_line_anchors([str(md)], tmp_path, unbound_sink=sink)
+        assert drifts == []
+        assert sink == [], f"symbol-bound anchor must not be audited, got: {sink}"
+
+    def test_unbound_anchors_listed_with_enclosing_def(self, tmp_path):
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- see notes (`mod.py:7`)\n"
+            "- and [docs](mod.py:3)\n",
+        )
+        sink: list = []
+        drifts = check_line_anchors([str(md)], tmp_path, unbound_sink=sink)
+        assert drifts == []
+        assert len(sink) == 2, f"both unbound anchors must be audited, got: {sink}"
+        by_line = {e["target_line"]: e for e in sink}
+        assert by_line[7]["enclosing"] == "top_fn"
+        assert by_line[3]["enclosing"] == "Holder.method_a"
+        assert by_line[7]["symbol"] is None
+        assert by_line[7]["doc_line"] == 1
+        assert by_line[3]["doc_line"] == 2
+        assert by_line[7]["target_file"] == "mod.py"
+
+    def test_default_run_has_no_sink_behavior_change(self, tmp_path):
+        # Without a sink the checker behaves exactly as before (smoke).
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(tmp_path, "doc.md", "- see notes (`mod.py:7`)\n")
+        assert check_line_anchors([str(md)], tmp_path) == []
+
+    def test_cli_list_unbound_exits_zero(self, capsys):
+        # Integration smoke against the real repo's default doc set: audit-only,
+        # never gates.
+        from check_doc_claims import main
+        rc = main(["--list-unbound"])
+        out = capsys.readouterr().out
+        assert rc == 0
+        assert "unbound" in out.lower()
+
+    def test_fallback_is_segment_scoped_across_anchors(self, tmp_path):
+        # Two anchors on one line: the 2nd anchor's fallback may only scan its
+        # own segment (after the 1st anchor) — it catches `target_fn` there,
+        # but must never reach back across the 1st anchor (C-1 guard family).
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "other.py",
+            "def helper_x():\n    pass\n# c\n# c\n# c\n",
+        )
+        _commit_py(
+            tmp_path, "mod.py",
+            "def target_fn(some_arg=None):\n    pass\n"
+            "# filler\n# filler\n# filler\n# filler\n",
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- `helper_x` at `other.py:1`; `target_fn`'s `some_arg` arg (`mod.py:5`)\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"segment-scoped fallback must catch :5, got: {drifts}"
+        assert drifts[0].symbol == "target_fn"
+        assert drifts[0].target_line == 5
+        assert drifts[0].suggested_line == 1

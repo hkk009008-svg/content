@@ -146,6 +146,78 @@ def _def_lines(source_lines: list[str], symbol: str) -> list[int]:
     return found
 
 
+def _enclosing_def(source_lines: list[str], line_num: int) -> Optional[str]:
+    """Nearest enclosing def/class of 1-based *line_num*: 'fn', 'Cls.method',
+    bare 'Cls' (class body before any method), or None (module level).
+    Indent-scan, not AST — good enough for the audit listing."""
+    def_re = re.compile(r'^(\s*)(?:async\s+)?def\s+([A-Za-z_]\w*)')
+    cls_re = re.compile(r'^(\s*)class\s+([A-Za-z_]\w*)')
+    method: Optional[tuple[int, str]] = None
+    for i in range(min(line_num, len(source_lines)) - 1, -1, -1):
+        dm = def_re.match(source_lines[i])
+        if dm:
+            if len(dm.group(1)) == 0:
+                return dm.group(2)
+            if method is None:
+                method = (len(dm.group(1)), dm.group(2))
+            continue
+        cm = cls_re.match(source_lines[i])
+        if cm:
+            if method is not None and len(cm.group(1)) < method[0]:
+                return f"{cm.group(2)}.{method[1]}"
+            if method is None and len(cm.group(1)) == 0:
+                return cm.group(2)
+    return method[1] if method else None
+
+
+def _fallback_symbol(
+    line_text: str,
+    anchor_span: "tuple[int, int]",
+    source_lines: list[str],
+    exclude: Optional[str],
+    preceding_only: bool,
+) -> Optional[str]:
+    """Step 2.5 def-aware fallback: when the nearest/bound token has no def in
+    the target file, retry the line's OTHER identifier tokens by distance from
+    the anchor and return the first that actually defines in the target.
+    Inline anchors stay preceding-only (symbol-precedes-anchor convention);
+    link anchors may fall back to after-tokens, mirroring each path's existing
+    nearest-binding side rules. Path tokens (`mod.py:10`) self-exclude via the
+    dotted-attribute rule in _ident_token."""
+    a_start, a_end = anchor_span
+    # Segment scoping: an anchor's symbol cannot live beyond a NEIGHBORING
+    # anchor on the same line (C-1 guard family: in two-anchor-column compound
+    # rows, a col-3 anchor must never reach back across col-2's anchors and
+    # steal col-1's symbols — that is exactly the --fix corruption shape).
+    seg_lo, seg_hi = 0, len(line_text)
+    for pat in (_ANCHOR_RE, _INLINE_ANCHOR_RE, _CONTINUATION_ANCHOR_RE, _MULTIRANGE_RE):
+        for am in pat.finditer(line_text):
+            if am.end() <= a_start:
+                seg_lo = max(seg_lo, am.end())
+            elif am.start() >= a_end:
+                seg_hi = min(seg_hi, am.start())
+    candidates: list[tuple[int, str]] = []
+    for t in _BACKTICK_RE.finditer(line_text):
+        if t.end() <= a_start and t.start() >= seg_lo:
+            dist = a_start - t.end()
+        elif t.start() >= a_end and t.end() <= seg_hi and not preceding_only:
+            dist = t.start() - a_end
+        else:
+            continue  # own span/overlap, disallowed side, or outside the segment
+        ident = _ident_token(t.group(1))
+        if ident is None or ident == exclude:
+            continue
+        candidates.append((dist, ident))
+    seen: set[str] = set()
+    for _, ident in sorted(candidates, key=lambda c: c[0]):
+        if ident in seen:
+            continue
+        seen.add(ident)
+        if _def_lines(source_lines, ident):
+            return ident
+    return None
+
+
 def _build_basename_index(repo_root: Path) -> "tuple[dict[str, list[str]], bool]":
     """Map basename -> sorted [tracked relpaths] from `git ls-files`.
 
@@ -388,6 +460,8 @@ def check_anchor(
     rebind_symbol: bool = True,
     style: str = "link",
     doc_col: Optional[tuple[int, int]] = None,
+    symbol_fallback: bool = False,
+    unbound_sink: "Optional[list[dict]]" = None,
 ) -> Optional[Drift]:
     """Return a Drift if the anchor is stale, else None.
 
@@ -451,6 +525,23 @@ def check_anchor(
                         symbol = ident
     # else: use the `symbol` parameter as-is (pre-bound by check_line_anchors).
 
+    # Step 2.5 — def-aware fallback. When the nearest-bound token has no def in
+    # the target file (or nothing bound at all), retry the line's other tokens
+    # by distance instead of silently degrading to bounds-only. Positionally
+    # paired symbols are authoritative: callers signal eligibility via
+    # rebind_symbol (link nearest path) or symbol_fallback (inline nearest path).
+    if (
+        (rebind_symbol or symbol_fallback)
+        and doc_col is not None
+        and (symbol is None or not _def_lines(source_lines, symbol))
+    ):
+        fb = _fallback_symbol(
+            doc_line_text, doc_col, source_lines,
+            exclude=symbol, preceding_only=(style == "inline"),
+        )
+        if fb is not None:
+            symbol = fb
+
     if symbol is not None:
         def_line_list = _def_lines(source_lines, symbol)
         if def_line_list:
@@ -510,6 +601,19 @@ def check_anchor(
             style=style,
             doc_col=doc_col,
         )
+
+    # Audit sink: reaching here means the anchor passed BOUNDS-ONLY (symbol was
+    # never bound, or bound with 0 defs even after the Step-2.5 fallback) — the
+    # silent-degrade class --list-unbound exists to surface.
+    if unbound_sink is not None:
+        unbound_sink.append({
+            "doc_path": doc_path,
+            "doc_line": doc_line_num,
+            "target_file": target_file_rel,
+            "target_line": target_line,
+            "symbol": symbol,
+            "enclosing": _enclosing_def(source_lines, target_line),
+        })
 
     return None  # OK — in bounds, no symbol binding
 
@@ -594,8 +698,15 @@ def check_multirange_anchor(
 # Main checker
 # ---------------------------------------------------------------------------
 
-def check_line_anchors(doc_paths: list[str], repo_root: Path) -> list[Drift]:
-    """Check all line-anchors (markdown-link AND inline-backtick) in the given docs."""
+def check_line_anchors(
+    doc_paths: list[str], repo_root: Path,
+    unbound_sink: "Optional[list[dict]]" = None,
+) -> list[Drift]:
+    """Check all line-anchors (markdown-link AND inline-backtick) in the given docs.
+
+    unbound_sink: optional audit collector — every anchor that passes BOUNDS-ONLY
+    (no symbol bound / 0 defs) is recorded with its enclosing def (--list-unbound).
+    Default None = zero behavior change."""
     drifts: list[Drift] = []
     basename_index, git_ok = _build_basename_index(repo_root)
     unresolved_bare = 0   # for the git-absent warning
@@ -638,6 +749,7 @@ def check_line_anchors(doc_paths: list[str], repo_root: Path) -> list[Drift]:
                     repo_root=repo_root, doc_col=(m.start(), m.end()),
                     symbol=pos_sym,
                     rebind_symbol=pos_sym is None,
+                    unbound_sink=unbound_sink,
                 )
                 if drift is not None:
                     drifts.append(drift)
@@ -686,6 +798,8 @@ def check_line_anchors(doc_paths: list[str], repo_root: Path) -> list[Drift]:
                     target_line=target_line, display_text=display, repo_root=repo_root,
                     resolved_rel=resolved_rel, symbol=symbol,
                     rebind_symbol=False, style="inline", doc_col=(a["start"], a["end"]),
+                    symbol_fallback=inline_pos_map.get(anchor_start) is None,
+                    unbound_sink=unbound_sink,
                 )
                 if drift is not None:
                     drifts.append(drift)
@@ -1410,6 +1524,13 @@ def main(argv=None) -> int:
         help="List every cited SHA with its actual commit subject (mis-citation review).",
     )
     parser.add_argument(
+        "--list-unbound", action="store_true",
+        help="Audit-only: list anchors that verify BOUNDS-ONLY (no symbol binding), "
+             "with the enclosing def at the cited line. Never gates (exit 0). "
+             "Covers link/inline/continuation anchors; multirange anchors are "
+             "verified separately and not audited here.",
+    )
+    parser.add_argument(
         "--exclude-target", action="append", default=[], metavar="SUBSTR",
         help="With --fix, skip drifts whose target file contains SUBSTR (repeatable). "
              "Defers anchors into files under concurrent edit; they stay flagged, not fixed.",
@@ -1432,6 +1553,18 @@ def main(argv=None) -> int:
 
     sha_mode = args.sha_refs or args.show_subjects
     docs = args.docs or (SHA_DEFAULT_DOCS if sha_mode else ["ARCHITECTURE.md"])
+
+    if args.list_unbound:
+        sink: list[dict] = []
+        check_line_anchors(docs, repo_root, unbound_sink=sink)
+        print(f"UNBOUND-ANCHOR AUDIT  ({len(sink)} bounds-only anchor(s) "
+              f"across {len(docs)} doc(s)) — advisory, exit-neutral")
+        for e in sink:
+            sym = f" (bound `{e['symbol']}`: 0 defs)" if e["symbol"] else ""
+            enc = e["enclosing"] or "<module level>"
+            print(f"  {e['doc_path']}:{e['doc_line']}  →  "
+                  f"{e['target_file']}:{e['target_line']}  enclosing: {enc}{sym}")
+        return 0
 
     if args.show_subjects:
         return _print_sha_subjects(docs, repo_root)
