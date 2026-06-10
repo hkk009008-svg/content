@@ -17,7 +17,9 @@
 #   - Matrix builds
 #
 # Baseline as of 2026-06-10 (bare pytest — the CI invocation shape):
-#   - pytest tests/unit/: 1974 passed, 2 warnings, 10 subtests passed
+#   - pytest tests/unit/: local 1982 passed; CI-shape (archive + dummy
+#     keys, no .env, no projects/) 1981 passed + 1 skipped (the skip is a
+#     real-project-fixture test that self-skips when projects/ is absent)
 #   - tsc --noEmit: silent exit
 #   - §15 smoke: OK
 #
@@ -78,6 +80,19 @@ jobs:
     timeout-minutes: 15
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      # The unit suite asserts keys-PRESENT behavior: llm/ensemble.py
+      # constructs openai.OpenAI() at __init__ (hard OpenAIError keyless,
+      # 49F+1E on a bare runner), its gemini branch flips judge-map
+      # behavior on key presence, and the phase-C vision-identity path
+      # branches on ANTHROPIC_API_KEY presence (6F without it). Local runs
+      # get real keys from .env; CI gets inert placeholders so the suite
+      # exercises the same configuration. No test calls the network
+      # (offline suite, ~1 min). Hermeticity refactor (lazy/injectable
+      # LLMEnsemble) is a named follow-up per the adversarial review of
+      # docs/STRATEGIC_REVIEW-2026-06-10.md Session 1.
+      OPENAI_API_KEY: ci-dummy-not-a-real-key
+      GEMINI_API_KEY: ci-dummy-not-a-real-key
+      ANTHROPIC_API_KEY: ci-dummy-not-a-real-key
     steps:
       - uses: actions/checkout@v6
 
@@ -97,7 +112,8 @@ jobs:
 
       - name: Run pytest tests/unit/
         # tests/integration/ requires real cloud credentials and must NOT run
-        # in CI. Unit suite baseline 2026-06-10: 1974 passed (10 subtests).
+        # in CI. Baseline 2026-06-10: 1981 passed + 1 skipped here (1982
+        # locally — the delta is one real-project-fixture self-skip).
         # If your PR changes this count, the diff or the brief explains why.
         # Root-module importability comes from [tool.pytest.ini_options]
         # pythonpath in pyproject.toml — bare `pytest` here relies on it.
