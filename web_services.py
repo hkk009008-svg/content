@@ -21,6 +21,7 @@ through this builder; the builder itself is pure (no module state).
 
 from __future__ import annotations
 
+import json
 import queue
 from typing import Callable, Optional
 
@@ -91,6 +92,22 @@ def make_progress_callback(progress_queue: Optional[queue.Queue]) -> Callable:
             event["quality_metrics"] = quality_metrics
         if gate_status:
             event["gate_status"] = gate_status
+        # NF-3 (docs/STRATEGIC_REVIEW-2026-06-10.md P1-3): pass producer
+        # extras through instead of silently discarding **kwargs — this
+        # function lagging its producers WAS the defect class (engine on
+        # MOTION, spent/budget on BUDGET_EXCEEDED, performance_engine on
+        # the SKIP path never reached the UI). Lean-ness: None/"" dropped;
+        # 0 and False are real data and pass. Safety: the /stream generator
+        # json.dumps()'s every event — ONE non-serializable value would
+        # kill the whole SSE stream, so unserializable extras drop here.
+        for key, value in kwargs.items():
+            if key in event or value is None or value == "":
+                continue
+            try:
+                json.dumps(value)
+            except (TypeError, ValueError):
+                continue
+            event[key] = value
         if progress_queue is not None:
             progress_queue.put(event)
 

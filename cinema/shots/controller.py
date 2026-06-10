@@ -1431,6 +1431,9 @@ class ShotController:
             scene_id=scene_id,
             shot_id=shot_id,
             take_id=take["id"],
+            # P1-3 (NF-3): the engine being TRIED — the cascade winner may
+            # differ; the take's cascade_metadata records the actual one.
+            engine=target_api,
         )
 
         # Resolve performance-capture driving video (handoff §8). When the

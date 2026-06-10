@@ -24,23 +24,29 @@ export default function Monitor({
     [activeShotId, shotStates]
   )
 
-  // Resolve cascade_metadata for the live take so TakeStrip can render the
-  // fallback / engine badge in the live-run console (Session 6 wired this
-  // into ReviewStage; this closes the deferred Monitor-side gap).
-  const cascadeMetadata = useMemo(() => {
+  // Resolve cascade metadata for the live take so TakeStrip can render the
+  // fallback / engine badges in the live-run console (Session 6 wired this
+  // into ReviewStage; this closes the deferred Monitor-side gap). NF-4
+  // (P1-3): dialogue takes carry a SECOND record at metadata.lipsync_cascade
+  // — the overlay lip-sync pass; cascade_metadata holds the video cascade.
+  const { cascadeMetadata, lipsyncCascadeMetadata } = useMemo(() => {
+    const none = { cascadeMetadata: null, lipsyncCascadeMetadata: null }
     const takeId = activeState?.take_id
-    if (!activeShotId || !takeId) return null
+    if (!activeShotId || !takeId) return none
     const shot = project.scenes
       .flatMap((s) => s.shots)
       .find((s) => s.id === activeShotId)
-    if (!shot) return null
+    if (!shot) return none
     const take = [
       ...(shot.keyframe_takes ?? []),
       ...(shot.motion_takes ?? []),
       ...(shot.performance_takes ?? []),
       ...(shot.postprocess_variants ?? []),
     ].find((t) => t.id === takeId)
-    return take?.cascade_metadata ?? null
+    return {
+      cascadeMetadata: take?.cascade_metadata ?? null,
+      lipsyncCascadeMetadata: take?.metadata?.lipsync_cascade ?? null,
+    }
   }, [activeShotId, activeState?.take_id, project.scenes])
 
   const keyframeUrl = activeState?.generated_image ?? null
@@ -66,6 +72,7 @@ export default function Monitor({
             apiBase={apiBase}
             projectId={projectId}
             cascadeMetadata={cascadeMetadata}
+            lipsyncCascadeMetadata={lipsyncCascadeMetadata}
           />
         </div>
       ) : (

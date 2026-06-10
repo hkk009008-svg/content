@@ -92,24 +92,25 @@ function NowShowingMarquee({ latest }: { latest: ProgressEvent | null }) {
   const stage = latest?.stage ?? 'IDLE'
   const detail = latest?.detail ?? ''
   const percent = Math.round(latest?.percent ?? 0)
+  // P1-3 (NF-3): the engine being tried, now passed through the SSE bridge
+  // on MOTION events — the operator's #1 blindness during motion waits.
+  const engine = latest?.engine ?? ''
 
-  const fragments = [
+  const cycle = [
     'NOW SHOWING',
     `STAGE ${stage}`,
     detail || '—',
-    `${percent}%`,
-    'NOW SHOWING',
-    `STAGE ${stage}`,
-    detail || '—',
+    ...(engine ? [`VIA ${engine}`] : []),
     `${percent}%`,
   ]
+  const fragments = [...cycle, ...cycle]
 
   return (
     <div
       role="status"
       aria-live="polite"
       aria-atomic="true"
-      aria-label={`Now showing — stage ${stage}, ${percent} percent${detail ? `, ${detail}` : ''}`}
+      aria-label={`Now showing — stage ${stage}, ${percent} percent${detail ? `, ${detail}` : ''}${engine ? `, via ${engine}` : ''}`}
       className="border-y border-editorial-curtain/40 bg-editorial-curtain/[0.04] overflow-hidden"
     >
       <div className="marquee-track py-2.5" aria-hidden>
@@ -123,6 +124,40 @@ function NowShowingMarquee({ latest }: { latest: ProgressEvent | null }) {
           </span>
         ))}
       </div>
+    </div>
+  )
+}
+
+/** Budget-halt banner — sticky surface for BUDGET_EXCEEDED (P1-3).
+ *  The abort emits MOTION_DONE right after the halt, so keying on
+ *  `latest` alone would flash and vanish; the shell stores the halt
+ *  event and clears it on dismiss or when a new run starts. */
+function BudgetHaltBanner({
+  event,
+  onDismiss,
+}: {
+  event: ProgressEvent
+  onDismiss: () => void
+}) {
+  const amounts =
+    typeof event.spent === 'number' && typeof event.budget === 'number'
+      ? ` — spent $${event.spent.toFixed(2)} of $${event.budget.toFixed(2)}`
+      : ''
+  return (
+    <div
+      role="alert"
+      className="border-y border-editorial-curtain/60 bg-editorial-curtain/10 px-10 py-3 flex items-center justify-between gap-4"
+    >
+      <div className="font-mono text-eyebrow-lg text-editorial-curtain tracking-wide-eyebrow uppercase">
+        Budget cap reached{amounts}. Motion halted — raise the budget in
+        Settings and regenerate.
+      </div>
+      <button
+        onClick={onDismiss}
+        className="font-mono text-eyebrow text-editorial-ivory-mute hover:text-editorial-ivory uppercase shrink-0"
+      >
+        Dismiss
+      </button>
     </div>
   )
 }
@@ -240,8 +275,18 @@ export default function EditorialShell({
   const runCounterRef = useRef(0)
   const lastStageRef = useRef<string | null>(null)
 
+  // P1-3: sticky BUDGET_EXCEEDED surface. The phase abort emits MOTION_DONE
+  // immediately after the halt event, so `latest` moves past it — store the
+  // halt and clear on dismiss or when a fresh run starts (inFlight rising
+  // edge, handled below the inFlight computation).
+  const [budgetHalt, setBudgetHalt] = useState<ProgressEvent | null>(null)
+
   useEffect(() => {
     if (!latest) return
+
+    if (latest.stage === 'BUDGET_EXCEEDED') {
+      setBudgetHalt(latest)
+    }
 
     // New-run detector: transitioning OUT of DONE means a fresh run is
     // starting. Bump the counter so the dedup fingerprint changes for the
@@ -270,6 +315,15 @@ export default function EditorialShell({
   const reelNumber = project.id.slice(0, 4).toUpperCase()
 
   const inFlight = generating || isStreaming
+
+  // Clear the budget banner when a fresh run starts (inFlight rising edge) —
+  // the operator raised the budget and regenerated; the halt is history.
+  const prevInFlightRef = useRef(false)
+  useEffect(() => {
+    if (inFlight && !prevInFlightRef.current) setBudgetHalt(null)
+    prevInFlightRef.current = inFlight
+  }, [inFlight])
+
   const status = inFlight
     ? 'PRINTING'
     : project.scenes.length === 0
@@ -328,6 +382,9 @@ export default function EditorialShell({
 
       {/* ── Marquee — only while a take is being printed ───────── */}
       {inFlight && <NowShowingMarquee latest={latest} />}
+      {budgetHalt && (
+        <BudgetHaltBanner event={budgetHalt} onDismiss={() => setBudgetHalt(null)} />
+      )}
 
       {/* ── Hero ── title + acts column ───────────────────────── */}
       <section className="px-10 pt-16 pb-12 grid grid-cols-12 gap-10">

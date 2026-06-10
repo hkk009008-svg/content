@@ -46,6 +46,36 @@ export interface TakeStripProps {
   /** Optional cascade metadata — renders "via {engine}" chip + FALLBACK badge
    *  below the motion pane using console-* palette only. */
   cascadeMetadata?: CascadeMetadata | null
+  /** Lip-sync overlay cascade (NF-4, P1-3): dialogue takes carry a SECOND
+   *  cascade record at take.metadata.lipsync_cascade — cascade_metadata on
+   *  those takes holds the VIDEO cascade. Renders "lipsync via {engine}". */
+  lipsyncCascadeMetadata?: CascadeMetadata | null
+}
+
+/** Engine/score/fallback chip row — shared by the video and lipsync rows. */
+function CascadeChips({ meta, label }: { meta?: CascadeMetadata | null; label?: string }) {
+  if (!meta) return null
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1">
+      <span className="rounded bg-console-surface-2 px-1.5 py-0.5 text-eyebrow text-console-ink-dim">
+        {label ? `${label} via ${meta.engine}` : `via ${meta.engine}`}
+      </span>
+      {meta.score != null && meta.threshold != null && (
+        <span className={`font-mono text-eyebrow ${
+          meta.score >= meta.threshold
+            ? 'text-console-gold'
+            : 'text-console-ink-dim'
+        }`}>
+          {meta.score.toFixed(3)}
+        </span>
+      )}
+      {meta.fallback && (
+        <span className="rounded bg-console-accent/20 px-1.5 py-0.5 text-eyebrow text-console-accent">
+          ⚠ FALLBACK
+        </span>
+      )}
+    </div>
+  )
 }
 
 export default function TakeStrip({
@@ -57,6 +87,7 @@ export default function TakeStrip({
   projectId,
   labels,
   cascadeMetadata,
+  lipsyncCascadeMetadata,
 }: TakeStripProps) {
   const base = apiBase || '/api'
   const hasAny = Boolean(keyframeUrl || drivingUrl || performanceUrl || motionUrl)
@@ -120,27 +151,8 @@ export default function TakeStrip({
             loop
             className="w-full rounded border border-console-rule bg-black"
           />
-          {cascadeMetadata && (
-            <div className="mt-1 flex flex-wrap items-center gap-1">
-              <span className="rounded bg-console-surface-2 px-1.5 py-0.5 text-eyebrow text-console-ink-dim">
-                via {cascadeMetadata.engine}
-              </span>
-              {cascadeMetadata.score != null && cascadeMetadata.threshold != null && (
-                <span className={`font-mono text-eyebrow ${
-                  cascadeMetadata.score >= cascadeMetadata.threshold
-                    ? 'text-console-gold'
-                    : 'text-console-ink-dim'
-                }`}>
-                  {cascadeMetadata.score.toFixed(3)}
-                </span>
-              )}
-              {cascadeMetadata.fallback && (
-                <span className="rounded bg-console-accent/20 px-1.5 py-0.5 text-eyebrow text-console-accent">
-                  ⚠ FALLBACK
-                </span>
-              )}
-            </div>
-          )}
+          <CascadeChips meta={cascadeMetadata} />
+          <CascadeChips meta={lipsyncCascadeMetadata} label="lipsync" />
         </div>
       ) : null}
     </div>

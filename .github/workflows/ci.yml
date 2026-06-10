@@ -16,10 +16,13 @@
 #   - Code coverage reporting
 #   - Matrix builds
 #
-# Baseline as of 2026-06-10 (bare pytest — the CI invocation shape):
-#   - pytest tests/unit/: local (macOS, .env) 1982 passed; live runner
-#     (ubuntu, dummy keys) 1975 passed + 7 skipped — same 1982 collected;
-#     the skips are environment-conditional self-skips (run 27267540679)
+# Baseline: the CURRENT suite count lives in ARCHITECTURE.md §16 (single
+# source — these comments stopped tracking it after drifting twice in one
+# day). Properties that hold: the live ubuntu runner shows a handful more
+# skips than local macOS (environment-conditional self-skips; same total
+# collected). First-green acceptance evidence: run 27267540679
+# (2026-06-10, 1975 passed + 7 skipped) and the intentional-red proof on
+# PR #12 run 27267553553.
 #   - tsc --noEmit: silent exit
 #   - §15 smoke: OK
 #
@@ -112,9 +115,9 @@ jobs:
 
       - name: Run pytest tests/unit/
         # tests/integration/ requires real cloud credentials and must NOT run
-        # in CI. Live baseline 2026-06-10 (run 27267540679): 1975 passed
-        # + 7 skipped here; 1982 locally — same 1982 collected, the delta
-        # is environment-conditional self-skips.
+        # in CI. Current count: ARCHITECTURE.md §16 (single source). The
+        # live runner shows a few more skips than local — environment-
+        # conditional self-skips, same total collected.
         # If your PR changes this count, the diff or the brief explains why.
         # Root-module importability comes from [tool.pytest.ini_options]
         # pythonpath in pyproject.toml — bare `pytest` here relies on it.

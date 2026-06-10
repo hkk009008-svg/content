@@ -84,7 +84,17 @@ function formatScore(value?: number) {
   return <span className={`text-xs font-mono ${color}`}>{pct}%</span>
 }
 
-function CascadeBadge({ meta }: { meta: TakeRecord['cascade_metadata'] }) {
+function CascadeBadge({
+  meta,
+  label,
+}: {
+  meta: TakeRecord['cascade_metadata']
+  /** Prefix for the engine chip — e.g. "lipsync" renders "lipsync via X".
+   *  NF-4 (P1-3): dialogue takes carry a SECOND cascade record at
+   *  metadata.lipsync_cascade (the overlay lip-sync pass); cascade_metadata
+   *  on those takes holds the VIDEO cascade. */
+  label?: string
+}) {
   if (!meta) return null
   const scoreColor = meta.score != null && meta.threshold != null
     ? meta.score >= meta.threshold
@@ -94,7 +104,7 @@ function CascadeBadge({ meta }: { meta: TakeRecord['cascade_metadata'] }) {
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1">
       <span className="rounded bg-editorial-ink-soft px-1.5 py-0.5 text-eyebrow text-editorial-ivory-mute">
-        via {meta.engine}
+        {label ? `${label} via ${meta.engine}` : `via ${meta.engine}`}
       </span>
       {scoreColor && meta.score != null && (
         <span className={`font-mono text-eyebrow ${scoreColor}`}>
@@ -147,6 +157,7 @@ function TakeCard({
         </div>
         <div className="mt-1 text-eyebrow text-editorial-ivory-mute font-mono break-all">{take.id}</div>
         <CascadeBadge meta={take.cascade_metadata} />
+        <CascadeBadge meta={take.metadata?.lipsync_cascade} label="lipsync" />
       </button>
       {!approved && (
         <div className="mt-2 flex gap-2">
@@ -378,9 +389,10 @@ function ClipCard({
               <span className="text-editorial-ivory-mute">Motion</span>
               {formatScore(diagnosis?.scores?.motion ?? latestDiagnostic?.scores?.motion)}
             </div>
-            {selectedFinal?.cascade_metadata && (
+            {(selectedFinal?.cascade_metadata || selectedFinal?.metadata?.lipsync_cascade) && (
               <div className="mt-2 border-t border-editorial-rule pt-2">
                 <CascadeBadge meta={selectedFinal.cascade_metadata} />
+                <CascadeBadge meta={selectedFinal.metadata?.lipsync_cascade} label="lipsync" />
               </div>
             )}
           </div>

@@ -330,7 +330,12 @@ export interface TakeRecord {
   source_take_id?: string
   status?: string
   created_at?: string
-  metadata?: Record<string, any>
+  /** Producer-attached metadata. The typed key below is a convention, not a
+   *  schema — dialogue takes persist their lip-sync cascade record here
+   *  (NF-4, P1-3): read via take.metadata?.lipsync_cascade. */
+  metadata?: Record<string, any> & {
+    lipsync_cascade?: TakeRecord['cascade_metadata']
+  }
   /** Cascade decision metadata — added Session 6 (P2-3).
    *  Optional: absent on takes produced before this field existed.
    *  Consumers MUST use optional chaining: take.cascade_metadata?.engine */
@@ -375,6 +380,13 @@ export interface ProgressEvent {
   failure_reason?: string
   quality_metrics?: QualityMetrics
   gate_status?: GateStatus
+  /** P1-3 (NF-3): producer extras now pass through the SSE bridge.
+   *  engine = the engine being TRIED on MOTION events (the cascade winner
+   *  may differ — the take's cascade_metadata records the actual one);
+   *  spent/budget arrive on BUDGET_EXCEEDED. */
+  engine?: string
+  spent?: number
+  budget?: number
 }
 
 export interface PipelineState {

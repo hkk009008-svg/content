@@ -197,6 +197,14 @@ class TestPreSpendBudgetGate:
 
         assert result.get("success") is True
         lifecycle.pause.assert_not_called()
+        # P1-3 (NF-3): the MOTION progress event carries the engine being
+        # tried — the operator's #1 blindness during 8-minute motion waits.
+        motion_events = [
+            c for c in lifecycle.report_progress.call_args_list
+            if c.args and c.args[0] == "MOTION"
+        ]
+        assert motion_events, "expected a MOTION progress event"
+        assert motion_events[0].kwargs.get("engine") == "KLING_NATIVE"
 
 
 class TestBudgetPhaseAbort:
