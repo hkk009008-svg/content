@@ -320,8 +320,10 @@ def controller_two_chars(monkeypatch, tmp_path, captured, _stub_validator):
     os.makedirs(proj_root, exist_ok=True)
     secondary = [{"char_id": "char_b", "reference": "/r/b.jpg",
                   "multi_angle_refs": ["/r/b1.jpg"], "identity_anchor": "anchor b"}]
+    # char_c is IN FRAME but unregistered (no secondary entry) — it must land
+    # unconditioned and NEVER be scored (spec §6 AC3's negative invariant).
     host = _build_host(tmp_path, secondary_chars=secondary,
-                       characters_in_frame=["char_a", "char_b"])
+                       characters_in_frame=["char_a", "char_b", "char_c"])
     project = host._core.project
     proj_dir = os.path.join(proj_root, project["id"])
     os.makedirs(proj_dir, exist_ok=True)
@@ -374,8 +376,11 @@ def test_identity_per_char_written_for_conditioned_only(controller_two_chars, ca
     controller_two_chars.generate_keyframe_take("scene_1", "shot_1")
     take = _latest_keyframe_take(controller_two_chars, "shot_1")
     per_char = take["metadata"]["identity_per_char"]
-    # exact discriminating values — proves each char was scored against its OWN ref
+    # exact discriminating values — proves each char was scored against its OWN
+    # ref, and the unregistered in-frame char_c was NEVER scored (AC3 negative)
     assert per_char == {"char_a": 0.8, "char_b": 0.55}
+    assert "char_c" not in per_char
+    assert take["metadata"]["identity_strategy"]["unconditioned_chars"] == ["char_c"]
     assert take["metadata"]["identity_score"] == per_char["char_a"]  # scalar = primary, unchanged
 
 

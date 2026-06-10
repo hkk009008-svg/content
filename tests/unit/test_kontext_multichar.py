@@ -171,3 +171,106 @@ def test_empty_secondary_refs_is_byte_identical_to_single_char(
         f"Single-char path drifted with empty secondary_char_refs.\n"
         f"Expected:\n{GOLDEN_SINGLE_CHAR_PROMPT}\n\nGot:\n{args['prompt']}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Partial-upload alignment (operator Lane-V disposition, 2026-06-11):
+# uploads happen BEFORE slot allocation so @ImageN labels track survivors.
+# ---------------------------------------------------------------------------
+
+def test_partial_upload_failure_keeps_imageN_aligned(fal_capture, tmp_path):
+    """A silent mid-list upload failure used to left-shift every later image
+    while the prompt's @ImageN labels stayed put — the prompt then addressed
+    the WRONG reference (old code allocated slots pre-upload)."""
+    a1, a2, a3 = (tmp_path / n for n in ("a1.jpg", "a2.jpg", "a3.jpg"))
+    bc, b1 = tmp_path / "bc.jpg", tmp_path / "b1.jpg"
+    for f in (a1, a2, a3, bc, b1):
+        f.write_bytes(b"j")
+    out = tmp_path / "out.jpg"
+    fal = sys.modules["fal_client"]
+
+    def _upload(path):
+        if os.path.basename(str(path)) == "a2.jpg":
+            raise RuntimeError("CDN hiccup")
+        return f"url://{os.path.basename(str(path))}"
+
+    fal.upload_file.side_effect = _upload
+    result = pca._fal_flux_fallback(
+        "A rooftop cafe", str(out),
+        character_image=str(a1),
+        multi_angle_refs=[str(a1), str(a2), str(a3)],
+        identity_anchor="a woman with auburn hair",
+        secondary_char_refs=[{"char_id": "char_b", "reference": str(bc),
+                              "multi_angle_refs": [str(b1)],
+                              "identity_anchor": "a man with a grey beard"}],
+    )
+    assert result.api_name == "FLUX_KONTEXT"
+    args = fal_capture["arguments"]
+    # survivors only, in slot order: primary [a1, a3] then char_b [bc, b1]
+    assert args["image_urls"] == [
+        "url://a1.jpg", "url://a3.jpg", "url://bc.jpg", "url://b1.jpg"]
+    # char_b's first slot is 3 — right after the 2 SURVIVING primary refs
+    # (the old desync labelled it @Image4 against a 4-image list)
+    assert "@Image3 is a man with a grey beard" in args["prompt"]
+
+
+def test_secondary_canonical_upload_failure_drops_its_block(fal_capture, tmp_path):
+    """A secondary whose canonical fails to upload is dropped entirely — no
+    PRESERVE block addressing a slot that does not exist; the primary
+    reclaims the full budget (allocator sees a single-char allocation)."""
+    a1, bc = tmp_path / "a1.jpg", tmp_path / "bc.jpg"
+    a1.write_bytes(b"j")
+    bc.write_bytes(b"j")
+    out = tmp_path / "out.jpg"
+    fal = sys.modules["fal_client"]
+
+    def _upload(path):
+        if os.path.basename(str(path)) == "bc.jpg":
+            raise RuntimeError("CDN hiccup")
+        return f"url://{os.path.basename(str(path))}"
+
+    fal.upload_file.side_effect = _upload
+    result = pca._fal_flux_fallback(
+        "A rooftop cafe", str(out),
+        character_image=str(a1),
+        identity_anchor="a woman with auburn hair",
+        secondary_char_refs=[{"char_id": "char_b", "reference": str(bc),
+                              "multi_angle_refs": [],
+                              "identity_anchor": "a man with a grey beard"}],
+    )
+    assert result.api_name == "FLUX_KONTEXT"
+    args = fal_capture["arguments"]
+    assert args["image_urls"] == ["url://a1.jpg"]
+    assert args["prompt"].count("PRESERVE IDENTITY") == 1
+    assert "a man with a grey beard" not in args["prompt"]
+
+
+def test_all_primary_uploads_fail_degrades_single_char(fal_capture, tmp_path):
+    """Every PRIMARY upload failing forces the single-char degradation guard
+    even when a secondary uploaded fine — @ImageN can never address a
+    primary that is not in image_urls."""
+    a1, a2, c, bc = (tmp_path / n for n in ("a1.jpg", "a2.jpg", "c.jpg", "bc.jpg"))
+    for f in (a1, a2, c, bc):
+        f.write_bytes(b"j")
+    out = tmp_path / "out.jpg"
+    fal = sys.modules["fal_client"]
+
+    def _upload(path):
+        if os.path.basename(str(path)) in ("a1.jpg", "a2.jpg"):
+            raise RuntimeError("CDN hiccup")
+        return f"url://{os.path.basename(str(path))}"
+
+    fal.upload_file.side_effect = _upload
+    result = pca._fal_flux_fallback(
+        "A rooftop cafe", str(out),
+        character_image=str(c),
+        multi_angle_refs=[str(a1), str(a2)],
+        identity_anchor="a woman with auburn hair",
+        secondary_char_refs=[{"char_id": "char_b", "reference": str(bc),
+                              "multi_angle_refs": [],
+                              "identity_anchor": "a man with a grey beard"}],
+    )
+    assert result.api_name == "FLUX_KONTEXT"
+    args = fal_capture["arguments"]
+    assert args["image_urls"] == ["url://c.jpg"]
+    assert args["prompt"].count("PRESERVE IDENTITY") == 1

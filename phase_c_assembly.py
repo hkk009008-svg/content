@@ -533,32 +533,54 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
             try:
                 if secondary_char_refs:
                     # P1-1 multi-char branch (S1-gated). Existence-filter refs the
-                    # same way the single-char path does, allocate slots, address
-                    # each character by its first slot.
+                    # same way the single-char path does, upload, allocate slots
+                    # over the SURVIVORS, address each character by its first slot.
                     primary_refs = [r for r in (multi_angle_refs or []) if os.path.exists(r)] \
                         or [character_image]
                     live_secondaries = [
                         e for e in secondary_char_refs if os.path.exists(e["reference"])
                     ]
-                    ref_paths, slot_map = _allocate_ref_slots(primary_refs, live_secondaries)
-                    image_urls = []
-                    for ref_path in ref_paths:
+                    # Upload BEFORE allocating slots: a silent mid-list upload
+                    # failure used to left-shift every later image while the
+                    # prompt's @ImageN labels stayed put, so the prompt addressed
+                    # the WRONG reference (operator Lane-V disposition 2026-06-11).
+                    candidate_paths = list(dict.fromkeys(
+                        primary_refs
+                        + [e["reference"] for e in live_secondaries]
+                        + [r for e in live_secondaries
+                           for r in (e.get("multi_angle_refs") or [])]))
+                    url_by_path = {}
+                    for ref_path in candidate_paths:
                         try:
-                            image_urls.append(fal_client.upload_file(ref_path))
+                            url_by_path[ref_path] = fal_client.upload_file(ref_path)
                         except Exception:
                             pass
-                    sections = _parse_structured_prompt(prompt)
-                    char_blocks = [(slot_map["primary"][0], identity_anchor)]
-                    char_blocks += [
-                        (slot_map[e["char_id"]][0], e.get("identity_anchor", ""))
-                        for e in live_secondaries if e["char_id"] in slot_map
+                    uploaded_primary = [r for r in primary_refs if r in url_by_path]
+                    uploaded_secondaries = [
+                        {**e, "multi_angle_refs": [
+                            r for r in (e.get("multi_angle_refs") or [])
+                            if r in url_by_path]}
+                        for e in live_secondaries if e["reference"] in url_by_path
                     ]
-                    kontext_prompt = _build_multichar_kontext_prompt(sections, char_blocks)
-                    print(f"   [KONTEXT] Multi-char ({len(image_urls)} refs, "
-                          f"{len(char_blocks)} identities)")
+                    ref_paths, slot_map = _allocate_ref_slots(uploaded_primary,
+                                                              uploaded_secondaries)
+                    image_urls = [url_by_path[p] for p in ref_paths]
+                    sections = _parse_structured_prompt(prompt)
+                    if slot_map.get("primary"):
+                        char_blocks = [(slot_map["primary"][0], identity_anchor)]
+                        char_blocks += [
+                            (slot_map[e["char_id"]][0], e.get("identity_anchor", ""))
+                            for e in uploaded_secondaries if e["char_id"] in slot_map
+                        ]
+                        kontext_prompt = _build_multichar_kontext_prompt(sections, char_blocks)
+                        print(f"   [KONTEXT] Multi-char ({len(image_urls)} refs, "
+                              f"{len(char_blocks)} identities)")
+                    else:
+                        # no surviving primary ref — force the degradation guard
+                        image_urls = []
                     if not image_urls:
-                        # all uploads failed — degrade to single-char via the
-                        # multichar builder (1 block); do not crash the take
+                        # every primary upload failed — degrade to single-char via
+                        # the multichar builder (1 block); do not crash the take
                         image_urls = [fal_client.upload_file(character_image)]
                         kontext_prompt = _build_multichar_kontext_prompt(
                             _parse_structured_prompt(prompt),
