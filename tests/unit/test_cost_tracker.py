@@ -656,6 +656,24 @@ class TestBudgetGate:
         assert tracker.is_over_budget() is True
         tracker.close()
 
+    # NF-2 regression (docs/STRATEGIC_REVIEW-2026-06-10.md): make_project()
+    # defaults budget_limit_usd to 0 and the settings UI documents 0 as
+    # "unlimited" — a zero budget must behave like NO budget, not like a cap
+    # the first recorded call exceeds.
+
+    def test_zero_budget_is_unlimited_for_is_over_budget(self, db_path):
+        """budget_usd=0.0 (the default-project value) must not trip the gate."""
+        tracker = CostTracker(db_path=db_path, budget_usd=0.0)
+        tracker.record_api_call("KLING_NATIVE")
+        assert tracker.is_over_budget() is False
+        tracker.close()
+
+    def test_zero_budget_is_unlimited_for_would_exceed(self, db_path):
+        """budget_usd=0 (int form) must not trip the pre-spend check either."""
+        tracker = CostTracker(db_path=db_path, budget_usd=0)
+        assert tracker.would_exceed("SORA_2") is False
+        tracker.close()
+
 
 class TestDbPathResolution:
     """T7: CostTracker resolves db_path from the EXPERIMENTS_DB_PATH env var

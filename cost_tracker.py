@@ -22,8 +22,10 @@ Budget gate
 Construct ``CostTracker(budget_usd=N)`` to enable the soft cap. Call
 ``would_exceed(api_name)`` before an API call and ``is_over_budget()``
 after to gate the pipeline. Both return False when ``budget_usd`` is None
-(no limit). ``spent_usd`` accumulates in-process only; SQLite is the
-durable store, but the budget gate uses the fast in-memory counter.
+(no limit); a falsy budget (0 / 0.0) is coerced to None at construction —
+it is the project-settings sentinel for "unlimited", not a zero cap.
+``spent_usd`` accumulates in-process only; SQLite is the durable store,
+but the budget gate uses the fast in-memory counter.
 """
 
 import sqlite3
@@ -153,7 +155,12 @@ class CostTracker:
         # (not in the signature default) so the env is read at construction
         # time, and to avoid coupling this low-level util to config.settings.
         self.db_path = db_path or os.environ.get("EXPERIMENTS_DB_PATH", "data/experiments.db")
-        self.budget_usd = budget_usd
+        # Falsy budget (0 / 0.0 / None) means NO cap: make_project() defaults
+        # budget_limit_usd to 0 and the settings UI documents 0 as
+        # "unlimited". Without this coercion a default-settings project
+        # paused with BUDGET_EXCEEDED after its first motion cost record
+        # (NF-2, docs/STRATEGIC_REVIEW-2026-06-10.md).
+        self.budget_usd = budget_usd if budget_usd else None
         # Fast in-process accumulator for the budget gate.  The SQLite
         # store is the durable record; this counter is reset each process.
         self.spent_usd: float = 0.0

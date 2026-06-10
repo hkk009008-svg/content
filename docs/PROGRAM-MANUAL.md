@@ -651,10 +651,10 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | Name | file:line | What it does |
 |---|---|---|
 | `CostTracker` | `cost_tracker.py:136` | SQLite ledger (`data/experiments.db`) + budget gate. `spent_usd` is an in-process accumulator (NOT loaded from SQLite on init). |
-| `record_api_call` | `cost_tracker.py:286` | Primary API logging path. |
-| `log_llm` | `cost_tracker.py:224` | LLM logging path; auto-detects provider from `PRICING` (`:76`) and silently records `$0.00` for unknown models. |
-| `would_exceed` | `cost_tracker.py:346` | Pre-call budget predicate (currently exercised by the cost-tracker unit tests rather than a live controller call site). |
-| `is_over_budget` | `cost_tracker.py:356` | Post-call budget gate, consulted in `cinema/shots/controller.py:1197`. |
+| `record_api_call` | `cost_tracker.py:293` | Primary API logging path. |
+| `log_llm` | `cost_tracker.py:231` | LLM logging path; auto-detects provider from `PRICING` (`:76`) and silently records `$0.00` for unknown models. |
+| `would_exceed` | `cost_tracker.py:353` | Pre-call budget predicate — wired as the pre-spend gate in `generate_motion_take` (`cinema/shots/controller.py:1393`) since 2026-06-10 (P0-2). |
+| `is_over_budget` | `cost_tracker.py:363` | Post-call budget gate, consulted in `cinema/shots/controller.py:1240`. |
 | `API_COST_USD` | `cost_tracker.py:43` | ±30% per-call USD estimates — operators must calibrate against invoices. |
 | `cleanup_project` | `cleanup.py:56` | Deletes intermediate `temp/` artifacts post-assembly (called at `cinema_pipeline.py:907`, non-fatal); `aggressive=True` also removes generated media. |
 | `CLEANUP_RULES` | `cleanup.py:34` | The delete-pattern ruleset `cleanup_project` applies. |
@@ -985,7 +985,7 @@ During the wait the operator: hits `POST .../assemble/screen` for the timeline m
 
 ---
 
-**Cross-cutting note on the cost gate (assembly-relevant):** the budget gate (`would_exceed` at `cost_tracker.py:346`, `is_over_budget` at `cost_tracker.py:356`) accounts for video/image generation only. Audio modules (`audio/dialogue.py`, `audio/music.py`, `audio/foley.py`) and performance modules each construct **isolated** `CostTracker()` instances that log to the same SQLite DB but do **not** add to the core tracker's `spent_usd` — so audio API spend runs uncapped, and `spent_usd` resets per process (it is not loaded from SQLite on init). Operators relying on `budget_limit_usd` for hard governance should know it bounds the generation stages, not the full run.
+**Cross-cutting note on the cost gate (assembly-relevant):** the budget gate (`would_exceed` at `cost_tracker.py:353`, `is_over_budget` at `cost_tracker.py:363`) accounts for video/image generation only. Audio modules (`audio/dialogue.py`, `audio/music.py`, `audio/foley.py`) and performance modules each construct **isolated** `CostTracker()` instances that log to the same SQLite DB but do **not** add to the core tracker's `spent_usd` — so audio API spend runs uncapped, and `spent_usd` resets per process (it is not loaded from SQLite on init). Operators relying on `budget_limit_usd` for hard governance should know it bounds the generation stages, not the full run.
 
 ---
 
@@ -1769,8 +1769,8 @@ The functions an engineer reaches for most, grouped by task. All `file:line` ref
 
 | Function | Location | What it does |
 |---|---|---|
-| `CostTracker.record_api_call` | `cost_tracker.py:275` | Logs a video/image/audio API spend (success path only); updates in-process `spent_usd` |
-| `CostTracker.would_exceed` / `is_over_budget` | `cost_tracker.py:335 / 345` | Pre-call and post-call budget gates (return `False`/no-op when `budget_usd=None`) |
+| `CostTracker.record_api_call` | `cost_tracker.py:293` | Logs a video/image/audio API spend (success path only); updates in-process `spent_usd` |
+| `CostTracker.would_exceed` / `is_over_budget` | `cost_tracker.py:353 / 363` | Pre-call and post-call budget gates (return `False`/no-op when `budget_usd=None`; falsy budgets coerce to None at construction — 0 = unlimited) |
 | `CostTracker.get_video_cost` | `cost_tracker.py:358` | Per-video breakdown by provider/operation |
 | `cleanup_project` | `cleanup.py:56` | Deletes always-delete temp patterns; `aggressive=True` also deletes generated media |
 

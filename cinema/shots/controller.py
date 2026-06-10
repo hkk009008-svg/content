@@ -1382,6 +1382,32 @@ class ShotController:
             target_api = raw_api
             video_fallbacks = None
 
+        # Pre-spend budget gate (STRATEGIC_REVIEW-2026-06-10 P0-2):
+        # would_exceed() promised pre-call gating since cost_tracker was
+        # written but had zero callers — only the post-fact is_over_budget()
+        # sibling at _finalize_motion_take step 9 was wired. Every per-take
+        # motion spend routes through this function (web endpoint, phase
+        # loop, regenerate, iterate, retry), so one check here covers them
+        # all. API_COST_USD estimates are ±30%, so this can fire one call
+        # early or late — the cap is a soft cap either way.
+        if self.cost_tracker.would_exceed(target_api):
+            self.progress(
+                "BUDGET_EXCEEDED",
+                f"Estimated {target_api} cost would push spend "
+                f"${self.cost_tracker.spent_usd:.2f} past budget cap "
+                f"${self.cost_tracker.budget_usd:.2f}. Pausing before generation.",
+                -1,
+                scene_id=scene_id,
+                shot_id=shot_id,
+                spent=self.cost_tracker.spent_usd,
+                budget=self.cost_tracker.budget_usd,
+            )
+            self._lifecycle.pause()
+            return {
+                "success": False,
+                "error": "Budget cap reached — motion generation not started",
+            }
+
         take = make_take(
             "motion",
             source_take_id=keyframe_take_id,

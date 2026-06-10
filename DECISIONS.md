@@ -824,6 +824,42 @@ Each entry is **dated and immutable** — supersession is tracked via the
 
 ---
 
+## ADR-022 — Wire `would_exceed` as the pre-spend motion budget gate (not delete)
+
+- **Date:** 2026-06-10
+- **Status:** Accepted
+- **Context:** STRATEGIC_REVIEW-2026-06-10 P0-2 found `would_exceed`
+  documented-but-dead: the cost_tracker module docstring has promised "call
+  `would_exceed(api_name)` before an API call" since the module was written,
+  but only the post-fact `is_over_budget()` sibling (controller
+  `_finalize_motion_take` step 9) was ever wired. The review required
+  wire-or-delete — don't keep a documented-but-dead safety API. The same
+  change fixed NF-2 (falsy `budget_usd` coerced to None at construction; 0
+  is the project-settings sentinel for "unlimited", and default projects
+  were pausing with BUDGET_EXCEEDED after their first motion cost record).
+- **Decision:** Wire it. `generate_motion_take`
+  (`cinema/shots/controller.py:1393`) now refuses to launch a generation
+  when `would_exceed(target_api)` — emits BUDGET_EXCEEDED, pauses the
+  lifecycle, returns failure BEFORE any video API call. Every per-take
+  motion spend routes through this function (web endpoint, phase loop,
+  regenerate, iterate, retry), so one check covers all paths. The F2b
+  storyboard batch path records one batch cost up front and keeps only the
+  post-fact gate (its spend is committed before per-segment finalize).
+- **Consequences:**
+  - +: The cap binds BEFORE money is spent — overshoot drops from one
+    take's cost to ~zero; the documented API contract is honored instead of
+    the capability being deleted.
+  - −: `API_COST_USD` estimates are ±30%, so the gate can refuse a call
+    that would not actually have exceeded (or admit one that does). It is
+    a soft cap either way; the operator resumes after raising the budget.
+  - −: Tests that mock `cost_tracker` must configure
+    `would_exceed.return_value` — a bare MagicMock is truthy and fires the
+    gate (two fixtures updated in this change).
+- **Cross-ref:** docs/STRATEGIC_REVIEW-2026-06-10.md NF-2/P0-2;
+  tests/unit/test_budget_pre_spend_gate.py; ADR-013 (evidence discipline).
+
+---
+
 *To add a new decision: copy the template below, increment the ADR
 number, fill in Context / Decision / Consequences, and append at the
 bottom. Do not edit prior entries — supersede via Status field instead.*
