@@ -1874,7 +1874,7 @@ Set via `PUT /api/projects/<pid>` with `{"global_settings": {...}}`. The capabil
 | `redux_strength` | enum high/medium/low | FLUX Redux style strength (node 804) |
 | `face_detailer_enabled` + `face_detailer_guide_size` | bool / {512,1024,2048} | FaceDetailer crop |
 | `supir_enabled` + `supir_steps` | bool / [20,100] | SUPIR 4K upscale |
-| `hires_fix_enabled` + `hires_fix_denoise` | bool / [0.2,0.6] | **Pass-2 denoise NOT wired** (D-image-2) |
+| `hires_fix_enabled` + `hires_fix_denoise` | bool / [0.2,0.6] | Pass-2 denoise wired — node-18 write at `quality_max.py:754` (D-image-2 fixed 2026-06-09; floor 0.40) |
 
 **Video / motion / audio assembly**
 
