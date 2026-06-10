@@ -7,6 +7,7 @@ drift it by a byte. Captured from phase_c_assembly.py:493-529 at dcb4064.
 from __future__ import annotations
 
 import dataclasses
+import os
 import sys
 import urllib.request
 from unittest.mock import MagicMock
@@ -40,7 +41,7 @@ def fal_capture(monkeypatch, tmp_path):
     sibling test_phase_c_assembly_provenance.py) and capture Kontext arguments.
     """
     fake = MagicMock()
-    fake.upload_file.side_effect = lambda path: f"url://{path.split('/')[-1]}"
+    fake.upload_file.side_effect = lambda path: f"url://{os.path.basename(str(path))}"
     fake.subscribe.return_value = {"images": [{"url": "https://fake/image.jpg"}]}
     monkeypatch.setitem(sys.modules, "fal_client", fake)
 
@@ -76,18 +77,15 @@ def test_single_char_kontext_prompt_snapshot(fal_capture, tmp_path):
 
     assert result is not None and result.api_name == "FLUX_KONTEXT"
 
-    # Verify the FAL endpoint
     call_args = fal_capture.subscribe.call_args
     assert call_args is not None, "fal_client.subscribe was never called"
-    endpoint = call_args.args[0] if call_args.args else call_args.kwargs.get("endpoint")
+    # Production passes the endpoint positionally and arguments by keyword
+    # (phase_c_assembly.py:531-541) — extract strictly so a call-shape refactor
+    # fails LOUD here instead of vacuously passing through a fallback chain.
+    endpoint = call_args.args[0]
+    arguments = call_args.kwargs["arguments"]
     assert endpoint == "fal-ai/flux-pro/kontext/max/multi"
-
-    # Verify the image_urls (single ref, basename matches the fixture file)
-    arguments = call_args.kwargs.get("arguments") or (
-        call_args.args[1] if len(call_args.args) > 1 else None
-    )
-    assert arguments is not None, "subscribe 'arguments' kwarg missing"
-    assert arguments["image_urls"] == [f"url://aria.jpg"]
+    assert arguments["image_urls"] == ["url://aria.jpg"]
 
     # THE GOLDEN ASSERTION — this is what P1-1 multi-char branch must not touch
     assert arguments["prompt"] == GOLDEN_SINGLE_CHAR_PROMPT, (
