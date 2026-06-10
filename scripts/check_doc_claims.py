@@ -345,6 +345,9 @@ def _resolve_inline_target(
       (None, [c1, c2..]) -> ambiguous_path advisory (candidates listed).
     Directory-qualified within-repo tokens pass through as-is; existence
     (incl. missing_file) is handled downstream by check_anchor.
+    Ambiguity tie-break order: a symbol defined in exactly one candidate
+    wins; else a token that IS a tracked relpath (root-exact — the root
+    re-export shims) wins; else advisory.
     """
     parts = token_file.split("/")
     if token_file.startswith("/") or ".." in parts:
@@ -363,7 +366,9 @@ def _resolve_inline_target(
             # git ls-files lists TRACKED paths even if absent on disk (staged
             # deletion, `git rm --cached`, sparse checkout, mid-rename). An
             # unreadable candidate must NOT abort the run (CQ-1) — treat it as
-            # non-defining (skip), consistent with the advisory fallback below.
+            # non-defining (skip); resolution then falls to the root-exact
+            # tie-break or the advisory below (an absent root-exact file
+            # surfaces downstream as a fatal missing_file — deliberate).
             try:
                 src = (repo_root / c).read_text(encoding="utf-8", errors="replace")
             except OSError:
@@ -372,6 +377,13 @@ def _resolve_inline_target(
                 defining.append(c)
         if len(defining) == 1:
             return defining[0], None            # disambiguated -> real check
+    if token_file in matches:
+        # Root-exact: the bare token IS a tracked relpath (only possible for
+        # a repo-root file, e.g. the root re-export shims). "Qualify with a
+        # directory" is unsatisfiable at the root, so exactness breaks the
+        # tie when symbol evidence is absent or inconclusive; a symbol
+        # defined in exactly one candidate (above) stays the stronger signal.
+        return token_file, None
     return None, matches                        # truly ambiguous -> advisory
 
 

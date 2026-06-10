@@ -939,21 +939,50 @@ class TestResolveInlineTarget:
         assert rel == "domain/controller.py" and cand is None
 
     def test_ambiguous_without_symbol_is_advisory(self, tmp_path):
+        # Neither candidate is at the repo root, so root-exactness cannot
+        # break the tie — "qualify with a directory" is satisfiable here.
         _init_repo(tmp_path)
-        _commit_py(tmp_path, "controller.py", "x = 1\n")
-        _commit_py(tmp_path, "domain/controller.py", "y = 2\n")
+        _commit_py(tmp_path, "review/controller.py", "x = 1\n")
+        _commit_py(tmp_path, "shots/controller.py", "y = 2\n")
         idx = self._index(tmp_path)
         rel, cand = _resolve_inline_target("controller.py", None, idx, tmp_path)
         assert rel is None
-        assert cand == ["controller.py", "domain/controller.py"]
+        assert cand == ["review/controller.py", "shots/controller.py"]
 
     def test_ambiguous_symbol_in_two_candidates_is_advisory(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "review/controller.py", "def shared():\n    pass\n")
+        _commit_py(tmp_path, "shots/controller.py", "def shared():\n    pass\n")
+        idx = self._index(tmp_path)
+        rel, cand = _resolve_inline_target("controller.py", "shared", idx, tmp_path)
+        assert rel is None and cand == ["review/controller.py", "shots/controller.py"]
+
+    def test_root_exact_match_beats_basename_ambiguity(self, tmp_path):
+        # The repo-root shim pattern (project_manager.py et al.): a bare token
+        # that IS a tracked relpath — only possible for a root-level file —
+        # resolves to that file. The advisory's "qualify with a directory"
+        # remedy is unsatisfiable at the root.
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "project_manager.py",
+                   "from domain.project_manager import *  # noqa\n")
+        _commit_py(tmp_path, "domain/project_manager.py",
+                   "def load_project():\n    pass\n")
+        idx = self._index(tmp_path)
+        rel, cand = _resolve_inline_target("project_manager.py", None, idx, tmp_path)
+        assert rel == "project_manager.py" and cand is None
+
+    def test_root_exact_with_inconclusive_symbol_resolves_root(self, tmp_path):
+        # A symbol defined in BOTH candidates is inconclusive — same as no
+        # symbol; root-exactness breaks the tie instead of an advisory.
+        # (Symbol defined in exactly ONE candidate still wins over root-
+        # exactness — test_ambiguous_resolved_by_symbol guards that ordering:
+        # its root controller.py exists yet domain/ resolves.)
         _init_repo(tmp_path)
         _commit_py(tmp_path, "controller.py", "def shared():\n    pass\n")
         _commit_py(tmp_path, "domain/controller.py", "def shared():\n    pass\n")
         idx = self._index(tmp_path)
         rel, cand = _resolve_inline_target("controller.py", "shared", idx, tmp_path)
-        assert rel is None and cand == ["controller.py", "domain/controller.py"]
+        assert rel == "controller.py" and cand is None
 
     def test_zero_match_is_skip(self, tmp_path):
         _init_repo(tmp_path)
@@ -1023,15 +1052,42 @@ class TestInlineAnchorsE2E:
         assert drifts[0].kind == "def_drift" and drifts[0].suggested_line == 3
 
     def test_bare_ambiguous_no_symbol_is_advisory(self, tmp_path):
+        # Off-root collision: root-exactness cannot apply, so this stays
+        # the genuine "qualify with a directory" advisory.
         _init_repo(tmp_path)
-        _commit_py(tmp_path, "controller.py", "x = 1\n")
-        _commit_py(tmp_path, "domain/controller.py", "y = 2\n")
+        _commit_py(tmp_path, "review/controller.py", "x = 1\n")
+        _commit_py(tmp_path, "shots/controller.py", "y = 2\n")
         md = self._doc(tmp_path, "plain `controller.py:1` with no symbol\n")
         drifts = check_line_anchors([str(md)], tmp_path)
         assert len(drifts) == 1
         d = drifts[0]
         assert d.kind == "ambiguous_path" and d.fixable is False
-        assert d.candidates == ["controller.py", "domain/controller.py"]
+        assert d.candidates == ["review/controller.py", "shots/controller.py"]
+
+    def test_root_shim_cite_in_bounds_no_drift(self, tmp_path):
+        # The manual:1314 shape — bare cite of the repo-root re-export shim,
+        # colliding with domain/'s canonical module. Root-exact resolution
+        # turns the former advisory into a real (passing) bounds check.
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "project_manager.py",
+                   "# 1\n# 2\nfrom domain.project_manager import *  # noqa\n")
+        _commit_py(tmp_path, "domain/project_manager.py",
+                   "def load_project():\n    pass\n")
+        md = self._doc(tmp_path, "the root shim (`project_manager.py:3`) re-exports\n")
+        assert check_line_anchors([str(md)], tmp_path) == []
+
+    def test_root_shim_cite_out_of_bounds_detected(self, tmp_path):
+        # Root-exact resolution is a REAL check: a line past the shim's end
+        # is out_of_bounds against the ROOT file, not silently advisory and
+        # not bounds-checked against the longer domain/ collider.
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "project_manager.py",
+                   "from domain.project_manager import *  # noqa\n")  # 1 line
+        _commit_py(tmp_path, "domain/project_manager.py", "x = 1\n" * 50)
+        md = self._doc(tmp_path, "see `project_manager.py:40`\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1
+        assert drifts[0].kind == "out_of_bounds"
 
     def test_bare_unresolvable_skipped(self, tmp_path):
         _init_repo(tmp_path)
@@ -1192,9 +1248,10 @@ class TestAdvisoryExitNeutral:
 
     def test_advisory_only_is_clean_exit(self, tmp_path, capsys, monkeypatch):
         # An ambiguous-only doc must not be exit 1. Drive run() + the partition.
+        # Off-root collision: root-exact resolution must not apply here.
         _init_repo(tmp_path)
-        _commit_py(tmp_path, "controller.py", "x = 1\n")
-        _commit_py(tmp_path, "domain/controller.py", "y = 2\n")
+        _commit_py(tmp_path, "review/controller.py", "x = 1\n")
+        _commit_py(tmp_path, "shots/controller.py", "y = 2\n")
         md = _write_md(tmp_path, "doc.md", "plain `controller.py:1`\n")
         from check_doc_claims import _split_advisories
         fatal, adv = _split_advisories(run([str(md)], tmp_path))
@@ -1365,6 +1422,22 @@ class TestResolveInlineTargetAbsentCandidate:
         assert rel is None
         assert cand == ["x/controller.py", "y/controller.py"]
 
+    def test_absent_root_exact_resolves_and_surfaces_missing_file(self, tmp_path):
+        # Root-exact ties break on TRACKEDNESS alone: a tracked-but-absent
+        # ROOT file still resolves (the cite names it exactly), and the
+        # absence surfaces downstream as a fatal missing_file — deliberately
+        # louder than the old exit-neutral advisory.
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "controller.py", "x = 1\n")
+        _commit_py(tmp_path, "sub/controller.py", "y = 2\n")
+        (tmp_path / "controller.py").unlink()
+        idx = {"controller.py": ["controller.py", "sub/controller.py"]}
+        rel, cand = _resolve_inline_target("controller.py", None, idx, tmp_path)
+        assert rel == "controller.py" and cand is None
+        md = _write_md(tmp_path, "doc.md", "see `controller.py:1`\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1 and drifts[0].kind == "missing_file"
+
 
 # ---------------------------------------------------------------------------
 # BUG 3 — ADV-2 (MINOR): an unbalanced/stray fence leaves in_fence=True for the
@@ -1461,6 +1534,17 @@ class TestMultiRangeVerification:
         md = _write_md(tmp_path, "doc.md", "**`f`** `mod.py:1-2, 3-5`\n")
         drifts = check_line_anchors([str(md)], tmp_path)
         assert drifts == [], f"def 3 is within term 3-5, expected no drift: {drifts}"
+
+    def test_root_exact_multirange_resolves_and_verifies(self, tmp_path):
+        """The second _resolve_inline_target call site: a bare multi-range cite
+        of a root file colliding with a subdir basename resolves root-exact
+        (no advisory) and verifies its terms against the ROOT file."""
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "mod.py", "# 1\n# 2\n# 3\n# 4\n# 5\n")
+        _commit_py(tmp_path, "sub/mod.py", "# 1\n")
+        md = _write_md(tmp_path, "doc.md", "spans `mod.py:1-2, 3-5`\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"root-exact multirange should verify clean: {drifts}"
 
     def test_bound_symbol_def_outside_all_terms_is_drift(self, tmp_path):
         """Symbol def at line 9; multi-range `mod.py:1-2, 3-5` -> 9 in NO term ->
