@@ -1306,15 +1306,22 @@ channel**: each seat inferred the other's liveness from a 10-minute-idle-since-
 last-commit heuristic, so any seat doing non-committing work (reading, TDD,
 review, thinking) read as "offline." Rule #19 replaces inference with a signal.
 
-1. **Each seat maintains `coordination/presence/<seat>.md`** (gitignored,
-   per-clone; flat `key: value`: `seat`, `status` (active|wrapping|away),
-   `current_task`, `head_at_write`, `updated`). The hook bumps
-   `updated`/`head_at_write` every tool call (operator-shipped M2/M3); the
-   **agent owns `status` + `current_task`** and updates `current_task` at each
-   task boundary.
-2. **Liveness is read from presence freshness + `current_task`, NOT from commit
-   recency.** "Offline" = presence `updated` stale > T (default 10 min). A seat
-   mid-implementation with a fresh presence file is active, not idle.
+1. **Presence is SPLIT (v6.0 Tier 2, user-authorized 2026-06-11):**
+   (a) `coordination/presence/<seat>-heartbeat.ts` — hook-owned, rewritten
+   atomically (single line `<ISO-UTC> <short-head>`) on every Bash/Write/Edit
+   tool call; the agent never writes it. (b) `coordination/presence/<seat>.md`
+   — wholly **agent-owned** intent (`seat`, `status` (active|wrapping|away),
+   `current_task`, plus any fields the seat finds useful); the hook never
+   touches it. Both gitignored, per-clone. The split kills the pre-v6.0
+   read-modify-write livelock (hook sed racing the seat's Write tool) and the
+   stale-status class (hook-moved `updated:` under frozen prose — 2 recorded
+   misattribution incidents). Tests:
+   tests/unit/test_presence_heartbeat_split.py.
+2. **Liveness is read from heartbeat freshness; intent from the .md.**
+   "Offline" = `<seat>-heartbeat.ts` stale > T (default 10 min). A seat
+   mid-implementation with a fresh heartbeat is active, not idle. Transition
+   fallback: a peer session predating the split has no heartbeat file yet —
+   read its .md `updated:` field until the first heartbeat appears.
 3. **Binding cross-seat signals MUST be artifacts** — a mailbox event or a
    presence-file update — never chat narration alone. Chat is per-session-
    private (only the user-principal sees both terminals), so it is a user-facing

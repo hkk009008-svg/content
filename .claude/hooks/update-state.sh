@@ -37,42 +37,34 @@ export LC_ALL=C
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 
-# Presence auto-freshness (v5.7 M1): stamp this seat's presence file every
-# Bash/Write/Edit call (NOT HEAD-gated — liveness must update during
-# non-committing work). The agent owns `status` + `current_task` (Rule #19);
-# the hook only bumps `head_at_write` + `updated`.
-# Wrapped in `{ … } || true` (Lane V M1, 2026-05-30): a presence-write hiccup
-# (mkdir/mktemp/sed/mv/printf) must NEVER abort the hook under `set -e` before
-# the STATE.md regen below — presence is best-effort, STATE.md is the priority.
-{
-# Resolve the seat. CLAUDE_SEAT (per-launch env — the documented D-a path,
-# coordination/README.md §"Per-seat launch") wins. FALLBACK (hardening
-# 2026-06-06): if the session was launched WITHOUT CLAUDE_SEAT, read a
-# per-session marker the agent writes at start —
-# `.claude/presence-seat.<session-id>`, keyed by CLAUDE_CODE_SESSION_ID (which
-# the hook inherits) so two concurrent seats can NEVER collide on one file.
-# Root cause this closes: a forgotten CLAUDE_SEAT made presence stamping
-# silently no-op for a whole session, so both seats mis-read each other's
-# liveness (the exact Rule #19/#20 failure observed 2026-06-06).
-_SEAT="${CLAUDE_SEAT:-}"
-if [ -z "$_SEAT" ] && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
-  _SEAT=$(cat ".claude/presence-seat.${CLAUDE_CODE_SESSION_ID}" 2>/dev/null || true)
-fi
-if [ -n "$_SEAT" ]; then
-  mkdir -p coordination/presence
-  _PF="coordination/presence/${_SEAT}.md"
-  _NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  _H=$(git rev-parse --short HEAD 2>/dev/null || echo "?")
-  if [ -f "$_PF" ]; then
-    _t=$(mktemp)
-    sed -e "s|^head_at_write:.*|head_at_write: ${_H}|" \
-        -e "s|^updated:.*|updated: ${_NOW}|" "$_PF" > "$_t" && mv "$_t" "$_PF"
-  else
-    printf 'seat: %s\nstatus: active\ncurrent_task: (set me when your focus changes)\nhead_at_write: %s\nupdated: %s\n' \
-      "$_SEAT" "$_H" "$_NOW" > "$_PF"
+# Presence heartbeat (v6.0 Tier 2, user-authorized 2026-06-11; replaces the
+# v5.7 M1 sed-in-place stamp): the hook's liveness signal is a SINGLE-LINE
+# atomic overwrite of coordination/presence/<seat>-heartbeat.ts —
+# "<ISO-UTC> <short-head>". The hook NEVER touches the seat-owned
+# coordination/presence/<seat>.md anymore (status/current_task/intent are
+# wholly agent-owned per Rule #19). This kills two recorded failure classes:
+# the read-modify-write livelock (hook sed racing a seat's Write tool between
+# its read and write — workaround was Bash heredocs) and the stale-status
+# split (hook-moved `updated:` under frozen prose → 2 misattribution
+# incidents). Liveness = heartbeat freshness; intent = the .md file.
+# Seat resolution unchanged (v5.7 + 2026-06-06 hardening): CLAUDE_SEAT env
+# wins, else the per-session marker `.claude/presence-seat.<session-id>`.
+# Best-effort: called with `|| true` — a presence hiccup must never abort
+# the hook under `set -e` before the STATE.md regen below.
+# Tests: tests/unit/test_presence_heartbeat_split.py (awk-slices this fn).
+_stamp_presence() {
+  local seat="${CLAUDE_SEAT:-}"
+  if [ -z "$seat" ] && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+    seat=$(cat ".claude/presence-seat.${CLAUDE_CODE_SESSION_ID}" 2>/dev/null || true)
   fi
-fi
-} || true
+  [ -n "$seat" ] || return 0
+  mkdir -p coordination/presence
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$(git rev-parse --short HEAD 2>/dev/null || echo '?')" \
+    > "coordination/presence/${seat}-heartbeat.ts"
+  return 0
+}
+_stamp_presence || true
 
 # v5.8 — per-seat index auto-refresh (D-a). The peer's commits move shared
 # HEAD but NOT this seat's GIT_INDEX_FILE index; the stale index then shows

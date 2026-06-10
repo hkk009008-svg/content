@@ -32,12 +32,16 @@ for the full discipline (Rules 1–20).
   warns in CI; ADVISORY warns; INFO silent.
 - `mailbox/archive/` — Old events moved out of `sent/` for log hygiene (manual
   move by operator).
-- `presence/director.md`, `presence/operator.md` — (v5.7, Rule #19) per-seat
-  **live presence**: flat `key: value` (`seat`, `status`, `current_task`,
-  `head_at_write`, `updated`). Gitignored + per-clone; the hook bumps
-  `updated`/`head_at_write` every tool call, the agent owns `current_task`. The
-  peer reads the other file for liveness (fresh `updated` < T = active),
-  replacing the old "no commit in 10 min = offline" inference.
+- `presence/<seat>-heartbeat.ts` — (v6.0 Tier 2) HOOK-OWNED liveness: a single
+  line `<ISO-UTC> <short-head>` atomically overwritten on every tool call.
+  Read the peer's heartbeat for liveness (fresh < T = active).
+- `presence/director.md`, `presence/operator.md` — (v5.7 Rule #19, narrowed by
+  v6.0 Tier 2) per-seat **agent-owned intent**: flat `key: value` (`seat`,
+  `status`, `current_task`, …). The hook NEVER touches these anymore (the
+  pre-split hook sed livelocked the seat's own Write-tool edits and let
+  hook-stamped `updated:` mask stale prose). Gitignored + per-clone.
+  Transition: a session predating the split has no heartbeat file — fall back
+  to its .md `updated:` until the first heartbeat appears.
 
 ## Authority (Rule #8)
 
