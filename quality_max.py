@@ -458,6 +458,24 @@ def _prune_unavailable(workflow: dict, available: Set[str], has_character: bool,
         workflow["9"]["inputs"]["images"] = [feed_node, 0]
 
 
+def _assemble_max_prompt(prompt: str, char_lora_trigger: Optional[str],
+                          secondary_chars: Optional[list]) -> str:
+    """Prepend LoRA trigger tokens (training-caption convention: token first).
+
+    Primary trigger first, then each secondary's — but a secondary token only
+    when that secondary actually carries a LoRA (a trigger without its LoRA in
+    the chain is noise). No tokens -> prompt unchanged (every pre-slice-2
+    call path).
+    """
+    triggers = [char_lora_trigger] if char_lora_trigger else []
+    for entry in secondary_chars or []:
+        if entry.get("trigger") and entry.get("lora_path"):
+            triggers.append(entry["trigger"])
+    if not triggers:
+        return prompt
+    return f"{', '.join(triggers)}, {prompt}"
+
+
 def _inject_identity(workflow: dict, char_lora: Optional[str], face_anchor_remote: Optional[str],
                       params: dict, has_character: bool,
                       char_lora_strength: Optional[float] = None):
@@ -471,7 +489,10 @@ def _inject_identity(workflow: dict, char_lora: Optional[str], face_anchor_remot
         return
     if "700" in workflow:
         if char_lora:
-            workflow["700"]["inputs"]["lora_name"] = char_lora
+            # ComfyUI's LoraLoader expects a loras/-relative name, not an absolute path.
+            # pod-side placement of the file into ComfyUI's loras/ dir under this
+            # basename is the slice-2 POD-SESSION step (spec §7.2).
+            workflow["700"]["inputs"]["lora_name"] = os.path.basename(char_lora)
             # Use the validated per-character strength if provided; else fall back to
             # the tier-default model/clip values SEPARATELY (preserves the original
             # independent-clip behavior — they aren't always equal, cf. _max_lora_test).
@@ -713,6 +734,8 @@ def generate_ai_broll_max(
     # max-tier extras:
     char_lora_path: Optional[str] = None,
     char_lora_strength: Optional[float] = None,
+    char_lora_trigger: Optional[str] = None,
+    secondary_chars: Optional[List[dict]] = None,
     style_reference: Optional[str] = None,
     shot_hint: Optional[dict] = None,
     ctx: Optional["PipelineContext"] = None,

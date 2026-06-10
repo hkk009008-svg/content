@@ -852,7 +852,7 @@ the `identity_strategy` promise into take metadata
 for in-frame characters beyond the primary that have a registered reference
 (unregistered chars are skipped, mirroring validation). When `secondary_char_refs` is
 non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:534](phase_c_assembly.py:534)) takes the multi-char
-branch: `_allocate_ref_slots` ([phase_c_assembly.py:445](phase_c_assembly.py:445)) partitions the Kontext
+branch: `_allocate_ref_slots` ([phase_c_assembly.py:450](phase_c_assembly.py:450)) partitions the Kontext
 image-URL budget on a fixed-share 3/2/1 slot schedule (primary up to 3, first
 secondary up to 2, second secondary up to 1), and `_build_multichar_kontext_prompt`
 ([phase_c_assembly.py:469](phase_c_assembly.py:469)) emits per-character `@ImageN PRESERVE` blocks with a

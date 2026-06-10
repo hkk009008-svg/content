@@ -464,3 +464,58 @@ def test_strategy_carries_primary_trigger_and_multi_lora_tag_importable():
                          primary_char_id="char_a", char_lora_trigger="TOKwoman")
     assert s.char_lora_trigger == "TOKwoman"
     json.dumps(s.to_metadata_dict())  # stays JSON-safe
+
+
+# ---------------------------------------------------------------------------
+# Task 4 (slice 2): controller integration — max-tier kwarg forwarding
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def controller_two_chars_max(monkeypatch, tmp_path, captured, _stub_validator):
+    """Host/controller with a two-character shot, quality_tier=max.
+
+    Like controller_two_chars but global_settings carries quality_tier: "max".
+    No LoRA registered for either char — char_lora_trigger will be None
+    (the slice-2 accountability pin: the trigger flows through even when absent).
+    """
+    proj_root = str(tmp_path / "projects")
+    os.makedirs(proj_root, exist_ok=True)
+    secondary = [{"char_id": "char_b", "reference": "/r/b.jpg",
+                  "multi_angle_refs": ["/r/b1.jpg"], "identity_anchor": "anchor b"}]
+    host = _build_host(tmp_path, secondary_chars=secondary,
+                       characters_in_frame=["char_a", "char_b", "char_c"])
+    # Override global_settings to max tier
+    host._core.project["global_settings"]["quality_tier"] = "max"
+    project = host._core.project
+    proj_dir = os.path.join(proj_root, project["id"])
+    os.makedirs(proj_dir, exist_ok=True)
+    with open(os.path.join(proj_dir, "project.json"), "w") as f:
+        json.dump(project, f)
+    monkeypatch.setattr(dpm, "PROJECTS_DIR", proj_root)
+    return host._shot_ctrl
+
+
+def test_two_char_max_tier_strategy_tag_and_kwargs(
+        controller_two_chars_max, captured):
+    """MAX_TIER_MULTI_LORA is set; char_lora_trigger kwarg flows to generate_ai_broll;
+    identity_per_char covers both conditioned chars (slice-2 accountability pin)."""
+    controller_two_chars_max.generate_keyframe_take("scene_1", "shot_1")
+    take = _latest_keyframe_take(controller_two_chars_max, "shot_1")
+
+    # Strategy promise
+    md = take["metadata"]["identity_strategy"]
+    assert md["mechanism_tag"] == "MAX_TIER_MULTI_LORA"
+
+    # char_lora_trigger kwarg must be present in the captured call
+    # (no trigger registered in fixture → value is None, but key must exist)
+    assert "char_lora_trigger" in captured["kwargs"], (
+        f"generate_ai_broll must receive char_lora_trigger kwarg; "
+        f"got: {list(captured['kwargs'].keys())}"
+    )
+    assert captured["kwargs"]["char_lora_trigger"] is None
+
+    # identity_per_char covers both conditioned chars (AC3 negative: char_c absent)
+    per_char = take["metadata"]["identity_per_char"]
+    assert "char_a" in per_char
+    assert "char_b" in per_char
+    assert "char_c" not in per_char

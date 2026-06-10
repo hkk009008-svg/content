@@ -78,6 +78,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                        pulid_weight_override=None, negative_prompt="",
                        quality_tier="production", char_lora_path=None,
                        char_lora_strength=None,
+                       char_lora_trigger=None,
                        secondary_char_refs=None,
                        style_reference=None, shot_hint=None, ctx=None):
     """
@@ -106,6 +107,8 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
         characters: List of character config dicts
         quality_tier: "production" | "max" — selects the generation pipeline.
         char_lora_path: (max tier only) Path to per-character LoRA .safetensors.
+        char_lora_trigger: (max tier only) P1-1 slice 2: trigger token for the primary
+            character's LoRA (training-caption prefix). Ignored on other tiers.
         secondary_char_refs: P1-1 slice 1: additional character entries forwarded
             to _fal_flux_fallback; each entry has char_id, reference, multi_angle_refs,
             identity_anchor. None / [] takes the single-char (golden) path.
@@ -139,6 +142,8 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                 negative_prompt=negative_prompt,
                 char_lora_path=char_lora_path,
                 char_lora_strength=char_lora_strength,
+                char_lora_trigger=char_lora_trigger,
+                secondary_chars=secondary_char_refs,
                 style_reference=style_reference,
                 shot_hint=shot_hint,
                 ctx=ctx,

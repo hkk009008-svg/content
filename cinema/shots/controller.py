@@ -738,6 +738,7 @@ class ShotController:
             quality_tier=quality_tier,
             char_lora_path=char_lora_path,
             char_lora_strength=char_lora_strength,
+            char_lora_trigger=strategy.char_lora_trigger,
             style_reference=style_reference,
             secondary_char_refs=[c.to_dict() for c in strategy.secondary_specs] or None,
             shot_hint={"prompt": full_prompt, "characters_in_frame": shot.get("characters_in_frame", []),
