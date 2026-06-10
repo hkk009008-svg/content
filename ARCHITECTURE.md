@@ -950,6 +950,22 @@ calibration is GPU-pod (Phase-B) work. Status: `pipeline_status.toml::lora_valid
 gone; `prep/lora_training.py::train_character_lora` is now a pure single-train the gate
 orchestrates.
 
+**Multi-char keyframe flow (P1-1 slice 2).** When `_resolve_identity_strategy`
+([cinema/shots/controller.py:279](cinema/shots/controller.py:279)) assigns `MAX_TIER_MULTI_LORA`
+([cinema/shots/controller.py:343](cinema/shots/controller.py:343)), the dispatcher passes `secondary_char_refs`
+([cinema/shots/controller.py:747](cinema/shots/controller.py:747)) through `generate_ai_broll` →
+`generate_ai_broll_max` as the `secondary_chars` list. Inside the max dispatch:
+`_inject_secondary_loras` ([quality_max.py:536](quality_max.py:536)) chains up to two extra LoraLoader nodes
+(701/702) after the primary's node 700, clamped to `_SECONDARY_LORA_MAX_STRENGTH=0.55`
+([quality_max.py:533](quality_max.py:533)), with each `lora_name` set to the artifact's basename for
+pod-side placement; `_assemble_max_prompt` ([quality_max.py:461](quality_max.py:461)) prepends LoRA trigger
+tokens (primary first, then each secondary's) before conditioning; and
+`_inject_secondary_faceswap` ([quality_max.py:592](quality_max.py:592)) splices a LoadImage(94) +
+ReActorFaceSwap(611) node after the existing node 610, swapping face index "1" from the
+secondary's canonical image — MUST run after `_inject_post_passes` so the SUPIR-absent
+950-feed rewire sees it. All three injectors are retry-safe (idempotent pop/re-inject);
+per-char validation and the capability scorecard are unchanged from slice 1.
+
 ### 8.4 Identity-validator integration
 
 `face_validator_gate._get_validator()` returns `identity.get_shared_validator()`

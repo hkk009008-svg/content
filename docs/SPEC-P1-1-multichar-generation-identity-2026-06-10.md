@@ -253,17 +253,20 @@ LoRA but the primary has none, there is no node 700 to chain from —
 directly. Live the moment Aria registers and a pod exists.
 
 - Controller side: collect `secondary_char_loras = [(cid, path, strength), …]` for
-  all in-frame chars with a registered LoRA (controller.py:540-549 generalized).
+  all in-frame chars with a registered LoRA — now implemented as `_resolve_identity_strategy`
+  ([cinema/shots/controller.py:279](cinema/shots/controller.py:279)) which sets `MAX_TIER_MULTI_LORA`
+  when ≥2 characters are conditioned ([cinema/shots/controller.py:343](cinema/shots/controller.py:343)).
 - Trigger tokens — corrected provenance: the LOCAL training path writes
   `trigger_token` to `loras/<char_id>/dataset_manifest.json`
-  (prep/lora_training.py:224); the FAL cloud path — which produced the only
-  existing artifacts — writes NO manifest (no `loras/` directory exists anywhere;
-  verified). Aria's trigger `TOKwoman` is hardcoded only in
+  (prep/lora_training.py:224); the FAL cloud path writes NO manifest (no `loras/`
+  directory exists anywhere; verified) — two FAL artifacts exist: v1 (`logs/char_lora_fal.safetensors`,
+  superseded) and v2 (`logs/char_lora_fal_v2.safetensors`, registered 2026-06-11 via
+  `scripts/_register_aria_lora.py`, commit `a43b59d`). Aria's trigger `TOKwoman` is hardcoded only in
   scripts/_fal_lora_production.py:25 and scripts/_fal_lora_train.py:28.
   Prerequisite fix: persist `global_settings.char_lora_triggers[cid]` at the same
-  web_server.py:779-787 mutate that registers path/strength, accepting a manual
-  value for FAL-trained LoRAs (nothing injects triggers at inference today —
-  verified; injection becomes part of this mechanism's prompt assembly).
+  web_server.py mutate that registers path/strength — RESOLVED by `web_server.py:788-789`
+  (commit `574118e`) + the manual registration script (`a43b59d`) which passes `trigger_token`
+  so the mutate persists it; injection now active at inference.
 - Bleed risk: two face-LoRAs stacked on FLUX's global attention can cross-leak
   features. Mitigations: validated per-char strengths (the [0.45, 0.55, 0.7, 1.0]
   sweep argmax, prep/lora_quality.py:151), a stacking clamp (≤0.55 per secondary,
@@ -436,6 +439,16 @@ scope.
   LoRAs). Sweep stacked strengths (primary at validated, secondary ∈ {0.35, 0.45,
   0.55}); watch for bleed (cross-character feature leakage shows as paired score
   collapse).
+
+  **Slice-2 implementation record (2026-06-11):** offline code+tests complete.
+  - `_resolve_identity_strategy` max arm (`5bb1d89`) — `MAX_TIER_MULTI_LORA` promise, secondary specs
+  - `_inject_secondary_loras` + `_inject_secondary_faceswap` + `_assemble_max_prompt` (`be5c0b3`)
+  - `web_server.py` trigger persistence (`574118e`)
+  - `generate_ai_broll_max` secondary wiring (`e1981f0`, `c45eecf`)
+  - faceswap upload + ordering fixes, production dispatch negative (`d73fa45`, `82a08a7`)
+  - test pins (`3ecee1e`)
+  - dispositions (`e956462`, `0359c92`)
+  - S2/S3 spikes + pod-side LoRA placement pending next bundled pod session.
 
 ## 7. Recommended sequencing — and the deviation, surfaced
 

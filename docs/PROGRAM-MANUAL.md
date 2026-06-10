@@ -553,7 +553,8 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `generate_ai_broll_max` | `quality_max.py:828` | Max-tier orchestrator: probe → load `pulid_max.json` → optional HiDream swap → prune → 5 inject axes → best-of-N loop → PuLID-boost retry → copy best. |
 | `_probe_node_availability` | `quality_max.py:253` | One-time `/object_info` probe. |
 | `_prune_unavailable` | `quality_max.py:364` | Strip absent nodes with safe rewires. |
-| `_inject_identity / _inject_conditioning / _inject_sampling / _inject_latent_source / _inject_post_passes` | `quality_max.py:461 / 509 / 543 / 564 / 587` | Wire LoRA+PuLID; prompt+guidance+ControlNet+Redux; AYS steps+sampler+SLG+FreeU; latent source (txt2img / LatentBlend / img2img); FaceDetailer+SUPIR+4K. |
+| `_inject_identity / _inject_conditioning / _inject_sampling / _inject_latent_source / _inject_post_passes` | `quality_max.py:479 / 636 / 670 / 691 / 714` | Wire LoRA+PuLID; prompt+guidance+ControlNet+Redux; AYS steps+sampler+SLG+FreeU; latent source (txt2img / LatentBlend / img2img); FaceDetailer+SUPIR+4K. |
+| `_inject_secondary_loras / _inject_secondary_faceswap` | `quality_max.py:536 / 592` | P1-1 slice 2 secondary identity axes: chain 701/702 LoraLoaders (≤0.55 clamp) after primary node 700; splice ReActorFaceSwap(611) after node 610 for face index "1". |
 | `_validate_overlay_value` | `quality_max.py:144` | Clamp/validate 17 ComfyUI + 8 halt UI knobs against `_MAX_TIER_KNOB_SCHEMA`. |
 | `score_candidate` | `face_validator_gate.py:170` | Composite = `0.6·arc + 0.4·aesthetic`. |
 | `should_halt` | `face_validator_gate.py:227` | Halt on budget or composite ≥ threshold. |
