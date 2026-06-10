@@ -18,7 +18,7 @@ This is a single-operator, single-machine tool. Not a multi-tenant SaaS.
 | Learn the whole program end-to-end + drive it to max capability (macro + micro + user manual) | [docs/PROGRAM-MANUAL.md](docs/PROGRAM-MANUAL.md) |
 | Run it locally / set up env / troubleshoot | [OPERATIONS.md](OPERATIONS.md) |
 | See WHY the architecture is shaped this way (settled decisions) | [DECISIONS.md](DECISIONS.md) |
-| Strategic direction + open critique from current leadership | [docs/STRATEGIC_REVIEW-2026-05-24.md](docs/STRATEGIC_REVIEW-2026-05-24.md) |
+| Strategic direction + open critique from current leadership | [docs/STRATEGIC_REVIEW-2026-06-10.md](docs/STRATEGIC_REVIEW-2026-06-10.md) |
 | Execute a session from the roadmap (operator manual) | [docs/HANDOFF-roadmap-2026-05-24.md](docs/HANDOFF-roadmap-2026-05-24.md) |
 | Work in this repo as Claude Code | [CLAUDE.md](CLAUDE.md) |
 | Work in this repo as another AI agent (Cursor, Aider, Copilot, Codex, …) | [AGENTS.md](AGENTS.md) |
@@ -82,12 +82,16 @@ For pod setup (ComfyUI workflows, models), see [OPERATIONS.md](OPERATIONS.md).
 
 The post-pivot codebase is stable and shipping. There is no active migration.
 Strategic direction and open work are tracked in
-[docs/STRATEGIC_REVIEW-2026-05-24.md](docs/STRATEGIC_REVIEW-2026-05-24.md).
+[docs/STRATEGIC_REVIEW-2026-06-10.md](docs/STRATEGIC_REVIEW-2026-06-10.md).
 
-**CI:** Three independent jobs run on every push to `main` and every pull
-request — `ARCHITECTURE.md §15` singleton/ctx smoke, `pytest tests/unit/`,
-and `tsc --noEmit`. All must pass. See [.github/workflows/ci.yml](.github/workflows/ci.yml).
-Baseline 2026-05-24: 478 pass / 3 skip / 0 fail.
+**CI:** Three jobs run on every push to `main` and every pull request —
+`ARCHITECTURE.md §15` singleton/ctx smoke, `pytest tests/unit/`, and
+`tsc --noEmit`. See [.github/workflows/ci.yml](.github/workflows/ci.yml).
+**Known defect:** the pytest job has never passed (collection-time sys.path
+gap — CI runs bare `pytest`; local runs use `python -m pytest`); fix is
+session 1 of the 2026-06-10 strategic-review roadmap (NF-1). The suite
+itself is green when run correctly: 1,964 pass / 0 fail local at `4b7135c`
+(2026-06-10).
 
 Last architecture verification: see the `*Last verified: ...*` footer in
 [ARCHITECTURE.md](ARCHITECTURE.md).
