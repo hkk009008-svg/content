@@ -276,6 +276,72 @@ def _resolve_f1b_audio(
     return host._ensure_scene_audio(scene, _scene_characters(all_characters, scene))
 
 
+def _resolve_identity_strategy(shot, quality_tier, settings, cc):
+    """Resolve the per-shot identity-conditioning promise (P1-1 spec §3d).
+
+    Pure decision function: replaces the primary-only asset derivation
+    (formerly inline at the MAX-TIER WIRE-UP block) and names which characters
+    are promised identity conditioning under which mechanism. quality_tier and
+    style_reference remain the caller's concern — inputs, not outputs.
+    """
+    from cinema.shots.strategy import (
+        IdentityStrategy, CharIdentitySpec,
+        PRIMARY_ONLY, KONTEXT_MULTI_CHAR, MAX_TIER_PRIMARY_ONLY, NO_IDENTITY_ASSET,
+    )
+    in_frame = shot.get("characters_in_frame") or []
+    primary_char_id = shot.get("primary_character") or (in_frame[0] if in_frame else "")
+    char_lora_paths = settings.get("char_lora_paths", {}) or {}
+    char_lora_path = char_lora_paths.get(primary_char_id) or None
+    char_lora_strength = (settings.get("char_lora_strengths", {}) or {}).get(primary_char_id)
+    primary_ref = cc.get("primary_reference")
+    secondary = cc.get("secondary_chars") or []
+
+    if not in_frame or not primary_ref:
+        return IdentityStrategy(
+            mechanism_tag=NO_IDENTITY_ASSET,
+            primary_char_id=primary_char_id,
+            char_lora_path=char_lora_path,
+            char_lora_strength=char_lora_strength,
+            unconditioned_chars=list(in_frame),
+        )
+
+    conditioned = [CharIdentitySpec(
+        char_id=primary_char_id, reference=primary_ref,
+        identity_anchor=cc.get("identity_anchor", ""),
+        multi_angle_refs=tuple(cc.get("multi_angle_refs") or ()),
+        fidelity="pulid" if quality_tier == "max" else "reference",
+    )]
+    conditioned_ids = {primary_char_id}
+
+    if quality_tier == "max":
+        tag = MAX_TIER_PRIMARY_ONLY          # slice 2 lifts this to MULTI_LORA
+    elif secondary:
+        # Kontext-tier cap: 2 secondaries (spec §3a); overflow degrades to text-only.
+        for entry in secondary[:2]:
+            conditioned.append(CharIdentitySpec(
+                char_id=entry["char_id"], reference=entry["reference"],
+                identity_anchor=entry.get("identity_anchor", ""),
+                # V-5: without this, the Task-7 allocator's
+                # entry.get("multi_angle_refs") is ALWAYS empty via this path
+                # and secondaries can never fill their 2 slots.
+                multi_angle_refs=tuple(entry.get("multi_angle_refs") or ()),
+                fidelity="reference",
+            ))
+            conditioned_ids.add(entry["char_id"])
+        tag = KONTEXT_MULTI_CHAR if len(conditioned) > 1 else PRIMARY_ONLY
+    else:
+        tag = PRIMARY_ONLY
+
+    return IdentityStrategy(
+        mechanism_tag=tag,
+        primary_char_id=primary_char_id,
+        char_lora_path=char_lora_path,
+        char_lora_strength=char_lora_strength,
+        conditioned_chars=conditioned,
+        unconditioned_chars=[c for c in in_frame if c not in conditioned_ids],
+    )
+
+
 from cinema.lifecycle import LifecycleService
 from domain.models import DirectorialIntent, Project
 
