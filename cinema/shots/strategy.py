@@ -4,7 +4,7 @@ The router (cinema/shots/controller.py::_resolve_identity_strategy) emits one
 IdentityStrategy per keyframe take BEFORE generation; the validator and the
 capability scorecard hold generation accountable to it. Only tags whose
 mechanism is implemented are ever emitted (slice 1: the four below; slice 2
-adds MAX_TIER_MULTI_LORA / MAX_TIER_DUAL_PULID).
+adds MAX_TIER_MULTI_LORA; MAX_TIER_DUAL_PULID remains reserved for Pass B/S2).
 """
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -13,6 +13,7 @@ PRIMARY_ONLY = "PRIMARY_ONLY"
 KONTEXT_MULTI_CHAR = "KONTEXT_MULTI_CHAR"
 MAX_TIER_PRIMARY_ONLY = "MAX_TIER_PRIMARY_ONLY"
 NO_IDENTITY_ASSET = "NO_IDENTITY_ASSET"
+MAX_TIER_MULTI_LORA = "MAX_TIER_MULTI_LORA"
 
 
 @dataclass(frozen=True)
@@ -20,15 +21,23 @@ class CharIdentitySpec:
     char_id: str
     reference: str
     identity_anchor: str = ""
-    fidelity: str = "reference"  # slice 1: reference | pulid; slice 2 adds lora
+    fidelity: str = "reference"  # slice 1: reference | pulid; lora is now live
     # V-5: angle refs ride the spec through to_dict() -> generate_ai_broll ->
     # the slot allocator; a tuple (not list) keeps the frozen dataclass hashable.
     multi_angle_refs: tuple = ()
+    # P1-1 slice 2 (§3b): per-char LoRA assets — populated only on the max
+    # tier for registered-LoRA secondaries; None elsewhere (Kontext specs
+    # carry them as None and the Kontext branch ignores them).
+    lora_path: Optional[str] = None
+    lora_strength: Optional[float] = None
+    trigger: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {"char_id": self.char_id, "reference": self.reference,
                 "identity_anchor": self.identity_anchor, "fidelity": self.fidelity,
-                "multi_angle_refs": list(self.multi_angle_refs)}
+                "multi_angle_refs": list(self.multi_angle_refs),
+                "lora_path": self.lora_path, "lora_strength": self.lora_strength,
+                "trigger": self.trigger}
 
 
 @dataclass
@@ -39,6 +48,7 @@ class IdentityStrategy:
     char_lora_strength: Optional[float] = None
     conditioned_chars: List[CharIdentitySpec] = field(default_factory=list)
     unconditioned_chars: List[str] = field(default_factory=list)
+    char_lora_trigger: Optional[str] = None
 
     @property
     def secondary_specs(self) -> List[CharIdentitySpec]:

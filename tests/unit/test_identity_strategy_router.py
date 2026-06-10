@@ -392,3 +392,28 @@ def test_single_char_identity_per_char_pins_scalar_convention(
     take = _latest_keyframe_take(controller_one_char, "shot_1")
     assert take["metadata"]["identity_per_char"] == \
         {"char_a": take["metadata"]["identity_score"]}
+
+
+# ---------------------------------------------------------------------------
+# Task 1 (slice 2): CharIdentitySpec per-char LoRA fields + MAX_TIER_MULTI_LORA
+# ---------------------------------------------------------------------------
+
+def test_char_spec_lora_fields_default_none_and_serialize():
+    s = CharIdentitySpec(char_id="char_b", reference="/r/b.jpg",
+                         fidelity="lora", lora_path="/l/b.safetensors",
+                         lora_strength=0.55, trigger="TOKman")
+    d = s.to_dict()
+    assert d["lora_path"] == "/l/b.safetensors"
+    assert d["lora_strength"] == 0.55
+    assert d["trigger"] == "TOKman"
+    # defaults stay None and serialize (Kontext-tier specs carry them as None)
+    bare = CharIdentitySpec(char_id="c", reference="/r/c.jpg").to_dict()
+    assert bare["lora_path"] is None and bare["trigger"] is None
+
+
+def test_strategy_carries_primary_trigger_and_multi_lora_tag_importable():
+    from cinema.shots.strategy import MAX_TIER_MULTI_LORA
+    s = IdentityStrategy(mechanism_tag=MAX_TIER_MULTI_LORA,
+                         primary_char_id="char_a", char_lora_trigger="TOKwoman")
+    assert s.char_lora_trigger == "TOKwoman"
+    json.dumps(s.to_metadata_dict())  # stays JSON-safe
