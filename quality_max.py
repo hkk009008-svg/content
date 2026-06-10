@@ -527,6 +527,12 @@ def _inject_identity(workflow: dict, char_lora: Optional[str], face_anchor_remot
         workflow["100"]["inputs"]["end_at"] = params.get("pulid_end_at", 0.90)
 
 
+# §3(b) bleed-mitigation ceiling for SECONDARY LoRA strength. The S3 spike
+# (stacking clamp tune, pod session) is the designated knob-turner; a tune
+# edits exactly this one site.
+_SECONDARY_LORA_MAX_STRENGTH = 0.55
+
+
 def _inject_secondary_loras(workflow: dict, secondary_chars: Optional[list]):
     """Chain one LoraLoader per LoRA-bearing secondary after the primary's 700.
 
@@ -538,7 +544,11 @@ def _inject_secondary_loras(workflow: dict, secondary_chars: Optional[list]):
     future _inject_identity changes).
     Chain base = node 700 when the primary kept its LoRA, else the base
     loaders (112 model / 11 clip — the LoRA-less-primary path prunes 700).
-    Consumers (100.model, 122.clip, 600.clip) move to the LAST chained node.
+    Consumers (100.model, 122.clip, 600.clip) move to the LAST chained node —
+    hardcoded like _inject_identity's rewires (the complete 700-consumer set
+    in the static graph). _inject_secondary_faceswap scans dynamically instead
+    because _inject_post_passes REWIRES 610-consumers at runtime; no such
+    dynamic writer exists for the model/clip chain. Don't "unify" the two.
     Strength clamp ≤0.55 per secondary (§3b bleed mitigation; S3 tunes).
     lora_name takes the artifact's BASENAME — pod-side placement into
     ComfyUI's loras/ dir is the slice-2 pod-session step (spec §7.2).
@@ -556,7 +566,9 @@ def _inject_secondary_loras(workflow: dict, secondary_chars: Optional[list]):
     for i, entry in enumerate(entries):
         nid = str(701 + i)
         strength = entry.get("lora_strength")
-        strength = min(strength if strength is not None else 0.55, 0.55)
+        strength = min(strength if strength is not None
+                       else _SECONDARY_LORA_MAX_STRENGTH,
+                       _SECONDARY_LORA_MAX_STRENGTH)
         workflow[nid] = {
             "inputs": {
                 "lora_name": os.path.basename(entry["lora_path"]),
@@ -581,7 +593,8 @@ def _inject_secondary_faceswap(workflow: dict, secondary_face_remote: Optional[s
     """Dual face swap (P1-1 slice 2, spec §3(c) Pass A).
 
     MUST run AFTER _inject_post_passes: its SUPIR-absent branch re-feeds 950
-    from a 610-priority list that does not know 611 (quality_max.py:597-602)
+    from a 610-priority list that does not know 611 (the ("610","600","902",
+    "8") feed tuple in _inject_post_passes' SUPIR-absent branch)
     — injected earlier, 611 would be generated but never consumed.
     Splice LoadImage(94) + ReActorFaceSwap(611) after the existing 610: 611
     swaps face index "1" — the right-hand face under ReActor's left-right
@@ -997,6 +1010,9 @@ def generate_ai_broll_max(
     sec_face_remote = None
     if has_character and secondary_chars:
         first_ref = secondary_chars[0].get("reference")
+        # Missing file -> silent skip: that take gets NO swap rescue and the
+        # per-char validator surfaces the low secondary score (§3c). A pod/
+        # network failure still raises, matching the primary uploads above.
         if first_ref and os.path.exists(first_ref):
             sec_face_remote = _upload_with_cache(comfy, first_ref)
     if has_character:

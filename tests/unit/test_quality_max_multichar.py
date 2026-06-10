@@ -180,6 +180,19 @@ def test_no_lora_secondaries_is_noop():
     assert wf == before
 
 
+def test_three_lora_secondaries_truncate_at_two():
+    # Defense-in-depth pin (Task-5 review fold): the router already caps at 2,
+    # but the injector's own [:2] must hold if a future caller bypasses it.
+    wf = _load_max_workflow()
+    _inject_identity(wf, "/l/a.safetensors", None, _params(), True)
+    _inject_secondary_loras(
+        wf, [_sec(), _sec("char_c", "/l/c.safetensors"),
+             _sec("char_d", "/l/d.safetensors")])
+    assert "701" in wf and "702" in wf
+    assert "703" not in wf
+    assert wf["100"]["inputs"]["model"] == ["702", 0]   # chain ends at 702
+
+
 def test_inject_secondary_loras_idempotent_after_identity_rerun():
     """The PuLID-boost retry re-calls _inject_identity (boosted params).
     Plan-review established the retry CANNOT break the chain today: the
@@ -316,7 +329,8 @@ def test_faceswap_after_full_prune_sequence_when_reactor_pruned():
 def test_faceswap_after_post_passes_supir_absent_feeds_611():
     """THE ordering pin (adversarial plan-review CRITICAL): when SUPIR is
     absent, _inject_post_passes re-feeds 950 from a 610-priority list that
-    does not know 611 (quality_max.py:597-602). Injecting the faceswap AFTER
+    does not know 611 (the ("610","600","902","8") feed tuple in
+    _inject_post_passes' SUPIR-absent branch). Injecting the faceswap AFTER
     post_passes makes the dynamic consumer-rewire catch that fresh
     950.image<-[610,0] and move it to 611. (Injected BEFORE, 611 would be
     silently bypassed — generated but never consumed.)"""
@@ -327,6 +341,12 @@ def test_faceswap_after_post_passes_supir_absent_feeds_611():
     _inject_post_passes(wf, _params(), available)       # re-feeds 950 from 610
     assert wf["950"]["inputs"]["image"] == ["610", 0]
     _inject_secondary_faceswap(wf, "sec.jpg")           # production order: AFTER
+    assert wf["950"]["inputs"]["image"] == ["611", 0]
+    # Retry leg on the SUPIR-absent graph (Task-7 review fold): the teardown
+    # restores 950<-610, the re-rewire must catch it again — the retry never
+    # re-runs _inject_post_passes, so this is the full combination.
+    _inject_identity(wf, None, None, dict(_params(), pulid_weight=1.0), True)
+    _inject_secondary_faceswap(wf, "sec.jpg")
     assert wf["950"]["inputs"]["image"] == ["611", 0]
 
 
@@ -370,7 +390,8 @@ def test_wireup_call_order_in_source():
     i_post = src.index("_inject_post_passes(")
     i_swap = src.index("_inject_secondary_faceswap(")
     # loras right after identity; faceswap AFTER post_passes (the SUPIR-absent
-    # 950 re-feed at quality_max.py:597-602 would bypass an earlier 611)
+    # 950 re-feed in _inject_post_passes' SUPIR-absent branch would bypass
+    # an earlier 611)
     assert i_id < i_loras < i_cond < i_post < i_swap
     # retry leg re-injects both, after the boosted _inject_identity
     retry = src[src.index("boosted_params"):]
