@@ -579,6 +579,49 @@ def _inject_secondary_loras(workflow: dict, secondary_chars: Optional[list]):
         workflow["600"]["inputs"]["clip"] = [last, 1]
 
 
+def _inject_secondary_faceswap(workflow: dict, secondary_face_remote: Optional[str]):
+    """Dual face swap (P1-1 slice 2, spec §3(c) Pass A).
+
+    MUST run AFTER _inject_post_passes: its SUPIR-absent branch re-feeds 950
+    from a 610-priority list that does not know 611 (quality_max.py:597-602)
+    — injected earlier, 611 would be generated but never consumed.
+    Splice LoadImage(94) + ReActorFaceSwap(611) after the existing 610: 611
+    swaps face index "1" — the right-hand face under ReActor's left-right
+    ordering, matching the prompt's position hints for 2-char shots
+    (domain/continuity_engine.py:480-484) — from the secondary's canonical.
+    Idempotent: restores 611's consumers to 610 and pops 611/94 before
+    re-injecting. No-ops when 610 was pruned (ReActor not on the pod) or no
+    remote was uploaded. Cap: ONE extra swap node — the 3-char center
+    position has no ReActor equivalent (§3c); the per-char validator owns
+    that gap. Mis-ordered faces are a known failure mode the validator
+    catches (§3c).
+    """
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        for key, val in node.get("inputs", {}).items():
+            if isinstance(val, list) and len(val) == 2 and str(val[0]) == "611":
+                node["inputs"][key] = ["610", val[1]]
+    workflow.pop("611", None)
+    workflow.pop("94", None)
+    if not secondary_face_remote or "610" not in workflow:
+        return
+    workflow["94"] = {"inputs": {"image": secondary_face_remote},
+                      "class_type": "LoadImage"}
+    inputs_611 = copy.deepcopy(workflow["610"]["inputs"])
+    inputs_611["input_image"] = ["610", 0]
+    inputs_611["source_image"] = ["94", 0]
+    inputs_611["input_faces_index"] = "1"
+    inputs_611["source_faces_index"] = "0"
+    workflow["611"] = {"class_type": "ReActorFaceSwap", "inputs": inputs_611}
+    for nid, node in workflow.items():
+        if nid == "611" or not isinstance(node, dict):
+            continue
+        for key, val in node.get("inputs", {}).items():
+            if isinstance(val, list) and len(val) == 2 and str(val[0]) == "610":
+                node["inputs"][key] = ["611", val[1]]
+
+
 def _inject_conditioning(workflow: dict, prompt: str, prev_shot_remote: Optional[str],
                           style_remote: Optional[str], params: dict, has_character: bool):
     """Prompt + CN channels + Redux."""

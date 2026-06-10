@@ -21,6 +21,8 @@ import pytest
 from quality_max import (
     _assemble_max_prompt,
     _inject_identity,
+    _inject_post_passes,
+    _inject_secondary_faceswap,
     _inject_secondary_loras,
     _load_max_workflow,
     _prune_node,
@@ -252,3 +254,76 @@ def test_phase_c_assembly_forwards_char_lora_trigger_and_secondary_chars_to_max(
     assert call_kwargs["secondary_chars"] == secondary, (
         f"expected secondary_chars={secondary!r}, got {call_kwargs['secondary_chars']!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# _inject_secondary_faceswap — dual ReActor splice (spec §3c Pass A)
+# ---------------------------------------------------------------------------
+
+def test_faceswap_injects_94_and_611_and_rewires_consumers():
+    wf = _load_max_workflow()
+    _inject_secondary_faceswap(wf, "sec_face_remote.jpg")
+    assert wf["94"] == {"inputs": {"image": "sec_face_remote.jpg"},
+                        "class_type": "LoadImage"}
+    n = wf["611"]
+    assert n["class_type"] == "ReActorFaceSwap"
+    assert n["inputs"]["input_image"] == ["610", 0]
+    assert n["inputs"]["source_image"] == ["94", 0]
+    assert n["inputs"]["input_faces_index"] == "1"   # string, like 610's "0"
+    assert n["inputs"]["source_faces_index"] == "0"
+    # 610's static consumer moves to 611 (501.image in the full graph)
+    assert wf["501"]["inputs"]["image"] == ["611", 0]
+    # 611 inherits 610's scalar config (swap model, restore model, ordering)
+    assert n["inputs"]["swap_model"] == wf["610"]["inputs"]["swap_model"]
+    assert n["inputs"]["input_faces_order"] == "left-right"
+
+
+def test_faceswap_noop_without_remote_or_without_610():
+    wf = _load_max_workflow()
+    before = copy.deepcopy(wf)
+    _inject_secondary_faceswap(wf, None)
+    assert wf == before
+    _prune_node(wf, "610", rewire_to=("600", 0))
+    _inject_secondary_faceswap(wf, "x.jpg")
+    assert "611" not in wf and "94" not in wf
+
+
+def test_faceswap_idempotent_double_call_no_dangling():
+    wf = _load_max_workflow()
+    original_ids = set(wf)
+    _inject_secondary_faceswap(wf, "a.jpg")
+    _inject_secondary_faceswap(wf, "b.jpg")
+    assert wf["94"]["inputs"]["image"] == "b.jpg"
+    assert wf["501"]["inputs"]["image"] == ["611", 0]
+    # exactly one 611 in the graph, nothing dangling
+    assert _reachable_dangling(wf, original_ids | {"611", "94"}) == []
+
+
+def test_faceswap_after_full_prune_sequence_when_reactor_pruned():
+    """When ReActorFaceSwap is NOT in the pod's available classes,
+    _prune_unavailable drops 610 — the injector must no-op, and the graph
+    stays clean end-to-end."""
+    wf = _load_max_workflow()
+    available = set(_AVAILABLE) - {"ReActorFaceSwap"}
+    _prune_unavailable(wf, available, has_character=True, has_init=False)
+    assert "610" not in wf
+    before = copy.deepcopy(wf)
+    _inject_secondary_faceswap(wf, "x.jpg")
+    assert wf == before
+
+
+def test_faceswap_after_post_passes_supir_absent_feeds_611():
+    """THE ordering pin (adversarial plan-review CRITICAL): when SUPIR is
+    absent, _inject_post_passes re-feeds 950 from a 610-priority list that
+    does not know 611 (quality_max.py:597-602). Injecting the faceswap AFTER
+    post_passes makes the dynamic consumer-rewire catch that fresh
+    950.image<-[610,0] and move it to 611. (Injected BEFORE, 611 would be
+    silently bypassed — generated but never consumed.)"""
+    wf = _load_max_workflow()
+    available = set(_AVAILABLE) - {"SUPIR_model_loader_v2"}
+    _prune_unavailable(wf, available, has_character=True, has_init=False)
+    _inject_identity(wf, None, None, _params(), True)
+    _inject_post_passes(wf, _params(), available)       # re-feeds 950 from 610
+    assert wf["950"]["inputs"]["image"] == ["610", 0]
+    _inject_secondary_faceswap(wf, "sec.jpg")           # production order: AFTER
+    assert wf["950"]["inputs"]["image"] == ["611", 0]
