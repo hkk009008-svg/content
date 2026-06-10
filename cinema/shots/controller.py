@@ -333,7 +333,11 @@ def _resolve_identity_strategy(shot, quality_tier, settings, cc):
                 fidelity="lora" if sec_lora else "reference",
                 lora_path=sec_lora,
                 lora_strength=(settings.get("char_lora_strengths", {}) or {}).get(sec_id),
-                trigger=char_lora_triggers.get(sec_id),
+                # `or None` matches the primary's coercion (:298) — a ""
+                # trigger must not diverge between primary and secondary.
+                # (Strength stays bare .get(): 0.0 is a real value, cf. the
+                # is-not-None gate at web_server.py:781.)
+                trigger=char_lora_triggers.get(sec_id) or None,
             ))
             conditioned_ids.add(sec_id)
         tag = MAX_TIER_MULTI_LORA if len(conditioned) > 1 else MAX_TIER_PRIMARY_ONLY

@@ -30,6 +30,9 @@ class CharIdentitySpec:
     # carry them as None and the Kontext branch ignores them).
     lora_path: Optional[str] = None
     lora_strength: Optional[float] = None
+    # The PRIMARY's trigger rides IdentityStrategy.char_lora_trigger (the
+    # char_lora_* naming convention there); this field is the per-SECONDARY
+    # mirror.
     trigger: Optional[str] = None
 
     def to_dict(self) -> dict:

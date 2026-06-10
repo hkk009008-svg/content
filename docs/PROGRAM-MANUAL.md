@@ -550,7 +550,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `RunPodComfyUI` | `phase_c_assembly.py:35` | ComfyUI REST client (`upload_image`/`queue_prompt`/`get_history`/`get_image`); shared by both tiers. |
 | `_fal_flux_fallback` | `phase_c_assembly.py:515` | FLUX Kontext Max Multi → FLUX-Pro → Schnell → Pollinations. |
 | `ImageGenResult` | `phase_c_assembly.py:18` | `NamedTuple(path, api_name)`; `api_name` is the authoritative backend token. |
-| `generate_ai_broll_max` | `quality_max.py:722` | Max-tier orchestrator: probe → load `pulid_max.json` → optional HiDream swap → prune → 5 inject axes → best-of-N loop → PuLID-boost retry → copy best. |
+| `generate_ai_broll_max` | `quality_max.py:724` | Max-tier orchestrator: probe → load `pulid_max.json` → optional HiDream swap → prune → 5 inject axes → best-of-N loop → PuLID-boost retry → copy best. |
 | `_probe_node_availability` | `quality_max.py:253` | One-time `/object_info` probe. |
 | `_prune_unavailable` | `quality_max.py:364` | Strip absent nodes with safe rewires. |
 | `_inject_identity / _inject_conditioning / _inject_sampling / _inject_latent_source / _inject_post_passes` | `quality_max.py:461 / 509 / 543 / 564 / 587` | Wire LoRA+PuLID; prompt+guidance+ControlNet+Redux; AYS steps+sampler+SLG+FreeU; latent source (txt2img / LatentBlend / img2img); FaceDetailer+SUPIR+4K. |
@@ -561,7 +561,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `get_workflow_params` | `workflow_selector.py:450` | Per-type params + UI overlays. |
 | `apply_workflow_params` | `workflow_selector.py:501` | Write params into the `pulid.json` node map. |
 | `get_adaptive_pulid_weight` | `workflow_selector.py:540` | Rolling-stats adaptive PuLID weight. |
-| `generate_keyframe_take` | `cinema/shots/controller.py:567` | Requires `plan_status=="approved"`; `enhance_shot_prompt` → optional optimizer → `generate_ai_broll` → identity validate → append take → record cost. |
+| `generate_keyframe_take` | `cinema/shots/controller.py:571` | Requires `plan_status=="approved"`; `enhance_shot_prompt` → optional optimizer → `generate_ai_broll` → identity validate → append take → record cost. |
 
 ### 3.10 Identity / Continuity / Coherence
 
@@ -653,7 +653,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `CostTracker` | `cost_tracker.py:138` | SQLite ledger (`data/experiments.db`) + budget gate. `spent_usd` is an in-process accumulator (NOT loaded from SQLite on init). |
 | `record_api_call` | `cost_tracker.py:293` | Primary API logging path. |
 | `log_llm` | `cost_tracker.py:231` | LLM logging path; auto-detects provider from `PRICING` (`:78`) and silently records `$0.00` for unknown models. |
-| `would_exceed` | `cost_tracker.py:353` | Pre-call budget predicate — wired as the pre-spend gate in `generate_motion_take` (`cinema/shots/controller.py:1380`) since 2026-06-10 (P0-2). |
+| `would_exceed` | `cost_tracker.py:353` | Pre-call budget predicate — wired as the pre-spend gate in `generate_motion_take` (`cinema/shots/controller.py:1384`) since 2026-06-10 (P0-2). |
 | `is_over_budget` | `cost_tracker.py:363` | Post-call budget gate, consulted in `cinema/shots/controller.py:1312`. |
 | `API_COST_USD` | `cost_tracker.py:45` | ±30% per-call USD estimates — operators must calibrate against invoices. |
 | `cleanup_project` | `cleanup.py:56` | Deletes intermediate `temp/` artifacts post-assembly (called at `cinema_pipeline.py:907`, non-fatal); `aggressive=True` also removes generated media. |
@@ -674,7 +674,7 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 | `pipeline_context.py` vs `cinema/context.py` | top-level vs `cinema/` | 15-line prompt-string loader vs typed `PipelineContext` dataclass. |
 | `headless=True` does NOT use `NullLifecycle` | `cinema/lifecycle.py:70` | Headless still uses `ThreadedLifecycle`; `RunState.headless` makes `_wait_for_gate` raise. `NullLifecycle.wait_for_gate` returns `True` unconditionally — using it would silently skip gate enforcement. |
 | PLAN_REVIEW headless stall (FIXED) | `cinema_pipeline.py:1054`, `cinema/auto_approve.py:235` | Without `record_director_review_on_shots`, `_rules_for_plan` always vetoed → headless hang. Now called unconditionally; MODIFIED→APPROVED (cycle-17, `138d7c7`). |
-| `evaluate_generation_quality` wired by T6 | `llm/chief_director.py:406` | Full 2×2 mutation matrix; **now called** by `diagnose_clip(deep=True)` in `cinema/shots/controller.py:2020` (T6, `10a0eb4`); vision-grounded since `d974c15` (take + reference images attached to the LLM call). |
+| `evaluate_generation_quality` wired by T6 | `llm/chief_director.py:406` | Full 2×2 mutation matrix; **now called** by `diagnose_clip(deep=True)` in `cinema/shots/controller.py:2024` (T6, `10a0eb4`); vision-grounded since `d974c15` (take + reference images attached to the LLM call). |
 | `style_director` is OpenAI-only | `llm/style_director.py:38` | No Anthropic path — asymmetric with the Anthropic-first ChiefDirector/CinemaDirector. |
 | Veo `reference_images` silently dropped (Bug #4) | `veo_native.py:155` | Vertex rejects image+reference both set; identity comes from the start frame only. `driving_video_path` also unwired on Veo (only Sora wires it). |
 | VEO_NATIVE has no quota guard | `phase_c_ffmpeg.py:313` | The 1800s cooldown TTL is set/checked only by the FAL-proxy `VEO` branch. |
@@ -802,7 +802,7 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 
 **INPUTS:** Approved shot plans. Per shot: `prompt`, `characters_in_frame`, previous shot's approved keyframe (img2img init), `global_settings` (tier, sampler knobs, LoRA/style paths, identity strictness), and the baseline ComfyUI workflow graph (`pulid.json` production / `pulid_max.json` max).
 
-**PROCESSING** (`KeyframeRenderPhase.run`, `cinema/phases/keyframe_render.py:68` → per shot `generate_keyframe_take`, `cinema/shots/controller.py:567`):
+**PROCESSING** (`KeyframeRenderPhase.run`, `cinema/phases/keyframe_render.py:68` → per shot `generate_keyframe_take`, `cinema/shots/controller.py:571`):
 1. Skip shots already carrying `approved_keyframe_take_id`.
 2. Require `shot["plan_status"] == "approved"`.
 3. `ContinuityEngine.enhance_shot_prompt` (`domain/continuity_engine.py:446`) builds the augmented prompt + a `continuity_config` dict (img2img flag, `init_image`, `denoise_strength`, scene/location seed, `pulid_weight_override`, identity anchor, threshold).
@@ -811,7 +811,7 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 6. Post-gen identity validation: `IdentityValidator.validate_image(...)` (`cinema/shots/controller.py:674`) against `identity_strictness` (default 0.60).
 7. Append take to `shot["keyframe_takes"]`; record cost.
 
-**KEY FUNCTIONS:** `generate_ai_broll` (`phase_c_assembly.py:75`); `enhance_shot_prompt` (`domain/continuity_engine.py:446`); `classify_shot_type` (`workflow_selector.py:411`); `get_workflow_params` (`workflow_selector.py:450`) / `apply_workflow_params` (`workflow_selector.py:501`); `get_adaptive_pulid_weight` (`workflow_selector.py:540`); for max tier `generate_ai_broll_max` (`quality_max.py:722`).
+**KEY FUNCTIONS:** `generate_ai_broll` (`phase_c_assembly.py:75`); `enhance_shot_prompt` (`domain/continuity_engine.py:446`); `classify_shot_type` (`workflow_selector.py:411`); `get_workflow_params` (`workflow_selector.py:450`) / `apply_workflow_params` (`workflow_selector.py:501`); `get_adaptive_pulid_weight` (`workflow_selector.py:540`); for max tier `generate_ai_broll_max` (`quality_max.py:724`).
 
 **DECISION POINTS:**
 
@@ -900,7 +900,7 @@ Driving-video mode (`driving_video_source`, `domain/performance.py:145`): `"uplo
 
 *Per-shot path* — `generate_ai_video` (`phase_c_ffmpeg.py:54`) classifies the shot, resolves the engine, and runs a fault-tolerant cascade.
 
-**KEY FUNCTIONS:** `generate_ai_video` (`phase_c_ffmpeg.py:54`); inner `try_next_api` (`phase_c_ffmpeg.py:139`) and `_record_video_cascade` (`phase_c_ffmpeg.py:108`); the dialogue override + `audio_embedded` tagging + mandatory lipsync at `cinema/shots/controller.py:139` (routing helper), `:183` (tagging), and `:1528` (F1b lipsync), all driven from `generate_motion_take` (`:1380`).
+**KEY FUNCTIONS:** `generate_ai_video` (`phase_c_ffmpeg.py:54`); inner `try_next_api` (`phase_c_ffmpeg.py:139`) and `_record_video_cascade` (`phase_c_ffmpeg.py:108`); the dialogue override + `audio_embedded` tagging + mandatory lipsync at `cinema/shots/controller.py:139` (routing helper), `:183` (tagging), and `:1528` (F1b lipsync), all driven from `generate_motion_take` (`:1384`).
 
 **DECISION POINTS:**
 
@@ -1223,7 +1223,7 @@ Triggered via `POST .../shots/<sid>/correct` (`web_server.py:2139`) or auto-reco
 **To get a clean, controlled background (no smear, no stray figures):**
 1. Understand the cause first: the painterly "background smear" is the **base FLUX+PuLID generation reacting to an under-specified backdrop**, *not* a post-pass artifact. The SUPIR upscaler and hires-fix pass leave it unchanged — **validated on-pod 2026-06-09** (varying `supir_cfg_scale`/`hires_fix_denoise` does not alter the background). Fix it at the prompt, not by tuning post-passes.
 2. Put an **explicit backdrop in the positive prompt** (the shot/scene prompt), e.g. `"plain neutral grey seamless studio backdrop"` or `"softly-lit plain interior wall"`. Leaving the background unspecified lets FLUX hallucinate smeary depth and stray figures.
-3. **The max-tier keyframe is FLUX with `BasicGuider` (`pulid_max.json` node 22) — it has NO negative-prompt channel** (the only text node is the positive `CLIPTextEncode` node 122, set by `_inject_conditioning` at `quality_max.py:530`; `generate_ai_broll_max`'s `negative_prompt` arg is accepted but unwired). So express exclusions **positively** in the prompt: `"solo, alone, one person only, plain empty backdrop, no other people in frame"`. A negative prompt is a no-op on the max keyframe. (One pedantic exception: the SUPIR upscaler stage's `SUPIR_conditioner` node 504 carries its own fixed generic quality strings — e.g. negative `"blurry, low quality, deformed"` — but they are hard-coded upscale-pass boilerplate; shot prompts and `negative_constraints` never reach them.)
+3. **The max-tier keyframe is FLUX with `BasicGuider` (`pulid_max.json` node 22) — it has NO negative-prompt channel** (the only text node is the positive `CLIPTextEncode` node 122, set by `_inject_conditioning` at `quality_max.py:532`; `generate_ai_broll_max`'s `negative_prompt` arg is accepted but unwired). So express exclusions **positively** in the prompt: `"solo, alone, one person only, plain empty backdrop, no other people in frame"`. A negative prompt is a no-op on the max keyframe. (One pedantic exception: the SUPIR upscaler stage's `SUPIR_conditioner` node 504 carries its own fixed generic quality strings — e.g. negative `"blurry, low quality, deformed"` — but they are hard-coded upscale-pass boilerplate; shot prompts and `negative_constraints` never reach them.)
 4. For the recurring **neck/collarbone elongation** artifact, likewise use **positive** anatomy guidance (`"natural proportional neck and shoulders, well-defined collarbone"`) — not a negative term. (The shot's `negative_constraints` field still threads to the standard tier + video-gen, but the max-tier FLUX keyframe ignores it.)
 5. Keep the photoreal suffix consistent across every shot via `style_rules.photorealism_rules` (`llm/style_director.py:143`) → `style_rules_to_prompt_suffix` (`:187`, applied at `cinema/shots/controller.py:497`) so the background treatment doesn't drift shot-to-shot.
 6. **On-pod confirmation (2026-06-09):** explicit clean backdrop + positive exclusion phrasing yielded a clean 4K background with identity intact (arc 0.829). SUPIR cfg and hires-fix are *upscalers* — they do not author the background; the (positive) prompt does.
@@ -1747,7 +1747,7 @@ The functions an engineer reaches for most, grouped by task. All `file:line` ref
 | Function | Location | What it does |
 |---|---|---|
 | `generate_ai_broll` | `phase_c_assembly.py:75` | Image-gen dispatch: max-tier → ComfyUI+PuLID → FAL fallback |
-| `generate_ai_broll_max` | `quality_max.py:722` | N=8 adaptive best-of with prune/inject pipeline; returns `ImageGenResult(path, "QUALITY_MAX")` |
+| `generate_ai_broll_max` | `quality_max.py:724` | N=8 adaptive best-of with prune/inject pipeline; returns `ImageGenResult(path, "QUALITY_MAX")` |
 | `generate_ai_video` | `phase_c_ffmpeg.py:54` | Central video routing + fault-tolerant cascade across 9+ engines |
 | `classify_shot_type` | `workflow_selector.py:411` | Returns `portrait\|medium\|wide\|action\|landscape` (note: **never** returns `close_up` — D-video-1) |
 | `get_workflow_params` / `apply_workflow_params` | `workflow_selector.py:450 / 501` | Per-shot-type template + ComfyUI node injection |

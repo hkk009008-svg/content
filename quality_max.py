@@ -458,6 +458,8 @@ def _prune_unavailable(workflow: dict, available: Set[str], has_character: bool,
         workflow["9"]["inputs"]["images"] = [feed_node, 0]
 
 
+# NOTE(P1-1 s2): defined-but-unwired until Task 7 wires it into
+# generate_ai_broll_max — delete this note in that commit.
 def _assemble_max_prompt(prompt: str, char_lora_trigger: Optional[str],
                           secondary_chars: Optional[list]) -> str:
     """Prepend LoRA trigger tokens (training-caption convention: token first).

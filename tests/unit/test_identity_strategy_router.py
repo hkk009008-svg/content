@@ -86,6 +86,7 @@ def test_max_tier_single_char_stays_primary_only():
                                    SETTINGS_NO_LORA, CC_PRIMARY_ONLY)
     assert s.mechanism_tag == "MAX_TIER_PRIMARY_ONLY"
     assert s.unconditioned_chars == []
+    assert s.conditioned_chars[0].fidelity == "pulid"
 
 
 def test_max_tier_secondary_cap_two_overflow_unconditioned():
