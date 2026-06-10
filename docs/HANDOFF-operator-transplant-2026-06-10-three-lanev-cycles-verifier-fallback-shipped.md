@@ -97,8 +97,14 @@ and confirm the 05-24 review's disposition. Then, in order of value:
   residue) — found + unstaged, never committed. Check `git status` for recurrence.
 
 ## Cross-seat state at wrap
-Director ACTIVE (their presence body may lag — it predates `b550dcf`). All my
-dispositions are CLOSED by them; all their commits through `4b7135c` are Lane-V'd
-SAFE by me. Mailbox: 0 unread both directions at wrap. Nothing owed except the
-released `b550dcf` Lane V (next operator's, per Rule #9 — post-wrap landing).
-Companion docs: my 3 mailbox reports (23:09:37Z / 23:42:25Z / 00:36:30Z).
+**Simultaneous wrap (post-scriptum):** the director wrapped in the same window —
+`c5617e5` (their wrap, cursor → my 00:36:30Z event, 0 unread both ways) landed
+seconds before this handoff's commit. Companion doc:
+`docs/HANDOFF-director-transplant-2026-06-10-roadmap-arc-landed-strategic-review-successor.md`
+— it assigns next-session #1 (P0-1 CI pytest 0-for-289 fix + P0-2 budget
+zero-coercion bug) and lists the operator-lane queue (AST-guard dodges, 67+335
+unbound anchors, P2-2 manual-gate cadence). All my dispositions are CLOSED by them;
+all their commits through `4b7135c` are Lane-V'd SAFE by me. Nothing owed except
+the released `b550dcf` Lane V (next operator's, per Rule #9 — post-wrap landing;
+note the new STRATEGIC_REVIEW's ledger claims are part of that review).
+Companion artifacts: my 3 mailbox reports (23:09:37Z / 23:42:25Z / 00:36:30Z).
