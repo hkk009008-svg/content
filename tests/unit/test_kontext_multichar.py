@@ -146,9 +146,12 @@ def test_multichar_branch_sends_both_chars_refs_and_blocks(fal_capture, tmp_path
     assert args["prompt"].count("PRESERVE IDENTITY") == 2
 
 
-def test_empty_secondary_refs_is_byte_identical_to_single_char(fal_capture, tmp_path):
-    """Early return: secondary_char_refs=[] takes the old single-char path and
-    produces the exact GOLDEN_SINGLE_CHAR_PROMPT (byte-for-byte)."""
+@pytest.mark.parametrize("empty_refs", [None, []], ids=["none", "empty-list"])
+def test_empty_secondary_refs_is_byte_identical_to_single_char(
+        fal_capture, tmp_path, empty_refs):
+    """Early return: secondary_char_refs=None and =[] BOTH take the old
+    single-char path (spec §3a) and produce the exact GOLDEN_SINGLE_CHAR_PROMPT
+    (byte-for-byte). The None case pins against an 'is not None' refactor."""
     ref = tmp_path / "aria.jpg"
     ref.write_bytes(b"jpg")
     out = tmp_path / "out.jpg"
@@ -158,7 +161,7 @@ def test_empty_secondary_refs_is_byte_identical_to_single_char(fal_capture, tmp_
         str(out),
         character_image=str(ref),
         identity_anchor="a woman with auburn hair and green eyes",
-        secondary_char_refs=[],
+        secondary_char_refs=empty_refs,
     )
 
     assert result is not None

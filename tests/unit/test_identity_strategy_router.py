@@ -280,12 +280,17 @@ def _stub_validator(monkeypatch):
     """Stub phase_c_vision._get_shared_validator — validation runs on the success path."""
 
     class _FakeValidateResult:
-        overall_score = 0.8
-        passed = True
-        character_results = {}
+        def __init__(self, score=0.8):
+            self.overall_score = score
+            self.passed = True
+            self.character_results = {}
 
     class _FakeValidator:
         def validate_image(self, *args, **kwargs):
+            # Discriminating per-char scores: with a uniform return, a per-char
+            # loop that scored the SAME face twice would be invisible.
+            if kwargs.get("character_id") == "char_b":
+                return _FakeValidateResult(0.55)
             return _FakeValidateResult()
 
     monkeypatch.setattr("phase_c_vision._get_shared_validator", lambda: _FakeValidator())
@@ -369,7 +374,8 @@ def test_identity_per_char_written_for_conditioned_only(controller_two_chars, ca
     controller_two_chars.generate_keyframe_take("scene_1", "shot_1")
     take = _latest_keyframe_take(controller_two_chars, "shot_1")
     per_char = take["metadata"]["identity_per_char"]
-    assert set(per_char) == {"char_a", "char_b"}      # conditioned chars only
+    # exact discriminating values — proves each char was scored against its OWN ref
+    assert per_char == {"char_a": 0.8, "char_b": 0.55}
     assert take["metadata"]["identity_score"] == per_char["char_a"]  # scalar = primary, unchanged
 
 
