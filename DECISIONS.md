@@ -839,19 +839,30 @@ Each entry is **dated and immutable** — supersession is tracked via the
   were pausing with BUDGET_EXCEEDED after their first motion cost record).
 - **Decision:** Wire it. `generate_motion_take`
   (`cinema/shots/controller.py:1393`) now refuses to launch a generation
-  when `would_exceed(target_api)` — emits BUDGET_EXCEEDED, pauses the
-  lifecycle, returns failure BEFORE any video API call. Every per-take
-  motion spend routes through this function (web endpoint, phase loop,
-  regenerate, iterate, retry), so one check covers all paths. The F2b
-  storyboard batch path records one batch cost up front and keeps only the
-  post-fact gate (its spend is committed before per-segment finalize).
+  when `would_exceed(target_api)` — emits BUDGET_EXCEEDED, sets the
+  lifecycle pause flag, and returns a structured refusal
+  (`error_kind: "budget"`) BEFORE any video API call. All PER-TAKE motion
+  spend routes through this function (web endpoint, phase loop,
+  regenerate, iterate, retry). *Amended same session, pre-push, per
+  adversarial review `wf_4e0e2a6f` (the original entry overstated):* the
+  F2b storyboard BATCH launch does NOT route through it — it is gated
+  separately at the top of `_run_storyboard_scene`
+  (`cinema/phases/motion_render.py`), refusing before `KlingNativeAPI` is
+  constructed and falling through to the per-shot path; and the motion
+  phase loop ABORTS on the structured refusal (`PhaseResult(ok=False)`)
+  instead of marching through remaining shots. Note `lifecycle.pause()`
+  only sets a flag — `check_pause()` has zero production call sites, so
+  the loop abort, not the pause, is what actually stops the phase (wiring
+  `check_pause` into phase loops is a named follow-up, NOT this change).
 - **Consequences:**
   - +: The cap binds BEFORE money is spent — overshoot drops from one
     take's cost to ~zero; the documented API contract is honored instead of
     the capability being deleted.
   - −: `API_COST_USD` estimates are ±30%, so the gate can refuse a call
-    that would not actually have exceeded (or admit one that does). It is
-    a soft cap either way; the operator resumes after raising the budget.
+    that would not actually have exceeded (or admit one that does); a
+    fallback-cascade winner can also cost several times the admitted
+    primary estimate. It is a soft cap either way; the operator resumes
+    after raising the budget.
   - −: Tests that mock `cost_tracker` must configure
     `would_exceed.return_value` — a bare MagicMock is truthy and fires the
     gate (two fixtures updated in this change).

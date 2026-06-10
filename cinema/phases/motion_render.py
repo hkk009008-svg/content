@@ -113,6 +113,27 @@ class MotionRenderPhase:
         scene_id = scene["id"]
         num_shots = len(shot_kf_pairs)
 
+        # Pre-spend budget gate (ADR-022): the batch launch spends BEFORE any
+        # per-take gate can run (one batch cost is recorded post-spend below,
+        # and per-segment finalize uses record_cost=False). Refuse here and
+        # fall through to the per-shot path, whose own gate emits
+        # BUDGET_EXCEEDED and aborts the phase — single abort mechanism.
+        tracker = getattr(self._gen, "cost_tracker", None)
+        if tracker is not None:
+            try:
+                refused = bool(tracker.would_exceed("KLING_NATIVE"))
+            except Exception:
+                # Best-effort tracker (test stubs): match the posture of the
+                # cost-record below, which is also wrapped.
+                refused = False
+            if refused:
+                logger.info(
+                    "storyboard batch: budget gate refused launch for scene=%s; "
+                    "falling through to per-shot path",
+                    scene_id,
+                )
+                return ok_count, fail_count, False
+
         try:
             from kling_native import KlingNativeAPI
             from phase_c_ffmpeg import split_video_into_segments
@@ -414,6 +435,22 @@ class MotionRenderPhase:
                 result = self._gen.generate_motion_take(scene["id"], shot["id"])
                 if result.get("success"):
                     ok_count += 1
+                elif result.get("error_kind") == "budget":
+                    # Pre-spend gate refused (ADR-022): stop the phase rather
+                    # than marching through every remaining shot — each would
+                    # be refused identically (no spend) but mislabeled as a
+                    # shot failure via on_failure. Not a failure: the shot
+                    # stays unapproved and regenerates once the budget is
+                    # raised.
+                    return PhaseResult(
+                        ok=False,
+                        message=(
+                            f"budget cap reached at {shot['id']} — motion phase "
+                            f"stopped (ok={ok_count}, skip={skip_count}, "
+                            f"fail={fail_count})"
+                        ),
+                        elapsed_s=time.time() - start,
+                    )
                 else:
                     fail_count += 1
                     self._on_failure(scene["id"], shot["id"], result.get("error", ""))

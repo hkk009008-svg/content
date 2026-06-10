@@ -1632,8 +1632,8 @@ script, the local check + CI move together.
 
 ## 16. Known bugs & latent issues
 
-> Test suite state (verified 2026-06-10 with the Session-1 P0 changes applied):
-> **1978 pass / 0 skip / 0 fail** in `tests/unit/`. Run
+> Test suite state (verified 2026-06-10, Session-1 P0 + review follow-ups applied):
+> **1982 pass / 0 skip / 0 fail** in `tests/unit/`. Run
 > `.venv/bin/python -m pytest tests/unit/ -q` to verify.
 
 | Severity | Issue | Location |

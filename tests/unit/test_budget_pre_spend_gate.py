@@ -45,6 +45,12 @@ for _dep in [
     if _dep not in sys.modules:
         _stub_module(_dep)
 
+# Guarantee kling_native.KlingNativeAPI exists so patch() can find it
+# (mirrors test_f2b_storyboard_mode._ensure_kling_native_patchable — another
+# test file may have registered the stub without the class).
+if not hasattr(sys.modules["kling_native"], "KlingNativeAPI"):
+    sys.modules["kling_native"].KlingNativeAPI = MagicMock  # type: ignore[attr-defined]
+
 
 class TestPreSpendBudgetGate:
     """generate_motion_take refuses to spend when would_exceed(target_api)."""
@@ -134,9 +140,40 @@ class TestPreSpendBudgetGate:
 
         assert result.get("success") is False
         assert "budget" in result.get("error", "").lower()
+        # Structured kind — the phase loop keys its abort on this, not on
+        # parsing the human-facing error string.
+        assert result.get("error_kind") == "budget"
         gen_vid.assert_not_called()
         lifecycle.pause.assert_called_once()
         cost_tracker.would_exceed.assert_called_once_with("KLING_NATIVE")
+        # The refusal must be visible to the UI: a BUDGET_EXCEEDED progress
+        # event is emitted (ctrl.progress proxies lifecycle.report_progress).
+        events = [c.args[0] for c in lifecycle.report_progress.call_args_list if c.args]
+        assert "BUDGET_EXCEEDED" in events
+
+    def test_auto_shot_gate_uses_resolved_engine(self, tmp_path):
+        """Anti-mutation pin: the gate must price the RESOLVED engine, not the
+        raw 'AUTO' sentinel (API_COST_USD.get('AUTO') is 0.0 — gating on it
+        would silently disable the pre-spend estimate for AUTO shots)."""
+        from workflow_selector import WORKFLOW_TEMPLATES
+
+        project = self._make_project(target_api="AUTO")
+        ctrl, host, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
+        cost_tracker.would_exceed.return_value = True
+        cost_tracker.spent_usd = 0.80
+        cost_tracker.budget_usd = 1.00
+
+        gen_vid = MagicMock()
+        with (
+            patch("cinema.shots.controller.generate_ai_video", gen_vid),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result.get("success") is False
+        resolved = WORKFLOW_TEMPLATES["medium"]["target_api"]
+        assert resolved != "AUTO"
+        cost_tracker.would_exceed.assert_called_once_with(resolved)
 
     def test_proceeds_when_within_budget(self, tmp_path):
         """Control: would_exceed False → generation proceeds, no pause."""
@@ -160,3 +197,104 @@ class TestPreSpendBudgetGate:
 
         assert result.get("success") is True
         lifecycle.pause.assert_not_called()
+
+
+class TestBudgetPhaseAbort:
+    """Phase-level behavior when the per-take gate refuses for budget.
+
+    Without the abort, a budget-exhausted run marches through every remaining
+    shot — each refused (no spend) but each mislabeled as a SHOT_FAILED via
+    on_failure — and then proceeds to the next stage. The abort stops the
+    phase at the first budget refusal; ordinary failures keep today's
+    continue-and-record behavior.
+    """
+
+    _BUDGET_REFUSAL = {
+        "success": False,
+        "error": "Budget cap reached — motion generation not started",
+        "error_kind": "budget",
+    }
+
+    def _make_ctx(self):
+        lc = MagicMock()
+        lc.is_cancelled.return_value = False
+        ctx = MagicMock(lifecycle=lc)
+        ctx.get.side_effect = lambda k, d=None: ({} if k == "global_settings" else d)
+        return ctx
+
+    def _make_project(self, n_shots=3, storyboard_mode=False):
+        shots = [
+            {
+                "id": f"s1_{i}",
+                "approved_keyframe_take_id": "kf_001",
+                "prompt": f"shot {i}",
+                "duration": 5.0,
+            }
+            for i in range(n_shots)
+        ]
+        return {
+            "id": "proj_budget_abort",
+            "scenes": [{"id": "scene_1", "shots": shots}],
+            "global_settings": {
+                "api_engines": {"KLING_NATIVE": {"storyboard_mode": storyboard_mode}},
+            },
+        }
+
+    def _make_gen(self, tmp_path, take_result):
+        kf = str(tmp_path / "kf.jpg")
+        open(kf, "wb").write(b"fake_jpg")
+        gen = MagicMock()
+        gen._resolve_take_path.return_value = kf
+        gen.cost_tracker = MagicMock()
+        gen.cost_tracker.would_exceed.return_value = False
+        gen.generate_motion_take.return_value = take_result
+        return gen
+
+    def test_per_shot_loop_aborts_on_budget_refusal(self, tmp_path):
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        gen = self._make_gen(tmp_path, self._BUDGET_REFUSAL)
+        on_failure = MagicMock()
+        phase = MotionRenderPhase(
+            shot_generator=gen, project=self._make_project(), on_failure=on_failure,
+        )
+        result = phase.run(self._make_ctx())
+
+        assert gen.generate_motion_take.call_count == 1
+        on_failure.assert_not_called()  # budget stop is not a shot failure
+        assert result.ok is False
+        assert "budget" in result.message.lower()
+
+    def test_per_shot_loop_continues_on_ordinary_failure(self, tmp_path):
+        """Control: failures without error_kind keep the record-and-continue path."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        gen = self._make_gen(tmp_path, {"success": False, "error": "boom"})
+        on_failure = MagicMock()
+        phase = MotionRenderPhase(
+            shot_generator=gen, project=self._make_project(), on_failure=on_failure,
+        )
+        result = phase.run(self._make_ctx())
+
+        assert gen.generate_motion_take.call_count == 3
+        assert on_failure.call_count == 3
+        assert result.ok is True
+
+    def test_storyboard_batch_refused_when_would_exceed(self, tmp_path):
+        """F2b: the batch launch is pre-spend-gated too — would_exceed refuses
+        BEFORE KlingNativeAPI is constructed; the scene falls through to the
+        per-shot path, whose own gate then aborts the phase."""
+        from cinema.phases.motion_render import MotionRenderPhase
+
+        gen = self._make_gen(tmp_path, self._BUDGET_REFUSAL)
+        gen.cost_tracker.would_exceed.return_value = True
+        phase = MotionRenderPhase(
+            shot_generator=gen, project=self._make_project(storyboard_mode=True),
+        )
+        with patch("kling_native.KlingNativeAPI") as mock_kling_cls:
+            result = phase.run(self._make_ctx())
+            mock_kling_cls.assert_not_called()
+
+        assert gen.generate_motion_take.call_count == 1
+        assert result.ok is False
+        assert "budget" in result.message.lower()

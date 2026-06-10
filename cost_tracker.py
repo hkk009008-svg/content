@@ -155,11 +155,11 @@ class CostTracker:
         # (not in the signature default) so the env is read at construction
         # time, and to avoid coupling this low-level util to config.settings.
         self.db_path = db_path or os.environ.get("EXPERIMENTS_DB_PATH", "data/experiments.db")
-        # Falsy budget (0 / 0.0 / None) means NO cap: make_project() defaults
-        # budget_limit_usd to 0 and the settings UI documents 0 as
-        # "unlimited". Without this coercion a default-settings project
-        # paused with BUDGET_EXCEEDED after its first motion cost record
-        # (NF-2, docs/STRATEGIC_REVIEW-2026-06-10.md).
+        # Falsy budget (0 / 0.0 / None) means NO cap — make_project() defaults
+        # budget_limit_usd to 0; the UI documents 0 = unlimited (NF-2,
+        # docs/STRATEGIC_REVIEW-2026-06-10.md). Negative values are KEPT
+        # deliberately: they block all spend (fail-safe) rather than
+        # coercing to unlimited (fail-open on a typo).
         self.budget_usd = budget_usd if budget_usd else None
         # Fast in-process accumulator for the budget gate.  The SQLite
         # store is the durable record; this counter is reset each process.

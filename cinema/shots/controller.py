@@ -1382,14 +1382,14 @@ class ShotController:
             target_api = raw_api
             video_fallbacks = None
 
-        # Pre-spend budget gate (STRATEGIC_REVIEW-2026-06-10 P0-2):
-        # would_exceed() promised pre-call gating since cost_tracker was
-        # written but had zero callers — only the post-fact is_over_budget()
-        # sibling at _finalize_motion_take step 9 was wired. Every per-take
-        # motion spend routes through this function (web endpoint, phase
-        # loop, regenerate, iterate, retry), so one check here covers them
-        # all. API_COST_USD estimates are ±30%, so this can fire one call
-        # early or late — the cap is a soft cap either way.
+        # Pre-spend budget gate (STRATEGIC_REVIEW-2026-06-10 P0-2 / ADR-022):
+        # all PER-TAKE motion spend routes through this function (web
+        # endpoint, phase loop, regenerate, iterate, retry); the F2b
+        # storyboard BATCH launch is gated separately in
+        # cinema/phases/motion_render.py. Soft cap: API_COST_USD estimates
+        # are ±30% and price only the resolved primary — a fallback-cascade
+        # winner can cost several times the admitted estimate. The motion
+        # phase loop aborts on the structured "budget" refusal below.
         if self.cost_tracker.would_exceed(target_api):
             self.progress(
                 "BUDGET_EXCEEDED",
@@ -1406,6 +1406,10 @@ class ShotController:
             return {
                 "success": False,
                 "error": "Budget cap reached — motion generation not started",
+                # Structured kind: the motion phase loop keys its abort on
+                # this (cinema/phases/motion_render.py), not on string-parsing
+                # the human-facing error.
+                "error_kind": "budget",
             }
 
         take = make_take(

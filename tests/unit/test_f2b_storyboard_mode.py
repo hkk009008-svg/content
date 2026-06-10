@@ -131,6 +131,9 @@ def _make_gen_mock(
     # cost_tracker
     gen.cost_tracker = MagicMock()
     gen.cost_tracker.record_api_call = MagicMock()
+    # Pre-spend batch gate (ADR-022): an unconfigured MagicMock is truthy
+    # and would refuse every storyboard launch.
+    gen.cost_tracker.would_exceed.return_value = False
 
     # _shot_ctrl — needs _take_output_path and _finalize_motion_take
     shot_ctrl = MagicMock()
