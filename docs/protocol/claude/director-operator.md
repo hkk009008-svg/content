@@ -266,6 +266,21 @@ stated wishes. When in doubt, the role of the SENDER (user vs.
 operator vs. director) is what determines tier, not the CONTENT or
 intent.
 
+**Cursor bookkeeping (v6.0, 2026-06-10, user-approved).**
+`coordination/mailbox/seen/<role>.txt` is the SINGLE cursor truth — do
+not restate cursors in commit messages or event prose (the 2026-06-10
+three-way divergence between seen-file, event footers, and commit
+messages is the codifying incident). The sanctioned writers are the
+scripts: `coordination/bin/send-event` (writes a conforming event +
+`Cursor at send:` line read from the seen file) and
+`coordination/bin/consume-events <role>` (advances + STAGES the seen
+file; refuses regressions). **Cursor folding:** the staged seen-file
+rides the next substantive commit; standalone cursor-only commits are
+deprecated (idle-consume exempt). Hand-rolled events/cursor edits are
+the fallback when the scripts are unavailable, not the norm —
+`scripts/check_coordination.py` (wired into ci_smoke) lints either
+way. Format details: coordination/README.md.
+
 ## Independent reviewer convention (Rule #9)
 
 **Rule #9: Operator-side reviewer is independent, not duplicate.**
