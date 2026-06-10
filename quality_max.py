@@ -458,8 +458,6 @@ def _prune_unavailable(workflow: dict, available: Set[str], has_character: bool,
         workflow["9"]["inputs"]["images"] = [feed_node, 0]
 
 
-# NOTE(P1-1 s2): defined-but-unwired until Task 7 wires it into
-# generate_ai_broll_max — delete this note in that commit.
 def _assemble_max_prompt(prompt: str, char_lora_trigger: Optional[str],
                           secondary_chars: Optional[list]) -> str:
     """Prepend LoRA trigger tokens (training-caption convention: token first).
@@ -994,10 +992,25 @@ def generate_ai_broll_max(
     # ---- Inject per-axis params ----
     _inject_identity(workflow, char_lora_path, face_anchor_remote, params, has_character,
                      char_lora_strength=char_lora_strength)
+    # (i) Secondary LoRAs chain after the primary identity LoRA; prompt gets
+    #     trigger tokens prepended before entering conditioning.
+    sec_face_remote = None
+    if has_character and secondary_chars:
+        first_ref = secondary_chars[0].get("reference")
+        if first_ref and os.path.exists(first_ref):
+            sec_face_remote = _upload_with_cache(comfy, first_ref)
+    if has_character:
+        _inject_secondary_loras(workflow, secondary_chars)
+    prompt = _assemble_max_prompt(prompt, char_lora_trigger, secondary_chars)
     _inject_conditioning(workflow, prompt, init_remote, style_remote, params, has_character)
     _inject_sampling(workflow, params)
     _inject_latent_source(workflow, init_remote, params)
     _inject_post_passes(workflow, params, available)
+    # (ii) Secondary faceswap AFTER post_passes: the SUPIR-absent branch re-feeds
+    #      node 950 from a 610-priority list; injecting 611 here lets the dynamic
+    #      consumer-rewire pick up that fresh feed (adversarial plan-review CRITICAL).
+    if has_character:
+        _inject_secondary_faceswap(workflow, sec_face_remote)
     _inject_aspect(workflow, aspect_ratio)  # transpose nodes 102+950 once; deepcopy loop inherits
 
     # ---- Best-of-N adaptive halt loop ----
@@ -1093,6 +1106,11 @@ def generate_ai_broll_max(
         boosted_params["pulid_weight"] = min(1.0, params["pulid_weight"] + 0.15)
         _inject_identity(workflow, char_lora_path, face_anchor_remote, boosted_params, has_character,
                          char_lora_strength=char_lora_strength)
+        # Defensive re-injection: keeps secondary chain intact after the boosted
+        # _inject_identity (sec_face_remote already uploaded; no second upload).
+        if has_character:
+            _inject_secondary_loras(workflow, secondary_chars)
+            _inject_secondary_faceswap(workflow, sec_face_remote)
         retry_seed = base_seed + n_max * 1009
         retry_wf = copy.deepcopy(workflow)
         if "25" in retry_wf:

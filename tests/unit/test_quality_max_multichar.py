@@ -20,6 +20,7 @@ import pytest
 
 from quality_max import (
     _assemble_max_prompt,
+    _inject_conditioning,
     _inject_identity,
     _inject_post_passes,
     _inject_secondary_faceswap,
@@ -327,3 +328,52 @@ def test_faceswap_after_post_passes_supir_absent_feeds_611():
     assert wf["950"]["inputs"]["image"] == ["610", 0]
     _inject_secondary_faceswap(wf, "sec.jpg")           # production order: AFTER
     assert wf["950"]["inputs"]["image"] == ["611", 0]
+
+
+# ---------------------------------------------------------------------------
+# Task 7: Wire-up sequence tests
+# ---------------------------------------------------------------------------
+
+def test_full_multichar_sequence_no_dangling_and_retry_safe():
+    """Mirror of the production order in generate_ai_broll_max with
+    secondaries, including the PuLID-boost retry re-injection. ORDER IS
+    LOAD-BEARING: loras after identity; faceswap after post_passes
+    (adversarial plan-review CRITICAL — see the 950 re-feed pin)."""
+    wf = _load_max_workflow()
+    original_ids = set(wf)
+    params = _params()
+    available = set(_AVAILABLE)
+    _prune_unavailable(wf, available, has_character=True, has_init=False)
+    _inject_identity(wf, None, None, params, True)          # LoRA-less primary
+    _inject_secondary_loras(wf, [_sec()])
+    prompt = _assemble_max_prompt("a prompt", None, [_sec()])
+    _inject_conditioning(wf, prompt, None, None, params, True)
+    _inject_post_passes(wf, params, available)
+    _inject_secondary_faceswap(wf, "sec.jpg")               # AFTER post_passes
+    # retry leg (defensive re-injection)
+    _inject_identity(wf, None, None, dict(params, pulid_weight=1.0), True)
+    _inject_secondary_loras(wf, [_sec()])
+    _inject_secondary_faceswap(wf, "sec.jpg")
+    assert wf["100"]["inputs"]["model"] == ["701", 0]
+    assert wf["122"]["inputs"]["clip"] == ["701", 1]
+    assert wf["501"]["inputs"]["image"] == ["611", 0]       # 611 consumed
+    assert _reachable_dangling(wf, original_ids | {"701", "611", "94"}) == []
+
+
+def test_wireup_call_order_in_source():
+    import inspect
+    import quality_max
+    src = inspect.getsource(quality_max.generate_ai_broll_max)
+    i_id = src.index("_inject_identity(")
+    i_loras = src.index("_inject_secondary_loras(")
+    i_cond = src.index("_inject_conditioning(")
+    i_post = src.index("_inject_post_passes(")
+    i_swap = src.index("_inject_secondary_faceswap(")
+    # loras right after identity; faceswap AFTER post_passes (the SUPIR-absent
+    # 950 re-feed at quality_max.py:597-602 would bypass an earlier 611)
+    assert i_id < i_loras < i_cond < i_post < i_swap
+    # retry leg re-injects both, after the boosted _inject_identity
+    retry = src[src.index("boosted_params"):]
+    assert "_inject_secondary_loras(" in retry
+    assert "_inject_secondary_faceswap(" in retry
+    assert "_assemble_max_prompt(" in src
