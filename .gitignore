@@ -70,6 +70,7 @@ logs/
 # State-update hook marker (per-clone runtime state, not source)
 .claude/hooks/.last-state-head
 .claude/hooks/.last-index-sync-*
+.claude/hooks/.skip-worktree-cleared.log
 
 # Hookify local rules (per-clone runtime guardrails, not source — see /hookify)
 .claude/hookify.*.local.md

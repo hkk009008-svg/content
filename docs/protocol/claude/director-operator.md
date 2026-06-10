@@ -1341,7 +1341,9 @@ fast-forwards a seat's `GIT_INDEX_FILE` index to HEAD on peer-commit
 staleness (and only then — staged work is never touched; see the decision
 table in the hook). Manual `git read-tree HEAD` is retired except for the
 mixed case (staged work + peer commit), where `git read-tree -m` remains a
-manual call.
+manual call. Skip-worktree pollution from harness child processes is likewise
+hook-cleared (v5.9, per-path flag-only clear + event log; see
+`coordination/README.md` §"Index freshness").
 
 **Beneficiary (per R11): `both`** — symmetric. Both seats owe presence
 maintenance; both gain accurate peer-liveness. No asymmetric-veto path;

@@ -208,3 +208,14 @@ this case). The one case left manual is **mixed** state (you have staged work
 AND the peer moved HEAD): the hook deliberately abstains, so resolve it with
 `git read-tree -m`. The launch seed above (`[ -f … ] || git read-tree HEAD`)
 still stands — the hook needs an existing index to maintain.
+
+**Skip-worktree pollution is also hook-cleared (v5.9).** Harness child
+processes (Workflow/subagent runs) have twice left skip-worktree bits in the
+active index (N=4; N=767/844 on 2026-06-10), which hides the seat's own edits
+from `git status` and breaks add/rm with phantom "sparse-checkout" errors.
+`update-state.sh` now clears any flagged entry per-path
+(`git update-index --no-skip-worktree` — flag-only, staged work untouched)
+on every hook fire, and appends one line per event to the gitignored
+`.claude/hooks/.skip-worktree-cleared.log` (the evidence trail toward the
+still-unidentified trigger op). The manual per-path / `read-tree HEAD`
+workarounds are retired for this case.

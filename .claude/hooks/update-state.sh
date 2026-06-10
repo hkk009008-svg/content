@@ -111,9 +111,45 @@ _sync_seat_index() {
   return 0
 }
 
+# v5.9 — skip-worktree pollution auto-clear. Harness child processes
+# (Workflow/subagent runs) have twice left skip-worktree bits in the active
+# index (N=4; then N=767 of 844 tracked, 2026-06-10) — `git status` then
+# hides this seat's OWN edits and add/rm fail with phantom "sparse-checkout"
+# errors although no sparse checkout is configured. Trigger op still
+# unreproduced (plain and worktree-isolated 1-agent probes both came back
+# clean, 2026-06-11) — hence detect-and-clear here rather than a fix at the
+# source, plus a log line per event to build the evidence trail.
+# Safety: no legitimate skip-worktree use exists in this repo, so ANY flagged
+# entry is pollution. `update-index --no-skip-worktree` flips ONLY the flag
+# bit — staged content is untouched (pinned by test), unlike the manual
+# wholesale `git read-tree HEAD` fix, which destroys staged work. Targets
+# whatever index this process resolves (the per-seat GIT_INDEX_FILE under
+# D-a, else the default) — exactly the index a polluting child inherits.
+# Deliberately NOT gated on GIT_INDEX_FILE, and runs BEFORE the skip-perf
+# gate: pollution arrives WITHOUT a HEAD move.
+# Tests: tests/unit/test_skip_worktree_clear.py (awk-slices this function).
+_clear_skip_worktree() {
+  local -a _flagged=()
+  local _e
+  while IFS= read -r -d '' _e; do
+    case "$_e" in 'S '*) _flagged+=("${_e#S }") ;; esac
+  done < <(git ls-files -v -z 2>/dev/null)
+  [ "${#_flagged[@]}" -gt 0 ] || return 0
+  git update-index --no-skip-worktree -- "${_flagged[@]}" 2>/dev/null || return 0
+  printf '%s cleared=%d index=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${#_flagged[@]}" \
+    "$(basename "${GIT_INDEX_FILE:-default}")" \
+    >> .claude/hooks/.skip-worktree-cleared.log 2>/dev/null || true
+  return 0
+}
+
 MARKER=".claude/hooks/.last-state-head"
 CURRENT=$(git rev-parse HEAD 2>/dev/null || exit 0)
 LAST=$(cat "$MARKER" 2>/dev/null || echo "")
+
+# v5.9: clear index pollution first (sane index before sync logic; both run
+# before the shared skip-perf gate — see each function's comment).
+_clear_skip_worktree || true
 
 # v5.8: sync the per-seat index BEFORE the shared skip-perf gate (see
 # _sync_seat_index comment for why the shared marker cannot gate this).
