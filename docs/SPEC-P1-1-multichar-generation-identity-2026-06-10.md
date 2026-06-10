@@ -396,7 +396,11 @@ scope.
     correction: §6 says score every FACE; pass 1 scored every IMAGE, validator
     face-pick undetermined):* baseline L/a=0.680 R/b=0.610 · control
     L/a=0.671 R/b=0.483 · multi R/b = [0.518, 0.550, 0.545], blend=False ×3
-    → **NO-GO 0/3** (bar 0.583).
+    → **NO-GO 0/3** (bar 0.583). multi_c additionally fails the
+    primary-stability term (L/a=0.603 vs baseline 0.680 → |a−base|=0.077 >
+    0.05; multi_a/b pass at 0.035/0.016) — operator Lane-V MINOR folded;
+    numbers independently reproduced to 3 decimals by the operator
+    (18:11:34Z report).
   - *Measurement-validity analysis — the criteria, not the mechanism, failed:*
     (i) control-anchor saturation: the descriptive anchors (hair color/style,
     ethnicity, lips) let TEXT-ONLY generation score 0.671 vs Aria's ref —
