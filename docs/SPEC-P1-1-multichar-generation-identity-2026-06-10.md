@@ -441,13 +441,24 @@ scope.
   collapse).
 
   **Slice-2 implementation record (2026-06-11):** offline code+tests complete.
-  - `_resolve_identity_strategy` max arm (`5bb1d89`) — `MAX_TIER_MULTI_LORA` promise, secondary specs
-  - `_inject_secondary_loras` + `_inject_secondary_faceswap` + `_assemble_max_prompt` (`be5c0b3`)
+  (Attributions corrected same-day — the first cut of this record paired
+  descriptions with wrong SHAs; each line below re-verified against
+  `git show --stat <sha>`.)
+  - strategy types (`5bb1d89`) — `MAX_TIER_MULTI_LORA` tag + `CharIdentitySpec`
+    lora_path/lora_strength/trigger + `IdentityStrategy.char_lora_trigger`
+  - `_resolve_identity_strategy` max arm (`be5c0b3`) — secondaries
+    CONDITIONED, `MAX_TIER_MULTI_LORA` promised (contract change vs slice-1
+    stub pin)
   - `web_server.py` trigger persistence (`574118e`)
-  - `generate_ai_broll_max` secondary wiring (`e1981f0`, `c45eecf`)
-  - faceswap upload + ordering fixes, production dispatch negative (`d73fa45`, `82a08a7`)
-  - test pins (`3ecee1e`)
-  - dispositions (`e956462`, `0359c92`)
+  - plumbing (`e1981f0`) — secondaries + trigger reach `generate_ai_broll_max`
+    (signature only); `_assemble_max_prompt` helper; lora_name basename
+  - `_inject_secondary_loras` (`c45eecf`) · `_inject_secondary_faceswap`
+    (`d73fa45`) · wire-up incl. secondary upload + retry re-injection
+    (`82a08a7`)
+  - accountability pins (`3ecee1e`) — scorecard surface, production-dispatch
+    negative, empty-trigger pop, secondary-refs value
+  - dispositions + doc-anchor follow-ups (`e956462`, `0359c92`, `ec0b706`,
+    `b708257`)
   - S2/S3 spikes + pod-side LoRA placement pending next bundled pod session.
 
 ## 7. Recommended sequencing — and the deviation, surfaced
