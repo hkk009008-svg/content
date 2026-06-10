@@ -62,7 +62,10 @@ def test_two_char_max_tier_is_max_primary_only_with_secondary_unconditioned():
     assert s.unconditioned_chars == ["char_b"]
 
 
-def test_secondary_without_ref_is_unconditioned():
+def test_char_absent_from_secondary_chars_is_unconditioned():
+    # A no-ref char never reaches the router as a secondary entry — the engine
+    # filters upstream (Task 3); the router reads entry["reference"]
+    # unconditionally by design. What it sees here is an EMPTY secondary list.
     s = _resolve_identity_strategy(_shot(["char_a", "char_b"]), "production",
                                    SETTINGS_NO_LORA, CC_PRIMARY_ONLY)
     assert s.mechanism_tag == "PRIMARY_ONLY"
@@ -86,6 +89,17 @@ def test_no_chars_or_no_primary_ref_is_no_identity_asset():
                                    {"primary_reference": None, "secondary_chars": []})
     assert s.mechanism_tag == "NO_IDENTITY_ASSET"
     assert s.conditioned_chars == []
+
+
+def test_chars_in_frame_but_no_primary_ref_all_unconditioned():
+    # The other disjunct of the NO_IDENTITY_ASSET arm: chars ARE in frame but
+    # no primary reference exists — every in-frame char lands unconditioned.
+    s = _resolve_identity_strategy(_shot(["char_a", "char_b"]), "production",
+                                   SETTINGS_NO_LORA,
+                                   {"primary_reference": None, "secondary_chars": []})
+    assert s.mechanism_tag == "NO_IDENTITY_ASSET"
+    assert s.conditioned_chars == []
+    assert s.unconditioned_chars == ["char_a", "char_b"]
 
 
 def test_to_metadata_dict_is_json_safe_and_complete():
@@ -300,7 +314,7 @@ def controller_two_chars(monkeypatch, tmp_path, captured, _stub_validator):
     proj_root = str(tmp_path / "projects")
     os.makedirs(proj_root, exist_ok=True)
     secondary = [{"char_id": "char_b", "reference": "/r/b.jpg",
-                  "multi_angle_refs": [], "identity_anchor": "anchor b"}]
+                  "multi_angle_refs": ["/r/b1.jpg"], "identity_anchor": "anchor b"}]
     host = _build_host(tmp_path, secondary_chars=secondary,
                        characters_in_frame=["char_a", "char_b"])
     project = host._core.project
@@ -328,8 +342,8 @@ def test_single_char_take_metadata_and_kwargs_unchanged(controller_one_char, cap
     assert take["metadata"]["mechanism_actually_used"] == "FLUX_KONTEXT"
     # exact same kwargs today's code sends — zero regression
     assert captured["kwargs"]["char_lora_path"] is None
-    assert "secondary_char_refs" not in captured["kwargs"] or \
-        captured["kwargs"]["secondary_char_refs"] is None
+    assert captured["kwargs"]["char_lora_strength"] is None
+    assert captured["kwargs"]["secondary_char_refs"] is None
 
 
 def test_two_char_take_promises_kontext_multi_and_forwards_refs(
@@ -340,6 +354,8 @@ def test_two_char_take_promises_kontext_multi_and_forwards_refs(
     assert md["mechanism_tag"] == "KONTEXT_MULTI_CHAR"
     sent = captured["kwargs"]["secondary_char_refs"]
     assert [c["char_id"] for c in sent] == ["char_b"]
-    assert "multi_angle_refs" in sent[0]  # V-5: field survives the to_dict chain
+    # V-5: the VALUE survives the to_dict chain (key-presence alone would pass
+    # even if a serialization bug emptied the list)
+    assert sent[0]["multi_angle_refs"] == ["/r/b1.jpg"]
     # V-2: derived actual — multi-char emission on a successful Kontext call
     assert take["metadata"]["mechanism_actually_used"] == "FLUX_KONTEXT_MULTI_CHAR"

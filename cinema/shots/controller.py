@@ -725,7 +725,7 @@ class ShotController:
         if not result or not os.path.exists(img_path):
             return {"success": False, "error": "Image generation failed"}
 
-        actual = result.api_name if result else None
+        actual = result.api_name
         if actual == "FLUX_KONTEXT" and strategy.secondary_specs:
             # V-2 / spec §3(d): api_name is backend-granular — a successful
             # Kontext call looks identical for multi-char and primary-only, so

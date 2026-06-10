@@ -150,7 +150,7 @@ winner can differ from the promise — e.g. Kontext timeout → FLUX-Pro
 no-face-lock). Honesty boundary: the derived value records what was EMITTED,
 not what the server honored — a silent server-side `@Image2`-ignore is
 undetectable in metadata by construction; S1 plus per-char validation exist to
-catch exactly that. The controller call site at controller.py:643 passes
+catch exactly that. The controller call site at controller.py:719 passes
 `secondary_char_refs=[c.to_dict() for c in strategy.secondary_specs] or None`
 into `generate_ai_broll` — the POST-resolution, post-cap list (≤2 secondaries,
 the Kontext-tier cap the router applies), NOT the raw `cc.get("secondary_chars")`
