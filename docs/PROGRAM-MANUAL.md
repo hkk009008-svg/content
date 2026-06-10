@@ -654,7 +654,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `record_api_call` | `cost_tracker.py:293` | Primary API logging path. |
 | `log_llm` | `cost_tracker.py:231` | LLM logging path; auto-detects provider from `PRICING` (`:78`) and silently records `$0.00` for unknown models. |
 | `would_exceed` | `cost_tracker.py:353` | Pre-call budget predicate — wired as the pre-spend gate in `generate_motion_take` (`cinema/shots/controller.py:1344`) since 2026-06-10 (P0-2). |
-| `is_over_budget` | `cost_tracker.py:363` | Post-call budget gate, consulted in `cinema/shots/controller.py:1240`. |
+| `is_over_budget` | `cost_tracker.py:363` | Post-call budget gate, consulted in `cinema/shots/controller.py:1312`. |
 | `API_COST_USD` | `cost_tracker.py:45` | ±30% per-call USD estimates — operators must calibrate against invoices. |
 | `cleanup_project` | `cleanup.py:56` | Deletes intermediate `temp/` artifacts post-assembly (called at `cinema_pipeline.py:907`, non-fatal); `aggressive=True` also removes generated media. |
 | `CLEANUP_RULES` | `cleanup.py:34` | The delete-pattern ruleset `cleanup_project` applies. |
@@ -1194,7 +1194,7 @@ Location consistency is automatic: each location carries a fixed `seed` and a ve
 | video API | `LTX` ($0.06–0.10/shot) | `SORA_NATIVE`/`VEO_NATIVE` ($0.40–0.80) |
 
 **Budget governance** — three caveats that bite operators:
-1. `budget_limit_usd` only gates **video/image** generation in `ShotController` (the pre-spend `would_exceed` gate at `cinema/shots/controller.py:1393` + the post-call `is_over_budget` check at `:1240`); **audio API costs run uncapped** (audio modules create isolated `CostTracker()` instances that log to the DB but don't update the core tracker's `spent_usd`).
+1. `budget_limit_usd` only gates **video/image** generation in `ShotController` (the pre-spend `would_exceed` gate at `cinema/shots/controller.py:1465` + the post-call `is_over_budget` check at `:1312`); **audio API costs run uncapped** (audio modules create isolated `CostTracker()` instances that log to the DB but don't update the core tracker's `spent_usd`).
 2. `CostTracker.spent_usd` **resets to 0 each process** — it is not loaded from SQLite on init (`cost_tracker.py:166`). A server restart mid-project zeroes the in-memory budget counter.
 3. `EXPERIMENTS_DB_PATH` works **via the environment only**: since T7 (`4af8c05`) every `CostTracker` resolves it at construction (`db_path` arg > env var > `data/experiments.db`, `cost_tracker.py:157`), but `Settings.experiments_db_path` is never threaded into the constructor (`cinema/core.py:113`) — set the env var, not the settings field.
 
