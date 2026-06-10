@@ -426,3 +426,46 @@ def test_accept_without_trigger_pops_stale_trigger(client):
         f"stale char_lora_triggers[{_CID!r}] must be popped when result has no trigger_token; "
         f"got {settings.get('char_lora_triggers')!r}"
     )
+
+
+def test_accept_with_empty_trigger_pops_stale_trigger(client):
+    """PIN (F2): a result with trigger_token="" (empty string) must also pop any stale
+    char_lora_triggers[cid] entry.
+    The truthiness gate treats "" as absent (commit 574118e declared this intentional);
+    the existing test only covered the key-absent case.
+    """
+    project = _make_project()
+    # Pre-seed a stale trigger from an earlier train
+    project["global_settings"]["char_lora_triggers"] = {_CID: "TOKold"}
+
+    def fake_gated(project_dir, char, *, config_overrides=None):
+        return {
+            "success": True,
+            "lora_path": "/l/c3.safetensors",
+            "best_strength": 0.58,
+            "rejected": False,
+            "quality_warning": False,
+            "quality_score": 0.77,
+            "skipped": False,
+            "attempts": 1,
+            "trigger_token": "",   # empty string — falsy, treated as absent
+        }
+
+    def fake_mutate(pid, mutator_fn, timeout=None):
+        return mutator_fn(project)
+
+    with (
+        patch("web_server.load_project", return_value=project),
+        patch("web_server.get_project_dir", return_value="/proj/t6"),
+        patch("web_server.mutate_project", side_effect=fake_mutate),
+        patch("prep.lora_quality.train_character_lora_gated", side_effect=fake_gated),
+    ):
+        resp = _post_train(client)
+        assert resp.status_code == 202, resp.data
+        _wait_for_runner()
+
+    settings = project.get("global_settings", {})
+    assert _CID not in settings.get("char_lora_triggers", {}), (
+        f"stale char_lora_triggers[{_CID!r}] must be popped when trigger_token=''; "
+        f"got {settings.get('char_lora_triggers')!r}"
+    )

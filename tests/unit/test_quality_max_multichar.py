@@ -231,7 +231,11 @@ def test_phase_c_assembly_forwards_char_lora_trigger_and_secondary_chars_to_max(
     fake_qm = MagicMock()
     fake_qm.generate_ai_broll_max = mock_max
 
+    # F3 enrichment: lora_path + trigger fields must ride through identically
+    # (minimal dict previously had no teeth for those keys).
     secondary = [{"char_id": "char_b", "reference": "/r/b.jpg",
+                  "lora_path": "/l/b.safetensors", "trigger": "TOKman",
+                  "lora_strength": 0.55, "fidelity": "lora",
                   "multi_angle_refs": ["/r/b1.jpg"], "identity_anchor": "anchor b"}]
 
     old_qm = sys.modules.get("quality_max")
@@ -267,6 +271,95 @@ def test_phase_c_assembly_forwards_char_lora_trigger_and_secondary_chars_to_max(
     )
     assert call_kwargs["secondary_chars"] == secondary, (
         f"expected secondary_chars={secondary!r}, got {call_kwargs['secondary_chars']!r}"
+    )
+
+
+def test_phase_c_assembly_secondary_chars_dict_values_ride_through():
+    """PIN (F3): the forwarded secondary_chars first-dict CONTENT (char_id, lora_path,
+    trigger) must equal the caller-supplied values — not just list identity.
+    Ensures the dispatch boundary doesn't silently drop or transform fields.
+    """
+    import phase_c_assembly
+
+    fake_result = MagicMock()
+    fake_result.__bool__ = lambda self: True
+
+    mock_max = MagicMock(return_value=fake_result)
+    fake_qm = MagicMock()
+    fake_qm.generate_ai_broll_max = mock_max
+
+    secondary = [{"char_id": "char_b", "reference": "/r/b.jpg",
+                  "lora_path": "/l/b.safetensors", "trigger": "TOKman",
+                  "lora_strength": 0.55, "fidelity": "lora",
+                  "multi_angle_refs": ["/r/b1.jpg"], "identity_anchor": "anchor b"}]
+
+    old_qm = sys.modules.get("quality_max")
+    sys.modules["quality_max"] = fake_qm
+    try:
+        phase_c_assembly.generate_ai_broll(
+            "test prompt",
+            "/tmp/out.jpg",
+            quality_tier="max",
+            char_lora_path="/fake/mara.safetensors",
+            char_lora_trigger="TOKwoman",
+            secondary_char_refs=secondary,
+        )
+    finally:
+        if old_qm is None:
+            sys.modules.pop("quality_max", None)
+        else:
+            sys.modules["quality_max"] = old_qm
+
+    call_kwargs = mock_max.call_args.kwargs
+    forwarded = call_kwargs["secondary_chars"]
+    assert len(forwarded) == 1
+    fwd = forwarded[0]
+    assert fwd["char_id"] == "char_b", f"char_id mismatch: {fwd['char_id']!r}"
+    assert fwd["lora_path"] == "/l/b.safetensors", f"lora_path mismatch: {fwd['lora_path']!r}"
+    assert fwd["trigger"] == "TOKman", f"trigger mismatch: {fwd['trigger']!r}"
+
+
+def test_phase_c_assembly_production_tier_does_not_call_max():
+    """PIN (F1): quality_tier='production' must NOT route through generate_ai_broll_max
+    even when secondary_char_refs and char_lora_trigger are supplied.
+    (The 'if quality_tier == "max"' guard means those kwargs are absorbed by
+    the production path without ever touching quality_max.)
+    """
+    import phase_c_assembly
+
+    mock_max = MagicMock()
+    fake_qm = MagicMock()
+    fake_qm.generate_ai_broll_max = mock_max
+
+    secondary = [{"char_id": "char_b", "reference": "/r/b.jpg",
+                  "lora_path": "/l/b.safetensors", "trigger": "TOKman",
+                  "lora_strength": 0.55, "fidelity": "lora",
+                  "multi_angle_refs": [], "identity_anchor": ""}]
+
+    old_qm = sys.modules.get("quality_max")
+    sys.modules["quality_max"] = fake_qm
+    try:
+        # Production path is network-coupled (FAL/ComfyUI); accept any raise/return
+        # as long as generate_ai_broll_max is never invoked.
+        try:
+            phase_c_assembly.generate_ai_broll(
+                "test prompt",
+                "/tmp/out.jpg",
+                quality_tier="production",
+                char_lora_trigger="TOKwoman",
+                secondary_char_refs=secondary,
+            )
+        except Exception:
+            pass  # network I/O, missing config, etc. — all acceptable
+    finally:
+        if old_qm is None:
+            sys.modules.pop("quality_max", None)
+        else:
+            sys.modules["quality_max"] = old_qm
+
+    mock_max.assert_not_called(), (
+        f"generate_ai_broll_max must NOT be called for quality_tier='production'; "
+        f"was called {mock_max.call_count} time(s)"
     )
 
 

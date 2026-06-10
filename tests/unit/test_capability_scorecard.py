@@ -152,6 +152,27 @@ class TestIdentityMulti:
         card = build_capability_scorecard(proj, project_dir="/tmp/x")
         assert "identity_multi" not in card["per_shot"][0]
 
+    def test_identity_multi_surfaces_max_tier_multi_lora(self):
+        """PIN (Task 8): MAX_TIER_MULTI_LORA mechanism_tag surfaces through
+        build_capability_scorecard unchanged — generic read at scorecard.py:165-169
+        requires no special-casing for this tag.
+        """
+        project = self._project_with_shot({
+            "identity_score": 0.8,
+            "identity_per_char": {"char_a": 0.8, "char_b": 0.61},
+            "identity_strategy": {
+                "mechanism_tag": "MAX_TIER_MULTI_LORA",
+                "primary_char_id": "char_a",
+                "conditioned_chars": [
+                    {"char_id": "char_a", "fidelity": "pulid"},
+                    {"char_id": "char_b", "fidelity": "lora"},
+                ],
+                "unconditioned_chars": [],
+            },
+        })
+        card = build_capability_scorecard(project, project_dir="/tmp/x")
+        assert card["per_shot"][0]["identity_multi"]["mechanism"] == "MAX_TIER_MULTI_LORA"
+
 
 class TestScorecardEndpoint:
     def _client(self):
