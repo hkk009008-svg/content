@@ -910,7 +910,7 @@ selected by the `max_halt_rule` config enum, passed as `should_halt(halt_rule=..
 | **FreeU V2** | Training-free U-Net skip/backbone feature rescaling | `b1=1.3, b2=1.4, s1=0.9, s2=0.2` |
 | **SLG** | Skip-Layer Guidance for Diffusion Transformers | `scale=2.5, double_layers="7,8,9", single_layers="10,11"` |
 | **DetailDaemon** | Sampler wrapper injecting noise to surface micro-detail | `detail_amount=0.5` |
-| **SUPIR V2** | Scaling Up Image Restoration as final post-pass | `steps=50, cfg_scale_start/end=4.0` |
+| **SUPIR V2** | Scaling Up Image Restoration as final post-pass | `steps=40, cfg_scale_start/end=2.8` |
 | **Final downsample** | Latent upscale + downsample to target | `(3840, 2160)` |
 
 **No Topaz in the live path.** Operator-side Topaz prep lives in
