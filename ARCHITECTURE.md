@@ -849,7 +849,8 @@ quality_max.
 the `identity_strategy` promise into take metadata
 ([cinema/shots/controller.py:610](cinema/shots/controller.py:610)); `secondary_chars` is populated in
 `ContinuityEngine.get_continuity_config` ([domain/continuity_engine.py:585](domain/continuity_engine.py:585))
-for every registered character beyond the primary. When `secondary_char_refs` is
+for in-frame characters beyond the primary that have a registered reference
+(unregistered chars are skipped, mirroring validation). When `secondary_char_refs` is
 non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:534](phase_c_assembly.py:534)) takes the multi-char
 branch: `_allocate_ref_slots` ([phase_c_assembly.py:445](phase_c_assembly.py:445)) partitions the Kontext
 image-URL budget on a fixed-share 3/2/1 slot schedule (primary up to 3, first
