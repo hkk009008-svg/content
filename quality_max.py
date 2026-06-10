@@ -529,6 +529,56 @@ def _inject_identity(workflow: dict, char_lora: Optional[str], face_anchor_remot
         workflow["100"]["inputs"]["end_at"] = params.get("pulid_end_at", 0.90)
 
 
+def _inject_secondary_loras(workflow: dict, secondary_chars: Optional[list]):
+    """Chain one LoraLoader per LoRA-bearing secondary after the primary's 700.
+
+    P1-1 slice 2, spec §3(b). MUST run after _inject_identity (the chain base
+    depends on whether 700 survived). Idempotent: pops 701/702 first, so the
+    PuLID-boost retry can re-run it defensively after its _inject_identity
+    re-call (which cannot break the chain today — the consumer rewires are
+    700-presence-guarded — but re-injection is cheap insurance against
+    future _inject_identity changes).
+    Chain base = node 700 when the primary kept its LoRA, else the base
+    loaders (112 model / 11 clip — the LoRA-less-primary path prunes 700).
+    Consumers (100.model, 122.clip, 600.clip) move to the LAST chained node.
+    Strength clamp ≤0.55 per secondary (§3b bleed mitigation; S3 tunes).
+    lora_name takes the artifact's BASENAME — pod-side placement into
+    ComfyUI's loras/ dir is the slice-2 pod-session step (spec §7.2).
+    """
+    workflow.pop("701", None)
+    workflow.pop("702", None)
+    entries = [e for e in (secondary_chars or []) if e.get("lora_path")][:2]
+    if not entries:
+        return
+    if "700" in workflow:
+        model_src, clip_src = ["700", 0], ["700", 1]
+    else:
+        model_src, clip_src = ["112", 0], ["11", 0]
+    last = None
+    for i, entry in enumerate(entries):
+        nid = str(701 + i)
+        strength = entry.get("lora_strength")
+        strength = min(strength if strength is not None else 0.55, 0.55)
+        workflow[nid] = {
+            "inputs": {
+                "lora_name": os.path.basename(entry["lora_path"]),
+                "strength_model": strength,
+                "strength_clip": strength,
+                "model": list(model_src),
+                "clip": list(clip_src),
+            },
+            "class_type": "LoraLoader",
+        }
+        model_src, clip_src = [nid, 0], [nid, 1]
+        last = nid
+    if "100" in workflow:
+        workflow["100"]["inputs"]["model"] = [last, 0]
+    if "122" in workflow:
+        workflow["122"]["inputs"]["clip"] = [last, 1]
+    if "600" in workflow:
+        workflow["600"]["inputs"]["clip"] = [last, 1]
+
+
 def _inject_conditioning(workflow: dict, prompt: str, prev_shot_remote: Optional[str],
                           style_remote: Optional[str], params: dict, has_character: bool):
     """Prompt + CN channels + Redux."""
