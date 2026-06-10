@@ -361,6 +361,13 @@ spec §6 (S1 row) and note the real per-call price from the FAL dashboard in spe
 **If NO-GO: skip Tasks 7–8 entirely** (spec §6 no-go path); Tasks 3–6 and 9–12 land
 regardless.
 
+**DONE 2026-06-10:** ran live (user "s1 go ahead"); pair = Aria + 정연
+(bf1a4e9e8a9a — the Mara-lineage canonicals are the SAME face as Aria, visually
+confirmed; 정연 is the only distinct registered person on disk). Verdict +
+per-face re-score (`scripts/_s1_rescore_crops.py`) + validity analysis +
+disposition (Tasks 7–8 proceed) recorded in spec §6 "S1 RESULT". Dashboard
+price read still pending (no CLI access).
+
 ## Chunk 2: Data flow + the router
 
 ### Task 3: `secondary_chars` in `continuity_config`
@@ -882,11 +889,17 @@ git commit -m "feat(p1-1): keyframe takes carry identity_strategy promise + mech
 
 ## Chunk 3: Kontext multi-char branch (S1-gated) + accountability + registration
 
-> **GATE:** Tasks 7–8 only on S1 = GO (Task 2 Step 4). On NO-GO, jump to Task 9 —
-> the router keeps emitting KONTEXT_MULTI_CHAR promises only when the mechanism
-> exists, so on NO-GO also change the router's `secondary` branch to leave
-> secondaries unconditioned (one-line change + matrix-test update) and record the
-> S1 scores in the spec.
+> **GATE — RESOLVED 2026-06-10 (spec §6 "S1 RESULT" is the full record):** S1
+> ran live (user-approved). Pre-registered quantitative criteria returned NO-GO
+> on both measurement passes, but the measurement itself was shown invalid at
+> two-shot face scale (control-anchor saturation + embedding domain-gap: the
+> UNCONDITIONED baseline outscored the conditioned arms against the secondary's
+> ref). The blocking question answered qualitatively: @Image2 HONORED, zero
+> blending across all three arms. **Disposition: Tasks 7–8 PROCEED** —
+> secondaries stay advisory-fail territory exactly as §3(a) projects. One
+> implementation note from the spike: wardrobe cross-bleed (multi_b put the
+> secondary's reference clothing on both people) — Task 7's prompt builder
+> carries a keep-own-clothing constraint for it.
 
 ### Task 7: Slot allocator + multi-char prompt builder (pure functions)
 
@@ -954,6 +967,7 @@ def test_multichar_prompt_addresses_each_slot():
     assert "@Image1 is a woman with auburn hair" in prompt
     assert "@Image4 is a man with a grey beard" in prompt
     assert "Do NOT blend or average" in prompt
+    assert "Do NOT transfer clothing" in prompt   # S1 wardrobe cross-bleed pin
     assert "CHANGE BACKGROUND: a rooftop cafe." in prompt
     assert prompt.count("PRESERVE IDENTITY") == 2
 ```
@@ -1021,6 +1035,8 @@ def _build_multichar_kontext_prompt(sections, char_blocks):
     parts.append(
         f"CONSTRAINTS: Do NOT alter facial features, hairstyle, glasses, or skin. "
         f"Do NOT generate a different person. Do NOT blend or average the faces. "
+        f"Do NOT transfer clothing between people — each person keeps their own "
+        f"outfit. "
         f"Each output face MUST match its own reference ({tokens}) exactly."
     )
     parts.append(

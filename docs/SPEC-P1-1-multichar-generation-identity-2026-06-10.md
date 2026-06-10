@@ -383,6 +383,47 @@ scope.
   (a) reduces to interleaved-refs-without-addressing; re-scope slice 1 to router
   (d) + per-char validation only, and record the finding. Also read the actual
   multi-call price off the FAL dashboard while there.
+
+  **S1 RESULT (run 2026-06-10, user-approved; AC5 record):** pair = Aria
+  canonical (cfd3f0967eb3, @Image1/left) + 정연 canonical (bf1a4e9e8a9a,
+  @Image2/right); scene "a quiet rooftop cafe at dusk", medium two-shot;
+  outputs + crops in `logs/s1_kontext_multichar/`.
+  - *Pass 1 (full-frame, scripts/_test_kontext_multi_char.py --live):*
+    baseline a=0.549 b=0.488 · control a=0.646 b=0.522 · multi a/b/c
+    secondary spread [0.574, 0.555, 0.505], |a-base| ≤ 0.031, blend=False ×3
+    → **NO-GO 0/3** (go bar = control+0.10 = 0.622).
+  - *Pass 2 (per-face half-crops, scripts/_s1_rescore_crops.py — required
+    correction: §6 says score every FACE; pass 1 scored every IMAGE, validator
+    face-pick undetermined):* baseline L/a=0.680 R/b=0.610 · control
+    L/a=0.671 R/b=0.483 · multi R/b = [0.518, 0.550, 0.545], blend=False ×3
+    → **NO-GO 0/3** (bar 0.583).
+  - *Measurement-validity analysis — the criteria, not the mechanism, failed:*
+    (i) control-anchor saturation: the descriptive anchors (hair color/style,
+    ethnicity, lips) let TEXT-ONLY generation score 0.671 vs Aria's ref —
+    within 0.01 of the baseline that HAD her photo — so "control+0.10" was
+    unreachable for metric, not mechanism, reasons; (ii) embedding domain-gap:
+    the baseline (no @Image2 at all) scored HIGHER vs 정연's ref (0.610) than
+    every conditioned arm (≤0.550), and cross-terms exceed diagonals
+    (right-side faces ~0.67 vs ARIA's ref in all images) — at dim two-shot
+    face scale GhostFaceNet tracks image statistics, not identity.
+  - *Qualitative result on the blocking question (visual inspection, all five
+    outputs):* @Image2 is HONORED — all three multi arms render two distinct,
+    recognizable identities (정연's bangs/red lips/earring; Aria's hair/face);
+    **zero blending** (consistent with blend=False ×3 and |a-base| ≤ 0.035).
+    NEW failure mode found: **wardrobe cross-bleed** — multi_b put 정연's
+    reference cheongsam on BOTH characters; the Task-7 prompt builder should
+    add a keep-own-clothing constraint line (recorded as an implementation
+    note, not a gate).
+  - *Disposition (director, surfaced to the user-principal in-session):* the
+    no-go path's premise ("@Image2 ignored → reduces to
+    interleaved-refs-without-addressing") is CONTRADICTED by the evidence;
+    blend signal — the explicit no-go trigger — is absent. **Proceed with
+    (d)+(a) including Tasks 7–8**, with secondaries remaining advisory-fail
+    territory exactly as §3(a) already projects, and the quantitative
+    per-char lift recorded as UNMEASURED at two-shot scale (the same limit
+    applies to the production per-char validator — identity_per_char stays
+    advisory, never gating, which §3(d) already specifies). Per-input-image
+    FAL pricing: still unverified — needs a dashboard read (no CLI access).
 - **S2 — dual-PuLID VRAM + composition** (gates (c) Pass B; pod). Measure peak
   VRAM of the current single-char N=8+SUPIR run first (never measured), then inject
   node 103 at N=1 against the post-prune graph (§3(c)). **Go:** no OOM at N=4+ and
