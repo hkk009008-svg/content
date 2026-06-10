@@ -848,7 +848,7 @@ quality_max.
 ([cinema/shots/controller.py:279](cinema/shots/controller.py:279)) inspects registered characters and writes
 the `identity_strategy` promise into take metadata
 ([cinema/shots/controller.py:610](cinema/shots/controller.py:610)); `secondary_chars` is populated in
-`ContinuityEngine.get_continuity_config` ([domain/continuity_engine.py:585](domain/continuity_engine.py:585))
+`ContinuityEngine.enhance_shot_prompt` ([domain/continuity_engine.py:585](domain/continuity_engine.py:585))
 for in-frame characters beyond the primary that have a registered reference
 (unregistered chars are skipped, mirroring validation). When `secondary_char_refs` is
 non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:534](phase_c_assembly.py:534)) takes the multi-char
