@@ -1,17 +1,23 @@
-# Per HANDOFF Session 1 (P0-2). Three independent jobs run in parallel; all
-# must pass for the workflow to succeed. Mirrors the three local checks
+# Landed per the 2026-05-24 handoff. Three independent jobs run in parallel;
+# all must pass for the workflow to succeed. Mirrors the three local checks
 # documented in ARCHITECTURE.md §15 + OPERATIONS.md §7. Concurrency cancels
 # older runs on the same branch (saves minutes on rapid pushes).
 #
-# Scope intentionally NOT included (per Session 1 brief):
+# 2026-06-10 (STRATEGIC_REVIEW-2026-06-10 P0-1 / NF-1): the pytest job was
+# 0-for-289 since landing — bare `pytest` cannot import root modules
+# (cost_tracker, …) at collection time. The fix lives in pyproject.toml
+# ([tool.pytest.ini_options] pythonpath = ["."]), not in this file. Action
+# majors bumped to Node-24 runtimes ahead of GitHub's 2026-06-16 forcing.
+#
+# Scope intentionally NOT included (per the 2026-05-24 Session 1 brief):
 #   - Linting (ruff, eslint)
 #   - Deployment workflows
 #   - Auto-publish, releases, changelogs
 #   - Code coverage reporting
 #   - Matrix builds
 #
-# Baseline as of 2026-05-24:
-#   - pytest tests/unit/: 478 pass / 3 skip / 0 fail
+# Baseline as of 2026-06-10 (bare pytest — the CI invocation shape):
+#   - pytest tests/unit/: 1974 passed, 2 warnings, 10 subtests passed
 #   - tsc --noEmit: silent exit
 #   - §15 smoke: OK
 #
@@ -41,9 +47,9 @@ jobs:
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
           cache: 'pip'
@@ -52,7 +58,7 @@ jobs:
       # validator construction. Cache them across runs so first run is slow
       # but subsequent runs are fast.
       - name: Cache DeepFace weights
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.deepface
           key: deepface-weights-v1
@@ -73,15 +79,15 @@ jobs:
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
           cache: 'pip'
 
       - name: Cache DeepFace weights
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.deepface
           key: deepface-weights-v1
@@ -91,8 +97,10 @@ jobs:
 
       - name: Run pytest tests/unit/
         # tests/integration/ requires real cloud credentials and must NOT run
-        # in CI. Unit suite baseline 2026-05-24: 478 pass / 3 skip / 0 fail.
+        # in CI. Unit suite baseline 2026-06-10: 1974 passed (10 subtests).
         # If your PR changes this count, the diff or the brief explains why.
+        # Root-module importability comes from [tool.pytest.ini_options]
+        # pythonpath in pyproject.toml — bare `pytest` here relies on it.
         run: pytest tests/unit/ --tb=short -q
 
   tsc:
@@ -100,9 +108,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'

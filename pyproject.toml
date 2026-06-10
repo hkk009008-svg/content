@@ -18,6 +18,15 @@ readme = "README.md"
 #   .venv/bin/pip install --upgrade pip
 #   .venv/bin/pip install -r requirements.txt
 
+[tool.pytest.ini_options]
+# Root modules (cost_tracker, workflow_selector, …) are imported bare by the
+# test suite. `python -m pytest` puts CWD on sys.path implicitly; bare
+# `pytest` (what CI runs) does NOT — without this line collection dies with
+# ModuleNotFoundError before a single test runs (NF-1 in
+# docs/STRATEGIC_REVIEW-2026-06-10.md: 0 green CI runs in 289).
+# tests/conftest.py's autouse sys.path fixture runs after collection — too late.
+pythonpath = ["."]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
