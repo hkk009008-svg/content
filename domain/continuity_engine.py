@@ -560,6 +560,7 @@ class ContinuityEngine:
             "pulid_weight_override": pulid_weight_override,
             "negative_constraints": shot.get("negative_constraints", ""),
             "approved_anchor_image": anchor_image,
+            "secondary_chars": [],
         }
 
         # Get PuLID reference + multi-angle refs + identity anchor for primary character
@@ -573,6 +574,20 @@ class ContinuityEngine:
             continuity_config["identity_anchor"] = (
                 get_identity_anchor(self.project, primary_char)
             )
+
+        # P1-1: per-character identity assets for chars beyond the primary.
+        # Same existence guard as validation (validate_shot skips unregistered
+        # chars at :606-610) — generation mirrors the skip, never fails on it.
+        for cid in chars_in_frame[1:]:
+            ref = self.character_tracker.get_reference_for_pulid(cid)
+            if not ref:
+                continue
+            continuity_config["secondary_chars"].append({
+                "char_id": cid,
+                "reference": ref,
+                "multi_angle_refs": self.character_tracker.get_multi_angle_refs(cid),
+                "identity_anchor": get_identity_anchor(self.project, cid),
+            })
 
         # Assemble final prompt
         enhanced["prompt"] = ". ".join(filter(None, prompt_parts))

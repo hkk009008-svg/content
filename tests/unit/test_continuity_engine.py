@@ -192,3 +192,96 @@ class TestRecordAndReset:
         mgr = TemporalConsistencyManager()
         mgr.last_generated_image = img_path
         assert mgr.get_init_image() == img_path
+
+
+# ---------------------------------------------------------------------------
+# ContinuityEngine.enhance_shot_prompt — secondary_chars population (P1-1)
+# ---------------------------------------------------------------------------
+
+
+import unittest.mock as mock
+from continuity_engine import ContinuityEngine
+
+
+def _make_engine(char_a_ref="/ref/char_a.jpg", char_b_ref="/ref/char_b.jpg"):
+    """
+    Build a ContinuityEngine with stubbed file-system dependencies.
+
+    Patches:
+    - get_project_dir (called in __init__ for cache_dir)
+    - get_character_embedding (called in CharacterContinuityTracker.__init__)
+    - identity.make_validator (avoids DeepFace/disk I/O)
+
+    After construction, character_tracker methods are replaced with Mocks so
+    tests control get_reference_for_pulid / get_multi_angle_refs return values.
+    """
+    project = {
+        "id": "proj_test",
+        "characters": [
+            {"id": "char_a", "name": "Alice"},
+            {"id": "char_b", "name": "Bob"},
+        ],
+        "global_settings": {"adaptive_pulid": False},
+    }
+
+    with (
+        mock.patch("domain.project_manager.get_project_dir", return_value="/tmp/proj_test"),
+        mock.patch("domain.continuity_engine.get_character_embedding", return_value=None),
+        mock.patch("identity.make_validator", return_value=mock.MagicMock()),
+    ):
+        engine = ContinuityEngine(project)
+
+    # Replace tracker methods with mocks; callers in enhance_shot_prompt
+    # go through self.character_tracker.* so patching at this level is
+    # the same level the plan specifies.
+    def _ref_for_pulid(cid):
+        if cid == "char_a":
+            return char_a_ref
+        if cid == "char_b":
+            return char_b_ref
+        return None
+
+    engine.character_tracker.get_reference_for_pulid = mock.MagicMock(side_effect=_ref_for_pulid)
+    engine.character_tracker.get_multi_angle_refs = mock.MagicMock(
+        side_effect=lambda cid: [f"/angles/{cid}_front.jpg"]
+    )
+    # get_primary_character is not patched — real logic (returns chars[0])
+    return engine
+
+
+@pytest.fixture
+def engine_two_chars():
+    return _make_engine(char_a_ref="/ref/char_a.jpg", char_b_ref="/ref/char_b.jpg")
+
+
+@pytest.fixture
+def engine_two_chars_b_unregistered():
+    # char_b has no reference (unregistered)
+    return _make_engine(char_a_ref="/ref/char_a.jpg", char_b_ref=None)
+
+
+class TestContinuityEngineSecondaryChars:
+    def test_secondary_chars_populated_for_registered_second_char(self, engine_two_chars):
+        """chars_in_frame[1:] with a registered reference appear in secondary_chars."""
+        enhanced = engine_two_chars.enhance_shot_prompt(
+            {"characters_in_frame": ["char_a", "char_b"], "prompt": "p"},
+            {"id": "s1", "shots": []}, None, 0,
+        )
+        sec = enhanced["continuity_config"]["secondary_chars"]
+        assert [c["char_id"] for c in sec] == ["char_b"]
+        assert sec[0]["reference"]            # the registered ref path
+        assert "identity_anchor" in sec[0] and "multi_angle_refs" in sec[0]
+
+    def test_secondary_chars_skips_unregistered(self, engine_two_chars_b_unregistered):
+        enhanced = engine_two_chars_b_unregistered.enhance_shot_prompt(
+            {"characters_in_frame": ["char_a", "char_b"], "prompt": "p"},
+            {"id": "s1", "shots": []}, None, 0,
+        )
+        assert enhanced["continuity_config"]["secondary_chars"] == []
+
+    def test_secondary_chars_empty_for_single_char(self, engine_two_chars):
+        enhanced = engine_two_chars.enhance_shot_prompt(
+            {"characters_in_frame": ["char_a"], "prompt": "p"},
+            {"id": "s1", "shots": []}, None, 0,
+        )
+        assert enhanced["continuity_config"]["secondary_chars"] == []
