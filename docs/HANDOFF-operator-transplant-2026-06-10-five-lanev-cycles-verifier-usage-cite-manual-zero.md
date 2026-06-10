@@ -125,3 +125,45 @@ of origin/main `4d10ccd` (the first-green-CI push happened mid-session; runs
 27267540679 GREEN / 27267553553 RED both archived in `4d10ccd`'s body).
 Companion artifacts: my 4 mailbox reports (07:36:02Z / 07:58:56Z / 10:30:15Z /
 10:48:08Z) + the director's 2 events (07:55:25Z / 10:56:37Z).
+
+---
+
+## POST-WRAP ADDENDUM — the 828ece9 Lane V retry returned HALF-COMPLETE after my wrap commit
+
+The backend-docs lens FINISHED (5 findings, adjudication never triggered); the
+FE lens stalled again (6×180s — third stall of the evening). **The #1 pickup is
+therefore half-done; the successor re-runs ONLY the FE lens** (claims P1–P6 in
+the persisted script) and synthesizes with the verdicts below, then reports.
+
+**Backend-docs lens verdicts (verbatim-condensed; era = 828ece9 blobs):**
+- **Q1 — MOTION_HALTED branch (the eyeball-hardest): CONFIRMED, no functional
+  defect.** Keys on `PhaseResult.ok`, which is False ONLY for budget/cancel —
+  ordinary per-shot failures return ok=True, so no misfire class. if/else
+  exclusive, sole emission site, nothing keys on MOTION_DONE (backend or FE,
+  grep-verified). Post-halt flow correct (review-clips/checkpoint/REVIEW gate
+  still run; shots stay unapproved). MINOR blemish: comments at
+  `web/src/App.tsx:47` + `web/src/components/BudgetHaltBanner.tsx:6` still
+  describe the pre-fix "MOTION_DONE right after the halt" behavior — cheap fix
+  on next touch. The lens also wrote the unit-harness repro sketch the commit
+  lacked (monkeypatch MotionRenderPhase.run → PhaseResult(ok=False, budget
+  message); assert MOTION_HALTED@72 and no MOTION_DONE) — hand it to the
+  director for the P3-1 testability follow-up.
+- **Q2 — bridge hardening: CONFIRMED, with the RED claim empirically
+  reproduced** (parent blob + new tests in /tmp → 2 failed exactly as claimed).
+  Footnotes: RecursionError arm has no dedicated test; str-subclass __eq__
+  beyond the threat model.
+- **Q3 — docs: PARTIAL (the one finding to act on).** LOC mentions
+  stale-on-arrival: manual `:387`/`:1616` say web_services.py 114 LOC, actual
+  121 (the commit grew the file +7 AFTER setting the mention); manual `:1609`
+  says cinema_pipeline.py 1669, actual 1677. Plus **4 `_assemble_final` `:1315`
+  stragglers** my f85a6e8 didn't cover (manual ~:206 mermaid, ~:274 tree,
+  ~:371 table, ~:1720 table — bounds-only anchors, invisible to the def-drift
+  report; re-locate by content). No collision with f85a6e8 (disjoint hunks).
+  → fold all of these into the successor's first docs touch.
+- **Q4 — suite: CONFIRMED**, reconciliation EXACT (commit's 1869 + 130
+  check_doc_claims + 16 guard = 2015 at HEAD).
+- **Q5 — no unannounced scope**; GenerationPanel percent>=0 gating mechanism
+  verified against the producer's percent=-1 MOTION emit.
+
+Severity rollup so far: 0 CRITICAL / 0 IMPORTANT / Q1-comment + Q3-docs MINORs.
+Unless the FE lens finds otherwise, 828ece9 is trending ✅ SAFE.
