@@ -2029,3 +2029,172 @@ class TestUnboundAuditSink:
         assert drifts[0].symbol == "target_fn"
         assert drifts[0].target_line == 5
         assert drifts[0].suggested_line == 1
+
+
+# ---------------------------------------------------------------------------
+# Usage-cite acceptance — a line anchor may deliberately cite a USAGE site
+# (gate check, registry entry, composition line) rather than the bound
+# symbol's def. check_anchor accepts these instead of reporting drift toward
+# the def — which --fix would then corrupt. Empirical basis: 14 hand-verified
+# false def_drifts in docs/PROGRAM-MANUAL.md at 2d58fca (e.g. manual:328
+# citing the def of _assemble_approved_takes_core exactly, mis-bound to
+# `CinemaPipeline`; manual:1199 citing the EXPERIMENTS_DB_PATH env read,
+# mis-bound to `CostTracker`).
+# ---------------------------------------------------------------------------
+
+class TestUsageCiteAcceptance:
+    def _mod(self, tmp_path):
+        return _commit_py(
+            tmp_path, "mod.py",
+            "def worker_fn(arg=None):\n"          # 1
+            "    return arg\n"                    # 2
+            "\n"                                  # 3
+            "CFG = {\n"                           # 4
+            '    "cfg_key": 1,\n'                 # 5
+            "}\n"                                 # 6
+            "\n"                                  # 7
+            "def loop():\n"                       # 8
+            "    worker_fn()\n"                   # 9
+            "    return None\n",                  # 10
+        )
+
+    def test_usage_cite_token_on_cited_line_accepted(self, tmp_path):
+        # `worker_fn` binds (def :1); the anchor cites the CALL at :9 — a
+        # deliberate usage cite. Must NOT drift toward :1.
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- `worker_fn` is invoked by the loop (`mod.py:9`)\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"usage cite must be accepted, got: {drifts}"
+
+    def test_usage_cite_other_token_occurrence_accepted(self, tmp_path):
+        # Bound symbol is `worker_fn` (the only token with a def), but the
+        # anchor cites the registry row at :5 — accepted because the doc
+        # line's OTHER token `cfg_key` occurs on the cited line.
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- `worker_fn` reads `cfg_key` from the registry (`mod.py:5`)\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"other-token usage cite must be accepted, got: {drifts}"
+
+    def test_usage_cite_range_accepted(self, tmp_path):
+        # Range cite: no def line inside :8-10, but the token occurs within
+        # the range (call at :9).
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- `worker_fn` call window (`mod.py:8-10`)\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"range usage cite must be accepted, got: {drifts}"
+
+    def test_def_extent_acceptance(self, tmp_path):
+        # The cited line mentions NO doc-line token but sits inside the bound
+        # symbol's def extent (class body) — accepted (extent rule).
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "mod2.py",
+            "class Widget:\n"                     # 1
+            "    def check(self):\n"              # 2
+            "        val = 1\n"                   # 3
+            "        return val\n"                # 4
+            "\n"                                  # 5
+            "def other():\n"                      # 6
+            "    pass\n",                         # 7
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- `Widget` validates input (`mod2.py:4`)\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"def-extent usage cite must be accepted, got: {drifts}"
+
+    def test_real_def_drift_still_flagged(self, tmp_path):
+        # A genuinely stale def-cite: the cited line mentions no doc-line
+        # token and is outside the bound def's extent — drift still fires.
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- `worker_fn` def (`mod.py:10`)\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"stale def-cite must still drift, got: {drifts}"
+        assert drifts[0].kind == "def_drift"
+        assert drifts[0].symbol == "worker_fn"
+        assert drifts[0].suggested_line == 1
+
+    def test_usage_cite_recorded_in_sink(self, tmp_path):
+        # Accepted usage cites surface in the audit sink (exit-neutral
+        # visibility, like bounds-only anchors), flagged usage_cite=True.
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- `worker_fn` is invoked by the loop (`mod.py:9`)\n",
+        )
+        sink: list = []
+        drifts = check_line_anchors([str(md)], tmp_path, unbound_sink=sink)
+        assert drifts == []
+        assert len(sink) == 1, f"accepted usage cite must be audited, got: {sink}"
+        assert sink[0]["usage_cite"] is True
+        assert sink[0]["target_line"] == 9
+        assert sink[0]["enclosing"] == "loop"
+
+    def test_path_like_tokens_do_not_trigger_acceptance(self, tmp_path):
+        # The anchor's own `mod.py:N` backtick token must not feed the
+        # occurrence check (its `mod` fragment could spuriously match).
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "mod3.py",
+            "def real_fn():\n"                    # 1
+            "    pass\n"                          # 2
+            "import mod\n"                        # 3  ('mod' occurs here)
+            "# filler\n# filler\n",               # 4-5
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- `real_fn` def (`mod3.py:3`)\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"path-token must not rescue a stale cite, got: {drifts}"
+        assert drifts[0].suggested_line == 1
+
+    def test_def_extent_survives_dedented_template_string(self, tmp_path):
+        # LLM prompt templates inside a class body contain zero-indent text;
+        # the extent scan must not read those as a dedent (real case:
+        # llm/chief_director.py class template truncating the extent at the
+        # template body, blocking rule-B acceptance of a method-area cite).
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "mod4.py",
+            "class Engine:\n"                     # 1
+            "    TEMPLATE = \"\"\"\n"             # 2
+            "You are an engine.\n"                # 3  (zero indent, in-string)
+            "Rules apply.\n"                      # 4
+            "\"\"\"\n"                            # 5
+            "    def evaluate(self):\n"           # 6
+            "        return 1\n"                  # 7
+            "\n"                                  # 8
+            "TOP = 1\n",                          # 9
+        )
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- `Engine` evaluates input (`mod4.py:7`)\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"template dedent must not truncate extent, got: {drifts}"
+        # Control: a cite past the class's real end still drifts.
+        md2 = _write_md(
+            tmp_path, "doc2.md",
+            "- `Engine` evaluates input (`mod4.py:9`)\n",
+        )
+        drifts2 = check_line_anchors([str(md2)], tmp_path)
+        assert len(drifts2) == 1, f"cite past real extent must drift, got: {drifts2}"

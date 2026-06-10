@@ -170,6 +170,95 @@ def _enclosing_def(source_lines: list[str], line_num: int) -> Optional[str]:
     return method[1] if method else None
 
 
+def _def_extent_end(source_lines: list[str], def_line: int) -> int:
+    """Last 1-based line of the block opened at *def_line* (indent-scan;
+    blank lines never close a block). Triple-quoted spans are skipped —
+    docstrings/LLM prompt templates routinely contain zero-indent text
+    that would otherwise read as a dedent and truncate the extent."""
+    base = source_lines[def_line - 1]
+    base_indent = len(base) - len(base.lstrip())
+    end = def_line
+    in_string = False
+    for i in range(def_line + 1, len(source_lines) + 1):
+        text = source_lines[i - 1]
+        quotes = text.count('"""') + text.count("'''")
+        if in_string:
+            end = i
+            if quotes % 2 == 1:
+                in_string = False
+            continue
+        if quotes % 2 == 1:
+            in_string = True
+            end = i
+            continue
+        if not text.strip():
+            continue
+        if len(text) - len(text.lstrip()) <= base_indent:
+            break
+        end = i
+    return end
+
+
+def _usage_cite_acceptance(
+    doc_line_text: str,
+    source_lines: list[str],
+    target_line: int,
+    range_a: Optional[int],
+    range_b: Optional[int],
+    bound_symbol: Optional[str],
+) -> bool:
+    """Accept a non-def-line anchor as a deliberate usage-site citation.
+
+    Rule A: any backticked identifier token on the doc line occurs
+    word-bounded on the cited line (or any line of the cited range).
+    Rule B: the cited line lies within the bound symbol's def extent.
+
+    Why: the binder treats every anchor as a def-citation, but doc anchors
+    routinely cite usage sites — a gate check, a registry entry, a
+    composition line. Reporting those as def_drift makes --fix actively
+    corrupt them (14 hand-verified cases in docs/PROGRAM-MANUAL.md at
+    2d58fca). Known accepted residual: a truly-drifted def-cite whose new
+    cited line happens to CALL the symbol passes silently — far cheaper
+    than --fix dragging correct usage cites to the def.
+    """
+    tokens: set[str] = set()
+    for t in _BACKTICK_RE.finditer(doc_line_text):
+        text = t.group(1)
+        if ':' in text or '/' in text or text.endswith('.py'):
+            continue  # path/anchor tokens — their fragments match spuriously
+        m = _IDENT_RE.match(text)
+        if m:
+            tokens.add(m.group(1))
+    scan = (
+        range(range_a, range_b + 1)
+        if range_a is not None and range_b is not None
+        else (target_line,)
+    )
+    _strings_re = re.compile(r"'[^']*'|\"[^\"]*\"")
+    for ln in scan:
+        if not (1 <= ln <= len(source_lines)):
+            continue
+        no_comment = source_lines[ln - 1].split('#', 1)[0]
+        code_only = _strings_re.sub('', no_comment)
+        for tok in tokens:
+            # The BOUND symbol must occur as CODE — a comment/string mention
+            # is the classic false-pass (TestProseMentionNoFalsePass). Other
+            # tokens corroborate from strings too (dict keys, env-var names)
+            # but never from comments.
+            haystack = code_only if tok == bound_symbol else no_comment
+            if re.search(r'(?<!\w)' + re.escape(tok) + r'(?!\w)', haystack):
+                return True
+    if bound_symbol:
+        # Extent rule only when the binding is unambiguous (exactly one def);
+        # duplicate defs make the binding itself unreliable.
+        def_lines = _def_lines(source_lines, bound_symbol)
+        if len(def_lines) == 1:
+            d = def_lines[0]
+            if d <= target_line <= _def_extent_end(source_lines, d):
+                return True
+    return False
+
+
 def _fallback_symbol(
     line_text: str,
     anchor_span: "tuple[int, int]",
@@ -561,6 +650,21 @@ def check_anchor(
                     ok = True
 
             if not ok:
+                if _usage_cite_acceptance(
+                    doc_line_text, source_lines, target_line,
+                    range_a, range_b, symbol,
+                ):
+                    if unbound_sink is not None:
+                        unbound_sink.append({
+                            "doc_path": doc_path,
+                            "doc_line": doc_line_num,
+                            "target_file": target_file_rel,
+                            "target_line": target_line,
+                            "symbol": symbol,
+                            "enclosing": _enclosing_def(source_lines, target_line),
+                            "usage_cite": True,
+                        })
+                    return None
                 fixable = len(def_line_list) == 1
                 suggested = def_line_list[0] if fixable else None
                 return Drift(
@@ -1560,7 +1664,10 @@ def main(argv=None) -> int:
         print(f"UNBOUND-ANCHOR AUDIT  ({len(sink)} bounds-only anchor(s) "
               f"across {len(docs)} doc(s)) — advisory, exit-neutral")
         for e in sink:
-            sym = f" (bound `{e['symbol']}`: 0 defs)" if e["symbol"] else ""
+            if e.get("usage_cite"):
+                sym = f" (usage-cite of `{e['symbol']}`)"
+            else:
+                sym = f" (bound `{e['symbol']}`: 0 defs)" if e["symbol"] else ""
             enc = e["enclosing"] or "<module level>"
             print(f"  {e['doc_path']}:{e['doc_line']}  →  "
                   f"{e['target_file']}:{e['target_line']}  enclosing: {enc}{sym}")
