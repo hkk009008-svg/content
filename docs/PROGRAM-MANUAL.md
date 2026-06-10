@@ -688,7 +688,7 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 | Single SSE consumer | `web_server.py:1577` | A second `/stream` tab drains the shared queue; both miss events. |
 | `_running_cores` not invalidated on settings edit | `web_server.py:109` | Out-of-band `settings.json` edits need a server restart. |
 | Re-assemble must call `_assemble_approved_takes_core` directly | `web_server.py:2371`, `cinema_pipeline.py:783` | Calling the full `assemble_approved_takes()` from a Flask thread during screening deadlocks (the approve signal targets the original pipeline). |
-| Single-mode / zero-caller features | `face_validator_gate.py:227`, `cinema/auto_approve.py:736` | `should_halt` dispatches `composite_only` and `conjunctive` (wired via the `max_halt_rule` knob — `quality_max.py:134`/`:763`/`:892`/`:959`); only `budget_only` is deferred, falling back to composite-only behavior (`face_validator_gate.py:302`); `summarize_audit` is defined but no web endpoint calls it. (Two former entries here are now resolved: `validate_lora_quality` is a real ArcFace oracle at `prep/lora_quality.py:172` — see §3.12 — and the hires-fix pass-2 denoise IS now injected, at `quality_max.py:620`.) |
+| Single-mode / zero-caller features | `face_validator_gate.py:227`, `cinema/auto_approve.py:736` | `should_halt` dispatches `composite_only` and `conjunctive` (wired via the `max_halt_rule` knob — `quality_max.py:134`/`:763`/`:892`/`:959`); only `budget_only` is deferred, falling back to composite-only behavior (`face_validator_gate.py:302`); `summarize_audit` is defined but no web endpoint calls it. (Two former entries here are now resolved: `validate_lora_quality` is a real ArcFace oracle at `prep/lora_quality.py:172` — see §3.12 — and the hires-fix pass-2 denoise IS now injected, at `quality_max.py:754`.) |
 | `reporter.py` + dialogue helpers removed | — | The legacy `reporter.py` diagnostic orphan has been **deleted** outright; the dead dialogue helpers `format_dialogue_for_voiceover` / `dialogue_to_narration_text` were also removed (audio uses raw `generate_dialogue` output). |
 
 ---
@@ -1095,7 +1095,7 @@ The single biggest quality switch is `quality_tier` in `global_settings`. It is 
 
 **How to select it:** `PUT /api/projects/<pid>` with `{"global_settings": {"quality_tier": "max"}}`. Max tier requires `pulid_max.json` present on the pod and the pod running; on any failure or `None` return it transparently falls through to the production path (`phase_c_assembly.py:117`–143), so you never get a hard failure from choosing max.
 
-> **Watch out:** `max_halt_rule` accepts `composite_only`/`conjunctive`/`budget_only` and `should_halt` dispatches `composite_only` and `conjunctive`; only `budget_only` is deferred, falling back to composite-only behavior (`face_validator_gate.py:227`). (The `hires_fix_denoise` knob, formerly unwired, **is** now injected into the pass-2 node at `quality_max.py:620`.) The post-passes (FaceDetailer/SUPIR) carry the bulk of the max-tier quality lift.
+> **Watch out:** `max_halt_rule` accepts `composite_only`/`conjunctive`/`budget_only` and `should_halt` dispatches `composite_only` and `conjunctive`; only `budget_only` is deferred, falling back to composite-only behavior (`face_validator_gate.py:227`). (The `hires_fix_denoise` knob, formerly unwired, **is** now injected into the pass-2 node at `quality_max.py:754`.) The post-passes (FaceDetailer/SUPIR) carry the bulk of the max-tier quality lift.
 
 ### 5.3 The Capability-Knobs Playbook
 
