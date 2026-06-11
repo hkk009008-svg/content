@@ -651,11 +651,11 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 | Name | file:line | What it does |
 |---|---|---|
-| `CostTracker` | `cost_tracker.py:138` | SQLite ledger (`data/experiments.db`) + budget gate. `spent_usd` is an in-process accumulator (NOT loaded from SQLite on init). |
-| `record_api_call` | `cost_tracker.py:293` | Primary API logging path. |
-| `log_llm` | `cost_tracker.py:231` | LLM logging path; auto-detects provider from `PRICING` (`:78`) and silently records `$0.00` for unknown models. |
-| `would_exceed` | `cost_tracker.py:353` | Pre-call budget predicate — wired as the pre-spend gate in `generate_motion_take` (`cinema/shots/controller.py:1384`) since 2026-06-10 (P0-2). |
-| `is_over_budget` | `cost_tracker.py:363` | Post-call budget gate, consulted in `cinema/shots/controller.py:1312`. |
+| `CostTracker` | `cost_tracker.py:141` | SQLite ledger (`data/experiments.db`) + budget gate. `spent_usd` is an in-process accumulator (NOT loaded from SQLite on init). |
+| `record_api_call` | `cost_tracker.py:296` | Primary API logging path. |
+| `log_llm` | `cost_tracker.py:234` | LLM logging path; auto-detects provider from `PRICING` (`:81`) and silently records `$0.00` for unknown models. |
+| `would_exceed` | `cost_tracker.py:356` | Pre-call budget predicate — wired as the pre-spend gate in `generate_motion_take` (`cinema/shots/controller.py:1384`) since 2026-06-10 (P0-2). |
+| `is_over_budget` | `cost_tracker.py:366` | Post-call budget gate, consulted in `cinema/shots/controller.py:1312`. |
 | `API_COST_USD` | `cost_tracker.py:45` | ±30% per-call USD estimates — operators must calibrate against invoices. |
 | `cleanup_project` | `cleanup.py:56` | Deletes intermediate `temp/` artifacts post-assembly (called at `cinema_pipeline.py:907`, non-fatal); `aggressive=True` also removes generated media. |
 | `CLEANUP_RULES` | `cleanup.py:34` | The delete-pattern ruleset `cleanup_project` applies. |
@@ -986,7 +986,7 @@ During the wait the operator: hits `POST .../assemble/screen` for the timeline m
 
 ---
 
-**Cross-cutting note on the cost gate (assembly-relevant):** the budget gate (`would_exceed` at `cost_tracker.py:353`, `is_over_budget` at `cost_tracker.py:363`) accounts for video/image generation only. Audio modules (`audio/dialogue.py`, `audio/music.py`, `audio/foley.py`) and performance modules each construct **isolated** `CostTracker()` instances that log to the same SQLite DB but do **not** add to the core tracker's `spent_usd` — so audio API spend runs uncapped, and `spent_usd` resets per process (it is not loaded from SQLite on init). Operators relying on `budget_limit_usd` for hard governance should know it bounds the generation stages, not the full run.
+**Cross-cutting note on the cost gate (assembly-relevant):** the budget gate (`would_exceed` at `cost_tracker.py:356`, `is_over_budget` at `cost_tracker.py:366`) accounts for video/image generation only. Audio modules (`audio/dialogue.py`, `audio/music.py`, `audio/foley.py`) and performance modules each construct **isolated** `CostTracker()` instances that log to the same SQLite DB but do **not** add to the core tracker's `spent_usd` — so audio API spend runs uncapped, and `spent_usd` resets per process (it is not loaded from SQLite on init). Operators relying on `budget_limit_usd` for hard governance should know it bounds the generation stages, not the full run.
 
 ---
 
@@ -1197,7 +1197,7 @@ Location consistency is automatic: each location carries a fixed `seed` and a ve
 **Budget governance** — three caveats that bite operators:
 1. `budget_limit_usd` only gates **video/image** generation in `ShotController` (the pre-spend `would_exceed` gate at `cinema/shots/controller.py:1505` + the post-call `is_over_budget` check at `:1352`); **audio API costs run uncapped** (audio modules create isolated `CostTracker()` instances that log to the DB but don't update the core tracker's `spent_usd`).
 2. `CostTracker.spent_usd` **resets to 0 each process** — it is not loaded from SQLite on init (`cost_tracker.py:166`). A server restart mid-project zeroes the in-memory budget counter.
-3. `EXPERIMENTS_DB_PATH` works **via the environment only**: since T7 (`4af8c05`) every `CostTracker` resolves it at construction (`db_path` arg > env var > `data/experiments.db`, `cost_tracker.py:157`), but `Settings.experiments_db_path` is never threaded into the constructor (`cinema/core.py:113`) — set the env var, not the settings field.
+3. `EXPERIMENTS_DB_PATH` works **via the environment only**: since T7 (`4af8c05`) every `CostTracker` resolves it at construction (`db_path` arg > env var > `data/experiments.db`, `cost_tracker.py:160`), but `Settings.experiments_db_path` is never threaded into the constructor (`cinema/core.py:113`) — set the env var, not the settings field.
 
 > **Cost-estimate note:** `API_REGISTRY` and `cost_tracker.API_COST_USD` disagree on a few engines (e.g. VEO_NATIVE: $0.40 in the registry, $0.30 in the cost table). Both are ±30% estimates — calibrate against real invoices before trusting either for budgeting.
 
@@ -1751,7 +1751,7 @@ The functions an engineer reaches for most, grouped by task. All `file:line` ref
 | `generate_ai_broll_max` | `quality_max.py:861` | N=8 adaptive best-of with prune/inject pipeline; returns `ImageGenResult(path, "QUALITY_MAX")` |
 | `generate_ai_video` | `phase_c_ffmpeg.py:54` | Central video routing + fault-tolerant cascade across 9+ engines |
 | `classify_shot_type` | `workflow_selector.py:416` | Returns `portrait\|medium\|wide\|action\|landscape` (note: **never** returns `close_up` — D-video-1) |
-| `get_workflow_params` / `apply_workflow_params` | `workflow_selector.py:455 / 501` | Per-shot-type template + ComfyUI node injection |
+| `get_workflow_params` / `apply_workflow_params` | `workflow_selector.py:455 / 506` | Per-shot-type template + ComfyUI node injection |
 | `get_adaptive_pulid_weight` | `workflow_selector.py:545` | Rolling-stats feedback → PuLID weight delta, clamped [0,1] |
 
 #### Identity / continuity / audio assembly
@@ -1806,7 +1806,7 @@ Set in `.env` (loaded once at import via `load_dotenv`, frozen into the `Setting
 | Variable | Default | Effect |
 |---|---|---|
 | `COMFYUI_SERVER_URL` | `http://127.0.0.1:8188` | RunPod ComfyUI pod address (production + max tier); absence forces FAL image fallback |
-| `EXPERIMENTS_DB_PATH` | `data/experiments.db` | Honored by every tracker via the `CostTracker` default-path env read (`cost_tracker.py:157`, T7 `4af8c05`); the `Settings.experiments_db_path` field itself is decorative (D-config-1 resolved) |
+| `EXPERIMENTS_DB_PATH` | `data/experiments.db` | Honored by every tracker via the `CostTracker` default-path env read (`cost_tracker.py:160`, T7 `4af8c05`); the `Settings.experiments_db_path` field itself is decorative (D-config-1 resolved) |
 | `PERFORMANCE_CACHE_DIR` | `data/cache/driving` | SHA256-keyed driving-video cache |
 | `MOTION_GATE_SAMPLES` | `8` | Frame-pair count for motion-fidelity scoring; read once at module load |
 | `WEB_BIND_HOST` | `127.0.0.1` | Flask bind; set `0.0.0.0` for LAN (then tighten CORS) |
@@ -2068,7 +2068,7 @@ An older audit listed `storyboard_mode` as having "zero callers" — that is **s
 
 | ID | Issue | Verified |
 |---|---|---|
-| D-config-1 | `EXPERIMENTS_DB_PATH` formerly unwired — RESOLVED by T7 (`4af8c05`) | `cinema/core.py:113` still builds `CostTracker(budget_usd=budget_usd)` with no `db_path`, but `cost_tracker.py:157` resolves `db_path or os.environ.get("EXPERIMENTS_DB_PATH", "data/experiments.db")` — env var honored by every tracker (explicit `db_path` arg wins) |
+| D-config-1 | `EXPERIMENTS_DB_PATH` formerly unwired — RESOLVED by T7 (`4af8c05`) | `cinema/core.py:113` still builds `CostTracker(budget_usd=budget_usd)` with no `db_path`, but `cost_tracker.py:160` resolves `db_path or os.environ.get("EXPERIMENTS_DB_PATH", "data/experiments.db")` — env var honored by every tracker (explicit `db_path` arg wins) |
 | D-config-2 | Audio/performance modules use isolated `CostTracker()` (no budget); only video/image is gated | confirmed across `audio/*`, `performance/*` |
 | D-config-3 | `spent_usd` is per-process, not loaded from SQLite; resets on restart | `cost_tracker.py:166` |
 
