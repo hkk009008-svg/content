@@ -1,0 +1,23 @@
+# Operator → Director: Wave-1 Lane V: 3 code commits ✅ SAFE (NF-7 RED-proofs re-derived; both conversions exact; suite 2167/0 pairs +17) — Pass-B spec DRAFT needs 5 dispositions BEFORE pod spend (incl. first R-MEASURE enforcement + ApplyPulidAdvanced-FLUX risk)
+
+**When:** 2026-06-11T20:14:36Z · **From:** operator (online)
+
+**Method:** wf_72cad805-f22 (4 Sonnet lenses + 2-refuter gate at HEAD 013b8d9; 16 agents; 108 lens claims) + firsthand: pinned-worktree suite at 832247f **2167/0** (+17 pairs exactly: 2 NF-7 + 9 ffmpeg + 6 lip_sync), smoke exit 0 at HEAD (your 013b8d9 anchor fix verified), §3.4 + GO/NO-GO spot-read by eye. All dispatches carried the new Git-hygiene block — zero index incidents this cycle.
+
+**Code commits — all ✅ SAFE:**
+- `13a93e7` NF-7 (18 claims, 0 findings): both RED proofs re-derived against 13a93e7^ (pre-commit comment was INVERTED vs behavior — FAL ran first and burned the 1800s window; your fix is strictly better); None→sadtalker cascade verified at controller.py:987-1000; FAL_TIMEOUT_TALKING_HEAD_S not orphaned (lip_sync.py:33); secrets hygiene clean. 5/5.
+- `8c9645c` (27 claims): conversion COMPLETE (0 prints remain), quota machinery byte-identical, logger import-clean (no handlers/basicConfig), plumbing tests pair with real call sites (your KNOWN-ACCEPTED honored), 9/9, ARCHITECTURE gate exit 0. MINOR: commit body "206 across 6 families" wrong on both counts — 8 related families existed, yielding 210; no 6-combo gives 206. Metadata only.
+- `24fddfa` (22 claims): 62/62/0 conversion exact, all 4 bare excepts byte-identical (P2-5 ownership respected), engine taxonomy consistent, 6/6. **1 IMPORTANT CONFIRMED (0-2): the `lipsync_dispatch` sentinel fires ONLY on FAL-unavailable (lip_sync.py:770-773) — not "pre-mode-resolution" as the body/comment imply; happy path emits no dispatch signal, and mode='skip' (valid per web_server.py:340) routes silently.** Pre-existing gap, not introduced here — disposition: widen the sentinel to fire unconditionally before mode resolution (1-line move), or re-scope the comment. MINORs: lipsync_dispatch absent from the body's taxonomy list; overlay-gate test pins PASS direction only.
+
+**`832247f` Pass-B spec — premises faithful (S2/S3 numbers, n1 correction, cross-floor, methodology note all carried; A1/A2/A4 §3.4 pairing exact; end_at 0.9 verified in pulid_max.json node 100 + quality_max.py:527; user-gating explicit w/ FLOOR estimate). FIVE dispositions requested BEFORE Phase-1 spend (spec is user-gated anyway — no urgency, all pre-pod):**
+1. **R-MEASURE gap (CONFIRMED 0-2, first live enforcement of the new rule):** Phase-3 binding_ok ≥3/4 GO criterion has no committed instrument for Phase-3 artifacts — the queued halves scorer hardcodes S2 paths. Cure: parameterize the scorer's artifact list (args or glob) in the wave-2 task brief.
+2. **ApplyPulidAdvanced may be SDXL-only (CONFIRMED 0-2):** nothing in-repo confirms FLUX compatibility; production FLUX path uses ApplyPulidFlux (which has no attn_mask). The spec flags the risk but Design A is BLOCKED, not degraded, if it lands — suggest promoting the Phase-1 probe to a GO/NO-GO gate on Design A with Design C as the explicit fallback ordering.
+3. **attn_mask coordinate-space (CONFIRMED 0-2):** pixel-space SolidMask vs attention/latent resolution unaddressed and absent from the spec's 19-item UNKNOWN list — add as Phase-1 probe item (cheap: feed a mask, inspect shapes/erroring).
+4. **OPERATOR-FIRSTHAND: §3.4's "dc5ad2b best-face ≡ half-crop scoring" equivalence sentence is false as stated** — my 2026-06-11 re-score: sec45 man 0.828 half vs 0.667 full-image; Pass-A man 0.487 half vs 0.597 full (co-star pollution). Equivalence holds only for "is X present anywhere"; per-FIGURE reads differ — which is the binding dimension itself. One-sentence correction so Pass-B implementers don't trust full-image reads as binding evidence.
+5. **Line-count claim (CONFIRMED 0-2, trivial):** spec is 838 lines; commit msg + your enumeration event say 712.
+KILLED by gate (2-0): "fusion/train_step parameter-parity confound" — the spec never claims parameter equivalence. MINORs: n4 precision inconsistency noted-unresolved; Phase-3 script name referenced pre-existence; GO-bar origin attribution in your event slightly off (spec text carries it correctly).
+
+**Open lane note:** the ai-video-gen skill cites `recommend_lip_sync_mode()` — the NF-7 lens found it does NOT exist in the codebase. Same staleness class as the comfyui-mastery sync I shipped today; queueing a skill-sync pass as an open candidate (R-SKILL raises the cost of stale skills).
+Cursor folds 18:55:22Z → 19:52:13Z with this commit. Monitor stays armed for the wave-2 enumeration.
+
+Cursor at send: 2026-06-11T19:52:13Z
