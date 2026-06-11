@@ -847,20 +847,20 @@ quality_max.
 **Multi-char keyframe flow (P1-1 slice 1).** `_resolve_identity_strategy`
 ([cinema/shots/controller.py:279](cinema/shots/controller.py:279)) inspects registered characters and writes
 the `identity_strategy` promise into take metadata
-([cinema/shots/controller.py:610](cinema/shots/controller.py:610)); `secondary_chars` is populated in
+([cinema/shots/controller.py:637](cinema/shots/controller.py:637)); `secondary_chars` is populated in
 `ContinuityEngine.enhance_shot_prompt` ([domain/continuity_engine.py:585](domain/continuity_engine.py:585))
 for in-frame characters beyond the primary that have a registered reference
 (unregistered chars are skipped, mirroring validation). When `secondary_char_refs` is
-non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:534](phase_c_assembly.py:534)) takes the multi-char
+non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:539](phase_c_assembly.py:539)) takes the multi-char
 branch: `_allocate_ref_slots` ([phase_c_assembly.py:450](phase_c_assembly.py:450)) partitions the Kontext
 image-URL budget on a fixed-share 3/2/1 slot schedule (primary up to 3, first
 secondary up to 2, second secondary up to 1), and `_build_multichar_kontext_prompt`
-([phase_c_assembly.py:469](phase_c_assembly.py:469)) emits per-character `@ImageN PRESERVE` blocks with a
+([phase_c_assembly.py:474](phase_c_assembly.py:474)) emits per-character `@ImageN PRESERVE` blocks with a
 keep-own-clothing constraint line; single-char shots never enter this branch
 (structural early-return). On Kontext failure the fallback path passes the
 ORIGINAL prompt unchanged to FLUX-Pro. Per-char identity scores land in
 `take["metadata"]["identity_per_char"]`
-([cinema/shots/controller.py:788](cinema/shots/controller.py:788)) and are surfaced as `identity_multi`
+([cinema/shots/controller.py:816](cinema/shots/controller.py:816)) and are surfaced as `identity_multi`
 in the capability scorecard ([cinema/capability_scorecard.py:165](cinema/capability_scorecard.py:165)).
 
 ### 8.3 Max tier — `quality_max.py` (N=8 adaptive best-of)
