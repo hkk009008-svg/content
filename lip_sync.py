@@ -22,6 +22,7 @@ MODE 2: GENERATION (Omnihuman v1.5) — For dedicated dialogue shots
 FALLBACK CHAIN: MuseTalk → Sync Lipsync v2 → LatentSync → Omnihuman (last resort)
 """
 
+import logging
 import os
 import subprocess
 import urllib.request  # retained for legacy code paths; new downloads use performance._net.safe_download
@@ -30,6 +31,8 @@ from typing import Optional, Dict, List
 from dataclasses import dataclass
 from config.settings import settings as ENV_SETTINGS
 from cinema.fal_limits import FAL_TIMEOUT_TALKING_HEAD_S, FAL_TIMEOUT_VIDEO_S
+
+logger = logging.getLogger(__name__)
 
 try:
     import fal_client
@@ -194,16 +197,16 @@ def lipsync_overlay(
         Key: "cascade_metadata" → {engine, score?, threshold?, fallback, attempts}
     """
     if not FAL_AVAILABLE or not ENV_SETTINGS.fal_key:
-        print("   [LIPSYNC-OVERLAY] FAL not available")
+        logger.warning("FAL not available — lipsync overlay skipped", extra={"engine": "overlay"})
         return None
 
     # Check prerequisites
     prereqs = check_overlay_prerequisites(video_path, audio_path)
     for w in prereqs.warnings:
-        print(f"   [LIPSYNC-OVERLAY] {w}")
+        logger.warning(w, extra={"engine": "overlay"})
     if not prereqs.passed:
         for b in prereqs.blockers:
-            print(f"   [LIPSYNC-OVERLAY] {b}")
+            logger.error(b, extra={"engine": "overlay"})
         return None
 
     video_url = fal_client.upload_file(video_path)
@@ -229,7 +232,10 @@ def lipsync_overlay(
                 }
             return True
         score = validate_lipsync_quality(output_path, audio_path)
-        print(f"   [LIPSYNC-GATE] overlay/{engine_name} sync_score={score:.3f} (threshold {overlay_threshold:.2f})")
+        logger.info(
+            "overlay sync gate scored",
+            extra={"engine": f"overlay/{engine_name}", "sync_score": round(score, 4), "threshold": overlay_threshold},
+        )
         if score >= overlay_threshold:
             # Gate passed — write cascade_metadata for the winning engine
             if _cascade_out is not None:
@@ -246,14 +252,17 @@ def lipsync_overlay(
             _shutil_overlay.copyfile(output_path, stash)
             overlay_candidates.append((score, stash, engine_name))
         except Exception as _e:
-            print(f"   [LIPSYNC-GATE] could not stash overlay/{engine_name}: {_e}")
+            logger.warning(
+                "could not stash overlay candidate",
+                extra={"engine": f"overlay/{engine_name}", "error": str(_e)},
+            )
         return False
 
     # ATTEMPT 0: sync.so v3 (Q=0.90, Sync Labs current best generalist)
     # Handles motion + occlusion + side angles where MuseTalk often fails.
     # Slightly more expensive but better baseline quality on hard inputs.
     try:
-        print(f"   [LIPSYNC-OVERLAY] sync.so v3: best generalist...")
+        logger.info("overlay attempt: sync.so v3 (best generalist)", extra={"engine": "syncSoV3"})
         result = fal_client.subscribe(
             "fal-ai/sync-lipsync/v3",
             client_timeout=FAL_TIMEOUT_VIDEO_S,
@@ -266,18 +275,18 @@ def lipsync_overlay(
         out_url = result.get("video", {}).get("url")
         if out_url:
             if safe_download(out_url, output_path) is None:
-                print(f"   [LIPSYNC-OVERLAY] sync.so v3 download failed")
+                logger.warning("sync.so v3 download failed", extra={"engine": "syncSoV3"})
             elif _overlay_gate_or_stash("syncSoV3"):
-                print(f"   [LIPSYNC-OVERLAY] sync.so v3 success: {output_path}")
+                logger.info("overlay success", extra={"engine": "syncSoV3", "output_path": output_path})
                 return output_path
     except Exception as e:
         # sync.so v3 endpoint might be named differently or not yet on FAL.
         # Falls through to MuseTalk silently — no user-visible regression.
-        print(f"   [LIPSYNC-OVERLAY] sync.so v3 failed: {e}")
+        logger.warning("sync.so v3 overlay attempt failed", extra={"engine": "syncSoV3", "error": str(e)})
 
     # ATTEMPT 1: MuseTalk (mouth-only overlay, cheapest)
     try:
-        print(f"   [LIPSYNC-OVERLAY] MuseTalk: mouth-only overlay...")
+        logger.info("overlay attempt: MuseTalk (mouth-only)", extra={"engine": "MuseTalk"})
         result = fal_client.subscribe(
             "fal-ai/musetalk",
             client_timeout=FAL_TIMEOUT_VIDEO_S,
@@ -290,16 +299,16 @@ def lipsync_overlay(
         out_url = result.get("video", {}).get("url")
         if out_url:
             if safe_download(out_url, output_path) is None:
-                print(f"   [LIPSYNC-OVERLAY] MuseTalk download failed")
+                logger.warning("MuseTalk download failed", extra={"engine": "MuseTalk"})
             elif _overlay_gate_or_stash("MuseTalk"):
-                print(f"   [LIPSYNC-OVERLAY] MuseTalk success: {output_path}")
+                logger.info("overlay success", extra={"engine": "MuseTalk", "output_path": output_path})
                 return output_path
     except Exception as e:
-        print(f"   [LIPSYNC-OVERLAY] MuseTalk failed: {e}")
+        logger.warning("MuseTalk overlay attempt failed", extra={"engine": "MuseTalk", "error": str(e)})
 
     # ATTEMPT 2: LatentSync (ByteDance, no intermediate representations)
     try:
-        print(f"   [LIPSYNC-OVERLAY] LatentSync fallback...")
+        logger.info("overlay attempt: LatentSync fallback", extra={"engine": "LatentSync"})
         result = fal_client.subscribe(
             "fal-ai/latentsync",
             client_timeout=FAL_TIMEOUT_VIDEO_S,
@@ -312,16 +321,16 @@ def lipsync_overlay(
         out_url = result.get("video", {}).get("url")
         if out_url:
             if safe_download(out_url, output_path) is None:
-                print(f"   [LIPSYNC-OVERLAY] LatentSync download failed")
+                logger.warning("LatentSync download failed", extra={"engine": "LatentSync"})
             elif _overlay_gate_or_stash("LatentSync"):
-                print(f"   [LIPSYNC-OVERLAY] LatentSync success: {output_path}")
+                logger.info("overlay success", extra={"engine": "LatentSync", "output_path": output_path})
                 return output_path
     except Exception as e:
-        print(f"   [LIPSYNC-OVERLAY] LatentSync failed: {e}")
+        logger.warning("LatentSync overlay attempt failed", extra={"engine": "LatentSync", "error": str(e)})
 
     # ATTEMPT 3: Sync Lipsync v2 (premium fallback for hard cases)
     try:
-        print(f"   [LIPSYNC-OVERLAY] Sync Lipsync v2 fallback (premium)...")
+        logger.info("overlay attempt: Sync Lipsync v2 fallback (premium)", extra={"engine": "SyncV2"})
         result = fal_client.subscribe(
             "fal-ai/sync-lipsync/v2",
             client_timeout=FAL_TIMEOUT_VIDEO_S,
@@ -334,23 +343,28 @@ def lipsync_overlay(
         out_url = result.get("video", {}).get("url")
         if out_url:
             if safe_download(out_url, output_path) is None:
-                print(f"   [LIPSYNC-OVERLAY] Sync Lipsync v2 download failed")
+                logger.warning("Sync v2 download failed", extra={"engine": "SyncV2"})
             elif _overlay_gate_or_stash("SyncV2"):
-                print(f"   [LIPSYNC-OVERLAY] Sync Lipsync v2 success: {output_path}")
+                logger.info("overlay success", extra={"engine": "SyncV2", "output_path": output_path})
                 return output_path
     except Exception as e:
-        print(f"   [LIPSYNC-OVERLAY] Sync v2 failed: {e}")
+        logger.warning("Sync v2 overlay attempt failed", extra={"engine": "SyncV2", "error": str(e)})
 
     # Best-of-failed recovery for overlay pipeline
     if overlay_candidates:
         overlay_candidates.sort(key=lambda c: c[0], reverse=True)
         best_score, best_path, best_name = overlay_candidates[0]
-        print(f"   [LIPSYNC-GATE] No overlay engine cleared threshold {overlay_threshold:.2f}. "
-              f"Returning best-of-failed: {best_name} (score={best_score:.3f})")
+        logger.warning(
+            "no overlay engine cleared sync threshold; returning best-of-failed",
+            extra={"engine": best_name, "sync_score": round(best_score, 4), "threshold": overlay_threshold},
+        )
         try:
             _shutil_overlay.copyfile(best_path, output_path)
         except Exception as e:
-            print(f"   [LIPSYNC-GATE] could not restore best candidate: {e}")
+            logger.exception(
+                "could not restore best overlay candidate",
+                extra={"engine": best_name, "error": str(e)},
+            )
         for _, p, _ in overlay_candidates:
             try:
                 if os.path.exists(p):
@@ -367,7 +381,7 @@ def lipsync_overlay(
             }
         return output_path
 
-    print("   [LIPSYNC-OVERLAY] All overlay methods failed")
+    logger.error("all overlay lipsync methods failed", extra={"engine": "overlay"})
     return None
 
 
@@ -493,16 +507,16 @@ def lipsync_generation(
         Key: "cascade_metadata" → {engine, score?, threshold?, fallback, attempts}
     """
     if not FAL_AVAILABLE or not ENV_SETTINGS.fal_key:
-        print("   [LIPSYNC-GEN] FAL not available")
+        logger.warning("FAL not available — lipsync generation skipped", extra={"engine": "generation"})
         return None
 
     # Check prerequisites
     prereqs = check_generation_prerequisites(character_image_path, audio_path)
     for w in prereqs.warnings:
-        print(f"   [LIPSYNC-GEN] {w}")
+        logger.warning(w, extra={"engine": "generation"})
     if not prereqs.passed:
         for b in prereqs.blockers:
-            print(f"   [LIPSYNC-GEN] {b}")
+            logger.error(b, extra={"engine": "generation"})
         return None
 
     image_url = fal_client.upload_file(character_image_path)
@@ -538,8 +552,10 @@ def lipsync_generation(
         # clip must never win the best-of-failed fallback for a portrait deliverable.
         from phase_c_ffmpeg import _accept_or_reject
         if not _accept_or_reject(output_path, _aspect):
-            print(f"   [LIPSYNC-ORIENT] {engine_name} produced wrong orientation for "
-                  f"{_aspect} — rejecting → next engine")
+            logger.warning(
+                "engine produced wrong orientation — rejecting, trying next",
+                extra={"engine": engine_name, "aspect": _aspect},
+            )
             return False
         if not gate_enabled:
             if _cascade_out is not None:
@@ -550,7 +566,10 @@ def lipsync_generation(
                 }
             return True
         score = validate_lipsync_quality(output_path, audio_path)
-        print(f"   [LIPSYNC-GATE] {engine_name} sync_score={score:.3f} (threshold {gate_threshold:.2f})")
+        logger.info(
+            "generation sync gate scored",
+            extra={"engine": engine_name, "sync_score": round(score, 4), "threshold": gate_threshold},
+        )
         if score >= gate_threshold:
             if _cascade_out is not None:
                 _cascade_out["cascade_metadata"] = {
@@ -567,7 +586,10 @@ def lipsync_generation(
             _shutil.copyfile(output_path, stash)
             candidates.append((score, stash, engine_name))
         except Exception as _e:
-            print(f"   [LIPSYNC-GATE] could not stash {engine_name}: {_e}")
+            logger.warning(
+                "could not stash generation candidate",
+                extra={"engine": engine_name, "error": str(_e)},
+            )
         return False
 
     # ATTEMPT 0: Hedra Character-3 (Q=0.93, SOTA portrait talking head)
@@ -577,7 +599,10 @@ def lipsync_generation(
     # Native full-body output, handles off-axis angles better than Omnihuman.
     try:
         aspect = _hedra_aspect_ratio_from_image(character_image_path)
-        print(f"   [LIPSYNC-GEN] Hedra Character-3 via direct API (aspect={aspect}, res={resolution})...")
+        logger.info(
+            "generation attempt: Hedra Character-3 via direct API",
+            extra={"engine": "hedra", "aspect": aspect, "resolution": resolution},
+        )
         hedra_result = _HedraAPI().generate_talking_head(
             character_image_path=character_image_path,
             audio_path=audio_path,
@@ -587,17 +612,17 @@ def lipsync_generation(
         )
         if hedra_result and os.path.exists(output_path):
             if _gate_or_stash("Hedra"):
-                print(f"   [LIPSYNC-GEN] Hedra Character-3 success: {output_path}")
+                logger.info("generation success", extra={"engine": "hedra", "output_path": output_path})
                 return output_path
         else:
-            print(f"   [LIPSYNC-GEN] Hedra Character-3 returned no output")
+            logger.warning("Hedra Character-3 returned no output", extra={"engine": "hedra"})
     except Exception as e:
         # Graceful fallback — caller will try the next engine below.
-        print(f"   [LIPSYNC-GEN] Hedra Character-3 failed: {e}")
+        logger.warning("Hedra Character-3 failed", extra={"engine": "hedra", "error": str(e)})
 
     # ATTEMPT 1: Kling native lip sync (cheapest at $0.014/sec, integrated motion)
     try:
-        print(f"   [LIPSYNC-GEN] Kling native lip sync...")
+        logger.info("generation attempt: Kling native lip sync", extra={"engine": "kling"})
         result = fal_client.subscribe(
             "fal-ai/kling-video/lipsync/audio-to-video",
             client_timeout=FAL_TIMEOUT_TALKING_HEAD_S,
@@ -610,16 +635,19 @@ def lipsync_generation(
         video_url = result.get("video", {}).get("url")
         if video_url:
             if safe_download(video_url, output_path) is None:
-                print(f"   [LIPSYNC-GEN] Kling lip sync download failed")
+                logger.warning("Kling lip sync download failed", extra={"engine": "kling"})
             elif _gate_or_stash("Kling"):
-                print(f"   [LIPSYNC-GEN] Kling lip sync success: {output_path}")
+                logger.info("generation success", extra={"engine": "kling", "output_path": output_path})
                 return output_path
     except Exception as e:
-        print(f"   [LIPSYNC-GEN] Kling lip sync failed: {e}")
+        logger.warning("Kling lip sync failed", extra={"engine": "kling", "error": str(e)})
 
     # ATTEMPT 2: Omnihuman v1.5 (best full-body quality)
     try:
-        print(f"   [LIPSYNC-GEN] Omnihuman v1.5: full-body talking video ({resolution})...")
+        logger.info(
+            "generation attempt: Omnihuman v1.5 full-body",
+            extra={"engine": "omnihuman", "resolution": resolution},
+        )
         result = fal_client.subscribe(
             "fal-ai/bytedance/omnihuman/v1.5",
             client_timeout=FAL_TIMEOUT_TALKING_HEAD_S,
@@ -635,16 +663,19 @@ def lipsync_generation(
         duration = result.get("duration", 0)
         if video_url:
             if safe_download(video_url, output_path) is None:
-                print(f"   [LIPSYNC-GEN] Omnihuman download failed")
+                logger.warning("Omnihuman download failed", extra={"engine": "omnihuman"})
             elif _gate_or_stash("Omnihuman"):
-                print(f"   [LIPSYNC-GEN] Omnihuman success: {output_path} ({duration:.1f}s)")
+                logger.info(
+                    "generation success",
+                    extra={"engine": "omnihuman", "output_path": output_path, "video_duration_s": round(duration, 3)},
+                )
                 return output_path
     except Exception as e:
-        print(f"   [LIPSYNC-GEN] Omnihuman failed: {e}")
+        logger.warning("Omnihuman failed", extra={"engine": "omnihuman", "error": str(e)})
 
     # ATTEMPT 3: Creatify Aurora (studio-grade avatar)
     try:
-        print(f"   [LIPSYNC-GEN] Creatify Aurora fallback...")
+        logger.info("generation attempt: Creatify Aurora fallback", extra={"engine": "aurora"})
         result = fal_client.subscribe(
             "fal-ai/creatify/aurora",
             client_timeout=FAL_TIMEOUT_TALKING_HEAD_S,
@@ -658,12 +689,12 @@ def lipsync_generation(
         video_url = result.get("video", {}).get("url")
         if video_url:
             if safe_download(video_url, output_path) is None:
-                print(f"   [LIPSYNC-GEN] Aurora download failed")
+                logger.warning("Aurora download failed", extra={"engine": "aurora"})
             elif _gate_or_stash("Aurora"):
-                print(f"   [LIPSYNC-GEN] Aurora success: {output_path}")
+                logger.info("generation success", extra={"engine": "aurora", "output_path": output_path})
                 return output_path
     except Exception as e:
-        print(f"   [LIPSYNC-GEN] Aurora failed: {e}")
+        logger.warning("Aurora failed", extra={"engine": "aurora", "error": str(e)})
 
     # SyncNet gate fallback: no engine cleared the threshold. Pick the highest-
     # scored candidate from the stashed attempts. Better than returning None
@@ -671,12 +702,17 @@ def lipsync_generation(
     if candidates:
         candidates.sort(key=lambda c: c[0], reverse=True)
         best_score, best_path, best_name = candidates[0]
-        print(f"   [LIPSYNC-GATE] No engine cleared threshold {gate_threshold:.2f}. "
-              f"Returning best-of-failed: {best_name} (score={best_score:.3f})")
+        logger.warning(
+            "no generation engine cleared sync threshold; returning best-of-failed",
+            extra={"engine": best_name, "sync_score": round(best_score, 4), "threshold": gate_threshold},
+        )
         try:
             _shutil.copyfile(best_path, output_path)
         except Exception as e:
-            print(f"   [LIPSYNC-GATE] could not restore best candidate: {e}")
+            logger.exception(
+                "could not restore best generation candidate",
+                extra={"engine": best_name, "error": str(e)},
+            )
         # Clean up stash files
         for _, p, _ in candidates:
             try:
@@ -694,7 +730,7 @@ def lipsync_generation(
             }
         return output_path
 
-    print("   [LIPSYNC-GEN] All generation methods failed")
+    logger.error("all generation lipsync methods failed", extra={"engine": "generation"})
     return None
 
 
@@ -732,7 +768,8 @@ def generate_lip_sync_video(
     - User can force a specific mode
     """
     if not FAL_AVAILABLE or not ENV_SETTINGS.fal_key:
-        print("   [LIPSYNC] FAL not available — skipping")
+        # "lipsync_dispatch": pre-mode-resolution guard (mode not yet resolved to overlay/generation)
+        logger.warning("FAL not available — lipsync skipped", extra={"engine": "lipsync_dispatch"})
         return None
 
     # Determine mode
@@ -744,7 +781,7 @@ def generate_lip_sync_video(
     else:
         selected_mode = mode
 
-    print(f"   [LIPSYNC] Mode: {selected_mode.upper()}")
+    logger.info("lipsync mode selected", extra={"engine": selected_mode})
 
     if selected_mode == "overlay" and existing_video_path:
         return lipsync_overlay(existing_video_path, audio_path, output_path,
@@ -775,7 +812,7 @@ def generate_rife_interpolation(
         Path to interpolated video, or None on failure
     """
     if not FAL_AVAILABLE or not ENV_SETTINGS.fal_key:
-        print("   [RIFE] FAL not available — skipping cloud interpolation")
+        logger.warning("FAL not available — RIFE interpolation skipped", extra={"engine": "rife"})
         return None
 
     if not os.path.exists(video_path):
@@ -784,7 +821,10 @@ def generate_rife_interpolation(
     try:
         video_url = fal_client.upload_file(video_path)
 
-        print(f"   [RIFE] Cloud frame interpolation (num_frames={num_frames})...")
+        logger.info(
+            "cloud frame interpolation starting",
+            extra={"engine": "rife", "num_frames": num_frames},
+        )
 
         result = fal_client.subscribe(
             "fal-ai/rife/video",
@@ -801,14 +841,14 @@ def generate_rife_interpolation(
         out_url = result.get("video", {}).get("url")
         if out_url:
             if safe_download(out_url, output_path) is None:
-                print("   [RIFE] download failed")
+                logger.warning("RIFE download failed", extra={"engine": "rife"})
                 return None
-            print(f"   [RIFE] Success: {output_path}")
+            logger.info("RIFE interpolation success", extra={"engine": "rife", "output_path": output_path})
             return output_path
         return None
 
     except Exception as e:
-        print(f"   [RIFE] Interpolation error: {e}")
+        logger.exception("RIFE interpolation error", extra={"engine": "rife", "error": str(e)})
         return None
 
 
@@ -830,7 +870,7 @@ def upscale_video_seedvr2(
         Path to upscaled video, or None on failure
     """
     if not FAL_AVAILABLE or not ENV_SETTINGS.fal_key:
-        print("   [UPSCALE] FAL not available — skipping cloud upscaling")
+        logger.warning("FAL not available — SeedVR2 upscaling skipped", extra={"engine": "seedvr2"})
         return None
 
     if not os.path.exists(video_path):
@@ -839,7 +879,10 @@ def upscale_video_seedvr2(
     try:
         video_url = fal_client.upload_file(video_path)
 
-        print(f"   [UPSCALE] SeedVR2 → {target_resolution}...")
+        logger.info(
+            "SeedVR2 upscale starting",
+            extra={"engine": "seedvr2", "target_resolution": target_resolution},
+        )
 
         result = fal_client.subscribe(
             "fal-ai/seedvr/upscale/video",
@@ -858,14 +901,17 @@ def upscale_video_seedvr2(
         out_url = result.get("video", {}).get("url")
         if out_url:
             if safe_download(out_url, output_path) is None:
-                print("   [UPSCALE] SeedVR2 download failed")
+                logger.warning("SeedVR2 download failed", extra={"engine": "seedvr2"})
                 return None
-            print(f"   [UPSCALE] SeedVR2 success: {output_path}")
+            logger.info(
+                "SeedVR2 upscale success",
+                extra={"engine": "seedvr2", "output_path": output_path},
+            )
             return output_path
         return None
 
     except Exception as e:
-        print(f"   [UPSCALE] SeedVR2 error: {e}")
+        logger.exception("SeedVR2 upscale error", extra={"engine": "seedvr2", "error": str(e)})
         return None
 
 
@@ -881,5 +927,5 @@ def extract_last_frame(video_path: str, output_path: str) -> Optional[str]:
         if os.path.exists(output_path):
             return output_path
     except Exception as e:
-        print(f"   [CHAIN] Failed to extract last frame: {e}")
+        logger.exception("failed to extract last frame", extra={"engine": "chain", "error": str(e)})
     return None
