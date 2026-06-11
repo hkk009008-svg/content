@@ -461,6 +461,69 @@ scope.
     `b708257`)
   - S2/S3 spikes + pod-side LoRA placement pending next bundled pod session.
 
+  **Pod-session results record (2026-06-11, director; pod arc complete, pod
+  released):**
+
+  - **Pass-A (Phase 3) — GREEN on re-run.** First run QUALITY-FAILED via the
+    shot_hint landscape misclassification (root cause + fix `945d022`; failed
+    artifact preserved `logs/pass_a_multichar_FAILED_landscape_20260610.jpg`).
+    Re-run through the REAL dispatch: `medium | N_max=8 | halt@composite=0.90,
+    arc=0.83 | char=True`, fp8, 8 candidates, best arc **0.819** (≥0.80 regen
+    floor — no boost retry needed), `ImageGenResult(api_name='QUALITY_MAX')`.
+    Artifact coherent/photoreal-leaning (`logs/pass_a_multichar.jpg`).
+    Secondary (reference-fidelity ReActor path): the accepted artifact's man
+    is prompt-generic — his half scores **0.487** vs his ref (the swap
+    demonstrably CAN deliver ~0.7-0.8: both halves of the FAILED artifact
+    score ≥0.70 vs the man). Swap-targeting/blend under a coherent base =
+    open question (§3(c) follow-up; `input_faces_index="1"`).
+  - **S2 — dual-PuLID: VRAM GO / identity CONDITIONAL-GO.** 4/4 renders, peak
+    **41.8 GiB** = **+0.4** over the single-char 41.4/47.5 baseline (recorded
+    at wrap `f25af7c`; operator-disposed: no re-measure) — the dual delta
+    rides the FLUX stage, nowhere near the SUPIR peak. No OOM. Identity:
+    both faces ≥0.70 in **2/4 seeds** (best pair L:man 0.832 / R:aria 0.773,
+    n3); one seed = Aria-duplication (n2, both halves ~0.73 aria), one
+    near-miss (n4, 0.670). **BUT identity↔figure binding is uncontrolled**
+    (the documented no-spatial-binding limitation, observed concretely): in
+    n3 the man's GEOMETRY (0.832) sits on the beardless LEFT figure while
+    the BEARD followed the prompt to the right figure whose geometry scores
+    aria-side (0.773). Metric calibration: aria-ref↔man-ref cross floor
+    0.447, self 1.000 — ≥0.70 is real signal; the metric reads geometry,
+    not surface markers. **Pass B direction: chained dual-PuLID is feasible
+    (VRAM-cheap, identities materialize) but needs spatial binding
+    (ApplyPulidAdvanced attn_mask) or per-face best-of-N selection + swap
+    rescue before it is production-bindable.**
+  - **S3 — LoRA stacking sweep: BLEED at all strengths (visual verdict
+    overrides the embedding read).** Primary Aria LoRA 0.55 + PuLID anchor;
+    secondary man LoRA (char_lora_man_v1, TOKman, FAL-trained this session)
+    swept {0.35, 0.45, 0.55}, fixed seed, N=1/arm. ALL THREE arms render
+    **two women** — Aria's trained wardrobe on both figures, no beard, the
+    "grey beard" token leaking as a neck-texture artifact. Embeddings retain
+    traces of the man's geometry (sec45 L 0.828) but the visual identity is
+    unusable. **Finding: a pure-LoRA secondary (≤0.55, the §3b clamp) under
+    a PuLID-anchored primary cannot hold a distinct visual identity** —
+    secondaries need PuLID/faceswap support, not just a LoRA. Caveats: man
+    LoRA trained on the painterly P1-2 specimen lineage (6 refs, 2500
+    steps); single seed per arm.
+  - **P1-2(b) pod-side training feasibility (probed):** ai-toolkit INSTALLED
+    + import-verified on the pod (own venv: diffusers 0.38-dev, peft 0.18.1,
+    torch 2.6/cu124); GPU ample; **disk is the binding constraint (14 GiB
+    free, 87%)** — a fresh FLUX.1-dev training pull (~34 GiB) does not fit
+    without ~18 GiB cleanup (checkpoints/ holds likely-legacy SDXL-era
+    weights). Verdict: feasible-with-cleanup; FAL remains the practical
+    path ($2/1000 steps, validated twice).
+  - **P1-2 direction (carried from the A/B):** over-cook is identity-mode-
+    dependent — per-identity-mode post-pass tuning, NOT global weakening
+    (the same graph/params that over-cook a fresh face render LoRA-anchored
+    Aria photoreal; specimens `logs/p12_fresh_face_man.jpg` vs
+    `logs/max_lora_live_check.jpg`, arc 0.880).
+  - **Instrumentation notes:** (1) `aesthetics_predictor` is not installed
+    in the local venv → composite's aesthetic channel = neutral 0.5 by
+    design; Pass-A selection was arc-only. Deliberate install deferred
+    (lazy network weight download = test-hermeticity risk on the shared
+    venv). (2) `validate_image` scored only the FIRST detected face until
+    `dc5ad2b` (best-face now) — multi-char PER-FACE validation (crop or
+    face-index aware) remains the §3(d) follow-up.
+
 ## 7. Recommended sequencing — and the deviation, surfaced
 
 **7.1 Slice 1 (Session 4): (d) + (a), S1 first, §7.3 in parallel.** Rationale: it

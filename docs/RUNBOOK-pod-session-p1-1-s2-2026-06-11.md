@@ -1,16 +1,13 @@
 # Runbook — P1-1 slice-2 bundled pod session (spec §7.2)
 
-**Status: EXECUTING — Phases 0–3 DONE, Phase 4+ in flight (2026-06-11).**
-Phases 0–2 ran 2026-06-10 late-night (census green; Aria LoRA placed +
-live-render PHOTOREAL at 0.55; P1-2 over-cook confirmed; S2 single-char
-baseline 41.4/47.5 GiB recorded at wrap `f25af7c`). Phase 3 Pass-A
-QUALITY-FAILED on first run (landscape misclassification — root-caused and
-fixed `945d022`, shot_hint merge defect, NOT injectors) and is re-running
-through the fixed dispatch. Phase 4 (S2 spike) GO after operator review
-(01:27:54Z event; done-guard fixed `6d1eefa`); S3 stacking sweep added to
-this session's scope (2nd LoRA `char_lora_man_v1` FAL-trained + pod-placed,
-user-funded). User authorized pod work this session verbatim
-("do it all that requires pod", 2026-06-11).
+**Status: COMPLETE (2026-06-11) — all phases executed, pod released; see the
+Exit record at the bottom + spec §6 "Pod-session results record (2026-06-11)"
+for numbers and verdicts.** Headlines: Pass-A fail→fix `945d022`→GREEN (arc
+0.819, QUALITY_MAX); S2 VRAM GO (+0.4 GiB) / identity CONDITIONAL-GO (binding
+uncontrolled); S3 sweep = BLEED at all strengths (visual verdict); 2nd LoRA
+`char_lora_man_v1` FAL-trained + pod-placed (user-funded). User authorized pod
+work this session verbatim ("do it all that requires pod", 2026-06-11) and
+was notified pod-stoppable at ~02:30Z.
 
 **Purpose:** one bundled session (shared spin-up, spec §7.2) that converts the
 slice-2 offline work into validated live capability: pod-side LoRA placement,
@@ -124,3 +121,25 @@ sweep secondary strength ∈ {0.35, 0.45, 0.55} stacked over the primary at
   incident is the cautionary tale — P2-2 guardrails still NOT_DONE).
 - Mailbox event to the operator: session outcomes + any disposition requests;
   Lane V on whatever landed.
+
+## Exit record (2026-06-11, director — session COMPLETE, pod released)
+
+Every phase executed; full numbers + verdicts live in **spec §6 "Pod-session
+results record (2026-06-11)"** — this is the pointer, not a duplicate:
+
+- Phase 0-2: 2026-06-10 late-night (census 1106/44-of-48; Aria LoRA placed;
+  live render PHOTOREAL at 0.55, arc 0.880).
+- Phase 3 Pass-A: fail (landscape misclassification) → fix `945d022` →
+  re-run **GREEN** (medium-class, best arc 0.819, QUALITY_MAX).
+- Phase 4 S2: **VRAM GO** (peak 41.8 GiB = +0.4 over the 41.4 baseline) /
+  identity CONDITIONAL-GO (binding uncontrolled — attn_mask or per-face
+  selection needed for Pass B).
+- Phase 5 P1-2: direction recorded (per-identity-mode post-pass tuning);
+  (b) pod-side training = feasible-with-cleanup (ai-toolkit verified; disk
+  14 GiB free is the constraint); FAL path validated twice.
+- S3 (gate satisfied mid-session — user funded `char_lora_man_v1`): sweep
+  ran 3/3 — **BLEED at all strengths**, visual verdict overrides embeddings
+  (two-women homogenization; pure-LoRA secondary cannot hold identity).
+- Pod: all pod-dependent work complete; user notified pod-stoppable at
+  ~02:30Z. Stop/keep remains the user's call (P2-2 guardrails still
+  NOT_DONE).
