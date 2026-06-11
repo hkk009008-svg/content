@@ -15,7 +15,7 @@ From `character_manager.py`:
 
 **Input**: Single front-facing photo uploaded by user
 
-**Process**: FLUX Kontext MAX Multi (via `fal-ai/flux-kontext/max/multi`) with AuraFace embeddings generates **5 additional angle variations**:
+**Process**: FLUX Kontext MAX Multi (via `fal-ai/flux-pro/kontext/max/multi`) with AuraFace embeddings generates **5 additional angle variations**:
 - Front (canonical — the upload itself)
 - 45-degree left
 - 45-degree right
@@ -24,7 +24,7 @@ From `character_manager.py`:
 - Back (optional)
 
 **Prompt pattern** (verbatim from code):
-> "PRESERVE IDENTITY. Generate the same person from [angle]. Maintain exact facial features, skin tone, hair style, clothing. Identity-preserving angle variation."
+> "PRESERVE IDENTITY: Keep this exact person's face, hair, skin, and all physical features identical to @Image1. [angle-specific config prompt]"
 
 **Storage**: Reference images stored in `projects/<project_id>/characters/<character_id>/`
 
@@ -42,7 +42,7 @@ From `character_manager.py`:
 
 ### Pre-Computation Flow
 ```
-Upload photo → DeepFace.represent(model="GhostFaceNet_w1d1")
+Upload photo → DeepFace.represent(model_name="GhostFaceNet")
   → embedding vector → save to characters/<id>/embedding.npy
   → load at pipeline start → available for all validation calls
 ```
@@ -58,7 +58,7 @@ similarity = (1 + cosine_similarity(ref_embedding, frame_embedding)) / 2
 
 ## Identity Validation
 
-From `identity_validator.py`:
+From `identity/validator.py`:
 
 ### Adaptive Frame Sampling
 Number of frames sampled from video varies by shot type and video duration:
@@ -86,7 +86,7 @@ FrameSample:
 
 ### Shot-Type-Aware Thresholds
 
-From `identity_types.py` `SHOT_TYPE_THRESHOLDS`:
+From `identity/types.py` `SHOT_TYPE_THRESHOLDS`:
 
 | Shot Type | Strict | Standard | Lenient |
 |-----------|--------|----------|---------|
@@ -111,7 +111,7 @@ This prevents infinite retry loops while keeping early attempts strict.
 
 ## Failure Reason Taxonomy
 
-8 enum values from `identity_types.py:FailureReason`:
+11 enum values from `identity/types.py:FailureReason` (8 failure reasons plus PASSED, GENERATED_IMAGE_MISSING, VIDEO_ZERO_FRAMES):
 
 | Reason | Description | Remediation |
 |--------|-------------|-------------|
@@ -130,7 +130,7 @@ This prevents infinite retry loops while keeping early attempts strict.
 
 ## Identity Anchors
 
-From `character_manager.py:build_identity_anchor()`:
+From `domain/character_manager.py:build_identity_anchor()` (line 515):
 
 An **identity anchor** is an immutable string describing a character's physical appearance, injected verbatim into EVERY generation prompt.
 
@@ -153,10 +153,10 @@ Without anchors, GPT-4o's scene decomposition subtly rephrases character descrip
 
 ## Rolling Statistics for PuLID Feedback
 
-From `identity_validator.py:get_rolling_stats()`:
+From `identity/validator.py:get_rolling_stats()`:
 
 ```python
-stats = get_rolling_stats(character_id, window=10)
+stats = get_rolling_stats(character_id)  # window=10 is the default
 # Returns:
 #   mean_similarity: float     # average across last 10 validations
 #   success_rate: float        # % of validations that passed
@@ -165,8 +165,10 @@ stats = get_rolling_stats(character_id, window=10)
 ```
 
 This feeds into `workflow_selector.py:get_adaptive_pulid_weight()`:
-- `success_rate < 0.7` → delta = +0.10 (boost PuLID)
-- `mean_similarity > 0.8` → delta = −0.05 (relax PuLID)
+- `success_rate < 0.5` → delta = +0.10 (boost PuLID hard)
+- `success_rate < 0.8` → delta = +0.05 (moderate boost)
+- `success_rate == 1.0 AND mean_similarity > 0.80` → delta = −0.05 (relax PuLID)
+- else → delta = 0.0
 - `common_failure` is FACE_ANGLE_EXTREME or SMALL_FACE_REGION → delta = 0.0
 
 ---
@@ -175,11 +177,11 @@ This feeds into `workflow_selector.py:get_adaptive_pulid_weight()`:
 
 From `character_manager.py`:
 
-**Pool**: 25 ElevenLabs voices (women, men, children, elderly, narrators)
+**Pool**: 32 ElevenLabs voices (women, men, children, elderly, narrators, plus 6 Korean-native voices)
 
 **Voice model**: `eleven_v3`
 
-**Default settings**: Stability 0.55, Similarity 0.85, Style 0.60
+**Default settings**: Stability and similarity vary by character type; style ranges 0.15–0.85 by delivery profile (not a universal 0.60)
 
 **Deduplication**: Within a project, no two characters share the same voice ID.
 

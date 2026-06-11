@@ -39,7 +39,7 @@ controlnet_depth_strength: 0.35
 ip_adapter_weight:         0.25   # Minimal style transfer
 denoise_default:           0.25   # Tighter temporal consistency
 target_api:                KLING_NATIVE
-video_fallbacks:           [RUNWAY_GEN4, SORA_NATIVE, KLING_FAL]
+video_fallbacks:           ['RUNWAY_GEN4', 'SORA_NATIVE', 'KLING_3_0']
 ```
 
 ### Medium (Waist-up balanced)
@@ -90,7 +90,7 @@ controlnet_depth_strength: 0.30   # Light spatial guidance
 ip_adapter_weight:         0.25
 denoise_default:           0.40
 target_api:                SORA_NATIVE  # Best motion physics, body momentum, cloth
-video_fallbacks:           [KLING_NATIVE, RUNWAY_GEN4, LTX]
+video_fallbacks:           ['KLING_NATIVE', 'RUNWAY_GEN4', 'LTX', 'SEEDANCE']  # Seedance last — its multi-reference (up to 9 images) handles multi-character action
 ```
 
 ### Landscape (Pure environment, no characters)
@@ -118,14 +118,14 @@ From `phase_c_ffmpeg.py:generate_ai_video()`:
 
 1. Try primary API (from `target_api`)
 2. On failure → try next in `video_fallbacks` list
-3. If ALL APIs exhausted → wait **2 minutes** for quota refresh
-4. Retry up to **2 full cascade cycles**
+3. If ALL APIs exhausted → wait **30 seconds** (`time.sleep(30)`) for quota refresh
+4. Retry up to **1 extra cascade cycle** by default (`MAX_CASCADE_RETRIES = 1`), raisable via the `cascade_retry_limit` UI knob
 5. Track `attempted_apis` set to prevent retry loops
-6. After 2 complete cycles → return None (hard failure)
+6. After max retries exceeded → return None (hard failure)
 
 **Error handling**: Each API wrapped in try/catch. On exception → `try_next_api()`. Detailed logging per attempt.
 
-**Global quota flags**: Some APIs (Veo) set `_veo_quota_exhausted = True` to prevent ALL subsequent shots from wasting time on a known-dead endpoint.
+**Global quota flags**: Veo uses a TTL timestamp (`_VEO_QUOTA_EXHAUSTED_UNTIL`, auto-expires after 1800s) checked via `_veo_quota_blocked()` — not a simple boolean flag.
 
 ---
 
@@ -135,13 +135,16 @@ From `workflow_selector.py:get_adaptive_pulid_weight()`:
 
 ```
 base_weight = WORKFLOW_TEMPLATES[shot_type]["pulid_weight"]
-rolling_stats = identity_validator.get_rolling_stats(character_id, window=10)
+rolling_stats = identity_validator.get_rolling_stats(character_id)  # window=10 is the default; not passed explicitly at call sites
 
-if rolling_stats.success_rate < 0.7:
-    # Identity failing → boost PuLID
+if rolling_stats.success_rate < 0.5:
+    # Identity failing hard → boost PuLID
     delta = +0.10
-elif rolling_stats.mean_similarity > 0.8:
-    # Identity passing strongly → allow flexibility
+elif rolling_stats.success_rate < 0.8:
+    # Identity below target → moderate boost
+    delta = +0.05
+elif rolling_stats.success_rate == 1.0 and rolling_stats.mean_similarity > 0.80:
+    # Identity great → allow more creativity
     delta = -0.05
 else:
     delta = 0.0

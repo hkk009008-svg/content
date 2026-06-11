@@ -1,12 +1,12 @@
 # Continuity Engine & Style Direction
 
-The continuity system ensures characters, locations, objects, and physics remain consistent throughout an entire production. It consists of 4 integrated subsystems orchestrated by `ContinuityEngine`.
+The continuity system ensures characters, locations, objects, and physics remain consistent throughout an entire production. It consists of 4 integrated subsystems orchestrated by `ContinuityEngine` (lives in `domain/continuity_engine.py`; `continuity_engine.py` at the repo root is a re-export shim).
 
 ---
 
 ## 1. CharacterContinuityTracker
 
-**Source**: `continuity_engine.py`
+**Source**: `domain/continuity_engine.py`
 
 Tracks character identity and wardrobe across all scenes.
 
@@ -33,7 +33,7 @@ Position: [spatial hint from previous shot]
 
 ## 2. LocationPersistence
 
-**Source**: `continuity_engine.py`
+**Source**: `domain/continuity_engine.py`
 
 Ensures environments look identical across all shots at the same location.
 
@@ -63,7 +63,7 @@ Without deterministic seeds, the same "office interior" prompt can generate wild
 
 ## 3. PhysicsPromptEngineer
 
-**Source**: `continuity_engine.py`
+**Source**: `domain/continuity_engine.py`
 
 Injects physics constraints into prompts to prevent impossible visual artifacts.
 
@@ -94,7 +94,7 @@ Validates that character actions flow logically:
 
 ## 4. TemporalConsistencyManager
 
-**Source**: `continuity_engine.py`
+**Source**: `domain/continuity_engine.py`
 
 Manages img2img chaining between consecutive shots within a scene.
 
@@ -102,20 +102,22 @@ Manages img2img chaining between consecutive shots within a scene.
 Instead of generating each shot from noise (txt2img), consecutive shots within a scene use the **previous shot's output** as the input image with controlled denoise:
 
 ```
-Shot 1: txt2img (from noise) — denoise 0.55
-Shot 2: img2img (from Shot 1 output) — denoise 0.30
-Shot 3: img2img (from Shot 2 output) — denoise 0.30
-[new location]
-Shot 4: txt2img (from noise) — denoise 0.55 (chain reset)
+Shot 0: txt2img (from noise) — denoise 0.55 (shot_index == 0)
+Shot 1: img2img (from Shot 0 output) — denoise 0.40 (shot_index <= 1, same location)
+Shot 2+: img2img (from prior output) — denoise 0.30 (shot_index > 1, same location)
+[location change within scene]
+Next shot: img2img — denoise 0.50 (location_change)
+[new scene / no prior image]
+Next shot: txt2img — denoise 0.55 (chain reset)
 ```
 
-### Context-Aware Denoise Values
+### Context-Aware Denoise Values (shot-index-based, no time-skip detection)
 
 | Context | Denoise | Rationale |
 |---------|---------|-----------|
-| First shot of scene | 0.55 | Maximum creative freedom — no prior context |
-| Same location, consecutive | 0.30 | Tightest consistency — environment must match |
-| Same location, time skip | 0.40 | Allow lighting/mood change while keeping location |
+| First shot (shot_index == 0) or no prior image | 0.55 | Maximum creative freedom — no prior context |
+| Same location, shot_index <= 1 | 0.40 | Early shots get slight creative room |
+| Same location, shot_index > 1 | 0.30 | Tightest consistency — environment must match |
 | Location change within scene | 0.50 | New environment but maintain style/color grade |
 
 ### Scene Boundary Reset
@@ -128,7 +130,7 @@ When a new location begins, the img2img chain **resets**:
 
 ## ContinuityEngine Orchestrator
 
-**Source**: `continuity_engine.py:enhance_shot_prompt()`
+**Source**: `domain/continuity_engine.py:enhance_shot_prompt()`
 
 The central method that combines all 4 subsystems:
 
@@ -156,7 +158,7 @@ Output:
 
 ## Style Director
 
-**Source**: `style_director.py`
+**Source**: `llm/style_director.py`
 
 Generates global cinematography rules that are injected into every generation prompt.
 
@@ -232,7 +234,7 @@ Based on scores, generates specific remediation suggestions:
 
 ## Chief Director QA Layer
 
-**Source**: `chief_director.py`
+**Source**: `llm/chief_director.py`
 
 A metacognitive LLM layer that sits ABOVE all other LLMs in the pipeline.
 

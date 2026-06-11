@@ -6,7 +6,7 @@ The pipeline from raw generated video to final export: identity validation → f
 
 ## 1. Identity Validation
 
-**Source**: `identity_validator.py`, `phase_c_vision.py`
+**Source**: `identity/validator.py`, `phase_c_vision.py`
 
 ### Adaptive Frame Sampling
 Extracts frames from generated video for identity comparison:
@@ -59,7 +59,7 @@ Applied when identity validation fails and re-generation is not viable.
 
 Two operational modes for audio-visual synchronization.
 
-### Mode 1: OVERLAY (MuseTalk) — Default for Cinematic Shots
+### Mode 1: OVERLAY — Default for Cinematic Shots
 
 **How it works**: Takes existing video + audio → overlays lip movement on the mouth region ONLY.
 
@@ -67,16 +67,14 @@ Two operational modes for audio-visual synchronization.
 
 **Best for**: Any shot that already has good camera work from video generation.
 
-**FAL endpoint**: `fal-ai/musetalk`
-
-**Fallback chain**: MuseTalk → LatentSync → Sync Lipsync v2
+**Fallback chain**: sync.so v3 (`fal-ai/sync-lipsync/v3`, ATTEMPT 0) → MuseTalk (`fal-ai/musetalk`, ATTEMPT 1) → LatentSync (ATTEMPT 2) → Sync Lipsync v2 (`fal-ai/sync-lipsync/v2`, ATTEMPT 3)
 
 **Prerequisites**:
 - Video must have detectable face
 - Audio must be mono or stereo
 - Duration must reasonably match
 
-### Mode 2: GENERATION (Omnihuman v1.5) — For Dialogue Shots
+### Mode 2: GENERATION — For Dialogue Shots
 
 **How it works**: Takes still image + audio → generates full-body talking video from scratch.
 
@@ -86,9 +84,7 @@ Two operational modes for audio-visual synchronization.
 
 **Best for**: Interview-style, direct-to-camera dialogue shots.
 
-**FAL endpoint**: `fal-ai/bytedance/omnihuman/v1.5`
-
-**Fallback chain**: Kling native lip sync → Omnihuman v1.5 → Creatify Aurora
+**Fallback chain**: Hedra Character-3 (direct `api.hedra.com`; `fal-ai/hedra/character-3` proxy is dead/404) → Kling Lip Sync (`fal-ai/kling-video/lipsync/audio-to-video`) → Omnihuman v1.5 (`fal-ai/bytedance/omnihuman/v1.5`) → Creatify Aurora
 
 **Prerequisites**:
 - Front-facing portrait image
@@ -133,7 +129,7 @@ Two operational modes for audio-visual synchronization.
 
 ## 5. Video Upscaling
 
-**Source**: `lip_sync.py`, `phase_c_ffmpeg.py`
+**Source**: `lip_sync.py` (SeedVR2); Real-ESRGAN is in the ComfyUI workflow (`pulid.json`)
 
 ### SeedVR2 (Preferred)
 - **Temporally consistent** upscaling — no inter-frame flicker
@@ -144,7 +140,7 @@ Two operational modes for audio-visual synchronization.
 ### Real-ESRGAN 4x (Fallback)
 - Per-frame upscaling
 - Can introduce temporal inconsistency (shimmer between frames)
-- Available in ComfyUI workflow (`Pulid.json` nodes 500-502)
+- Available in ComfyUI workflow (`pulid.json` nodes 500-502)
 - Upscales to 2688x1536 (2.7K cinema resolution)
 - Uses Lanczos resampling
 
@@ -158,22 +154,9 @@ Two operational modes for audio-visual synchronization.
 
 ---
 
-## 6. Transition Generation
+## 6. Transitions
 
-**Source**: `lip_sync.py`
-
-### Wan FLF2V (First-Last Frame to Video)
-- Generates smooth transition clips between two keyframes
-- Input: start frame (end of shot N) + end frame (start of shot N+1)
-- Duration: typically 1–2 seconds
-- Creates seamless motion between cuts
-
-### Mood-Aware Transitions
-Example prompt patterns:
-- Dark → Light: "sunrise-like illumination"
-- Light → Dark: "colors desaturating, shadows deepening"
-- Same mood: "smooth continuous flow"
-- Cross-mood: "cinematic match cut"
+Assembly uses **hard cuts only** — no AI-generated transition clips. Wan FLF2V transition generation does not exist in the pipeline (`workflow_selector.py` explicitly states "Assembly uses HARD CUTS only"). Mood-aware transition generation via video APIs is not implemented.
 
 ---
 
@@ -183,24 +166,17 @@ Example prompt patterns:
 
 The final assembly stage combines all generated assets into a complete video.
 
-### Per-Scene Assembly (`stitch_modules()`)
+### Per-Scene Assembly (`stitch_modules()` — `phase_c_ffmpeg.py:949`)
 1. Concatenate shot video clips in order
-2. Insert transition clips between shots
-3. Apply per-clip visual effects via `normalize_clip()`
+2. Insert hard cuts between shots (no AI transition clips)
+3. Produce per-scene stitched video
 
-### normalize_clip() — Per-Clip Effect Application
-Applies visual effects to individual clips:
-- Color grading presets (warm_cinema, cinematic, etc.)
-- Consistent codec normalization (h264, yuv420p)
-- Resolution normalization (ensure all clips match)
-- Frame rate normalization
-
-### Master Assembly (`execute_master_ffmpeg_assembly()`)
+### Master Assembly (`cinema_pipeline.py:_assemble_final()`)
 Combines everything into the final export:
 
 ```
 Input:
-  - Video clips (per scene, stitched)
+  - Video clips (per scene, stitched via stitch_modules)
   - TTS voiceover audio
   - Background music
   - Foley/sound effects
@@ -217,15 +193,19 @@ Output:
   - Final MP4 with all tracks merged
 ```
 
+Note: `execute_master_ffmpeg_assembly()` and `normalize_clip()` do not exist in `phase_c_ffmpeg.py`.
+
 ### Color Grading Presets
 | Preset | Description |
 |--------|-------------|
 | `warm_cinema` | Warm tones, slight orange in highlights |
-| `cinematic` | Standard film look, slightly desaturated |
-| `cool_blue` | Cold tones, blue shadows |
+| `cool_noir` | Cold tones, blue shadows, reduced saturation |
+| `vibrant` | Boosted saturation, slight brightness lift |
+| `desaturated` | Muted colors, slight contrast boost |
+| `golden_hour` | Warm golden tones, lifted shadows |
+| `moonlight` | Cool, desaturated, dark |
 | `high_contrast` | Crushed blacks, bright highlights |
-| `film_noir` | High contrast B&W |
-| `dreamy` | Low contrast, lifted blacks |
+| `pastel` | Soft, low contrast, lifted blacks |
 
 ### Audio Mixing
 - **Voice**: Primary track, normalization applied
@@ -254,9 +234,9 @@ Upscaling (SeedVR2 or Real-ESRGAN)
     ↓
 Per-Clip Normalization (FFmpeg: codec, resolution, effects)
     ↓
-Scene Stitching (shots + transitions)
+Scene Stitching (stitch_modules — hard cuts, no AI transitions)
     ↓
-Master Assembly (video + voice + BGM + foley + subtitles)
+Master Assembly (_assemble_final — video + voice + BGM + foley + subtitles)
     ↓
 Final Export (.mp4)
 ```
