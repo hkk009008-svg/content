@@ -238,8 +238,8 @@ Chain a second LoraLoader (node "701", then "702", cap 2 secondaries) after node
 122/600.clip (the FaceDetailer-clip rewire at 600 must move to the last chained
 node — missing it leaves FaceDetailer on char-A-only CLIP; node 600's clip is
 `["700",1]` in the static JSON). Ordering fact that SIMPLIFIES the design:
-`_prune_unavailable` runs at quality_max.py:863, BEFORE `_inject_identity`
-(:877, retry :976), on a per-call deep copy — injected nodes never pre-exist in
+`_prune_unavailable` runs at quality_max.py:1023, BEFORE `_inject_identity`
+(:1037, retry :1154), on a per-call deep copy — injected nodes never pre-exist in
 the static JSON and are injected only when secondaries exist, so **no prune-rule
 changes are needed**; LoraLoader is a core node present on any ComfyUI. The
 injector simply does not inject for absent secondaries. (The first-draft "state

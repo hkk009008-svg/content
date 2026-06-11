@@ -550,7 +550,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `RunPodComfyUI` | `phase_c_assembly.py:35` | ComfyUI REST client (`upload_image`/`queue_prompt`/`get_history`/`get_image`); shared by both tiers. |
 | `_fal_flux_fallback` | `phase_c_assembly.py:515` | FLUX Kontext Max Multi → FLUX-Pro → Schnell → Pollinations. |
 | `ImageGenResult` | `phase_c_assembly.py:18` | `NamedTuple(path, api_name)`; `api_name` is the authoritative backend token. |
-| `generate_ai_broll_max` | `quality_max.py:828` | Max-tier orchestrator: probe → load `pulid_max.json` → optional HiDream swap → prune → 5 inject axes → best-of-N loop → PuLID-boost retry → copy best. |
+| `generate_ai_broll_max` | `quality_max.py:861` | Max-tier orchestrator: probe → load `pulid_max.json` → optional HiDream swap → prune → 5 inject axes → best-of-N loop → PuLID-boost retry → copy best. |
 | `_probe_node_availability` | `quality_max.py:253` | One-time `/object_info` probe. |
 | `_prune_unavailable` | `quality_max.py:364` | Strip absent nodes with safe rewires. |
 | `_inject_identity / _inject_conditioning / _inject_sampling / _inject_latent_source / _inject_post_passes` | `quality_max.py:479 / 636 / 670 / 691 / 714` | Wire LoRA+PuLID; prompt+guidance+ControlNet+Redux; AYS steps+sampler+SLG+FreeU; latent source (txt2img / LatentBlend / img2img); FaceDetailer+SUPIR+4K. |
@@ -812,7 +812,7 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 6. Post-gen identity validation: `IdentityValidator.validate_image(...)` (`cinema/shots/controller.py:674`) against `identity_strictness` (default 0.60).
 7. Append take to `shot["keyframe_takes"]`; record cost.
 
-**KEY FUNCTIONS:** `generate_ai_broll` (`phase_c_assembly.py:75`); `enhance_shot_prompt` (`domain/continuity_engine.py:446`); `classify_shot_type` (`workflow_selector.py:411`); `get_workflow_params` (`workflow_selector.py:450`) / `apply_workflow_params` (`workflow_selector.py:501`); `get_adaptive_pulid_weight` (`workflow_selector.py:540`); for max tier `generate_ai_broll_max` (`quality_max.py:828`).
+**KEY FUNCTIONS:** `generate_ai_broll` (`phase_c_assembly.py:75`); `enhance_shot_prompt` (`domain/continuity_engine.py:446`); `classify_shot_type` (`workflow_selector.py:411`); `get_workflow_params` (`workflow_selector.py:450`) / `apply_workflow_params` (`workflow_selector.py:501`); `get_adaptive_pulid_weight` (`workflow_selector.py:540`); for max tier `generate_ai_broll_max` (`quality_max.py:861`).
 
 **DECISION POINTS:**
 
@@ -836,7 +836,7 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 
 *Identity thresholds* (`SHOT_TYPE_THRESHOLDS`, `identity/types.py:95`, **verified**): portrait 0.75/0.70/0.60, medium 0.70/0.65/0.55, wide 0.60/0.55/0.45, action 0.65/0.60/0.50, landscape 0.0 (strict/standard/lenient). On retry, the threshold degrades linearly toward `lenient` (`get_threshold_for_shot`, `identity/types.py:104`), preventing infinite retry loops.
 
-*Max-tier best-of-N* (`quality_max.py:926`): generate `max_candidate_count` (default 8) candidates in `max_candidate_batch` batches with deterministic seeds (`base_seed + i*1009`); after each batch `should_halt` (`face_validator_gate.py:227`) checks composite ≥ `halt_threshold_composite` (portrait default 0.92) once `n ≥ halt_min_n`; composite = `0.6*ArcFace + 0.4*aesthetic`. If `needs_regenerate` (best ArcFace < `regenerate_floor_arc`, portrait 0.82), one PuLID-boost retry runs (weight += 0.15, capped 1.0).
+*Max-tier best-of-N* (`quality_max.py:1103`): generate `max_candidate_count` (default 8) candidates in `max_candidate_batch` batches with deterministic seeds (`base_seed + i*1009`); after each batch `should_halt` (`face_validator_gate.py:227`) checks composite ≥ `halt_threshold_composite` (portrait default 0.92) once `n ≥ halt_min_n`; composite = `0.6*ArcFace + 0.4*aesthetic`. If `needs_regenerate` (best ArcFace < `regenerate_floor_arc`, portrait 0.82), one PuLID-boost retry runs (weight += 0.15, capped 1.0).
 
 *img2img / continuity denoise* (`TemporalConsistencyManager.get_denoise_strength`, `domain/continuity_engine.py:368`): first shot 0.55, location change 0.50, same-location index ≤1 → 0.40, same-location index >1 → 0.30. UI override `continuity_options.img2img_denoise` clamps to **[0.2, 0.6]**.
 
@@ -1748,7 +1748,7 @@ The functions an engineer reaches for most, grouped by task. All `file:line` ref
 | Function | Location | What it does |
 |---|---|---|
 | `generate_ai_broll` | `phase_c_assembly.py:75` | Image-gen dispatch: max-tier → ComfyUI+PuLID → FAL fallback |
-| `generate_ai_broll_max` | `quality_max.py:828` | N=8 adaptive best-of with prune/inject pipeline; returns `ImageGenResult(path, "QUALITY_MAX")` |
+| `generate_ai_broll_max` | `quality_max.py:861` | N=8 adaptive best-of with prune/inject pipeline; returns `ImageGenResult(path, "QUALITY_MAX")` |
 | `generate_ai_video` | `phase_c_ffmpeg.py:54` | Central video routing + fault-tolerant cascade across 9+ engines |
 | `classify_shot_type` | `workflow_selector.py:411` | Returns `portrait\|medium\|wide\|action\|landscape` (note: **never** returns `close_up` — D-video-1) |
 | `get_workflow_params` / `apply_workflow_params` | `workflow_selector.py:450 / 501` | Per-shot-type template + ComfyUI node injection |

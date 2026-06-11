@@ -113,7 +113,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             to _fal_flux_fallback; each entry has char_id, reference, multi_angle_refs,
             identity_anchor. None / [] takes the single-char (golden) path.
         style_reference: (max tier only) Path to style-board reference image.
-        shot_hint: (max tier only) Pre-classified shot dict; bypasses re-classification.
+        shot_hint: (max tier only) Classification fields, MERGED over inferred defaults then ALWAYS classified — see quality_max._resolve_shot_info.
 
     Returns:
         ImageGenResult(path, api_name) naming the backend that actually ran

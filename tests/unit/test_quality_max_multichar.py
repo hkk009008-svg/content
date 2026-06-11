@@ -473,6 +473,76 @@ def test_full_multichar_sequence_no_dangling_and_retry_safe():
     assert _reachable_dangling(wf, original_ids | {"701", "611", "94"}) == []
 
 
+# ---------------------------------------------------------------------------
+# _resolve_shot_info — partial-hint merge (Pass-A landscape misclassification,
+# 2026-06-11: shot_hint={"shot_type": "two_shot"} replaced the inferred
+# fallback wholesale → characters_in_frame=[] → landscape params zeroed the
+# identity stack and disabled the arc halt-gate)
+# ---------------------------------------------------------------------------
+
+def test_resolve_shot_info_partial_hint_keeps_identity_inference():
+    from quality_max import _resolve_shot_info
+    from workflow_selector import classify_shot_type
+    info = _resolve_shot_info(
+        prompt="a woman on the left and a man on the right, medium two-shot",
+        character_image="/refs/aria.jpg",
+        char_lora_path=None,
+        secondary_chars=[_sec()],
+        shot_hint={"shot_type": "two_shot"},
+    )
+    assert info["characters_in_frame"]
+    assert classify_shot_type(info) == "medium"
+
+
+def test_resolve_shot_info_no_hint_matches_legacy_inference():
+    from quality_max import _resolve_shot_info
+    with_char = _resolve_shot_info("p", "/r/a.jpg", None, None, None)
+    assert with_char == {"prompt": "p", "characters_in_frame": ["char"]}
+    without = _resolve_shot_info("p", None, None, None, None)
+    assert without == {"prompt": "p", "characters_in_frame": []}
+
+
+def test_resolve_shot_info_explicit_empty_chars_honored():
+    # The controller's real landscape hint (characters_in_frame=[]) must win
+    # over inference — explicit keys beat inferred defaults.
+    from quality_max import _resolve_shot_info
+    info = _resolve_shot_info(
+        "aerial valley scenery", "/r/a.jpg", None, None,
+        {"prompt": "aerial valley scenery", "characters_in_frame": [],
+         "camera": ""},
+    )
+    assert info["characters_in_frame"] == []
+
+
+def test_resolve_shot_info_lora_or_secondaries_count_as_characters():
+    from quality_max import _resolve_shot_info
+    lora_only = _resolve_shot_info("p", None, "/l/a.safetensors", None, None)
+    assert lora_only["characters_in_frame"]
+    sec_only = _resolve_shot_info("p", None, None, [_sec()], None)
+    assert sec_only["characters_in_frame"]
+
+
+def test_resolve_shot_info_none_hint_values_do_not_clobber():
+    from quality_max import _resolve_shot_info
+    info = _resolve_shot_info(
+        "real prompt", "/r/a.jpg", None, None,
+        {"prompt": None, "image_api": None, "camera": "85mm"},
+    )
+    assert info["prompt"] == "real prompt"
+    assert "image_api" not in info
+    assert info["camera"] == "85mm"
+
+
+def test_resolve_shot_info_wired_into_dispatch_source():
+    import inspect
+    import quality_max
+    src = inspect.getsource(quality_max.generate_ai_broll_max)
+    assert "_resolve_shot_info(" in src
+    # the all-or-nothing `shot_hint or {...}` replacement must be gone —
+    # including the image_api read, which now goes through the resolved dict
+    assert "shot_hint or {" not in src
+
+
 def test_wireup_call_order_in_source():
     import inspect
     import quality_max

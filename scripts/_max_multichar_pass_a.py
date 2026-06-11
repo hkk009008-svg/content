@@ -134,7 +134,14 @@ def main():
             "lora_strength": None,
             "trigger": None,
         }],
-        shot_hint={"shot_type": "two_shot"},
+        # Full classification shape (mirrors cinema/shots/controller.py:748):
+        # the 2026-06-11 run passed {"shot_type": "two_shot"} — a key
+        # classify_shot_type never reads — and the then-replacement semantics
+        # dropped the inferred characters_in_frame → landscape params
+        # (identity stack zeroed, arc gate off) → disintegrated artifact.
+        shot_hint={"prompt": PASS_A_PROMPT,
+                   "characters_in_frame": ["aria", "fresh_man"],
+                   "camera": "medium two-shot"},
     )
     print(f"Pass A result: {result}")
     return 0 if result else 1

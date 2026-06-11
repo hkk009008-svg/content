@@ -825,6 +825,39 @@ def _run_one_candidate(comfy: RunPodComfyUI, workflow: dict, output_filename: st
 # Top-level entry point
 # ---------------------------------------------------------------------------
 
+def _resolve_shot_info(
+    prompt: str,
+    character_image: Optional[str],
+    char_lora_path: Optional[str],
+    secondary_chars: Optional[List[dict]],
+    shot_hint: Optional[dict],
+) -> dict:
+    """Build the dict classify_shot_type reads (prompt / characters_in_frame /
+    camera / image_api).
+
+    Inferred defaults first; shot_hint MERGES over them (None values skipped),
+    so an explicit key — including the controller's empty characters_in_frame
+    on a true landscape — always wins, while a partial hint can never erase
+    the inferred identity presence. The previous `shot_hint or {...}`
+    replacement classified the 2026-06-11 Pass-A two-shot as landscape
+    (identity stack zeroed, arc halt-gate off) because a truthy-but-partial
+    hint dropped the inferred characters_in_frame.
+
+    classify_shot_type branches only on characters_in_frame EMPTINESS, so a
+    single "char" sentinel covers primary / LoRA-only / secondary payloads.
+    """
+    shot_info = {
+        "prompt": prompt,
+        "characters_in_frame": (
+            ["char"] if (character_image or char_lora_path or secondary_chars)
+            else []
+        ),
+    }
+    if shot_hint:
+        shot_info.update({k: v for k, v in shot_hint.items() if v is not None})
+    return shot_info
+
+
 def generate_ai_broll_max(
     prompt: str,
     output_filename: str,
@@ -863,10 +896,8 @@ def generate_ai_broll_max(
         return None
 
     # ---- Classification & param lookup ----
-    shot_info = shot_hint or {
-        "prompt": prompt,
-        "characters_in_frame": ["char"] if character_image else [],
-    }
+    shot_info = _resolve_shot_info(prompt, character_image, char_lora_path,
+                                   secondary_chars, shot_hint)
     shot_type = classify_shot_type(shot_info)
     params = get_max_quality_params(shot_type)
 
@@ -971,7 +1002,7 @@ def generate_ai_broll_max(
     # Per-shot image-API swap. If the optimizer requested HiDream-I1 and the pod
     # has the custom node installed, swap the UNet loader. PuLID is stripped in
     # that case (HiDream has no PuLID equivalent) but LoRA + Redux still apply.
-    requested_image_api = (shot_hint or {}).get("image_api") or params.get("image_api")
+    requested_image_api = shot_info.get("image_api") or params.get("image_api")
     if requested_image_api == "HIDREAM_I1":
         if _swap_to_hidream(workflow, available):
             print("[quality_max] image backbone: HiDream-I1-Full")
