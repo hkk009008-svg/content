@@ -17,7 +17,6 @@ import os
 from typing import Optional, Tuple
 
 from config.settings import settings
-from cinema.fal_limits import FAL_TIMEOUT_TALKING_HEAD_S
 from performance._net import safe_download
 from performance._poll import poll_task
 
@@ -49,44 +48,20 @@ def _synth_via_hedra(
     audio_path: str, keyframe_path: str, output_mp4: str, duration_s: float,
     shot_id: str, video_id: str,
 ) -> Optional[str]:
-    """Hedra Character-3 audio→video. We already integrated Hedra for lipsync
-    (see lip_sync.py); here we use it specifically to synthesize a driving
-    face for downstream Act-One / LivePortrait — same engine, different role.
+    """Hedra Character-3 audio→video via direct REST API.
+
+    Uses the direct api.hedra.com REST endpoint exclusively. The fal-ai/hedra/
+    character-3 FAL route is HTTP-404-dead (confirmed; see lip_sync.py:574) and
+    has been removed. Requires HEDRA_API_KEY; returns None immediately if the
+    key is absent so the caller can fall through to the SadTalker cascade without
+    burning a timeout window.
     """
     api_key = getattr(settings, "hedra_api_key", "") or os.environ.get("HEDRA_API_KEY", "")
-    fal_key = getattr(settings, "fal_key", "") or os.environ.get("FAL_KEY", "")
-
-    # Prefer direct Hedra REST when HEDRA_API_KEY is set; otherwise route via
-    # FAL (we already integrated Hedra C3 via fal-ai/hedra/character-3).
-    if fal_key:
-        try:
-            import fal_client
-            print(f"   [DRIVING/HEDRA-FAL] synth driving face from audio...")
-            image_url = fal_client.upload_file(keyframe_path)
-            audio_url = fal_client.upload_file(audio_path)
-            result = fal_client.subscribe(
-                "fal-ai/hedra/character-3",
-                client_timeout=FAL_TIMEOUT_TALKING_HEAD_S,
-                arguments={
-                    "image_url": image_url,
-                    "audio_url": audio_url,
-                    "aspect_ratio": "1:1",
-                    "resolution": "720p",
-                },
-                with_logs=False,
-            )
-            video_url = result.get("video", {}).get("url")
-            if video_url and safe_download(video_url, output_mp4):
-                _cost_log("hedra", duration_s, shot_id, video_id)
-                print(f"   ✅ Hedra (FAL) driving face: {output_mp4}")
-                return output_mp4
-        except Exception as e:
-            print(f"   [DRIVING/HEDRA-FAL] failed: {e}")
 
     if not api_key:
         return None
 
-    # Direct Hedra REST API (kept defensive in case FAL is unavailable)
+    # Direct Hedra REST API
     try:
         import requests
         # 1) Create generation job
