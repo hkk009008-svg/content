@@ -12,11 +12,18 @@ Features:
 
 import os
 import tempfile
-from typing import Optional, List, Dict, Callable
+from typing import Optional, List, Dict, Callable, Tuple
 from collections import Counter
 
 import cv2
 import numpy as np
+
+try:
+    from PIL import Image as _PILImage
+    _PIL_AVAILABLE = True
+except ImportError:
+    _PILImage = None
+    _PIL_AVAILABLE = False
 
 from identity.types import (
     FailureReason,
@@ -128,6 +135,194 @@ class IdentityValidator:
         self.history.append(result)
         icon = "✅" if result.passed else "❌"
         print(f"      {icon} Image identity: similarity={result.overall_score:.3f} (threshold={threshold})")
+        return result
+
+    def validate_image_with_binding(
+        self,
+        image_path: str,
+        reference_path: str,
+        char_specs: List[Dict],
+        character_id: str = "",
+        character_name: str = "",
+        shot_type: str = "medium",
+        threshold: float = None,
+    ) -> Tuple[IdentityValidationResult, Dict[str, Dict]]:
+        """
+        Thin public wrapper returning BOTH the existing presence result and
+        per-character binding scores.
+
+        validate_image is called unchanged (backward-compatible); binding
+        scores are computed separately via _compute_binding_scores.
+
+        Args:
+            image_path: Path to generated image.
+            reference_path: Path to primary character reference (used by
+                validate_image for the presence check).
+            char_specs: List of binding spec dicts, each:
+                {
+                    "char_id":      str,   # character identifier
+                    "ref_path":     str,   # reference image path (path-based,
+                                          # same API style as validate_image)
+                    "intended_slot": "left" | "right",
+                }
+            character_id: Forwarded to validate_image unchanged.
+            character_name: Forwarded to validate_image unchanged.
+            shot_type: Forwarded to validate_image unchanged.
+            threshold: Forwarded to validate_image unchanged.
+
+        Returns:
+            (presence_result, binding_dict)
+            presence_result: same IdentityValidationResult as validate_image.
+            binding_dict: char_id -> {
+                "binding_score": float,   # positive = intended side stronger
+                "binding_ok":   bool,     # True only when binding_score > 0
+                "intended_score": float,  # score on the intended half
+                "other_score":  float,    # score on the other half
+            }
+        """
+        presence_result = self.validate_image(
+            image_path, reference_path,
+            character_id=character_id,
+            character_name=character_name,
+            shot_type=shot_type,
+            threshold=threshold,
+        )
+        binding_dict = self._compute_binding_scores(image_path, char_specs)
+        return presence_result, binding_dict
+
+    def _compute_binding_scores(
+        self,
+        image_path: str,
+        char_specs: List[Dict],
+    ) -> Dict[str, Dict]:
+        """
+        Compute per-character spatial-binding scores using 50%-width half crops.
+
+        For each character spec, answers "is character X's face on the INTENDED
+        half of the frame?" by calling validate_image once per half crop and
+        taking the delta:
+
+            binding_score(X) = score(intended_half, X.ref)
+                              - score(other_half,   X.ref)
+
+        A positive binding_score means X is more prominent on the intended side;
+        binding_ok is True only when binding_score > 0 (strictly; ties are
+        FAILURE per §3.2: the face scored at least as strongly on the wrong half).
+
+        Boundary: w // 2 EXACTLY — matches _s1_rescore_crops.crop_half and the
+        0-based masks in scripts/_arc_score_session.py.
+
+        The bbox-centroid alternative (spec §3.2 "An alternative...") — assign
+        detected face to char via embedding match, then check bbox.x centroid —
+        is NOT implemented here; it is the recorded follow-up when bbox
+        coordinates become available through the _analyze_frame DeepFace path.
+
+        Args:
+            image_path: Path to generated image (must exist; silently returns
+                zero scores if missing or PIL unavailable).
+            char_specs: list of {
+                "char_id":      str,
+                "ref_path":     str,   # reference image (path-based, not
+                                       # pre-computed embeddings)
+                "intended_slot": "left" | "right",
+            }
+
+        Returns:
+            Dict[char_id, {
+                "binding_score": float,
+                "binding_ok":    bool,
+                "intended_score": float,
+                "other_score":   float,
+            }]
+        """
+        result: Dict[str, Dict] = {}
+
+        if not char_specs:
+            return result
+
+        if not _PIL_AVAILABLE or _PILImage is None:
+            # Return zero-scores with binding_ok False for all chars so callers
+            # get a deterministic (non-crashing) result without PIL installed.
+            for spec in char_specs:
+                result[spec["char_id"]] = {
+                    "binding_score": 0.0,
+                    "binding_ok": False,
+                    "intended_score": 0.0,
+                    "other_score": 0.0,
+                }
+            return result
+
+        if not os.path.exists(image_path):
+            for spec in char_specs:
+                result[spec["char_id"]] = {
+                    "binding_score": 0.0,
+                    "binding_ok": False,
+                    "intended_score": 0.0,
+                    "other_score": 0.0,
+                }
+            return result
+
+        try:
+            img = _PILImage.open(image_path)
+            w, h = img.size
+            mid = w // 2
+
+            # Produce the two half crops in a temp dir; clean up after scoring.
+            with tempfile.TemporaryDirectory() as tmpdir:
+                base = os.path.splitext(os.path.basename(image_path))[0]
+                left_path = os.path.join(tmpdir, f"{base}_left.jpg")
+                right_path = os.path.join(tmpdir, f"{base}_right.jpg")
+                img.crop((0, 0, mid, h)).save(left_path, quality=95)
+                img.crop((mid, 0, w, h)).save(right_path, quality=95)
+
+                for spec in char_specs:
+                    char_id = spec["char_id"]
+                    ref_path = spec.get("ref_path", "")
+                    intended_slot = spec.get("intended_slot", "left")
+
+                    if intended_slot == "left":
+                        intended_path = left_path
+                        other_path = right_path
+                    else:
+                        intended_path = right_path
+                        other_path = left_path
+
+                    # Mirror _s1_rescore_crops.score(): call validate_image
+                    # with threshold=0.0 so we always get a numeric score.
+                    intended_score = self.validate_image(
+                        intended_path, ref_path,
+                        character_id=f"{char_id}_intended",
+                        threshold=0.0,
+                    ).overall_score or 0.0
+
+                    other_score = self.validate_image(
+                        other_path, ref_path,
+                        character_id=f"{char_id}_other",
+                        threshold=0.0,
+                    ).overall_score or 0.0
+
+                    binding_score = intended_score - other_score
+                    binding_ok = binding_score > 0  # <= 0 is FAILURE (spec §3.2)
+
+                    result[char_id] = {
+                        "binding_score": binding_score,
+                        "binding_ok": binding_ok,
+                        "intended_score": intended_score,
+                        "other_score": other_score,
+                    }
+
+        except Exception as e:
+            print(f"   ⚠️ _compute_binding_scores failed: {e}")
+            for spec in char_specs:
+                cid = spec["char_id"]
+                if cid not in result:
+                    result[cid] = {
+                        "binding_score": 0.0,
+                        "binding_ok": False,
+                        "intended_score": 0.0,
+                        "other_score": 0.0,
+                    }
+
         return result
 
     def validate_video(
