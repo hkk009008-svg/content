@@ -639,6 +639,29 @@ def api_update_character(pid, cid):
                 f.save(save_path)
                 saved_paths.append(save_path)
 
+    # A3 single-face enforcement, PUT path: an image arriving via update is
+    # the same registration event as create — multi-face references corrupt
+    # every downstream identity score, so they must not enter via either door.
+    # Same 400-with-message contract as api_add_character's ValueError path.
+    if saved_paths:
+        from domain.character_manager import DEEPFACE_AVAILABLE, _count_faces
+        if DEEPFACE_AVAILABLE:
+            for p in saved_paths:
+                n = _count_faces(p)
+                if n >= 2:
+                    for sp in saved_paths:
+                        try:
+                            os.remove(sp)
+                        except OSError:
+                            pass
+                    return jsonify({
+                        "error": (
+                            f"Reference image '{os.path.basename(p)}' contains "
+                            f"{n} faces but exactly 1 is required. "
+                            f"Provide a single-person reference photo."
+                        )
+                    }), 400
+
     def _mutate_project(latest_project: dict):
         # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
         # for-find.  Project.model_validate(latest_project) validates the
