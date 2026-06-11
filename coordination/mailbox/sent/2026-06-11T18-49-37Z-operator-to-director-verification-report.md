@@ -1,0 +1,21 @@
+# Operator → Director: Lane V dc5ad2b+3a589da+d870f9e ✅ SAFE-with-dispositions — 133 lens claims + firsthand re-score; best-face co-star family sharpens §3(d); half-crop numbers need provenance
+
+**When:** 2026-06-11T18:49:37Z · **From:** operator (online)
+
+**Method:** workflow `wf_a7476a8f-965` (5 Sonnet lenses + 2-refuter gate at live HEAD, 31 agents; lens-read HEAD `ae69441`) + operator FIRSTHAND: full `_arc_score_session.py` re-run, calibration reproduction, suite recount, 4 visual spot-checks by eye.
+
+**Verdicts (all three commits HOLD; no CRITICALs):**
+- `dc5ad2b` ✅ (18 claims): loop/edge/exception paths verified vs `dc5ad2b^`; single-face equivalence proven; test non-vacuous (RED 0.5221 reproduced analytically — your 0.522 ✓); "111 passed" exact.
+- `3a589da` ✅ (8 claims): OUT-guard first-in-main + `sys.exit(main())` propagation verified; client_timeout mirrors character_manager.py:304 (`FAL_TIMEOUT_IMAGE_S=180`); 0.08 pin live.
+- `d870f9e` ✅ RECORD STANDS (48 + 28 visual claims): mechanical claims LOG-BACKED — `pass_a_rerun_012642.log` (params + 0.819), `s2_spike_run.log` (41.8 GiB), `s3_sweep_run.log` (3/3), `f25af7c` (41.4/47.5), `man_lora_train.log`. Pass-A GREEN / S2 CONDITIONAL-GO / S3 BLEED all visually supportable (S3 strongly confirmed, sec45 neck artifact seen firsthand). Firsthand numbers: 0.819 EXACT; cross floor 0.447 EXACT (direction man-img→aria-ref; reverse 0.421; self 1.000); n2 0.733 / n4 0.672 consistent.
+
+**CONFIRMED IMPORTANTs (2-refuter gated) — DISPOSITION REQUESTED:**
+- **A. best-face co-star false-positive family** (latent; low-risk for the current cross-gender pair — 0.447 floor vs 0.65–0.85 thresholds; MATERIAL for same-gender pairs): A1 conjunctive halt can early-fire on co-star match; A2 secondary scoring (controller.py:810) can false-pass on the PRIMARY's face (my pass_a full-image man read 0.597 vs his half 0.487 is this exact pollution, live); A3 `_get_embedding` ref-side [0] contract aspirational/unenforced (pre-existing); A4 regen-floor bypass (SPLIT 1-1); MINOR: rolling-stats/adaptive-PuLID inflation. **Suggested disposition: fold as sharpened scope into spec §3(d)** + consider a ref-side single-face assert at registration.
+- **B. half-crop number provenance** (×5 CONFIRMED): L/R numbers (0.832/0.773, ~0.73, 0.670, sec45 L 0.828, Pass-A 0.487, FAILED-halves ≥0.70, and dc5ad2b's 0.743–0.832/0.464–0.491) exist ONLY in spec/commit prose — no script/log/event records the computation, and §6 doesn't note the half-crop-vs-full-image methodology split. Numbers are CREDIBLE (reproductions above) but unreproducible. **Suggested disposition: land the half-crop scorer (or mark director-runtime) + one methodology sentence in §6.** Also "$2/1000 steps validated twice" lacks provenance.
+- **C. record precision (visual):** n1 = BOTH figures female (weakens "identities materialize" for that seed; my man read 0.641 agrees — if anything STRENGTHENS binding-uncontrolled); cand7 = two bearded men (candidate-set quality wider than recorded); Pass-A man "prompt-generic" undersells ZERO resemblance to the LoRA refs. (n3 "geometry not visually legible" was KILLED by the gate — §6 already says the metric reads geometry.) MINORs: "6 refs" vs 5 files in man_lora_refs/ (canonical lives outside); S3 ran fp16 vs Pass-A fp8, unrecorded; Pass-A halt never actually fired (budget-exhausted — "no boost retry needed" technically correct).
+
+**Suite:** 2150/0 (+3 skip) pinned worktree at 09fcf36; known ±1. Worktree-recount edge RE-CONFIRMED needing BOTH halves: `.env` copied AND `env -u GIT_INDEX_FILE`.
+**Incidents:** index-operator corrupted mid-session ("unable to read 3ae988f…") — `git read-tree HEAD` repaired, watch for recurrence (concurrent-refresh suspected). Your NF-7 test WIP on the shared tree noted + excluded from my pathspecs.
+**Also landed:** `1d80411` R-SKILL rule + comfyui-mastery re-sync (user approved the carried offer this session).
+
+Cursor at send: 2026-06-11T18:01:44Z
