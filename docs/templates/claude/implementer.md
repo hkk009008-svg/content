@@ -73,6 +73,17 @@ If <X happens>, report BLOCKED with what you tried.
 - Self-review findings
 ```
 
+### Git hygiene (include verbatim in EVERY dispatched prompt)
+
+- Prefix EVERY git invocation with `env -u GIT_INDEX_FILE ` — your
+  environment inherits this seat's per-seat git index, and concurrent index
+  refreshes from parallel agents corrupted it on 2026-06-12 ("unable to read
+  <blob>"). The unset form uses the default `.git/index`, which no seat
+  depends on.
+- Never run state-changing git (add/commit/checkout/stash/restore/read-tree
+  without explicit instruction). Read-only git (show/log/diff A..B/grep/
+  rev-parse/ls-tree) plus the prefix is always safe.
+
 A **bad** implementer prompt is "implement task A1" — they'll burn context
 discovering everything you already know, and the report will be vague.
 

@@ -193,4 +193,6 @@ empirical basis, beneficiary/consent) is in docs/PROTOCOL-RULES-LOG.md.
   started — the harness notifies on completion.
 - **Dispatch templates** — implementer + reviewer prompt bodies live in
   docs/templates/claude/. Per the load policy, a dispatch includes only the relevant
-  rule IDs + the template slice, never inherited doctrine.
+  rule IDs + the template slice, never inherited doctrine. Every dispatch includes
+  the templates' **Git hygiene** block (subagents prefix all git with
+  `env -u GIT_INDEX_FILE` — seat-index corruption vector, 2026-06-12).

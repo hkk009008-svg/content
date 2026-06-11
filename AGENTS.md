@@ -42,7 +42,9 @@ you know the task*. Everything task-specific lives in linked docs, pulled on dem
 - Do NOT read linked protocol docs at session start.
 - Read a linked doc only when its trigger fires.
 - When dispatching a subagent, include only the relevant rule IDs + template
-  slice — never inherited doctrine.
+  slice — never inherited doctrine. Every dispatch includes the templates'
+  **Git hygiene** block (subagents prefix all git with `env -u GIT_INDEX_FILE`
+  — seat-index corruption vector, 2026-06-12).
 - `docs/PROGRAM-MANUAL.md` is pull-on-demand only — read
   `docs/protocol/program-manual-guide.md` before using/maintaining it; never load
   the full manual at session start.
