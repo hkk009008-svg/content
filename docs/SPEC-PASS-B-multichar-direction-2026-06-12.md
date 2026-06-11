@@ -390,9 +390,12 @@ Three approaches exist, each with different implications:
   always the other, based on `primary_char_id` vs `secondary_specs[0]`. Works
   for 2-char shots only; breaks at 3+ chars (no center convention exists).
 
-**This design decision must be made before implementing `_compute_binding_scores`.**
-Surface to the director before coding begins. The spec leaves the approach open;
-do not silently pick one during implementation.
+**RESOLVED (2026-06-12, director, recorded at `ef7b60c`):** the metric is
+slot-source-agnostic — callers pass `intended_slot` explicitly per character
+(option (c)-as-parameter). Phase-0/Phase-3 callers (instrument, spike driver)
+know the prompt convention; the `CharIdentitySpec` schema change (option (a))
+is deferred until the spike validates the metric and production wiring
+(A1/A2/A4 gating) begins.
 
 **Dependency chain:** the controller at `controller.py:808-816` calls
 `validate_image` per character on the full image (post-dc5ad2b, scores best
@@ -442,13 +445,18 @@ half-crop scripts (`_s1_rescore_crops.py` pattern), not the production
 validate_image. **Correction (operator Lane V 20:14:36Z, firsthand-refuted;
 director-disposed):** best-face-on-full-image is NOT equivalent to half-crop
 scoring. The equivalence holds only for "is X present anywhere in frame";
-per-FIGURE reads differ — which is the binding dimension itself (operator
-firsthand: sec45 man 0.828 half vs 0.667 full; Pass-A man 0.487 ad-hoc half
-vs 0.597 full). The committed instrument (`scripts/_arc_score_session.py
---halves`, post-dc5ad2b best-face per half) reads n3 L:man 0.780 and Pass-A
-man L 0.587 / R 0.720 — see the SPEC-P1-1 §6 instrument-provenance append.
-Pass-B implementers MUST NOT use full-image reads as binding evidence;
-binding numbers come from per-half (or per-bbox) scoring only.
+per-FIGURE reads differ — which is the binding dimension itself. Evidence
+(second correction, 2026-06-12 late: the original sec45 leg of this argument
+was itself a junk read — operator-owned in their 21:16:46Z probe report —
+and the unfiltered instrument's man-column was 13/18 non-figure reads):
+the per-face probe (`scripts/_probe_halves_faces.py`) reads the Pass-A man
+FIGURE at 0.480 on his half vs 0.597 full-image (co-star elevation), and
+the detection-FILTERED instrument (`scripts/_arc_score_session.py --halves`
+at `312f6d2`: largest-OK-face only, blobs and whole-image fallbacks
+excluded) reads n3-L man figure 0.519 (the unfiltered 0.780 was a 93×93
+blob) and Pass-A man L 0.480 / R 0.481. Pass-B implementers MUST NOT use
+full-image reads as binding evidence; binding numbers come from
+detection-filtered per-half figure reads only.
 
 ---
 
@@ -587,6 +595,32 @@ Implement `IdentityValidator._compute_binding_scores` in `identity/validator.py`
 Write TDD (RED → GREEN). Test against S2 n3 artifact using the known binding
 expectation (man's face geometry should bind to LEFT per n3 embedding scores).
 This is fully OFFLINE and can be reviewed before pod spin-up.
+
+**PHASE 0 RESULTS (2026-06-12 — COMPLETE):**
+
+- **0a** — binding directions derived from the committed instrument
+  (no new compute). **0b** `fcd06b5` — `scripts/_mask_gen.py`, boundary
+  test-pinned to `crop_half`'s `w//2`. **0c** `ef7b60c` — binding metric +
+  `validate_image_with_binding`, 28 tests. **Filter (unplanned, blocking)**
+  `312f6d2` — the operator's 21:16:46Z probe showed the unfiltered
+  instrument's man-column was 13/18 non-figure reads (blobs + whole-image
+  fallbacks); detection-filtered figure reads (largest OK face, ≥1% area)
+  now back both the instrument and the metric; ref embeddings use the
+  largest-OK guard. A3 hardening rode along: registration assert `418dee2`
+  + PUT-bypass closed `786d9e9`.
+- **Unmasked baseline (FILTERED figure reads, S2 n1–4, intended
+  aria=left / man=right per the driver prompt):** aria binding_ok **0/4**;
+  man **1/4** (n4 only, via face-absent-on-other-half semantics; **0/3**
+  on seeds where both halves had detectable faces). Man figure reads are
+  uniformly 0.466–0.528. Re-emitted table:
+  `logs/halves_rescore_20260612_filtered.{json,txt}` (regenerate:
+  `PYTHONPATH=. .venv/bin/python scripts/_arc_score_session.py --halves`).
+- **New signal for Phase 3:** 4 of 18 half-crops have NO detectable face
+  at all (FAILED-landscape both halves; n4-L; sec45-L; sec55-L TINY-only) —
+  per-half face-presence is itself a cheap render-quality gate worth
+  recording per seed in Phase 3.
+- Design A's ≥3/4 GO bar therefore measures against a **0/4 (strict 0/3)**
+  unmasked baseline.
 
 ### Phase 1 — Pod spin-up + census (same as S2 runbook Phase 0)
 

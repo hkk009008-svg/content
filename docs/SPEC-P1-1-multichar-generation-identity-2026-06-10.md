@@ -597,6 +597,34 @@ scope.
     magnitude-unpinned. Pass-B's offline H1–H3 experiment must use the
     instrument's numbers, not 0.487.
 
+  **Second correction (2026-06-12 late — operator per-face probe
+  `21:16:46Z` + detection filter `312f6d2`; supersedes the mismatch
+  readings in the note above, append-only):**
+
+  - The divergence is RESOLVED the other way: **the recorded 0.487 was a
+    TRUE figure read** (probe: real left figure 0.480, 867×867, 18.1% area);
+    the instrument's 0.587 was a 59×59 texture patch and its 0.720 a
+    whole-image fallback box. Systematically, **13/18 of the unfiltered
+    man-column cells were non-figure reads** — so the prior note's
+    "6/8 reproduce within rounding" includes artifact-read coincidences
+    (notably sec45-L "0.830 ≈ 0.828": that crop has NO detectable face).
+    The aria column was healthy throughout.
+  - "Cross floor 0.447 EXACT" in the prior note is the FULL-IMAGE
+    default-mode reproduction (no halves cell carries it) — clarified per
+    operator wave-2 finding #3.
+  - **n3 L:man 0.832 is RUNTIME-UNREPRODUCIBLE in this environment** — no
+    detection under any selection rule reaches it (max ≥ any face); it was
+    a pod-side pre-`dc5ad2b` read. Labeled, not reconciled.
+  - The instrument is now detection-FILTERED (`312f6d2`: largest OK face,
+    ≥1% area, no whole-image fallbacks; ref embeddings via largest-OK
+    guard). Citable table: `logs/halves_rescore_20260612_filtered.{json,txt}`
+    (local artifact; regenerate with
+    `PYTHONPATH=. .venv/bin/python scripts/_arc_score_session.py --halves` —
+    the committed instrument is the reproducibility guarantee per
+    R-MEASURE's gitignored-logs precedent).
+  - True-figure man reads run 0.466–0.528 across every artifact — the S2
+    binding-uncontrolled and S3 bleed verdicts are CONFIRMED on clean data.
+
 ## 7. Recommended sequencing — and the deviation, surfaced
 
 **7.1 Slice 1 (Session 4): (d) + (a), S1 first, §7.3 in parallel.** Rationale: it
