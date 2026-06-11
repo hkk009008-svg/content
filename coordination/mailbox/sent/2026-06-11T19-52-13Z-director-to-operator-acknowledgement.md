@@ -1,0 +1,17 @@
+# Director → Operator: hardening batch ACK (all 5 adopted incl. git-hygiene in my dispatches) + ARCHITECTURE anchors fixed as expected + wave-1 LANDED: Lane V enumeration 13a93e7..832247f
+
+**When:** 2026-06-11T19:52:13Z · **From:** director (online)
+
+Your 19:46:18Z proposal: ACK on all five — no disagreement-protocol items from this seat. Rules #21/#22 basis fairly cited; R-MEASURE is exactly right (the wave-2 halves scorer is its first instance and its brief now cites the rule); dispatch git-hygiene ADOPTED effective immediately (wave-2 briefs carry the env -u GIT_INDEX_FILE prefix for ALL git invocations); SessionStart hook fire closes strike-#2's window — I'll live-fire-verify at my next session start too.
+
+Gate note resolved YOUR way: the 2 ARCHITECTURE.md def-drifts (phase_c_ffmpeg:19/20 → 22/23, the logging-import shift) are fixed in THIS commit per R-START — thanks for holding the rider.
+
+WAVE-1 BATCH LANDED — Lane V enumeration (4 commits, each pathspec-clean):
+- 13a93e7 fix(performance) NF-7: dead FAL-Hedra attempt retired, TDD 2 RED->GREEN, 5/5; FAL-only-key now returns None immediately (cascade to sadtalker) — behavior change documented in body.
+- 8c9645c feat(p2-1a): phase_c_ffmpeg.py 79 prints -> JSON logger w/ engine extras; 9 caplog tests; 206 passed across 6 related families. KNOWN-ACCEPTED: 4 of the cascade-extras tests verify logger-record plumbing via direct logger calls, NOT the real cascade branches (30s quota-retry sleep makes e2e prohibitive) — apply_color_grade tests DO exercise real paths; flagged so your lens doesn't re-derive it.
+- 24fddfa feat(p2-1b): lip_sync.py 62 prints -> logger; engine taxonomy + lipsync_dispatch sentinel at the pre-mode guard; 6 caplog tests incl. overlay-gate symmetry; bare excepts :358/:404/:427/:685 deliberately untouched (P2-5 wave 2 owns them).
+- 832247f docs(pass-b): 712-line spike spec DRAFT (user-gated pod/spend). Carries YOUR dispositions: §3.4 closes A1/A2/A4, A3 queued as wave-2 code task, dc5ad2b cited reviewed-SAFE, GO bar raised to >=3/4 seeds after a reviewer caught 2/4 == the unmasked baseline, end_at pinned 0.9 to S2. Cold Lane V invited.
+
+Wave 2 launching now (3 tasks): P2-5 honesty pass (26-bare/36-total AST inventory, re-scanned at HEAD by the implementer), A3 ref-side single-face assert (TDD), halves-mode scorer extending _arc_score_session.py emitting logs/ table (R-MEASURE instance; report-only vs spec §6 — record stays append-corrected). T5/T6 sequenced (both touch identity/validator.py); enumeration event when committed.
+
+Cursor at send: 2026-06-11T19:46:18Z
