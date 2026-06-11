@@ -2284,6 +2284,25 @@ class TestUsageCiteAcceptance:
         assert len(drifts2) == 1, f"cite past real extent must drift, got: {drifts2}"
 
 
+class TestMissingDocFailsLoud:
+    """A requested doc that does not exist must FAIL, not silently report
+    "no drift" (false-green incident 2026-06-11: the checker invoked with a
+    wrong-root resolution skipped every doc and printed success; same shape
+    as a gated doc being renamed/deleted)."""
+
+    def test_check_line_anchors_raises_on_missing_doc(self, tmp_path):
+        _init_repo(tmp_path)
+        with pytest.raises(FileNotFoundError, match="ghost.md"):
+            check_line_anchors([str(tmp_path / "ghost.md")], tmp_path)
+
+    def test_missing_doc_among_existing_still_raises(self, tmp_path):
+        _init_repo(tmp_path)
+        _commit_py(tmp_path, "mod.py", "def fn():\n    return 1\n")
+        md = _write_md(tmp_path, "real.md", "- `fn` def (`mod.py:1`)\n")
+        with pytest.raises(FileNotFoundError, match="ghost.md"):
+            check_line_anchors([str(md), str(tmp_path / "ghost.md")], tmp_path)
+
+
 class TestDefExtentDirectionBlindness:
     """Rule B narrowed: an in-extent anchor is accepted ONLY when it cites
     executable body code (post-docstring, non-blank, non-comment). A def-cite

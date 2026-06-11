@@ -951,7 +951,12 @@ def check_line_anchors(
     for doc_path in doc_paths:
         full_path = Path(doc_path) if Path(doc_path).is_absolute() else repo_root / doc_path
         if not full_path.exists():
-            continue
+            # A silently skipped doc is a FALSE GREEN — the gate reports "no
+            # drift" while checking nothing (wrong-root invocation / renamed
+            # gated doc, reproduced 2026-06-11). Fail loud instead.
+            raise FileNotFoundError(
+                f"doc not found: {doc_path} (resolved to {full_path})"
+            )
         doc_lines = full_path.read_text(encoding="utf-8", errors="replace").splitlines()
 
         in_fence = False
@@ -1491,7 +1496,11 @@ def _collect_sha_citations(doc_paths: list[str], repo_root: Path) -> list[dict]:
     for doc_path in doc_paths:
         full = Path(doc_path) if Path(doc_path).is_absolute() else repo_root / doc_path
         if not full.exists():
-            continue
+            # Same false-green guard as check_line_anchors: never skip a
+            # requested doc silently.
+            raise FileNotFoundError(
+                f"doc not found: {doc_path} (resolved to {full})"
+            )
         for line_num, line in enumerate(
             full.read_text(encoding="utf-8", errors="replace").splitlines(), 1
         ):
@@ -1824,6 +1833,16 @@ def main(argv=None) -> int:
 
     sha_mode = args.sha_refs or args.show_subjects
     docs = args.docs or (SHA_DEFAULT_DOCS if sha_mode else ["ARCHITECTURE.md"])
+
+    # Missing docs fail loud (exit 2) — a skipped doc would be a false green.
+    missing = [
+        d for d in docs
+        if not (Path(d) if Path(d).is_absolute() else repo_root / d).exists()
+    ]
+    if missing:
+        for d in missing:
+            print(f"ERROR: doc not found: {d} (repo root: {repo_root})")
+        return 2
 
     if args.list_unbound:
         sink: list[dict] = []
