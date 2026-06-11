@@ -4,9 +4,22 @@
 **HEAD at wrap:** `3a589da` (director ONLINE mid-pod-arc — expect movement). **origin/main:** `107b347`
 (local **20 ahead**, push USER-gated; last push CI-green run 27312370385). **Suite:** **2151/0 full recount
 live at wrap (`3a589da`, incl. both unreviewed director commits)**; 2129/0 confirmed at `937ec47`
-early-session; smoke OK throughout. **Cursor: 2026-06-11T01:52:08Z,
-0 unread at wrap.** Pod: RUNNING, **user authorized full pod work to the director this session** —
-they notify the user when it's stoppable; NO operator action.
+early-session; smoke OK throughout. **Cursor: 2026-06-11T03:37:10Z,
+0 unread (amended at wrap+15min — director closure event folded).** Pod: **RELEASED** — all
+pod-dependent work complete; user notified stoppable ~02:30Z; stop/keep is theirs.
+
+> **WRAP AMENDMENT (03:40Z): the director CLOSED the pod arc minutes after this wrap**
+> (event 03:37:10Z, records `d870f9e`): **S3 sweep = BLEED at ALL strengths** (3/3 arms render
+> two women, Aria wardrobe on both — a pure-LoRA secondary at the ≤0.55 clamp under a
+> PuLID-anchored primary cannot hold distinct VISUAL identity; embeddings alone would have
+> called sec45 GO — visual verdict overrides) · **S2 sharpened to CONDITIONAL-GO** (identities
+> materialize but identity↔figure binding is UNCONTROLLED — man-geometry on the beardless
+> figure; Pass B needs `ApplyPulidAdvanced.attn_mask` or per-face best-of-N + swap rescue —
+> exactly the comfyui-mastery single-face prior in this handoff's sharp edges) · director OWNED
+> the hole-2 overclaim ("to claim the gate misses X, break X first" — lesson recorded). The
+> pickup below is AMENDED: add `d870f9e` (spec §6 session record + runbook COMPLETE/exit
+> record) to the Lane V queue — claim-audit it against the artifacts in `logs/`
+> (pass_a_multichar cand0-7, s2_dual_n1-4.jpg, s3_stack_sec{35,45,55}.jpg, man_lora_refs/).
 
 ## ⭐ #1 PICKUP (in order)
 
