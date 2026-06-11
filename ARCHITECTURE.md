@@ -874,7 +874,7 @@ Workflow file: [pulid_max.json](pulid_max.json) (cached at module level with
 `_inject_post_passes` so the best-of-N `copy.deepcopy` fan-out inherits portrait
 dims. 16:9 / ctx-less = no-op (same gate as §8.2 — now OPEN post-T10).
 
-**Adaptive halt loop** ([quality_max.py:784-792](quality_max.py:784)):
+**Adaptive halt loop** ([quality_max.py:1103-1141](quality_max.py:1103)):
 ```
 while len(scores) < n_max:
     starting_index = len(scores)
