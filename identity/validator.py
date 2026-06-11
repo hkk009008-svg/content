@@ -44,6 +44,208 @@ except ImportError:
 # Returns {"confidence": float, "issues": list[str], ...}.
 VisionValidator = Callable[[str, str], Dict]
 
+# ---------------------------------------------------------------------------
+# Figure-read constants and helpers (detection filtering)
+# ---------------------------------------------------------------------------
+# These are module-level so scripts/_face_reads.py can re-export them without
+# duplicating code (import direction: scripts → identity is conventional).
+
+#: Below this fraction of crop area a detection is classified TINY (junk).
+FIGURE_TINY_AREA_RATIO: float = 0.01
+
+#: A bounding box within this many pixels of the full crop size is classified
+#: DEGENERATE — the whole-image fallback that DeepFace emits with
+#: enforce_detection=False when no face is found.
+FIGURE_DEGENERATE_MARGIN_PX: int = 2
+
+
+def _classify_face_detection(
+    bbox_w: int, bbox_h: int, img_w: int, img_h: int, confidence: float
+) -> str:
+    """Classify one DeepFace detection as DEGENERATE, TINY, or OK.
+
+    DEGENERATE: bbox spans the whole crop (enforce_detection=False fallback;
+    confidence is typically 0.0 but may be non-zero on some images).
+    TINY: bbox area < FIGURE_TINY_AREA_RATIO of the crop — texture patches that
+    routinely score higher vs man ref than the true figure (0.59–0.78 vs 0.47–0.52
+    on the 2026-06-12 probe).
+    OK: any other detection — treated as a valid face.
+    """
+    if bbox_w >= img_w - FIGURE_DEGENERATE_MARGIN_PX and bbox_h >= img_h - FIGURE_DEGENERATE_MARGIN_PX:
+        return "DEGENERATE"
+    if img_w and img_h and (bbox_w * bbox_h) / (img_w * img_h) < FIGURE_TINY_AREA_RATIO:
+        return "TINY"
+    return "OK"
+
+
+def _figure_read_score(
+    image_path: str,
+    ref_emb: np.ndarray,
+    *,
+    ref_name: str = "ref",
+) -> dict:
+    """Score a single image against a pre-computed reference embedding.
+
+    Returns only from OK-classified detections (area >= 1% of crop, not a
+    whole-image fallback).  Selects the LARGEST OK face (per-figure semantics:
+    each half crop contains one figure; largest bbox = that figure; max-similarity
+    would re-promote junk blobs whose scores exceed the real figure's score).
+
+    Returns:
+        score:           float | None   — (1+cos)/2; None when no OK face
+        read_type:       'figure'|'none'
+        n_detections:    int
+        face_area_pct:   float          — area% of the selected face (0.0 if none)
+        detection_class: dict[str,int]  — counts of OK/TINY/DEGENERATE
+        ref_name:        str
+    """
+    if not DEEPFACE_AVAILABLE:
+        return {
+            "score": None, "read_type": "none", "n_detections": 0,
+            "face_area_pct": 0.0,
+            "detection_class": {"OK": 0, "TINY": 0, "DEGENERATE": 0},
+            "ref_name": ref_name,
+        }
+
+    if not os.path.exists(image_path):
+        return {
+            "score": None, "read_type": "none", "n_detections": 0,
+            "face_area_pct": 0.0,
+            "detection_class": {"OK": 0, "TINY": 0, "DEGENERATE": 0},
+            "ref_name": ref_name,
+        }
+
+    if _PIL_AVAILABLE and _PILImage is not None:
+        img = _PILImage.open(image_path)
+        img_w, img_h = img.size
+    else:
+        # Fallback: use OpenCV for dimensions
+        img_cv = cv2.imread(image_path)
+        if img_cv is None:
+            return {
+                "score": None, "read_type": "none", "n_detections": 0,
+                "face_area_pct": 0.0,
+                "detection_class": {"OK": 0, "TINY": 0, "DEGENERATE": 0},
+                "ref_name": ref_name,
+            }
+        img_h, img_w = img_cv.shape[:2]
+
+    img_area = img_w * img_h
+
+    emb_list = DeepFace.represent(
+        img_path=image_path, model_name="GhostFaceNet", enforce_detection=False
+    )
+
+    class_counts: Dict[str, int] = {"OK": 0, "TINY": 0, "DEGENERATE": 0}
+    best_ok_area = -1.0
+    best_ok_emb: Optional[np.ndarray] = None
+    best_ok_area_pct = 0.0
+
+    for entry in emb_list:
+        fa = entry.get("facial_area", {})
+        w, h = fa.get("w", 0), fa.get("h", 0)
+        conf = float(entry.get("face_confidence") or 0.0)
+        cls = _classify_face_detection(w, h, img_w, img_h, conf)
+        class_counts[cls] = class_counts.get(cls, 0) + 1
+
+        if cls == "OK":
+            area = float(w * h)
+            if area > best_ok_area:
+                best_ok_area = area
+                best_ok_emb = np.array(entry["embedding"])
+                best_ok_area_pct = 100.0 * area / img_area if img_area else 0.0
+
+    if best_ok_emb is None:
+        return {
+            "score": None, "read_type": "none",
+            "n_detections": len(emb_list),
+            "face_area_pct": 0.0,
+            "detection_class": class_counts,
+            "ref_name": ref_name,
+        }
+
+    cos_sim = float(
+        np.dot(best_ok_emb, ref_emb)
+        / (np.linalg.norm(best_ok_emb) * np.linalg.norm(ref_emb) + 1e-10)
+    )
+    score = (1.0 + cos_sim) / 2.0
+
+    return {
+        "score": score, "read_type": "figure",
+        "n_detections": len(emb_list),
+        "face_area_pct": best_ok_area_pct,
+        "detection_class": class_counts,
+        "ref_name": ref_name,
+    }
+
+
+def _ref_embedding_largest_ok(ref_path: str, ref_name: str = "ref") -> Optional[np.ndarray]:
+    """Compute a reference embedding using the largest OK detection.
+
+    Guarded variant of _get_embedding: uses the largest OK bbox instead of
+    emb_list[0].  MAN_REF (logs/p12_fresh_face_man.jpg) has 2 detections;
+    [0] is correct only by ordering luck.  Falls back to emb_list[0] if no
+    OK detection is found (should not occur for a well-cropped ref image).
+
+    Returns None if DEEPFACE_AVAILABLE is False or any exception occurs.
+    """
+    if not DEEPFACE_AVAILABLE:
+        return None
+
+    try:
+        if _PIL_AVAILABLE and _PILImage is not None:
+            img = _PILImage.open(ref_path)
+            img_w, img_h = img.size
+        else:
+            img_cv = cv2.imread(ref_path)
+            if img_cv is None:
+                return None
+            img_h, img_w = img_cv.shape[:2]
+
+        emb_list = DeepFace.represent(
+            img_path=ref_path, model_name="GhostFaceNet", enforce_detection=False
+        )
+
+        best_ok_area = -1.0
+        best_ok_emb: Optional[np.ndarray] = None
+
+        for entry in emb_list:
+            fa = entry.get("facial_area", {})
+            w, h = fa.get("w", 0), fa.get("h", 0)
+            conf = float(entry.get("face_confidence") or 0.0)
+            cls = _classify_face_detection(w, h, img_w, img_h, conf)
+            if cls == "OK":
+                area = float(w * h)
+                if area > best_ok_area:
+                    best_ok_area = area
+                    best_ok_emb = np.array(entry["embedding"])
+
+        if best_ok_emb is not None:
+            n_ok = sum(
+                1 for e in emb_list
+                if _classify_face_detection(
+                    e.get("facial_area", {}).get("w", 0),
+                    e.get("facial_area", {}).get("h", 0),
+                    img_w, img_h,
+                    float(e.get("face_confidence") or 0.0),
+                ) == "OK"
+            )
+            print(
+                f"   [face_reads] ref {ref_name}: {len(emb_list)} detection(s), "
+                f"{n_ok} OK — using largest OK face ({best_ok_area:.0f}px^2)"
+            )
+            return best_ok_emb
+
+        # Fallback: no OK detection
+        print(
+            f"   [face_reads] WARNING: no OK detection in ref {ref_name} "
+            f"({ref_path}); falling back to emb_list[0]"
+        )
+        return np.array(emb_list[0]["embedding"])
+    except Exception as e:
+        print(f"   [face_reads] ref embedding failed for {ref_path}: {e}")
+        return None
+
 
 class IdentityValidator:
     """
@@ -174,11 +376,24 @@ class IdentityValidator:
             (presence_result, binding_dict)
             presence_result: same IdentityValidationResult as validate_image.
             binding_dict: char_id -> {
-                "binding_score": float,   # positive = intended side stronger
-                "binding_ok":   bool,     # True only when binding_score > 0
-                "intended_score": float,  # score on the intended half
-                "other_score":  float,    # score on the other half
+                "binding_score":      float,  # positive = intended side stronger
+                "binding_ok":         bool,   # True only when binding_score > 0
+                "intended_score":     float,  # figure-read score on intended half
+                                              # (0.0 when no OK face detected)
+                "other_score":        float,  # figure-read score on other half
+                                              # (0.0 when no OK face detected)
+                "intended_read_type": str,    # 'figure' | 'none'
+                "other_read_type":    str,    # 'figure' | 'none'
+                "note":               str,    # '' | 'NO_FACE_INTENDED' |
+                                              # 'REF_EMBEDDING_FAILED' |
+                                              # 'MISSING_IMAGE' | 'PIL_UNAVAILABLE'
             }
+
+            NO_FACE semantics (director-decided 2026-06-12):
+              - intended_read_type='none' → binding_ok=False, note='NO_FACE_INTENDED'
+              - other_read_type='none' with intended 'figure' → binding decided
+                as intended_score > 0 (face only on intended side = binds)
+              - both 'none' → binding_ok=False, note='NO_FACE_INTENDED'
         """
         presence_result = self.validate_image(
             image_path, reference_path,
@@ -199,31 +414,32 @@ class IdentityValidator:
         Compute per-character spatial-binding scores using 50%-width half crops.
 
         For each character spec, answers "is character X's face on the INTENDED
-        half of the frame?" by calling validate_image once per half crop and
-        taking the delta:
+        half of the frame?" using figure_read_score (detection-filtered; only
+        OK-classified faces: area >= 1% of crop, not a whole-image fallback).
+        The score is from the LARGEST OK face (per-figure semantics).
 
-            binding_score(X) = score(intended_half, X.ref)
-                              - score(other_half,   X.ref)
+            binding_score(X) = intended_score - other_score
+            binding_ok(X)    = binding_score > 0
 
-        A positive binding_score means X is more prominent on the intended side;
-        binding_ok is True only when binding_score > 0 (strictly; ties are
-        FAILURE per §3.2: the face scored at least as strongly on the wrong half).
+        Director-decided NO_FACE semantics (2026-06-12 operator report):
+          - intended read_type 'none' → binding_ok=False, note NO_FACE_INTENDED
+          - other read_type 'none' with intended 'figure' → binding decided as
+            intended_score > 0 (face only on intended side = binds)
+          - both 'none' → binding_ok=False
 
         Boundary: w // 2 EXACTLY — matches _s1_rescore_crops.crop_half and the
         0-based masks in scripts/_arc_score_session.py.
 
-        The bbox-centroid alternative (spec §3.2 "An alternative...") — assign
-        detected face to char via embedding match, then check bbox.x centroid —
-        is NOT implemented here; it is the recorded follow-up when bbox
-        coordinates become available through the _analyze_frame DeepFace path.
+        validate_image is NOT called here; scores come from _figure_read_score
+        directly so blob/degenerate detections cannot pollute the binding
+        decision.  validate_image itself is byte-unchanged.
 
         Args:
             image_path: Path to generated image (must exist; silently returns
-                zero scores if missing or PIL unavailable).
+                zero scores if missing or PIL/DeepFace unavailable).
             char_specs: list of {
                 "char_id":      str,
-                "ref_path":     str,   # reference image (path-based, not
-                                       # pre-computed embeddings)
+                "ref_path":     str,   # reference image (path-based)
                 "intended_slot": "left" | "right",
             }
 
@@ -231,8 +447,11 @@ class IdentityValidator:
             Dict[char_id, {
                 "binding_score": float,
                 "binding_ok":    bool,
-                "intended_score": float,
-                "other_score":   float,
+                "intended_score": float,     # None-converted to 0.0 for delta
+                "other_score":   float,      # None-converted to 0.0 for delta
+                "intended_read_type": str,   # 'figure'|'none'
+                "other_read_type":    str,   # 'figure'|'none'
+                "note":          str,        # '' | 'NO_FACE_INTENDED' | ...
             }]
         """
         result: Dict[str, Dict] = {}
@@ -241,14 +460,15 @@ class IdentityValidator:
             return result
 
         if not _PIL_AVAILABLE or _PILImage is None:
-            # Return zero-scores with binding_ok False for all chars so callers
-            # get a deterministic (non-crashing) result without PIL installed.
             for spec in char_specs:
                 result[spec["char_id"]] = {
                     "binding_score": 0.0,
                     "binding_ok": False,
                     "intended_score": 0.0,
                     "other_score": 0.0,
+                    "intended_read_type": "none",
+                    "other_read_type": "none",
+                    "note": "PIL_UNAVAILABLE",
                 }
             return result
 
@@ -259,6 +479,9 @@ class IdentityValidator:
                     "binding_ok": False,
                     "intended_score": 0.0,
                     "other_score": 0.0,
+                    "intended_read_type": "none",
+                    "other_read_type": "none",
+                    "note": "MISSING_IMAGE",
                 }
             return result
 
@@ -266,6 +489,16 @@ class IdentityValidator:
             img = _PILImage.open(image_path)
             w, h = img.size
             mid = w // 2
+
+            # Pre-compute ref embeddings using largest-OK-face guard so ref
+            # images with multiple detections (e.g. MAN_REF has 2) use the
+            # correct face rather than emb_list[0] by ordering luck.
+            ref_embs: Dict[str, Optional[np.ndarray]] = {}
+            for spec in char_specs:
+                char_id = spec["char_id"]
+                ref_path = spec.get("ref_path", "")
+                if char_id not in ref_embs:
+                    ref_embs[char_id] = _ref_embedding_largest_ok(ref_path, char_id)
 
             # Produce the two half crops in a temp dir; clean up after scoring.
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -287,28 +520,61 @@ class IdentityValidator:
                         intended_path = right_path
                         other_path = left_path
 
-                    # Mirror _s1_rescore_crops.score(): call validate_image
-                    # with threshold=0.0 so we always get a numeric score.
-                    intended_score = self.validate_image(
-                        intended_path, ref_path,
-                        character_id=f"{char_id}_intended",
-                        threshold=0.0,
-                    ).overall_score or 0.0
+                    ref_emb = ref_embs.get(char_id)
 
-                    other_score = self.validate_image(
-                        other_path, ref_path,
-                        character_id=f"{char_id}_other",
-                        threshold=0.0,
-                    ).overall_score or 0.0
+                    if ref_emb is None:
+                        # DeepFace unavailable or ref embedding failed
+                        result[char_id] = {
+                            "binding_score": 0.0,
+                            "binding_ok": False,
+                            "intended_score": 0.0,
+                            "other_score": 0.0,
+                            "intended_read_type": "none",
+                            "other_read_type": "none",
+                            "note": "REF_EMBEDDING_FAILED",
+                        }
+                        continue
 
-                    binding_score = intended_score - other_score
-                    binding_ok = binding_score > 0  # <= 0 is FAILURE (spec §3.2)
+                    intended_read = _figure_read_score(
+                        intended_path, ref_emb, ref_name=f"{char_id}_intended"
+                    )
+                    other_read = _figure_read_score(
+                        other_path, ref_emb, ref_name=f"{char_id}_other"
+                    )
+
+                    intended_rtype = intended_read["read_type"]
+                    other_rtype = other_read["read_type"]
+
+                    intended_score_val = intended_read["score"]  # may be None
+                    other_score_val = other_read["score"]         # may be None
+
+                    # Director-decided semantics:
+                    if intended_rtype == "none":
+                        # No face on the intended side → cannot bind
+                        binding_ok = False
+                        note = "NO_FACE_INTENDED"
+                    elif other_rtype == "none":
+                        # Face on intended side, no face on other side →
+                        # face is only on the intended side → binds
+                        binding_ok = (intended_score_val or 0.0) > 0
+                        note = ""
+                    else:
+                        # Both sides have figure reads — standard delta
+                        binding_ok = (intended_score_val or 0.0) > (other_score_val or 0.0)
+                        note = ""
+
+                    intended_f = intended_score_val if intended_score_val is not None else 0.0
+                    other_f = other_score_val if other_score_val is not None else 0.0
+                    binding_score = intended_f - other_f
 
                     result[char_id] = {
                         "binding_score": binding_score,
                         "binding_ok": binding_ok,
-                        "intended_score": intended_score,
-                        "other_score": other_score,
+                        "intended_score": intended_f,
+                        "other_score": other_f,
+                        "intended_read_type": intended_rtype,
+                        "other_read_type": other_rtype,
+                        "note": note,
                     }
 
         except Exception as e:
@@ -321,6 +587,9 @@ class IdentityValidator:
                         "binding_ok": False,
                         "intended_score": 0.0,
                         "other_score": 0.0,
+                        "intended_read_type": "none",
+                        "other_read_type": "none",
+                        "note": "ERROR",
                     }
 
         return result

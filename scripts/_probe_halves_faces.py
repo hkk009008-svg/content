@@ -22,34 +22,19 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from scripts._face_reads import (  # noqa: F401 (re-exported for probe callers + tests)
+    TINY_AREA_RATIO,
+    DEGENERATE_MARGIN_PX,
+    classify_detection,
+    ref_embedding_largest_ok,
+)
+
 # Canonical refs — same as scripts/_arc_score_session.py
 DEFAULT_REFS = {
     "man": "logs/p12_fresh_face_man.jpg",
     "aria": "domain/projects/cfd3f0967eb3/characters/char_b9c8bcfe9af0/lighting_outdoor.jpg",
 }
 DEFAULT_CROPS = ["logs/halves_crops/*.jpg"]
-
-TINY_AREA_RATIO = 0.01  # below this fraction of the crop, a detection is junk
-DEGENERATE_MARGIN_PX = 2  # bbox within this of full crop size = fallback box
-
-
-def classify_detection(
-    bbox_w: int, bbox_h: int, img_w: int, img_h: int, confidence: float
-) -> str:
-    """Classify one detection: DEGENERATE (whole-image fallback), TINY, or OK.
-
-    DEGENERATE: bbox spans the whole crop (enforce_detection=False emits this
-    when no face is found; confidence is typically 0.0) — an embedding of the
-    entire half-image, not a face.
-    TINY: bbox under TINY_AREA_RATIO of the crop — texture patches at 50-95px
-    scored 0.59-0.78 vs the man ref on 2026-06-12 while true figures read
-    0.47-0.52, so these routinely steal the best-face max.
-    """
-    if bbox_w >= img_w - DEGENERATE_MARGIN_PX and bbox_h >= img_h - DEGENERATE_MARGIN_PX:
-        return "DEGENERATE"
-    if img_w and img_h and (bbox_w * bbox_h) / (img_w * img_h) < TINY_AREA_RATIO:
-        return "TINY"
-    return "OK"
 
 
 def format_probe_table(rows: list[dict]) -> str:
@@ -80,12 +65,12 @@ def run_probe(crop_patterns, refs, outdir, date_suffix) -> int:
 
     ref_embs = {}
     for name, path in refs.items():
-        el = DeepFace.represent(
-            img_path=path, model_name="GhostFaceNet", enforce_detection=False
-        )
-        # validator _get_embedding contract: el[0]
-        ref_embs[name] = np.array(el[0]["embedding"])
-        print(f"REF {name}: {len(el)} detection(s); using [0]")
+        # Use largest-OK-face guard (same as production scorer) so MAN_REF's
+        # two-detection case uses the correct face rather than emb_list[0] by luck.
+        emb = ref_embedding_largest_ok(path, name)
+        if emb is None:
+            raise RuntimeError(f"ref_embedding_largest_ok failed for {name}: {path}")
+        ref_embs[name] = emb
 
     crops = [p for pat in crop_patterns for p in (sorted(glob.glob(pat)) or [pat])]
     rows = []

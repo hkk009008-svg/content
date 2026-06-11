@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PIL import Image
 
 from identity.validator import IdentityValidator
+from scripts._face_reads import figure_read_score, ref_embedding_largest_ok
 
 ARIA_REF = "domain/projects/cfd3f0967eb3/characters/char_b9c8bcfe9af0/lighting_outdoor.jpg"
 MAN_REF = "logs/p12_fresh_face_man.jpg"
@@ -73,21 +74,32 @@ def collect_halves_artifacts(patterns: list[str] | None = None) -> list[str]:
 def format_halves_table(rows: list[dict]) -> str:
     """Format halves-mode rows into a human-readable table.
 
-    Each row dict: artifact, half, ref, arc_score (float or None), note (str).
+    Each row dict: artifact, half, ref, arc_score (float or None),
+    read_type (str, optional), n_detections (int, optional),
+    face_area_pct (float, optional), note (str).
     Returns a multi-line string.
     """
-    header = f"{'artifact':56s} {'half':5s} {'ref':5s} {'arc':>6s}"
+    header = (
+        f"{'artifact':56s} {'half':5s} {'ref':5s} {'arc':>6s} "
+        f"{'type':7s} {'n':>2s} {'area%':>6s}"
+    )
     divider = "-" * len(header)
     lines = [
-        "=== HALVES MODE ARC SCORE TABLE (w//2 boundary, best-face per ref) ===",
+        "=== HALVES MODE ARC SCORE TABLE (w//2 boundary, figure-read per ref) ===",
         header,
         divider,
     ]
     for r in rows:
-        score_str = f"{r['arc_score']:.3f}" if r["arc_score"] is not None else "  —  "
+        score_str = f"{r['arc_score']:.3f}" if r["arc_score"] is not None else "   — "
+        rtype = r.get("read_type", "")
+        n_det = r.get("n_detections", "")
+        area_pct = r.get("face_area_pct", "")
+        n_str = f"{n_det:>2d}" if isinstance(n_det, int) else "  "
+        area_str = f"{area_pct:>6.1f}" if isinstance(area_pct, float) else "      "
         note = f"  {r['note']}" if r.get("note") else ""
         lines.append(
-            f"{r['artifact']:56s} {r['half']:5s} {r['ref']:5s} {score_str:>6s}{note}"
+            f"{r['artifact']:56s} {r['half']:5s} {r['ref']:5s} {score_str:>6s} "
+            f"{rtype:7s} {n_str} {area_str}{note}"
         )
     return "\n".join(lines)
 
@@ -111,10 +123,26 @@ def run_halves(
     date_suffix: str,
     artifact_patterns: list[str] | None = None,
 ) -> int:
-    """Run halves mode: crop L/R, score each half vs each ref, emit artifacts."""
+    """Run halves mode: crop L/R, score each half vs each ref, emit artifacts.
+
+    Uses figure_read_score (scripts._face_reads) so only OK-classified
+    detections (area >= 1% of crop, not a whole-image fallback) contribute
+    scores.  Rows with no OK detection emit arc_score=None + note=NO_FACE.
+    Ref embeddings are computed via ref_embedding_largest_ok so MAN_REF's
+    two-detection case uses the correct (largest OK) face rather than relying
+    on ordering luck.
+    """
+    import numpy as np
+
     artifact_paths = collect_halves_artifacts(artifact_patterns)
     crop_dir = os.path.join(outdir, "halves_crops")
     os.makedirs(crop_dir, exist_ok=True)
+
+    # Pre-compute ref embeddings using largest-OK-face guard
+    print("Computing reference embeddings (largest OK face)...")
+    ref_embs: dict[str, np.ndarray] = {}
+    for ref_name, ref_path in (("man", MAN_REF), ("aria", ARIA_REF)):
+        ref_embs[ref_name] = ref_embedding_largest_ok(ref_path, ref_name)
 
     rows: list[dict] = []
     for path in artifact_paths:
@@ -126,28 +154,34 @@ def run_halves(
                         "half": side,
                         "ref": ref_name,
                         "arc_score": None,
+                        "read_type": "none",
+                        "n_detections": 0,
+                        "face_area_pct": 0.0,
                         "note": "MISSING",
                     })
             continue
 
         for side in ("left", "right"):
             crop_path = crop_half(path, side, crop_dir)
-            for ref_name, ref_path in (("man", MAN_REF), ("aria", ARIA_REF)):
+            for ref_name in ("man", "aria"):
                 try:
-                    result = v.validate_image(
-                        crop_path, ref_path, ref_name, shot_type="medium"
+                    read = figure_read_score(
+                        crop_path, ref_embs[ref_name], ref_name=ref_name
                     )
-                    arc = result.overall_score
+                    arc = read["score"]
+                    note = "NO_FACE" if read["read_type"] == "none" else ""
                 except Exception as exc:
                     arc = None
+                    read = {"read_type": "error", "n_detections": 0, "face_area_pct": 0.0}
                     note = f"ERROR: {exc}"
-                else:
-                    note = ""
                 rows.append({
                     "artifact": path,
                     "half": side,
                     "ref": ref_name,
                     "arc_score": arc,
+                    "read_type": read.get("read_type", ""),
+                    "n_detections": read.get("n_detections", 0),
+                    "face_area_pct": read.get("face_area_pct", 0.0),
                     "note": note,
                 })
 
