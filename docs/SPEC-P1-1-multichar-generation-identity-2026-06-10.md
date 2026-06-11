@@ -178,6 +178,23 @@ This layer is what makes the program *symmetric*: the validator stops measuring
 unkept un-promises. Pod-independent, no new spend paths, ~80-LOC helper + a
 dataclass. All three mechanisms below plug into it.
 
+**Per-face validation follow-up — sharpened scope (2026-06-12, operator Lane V
+on `dc5ad2b`, director-disposed):** best-face scoring (`dc5ad2b`) fixed the
+first-face false-NEGATIVE but leaves a latent co-star false-POSITIVE family
+that per-face ASSIGNMENT must close: **A1** the conjunctive halt (ADR-023) can
+early-fire when the best-matching face is the co-star's; **A2** secondary
+scoring (controller.py:810) can false-pass on the PRIMARY's face — observed
+live: the Pass-A man full-image read 0.597 vs his half-crop 0.487 is exactly
+this pollution; **A3** the ref-side `_get_embedding` first-face `[0]` contract
+is aspirational/unenforced — enforce single-face at character-registration
+time (assert/fail-loud; queued as a code task); **A4** regen-floor bypass via
+co-star match (refuters split 1-1 — treat as plausible until assignment
+lands). Risk today: LOW for cross-gender pairs (cross floor 0.447 vs 0.65–0.85
+thresholds), MATERIAL for same-gender pairs. The cure is per-face identity
+assignment (each detected face matched to its intended character before any
+scoring/halt/regen decision), not nearest-match — implementation home is the
+Pass-B spec's binding-metric design.
+
 ### 3(a) — Multi-character Kontext keyframes (FAL tier; pod-independent)
 
 Extend the already-plural `image_urls` to carry refs for up to 2 secondary
@@ -523,6 +540,36 @@ scope.
     venv). (2) `validate_image` scored only the FIRST detected face until
     `dc5ad2b` (best-face now) — multi-char PER-FACE validation (crop or
     face-index aware) remains the §3(d) follow-up.
+
+  **Record corrections + provenance (2026-06-12 — operator Lane V report
+  `2026-06-11T18:49:37Z`, director-disposed; append-only, the record above
+  is preserved as written):**
+
+  - *Methodology note (applies to every L/R "half" number above):* per-half
+    arc scores were computed at director-runtime by cropping the artifact
+    into L/R halves and scoring each half against the named ref via the
+    validator's arc path — the same method `scripts/_s1_rescore_crops.py`
+    codifies for S1, but the pod-arc runs were ad hoc and are NOT
+    log-backed. Operator-assessed CREDIBLE (full-image reproductions match:
+    0.819 exact, cross floor 0.447 exact, n2 0.733 / n4 0.672 consistent)
+    but unreproducible until a halves-mode scorer lands (queued: extend
+    `scripts/_arc_score_session.py`, re-emit the table to `logs/`).
+  - *S2 n1:* BOTH figures render female (operator visual; man-read 0.641) —
+    "identities materialize" does not hold for that seed; weakens the 2/4
+    identity read, STRENGTHENS the binding-uncontrolled verdict.
+  - *Pass-A cand7:* renders two bearded men — candidate-set quality variance
+    is wider than the record implies.
+  - *Pass-A man:* "prompt-generic" understates it — the accepted artifact's
+    man bears no resemblance to the LoRA refs (operator visual).
+  - *Precision split unrecorded:* S3 ran fp16; Pass-A ran fp8.
+  - *man LoRA refs:* `logs/man_lora_refs/` holds 5 files; the "6 refs" count
+    includes the canonical reference living outside that dir.
+  - *Pass-A halt:* the conjunctive halt never actually fired (run was
+    budget-exhausted at N=8); "no boost retry needed" is technically correct
+    but the halt path itself is unexercised by this record.
+  - *"$2/1000 steps, validated twice":* no in-repo log/invoice artifact backs
+    the validation claim — treat as ESTIMATE until a further training run
+    pins it with logged cost.
 
 ## 7. Recommended sequencing — and the deviation, surfaced
 

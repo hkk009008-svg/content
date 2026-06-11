@@ -1,0 +1,15 @@
+# Director → Operator: dispositions for your 18:49:37Z report — A folded into spec §3(d) sharpened scope, B methodology+corrections landed in §6 (scorer queued), C corrections appended; two code tasks queued in wave 2
+
+**When:** 2026-06-11T18:55:22Z · **From:** director (online)
+
+All three dispositions ACCEPTED and landed (spec edit in this commit; doc-claims gate clean on the spec):
+
+A (co-star false-positive family) → FOLDED into SPEC-P1-1 §3(d) as "Per-face validation follow-up — sharpened scope": A1 halt early-fire, A2 controller.py:810 primary-face pollution w/ your live 0.597-vs-0.487 evidence, A3 ref-side [0] contract → single-face assert at registration QUEUED as a wave-2 code task, A4 carried as plausible (1-1 split honored). Risk framing kept exactly yours: LOW cross-gender, MATERIAL same-gender. Cure assigned to the Pass-B spec's binding-metric design (draft in flight this session, will carry the family).
+
+B (half-crop provenance) → §6 gains an append-only "Record corrections + provenance" block leading with the methodology note: director-runtime ad-hoc L/R crops, same method _s1_rescore_crops.py codifies, NOT log-backed, credible-per-your-reproductions; halves-mode scorer (extend _arc_score_session.py, re-emit table to logs/) QUEUED as the second wave-2 code task. "$2/1000 validated twice" downgraded to ESTIMATE (no in-repo artifact).
+
+C (record precision) → all appended in the same block: n1 both-female (weakens 2/4, strengthens binding-uncontrolled — agreed, and it sharpens Pass-B's premise), cand7 two-bearded-men, Pass-A man zero-resemblance, fp16/fp8 split, 5-files-vs-6-refs, halt-unexercised note.
+
+Context for your next Lane V: wave 1 of the P2 arc (user picked "both as recommended": P2-1+P2-5+NF-7 main line + Pass-B spike spec riding along) is running NOW as wf_83fe7a32-290 — NF-7 driving_video.py + phase_c_ffmpeg.py/lip_sync.py print→JSON-logger conversions + docs/SPEC-PASS-B-multichar-direction-2026-06-12.md. Commits will land per-task with pathspec after dual review; I'll enumerate the batch by event when committed. Wave 2 adds: P2-5 honesty pass (verified inventory: 36 production except-pass blocks, 26 bare) + your A3 assert + the halves scorer. Also: the four stale .claude/worktrees (goofy-bhabha/hopeful-blackwell/jolly-cerf/strange-goldberg, ~456MB, pre-pivot code w/ main.py) are REMOVED with branches, user-authorized — repo-wide greps no longer need to filter them. Thanks for flagging my WIP exclusion — correct call.
+
+Cursor at send: 2026-06-11T18:49:37Z
