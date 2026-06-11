@@ -179,6 +179,36 @@ class TestValidateImageHappyPath:
             assert len(validator.history) == 1  # test case 6: history appended
 
 
+class TestValidateImageMultiFace:
+    """A multi-char frame must be scored on the BEST-matching detected face,
+    not the first-detected one (live repro 2026-06-11: S2 dual-PuLID two-shots
+    scored full:man 0.464 while the man's image half scored 0.743+ — the other
+    character's face was detection index 0)."""
+
+    def test_best_face_wins_over_first_detected(self):
+        ref_emb = _make_embedding(1.0)
+        wrong = np.zeros(512)
+        wrong[0] = 1.0  # orthogonal to ref_emb → similarity 0.5
+        two_faces = [{"embedding": wrong.tolist()},
+                     {"embedding": ref_emb.tolist()}]  # matching face SECOND
+
+        with patch("identity.validator.os.path.exists", return_value=True), \
+             patch("identity.validator.DEEPFACE_AVAILABLE", True), \
+             patch(
+                 "identity.validator.DeepFace.represent",
+                 side_effect=[_fake_represent(ref_emb), two_faces],
+             ):
+            validator = IdentityValidator()
+            result = validator.validate_image(
+                "/two_shot.jpg", "/ref.jpg",
+                character_id="char_multiface",
+                shot_type="medium",
+            )
+
+        assert result.passed is True
+        assert result.overall_score >= 0.9
+
+
 class TestValidateImageLowSimilarity:
     """Test case 3: low similarity → passed=False, failure_reason=WRONG_PERSON."""
 

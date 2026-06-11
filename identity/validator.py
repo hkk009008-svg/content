@@ -547,11 +547,18 @@ class IdentityValidator:
                 img_path=image_path, model_name="GhostFaceNet", enforce_detection=False
             )
             if emb_list:
-                gen_emb = np.array(emb_list[0]["embedding"])
-                cos_sim = float(np.dot(gen_emb, ref_emb) / (
-                    np.linalg.norm(gen_emb) * np.linalg.norm(ref_emb) + 1e-10
-                ))
-                similarity = (1 + cos_sim) / 2
+                # Score the BEST-matching detected face, not emb_list[0]: on a
+                # multi-char frame the gate asks "is this character present",
+                # and detection order is arbitrary (first-face scoring read the
+                # co-star's face and false-negatived the 2026-06-11 S2 spike
+                # two-shots: full-image 0.464 vs the true face's 0.743+).
+                similarity = 0.0
+                for emb in emb_list:
+                    gen_emb = np.array(emb["embedding"])
+                    cos_sim = float(np.dot(gen_emb, ref_emb) / (
+                        np.linalg.norm(gen_emb) * np.linalg.norm(ref_emb) + 1e-10
+                    ))
+                    similarity = max(similarity, (1 + cos_sim) / 2)
 
                 matched = similarity >= threshold
                 failure = FailureReason.PASSED if matched else FailureReason.WRONG_PERSON
