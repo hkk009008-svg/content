@@ -133,6 +133,20 @@ find a matching resource — IDs collide across projects. Inspect a sibling endp
 (e.g. `api_update_shot_prompt`) to confirm route shape + scoping.
 Details: docs/protocol/claude/director-operator.md (Rule #13).
 
+## R-SKILL — project-skill load triggers
+Scope: both
+Trigger: about to author, modify, review, or debug ComfyUI graph code/JSON
+(`pulid*.json`, node wiring, samplers, PuLID/IP-Adapter/LoRA chains,
+graph-injection helpers in `quality_max.py`) — or pipeline-level
+video-generation design work (shot routing, video-API selection,
+identity/continuity systems, lip-sync).
+Action: invoke the matching project skill BEFORE writing or judging the code —
+`comfyui-mastery` for ComfyUI-graph work, `ai-video-gen` for pipeline-level
+work. When a skill prior shapes a verdict, name it in the work product (the
+2026-06-11 S2 dual-PuLID verdicts leaned on comfyui-mastery's single-face
+prior + `ApplyPulidAdvanced.attn_mask` escape hatch).
+Details: .claude/skills/comfyui-mastery/SKILL.md; .claude/skills/ai-video-gen/SKILL.md.
+
 ## Rule #12 — grep-the-writes
 Scope: both
 Trigger: a brief names a schema field / dict key / mutator / write-path as a target of new code.

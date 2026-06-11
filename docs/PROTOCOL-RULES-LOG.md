@@ -648,6 +648,30 @@ shipped Sessions 7, 8, 9, Monitor.tsx wiring, P3-1 audit, P4-3 product design
 
 (Future sessions append new tables.)
 
+### R-SKILL — project-skill load triggers (2026-06-12, operator ship)
+
+**Mechanism:** CLAUDE.md/AGENTS.md rule block — invoke `comfyui-mastery`
+before authoring/reviewing/debugging ComfyUI graph code or JSON, and
+`ai-video-gen` before pipeline-level video-generation design work; when a
+skill prior shapes a verdict, name it in the work product.
+
+**Empirical basis:** the 2026-06-11 S2 dual-PuLID GO/NO-GO verdicts were
+shaped by comfyui-mastery priors (PuLID documented single-face → identity
+blending is the expected dual-chain failure mode → the both-arcs>0.70
+criterion; `ApplyPulidAdvanced.attn_mask` region mask became the recorded
+Pass-B direction). The priors only entered the review because the operator
+happened to have the skill loaded — the user asked whether both seats use it
+(2026-06-11); operator offered codification; user approved 2026-06-12
+("proceed with recommendation"). Shipped with the same commit: the skill's
+integration section re-synced against live code (pulid.json 15→22 nodes incl.
+PAG + RealESRGAN hires chain; RunPod RTX 4090 → Novita RTX 6000 Ada
+host-agnostic; production parameter table re-snapshotted from
+`WORKFLOW_TEMPLATES`; `pulid_max.json` max tier documented).
+
+**Beneficiary (per Rule #11): `both` seats + user** — verdicts grounded in
+documented node semantics rather than recall, on both authoring and reviewing
+sides.
+
 ## Retirement criteria
 
 A rule unused for 5 consecutive sessions → flagged for review.
