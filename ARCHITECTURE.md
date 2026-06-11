@@ -986,14 +986,14 @@ which appends to the shared `IdentityValidator.history` (see §11).
 | `action` | `SORA_NATIVE` | `["KLING_NATIVE", "RUNWAY_GEN4", "LTX", "SEEDANCE"]` |
 | `landscape` | `LTX` | `["VEO_NATIVE", "KLING_NATIVE"]` |
 
-A parallel `MAX_QUALITY_TEMPLATES` dict at [workflow_selector.py:143-370](workflow_selector.py:143)
+A parallel `MAX_QUALITY_TEMPLATES` dict at [workflow_selector.py:143-375](workflow_selector.py:143)
 mirrors these with different fallback orderings.
 
 **SEEDANCE appears only in the `action` cascade** (last fallback). It is
 NOT a general multi-character fallback. Two-character dialogue shots
 classify as `medium` and route Kling → Runway → Sora → LTX.
 
-### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:411-432](workflow_selector.py:411))
+### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:416-437](workflow_selector.py:416))
 
 Empty `characters_in_frame` → `landscape`; otherwise concatenate `[SHOT]` +
 prompt + camera into a search string, first containment match wins; default `medium`.
@@ -1006,7 +1006,7 @@ prompt + camera into a search string, first containment match wins; default `med
 | `landscape` | landscape, aerial, drone, skyline, panoramic, environment, scenery, no character |
 | `medium` | medium, 50mm, mid-shot, waist, hip, american shot, cowboy shot, two-shot |
 
-### 9.3 `MOTION_FIDELITY_FLOORS` ([workflow_selector.py:395-402](workflow_selector.py:395))
+### 9.3 `MOTION_FIDELITY_FLOORS` ([workflow_selector.py:400-407](workflow_selector.py:400))
 
 | Shot type | Floor |
 |---|---|

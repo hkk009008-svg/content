@@ -1,10 +1,16 @@
 # Runbook — P1-1 slice-2 bundled pod session (spec §7.2)
 
-**Status: READY, blocked on one human gate** — ComfyUI start over SSH needs a
-verbatim user go-ahead in a live seat session (classifier-gated; both seats'
-attempts were denied on 2026-06-10 pending authorization). The pod itself is
-RUNNING (user, 2026-06-10T~22:52Z); SSH port open; gateway 502 = ComfyUI not
-started (known same-pod-restart pattern).
+**Status: EXECUTING — Phases 0–3 DONE, Phase 4+ in flight (2026-06-11).**
+Phases 0–2 ran 2026-06-10 late-night (census green; Aria LoRA placed +
+live-render PHOTOREAL at 0.55; P1-2 over-cook confirmed; S2 single-char
+baseline 41.4/47.5 GiB recorded at wrap `f25af7c`). Phase 3 Pass-A
+QUALITY-FAILED on first run (landscape misclassification — root-caused and
+fixed `945d022`, shot_hint merge defect, NOT injectors) and is re-running
+through the fixed dispatch. Phase 4 (S2 spike) GO after operator review
+(01:27:54Z event; done-guard fixed `6d1eefa`); S3 stacking sweep added to
+this session's scope (2nd LoRA `char_lora_man_v1` FAL-trained + pod-placed,
+user-funded). User authorized pod work this session verbatim
+("do it all that requires pod", 2026-06-11).
 
 **Purpose:** one bundled session (shared spin-up, spec §7.2) that converts the
 slice-2 offline work into validated live capability: pod-side LoRA placement,

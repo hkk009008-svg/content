@@ -887,3 +887,35 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   - −: Tradeoffs accepted
 - **Cross-ref:** Link to ARCHITECTURE.md section if applicable.
 ```
+
+---
+
+## ADR-023 — Per-shot-class halt_rule defaults in MAX_QUALITY_TEMPLATES
+
+- **Date:** 2026-06-11
+- **Status:** Accepted
+- **Context:** Operator Lane V (event 01:30:23Z) surfaced a latent gap riding
+  the Pass-A landscape misclassification (`945d022`): NO MAX template carried
+  `halt_rule`, so `quality_max.py` always fell back to `composite_only` —
+  leaving every template's `halt_threshold_arc` (e.g. portrait/medium 0.83)
+  DEAD as a halt criterion unless the per-project `max_halt_rule` UI knob was
+  set. The `conjunctive` mode already existed in `face_validator_gate.should_halt`
+  with the right semantics (identity floor at halt time; auto-satisfied for
+  non-character shots/candidates without an arc score).
+- **Decision:** Templates now declare halt_rule explicitly, per shot class:
+  `portrait`/`medium` → `conjunctive` (faces dominate the frame; arc is a
+  reliable halt gate); `action`/`wide`/`landscape` → `composite_only` (motion
+  blur / distant faces / no identity stack make arc unreliable or absent).
+  The `max_halt_rule` UI overlay still overrides per project. The
+  `regenerate_floor_arc` PuLID-boost retry remains the post-hoc identity
+  backstop for ALL classes, independent of halting.
+- **Consequences:**
+  - +: The arc thresholds the templates always carried now actually bind for
+    the classes where they're meaningful; an early-halted portrait/medium
+    best-of-N can no longer ship a low-identity winner purely on aesthetics.
+  - −: Character shots that struggle on identity render more candidates
+    before halting (bounded by the unconditional `halt_max_n` budget cap) —
+    accepted as aligned with the tier's "ignore cost, max quality" charter.
+- **Cross-ref:** tests/unit/test_max_quality_templates.py (pins);
+  workflow_selector.py:143-375; face_validator_gate.py:234-296 (rule
+  semantics); spec §S2/§6 record.

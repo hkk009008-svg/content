@@ -147,6 +147,7 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "halt_threshold_composite": 0.92,
         "halt_threshold_arc": 0.85,
         "halt_min_n": 4,
+        "halt_rule": "conjunctive",   # face-dominant: arc threshold is a REAL halt gate (2026-06-11 disposition — was fallback composite_only, leaving halt_threshold_arc dead)
         "regenerate_floor_arc": 0.82,
         "pulid_weight": 0.85,
         "pulid_start_at": 0.0,
@@ -192,6 +193,7 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "halt_threshold_composite": 0.90,
         "halt_threshold_arc": 0.83,
         "halt_min_n": 4,
+        "halt_rule": "conjunctive",   # face-dominant: arc threshold is a REAL halt gate (2026-06-11 disposition)
         "regenerate_floor_arc": 0.80,
         "pulid_weight": 0.80,
         "pulid_start_at": 0.0,
@@ -237,6 +239,7 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "halt_threshold_composite": 0.88,
         "halt_threshold_arc": 0.78,
         "halt_min_n": 4,
+        "halt_rule": "composite_only",  # distant faces: arc unreliable as a halt gate; regen floor still backstops identity
         "regenerate_floor_arc": 0.72,
         "pulid_weight": 0.65,
         "pulid_start_at": 0.20,
@@ -282,6 +285,7 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "halt_threshold_composite": 0.88,
         "halt_threshold_arc": 0.80,
         "halt_min_n": 4,
+        "halt_rule": "composite_only",  # motion blur: arc unreliable as a halt gate; regen floor still backstops identity
         "regenerate_floor_arc": 0.75,
         "pulid_weight": 0.75,
         "pulid_start_at": 0.0,
@@ -328,6 +332,7 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "halt_threshold_composite": 0.90,
         "halt_threshold_arc": 0.0,
         "halt_min_n": 4,
+        "halt_rule": "composite_only",  # no identity stack at all
         "regenerate_floor_arc": 0.0,
         "pulid_weight": 0.0,
         "pulid_start_at": 0.0,

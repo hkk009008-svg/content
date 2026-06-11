@@ -120,7 +120,7 @@ One orchestrator — `cinema_pipeline.CinemaPipeline` (`cinema_pipeline.py:49`) 
 
 - **Multi-API video generation with a fallback cascade.** A single entry point, `generate_ai_video` (`phase_c_ffmpeg.py:54`), routes each shot to an optimal engine and fails over through an ordered list — `KLING_NATIVE → SORA_NATIVE → RUNWAY_GEN4 → LTX → VEO_NATIVE → KLING_3_0 → SORA_2 → VEO (FAL) → RUNWAY` (`phase_c_ffmpeg.py:145`) — so one vendor outage doesn't stall a render. Eleven-plus engines are integrated behind native SDKs and FAL proxies; the winning engine's provenance is recorded on every take.
 
-- **Character consistency.** Keyframes are face-locked with PuLID in a ComfyUI workflow; an `IdentityValidator` (`identity/validator.py`) scores every generated frame against the character's reference embedding (GhostFaceNet/ArcFace), and a rolling-stats feedback loop adapts the PuLID weight per character (`workflow_selector.py:540`). Locations stay consistent via a persisted per-location seed (`domain/location_manager.py`).
+- **Character consistency.** Keyframes are face-locked with PuLID in a ComfyUI workflow; an `IdentityValidator` (`identity/validator.py`) scores every generated frame against the character's reference embedding (GhostFaceNet/ArcFace), and a rolling-stats feedback loop adapts the PuLID weight per character (`workflow_selector.py:545`). Locations stay consistent via a persisted per-location seed (`domain/location_manager.py`).
 
 - **Native audio & dialogue.** `VEO_NATIVE` is the only video engine that generates voice *embedded in the clip* (`native_audio: True`, the sole such entry — `domain/scene_decomposer.py:43`); dialogue shots route to it when available. Every other engine produces silent video, so any non-embedded dialogue take gets a **mandatory lip-sync pass** (`cinema/shots/controller.py:1528`). Separately, a full audio stack generates TTS dialogue (ElevenLabs / Cartesia for Korean), BGM (Suno / FAL Stable Audio), and environmental foley (Stability AI), mixed into a 3-track final.
 
@@ -530,7 +530,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `_VEO_QUOTA_EXHAUSTED_UNTIL` | `phase_c_ffmpeg.py:19` | Cooldown timestamp — only the **FAL-proxy VEO** branch sets/checks it; VEO_NATIVE has no quota guard (§3.13). |
 | `stitch_modules` | `phase_c_ffmpeg.py:857` | Concat demuxer (`-c copy`). |
 | `split_video_into_segments` | `phase_c_ffmpeg.py:883` | Storyboard splitter (last segment to EOF). |
-| `classify_shot_type` | `workflow_selector.py:411` | → `portrait/medium/wide/action/landscape`. Note: never returns `close_up` despite a `MOTION_FIDELITY_FLOORS` key for it (§3.13). |
+| `classify_shot_type` | `workflow_selector.py:416` | → `portrait/medium/wide/action/landscape`. Note: never returns `close_up` despite a `MOTION_FIDELITY_FLOORS` key for it (§3.13). |
 | `WORKFLOW_TEMPLATES` | `workflow_selector.py:21` | Per-shot-type primary API + fallback list + render params (e.g. portrait→KLING_NATIVE; wide/landscape→LTX; action→SORA_NATIVE). |
 | `VeoNativeAPI.generate_video` | `veo_native.py:138` | Vertex-preferred / Gemini-fallback. **Bug #4:** `reference_images` accepted but dropped (Vertex exclusivity). `driving_video_path` accepted but unwired. Duration clamped to (4,6,8). |
 | `_extract_video_bytes` | `veo_native.py:85` | Inline `video_bytes` (Vertex) vs `files.download` (Gemini). Cycle-17 native-audio fix path. |
@@ -559,9 +559,9 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `score_candidate` | `face_validator_gate.py:170` | Composite = `0.6·arc + 0.4·aesthetic`. |
 | `should_halt` | `face_validator_gate.py:227` | Halt on budget or composite ≥ threshold. |
 | `needs_regenerate` | `face_validator_gate.py:326` | Regenerate (one PuLID-boost retry) if `arc < floor`. |
-| `get_workflow_params` | `workflow_selector.py:450` | Per-type params + UI overlays. |
-| `apply_workflow_params` | `workflow_selector.py:501` | Write params into the `pulid.json` node map. |
-| `get_adaptive_pulid_weight` | `workflow_selector.py:540` | Rolling-stats adaptive PuLID weight. |
+| `get_workflow_params` | `workflow_selector.py:455` | Per-type params + UI overlays. |
+| `apply_workflow_params` | `workflow_selector.py:506` | Write params into the `pulid.json` node map. |
+| `get_adaptive_pulid_weight` | `workflow_selector.py:545` | Rolling-stats adaptive PuLID weight. |
 | `generate_keyframe_take` | `cinema/shots/controller.py:571` | Requires `plan_status=="approved"`; `enhance_shot_prompt` → optional optimizer → `generate_ai_broll` → identity validate → append take → record cost. |
 
 ### 3.10 Identity / Continuity / Coherence
@@ -679,7 +679,7 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 | `style_director` is OpenAI-only | `llm/style_director.py:38` | No Anthropic path — asymmetric with the Anthropic-first ChiefDirector/CinemaDirector. |
 | Veo `reference_images` silently dropped (Bug #4) | `veo_native.py:155` | Vertex rejects image+reference both set; identity comes from the start frame only. `driving_video_path` also unwired on Veo (only Sora wires it). |
 | VEO_NATIVE has no quota guard | `phase_c_ffmpeg.py:313` | The 1800s cooldown TTL is set/checked only by the FAL-proxy `VEO` branch. |
-| `close_up` unreachable in motion floors | `workflow_selector.py:395` | `MOTION_FIDELITY_FLOORS` has a `close_up` key but `classify_shot_type` never returns it. |
+| `close_up` unreachable in motion floors | `workflow_selector.py:400` | `MOTION_FIDELITY_FLOORS` has a `close_up` key but `classify_shot_type` never returns it. |
 | Several live shot/project fields not in Pydantic models | `Shot` (`domain/models.py:82`) / `Project` (`domain/models.py:166`) | `objects`, `performance_engine`, `driving_video_path`, `director_review`, `screening_approved`, `needs_reassembly`, `auto_approve_audit` live via `extra="allow"`. Strict mode warns; default absorbs. |
 | `shot_id` not globally unique | `domain/project_manager.py:405` | `shot_{scene_id}_{idx}` can collide across projects (cycle-6/S13 F1 CRITICAL) — always pair with `project_id` on endpoints. |
 | Audio/performance `CostTracker()` instances bypass the budget gate | `audio/dialogue.py`, `audio/music.py`, `performance/*` | Each constructs a fresh no-budget tracker; spend lands in the DB but does NOT update the core's `spent_usd`. Budget governance covers video/image gen only. |
@@ -812,7 +812,7 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 6. Post-gen identity validation: `IdentityValidator.validate_image(...)` (`cinema/shots/controller.py:674`) against `identity_strictness` (default 0.60).
 7. Append take to `shot["keyframe_takes"]`; record cost.
 
-**KEY FUNCTIONS:** `generate_ai_broll` (`phase_c_assembly.py:75`); `enhance_shot_prompt` (`domain/continuity_engine.py:446`); `classify_shot_type` (`workflow_selector.py:411`); `get_workflow_params` (`workflow_selector.py:450`) / `apply_workflow_params` (`workflow_selector.py:501`); `get_adaptive_pulid_weight` (`workflow_selector.py:540`); for max tier `generate_ai_broll_max` (`quality_max.py:861`).
+**KEY FUNCTIONS:** `generate_ai_broll` (`phase_c_assembly.py:75`); `enhance_shot_prompt` (`domain/continuity_engine.py:446`); `classify_shot_type` (`workflow_selector.py:416`); `get_workflow_params` (`workflow_selector.py:455`) / `apply_workflow_params` (`workflow_selector.py:506`); `get_adaptive_pulid_weight` (`workflow_selector.py:545`); for max tier `generate_ai_broll_max` (`quality_max.py:861`).
 
 **DECISION POINTS:**
 
@@ -1103,7 +1103,7 @@ Every knob below lives in `project["global_settings"]` unless marked as an env v
 
 #### A. API routing strategy (per shot type)
 
-The router classifies each shot via `classify_shot_type` (`workflow_selector.py:411`) into `portrait | medium | wide | action | landscape`, then picks a primary video API and an ordered fallback cascade from `WORKFLOW_TEMPLATES` (`workflow_selector.py:21`):
+The router classifies each shot via `classify_shot_type` (`workflow_selector.py:416`) into `portrait | medium | wide | action | landscape`, then picks a primary video API and an ordered fallback cascade from `WORKFLOW_TEMPLATES` (`workflow_selector.py:21`):
 
 | shot_type | Primary video API | Fallback cascade |
 |---|---|---|
@@ -1130,8 +1130,8 @@ This is where most of your perceived quality lives. The knobs, in order of impac
 | `ip_adapter_weight` | 0.85 | 0.5–1.0 | PuLID face-lock strength (per-character and per-object) | `global_settings` |
 | `identity_strictness` | 0.60 | — | Threshold for post-keyframe identity validation + N=8 scoring | `domain/project_manager.py:324`, `cinema/shots/controller.py:672` |
 | `identity_threshold` | 0.55 | 0.4–0.8 | Per-shot face-similarity threshold | `global_settings` |
-| `adaptive_pulid` | True | bool | Self-calibrates PuLID weight from rolling ArcFace stats (`get_adaptive_pulid_weight`) | `domain/continuity_engine.py:535`, `workflow_selector.py:540` |
-| `img2img_denoise` | 0.35 | 0.2–0.6 | Continuity strength: lower = more consistent with prior shot | `workflow_selector.py:493` |
+| `adaptive_pulid` | True | bool | Self-calibrates PuLID weight from rolling ArcFace stats (`get_adaptive_pulid_weight`) | `domain/continuity_engine.py:535`, `workflow_selector.py:545` |
+| `img2img_denoise` | 0.35 | 0.2–0.6 | Continuity strength: lower = more consistent with prior shot | `workflow_selector.py:498` |
 | `char_lora_paths` | {} | dict | Per-character trained LoRA `.safetensors` — the single biggest identity lever | `global_settings` |
 
 Per-shot identity thresholds also auto-scale by shot type (`SHOT_TYPE_THRESHOLDS`, `identity/types.py:95`): portrait standard 0.70, medium 0.65, wide 0.55, action 0.60, landscape 0.0 (faces aren't gated in landscapes).
@@ -1750,9 +1750,9 @@ The functions an engineer reaches for most, grouped by task. All `file:line` ref
 | `generate_ai_broll` | `phase_c_assembly.py:75` | Image-gen dispatch: max-tier → ComfyUI+PuLID → FAL fallback |
 | `generate_ai_broll_max` | `quality_max.py:861` | N=8 adaptive best-of with prune/inject pipeline; returns `ImageGenResult(path, "QUALITY_MAX")` |
 | `generate_ai_video` | `phase_c_ffmpeg.py:54` | Central video routing + fault-tolerant cascade across 9+ engines |
-| `classify_shot_type` | `workflow_selector.py:411` | Returns `portrait\|medium\|wide\|action\|landscape` (note: **never** returns `close_up` — D-video-1) |
-| `get_workflow_params` / `apply_workflow_params` | `workflow_selector.py:450 / 501` | Per-shot-type template + ComfyUI node injection |
-| `get_adaptive_pulid_weight` | `workflow_selector.py:540` | Rolling-stats feedback → PuLID weight delta, clamped [0,1] |
+| `classify_shot_type` | `workflow_selector.py:416` | Returns `portrait\|medium\|wide\|action\|landscape` (note: **never** returns `close_up` — D-video-1) |
+| `get_workflow_params` / `apply_workflow_params` | `workflow_selector.py:455 / 501` | Per-shot-type template + ComfyUI node injection |
+| `get_adaptive_pulid_weight` | `workflow_selector.py:545` | Rolling-stats feedback → PuLID weight delta, clamped [0,1] |
 
 #### Identity / continuity / audio assembly
 
@@ -1955,7 +1955,7 @@ Each entry: **symptom → diagnose → fix**, with the source location that gove
 #### Identity drift (character face changes across shots)
 
 - **Diagnose:** Check `take["metadata"]["identity_score"]` + `identity_failure_reason`. Run `IdentityValidator.get_rolling_stats(char_id)` — `common_failure` tells you the class (`FACE_ANGLE_EXTREME`, `SMALL_FACE_REGION`, `WRONG_PERSON`, `LOW_CONFIDENCE_DETECTION`).
-- **Fix:** Upload more real front-facing references (not synthetic); let multi-angle FLUX generation run (`_generate_multi_angle_refs`, needs `FAL_KEY`); raise `identity_strictness` to 0.70–0.75 for portraits; keep `adaptive_pulid=True`; use `quality_tier="max"` to engage the N=8 face gate; train a per-character LoRA (single biggest lever). Note: boosting PuLID does **not** fix `FACE_ANGLE_EXTREME` — the adaptive logic correctly caps the delta to 0 in that case (`workflow_selector.py:540`).
+- **Fix:** Upload more real front-facing references (not synthetic); let multi-angle FLUX generation run (`_generate_multi_angle_refs`, needs `FAL_KEY`); raise `identity_strictness` to 0.70–0.75 for portraits; keep `adaptive_pulid=True`; use `quality_tier="max"` to engage the N=8 face gate; train a per-character LoRA (single biggest lever). Note: boosting PuLID does **not** fix `FACE_ANGLE_EXTREME` — the adaptive logic correctly caps the delta to 0 in that case (`workflow_selector.py:545`).
 
 #### Color shift / temporal discontinuity between shots
 

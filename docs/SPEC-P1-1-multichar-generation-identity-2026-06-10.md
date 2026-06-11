@@ -264,7 +264,7 @@ directly. Live the moment Aria registers and a pod exists.
   `scripts/_register_aria_lora.py`, commit `a43b59d`). Aria's trigger `TOKwoman` is hardcoded only in
   scripts/_fal_lora_production.py:25 and scripts/_fal_lora_train.py:28.
   Prerequisite fix: persist `global_settings.char_lora_triggers[cid]` at the same
-  web_server.py mutate that registers path/strength — RESOLVED by `web_server.py:788-789`
+  web_server.py mutate that registers path/strength — RESOLVED by `web_server.py:789`
   (commit `574118e`) + the manual registration script (`a43b59d`) which passes `trigger_token`
   so the mutate persists it; injection now active at inference.
 - Bleed risk: two face-LoRAs stacked on FLUX's global attention can cross-leak
