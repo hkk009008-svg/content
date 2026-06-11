@@ -137,7 +137,7 @@ two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:2172-2173](web_se
 | `_progress_queues: dict[pid, Queue]` | no (GIL-atomic `dict.get`) | [web_server.py:72](web_server.py:72) |
 | `_running_pipelines: dict[pid, CinemaPipeline]` | no | [web_server.py:73](web_server.py:73) |
 | `_running_cores: dict[pid, PipelineCore]` | `_cores_lock` | [web_server.py:109-110](web_server.py:109) |
-| `_lora_training_threads` | `_lora_training_lock` | [web_server.py:703-704](web_server.py:703) |
+| `_lora_training_threads` | `_lora_training_lock` | [web_server.py:710-711](web_server.py:710) |
 
 Pipeline worker: `threading.Thread(target=run_pipeline, daemon=True)`
 spawned by `POST /generate` ([web_server.py:1505](web_server.py:1505)).
@@ -151,7 +151,7 @@ wind down.
 - Pipeline thread builds a callback via
   `web_services.make_progress_callback(q)` and passes it into `CinemaPipeline`.
 - `GET /api/projects/<pid>/stream` opens an EventSource. Generator inside
-  `api_stream` ([web_server.py:1583](web_server.py:1583)) does
+  `api_stream` ([web_server.py:1589](web_server.py:1589)) does
   `q.get(timeout=30)`; on timeout emits HEARTBEAT, on `None` sentinel
   emits END and breaks.
 - Pipeline thread writes `None` to the queue in `finally`
@@ -613,7 +613,7 @@ strict = os.environ.get("CINEMA_STRICT_SCHEMA", "").strip() in (
 
 Literal-case tuple form — does NOT accept `"True"` (Python's `str(True)`) or
 other mixed-case truthy values. First caller migration:
-`api_generate_dialogue` at [web_server.py:1369](web_server.py:1369) — uses the
+`api_generate_dialogue` at [web_server.py:1375](web_server.py:1375) — uses the
 canonical migration recipe at
 [docs/MIGRATION-PATTERN-pydantic-caller.md](docs/MIGRATION-PATTERN-pydantic-caller.md).
 

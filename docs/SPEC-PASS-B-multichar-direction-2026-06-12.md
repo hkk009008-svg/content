@@ -260,9 +260,16 @@ All probes are single `GET /object_info/<class_name>` calls — zero render cost
 3. **Census gaps:** the 2026-06-11 census reported 44/48 expected classes
    (operator handoff). Identify the 4 absent classes before any graph surgery
    that depends on them.
+4. **`attn_mask` coordinate space (operator disposition #3):** pixel-space
+   `SolidMask` output vs the attention/latent resolution (FLUX latents are
+   /8) is unaddressed by any in-repo source. Schema probe first (does the
+   input declare a `MASK` type with dimension hints?); then resolve
+   empirically at the Phase-3 N=1 smoke — feed the mask and inspect
+   shapes/erroring BEFORE the N=4 batch. A silently mis-scaled mask would
+   produce unmasked-equivalent results and read as a false Design-A NO-GO.
 
-All three probes must pass before any Design A render. Budget: 3 HTTP calls,
-~0 minutes wall-clock, $0 cost.
+All probes must pass before any Design A render. Budget: 4 HTTP calls +
+one N=1 smoke already in the protocol, $0 incremental cost.
 
 ---
 
@@ -432,9 +439,16 @@ review are folded into SPEC-P1-1 §3(d) "Per-face validation follow-up —
 sharpened scope (2026-06-12)". The per-face scoring numbers in §1 above
 (n3: L:man 0.832) came from the S2 spike BEFORE dc5ad2b landed — they used
 half-crop scripts (`_s1_rescore_crops.py` pattern), not the production
-validate_image. The production validator (post-dc5ad2b) would score these
-the same way since dc5ad2b's best-face logic is equivalent to the half-crop
-approach's "score each face independently."
+validate_image. **Correction (operator Lane V 20:14:36Z, firsthand-refuted;
+director-disposed):** best-face-on-full-image is NOT equivalent to half-crop
+scoring. The equivalence holds only for "is X present anywhere in frame";
+per-FIGURE reads differ — which is the binding dimension itself (operator
+firsthand: sec45 man 0.828 half vs 0.667 full; Pass-A man 0.487 ad-hoc half
+vs 0.597 full). The committed instrument (`scripts/_arc_score_session.py
+--halves`, post-dc5ad2b best-face per half) reads n3 L:man 0.780 and Pass-A
+man L 0.587 / R 0.720 — see the SPEC-P1-1 §6 instrument-provenance append.
+Pass-B implementers MUST NOT use full-image reads as binding evidence;
+binding numbers come from per-half (or per-bbox) scoring only.
 
 ---
 
@@ -584,9 +598,16 @@ This is fully OFFLINE and can be reviewed before pod spin-up.
    - All prior S2 classes: `ApplyPulidFlux`, `PulidFluxModelLoader`,
      `ReActorFaceSwap`, `SUPIR_model_loader_v2`, `FaceDetailer`
 4. Record: census count + GPU name/VRAM from `/system_stats`.
-5. **If `ApplyPulidAdvanced` is absent:** pivot to Design C only (per-face
-   swap rescue without attention mask). Document the absence as a sprint blocker
-   for Design A; do not abort the session.
+5. **Design A GATE (operator disposition #2 — this probe is GO/NO-GO, not
+   advisory):** Design A proceeds ONLY if `ApplyPulidAdvanced` is present
+   AND its schema shows FLUX compatibility (a `pulid_flux`-typed input, not
+   only SDXL-era `pulid`) AND it exposes `attn_mask`. Class presence alone
+   is NOT a pass — nothing in-repo confirms FLUX compatibility, and the
+   production FLUX path uses `ApplyPulidFlux`, which has no `attn_mask`.
+   Absent-or-SDXL-only → Design A NO-GO for this spike; fall back in order:
+   Design C (swap rescue, Phase 4) with Design B's binding metric as the
+   measurement layer either way. Document the NO-GO; do not abort the
+   session.
 
 ### Phase 2 — VRAM baseline re-confirm (N=1, ~5 min)
 
@@ -692,6 +713,12 @@ Pod stop/keep: user decision.
 - Binding_ok=True for BOTH conditioned characters in **>=3/4 seeds** (true
   majority; 2/4 is not a majority and equals the unmasked S2 baseline — the
   masked arm must BEAT the baseline, not tie it).
+- **Instrument (R-MEASURE; operator disposition #1 DISCHARGED `45c6e52`):**
+  all per-half arc/binding numbers for Phase-3 artifacts come from the
+  committed scorer — `scripts/_arc_score_session.py --halves --artifacts
+  'logs/passb_*.jpg'` — emitting the `logs/halves_rescore_<date>.{json,txt}`
+  table. No ad-hoc runtime reads (the S2-era ad-hoc numbers produced two
+  unreproducible record entries; see SPEC-P1-1 §6 instrument append).
 - **VISUAL CHECK mandatory**: binding metric numbers alone are insufficient given
   the S3 lesson (embeddings can false-GO). Director or operator must visually
   confirm both faces are on the intended figures.

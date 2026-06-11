@@ -571,6 +571,32 @@ scope.
     the validation claim — treat as ESTIMATE until a further training run
     pins it with logged cost.
 
+  **Instrument provenance for the L/R half numbers (2026-06-12 — the queued
+  halves scorer LANDED `45c6e52`: `scripts/_arc_score_session.py --halves`,
+  table `logs/halves_rescore_20260612.{json,txt}`, 36 rows; append-only):**
+
+  - REPRODUCED within rounding: sec45 L:man 0.830 (recorded 0.828) · n2
+    halves 0.725/0.742 aria (recorded "~0.73") · FAILED-artifact man halves
+    0.719/0.753 (recorded "≥0.70") · n3 R:aria 0.769 (recorded 0.773) ·
+    cross floor 0.447 EXACT (direction-sensitive: man-img→aria-ref 0.447,
+    reverse 0.435 — the recorded floor is the man→aria direction). All
+    full-image calibration numbers exact (0.819, 0.597, 0.641, 0.733, 0.672).
+  - MISMATCH 1 — n3 L:man: instrument 0.780 vs recorded 0.832. Plausible
+    cause: the ad-hoc run hit the first-face→best-face transition window
+    around `dc5ad2b` (n3 rendered ~11:38, fix committed 12:13; the dc5ad2b
+    body itself cites 0.743–0.832 as the live range). Verdict impact: none —
+    both values ≥0.70, and binding-uncontrolled rested on the geometry/beard
+    split, not this magnitude.
+  - MISMATCH 2 — Pass-A man-half: instrument L 0.587 / R 0.720 vs recorded
+    0.487. **Unresolved divergence:** the operator firsthand-reproduced
+    0.487 on 2026-06-11 (method/crop boundary not recorded), while the
+    instrument (crop_half boundary, best-face) cannot produce it from either
+    half — flagged to the operator for reconciliation; until then treat the
+    Pass-A swap-underdelivery PREMISE (§3(c)/Pass-B Design C) as
+    direction-correct (operator visual: zero LoRA-ref resemblance) but
+    magnitude-unpinned. Pass-B's offline H1–H3 experiment must use the
+    instrument's numbers, not 0.487.
+
 ## 7. Recommended sequencing — and the deviation, surfaced
 
 **7.1 Slice 1 (Session 4): (d) + (a), S1 first, §7.3 in parallel.** Rationale: it
