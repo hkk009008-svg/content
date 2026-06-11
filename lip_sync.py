@@ -370,7 +370,7 @@ def lipsync_overlay(
                 if os.path.exists(p):
                     os.unlink(p)
             except Exception:
-                pass
+                pass  # Temp-file cleanup — non-fatal if OS-level delete fails
         if _cascade_out is not None:
             _cascade_out["cascade_metadata"] = {
                 "engine": best_name,
@@ -439,7 +439,7 @@ def validate_lipsync_quality(video_path: str, audio_path: Optional[str] = None) 
         # Each 1% drift costs 5pts of sync confidence; 20% drift → 0
         return max(0.0, 1.0 - diff_ratio * 5.0)
     except Exception:
-        pass
+        pass  # ffprobe unavailable or returned unexpected output — neutral score returned below
 
     # No scorer available — neutral
     return 1.0
@@ -719,7 +719,7 @@ def lipsync_generation(
                 if os.path.exists(p):
                     os.unlink(p)
             except Exception:
-                pass
+                pass  # Temp-file cleanup — non-fatal if OS-level delete fails
         if _cascade_out is not None:
             _cascade_out["cascade_metadata"] = {
                 "engine": best_name,
@@ -757,7 +757,7 @@ def generate_lip_sync_video(
         audio_path: Path to dialogue audio
         output_path: Where to save the output
         existing_video_path: If provided, uses OVERLAY mode (preserves video)
-        mode: "auto" | "overlay" | "generation"
+        mode: "auto" | "overlay" | "generation" | "skip"
         resolution: "720p" or "1080p"
         turbo: Faster but lower quality
         _cascade_out: optional mutable dict — receives cascade_metadata on return.
@@ -767,8 +767,11 @@ def generate_lip_sync_video(
     - If only image + audio → GENERATION (create from scratch)
     - User can force a specific mode
     """
+    # "lipsync_dispatch": every router entry is visible in the log stream,
+    # whatever path it exits through (mode not yet resolved here).
+    logger.info("lipsync dispatch", extra={"engine": "lipsync_dispatch", "mode": mode})
+
     if not FAL_AVAILABLE or not ENV_SETTINGS.fal_key:
-        # "lipsync_dispatch": pre-mode-resolution guard (mode not yet resolved to overlay/generation)
         logger.warning("FAL not available — lipsync skipped", extra={"engine": "lipsync_dispatch"})
         return None
 
@@ -780,6 +783,13 @@ def generate_lip_sync_video(
             selected_mode = "generation"
     else:
         selected_mode = mode
+
+    if selected_mode == "skip":
+        # "skip" is UI-selectable (web_server.py lip_sync_modes) and must reach
+        # neither overlay nor generation; None = the caller keeps the original
+        # video (controller gates on a truthy result).
+        logger.info("lipsync skipped by mode", extra={"engine": "lipsync_dispatch"})
+        return None
 
     logger.info("lipsync mode selected", extra={"engine": selected_mode})
 

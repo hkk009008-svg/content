@@ -305,3 +305,29 @@ class TestPrereqBlockerLogsError:
         assert any("BLOCKER" in m for m in blocker_msgs), (
             f"Expected 'BLOCKER' in error message; got {blocker_msgs!r}"
         )
+
+
+class TestSkipMode:
+    """mode='skip' must dispatch to neither overlay nor generation (UI offers it)."""
+
+    def test_skip_mode_returns_none_without_generation(self, caplog):
+        import logging as _logging
+        import lip_sync as ls
+        with (
+            patch("lip_sync.FAL_AVAILABLE", True),
+            patch("lip_sync.ENV_SETTINGS", types.SimpleNamespace(fal_key="k")),
+            patch("lip_sync.lipsync_generation") as gen,
+            patch("lip_sync.lipsync_overlay") as ov,
+        ):
+            with caplog.at_level(_logging.INFO, logger="lip_sync"):
+                result = ls.generate_lip_sync_video(
+                    "img.png", "a.wav", "out.mp4", mode="skip"
+                )
+        assert result is None
+        gen.assert_not_called()
+        ov.assert_not_called()
+        dispatch_records = [
+            r for r in caplog.records
+            if getattr(r, "engine", None) == "lipsync_dispatch"
+        ]
+        assert dispatch_records, "entry/skip dispatch signal must be logged"
