@@ -85,14 +85,23 @@ landed; pod-need signal overtaken by the user starting the pod themselves).
 a. **Surface the pod stop/keep decision to the user IMMEDIATELY** (it
    bills while you read this). If continuing the bundle: get the verbatim
    pod-SSH go-ahead for YOUR session up front (seat-scoped, see above).
-b. **Finish Pass A:** check `logs/pass_a_multichar.jpg`; if absent,
-   recover from pod `/history` (pattern validated this session — the
-   gateway transiently resets large `/view` downloads; retry loop now in
-   both scripts) or simply re-run
-   `PYTHONPATH=. .venv/bin/python scripts/_max_multichar_pass_a.py`
-   (idempotent; specimen exists so step 1 skips). Acceptance per runbook
-   Phase 3: MULTI_LORA metadata, trigger in prompt, 611 right-hand swap,
-   per-char advisory scores.
+b. **Diagnose the Pass-A quality failure (LANDED AT WRAP — race-patched
+   in):** the render COMPLETED mechanically — dispatch returned
+   `ImageGenResult(path='logs/pass_a_multichar.jpg', api_name='QUALITY_MAX')`,
+   no graph errors, plumbing validated live end-to-end — but the artifact
+   is **severely disintegrated** (granular corruption, both faces
+   destroyed). Two firsthand clues: (1) the run line says
+   `[quality_max] landscape | N_max=8 | halt@composite=0.90, arc=0.00` —
+   the dispatch classified the two-shot prompt as **landscape** params
+   (every validated probe this session ran **portrait** params; the
+   landscape arm's hires/SUPIR combo may never have been pod-tuned —
+   cf. the documented denoise-0.25-disintegrates floor), and **arc=0.00
+   disabled the identity halt-gate**, so best-of-N returned the
+   least-bad of uniformly bad candidates. (2) The corruption pattern
+   matches the known low-denoise disintegration class, not an identity
+   failure. Diagnose params-by-shot-class FIRST (cheap: re-run the same
+   call with shot_hint forcing portrait params, N=1) before touching
+   the injectors — the injector layer is the 507-claim-verified part.
 c. **S2 spike:** `scripts/_max_s2_dual_pulid.py` is READY but UNTESTED
    (syntax-checked only — committed expectations: splices 103 between
    100 and its post-prune consumer, shares loaders 99/101/97, LoadImage
