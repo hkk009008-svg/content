@@ -214,7 +214,7 @@ class CinemaDirector:
                 self.provider = "anthropic"
                 return anthropic.Anthropic(api_key=env_settings.anthropic_api_key, timeout=120.0)
             except ImportError:
-                pass
+                pass  # anthropic package not installed — fall through to OpenAI
 
         if env_settings.openai_api_key:
             try:
@@ -222,7 +222,7 @@ class CinemaDirector:
                 self.provider = "openai"
                 return OpenAI(api_key=env_settings.openai_api_key, timeout=120.0)
             except ImportError:
-                pass
+                pass  # openai package not installed — no LLM client available
 
         self.provider = None
         return None

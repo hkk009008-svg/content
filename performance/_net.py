@@ -88,7 +88,7 @@ def safe_download(
                             f.close()
                             os.remove(dest_path)
                         except OSError:
-                            pass
+                            pass  # Delete of partial file failed — caller sees None, not a corrupted artifact
                         return None
                     f.write(chunk)
         return dest_path

@@ -176,7 +176,7 @@ def run_with_tools(
                             output_tokens=getattr(usage, "completion_tokens", 0),
                         )
                 except Exception:
-                    pass
+                    pass  # Cost tracking is best-effort — import or write failure doesn't fail the research call
                 msg = response.choices[0].message
 
                 if msg.tool_calls:
@@ -216,6 +216,6 @@ def run_with_tools(
                 output_tokens=getattr(usage, "completion_tokens", 0),
             )
     except Exception:
-        pass
+        pass  # Cost tracking is best-effort — import or write failure doesn't fail the research call
     content = response.choices[0].message.content
     return content.strip() if content else ""

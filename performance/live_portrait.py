@@ -37,7 +37,7 @@ def _cost_log(duration_s: float, shot_id: str = "", video_id: str = "") -> None:
             video_id=video_id,
         )
     except Exception:
-        pass
+        pass  # Cost tracking is best-effort — import or write failure doesn't fail the render
 
 
 def generate_live_portrait_performance(

@@ -329,7 +329,7 @@ def _detect_trainer() -> Optional[str]:
         import toolkit  # ai-toolkit's package name  # noqa: F401
         return "ai-toolkit"
     except ImportError:
-        pass
+        pass  # ai-toolkit not importable as a module either — try kohya next
     if shutil.which("accelerate"):
         # Loose proxy for kohya-ss; kohya uses accelerate to launch its trainer
         return "kohya"
@@ -501,7 +501,7 @@ def train_character_lora(
                 lines = f.readlines()
             status.log_tail = "".join(lines[-40:])
         except Exception:
-            pass
+            pass  # Log tail is cosmetic — read failure doesn't affect training status
 
     if rc != 0:
         status.status = "failed"

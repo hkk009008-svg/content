@@ -40,7 +40,7 @@ def _cost_log(operation: str, duration_s: float, shot_id: str = "", video_id: st
             video_id=video_id,
         )
     except Exception:
-        pass
+        pass  # Cost tracking is best-effort — import or write failure doesn't fail the render
 
 
 def generate_act_one_performance(

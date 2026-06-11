@@ -512,7 +512,7 @@ class IdentityValidator:
                                 failure_reason=failure,
                             )
                 except Exception:
-                    pass
+                    pass  # Face crop scoring failed — frame skipped; next frame may succeed
                 finally:
                     if os.path.exists(crop_path):
                         os.remove(crop_path)

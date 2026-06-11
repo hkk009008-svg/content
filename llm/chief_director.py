@@ -67,7 +67,7 @@ class ChiefDirector:
                 # for the SDK default 10min x 2 retries (Lane V ticket #2).
                 return anthropic.Anthropic(api_key=anthropic_key, timeout=120.0)
             except ImportError:
-                pass
+                pass  # anthropic package not installed — fall through to OpenAI
 
         # Fallback to OpenAI GPT-4o
         openai_key = settings.openai_api_key
@@ -77,7 +77,7 @@ class ChiefDirector:
                 self.provider = "openai"
                 return OpenAI(api_key=openai_key, timeout=120.0)
             except ImportError:
-                pass
+                pass  # openai package not installed — no LLM client available
 
         self.provider = None
         return None

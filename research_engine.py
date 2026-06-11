@@ -26,7 +26,7 @@ def _get_tavily():
             from tavily import TavilyClient
             _tavily_client = TavilyClient(api_key=settings.tavily_api_key)
         except Exception:
-            pass
+            pass  # Tavily package missing or init failed — research calls return empty results ("" from the text helpers, [] from research_location_visual)
     return _tavily_client
 
 
@@ -37,7 +37,7 @@ def _get_firecrawl():
             from firecrawl import FirecrawlApp
             _firecrawl_app = FirecrawlApp(api_key=settings.firecrawl_api_key)
         except Exception:
-            pass
+            pass  # Firecrawl package missing or init failed — research calls will skip crawl
     return _firecrawl_app
 
 

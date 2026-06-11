@@ -155,7 +155,7 @@ class SoraNativeAPI:
             try:
                 os.unlink(tmp_path)
             except OSError:
-                pass
+                pass  # Temp still-frame cleanup — non-fatal if OS-level delete fails
 
             status = getattr(video, "status", "unknown")
             if status != "completed":

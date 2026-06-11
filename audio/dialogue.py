@@ -513,7 +513,7 @@ def generate_dialogue_voiceover(
                     else:
                         voice_id = lang_defaults.get("default_female_voice", "")
                 except Exception:
-                    pass
+                    pass  # Import or lookup failed — legacy hardcode fallback below is safe
             if not voice_id:
                 voice_id = "pNInz6obpgDQGcFmaJgB"  # legacy hardcode last resort
 

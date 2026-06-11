@@ -68,7 +68,7 @@ def _detect_cli() -> Optional[str]:
             if "tvai_up" in (out.stdout or ""):
                 return ff
         except Exception:
-            pass
+            pass  # ffmpeg probe failed — Topaz filter not detected, return None
     return None
 
 

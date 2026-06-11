@@ -559,7 +559,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                         try:
                             url_by_path[ref_path] = fal_client.upload_file(ref_path)
                         except Exception:
-                            pass
+                            pass  # Upload failed for this ref — excluded from the slot map; others proceed
                     uploaded_primary = [r for r in primary_refs if r in url_by_path]
                     uploaded_secondaries = [
                         {**e, "multi_angle_refs": [
@@ -605,7 +605,7 @@ def _fal_flux_fallback(prompt, output_filename, seed=None, character_image=None,
                         try:
                             image_urls.append(fal_client.upload_file(ref_path))
                         except Exception:
-                            pass
+                            pass  # Upload failed for this ref — excluded from batch; others proceed
 
                     if not image_urls:
                         image_urls = [fal_client.upload_file(character_image)]

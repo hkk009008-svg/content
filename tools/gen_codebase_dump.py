@@ -212,7 +212,7 @@ def main() -> int:
             try:
                 total_loc += p.read_text(encoding="utf-8").count("\n")
             except UnicodeDecodeError:
-                pass
+                pass  # Binary file — skip LOC count; metadata total may be understated
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     with OUTPUT.open("w", encoding="utf-8") as out:

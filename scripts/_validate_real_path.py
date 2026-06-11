@@ -52,7 +52,7 @@ try:
             urllib.request.urlopen(urllib.request.Request(SERVER + ep, data=pl,
                 headers={"Content-Type": "application/json"}), timeout=10)
         except Exception:
-            pass
+            pass  # Interrupt/clear is best-effort — validation already printed success above
     print("interrupted + cleared queue (no GPU work ran)")
 except urllib.error.HTTPError as e:
     j = json.loads(e.read().decode())

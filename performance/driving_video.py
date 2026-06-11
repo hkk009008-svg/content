@@ -41,7 +41,7 @@ def _cost_log(provider: str, duration_s: float, shot_id: str, video_id: str) -> 
             shot_id=shot_id, video_id=video_id,
         )
     except Exception:
-        pass
+        pass  # Cost tracking is best-effort — import or write failure doesn't fail the render
 
 
 def _synth_via_hedra(

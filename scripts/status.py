@@ -412,7 +412,7 @@ def _parse_env_key(repo_root: Path, key: str) -> Optional[str]:
             if line.startswith(f"{key}="):
                 return line[len(key) + 1:].strip().strip('"').strip("'")
     except Exception:
-        pass
+        pass  # .env missing or unreadable — caller falls back to env-var or None
     return None
 
 

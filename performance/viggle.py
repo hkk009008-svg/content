@@ -36,7 +36,7 @@ def _cost_log(shot_id: str = "", video_id: str = "") -> None:
             video_id=video_id,
         )
     except Exception:
-        pass
+        pass  # Cost tracking is best-effort — import or write failure doesn't fail the render
 
 
 def generate_viggle_performance(
