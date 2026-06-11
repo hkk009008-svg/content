@@ -124,6 +124,19 @@ asserting it.
 Evidence: the command + its output, in the doc/commit body (cite or don't claim).
 Details: docs/protocol/agents/core.md (ADR-013; the 24-vs-1 origin story).
 
+# Measurement-as-artifact (R-MEASURE)
+Scope: both
+Trigger: recording a number that backs a GO/NO-GO verdict, a gate threshold,
+or a spec/record claim (arc scores, VRAM peaks, prices, durations, counts).
+Action: the number must be produced by a COMMITTED script/command and
+persisted to (or directly citable from) a `logs/` artifact in the same change
+that records it. Ad-hoc runtime measurements may be recorded only when
+explicitly labeled estimate / runtime-unreproducible. Extends R-EVIDENCE from
+"cite the command" to "commit the instrument".
+Evidence: script path + `logs/` artifact cited next to the number.
+Details: docs/PROTOCOL-RULES-LOG.md (R-MEASURE entry; origin = the 2026-06-11
+half-crop numbers that backed S2/S3 verdicts from REPL-only measurement).
+
 # Multi-task orchestration (R-ORCH)
 Scope: both
 Trigger: a plan with ≥5 independent sub-tasks OR ≥800 LOC of total change; or a
