@@ -672,6 +672,33 @@ host-agnostic; production parameter table re-snapshotted from
 documented node semantics rather than recall, on both authoring and reviewing
 sides.
 
+### Rules #21 + #22 + R-MEASURE + dispatch git-hygiene + SessionStart sweep (2026-06-12, operator ship, user-directed)
+
+One user-directed hardening batch ("plan to apply these", 2026-06-12) of four
+items surfaced by the 2026-06-11/12 sessions; plan
+`docs/superpowers/plans/2026-06-12-two-seat-process-hardening.md`:
+
+- **Rule #21 verdict-ahead-of-report** — basis: `6f3b809` verdict-first
+  unblocked a billed pod session; report `3a13156` followed; nothing
+  reversed. Beneficiary (Rule #11): both + user (billed-clock waste removed).
+- **Rule #22 flag-before-burn** — basis: reviewed S3 sweep ran clean;
+  unreviewed train script carried the F1 fee-respend defect (`3a589da`
+  guard). Beneficiary: both + user (fee protection).
+- **R-MEASURE** — basis: half-crop S2/S3 verdict numbers were REPL-only
+  (operator Lane V `2026-06-11T18:49:37Z`, disposed `b91c6c9`; halves-mode
+  scorer queued wave-2 is the instance). Beneficiary: both + user
+  (reproducible records).
+- **Dispatch git-hygiene (templates + CLAUDE/AGENTS clause)** — basis:
+  index-operator corruption 2026-06-12 ("unable to read <blob>") during a
+  31-agent workflow; per-invocation `env -u GIT_INDEX_FILE` (subagent shell
+  state does not persist). Beneficiary: both (either seat's index).
+- **SessionStart sweep registration** — closes the v5.9 post-last-hook-fire
+  window (strike #2, 866 paths). Local registration documented in
+  OPERATIONS.md. Beneficiary: both.
+
+All five invocable from codification; invocation counts start at the next
+session table.
+
 ## Retirement criteria
 
 A rule unused for 5 consecutive sessions → flagged for review.
