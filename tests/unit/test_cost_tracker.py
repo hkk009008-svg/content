@@ -701,3 +701,16 @@ class TestDbPathResolution:
         tracker = CostTracker()
         assert tracker.db_path == "data/experiments.db"
         tracker.close()
+
+
+class TestVerifiedPricePins:
+    """Pins for prices VERIFIED against provider pages (not estimates).
+    Operator INFO 2026-06-11T02:01:00Z: without a direct pin, an accidental
+    revert of a verified price passes the suite (test:517 passes an explicit
+    override, so it never reads the constant)."""
+
+    def test_flux_kontext_price_is_the_verified_2026_06_11_value(self):
+        from cost_tracker import API_COST_USD
+        # fal.ai model page for flux-pro/kontext/max/multi (the variant
+        # production calls): "$0.08 per image". The old 0.04 was the non-max tier.
+        assert API_COST_USD["FLUX_KONTEXT"] == 0.08

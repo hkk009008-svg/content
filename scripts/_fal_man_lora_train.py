@@ -17,7 +17,6 @@ from a photoreal canonical.
 
 Run: PYTHONPATH=. .venv/bin/python scripts/_fal_man_lora_train.py
 """
-import glob
 import hashlib
 import os
 import sys
@@ -90,6 +89,7 @@ def generate_refs():
         try:
             result = fal_client.subscribe(
                 "fal-ai/flux-pro/kontext/max/multi",
+                client_timeout=180,  # mirror character_manager.py:304 — a stalled FAL queue must not hang the run
                 arguments={
                     "prompt": (
                         "PRESERVE IDENTITY: Keep this exact person's face, hair, skin, "
@@ -112,6 +112,11 @@ def generate_refs():
 
 
 def main():
+    if os.path.exists(OUT):
+        # operator F1 (02:01:00Z): training is NOT idempotent — a re-run
+        # re-spends the FAL fee and overwrites the validated artifact.
+        print(f"ABORT: {OUT} already exists — delete it explicitly to retrain")
+        return 1
     if not os.path.exists(CANONICAL):
         print(f"canonical missing: {CANONICAL}"); return 1
     refs = generate_refs()
