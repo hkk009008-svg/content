@@ -113,6 +113,11 @@ def main():
                 outs = h[pid].get("outputs", {})
                 node = outs.get("9") or next((o for o in outs.values() if "images" in o), None)
                 imgs = (node or {}).get("images")
+                if not imgs:
+                    # a completed run with empty outputs must FAIL the arm
+                    # (operator S2 finding, same family)
+                    print(f"[s3 sec={strength}] completed with NO images — failing", flush=True)
+                    return 1
                 if imgs:
                     img = imgs[-1]
                     # gateway resets large transfers transiently — retry;
@@ -123,6 +128,7 @@ def main():
                                 "filename": img["filename"],
                                 "subfolder": img.get("subfolder", ""),
                                 "type": img.get("type", "output")}, timeout=300)
+                            dl.raise_for_status()  # a 502 RESPONSE is not success
                             break
                         except Exception as e:  # noqa: BLE001
                             print(f"[s3 sec={strength}] download attempt "

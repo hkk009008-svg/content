@@ -33,6 +33,7 @@ PROMPT = ("a woman with short dark wavy hair on the left and a middle-aged "
           "photorealistic, cinematic")
 N_RUNS = 4
 SEEDS = [990011, 990022, 990033, 990044]
+assert len(SEEDS) >= N_RUNS, "raise SEEDS alongside N_RUNS"
 
 
 def _upload(path, name):
@@ -124,6 +125,12 @@ def main():
                 outs = h[pid].get("outputs", {})
                 node = outs.get("9") or next((o for o in outs.values() if "images" in o), None)
                 imgs = (node or {}).get("images")
+                if not imgs:
+                    # operator Lane V IMPORTANT (01:27:54Z): a completed run
+                    # with empty outputs must FAIL, not count as done — else
+                    # the spike exits 0 with nothing to arc-score.
+                    print(f"[n{i+1}] completed with NO images — failing", flush=True)
+                    return 1
                 if imgs:
                     img = imgs[-1]
                     # gateway resets large transfers transiently (bit the
@@ -134,6 +141,7 @@ def main():
                                 "filename": img["filename"],
                                 "subfolder": img.get("subfolder", ""),
                                 "type": img.get("type", "output")}, timeout=300)
+                            dl.raise_for_status()  # a 502 RESPONSE is not success
                             break
                         except Exception as e:  # noqa: BLE001
                             print(f"[n{i+1}] download attempt {attempt+1} "

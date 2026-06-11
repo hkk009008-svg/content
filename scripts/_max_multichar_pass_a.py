@@ -71,6 +71,7 @@ def _submit_and_save(wf, out_path, tag):
                         "filename": img["filename"],
                         "subfolder": img.get("subfolder", ""),
                         "type": img.get("type", "output")}, timeout=300)
+                    dl.raise_for_status()  # a 502 RESPONSE is not success
                     break
                 except Exception as e:  # noqa: BLE001
                     print(f"[{tag}] download attempt {attempt+1} failed: {e}",
@@ -141,7 +142,8 @@ def main():
         # (identity stack zeroed, arc gate off) → disintegrated artifact.
         shot_hint={"prompt": PASS_A_PROMPT,
                    "characters_in_frame": ["aria", "fresh_man"],
-                   "camera": "medium two-shot"},
+                   "camera": "medium two-shot",
+                   "image_api": None},
     )
     print(f"Pass A result: {result}")
     return 0 if result else 1
