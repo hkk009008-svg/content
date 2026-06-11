@@ -279,7 +279,7 @@ only one ApplyPulidFlux node exists; that is mechanism (c)'s territory.
 **Pod-dependence:** hard to RUN (the graph executes on the pod), but ALL code +
 unit tests (graph-surgery assertions on the JSON dict) ship pod-independently —
 the branch is dead code until `quality_tier=="max"` AND a pod exists.
-**Cost:** still one QUALITY_MAX unit ($0.40, cost_tracker.py:63); ~+5-10% pod
+**Cost:** still one QUALITY_MAX unit ($0.40, cost_tracker.py:66); ~+5-10% pod
 wall-clock per candidate (extrapolated).
 
 ### 3(c) — Max-tier dual identity: ReActor rescue now, chained PuLID behind a spike
@@ -330,10 +330,10 @@ spike session, 1 regional/polish) — the natural Slice 2/3.
 
 | Item | Estimate | Basis |
 |---|---|---|
-| Kontext multi-char keyframe | $0.04/call | cost_tracker.py:59 `FLUX_KONTEXT` — repo estimate; per-input-image surcharge **unverified**. If FAL bills per ref, today's single-char 6-ref calls are ALSO mispriced against this entry (and the multi-char slot cap of 3 primary refs could even lower single-call cost). S1 reads the real price off the FAL dashboard; update `FLUX_KONTEXT` after S1 regardless of the spike's go/no-go. Multi logs under the same key as single — the record site is controller.py:744-751, keyed by `result.api_name` (cite corrected per Lane-V M-2; phase_c_assembly.py:546 is where the `FLUX_KONTEXT` name originates, not where cost is logged). |
-| Max-tier multi-LoRA shot | $0.40/shot | cost_tracker.py:63 `QUALITY_MAX`; same pod call, no new billing unit |
+| Kontext multi-char keyframe | $0.08/call | cost_tracker.py:62 `FLUX_KONTEXT` — **VERIFIED 2026-06-11 against the fal.ai model page** for `flux-pro/kontext/max/multi` (the variant production calls): "$0.08 per image", billed per OUTPUT image with **no per-input-ref surcharge listed** — the per-ref-billing worry is discharged (list-price basis; account-actual dashboard read would need the user's login and is no longer load-bearing). The prior $0.04 was the non-max Kontext tier. Multi logs under the same key as single — the record site is controller.py:744-751, keyed by `result.api_name` (cite corrected per Lane-V M-2; phase_c_assembly.py:546 is where the `FLUX_KONTEXT` name originates, not where cost is logged). |
+| Max-tier multi-LoRA shot | $0.40/shot | cost_tracker.py:66 `QUALITY_MAX`; same pod call, no new billing unit |
 | Max-tier dual-PuLID shot | ~$0.44-0.51/shot | **extrapolation**: QUALITY_MAX $0.40 + 10-27% overhead; N=8 timing unmeasured (the 8.5-min benchmark was N=1) — add `QUALITY_MAX_MULTI` ≈ $0.50 to API_COST_USD when Pass B ships |
-| Spike S1 (@Image2 behavior) | ~$0.20 | 5 calls @ ~$0.04: single-char baseline + 3 multi-char arms on the Kontext endpoint (N=3 variance design per Lane-V V-4, §6) + 1 text-only control on `fal-ai/flux-pro/v1.1-ultra`, whose price may differ; contingent on flat-rate pricing — the same unverified assumption the row above flags |
+| Spike S1 (@Image2 behavior) | ~$0.20 | 5 calls @ ~$0.04: single-char baseline + 3 multi-char arms on the Kontext endpoint (N=3 variance design per Lane-V V-4, §6) + 1 text-only control on `fal-ai/flux-pro/v1.1-ultra`, whose price may differ; contingent on flat-rate pricing (2026-06-11 hindsight: per-OUTPUT flat-rate confirmed, but at $0.08/call — the executed S1's true Kontext spend was ~2x this estimate) |
 | Spike S2/S3 pod session | ~$0.50-1.20 | **assumes 1-4 h total billed pod uptime** (spin-up + development + idle + N=1 runs @ $0.30/hr) — generation cycles alone would be ~$0.36; the range prices the session, not the renders |
 | LoRA training (prereq) | **uninstrumented** | zero API_COST_USD entry / record_api_call anywhere under prep/ (verified) — must be priced before slice 2 makes training routine |
 

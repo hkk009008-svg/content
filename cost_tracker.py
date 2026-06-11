@@ -56,7 +56,10 @@ API_COST_USD: dict[str, float] = {
     # Image APIs (per still)
     "COMFYUI_PULID": 0.04,   # FLUX+PuLID on the ComfyUI pod (GPU-time estimate)
     "FLUX_PULID":    0.05,
-    "FLUX_KONTEXT":  0.04,
+    # fal.ai list price read 2026-06-11 (model page for flux-pro/kontext/max/multi,
+    # the variant production actually calls): "$0.08 per image" — per OUTPUT image,
+    # no per-input-ref surcharge listed. The old 0.04 was the non-max Kontext tier.
+    "FLUX_KONTEXT":  0.08,
     "FLUX_PRO":      0.05,
     "FLUX_SCHNELL":  0.01,   # FAL flux/schnell — fast, low-cost fallback
     "POLLINATIONS":  0.00,   # free service (last-resort fallback)
