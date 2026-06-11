@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 import json
@@ -7,6 +8,8 @@ import subprocess
 from typing import TYPE_CHECKING, Optional
 from config.settings import settings
 from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from cinema.context import PipelineContext
@@ -134,7 +137,10 @@ def generate_ai_video(
         }
         negative_prompt = _base_neg + _shot_neg.get(shot_type, "")
 
-    print(f"   [VIDEO] Routing to {target_api} (motion: {camera_motion}, shot: {shot_type or 'auto'})")
+    logger.info(
+        "Video routing",
+        extra={"engine": target_api, "camera_motion": camera_motion, "shot_type": shot_type or "auto"},
+    )
 
     def try_next_api():
         # Smart cascade — use shot-type-specific fallbacks if provided
@@ -163,7 +169,7 @@ def generate_ai_video(
 
         for api in fallback_list:
             if api not in attempted_apis:
-                print(f"   [CASCADE] -> {api}")
+                logger.info("Cascade routing to next engine", extra={"engine": api})
                 return generate_ai_video(
                     image_path, camera_motion, api, output_mp4, pacing,
                     character_id, attempted_apis, multi_angle_refs,
@@ -184,11 +190,14 @@ def generate_ai_video(
             if isinstance(_override, int) and _override >= 0:
                 MAX_CASCADE_RETRIES = _override
         if _cascade_retries >= MAX_CASCADE_RETRIES:
-            print(f"   [WARN] All video APIs exhausted after {MAX_CASCADE_RETRIES} retry pass(es).")
+            logger.warning(
+                "All video APIs exhausted",
+                extra={"max_cascade_retries": MAX_CASCADE_RETRIES},
+            )
             return None
-        print(
-            f"   [WARN] All APIs exhausted. Waiting 30s for quota refresh "
-            f"(retry {_cascade_retries + 1}/{MAX_CASCADE_RETRIES})..."
+        logger.warning(
+            "All APIs exhausted — waiting 30s for quota refresh",
+            extra={"retry": _cascade_retries + 1, "max_cascade_retries": MAX_CASCADE_RETRIES},
         )
         time.sleep(30)
         first_api = (video_fallbacks or ["KLING_NATIVE"])[0]
@@ -211,7 +220,10 @@ def generate_ai_video(
         _api_engines = get_project_setting(ctx, "api_engines", None)
         if isinstance(_api_engines, dict):
             if _api_engines.get(target_api.upper(), {}).get("enabled", True) is False:
-                print(f"   [VIDEO] {target_api.upper()} disabled by api_engines — delegating to cascade")
+                logger.info(
+                    "Engine disabled by api_engines — delegating to cascade",
+                    extra={"engine": target_api.upper()},
+                )
                 return try_next_api()
 
     # Portrait projects: a target that cannot produce 9:16 must NOT be dispatched as the
@@ -225,7 +237,10 @@ def generate_ai_video(
     # this single guard also closes that path. target_api was already appended to
     # attempted_apis above, so the cascade correctly skips it.
     if is_portrait(_aspect) and target_api.upper() not in PORTRAIT_CAPABLE:
-        print(f"   [VIDEO] {target_api.upper()} cannot produce {_aspect} portrait — delegating to portrait-filtered cascade")
+        logger.info(
+            "Engine cannot produce portrait aspect — delegating to portrait-filtered cascade",
+            extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+        )
         return try_next_api()
 
     # ═══════════════════════════════════════════════════════════════
@@ -259,13 +274,16 @@ def generate_ai_video(
                 # the file the provider wrote (result==output_mp4 for native branches; see the
                 # _accept_or_reject caller contract). Wrong orientation → cascade; no-op for landscape.
                 if not _accept_or_reject(output_mp4, _aspect):
-                    print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                    logger.warning(
+                        "Aspect backstop: wrong orientation — rejecting → cascade",
+                        extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+                    )
                     return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
             return try_next_api()
         except Exception as e:
-            print(f"   [WARN] Kling Native error: {e}")
+            logger.warning("Kling Native error", extra={"engine": "KLING_NATIVE", "error": str(e)})
             return try_next_api()
 
     elif target_api.upper() == "SORA_NATIVE":
@@ -302,13 +320,16 @@ def generate_ai_video(
             )
             if result:
                 if not _accept_or_reject(output_mp4, _aspect):
-                    print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                    logger.warning(
+                        "Aspect backstop: wrong orientation — rejecting → cascade",
+                        extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+                    )
                     return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
             return try_next_api()
         except Exception as e:
-            print(f"   [WARN] Sora Native error: {e}")
+            logger.warning("Sora Native error", extra={"engine": "SORA_NATIVE", "error": str(e)})
             return try_next_api()
 
     elif target_api.upper() == "VEO_NATIVE":
@@ -334,13 +355,16 @@ def generate_ai_video(
             )
             if result:
                 if not _accept_or_reject(output_mp4, _aspect):
-                    print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                    logger.warning(
+                        "Aspect backstop: wrong orientation — rejecting → cascade",
+                        extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+                    )
                     return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
             return try_next_api()
         except Exception as e:
-            print(f"   [WARN] Veo Native error: {e}")
+            logger.warning("Veo Native error", extra={"engine": "VEO_NATIVE", "error": str(e)})
             return try_next_api()
 
     elif target_api.upper() == "LTX":
@@ -376,13 +400,16 @@ def generate_ai_video(
             )
             if result:
                 if not _accept_or_reject(output_mp4, _aspect):
-                    print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                    logger.warning(
+                        "Aspect backstop: wrong orientation — rejecting → cascade",
+                        extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+                    )
                     return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return result
             return try_next_api()
         except Exception as e:
-            print(f"   [WARN] LTX error: {e}")
+            logger.warning("LTX error", extra={"engine": "LTX", "error": str(e)})
             return try_next_api()
 
     elif target_api.upper() == "RUNWAY_GEN4":
@@ -392,7 +419,7 @@ def generate_ai_video(
             client = RunwayML(api_key=settings.runwayml_api_secret)
             import urllib.request
 
-            print(f"   [RUNWAY-GEN4] Runway Gen-4 I2V with style lock")
+            logger.info("Runway Gen-4 I2V with style lock", extra={"engine": "RUNWAY_GEN4"})
 
             # Upload image as data URI or use URL
             import base64
@@ -420,23 +447,26 @@ def generate_ai_video(
                 elapsed += 10
                 task = client.tasks.retrieve(id=task.id)
                 if elapsed % 30 == 0:
-                    print(f"   [RUNWAY-GEN4] Polling... ({elapsed}s)")
+                    logger.debug("Runway Gen-4 polling", extra={"engine": "RUNWAY_GEN4", "elapsed_s": elapsed})
 
             if task.status == "SUCCEEDED" and task.output:
                 video_url = task.output[0] if isinstance(task.output, list) else task.output
                 urllib.request.urlretrieve(video_url, output_mp4)
-                print(f"   [RUNWAY-GEN4] Success: {output_mp4}")
+                logger.info("Runway Gen-4 success", extra={"engine": "RUNWAY_GEN4", "output_mp4": output_mp4})
                 if not _accept_or_reject(output_mp4, _aspect):
-                    print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                    logger.warning(
+                        "Aspect backstop: wrong orientation — rejecting → cascade",
+                        extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+                    )
                     return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return output_mp4
 
-            print(f"   [WARN] Runway Gen-4 {task.status}")
+            logger.warning("Runway Gen-4 task not succeeded", extra={"engine": "RUNWAY_GEN4", "task_status": task.status})
             return try_next_api()
 
         except Exception as e:
-            print(f"   [WARN] Runway Gen-4 error: {e}")
+            logger.warning("Runway Gen-4 error", extra={"engine": "RUNWAY_GEN4", "error": str(e)})
             return try_next_api()
 
     # ═══════════════════════════════════════════════════════════════
@@ -450,7 +480,7 @@ def generate_ai_video(
             try:
                 import urllib.request
 
-                print(f"   [SORA2] fal.ai Sora 2 I2V (25s continuous)")
+                logger.info("fal.ai Sora 2 I2V (25s continuous)", extra={"engine": "SORA_2"})
 
                 start_url = fal_client.upload_file(image_path)
 
@@ -482,9 +512,12 @@ def generate_ai_video(
                 video_url = result.get("video", {}).get("url")
                 if video_url:
                     urllib.request.urlretrieve(video_url, output_mp4)
-                    print(f"   [SORA2] Success: {output_mp4}")
+                    logger.info("Sora 2 success", extra={"engine": "SORA_2", "output_mp4": output_mp4})
                     if not _accept_or_reject(output_mp4, _aspect):
-                        print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                        logger.warning(
+                            "Aspect backstop: wrong orientation — rejecting → cascade",
+                            extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+                        )
                         return try_next_api()
                     _record_video_cascade(target_api.upper())
                     return output_mp4
@@ -492,10 +525,10 @@ def generate_ai_video(
                 return try_next_api()
 
             except Exception as e:
-                print(f"   [WARN] Sora 2 error: {e}")
+                logger.warning("Sora 2 error", extra={"engine": "SORA_2", "error": str(e)})
                 return try_next_api()
         else:
-            print("   [WARN] FAL_KEY missing for Sora 2. Cascading...")
+            logger.warning("FAL_KEY missing for Sora 2 — cascading", extra={"engine": "SORA_2"})
             return try_next_api()
 
     elif target_api.upper() == "VEO":
@@ -503,7 +536,10 @@ def generate_ai_video(
         global _VEO_QUOTA_EXHAUSTED_UNTIL
         if _veo_quota_blocked():
             remaining = int(_VEO_QUOTA_EXHAUSTED_UNTIL - time.time())
-            print(f"   [VEO] Quota cooldown active ({remaining}s remaining). Cascading...")
+            logger.warning(
+                "VEO quota cooldown active — cascading",
+                extra={"engine": "VEO", "cooldown_remaining_s": remaining},
+            )
             return try_next_api()
 
         fal_key = settings.fal_key
@@ -511,7 +547,7 @@ def generate_ai_video(
             try:
                 import urllib.request
 
-                print(f"   [VEO] fal.ai Veo 3.1 reference-to-video")
+                logger.info("fal.ai Veo 3.1 reference-to-video", extra={"engine": "VEO"})
 
                 # Upload reference images for subject preservation
                 image_urls = []
@@ -521,7 +557,10 @@ def generate_ai_video(
                             try:
                                 image_urls.append(fal_client.upload_file(ref_path))
                             except (OSError, RuntimeError) as e:
-                                print(f"   [WARN] Failed to upload ref {ref_path}: {e}")
+                                logger.warning(
+                                    "Failed to upload ref image",
+                                    extra={"engine": "VEO", "ref_path": ref_path, "error": str(e)},
+                                )
 
                 # Always include the source keyframe
                 if not image_urls:
@@ -556,9 +595,12 @@ def generate_ai_video(
                 video_url = result.get("video", {}).get("url")
                 if video_url:
                     urllib.request.urlretrieve(video_url, output_mp4)
-                    print(f"   [VEO] Success: {output_mp4}")
+                    logger.info("VEO success", extra={"engine": "VEO", "output_mp4": output_mp4})
                     if not _accept_or_reject(output_mp4, _aspect):
-                        print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                        logger.warning(
+                            "Aspect backstop: wrong orientation — rejecting → cascade",
+                            extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+                        )
                         return try_next_api()
                     _record_video_cascade(target_api.upper())
                     return output_mp4
@@ -569,11 +611,14 @@ def generate_ai_video(
                 error_str = str(e).lower()
                 if "429" in error_str or "quota" in error_str or "exhausted" in error_str:
                     _VEO_QUOTA_EXHAUSTED_UNTIL = time.time() + _VEO_QUOTA_TTL_S
-                    print(f"   [VEO] Quota exhausted — blocking VEO for {_VEO_QUOTA_TTL_S}s")
-                print(f"   [WARN] Veo 3.1 error: {e}")
+                    logger.warning(
+                        "VEO quota exhausted — blocking VEO",
+                        extra={"engine": "VEO", "block_duration_s": _VEO_QUOTA_TTL_S},
+                    )
+                logger.warning("Veo 3.1 error", extra={"engine": "VEO", "error": str(e)})
                 return try_next_api()
         else:
-            print("   [WARN] FAL_KEY missing for Veo. Cascading...")
+            logger.warning("FAL_KEY missing for Veo — cascading", extra={"engine": "VEO"})
             return try_next_api()
             
     elif target_api.upper() == "KLING_3_0":
@@ -585,7 +630,10 @@ def generate_ai_video(
                 try:
                     import urllib.request
 
-                    print(f"   [KLING] fal.ai Kling 3.0 Pro I2V (attempt {attempt}/{max_attempts})")
+                    logger.info(
+                        "fal.ai Kling 3.0 Pro I2V",
+                        extra={"engine": "KLING_3_0", "attempt": attempt, "max_attempts": max_attempts},
+                    )
 
                     # Upload the source keyframe
                     start_image_url = fal_client.upload_file(image_path)
@@ -628,13 +676,19 @@ def generate_ai_video(
                                 try:
                                     extra_urls.append(fal_client.upload_file(ref_path))
                                 except (OSError, RuntimeError) as e:
-                                    print(f"   [WARN] Failed to upload ref {ref_path}: {e}")
+                                    logger.warning(
+                                        "Failed to upload ref image",
+                                        extra={"engine": "KLING_3_0", "ref_path": ref_path, "error": str(e)},
+                                    )
 
                             args["elements"] = [{
                                 "frontal_image_url": frontal_url,
                                 "reference_image_urls": extra_urls,
                             }]
-                            print(f"   [KLING] Subject bound: 1 frontal + {len(extra_urls)} angle refs")
+                            logger.info(
+                                "Kling subject bound",
+                                extra={"engine": "KLING_3_0", "extra_angle_refs": len(extra_urls)},
+                            )
 
                     result = fal_client.subscribe(
                         "fal-ai/kling-video/v3/pro/image-to-video",
@@ -646,24 +700,30 @@ def generate_ai_video(
                     video_url = result.get("video", {}).get("url")
                     if video_url:
                         urllib.request.urlretrieve(video_url, output_mp4)
-                        print(f"   [KLING] Success: {output_mp4}")
+                        logger.info("Kling success", extra={"engine": "KLING_3_0", "output_mp4": output_mp4})
                         if not _accept_or_reject(output_mp4, _aspect):
-                            print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                            logger.warning(
+                                "Aspect backstop: wrong orientation — rejecting → cascade",
+                                extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+                            )
                             return try_next_api()
                         _record_video_cascade(target_api.upper())
                         return output_mp4
 
-                    print(f"   [WARN] Kling returned no video URL")
+                    logger.warning("Kling returned no video URL", extra={"engine": "KLING_3_0"})
                     return try_next_api()
 
                 except Exception as e:
-                    print(f"   [WARN] Kling 3.0 Pro fal.ai error: {e}")
+                    logger.warning(
+                        "Kling 3.0 Pro fal.ai error",
+                        extra={"engine": "KLING_3_0", "attempt": attempt, "error": str(e)},
+                    )
                     if attempt < max_attempts:
                         time.sleep(5)
                         continue
                     return try_next_api()
         else:
-            print("   [WARN] FAL_KEY missing for Kling. Cascading...")
+            logger.warning("FAL_KEY missing for Kling — cascading", extra={"engine": "KLING_3_0"})
             return try_next_api()
 
     elif target_api.upper() == "FAL_SVD":
@@ -675,7 +735,7 @@ def generate_ai_video(
         fal_key = settings.fal_key
         if fal_key and FAL_AVAILABLE:
             try:
-                print(f"   ↳ Generating frame via FAL fast-SVD endpoint...")
+                logger.info("Generating frame via FAL fast-SVD endpoint", extra={"engine": "FAL_SVD"})
 
                 # IP-Adapter Injection Simulation:
                 ref_img_url = ""
@@ -684,14 +744,20 @@ def generate_ai_video(
                         chars = json.load(f)
                     ref_img = chars.get(character_id, {}).get("reference_image")
                     if ref_img and os.path.exists(ref_img):
-                        print(f"      ↳ Injecting IP-Adapter Weights for Character: {character_id}")
+                        logger.info(
+                            "Injecting IP-Adapter weights for character",
+                            extra={"engine": "FAL_SVD", "character_id": character_id},
+                        )
                         try:
                             ref_img_url = fal_client.upload_file(ref_img)
                         except AttributeError as e:
                             # fal_client.upload_file missing — SDK not loaded properly.
                             # We previously swallowed this and proceeded with an empty
                             # ref URL (silent identity loss). Surface it and cascade.
-                            print(f"   [ERROR] fal_client.upload_file missing while uploading character ref: {e}")
+                            logger.error(
+                                "fal_client.upload_file missing while uploading character ref",
+                                extra={"engine": "FAL_SVD", "error": str(e)},
+                            )
                             return try_next_api()
 
                 try:
@@ -700,7 +766,10 @@ def generate_ai_video(
                     # We previously substituted a random picsum.photos placeholder.
                     # That produced "successful" videos with the wrong content.
                     # Fail cleanly so the cascade can route to a working backend.
-                    print(f"   [ERROR] fal_client.upload_file missing for base image ({image_path}): {e}")
+                    logger.error(
+                        "fal_client.upload_file missing for base image",
+                        extra={"engine": "FAL_SVD", "image_path": image_path, "error": str(e)},
+                    )
                     return try_next_api()
 
                 result = fal_client.subscribe(
@@ -718,17 +787,22 @@ def generate_ai_video(
                     import urllib.request
                     urllib.request.urlretrieve(video_url, output_mp4)
                     if not _accept_or_reject(output_mp4, _aspect):
-                        print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                        logger.warning(
+                            "Aspect backstop: wrong orientation — rejecting → cascade",
+                            extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+                        )
                         return try_next_api()
                     _record_video_cascade(target_api.upper())
                     return output_mp4
                 return try_next_api()
             except Exception as e:
-                print(f"   ⚠️ FAL_SVD Serverless Error: {e}")
-                print("   ⚠️ Re-routing gracefully...")
+                logger.warning(
+                    "FAL_SVD serverless error — re-routing",
+                    extra={"engine": "FAL_SVD", "error": str(e)},
+                )
                 return try_next_api()
         else:
-            print("   ⚠️ FAL_KEY missing. Re-routing gracefully...")
+            logger.warning("FAL_KEY missing — re-routing", extra={"engine": "FAL_SVD"})
             return try_next_api()
             
     elif target_api.upper() == "RUNWAY":
@@ -750,21 +824,27 @@ def generate_ai_video(
                     ratio=runway_ratio(_aspect, "gen3a_turbo"),
                     duration=5
                 )
-                print(f"   ↳ Runway Task {video_task.id} queued. Polling...")
+                logger.info(
+                    "Runway task queued — polling",
+                    extra={"engine": "RUNWAY", "task_id": video_task.id},
+                )
                 completed_task = video_task.wait_for_task_output()
                 final_video_url = completed_task.output[0]
                 import urllib.request
                 urllib.request.urlretrieve(final_video_url, output_mp4)
                 if not _accept_or_reject(output_mp4, _aspect):
-                    print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                    logger.warning(
+                        "Aspect backstop: wrong orientation — rejecting → cascade",
+                        extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+                    )
                     return try_next_api()
                 _record_video_cascade(target_api.upper())
                 return output_mp4
             except Exception as e:
-                print(f"   ⚠️ Runway API Error: {e}")
+                logger.warning("Runway API error", extra={"engine": "RUNWAY", "error": str(e)})
                 return try_next_api()
         else:
-            print("   ⚠️ RunwayML key missing. Re-routing gracefully...")
+            logger.warning("RunwayML key missing — re-routing", extra={"engine": "RUNWAY"})
             return try_next_api()
             
     elif target_api.upper() == "SEEDANCE":
@@ -775,7 +855,7 @@ def generate_ai_video(
             try:
                 import requests
                 import base64
-                print(f"   ↳ Generating via Seedance 2.0 API (multi-ref capable)...")
+                logger.info("Generating via Seedance 2.0 API (multi-ref capable)", extra={"engine": "SEEDANCE"})
 
                 # Encode the source image
                 with open(image_path, "rb") as f:
@@ -803,7 +883,10 @@ def generate_ai_video(
                         with open(char_ref, "rb") as f:
                             face_b64 = base64.b64encode(f.read()).decode("utf-8")
                         payload["reference_images"].append({"image": face_b64, "type": "identity"})
-                        print(f"      ↳ Seedance: injected identity reference for {character_id}")
+                        logger.info(
+                            "Seedance: injected identity reference",
+                            extra={"engine": "SEEDANCE", "character_id": character_id},
+                        )
 
                 headers = {
                     "Authorization": f"Bearer {seedance_key}",
@@ -812,7 +895,7 @@ def generate_ai_video(
                 resp = requests.post(url, json=payload, headers=headers, timeout=30)
                 resp.raise_for_status()
                 task_id = resp.json().get("task_id") or resp.json().get("id")
-                print(f"   ↳ Seedance Task {task_id} queued. Polling...")
+                logger.info("Seedance task queued — polling", extra={"engine": "SEEDANCE", "task_id": task_id})
 
                 # Poll for completion
                 poll_url = f"https://api.seedance.ai/v1/video/status/{task_id}"
@@ -831,23 +914,32 @@ def generate_ai_video(
                         if video_url:
                             import urllib.request
                             urllib.request.urlretrieve(video_url, output_mp4)
-                            print(f"   ✅ Seedance video downloaded: {output_mp4}")
+                            logger.info(
+                                "Seedance video downloaded",
+                                extra={"engine": "SEEDANCE", "output_mp4": output_mp4},
+                            )
                             if not _accept_or_reject(output_mp4, _aspect):
-                                print(f"   [ASPECT-BACKSTOP] {target_api.upper()} produced wrong orientation for {_aspect} — rejecting → cascade")
+                                logger.warning(
+                                    "Aspect backstop: wrong orientation — rejecting → cascade",
+                                    extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+                                )
                                 return try_next_api()
                             _record_video_cascade(target_api.upper())
                             return output_mp4
                         break
                     elif status in ("failed", "error"):
-                        print(f"   ⚠️ Seedance generation failed: {poll_resp}")
+                        logger.warning(
+                            "Seedance generation failed",
+                            extra={"engine": "SEEDANCE", "status": poll_resp.get("status"), "error": poll_resp.get("error")},
+                        )
                         break
 
                 return try_next_api()
             except Exception as e:
-                print(f"   ⚠️ Seedance API Error: {e}")
+                logger.warning("Seedance API error", extra={"engine": "SEEDANCE", "error": str(e)})
                 return try_next_api()
         else:
-            print("   ⚠️ SEEDANCE_API_KEY missing. Re-routing gracefully...")
+            logger.warning("SEEDANCE_API_KEY missing — re-routing", extra={"engine": "SEEDANCE"})
             return try_next_api()
     
     else:
@@ -868,11 +960,14 @@ def stitch_modules(module_paths: list, final_output: str) -> str:
     try:
         subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     except subprocess.CalledProcessError as e:
-        print(f"      ❌ FFMPEG CONCAT ERROR: {e.stderr.decode()}")
+        logger.exception(
+            "ffmpeg concat error",
+            extra={"stderr_tail": e.stderr.decode(errors="replace")[-200:]},
+        )
         raise
-        
+
     os.remove(list_file)
-    print(f"      Stitched sequence: {final_output}")
+    logger.info("Stitched sequence", extra={"final_output": final_output})
     return final_output
 
 
@@ -923,14 +1018,11 @@ def split_video_into_segments(
           (``-to`` is omitted for the final segment) so floating-point
           accumulation errors do not drop the last few frames.
     """
-    import logging as _logging
-    _log = _logging.getLogger(__name__)
-
     if not source_path or not os.path.exists(source_path):
-        _log.warning("split_video_into_segments: source not found: %s", source_path)
+        logger.warning("split_video_into_segments: source not found", extra={"source_path": source_path})
         return []
     if not durations:
-        _log.warning("split_video_into_segments: empty durations list")
+        logger.warning("split_video_into_segments: empty durations list")
         return []
 
     os.makedirs(output_dir, exist_ok=True)
@@ -966,9 +1058,9 @@ def split_video_into_segments(
             ) from exc
 
         segment_paths.append(os.path.abspath(out_path))
-        _log.debug(
-            "split_video_into_segments: segment %d written (start=%.3fs dur=%.3fs) → %s",
-            idx, start, dur, out_path,
+        logger.debug(
+            "split_video_into_segments: segment written",
+            extra={"segment_idx": idx, "start_s": round(start, 3), "dur_s": round(dur, 3), "out_path": out_path},
         )
         start += dur
 
@@ -1135,10 +1227,10 @@ def apply_color_grade(video_path: str, output_path: str, preset: str = "warm_cin
 
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=120)
-        print(f"      [COLOR] Graded ({preset}): {output_path}")
+        logger.info("Color graded", extra={"preset": preset, "output_path": output_path})
         return output_path
     except Exception as e:
-        print(f"      [COLOR] Grading failed: {e}")
+        logger.warning("Color grading failed", extra={"preset": preset, "error": str(e)})
         return None
 
 
@@ -1181,10 +1273,10 @@ def adjust_speed(video_path: str, output_path: str, factor: float = 1.0) -> str:
 
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=120)
-        print(f"      [SPEED] Adjusted {factor}x: {output_path}")
+        logger.info("Speed adjusted", extra={"speed_factor": factor, "output_path": output_path})
         return output_path
     except Exception as e:
-        print(f"      [SPEED] Adjustment failed: {e}")
+        logger.warning("Speed adjustment failed", extra={"speed_factor": factor, "error": str(e)})
         return None
 
 
@@ -1215,7 +1307,7 @@ def measure_loudness(path: str, target_i: float = -14.0, target_lra: float = 11.
     try:
         result = subprocess.run(measure_cmd, capture_output=True, text=True, timeout=180)
     except subprocess.TimeoutExpired:
-        print("   [MEASURE-LOUDNESS] Measurement pass timed out")
+        logger.warning("Loudness measurement pass timed out")
         return None
 
     stderr = result.stderr or ""
@@ -1223,19 +1315,21 @@ def measure_loudness(path: str, target_i: float = -14.0, target_lra: float = 11.
     # {...} block that contains "input_i". Non-greedy + DOTALL.
     matches = re.findall(r'\{[^{}]*?"input_i"[^{}]*?\}', stderr, flags=re.DOTALL)
     if not matches:
-        print("   [MEASURE-LOUDNESS] No measurement JSON in ffmpeg output")
+        logger.warning("No measurement JSON in ffmpeg loudnorm output")
         return None
 
     try:
         measured = json.loads(matches[-1])
         required = ("input_i", "input_tp", "input_lra", "input_thresh", "target_offset")
         if not all(k in measured for k in required):
-            print(f"   [MEASURE-LOUDNESS] Measurement JSON missing keys: "
-                  f"{set(required) - set(measured)}")
+            logger.warning(
+                "Loudness measurement JSON missing keys",
+                extra={"missing_keys": list(set(required) - set(measured))},
+            )
             return None
         return measured
     except json.JSONDecodeError as e:
-        print(f"   [MEASURE-LOUDNESS] JSON parse failed: {e}")
+        logger.warning("Loudness measurement JSON parse failed", extra={"error": str(e)})
         return None
 
 
@@ -1267,7 +1361,7 @@ def two_pass_loudnorm(
     measured = measure_loudness(input_video_path, target_i=target_i,
                                 target_lra=target_lra, target_tp=target_tp)
     if measured is None:
-        print("   [LOUDNORM-2PASS] Measurement failed — skipping 2nd pass")
+        logger.warning("Loudnorm measurement failed — skipping 2nd pass")
         return False
 
     # ---- Pass 2: normalize with measured values ----
@@ -1291,18 +1385,21 @@ def two_pass_loudnorm(
     try:
         norm = subprocess.run(norm_cmd, capture_output=True, text=True, timeout=180)
     except subprocess.TimeoutExpired:
-        print("   [LOUDNORM-2PASS] Normalization pass timed out")
+        logger.warning("Loudnorm normalization pass timed out")
         return False
 
     if norm.returncode != 0 or not os.path.exists(output_video_path):
         # Surface the tail of ffmpeg's error so failures are diagnosable
         tail = (norm.stderr or "").strip().splitlines()[-3:]
-        print(f"   [LOUDNORM-2PASS] Normalization failed: {' | '.join(tail)}")
+        logger.error(
+            "Loudnorm normalization pass failed",
+            extra={"stderr_tail": " | ".join(tail)},
+        )
         return False
 
-    print(
-        f"   [LOUDNORM-2PASS] Precise normalization: "
-        f"measured I={measured['input_i']} -> target I={target_i}"
+    logger.info(
+        "Two-pass loudnorm complete",
+        extra={"measured_i_lufs": measured["input_i"], "target_i_lufs": target_i},
     )
     return True
 
@@ -1327,7 +1424,10 @@ def _accept_or_reject(path: str, aspect_ratio) -> bool:
     fmt = (probed or {}).get("format") or {}
     w, h = fmt.get("width"), fmt.get("height")
     if not w or not h:
-        print(f"   [ASPECT-BACKSTOP] could not probe dims for {path} — accepting (probe unavailable)")
+        logger.warning(
+            "Aspect backstop: could not probe dims — accepting (probe unavailable)",
+            extra={"path": path},
+        )
         return True
     return (h > w) == _is_portrait(aspect_ratio)  # portrait file iff portrait project
 
@@ -1379,7 +1479,7 @@ def probe_final_media(path: str) -> "dict | None":
             "duration_s": float(fmt["duration"]) if fmt.get("duration") else None,
         }
     except Exception as e:
-        print(f"   [PROBE-FINAL-MEDIA] ffprobe failed: {e}")
+        logger.warning("probe_final_media: ffprobe failed", extra={"path": path, "error": str(e)})
         # format half absent — will be omitted from result
 
     # ---- Loudness half (measure_loudness) ----
@@ -1390,7 +1490,7 @@ def probe_final_media(path: str) -> "dict | None":
     try:
         measured = measure_loudness(path)
     except Exception as e:
-        print(f"   [PROBE-FINAL-MEDIA] loudness measure raised: {e}")
+        logger.warning("probe_final_media: loudness measure raised", extra={"path": path, "error": str(e)})
         measured = None
     if measured is not None:
         try:
@@ -1400,7 +1500,7 @@ def probe_final_media(path: str) -> "dict | None":
                 "lra": float(measured["input_lra"]),
             }
         except (KeyError, ValueError, TypeError) as e:
-            print(f"   [PROBE-FINAL-MEDIA] Loudness result parse failed: {e}")
+            logger.warning("probe_final_media: loudness result parse failed", extra={"error": str(e)})
 
     if not result:
         return None
@@ -1553,10 +1653,9 @@ def xfade_concat(scene_videos: list, out_path: str,
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=300)
     except subprocess.CalledProcessError as exc:
-        import logging
-        logging.getLogger(__name__).warning(
-            "xfade_concat ffmpeg failed: %s",
-            exc.stderr.decode(errors="replace") if exc.stderr else exc,
+        logger.exception(
+            "xfade_concat ffmpeg failed",
+            extra={"stderr_tail": exc.stderr.decode(errors="replace")[-200:] if exc.stderr else str(exc)},
         )
         raise
     return out_path
