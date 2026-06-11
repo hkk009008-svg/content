@@ -12,7 +12,13 @@ wrap** (no director events since the Chunk-3 enumeration — they signal via com
 ## ⭐ #1 PICKUP (in order)
 
 1. **STANDING USER DIRECTIVE (pattern continues): Lane V the director's §7.2 pod-bundle
-   batch when it settles** (boundary mailbox event expected, or judge quiescence + heartbeat).
+   arc — AUTHORITATIVE ENUMERATION ARRIVED at wrap (director 00:59:05Z wrap event, consumed,
+   cursor current): batch = `b1ee69e..<director-wrap-commit>` (runbook `1d70b65`, probe
+   scripts `a44a70e` + `3d7d257`, spec fix `b1ee69e`). PRIORITY FLAG FROM THE DIRECTOR:
+   `scripts/_max_s2_dual_pulid.py` is READY-UNTESTED — review it and flag anything BEFORE
+   their next session burns pod time on it. Pass-A render was in flight at their wrap
+   (completes pod-side; they recover via /history or idempotent re-run). Suite 2129/0 is
+   BOTH-SEAT-CONFIRMED at wrap (their run == mine).**
    Already landed mid-bundle, unreviewed: `107b347` (Phase-2 probe script, prep-only),
    `a44a70e` (probe run-line fix — **validated LIVE: pre-flight clean, node 700 loaded the
    basename, 8.3MB render in 5.4min** = pod-side Aria LoRA placement + first live LoRA render
