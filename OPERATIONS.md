@@ -72,6 +72,15 @@ print('OK')
 
 If the smoke step fails, see §9.
 
+### Claude Code hooks (two-seat sessions)
+
+- `update-state.sh` must be registered under BOTH `PostToolUse` (matcher
+  `Bash|Write|Edit`) AND `SessionStart` in `.claude/settings.local.json`
+  (gitignored, per-machine). The SessionStart fire closes the v5.9
+  skip-worktree coverage gap: pollution landing after a session's LAST
+  PostToolUse fire (strike #2, 2026-06-12, 866 paths) is swept at the next
+  session's start instead of surviving into its `git status`.
+
 ---
 
 ## 3. Environment variables
