@@ -1421,6 +1421,45 @@ Empirical basis: same session as Rule #19 — RC3 (STATE.md broken count, observ
 The M2 fix validated on controlled data (old over-counts 3, new correct 1;
 `docs/DRAFT-v5.7-phase1-implementation-2026-05-30.md` §1).
 
+## Verdict-ahead-of-report (Rule #21)
+
+**Rule #21: Verdict-ahead-of-report.** When the peer seat is blocked on a
+clock-billed resource (GPU-pod hours, paid-API budget, an external window)
+awaiting your review, send the dispositive verdict — GO/NO-GO plus its
+conditions, nothing more — as its OWN mailbox event the moment it is
+determined. The full evidence report follows as a separate event on the
+normal cadence. The verdict event must say a full report follows, so the
+receiving seat never mistakes it for the complete review.
+
+Empirical basis: 2026-06-11 S2 spike — the director sat blocked mid-pod-
+session (billing by the hour) on the operator's script review; the operator
+sent the GO-after-done-guard-fix verdict ahead (`6f3b809`), full 114-claim
+report later (`3a13156`). Fold time on the verdict was minutes; nothing in
+the later report reversed it.
+
+Composition: does NOT relax R-EVIDENCE — the verdict event states which
+checks back it; unverified residue is flagged in the follow-up report.
+
+## Flag-before-burn (Rule #22)
+
+**Rule #22: Flag-before-burn.** Any script or driver whose execution spends
+clock-billed or per-call money (pod render time, paid-API training or
+generation) gets the NON-AUTHOR seat's review BEFORE its first execution.
+Minimum review scope (the money-path lens): existing-output/idempotency
+guard, spend-site enumeration, `raise_for_status`/error propagation on every
+paid call, timeout on every blocking call. If the peer is unavailable and
+the window is closing, the author may proceed only after running the
+money-path lens themselves and saying so in the run record.
+
+Empirical basis: 2026-06-11 S3 — the reviewed sweep script ran clean under
+flag-before-burn; the UNREVIEWED train script had already run and carried
+the F1 no-rerun-guard defect (a re-run would have re-spent the FAL training
+fee; guard landed `3a589da`). The convention caught one and missed the
+other only because it was not yet mandatory.
+
+Composition: Rule #21 covers the reply latency this rule would otherwise
+add — verdict first, report later.
+
 ## Disagreement protocol (v5)
 
 Generalizes v4's R-V1 counter precedent. When operator-seat disagrees

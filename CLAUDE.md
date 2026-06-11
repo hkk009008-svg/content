@@ -177,7 +177,7 @@ both serve the user-principal. Load-bearing invariants:
   the first commit to land wins.
 - **Signal via artifacts** (mailbox event / presence file), not chat alone.
 
-Full governance — Rules #7–#20, the disagreement protocol, emergency handling, phase
+Full governance — Rules #7–#22, the disagreement protocol, emergency handling, phase
 taxonomy, and mailbox protocol — lives in **docs/protocol/claude/director-operator.md**;
 read it only when coordinating with the other seat. Rule provenance (codified SHAs,
 empirical basis, beneficiary/consent) is in docs/PROTOCOL-RULES-LOG.md.
