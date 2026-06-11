@@ -171,7 +171,12 @@ class TestIdentityMulti:
             },
         })
         card = build_capability_scorecard(project, project_dir="/tmp/x")
-        assert card["per_shot"][0]["identity_multi"]["mechanism"] == "MAX_TIER_MULTI_LORA"
+        multi = card["per_shot"][0]["identity_multi"]
+        assert multi["mechanism"] == "MAX_TIER_MULTI_LORA"
+        # operator Lane-V 23:05:51Z fold: per-char + unconditioned asserted
+        # for the MAX tag specifically (not just via the KONTEXT sibling).
+        assert multi["per_char"] == {"char_a": 0.8, "char_b": 0.61}
+        assert multi["unconditioned"] == []
 
 
 class TestScorecardEndpoint:
