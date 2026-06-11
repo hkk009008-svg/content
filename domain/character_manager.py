@@ -146,6 +146,26 @@ def create_character_with_images(
 
     character["reference_images"] = stored_refs
 
+    # 1b. Single-face enforcement (A3) — each reference image must contain
+    #     exactly one face.  Two+ faces corrupt every downstream identity score
+    #     because the embedding pipeline reads emb_list[0] without knowing which
+    #     person it belongs to.  Reject at registration time; fail-loud so the
+    #     caller can surface a clear error to the user.
+    #     Zero-face images are NOT rejected here — the existing warning path
+    #     (step 2) handles them with a limited-identity-lock advisory.
+    if DEEPFACE_AVAILABLE:
+        for ref_path in stored_refs:
+            n = _count_faces(ref_path)
+            if n >= 2:
+                # Clean up the copied files before raising — mirror the
+                # add_character cleanup pattern (try/except/raise below).
+                shutil.rmtree(char_path, ignore_errors=True)
+                raise ValueError(
+                    f"Reference image '{os.path.basename(ref_path)}' contains "
+                    f"{n} faces but exactly 1 is required. "
+                    f"Provide a single-person reference photo."
+                )
+
     # 2. Find canonical (best face) from uploaded images — NO synthetic fallback
     canonical = _find_canonical_from_uploads(character, char_path)
     character["canonical_reference"] = canonical or ""
@@ -350,6 +370,22 @@ def _has_detectable_face(image_path: str) -> bool:
         return len(faces) > 0
     except Exception:
         return False
+
+
+def _count_faces(image_path: str) -> int:
+    """
+    Return the number of faces detected in image_path.
+
+    Returns 0 on detection failure or when DeepFace is unavailable.
+    Used for single-face enforcement at character registration time (A3).
+    """
+    if not DEEPFACE_AVAILABLE:
+        return 0  # Cannot count; caller falls back to lenient path
+    try:
+        faces = DeepFace.extract_faces(img_path=image_path, enforce_detection=True)
+        return len(faces)
+    except Exception:
+        return 0
 
 
 def compute_face_embedding(image_path: str) -> Optional[np.ndarray]:

@@ -579,14 +579,20 @@ def api_add_character(pid):
             img.save(path)
             image_paths.append(path)
 
-    # Create character with full processing
-    character = create_character_with_images(
-        project, name, description,
-        reference_image_paths=image_paths,
-        voice_id=voice_id,
-        ip_adapter_weight=ip_weight,
-        commit_timeout=HTTP_PROJECT_TIMEOUT,
-    )
+    # Create character with full processing.
+    # ValueError is raised by the A3 single-face enforcement when a reference
+    # image contains 2+ faces — surface as HTTP 400 with the informative message
+    # rather than letting Flask return a generic HTTP 500.
+    try:
+        character = create_character_with_images(
+            project, name, description,
+            reference_image_paths=image_paths,
+            voice_id=voice_id,
+            ip_adapter_weight=ip_weight,
+            commit_timeout=HTTP_PROJECT_TIMEOUT,
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     return jsonify(character), 201
 
