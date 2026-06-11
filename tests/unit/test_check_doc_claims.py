@@ -2284,6 +2284,108 @@ class TestUsageCiteAcceptance:
         assert len(drifts2) == 1, f"cite past real extent must drift, got: {drifts2}"
 
 
+class TestDefExtentDirectionBlindness:
+    """Rule B narrowed: an in-extent anchor is accepted ONLY when it cites
+    executable body code (post-docstring, non-blank, non-comment). A def-cite
+    drifted by a small upward shift of the def lands on the signature
+    continuation / docstring / blank / comment lines — the live incident
+    (2026-06-11): a --fix'd anchor sat at def+4 (a docstring line) over a def
+    pulled back to its old line by a reverted edit, invisible to the gate.
+    """
+
+    def _mod(self, tmp_path):
+        return _commit_py(
+            tmp_path, "mod3.py",
+            "def above():\n"                          # 1
+            "    return 1\n"                          # 2
+            "\n"                                      # 3
+            "def target_fn(a,\n"                      # 4  <- def line
+            "              b=None):\n"                # 5  <- signature continuation
+            '    """Summary line.\n'                  # 6  <- docstring start
+            "    More docs on retry_policy here.\n"   # 7  <- docstring body
+            '    """\n'                               # 8  <- docstring end
+            "\n"                                      # 9  <- blank
+            "    # setup comment\n"                   # 10 <- comment-only
+            "    val = a or b\n"                      # 11 <- executable
+            "    return val\n",                       # 12 <- executable
+        )
+
+    def test_anchor_ahead_on_docstring_line_flagged(self, tmp_path):
+        # The incident shape: a def-cite anchor sitting a few lines PAST the
+        # def, on a docstring line. Must drift toward the def.
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(tmp_path, "doc.md", "- `target_fn` def (`mod3.py:7`)\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"docstring-line anchor must drift, got: {drifts}"
+        assert drifts[0].kind == "def_drift"
+        assert drifts[0].suggested_line == 4
+
+    def test_anchor_on_signature_continuation_flagged(self, tmp_path):
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(tmp_path, "doc.md", "- `target_fn` def (`mod3.py:5`)\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"signature-continuation anchor must drift, got: {drifts}"
+        assert drifts[0].suggested_line == 4
+
+    def test_anchor_ahead_on_blank_line_flagged(self, tmp_path):
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(tmp_path, "doc.md", "- `target_fn` def (`mod3.py:9`)\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"blank-line anchor must drift, got: {drifts}"
+
+    def test_anchor_ahead_on_comment_line_flagged(self, tmp_path):
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(tmp_path, "doc.md", "- `target_fn` def (`mod3.py:10`)\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"comment-line anchor must drift, got: {drifts}"
+
+    def test_executable_body_line_still_accepted(self, tmp_path):
+        # The legitimate Rule-B load (e.g. ARCHITECTURE.md's
+        # `_fal_flux_fallback` branch cite): executable body code, no token
+        # on the line. Must stay accepted.
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(tmp_path, "doc.md", "- `target_fn` combines its inputs (`mod3.py:11`)\n")
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"executable body cite must stay accepted, got: {drifts}"
+
+    def test_rule_a_docstring_token_still_accepted(self, tmp_path):
+        # Rule A is untouched: a non-bound corroborating token occurring on
+        # the cited docstring line still accepts (string occurrences allowed
+        # for non-bound tokens by design).
+        _init_repo(tmp_path)
+        self._mod(tmp_path)
+        md = _write_md(
+            tmp_path, "doc.md",
+            "- `target_fn` honors `retry_policy` (`mod3.py:7`)\n",
+        )
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"Rule A token match must still accept, got: {drifts}"
+
+    def test_unparseable_source_falls_back_lexical(self, tmp_path):
+        # ast unavailable (syntax error elsewhere in the file): blank/comment
+        # rejection still works lexically; executable lines stay accepted.
+        _init_repo(tmp_path)
+        _commit_py(
+            tmp_path, "mod5.py",
+            "def target_fn():\n"     # 1
+            "    # comment\n"        # 2
+            "    val = 1\n"          # 3
+            "    return val\n"       # 4
+            "\n"                     # 5
+            "def broken(:\n",        # 6 <- SyntaxError
+        )
+        md_code = _write_md(tmp_path, "doc.md", "- `target_fn` computes (`mod5.py:3`)\n")
+        assert check_line_anchors([str(md_code)], tmp_path) == []
+        md_comment = _write_md(tmp_path, "doc2.md", "- `target_fn` def (`mod5.py:2`)\n")
+        drifts = check_line_anchors([str(md_comment)], tmp_path)
+        assert len(drifts) == 1, f"comment-line anchor must drift even unparseable, got: {drifts}"
+
+
 class TestSlashListAnchors:
     """Single-token slash-list anchor cells: `path.py:N / M / P`.
 

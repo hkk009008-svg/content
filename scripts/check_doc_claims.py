@@ -13,6 +13,7 @@ main(argv=None)  -> int   (exit 0=clean, 1=drift, >1=error)
 """
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import sys
@@ -224,6 +225,51 @@ def _def_extent_end(source_lines: list[str], def_line: int) -> int:
     return end
 
 
+def _is_executable_body_line(
+    source_lines: list[str], def_line: int, target_line: int,
+) -> bool:
+    """True when target_line is executable BODY code of the def at def_line —
+    not the signature continuation, the docstring, a blank, or a comment-only
+    line.
+
+    Direction-blindness guard for the extent rule: a def-cite drifted by a
+    small upward shift of the def (lines deleted above it, or a --fix'd
+    anchor surviving a revert) lands a few lines PAST the def — on exactly
+    these line classes — and the bare extent rule accepted it silently
+    (live incident: anchor :454 over `_allocate_ref_slots` def :450,
+    2026-06-11). Deliberate body cites (a gate check, a registry entry, a
+    composition line) cite executable code.
+    """
+    raw = source_lines[target_line - 1] if 1 <= target_line <= len(source_lines) else ""
+    stripped = raw.strip()
+    if not stripped or stripped.startswith("#"):
+        return False
+    try:
+        tree = ast.parse("\n".join(source_lines))
+    except SyntaxError:
+        return True  # can't classify docstrings/signatures — lexical checks only
+    node = next(
+        (
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and n.lineno == def_line
+        ),
+        None,
+    )
+    if node is None or not node.body:
+        return True
+    first = node.body[0]
+    code_start = first.lineno
+    if (
+        isinstance(first, ast.Expr)
+        and isinstance(first.value, ast.Constant)
+        and isinstance(first.value.value, str)
+    ):
+        code_start = (first.end_lineno or first.lineno) + 1
+    return target_line >= code_start
+
+
 def _usage_cite_acceptance(
     doc_line_text: str,
     source_lines: list[str],
@@ -236,14 +282,20 @@ def _usage_cite_acceptance(
 
     Rule A: any backticked identifier token on the doc line occurs
     word-bounded on the cited line (or any line of the cited range).
-    Rule B: the cited line lies within the bound symbol's def extent.
+    Rule B: the cited line is executable BODY code within the bound symbol's
+    def extent — signature continuations, docstrings, blanks, and
+    comment-only lines are NOT accepted (see _is_executable_body_line):
+    that is where direction-drifted def-cites land, and the bare extent
+    rule was direction-blind to them (anchor:454 over def:450 sat unflagged,
+    2026-06-11 incident).
 
     Why: the binder treats every anchor as a def-citation, but doc anchors
     routinely cite usage sites — a gate check, a registry entry, a
     composition line. Reporting those as def_drift makes --fix actively
     corrupt them (14 hand-verified cases in docs/PROGRAM-MANUAL.md at
     2d58fca). Known accepted residual: a truly-drifted def-cite whose new
-    cited line happens to CALL the symbol passes silently — far cheaper
+    cited line happens to CALL the symbol (Rule A) or lands on executable
+    body code inside the extent (Rule B) passes silently — far cheaper
     than --fix dragging correct usage cites to the def.
     """
     tokens: set[str] = set()
@@ -279,7 +331,10 @@ def _usage_cite_acceptance(
         def_lines = _def_lines(source_lines, bound_symbol)
         if len(def_lines) == 1:
             d = def_lines[0]
-            if d <= target_line <= _def_extent_end(source_lines, d):
+            if (
+                d <= target_line <= _def_extent_end(source_lines, d)
+                and _is_executable_body_line(source_lines, d, target_line)
+            ):
                 return True
     return False
 

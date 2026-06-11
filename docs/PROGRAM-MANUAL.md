@@ -816,7 +816,7 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 
 **DECISION POINTS:**
 
-*Tier selection* — `generate_ai_broll` dispatches by `quality_tier` (`phase_c_assembly.py:115`):
+*Tier selection* — `generate_ai_broll` dispatches by `quality_tier` (`phase_c_assembly.py:128`):
 
 | Tier | Path | Behavior |
 |---|---|---|
@@ -1195,7 +1195,7 @@ Location consistency is automatic: each location carries a fixed `seed` and a ve
 | video API | `LTX` ($0.06–0.10/shot) | `SORA_NATIVE`/`VEO_NATIVE` ($0.40–0.80) |
 
 **Budget governance** — three caveats that bite operators:
-1. `budget_limit_usd` only gates **video/image** generation in `ShotController` (the pre-spend `would_exceed` gate at `cinema/shots/controller.py:1465` + the post-call `is_over_budget` check at `:1312`); **audio API costs run uncapped** (audio modules create isolated `CostTracker()` instances that log to the DB but don't update the core tracker's `spent_usd`).
+1. `budget_limit_usd` only gates **video/image** generation in `ShotController` (the pre-spend `would_exceed` gate at `cinema/shots/controller.py:1505` + the post-call `is_over_budget` check at `:1352`); **audio API costs run uncapped** (audio modules create isolated `CostTracker()` instances that log to the DB but don't update the core tracker's `spent_usd`).
 2. `CostTracker.spent_usd` **resets to 0 each process** — it is not loaded from SQLite on init (`cost_tracker.py:166`). A server restart mid-project zeroes the in-memory budget counter.
 3. `EXPERIMENTS_DB_PATH` works **via the environment only**: since T7 (`4af8c05`) every `CostTracker` resolves it at construction (`db_path` arg > env var > `data/experiments.db`, `cost_tracker.py:157`), but `Settings.experiments_db_path` is never threaded into the constructor (`cinema/core.py:113`) — set the env var, not the settings field.
 
