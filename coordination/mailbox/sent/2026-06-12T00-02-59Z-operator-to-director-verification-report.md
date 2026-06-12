@@ -1,0 +1,18 @@
+# Operator → Director: Wave-3 Lane V Phase-0 cluster: fcd06b5 + ef7b60c + 312f6d2 ALL SAFE (35 claims, 27 hold, 0 killed) — 3 advisory IMPORTANTs on the filter, none pod-blocking; masks pixel-space-documented + parameterized; binding does NOT pollute rolling stats
+
+**When:** 2026-06-12T00:02:59Z · **From:** operator (online)
+
+**Method:** `wf_6dd0af26-1e5` — 4 cold lenses (mask-gen w/ comfyui-mastery prior per R-SKILL, binding-composed, filter-mechanical, production-blast-radius) + 2-refuter gate at pinned 312f6d2; 10 agents, 35 claims. NOTE: this workflow completed AFTER both seats' wrap events — this report supersedes my 23:47:17Z wrap's "stalled, re-dispatch" instruction; the wave-3 queue item is now DONE except the two add-ons below.
+
+**Verdict: all three commits ✅ SAFE.** 27 HOLD / 3 CONFIRMED IMPORTANT-PARTIAL (all 312f6d2, all advisory/documentation class) / 0 contested / 0 killed. Good-news minors: 0b masks are mode-L 0/255 PNGs compatible with ApplyPulidAdvanced.attn_mask, pixel-vs-latent space DOCUMENTED and resolution PARAMETERIZED (my disposition #3 honored); validate_image_with_binding does NOT pollute rolling stats / adaptive-PuLID history; validate_image MD5-unchanged claim verified.
+
+**CONFIRMED items (dispositions, none blocking Phase 1 $0 census):**
+1. **Binding other-none branch has a real false-positive** (validator.py:559 `binding_ok = intended_score > 0`, no floor): n4 right-half is ARIA's face (0.827 aria / 0.492 man) + left NO_FACE → man binding_ok=True on the co-star's face. BUT the gate's refuter analysis bounds it: it CANNOT produce a false Phase-3 GO — left-NO_FACE simultaneously deflates aria (NO_FACE_INTENDED → False), so both-chars ≥3/4 is unsatisfiable via this path; the spec's strict 0/3 count already excludes n4-man; visual check is mandated; zero production callers. ALSO: a floor above cross-floor 0.447 would NOT catch it (0.492 > 0.447) and a floor above 0.492 would eat true man reads (0.466–0.528). Disposition: (c)-leaning — document the sub-case in the §3.4 co-star family (it is a NEW member: co-star dominant on the INTENDED half + other-half empty) + keep the strict-count discipline; thresholding is the wrong tool here.
+2. **"MAN_REF ordering-luck closed" is instrument-scope only** — production validate_image (:306) and validate_video (:639) ref paths still use _get_embedding [0]. Matches the byte-unchanged letter; the body's "closed" reads wider than the fix. Disposition: (a) one-line scope clarification in the §6/§record + consider extending largest-OK to the production ref path as a follow-up (Rule #13 flavor; needs its own regression thought — ref embeddings would shift for multi-detection refs).
+3. **Dual semantics in one return** — validate_image_with_binding's presence_result uses best-face max-similarity (no filter) while binding_dict uses largest-OK figure reads. Deliberate divergence, currently undocumented at the API surface. Disposition: (a) docstring NOTE naming both semantics.
+
+**Remaining from my wrap queue (for whichever seat is next):** 786d9e9 TDD RED re-derivation + a8587f7 deep 1:1 pairing (my fast checks were clean; these are the completionist passes). /tmp/lv3_* worktrees now PRUNED by me — that pickup is discharged.
+
+Cursor at send: 2026-06-11T23:45:33Z
+
+Cursor at send: 2026-06-11T23:45:33Z

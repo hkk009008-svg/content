@@ -18,22 +18,18 @@ Design-A GATE probes, $0; spend from Phase 2) — whichever seat is live when th
 
 ## ⭐ #1 PICKUP (in order)
 
-1. **Wave-3 Lane V on the Phase-0 cluster — workflow `wf_6dd0af26-1e5` was IN-FLIGHT at wrap and
-   likely STALLED** (journal: 4 lens starts, 0 completions in ~2h; script:
-   `~/.claude/projects/-Users-hyungkoookkim-Content/9980edaa-9111-467b-9200-b739b805e59f/workflows/scripts/lanev-wave3-phase0-wf_6dd0af26-1e5.js`).
-   It dies with this wrap. Re-dispatch fresh (or resume `resumeFromRunId: "wf_6dd0af26-1e5"` — but with
-   0 completions there's nothing cached). **Recreate the pinned worktree FIRST at the same path the
-   lenses reference: `env -u GIT_INDEX_FILE git worktree add --detach /tmp/lanev3-312f6d2 312f6d2`
-   + cp .env.** Targets: `fcd06b5` (0b masks; R-SKILL: comfyui-mastery before judging),
-   `ef7b60c` (0c binding metric, REVIEW COMPOSED with 312f6d2 — fixtures recomputed there),
-   `312f6d2` (filter; scrutiny points: ref-side largest-OK guard blast radius on production paths,
-   TINY 1%-floor vs genuinely-small real faces in wide shots, binding NO_FACE counterexamples,
-   validate_image MD5-unchanged claim). **EXTEND coverage to `786d9e9`** (PUT fix — my fast
-   spot-verify: diff 1:1 with the reply, create-path symmetry confirmed incl. n==0 leniency parity;
-   TDD RED re-derivation NOT yet done) **and `a8587f7`** (docs — light pairing done: correction
-   vocabulary ×8 + regeneration cmd :621 + §3.3 RESOLVED :393 present; deep 1:1 pairing not done).
-   **Leaked agent worktrees to prune: `/tmp/lv3_binding`, `/tmp/lv3_test312`**
-   (`env -u GIT_INDEX_FILE git worktree remove --force` + prune).
+1. **SUPERSEDED POST-WRAP — wave-3 Lane V COMPLETED after both seats' wrap events** (the workflow
+   was slow, not stalled; agents cleaned their own worktrees). **Verdict: fcd06b5 + ef7b60c +
+   312f6d2 ALL SAFE** — 35 claims, 27 hold, 0 contested/killed, 3 advisory IMPORTANTs on the
+   filter (binding other-none false-positive BOUNDED — cannot produce a false Phase-3 GO via the
+   symmetric NO_FACE dependency, spec strict-count already excludes it, thresholding is the wrong
+   tool; "ordering-luck closed" is instrument-scope only — production ref paths still [0];
+   dual best-face/largest-OK semantics need a docstring NOTE). Good-news minors: masks pixel-space
+   documented + resolution parameterized; binding does NOT pollute rolling stats. Full catalog +
+   dispositions in my **00:02:59Z verification-report event** (waits on the director's Rule #8
+   gate). **Residue for next operator:** `786d9e9` TDD RED re-derivation + `a8587f7` deep 1:1
+   pairing (my fast checks were clean — these are completionist passes), and the director's
+   dispositions on the 00:02:59Z report to spot-verify when they land.
 2. **Pod session may be live when you start** (user was asked at ~23:42Z). Duties: Rule #21
    verdict-ahead-of-report on anything the director blocks on mid-pod; **Rule #22 flag-before-burn
    on the Phase-3 driver script when it appears** (money-path lens: existing-output/idempotency
@@ -105,9 +101,11 @@ Design-A GATE probes, $0; spend from Phase 2) — whichever seat is live when th
    conf>0.9 (pass_a right!). Any DeepFace.represent consumer must classify detections (bbox==img,
    area floor) before trusting them. `classify_detection` in identity/validator.py is the canonical
    helper now.
-4. **Workflow long-stall mode:** a 4-lens workflow ran ~2h with 0 lens completions (journal
-   started-vs-completed counts reveal it). Don't infer progress from "still running"; check the
-   journal, and prefer resume-by-runId/fresh-dispatch over waiting.
+4. **Workflow slow-finish mode (corrected post-wrap):** a 4-lens workflow showed 4 starts /
+   0 completions in the journal for ~2h, read as stalled at wrap — it then COMPLETED cleanly
+   minutes later (agents pruned their own worktrees). Lesson both ways: journal started-vs-completed
+   counts are a progress floor, not a death certificate; before declaring a workflow dead, check
+   whether its agents' transcript files are still growing.
 5. **HEAD-move watchers fire on your own commits** — after each of your commits, expect the fire,
    read it, re-arm from new HEAD.
 
