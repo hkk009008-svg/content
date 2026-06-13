@@ -119,7 +119,7 @@ class TestApplyWorkflowParams:
         result = apply_workflow_params(workflow, params)
 
         assert result["100"]["inputs"]["weight"] == 1.0
-        assert result["100"]["inputs"]["start_at"] == 0.2
+        assert result["100"]["inputs"]["start_at"] == 0.0  # FLUX: portrait binds from step 0 (was SDXL-era 0.2)
         assert result["100"]["inputs"]["end_at"] == 1.0
         assert result["60"]["inputs"]["guidance"] == 3.5
         assert result["17"]["inputs"]["steps"] == 25
