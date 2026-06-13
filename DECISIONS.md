@@ -919,3 +919,92 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
 - **Cross-ref:** tests/unit/test_max_quality_templates.py (pins);
   workflow_selector.py:143-375; face_validator_gate.py:234-296 (rule
   semantics); spec §S2/§6 record.
+
+---
+
+## ADR-024 — Production-tier identity GRAFT for realism + binding (reject tier-unification and post-pass toggling)
+
+- **Date:** 2026-06-13
+- **Status:** Accepted (architecture); empirical validation pending the first
+  N=1 burn of the graft driver.
+- **Context:** The realism goal needs ONE config that is both photorealistic
+  AND holds two distinct character identities (aria + the man). Neither shipped
+  tier delivers both, and the 2026-06-13 investigation closed off the easy
+  hybrids:
+  - **The over-cook is STRUCTURAL to the max base graph**, proven by three
+    independent probes (all over-cooked): Design-D (max + dual PuLID + man-LoRA
+    + SUPIR-on); Design-A (max + dual + no-LoRA + SUPIR-on); Design-E
+    (`_max_passBe_quality_lora_pulid.py`, SUPIR-off **and** FaceDetailer-off).
+    No post-pass toggle clears it ⇒ the "selectively disable post-passes"
+    hybrid is **refuted by experiment**. Root cause (design workflow
+    `wf_963a4a8a` Lens C, RANK 1): the max base's **hires-fix re-diffusion**
+    (node 901 — a 2nd sampler pass @denoise 0.40 on a 1.5× upscaled latent) +
+    the heavier OptimalStepsScheduler/28-step sampler. The fix is the SAMPLER
+    CHAIN, not removing passes.
+  - **The production graph (`pulid.json`) ships photoreal** because its sampler
+    chain is clean: BasicScheduler + dpmpp_2m + sgm_uniform + 20 steps + PAG +
+    RealESRGAN, with NO hires-fix / SUPIR / FaceDetailer.
+  - **But production cannot bind identity as-shipped:** `pulid.json` has NO
+    `LoraLoader` node, and its PuLID stack is the **SDXL-era** nodes
+    (`PulidModelLoader` 99 / `ApplyPulid` 100 / `PulidEvaClipLoader` 101) on a
+    FLUX UNet [CONFIRMED by direct JSON inspection + audit `wf_3b4ddaf1` Lens 1].
+    `ApplyPulid` patches U-Net cross-attention layers FLUX's DiT lacks, so it
+    applies ~zero face lock [HIGH-CONFIDENCE CODE INFERENCE, NOT yet
+    pod-confirmed]. `workflow_selector.py:512` tunes params for that no-op node.
+    See the DATA-INTEGRITY follow-up below.
+  - **Full tier-unification is blocked** by node-ID class collisions across the
+    two graphs (100 `ApplyPulid` vs `ApplyPulidFlux`; 17 scheduler class; 500/
+    501/502 RealESRGAN vs SUPIR at the SAME IDs) + an `ays_steps` vs `steps`
+    param-key mismatch (operator dialectic `wf_f353d3ad`, director concurrence).
+- **Decision:** Build a **production-tier hybrid driver**
+  (`scripts/_prod_dual_lora_pulid.py`, `build_prod_dual_lora`) that GRAFTS the
+  proven identity stack onto the clean production sampler:
+  - KEEP `pulid.json`'s sampler chain UNTOUCHED (the realism source).
+  - GRAFT the max identity stack by deep-copying nodes 99/100/101/700 VERBATIM
+    from `pulid_max.json` (node IDs are identical across graphs, so links
+    resolve with no remapping): the FLUX PuLID loader trio
+    (`PulidFluxModelLoader`/`PulidFluxEvaClipLoader`/`PulidInsightFaceLoader`),
+    `ApplyPulidFlux` (100=aria), and `LoraLoader` (700, `char_lora_man_v1`@0.55).
+    Splice a 2nd `ApplyPulidFlux` (103=man, `103.model=['100',0]`), prepend
+    `TOKman`, route `122.clip→['700',1]` so the LoRA CLIP patch reaches the
+    prompt, rewire PAG (301) to 103. Inherits the proven `start_at=0.0` (NOT the
+    SDXL-era `start_at=0.3` that would miss the coarse-identity window).
+  - **COLLISION-SAFE BY CONSTRUCTION:** the driver loads `pulid.json` directly +
+    deep-copies the 4 identity nodes; it NEVER calls
+    `quality_max._inject_post_passes` / `_prune_unavailable`, so the RealESRGAN
+    500/501/502 chain is untouched (a max post-pass injection would write SUPIR
+    params into the same node IDs and corrupt the prod save chain).
+  - **Reject** both (a) full tier-unification and (b) the toggle-post-passes
+    hybrid, per the Context findings.
+- **Consequences:**
+  - +: One config that should give realism (clean sampler) AND binding (grafted
+    FLUX identity stack). $0 offline dry-build + an independent adversarial
+    pre-burn audit (`wf_3b4ddaf1`, 4 lenses) both PASS: all 25 links resolve,
+    correct slot indices, FLUX nodes replace SDXL, LoRA in the model path,
+    over-cook nodes absent; verdict GO, 0 blockers.
+  - +: Collision-safe; money-path = `render_leg` unchanged (operator-SAFE) +
+    pure offline graph assembly guarded by 6 pre-submit asserts ⇒ malformed
+    graph fails $0 before `/prompt`.
+  - −: **Empirically unvalidated** — the identity stack bound man 0.870 on the
+    MAX sampler; whether binding survives the lighter 20-step production sampler
+    is an open empirical question the first N=1 burn resolves. GO read: arc man
+    LEFT ≥~0.75 + VISUAL photoreal (primary) + two distinct faces.
+  - −: It is a **separate experiment-tier driver** (`scripts/_*`), NOT folded
+    into the shipping production tier (`phase_c_assembly`/`workflow_selector`).
+    Productionizing it is future work.
+  - −: **Placement** (man renders LEFT, aria RIGHT — not the intended slots)
+    remains an open COMPOSITION axis; masking was proven placement-inert for a
+    bound identity (`48ad08b`), so the levers are prompt-order / seed /
+    PuLID-node-swap, re-measured on a clean render.
+  - −: **DATA-INTEGRITY follow-up (carried, separate thread):** the shipping
+    production path renders `COMFYUI_PULID` portraits through the SDXL-on-FLUX
+    no-op PuLID. If the functional no-op is pod-confirmed, production-default
+    portraits carry little/no reference-face identity — a real latent defect to
+    fix (upgrade `pulid.json` 99/100/101 to FLUX-native + adjust
+    `workflow_selector` PuLID params). Needs empirical confirmation FIRST.
+- **Cross-ref:** scripts/_prod_dual_lora_pulid.py (the graft);
+  pulid.json / pulid_max.json (the two tiers); quality_max.py:237
+  (`_inject_post_passes` rewire — deliberately NOT called);
+  workflow_selector.py:512 (production PuLID param tuning, no-op target);
+  phase_c_assembly.py:204,413 (shipping production render path);
+  docs/HANDOFF-director-transplant-2026-06-13-overcook-structural-prod-hybrid-driver-built.md.
