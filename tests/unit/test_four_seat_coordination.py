@@ -8,6 +8,10 @@ four synced vocabulary spots so they cannot drift apart again:
   - scripts/status.py              (count_unread: `all` counts for every seat)
   - coordination/bin/send-event    (FROM/TO enum incl. `all` target)
   - coordination/bin/consume-events(ROLE enum + `-to-(role|all)-` consume)
+
+`coordinator` is a later addition: a send-only pseudo-seat (a valid `from`
+only, never a `to`, no cursor — the mirror of `all`). It lets the read-only
+oversight seat notify the four real seats without becoming a consumer.
 """
 import os
 import subprocess
@@ -151,3 +155,53 @@ def test_send_event_rejects_all_as_sender(repo):
     r = _run(SEND_EVENT, ["all", "director", "fyi", "x"], repo)
     assert r.returncode != 0
     assert not list((repo / "coordination/mailbox/sent").iterdir())
+
+
+# --- coordinator: send-only pseudo-seat (valid <from> only, never <to>) -------
+
+def test_coordinator_as_sender_lints_clean(tmp_path):
+    # coordinator is a valid <from> (read-only oversight seat); to a real seat
+    # and to `all` both lint clean.
+    events = {
+        "2026-06-13T06-00-00Z-coordinator-to-director-coordination.md":
+            "**When:** 2026-06-13T06:00:00Z\n",
+        "2026-06-13T07-00-00Z-coordinator-to-all-fyi.md":
+            "**When:** 2026-06-13T07:00:00Z\n",
+    }
+    root = _make_coord(tmp_path, events=events)
+    issues = check_coordination.run(root, since="2026-06-11",
+                                    now="2026-06-14T00:00:00Z")
+    assert _fatals(issues) == [], [str(i) for i in _fatals(issues)]
+
+
+def test_coordinator_as_target_is_bad_filename(tmp_path):
+    # coordinator is a <from> only — never a <to>; -to-coordinator- is invalid.
+    root = _make_coord(
+        tmp_path,
+        events={"2026-06-13T08-00-00Z-director-to-coordinator-fyi.md":
+                "**When:** 2026-06-13T08:00:00Z\n"})
+    issues = check_coordination.run(root, now="2026-06-14T00:00:00Z")
+    assert any(i.kind == "bad_filename" for i in _fatals(issues))
+
+
+def test_coordinator_not_a_role_no_cursor_required(tmp_path):
+    # coordinator is NOT in ROLES, so no seen/coordinator.txt is ever expected.
+    assert "coordinator" not in check_coordination.ROLES
+    root = _make_coord(tmp_path)  # only the 4 real cursors exist
+    issues = check_coordination.run(root, now="2026-06-14T00:00:00Z")
+    assert not any(i.kind == "cursor_missing" for i in _fatals(issues))
+
+
+def test_send_event_accepts_coordinator_from(repo):
+    r = _run(SEND_EVENT,
+             ["coordinator", "director", "coordination", "oversight note"],
+             repo, stdin="body\n")
+    assert r.returncode == 0, r.stderr
+    names = sorted(p.name for p in (repo / "coordination/mailbox/sent").iterdir())
+    assert any("-coordinator-to-director-coordination.md" in n for n in names)
+
+
+def test_send_event_rejects_coordinator_as_target(repo):
+    # coordinator is a FROM-only pseudo-seat — never a valid TO.
+    r = _run(SEND_EVENT, ["director", "coordinator", "fyi", "x"], repo)
+    assert r.returncode != 0

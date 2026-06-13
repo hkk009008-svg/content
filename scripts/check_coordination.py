@@ -55,9 +55,12 @@ KNOWN_KINDS = frozenset({
     "reply", "fyi", "discussion", "convergence",
 })
 
+# `coordinator` is a send-only pseudo-seat: a valid <from> only, never a <to>,
+# no seen cursor (mirror of `all`, which is <to>-only). Deliberately NOT added
+# to ROLES, so no seen/coordinator.txt is expected.
 _EVENT_NAME_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)-"
-    r"(?P<frm>director|director2|operator|operator2)"
+    r"(?P<frm>director|director2|operator|operator2|coordinator)"
     r"-to-(?P<to>director|director2|operator|operator2|all)-"
     r"(?P<kind>[a-z0-9-]+)\.md$"
 )
