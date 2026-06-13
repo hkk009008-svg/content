@@ -211,6 +211,13 @@ taxonomy, and mailbox protocol — lives in **docs/protocol/claude/director-oper
 read it only when coordinating with the other seat. Rule provenance (codified SHAs,
 empirical basis, beneficiary/consent) is in docs/PROTOCOL-RULES-LOG.md.
 
+- **Rule #23 co-sign is TIERED** (Lever #7, audit `wf_6be2ee18-f4b`; body in
+  `docs/protocol/claude/four-seat-extension.md` §6). Classifier: *would the
+  co-signer's verification change which files/sites the implementation touches?*
+  **Tier A** (yes) = co-signer lands a mailbox `verification-report` BEFORE dispatch
+  (async-OK via workflow+mailbox, no session restart). **Tier B** (no) = awareness
+  heads-up, 48h proceed-if-no-objection. Unsure → Tier A.
+
 # Claude Code mechanics
 
 - **AskUserQuestion** — use for choices that are cross-cutting, set policy

@@ -716,6 +716,20 @@ session table.
   production-code verification — Lane V / Rule #9 per-commit checks unchanged.
   Note: this is the corpus's first depth-CAP rule; it reduces protocol work.
 
+## 2026-06-14 addendum — Rule #23 async-split (Lever #7, capacity audit `wf_6be2ee18-f4b`)
+
+- **Rule #23 co-sign classifier** — splits the single "both directors' sign-off"
+  obligation into two tiers so an awareness heads-up no longer serializes behind a
+  full session. Classifier: *would the co-signer's verification change which
+  files/sites the implementation touches?* **Tier A** (yes, implementation-scope-
+  determining): co-signer lands a mailbox `verification-report` BEFORE dispatch —
+  async-fulfillable via workflow+mailbox, no session restart. **Tier B** (no,
+  awareness-only): `-to-all-` heads-up, 48h proceed-if-no-objection. Empirical
+  basis: the char-landscape co-sign was Tier A and caught a 4K-drop + silent-audio
+  regression the brief's caller-grep missed; the determinism-siblings ACK was Tier B
+  and round-tripped in <10min. Body in four-seat-extension.md §6. Beneficiary: both
+  (unblocks cross-pair throughput without weakening scope-determining review).
+
 ## Retirement criteria
 
 A rule unused for 5 consecutive sessions → flagged for review.

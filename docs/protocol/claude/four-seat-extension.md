@@ -114,6 +114,21 @@ coordination/mailbox/seen/operator2.txt   <- 2026-06-13T00:00:00Z
   lane's director. A **cross-cutting / cross-lane ADR needs BOTH directors'
   sign-off** (a `director-to-director2` proposal + `proposal-reply` ack), or
   escalate to the user. Prevents two directors landing conflicting architecture.
+- **Co-sign tiers (Lever #7, audit `wf_6be2ee18-f4b`).** The cross-director
+  co-sign is **tiered** so an awareness heads-up does not serialize behind a full
+  session. Classifier: *would the co-signer's own verification change which files /
+  sites the implementation touches?*
+  - **Tier A — implementation-scope-determining** (yes): the co-signing director
+    MUST run an independent verification (e.g. a downstream string-consumer audit
+    the brief's caller-grep can't see — the landscape co-sign caught a 4K-drop +
+    silent-audio regression this way) and land a mailbox `verification-report`
+    **before dispatch**. This is fulfillable **async** via a workflow + mailbox
+    report — NO session restart required; it just must precede the implementer
+    dispatch.
+  - **Tier B — awareness-only** (no): a `-to-all-` or direct heads-up with a
+    **48h proceed-if-no-objection** default (already the de-facto practice — e.g.
+    the determinism-siblings ACK round-tripped in <10 min).
+  When unsure which tier, treat it as Tier A (the safe default).
 
 ## 7. Rules deltas (docs/protocol/claude/director-operator.md)
 
