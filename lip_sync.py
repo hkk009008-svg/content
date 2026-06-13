@@ -802,6 +802,42 @@ def generate_lip_sync_video(
             resolution=resolution, turbo=turbo, settings=settings,
             _cascade_out=_cascade_out,
         )
+
+
+def _restore_audio_track(video_path: str, audio_source_path: str, output_path: str) -> bool:
+    """Mux the audio track from ``audio_source_path`` onto the (video-only)
+    ``video_path`` → ``output_path``, stream-copying both (no re-encode).
+
+    ``fal-ai/rife/video`` returns VIDEO-ONLY output (its schema exposes no audio
+    field and bare RIFE strips audio by design), so a RIFE pass on a lip-synced /
+    native-audio / TTS-overlaid clip would otherwise go silent. Audio is OPTIONAL
+    (``-map 1:a:0?``): a genuinely silent source yields a video-only output without
+    error. ``-shortest`` guards against any duration drift between the interpolated
+    video and the source audio.
+
+    Returns True when ``output_path`` was written, False on any ffmpeg failure.
+    """
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-i", video_path,
+                "-i", audio_source_path,
+                "-map", "0:v:0",
+                "-map", "1:a:0?",
+                "-c", "copy",
+                "-shortest",
+                output_path,
+            ],
+            check=True,
+            capture_output=True,
+        )
+        return os.path.exists(output_path)
+    except (subprocess.CalledProcessError, OSError):
+        logger.warning("RIFE audio re-mux failed", exc_info=True, extra={"engine": "rife"})
+        return False
+
+
 def generate_rife_interpolation(
     video_path: str,
     output_path: str,
@@ -850,8 +886,25 @@ def generate_rife_interpolation(
 
         out_url = result.get("video", {}).get("url")
         if out_url:
-            if safe_download(out_url, output_path) is None:
+            # fal-ai/rife/video returns VIDEO-ONLY output: download it to a temp,
+            # then restore the SOURCE clip's audio so RIFE'd dialogue / lip-synced /
+            # native-audio takes are not silently muted. On re-mux failure, signal
+            # failure (return None) so the caller keeps the original audio-bearing
+            # clip rather than a silent one — audio integrity over smoothing.
+            rife_tmp = output_path + ".noaudio.mp4"
+            if safe_download(out_url, rife_tmp) is None:
                 logger.warning("RIFE download failed", extra={"engine": "rife"})
+                return None
+            remuxed = _restore_audio_track(rife_tmp, video_path, output_path)
+            try:
+                os.remove(rife_tmp)
+            except OSError:
+                pass
+            if not remuxed:
+                logger.warning(
+                    "RIFE audio re-mux failed; keeping original clip",
+                    extra={"engine": "rife"},
+                )
                 return None
             logger.info("RIFE interpolation success", extra={"engine": "rife", "output_path": output_path})
             return output_path
