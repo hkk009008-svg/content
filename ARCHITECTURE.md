@@ -432,7 +432,7 @@ Implications:
 - Approvals survive worker crashes — state lives on disk.
 - A 500ms-bounded latency between approval and resume.
 
-### 6.1 `_gate_satisfied` predicates ([cinema/review/controller.py:214-236](cinema/review/controller.py:214))
+### 6.1 `_gate_satisfied` predicates ([cinema/review/controller.py:224-247](cinema/review/controller.py:224))
 
 | Gate | Predicate |
 |---|---|
@@ -442,7 +442,7 @@ Implications:
 | REVIEW | all shots have `approved_final_take_id` |
 
 PERFORMANCE_REVIEW is symmetric with the other three gates as of 2026-05-24:
-the predicate at [cinema/review/controller.py:223-235](cinema/review/controller.py:223)
+the predicate at [cinema/review/controller.py:233-244](cinema/review/controller.py:233)
 covers all three satisfaction paths (SKIP routing, missing keyframe, explicit
 approval). The orchestrator's `all_skipped` short-circuit at
 [cinema_pipeline.py:1024-1044](cinema_pipeline.py:1024) is now redundant for
@@ -622,7 +622,7 @@ canonical migration recipe at
 `"PERFORMANCE_REVIEW" → "motion"`, wiring the motion-gate auto-approve
 rules (themselves shipped tested-but-dead in Session 11) into production.
 Helper at [cinema/auto_approve.py:523](cinema/auto_approve.py:523); conditional
-at [cinema/review/controller.py:270-271](cinema/review/controller.py:270).
+at [cinema/review/controller.py:280-281](cinema/review/controller.py:280).
 Parser at [cinema/auto_approve.py:532](cinema/auto_approve.py:532):
 
 ```python
@@ -802,7 +802,7 @@ if quality_tier == "max":
 ```
 
 `quality_tier` is sourced from `settings.get("quality_tier", "production")`
-at [cinema/shots/controller.py:375](cinema/shots/controller.py:375). Operator
+at [cinema/shots/controller.py:633](cinema/shots/controller.py:633). Operator
 picks via UI Advanced Settings; no per-shot heuristic.
 
 ### 8.2 Production tier — `phase_c_assembly.py`
@@ -845,9 +845,9 @@ Polling: 2s × up to 300 iterations (~10 min) in production, 900s default in
 quality_max.
 
 **Multi-char keyframe flow (P1-1 slice 1).** `_resolve_identity_strategy`
-([cinema/shots/controller.py:279](cinema/shots/controller.py:279)) inspects registered characters and writes
+([cinema/shots/controller.py:280](cinema/shots/controller.py:280)) inspects registered characters and writes
 the `identity_strategy` promise into take metadata
-([cinema/shots/controller.py:637](cinema/shots/controller.py:637)); `secondary_chars` is populated in
+([cinema/shots/controller.py:638](cinema/shots/controller.py:638)); `secondary_chars` is populated in
 `ContinuityEngine.enhance_shot_prompt` ([domain/continuity_engine.py:585](domain/continuity_engine.py:585))
 for in-frame characters beyond the primary that have a registered reference
 (unregistered chars are skipped, mirroring validation). When `secondary_char_refs` is
@@ -860,7 +860,7 @@ keep-own-clothing constraint line; single-char shots never enter this branch
 (structural early-return). On Kontext failure the fallback path passes the
 ORIGINAL prompt unchanged to FLUX-Pro. Per-char identity scores land in
 `take["metadata"]["identity_per_char"]`
-([cinema/shots/controller.py:816](cinema/shots/controller.py:816)) and are surfaced as `identity_multi`
+([cinema/shots/controller.py:817](cinema/shots/controller.py:817)) and are surfaced as `identity_multi`
 in the capability scorecard ([cinema/capability_scorecard.py:165](cinema/capability_scorecard.py:165)).
 
 ### 8.3 Max tier — `quality_max.py` (N=8 adaptive best-of)
@@ -951,9 +951,9 @@ gone; `prep/lora_training.py::train_character_lora` is now a pure single-train t
 orchestrates.
 
 **Multi-char keyframe flow (P1-1 slice 2).** When `_resolve_identity_strategy`
-([cinema/shots/controller.py:279](cinema/shots/controller.py:279)) assigns `MAX_TIER_MULTI_LORA`
-([cinema/shots/controller.py:343](cinema/shots/controller.py:343)), the dispatcher passes `secondary_char_refs`
-([cinema/shots/controller.py:747](cinema/shots/controller.py:747)) through `generate_ai_broll` →
+([cinema/shots/controller.py:280](cinema/shots/controller.py:280)) assigns `MAX_TIER_MULTI_LORA`
+([cinema/shots/controller.py:344](cinema/shots/controller.py:344)), the dispatcher passes `secondary_char_refs`
+([cinema/shots/controller.py:748](cinema/shots/controller.py:748)) through `generate_ai_broll` →
 `generate_ai_broll_max` as the `secondary_chars` list. Inside the max dispatch:
 `_inject_secondary_loras` ([quality_max.py:536](quality_max.py:536)) chains up to two extra LoraLoader nodes
 (701/702) after the primary's node 700, clamped to `_SECONDARY_LORA_MAX_STRENGTH=0.55`
@@ -1403,13 +1403,13 @@ Verified by id-comparison:
 interpolates from `mode` to `lenient` over retries.
 
 Project-wide `identity_strictness` setting (default 0.60) overrides per-shot
-defaults at [cinema/shots/controller.py:504](cinema/shots/controller.py:504).
+defaults at [cinema/shots/controller.py:773](cinema/shots/controller.py:773).
 
 ### 11.5 Rolling-stats update sites (4 sites total)
 
 `IdentityValidator.history` accumulates from:
 
-1. **Keyframe validation** — `cinema/shots/controller.py:506` and `:1617`
+1. **Keyframe validation** — `cinema/shots/controller.py:775` and `:811`
 2. **N=8 best-of grading** — `face_validator_gate._arcface_score` → `validate_image(threshold=0.0)`
 3. **Performance gate scoring** — `performance/identity_gate._arcface_score` → `validate_image(threshold=0.0)`
 4. **Continuity video validation** — `domain/continuity_engine.py:616` → `validate_video`
@@ -1578,7 +1578,7 @@ Decision: `RETRY | ACCEPT_LENIENT | FAIL`. Negative-prompt phrases (from
 `llm.negative_prompts`) appended based on first failing character's reason.
 
 **Wired by T6 (`10a0eb4`, 2026-06-06):** called from
-`cinema/shots/controller.py:2109` inside `diagnose_clip(deep=True)`.
+`cinema/shots/controller.py:2184` inside `diagnose_clip(deep=True)`.
 The opt-in deep path is triggered by `POST /api/projects/<pid>/shots/<shot_id>/diagnose?deep=true`.
 
 **Vision-grounded (`d974c15`+`a4cb076`, 2026-06-07):** the deep call attaches
@@ -1632,7 +1632,7 @@ Consumers (as of T6, 2026-06-06):
 - `ChiefDirector.evaluate_generation_quality` — uses first failing character's reason.
 - `build_remediation_advisory` (new, `llm/negative_prompts.py:52`) — called from
   `generate_keyframe_take` (`cinema/shots/controller.py:572`) and `diagnose_clip`
-  (`cinema/shots/controller.py:1984`); returns `{failure_label, suggested_negative_prompt, remediation_steps}`.
+  (`cinema/shots/controller.py:2132`); returns `{failure_label, suggested_negative_prompt, remediation_steps}`.
 
 ### 13.8 `config/settings.py`
 
