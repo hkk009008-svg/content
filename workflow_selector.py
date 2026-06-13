@@ -509,7 +509,7 @@ def apply_workflow_params(workflow: dict, params: Dict) -> dict:
     Modifies the workflow IN PLACE and returns it.
 
     Node map:
-    - Node 100 (ApplyPulidFlux): weight, start_at, end_at, fusion
+    - Node 100 (ApplyPulidFlux): weight, start_at, end_at (fusion is graph default "mean")
     - Node 60 (FluxGuidance): guidance
     - Node 17 (BasicScheduler): steps, denoise, scheduler
     - Node 16 (KSamplerSelect): sampler_name
@@ -518,7 +518,7 @@ def apply_workflow_params(workflow: dict, params: Dict) -> dict:
     # PuLID face-lock parameters (Node 100)
     if "100" in workflow:
         workflow["100"]["inputs"]["weight"] = params.get("pulid_weight", 1.0)
-        workflow["100"]["inputs"]["start_at"] = params.get("pulid_start_at", 0.3)
+        workflow["100"]["inputs"]["start_at"] = params.get("pulid_start_at", 0.0)
         workflow["100"]["inputs"]["end_at"] = params.get("pulid_end_at", 1.0)
 
     # Guidance / CFG (Node 60)

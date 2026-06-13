@@ -93,3 +93,23 @@ def test_production_graph_tracked_lowercase():
         "production graph must be tracked as lowercase 'pulid.json' "
         f"(all code opens open('pulid.json')); got {variants!r}"
     )
+
+
+def test_apply_params_default_start_at_is_flux_zero():
+    """apply_workflow_params' fallback start_at must be the FLUX coarse-identity
+    0.0, not the SDXL-era 0.3. Templates always pass pulid_start_at so the default
+    is normally unreached, but a caller that omits it must not silently re-suppress
+    the FLUX swap (operator advisory F2)."""
+    import workflow_selector as ws
+    wf = {"100": {"inputs": {}}}
+    ws.apply_workflow_params(wf, {})
+    assert wf["100"]["inputs"]["start_at"] == 0.0
+
+
+def test_pulid_patched_model_feeds_pag(graph):
+    """The PuLID-patched model (node 100, ApplyPulidFlux) must feed PAG (node 301)
+    -> sampler. Pins the wiring so a future edit that disconnects 100->301 can't
+    silently pass while the class set still looks correct (operator advisory F3;
+    the original SDXL-on-FLUX no-op bug was test-dark)."""
+    assert graph["301"]["class_type"] == "PerturbedAttentionGuidance"
+    assert graph["301"]["inputs"]["model"] == ["100", 0]
