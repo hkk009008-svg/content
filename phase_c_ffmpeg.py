@@ -919,6 +919,11 @@ def generate_ai_video(
                 resp = requests.post(url, json=payload, headers=headers, timeout=30)
                 resp.raise_for_status()
                 task_id = resp.json().get("task_id") or resp.json().get("id")
+                if not task_id:
+                    # No task id → polling /status/None can never succeed; the old
+                    # code burned up to 120×5s on it before cascading. Raise into the
+                    # outer except → immediate try_next_api().
+                    raise ValueError(f"Seedance POST returned no task_id; body={resp.text[:200]}")
                 logger.info("Seedance task queued — polling", extra={"engine": "SEEDANCE", "task_id": task_id})
 
                 # Poll for completion
