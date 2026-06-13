@@ -372,7 +372,11 @@ def generate_ai_video(
                 ),
                 output_path=output_mp4,
                 reference_images=multi_angle_refs,
-                generate_audio=(shot_type == "landscape" or dialogue_native_audio),  # Environments + native-mode dialogue
+                generate_audio=(  # Environments + native dialogue + char-landscape→wide ambient
+                    shot_type == "landscape"
+                    or (shot_type == "wide" and not (has_dialogue and not dialogue_native_audio))
+                    or dialogue_native_audio
+                ),  # guarded: NO Veo ambient on overlay-dialogue (has_dialogue & not native) → no double-voice
                 driving_video_path=driving_video_path,
                 duration=duration,
                 aspect_ratio=fal_aspect_ratio(_aspect),
@@ -407,8 +411,9 @@ def generate_ai_video(
             }
             ltx_camera = _ltx_camera_map.get(camera_motion, camera_motion)
 
-            # Use 4K for landscape, 1080p for everything else
-            ltx_resolution = "4k" if shot_type == "landscape" else "1080p"
+            # Use 4K for landscape + wide (the documented 4K LTX tier), 1080p else.
+            # Char-landscape shots reroute to "wide" and must keep their 4K.
+            ltx_resolution = "4k" if shot_type in ("landscape", "wide") else "1080p"
 
             result = ltx.generate_video(
                 image_path=image_path,

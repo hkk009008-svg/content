@@ -446,6 +446,14 @@ def classify_shot_type(shot: dict) -> str:
     for shot_type, keywords in SHOT_TYPE_KEYWORDS.items():
         for keyword in keywords:
             if keyword in search_text:
+                # A landscape-keyword shot that STILL has a registered character
+                # must keep identity: route to "wide" (pulid_weight 0.65 in both
+                # tiers) rather than "landscape" (production drops the reference;
+                # max zeroes the weight). The characterless case already returned
+                # "landscape" via the early-return above, so this only overrides
+                # char-BEARING landscapes. (ADR-025 scope-exemption close.)
+                if shot_type == "landscape" and chars:
+                    return "wide"
                 return shot_type
 
     # Default to medium (safest — decent face-lock + scene balance)

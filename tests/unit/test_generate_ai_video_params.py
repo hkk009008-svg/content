@@ -283,3 +283,79 @@ def test_multi_engine_all_fail_terminates_after_max_retries(mock_kling_cls, mock
     # Exactly one quota-cooldown retry (MAX_CASCADE_RETRIES=1), then give up.
     assert len(sleep_calls) == 1, f"expected exactly 1 quota retry, got {len(sleep_calls)}"
     assert result is None
+
+
+# --- char-landscape routing companions (ADR-025 identity fix, 3-site) ------
+# When classify_shot_type reroutes a char-bearing landscape to "wide", two
+# downstream consumers branch on the shot_type STRING and must follow:
+#   phase_c_ffmpeg.py:411 (LTX resolution) and :375 (Veo generate_audio).
+
+
+@patch("phase_c_ffmpeg._accept_or_reject", return_value=True)
+@patch("ltx_native.LTXVideoAPI")
+def test_ltx_wide_renders_4k(mock_ltx_cls, _mock_accept):
+    """:411 companion — a `wide` shot must render LTX at 4K (wide is the
+    documented 4K LTX tier), not drop to 1080p. Without this, a char-landscape
+    rerouted to wide loses 4x the pixels (no auto-upscale)."""
+    mock_ltx_cls.return_value.generate_video.return_value = "out.mp4"
+    from phase_c_ffmpeg import generate_ai_video
+    generate_ai_video(image_path="in.png", camera_motion="static",
+                      target_api="LTX", output_mp4="out.mp4", shot_type="wide")
+    _, kwargs = mock_ltx_cls.return_value.generate_video.call_args
+    assert kwargs.get("resolution") == "4k", (
+        f"wide LTX shot dropped to {kwargs.get('resolution')!r}; expected 4k")
+
+
+@patch("phase_c_ffmpeg._accept_or_reject", return_value=True)
+@patch("ltx_native.LTXVideoAPI")
+def test_ltx_landscape_still_4k(mock_ltx_cls, _mock_accept):
+    """No-regression: a genuine landscape stays 4K."""
+    mock_ltx_cls.return_value.generate_video.return_value = "out.mp4"
+    from phase_c_ffmpeg import generate_ai_video
+    generate_ai_video(image_path="in.png", camera_motion="static",
+                      target_api="LTX", output_mp4="out.mp4", shot_type="landscape")
+    _, kwargs = mock_ltx_cls.return_value.generate_video.call_args
+    assert kwargs.get("resolution") == "4k"
+
+
+@patch("phase_c_ffmpeg._accept_or_reject", return_value=True)
+@patch("ltx_native.LTXVideoAPI")
+def test_ltx_medium_stays_1080p(mock_ltx_cls, _mock_accept):
+    """No-regression: non-wide/non-landscape stays 1080p (the broaden is scoped)."""
+    mock_ltx_cls.return_value.generate_video.return_value = "out.mp4"
+    from phase_c_ffmpeg import generate_ai_video
+    generate_ai_video(image_path="in.png", camera_motion="static",
+                      target_api="LTX", output_mp4="out.mp4", shot_type="medium")
+    _, kwargs = mock_ltx_cls.return_value.generate_video.call_args
+    assert kwargs.get("resolution") == "1080p"
+
+
+@pytest.mark.parametrize(
+    "shot_type,has_dialogue,native,expected_audio",
+    [
+        ("wide", False, False, True),       # rerouted char-landscape, no dialogue → ambient restored (the fix)
+        ("wide", True, False, False),       # overlay dialogue → NO Veo ambient (avoid double-voice)
+        ("wide", True, True, True),          # native dialogue → Veo generates it
+        ("landscape", False, False, True),  # no-regression: genuine landscape keeps ambient
+        ("medium", False, False, False),    # no-regression: medium no-dialogue stays silent (scene-TTS owns it)
+    ],
+)
+@patch("phase_c_ffmpeg._accept_or_reject", return_value=True)
+@patch("veo_native.VeoNativeAPI")
+def test_veo_generate_audio_guarded_broaden(
+    mock_veo_cls, _mock_accept, shot_type, has_dialogue, native, expected_audio
+):
+    """:375 companion — guarded-broaden (director2 Pair-B call): `wide` shots get
+    Veo ambient UNLESS overlay-dialogue (`has_dialogue and not dialogue_native_audio`),
+    which preserves ambient on rerouted no-dialogue char-landscapes while avoiding
+    double-voice on genuine wide+overlay-dialogue shots."""
+    mock_veo_cls.return_value.generate_video.return_value = "out.mp4"
+    from phase_c_ffmpeg import generate_ai_video
+    generate_ai_video(image_path="in.png", camera_motion="static",
+                      target_api="VEO_NATIVE", output_mp4="out.mp4",
+                      shot_type=shot_type, has_dialogue=has_dialogue,
+                      dialogue_native_audio=native)
+    _, kwargs = mock_veo_cls.return_value.generate_video.call_args
+    assert kwargs.get("generate_audio") == expected_audio, (
+        f"{shot_type} has_dialogue={has_dialogue} native={native}: got "
+        f"generate_audio={kwargs.get('generate_audio')!r}, expected {expected_audio}")

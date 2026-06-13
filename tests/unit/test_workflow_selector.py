@@ -186,9 +186,79 @@ class TestClassifyShotTypeKeywords:
             "camera": "",
             "characters_in_frame": ["c1"],
         }
-        assert classify_shot_type(shot) == expected_bucket, (
+        # char-landscape identity fix (ADR-025 scope-exemption close): a landscape
+        # keyword on a CHARACTER-bearing shot routes to "wide" (pulid_weight 0.65
+        # in both tiers) instead of "landscape" (0.0) so the registered character
+        # keeps identity. The true characterless-landscape path is the no-char
+        # early-return, covered by TestCharLandscapeRouting below.
+        expected = "wide" if expected_bucket == "landscape" else expected_bucket
+        assert classify_shot_type(shot) == expected, (
             f"keyword '{kw}' (declared in {expected_bucket}) routed elsewhere"
         )
+
+
+# --- Char-bearing landscape routing (ADR-025 identity fix) ----------------
+
+
+class TestCharLandscapeRouting:
+    """A shot with a registered character whose prompt carries a landscape
+    keyword (and no earlier portrait/action/wide keyword) was mis-classified
+    `landscape` → identity dropped (production drops the ref; max zeroes
+    pulid_weight). The seam routes such char-bearing landscapes to `wide`
+    so identity re-engages in both tiers. Genuine characterless landscapes
+    are untouched (the no-char early-return)."""
+
+    def test_char_bearing_landscape_keyword_routes_to_wide(self):
+        shot = {
+            "prompt": "an aerial vista of the valley",  # only a landscape keyword
+            "camera": "",
+            "characters_in_frame": ["hero"],
+        }
+        assert classify_shot_type(shot) == "wide"
+
+    def test_characterless_landscape_keyword_still_landscape(self):
+        """No characters → the no-char early-return keeps it `landscape`
+        (cheap Kontext path stays correct; no identity to preserve)."""
+        shot = {
+            "prompt": "an aerial vista of the valley",
+            "camera": "",
+            "characters_in_frame": [],
+        }
+        assert classify_shot_type(shot) == "landscape"
+
+    def test_wide_keyword_precedence_unchanged_with_chars(self):
+        """A wide keyword precedes landscape in dict order, so a shot with both
+        already routes `wide` — pin it so the seam override doesn't perturb it."""
+        shot = {
+            "prompt": "a wide shot of an aerial landscape",
+            "camera": "",
+            "characters_in_frame": ["hero"],
+        }
+        assert classify_shot_type(shot) == "wide"
+
+    def test_char_landscape_recovers_production_identity_weight(self):
+        """End-to-end: a char-bearing landscape now resolves to a production
+        template with a NON-ZERO PuLID weight (0.65), not landscape's 0.0."""
+        shot = {
+            "prompt": "an aerial vista of the valley",
+            "camera": "",
+            "characters_in_frame": ["hero"],
+        }
+        weight = WORKFLOW_TEMPLATES[classify_shot_type(shot)]["pulid_weight"]
+        assert weight == 0.65, f"identity not recovered: pulid_weight={weight}"
+
+    def test_char_landscape_recovers_max_tier_identity_weight(self):
+        """Same recovery in the max tier: the routed shot pulls wide's 0.65 /
+        lora 0.9 instead of the landscape template's zeros."""
+        from workflow_selector import get_max_quality_params
+
+        shot = {
+            "prompt": "an aerial vista of the valley",
+            "camera": "",
+            "characters_in_frame": ["hero"],
+        }
+        params = get_max_quality_params(classify_shot_type(shot))
+        assert params["pulid_weight"] == 0.65, f"max identity not recovered: {params['pulid_weight']}"
 
 
 # --- Shot-section priority over full prompt -------------------------------
