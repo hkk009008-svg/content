@@ -2038,7 +2038,7 @@ Each top-level file is a **9-line `from domain.X import *` re-export shim**; the
 |---|---|
 | `identity_validator.py`, `identity_types.py` (flat) | **Absent.** Real files are `identity/validator.py` (908 LOC) and `identity/types.py` (126 LOC) — a package, not flat modules |
 | `phase_b_audio.py` | **Absent** at repo root and `cinema/phases/`. The audio subsystem is the `audio/` package (`dialogue.py`, `music.py`, `foley.py`, `effects.py`, `alignment.py`, `voiceover.py`) |
-| `Pulid.json` | **Not a separate/absent file.** `Pulid.json` and `pulid.json` resolve to the **same inode** (14399359) on the macOS case-insensitive filesystem. The real two workflows are `pulid.json` (production, 22 nodes) and `pulid_max.json` (max tier, 56 nodes, different inode). The skill's `Pulid.json` is just a case variant of the production workflow |
+| `Pulid.json` (historical) | **Reconciled 2026-06-13 — now a single lowercase `pulid.json`.** Was git-tracked capital-P while all code opens `open('pulid.json')`; on case-insensitive macOS both resolved to the **same inode** so it worked, but a case-sensitive checkout (Linux CI/pod) would `FileNotFoundError` and silently cascade past the production PuLID branch. Renamed via `git mv` (git/disk/code/test now agree). The two real workflows are `pulid.json` (production, 22 nodes) and `pulid_max.json` (max tier, different inode). |
 
 #### Two classes named `CinemaPipeline` (D-1)
 

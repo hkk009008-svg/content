@@ -64,3 +64,32 @@ def test_production_pulid_start_at_is_flux_zero():
     import workflow_selector as ws
     for cls in ("portrait", "medium", "wide", "action"):
         assert ws.WORKFLOW_TEMPLATES[cls]["pulid_start_at"] == 0.0, cls
+
+
+def test_production_graph_tracked_lowercase():
+    """Regression guard for the case-sensitivity landmine (ADR-024 / operator F1).
+
+    All code opens open('pulid.json') (phase_c_assembly.py:178/204), but git
+    tracked the graph as 'Pulid.json' (capital P). On case-insensitive macOS both
+    resolve to one inode so it works; on a case-SENSITIVE checkout (Linux CI/pod)
+    open('pulid.json') -> FileNotFoundError and the production PuLID branch
+    silently cascades, making the FLUX-native fix (Chunk-1) unreachable.
+
+    os.path.exists() is blind to tracked case on macOS (same inode), so assert
+    against HEAD's tree -- the committed truth, immune to per-seat index churn.
+    """
+    import subprocess
+
+    root = Path(__file__).resolve().parents[2]
+    try:
+        out = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", "HEAD"],
+            cwd=root, capture_output=True, text=True, check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pytest.skip("not a git checkout")
+    variants = [p for p in out.splitlines() if p.lower() == "pulid.json"]
+    assert variants == ["pulid.json"], (
+        "production graph must be tracked as lowercase 'pulid.json' "
+        f"(all code opens open('pulid.json')); got {variants!r}"
+    )

@@ -144,7 +144,7 @@ Two operational modes for audio-visual synchronization.
 ### Real-ESRGAN 4x (Fallback)
 - Per-frame upscaling
 - Can introduce temporal inconsistency (shimmer between frames)
-- Available in ComfyUI workflow (`Pulid.json` nodes 500-502)
+- Available in ComfyUI workflow (`pulid.json` nodes 500-502)
 - Upscales to 2688x1536 (2.7K cinema resolution)
 - Uses Lanczos resampling
 

@@ -135,7 +135,7 @@ This is appended to every image generation prompt via the Style Director.
 | Sora API | `sora_native.py` |
 | Veo API | `veo_native.py` |
 | LTX API | `ltx_native.py` |
-| ComfyUI workflow | `Pulid.json` |
+| ComfyUI workflow | `pulid.json` |
 
 ## Common Failure Modes
 
