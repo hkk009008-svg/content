@@ -972,7 +972,7 @@ per-char validation and the capability scorecard are unchanged from slice 1.
 — the canonical singleton. Per-candidate score uses `validate_image(threshold=0.0)`
 which appends to the shared `IdentityValidator.history` (see §11).
 
-### 8.5 Known defect — char-bearing **landscape** shots silently zero identity (both tiers)
+### 8.5 ✅ FIXED 2026-06-13 (`cf32ca3`) — char-bearing **landscape** shots silently zeroed identity (both tiers)
 
 A shot whose prompt carries a landscape keyword (`landscape`/`aerial`/`drone`/
 `skyline`/`panoramic`/`environment`/`scenery`/`no character`) **but has a
@@ -1017,23 +1017,28 @@ production keys its
 early-return on `shot_type`, the max template keys its zeroing on `shot_type`, so
 one `classify_shot_type` fix covers both. No separate per-tier patch needed.
 
-Status: **fix_with_brief — BRIEF AUTHORED + Pair-A co-signed** (joint, Rule #23):
+Status: **FIXED 2026-06-13 (`cf32ca3`, operator2 impl; director2 verifies)** — per the joint Rule #23 brief
 [`docs/BRIEF-director2-2026-06-13-landscape-char-routing-rule23-joint.md`](docs/BRIEF-director2-2026-06-13-landscape-char-routing-rule23-joint.md)
-(director2 author; director-1 Pair-A co-sign 2026-06-13). **The fix is 3 sites, not 1**
+(director2 author; director-1 Pair-A co-sign `ef5c4c6`; PM7 dispatch resolving all companion decisions). **The fix is 3 sites, not 1**
 (the `"landscape"` string overloaded identity-treatment *and* environment-semantics): the
 core seam (`classify_shot_type` → return `"wide"` when the landscape bucket matches a
 char-bearing shot) re-engages identity in both tiers, but **two downstream consumers branch
-on the `shot_type=="landscape"` string** and need re-keying to `("landscape","wide")` — the
-LTX-4K branch ([`phase_c_ffmpeg.py:411`](phase_c_ffmpeg.py:411)) and the Veo ambient-audio
-flag ([`phase_c_ffmpeg.py:375`](phase_c_ffmpeg.py:375)); a seam-only fix re-introduces a
-4K-loss + a narrow silent-clip regression (caught by the director-1 co-sign's independent
+on the `shot_type=="landscape"` string** and were re-keyed in `cf32ca3`: the
+LTX-4K branch ([`phase_c_ffmpeg.py:416`](phase_c_ffmpeg.py:416)) → `"4k" if shot_type in ("landscape","wide")`,
+and the Veo ambient-audio flag ([`phase_c_ffmpeg.py:375`](phase_c_ffmpeg.py:375)) **guarded-broadened**
+(wide gets Veo ambient *unless* overlay-dialogue — `has_dialogue and not dialogue_native_audio` — so no
+double-voice on a genuine wide+overlay-dialogue shot; director2 Pair-B call). A seam-only fix would have
+re-introduced a 4K-loss + a narrow silent-clip regression (caught by the director-1 co-sign's independent
 pass `wf_e378821e-04d`, 11 mappers + 5 refuters — these consumers are invisible to a
 `classify_shot_type` *caller* audit). Single-seam **completeness for routing confirmed** (no
 second classifier produces the defect; `scene_decomposer` writes no `shot_type`;
-`optimizer_cache["spec"]["shot_type"]` is a dead store for routing). Recorded as a scope
-**exemption** in [ADR-025](DECISIONS.md) (the Task-4 pod gate validated portrait routing
-only; the char-aerial path was not exercised — a char-aerial pod re-validation is a
-pod-gated follow-up). Sources: operator verification-reports `77eb334` (production severity
+`optimizer_cache["spec"]["shot_type"]` is a dead store for routing; `prompt_optimizer.py:177`
+consumes a *different* classifier (`_heuristic_shot_type`, which only returns `"landscape"` when
+`not has_chars`), so it is safe-by-construction and not a seam consumer — Rule #13 re-confirmed at
+landing). The ADR-025 scope **exemption** (the Task-4 pod gate validated portrait routing only;
+char-aerial was not exercised) is now **closed** — char-landscape engages PuLID via `wide`.
+**Owed (pod-gated debt, not a blocker):** a char-aerial binding re-validation on the Linux/TBB pod
+(pod STOPPED; R-MEASURE — no binding number asserted unmeasured). Sources: operator verification-reports `77eb334` (production severity
 correction) + `9be752a` (max tier, dual-verified — source trace + adversarial refute=held).
 *Documented 2026-06-13 (operator-1 finding; director-delegated placement, co-sign
 pre-granted in the director's 10:49Z ACK). Source anchors hardened + all six

@@ -1077,6 +1077,14 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
     director+director2 sign-off, targeting `phase_c_assembly.py:224` +
     `classify_shot_type` + an **untraced MAX-tier sibling** (`quality_max.py` landscape
     template, also `pulid_weight=0.0`). **NOT** landing in this change.
+    - − **RESOLVED 2026-06-13 (`cf32ca3`, operator2 impl; director2 verifies):** the scope
+      exemption is now **closed**. `classify_shot_type` routes a char-bearing landscape to
+      `wide` (3-site fix: seam + `phase_c_ffmpeg:411` LTX-4K + `:375` guarded-broaden Veo
+      audio), re-engaging PuLID at `pulid_weight=0.65` in both tiers and preserving the
+      production reference (the `phase_c_assembly:224` early-return no longer fires). Joint
+      Rule #23 brief `27d1323` + Pair-A co-sign `ef5c4c6`; ARCHITECTURE.md §8.5 marked FIXED.
+      **Still owed (pod-gated debt, not a blocker):** a char-aerial binding re-validation on
+      the Linux/TBB pod (pod STOPPED; R-MEASURE — no binding number asserted unmeasured).
   - −: Historical `COMFYUI_PULID` renders logged **before** this fix carried ~zero
     identity (provenance caveat for old takes).
   - −: Residual — the macOS-pinned binding numbers owe a Linux/TBB pod-portability
