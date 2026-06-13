@@ -964,3 +964,118 @@ class TestNoFaceIntended:
         assert r["binding_ok"] is False
         # Both none: intended is 'none' → NO_FACE_INTENDED (caught first)
         assert r["note"] == "NO_FACE_INTENDED"
+
+
+class TestRepresentDeterminism:
+    """_represent_deterministic pins OpenCV to a single thread during the
+    DeepFace.represent call, then restores the prior thread count.
+
+    Root cause (operator 2026-06-13, scripts/_probe_embedding_determinism.py):
+    DeepFace's align=True path runs an OpenCV op that races under multithreading
+    — ~1 in 20 calls returns a DIFFERENT (mis-aligned) crop whose embedding is
+    0.456 cosine-distant from the stable majority, enough to swing an identity
+    score 0.870→0.762 (the man-ref 'cold-draw'). The detected bbox is identical
+    every run; only the aligned crop races. cv2.setNumThreads(1) serializes the
+    op and pins the result to the deterministic majority value (verified 30/30
+    byte-identical), preserving align=True accuracy. The serialization is
+    localized to this one call (prior thread count restored, even on error) so
+    the rest of the process keeps multi-threaded OpenCV.
+    """
+
+    def test_pins_single_thread_during_represent_then_restores(self):
+        from identity import validator
+
+        events = []
+        fake_cv2 = MagicMock()
+        fake_cv2.getNumThreads.return_value = 8
+        fake_cv2.setNumThreads.side_effect = lambda n: events.append(("set", n))
+
+        def fake_represent(**kwargs):
+            # capture that the represent call happened AFTER threads were pinned
+            events.append(("represent", kwargs.get("model_name")))
+            return [{"embedding": [0.1, 0.2, 0.3]}]
+
+        fake_df = MagicMock()
+        fake_df.represent.side_effect = fake_represent
+
+        with patch.object(validator, "cv2", fake_cv2), \
+             patch.object(validator, "DeepFace", fake_df, create=True):
+            out = validator._represent_deterministic("/tmp/face.jpg")
+
+        assert out == [{"embedding": [0.1, 0.2, 0.3]}]
+        # threads pinned to 1 BEFORE represent, restored to 8 AFTER — in order
+        assert events == [("set", 1), ("represent", "GhostFaceNet"), ("set", 8)]
+
+    def test_restores_thread_count_on_exception(self):
+        from identity import validator
+
+        events = []
+        fake_cv2 = MagicMock()
+        fake_cv2.getNumThreads.return_value = 4
+        fake_cv2.setNumThreads.side_effect = lambda n: events.append(n)
+
+        fake_df = MagicMock()
+        fake_df.represent.side_effect = RuntimeError("alignment blew up")
+
+        with patch.object(validator, "cv2", fake_cv2), \
+             patch.object(validator, "DeepFace", fake_df, create=True):
+            with pytest.raises(RuntimeError):
+                validator._represent_deterministic("/tmp/face.jpg")
+
+        # restored to 4 even though represent raised (pin set 1, finally set 4)
+        assert events == [1, 4]
+
+    def test_passes_through_represent_arguments(self):
+        from identity import validator
+
+        fake_cv2 = MagicMock()
+        fake_cv2.getNumThreads.return_value = 6
+        fake_df = MagicMock()
+        fake_df.represent.return_value = [{"embedding": [1.0]}]
+
+        with patch.object(validator, "cv2", fake_cv2), \
+             patch.object(validator, "DeepFace", fake_df, create=True):
+            validator._represent_deterministic("/tmp/img.png")
+
+        # exact represent contract the 5 former call sites used
+        fake_df.represent.assert_called_once_with(
+            img_path="/tmp/img.png",
+            model_name="GhostFaceNet",
+            enforce_detection=False,
+        )
+
+    def test_equal_area_tie_selects_same_face_regardless_of_order(self):
+        """Two OK detections with IDENTICAL area select deterministically.
+
+        DeepFace's return ORDER varies run-to-run (proven,
+        scripts/_probe_figure_read_determinism.py). The largest-OK selection
+        breaks area ties on a geometric key (top-left-most), so the SAME face —
+        and the same embedding/score — is chosen no matter the arrival order.
+        """
+        from identity import validator
+
+        ref = np.ones(4) / np.linalg.norm(np.ones(4))
+        emb_A = ref.copy()                      # cos 1.0 → score 1.0
+        emb_B = np.array([1.0, 0.0, 0.0, 0.0])  # cos 0.5 → score 0.75
+        det_A = {"facial_area": {"x": 10, "y": 10, "w": 1000, "h": 1000},
+                 "face_confidence": 0.9, "embedding": emb_A.tolist()}
+        det_B = {"facial_area": {"x": 500, "y": 10, "w": 1000, "h": 1000},
+                 "face_confidence": 0.9, "embedding": emb_B.tolist()}
+        pil = MagicMock()
+        pil.size = (3000, 3000)  # area 1e6 / 9e6 = 11% → OK, not DEGENERATE/TINY
+
+        scores = []
+        for order in ([det_A, det_B], [det_B, det_A]):
+            with patch("identity.validator._PIL_AVAILABLE", True), \
+                 patch("identity.validator._PILImage") as mpil, \
+                 patch("identity.validator.os.path.exists", return_value=True), \
+                 patch("identity.validator.DEEPFACE_AVAILABLE", True), \
+                 patch("identity.validator._represent_deterministic",
+                       return_value=order):
+                mpil.open.return_value = pil
+                res = validator._figure_read_score("/tmp/x.jpg", ref, ref_name="man")
+            scores.append(res["score"])
+
+        # top-left-most (det_A, smaller x) wins in BOTH orders → identical score
+        assert scores[0] == scores[1]
+        assert scores[0] == pytest.approx(1.0)

@@ -10,6 +10,7 @@ Features:
 - Rolling history for adaptive PuLID weight feedback loop
 """
 
+import contextlib
 import os
 import tempfile
 from typing import Optional, List, Dict, Callable, Tuple
@@ -62,6 +63,56 @@ FIGURE_TINY_AREA_RATIO: float = 0.01
 #: DEGENERATE — the whole-image fallback that DeepFace emits with
 #: enforce_detection=False when no face is found.
 FIGURE_DEGENERATE_MARGIN_PX: int = 2
+
+
+@contextlib.contextmanager
+def _cv2_single_thread():
+    """Pin OpenCV to one thread for the duration of the block, then restore.
+
+    DeepFace's align=True path (the default, and load-bearing — align=False
+    collapses the man-binding signal 0.870→0.522) runs an OpenCV operation
+    whose output is NON-DETERMINISTIC under multi-threading: ~1 in 20 calls
+    returns a DIFFERENT, mis-aligned crop whose GhostFaceNet embedding is 0.456
+    cosine-distant from the otherwise byte-stable majority — enough to swing an
+    identity score 0.870→0.762 (the man-ref "cold-draw", operator 2026-06-13).
+    The DETECTED bbox is identical across runs; only the aligned crop races.
+    Neither numpy/cv2/Python/TF seeds nor TF_DETERMINISTIC_OPS remove it — it is
+    an OpenCV thread race, not seedable RNG. cv2.setNumThreads(1) serializes the
+    op and pins the result to the deterministic majority value (verified 30/30
+    byte-identical, scripts/_probe_embedding_determinism.py), preserving
+    align=True accuracy (the calibrated man-0.870 baseline IS that majority
+    value, so this introduces no re-baselining).
+
+    The pin is restored to the prior count afterward (even on exception) so the
+    serialization is localized to the wrapped DeepFace call rather than
+    throttling OpenCV process-wide. Both the binding instrument and the
+    production identity path (validate_image/validate_video, via represent AND
+    extract_faces — both align) route through this guard.
+
+    NOTE: cv2.setNumThreads is process-global; if two threads enter here
+    concurrently the prior count may be restored imperfectly (it lands at 1).
+    The validator is called sequentially per shot, so this is benign; revisit
+    if identity validation is ever parallelised across threads.
+    """
+    _prev_threads = cv2.getNumThreads()
+    try:
+        cv2.setNumThreads(1)
+        yield
+    finally:
+        cv2.setNumThreads(_prev_threads)
+
+
+def _represent_deterministic(image_path: str) -> list:
+    """GhostFaceNet DeepFace.represent under the cv2 single-thread guard.
+
+    The deterministic chokepoint for the five represent call sites (the binding
+    instrument's figure/ref reads + the production validate_image/validate_video
+    embedding reads). See _cv2_single_thread for the root-cause writeup.
+    """
+    with _cv2_single_thread():
+        return DeepFace.represent(
+            img_path=image_path, model_name="GhostFaceNet", enforce_detection=False
+        )
 
 
 def _classify_face_detection(
@@ -145,12 +196,11 @@ def _figure_read_score(
 
     img_area = img_w * img_h
 
-    emb_list = DeepFace.represent(
-        img_path=image_path, model_name="GhostFaceNet", enforce_detection=False
-    )
+    emb_list = _represent_deterministic(image_path)
 
     class_counts: Dict[str, int] = {"OK": 0, "TINY": 0, "DEGENERATE": 0}
     best_ok_area = -1.0
+    best_ok_key: Optional[tuple] = None
     best_ok_emb: Optional[np.ndarray] = None
     best_ok_area_pct = 0.0
 
@@ -163,7 +213,15 @@ def _figure_read_score(
 
         if cls == "OK":
             area = float(w * h)
-            if area > best_ok_area:
+            # Largest OK face wins; ties broken by a deterministic geometric
+            # key (top-left-most) so selection is a pure function of the
+            # detection SET, independent of DeepFace's non-deterministic return
+            # ORDER (proven to vary, scripts/_probe_figure_read_determinism.py).
+            # Without it, two equal-area OK blobs would select by arrival order
+            # → different embeddings across runs.
+            key = (area, -fa.get("x", 0), -fa.get("y", 0), -w, -h)
+            if best_ok_key is None or key > best_ok_key:
+                best_ok_key = key
                 best_ok_area = area
                 best_ok_emb = np.array(entry["embedding"])
                 best_ok_area_pct = 100.0 * area / img_area if img_area else 0.0
@@ -222,11 +280,10 @@ def _ref_embedding_largest_ok(ref_path: str, ref_name: str = "ref") -> Optional[
                 return None
             img_h, img_w = img_cv.shape[:2]
 
-        emb_list = DeepFace.represent(
-            img_path=ref_path, model_name="GhostFaceNet", enforce_detection=False
-        )
+        emb_list = _represent_deterministic(ref_path)
 
         best_ok_area = -1.0
+        best_ok_key: Optional[tuple] = None
         best_ok_emb: Optional[np.ndarray] = None
 
         for entry in emb_list:
@@ -236,7 +293,12 @@ def _ref_embedding_largest_ok(ref_path: str, ref_name: str = "ref") -> Optional[
             cls = _classify_face_detection(w, h, img_w, img_h, conf)
             if cls == "OK":
                 area = float(w * h)
-                if area > best_ok_area:
+                # Deterministic tie-break (top-left-most), mirroring
+                # _figure_read_score: ref selection is a pure function of the
+                # detection set, not DeepFace's return order.
+                key = (area, -fa.get("x", 0), -fa.get("y", 0), -w, -h)
+                if best_ok_key is None or key > best_ok_key:
+                    best_ok_key = key
                     best_ok_area = area
                     best_ok_emb = np.array(entry["embedding"])
 
@@ -854,9 +916,7 @@ class IdentityValidator:
 
         # 3. Compute from scratch via DeepFace
         try:
-            emb_list = DeepFace.represent(
-                img_path=image_path, model_name="GhostFaceNet", enforce_detection=False
-            )
+            emb_list = _represent_deterministic(image_path)
             if emb_list:
                 emb = np.array(emb_list[0]["embedding"])
                 if cache_key:
@@ -929,9 +989,10 @@ class IdentityValidator:
         result = {}
 
         try:
-            faces = DeepFace.extract_faces(
-                img_path=frame_path, enforce_detection=False
-            )
+            with _cv2_single_thread():
+                faces = DeepFace.extract_faces(
+                    img_path=frame_path, enforce_detection=False
+                )
         except Exception:
             # No face detected — create failure samples for all characters
             for cid in ref_embeddings:
@@ -994,9 +1055,7 @@ class IdentityValidator:
                 cv2.imwrite(crop_path, cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR))
 
                 try:
-                    emb_list = DeepFace.represent(
-                        img_path=crop_path, model_name="GhostFaceNet", enforce_detection=False
-                    )
+                    emb_list = _represent_deterministic(crop_path)
                     if emb_list:
                         face_emb = np.array(emb_list[0]["embedding"])
                         cos_sim = float(np.dot(face_emb, ref_emb) / (
@@ -1053,9 +1112,7 @@ class IdentityValidator:
     ) -> FrameSample:
         """Simplified analysis for a single image (not video frame)."""
         try:
-            emb_list = DeepFace.represent(
-                img_path=image_path, model_name="GhostFaceNet", enforce_detection=False
-            )
+            emb_list = _represent_deterministic(image_path)
             if emb_list:
                 # Score the BEST-matching detected face, not emb_list[0]: on a
                 # multi-char frame the gate asks "is this character present",

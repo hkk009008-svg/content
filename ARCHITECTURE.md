@@ -1243,11 +1243,27 @@ Set via `project.global_settings.dialogue_voice_mode` (see OPERATIONS.md §8).
 
 ### 11.1 Model
 
-`IdentityValidator` uses **DeepFace's `GhostFaceNet`** model
-([identity/validator.py:347, 487, 546](identity/validator.py:347)):
+`IdentityValidator` uses **DeepFace's `GhostFaceNet`** model. Every embedding
+read routes through one chokepoint, `_represent_deterministic`
+([identity/validator.py:105](identity/validator.py:105)):
 ```python
 DeepFace.represent(..., model_name="GhostFaceNet", ...)
 ```
+
+**Determinism (load-bearing — operator finding 2026-06-13).** DeepFace's
+`align=True` path (the default; `align=False` collapses the man-binding signal
+0.870→0.522 — alignment is essential, not optional) runs an OpenCV op that
+**races under multithreading**: ~1 in 20 calls returns a different, mis-aligned
+crop whose embedding is 0.456 cosine-distant from the otherwise byte-stable
+majority — enough to swing an identity score 0.870→0.762 (the man-ref
+"cold-draw"). It is NOT seedable (numpy/cv2/Python/TF seeds and
+`TF_DETERMINISTIC_OPS` do not remove it). `_cv2_single_thread` pins
+`cv2.setNumThreads(1)` for the duration of the call (prior count restored after,
+even on exception) → **30/30 byte-identical** (`scripts/_probe_embedding_determinism.py`),
+preserving the calibrated majority value (no re-baselining). All five `represent`
+call sites plus the video path's `extract_faces` (also aligns) route through this
+guard; figure-read selection breaks area ties on a deterministic geometric key so
+it is a pure function of the (stable) detection set.
 
 Naming clarification: everything in the codebase that says "ArcFace" actually
 runs GhostFaceNet. ArcFace is the loss function GhostFaceNet was trained with;
