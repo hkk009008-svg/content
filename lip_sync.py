@@ -895,11 +895,14 @@ def generate_rife_interpolation(
             if safe_download(out_url, rife_tmp) is None:
                 logger.warning("RIFE download failed", extra={"engine": "rife"})
                 return None
-            remuxed = _restore_audio_track(rife_tmp, video_path, output_path)
             try:
-                os.remove(rife_tmp)
-            except OSError:
-                pass
+                remuxed = _restore_audio_track(rife_tmp, video_path, output_path)
+            finally:
+                # Guarantee temp cleanup even if the re-mux raises unexpectedly.
+                try:
+                    os.remove(rife_tmp)
+                except OSError:
+                    pass
             if not remuxed:
                 logger.warning(
                     "RIFE audio re-mux failed; keeping original clip",

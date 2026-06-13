@@ -130,3 +130,27 @@ def test_rife_remux_failure_returns_none(tmp_path, monkeypatch):
     out = lip_sync.generate_rife_interpolation(str(source), str(tmp_path / "out.mp4"))
 
     assert out is None, "re-mux failure must surface as None (caller keeps original)"
+
+
+def test_rife_temp_cleaned_on_unexpected_remux_exception(tmp_path, monkeypatch):
+    """If the re-mux helper raises an UNEXPECTED exception (not the ffmpeg errors
+    it catches internally), the .noaudio.mp4 temp must still be cleaned up
+    (try/finally) and the call returns None so the caller keeps the original."""
+    import lip_sync
+
+    source = tmp_path / "source_with_audio.mp4"
+    _make_clip(source, with_audio=True)
+    cloud_video_only = tmp_path / "rife_cloud_result.mp4"
+    _make_clip(cloud_video_only, with_audio=False)
+    _mock_cloud(monkeypatch, cloud_video_only)
+
+    def _boom(*a, **k):
+        raise RuntimeError("unexpected re-mux failure")
+
+    monkeypatch.setattr(lip_sync, "_restore_audio_track", _boom)
+
+    out_path = tmp_path / "out.mp4"
+    out = lip_sync.generate_rife_interpolation(str(source), str(out_path))
+
+    assert out is None
+    assert not (tmp_path / "out.mp4.noaudio.mp4").exists(), "temp file leaked on unexpected exception"
