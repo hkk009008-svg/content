@@ -121,3 +121,40 @@ Beyond the impact-analysis checks above:
   change), don't implement in main context — orchestrate. See
   "Working a Multi-Task Plan" below.**
 
+# Session-wrap & handoff hygiene
+*Capacity lever #2 (audit `wf_6be2ee18-f4b`). Cuts stale-filename churn — 119
+handoff docs had accumulated, many with verdicts baked into 100+ char names that
+were false hours later.*
+
+- **Handoff filenames carry NO reversible state.** Name = `HANDOFF-<seat>-YYYY-MM-DD[-PMn].md`
+  only (seat + date + optional sequence). Verdicts, GO/NO-GO, pod/push/HEAD status,
+  blast-radius — all live in the BODY, where they can be corrected without spawning a
+  new file. A name like `...task4-GO-...-pod-BILLING.md` is false hours later and
+  forces "STALE — trust git" caveats downstream.
+- **Body is reconstructable-minus-git.** Record only: last-commit SHA, open
+  carry-forwards with status, session-specific sharp edges not yet promoted to a
+  standing doc, cursor position. Omit anything `git log` already proves.
+- Append-only across sessions is retained (one file per seat per session) — it is the
+  concurrent-write race-detection signal; do not overwrite-in-place.
+
+# Git-tooling sharp edges (standing — stop re-deriving these in handoffs)
+*Capacity lever #2. These are durable environment facts, not session observations.
+Reference this section from a handoff; don't restate it.*
+
+- **Stale per-seat / default index → phantom `MM`/deletions.** `git status` and
+  `git diff --stat HEAD` read the index and can show committed files as
+  modified/deleted. Ground truth: `git cat-file -e HEAD:<f>` (in HEAD?) + `test -f <f>`
+  (on disk?). Reseed with `git read-tree HEAD`.
+- **macOS `core.ignorecase=true` collapses case-only renames.** `git mv Foo.json foo.json`
+  can become a no-op/duplicate. Verify via the object store (`git ls-tree HEAD`), or use
+  `git -c core.ignorecase=false`, or `rm --cached` + `add`.
+- **Partial commits need an explicit pathspec.** `git commit -m … -- <path>` builds a
+  temp index from HEAD and cannot sweep a peer's staged WIP even if HEAD moved under
+  you. A bare `git commit` from a shared/default index CAN sweep peers — always
+  pathspec-scope (`-m` BEFORE `--`).
+- **Subagent git uses `env -u GIT_INDEX_FILE`** (subagent shell state does not
+  persist); main-seat commits go through the per-seat index directly — do NOT apply
+  `env -u` there.
+- **ComfyUI re-render of an identical graph+seed = cache hit → empty `/history`
+  outputs** (false-fail, not OOM). Cache-bust the filename_prefix / use fresh seeds.
+

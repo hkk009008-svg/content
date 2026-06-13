@@ -209,3 +209,7 @@ empirical basis, beneficiary/consent) is in docs/PROTOCOL-RULES-LOG.md.
   rule IDs + the template slice, never inherited doctrine. Every dispatch includes
   the templates' **Git hygiene** block (subagents prefix all git with
   `env -u GIT_INDEX_FILE` — seat-index corruption vector, 2026-06-12).
+- **Git-tooling sharp edges** — the recurring shared-tree/index edges (phantom index,
+  case-only renames, pathspec discipline, `env -u GIT_INDEX_FILE`, ComfyUI cache-hit
+  false-fail) are documented once in `docs/protocol/claude/core.md` →
+  "Git-tooling sharp edges (standing)". Reference it; do not re-derive in handoffs.
