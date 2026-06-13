@@ -1183,6 +1183,86 @@ class ShotController:
             )
         return identity_score
 
+    def _maybe_auto_rife(
+        self, video_path: str, take: dict, shot_id: str, settings: dict
+    ) -> str:
+        """Best-effort auto-RIFE smoothness pass for a finalized motion take.
+
+        Reads ``auto_rife_smoothness_threshold`` from per-project global_settings
+        (default 0.4; ``<= 0`` disables). Runs ``assess_motion_quality`` and records
+        the resulting ``smoothness_score`` on the take. When the score is below the
+        threshold, applies ``generate_rife_interpolation`` and, on success, returns
+        the interpolated path + records the ``FAL_RIFE`` cost. Auto-applies what
+        ``diagnose_clip`` (~:2096) only *recommends*. The ai-video-gen skill notes
+        RIFE after lip-sync "smooths boundary artifacts"; interpolation preserves
+        the audio-locked keyframe timing, so it is left on for dialogue takes too —
+        the smoothness threshold is the gate.
+
+        Never raises: any failure leaves the original ``video_path`` intact.
+
+        NOTE: ``assess_motion_quality`` calls cv2 WITHOUT the single-thread guard
+        (``identity.validator.cv2_single_thread``) used for binding identity scores.
+        Accepted here — the smoothness score gates only a best-effort enhancement,
+        so non-determinism can at worst trigger or skip one RIFE call, never corrupt
+        a take. Revisit if multi-worker finalize is ever enabled.
+
+        Returns:
+            The interpolated video path on success, else the original ``video_path``.
+        """
+        try:
+            threshold = float(settings.get("auto_rife_smoothness_threshold", 0.4))
+        except (TypeError, ValueError):
+            threshold = 0.4
+        if threshold <= 0 or not video_path or not os.path.exists(video_path):
+            return video_path
+        try:
+            from phase_c_ffmpeg import assess_motion_quality
+            mq = assess_motion_quality(video_path)
+            smoothness = mq.get("smoothness_score", 1.0)
+            take["metadata"]["smoothness_score"] = smoothness
+            # Only interpolate genuinely-jittery-but-recoverable motion. A
+            # "regenerate" verdict means frozen / heavily-artifacted / unreadable
+            # video that RIFE cannot fix (and is what assess_motion_quality returns
+            # for short or unopenable clips) — never send those to the cloud.
+            if mq.get("recommendation") != "regenerate" and smoothness < threshold:
+                rife_out = self._take_output_path(shot_id, take["id"] + "_rife", ".mp4")
+                rife_result = generate_rife_interpolation(video_path, rife_out)
+                if rife_result and os.path.exists(rife_result):
+                    take["metadata"]["auto_rife_applied"] = True
+                    logger.info(
+                        "auto-RIFE applied",
+                        extra={
+                            "shot_id": shot_id,
+                            "smoothness_score": round(smoothness, 3),
+                            "threshold": threshold,
+                        },
+                    )
+                    try:
+                        self.cost_tracker.record_api_call(
+                            "FAL_RIFE",
+                            operation="rife_interpolation",
+                            shot_id=shot_id,
+                            video_id=self.project.get("id", ""),
+                        )
+                    except Exception:
+                        logger.warning(
+                            "auto-RIFE cost record skipped",
+                            exc_info=True,
+                            extra={"shot_id": shot_id},
+                        )
+                    return rife_result
+                logger.warning(
+                    "auto-RIFE produced no output; keeping original",
+                    extra={"shot_id": shot_id, "smoothness_score": round(smoothness, 3)},
+                )
+        except Exception:
+            logger.warning(
+                "auto-RIFE step skipped (error)",
+                exc_info=True,
+                extra={"shot_id": shot_id},
+            )
+        return video_path
+
     def _finalize_motion_take(
         self,
         scene: dict,
@@ -1215,6 +1295,8 @@ class ShotController:
           2. Motion-fidelity gate (when driving_video_path is provided).
           3. Provenance fields (parent_take_id / intent / revised_prompt).
           4. take["path"] assignment.
+          4b. Optional auto-RIFE smoothness pass (may rebind take["path"] +
+              generated_video; records FAL_RIFE cost on apply).
           5. _mutate_shot (appends to motion_takes + sets generated_video).
           6. shot_results update.
           7. _rebuild_review_clips + _save_checkpoint.
@@ -1304,6 +1386,10 @@ class ShotController:
             take["revised_prompt"] = revised_prompt
         if extra_metadata:
             take["metadata"].update(extra_metadata)
+
+        # 3b. Auto-RIFE smoothness pass (best-effort; may rebind take["path"]).
+        video_path = self._maybe_auto_rife(video_path, take, shot_id, settings)
+        take["path"] = video_path
 
         # 4–5. Persist take via mutation
         final_vid = video_path

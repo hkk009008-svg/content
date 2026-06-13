@@ -71,6 +71,8 @@ API_COST_USD: dict[str, float] = {
     "ELEVENLABS":        0.01,    # per ~5s line (typical short dialogue; Eleven v3)
     "SUNO_V5":           0.50,    # per ~60s song via Suno V5 chirp model
     "FAL_STABLE_AUDIO":  0.10,    # per ~47s BGM clip via FAL Stable Audio (production default)
+    # Post-processing APIs (per clip / per call)
+    "FAL_RIFE":          0.04,    # per clip RIFE frame-interpolation via fal-ai/rife/video
 }
 
 
