@@ -1017,12 +1017,24 @@ production keys its
 early-return on `shot_type`, the max template keys its zeroing on `shot_type`, so
 one `classify_shot_type` fix covers both. No separate per-tier patch needed.
 
-Status: **fix_with_brief, deferred** — joint director + director2 routing brief
-(the seam also drives video-API selection, a Pair-B concern → Rule #23). Recorded
-as a scope **exemption** in [ADR-025](DECISIONS.md) (the Task-4 pod gate validated
-portrait routing only; this path was not exercised). Sources: operator
-verification-reports `77eb334` (production severity correction) + `9be752a`
-(max tier, dual-verified — source trace + adversarial refute=held).
+Status: **fix_with_brief — BRIEF AUTHORED + Pair-A co-signed** (joint, Rule #23):
+[`docs/BRIEF-director2-2026-06-13-landscape-char-routing-rule23-joint.md`](docs/BRIEF-director2-2026-06-13-landscape-char-routing-rule23-joint.md)
+(director2 author; director-1 Pair-A co-sign 2026-06-13). **The fix is 3 sites, not 1**
+(the `"landscape"` string overloaded identity-treatment *and* environment-semantics): the
+core seam (`classify_shot_type` → return `"wide"` when the landscape bucket matches a
+char-bearing shot) re-engages identity in both tiers, but **two downstream consumers branch
+on the `shot_type=="landscape"` string** and need re-keying to `("landscape","wide")` — the
+LTX-4K branch ([`phase_c_ffmpeg.py:411`](phase_c_ffmpeg.py:411)) and the Veo ambient-audio
+flag ([`phase_c_ffmpeg.py:375`](phase_c_ffmpeg.py:375)); a seam-only fix re-introduces a
+4K-loss + a narrow silent-clip regression (caught by the director-1 co-sign's independent
+pass `wf_e378821e-04d`, 11 mappers + 5 refuters — these consumers are invisible to a
+`classify_shot_type` *caller* audit). Single-seam **completeness for routing confirmed** (no
+second classifier produces the defect; `scene_decomposer` writes no `shot_type`;
+`optimizer_cache["spec"]["shot_type"]` is a dead store for routing). Recorded as a scope
+**exemption** in [ADR-025](DECISIONS.md) (the Task-4 pod gate validated portrait routing
+only; the char-aerial path was not exercised — a char-aerial pod re-validation is a
+pod-gated follow-up). Sources: operator verification-reports `77eb334` (production severity
+correction) + `9be752a` (max tier, dual-verified — source trace + adversarial refute=held).
 *Documented 2026-06-13 (operator-1 finding; director-delegated placement, co-sign
 pre-granted in the director's 10:49Z ACK). Source anchors hardened + all six
 claims re-verified against HEAD 2026-06-13 (operator-1, 6-way adversarial
