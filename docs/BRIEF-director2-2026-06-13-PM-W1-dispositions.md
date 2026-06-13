@@ -42,12 +42,31 @@ to reset) — which is why the suite never caught it.
   `except Exception` couldn't swallow the cap.)
 - **Severity:** production hang (multi-minute→indefinite 30s-loop) on total video-API outage.
 - **Fix:** add `_cascade_retries=_cascade_retries` to the site-1 recursive call (carry,
-  don't increment — same pass). One line. The probe converts directly to a regression test
-  (cap `time.sleep`, assert call_count==1) in `test_generate_ai_video_params.py`.
-- **Disposition:** near-trivial behavior-fix (restores documented intent). Recommend
-  fix_now via TDD once principal/operator2 picks it up — it's the highest-severity item here.
+  don't increment — same pass). One line.
+- **Disposition: ✅ LANDED `a46fd67` (W1.3)** — TDD (RED looped >3 → GREEN exactly 1 quota
+  retry, returns None); `test_multi_engine_all_fail_terminates_after_max_retries`; 6 in-file +
+  135 across cascade/aspect/dialogue/storyboard/ltx; ci_smoke OK. director2 implemented →
+  **operator2 verifies on resume** (implementer≠verifier; operator2 independently confirmed
+  the bug with their own probe = 7× quota retries). Restores documented `MAX_CASCADE_RETRIES=1`.
 
 ---
+
+## 2b. operator2 cross-verification findings (complementary verify worked)
+
+operator2's adversarial-verify of A/B/C (`wf_81bbe2c8`, 6 sonnet) — cores all CONFIRMED
+correct, 0 critical/0 major — surfaced 2 MINOR findings my trace missed (event
+`...10-13-35Z-operator2-to-director2-verification-report.md`); my dispositions
+(`...10-17-46Z-director2-to-operator2-coordination.md`):
+- **A1 — Fix-A `shot_id=scene_id` pollutes `get_video_cost()` shot_count** (cost_tracker.py:408-419;
+  a *consumer-side* angle my writer-only Rule#13 missed). No production reader → latent.
+  **Disposition: APPROVED refine to `shot_id=''`** — semantically a batch has no single shot;
+  `operation="storyboard_generation"`+`video_id` already attribute it; keeps shot_count honest.
+  operator2 lands (low priority, test-clean), director2 verifies.
+- **B-sib — KLING_3_0 (`phase_c_ffmpeg.py:677`) hardcodes `negative_prompt`** — CONVERGENT with
+  my ⭐#3 KLING-duration refuter. Folded into the KLING `fix_with_brief` (§3c — KLING_3_0
+  hardcodes BOTH duration `:667` and negative_prompt `:677`). My design call, deferred.
+- Doc-drift: my/operator2's phase_c_ffmpeg additions bumped PROGRAM-MANUAL anchors 55→57
+  (advisory; ci_smoke OK; `--fix` footgun + 4-seat line-shift → doc-sync on touch).
 
 ## 3. ⭐#3 design-call dispositions — ALL `fix_with_brief` (none `fix_now`)
 
