@@ -259,7 +259,7 @@ env -u GIT_INDEX_FILE git commit -m "test(prod-pulid): update <test> for FLUX-na
 
 **Procedure (controlled A/B on the same prompt + seed + reference face):**
 
-- [ ] **Step 1 — PuLID-OFF baseline (no identity):** render the production graph with the PuLID nodes bypassed (the existing no-character path pops 93/97/99/100/101, rewires PAG 301 → `["112",0]`). Arc-score the face identity against the reference. Expected: low (plain FLUX txt2img, no lock).
+- [ ] **Step 1 — PuLID-OFF baseline (no identity):** render the production graph with the PuLID nodes bypassed (the existing no-character path pops 93/97/99/100/101, rewires PAG 301 → `["112",0]`). Do this as a direct pod `/prompt` submit of the modified graph JSON — a small standalone script mirroring the experiment driver's `render_leg` (`scripts/_max_passBa_masked_pulid.py`) — NOT via a full `generate_ai_broll` pipeline call. Arc-score the face identity against the reference. Expected: low (plain FLUX txt2img, no lock).
 
 - [ ] **Step 2 — PuLID-ON (fixed graph):** render the fixed production `pulid.json` with the reference face on node 93, same prompt + seed. Arc-score against the same reference.
 
