@@ -19,6 +19,12 @@ Each test corresponds to a confirmed capability-recovery fix:
   member that consumes negative_prompt; Veo/Sora/Runway consume
   driving_video_path — so the two params are asserted on their respective
   consuming engines.
+- W1.3: a MULTI-engine all-fail cascade must terminate after MAX_CASCADE_RETRIES
+  (=1), not loop forever. The next-engine hop dropped _cascade_retries (reset to
+  0 each hop), so a multi-engine cascade never saw the incremented counter at its
+  terminal quota-check and the 30s retry pass repeated indefinitely. (Found via
+  the Rule#13 symmetric audit of W1.2's two recursion sites; single-engine
+  cascades terminated, which is why the suite never caught it.)
 """
 
 from __future__ import annotations
@@ -219,3 +225,61 @@ def test_explicit_negative_prompt_survives_quota_cooldown_retry(mock_kling_cls, 
     )
     # Sanity: the retry path actually ran (initial fail + retry = 2 dispatches).
     assert mock_kling_cls.return_value.generate_video.call_count == 2
+
+
+class _CascadeDidNotTerminate(BaseException):
+    """BaseException (NOT Exception) so the cascade's broad `except Exception`
+    cannot swallow the test cap — a real infinite loop would otherwise hang."""
+
+
+@patch("phase_c_ffmpeg._accept_or_reject", return_value=True)
+@patch("sora_native.SoraNativeAPI")
+@patch("kling_native.KlingNativeAPI")
+def test_multi_engine_all_fail_terminates_after_max_retries(mock_kling_cls, mock_sora_cls, _mock_accept):
+    """A MULTI-engine all-fail cascade must give up after MAX_CASCADE_RETRIES (=1):
+    exactly ONE 30s quota-cooldown retry, then return None.
+
+    Regression (W1.3): the next-engine hop (try_next_api's first recursion site,
+    phase_c_ffmpeg.py:176) forwarded attempted_apis but DROPPED _cascade_retries,
+    resetting it to 0 on every hop. In a multi-engine cascade the terminal
+    quota-check therefore never saw the incremented counter and the 30s retry pass
+    repeated indefinitely (a production hang on a total video-API outage).
+    Single-engine cascades terminated (no hop to reset the counter), which is why
+    the suite never caught it. time.sleep is mocked + capped so a real infinite
+    loop fails cleanly instead of hanging.
+    """
+    mock_kling_cls.return_value.generate_video.return_value = None   # KLING always fails
+    mock_sora_cls.return_value.generate_video.return_value = None    # SORA always fails
+
+    sleep_calls = []
+
+    def _capped_sleep(_secs):
+        sleep_calls.append(_secs)
+        if len(sleep_calls) > 3:
+            raise _CascadeDidNotTerminate(
+                f"cascade slept {len(sleep_calls)}x — did not terminate after MAX_CASCADE_RETRIES"
+            )
+
+    from phase_c_ffmpeg import generate_ai_video
+    looped = False
+    result = "sentinel"
+    with patch("phase_c_ffmpeg.time.sleep", side_effect=_capped_sleep):
+        try:
+            result = generate_ai_video(
+                image_path="in.png",
+                camera_motion="static",
+                target_api="KLING_NATIVE",
+                output_mp4="out.mp4",
+                shot_type="action",
+                video_fallbacks=["KLING_NATIVE", "SORA_NATIVE"],   # 2-engine cascade, both fail
+            )
+        except _CascadeDidNotTerminate:
+            looped = True
+
+    assert not looped, (
+        "multi-engine all-fail cascade did not terminate — looped >3 quota retries; "
+        "the next-engine hop drops _cascade_retries, resetting it to 0 each hop"
+    )
+    # Exactly one quota-cooldown retry (MAX_CASCADE_RETRIES=1), then give up.
+    assert len(sleep_calls) == 1, f"expected exactly 1 quota retry, got {len(sleep_calls)}"
+    assert result is None

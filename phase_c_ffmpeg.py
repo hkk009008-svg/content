@@ -180,6 +180,14 @@ def generate_ai_video(
                     has_dialogue=has_dialogue,
                     dialogue_native_audio=dialogue_native_audio,
                     duration=duration,
+                    # Carry (do NOT increment) the retry counter across the
+                    # next-engine hop — this is the same cascade pass. Dropping it
+                    # reset it to 0 on every hop, so a MULTI-engine all-fail cascade
+                    # never reached MAX_CASCADE_RETRIES at its terminal quota-check
+                    # and looped the 30s retry forever (W1.3; single-engine cascades
+                    # terminated, hiding it). Only the quota-cooldown retry below
+                    # (site 2) increments it.
+                    _cascade_retries=_cascade_retries,
                     # Forward both cascade-sensitive params across the hop:
                     #  - driving_video_path: else Veo/Sora/Runway silently fall
                     #    back to image-only motion (no perf-capture guidance).
