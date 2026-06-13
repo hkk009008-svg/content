@@ -972,11 +972,14 @@ def generate_ai_video(
 
 def stitch_modules(module_paths: list, final_output: str) -> str:
     """Stitches normalized MP4 modules sequentially using the FFmpeg concat demuxer."""
-    list_file = "concat_list.txt"
+    # Scope the concat list to the output path (mirror audio/dialogue.py:651) so
+    # two stitches running from the same CWD for different projects can't clobber
+    # each other's list; clean it up in a finally so a failed ffmpeg run can't leak it.
+    list_file = f"{final_output}.concat.txt"
     with open(list_file, "w") as f:
         for path in module_paths:
             f.write(f"file '{os.path.abspath(path)}'\n")
-            
+
     cmd = [
         "ffmpeg", "-y", "-f", "concat", "-safe", "0",
         "-i", list_file, "-c", "copy", final_output
@@ -989,8 +992,10 @@ def stitch_modules(module_paths: list, final_output: str) -> str:
             extra={"stderr_tail": e.stderr.decode(errors="replace")[-200:]},
         )
         raise
+    finally:
+        if os.path.exists(list_file):
+            os.remove(list_file)
 
-    os.remove(list_file)
     logger.info("Stitched sequence", extra={"final_output": final_output})
     return final_output
 
