@@ -120,8 +120,11 @@ def generate_ai_video(
                 "attempts": list(attempted_apis),
             }
 
-    # Shot-type-aware negative prompt — tailored to what each shot type actually suffers from
-    if negative_prompt is None:
+    # Shot-type-aware negative prompt — tailored to what each shot type actually suffers from.
+    # Guard is `not negative_prompt` (not `is None`): callers commonly pass "" for a shot with
+    # no negative_constraints (controller.py:1600 → shot.get("negative_constraints", "")), and an
+    # empty string must still trigger the builder rather than ship the engine an empty negative.
+    if not negative_prompt:
         _base_neg = (
             "blur, distortion, deformed face, identity change, face morph, extra limbs, "
             "floating objects, flickering, temporal inconsistency, plastic skin, "
