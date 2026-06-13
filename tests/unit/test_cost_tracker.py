@@ -714,3 +714,17 @@ class TestVerifiedPricePins:
         # fal.ai model page for flux-pro/kontext/max/multi (the variant
         # production calls): "$0.08 per image". The old 0.04 was the non-max tier.
         assert API_COST_USD["FLUX_KONTEXT"] == 0.08
+
+
+class TestApiCostUsdCompleteness:
+    """Every dispatched video engine must be priced, else would_exceed() returns
+    0.0 for it and the pre-spend budget gate (controller.generate_motion_take,
+    ADR-022) silently admits it near budget. Capacity audit wf_6be2ee18-f4b."""
+
+    def test_seedance_priced_in_api_cost_usd(self):
+        assert "SEEDANCE" in API_COST_USD
+        assert API_COST_USD["SEEDANCE"] > 0
+
+    def test_fal_svd_priced_in_api_cost_usd(self):
+        assert "FAL_SVD" in API_COST_USD
+        assert API_COST_USD["FAL_SVD"] > 0

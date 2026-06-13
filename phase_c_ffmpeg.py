@@ -97,6 +97,13 @@ def generate_ai_video(
                              fall through silently to text-to-video baseline.
         Empty string disables the feature — preserves existing behavior
         for all callers that haven't been updated yet.
+
+    Budget gate:
+        This function does NOT check the budget. The caller (generate_motion_take
+        in cinema/shots/controller.py, ADR-022) calls cost_tracker.would_exceed()
+        before invoking this — all per-take motion spend is gated there. New
+        engines must therefore carry an API_COST_USD entry (cost_tracker.py) or
+        would_exceed() reads 0.0 and the gate silently admits them.
     """
     from cinema.context import get_project_setting
     from cinema.aspect import DEFAULT_ASPECT_RATIO, fal_aspect_ratio, runway_ratio, is_portrait

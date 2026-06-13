@@ -53,6 +53,8 @@ API_COST_USD: dict[str, float] = {
     "LTX":           0.10,
     "RUNWAY_GEN4":   0.50,
     "RUNWAY":        0.40,
+    "FAL_SVD":       0.20,    # per ~5s clip via fal-ai/fast-svd (conservative estimate; calibrate against fal.ai invoice)
+    "SEEDANCE":      0.30,    # per ~5s clip via Seedance 2.0 (conservative estimate; calibrate against Seedance invoice)
     # Image APIs (per still)
     "COMFYUI_PULID": 0.04,   # FLUX+PuLID on the ComfyUI pod (GPU-time estimate)
     "FLUX_PULID":    0.05,
