@@ -1194,9 +1194,11 @@ class ShotController:
         threshold, applies ``generate_rife_interpolation`` and, on success, returns
         the interpolated path + records the ``FAL_RIFE`` cost. Auto-applies what
         ``diagnose_clip`` (~:2096) only *recommends*. The ai-video-gen skill notes
-        RIFE after lip-sync "smooths boundary artifacts"; interpolation preserves
-        the audio-locked keyframe timing, so it is left on for dialogue takes too —
-        the smoothness threshold is the gate.
+        RIFE after lip-sync "smooths boundary artifacts", so it is left on for
+        dialogue takes too — the smoothness threshold is the gate. Dialogue audio
+        survives because ``generate_rife_interpolation`` re-muxes the source clip's
+        audio onto the (video-only) RIFE output (``lip_sync._restore_audio_track``);
+        fal-ai/rife/video itself returns no audio track.
 
         Never raises: any failure leaves the original ``video_path`` intact.
 
