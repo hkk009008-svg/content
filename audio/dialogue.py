@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import re
+import warnings
 from typing import TYPE_CHECKING, Optional
 
 import requests
@@ -392,8 +393,13 @@ def _maybe_save_alignment(
 
     Driven by `forced_alignment_enabled` in the per-project global_settings
     on `ctx`. Returns the JSON path on success, None when disabled or
-    alignment fails. Downstream consumers (lipsync, SRT writer) load
-    these sidecars when present.
+    alignment fails.
+
+    NOTE (2026-06-13, capacity audit wf_6be2ee18-f4b): the sidecar is currently
+    WRITE-ONLY — load_alignment_json has zero callers (the SRT writer was deleted;
+    lip_sync has no alignment imports). Compute runs for no current output. Wire it
+    into lip_sync.validate_lipsync_quality when the mouth-energy scorer lands
+    (catB-syncnet integration point) to make this pay off.
 
     language: project language name. When None, reads from ctx's
     `language` setting. Critical for Korean/Japanese/Chinese — whisper
@@ -412,6 +418,12 @@ def _maybe_save_alignment(
         return None
     json_path = os.path.splitext(audio_path)[0] + ".alignment.json"
     save_alignment_json(result, json_path)
+    warnings.warn(
+        "[alignment] forced-alignment sidecar written but load_alignment_json has "
+        "no consumer — compute runs for no current output. Wire into "
+        "lip_sync.validate_lipsync_quality to use (catB-syncnet integration point).",
+        stacklevel=2,
+    )
     print(f"   📐 Forced alignment ({result.provider}, {len(result.words)} words, lang={language}) → {json_path}")
     return json_path
 
