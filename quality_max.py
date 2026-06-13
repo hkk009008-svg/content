@@ -34,6 +34,7 @@ import concurrent.futures
 import copy
 import hashlib
 import json
+import math
 import os
 import random
 import shutil
@@ -168,6 +169,8 @@ def _validate_overlay_value(ui_key: str, value):
             v = typ(value)
         except (TypeError, ValueError):
             return None, f"{ui_key}={value!r} not coercible to {typ.__name__}; skipped"
+        if typ is float and not math.isfinite(v):
+            return None, f"{ui_key}={value!r} non-finite; skipped"
         if v < lo:
             return typ(lo), f"{ui_key}={value} below min {lo}; clamped to {lo}"
         if v > hi:
@@ -183,6 +186,19 @@ def _validate_overlay_value(ui_key: str, value):
             return value, None
         return None, f"{ui_key}={value!r} not bool; skipped"
     return value, None  # unreachable for current schema shapes
+
+
+def _finite_or(value, default):
+    """Coerce value to a finite float, else return default. Defends the
+    numeric gate reads against a NaN/inf/non-coercible settings value (a
+    NaN token survives in project.json). Pair-B is landing a shared
+    _finite_or; this local copy is a documented temporary (trivial later
+    unification)."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    return v if math.isfinite(v) else default
 
 
 def _load_max_workflow() -> dict:
@@ -1064,9 +1080,9 @@ def generate_ai_broll_max(
     n_max = int(params.get("candidate_count", 8))
     batch = int(params.get("candidate_batch", 4))
     halt_min_n = int(params.get("halt_min_n", 4))
-    halt_composite = float(params.get("halt_threshold_composite", 0.92))
-    halt_arc = float(params.get("halt_threshold_arc", 0.85))
-    regen_floor = float(params.get("regenerate_floor_arc", 0.82))
+    halt_composite = _finite_or(params.get("halt_threshold_composite", 0.92), 0.92)
+    halt_arc = _finite_or(params.get("halt_threshold_arc", 0.85), 0.85)
+    regen_floor = _finite_or(params.get("regenerate_floor_arc", 0.82), 0.82)
     halt_rule = params.get("halt_rule", "composite_only")
 
     scores: List[CandidateScore] = []
@@ -1083,7 +1099,7 @@ def generate_ai_broll_max(
     # feeds get_adaptive_pulid_weight. Pass the project's identity acceptance
     # bar so passed=True means "would have been acceptable as the final shot".
     if ctx is not None:
-        identity_threshold = float(get_project_setting(ctx, "identity_strictness", 0.60))
+        identity_threshold = _finite_or(get_project_setting(ctx, "identity_strictness", 0.60), 0.60)
     else:
         identity_threshold = 0.60
 
