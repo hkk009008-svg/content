@@ -729,6 +729,42 @@ investigate before scaling to N=4.
 - Both arc scores >=0.70 AND binding_ok for BOTH characters in >=3/4 seeds
   (see GO/NO-GO criteria): DESIGN A GO.
 
+**PHASE 3 RESULTS (2026-06-13 — DESIGN A = NO-GO at N=1; did NOT scale to N=4).**
+Instrument: `scripts/_max_passBa_masked_pulid.py` (= `_max_s2_dual_pulid.build_dual`
++ per-char `attn_mask` on the PRODUCTION `ApplyPulidFlux`, per the Phase-1
+correction — NOT `ApplyPulidAdvanced`, which is SDXL-era). Artifacts:
+`logs/passb_n1.jpg` (swapped polarity) + `logs/passb_n1_noswap.jpg`; binding
+table `logs/halves_rescore_20260613.{json,txt}` (regenerate:
+`scripts/_arc_score_session.py --halves --artifacts logs/passb_n1*.jpg`). Spend
+~$0.06 (2 × N=1 smoke). Seed 990011 both runs.
+
+- **VRAM (Phase 2 FOLDED): PASS** — peak 33.9 / 32.9 GiB, well below S2's 41.8
+  and the 48 GiB ceiling; no OOM. The masked dual adds no VRAM risk.
+- **attn_mask has NO controlling effect — swap-INVARIANT.** Same seed, two mask
+  polarities (default aria←left/man←right; `--swap` aria←right/man←left)
+  produced near-IDENTICAL output and binding: aria **0.823 / 0.828** on the
+  RIGHT half, man **0.450 / 0.454** (the ~0.447 cross-floor = noise) both runs,
+  left half NO_FACE both runs. If the mask were biting, swapping would move
+  aria across the frame; it did not. Likely cause: attn_mask coordinate-space
+  mismatch (pixel mask vs latent/8 expected — probe #4, `_mask_gen.py` note) or
+  PuLID dominance overriding the mask.
+- **Man never binds.** 0.45 cross-floor regardless of mask/territory —
+  consistent with Pass-A (0.487) and S2 (0/4). Masking gave the man exclusive
+  half and he STILL did not bind.
+- **VISUAL (mandatory, overrides embeddings): NO-GO.** Both figures render as
+  the same woman (aria-like, short dark wavy hair, feminine) — the prompt's
+  "middle-aged man with a grey beard" is absent. Textbook S3 homogenization.
+- **Binding GO bar (STRICT count): 0/1 both-chars** — man fails every seed; not
+  scaled to N=4 because N=1 is unambiguous and saves ~4× spend (ADR-023 spirit).
+- **ROOT-CAUSE REFRAME (carried to the fork):** the driver runs **LoRA-LESS by
+  design** (`build_dual` → `_inject_identity(..., None, ...)` to isolate the
+  PuLID axis), yet a trained **`char_lora_man_v1.safetensors` sits unused on the
+  pod**. The man's chronic PuLID-only underbinding may simply be that PuLID
+  alone is too weak for the secondary identity. Candidate **Design D**: dual
+  render WITH the man LoRA (@~0.55 per the realism config) + PuLID — tests the
+  production approach, not just the isolated-PuLID axis. Surfaced to user as the
+  recommended next direction over Design C swap-rescue.
+
 ### Phase 4 — Design C: ReActor swap rescue probe (with or without Design A)
 
 **Use the best seed from Phase 3** (or from S2 n3 if Phase 3 is skipped/aborting).
