@@ -569,6 +569,61 @@ class TestStoryboardHappyPath:
             f"All record_api_call invocations: {gen.cost_tracker.record_api_call.call_args_list}"
         )
 
+    def test_batch_cost_records_against_real_tracker(self, tmp_path):
+        """The storyboard batch cost must record against the REAL CostTracker
+        signature — not merely a MagicMock that accepts any kwarg.
+
+        Regression (Pair-B lane-health baseline): the call site passed
+        ``scene_id=scene_id``, but ``record_api_call()`` has no ``scene_id``
+        parameter, so every batch call raised a TypeError that the wrapping
+        ``except Exception`` swallowed — 100% of storyboard-mode cost tracking
+        was silently dead. ``test_cost_recorded_exactly_once_for_batch`` above
+        uses a MagicMock tracker that accepts the bad kwarg and therefore cannot
+        catch the mismatch. This test injects a real CostTracker so the
+        signature actually binds and the swallowed TypeError surfaces as a
+        zero ``spent_usd``.
+        """
+        from cinema.phases.motion_render import MotionRenderPhase
+        from cost_tracker import CostTracker
+
+        n = 3
+        shots = [_make_shot(f"s1_{i}") for i in range(n)]
+        scene = _make_scene("scene_1", shots)
+        project = _make_project([scene], storyboard_mode=True)
+
+        kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
+        for p in kf_paths.values():
+            open(p, "w").close()
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+        # REAL tracker: budget_usd=None → would_exceed() is always False, so the
+        # pre-spend gate lets the batch launch and we reach the cost record.
+        gen.cost_tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=None)
+
+        storyboard_path = str(tmp_path / "combined.mp4")
+        seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(n)]
+        for p in seg_paths:
+            open(p, "w").close()
+
+        with patch("kling_native.KlingNativeAPI") as mock_kling_cls:
+            mock_kling = MagicMock()
+            mock_kling.generate_storyboard.return_value = storyboard_path
+            open(storyboard_path, "w").close()
+            mock_kling_cls.return_value = mock_kling
+
+            with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
+                mock_split.return_value = seg_paths
+
+                phase = MotionRenderPhase(shot_generator=gen, project=project)
+                phase.run(_make_lifecycle())
+
+        # API_COST_USD["KLING_NATIVE"] == 0.50; a swallowed TypeError leaves it 0.0.
+        assert gen.cost_tracker.spent_usd == pytest.approx(0.50), (
+            "storyboard batch cost was not recorded against the real tracker — "
+            f"spent_usd={gen.cost_tracker.spent_usd!r} (expected 0.50). The "
+            "record_api_call(scene_id=...) kwarg raised a swallowed TypeError."
+        )
+
     def test_finalize_called_with_record_cost_false(self, tmp_path):
         """Each per-segment finalize must pass record_cost=False to suppress N-counting."""
         result, gen, mock_kling, mock_split, seg_paths, sb_path = self._run_storyboard(3, tmp_path)
