@@ -1,6 +1,6 @@
 # Production PuLID SDXL→FLUX Fix Implementation Plan
 
-> **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make the default production image tier's single PuLID actually lock the reference face on FLUX by replacing the SDXL-era PuLID nodes in `pulid.json` with the FLUX-native node set, and aligning the runtime `start_at` so the swap binds.
 
@@ -23,7 +23,7 @@
 - Create: `tests/unit/test_pulid_production_flux.py`
 - Modify: `pulid.json` (nodes 99, 100, 101)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/unit/test_pulid_production_flux.py`:
 
@@ -86,12 +86,12 @@ def test_no_sdxl_pulid_nodes_remain(graph):
     assert "PulidEvaClipLoader" not in classes
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_pulid_production_flux.py -v`
 Expected: FAIL — `pulid.json` node 99 is still `PulidModelLoader`, node 100 `ApplyPulid`, etc.
 
-- [ ] **Step 3: Edit `pulid.json` — replace nodes 99, 100, 101**
+- [x] **Step 3: Edit `pulid.json` — replace nodes 99, 100, 101**
 
 Replace node `"99"` with:
 
@@ -148,12 +148,12 @@ Replace node `"101"` with:
 Leave every other node untouched (97, 112, the sampler chain, RealESRGAN 500/501/502, PAG 301). Match the file's existing indentation. Verify it stays valid JSON:
 `env -u GIT_INDEX_FILE .venv/bin/python -c "import json; json.load(open('pulid.json')); print('valid json')"`
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_pulid_production_flux.py -v`
 Expected: PASS (4 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 env -u GIT_INDEX_FILE git add -- pulid.json tests/unit/test_pulid_production_flux.py
@@ -174,7 +174,7 @@ data-integrity no-op (ADR-024). Regression test pins the FLUX classes." -- pulid
 
 **Why:** `apply_workflow_params` writes `params["pulid_start_at"]` onto node 100 at runtime (`workflow_selector.py:520`). If the templates keep the SDXL-era values (0.2–0.35), they overwrite the JSON's new `0.0` on every render and re-suppress the coarse-identity window — making Task 1 net-zero.
 
-- [ ] **Step 1: Add the failing test**
+- [x] **Step 1: Add the failing test**
 
 Append to `tests/unit/test_pulid_production_flux.py`:
 
@@ -189,12 +189,12 @@ def test_production_pulid_start_at_is_flux_zero():
         assert ws.WORKFLOW_TEMPLATES[cls]["pulid_start_at"] == 0.0, cls
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_pulid_production_flux.py::test_production_pulid_start_at_is_flux_zero -v`
 Expected: FAIL — portrait is currently 0.2.
 
-- [ ] **Step 3: Edit `workflow_selector.py`**
+- [x] **Step 3: Edit `workflow_selector.py`**
 
 In `WORKFLOW_TEMPLATES`, set `pulid_start_at` to `0.0` for these four classes (find each by its current value):
 - portrait: `"pulid_start_at": 0.2` → `"pulid_start_at": 0.0`
@@ -209,12 +209,12 @@ Fix the stale docstring at `workflow_selector.py:512`:
 
 (Optional consistency tweak, not required: the fallback default in `apply_workflow_params` is `params.get("pulid_start_at", 0.3)` — a latent SDXL value. Every template supplies the key, so it is dead, but you may lower it to `0.0` to match. The spec scoped this out; leave it unless trivial.)
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_pulid_production_flux.py -v`
 Expected: PASS (5 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 env -u GIT_INDEX_FILE git add -- workflow_selector.py tests/unit/test_pulid_production_flux.py
@@ -230,17 +230,17 @@ apply_workflow_params writes start_at onto node 100 at runtime; SDXL-era
 
 **Files:** none (verification only).
 
-- [ ] **Step 1: Run the smoke block**
+- [x] **Step 1: Run the smoke block**
 
 Run: `env -u GIT_INDEX_FILE .venv/bin/python scripts/ci_smoke.py`
 Expected: ends with `OK` (the ~55 PROGRAM-MANUAL doc-anchor drifts are advisory).
 
-- [ ] **Step 2: Run the full suite**
+- [x] **Step 2: Run the full suite**
 
 Run: `env -u GIT_INDEX_FILE .venv/bin/python -m pytest -q`
 Expected: PASS (baseline this session was 2244 passed / 2 skipped; expect 2244+5 new − overlaps, no failures). No test pins `pulid_start_at` (verified), so the template change should not break anything. If a workflow_selector test fails on a structural assumption, read it and update it to reflect the new value — do NOT revert the fix.
 
-- [ ] **Step 3: Commit only if Step 2 required a test update**
+- [x] **Step 3: Commit only if Step 2 required a test update**
 
 ```bash
 env -u GIT_INDEX_FILE git add -- tests/<the-updated-test>.py
@@ -249,9 +249,9 @@ env -u GIT_INDEX_FILE git commit -m "test(prod-pulid): update <test> for FLUX-na
 
 ---
 
-## Chunk 2: Pod acceptance gate (BLOCKED — needs pod-up + user spend-go)
+## Chunk 2: Pod acceptance gate — COMPLETE ✅ (PASSED 2026-06-13)
 
-> This chunk is the empirical proof and is NOT runnable offline. The pod is currently down and pod spend is user-gated per session. Do NOT push / treat the fix as the shipping default until this gate passes. Run it when the pod is up and spend is authorized.
+> **GO.** Pod acceptance gate PASSED 2026-06-13 (operator-run, user-directed). PuLID-OFF arc **0.6205** → PuLID-ON arc **0.8779** (Δ +0.257), seed 990011, peak VRAM 18.2 GiB, fp8 (node 112 `flux1-dev-fp8`) + FaceDetailer-free + visually photoreal. All four Step-4 GO criteria met (material lift / FaceDetailer-free binding / fp8 compat / visual photoreal). Artifact: `logs/prod_pulid_acceptance_20260613.json` (logs/ gitignored; reproduce via the committed instrument `scripts/_prod_pulid_acceptance.py`, `a43358f`). **The FLUX-native production PuLID fix is the shipping default.** Decision record: ADR-025 (DECISIONS.md). Original "BLOCKED" gate text preserved in git history.
 
 ### Task 4: Pod before/after identity validation
 
@@ -259,18 +259,18 @@ env -u GIT_INDEX_FILE git commit -m "test(prod-pulid): update <test> for FLUX-na
 
 **Procedure (controlled A/B on the same prompt + seed + reference face):**
 
-- [ ] **Step 1 — PuLID-OFF baseline (no identity):** render the production graph with the PuLID nodes bypassed (the existing no-character path pops 93/97/99/100/101, rewires PAG 301 → `["112",0]`). Do this as a direct pod `/prompt` submit of the modified graph JSON — a small standalone script mirroring the experiment driver's `render_leg` (`scripts/_max_passBa_masked_pulid.py`) — NOT via a full `generate_ai_broll` pipeline call. Arc-score the face identity against the reference. Expected: low (plain FLUX txt2img, no lock).
+- [x] **Step 1 — PuLID-OFF baseline (no identity):** render the production graph with the PuLID nodes bypassed (the existing no-character path pops 93/97/99/100/101, rewires PAG 301 → `["112",0]`). Do this as a direct pod `/prompt` submit of the modified graph JSON — a small standalone script mirroring the experiment driver's `render_leg` (`scripts/_max_passBa_masked_pulid.py`) — NOT via a full `generate_ai_broll` pipeline call. Arc-score the face identity against the reference. Expected: low (plain FLUX txt2img, no lock).
 
-- [ ] **Step 2 — PuLID-ON (fixed graph):** render the fixed production `pulid.json` with the reference face on node 93, same prompt + seed. Arc-score against the same reference.
+- [x] **Step 2 — PuLID-ON (fixed graph):** render the fixed production `pulid.json` with the reference face on node 93, same prompt + seed. Arc-score against the same reference.
 
-- [ ] **Step 3 — Read with the deterministic scorer** (post `d48b58b`, the OpenCV thread-race fix): use `scripts/_arc_score_session.py` single-artifact. Show both renders in Preview.
+- [x] **Step 3 — Read with the deterministic scorer** (post `d48b58b`, the OpenCV thread-race fix): use `scripts/_arc_score_session.py` single-artifact. Show both renders in Preview.
 
-- [ ] **Step 4 — GO/NO-GO:**
+- [x] **Step 4 — GO/NO-GO:**
   - GO if PuLID-ON identity rises materially over the PuLID-OFF baseline (target toward ~0.87 for a single clean face) AND the render is visually photoreal AND a face is detectable (no NO_FACE — confirms FaceDetailer-free binding).
   - If NO_FACE / weak: the design's follow-up is to add FaceDetailer (node 600) — a NEW spec/ADR, not this plan.
   - If the lock is weak in a way consistent with fp8 truncation: escalate the fp16-UNet decision (follow-up ADR; no fp16 asset is in scope).
 
-- [ ] **Step 5 — Record the measurement** per R-MEASURE: persist the two arc scores + render md5s to a `logs/` artifact and cite them in the GO/NO-GO note. Only then is the fix cleared to be the shipping default.
+- [x] **Step 5 — Record the measurement** per R-MEASURE: persist the two arc scores + render md5s to a `logs/` artifact and cite them in the GO/NO-GO note. Only then is the fix cleared to be the shipping default.
 
 ---
 

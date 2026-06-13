@@ -725,11 +725,13 @@ audit across the post-prune wiring), live two-char pod render with both arc scor
 
 ## 9. Adjacent debts surfaced by this work (recorded, NOT in scope)
 
-- **Production `pulid.json` runs SDXL-generation PuLID on a FLUX UNet** — node 112
-  loads `FLUX1/flux1-dev-fp8.safetensors` while node 99/100 load
-  `ip-adapter_pulid_sdxl_fp16.safetensors` via legacy `ApplyPulid` (verified by
-  JSON inspection; max tier correctly uses `ApplyPulidFlux`). Latent quality bug on
-  the pod production path; candidate for ARCHITECTURE.md §16 + a fix ticket.
+- **Production `pulid.json` runs SDXL-generation PuLID on a FLUX UNet** —
+  **RESOLVED 2026-06-13 (ADR-025).** Nodes 99/100/101 upgraded to FLUX-native
+  (`PulidFluxModelLoader` / `ApplyPulidFlux` / `PulidFluxEvaClipLoader`,
+  `pulid_flux_v0.9.1.safetensors`, `start_at=0.0`); pod acceptance gate confirmed the
+  fix (PuLID-OFF 0.6205 → ON 0.8779). Was: SDXL `ip-adapter_pulid_sdxl_fp16` via legacy
+  `ApplyPulid` on the FLUX UNet (node 112 `flux1-dev-fp8`) — a structural no-op (verified
+  by JSON inspection). Fix commits `a1103bd`/`f05c83b`/`c5199de`/`a924055`/`7b54af9`.
 - **Lipsync is single-face**: `generate_lip_sync_video(character_image_path, …)`
   (lip_sync.py:705-733) is called with the primary ref only (controller.py:1562).
   In a two-character dialogue shot the secondary's face is never synced — out of

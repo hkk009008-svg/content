@@ -1008,3 +1008,82 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   workflow_selector.py:512 (production PuLID param tuning, no-op target);
   phase_c_assembly.py:204,413 (shipping production render path);
   docs/HANDOFF-director-transplant-2026-06-13-overcook-structural-prod-hybrid-driver-built.md.
+
+## ADR-025 — Production PuLID SDXL→FLUX correctness fix (shipping default; Task-4 pod-validated)
+
+- **Date:** 2026-06-13
+- **Status:** Accepted + **VALIDATED** — shipping production default (push USER-gated).
+  (Distinct from ADR-024, whose dual-identity GRAFT experiment remains empirically
+  pending its own N=1 burn — that status is unchanged.)
+- **Context:** The default production image tier renders portraits via the ComfyUI
+  graph `pulid.json` on a FLUX UNet (node 112 = `flux1-dev-fp8.safetensors`). It
+  shipped with the **SDXL-era** PuLID node set — `PulidModelLoader` (99) /
+  `ApplyPulid` (100) / `PulidEvaClipLoader` (101) loading
+  `ip-adapter_pulid_sdxl_fp16.safetensors`. `ApplyPulid` patches U-Net
+  cross-attention layers that FLUX's DiT architecture lacks, so it applied **~zero
+  face lock** — a structural no-op. Production-default `COMFYUI_PULID` portraits
+  therefore carried little/no reference-face identity, while cost/provenance were
+  tagged as if PuLID ran. This was the **DATA-INTEGRITY follow-up carried in ADR-024**
+  (its Consequences bullet, "Needs empirical confirmation FIRST"). The bug was
+  **test-dark** — no test asserted the node classes, so it shipped silently.
+- **Decision:** Correct the single production PuLID to the FLUX-native node set, with
+  no other behavior change (LoRA / dual-identity stay out — that is the separate
+  ADR-024 experiment track):
+  - `pulid.json` nodes 99/100/101 → `PulidFluxModelLoader` / `ApplyPulidFlux` /
+    `PulidFluxEvaClipLoader` (`pulid_flux_v0.9.1.safetensors`). Node 100 wired
+    `pulid_flux`/`fusion`/`use_gray`, `start_at=0.0`, `model=["112",0]` direct from the
+    UNETLoader (no LoRA node 700).
+  - `workflow_selector.WORKFLOW_TEMPLATES` `pulid_start_at` → `0.0` for
+    portrait/medium/wide/action (**the crux:** `apply_workflow_params` writes
+    `start_at` onto node 100 at runtime; the SDXL-era 0.2–0.35 would overwrite the
+    graph's new 0.0 every render and re-suppress the coarse-identity window, making the
+    node swap net-zero). Landscape stays `pulid_weight=0.0` (PuLID off).
+  - Regression test `tests/unit/test_pulid_production_flux.py` pins the FLUX node
+    classes + `start_at=0.0` (closes the test-dark gap).
+  - **Commits:** `a1103bd` (graph) / `f05c83b` (templates + docstring) / `c5199de`
+    (test) / `a924055` (case-landmine `Pulid.json`→`pulid.json` git mv + case-pin
+    test) / `7b54af9` (advisory folds).
+- **Validation — Task-4 pod acceptance gate (R-MEASURE):** instrument
+  `scripts/_prod_pulid_acceptance.py` (`a43358f`); artifact
+  `logs/prod_pulid_acceptance_20260613.json` (logs/ gitignored, reproducible). A/B on
+  a fixed reference + seed 990011: **PuLID-OFF arc 0.6205 → PuLID-ON arc 0.8779
+  (+0.257)**, peak VRAM 18.2 GiB. All four Step-4 GO criteria met: material lift ✓;
+  **FaceDetailer-free binding** (figure read, no NO_FACE) ✓; **fp8 compatibility** —
+  node 112 `flux1-dev-fp8` bound to 0.8779, retiring the fp8-vs-fp16 escalation ✓;
+  **visually photoreal** (both renders viewed) ✓. Operator-run (user-directed),
+  director Step-5 GO call.
+- **Independent verification (operator report `77eb334`, Sonnet find→adversarial-refute,
+  $0):** the determinism siblings routed in PM4 (`970015b`/`099a1ea`) =
+  CONFIRMED-SOLID + complete set (5 production DeepFace sites guarded, zero unrouted,
+  not test-dark, 5/5 spy tests pass); the SDXL-on-FLUX no-op equivalence + the
+  scope-exemption claim (below) HELD under adversarial attack.
+- **Consequences:**
+  - +: Production-default portraits now carry genuine reference-face identity on the
+    shipping fp8 graph. The fix **is** the shipping default.
+  - +: **Resolves ADR-024's carried DATA-INTEGRITY follow-up** — the no-op is
+    pod-confirmed (the OFF baseline = no lock) and fixed. ADR-024's *main* decision
+    (the dual-identity GRAFT driver `scripts/_prod_dual_lora_pulid.py`) is untouched
+    and **still pending its own N=1 burn**.
+  - − **SCOPE EXEMPTION (director2 Rule #23 + operator severity correction).** The
+    Task-4 gate validated PuLID-*engaged* shot-classes. It did **not** cover
+    char-bearing-**landscape** shots: `classify_shot_type` mis-routes them to
+    `landscape`, and — corrected by the operator — the production tier does not merely
+    write `pulid_weight=0.0`; it **early-returns at `phase_c_assembly.py:224`** to
+    `_fal_flux_fallback(..., character_image=None, ...)`, skipping ComfyUI and
+    **dropping the character reference entirely** → pure text2img, zero identity
+    (strictly *worse* than weight 0.0). This is **orthogonal** to this fix (it decides
+    *whether* identity engages, not *whether PuLID binds when it runs* — confirmed by
+    the operator). It is a **separate routing/fallback bug**, `fix_with_brief` + joint
+    director+director2 sign-off, targeting `phase_c_assembly.py:224` +
+    `classify_shot_type` + an **untraced MAX-tier sibling** (`quality_max.py` landscape
+    template, also `pulid_weight=0.0`). **NOT** landing in this change.
+  - −: Historical `COMFYUI_PULID` renders logged **before** this fix carried ~zero
+    identity (provenance caveat for old takes).
+  - −: Residual — the macOS-pinned binding numbers owe a Linux/TBB pod-portability
+    re-confirm (the existing portability gate); not a blocker for this single-PuLID GO.
+- **Cross-refs:** `pulid.json`; `workflow_selector.py:21-109,506-542`;
+  `tests/unit/test_pulid_production_flux.py`; `phase_c_assembly.py:224` (the exemption
+  seam); `docs/superpowers/specs/2026-06-13-production-pulid-flux-fix-design.md` +
+  `docs/superpowers/plans/2026-06-13-production-pulid-flux-fix.md`;
+  `logs/prod_pulid_acceptance_20260613.json`; ADR-024 (DATA-INTEGRITY follow-up
+  resolved here); operator verification-report `77eb334`.

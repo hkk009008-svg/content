@@ -35,11 +35,13 @@ Seedance sits last in the action chain because its multi-reference input (up to 
 ### PuLID Weight by Shot Type (ComfyUI image gen)
 | Shot | Weight | start_at | end_at | Denoise | Rationale |
 |------|--------|----------|--------|---------|-----------|
-| Portrait | 1.0 | 0.20 | 1.0 | 0.25 | Maximum face lock |
-| Medium | 0.9 | 0.25 | 1.0 | 0.35 | Strong face, scene balance |
-| Wide | 0.65 | 0.35 | 0.9 | 0.45 | Environment priority |
-| Action | 0.8 | 0.30 | 1.0 | 0.40 | Identity through motion |
+| Portrait | 1.0 | 0.0 | 1.0 | 0.25 | Maximum face lock |
+| Medium | 0.9 | 0.0 | 1.0 | 0.35 | Strong face, scene balance |
+| Wide | 0.65 | 0.0 | 0.9 | 0.45 | Environment priority |
+| Action | 0.8 | 0.0 | 1.0 | 0.40 | Identity through motion |
 | Landscape | 0.0 | 0.0 | 0.0 | 0.55 | No face lock |
+
+**`start_at = 0.0` across the production tier** (FLUX coarse-identity window — bind from step 0). The prior SDXL-era values (portrait 0.20 / medium 0.25 / wide 0.35 / action 0.30) were a structural no-op on FLUX and re-suppressed the node swap at runtime; fixed 2026-06-13 (production `pulid.json` → FLUX-native `ApplyPulidFlux`; `workflow_selector.WORKFLOW_TEMPLATES`; validated OFF 0.6205 → ON 0.8779; DECISIONS.md ADR-025).
 
 ### Identity Validation Thresholds
 | Shot | Strict | Standard | Lenient |

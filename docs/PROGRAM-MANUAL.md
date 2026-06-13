@@ -1085,7 +1085,7 @@ The single biggest quality switch is `quality_tier` in `global_settings`. It is 
 
 | | **`"production"`** (default) | **`"max"`** |
 |---|---|---|
-| **Image engine** | FLUX-Dev on RunPod ComfyUI + PuLID face-lock (`pulid.json`, 22 nodes); FAL fallback chain | FLUX-Dev (or HiDream-I1) on `pulid_max.json` (56 nodes, FLUX-native `ApplyPulidFlux`) |
+| **Image engine** | FLUX-Dev on RunPod ComfyUI + PuLID face-lock (`pulid.json`, 22 nodes, FLUX-native `ApplyPulidFlux`); FAL fallback chain | FLUX-Dev (or HiDream-I1) on `pulid_max.json` (56 nodes, FLUX-native `ApplyPulidFlux`) |
 | **Generation strategy** | Single image per shot | **N=8 adaptive best-of** with ArcFace + LAION-Aesthetic scoring and an adaptive halt (`quality_max.py:701`) |
 | **Identity** | PuLID weight by shot type | + 4-channel Union ControlNet (depth/canny/pose/tile), per-character LoRA, adaptive PuLID-boost retry |
 | **Detail / upscale** | — | FaceDetailer (Impact Pack) + SUPIR 4K upscale (3840×2160 default) |
@@ -1666,7 +1666,7 @@ The pipeline's single entry point is `web_server.py` → `cinema_pipeline.py`; t
 | `veo_native.py` | 286 | Veo 3.1 client (Vertex-preferred, Gemini fallback) — **only `native_audio` engine** |
 | `ltx_native.py` | 373 | LTX Video 2.3 client (native REST preferred, FAL fallback) |
 | `sora_native.py` | 179 | OpenAI Sora 2 client (only engine that wires driving-video) |
-| `pulid.json` | 22 nodes | Production ComfyUI workflow (SDXL-era `ApplyPulid`) |
+| `pulid.json` | 22 nodes | Production ComfyUI workflow (FLUX-native `ApplyPulidFlux`; fixed 2026-06-13, ADR-025) |
 | `pulid_max.json` | 56 nodes | Max-tier ComfyUI workflow (FLUX-native `ApplyPulidFlux`) |
 
 #### Identity / continuity / coherence
@@ -1916,7 +1916,7 @@ Set via `PUT /api/projects/<pid>` with `{"global_settings": {...}}`. The capabil
 
 | Tier | Image path | Identity | Notable |
 |---|---|---|---|
-| `production` (default) | ComfyUI FLUX-Dev + PuLID (`pulid.json`, 22 nodes) → FAL Kontext/Pro/Schnell/Pollinations | single ArcFace pass | 1344×768 keyframe; `ApplyPulid` (SDXL-era) |
+| `production` (default) | ComfyUI FLUX-Dev + PuLID (`pulid.json`, 22 nodes) → FAL Kontext/Pro/Schnell/Pollinations | single ArcFace pass | 1344×768 keyframe; `ApplyPulidFlux` (FLUX-native; fixed 2026-06-13, start_at=0.0) |
 | `max` | `pulid_max.json` (56 nodes), N=8 best-of | ArcFace + LAION aesthetic composite, PuLID-boost retry | FaceDetailer + ReActor + SUPIR 4K (3840×2160); `ApplyPulidFlux` (FLUX-native); optional HiDream-I1 swap |
 
 ### 7.4 Glossary
@@ -1931,7 +1931,7 @@ Set via `PUT /api/projects/<pid>` with `{"global_settings": {...}}`. The capabil
 | **Veto rule** | A named predicate (`VetoRule`) that blocks auto-approval, e.g. `plan_decision_not_approved`, `image_cascade_fallback`. Carries a human-readable reason |
 | **Cascade** | The fault-tolerant ordered fallback across video engines in `generate_ai_video`. On engine failure, `try_next_api` advances; total exhaustion sleeps 30 s and retries up to `cascade_retry_limit` |
 | **Cascade metadata** | `{engine, attempts[]}` written by `_record_video_cascade` on success → persisted to the take for provenance/audit |
-| **PuLID** | Identity-locking ComfyUI node that binds a character's face to generation from a reference image. Weight is shot-type-dependent and adaptively tuned. Production uses `ApplyPulid`; max uses `ApplyPulidFlux` (incompatible node classes — D-image-3) |
+| **PuLID** | Identity-locking ComfyUI node that binds a character's face to generation from a reference image. Weight is shot-type-dependent and adaptively tuned. Both production and max now use `ApplyPulidFlux` (FLUX-native; production fixed 2026-06-13, ADR-025 — see D-image-3 for the historical class divergence) |
 | **Composite score** | Max-tier candidate quality = `0.6·arc_score + 0.4·aesthetic_score`; missing component substitutes neutral 0.5 (`face_validator_gate.py`) |
 | **ArcFace / GhostFaceNet** | Face-embedding models for identity cosine-similarity. `IdentityValidator` uses GhostFaceNet via DeepFace; mapped to [0,1] as `(1+cos)/2` |
 | **Coherence score** | Pixel-level cross-shot consistency: `(1−color_drift)·0.4 + lighting·0.3 + composition·0.3`. Result may be invalid (image read failed) — check `result.valid` |
@@ -2089,7 +2089,7 @@ The Pydantic models in `domain/models.py` are validation-only and omit several l
 | D-video-2 | Seedance uses a speculative `api.seedance.ai` REST endpoint; "live" in `API_REGISTRY` but unverified |
 | D-video-3 | `VEO_NATIVE` has no quota-cooldown guard (only the FAL-proxy `VEO` branch sets the TTL flag) |
 | D-image-1 | `max_halt_rule` enum is plumbed through the UI but `should_halt` only implements `composite_only` |
-| D-image-3 | `ApplyPulid` (production) and `ApplyPulidFlux` (max) are incompatible node classes; node 99 differs (`PulidModelLoader` vs `PulidFluxModelLoader`); production upscale nodes 500–502 are Real-ESRGAN, max 500–503 are SUPIR — same IDs, different subsystems |
+| D-image-3 | **RESOLVED 2026-06-13 (ADR-025)** — production `pulid.json` now uses `ApplyPulidFlux` / `PulidFluxModelLoader` (FLUX-native), matching max; was SDXL-era `ApplyPulid` / `PulidModelLoader` (a FLUX no-op, validated OFF 0.6205 → ON 0.8779). The upscale-node divergence remains: production 500–502 Real-ESRGAN vs max 500–503 SUPIR — same IDs, different subsystems |
 | D-llm-1 | `creative_llm` override is family-checked but **not** provider-switching; a cross-family value (e.g. `claude-*` when only OpenAI is configured) is silently ignored |
 | D-llm-2 | `style_director` is **OpenAI-only** (no Anthropic path); with only `ANTHROPIC_API_KEY` set it falls straight to `_default_style_rules` |
 | D-llm-3 | `competitive_enabled` is stored from settings but never enforced — `competitive_generate` always runs full competition |

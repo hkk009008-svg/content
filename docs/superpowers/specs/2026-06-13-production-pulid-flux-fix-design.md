@@ -1,7 +1,7 @@
 # Production PuLID SDXL→FLUX correctness fix — design
 
 - **Date:** 2026-06-13
-- **Status:** Approved (design); implementation pending
+- **Status:** COMPLETE — implementation shipped (`a1103bd`/`f05c83b`/`c5199de`/`a924055`/`7b54af9`); pod acceptance gate PASSED 2026-06-13 (arc 0.6205→0.8779, seed 990011, 18.2 GiB; artifact `logs/prod_pulid_acceptance_20260613.json`). Shipping default. Decision record: ADR-025.
 - **Author:** director seat
 - **Related:** ADR-024 (production-tier identity graft); `scripts/_prod_dual_lora_pulid.py`
   (proven FLUX graft, experiment-tier)
@@ -23,8 +23,10 @@ tagged `COMFYUI_PULID` (`phase_c_assembly.py:413`): cost attribution is correct
 (ComfyUI ran) but the identity-provenance claim is wrong.
 
 **Evidence:** the node-class mismatch is CONFIRMED by direct inspection of
-`pulid.json`; the *functional* no-op is high-confidence code analysis (`wf_963a4a8a`
-Lens A) to be **empirically confirmed by the acceptance gate** below. The correct
+`pulid.json`; the *functional* no-op was **empirically confirmed by the acceptance
+gate** below — the PuLID-OFF baseline (identity bypassed) scored arc 0.6205 while the
+fixed FLUX-native graph scored 0.8779 (+0.257), i.e. the SDXL-on-FLUX path carried
+~no reference-face identity, exactly as the `wf_963a4a8a` Lens A analysis predicted. The correct
 FLUX node set already runs on the same pod (the max tier `pulid_max.json` uses
 `PulidFluxModelLoader` / `ApplyPulidFlux` / `PulidFluxEvaClipLoader` +
 `pulid_flux_v0.9.1.safetensors`), and a proven graft exists in
@@ -118,18 +120,22 @@ A unit test (`tests/unit/test_pulid_production_flux.py`, matching the repo's
 This closes the **test-dark** gap: no current test asserts node classes, which is why
 the SDXL-on-FLUX misconfiguration shipped silently and undetected.
 
-### Component 4 — Acceptance gate (pod, empirical)
+### Component 4 — Acceptance gate (pod, empirical) — PASSED ✅ 2026-06-13
 
-Before/after on a fixed reference face + seed (pod required; currently down):
+Before/after on a fixed reference face + seed (operator-run, user-directed):
 
-- pre-fix (SDXL graph): identity score = baseline (expected low — the no-op);
-- post-fix (FLUX graph): identity score should rise materially (toward ~0.87 for a
-  single clean face).
+- PuLID-OFF baseline (identity bypassed): arc **0.6205** — confirmed low (a different
+  generic woman; coincidental prompt-match, not the reference identity).
+- PuLID-ON (fixed FLUX-native graph): arc **0.8779** (+0.257) — aria identity LOCKED,
+  at the ~0.87 single-clean-face ceiling.
 
-Confirms: (a) the bug is real, (b) the fix works, (c) **fp8 compatibility** (the one
-genuine unknown — prod's node 112 is `flux1-dev-fp8` vs max's fp16), (d) whether the
-clean production base binds without FaceDetailer. Use the (now deterministic, post
-`d48b58b`) arc scorer for the score read.
+All four confirmation targets satisfied: (a) the bug is real (OFF baseline low) ✓;
+(b) the fix works (+0.257 material lift) ✓; (c) **fp8 compatibility** — node 112
+`flux1-dev-fp8` bound to 0.8779, retiring the fp8-vs-fp16 escalation ✓; (d) the clean
+production base binds **without FaceDetailer** (figure read, no NO_FACE) ✓. Seed
+990011, peak VRAM 18.2 GiB, both renders visually photoreal. Read with the
+deterministic arc scorer (post `d48b58b`). Artifact
+`logs/prod_pulid_acceptance_20260613.json` (instrument `scripts/_prod_pulid_acceptance.py`, `a43358f`).
 
 ## Data flow
 
@@ -152,10 +158,10 @@ schnell → Pollinations) is untouched.
 
 ## Rollout & rollback
 
-In-place (R1). Implement + commit locally; the regression test passes offline. **Do
-not push / rely on as the shipping default until the pod acceptance gate passes** (pod
-currently down — the change lands behind the gate). Rollback = `git revert` the
-`pulid.json` + `workflow_selector.py` change (two files; no schema, no migration, no
+In-place (R1) — **COMPLETE.** Implemented + committed (`a1103bd`/`f05c83b`/`c5199de`);
+the regression test passes offline; the pod acceptance gate PASSED 2026-06-13 (above).
+The fix is now the **shipping default**. Push remains USER-gated. Rollback = `git revert`
+the `pulid.json` + `workflow_selector.py` change (two files; no schema, no migration, no
 data backfill).
 
 ## Cross-refs

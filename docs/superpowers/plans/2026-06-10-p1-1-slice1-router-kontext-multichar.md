@@ -1421,5 +1421,5 @@ git commit -m "docs(p1-1): ARCHITECTURE 8.2 multi-char keyframe flow + S1 result
   only persists it (Task 11).
 - The `web_server.py` train-endpoint write of `char_lora_triggers`: slice-2 prep.
 - Scorecard scalar swap to per-char mean; SSE/FE surfacing of identity_multi.
-- The production `pulid.json` SDXL-PuLID-on-FLUX bug (spec §9) — separate ticket.
+- ~~The production `pulid.json` SDXL-PuLID-on-FLUX bug (spec §9) — separate ticket.~~ **RESOLVED 2026-06-13 (ADR-025; commits `a1103bd`/`f05c83b`; pod gate PASSED 0.6205→0.8779).**
 - Budget gating of keyframe spend (ADR-022 backlog).

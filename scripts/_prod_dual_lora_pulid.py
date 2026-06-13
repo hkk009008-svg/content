@@ -11,18 +11,21 @@ pass on a 1.5x-upscaled latent) + the heavier OptimalStepsScheduler/28-step samp
 photoreal because its sampler chain is CLEAN: BasicScheduler + dpmpp_2m + sgm_uniform
 + 20 steps + PAG + RealESRGAN, with NO hires-fix / SUPIR / FaceDetailer.
 
-BUT pulid.json's PuLID is a FLUX/SDXL NO-OP: node 100 is `ApplyPulid` (the SDXL-era
-node) on a FLUX UNet — its cross-attention patches target U-Net layers FLUX's DiT
-lacks, so it applies ZERO face lock (pulid.json realism = plain FLUX txt2img). And it
-has no LoRA node, no 2nd PuLID. So this driver GRAFTS the proven FLUX identity stack
-onto the clean chain:
+NOTE (2026-06-13, ADR-025): pulid.json's single PuLID was a FLUX/SDXL NO-OP when this
+driver was written — node 100 was `ApplyPulid` (SDXL-era) on a FLUX UNet, applying ZERO
+face lock. That single-PuLID no-op is now FIXED in production (nodes 99/100/101 ->
+FLUX-native `ApplyPulidFlux`; validated OFF 0.6205 -> ON 0.8779). This driver is STILL
+needed for the distinct goal it serves — DUAL-identity (aria + man) + a per-character
+LoRA, which the single-PuLID production fix does not provide. It still has no LoRA node
+and no 2nd PuLID in the shipped graph, so this driver GRAFTS the proven FLUX identity
+stack onto the clean chain:
 
   - Upgrade nodes 99/100/101 SDXL->FLUX by COPYING the proven nodes VERBATIM from
     pulid_max.json (ApplyPulidFlux weight=0.85 start_at=0.0 end_at=0.9 fusion=mean ...).
     The node IDs 97/99/100/101/93/112/11 are IDENTICAL across both graphs, so the
     copied input links resolve with NO remapping (adversary's safe method — inherits
-    the proven start_at=0.0, NOT pulid.json's SDXL-era start_at=0.3 which would miss
-    the coarse-identity window and suppress binding).
+    the proven start_at=0.0; production pulid.json is now also start_at=0.0 post-fix,
+    so the coarse-identity window is no longer suppressed there either).
   - Inject the man LoRA (node 700, copied from max; model<-112 clip<-11) @0.55 + route
     122.clip -> 700 slot 1 so the LoRA's CLIP/TOKman patch reaches the prompt.
   - Splice a 2nd ApplyPulidFlux (node 103, the MAN) after 100 (aria); man face on 95.
