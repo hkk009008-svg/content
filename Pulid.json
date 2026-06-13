@@ -89,29 +89,33 @@
     "_meta": { "title": "Load InsightFace (PuLID)" }
   },
   "99": {
-    "inputs": { "pulid_file": "ip-adapter_pulid_sdxl_fp16.safetensors" },
-    "class_type": "PulidModelLoader",
-    "_meta": { "title": "Load PuLID Model" }
+    "inputs": { "pulid_file": "pulid_flux_v0.9.1.safetensors" },
+    "class_type": "PulidFluxModelLoader",
+    "_meta": { "title": "Load PuLID Flux Model" }
   },
   "100": {
     "inputs": {
       "weight": 1,
-      "method": "fidelity",
-      "start_at": 0.3,
+      "start_at": 0.0,
       "end_at": 1,
+      "fusion": "mean",
+      "fusion_weight_max": 1.0,
+      "fusion_weight_min": 0.0,
+      "train_step": 1000,
+      "use_gray": true,
       "model": ["112", 0],
-      "pulid": ["99", 0],
+      "pulid_flux": ["99", 0],
       "eva_clip": ["101", 0],
       "face_analysis": ["97", 0],
       "image": ["93", 0]
     },
-    "class_type": "ApplyPulid",
-    "_meta": { "title": "Apply PuLID" }
+    "class_type": "ApplyPulidFlux",
+    "_meta": { "title": "Apply PuLID Flux" }
   },
   "101": {
     "inputs": {},
-    "class_type": "PulidEvaClipLoader",
-    "_meta": { "title": "Load Eva Clip (PuLID)" }
+    "class_type": "PulidFluxEvaClipLoader",
+    "_meta": { "title": "Load Eva Clip (PuLID Flux)" }
   },
   "102": {
     "inputs": { "width": 1344, "height": 768, "batch_size": 1 },
