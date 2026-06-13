@@ -202,10 +202,12 @@ Details: docs/protocol/agents/director-operator.md (Rule #13).
 
 # Director–Operator concurrent operation (minimal model)
 
-Two agent sessions run in parallel by design — **director-seat** (strategy, briefs,
-ADRs, push decisions) and **operator-seat** (independent post-commit verification,
-doc-sync, mailbox reports). Two seats of one team; specialization, not hierarchy;
-both serve the user-principal. Load-bearing invariants:
+Four agent sessions (two pairs) run in parallel by design — **director-seats** (strategy, briefs,
+ADRs, push decisions) and **operator-seats** (independent post-commit verification,
+doc-sync, mailbox reports). Four seats / two pairs of one team; specialization, not hierarchy;
+all serve the user-principal. A `coordinator` pseudo-seat is spawned **on demand** at
+multi-pair-wrap boundaries for read-only cross-pair audit — not a standing concurrent
+seat (see `docs/protocol/claude/four-seat-extension.md` §10). Load-bearing invariants:
 
 - **User is principal.** User direct instructions override everything.
 - **Authority precedence:** user > git commits (durable record) > mailbox `sent/`
@@ -214,7 +216,7 @@ both serve the user-principal. Load-bearing invariants:
   the first commit to land wins.
 - **Signal via artifacts** (mailbox event / presence file), not chat alone.
 
-Full governance — Rules #7–#22, the disagreement protocol, emergency handling, phase
+Full governance — Rules #7–#23, the disagreement protocol, emergency handling, phase
 taxonomy, and mailbox protocol — lives in **docs/protocol/agents/director-operator.md**;
 read it only when coordinating with the other seat. Rule provenance (codified SHAs,
 empirical basis, beneficiary/consent) is in docs/PROTOCOL-RULES-LOG.md.
@@ -236,7 +238,7 @@ the Architecture Preamble. They diverge on tooling specifics:
 
 **If a Claude Code agent reads both files** and the guidance differs, the
 order of precedence is:
-1. The operator's explicit instructions (highest)
+1. The user-principal's explicit instructions (highest)
 2. `CLAUDE.md` Claude-specific extensions
 3. This file's universal principles
 4. The model's default behavior (lowest)

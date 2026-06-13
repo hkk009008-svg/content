@@ -11,14 +11,14 @@
 # Director-Operator Concurrent Operation
 *Router handles: `R-BRIEF` (composes with Rule #12) and `R-PID` (Rule #13) route here from CLAUDE.md.*
 
-This project runs two parallel Claude sessions by design.
+This project runs four parallel Claude sessions (two pairs) by design.
 
-## Two-seat team model (Protocol Bundle v5)
+## Four-seat team model
 
-**Director-seat** and **operator-seat** are two seats of one team,
+**Director-seats** and **operator-seats** form two pairs (Pair A: image-gen/realism, Pair B: video/assembly) of one team,
 with different specializations. Both serve the user-principal.
 Neither is senior to the other; specialization is cognitive-load
-distribution, not hierarchy.
+distribution, not hierarchy. A `coordinator` broadcast role also exists for cross-seat signaling.
 
 | Seat | Specializes in | Why this seat? |
 |---|---|---|
@@ -29,8 +29,9 @@ Both seats are equal in authority within their specialization. Within
 Lane V/D/S, operator-seat acts unilaterally (mailbox events bind
 director per Rule #8). Within strategic work (briefs, ADRs, push),
 director-seat acts unilaterally (operator-seat acknowledges via
-mailbox or commit body). Cross-cutting decisions (protocol changes
-themselves, role-partition adjustments) go through the proposal cycle.
+mailbox or commit body). Cross-cutting decisions across pairs (e.g., protocol changes
+themselves, role-partition adjustments, cross-lane ADRs) go through the proposal cycle
+between directors or escalate to the user.
 
 **User is the principal.** Both seats serve the user; neither is the
 boss of the other. When agents disagree, escalate to user (per the
@@ -367,8 +368,10 @@ type for spec review).
 
 **Rule #10: Joint-team mode.** *(Subtitle: co-agent mode.)*
 
-Director-seat and operator-seat are two seats of one team. Both serve
-the user-principal. Neither is senior to the other; specialization is
+Four seats (two pairs) form the team; the director–operator pair is the basic
+unit, duplicated across two pairs (see [four-seat-extension.md](four-seat-extension.md)).
+Within a pair, director-seat and operator-seat are two seats of one team. Both
+serve the user-principal. Neither is senior to the other; specialization is
 cognitive-load distribution, not hierarchy.
 
 **Practical implications:**
@@ -1631,3 +1634,25 @@ Do NOT:
 - Dispatch a duplicate reviewer or implementer
 - Run `pytest` against a dirty working tree mid-implementation
   (results don't reflect either landed or final state)
+
+## Lane ownership and cross-lane ADRs (Rule #23)
+
+**Rule #23: Lane ownership.**
+*(Subtitle: A seat does substantive work only in its lane.)*
+
+Cross-lane edits require a `-to-all-` heads-up first (or a direct dispatch-claim
+to the owning pair). Pathspec-scoped commits remain load-bearing.
+
+**Architectural decisions.** A lane-local ADR is owned by that
+lane's director. A **cross-cutting / cross-lane ADR needs BOTH directors'
+sign-off** (a `director-to-director2` proposal + `proposal-reply` ack), or
+escalate to the user. Prevents two directors landing conflicting architecture.
+
+**Co-sign is TIERED** (Lever #7, capacity audit `wf_6be2ee18-f4b`). Classifier:
+*would the co-signer's verification change which files/sites the implementation
+touches?* **Tier A** (yes) — the co-signing director lands a mailbox
+`verification-report` BEFORE dispatch (async-OK via workflow + mailbox; no session
+restart). **Tier B** (no) — an awareness heads-up with a 48h
+proceed-if-no-objection default. Unsure → Tier A. Full body:
+[four-seat-extension.md](four-seat-extension.md) §6 + the PROTOCOL-RULES-LOG
+2026-06-14 addendum.

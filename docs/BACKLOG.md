@@ -4,7 +4,7 @@
 "two seats of one team" reframe.
 
 This is a shared-visible workspace for "interesting but not cycle-N"
-items. Either seat (director-seat or operator-seat) can add a row;
+items. Any seat (any of the four — directors or operators) can add a row;
 director-seat typically curates (moves promising items to
 `POST-ROADMAP-2026-05-24.md` picks); operator-seat can claim
 Lane-D-style items (documentation, refactors, doc-sync candidates)
