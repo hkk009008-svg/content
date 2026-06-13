@@ -77,6 +77,10 @@ logs/
 
 # Per-seat launch config (D-a per-seat GIT_INDEX_FILE/CLAUDE_SEAT; per-clone, not source)
 .claude/launch.json
+.claude/settings.local.json
+
+# Local editor config (per-developer, not source)
+.vscode/
 
 # Auto-generated session snapshot (B-003 Option E, cycle 8). Hook
 # regenerates this file on every Bash call from local git state; not

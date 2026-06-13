@@ -37,6 +37,9 @@ export LC_ALL=C
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 
+# Sweep stale index.lock files older than 5 minutes to prevent git contention livelocks
+find .git/index.lock -mmin +5 -exec rm -f {} \; 2>/dev/null || true
+
 # Presence heartbeat (v6.0 Tier 2, user-authorized 2026-06-11; replaces the
 # v5.7 M1 sed-in-place stamp): the hook's liveness signal is a SINGLE-LINE
 # atomic overwrite of coordination/presence/<seat>-heartbeat.ts —
@@ -161,11 +164,12 @@ BRANCH=$(git rev-parse --abbrev-ref HEAD)
 AHEAD=$(git rev-list --count "origin/${BRANCH}..HEAD" 2>/dev/null || echo "?")
 BEHIND=$(git rev-list --count "HEAD..origin/${BRANCH}" 2>/dev/null || echo "?")
 
-WT_LINES=$(git status --porcelain 2>/dev/null | head -5)
+WT_LINES=$(git status --porcelain 2>/dev/null)
 if [ -z "$WT_LINES" ]; then
   WT_STATE="clean"
 else
-  WT_STATE=$(printf "dirty:\n%s" "$WT_LINES")
+  NUM_DIRTY=$(echo "$WT_LINES" | grep -c '^' || true)
+  WT_STATE=$(printf "DIRTY(%s):\n%s" "$NUM_DIRTY" "$(echo "$WT_LINES" | head -5)")
 fi
 
 # Smoke + pytest from latest commit body (cheaper than re-running, and the
@@ -196,7 +200,7 @@ _unread_for() {                       # $1 = role (director|operator)
   [ -f "$cf" ] || { echo 0; return; }
   cur=$(tr -d '[:space:]' < "$cf")            # 2026-05-30T00:37:53Z
   curkey=$(printf '%s' "$cur" | tr ':' '-')   # -> 2026-05-30T00-37-53Z (match filename token form)
-  for f in coordination/mailbox/sent/*-to-"${role}"-*.md; do
+  for f in coordination/mailbox/sent/*-to-"${role}"-*.md coordination/mailbox/sent/*-to-all-*.md; do
     [ -e "$f" ] || continue
     ts=$(basename "$f"); ts=${ts:0:20}
     # Byte-order compare of fixed-width ISO == chronological (LC_ALL=C exported above).
@@ -204,10 +208,12 @@ _unread_for() {                       # $1 = role (director|operator)
   done
   echo "$count"
 }
-UNREAD_DIR=0; UNREAD_OP=0
+UNREAD_DIR=0; UNREAD_OP=0; UNREAD_DIR2=0; UNREAD_OP2=0
 if [ -d "coordination/mailbox/sent" ]; then
   UNREAD_DIR=$(_unread_for director)
   UNREAD_OP=$(_unread_for operator)
+  UNREAD_DIR2=$(_unread_for director2)
+  UNREAD_OP2=$(_unread_for operator2)
 fi
 
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -223,7 +229,7 @@ cat > STATE.md <<EOF
 - **Working tree:** ${WT_STATE}
 - **Smoke:** ${SMOKE_RESULT} (last run ${TIMESTAMP})
 - **Pytest:** ${PYTEST_LINE}
-- **Unread mailbox:** director=${UNREAD_DIR}, operator=${UNREAD_OP}
+- **Unread mailbox:** director=${UNREAD_DIR}, operator=${UNREAD_OP}, director2=${UNREAD_DIR2}, operator2=${UNREAD_OP2}
 - **Updated:** ${TIMESTAMP} (after HEAD \`${HEAD_SHA}\`)
 EOF
 
