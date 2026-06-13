@@ -26,6 +26,13 @@ for the full discipline (Rules 1–20).
   regressions and nonexistent targets, and STAGES the cursor file. **Cursor
   folding (v6.0):** the staged advance rides the seat's next substantive
   commit; standalone cursor-only commits are deprecated (idle-consume exempt).
+  A commit whose **entire** changeset is `seen/*.txt` (no `sent/` event, no
+  code/doc) is a standalone cursor-only commit; `check_coordination.py --git-root <repo>`
+  ADVISORY-flags these (lever #5, capacity audit `wf_6be2ee18-f4b`). Intentional
+  idle-consume advances are exempt — prefix the subject `coord(cursor):` to signal it.
+  **ACKs:** an `acknowledgement` event that carries substantive body (role
+  resolution, retraction, findings) stays a `sent/` event file; a bare "received"
+  ACK that adds nothing beyond the cursor should be a cursor advance only.
 - `scripts/check_coordination.py` (repo root) — lints all of the above (cursor
   parseable/non-future/non-orphan, filename convention, envelope, kind enum,
   unread report). Wired into `scripts/ci_smoke.py`: FATAL hard-fails locally,

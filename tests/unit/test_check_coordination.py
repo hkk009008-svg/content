@@ -246,3 +246,46 @@ def test_main_exit_codes(tmp_path, capsys):
     assert main(["--root", str(broken), "--since", SINCE, "--now", NOW]) == 1
     out = capsys.readouterr().out
     assert "cursor_unparseable" in out
+
+
+# ── standalone cursor-only commit lint (lever #5, audit wf_6be2ee18-f4b) ──
+
+import subprocess as _sp  # noqa: E402
+
+
+def _init_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+        _sp.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
+    return repo
+
+
+def _commit(repo, msg):
+    _sp.run(["git", "-C", str(repo), "add", "-A"], check=True, capture_output=True, text=True)
+    _sp.run(["git", "-C", str(repo), "commit", "-q", "-m", msg], check=True, capture_output=True, text=True)
+
+
+def test_standalone_cursor_only_commit_is_advisory(tmp_path):
+    repo = _init_repo(tmp_path)
+    seen = repo / "coordination" / "mailbox" / "seen"
+    seen.mkdir(parents=True)
+    (seen / "operator.txt").write_text("2026-06-13T10:00:00Z\n")
+    _commit(repo, "coord: cursor advance")
+    root = make_coord(tmp_path)
+    issues = run(root, since=SINCE, now=NOW, git_root=repo)
+    assert any(i.kind == "standalone_cursor_commit" and i.severity == "ADVISORY" for i in issues)
+
+
+def test_cursor_commit_with_sent_event_is_not_flagged(tmp_path):
+    repo = _init_repo(tmp_path)
+    seen = repo / "coordination" / "mailbox" / "seen"
+    seen.mkdir(parents=True)
+    sent = repo / "coordination" / "mailbox" / "sent"
+    sent.mkdir(parents=True)
+    (seen / "operator.txt").write_text("2026-06-13T10:00:00Z\n")
+    (sent / "2026-06-13T10-00-00Z-operator-to-all-fyi.md").write_text("body\n")
+    _commit(repo, "coord: event + cursor (folded)")
+    root = make_coord(tmp_path)
+    issues = run(root, since=SINCE, now=NOW, git_root=repo)
+    assert not any(i.kind == "standalone_cursor_commit" for i in issues)

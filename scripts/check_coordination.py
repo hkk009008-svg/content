@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -66,6 +67,11 @@ _EVENT_NAME_RE = re.compile(
 )
 
 _CURSOR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+# A commit whose entire changeset is seen/*.txt is a standalone cursor advance —
+# cursor advances should ride the next substantive commit (capacity audit
+# wf_6be2ee18-f4b, lever #5). Detected opt-in via run(git_root=...).
+_SEEN_ONLY_RE = re.compile(r"^coordination/mailbox/seen/[^/]+\.txt$")
 
 _WHEN_RE = re.compile(r"\*\*When:\*\*\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)")
 
@@ -174,8 +180,37 @@ def _unread_report(coord_root: Path, names: list[str]) -> list[CoordIssue]:
     return issues
 
 
+def _check_standalone_cursor_commits(git_root, n: int = 30) -> list[CoordIssue]:
+    """ADVISORY: flag recent commits whose entire changeset is seen/*.txt.
+
+    Standalone cursor-only commits inflate coordination overhead — the cursor
+    advance should ride the next substantive commit (capacity audit
+    wf_6be2ee18-f4b, lever #5). Best-effort + opt-in: returns [] if git is
+    unavailable or git_root is not a repo. Never raises.
+    """
+    issues: list[CoordIssue] = []
+    try:
+        log = subprocess.run(["git", "log", "--format=%h", f"-{n}"],
+                             cwd=str(git_root), capture_output=True, text=True, timeout=5)
+        if log.returncode != 0:
+            return issues
+        for sha in log.stdout.split():
+            dt = subprocess.run(
+                ["git", "diff-tree", "--no-commit-id", "-r", "--root", "--name-only", sha],
+                cwd=str(git_root), capture_output=True, text=True, timeout=5)
+            files = [f for f in dt.stdout.splitlines() if f.strip()]
+            if files and all(_SEEN_ONLY_RE.match(f) for f in files):
+                issues.append(CoordIssue(
+                    "coordination/mailbox/seen/", "standalone_cursor_commit", "ADVISORY",
+                    f"commit {sha} changes only seen/*.txt — fold cursor advances into "
+                    f"the next substantive commit (lever #5)"))
+    except Exception:
+        pass
+    return issues
+
+
 def run(coord_root: Path | str, since: str = "2026-06-11",
-        now: str | None = None) -> list[CoordIssue]:
+        now: str | None = None, git_root: Path | str | None = None) -> list[CoordIssue]:
     coord_root = Path(coord_root)
     if now is None:
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -184,6 +219,8 @@ def run(coord_root: Path | str, since: str = "2026-06-11",
     issues += _check_cursors(coord_root, now, names)
     issues += _check_events(coord_root, since, names)
     issues += _unread_report(coord_root, names)
+    if git_root is not None:
+        issues += _check_standalone_cursor_commits(git_root)
     return issues
 
 
@@ -195,9 +232,12 @@ def main(argv=None) -> int:
     ap.add_argument("--since", default="2026-06-11",
                     help="envelope checks apply to events on/after this date")
     ap.add_argument("--now", default=None, help=argparse.SUPPRESS)  # test aid
+    ap.add_argument("--git-root", default=None,
+                    help="repo root; when given, ADVISORY-flag standalone cursor-only "
+                         "commits in recent history (lever #5). Omitted = skipped.")
     args = ap.parse_args(argv)
 
-    issues = run(args.root, since=args.since, now=args.now)
+    issues = run(args.root, since=args.since, now=args.now, git_root=args.git_root)
     fatal = [i for i in issues if i.severity == "FATAL"]
     advisory = [i for i in issues if i.severity == "ADVISORY"]
     for i in issues:
