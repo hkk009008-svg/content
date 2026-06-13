@@ -5,9 +5,10 @@ operator-authored per user directive ("scale 2→4 seats for speed"). The
 backward-compatible tooling cutover (§8) is **applied + verified** — `ci_smoke`
 green, regression test `tests/unit/test_four_seat_coordination.py` (6 cases:
 Pair-B + `all` lint clean, `count_unread` broadcast, bin round-trip). `director2`
-/`operator2` can launch now (README §"Per-seat launch"). **OPEN:** the LANE
-PARTITION (§6 — which subsystem each pair owns) is a director-lane decision left
-for the directors/user; director-1 was notified, free to adjust (clean revert).
+/`operator2` are LIVE (launched 2026-06-13T08:50Z; both heartbeating, indexes
+seeded). **Lanes FINAL** (PRINCIPAL-CONFIRMED 2026-06-13): Pair A = image-gen +
+identity/realism, Pair B = video + assembly + delivery (§1 table + §6). Status:
+**ACCEPTED.**
 
 **Principle: additive + backward-compatible.** No existing seat is renamed. The
 two current seats keep their exact identifiers, indexes, cursors, presence files,
@@ -22,10 +23,14 @@ live `director` session is never broken.
 Canonical seat IDs become a 4-set: **`director`, `director2`, `operator`,
 `operator2`** — where `director`/`operator` ARE seat-1 (unchanged). Two **pairs**:
 
-| Pair | Director | Operator | Owns |
+| Pair | Director | Operator | Lane (PRINCIPAL-CONFIRMED 2026-06-13, FINAL) |
 |------|----------|----------|------|
-| **A** | `director`  | `operator`  | lane A (a subsystem stream) |
-| **B** | `director2` | `operator2` | lane B (a disjoint subsystem stream) |
+| **A** | `director`  | `operator`  | **Image-generation + identity/realism** — `pulid*.json`, `quality_max.py`, `workflow_selector` image params, `identity/validator.py` + the arc scorer, and the data-integrity lane (production PuLID SDXL→FLUX fix + the unrouted siblings `continuity_engine.py:181`, `character_manager.py:396`). |
+| **B** | `director2` | `operator2` | **Video + assembly + delivery** — `phase_c_ffmpeg.py`/`phase_c_assembly.py` video paths, video-API selection (Veo/Kling/LTX/Sora/Runway), lip-sync, dialogue/TTS, `cinema/shots` sequence-level continuity, `web_server`/`cinema_pipeline` orchestration. |
+
+**Shared seams** (`phase_c_assembly`, `workflow_selector` touch both image + video):
+owner = whoever's specific change-lane the edit is in, with a `-to-all-` heads-up
+first per Rule #23.
 
 The director↔operator relationship (strategy/briefs vs independent verification)
 is **unchanged within each pair** — we duplicate the proven two-seat unit, we do
@@ -95,9 +100,10 @@ coordination/mailbox/seen/operator2.txt   <- 2026-06-13T00:00:00Z
 
 ## 6. Work partitioning (the actual speed lever)
 
-- **Pair lanes.** Pair A and Pair B each own a **disjoint subsystem lane**; the
-  paired director briefs, the paired operator independently verifies — exactly
-  the current loop, run twice in parallel.
+- **Pair lanes (FINAL — see the §1 table).** Pair A = **image-generation +
+  identity/realism**; Pair B = **video + assembly + delivery**. Each pair's
+  director briefs, its operator independently verifies — the current loop, run
+  twice in parallel. Disjoint by construction; shared seams handled per Rule #23.
 - **Tiebreaker unchanged.** `git log --oneline -3` before acting on a shared
   task; first commit to land wins. With four seats the per-seat `GIT_INDEX_FILE`
   already isolates staging; commits serialize on git's ref lock.
