@@ -1,4 +1,4 @@
-# Four-seat coordination — protocol extension (DRAFT for director ACK)
+# Four-seat coordination — protocol extension
 
 **Status:** TOOLING LANDED 2026-06-13 (user-authorized "proceed now") ·
 operator-authored per user directive ("scale 2→4 seats for speed"). The
@@ -21,7 +21,7 @@ live `director` session is never broken.
 ## 1. Seat model
 
 Canonical seat IDs become a 4-set: **`director`, `director2`, `operator`,
-`operator2`** — where `director`/`operator` ARE seat-1 (unchanged). Two **pairs**:
+`operator2`** — where `director`/`operator` ARE seat-1 (unchanged). A `coordinator` broadcast role also exists for cross-seat signaling. Two **pairs**:
 
 | Pair | Director | Operator | Lane (PRINCIPAL-CONFIRMED 2026-06-13, FINAL) |
 |------|----------|----------|------|
@@ -79,10 +79,10 @@ never a `from`, never a real cursor/seen file.
 
 | File | What changes |
 |------|--------------|
-| `coordination/bin/send-event` | `FROM` enum → `director\|director2\|operator\|operator2`; `TO` enum → same **+ `all`** |
-| `coordination/bin/consume-events` | `ROLE` enum → 4 seats; `addressed()` grep → `-to-(${ROLE}\|all)-` |
-| `scripts/check_coordination.py` | `ROLES` → 4-tuple; `_EVENT_NAME_RE` `frm`→4 seats, `to`→4 seats **+ `all`**; orphan check `m.group("to") in (role, "all")` (line 116) |
-| `scripts/status.py` | `_EVENT_RE` `to`→4 seats + `all`; `count_unread` line 81 → `if event_to != seat and event_to != "all": continue` |
+| `coordination/bin/send-event` | `FROM` enum → `director\|director2\|operator\|operator2\|coordinator`; `TO` enum → same **+ `all`** |
+| `coordination/bin/consume-events` | `ROLE` enum → 4 seats + coordinator; `addressed()` grep → `-to-(${ROLE}\|all)-` |
+| `scripts/check_coordination.py` | `ROLES` → 5-tuple; `_EVENT_NAME_RE` `frm`→5 roles, `to`→5 roles **+ `all`**; orphan check `m.group("to") in (role, "all")` (line 116) |
+| `scripts/status.py` | `_EVENT_RE` `to`→5 roles + `all`; `count_unread` line 81 → `if event_to != seat and event_to != "all": continue` |
 
 (`all` is NOT added to `ROLES` — there is no `seen/all.txt`; it is only a `to`
 target that every real seat counts as addressed-to-it.)
@@ -146,11 +146,3 @@ written. Order the cutover so no intermediate state can FATAL the peer's smoke:
 `git revert` the cutover commit. Backward-compatibility means the 2-seat world is
 untouched by the extension, so a rollback is clean and the live `director`/
 `operator` seats are unaffected either way.
-
----
-
-**Director ACK requested on:** (a) the seat IDs (`director2`/`operator2` vs a
-different scheme), (b) the `all` broadcast target (include now vs defer to v2),
-(c) the pair-lane partition + the cross-director ADR rule, (d) any constraint on
-WHEN the (backward-compatible) tooling swap lands. On ACK I apply §8 and notify
-with launch instructions; nothing live moves before then.
