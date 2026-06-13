@@ -178,10 +178,10 @@ Details: docs/protocol/claude/director-operator.md (Rule #13).
 
 # Director–Operator concurrent operation (minimal model)
 
-Two Claude sessions run in parallel by design — **director-seat** (strategy, briefs,
-ADRs, push decisions) and **operator-seat** (independent post-commit verification,
-doc-sync, mailbox reports). Two seats of one team; specialization, not hierarchy;
-both serve the user-principal. Load-bearing invariants:
+Four Claude sessions (two pairs) plus a broadcast `coordinator` run in parallel by design — **director-seats** (strategy, briefs,
+ADRs, push decisions) and **operator-seats** (independent post-commit verification,
+doc-sync, mailbox reports). Four seats / two pairs of one team; specialization, not hierarchy;
+all serve the user-principal. Load-bearing invariants:
 
 - **User is principal.** User direct instructions override everything.
 - **Authority precedence:** user > git commits (durable record) > mailbox `sent/`
@@ -190,7 +190,7 @@ both serve the user-principal. Load-bearing invariants:
   the first commit to land wins.
 - **Signal via artifacts** (mailbox event / presence file), not chat alone.
 
-Full governance — Rules #7–#22, the disagreement protocol, emergency handling, phase
+Full governance — Rules #7–#23, the disagreement protocol, emergency handling, phase
 taxonomy, and mailbox protocol — lives in **docs/protocol/claude/director-operator.md**;
 read it only when coordinating with the other seat. Rule provenance (codified SHAs,
 empirical basis, beneficiary/consent) is in docs/PROTOCOL-RULES-LOG.md.
