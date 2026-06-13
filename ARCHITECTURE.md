@@ -1277,9 +1277,12 @@ re-confirmed on the Linux pod before it is trusted as the production baseline**
 ThreadPoolExecutor (`max_quality_parallel_workers`, default 1) — each call still
 runs single-threaded (per-call determinism holds), but a concurrent overlap
 leaves OpenCV at 1 thread (benign); gate with a `threading.Lock` if
-`parallel_workers > 1` becomes the default. NOT yet routed: the domain-layer
-sibling sites `domain/continuity_engine.py:164,181` and
-`domain/character_manager.py:369,385,396` (the last persists `embedding.npy`).
+`parallel_workers > 1` becomes the default. ROUTED (commit `970015b`): the
+domain-layer sibling sites `domain/continuity_engine.py:165,183` and
+`domain/character_manager.py:371,389,402` (the last persists `embedding.npy`)
+wrap their `DeepFace` calls in `cv2_single_thread` (imported from
+`identity.validator`); `tests/unit/test_embedding_determinism_routing.py`
+(5 tests, green) pins the routing.
 
 Naming clarification: everything in the codebase that says "ArcFace" actually
 runs GhostFaceNet. ArcFace is the loss function GhostFaceNet was trained with;
