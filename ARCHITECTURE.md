@@ -552,9 +552,9 @@ falls through to `"AUTO"` if LLM returns an unrecognized key.
 Composes 4 subsystems:
 
 1. `CharacterContinuityTracker` ([:35](domain/continuity_engine.py:35)) — preloads embeddings, builds identity-anchored prompt fragments (respecting HC1), tracks wardrobe via `appearance_log`.
-2. `LocationPersistence` ([:234](domain/continuity_engine.py:234)) — wraps `location_manager.get_location_prompt()` + `get_location_seed()`.
-3. `PhysicsPromptEngineer` ([:261](domain/continuity_engine.py:261)) — appends physics constraint clauses.
-4. `TemporalConsistencyManager` ([:339](domain/continuity_engine.py:339)) — manages img2img chaining with `denoise_strength ∈ {0.30, 0.40, 0.50, 0.55}` based on transition type.
+2. `LocationPersistence` ([:237](domain/continuity_engine.py:237)) — wraps `location_manager.get_location_prompt()` + `get_location_seed()`.
+3. `PhysicsPromptEngineer` ([:264](domain/continuity_engine.py:264)) — appends physics constraint clauses.
+4. `TemporalConsistencyManager` ([:342](domain/continuity_engine.py:342)) — manages img2img chaining with `denoise_strength ∈ {0.30, 0.40, 0.50, 0.55}` based on transition type.
 
 **Key public methods:**
 - `enhance_shot_prompt(shot, scene, previous_shot, shot_index, approved_anchor_image)` → returns shot with appended prompt + `continuity_config` dict.

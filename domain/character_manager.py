@@ -366,7 +366,9 @@ def _has_detectable_face(image_path: str) -> bool:
     if not DEEPFACE_AVAILABLE:
         return True  # Assume valid if DeepFace unavailable
     try:
-        faces = DeepFace.extract_faces(img_path=image_path, enforce_detection=True)
+        from identity.validator import cv2_single_thread
+        with cv2_single_thread():  # determinism: serialize the OpenCV align race
+            faces = DeepFace.extract_faces(img_path=image_path, enforce_detection=True)
         return len(faces) > 0
     except Exception:
         return False
@@ -382,7 +384,9 @@ def _count_faces(image_path: str) -> int:
     if not DEEPFACE_AVAILABLE:
         return 0  # Cannot count; caller falls back to lenient path
     try:
-        faces = DeepFace.extract_faces(img_path=image_path, enforce_detection=True)
+        from identity.validator import cv2_single_thread
+        with cv2_single_thread():  # determinism: serialize the OpenCV align race
+            faces = DeepFace.extract_faces(img_path=image_path, enforce_detection=True)
         return len(faces)
     except Exception:
         return 0
@@ -393,11 +397,13 @@ def compute_face_embedding(image_path: str) -> Optional[np.ndarray]:
     if not DEEPFACE_AVAILABLE:
         return None
     try:
-        embeddings = DeepFace.represent(
-            img_path=image_path,
-            model_name="GhostFaceNet",
-            enforce_detection=False,
-        )
+        from identity.validator import cv2_single_thread
+        with cv2_single_thread():  # determinism: serialize the OpenCV align race
+            embeddings = DeepFace.represent(
+                img_path=image_path,
+                model_name="GhostFaceNet",
+                enforce_detection=False,
+            )
         if embeddings:
             return np.array(embeddings[0]["embedding"])
     except Exception as e:

@@ -117,6 +117,12 @@ def _cv2_single_thread():
         cv2.setNumThreads(_prev_threads)
 
 
+# Public alias for the shared cv2 single-thread determinism guard. domain/ embedding
+# call sites (character_manager, continuity_engine) import this to route their
+# DeepFace.represent/extract_faces through the same guard as the production path.
+cv2_single_thread = _cv2_single_thread
+
+
 def _represent_deterministic(image_path: str) -> list:
     """GhostFaceNet DeepFace.represent under the cv2 single-thread guard.
 

@@ -134,6 +134,7 @@ class CharacterContinuityTracker:
             return {"passed": True, "results": {}}
 
         import cv2
+        from identity.validator import cv2_single_thread
 
         # Extract 3 frames for robustness
         cap = cv2.VideoCapture(video_path)
@@ -160,11 +161,12 @@ class CharacterContinuityTracker:
             cv2.imwrite(temp_frame, frame)
 
             try:
-                # Detect all faces in frame
-                faces = DeepFace.extract_faces(
-                    img_path=temp_frame,
-                    enforce_detection=False,
-                )
+                # Detect all faces in frame (determinism: serialize OpenCV align)
+                with cv2_single_thread():
+                    faces = DeepFace.extract_faces(
+                        img_path=temp_frame,
+                        enforce_detection=False,
+                    )
 
                 for face_data in faces:
                     # Compute embedding for this detected face
@@ -178,11 +180,12 @@ class CharacterContinuityTracker:
                     cv2.imwrite(temp_face, cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR))
 
                     try:
-                        face_emb_list = DeepFace.represent(
-                            img_path=temp_face,
-                            model_name="GhostFaceNet",
-                            enforce_detection=False,
-                        )
+                        with cv2_single_thread():
+                            face_emb_list = DeepFace.represent(
+                                img_path=temp_face,
+                                model_name="GhostFaceNet",
+                                enforce_detection=False,
+                            )
                         if not face_emb_list:
                             continue
                         face_emb = np.array(face_emb_list[0]["embedding"])
