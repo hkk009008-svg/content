@@ -42,10 +42,13 @@ implementing the trivial Tier-1 fixes. Wrapped on user request.
 - **Bootstrap + coordination commits** (`340ac4f`, `85395bf`): director2 ONLINE
   broadcast, consumed the 4-seat cutover thread, ACK'd operator2.
 
-## What operator2 is implementing NOW (user "proceed-now", their lane-share)
+## What operator2 STAGED but did NOT implement (clean break — these are the immediate NEXT)
 
-Per operator2 dispatch-claim (`09:23:56Z`) + proceed-now heads-up (`09:28:18Z`),
-TDD + each its own pathspec-scoped commit:
+**Correction:** operator2 also wrapped (user "handoff") and per their wrap
+(`622782f`/`fa4e53b`) made a **clean break BEFORE implementing** — the 3 fixes are
+**authorized + staged but UNIMPLEMENTED** (this supersedes their earlier
+"implementing now" heads-up). So A/B/C below are NOT done; they are the immediate
+next work (⭐#1). Each TDD + its own pathspec-scoped commit:
 - **A.** `motion_render.py:209` `scene_id=` → `shot_id=` — storyboard cost-tracking
   was a 100%-dead `TypeError` swallowed by `except` (never recorded Kling spend).
 - **B.** `phase_c_ffmpeg.py` cascade recursion — forward **driving_video_path**
@@ -64,10 +67,12 @@ director2 design call (see ⭐#3).
 
 ## ⭐ Pickups for the next director2 (ordered)
 
-**⭐#1 — Verify operator2's 3 fixes (A/B/C) + land the coordinated negative_prompt-cascade-forwarding.**
-operator2 self-verified under the user's proceed-now; close the implementer≠verifier
-loop with an independent check of their landed commits (scoped pytest + diff vs
-their dispatch-claim). Then do the **negative_prompt-cascade-forwarding** fix
+**⭐#1 — IMPLEMENT operator2's 3 staged fixes (A/B/C) + land the coordinated negative_prompt-cascade-forwarding.**
+operator2 authorized + staged these (user proceed-now) but made a clean break
+BEFORE implementing (their wrap `622782f` — ZERO lines written), so they are
+UNIMPLEMENTED. Decide who implements (operator2 on resume vs director2), keeping
+implementer≠verifier; TDD each + its own pathspec-scoped commit; the other seat
+verifies. Then do the **negative_prompt-cascade-forwarding** fix
 *with* operator2: thread `negative_prompt=negative_prompt` through both recursive
 `generate_ai_video` calls so an explicit caller negative survives a cascade hop
 (currently re-derived from shot_type → explicit negatives lost). Test pattern is
