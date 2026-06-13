@@ -211,6 +211,43 @@ def _should_tag_audio_embedded(
     )
 
 
+def _inherit_audio_flags_from_base(base_take: Optional[dict], variant: dict) -> None:
+    """Propagate a base take's audio-embedding flags onto a postprocess variant
+    when the variant's output clip actually carries an audio stream.
+
+    Postprocess corrections (apply_correction) mint a variant with no audio-flag
+    slot. PRESERVE transforms (rife/color_grade/speed) and successfully re-muxed
+    STRIP transforms (upscale/face_swap) carry the source audio through — but
+    without ``audio_embedded`` / ``dialogue_audio_in_clip`` the assembler
+    (_build_scene_packages) treats the variant as audio-less, generates standalone
+    scene-TTS, and the final mux drops the clip's embedded ``[0:a]`` — REPLACING
+    the take's real voice with generic TTS (a voice-loss regression).
+
+    Gating on an actual audio stream (``_has_audio_stream``) keeps a failed-remux /
+    video-only STRIP variant correctly UNFLAGGED (TTS fills — degraded, not a silent
+    clip falsely claiming embedded audio). lip_sync GENERATES fresh dialogue and is
+    flagged directly in its branch (a silent base has no flag to inherit), not here.
+    [§3 audio-sibling family]
+    """
+    if not base_take or not isinstance(variant, dict):
+        return
+    path = variant.get("path")
+    if not path:
+        return
+    try:
+        from phase_c_ffmpeg import _has_audio_stream
+        if not _has_audio_stream(path):
+            return
+    except Exception:
+        return
+    base_meta = base_take.get("metadata") or {}
+    variant.setdefault("metadata", {})
+    if base_meta.get("audio_embedded"):
+        variant["metadata"]["audio_embedded"] = True
+    if base_meta.get("dialogue_audio_in_clip"):
+        variant["metadata"]["dialogue_audio_in_clip"] = True
+
+
 # Supported Veo clip durations (ascending).  The clamp picks the smallest
 # value >= speech_seconds; values beyond the maximum are capped to "8s".
 _VEO_SUPPORTED_DURATIONS = ("4s", "6s", "8s")
@@ -2384,6 +2421,12 @@ class ShotController:
                     )
                     if result:
                         variant["path"] = result
+                        # lip_sync GENERATES embedded dialogue (synced to audio_path)
+                        # even when the base take was silent/unflagged, so tag the
+                        # variant directly — base-flag inheritance has nothing to copy
+                        # from a silent base.  Mirrors the motion path at :1801.
+                        # [§3 audio-sibling family, completeness find C4]
+                        variant.setdefault("metadata", {})["dialogue_audio_in_clip"] = True
                         if "cascade_metadata" in _lipsync_cascade:
                             variant["cascade_metadata"] = _lipsync_cascade["cascade_metadata"]
                         # Cost-track the lipsync correction (Tier F NEW-2: previously
@@ -2435,6 +2478,13 @@ class ShotController:
 
             if not variant.get("path") or not os.path.exists(variant["path"]):
                 return {"success": False, "error": f"Action '{action}' failed or not applicable"}
+
+            # Propagate audio-embedding flags so the assembler doesn't substitute
+            # scene-TTS for a variant that carries (preserved or re-muxed) dialogue
+            # audio.  Gated on a real audio stream → video-only strips stay
+            # unflagged (TTS fills).  lip_sync flags itself in-branch above.
+            # [§3 audio-sibling family]
+            _inherit_audio_flags_from_base(base_take, variant)
 
             def _mutator(_scene: dict, project_shot: dict):
                 project_shot.setdefault("postprocess_variants", []).append(variant)

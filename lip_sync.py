@@ -848,6 +848,65 @@ def _restore_audio_track(video_path: str, audio_source_path: str, output_path: s
         return False
 
 
+def _remux_source_audio_in_place(video_only_path: str, source_video_path: str, *, engine: str) -> bool:
+    """Restore ``source_video_path``'s audio onto a freshly-produced VIDEO-ONLY
+    clip at ``video_only_path``, IN PLACE — mirrors :func:`_restore_audio_track`.
+
+    Used by audio-stripping cloud transforms (SeedVR2 upscale, PixVerse face-swap)
+    whose outputs carry no audio. Without this, a postprocess correction of a
+    dialogue / lip-synced take produces a silent variant; the assembler then
+    substitutes generic scene-TTS for the dropped voice (the §3 audio-sibling
+    defect). Best-effort + source-audio-gated:
+
+      * silent source  → no-op; the clip is left byte-identical (the common
+        non-dialogue B-roll path pays no ffmpeg cost);
+      * re-mux failure → any partial output is discarded and the original
+        video-only clip is restored and KEPT (degrade to pre-fix behavior, not
+        worse — the unflagged variant lets the assembler's TTS fill the audio);
+      * success        → the file at ``video_only_path`` now carries the source
+        audio track.
+
+    Returns True only when the in-place re-mux succeeded.
+    """
+    if not (video_only_path and os.path.exists(video_only_path)
+            and source_video_path and os.path.exists(source_video_path)):
+        return False
+    try:
+        from phase_c_ffmpeg import _has_audio_stream
+        if not _has_audio_stream(source_video_path):
+            return False  # silent source — nothing to restore
+    except Exception:
+        return False
+    noaudio = video_only_path + ".noaudio.mp4"
+    try:
+        os.replace(video_only_path, noaudio)
+    except OSError:
+        return False
+    ok = False
+    try:
+        ok = _restore_audio_track(noaudio, source_video_path, video_only_path)
+    except Exception:
+        ok = False
+    if ok and os.path.exists(video_only_path):
+        try:
+            os.remove(noaudio)
+        except OSError:
+            pass
+        return True
+    # Failure: discard any partial re-mux output, restore the known-good clip.
+    try:
+        if os.path.exists(video_only_path):
+            os.remove(video_only_path)
+    except OSError:
+        pass
+    try:
+        os.replace(noaudio, video_only_path)
+    except OSError:
+        logger.warning("%s audio re-mux: failed to restore video-only clip",
+                       engine, exc_info=True, extra={"engine": engine})
+    return False
+
+
 def generate_rife_interpolation(
     video_path: str,
     output_path: str,
@@ -979,6 +1038,13 @@ def upscale_video_seedvr2(
             if safe_download(out_url, output_path) is None:
                 logger.warning("SeedVR2 download failed", extra={"engine": "seedvr2"})
                 return None
+            # SeedVR2 (like RIFE) returns VIDEO-ONLY output. Restore the source
+            # clip's audio IN PLACE so an upscale of a dialogue / lip-synced /
+            # native-audio take is not silently muted — otherwise the postprocess
+            # assembler substitutes generic scene-TTS for the dropped voice.
+            # Best-effort + source-audio-gated; on failure the higher-res
+            # video-only clip is kept. [§3 audio-sibling family]
+            _remux_source_audio_in_place(output_path, video_path, engine="seedvr2")
             logger.info(
                 "SeedVR2 upscale success",
                 extra={"engine": "seedvr2", "output_path": output_path},

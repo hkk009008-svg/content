@@ -56,6 +56,13 @@ def face_swap_video_frames(video_path, reference_image, output_path):
     Post-processing face swap for identity consistency.
     Priority: fal.ai cloud swap → FaceFusion CLI → skip
     """
+    # Both swap paths (fal.ai PixVerse, FaceFusion CLI) emit VIDEO-ONLY clips.
+    # Restore the source clip's audio in place so a face-swap of a dialogue take
+    # is not silently muted — otherwise the postprocess assembler substitutes
+    # generic scene-TTS for the dropped voice. Lazy import (no module-level
+    # coupling; lip_sync owns the shared re-mux helper). [§3 audio-sibling family]
+    from lip_sync import _remux_source_audio_in_place
+
     # PRIORITY 1: fal.ai PixVerse face swap (cloud, no local deps)
     try:
         import fal_client
@@ -78,6 +85,7 @@ def face_swap_video_frames(video_path, reference_image, output_path):
             out_url = result.get("video", {}).get("url")
             if out_url:
                 urllib.request.urlretrieve(out_url, output_path)
+                _remux_source_audio_in_place(output_path, video_path, engine="pixverse_swap")
                 print(f"   [FACESWAP] Cloud swap complete: {output_path}")
                 return output_path
     except Exception as e:
@@ -97,6 +105,7 @@ def face_swap_video_frames(video_path, reference_image, output_path):
             capture_output=True, text=True, timeout=300
         )
         if result.returncode == 0 and os.path.exists(output_path):
+            _remux_source_audio_in_place(output_path, video_path, engine="facefusion")
             print(f"   [FACESWAP] FaceFusion complete: {output_path}")
             return output_path
     except FileNotFoundError:
