@@ -12,8 +12,11 @@
 set -euo pipefail
 
 ROLE=${1:-}
-case "$ROLE" in director|operator) ;; *)
-  echo "usage: consume-events <director|operator> [--to <timestamp>]" >&2; exit 2;; esac
+# 4-seat protocol (two director-operator pairs). `all` is a broadcast TARGET,
+# not a consuming role — there is no seen/all.txt; every real seat consumes
+# events addressed to itself OR to `all` (see addressed() below).
+case "$ROLE" in director|director2|operator|operator2) ;; *)
+  echo "usage: consume-events <director|director2|operator|operator2> [--to <timestamp>]" >&2; exit 2;; esac
 shift
 TARGET=""
 if [ "${1:-}" = "--to" ]; then
@@ -33,7 +36,7 @@ CUR=$(head -1 "$SEEN")
 dash()  { echo "${1:0:11}$(echo "${1:11:8}" | tr ':' '-')Z"; }
 colon() { echo "${1:0:11}$(echo "${1:11:8}" | tr '-' ':')Z"; }
 
-addressed() { ls "$SENT" 2>/dev/null | grep -E -- "-to-$ROLE-" | sort; }
+addressed() { ls "$SENT" 2>/dev/null | grep -E -- "-to-($ROLE|all)-" | sort; }
 
 if [ -n "$TARGET" ]; then
   TD=$(dash "$TARGET")

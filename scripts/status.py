@@ -78,7 +78,9 @@ def count_unread(cursor_ts: str, event_filenames: list[str], seat: str) -> int:
             continue
         event_ts = m.group("ts")   # already dashes
         event_to = m.group("to")
-        if event_to != seat:
+        # `all` is a broadcast target → addressed to every real seat (4-seat
+        # protocol). _EVENT_RE's (?P<to>\w+) already matches director2/operator2.
+        if event_to != seat and event_to != "all":
             continue
         if event_ts > cursor_norm:
             count += 1

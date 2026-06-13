@@ -54,8 +54,12 @@ def make_coord(tmp_path, events=None, cursors=None):
     (root / "mailbox" / "seen").mkdir(parents=True)
     for name, body in (events or {}).items():
         (root / "mailbox" / "sent" / name).write_text(body)
+    # 4-seat protocol: every role in check_coordination.ROLES needs a cursor or
+    # the linter FATALs cursor_missing. Seed all four; per-test overrides apply.
     default_cursors = {"director": "2026-01-01T00:00:00Z",
-                       "operator": "2026-01-01T00:00:00Z"}
+                       "director2": "2026-01-01T00:00:00Z",
+                       "operator": "2026-01-01T00:00:00Z",
+                       "operator2": "2026-01-01T00:00:00Z"}
     default_cursors.update(cursors or {})
     for role, ts in default_cursors.items():
         (root / "mailbox" / "seen" / f"{role}.txt").write_text(ts + "\n")
@@ -223,8 +227,9 @@ def test_unread_report_counts_per_role(tmp_path):
         cursors={"operator": "2026-06-12T10:00:00Z"},
     )
     issues = run(root, since=SINCE, now=NOW)
+    # Exact role prefix — "operator" is a substring of "operator2" (4-seat).
     op = [i for i in issues
-          if i.severity == "INFO" and "operator" in i.message and "unread" in i.message]
+          if i.kind == "unread" and i.message.startswith("operator:")]
     assert len(op) == 1 and "1" in op[0].message
 
 

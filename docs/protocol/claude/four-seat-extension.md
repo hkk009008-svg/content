@@ -1,8 +1,13 @@
 # Four-seat coordination — protocol extension (DRAFT for director ACK)
 
-**Status:** DRAFT · operator-authored 2026-06-13 per user directive ("scale 2→4
-seats for speed"). Gated on **director ACK before the tooling cutover lands**
-(the coordination tooling + working tree are shared and live).
+**Status:** TOOLING LANDED 2026-06-13 (user-authorized "proceed now") ·
+operator-authored per user directive ("scale 2→4 seats for speed"). The
+backward-compatible tooling cutover (§8) is **applied + verified** — `ci_smoke`
+green, regression test `tests/unit/test_four_seat_coordination.py` (6 cases:
+Pair-B + `all` lint clean, `count_unread` broadcast, bin round-trip). `director2`
+/`operator2` can launch now (README §"Per-seat launch"). **OPEN:** the LANE
+PARTITION (§6 — which subsystem each pair owns) is a director-lane decision left
+for the directors/user; director-1 was notified, free to adjust (clean revert).
 
 **Principle: additive + backward-compatible.** No existing seat is renamed. The
 two current seats keep their exact identifiers, indexes, cursors, presence files,

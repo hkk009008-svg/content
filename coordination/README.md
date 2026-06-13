@@ -221,7 +221,28 @@ export CLAUDE_SEAT=operator
 export GIT_INDEX_FILE="$(git rev-parse --absolute-git-dir)/index-operator"
 [ -f "$GIT_INDEX_FILE" ] || git read-tree HEAD
 claude
+
+# --- Pair B (4-seat protocol; see docs/protocol/claude/four-seat-extension.md) ---
+# director2 session (separate terminal, SAME tree)
+cd /Users/hyungkoookkim/Content
+export CLAUDE_SEAT=director2
+export GIT_INDEX_FILE="$(git rev-parse --absolute-git-dir)/index-director2"
+[ -f "$GIT_INDEX_FILE" ] || git read-tree HEAD
+claude
+
+# operator2 session (separate terminal, SAME tree)
+cd /Users/hyungkoookkim/Content
+export CLAUDE_SEAT=operator2
+export GIT_INDEX_FILE="$(git rev-parse --absolute-git-dir)/index-operator2"
+[ -f "$GIT_INDEX_FILE" ] || git read-tree HEAD
+claude
 ```
+
+**Seats** are `director`, `director2`, `operator`, `operator2` — two
+director↔operator **pairs** (A = `director`+`operator`, B = `director2`+`operator2`).
+The heartbeat hook (`.claude/hooks/update-state.sh`) is seat-generic, so presence /
+heartbeat / per-seat index isolation work for all four with no hook change. Mailbox
+events address any seat directly, or `all` to broadcast (`send-event <from> all <kind>`).
 
 The `git read-tree HEAD` seed is **required**: a fresh `GIT_INDEX_FILE` is an
 empty index, so without it `git status` reports every tracked file as a phantom

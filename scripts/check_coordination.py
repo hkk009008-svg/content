@@ -37,7 +37,11 @@ from pathlib import Path
 
 from status import count_unread
 
-ROLES = ("director", "operator")
+# 4-seat protocol (two director-operator pairs). `all` is a broadcast TARGET
+# only — NOT a role (no seen/all.txt); every real seat counts `-to-all-` events
+# as addressed to it (see _check_cursors orphan test + status.count_unread).
+# Keep in sync with coordination/bin/{send-event,consume-events} + status._EVENT_RE.
+ROLES = ("director", "director2", "operator", "operator2")
 
 # Union of the kinds documented in coordination/README.md and every kind
 # observed in filename position across the 270 events extant at adoption.
@@ -53,7 +57,8 @@ KNOWN_KINDS = frozenset({
 
 _EVENT_NAME_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)-"
-    r"(?P<frm>director|operator)-to-(?P<to>director|operator)-"
+    r"(?P<frm>director|director2|operator|operator2)"
+    r"-to-(?P<to>director|director2|operator|operator2|all)-"
     r"(?P<kind>[a-z0-9-]+)\.md$"
 )
 
@@ -113,7 +118,7 @@ def _check_cursors(coord_root: Path, now: str,
         # that matches no event is a hand-typed orphan.
         all_names = names + _event_names(coord_root, "archive")
         addressed = [m.group("ts") for m in map(_EVENT_NAME_RE.match, all_names)
-                     if m and m.group("to") == role]
+                     if m and m.group("to") in (role, "all")]
         cur_dash = _dash(cur)
         if addressed and cur_dash not in addressed and cur_dash > min(addressed):
             issues.append(CoordIssue(
