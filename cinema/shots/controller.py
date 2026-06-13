@@ -1828,7 +1828,7 @@ class ShotController:
                         # Replace take video with the lip-synced output.
                         final_vid = ls_result
                         take["metadata"]["lipsync_score"] = validate_lipsync_quality(
-                            ls_result, audio_path_for_sync
+                            ls_result, audio_path_for_sync, _generation=True
                         )
                         if "cascade_metadata" in _ls_cascade:
                             take["metadata"]["lipsync_cascade"] = _ls_cascade["cascade_metadata"]

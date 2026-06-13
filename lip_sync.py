@@ -423,15 +423,175 @@ def lipsync_overlay(
 # SYNC QUALITY VALIDATION (SyncNet gate)
 # ─────────────────────────────────────────────────────────────
 
-def validate_lipsync_quality(video_path: str, audio_path: Optional[str] = None) -> float:
+def _score_mouth_energy(video_path: str, audio_path: str) -> Optional[float]:
+    """Provider-1.5: mouth-brightness / audio-energy Pearson correlation scorer.
+
+    Samples up to N=24 evenly-spaced frames, detects the mouth region via the
+    OpenCV Haar smile cascade, records the ROI mean brightness, then extracts
+    per-frame RMS audio energy via ffprobe astats. Pearson correlation between
+    brightness and energy is mapped to [0, 1].
+
+    Returns:
+        float in [0, 1] on success; None on any failure (fail-open).
+    """
+    N = 24
+    try:
+        import cv2  # lazy — fail-open if absent
+        import numpy as _np
+        import subprocess as _sp
+        import json as _json
+
+        # ── 1. Sample frames ──────────────────────────────────────────────
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return None
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames <= 0:
+            cap.release()
+            return None
+
+        stride = max(1, total_frames // N)
+        sample_indices = list(range(0, total_frames, stride))[:N]
+
+        cascade_path = cv2.data.haarcascades + "haarcascade_smile.xml"
+        classifier = cv2.CascadeClassifier(cascade_path)
+
+        brightness_vals: list = []
+        occlusion_count = 0
+
+        for idx in sample_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, float(idx))
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                occlusion_count += 1
+                brightness_vals.append(None)
+                continue
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            boxes = classifier.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=3,
+                minSize=(20, 10),
+            )
+
+            if len(boxes) == 0:
+                occlusion_count += 1
+                brightness_vals.append(None)
+            else:
+                x, y, w, h = boxes[0]
+                roi = gray[y : y + h, x : x + w]
+                brightness_vals.append(float(_np.mean(roi)) if roi.size > 0 else None)
+
+        cap.release()
+
+        n_sampled = len(sample_indices)
+        mouth_detect_rate = (n_sampled - occlusion_count) / max(n_sampled, 1)
+
+        if occlusion_count / max(n_sampled, 1) > 0.50:
+            logger.info(
+                "mouth-energy scorer: too many occluded frames — fail-open",
+                extra={"provider": "mouth_energy", "mouth_detect_rate": round(mouth_detect_rate, 3)},
+            )
+            return None
+
+        # ── 2. Extract per-frame audio energy via ffprobe astats ──────────
+        try:
+            ffprobe_cmd = [
+                "ffprobe",
+                "-f", "lavfi",
+                "-i", f"amovie={audio_path},astats=metadata=1:reset=1",
+                "-show_entries", "frame_tags=lavfi.astats.Overall.RMS_level",
+                "-of", "json",
+                "-v", "error",
+            ]
+            res = _sp.run(ffprobe_cmd, capture_output=True, text=True, timeout=30)
+            frames_data = _json.loads(res.stdout).get("frames", [])
+            if not frames_data:
+                return None
+
+            # Map to our N sample indices (evenly resample from ffprobe output)
+            total_audio_frames = len(frames_data)
+            energy_vals: list = []
+            for i, brightness in enumerate(brightness_vals):
+                if brightness is None:
+                    continue
+                audio_idx = min(
+                    int(i / n_sampled * total_audio_frames),
+                    total_audio_frames - 1,
+                )
+                tag_val = (
+                    frames_data[audio_idx]
+                    .get("tags", {})
+                    .get("lavfi.astats.Overall.RMS_level", None)
+                )
+                if tag_val is None:
+                    continue
+                try:
+                    # ffprobe returns "-inf" for silence — clamp to a low number
+                    e = float(tag_val) if tag_val != "-inf" else -120.0
+                    energy_vals.append((brightness, e))
+                except (ValueError, TypeError):
+                    continue
+        except Exception:
+            return None
+
+        if len(energy_vals) < 4:
+            return None  # too few paired samples
+
+        brightness_arr = _np.array([v[0] for v in energy_vals])
+        energy_arr = _np.array([v[1] for v in energy_vals])
+
+        # Guard against zero-variance (constant arrays → corrcoef returns nan)
+        if brightness_arr.std() < 1e-6 or energy_arr.std() < 1e-6:
+            return None
+
+        corr_matrix = _np.corrcoef(brightness_arr, energy_arr)
+        pearson = float(corr_matrix[0, 1])
+        if _np.isnan(pearson):
+            return None
+
+        score = float(_np.clip((pearson + 1.0) / 2.0, 0.0, 1.0))
+
+        logger.info(
+            "mouth-energy scorer: scored",
+            extra={
+                "provider": "mouth_energy",
+                "mouth_detect_rate": round(mouth_detect_rate, 3),
+                "score": round(score, 4),
+                "n_frames": n_sampled,
+            },
+        )
+        return score
+
+    except Exception:
+        # Total fail-open — never block the pipeline
+        return None
+
+
+def validate_lipsync_quality(
+    video_path: str,
+    audio_path: Optional[str] = None,
+    *,
+    _generation: bool = False,
+) -> float:
     """Score audio-visual sync confidence in [0, 1].
 
     Provider chain (best-effort, all optional):
       1. syncnet_python (open-source SyncNet) — true phoneme-level scoring.
+      1.5. mouth-energy Pearson scorer (cv2 + ffprobe astats) — generation
+           path only (_generation=True). Skipped on overlay path.
       2. Duration-match heuristic — catches GROSS sync failures (mismatched
          clip lengths) but not subtle drift. Better than nothing.
       3. Neutral 1.0 fallback so the gate is a no-op when no scorer is
          installed. The pipeline never blocks on a missing dependency.
+
+    Args:
+        video_path: Path to the video to score.
+        audio_path: Optional path to the reference audio.
+        _generation: Set True on the generation path to enable Provider-1.5
+            (mouth-energy scorer). Must NOT be set on the overlay path.
 
     Returns:
         float in [0, 1]. Higher = better sync. 1.0 = "perfect or unmeasurable".
@@ -452,6 +612,15 @@ def validate_lipsync_quality(video_path: str, audio_path: Optional[str] = None) 
     except Exception:
         # ImportError, attribute error, or model checkpoint missing — skip
         pass
+
+    # Provider 1.5: mouth-energy Pearson scorer (generation path only)
+    if _generation:
+        try:
+            _m = _score_mouth_energy(video_path, audio_path or "")
+            if _m is not None:
+                return _m
+        except Exception:
+            pass
 
     # Provider 2: duration-match heuristic
     try:
@@ -599,7 +768,7 @@ def lipsync_generation(
                     "attempts": list(gen_attempts),
                 }
             return True
-        score = validate_lipsync_quality(output_path, audio_path)
+        score = validate_lipsync_quality(output_path, audio_path, _generation=True)
         logger.info(
             "generation sync gate scored",
             extra={"engine": engine_name, "sync_score": round(score, 4), "threshold": gate_threshold},
