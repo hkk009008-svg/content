@@ -79,6 +79,7 @@ crash on import-time NameError when they execute.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import time
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
@@ -1215,7 +1216,16 @@ class ShotController:
             threshold = float(settings.get("auto_rife_smoothness_threshold", 0.4))
         except (TypeError, ValueError):
             threshold = 0.4
-        if threshold <= 0 or not video_path or not os.path.exists(video_path):
+        # math.isfinite rejects nan AND ±inf: nan would skip every take silently
+        # (nan<=0 is False, smoothness<nan is False), +inf would RIFE every take
+        # (smoothness<inf always True) — both defeat the threshold as a gate.
+        if threshold <= 0 or not math.isfinite(threshold) or not video_path or not os.path.exists(video_path):
+            return video_path
+        # A take already failed the motion floor → it is bound for manual
+        # rejection/regeneration; do not spend a cloud RIFE call smoothing it.
+        # (The manual action=="rife" path stays ungated — re-smoothing a
+        # floor-failed take there is an explicit operator choice.)
+        if take.get("metadata", {}).get("motion_floor_failed"):
             return video_path
         try:
             from phase_c_ffmpeg import assess_motion_quality
@@ -1344,6 +1354,16 @@ class ShotController:
                 from performance.motion_gate import needs_remotion
                 motion_score = take["metadata"].get("motion_fidelity")
                 floor_override = settings.get("motion_quality_threshold")
+                # A non-finite / non-numeric override must NOT silently disable the
+                # gate: `motion_score < nan` is always False, so a JSON NaN would let
+                # any motion through. Validate → fall back to needs_remotion when bad.
+                if floor_override is not None:
+                    try:
+                        floor_override = float(floor_override)
+                        if not math.isfinite(floor_override):
+                            floor_override = None
+                    except (TypeError, ValueError):
+                        floor_override = None
                 if motion_score is not None:
                     below_floor = (
                         motion_score < floor_override

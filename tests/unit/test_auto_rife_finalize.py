@@ -231,3 +231,63 @@ class TestAutoRifeCostKey:
         from cost_tracker import API_COST_USD
         assert "FAL_RIFE" in API_COST_USD
         assert API_COST_USD["FAL_RIFE"] > 0
+
+
+class TestAutoRifeMotionFloorFailedGuard:
+    """D-MED: a take already flagged ``motion_floor_failed`` is bound for manual
+    rejection — auto-RIFE must not burn a $0.04 cloud call smoothing it."""
+
+    def test_motion_floor_failed_take_skips_auto_rife(self, tmp_path):
+        ctrl, scene, shot, take, vid, stored = _setup_ctrl(tmp_path)
+        take["metadata"]["motion_floor_failed"] = True
+        mq = {"smoothness_score": 0.1, "recommendation": "interpolate"}
+        with patch("phase_c_ffmpeg.assess_motion_quality", return_value=mq) as m_assess, \
+             patch("cinema.shots.controller.generate_rife_interpolation") as m_rife:
+            result = ctrl._maybe_auto_rife(vid, take, "sh1", {"auto_rife_smoothness_threshold": 0.4})
+
+        assert result == vid                  # original kept, no smoothing
+        m_assess.assert_not_called()          # short-circuits before assessment
+        m_rife.assert_not_called()            # no cloud RIFE call
+
+
+class TestAutoRifeNonFiniteThreshold:
+    """D-LOW: a non-finite smoothness threshold must DISABLE auto-RIFE. ``nan``
+    would skip every take (silently dead), ``+inf`` would RIFE every take
+    (``smoothness < inf`` always True). ``math.isfinite`` guards both."""
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+    def test_nonfinite_threshold_disables_auto_rife(self, tmp_path, bad):
+        ctrl, scene, shot, take, vid, stored = _setup_ctrl(tmp_path)
+        mq = {"smoothness_score": 0.1, "recommendation": "interpolate"}
+        with patch("phase_c_ffmpeg.assess_motion_quality", return_value=mq) as m_assess, \
+             patch("cinema.shots.controller.generate_rife_interpolation") as m_rife:
+            result = ctrl._maybe_auto_rife(vid, take, "sh1", {"auto_rife_smoothness_threshold": bad})
+
+        assert result == vid
+        m_assess.assert_not_called()
+        m_rife.assert_not_called()
+
+
+class TestMotionFloorThresholdFiniteness:
+    """D-LOW Rule #13 sibling: a non-finite ``motion_quality_threshold`` must not
+    silently disable the motion-floor regen gate. ``motion_score < nan`` is always
+    False, so a JSON NaN would let any motion through; the override must be
+    finiteness-validated and fall back to ``needs_remotion`` when invalid."""
+
+    def test_nan_motion_quality_threshold_falls_back_to_needs_remotion(self, tmp_path):
+        ctrl, scene, shot, take, vid, stored = _setup_ctrl(tmp_path)
+        drive = tmp_path / "drive.mp4"
+        drive.write_bytes(b"fake-driving")
+
+        with patch("performance.motion_gate.score_motion_fidelity", return_value=0.2), \
+             patch("performance.motion_gate.needs_remotion", return_value=True) as m_needs:
+            ctrl._finalize_motion_take(
+                scene, shot, take, vid,
+                source_image="/f/kf.jpg", target_api="KLING_NATIVE", cc={},
+                settings={"auto_rife_smoothness_threshold": 0, "motion_quality_threshold": float("nan")},
+                resolved_shot_type="medium", driving_video_path=str(drive), record_cost=False,
+            )
+
+        # NaN override is ignored → real gate (needs_remotion) decides → fires.
+        m_needs.assert_called_once()
+        assert take["metadata"].get("motion_floor_failed") is True
