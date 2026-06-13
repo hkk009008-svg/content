@@ -107,11 +107,12 @@ def _submit(wf):
     return j["prompt_id"]
 
 
-def render_leg(base, seeds, n):
-    """Faithful copy of the S2 money-path-safe render loop, saving to
-    logs/passb_n{i}.jpg. Every paid/remote call has a timeout; /view is
-    raise_for_status'd; a completed-but-empty run FAILS; sustained gateway
-    loss (err_streak>=6 = ~60s) is treated as ComfyUI OOM-death -> NO-GO."""
+def render_leg(base, seeds, n, save_prefix="logs/passb_n"):
+    """S2 money-path-safe render loop, saving to {save_prefix}{i}.jpg. Every
+    paid/remote call has a timeout; /view is raise_for_status'd; a
+    completed-but-empty run FAILS; sustained gateway loss (err_streak>=6 = ~60s)
+    is treated as ComfyUI OOM-death -> NO-GO. save_prefix lets sibling drivers
+    (Design D) reuse this loop without clobbering each other's artifacts."""
     peak = 0.0
     saved = []
     for i, seed in enumerate(seeds[:n]):
@@ -168,7 +169,7 @@ def render_leg(base, seeds, n):
                           f"({img['filename']}); continuing", flush=True)
                     done = True
                     break
-                path = f"logs/passb_n{i+1}.jpg"
+                path = f"{save_prefix}{i+1}.jpg"
                 with open(path, "wb") as f:
                     f.write(dl.content)
                 saved.append(path)

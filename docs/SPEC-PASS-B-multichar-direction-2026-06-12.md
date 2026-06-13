@@ -765,6 +765,36 @@ table `logs/halves_rescore_20260613.{json,txt}` (regenerate:
   production approach, not just the isolated-PuLID axis. Surfaced to user as the
   recommended next direction over Design C swap-rescue.
 
+**DESIGN D RESULTS (2026-06-13 — BREAKTHROUGH on the core problem; user chose
+D).** Instrument: `scripts/_max_passBd_lora_pulid.py` (= S2 dual topology + man
+LoRA `char_lora_man_v1` @0.55 on node 700 + `TOKman` trigger; aria PuLID-only;
+SINGLE LoRA, not the S3 stack; no masks). N=1 smoke, seed 990011, ~$0.03.
+Artifact `logs/passb_d_n1.jpg`; binding `logs/halves_rescore_20260613.*`
+(regenerate: `scripts/_arc_score_session.py --halves --artifacts logs/passb_d_n1.jpg`).
+
+- **THE MAN BINDS — first time ever.** LEFT half: **man 0.870** / aria 0.476;
+  RIGHT half: aria **0.763** / man 0.507. Two DISTINCT, strongly-bound
+  identities on separate halves (man 0.870 ≫ the 0.70 bar; cf. the chronic
+  0.45–0.52 man cross-floor in Pass-A/S2/Design-A). The reframe is CONFIRMED:
+  PuLID-alone was too weak for the secondary; his trained LoRA was the missing
+  piece. VRAM 41.6 GiB (LoRA adds ~8 GiB vs Design A's 33.9; still well under 48,
+  no OOM).
+- **CAVEAT 1 — placement SWAPPED:** rendered man-LEFT / aria-RIGHT vs the
+  prompt's woman-left/man-right. So the STRICT intended-slot binding_ok reads
+  0/1 (both on the "wrong" half) EVEN THOUGH both bound distinctly — the GO bar
+  as written measures placement-correctness, which is a SEPARATE axis from
+  "does the secondary bind at all" (now solved). Placement is tractable (prompt
+  order, seed, or masking now that two real identities exist to place).
+- **CAVEAT 2 — visual OVER-COOKED:** crusty/over-processed skin, no crisp grey
+  beard — the documented max-tier over-cook (`realism_production_plus_char_lora`:
+  production tier + char LoRA @0.55 = realism; max over-cooks). Tier/quality is
+  a separate axis from binding.
+- **Disposition:** core multi-character binding problem SOLVED via man LoRA.
+  Remaining: placement control + tier/quality polish. Surfaced to user for the
+  next direction (N=4 confirm / placement fix / production-tier quality /
+  strength tune). NOT yet scaled to N=4 (placement swap would read 0/4 strict
+  and undersell the binding win — fix placement first).
+
 ### Phase 4 — Design C: ReActor swap rescue probe (with or without Design A)
 
 **Use the best seed from Phase 3** (or from S2 n3 if Phase 3 is skipped/aborting).
