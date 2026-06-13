@@ -51,6 +51,11 @@ VisionValidator = Callable[[str, str], Dict]
 # duplicating code (import direction: scripts → identity is conventional).
 
 #: Below this fraction of crop area a detection is classified TINY (junk).
+#: NOTE (completeness item C, 2026-06-12): the ratio is relative to the INPUT
+#: image passed to _figure_read_score — a HALF-CROP in the binding path. A face
+#: that is 1% of the full frame is ~2% of its half-crop; the effective
+#: full-frame floor when scoring half-crops is therefore ~0.5%, not 1%. Callers
+#: scoring full images apply a 2x-stricter filter with the same constant.
 FIGURE_TINY_AREA_RATIO: float = 0.01
 
 #: A bounding box within this many pixels of the full crop size is classified
@@ -70,6 +75,14 @@ def _classify_face_detection(
     routinely score higher vs man ref than the true figure (0.59–0.78 vs 0.47–0.52
     on the 2026-06-12 probe).
     OK: any other detection — treated as a valid face.
+
+    NOTE (completeness item A, director disposition 2026-06-12): the DEGENERATE
+    test is CONJUNCTIVE — both dimensions must be within FIGURE_DEGENERATE_MARGIN_PX
+    of the crop. An asymmetric near-full-image box (e.g. full width but a few px
+    short in height) escapes DEGENERATE, also escapes TINY (area ~100%), and wins
+    as the largest OK face — a whole-image-equivalent embedding. Not observed in
+    the 2026-06-12 artifacts; tightening the test (area-fraction OR per-dim) needs
+    its own regression vs the 28 binding tests and is QUEUED, not done.
     """
     if bbox_w >= img_w - FIGURE_DEGENERATE_MARGIN_PX and bbox_h >= img_h - FIGURE_DEGENERATE_MARGIN_PX:
         return "DEGENERATE"
@@ -186,6 +199,13 @@ def _ref_embedding_largest_ok(ref_path: str, ref_name: str = "ref") -> Optional[
     emb_list[0].  MAN_REF (logs/p12_fresh_face_man.jpg) has 2 detections;
     [0] is correct only by ordering luck.  Falls back to emb_list[0] if no
     OK detection is found (should not occur for a well-cropped ref image).
+    When that fallback fires (WARNING printed) the returned embedding is
+    non-None and UNGUARDED — callers cannot tell it from a guarded read, and
+    _compute_binding_scores records note='' (not 'REF_EMBEDDING_FAILED') for it
+    (completeness item B, director disposition 2026-06-12). Scope note: this
+    largest-OK guard covers the INSTRUMENT/binding ref reads only; production
+    validate_image:326 / validate_video:685 still use _get_embedding[0]
+    (SPEC-P1-1 §6 scope clarification; Rule #13 follow-up queued).
 
     Returns None if DEEPFACE_AVAILABLE is False or any exception occurs.
     """
@@ -394,6 +414,20 @@ class IdentityValidator:
               - other_read_type='none' with intended 'figure' → binding decided
                 as intended_score > 0 (face only on intended side = binds)
               - both 'none' → binding_ok=False, note='NO_FACE_INTENDED'
+
+            NOTE — TWO face-selection rules in one return (operator Lane V
+            2026-06-12T00:02:59Z, advisory #3). presence_result and binding_dict
+            are NOT commensurable scores:
+              - presence_result comes from validate_image, whose reference read
+                goes through _get_embedding → DeepFace.represent[0] (FIRST
+                detection, unfiltered; best-face presence semantics).
+              - binding_dict comes from _compute_binding_scores via
+                _figure_read_score (LARGEST OK face, classify-filtered;
+                per-figure semantics — blobs / whole-image fallbacks excluded).
+            The divergence is deliberate (presence asks "is X anywhere in
+            frame", binding asks "is X's FIGURE on the intended half"). A caller
+            must not compare a presence score against a binding score as if they
+            were the same metric.
         """
         presence_result = self.validate_image(
             image_path, reference_path,
@@ -417,6 +451,18 @@ class IdentityValidator:
         half of the frame?" using figure_read_score (detection-filtered; only
         OK-classified faces: area >= 1% of crop, not a whole-image fallback).
         The score is from the LARGEST OK face (per-figure semantics).
+
+        INVARIANT — callers MUST assign DISTINCT intended_slot values (director
+        disposition 2026-06-12T00:02:59Z; adversarial verify wf_9ed6fbf2-50d).
+        In a two-character spike the two specs must be one 'left' + one 'right'.
+        If both share a slot — e.g. both defaulting to 'left' via
+        spec.get("intended_slot", "left") below — the other-half-none branch can
+        return binding_ok=True for BOTH characters on any seed whose un-intended
+        half is face-absent: a FALSE Phase-3 GO. This function does NOT yet
+        validate slot uniqueness; callers that build char_specs from
+        CharIdentitySpec (no intended_slot field) MUST set the slot explicitly.
+        The Phase-3 driver assigns opposite slots and is REQUIRED to add the
+        O(n) slot-uniqueness guard (SPEC-PASS-B §3.4 item A5 + §5 GO bar).
 
             binding_score(X) = intended_score - other_score
             binding_ok(X)    = binding_score > 0

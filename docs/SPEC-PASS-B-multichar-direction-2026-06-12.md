@@ -431,6 +431,29 @@ designated implementation home for closing it:
 enforce single-face at character-registration time) is queued as a SEPARATE
 code task, not part of Design B's binding metric implementation.
 
+**A5 — other-half-empty false-positive** (operator Lane V `2026-06-12T00:02:59Z`
+advisory #1; director-disposed + adversarially re-verified `wf_9ed6fbf2-50d`).
+A NEW family member: the co-star is dominant on the character's INTENDED half
+AND the other half is face-absent. The `other_rtype=='none'` branch
+(`validator.py:602-605`) then sets `binding_ok = intended_score > 0`, with no
+co-star/own-face discrimination — a wrong-identity face on the intended half
+(reading ~0.49 cross-identity vs the wrong ref) still passes. **Bounded for the
+spike**: under the spike's OPPOSITE-slot assignment + strict count (below), the
+character whose intended_slot is the empty half hits `intended_rtype=='none' →
+binding_ok=False`, so BOTH-chars-pass is unsatisfiable on a face-absent seed —
+A5 cannot lift a genuine `<3/4` to a GO **so long as two guards hold**:
+(i) the GO bar uses the STRICT count (§5 below) so face-absent-half seeds are
+excluded from the binding denominator; and (ii) callers assign DISTINCT slots.
+The adversary found the bound LEAKS for a same-slot caller — both specs
+defaulting to `intended_slot='left'` (the `spec.get(...,"left")` default) makes
+both fire the other-none branch and both pass on a face-absent-right seed. The
+Phase-3 driver MUST assign opposite slots AND add an O(n) slot-uniqueness guard
+(`assert len({s['intended_slot'] for s in specs}) == len(specs)` or a logged
+WARNING) to `_compute_binding_scores`'s caller path. Thresholding is the WRONG
+tool here: a floor above the 0.447 cross-floor would not catch 0.492, and a
+floor above 0.492 would eat true man reads (0.466–0.528). Close it with the
+strict count + slot guard, not a similarity threshold.
+
 Risk today: LOW for cross-gender pairs (cross floor 0.447 vs 0.65–0.85
 thresholds), MATERIAL for same-gender pairs. Design B eliminates this risk
 class for both.
@@ -747,6 +770,19 @@ Pod stop/keep: user decision.
 - Binding_ok=True for BOTH conditioned characters in **>=3/4 seeds** (true
   majority; 2/4 is not a majority and equals the unmasked S2 baseline — the
   masked arm must BEAT the baseline, not tie it).
+  **STRICT COUNT (director disposition 2026-06-12T00:02:59Z + adversarial verify
+  `wf_9ed6fbf2-50d`; closes the §3.4 A5 GO-leak):** count only seeds where BOTH
+  halves have a figure read (`read_type=='figure'`). Seeds with NO_FACE on
+  either half are EXCLUDED from the denominator — they MUST NOT count toward the
+  ≥3, because the `other-none` branch hands the present-half character a free
+  `binding_ok=True` (A5) that is not a real binding test. So: a GO needs **≥3 of
+  4 seeds in which both halves have a figure read AND both characters bind on
+  the intended side.** If fewer than 3 seeds have both-halves figure reads,
+  record the strict count and the raw count separately and treat as NO-GO (too
+  few testable seeds). The per-half face-presence already recorded per seed
+  (Phase-3 quality signal) is the EXCLUSION input — wire it into the GO tally,
+  not just the quality log. The unmasked baseline is **0/4 (strict 0/3)**; the
+  masked arm must reach ≥3/4 on the strict count.
 - **Instrument (R-MEASURE; operator disposition #1 DISCHARGED `45c6e52`):**
   all per-half arc/binding numbers for Phase-3 artifacts come from the
   committed scorer — `scripts/_arc_score_session.py --halves --artifacts

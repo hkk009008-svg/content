@@ -617,7 +617,19 @@ scope.
     a pod-side pre-`dc5ad2b` read. Labeled, not reconciled.
   - The instrument is now detection-FILTERED (`312f6d2`: largest OK face,
     ≥1% area, no whole-image fallbacks; ref embeddings via largest-OK
-    guard). Citable table: `logs/halves_rescore_20260612_filtered.{json,txt}`
+    guard). **Scope clarification (operator Lane V 2026-06-12T00:02:59Z,
+    advisory #2):** the largest-OK ref guard — and the `312f6d2` commit body's
+    "MAN_REF 2-detection ordering-luck closed" — are INSTRUMENT/binding-path
+    only. The PRODUCTION reference reads in `validate_image`
+    (`identity/validator.py:326`) and `validate_video` (`:685`) still go
+    through `_get_embedding` → `DeepFace.represent(...)[0]` (FIRST detection,
+    unfiltered), so the [0]-ordering exposure is NOT closed on the production
+    path. Extending largest-OK there is a Rule #13 follow-up (queued, not done):
+    it would shift every multi-detection production ref embedding and so needs
+    its own regression pass — distinct from registration-time A3 enforcement
+    (`418dee2`+`786d9e9`), which guarantees single-face refs at INTAKE but does
+    not re-filter pre-existing multi-face references at read time.
+    Citable table: `logs/halves_rescore_20260612_filtered.{json,txt}`
     (local artifact; regenerate with
     `PYTHONPATH=. .venv/bin/python scripts/_arc_score_session.py --halves` —
     the committed instrument is the reproducibility guarantee per

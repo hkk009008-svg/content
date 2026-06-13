@@ -40,6 +40,15 @@ def make_half_mask(width: int, height: int, side: str) -> Image.Image:
     Boundary: left gets columns 0..(width//2 - 1), right gets width//2..(width-1).
     This MATCHES crop_half in scripts/_s1_rescore_crops.py:22-30 which uses
     box=(0, 0, w//2, h) for left and box=(w//2, 0, w, h) for right.
+
+    IMPORTANT (completeness item D, director disposition 2026-06-12): this
+    returns a PIXEL-space mask at (width, height). The consumer
+    ApplyPulidAdvanced.attn_mask may expect LATENT-space dimensions (pixel/8 for
+    FLUX). Before wiring this into a ComfyUI graph, resolve the expected
+    coordinate space via the Phase-1 GATE probe (GET /object_info on
+    ApplyPulidAdvanced; SPEC-PASS-B §2.4 / §4 probe #4). A silently mis-scaled
+    mask produces unmasked-equivalent output and would register as a FALSE
+    Design-A NO-GO without revealing the cause.
     """
     if side not in ("left", "right"):
         raise ValueError(f"side must be 'left' or 'right', got {side!r}")
