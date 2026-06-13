@@ -194,10 +194,12 @@ Details: docs/protocol/claude/director-operator.md (Rule #13).
 
 # Director–Operator concurrent operation (minimal model)
 
-Four Claude sessions (two pairs) plus a broadcast `coordinator` run in parallel by design — **director-seats** (strategy, briefs,
+Four Claude sessions (two pairs) run in parallel by design — **director-seats** (strategy, briefs,
 ADRs, push decisions) and **operator-seats** (independent post-commit verification,
 doc-sync, mailbox reports). Four seats / two pairs of one team; specialization, not hierarchy;
-all serve the user-principal. Load-bearing invariants:
+all serve the user-principal. A `coordinator` seat is spawned **on demand** at multi-pair-wrap
+boundaries for read-only cross-pair audit — not a standing concurrent seat (see
+docs/protocol/claude/four-seat-extension.md §10). Load-bearing invariants:
 
 - **User is principal.** User direct instructions override everything.
 - **Authority precedence:** user > git commits (durable record) > mailbox `sent/`

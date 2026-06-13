@@ -161,3 +161,22 @@ written. Order the cutover so no intermediate state can FATAL the peer's smoke:
 `git revert` the cutover commit. Backward-compatibility means the 2-seat world is
 untouched by the extension, so a rollback is clean and the live `director`/
 `operator` seats are unaffected either way.
+
+## 10. Coordinator — on-demand policy (Lever #8, audit `wf_6be2ee18-f4b`)
+
+The `coordinator` is a 5th, read-only, cross-pair oversight pseudo-seat — **NOT a
+standing concurrent seat**. Standing-concurrent operation consumes the working
+seats' attention and duplicates findings already queued; the value is the
+cross-pair view, not the constant presence. (This is the on-demand framing of the
+`coordinator` broadcast role mentioned in §1.)
+
+- **Trigger.** Spawn on demand at a **multi-pair-wrap boundary** (both pairs
+  wrapped the same day) when the user or a director wants a cross-pair audit — the
+  high-collision regime where cross-pair stale-state accumulates fastest.
+- **Posture.** UNPINNED: no `CLAUDE_SEAT`, no `GIT_INDEX_FILE`. Read-only by
+  default; owns no lane (Rule #23-inert).
+- **Output.** Land findings as a **single** findings/doc commit (or one mailbox
+  event) — not a stream of per-finding events. The send-only `coordinator` mailbox
+  vocab (`fd334d3`) stays valid for this but is used sparingly.
+- **Commits** only under explicit user direction, via a seeded
+  `.git/index-coordinator` + pathspec partial commit; push stays USER-gated.
