@@ -180,6 +180,15 @@ def generate_ai_video(
                     has_dialogue=has_dialogue,
                     dialogue_native_audio=dialogue_native_audio,
                     duration=duration,
+                    # Forward both cascade-sensitive params across the hop:
+                    #  - driving_video_path: else Veo/Sora/Runway silently fall
+                    #    back to image-only motion (no perf-capture guidance).
+                    #  - negative_prompt: else an EXPLICIT caller negative is
+                    #    re-derived from shot_type only (override lost). W1.1's
+                    #    builder (line 124) supplies the default; this preserves
+                    #    an explicit override. Orthogonal, both correct.
+                    driving_video_path=driving_video_path,
+                    negative_prompt=negative_prompt,
                     ctx=ctx, _cascade_out=_cascade_out,
                 )
 
@@ -211,6 +220,10 @@ def generate_ai_video(
             has_dialogue=has_dialogue,
             dialogue_native_audio=dialogue_native_audio,
             duration=duration,
+            # Forward both cascade-sensitive params across the quota-cooldown
+            # retry too — same loss as the next-engine hop above if dropped here.
+            driving_video_path=driving_video_path,
+            negative_prompt=negative_prompt,
             ctx=ctx, _cascade_out=_cascade_out,
         )
 
