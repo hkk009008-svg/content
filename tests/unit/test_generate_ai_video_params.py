@@ -338,6 +338,7 @@ def test_ltx_medium_stays_1080p(mock_ltx_cls, _mock_accept):
         ("wide", True, True, True),          # native dialogue → Veo generates it
         ("landscape", False, False, True),  # no-regression: genuine landscape keeps ambient
         ("medium", False, False, False),    # no-regression: medium no-dialogue stays silent (scene-TTS owns it)
+        ("medium", True, True, True),       # PM7 cell: native dialogue on a non-wide shot → Veo generates it
     ],
 )
 @patch("phase_c_ffmpeg._accept_or_reject", return_value=True)
