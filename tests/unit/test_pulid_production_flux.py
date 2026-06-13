@@ -54,3 +54,13 @@ def test_no_sdxl_pulid_nodes_remain(graph):
     assert "ApplyPulid" not in classes
     assert "PulidModelLoader" not in classes
     assert "PulidEvaClipLoader" not in classes
+
+
+def test_production_pulid_start_at_is_flux_zero():
+    """Character-bearing classes must start PuLID at 0.0 (FLUX coarse-identity
+    window). Otherwise apply_workflow_params overwrites the graph default and
+    re-suppresses the swap. landscape has pulid_weight 0.0 (PuLID off) so its
+    start_at is irrelevant."""
+    import workflow_selector as ws
+    for cls in ("portrait", "medium", "wide", "action"):
+        assert ws.WORKFLOW_TEMPLATES[cls]["pulid_start_at"] == 0.0, cls

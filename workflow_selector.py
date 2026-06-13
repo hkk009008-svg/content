@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 WORKFLOW_TEMPLATES: Dict[str, Dict] = {
     "portrait": {
         "pulid_weight": 1.0,      # Maximum face-lock for close-ups
-        "pulid_start_at": 0.2,    # Face influence from 20% — earlier = stronger identity bake-in
+        "pulid_start_at": 0.0,    # FLUX: bind from step 0 (coarse-identity window); was SDXL-era 0.2
         "pulid_end_at": 1.0,
         "guidance": 3.5,           # FLUX sweet spot for photorealism + prompt adherence
         "steps": 25,               # More steps = finer skin texture, pore detail, iris sharpness
@@ -37,7 +37,7 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
     },
     "medium": {
         "pulid_weight": 0.9,
-        "pulid_start_at": 0.25,    # Earlier start than before for stronger face hold
+        "pulid_start_at": 0.0,    # FLUX: bind from step 0 (was SDXL-era 0.25)
         "pulid_end_at": 1.0,
         "guidance": 3.5,            # Matched to portrait — consistent look across shot types
         "steps": 20,                # Up from 15 — visible quality jump for mid-range detail
@@ -53,7 +53,7 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
     },
     "wide": {
         "pulid_weight": 0.65,      # Slightly lower — face is small, environment matters more
-        "pulid_start_at": 0.35,    # Later start — let environment establish first
+        "pulid_start_at": 0.0,    # FLUX: bind from step 0 (was SDXL-era 0.35)
         "pulid_end_at": 0.9,       # End at 90% — final 10% for environment polish without face interference
         "guidance": 3.0,            # Moderate guidance — balance prompt and creative freedom
         "steps": 20,                # Up from 12 — wide shots need detail for background architecture
@@ -69,7 +69,7 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
     },
     "action": {
         "pulid_weight": 0.8,       # Slightly reduced — action poses stress face-lock
-        "pulid_start_at": 0.3,     # Balanced start — face needs to hold through motion
+        "pulid_start_at": 0.0,     # FLUX: bind from step 0 (was SDXL-era 0.3)
         "pulid_end_at": 1.0,
         "guidance": 3.5,            # Higher guidance for action = tighter prompt control of motion
         "steps": 20,                # Consistent step count across all character shots
@@ -509,7 +509,7 @@ def apply_workflow_params(workflow: dict, params: Dict) -> dict:
     Modifies the workflow IN PLACE and returns it.
 
     Node map:
-    - Node 100 (ApplyPulid): weight, start_at, end_at, method
+    - Node 100 (ApplyPulidFlux): weight, start_at, end_at, fusion
     - Node 60 (FluxGuidance): guidance
     - Node 17 (BasicScheduler): steps, denoise, scheduler
     - Node 16 (KSamplerSelect): sampler_name
