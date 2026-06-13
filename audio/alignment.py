@@ -1,18 +1,23 @@
 """Forced alignment — word-level timestamps for dialogue audio.
 
-Used by the dialogue pipeline + lipsync engines for ms-accurate audio↔video
-synchronization. Lipsync precision jumps from ~85% (segment-level) to ~96%
-(word-level + wav2vec2 forced alignment).
+Produces a per-clip `.alignment.json` sidecar (word + start/end + confidence)
+for ms-accurate audio↔video sync.
+
+STATUS (2026-06-13): the sidecar is currently WRITE-ONLY — written by
+`audio.dialogue._maybe_save_alignment`, but no consumer reads it back yet.
+`lip_sync.validate_lipsync_quality` does NOT use alignment data, and the
+`audio/srt.py` subtitle writer was deleted. The "~85%→96% lipsync precision"
+figure is the design target once a reader is wired, not current behavior.
 
 Provider chain:
-  1. WhisperX (preferred) — Whisper transcript + wav2vec2 forced alignment
-  2. Vanilla Whisper with `word_timestamps=True` (less precise but always
-     available since this project already depends on whisper)
-  3. None — graceful return when both fail
+  1. WhisperX (preferred) — Whisper transcript + wav2vec2 forced alignment.
+     `whisperx` is not in the dev venv (returns None here); the Linux+GPU pod
+     is the intended runtime.
+  2. Vanilla Whisper (`word_timestamps=True`) — always available (CPU here).
+  3. None — graceful return when both fail.
 
-The output schema is fixed across providers so downstream callers
-(lip_sync.validate_lipsync_quality, audio.dialogue alignment metadata,
-subtitle writers) don't care which path produced the alignment.
+Output schema is fixed across providers, so a future reader need not care which
+path produced the alignment.
 """
 
 from __future__ import annotations
