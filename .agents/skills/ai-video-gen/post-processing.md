@@ -131,7 +131,7 @@ Two operational modes for audio-visual synchronization.
 
 ### Dialogue / audio safety (re-mux)
 - `fal-ai/rife/video` returns **video-only** output — bare RIFE strips the audio track by design (its schema has no audio field).
-- `generate_rife_interpolation` therefore re-muxes the **source clip's** audio back onto the interpolated video (`_restore_audio_track`: `ffmpeg -map 0:v:0 -map 1:a:0? -c copy -shortest`). Without this, a lip-synced / native-audio / TTS-overlaid take goes **silent** — and because auto-RIFE is default-on for dialogue takes (`_maybe_auto_rife`), the silent clip rebinds the take and the assembler suppresses the scene-TTS re-mux (`dialogue_audio_in_clip=True` still claims the clip carries audio) → silent dialogue in the final export.
+- `generate_rife_interpolation` therefore re-muxes the **source clip's** audio back onto the interpolated video (`_restore_audio_track`: `ffmpeg -y -i <video> -i <audio_src> -map 0:v:0 -map 1:a:0? -c copy -shortest <out>`). Without this, a lip-synced / native-audio / TTS-overlaid take goes **silent** — and because auto-RIFE runs on **every** finalized motion take (`_maybe_auto_rife`; the smoothness threshold is the only gate), the silent clip rebinds the take, still flagged `dialogue_audio_in_clip=True`; once all the scene's approved shots read as embedded, the assembler suppresses the scene-TTS re-mux → silent dialogue in the final export.
 - **Audio integrity over smoothing:** if the re-mux fails, `generate_rife_interpolation` returns `None` and the caller keeps the original audio-bearing clip rather than a silent interpolated one.
 - Pinned by `tests/unit/test_rife_audio_remux.py` (function level) + `tests/unit/test_auto_rife_audio_integration.py` (through the controller, real ffmpeg).
 
