@@ -109,30 +109,31 @@ def main():
             print(f"  aria ref OK: {s2.ARIA_REF}", flush=True)
         return 0
 
+    seeds = s2.SEEDS[:args.n]
     aria_remote = s2._upload(s2.ARIA_REF, "prodacc_aria.jpg")
-    print(f"uploaded aria ref -> {aria_remote}; seed={seed}", flush=True)
+    print(f"uploaded aria ref -> {aria_remote}; seeds={seeds}", flush=True)
 
     off = build_off()
-    print("OFF graph built (PuLID bypassed) — rendering baseline...", flush=True)
-    saved_off, peak_off, rc_off = render_leg(off, [seed], 1, save_prefix="logs/prod_pulid_off_n")
+    print(f"OFF graph built (PuLID bypassed) — rendering baseline (seed {seeds[0]})...", flush=True)
+    saved_off, peak_off, rc_off = render_leg(off, [seeds[0]], 1, save_prefix="logs/prod_pulid_off_n")
     if rc_off != 0 or not saved_off:
         raise SystemExit(f"OFF render FAILED rc={rc_off}")
 
     on = build_on(aria_remote)
-    print("ON graph built (ApplyPulidFlux face-lock) — rendering...", flush=True)
-    saved_on, peak_on, rc_on = render_leg(on, [seed], 1, save_prefix="logs/prod_pulid_on_n")
-    if rc_on != 0 or not saved_on:
-        raise SystemExit(f"ON render FAILED rc={rc_on}")
+    print(f"ON graph built (ApplyPulidFlux face-lock) — rendering N={args.n}...", flush=True)
+    saved_on, peak_on, rc_on = render_leg(on, seeds, args.n, save_prefix="logs/prod_pulid_on_n")
+    if rc_on != 0 or len(saved_on) < args.n:
+        raise SystemExit(f"ON render FAILED rc={rc_on} ({len(saved_on)}/{args.n})")
 
     print("scoring (deterministic, committed instrument)...", flush=True)
     from scripts._face_reads import ref_embedding_largest_ok
     ref_emb = ref_embedding_largest_ok(s2.ARIA_REF, "aria")
     off_res = _score(saved_off[0], ref_emb)
-    on_res = _score(saved_on[0], ref_emb)
+    on_res = [dict(_score(p, ref_emb), seed=seeds[i]) for i, p in enumerate(saved_on)]
 
     result = {
         "task": "prod-pulid-flux acceptance (Task-4, plan Chunk 2)",
-        "graph": "pulid.json", "seed": seed, "prompt": PROMPT, "ref": s2.ARIA_REF,
+        "graph": "pulid.json", "n": args.n, "seeds": seeds, "prompt": PROMPT, "ref": s2.ARIA_REF,
         "peak_vram_gib": round(max(peak_off, peak_on), 1),
         "off": off_res, "on": on_res,
     }
@@ -142,19 +143,26 @@ def main():
         json.dump(result, f, indent=2)
     print(json.dumps(result, indent=2), flush=True)
 
-    a_off, a_on = off_res["arc"], on_res["arc"]
-    face_on = on_res["read_type"] != "none"
-    delta = (a_on - a_off) if (a_on is not None and a_off is not None) else None
-    print("\n=== TASK-4 ACCEPTANCE READ ===", flush=True)
-    print(f"OFF (no PuLID):   arc={a_off if a_off is not None else 'NO_FACE'} [{off_res['read_type']}]", flush=True)
-    print(f"ON  (FLUX PuLID): arc={a_on if a_on is not None else 'NO_FACE'} [{on_res['read_type']}]", flush=True)
-    print(f"delta ON-OFF: {delta if delta is not None else 'n/a'}", flush=True)
-    if face_on and a_on is not None and (a_off is None or (delta is not None and delta > 0.10)):
-        print("PROVISIONAL: ON binds materially over OFF + face detected -> trending GO "
-              "(operator must confirm VISUAL photoreal before final GO).", flush=True)
+    a_off = off_res["arc"]
+    on_arcs = [r["arc"] for r in on_res if r["arc"] is not None]
+    faces_on = sum(1 for r in on_res if r["read_type"] != "none")
+    bind_ok = sum(1 for r in on_res if r["arc"] is not None and r["arc"] >= 0.75
+                  and (a_off is None or r["arc"] > a_off))
+    print(f"\n=== TASK-4 ACCEPTANCE READ (N={args.n}) ===", flush=True)
+    print(f"OFF (no PuLID, seed {seeds[0]}): arc={a_off if a_off is not None else 'NO_FACE'} [{off_res['read_type']}]", flush=True)
+    for r in on_res:
+        print(f"ON seed {r['seed']}: arc={r['arc'] if r['arc'] is not None else 'NO_FACE'} "
+              f"[{r['read_type']}, area {r['area_pct']:.0f}%]", flush=True)
+    if on_arcs:
+        print(f"ON arc: mean={sum(on_arcs)/len(on_arcs):.3f} min={min(on_arcs):.3f} max={max(on_arcs):.3f}", flush=True)
+    print(f"bind_ok (arc>=0.75 AND >OFF): {bind_ok}/{args.n}; faces detected: {faces_on}/{args.n}", flush=True)
+    need = (args.n * 3 + 3) // 4  # ceil(0.75 * n)
+    if bind_ok == args.n and faces_on == args.n:
+        print("PROVISIONAL: ALL seeds bind >=0.75 over OFF + face on all -> ROBUST GO (confirm VISUAL).", flush=True)
+    elif bind_ok >= need:
+        print(f"PROVISIONAL: {bind_ok}/{args.n} seeds bind -> majority GO (review misses + VISUAL).", flush=True)
     else:
-        print("PROVISIONAL: ON did NOT bind materially -> NO-GO/investigate "
-              "(fp8 truncation? FaceDetailer needed? NO_FACE?).", flush=True)
+        print(f"PROVISIONAL: only {bind_ok}/{args.n} bind -> investigate (fp8? NO_FACE? seed-fragile?).", flush=True)
     print(f"recorded -> {out}", flush=True)
     return 0
 
