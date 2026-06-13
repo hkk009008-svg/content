@@ -209,10 +209,11 @@ class MotionRenderPhase:
             self._gen.cost_tracker.record_api_call(
                 "KLING_NATIVE",
                 operation="storyboard_generation",
-                # record_api_call has no scene_id param; shot_id is the
-                # non-keyed cost-log label. operation="storyboard_generation"
-                # already marks this a scene batch, so the scene id rides shot_id.
-                shot_id=scene_id,
+                # A storyboard BATCH has no single shot, so shot_id is left empty
+                # (a scene_id here would pollute get_video_cost()'s shot_count —
+                # one phantom 'shot' per batch). operation="storyboard_generation"
+                # + video_id already attribute the cost to the scene batch.
+                shot_id="",
                 video_id=self._project.get("id", ""),
             )
         except Exception:

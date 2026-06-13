@@ -624,6 +624,61 @@ class TestStoryboardHappyPath:
             "record_api_call(scene_id=...) kwarg raised a swallowed TypeError."
         )
 
+    def test_batch_cost_does_not_inflate_shot_count(self, tmp_path):
+        """Finding A1: a storyboard BATCH has no single shot, so its cost row must
+        NOT pollute ``get_video_cost()['shot_count']``.
+
+        The earlier swallowed-TypeError fix (366af71) set ``shot_id=scene_id`` —
+        a *scene* id riding the shot label. ``get_video_cost`` (cost_tracker.py:
+        410-411) adds every truthy ``shot_id`` to a set and reports ``len`` as
+        ``shot_count``, so each storyboard batch counted as one phantom 'shot'.
+        ``operation='storyboard_generation'`` + ``video_id`` already attribute the
+        batch, so ``shot_id=''`` is the honest value. This injects a real
+        CostTracker and asserts the batch leaves ``shot_count == 0`` while the cost
+        is still recorded under the storyboard operation.
+        """
+        from cinema.phases.motion_render import MotionRenderPhase
+        from cost_tracker import CostTracker
+
+        n = 3
+        shots = [_make_shot(f"s1_{i}") for i in range(n)]
+        scene = _make_scene("scene_1", shots)
+        project = _make_project([scene], storyboard_mode=True)
+
+        kf_paths = {s["id"]: str(tmp_path / f"{s['id']}.jpg") for s in shots}
+        for p in kf_paths.values():
+            open(p, "w").close()
+
+        gen = _make_gen_mock(kf_paths=kf_paths)
+        gen.cost_tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=None)
+
+        storyboard_path = str(tmp_path / "combined.mp4")
+        seg_paths = [str(tmp_path / f"seg_{i}.mp4") for i in range(n)]
+        for p in seg_paths:
+            open(p, "w").close()
+
+        with patch("kling_native.KlingNativeAPI") as mock_kling_cls:
+            mock_kling = MagicMock()
+            mock_kling.generate_storyboard.return_value = storyboard_path
+            open(storyboard_path, "w").close()
+            mock_kling_cls.return_value = mock_kling
+
+            with patch("phase_c_ffmpeg.split_video_into_segments") as mock_split:
+                mock_split.return_value = seg_paths
+
+                phase = MotionRenderPhase(shot_generator=gen, project=project)
+                phase.run(_make_lifecycle())
+
+        cost = gen.cost_tracker.get_video_cost("proj_test")
+        # The batch is one cost row but NOT one shot — shot_count must stay honest.
+        assert cost["shot_count"] == 0, (
+            "storyboard batch polluted get_video_cost()['shot_count'] "
+            f"(got {cost['shot_count']}, expected 0) — the cost row carries a "
+            "scene_id in the shot_id column. A batch has no single shot."
+        )
+        # The cost is still attributed to the batch operation (no loss of tracking).
+        assert cost["breakdown_by_operation"].get("storyboard_generation") == pytest.approx(0.50)
+
     def test_finalize_called_with_record_cost_false(self, tmp_path):
         """Each per-segment finalize must pass record_cost=False to suppress N-counting."""
         result, gen, mock_kling, mock_split, seg_paths, sb_path = self._run_storyboard(3, tmp_path)
