@@ -114,6 +114,22 @@ Evidence: script path + `logs/` artifact cited next to the number.
 Details: docs/PROTOCOL-RULES-LOG.md (R-MEASURE entry; origin = the 2026-06-11
 half-crop numbers that backed S2/S3 verdicts from REPL-only measurement).
 
+# Verification tiering (R-VERIFY-TIER)
+Scope: both
+Trigger: about to launch a 3rd+ independent verification pass on a claim two seats
+already confirmed; OR confirming a code defect you are NOT fixing this session.
+Action: (A) For doc-only notes about an already-known/deferred defect, convergence =
+TWO independent seats confirming the same file:line claims (a Rule #23 co-sign counts
+as one). A 3rd pass is allowed ONLY for a genuinely different question, stated before
+launch. Does NOT relax per-commit production-code verification (Lane V / Rule #9).
+(B) An agent-confirmed defect left unfixed this session must ship a
+`pytest.mark.xfail(strict=True, reason=...)` pin in the same session, or be labeled
+`test-infeasible` with a one-line reason in the handoff — so CI, not the next
+session's agents, re-verifies.
+Evidence: the stated new question for any 3rd pass; the xfail pin (or test-infeasible label).
+Details: docs/protocol/claude/core.md (R-VERIFY-TIER); origin = audit wf_6be2ee18-f4b
+(the §8.5 char-landscape note drew ~25-31 agent-runs across 4 passes for one doc paragraph).
+
 # Multi-task orchestration (R-ORCH)
 Scope: both
 Trigger: a plan with ≥5 independent sub-tasks OR ≥800 LOC of total change; or a

@@ -702,6 +702,20 @@ items surfaced by the 2026-06-11/12 sessions; plan
 All five invocable from codification; invocation counts start at the next
 session table.
 
+## 2026-06-13 addendum — R-VERIFY-TIER (capacity audit `wf_6be2ee18-f4b`)
+
+- **R-VERIFY-TIER** — caps verification DEPTH where R-EVIDENCE / Rule #9 only ever
+  raised it. (A) doc-only deferred-defect notes converge at TWO independent seats
+  (a Rule #23 co-sign counts as one); a 3rd pass requires a stated new question.
+  (B) agent-confirmed unfixed defects ship a `pytest.mark.xfail(strict=True)` pin
+  or a `test-infeasible` label in the same session. Empirical basis: the §8.5
+  char-landscape note drew ~25–31 Sonnet agent-runs across 4 adversarial passes
+  (`wf_73f95c8c` / `wf_e09bded6` / `wf_5d39bbe3` / `wf_ed13f2b4`) for one doc
+  paragraph + 0 fix lines. Beneficiary: both (frees agent-cycles for the deliverable).
+  Consent: principal-directed (capacity audit, 2026-06-13). Does NOT relax
+  production-code verification — Lane V / Rule #9 per-commit checks unchanged.
+  Note: this is the corpus's first depth-CAP rule; it reduces protocol work.
+
 ## Retirement criteria
 
 A rule unused for 5 consecutive sessions → flagged for review.

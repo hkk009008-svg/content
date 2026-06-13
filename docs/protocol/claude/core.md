@@ -108,6 +108,35 @@ factual claim.** Authority and verification travel together.
 The rule is: **specific factual claims = verification required.**
 Qualitative directional claims = use your judgment but flag uncertainty.
 
+## Verification tiering (R-VERIFY-TIER)
+*Router handle: `R-VERIFY-TIER` (stub in CLAUDE.md). Capacity lever #3, audit `wf_6be2ee18-f4b`.*
+
+The discipline that prevents UNDER-verification (R-EVIDENCE, Rule #9) has no companion
+that prevents OVER-verification. The §8.5 char-landscape note — a doc-only paragraph
+about an undisputed, deferred defect — drew ~25–31 adversarial agent-runs across four
+passes (`wf_73f95c8c` / `wf_e09bded6` / `wf_5d39bbe3` / `wf_ed13f2b4`), producing zero
+fix code. Past the second independent confirmation, more passes on the same question add
+cost, not confidence.
+
+- **(A) Convergence cap for doc-only deferred-defect notes.** Two independent seats
+  confirming the same file:line claims = converged. A Rule #23 co-sign is one of the
+  two. A third adversarial pass is justified ONLY when scoped to a *different* question
+  (e.g. blast-radius mapping beyond the note, as `wf_5d39bbe3` legitimately was) — and
+  the launching seat must state that incremental question first. Applies to
+  `docs(arch)`-class deferred notes only; production code keeps Lane V / Rule #9
+  per-commit verification.
+- **(B) RED test at find-time.** When an adversarial workflow or agent-assisted
+  investigation confirms a code defect that is NOT being fixed this session
+  (`fix_with_brief` / `fix_deferred`), the finding seat commits a
+  `pytest.mark.xfail(strict=True, reason='...')` reproducing the failure in the same
+  session. If a faithful test is infeasible within budget, label the finding
+  `test-infeasible` with the specific reason in the handoff. Turns
+  O(agents × sessions) re-verification into O(seconds in CI).
+
+Keep R-EVIDENCE (cite the command) and R-MEASURE (commit the instrument) distinct —
+they close different gaps. R-VERIFY-TIER caps the *number* of passes; it does not
+weaken any single pass.
+
 ## When you change something
 
 Beyond the impact-analysis checks above:
