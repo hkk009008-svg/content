@@ -666,6 +666,37 @@ This is fully OFFLINE and can be reviewed before pod spin-up.
    measurement layer either way. Document the NO-GO; do not abort the
    session.
 
+**PHASE 1 RESULTS (2026-06-13 — COMPLETE; pod 07ed667 RUNNING, ComfyUI
+restarted; instrument `scripts/_passb_census.py`, artifact
+`logs/passb_phase1_census_20260613.{json,txt}`, regenerate:
+`.venv/bin/python scripts/_passb_census.py --url $COMFYUI_SERVER_URL --out logs/passb_phase1_census_<date>`
+— R-MEASURE, logs gitignored so the committed instrument is the guarantee):**
+
+- **Census: 1106 classes** (exact match to the validated S2 baseline). GPU
+  RTX 6000 Ada, 49140 MiB. Both char LoRAs present in `models/loras/`
+  (`char_lora_fal_v2.safetensors` + `char_lora_man_v1.safetensors`); disk 87%
+  (14 GiB free). All critical classes present incl. mask nodes (`SolidMask`,
+  `MaskComposite`, `InvertMask`, `LoadImageMask`, `ImageToMask`).
+- **DESIGN-A GATE: GO — but the premise above was STALE and is hereby
+  corrected.** The census schemas show:
+    - `ApplyPulidFlux` (the PRODUCTION FLUX node, already in the S2 dual driver):
+      `pulid_flux` input typed `PULIDFLUX` → FLUX-compatible, **AND it DOES
+      expose `attn_mask` (optional `MASK`).** The spec's "ApplyPulidFlux has no
+      attn_mask" was an UNVERIFIED assumption — REFUTED by census.
+    - `ApplyPulidAdvanced`: present, exposes `attn_mask`, BUT its `pulid` input
+      is typed `PULID` (SDXL/SD15-era), NOT `pulid_flux` → `flux_compatible=False`.
+      It is the SDXL PuLID applier; feeding a FLUX model is an architecture
+      mismatch. So it is NOT the route, attn_mask notwithstanding.
+- **Consequence (favorable):** masked dual-PuLID on FLUX needs NO new node
+  class. The route is the production `ApplyPulidFlux.attn_mask` — the Phase-3
+  delta from `_max_s2_dual_pulid.py` collapses to "wire a `MASK` into each
+  `ApplyPulidFlux.attn_mask` input." Lower risk than the original
+  `ApplyPulidAdvanced` plan (production node, already VRAM/identity-validated
+  in S2). `attn_mask` coordinate space (probe #4) still UNKNOWN from schema
+  alone — resolve empirically at the Phase-3 N=1 smoke (pixel vs latent/8;
+  `scripts/_mask_gen.py` emits pixel-space — a mis-scale registers as a false
+  NO-GO, see its docstring).
+
 ### Phase 2 — VRAM baseline re-confirm (N=1, ~5 min)
 
 Single-char Aria render at N=1 (no secondary). Poll `/system_stats` for VRAM.
@@ -764,7 +795,9 @@ Pod stop/keep: user decision.
 ### GO/NO-GO criteria
 
 **Design A GO (masked dual-PuLID):**
-- `ApplyPulidAdvanced` present on pod with `attn_mask` input AND FLUX-compatible.
+- Phase-1 GATE passed (2026-06-13: GO via `ApplyPulidFlux.attn_mask`, the
+  production FLUX node — `ApplyPulidAdvanced` is SDXL-era `PULID` and NOT the
+  route; see Phase-1 RESULTS).
 - No OOM at N=4.
 - Both arc scores >=0.70 (VRAM criterion from S2, unchanged).
 - Binding_ok=True for BOTH conditioned characters in **>=3/4 seeds** (true
