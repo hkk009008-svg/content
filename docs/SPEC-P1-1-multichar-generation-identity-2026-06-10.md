@@ -634,7 +634,12 @@ scope.
     `PYTHONPATH=. .venv/bin/python scripts/_arc_score_session.py --halves` —
     the committed instrument is the reproducibility guarantee per
     R-MEASURE's gitignored-logs precedent).
-  - True-figure man reads run 0.466–0.528 across every artifact — the S2
+  - True-figure man reads span **0.466–0.728** across the filtered table (13
+    reads; operator C7 2026-06-13). The 0.728 outlier is `s2_dual_n1` man on
+    aria's INTENDED (left) half — an OK-class figure (983×983, 23.3%, conf 0.97)
+    = a spatial binding SWAP, not weak binding. On the man's INTENDED (right)
+    half, reads are **0.466–0.492**. The verdict survives (the swap is itself a
+    mis-binding the masked-PuLID arm targets) — the S2
     binding-uncontrolled and S3 bleed verdicts are CONFIRMED on clean data.
 
 ## 7. Recommended sequencing — and the deviation, surfaced

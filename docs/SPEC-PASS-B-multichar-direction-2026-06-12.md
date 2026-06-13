@@ -451,7 +451,8 @@ Phase-3 driver MUST assign opposite slots AND add an O(n) slot-uniqueness guard
 (`assert len({s['intended_slot'] for s in specs}) == len(specs)` or a logged
 WARNING) to `_compute_binding_scores`'s caller path. Thresholding is the WRONG
 tool here: a floor above the 0.447 cross-floor would not catch 0.492, and a
-floor above 0.492 would eat true man reads (0.466–0.528). Close it with the
+floor above 0.492 would eat true man reads (0.466–0.492 on the intended half).
+Close it with the
 strict count + slot guard, not a similarity threshold.
 
 Risk today: LOW for cross-gender pairs (cross floor 0.447 vs 0.65–0.85
@@ -624,7 +625,8 @@ This is fully OFFLINE and can be reviewed before pod spin-up.
 - **0a** — binding directions derived from the committed instrument
   (no new compute). **0b** `fcd06b5` — `scripts/_mask_gen.py`, boundary
   test-pinned to `crop_half`'s `w//2`. **0c** `ef7b60c` — binding metric +
-  `validate_image_with_binding`, 28 tests. **Filter (unplanned, blocking)**
+  `validate_image_with_binding`, 18 tests (+10 by `312f6d2` → 28 HEAD total;
+  operator C4 — the 28 was the post-filter total, not ef7b60c's). **Filter (unplanned, blocking)**
   `312f6d2` — the operator's 21:16:46Z probe showed the unfiltered
   instrument's man-column was 13/18 non-figure reads (blobs + whole-image
   fallbacks); detection-filtered figure reads (largest OK face, ≥1% area)
@@ -635,11 +637,15 @@ This is fully OFFLINE and can be reviewed before pod spin-up.
   aria=left / man=right per the driver prompt):** aria binding_ok **0/4**;
   man **1/4** (n4 only, via face-absent-on-other-half semantics; **0/3**
   on seeds where both halves had detectable faces). Man figure reads are
-  uniformly 0.466–0.528. Re-emitted table:
+  0.466–0.492 on the man's INTENDED (right) half; the full filtered range is
+  0.466–0.728 (the 0.728 = n1 man on aria's left half, a binding SWAP — operator
+  C7). Re-emitted table:
   `logs/halves_rescore_20260612_filtered.{json,txt}` (regenerate:
   `PYTHONPATH=. .venv/bin/python scripts/_arc_score_session.py --halves`).
-- **New signal for Phase 3:** 4 of 18 half-crops have NO detectable face
-  at all (FAILED-landscape both halves; n4-L; sec45-L; sec55-L TINY-only) —
+- **New signal for Phase 3:** 5 of 18 half-crops have NO detectable face
+  at all (FAILED-landscape both halves =2; n4-L; sec45-L; sec55-L — all
+  read_type='none'/NO_FACE; operator C8 — was miscounted "4 of 18" with a
+  spurious "TINY-only" label on sec55-L) —
   per-half face-presence is itself a cheap render-quality gate worth
   recording per seed in Phase 3.
 - Design A's ≥3/4 GO bar therefore measures against a **0/4 (strict 0/3)**
@@ -740,17 +746,27 @@ table `logs/halves_rescore_20260613.{json,txt}` (regenerate:
 
 - **VRAM (Phase 2 FOLDED): PASS** — peak 33.9 / 32.9 GiB, well below S2's 41.8
   and the 48 GiB ceiling; no OOM. The masked dual adds no VRAM risk.
-- **attn_mask has NO controlling effect — swap-INVARIANT.** Same seed, two mask
-  polarities (default aria←left/man←right; `--swap` aria←right/man←left)
-  produced near-IDENTICAL output and binding: aria **0.823 / 0.828** on the
-  RIGHT half, man **0.450 / 0.454** (the ~0.447 cross-floor = noise) both runs,
-  left half NO_FACE both runs. If the mask were biting, swapping would move
-  aria across the frame; it did not. Likely cause: attn_mask coordinate-space
-  mismatch (pixel mask vs latent/8 expected — probe #4, `_mask_gen.py` note) or
-  PuLID dominance overriding the mask.
-- **Man never binds.** 0.45 cross-floor regardless of mask/territory —
-  consistent with Pass-A (0.487) and S2 (0/4). Masking gave the man exclusive
-  half and he STILL did not bind.
+- **attn_mask IS functional, but the man-absent outcome is mask-independent
+  (CORRECTED — operator graph-JSON diagnosis `d569edd` 04:53:22Z).** My first
+  read was "swap-INVARIANT → masks inert"; that was WRONG. The operator pulled
+  both executed graphs from the pod `/history` (read-only, $0): the two runs
+  (`00101` default, `00102` swapped) produced DIFFERENT pod outputs (distinct
+  md5, 8894702 vs 8895386 bytes) — so `attn_mask` DOES perturb the render. My
+  "identical" read came from a local download-naming artifact (both locally
+  scored files briefly resolved to `00101` before the swap render landed).
+  Man-node wiring verified CORRECT (node 103 weight 0.85, attn_mask wired, man
+  applied LAST). But the OUTCOME is the same in BOTH polarities: aria **0.823 /
+  0.828** on the right, man **0.450 / 0.454** (cross-floor), left NO_FACE.
+- **Man never binds — the blocker is UPSTREAM of masking.** Masking the man to
+  the right (default) OR left (swap) makes no difference to whether he appears:
+  he doesn't manifest at all (cross-floor 0.45, consistent with Pass-A 0.487 /
+  S2 0/4). Root cause (operator R-SKILL/comfyui-mastery diagnosis, CONVERGENT
+  with this doc's reframe): the man ref `logs/p12_fresh_face_man.jpg` is
+  PAINTERLY/stylized → weak InsightFace embedding, overwhelmed by aria's strong
+  photoreal embedding at equal 0.85 weights. `attn_mask` is a soft spatial
+  perturbation; it CANNOT make an identity appear that isn't binding upstream.
+  Masking was never the lever — identity reinforcement is (→ Design D / asym
+  weights / better ref).
 - **VISUAL (mandatory, overrides embeddings): NO-GO.** Both figures render as
   the same woman (aria-like, short dark wavy hair, feminine) — the prompt's
   "middle-aged man with a grey beard" is absent. Textbook S3 homogenization.
