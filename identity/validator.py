@@ -67,36 +67,51 @@ FIGURE_DEGENERATE_MARGIN_PX: int = 2
 
 @contextlib.contextmanager
 def _cv2_single_thread():
-    """Pin OpenCV to one thread for the duration of the block, then restore.
+    """Pin OpenCV to a SINGLE thread for the duration of the block, then restore.
 
     DeepFace's align=True path (the default, and load-bearing — align=False
-    collapses the man-binding signal 0.870→0.522) runs an OpenCV operation
-    whose output is NON-DETERMINISTIC under multi-threading: ~1 in 20 calls
-    returns a DIFFERENT, mis-aligned crop whose GhostFaceNet embedding is 0.456
-    cosine-distant from the otherwise byte-stable majority — enough to swing an
-    identity score 0.870→0.762 (the man-ref "cold-draw", operator 2026-06-13).
-    The DETECTED bbox is identical across runs; only the aligned crop races.
-    Neither numpy/cv2/Python/TF seeds nor TF_DETERMINISTIC_OPS remove it — it is
-    an OpenCV thread race, not seedable RNG. cv2.setNumThreads(1) serializes the
-    op and pins the result to the deterministic majority value (verified 30/30
-    byte-identical, scripts/_probe_embedding_determinism.py), preserving
-    align=True accuracy (the calibrated man-0.870 baseline IS that majority
-    value, so this introduces no re-baselining).
+    collapses the man-binding signal 0.870→0.522) runs an OpenCV operation that
+    **races under multi-threading**: it intermittently returns a different,
+    mis-aligned crop whose GhostFaceNet embedding is 0.456 cosine-distant from
+    the otherwise byte-stable majority — enough to swing an identity score
+    0.870→0.762 (the man-ref "cold-draw", operator 2026-06-13). The DETECTED
+    bbox is identical across runs; only the aligned crop races. It is an OpenCV
+    thread race, NOT seedable RNG (numpy/cv2/Python/TF seeds + TF_DETERMINISTIC_OPS
+    do not remove it). Serializing OpenCV pins the result to the deterministic
+    majority value, preserving align=True accuracy with no re-baselining.
 
-    The pin is restored to the prior count afterward (even on exception) so the
-    serialization is localized to the wrapped DeepFace call rather than
-    throttling OpenCV process-wide. Both the binding instrument and the
-    production identity path (validate_image/validate_video, via represent AND
+    VERIFIED (scripts/_probe_embedding_determinism.py --load): under induced
+    OpenCV CPU load the UNGUARDED path diverges 8/30 (27%) to the 0.456-distant
+    outlier; the GUARDED path is 30/30 byte-identical (the calibrated man-0.870
+    value). The race is load-dependent — it rarely fires on a quiet machine, so a
+    handful of clean runs is NOT evidence the guard is needed or working.
+
+    CROSS-PLATFORM: cv2.setNumThreads(1) yields one thread on TBB/pthreads
+    (Linux pod) but is a NO-OP on the GCD backend (macOS dev): there
+    getNumThreads() stays at the system default and only setNumThreads(0)
+    serializes. We therefore set 1, and fall back to 0 if 1 didn't take — so
+    cv2 is single-threaded on BOTH backends. ⚠ The deterministic value is
+    OpenCV-build-specific; the macOS single-threaded value (man 0.870) must be
+    re-confirmed on the Linux pod before it is trusted as the production
+    pinned value (review 2026-06-13, robustness lens).
+
+    The prior thread count is restored afterward (even on exception) so the
+    serialization is localized. Both the binding instrument and the production
+    identity path (validate_image/validate_video, via represent AND
     extract_faces — both align) route through this guard.
 
-    NOTE: cv2.setNumThreads is process-global; if two threads enter here
-    concurrently the prior count may be restored imperfectly (it lands at 1).
-    The validator is called sequentially per shot, so this is benign; revisit
-    if identity validation is ever parallelised across threads.
+    NOTE: cv2.setNumThreads is process-global. quality_max.py scores candidates
+    in a ThreadPoolExecutor (max_quality_parallel_workers, default 1, up to 4):
+    if two threads enter here concurrently, EACH call still runs single-threaded
+    (determinism holds per-call), but the restore may land at 1 (a benign
+    process-state leak — single-threaded is the desired state for this workload).
+    If parallel_workers>1 becomes the default, gate entry with a threading.Lock.
     """
     _prev_threads = cv2.getNumThreads()
     try:
         cv2.setNumThreads(1)
+        if cv2.getNumThreads() != 1:  # GCD: setNumThreads(1) is a no-op; 0 serializes
+            cv2.setNumThreads(0)
         yield
     finally:
         cv2.setNumThreads(_prev_threads)

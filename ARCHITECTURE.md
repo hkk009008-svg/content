@@ -1245,7 +1245,7 @@ Set via `project.global_settings.dialogue_voice_mode` (see OPERATIONS.md §8).
 
 `IdentityValidator` uses **DeepFace's `GhostFaceNet`** model. Every embedding
 read routes through one chokepoint, `_represent_deterministic`
-([identity/validator.py:105](identity/validator.py:105)):
+([identity/validator.py:120](identity/validator.py:120)):
 ```python
 DeepFace.represent(..., model_name="GhostFaceNet", ...)
 ```
@@ -1253,17 +1253,33 @@ DeepFace.represent(..., model_name="GhostFaceNet", ...)
 **Determinism (load-bearing — operator finding 2026-06-13).** DeepFace's
 `align=True` path (the default; `align=False` collapses the man-binding signal
 0.870→0.522 — alignment is essential, not optional) runs an OpenCV op that
-**races under multithreading**: ~1 in 20 calls returns a different, mis-aligned
-crop whose embedding is 0.456 cosine-distant from the otherwise byte-stable
-majority — enough to swing an identity score 0.870→0.762 (the man-ref
-"cold-draw"). It is NOT seedable (numpy/cv2/Python/TF seeds and
-`TF_DETERMINISTIC_OPS` do not remove it). `_cv2_single_thread` pins
-`cv2.setNumThreads(1)` for the duration of the call (prior count restored after,
-even on exception) → **30/30 byte-identical** (`scripts/_probe_embedding_determinism.py`),
-preserving the calibrated majority value (no re-baselining). All five `represent`
-call sites plus the video path's `extract_faces` (also aligns) route through this
-guard; figure-read selection breaks area ties on a deterministic geometric key so
-it is a pure function of the (stable) detection set.
+**races under multithreading**: it intermittently returns a different,
+mis-aligned crop whose embedding is 0.456 cosine-distant from the otherwise
+byte-stable majority — enough to swing an identity score 0.870→0.762 (the
+man-ref "cold-draw"). It is NOT seedable (numpy/cv2/Python/TF seeds and
+`TF_DETERMINISTIC_OPS` do not remove it). `_cv2_single_thread` serializes
+OpenCV for the duration of the call (prior count restored after, even on
+exception). **Verified** (`scripts/_probe_embedding_determinism.py --load`):
+under induced cv2 CPU load the **unguarded path diverges 8/30 (27%)**, the
+**guarded path is 30/30 byte-identical** — the race is load-dependent, so a few
+clean runs on a quiet machine prove nothing. All five `represent` call sites
+plus the video path's `extract_faces` (also aligns) route through the guard;
+figure-read selection breaks area ties on a deterministic geometric key so it is
+a pure function of the (stable) detection set.
+
+⚠ **Cross-platform caveat.** `cv2.setNumThreads(1)` serializes on TBB/pthreads
+(Linux pod) but is a **no-op on the GCD backend (macOS dev)** — there
+`getNumThreads()` stays at the default and only `setNumThreads(0)` serializes;
+the guard sets 1, then falls back to 0 if 1 didn't take. The deterministic value
+is OpenCV-build-specific, so the macOS pinned value (man 0.870) **must be
+re-confirmed on the Linux pod before it is trusted as the production baseline**
+(pre-burn gate). The guard is process-global; `quality_max.py` scores in a
+ThreadPoolExecutor (`max_quality_parallel_workers`, default 1) — each call still
+runs single-threaded (per-call determinism holds), but a concurrent overlap
+leaves OpenCV at 1 thread (benign); gate with a `threading.Lock` if
+`parallel_workers > 1` becomes the default. NOT yet routed: the domain-layer
+sibling sites `domain/continuity_engine.py:164,181` and
+`domain/character_manager.py:369,385,396` (the last persists `embedding.npy`).
 
 Naming clarification: everything in the codebase that says "ArcFace" actually
 runs GhostFaceNet. ArcFace is the loss function GhostFaceNet was trained with;

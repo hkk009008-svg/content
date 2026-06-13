@@ -982,16 +982,18 @@ class TestRepresentDeterminism:
     the rest of the process keeps multi-threaded OpenCV.
     """
 
-    def test_pins_single_thread_during_represent_then_restores(self):
+    def test_gcd_fallback_serializes_then_restores(self):
+        """GCD backend (macOS): setNumThreads(1) is a no-op (getNumThreads stays
+        >1), so the guard falls back to setNumThreads(0) — which DOES serialize
+        on GCD — then restores the prior count, around the represent call."""
         from identity import validator
 
         events = []
         fake_cv2 = MagicMock()
-        fake_cv2.getNumThreads.return_value = 8
+        fake_cv2.getNumThreads.return_value = 10  # GCD: never reaches 1 via set(1)
         fake_cv2.setNumThreads.side_effect = lambda n: events.append(("set", n))
 
         def fake_represent(**kwargs):
-            # capture that the represent call happened AFTER threads were pinned
             events.append(("represent", kwargs.get("model_name")))
             return [{"embedding": [0.1, 0.2, 0.3]}]
 
@@ -1003,7 +1005,33 @@ class TestRepresentDeterminism:
             out = validator._represent_deterministic("/tmp/face.jpg")
 
         assert out == [{"embedding": [0.1, 0.2, 0.3]}]
-        # threads pinned to 1 BEFORE represent, restored to 8 AFTER — in order
+        # set 1 (no-op) -> fallback set 0 -> represent -> restore prior (10)
+        assert events == [("set", 1), ("set", 0),
+                          ("represent", "GhostFaceNet"), ("set", 10)]
+
+    def test_tbb_no_fallback_then_restores(self):
+        """TBB/pthreads backend (Linux pod): setNumThreads(1) yields 1, so the
+        fallback is NOT taken; the prior count is restored after represent."""
+        from identity import validator
+
+        events = []
+        fake_cv2 = MagicMock()
+        # prev=8 at capture; after set(1) getNumThreads reports 1 -> no fallback
+        fake_cv2.getNumThreads.side_effect = [8, 1]
+        fake_cv2.setNumThreads.side_effect = lambda n: events.append(("set", n))
+
+        def fake_represent(**kwargs):
+            events.append(("represent", kwargs.get("model_name")))
+            return [{"embedding": [1.0]}]
+
+        fake_df = MagicMock()
+        fake_df.represent.side_effect = fake_represent
+
+        with patch.object(validator, "cv2", fake_cv2), \
+             patch.object(validator, "DeepFace", fake_df, create=True):
+            validator._represent_deterministic("/tmp/face.jpg")
+
+        # set 1 (took effect) -> represent -> restore prior (8); NO fallback set 0
         assert events == [("set", 1), ("represent", "GhostFaceNet"), ("set", 8)]
 
     def test_restores_thread_count_on_exception(self):
@@ -1011,7 +1039,7 @@ class TestRepresentDeterminism:
 
         events = []
         fake_cv2 = MagicMock()
-        fake_cv2.getNumThreads.return_value = 4
+        fake_cv2.getNumThreads.return_value = 4  # GCD-like: set(1) no-op -> fallback
         fake_cv2.setNumThreads.side_effect = lambda n: events.append(n)
 
         fake_df = MagicMock()
@@ -1022,8 +1050,8 @@ class TestRepresentDeterminism:
             with pytest.raises(RuntimeError):
                 validator._represent_deterministic("/tmp/face.jpg")
 
-        # restored to 4 even though represent raised (pin set 1, finally set 4)
-        assert events == [1, 4]
+        # restored to 4 even though represent raised (set 1 -> fallback 0 -> restore 4)
+        assert events == [1, 0, 4]
 
     def test_passes_through_represent_arguments(self):
         from identity import validator
