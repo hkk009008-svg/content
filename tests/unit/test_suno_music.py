@@ -137,3 +137,39 @@ def test_suno_no_key_skips(monkeypatch, tmp_path):
         suno_api_base = "https://api.sunoapi.org"
     _patch_env(monkeypatch, _NoKey())
     assert music.generate_suno_v5("epic", str(tmp_path / "b.mp3")) is False
+
+
+# --- generate_bgm router threads cost_tracker + AUTO-degrades (capacity audit wf_6be2ee18-f4b) ---
+
+def test_bgm_router_passes_cost_tracker_to_suno(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_suno(vibe, out, duration=60, custom_lyrics="", cost_tracker=None, **k):
+        captured["ct"] = cost_tracker
+        return True
+
+    monkeypatch.setattr(music, "generate_suno_v5", fake_suno)
+    monkeypatch.setattr(music, "generate_fal_bgm", lambda *a, **k: True)
+    sentinel = object()
+    assert music.generate_bgm("epic", str(tmp_path / "o.mp3"), cost_tracker=sentinel) is True
+    assert captured["ct"] is sentinel
+
+
+def test_bgm_router_passes_cost_tracker_to_fal_fallback(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_fal(vibe, out, duration=42, cost_tracker=None, **k):
+        captured["ct"] = cost_tracker
+        return True
+
+    monkeypatch.setattr(music, "generate_suno_v5", lambda *a, **k: False)
+    monkeypatch.setattr(music, "generate_fal_bgm", fake_fal)
+    sentinel = object()
+    assert music.generate_bgm("epic", str(tmp_path / "o.mp3"), cost_tracker=sentinel) is True
+    assert captured["ct"] is sentinel
+
+
+def test_bgm_router_no_key_degrades_to_fal(monkeypatch, tmp_path):
+    monkeypatch.setattr(music, "generate_suno_v5", lambda *a, **k: False)
+    monkeypatch.setattr(music, "generate_fal_bgm", lambda *a, **k: True)
+    assert music.generate_bgm("epic", str(tmp_path / "o.mp3"), cost_tracker=object()) is True

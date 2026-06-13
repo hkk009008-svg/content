@@ -20,7 +20,7 @@ from scene_decomposer import decompose_scene, update_scene_shots, competitive_de
 from dialogue_writer import generate_dialogue
 from llm.style_director import generate_style_rules
 from audio.dialogue import dialogue_cache_key, generate_dialogue_voiceover, scene_characters
-from audio.music import generate_fal_bgm
+from audio.music import generate_bgm
 from cinema.auto_approve import record_director_review_on_shots
 from cinema.context import PipelineContext
 from cinema.core import PipelineCore, build_pipeline_core
@@ -629,7 +629,7 @@ class CinemaPipeline:
         music_mood = settings.get("music_mood", "suspense")
         bgm_path = os.path.join(self.temp_dir, f"bgm_{music_mood}.mp3")
         if not os.path.exists(bgm_path):
-            generate_fal_bgm(music_mood, bgm_path, duration=47, cost_tracker=self.cost_tracker)  # T5: gate audio spend on pipeline budget
+            generate_bgm(music_mood, bgm_path, duration=47, prefer_provider="AUTO", cost_tracker=self.cost_tracker)  # T5: gate audio spend; AUTO = Suno V5 → FAL fallback
 
         if os.path.exists(bgm_path):
             try:

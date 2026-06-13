@@ -115,7 +115,7 @@ class Settings:
             # SUNO_TOKEN is the legacy alias the music module used to read
             # directly; preserve it here so the env contract is unchanged.
             suno_api_key=_env("SUNO_API_KEY") or _env("SUNO_TOKEN"),
-            suno_api_base=_env("SUNO_API_BASE", "https://api.suno.ai/v1"),
+            suno_api_base=_env("SUNO_API_BASE", "https://api.sunoapi.org"),
             viggle_api_key=_env("VIGGLE_API_KEY"),
             hedra_api_key=_env("HEDRA_API_KEY"),
             google_cloud_project=_env("GOOGLE_CLOUD_PROJECT"),

@@ -264,20 +264,23 @@ def generate_bgm(
     duration: int = 60,
     prefer_provider: Optional[str] = None,
     custom_lyrics: str = "",
+    cost_tracker: Optional = None,
 ) -> bool:
     """Smart router: Suno V5 → FAL Stable Audio. Returns True on success.
 
     Caller passes prefer_provider; "AUTO" tries Suno first, then falls through
-    to FAL on any failure.
+    to FAL on any failure. cost_tracker is threaded to whichever provider runs
+    so BGM spend is accounted regardless of path (ADR-022 budget integrity).
     """
     provider = prefer_provider or "AUTO"
 
     if provider in ("SUNO_V5", "AUTO"):
-        if generate_suno_v5(music_vibe, output_filename, duration=duration, custom_lyrics=custom_lyrics):
+        if generate_suno_v5(music_vibe, output_filename, duration=duration,
+                            custom_lyrics=custom_lyrics, cost_tracker=cost_tracker):
             return True
         # Fall through to FAL on Suno failure
 
-    return generate_fal_bgm(music_vibe, output_filename, duration=duration)
+    return generate_fal_bgm(music_vibe, output_filename, duration=duration, cost_tracker=cost_tracker)
 
 
 import time  # used by Suno polling — placed here to keep the import surface stable
