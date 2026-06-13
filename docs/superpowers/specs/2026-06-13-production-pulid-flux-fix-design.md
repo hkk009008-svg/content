@@ -98,7 +98,7 @@ the sampler chain, and the no-character bypass.
   is overwritten back to the SDXL-era value on every render, re-suppressing the
   coarse-identity window — making the node swap net-zero. This is the crux of the fix,
   not optional tuning.
-- Fix the stale docstring (~`workflow_selector.py:512`): `ApplyPulid` / `method` →
+- Fix the stale docstring (`workflow_selector.py:512`): `ApplyPulid` / `method` →
   `ApplyPulidFlux` / `fusion`.
 - **No change** to: `apply_workflow_params` body (writes `weight` / `start_at` /
   `end_at`, all valid on `ApplyPulidFlux`); `pulid_weight` / `pulid_end_at` (valid on
@@ -107,7 +107,8 @@ the sampler chain, and the no-character bypass.
 
 ### Component 3 — Regression guard (new test)
 
-A unit test that loads the real `pulid.json` and asserts:
+A unit test (`tests/unit/test_pulid_production_flux.py`, matching the repo's
+`tests/unit/` convention) that loads the real `pulid.json` and asserts:
 
 - nodes 99/100/101 `class_type` are the FLUX variants (`PulidFluxModelLoader`,
   `ApplyPulidFlux`, `PulidFluxEvaClipLoader`);
@@ -143,7 +144,7 @@ schnell → Pollinations) is untouched.
 
 | Risk | Mitigation |
 |---|---|
-| **fp8 incompatibility** — `ApplyPulidFlux` is trained against fp16; prod's node 112 is fp8 | The acceptance gate is the test. The experiment driver (`_prod_dual_lora_pulid.py`) runs the **same** fp8 prod graph, so its pending burn is the first evidence. If fp8 degrades the lock, the fallback is to point node 112 at an fp16 FLUX UNet — a separate decision, out of scope here. |
+| **fp8 incompatibility** — `ApplyPulidFlux` is trained against fp16; prod's node 112 is fp8 | The acceptance gate is the test. The experiment driver (`_prod_dual_lora_pulid.py`) runs the **same** fp8 prod graph, so its pending burn is the first evidence. If fp8 degrades the lock, the fallback is to point node 112 at an fp16 FLUX UNet — but **no fp16 FLUX UNet artifact is in scope A**, so the gate-failure path needs a follow-up ADR + a pod-side model asset before that fallback is actionable. |
 | **start_at undone at runtime** | Component 2 lowers the template values — without it the swap is net-zero. |
 | **Partial node swap** — upgrading 100 without 99/101 dangles `pulid_flux`/`eva_clip` links | All three swap atomically in one edit; the regression test (Component 3) pins it. |
 | **`method` stale write** — a future contributor wiring `method` to node 100 | Docstring fixed; `apply_workflow_params` confirmed not to write `method`. |
