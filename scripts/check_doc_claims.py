@@ -158,17 +158,47 @@ ADVISORY_KINDS = {"ambiguous_path"}
 
 # Definition patterns (def / async def / class at any indent, or module-level assignment)
 def _def_lines(source_lines: list[str], symbol: str) -> list[int]:
-    """Return 1-based line numbers where `symbol` is defined."""
+    """Return 1-based line numbers where `symbol` is defined.
+
+    `def`/`class` match at any indent.  Plain assignments match at column 0
+    only — EXCEPT ALL-CAPS constants (the module-constant convention), which
+    are ALSO matched when assigned at indent.  This covers the optional-import
+    / config-guard pattern (``try: FLAG = True`` / ``except: FLAG = False``,
+    or an ``if``-guarded constant) so a stale anchor to such a constant is
+    caught instead of passing silently as bounds-only.  Lowercase names stay
+    column-0-only so local variables (``    x = 1`` inside a function) are
+    never bound as defs and cannot produce false drifts.
+
+    Lines inside triple-quoted spans (docstrings / prompt templates) and
+    comment-only lines are skipped — without this, indented ALL-CAPS env-var
+    prose like ``    WEB_CORS_ORIGINS=*`` *documented inside a docstring*
+    would be mistaken for a constant definition (the relaxed-indent rule's
+    one real footgun; triple-quote tracking mirrors `_def_extent_end`).
+    """
     def_pat = re.compile(
         r'^\s*(async\s+def|def|class)\s+' + re.escape(symbol) + r'\b'
     )
+    # ALL-CAPS → constant convention → allow leading indent; else column-0 only.
+    indent = r'^\s*' if symbol.isupper() else r'^'
     assign_pat = re.compile(
-        r'^' + re.escape(symbol) + r'\s*[:=]'
+        indent + re.escape(symbol) + r'\s*[:=]'
     )
     found = []
+    in_string = False
     for i, line in enumerate(source_lines, 1):
-        if def_pat.match(line) or assign_pat.match(line):
+        quotes = line.count('"""') + line.count("'''")
+        if in_string:
+            # Inside a triple-quoted span — never a real def; flip state if
+            # this line closes the span (odd quote count).
+            if quotes % 2 == 1:
+                in_string = False
+            continue
+        if not line.lstrip().startswith("#") and (
+            def_pat.match(line) or assign_pat.match(line)
+        ):
             found.append(i)
+        if quotes % 2 == 1:
+            in_string = True
     return found
 
 

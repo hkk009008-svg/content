@@ -37,6 +37,7 @@ from check_doc_claims import (  # noqa: E402
     _build_basename_index,
     _resolve_inline_target,
     _split_advisories,
+    _def_lines,
 )
 
 
@@ -318,6 +319,102 @@ class TestModuleLevelConstant:
         assert d.kind == "def_drift"
         assert d.fixable is True
         assert d.suggested_line == 5
+
+
+# ---------------------------------------------------------------------------
+# Test 8b: INDENTED ALL-CAPS constant anchors (lane-a verifier extension)
+# Module constants assigned at indent — the import/config-guard pattern
+# (`try: FLAG = True / except: FLAG = False`) — were invisible to the
+# column-0 assign_pat, so a stale anchor to them passed silently as
+# bounds-only.  `def`/`class` already matched at any indent; constants now
+# do too, gated on the ALL-CAPS convention so lowercase locals stay unbound.
+# ---------------------------------------------------------------------------
+
+class TestIndentedConstantAnchor:
+    def test_indented_guarded_constant_wrong_line_is_drift(self, tmp_path):
+        """ALL-CAPS const assigned at indent (if-guard) at line 5; anchor at
+        line 2 → def_drift fixable to 5. RED on col-0-only assign_pat."""
+        src = _write_py(tmp_path, "flags.py", """\
+            \"\"\"flags module.\"\"\"
+            import os
+
+            if os.environ.get("CINEMA_X"):
+                FEATURE_FLAG = True
+        """)
+        assert src  # sanity
+        md = _write_md(tmp_path, "doc.md", """\
+            See `FEATURE_FLAG` ([flags.py:2](flags.py:2)) — the guard.
+        """)
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert len(drifts) == 1, f"expected 1 def_drift, got: {drifts}"
+        d = drifts[0]
+        assert d.kind == "def_drift"
+        assert d.suggested_line == 5
+
+    def test_indented_guarded_constant_correct_line_no_drift(self, tmp_path):
+        """Anchor at the indented const's actual line → clean."""
+        _write_py(tmp_path, "flags.py", """\
+            \"\"\"flags module.\"\"\"
+            import os
+
+            if os.environ.get("CINEMA_X"):
+                FEATURE_FLAG = True
+        """)
+        md = _write_md(tmp_path, "doc.md", """\
+            See `FEATURE_FLAG` ([flags.py:5](flags.py:5)) — the guard.
+        """)
+        drifts = check_line_anchors([str(md)], tmp_path)
+        assert drifts == [], f"expected no drift, got: {drifts}"
+
+    def test_try_except_constant_both_assignments_found(self):
+        """The canonical optional-import guard: _def_lines finds BOTH indented
+        assignments (try + except). RED returns [] on col-0-only pattern."""
+        src = [
+            '"""mod."""\n',
+            "try:\n",
+            "    import deepface  # noqa\n",
+            "    DEEPFACE_AVAILABLE = True\n",
+            "except ImportError:\n",
+            "    DEEPFACE_AVAILABLE = False\n",
+        ]
+        assert _def_lines(src, "DEEPFACE_AVAILABLE") == [4, 6]
+
+    def test_indented_lowercase_local_not_bound_as_def(self):
+        """Regression guard for the isupper() gate: an indented lowercase
+        assignment (a local var) must NOT be treated as a def — else every
+        `    x = ...` inside a function would bind and produce false drifts."""
+        src = [
+            "def f():\n",
+            "    helper_val = 1\n",
+            "    return helper_val\n",
+        ]
+        assert _def_lines(src, "helper_val") == []
+
+    def test_column0_constant_still_found(self):
+        """Non-regression: a column-0 ALL-CAPS constant still binds (the
+        pre-existing behavior must be preserved)."""
+        src = [
+            "IDENTITY_THRESHOLD = 0.70\n",
+            "OTHER = 1\n",
+        ]
+        assert _def_lines(src, "IDENTITY_THRESHOLD") == [1]
+
+    def test_allcaps_envvar_in_docstring_not_bound(self):
+        """The relaxed-indent footgun: an ALL-CAPS env-var name documented
+        INSIDE a docstring (indented prose `    WEB_CORS_ORIGINS=*`) must NOT
+        be mistaken for a def — triple-quote tracking skips it. Without the
+        skip, _def_lines would return the docstring line and a stale anchor
+        would mis-fix onto documentation prose."""
+        src = [
+            "def _parse(raw):\n",
+            '    """Parse WEB_CORS_ORIGINS env into a tuple.\n',
+            "\n",
+            "    To allow every origin, set\n",
+            "    WEB_CORS_ORIGINS=*. To allow LAN access, use a list.\n",
+            '    """\n',
+            "    return raw\n",
+        ]
+        assert _def_lines(src, "WEB_CORS_ORIGINS") == []
 
 
 # ---------------------------------------------------------------------------
