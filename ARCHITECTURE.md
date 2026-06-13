@@ -974,34 +974,46 @@ which appends to the shared `IdentityValidator.history` (see §11).
 
 ### 8.5 Known defect — char-bearing **landscape** shots silently zero identity (both tiers)
 
-A shot whose prompt carries a landscape keyword (`aerial`/`drone`/`skyline`/
-`panoramic`/`environment`/`scenery`) **but has a registered character** is
-mis-classified `landscape` by the shared seam
-[`workflow_selector.classify_shot_type`](workflow_selector.py): the landscape
-keyword bucket wins even when `characters_in_frame` is non-empty (rule 1's
-"no characters → landscape" shortcut is bypassed, but the keyword scan still
-returns `landscape`). Both image tiers then lose identity — **different
-mechanism, same net effect (zero face-lock), mutually exclusive by tier**:
+A shot whose prompt carries a landscape keyword (`landscape`/`aerial`/`drone`/
+`skyline`/`panoramic`/`environment`/`scenery`/`no character`) **but has a
+registered character** is mis-classified `landscape` by the shared seam
+[`workflow_selector.classify_shot_type`](workflow_selector.py:416): the landscape
+keyword bucket ([`SHOT_TYPE_KEYWORDS`](workflow_selector.py:112)) wins even when
+`characters_in_frame` is non-empty (rule 1's "no characters → landscape" shortcut
+is bypassed, but the keyword scan still returns `landscape`). The scan is
+**dict-order, first-match-wins** (portrait → action → wide → landscape → medium),
+so the mis-route fires only when no portrait/action/wide keyword co-occurs earlier
+in `search_text` — e.g. "drone tracking shot" resolves to `action`, not
+`landscape`. Both image tiers then lose identity — **different mechanism, same net
+effect (zero face-lock), mutually exclusive by tier**:
 
 - **Production (§8.2):** [phase_c_assembly.py:223-227](phase_c_assembly.py:223)
   early-returns to the Kontext fallback with `character_image=None` — ComfyUI
-  never runs and the **reference is dropped entirely** (strictly worse than
-  `pulid_weight=0.0`).
+  never runs and the **reference is dropped entirely** (strictly worse than the
+  `pulid_weight=0.0` its own `landscape` template would set at
+  [workflow_selector.py:88](workflow_selector.py:88)).
 - **Max tier (§8.3):** no early-return, but `MAX_QUALITY_TEMPLATES['landscape']`
-  (via `get_max_quality_params`) writes `pulid_weight=0.0`,
+  ([workflow_selector.py:329-341](workflow_selector.py:329), via
+  `get_max_quality_params`) writes `pulid_weight=0.0`,
   `lora_strength_model/clip=0.0`, `halt_threshold_arc=0.0`,
   `regenerate_floor_arc=0.0`. `_inject_identity` still runs (identity gating keys
   on `has_character`/file-presence at [quality_max.py:990](quality_max.py:990),
   not `shot_type`), so the PuLID node + uploaded reference are physically present
   but **inert**, and the best-of-N identity rescue is dead — the +0.15 PuLID-boost
-  retry at [quality_max.py:1149](quality_max.py:1149) never fires at
-  `regenerate_floor_arc=0.0`. The char LoRA fires only if the project explicitly
+  retry at [quality_max.py:1149](quality_max.py:1149) gates on
+  [`needs_regenerate`](face_validator_gate.py:326), whose `arc_score <
+  regenerate_floor_arc` test never holds at `regenerate_floor_arc=0.0` (and its
+  `has_character` guard passes for a char-bearing shot, so the `0.0` floor — not
+  the guard — is the operative kill). The char LoRA fires only if the project explicitly
   sets a non-zero per-character `char_lora_strengths`
   ([quality_max.py:500](quality_max.py:500)).
 
 **Root cause is the single shared seam.** Routing a landscape-keyword shot *with
-non-empty `characters_in_frame`* to `wide` (`pulid_weight=0.65`, both tiers) or
-`medium` re-engages identity in **both** tiers at once — production keys its
+non-empty `characters_in_frame`* to `wide` (`pulid_weight=0.65` both tiers —
+production [workflow_selector.py:54](workflow_selector.py:54), max
+[workflow_selector.py:236-248](workflow_selector.py:236) which also restores
+`lora_strength=0.9`) or `medium` re-engages identity in **both** tiers at once —
+production keys its
 early-return on `shot_type`, the max template keys its zeroing on `shot_type`, so
 one `classify_shot_type` fix covers both. No separate per-tier patch needed.
 
@@ -1011,7 +1023,13 @@ as a scope **exemption** in [ADR-025](DECISIONS.md) (the Task-4 pod gate validat
 portrait routing only; this path was not exercised). Sources: operator
 verification-reports `77eb334` (production severity correction) + `9be752a`
 (max tier, dual-verified — source trace + adversarial refute=held).
-*Documented 2026-06-13 (operator-1 finding; director co-signed).*
+*Documented 2026-06-13 (operator-1 finding; director-delegated placement, co-sign
+pre-granted in the director's 10:49Z ACK). Source anchors hardened + all six
+claims re-verified against HEAD 2026-06-13 (operator-1, 6-way adversarial
+refute-first pass — all CONFIRMED, high-confidence). **Director-1 co-sign
+FORMALIZED 2026-06-13**: independent second adversarial re-verification (6 verify
++ 6 refute, all CONFIRMED, all survived refute) — folded the dict-order scope
+bound, completed the 8-keyword set, and hardened the regen-floor anchor chain.*
 
 ---
 
