@@ -126,7 +126,13 @@ class HedraAPI:
                 print(f"   [HEDRA-NATIVE] generation rejected {g.status_code}: {g.text[:400]}")
                 return None
 
-            gid = g.json()["id"]
+            gid = g.json().get("id")
+            if not gid:
+                # No generation id → polling /generations/None/status can never
+                # succeed; the old code burned up to 150×5s (~12.5 min) on it.
+                # Cascade immediately (the caller falls through to the next engine).
+                print(f"   [HEDRA-NATIVE] no generation id in response: {g.text[:200]}")
+                return None
             print(f"   [HEDRA-NATIVE] generation {gid} submitted; polling /status...")
 
             url = None
