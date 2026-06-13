@@ -626,41 +626,54 @@ def api_update_character(pid, cid):
     else:
         data = request.form.to_dict()
 
-    # Handle reference image uploads
+    # Handle reference image uploads.
+    #
+    # A3 single-face enforcement, PUT path: an image arriving via update is the
+    # same registration event as create — multi-face references corrupt every
+    # downstream identity score, so they must not enter via either door. Same
+    # 400-with-message contract as api_add_character's ValueError path.
+    #
+    # bug_001 (cloud review): VALIDATE IN A STAGING DIR before moving anything
+    # into char_dir. Writing straight into char_dir (then os.remove on
+    # rejection) destroyed a pre-existing valid reference whenever an uploaded
+    # filename collided with it — secure_filename is deterministic, f.save
+    # truncates 'wb', and the cleanup loop then deleted the clobbered file
+    # while the 400 returned before _mutate_project, leaving the record
+    # pointing at a now-missing path. Staging means a rejected (or colliding)
+    # upload never touches an existing reference.
     saved_paths = []
     if request.files.getlist("reference_images"):
+        import shutil
+        import tempfile
+        from domain.character_manager import DEEPFACE_AVAILABLE, _count_faces
         project_dir = get_project_dir(pid)
         char_dir = os.path.join(project_dir, "characters", cid)
         os.makedirs(char_dir, exist_ok=True)
-        for f in request.files.getlist("reference_images"):
-            if f.filename:
-                safe_name = secure_filename(f.filename) or "file"
-                save_path = os.path.join(char_dir, safe_name)
-                f.save(save_path)
-                saved_paths.append(save_path)
-
-    # A3 single-face enforcement, PUT path: an image arriving via update is
-    # the same registration event as create — multi-face references corrupt
-    # every downstream identity score, so they must not enter via either door.
-    # Same 400-with-message contract as api_add_character's ValueError path.
-    if saved_paths:
-        from domain.character_manager import DEEPFACE_AVAILABLE, _count_faces
-        if DEEPFACE_AVAILABLE:
-            for p in saved_paths:
-                n = _count_faces(p)
-                if n >= 2:
-                    for sp in saved_paths:
-                        try:
-                            os.remove(sp)
-                        except OSError:
-                            pass
-                    return jsonify({
-                        "error": (
-                            f"Reference image '{os.path.basename(p)}' contains "
-                            f"{n} faces but exactly 1 is required. "
-                            f"Provide a single-person reference photo."
-                        )
-                    }), 400
+        with tempfile.TemporaryDirectory() as staging:
+            staged = []  # (tmp_path, safe_name) — index-prefixed temp names so
+            # same-request duplicate filenames don't clobber each other in staging
+            for i, f in enumerate(request.files.getlist("reference_images")):
+                if f.filename:
+                    safe_name = secure_filename(f.filename) or "file"
+                    tmp_path = os.path.join(staging, f"{i}_{safe_name}")
+                    f.save(tmp_path)
+                    staged.append((tmp_path, safe_name))
+            if DEEPFACE_AVAILABLE:
+                for tmp_path, safe_name in staged:
+                    n = _count_faces(tmp_path)
+                    if n >= 2:
+                        return jsonify({
+                            "error": (
+                                f"Reference image '{safe_name}' contains "
+                                f"{n} faces but exactly 1 is required. "
+                                f"Provide a single-person reference photo."
+                            )
+                        }), 400
+            # All uploads validated — commit them into char_dir now.
+            for tmp_path, safe_name in staged:
+                dst = os.path.join(char_dir, safe_name)
+                shutil.move(tmp_path, dst)
+                saved_paths.append(dst)
 
     def _mutate_project(latest_project: dict):
         # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-

@@ -111,3 +111,71 @@ class TestPutGuardSkippedWithoutDeepface:
         assert resp.status_code == 200
         rec = _char_record(pid, cid)
         assert len(rec["reference_images"]) == 1
+
+
+class TestPutCollisionDataLoss:
+    """bug_001 (cloud ultrareview): a rejected multi-face PUT whose filename
+    COLLIDES with an existing reference must NOT destroy that existing valid
+    file.  Pre-786d9e9 the overwrite survived on disk (record stayed
+    consistent); 786d9e9's os.remove cleanup turned the overwrite into a
+    delete + a dangling record.  The fix validates uploads in a staging dir
+    BEFORE moving anything into char_dir, so a rejection never touches an
+    existing reference.
+    """
+
+    def test_rejected_multiface_put_preserves_colliding_existing_ref(self, client):
+        from domain import project_manager as pm
+        pid, cid = _project_with_char()
+
+        # Seed an EXISTING valid single-face reference at a known filename and
+        # register it on the record (simulating a prior successful PUT).
+        char_dir = os.path.join(pm._project_dir(pid), "characters", cid)
+        os.makedirs(char_dir, exist_ok=True)
+        existing = os.path.join(char_dir, "headshot.jpg")
+        with open(existing, "wb") as fh:
+            fh.write(b"ORIGINAL-VALID-SINGLE-FACE-BYTES")
+
+        def _add_ref(p):
+            for c in p["characters"]:
+                if c["id"] == cid:
+                    c.setdefault("reference_images", []).append(existing)
+                    return c
+            return None
+        pm.mutate_project(pid, _add_ref)
+
+        # PUT the SAME filename carrying a multi-face image → must be rejected.
+        with patch.object(cm, "DEEPFACE_AVAILABLE", True), \
+             patch.object(cm, "_count_faces", return_value=2):
+            resp = client.put(
+                f"/api/projects/{pid}/characters/{cid}",
+                data={
+                    "name": "Solo",
+                    "reference_images": (io.BytesIO(b"TWO-FACE-BYTES"), "headshot.jpg"),
+                },
+                content_type="multipart/form-data",
+            )
+
+        assert resp.status_code == 400
+        # DATA-LOSS GUARD: the pre-existing valid reference must SURVIVE intact.
+        assert os.path.exists(existing), "existing reference was destroyed (bug_001)"
+        with open(existing, "rb") as fh:
+            assert fh.read() == b"ORIGINAL-VALID-SINGLE-FACE-BYTES", (
+                "existing reference was overwritten before validation (bug_001)"
+            )
+        # Record stays consistent with disk: still lists the surviving ref.
+        rec = _char_record(pid, cid)
+        assert existing in rec["reference_images"]
+
+    def test_valid_single_face_put_with_new_name_still_appends(self, client):
+        """Non-regression: a valid single-face PUT with a fresh filename still
+        lands the reference (the staging-then-move path works end to end)."""
+        pid, cid = _project_with_char()
+        with patch.object(cm, "DEEPFACE_AVAILABLE", True), \
+             patch.object(cm, "_count_faces", return_value=1):
+            resp = _put_with_image(client, pid, cid)
+        assert resp.status_code == 200
+        rec = _char_record(pid, cid)
+        assert len(rec["reference_images"]) == 1
+        assert rec["reference_images"][0].endswith("newref.jpg")
+        # the moved file actually exists on disk
+        assert os.path.exists(rec["reference_images"][0])
