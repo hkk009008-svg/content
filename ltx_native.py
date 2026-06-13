@@ -255,6 +255,12 @@ class LTXVideoAPI:
 
             with urllib.request.urlopen(req, timeout=600) as resp:
                 video_data = resp.read()
+                # An empty 200 body would otherwise be written as a 0-byte file
+                # and returned as output_path (a false success the caller treats
+                # as a real clip). Raise so the except-chain routes to FAL / None
+                # (→ caller cascades) instead of accepting the empty result.
+                if not video_data:
+                    raise RuntimeError("LTX native returned empty 200 body")
                 with open(output_path, "wb") as f:
                     f.write(video_data)
 

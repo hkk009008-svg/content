@@ -304,6 +304,62 @@ def test_native_happy_path_writes_output(monkeypatch, tmp_path):
         assert f.read() == b"NATIVE_VIDEO_BYTES"
 
 
+def test_native_empty_200_body_is_not_false_success(monkeypatch, tmp_path):
+    """A 200 response with an EMPTY body must NOT be written as a 0-byte file and
+    reported as success.
+
+    Regression (Pair-B lane-health baseline): _native_generate read the body and
+    wrote it unconditionally, so an empty 200 produced a 0-byte file and returned
+    output_path — a false success the caller accepts as a real clip. With no
+    fal_key the guard must route to None (failure → the caller cascades), and no
+    0-byte file may be left behind.
+    """
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx-key")          # fal_key="" -> no FAL fallback on failure
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"imgdata")
+    out_path = tmp_path / "out.mp4"
+    out = str(out_path)
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+
+    cm = _urlopen_cm(b"")                        # empty 200 body
+    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", MagicMock(return_value=cm))
+
+    result = api.generate_video(image_path=str(img), prompt="cinematic", output_path=out)
+
+    assert result is None, f"empty 200 body was reported as success: result={result!r}"
+    assert not out_path.exists(), "a 0-byte output file was written for an empty 200 body"
+
+
+def test_native_empty_200_body_falls_back_to_fal(monkeypatch, tmp_path):
+    """When fal_key is configured, an empty 200 body must route to the FAL
+    fallback (via the broad except) rather than be accepted as a 0-byte success.
+
+    This exercises the OTHER branch of the empty-body guard's except-chain: the
+    RuntimeError raised on an empty body is caught by `except Exception`, which
+    retries via FAL when fal_key + FAL_AVAILABLE.
+    """
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", True)
+    api = _make_api(ltx_key="ltx-key", fal_key="fal-key")
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"imgdata")
+    out_path = tmp_path / "out.mp4"
+    out = str(out_path)
+
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+    cm = _urlopen_cm(b"")                        # empty 200 body
+    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", MagicMock(return_value=cm))
+
+    fal_spy = MagicMock(return_value=out)        # stand in for the FAL recovery path
+    monkeypatch.setattr(api, "_fal_generate", fal_spy)
+
+    result = api.generate_video(image_path=str(img), prompt="cinematic", output_path=out)
+
+    fal_spy.assert_called_once()
+    assert result == out, "empty 200 body did not recover via the FAL fallback"
+
+
 # ---------------------------------------------------------------------------
 # G(ltx)1 FIXED: native HTTP 5xx → triggers FAL fallback (transient server error)
 # ---------------------------------------------------------------------------
