@@ -25,7 +25,40 @@ answer the principal, and (since this session) can **notify** via mailbox.
   `GIT_INDEX_FILE=… git commit -m "…" -- <pathspec>` (partial commit — cannot
   sweep peers even if HEAD moves). **Push stays USER-gated; never push.**
 
-## What this session did (2026-06-13, ~09:00–10:48Z)
+## Session 2 — PM (2026-06-13, ~11:00–11:22Z) — LATEST, read this first
+
+Re-onboarded as coordinator (user re-activated the seat after the Session-1 wrap),
+ran a full dependency-ordered oversight pass, then **pushed the stack on explicit
+principal direction**.
+
+1. **3-task oversight, ordered upstream→downstream** via a read-only Workflow
+   (`wf_5d39bbe3`, 7 Sonnet agents, adversarial-verify gating each phase):
+   - **Sweep** — all 4 working seats WRAPPED/converged, **zero stalls, zero
+     collisions**. Pair-B ran a fresh **PM2 session DURING the audit** (landed
+     `65e9b88` auto-RIFE default-on) and director-1 formalized the §8.5 co-sign
+     (`1b94dd7`) mid-audit — HEAD churned ~5× in 20 min; re-synced each step.
+   - **Defect** — §8.5 char-landscape note is **landed + co-signed**; the
+     "one `classify_shot_type` seam fix resolves both tiers" claim **HOLDS, high
+     confidence** (independently re-derived; convergent with `1b94dd7`).
+   - **Push-readiness** — stack coherent, ci_smoke green; verdict
+     *ready-with-caveats* (the auto-RIFE caveat below).
+2. **Surfaced (durable, pushed):**
+   - `b922aa9` — `coordinator → all` **findings**: the char-landscape fix's
+     **FULL blast radius = 5 `classify_shot_type` callers** (controller.py
+     video_fallbacks +RUNWAY_GEN4 [Pair-B]; continuity_engine identity_threshold
+     0.0→0.55 [Pair-A]; performance.py take-gating [Pair-A]; motion_render floor
+     None→0.65 [Pair-B]; calibrate CSV) — §8.5 only nods to "video-API selection".
+     Scope intel for the deferred joint routing brief, + 2 edge caveats.
+   - `4c3b64f` — `coordinator → all` **fyi**: origin/main pushed; "nothing
+     pushed" prose now stale.
+3. **PUSH (principal-directed; OVERRODE the never-push invariant):** the standing
+   all-seat USER-gate was lifted by an explicit user "push". Pushed
+   `5c508d4..b922aa9` (53 commits) then `b922aa9..4c3b64f` — two **clean
+   fast-forwards**. **origin/main is now CURRENT at `4c3b64f`, 0 ahead.**
+   ⚠ This was a **one-time principal exception** — the seat's default remains
+   **never push**; do NOT infer a standing push mandate.
+
+## What Session 1 did (2026-06-13, ~09:00–10:48Z)
 1. **Onboarded** + announced the seat (director-1 durably announced me at
    `e38b9fb`; later self-announced via mailbox once send-capable).
 2. **Align audit** (read-only Workflow `wf_ed13f2b4-0de`, 10 agents,
@@ -51,6 +84,26 @@ answer the principal, and (since this session) can **notify** via mailbox.
    dead-chain map).
 
 ## Open items for the next coordinator
+
+**Post Session-2 (LATEST):**
+- **auto-RIFE `65e9b88` verify owed ON A PUSHED COMMIT** — default-on auto-RIFE
+  (W1 §5.2) is public, principal-authorized + TDD-green (8 new + 70 regression),
+  but operator2 wrapped PM2 flagging it **peer-WIP, not CONFIRMED**. The formal
+  operator2 cross-verify is the one real carry-forward; watch Pair-B's next resume.
+- **Char-landscape joint routing brief — still to author** (deferred to next
+  Pair-B). Owners: director2 (author) + director (Rule #23 co-sign) + operator2
+  (implement). The 5-caller blast radius + 2 caveats are in `b922aa9` — the brief
+  must scope those, not just the §8.5 production/max mechanisms.
+- **Stale "nothing pushed" prose everywhere** — all seat handoffs + presence +
+  MEMORY.md still say "push USER-gated, N ahead, nothing pushed". FALSE now
+  (origin/main == main == `4c3b64f`). Trust git, not the prose; fix-on-touch.
+- **Session-1 items below are now mostly CLOSED:** §8.5 placed (`547cf12`) +
+  co-signed (`1b94dd7`); director2 consumed the lip_sync/forced-alignment action
+  events in PM2 (cursor 11:13:40Z); Rule #23 object-window on `fd334d3` closed
+  (no objection). director2's lip_sync loud-gate + forced-alignment build remain
+  **Pair-B lane work** (W1/W2), not coordinator items.
+
+**Session-1 (historical):**
 - **Rule #23 object-window** on `fd334d3` (added the coordinator sender under
   user-override = cross-cutting). If any seat objects → `git revert fd334d3`.
   No objection seen as of wrap.
@@ -65,7 +118,8 @@ answer the principal, and (since this session) can **notify** via mailbox.
 - **Pair A**: Task-4 GO landed (`6aad3b2`, pod acceptance gate passed) +
   ADR-025. The Linux/TBB determinism re-confirm (A2) was still OPEN at wrap;
   pod is now STOPPED (`b123632`) so it's deferred-on-restart.
-- **Everything UNPUSHED** (push USER-gated).
+- ~~**Everything UNPUSHED** (push USER-gated)~~ → **PUSHED in Session-2** (see
+  top): origin/main == main == `4c3b64f`, 0 ahead. Default stays never-push.
 
 ## Sharp edges (held)
 - **MM phantom**: unpinned `git status` reads the stale default index → shows
@@ -79,6 +133,19 @@ answer the principal, and (since this session) can **notify** via mailbox.
   to `ROLES` (would demand a `seen/coordinator.txt`).
 - **HEAD moves fast** (4+ live seats): `git log -1` before every commit;
   partial pathspec commits are the safety boundary.
+- **Session-2 lesson — HEAD churns mid-audit:** during a long read-only audit on
+  a live 4-seat tree, HEAD moved ~5×. `git diff --stat HEAD` can show ~500 phantom
+  "deletions" when the default index predates recent commits; **`git read-tree
+  HEAD` clears it**, but if HEAD moves again right after, `--stat` lies again until
+  you re-reseed. Definitive truth = `git cat-file -p HEAD:<f>` / `git diff HEAD
+  -- <f>` (empty = clean) / `git log -1` re-checked between steps. Workflow agents
+  on an unpinned seat inherit the same stale-index trap — tell them to avoid
+  `git status`.
 
-HEAD at wrap: `b123632`. Pod STOPPED ($0 billing). ci_smoke OK. All coordinator
-artifacts clean vs HEAD.
+HEAD at Session-1 wrap: `b123632`.
+
+**HEAD at Session-2 wrap: `4c3b64f` — origin/main CURRENT (0 ahead, two
+fast-forwards this session). Pod STOPPED ($0 billing). ci_smoke OK. coordination
+clean (4 INFO). Coordinator events `b922aa9` (findings) + `4c3b64f` (fyi) pushed;
+this handoff doc is the only local artifact committed at wrap (presence is
+gitignored, updated locally).**
