@@ -174,6 +174,63 @@ def check_generation_prerequisites(image_path: str, audio_path: str) -> Prerequi
     return PrerequisiteResult(passed=passed, mode="generation", warnings=warnings, blockers=blockers)
 
 
+def _return_best_of_failed(
+    candidates: list,
+    output_path: str,
+    *,
+    threshold: float,
+    attempts: list,
+    cascade_out: Optional[dict],
+    kind: str,
+) -> Optional[str]:
+    """Materialize the highest-scored best-of-failed lip-sync candidate.
+
+    When no engine clears the sync gate, both the overlay and generation
+    pipelines fall back to the best *failed* candidate. This is their single
+    shared implementation (de-duplicated so the copy-failure contract can't
+    regress at only one site — Rule #13).
+
+    Sorts ``candidates`` (``(score, stash_path, engine_name)``) descending by
+    score, copies the best to ``output_path``, cleans up every stash, and writes
+    fallback cascade metadata.
+
+    Returns ``output_path`` on a successful copy, else ``None`` — a failed copy
+    must NOT hand the caller a path that was never written. ``None`` is the
+    router's "no usable output, keep the original video" signal.
+    """
+    import shutil
+    candidates.sort(key=lambda c: c[0], reverse=True)
+    best_score, best_path, best_name = candidates[0]
+    logger.warning(
+        f"no {kind} engine cleared sync threshold; returning best-of-failed",
+        extra={"engine": best_name, "sync_score": round(best_score, 4), "threshold": threshold},
+    )
+    copied = False
+    try:
+        shutil.copyfile(best_path, output_path)
+        copied = True
+    except Exception as e:
+        logger.exception(
+            f"could not restore best {kind} candidate",
+            extra={"engine": best_name, "error": str(e)},
+        )
+    for _, p, _ in candidates:
+        try:
+            if os.path.exists(p):
+                os.unlink(p)
+        except Exception:
+            pass  # Temp-file cleanup — non-fatal if OS-level delete fails
+    if cascade_out is not None:
+        cascade_out["cascade_metadata"] = {
+            "engine": best_name,
+            "score": round(best_score, 4),
+            "threshold": threshold,
+            "fallback": True,
+            "attempts": list(attempts),
+        }
+    return output_path if copied else None
+
+
 # ─────────────────────────────────────────────────────────────
 # MODE 1: OVERLAY (MuseTalk — mouth-only on existing video)
 # ─────────────────────────────────────────────────────────────
@@ -352,34 +409,11 @@ def lipsync_overlay(
 
     # Best-of-failed recovery for overlay pipeline
     if overlay_candidates:
-        overlay_candidates.sort(key=lambda c: c[0], reverse=True)
-        best_score, best_path, best_name = overlay_candidates[0]
-        logger.warning(
-            "no overlay engine cleared sync threshold; returning best-of-failed",
-            extra={"engine": best_name, "sync_score": round(best_score, 4), "threshold": overlay_threshold},
+        return _return_best_of_failed(
+            overlay_candidates, output_path,
+            threshold=overlay_threshold, attempts=overlay_attempts,
+            cascade_out=_cascade_out, kind="overlay",
         )
-        try:
-            _shutil_overlay.copyfile(best_path, output_path)
-        except Exception as e:
-            logger.exception(
-                "could not restore best overlay candidate",
-                extra={"engine": best_name, "error": str(e)},
-            )
-        for _, p, _ in overlay_candidates:
-            try:
-                if os.path.exists(p):
-                    os.unlink(p)
-            except Exception:
-                pass  # Temp-file cleanup — non-fatal if OS-level delete fails
-        if _cascade_out is not None:
-            _cascade_out["cascade_metadata"] = {
-                "engine": best_name,
-                "score": round(best_score, 4),
-                "threshold": overlay_threshold,
-                "fallback": True,
-                "attempts": list(overlay_attempts),
-            }
-        return output_path
 
     logger.error("all overlay lipsync methods failed", extra={"engine": "overlay"})
     return None
@@ -700,35 +734,11 @@ def lipsync_generation(
     # scored candidate from the stashed attempts. Better than returning None
     # when we have *something* — the operator can review and decide.
     if candidates:
-        candidates.sort(key=lambda c: c[0], reverse=True)
-        best_score, best_path, best_name = candidates[0]
-        logger.warning(
-            "no generation engine cleared sync threshold; returning best-of-failed",
-            extra={"engine": best_name, "sync_score": round(best_score, 4), "threshold": gate_threshold},
+        return _return_best_of_failed(
+            candidates, output_path,
+            threshold=gate_threshold, attempts=gen_attempts,
+            cascade_out=_cascade_out, kind="generation",
         )
-        try:
-            _shutil.copyfile(best_path, output_path)
-        except Exception as e:
-            logger.exception(
-                "could not restore best generation candidate",
-                extra={"engine": best_name, "error": str(e)},
-            )
-        # Clean up stash files
-        for _, p, _ in candidates:
-            try:
-                if os.path.exists(p):
-                    os.unlink(p)
-            except Exception:
-                pass  # Temp-file cleanup — non-fatal if OS-level delete fails
-        if _cascade_out is not None:
-            _cascade_out["cascade_metadata"] = {
-                "engine": best_name,
-                "score": round(best_score, 4),
-                "threshold": gate_threshold,
-                "fallback": True,
-                "attempts": list(gen_attempts),
-            }
-        return output_path
 
     logger.error("all generation lipsync methods failed", extra={"engine": "generation"})
     return None
