@@ -87,9 +87,13 @@ def _score(path, ref_emb):
 def main():
     import argparse
     ap = argparse.ArgumentParser()
+    ap.add_argument("--n", type=int, default=1,
+                    help="ON-leg seed count (1=A/B acceptance, 4=seed robustness)")
     ap.add_argument("--dry", action="store_true",
                     help="$0 structural build + asserts only (no upload, no render)")
     args = ap.parse_args()
+    if args.n > len(s2.SEEDS):
+        raise SystemExit(f"--n {args.n} exceeds available seeds {len(s2.SEEDS)}")
 
     seed = s2.SEEDS[0]
     if args.dry:
