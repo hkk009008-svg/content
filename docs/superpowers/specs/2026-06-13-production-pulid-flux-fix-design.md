@@ -158,11 +158,15 @@ schnell → Pollinations) is untouched.
 
 ## Rollout & rollback
 
-In-place (R1) — **COMPLETE.** Implemented + committed (`a1103bd`/`f05c83b`/`c5199de`);
-the regression test passes offline; the pod acceptance gate PASSED 2026-06-13 (above).
-The fix is now the **shipping default**. Push remains USER-gated. Rollback = `git revert`
-the `pulid.json` + `workflow_selector.py` change (two files; no schema, no migration, no
-data backfill).
+In-place (R1) — **COMPLETE.** Implemented + committed: `a1103bd` (graph) + `f05c83b`
+(selector templates + docstring) are the **behavioral** change; `c5199de` (regression
+test), `a924055` (case-rename + case-pin test), `7b54af9` (advisory guards) are
+**additive** (tests/docs, no render-behavior impact). The regression test passes
+offline; the pod acceptance gate PASSED 2026-06-13 (above). The fix is now the
+**shipping default**. Push remains USER-gated. Rollback of render behavior = `git revert`
+the `pulid.json` + `workflow_selector.py` change (`a1103bd`/`f05c83b`; two files; no
+schema, no migration, no data backfill); a *complete* back-out also reverts the 3
+additive commits.
 
 ## Cross-refs
 
