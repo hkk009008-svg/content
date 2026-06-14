@@ -60,7 +60,7 @@ def build(supir_on, seed):
     q._apply_model_precision(w, "fp16")
     params = dict(get_max_quality_params("portrait"))
     params["supir_enabled"] = supir_on
-    q._prune_unavailable(w, _available, True, False)
+    q._prune_unavailable(w, _available, True, True, False)
     q._inject_identity(w, None, _face_remote, params, True)
     q._inject_conditioning(w, PROMPT, None, None, params, True)
     q._inject_sampling(w, params)

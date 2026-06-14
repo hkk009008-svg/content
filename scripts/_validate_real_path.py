@@ -19,17 +19,17 @@ print("pod node classes:", len(available))
 
 wf = qm._load_max_workflow()
 
-has_character, has_init = True, False
+has_face_ref, has_char_lora, has_init = True, True, False
 params = {k: v for k, v in []}  # defaults via .get() inside functions
 
 # mirror generate_ai_broll_max ordering (skip uploads; use fake remote names —
 # validation does not check image-file existence)
-qm._prune_unavailable(wf, available, has_character, has_init)
+qm._prune_unavailable(wf, available, has_face_ref, has_char_lora, has_init)
 face_anchor_remote = "canonical.jpg"
 init_remote = None
 style_remote = face_anchor_remote
-qm._inject_identity(wf, None, face_anchor_remote, params, has_character)   # char_lora=None (no LoRA)
-qm._inject_conditioning(wf, "a portrait of a woman, cinematic", init_remote, style_remote, params, has_character)
+qm._inject_identity(wf, None, face_anchor_remote, params, has_face_ref)   # char_lora=None (no LoRA)
+qm._inject_conditioning(wf, "a portrait of a woman, cinematic", init_remote, style_remote, params, has_face_ref)
 qm._inject_sampling(wf, params)
 qm._inject_latent_source(wf, init_remote, params)
 qm._inject_post_passes(wf, params, available)

@@ -22,12 +22,12 @@ w = q._load_max_workflow()
 w.pop("_metadata", None)
 q._apply_model_precision(w, "fp16")
 
-has_character, has_init = True, False
+has_face_ref, has_char_lora, has_init = True, True, False
 params: dict = {}
 
-q._prune_unavailable(w, available, has_character, has_init)
-q._inject_identity(w, None, face_remote, params, has_character)   # LoRA-less + real face anchor
-q._inject_conditioning(w, "cinematic portrait of a woman, short dark wavy bob, soft window light, photorealistic, 85mm", None, None, params, has_character)
+q._prune_unavailable(w, available, has_face_ref, has_char_lora, has_init)
+q._inject_identity(w, None, face_remote, params, has_face_ref)   # LoRA-less + real face anchor
+q._inject_conditioning(w, "cinematic portrait of a woman, short dark wavy bob, soft window light, photorealistic, 85mm", None, None, params, has_face_ref)
 q._inject_sampling(w, params)
 q._inject_latent_source(w, None, params)
 q._inject_post_passes(w, params, available)

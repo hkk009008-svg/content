@@ -51,7 +51,7 @@ def build(available, aria_remote, strength):
     w.pop("_metadata", None)
     q._apply_model_precision(w, "fp16")
     params = get_max_quality_params("portrait")
-    q._prune_unavailable(w, available, True, False)
+    q._prune_unavailable(w, available, True, True, False)
     q._inject_identity(w, ARIA_LORA, aria_remote, params, True,
                        char_lora_strength=ARIA_STRENGTH)
     q._inject_secondary_loras(w, [_secondary(strength)])

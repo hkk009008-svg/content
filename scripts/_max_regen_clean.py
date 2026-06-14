@@ -55,7 +55,7 @@ def build_base():
     # clean-neck candidate exactly; with the bake these now carry A's SUPIR
     # cfg=2.8/steps=40, and restore_cfg=3.0/churn=2 come from pulid_max.json.
     params = get_max_quality_params("portrait")
-    q._prune_unavailable(w, available, True, False)
+    q._prune_unavailable(w, available, True, True, False)
     q._inject_identity(w, None, face_remote, params, True)
     q._inject_conditioning(w, PROMPT, None, None, params, True)
     q._inject_sampling(w, params)

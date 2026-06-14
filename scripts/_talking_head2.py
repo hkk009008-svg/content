@@ -61,7 +61,7 @@ def gen_face():
     params["face_detailer_enabled"] = False
     params["hires_fix_enabled"] = False
     params["guidance"] = 3.2
-    q._prune_unavailable(w, available, False, False)          # has_character=False -> drop PuLID stack
+    q._prune_unavailable(w, available, False, False, False)    # has_face_ref=False, has_char_lora=False -> drop identity stack
     q._inject_identity(w, None, None, params, False)
     q._inject_conditioning(w, FACE_PROMPT, None, None, params, False)
     q._inject_sampling(w, params)

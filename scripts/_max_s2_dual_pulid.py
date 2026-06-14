@@ -54,7 +54,7 @@ def build_dual(available, aria_remote, man_remote):
     w.pop("_metadata", None)
     q._apply_model_precision(w, "fp16")
     params = get_max_quality_params("portrait")
-    q._prune_unavailable(w, available, True, False)
+    q._prune_unavailable(w, available, True, True, False)
     q._inject_identity(w, None, aria_remote, params, True)  # LoRA-less: isolate the PuLID axis
     q._inject_conditioning(w, PROMPT, None, None, params, True)
     q._inject_sampling(w, params)

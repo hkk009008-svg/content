@@ -98,26 +98,30 @@ def _reachable_dangling(workflow: dict, original_ids: set) -> list:
 
 
 @pytest.mark.parametrize(
-    "has_character,has_init",
+    "has_face_ref,has_char_lora,has_init",
     [
-        (True, True),
-        (True, False),
-        (False, True),
-        (False, False),
+        (True, True, True),
+        (True, True, False),
+        (False, True, True),   # LoRA-only shot: PuLID pruned, LoRA kept
+        (False, True, False),  # LoRA-only shot, no init
+        (False, False, True),
+        (False, False, False),
     ],
 )
-def test_prune_unavailable_leaves_no_reachable_dangling_links(has_character, has_init):
+def test_prune_unavailable_leaves_no_reachable_dangling_links(has_face_ref, has_char_lora, has_init):
     """F1: _prune_unavailable must never leave a SaveImage-reachable dangling link,
-    for any (has_character, has_init) on a full pod (nothing pruned by availability)."""
+    for any (has_face_ref, has_char_lora, has_init) on a full pod (nothing pruned by availability).
+    Includes the new (has_face_ref=False, has_char_lora=True) LoRA-only combination."""
     workflow = _load_max_workflow()
     original_ids = set(workflow.keys())
     available = _all_class_types(workflow)
 
-    _prune_unavailable(workflow, available, has_character=has_character, has_init=has_init)
+    _prune_unavailable(workflow, available, has_face_ref=has_face_ref,
+                       has_char_lora=has_char_lora, has_init=has_init)
 
     dangling = _reachable_dangling(workflow, original_ids)
     assert not dangling, (
-        f"has_character={has_character} has_init={has_init}: "
+        f"has_face_ref={has_face_ref} has_char_lora={has_char_lora} has_init={has_init}: "
         f"{len(dangling)} reachable dangling link(s): {dangling}"
     )
 
@@ -140,9 +144,9 @@ def test_inject_identity_loraless_prunes_700_no_placeholder():
     original_ids = set(workflow.keys())
     available = _all_class_types(workflow)
 
-    _prune_unavailable(workflow, available, has_character=True, has_init=True)
+    _prune_unavailable(workflow, available, has_face_ref=True, has_char_lora=True, has_init=True)
     _inject_identity(workflow, char_lora=None, face_anchor_remote=None,
-                     params={}, has_character=True)
+                     params={}, has_face_ref=True)
 
     assert "700" not in workflow, "LoraLoader(700) must be pruned when no char_lora"
     for node in workflow.values():
@@ -164,9 +168,9 @@ def test_inject_identity_with_lora_keeps_700():
     original_ids = set(workflow.keys())
     available = _all_class_types(workflow)
 
-    _prune_unavailable(workflow, available, has_character=True, has_init=True)
+    _prune_unavailable(workflow, available, has_face_ref=True, has_char_lora=True, has_init=True)
     _inject_identity(workflow, char_lora="mara_v1.safetensors", face_anchor_remote=None,
-                     params={}, has_character=True)
+                     params={}, has_face_ref=True)
 
     assert workflow["700"]["inputs"]["lora_name"] == "mara_v1.safetensors"
     assert workflow["100"]["inputs"]["model"] == ["700", 0], "PuLID.model stays on the LoRA"
@@ -187,10 +191,14 @@ _MAX_EXTRA_CLASSES = {
 
 
 @pytest.mark.parametrize(
-    "has_character,has_init",
-    [(True, True), (True, False), (False, True), (False, False)],
+    "has_face_ref,has_char_lora,has_init",
+    [
+        (True, True, True), (True, True, False),
+        (False, True, True), (False, True, False),  # LoRA-only combinations
+        (False, False, True), (False, False, False),
+    ],
 )
-def test_max_extras_absent_full_sequence_no_dangling(has_character, has_init):
+def test_max_extras_absent_full_sequence_no_dangling(has_face_ref, has_char_lora, has_init):
     """Production-pod-runs-max: the heavy max classes (SUPIR/FaceDetailer/Redux/
     DetailDaemon) are absent. After the FULL production graph-surgery sequence
     (prune + the inject_* steps, as generate_ai_broll_max runs them), the queued
@@ -204,16 +212,17 @@ def test_max_extras_absent_full_sequence_no_dangling(has_character, has_init):
     available = _all_class_types(workflow) - _MAX_EXTRA_CLASSES
     params: dict = {}
 
-    _prune_unavailable(workflow, available, has_character=has_character, has_init=has_init)
-    _inject_identity(workflow, None, None, params, has_character)
-    _inject_conditioning(workflow, "a prompt", None, None, params, has_character)
+    _prune_unavailable(workflow, available, has_face_ref=has_face_ref,
+                       has_char_lora=has_char_lora, has_init=has_init)
+    _inject_identity(workflow, None, None, params, has_face_ref)
+    _inject_conditioning(workflow, "a prompt", None, None, params, has_face_ref or has_char_lora)
     _inject_sampling(workflow, params)
     _inject_latent_source(workflow, None, params)
     _inject_post_passes(workflow, params, available)
 
     dangling = _reachable_dangling(workflow, original_ids)
     assert not dangling, (
-        f"has_character={has_character} has_init={has_init}: "
+        f"has_face_ref={has_face_ref} has_char_lora={has_char_lora} has_init={has_init}: "
         f"{len(dangling)} reachable dangling link(s): {dangling}"
     )
 

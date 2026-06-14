@@ -975,12 +975,12 @@ orchestrates.
 ([cinema/shots/controller.py:381](cinema/shots/controller.py:381)), the dispatcher passes `secondary_char_refs`
 ([cinema/shots/controller.py:785](cinema/shots/controller.py:785)) through `generate_ai_broll` →
 `generate_ai_broll_max` as the `secondary_chars` list. Inside the max dispatch:
-`_inject_secondary_loras` ([quality_max.py:579](quality_max.py:579)) chains up to two extra LoraLoader nodes
+`_inject_secondary_loras` ([quality_max.py:607](quality_max.py:607)) chains up to two extra LoraLoader nodes
 (701/702) after the primary's node 700, clamped to `_SECONDARY_LORA_MAX_STRENGTH=0.55`
 ([quality_max.py:576](quality_max.py:576)), with each `lora_name` set to the artifact's basename for
-pod-side placement; `_assemble_max_prompt` ([quality_max.py:493](quality_max.py:493)) prepends LoRA trigger
+pod-side placement; `_assemble_max_prompt` ([quality_max.py:517](quality_max.py:517)) prepends LoRA trigger
 tokens (primary first, then each secondary's) before conditioning; and
-`_inject_secondary_faceswap` ([quality_max.py:637](quality_max.py:637)) splices a LoadImage(94) +
+`_inject_secondary_faceswap` ([quality_max.py:665](quality_max.py:665)) splices a LoadImage(94) +
 ReActorFaceSwap(611) node after the existing node 610, swapping face index "1" from the
 secondary's canonical image — MUST run after `_inject_post_passes` so the SUPIR-absent
 950-feed rewire sees it. All three injectors are retry-safe (idempotent pop/re-inject);

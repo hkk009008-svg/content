@@ -65,7 +65,7 @@ def build(supir_on, final_res):
     params["final_resolution"] = final_res
     params["lora_strength_model"] = 1.0
     params["lora_strength_clip"] = 1.0
-    q._prune_unavailable(w, _available, True, False)
+    q._prune_unavailable(w, _available, True, True, False)
     q._inject_identity(w, LORA, _face_remote, params, True)
     q._inject_conditioning(w, PROMPT, None, None, params, True)
     q._inject_sampling(w, params)

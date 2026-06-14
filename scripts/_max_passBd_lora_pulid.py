@@ -49,7 +49,7 @@ def build_dual_lora(available, aria_remote, man_remote, strength):
     w.pop("_metadata", None)
     q._apply_model_precision(w, "fp16")
     params = get_max_quality_params("portrait")
-    q._prune_unavailable(w, available, True, False)
+    q._prune_unavailable(w, available, True, True, False)
     # man LoRA on node 700 (global) + aria face on the primary PuLID (node 100)
     q._inject_identity(w, MAN_LORA, aria_remote, params, True, char_lora_strength=strength)
     prompt = f"{MAN_TRIGGER}, {s2.PROMPT}"

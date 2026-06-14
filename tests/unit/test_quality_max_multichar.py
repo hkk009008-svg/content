@@ -412,7 +412,7 @@ def test_faceswap_after_full_prune_sequence_when_reactor_pruned():
     stays clean end-to-end."""
     wf = _load_max_workflow()
     available = set(_AVAILABLE) - {"ReActorFaceSwap"}
-    _prune_unavailable(wf, available, has_character=True, has_init=False)
+    _prune_unavailable(wf, available, has_face_ref=True, has_char_lora=True, has_init=False)
     assert "610" not in wf
     before = copy.deepcopy(wf)
     _inject_secondary_faceswap(wf, "x.jpg")
@@ -429,7 +429,7 @@ def test_faceswap_after_post_passes_supir_absent_feeds_611():
     silently bypassed — generated but never consumed.)"""
     wf = _load_max_workflow()
     available = set(_AVAILABLE) - {"SUPIR_model_loader_v2"}
-    _prune_unavailable(wf, available, has_character=True, has_init=False)
+    _prune_unavailable(wf, available, has_face_ref=True, has_char_lora=True, has_init=False)
     _inject_identity(wf, None, None, _params(), True)
     _inject_post_passes(wf, _params(), available)       # re-feeds 950 from 610
     assert wf["950"]["inputs"]["image"] == ["610", 0]
@@ -456,7 +456,7 @@ def test_full_multichar_sequence_no_dangling_and_retry_safe():
     original_ids = set(wf)
     params = _params()
     available = set(_AVAILABLE)
-    _prune_unavailable(wf, available, has_character=True, has_init=False)
+    _prune_unavailable(wf, available, has_face_ref=True, has_char_lora=True, has_init=False)
     _inject_identity(wf, None, None, params, True)          # LoRA-less primary
     _inject_secondary_loras(wf, [_sec()])
     prompt = _assemble_max_prompt("a prompt", None, [_sec()])

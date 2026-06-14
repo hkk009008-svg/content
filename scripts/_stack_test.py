@@ -66,7 +66,7 @@ def build(prompt, seed):
         final_resolution=(1920, 1080),
         lora_strength_model=1.0, lora_strength_clip=1.0,
     ))
-    q._prune_unavailable(w, _available, True, False)
+    q._prune_unavailable(w, _available, True, True, False)
     q._inject_identity(w, LORA, _face_remote, params, True)   # ReActor 610 stays ON
     q._inject_conditioning(w, prompt, None, None, params, True)
     q._inject_sampling(w, params)

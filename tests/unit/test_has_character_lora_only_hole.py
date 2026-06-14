@@ -59,44 +59,73 @@ def test_landscape_no_lora_correctly_prunes_lora_node():
     """Reference (passes): a genuine no-character shot (no face ref AND no LoRA) SHOULD drop the
     LoRA node — this prune is correct and the fix must preserve it."""
     wf, available = _max_workflow_with_full_availability()
-    qm._prune_unavailable(wf, available, has_character=False, has_init=False)
+    qm._prune_unavailable(wf, available, has_face_ref=False, has_char_lora=False, has_init=False)
     assert "700" not in wf
 
 
 def test_full_character_with_face_ref_wires_lora():
-    """Reference (passes): with a face reference present (has_character=True) a registered LoRA is
+    """Reference (passes): with a face reference present (has_face_ref=True) a registered LoRA is
     kept and wired — proving the wiring path itself works; the hole is purely the has_character gate."""
     wf, available = _max_workflow_with_full_availability()
-    qm._prune_unavailable(wf, available, has_character=True, has_init=False)
-    qm._inject_identity(wf, "aria_v1.safetensors", None, {}, has_character=True)
+    qm._prune_unavailable(wf, available, has_face_ref=True, has_char_lora=True, has_init=False)
+    qm._inject_identity(wf, "aria_v1.safetensors", None, {}, has_face_ref=True)
     assert "700" in wf
     assert wf["700"]["inputs"]["lora_name"] == "aria_v1.safetensors"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="has_character LoRA-only prune hole: has_character (quality_max:1006) keys off the face "
-    "reference ONLY, so a LoRA-only shot (char_lora_path set, no primary_reference) gets "
-    "has_character=False -> _prune_unavailable drops node 700 + _inject_identity early-returns -> the "
-    "trained LoRA is silently dropped. Production-reachable (scripts/_register_aria_lora.py:35 writes "
-    "char_lora_paths with no ref check; post-training ref deletion). Surfaced op-1 125be5e; re-verified "
-    "wf_1e47eeb0-08b; dispositioned director-1 PM7 (DESIGN). Fix = decouple has_face_ref/has_char_lora "
-    "(~24 sites). When fixed, _prune_unavailable/_inject_identity gain has_char_lora -> update this "
-    "test; XPASS/signature-error under strict=True flags it.",
-)
 def test_lora_only_shot_should_keep_and_wire_trained_lora():
-    """A LoRA-only shot (a registered per-char LoRA, but no face reference on disk) SHOULD retain and
-    wire its trained LoRA so the character still binds. Mirrors generate_ai_broll_max's :1006 derivation
-    for character_image=None. Currently node 700 is pruned (and _inject_identity early-returns), so the
-    LoRA is dropped -> this assertion fails -> xfail (the tracked gap)."""
+    """A LoRA-only shot (a registered per-char LoRA, but no face reference on disk) SHOULD retain
+    and wire its trained LoRA so the character still binds.
+
+    Fixed by decoupling has_face_ref (gates PuLID/face nodes) from has_char_lora (gates LoRA node
+    700 + _inject_identity LoRA arm). This was previously an xfail pin tracking the defect.
+    """
     char_lora_path = "aria_v1.safetensors"
-    character_image = None                     # no primary_reference on disk for this character
-    import os
-    has_character = bool(character_image and os.path.exists(character_image))  # == False, mirrors :1006
-
+    # no primary_reference on disk for this character
     wf, available = _max_workflow_with_full_availability()
-    qm._prune_unavailable(wf, available, has_character, has_init=False)
-    qm._inject_identity(wf, char_lora_path, None, {}, has_character)
+    qm._prune_unavailable(wf, available, has_face_ref=False, has_char_lora=True, has_init=False)
+    qm._inject_identity(wf, char_lora_path, None, {}, has_face_ref=False)
 
-    assert "700" in wf, "LoRA node 700 pruned for a LoRA-only shot (has_character keyed off face-ref only)"
-    assert wf["700"]["inputs"].get("lora_name") == "aria_v1.safetensors", "trained LoRA not wired"
+    assert "700" in wf, "LoRA node 700 must be kept for a LoRA-only shot"
+    assert wf["700"]["inputs"].get("lora_name") == "aria_v1.safetensors", "trained LoRA must be wired"
+
+
+def test_lora_only_shot_node_700_reachable_from_guider():
+    """Non-vacuity guard (the bypass trap): for a LoRA-only shot, node 700 must be reachable
+    from BasicGuider(22) by walking 'model' edges — proving the LoRA is IN the executing
+    chain, not orphaned/bypassed to [112,0].
+
+    A passing '"700" in wf' is NOT enough: the FLUX-incompat bridge can rewire
+    22.model -> [112,0] even when 700 survives as an orphaned node. This assertion
+    walks model edges to prove 700 is in the live chain.
+    """
+    char_lora_path = "aria_v1.safetensors"
+    wf, available = _max_workflow_with_full_availability()
+    qm._prune_unavailable(wf, available, has_face_ref=False, has_char_lora=True, has_init=False)
+    qm._inject_identity(wf, char_lora_path, None, {}, has_face_ref=False)
+
+    # Walk 'model' edges backward from node 22 (BasicGuider)
+    def reachable_via_model(workflow, start_nid):
+        """BFS/DFS over 'model' input edges; return all node ids reached."""
+        visited = set()
+        stack = [start_nid]
+        while stack:
+            cur = stack.pop()
+            if cur in visited:
+                continue
+            visited.add(cur)
+            node = workflow.get(cur)
+            if not isinstance(node, dict):
+                continue
+            model_ref = node.get("inputs", {}).get("model")
+            if isinstance(model_ref, list) and len(model_ref) == 2:
+                src = str(model_ref[0])
+                if src in workflow:
+                    stack.append(src)
+        return visited
+
+    reachable = reachable_via_model(wf, "22")
+    assert "700" in reachable, (
+        f"Node 700 (LoraLoader) is NOT reachable from BasicGuider(22) via 'model' edges — "
+        f"the LoRA is orphaned/bypassed. Reachable model-chain nodes: {reachable}"
+    )

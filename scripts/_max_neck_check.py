@@ -47,7 +47,7 @@ def build():
     w.pop("_metadata", None)
     q._apply_model_precision(w, "fp16")
     params = dict(get_max_quality_params("portrait"))  # cfg 2.8, hires 0.40, supir on
-    q._prune_unavailable(w, available, True, False)
+    q._prune_unavailable(w, available, True, True, False)
     q._inject_identity(w, None, face_remote, params, True)
     q._inject_conditioning(w, PROMPT, None, None, params, True)
     q._inject_sampling(w, params)

@@ -51,7 +51,7 @@ def main():
     q._apply_model_precision(w, "fp16")
     params = get_max_quality_params("portrait")
 
-    q._prune_unavailable(w, available, True, False)
+    q._prune_unavailable(w, available, True, True, False)
     q._inject_identity(w, LORA, face_remote, params, True,
                        char_lora_strength=STRENGTH)
     prompt = q._assemble_max_prompt(PROMPT, TRIGGER, None)

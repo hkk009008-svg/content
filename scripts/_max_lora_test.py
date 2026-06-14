@@ -66,7 +66,7 @@ def build(combo):
     params.update(BASE)
     params["lora_strength_model"] = combo["sm"]
     params["lora_strength_clip"] = combo["sc"]
-    q._prune_unavailable(w, _available, True, False)
+    q._prune_unavailable(w, _available, True, True, False)
     # char_lora set -> _inject_identity keeps node 700 LoraLoader + loads this LoRA
     q._inject_identity(w, combo["lora"], _face_remote, params, True)
     q._inject_conditioning(w, combo["prefix"] + PROMPT, None, None, params, True)

@@ -95,25 +95,15 @@ def test_needs_regenerate_returns_true_for_nan_arc_score():
 # fires when has_char_lora OR has_secondary_lora is True (independent of face-ref).
 # `_inject_secondary_loras` already handles the no-node-700 case (uses ["112",0] /
 # ["11",0] as chain base). When the fix lands this xpasses (strict) -> delete pin.
-@pytest.mark.xfail(
-    strict=True,
-    reason="W2:MEDIUM:secondary-lora-hole quality_max.py:1114+624-629: "
-    "_inject_secondary_loras is gated on has_character (primary face-ref only). "
-    "When primary has no face ref (has_character=False), the secondary character's "
-    "LoRA is silently dropped even when it has a lora_path. Secondary sibling of "
-    "the has_character LoRA-only hole (test_has_character_lora_only_hole.py). "
-    "Fix = decouple has_face_ref/has_char_lora (~24 sites, director-1 DESIGN backlog). "
-    "Surfaced: discovery-wf_13f9d2f6-f93.json confirmed[28]. "
-    "Ref: quality_max.py:1055, quality_max.py:1114.",
-)
 def test_secondary_lora_injected_when_primary_has_no_face_ref():
-    """When primary has no face reference (has_character=False) but a secondary
-    character has a lora_path, _inject_secondary_loras should still inject the
-    secondary LoRA. Currently it is skipped -> XFAIL.
+    """When primary has no face reference but a secondary character has a lora_path,
+    _inject_secondary_loras should still inject the secondary LoRA.
 
-    Mirrors test_has_character_lora_only_hole.py's approach: exercise
-    _inject_secondary_loras directly, derived from the generate_ai_broll_max
-    call-site logic at quality_max.py:1055 + 1114.
+    Fixed by decoupling has_face_ref from has_char_lora/has_secondary_lora in the
+    gate at quality_max.py generate_ai_broll_max: the gate now fires when
+    has_char_lora OR has_secondary_lora is True, independent of has_face_ref.
+    This was previously an xfail pin tracking the W2:MEDIUM:secondary-lora-hole defect.
+    Surfaced: discovery-wf_13f9d2f6-f93.json confirmed[28].
     """
     import quality_max as qm
 
@@ -123,28 +113,24 @@ def test_secondary_lora_injected_when_primary_has_no_face_ref():
     available = {n["class_type"] for n in wf.values()
                  if isinstance(n, dict) and "class_type" in n}
 
-    # Simulate: primary has NO face reference on disk -> has_character=False
-    character_image = None
-    has_character = bool(character_image and os.path.exists(str(character_image)))
-    assert has_character is False, "precondition: primary has no face ref"
-
-    # Prune as generate_ai_broll_max would (landscape-safe: node 700 and PuLID pruned)
-    qm._prune_unavailable(wf, available, has_character=has_character, has_init=False)
-
-    # Secondary character WITH a LoRA but no face reference of their own
+    # Simulate: primary has NO face reference on disk AND no primary LoRA
+    # Secondary character has a LoRA.
+    has_face_ref = False
+    has_char_lora = False  # primary has no LoRA either
     secondary_chars = [{"lora_path": "secondary_char_v1.safetensors", "lora_strength": 0.45}]
+    has_secondary_lora = any(e.get("lora_path") for e in secondary_chars)
 
-    # The buggy gate: `if has_character: _inject_secondary_loras(...)` at line 1114
-    # Reproduce the gate exactly as it is in generate_ai_broll_max
-    if has_character:  # False -> _inject_secondary_loras is NEVER called
+    # Prune as generate_ai_broll_max would with decoupled flags
+    qm._prune_unavailable(wf, available, has_face_ref=has_face_ref,
+                          has_char_lora=has_char_lora, has_init=False)
+
+    # The fixed gate: fires when has_char_lora OR has_secondary_lora is True
+    if has_char_lora or has_secondary_lora:
         qm._inject_secondary_loras(wf, secondary_chars)
 
-    # Check that the secondary LoRA node (701) was injected.
-    # Currently the gate prevents injection -> assert fails -> XFAIL (the tracked gap).
+    # Secondary LoRA node (701) must now be injected
     assert "701" in wf, (
-        "secondary LoRA node 701 was not injected: the has_character gate at "
-        "quality_max.py:1114 blocks _inject_secondary_loras when primary has no face "
-        "reference, silently dropping the secondary character's LoRA"
+        "secondary LoRA node 701 was not injected even though secondary_chars has a lora_path"
     )
     assert wf["701"]["inputs"].get("lora_name") == "secondary_char_v1.safetensors", (
         "secondary LoRA name not wired into node 701"

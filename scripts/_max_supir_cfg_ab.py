@@ -68,7 +68,7 @@ def build(supir_cfg, seed):
     params = dict(get_max_quality_params("portrait"))
     params["supir_enabled"] = True            # we ARE testing SUPIR
     params["supir_cfg_scale"] = supir_cfg     # the ONLY lever that varies
-    q._prune_unavailable(w, _available, True, False)
+    q._prune_unavailable(w, _available, True, True, False)
     q._inject_identity(w, None, _face_remote, params, True)
     q._inject_conditioning(w, PROMPT, None, None, params, True)
     q._inject_sampling(w, params)

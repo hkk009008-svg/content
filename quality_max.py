@@ -393,30 +393,54 @@ def _prune_node(workflow: dict, node_id: str, rewire_to: Optional[Tuple[str, int
                 node["inputs"][k] = list(rewire_to)
 
 
-def _prune_unavailable(workflow: dict, available: Set[str], has_character: bool, has_init: bool):
-    """Strip nodes whose class_type isn't on this pod, with safe rewires."""
+def _surviving_model_src(workflow: dict) -> str:
+    """Return the highest-priority surviving model-source node id.
+
+    Priority: PuLID(100) > LoRA(700) > base UNet(112).  Used by the
+    FLUX-incompat bridge to avoid bypassing a surviving LoRA node when PuLID
+    has been pruned (the LoRA-only shot case where has_face_ref=False but
+    has_char_lora=True keeps 700 in the graph).
+    """
+    for nid in ("100", "700", "112"):
+        if nid in workflow:
+            return nid
+    return "112"
+
+
+def _prune_unavailable(workflow: dict, available: Set[str],
+                       has_face_ref: bool, has_char_lora: bool, has_init: bool):
+    """Strip nodes whose class_type isn't on this pod, with safe rewires.
+
+    has_face_ref: True when a primary face-reference image exists on disk
+        (gates PuLID nodes 93/97/99/100/101, face upload, ReActor/FaceDetailer
+        610/600, ArcFace/regen).
+    has_char_lora: True when a per-character LoRA path is provided
+        (gates LoRA node 700 + the _inject_identity LoRA arm + secondary-LoRA gate).
+    has_init: True when an init image (img2img) exists on disk.
+    """
     if not available:
         return  # probe failed — best effort
 
-    # No character -> drop identity stack entirely
-    if not has_character:
-        for nid in ("700", "93", "97", "99", "101", "100"):
-            _prune_node(workflow, nid, rewire_to=("112", 0) if nid == "100" else None)
-        # If 700 was dropped, CLIPTextEncode needs base CLIP
-        if "122" in workflow:
-            workflow["122"]["inputs"]["clip"] = ["11", 0]
-        # FaceDetailer(600) reads the popped LoRA stack (600.clip<-[700,1]) and
-        # ReActor(610) face-swaps a popped source face (610.source_image<-[93,0]);
-        # a no-character shot has no face to detail or swap. Drop both face passes,
-        # feeding the SUPIR/save chain from the base VAEDecode (same fallbacks as
-        # the pruning_rules 600/610 rows). Without this they survive on a full pod
-        # with [700,1]/[93,0] links reachable from SaveImage -> /prompt validation
-        # reject -> silent production-tier fallback for landscape/establishing max
-        # shots. (Ported from max-tier Lane V F1, 4b20f1b; the FLUX-incompat
-        # 100-bridge half is N/A here -- this 56-node version has no such loop and
-        # the 100->112 rewire above already handles every [100, slot] model ref.)
+    # No face reference -> drop PuLID stack + face passes. LoRA(700) stays
+    # when a char LoRA is available so the model chain remains: 700->22.
+    if not has_face_ref:
+        # PuLID(100) consumers re-point to LoRA(700) if it will survive, else base UNet(112).
+        pulid_target = ("700", 0) if (has_char_lora and "700" in workflow) else ("112", 0)
+        for nid in ("93", "97", "99", "101", "100"):
+            _prune_node(workflow, nid, rewire_to=pulid_target if nid == "100" else None)
+        # FaceDetailer(600) reads the LoRA stack (600.clip<-[700,1]) and
+        # ReActor(610) face-swaps a source face (610.source_image<-[93,0]);
+        # without a face anchor, both passes have nothing to work from. Drop both.
         _prune_node(workflow, "600", rewire_to=("902", 0) if "902" in workflow else ("8", 0))
         _prune_node(workflow, "610", rewire_to=("902", 0) if "902" in workflow else ("8", 0))
+
+    # LANDSCAPE (no identity at all): also drop LoraLoader(700).
+    # Face-only-no-LoRA keeps 700 here and lets _inject_identity's else-branch prune it.
+    if not has_char_lora and not has_face_ref:
+        _prune_node(workflow, "700", rewire_to=None)
+        # CLIPTextEncode(122) was reading 700.clip[1]; fall back to base CLIP.
+        if "122" in workflow:
+            workflow["122"]["inputs"]["clip"] = ["11", 0]
 
     # No init image -> drop CN, Redux, img2img, latent blend
     if not has_init:
@@ -456,7 +480,7 @@ def _prune_unavailable(workflow: dict, available: Set[str], has_character: bool,
     # no-char path pops 100, so bridge to base UNet 112 when 100 is already gone.
     for _bad, _up in (("772", "770"), ("770", "301"), ("301", "100"), ("740", "100")):
         if _bad in workflow:
-            _tgt = _up if _up in workflow else ("112" if "100" not in workflow else "100")
+            _tgt = _up if _up in workflow else _surviving_model_src(workflow)
             _prune_node(workflow, _bad, rewire_to=(_tgt, 0))
 
     # Per-class pruning
@@ -509,15 +533,19 @@ def _assemble_max_prompt(prompt: str, char_lora_trigger: Optional[str],
 
 
 def _inject_identity(workflow: dict, char_lora: Optional[str], face_anchor_remote: Optional[str],
-                      params: dict, has_character: bool,
+                      params: dict, has_face_ref: bool,
                       char_lora_strength: Optional[float] = None):
     """Wire LoRA name + face ref into the identity stack.
 
+    has_face_ref: True when a primary face-reference image exists on disk.
+        When False AND no char_lora, the identity stack is skipped entirely.
+        When False but char_lora is set (LoRA-only shot), the LoRA arm still
+        fires so the trained LoRA is wired into node 700.
     char_lora_strength: per-character validated strength from project settings.
         When provided (not None), overrides the tier-default params["lora_strength_model"].
         None (the default) → use params["lora_strength_model"] unchanged (backward-compat).
     """
-    if not has_character:
+    if not has_face_ref and not char_lora:
         return
     if "700" in workflow:
         if char_lora:
@@ -1057,12 +1085,13 @@ def generate_ai_broll_max(
     if pulid_weight_override is not None:
         params["pulid_weight"] = pulid_weight_override
 
-    has_character = bool(character_image and os.path.exists(character_image))
+    has_face_ref = bool(character_image and os.path.exists(character_image))
+    has_char_lora = bool(char_lora_path)
     has_init = bool(init_image and os.path.exists(init_image))
 
     print(f"[quality_max] {shot_type} | N_max={params['candidate_count']} | "
           f"halt@composite={params['halt_threshold_composite']:.2f}, arc={params['halt_threshold_arc']:.2f} | "
-          f"char={has_character} init={has_init}")
+          f"face_ref={has_face_ref} char_lora={has_char_lora} init={has_init}")
 
     # ---- Probe + prep workflow ----
     available = _probe_node_availability(server_url)
@@ -1090,43 +1119,45 @@ def generate_ai_broll_max(
           + (" (UNet/T5 re-pointed to fp8 weights)" if max_precision == "fp8"
              else " (fp16 canonical; needs --max-fp16 provisioning)"))
 
-    _prune_unavailable(workflow, available, has_character, has_init)
+    _prune_unavailable(workflow, available, has_face_ref, has_char_lora, has_init)
 
     comfy = RunPodComfyUI(server_url)
 
     # ---- Upload + cache reference images ----
-    face_anchor_remote = _upload_with_cache(comfy, character_image) if has_character else None
+    face_anchor_remote = _upload_with_cache(comfy, character_image) if has_face_ref else None
     init_remote = _upload_with_cache(comfy, init_image) if has_init else None
     style_remote = (
         _upload_with_cache(comfy, style_reference)
         if style_reference and os.path.exists(style_reference)
-        else (face_anchor_remote if has_character else None)
+        else (face_anchor_remote if has_face_ref else None)
     )
 
     # ---- Inject per-axis params ----
-    _inject_identity(workflow, char_lora_path, face_anchor_remote, params, has_character,
+    _inject_identity(workflow, char_lora_path, face_anchor_remote, params, has_face_ref,
                      char_lora_strength=char_lora_strength)
     # (i) Secondary LoRAs chain after the primary identity LoRA; prompt gets
     #     trigger tokens prepended before entering conditioning.
+    has_secondary_lora = any(e.get("lora_path") for e in secondary_chars or [])
     sec_face_remote = None
-    if has_character and secondary_chars:
+    if has_face_ref and secondary_chars:
         first_ref = secondary_chars[0].get("reference")
         # Missing file -> silent skip: that take gets NO swap rescue and the
         # per-char validator surfaces the low secondary score (§3c). A pod/
         # network failure still raises, matching the primary uploads above.
         if first_ref and os.path.exists(first_ref):
             sec_face_remote = _upload_with_cache(comfy, first_ref)
-    if has_character:
+    if has_char_lora or has_secondary_lora:
         _inject_secondary_loras(workflow, secondary_chars)
     prompt = _assemble_max_prompt(prompt, char_lora_trigger, secondary_chars)
-    _inject_conditioning(workflow, prompt, init_remote, style_remote, params, has_character)
+    _inject_conditioning(workflow, prompt, init_remote, style_remote, params,
+                         has_face_ref or has_char_lora)
     _inject_sampling(workflow, params)
     _inject_latent_source(workflow, init_remote, params)
     _inject_post_passes(workflow, params, available)
     # (ii) Secondary faceswap AFTER post_passes: the SUPIR-absent branch re-feeds
     #      node 950 from a 610-priority list; injecting 611 here lets the dynamic
     #      consumer-rewire pick up that fresh feed (adversarial plan-review CRITICAL).
-    if has_character:
+    if has_face_ref:
         _inject_secondary_faceswap(workflow, sec_face_remote)
     _inject_aspect(workflow, aspect_ratio)  # transpose nodes 102+950 once; deepcopy loop inherits
 
@@ -1159,7 +1190,7 @@ def generate_ai_broll_max(
             return None
         cs = score_candidate(
             saved,
-            character_image if has_character else None,
+            character_image if has_face_ref else None,
             threshold=identity_threshold,
         )
         cs.seed = cand_seed
@@ -1198,7 +1229,7 @@ def generate_ai_broll_max(
             halt_threshold_arc=halt_arc,
             halt_min_n=halt_min_n,
             halt_max_n=n_max,
-            has_character=has_character,
+            has_character=has_face_ref,
             halt_rule=halt_rule,
         )
         if decision.halt:
@@ -1211,17 +1242,18 @@ def generate_ai_broll_max(
         return None
 
     # Identity floor — retry once with PuLID boost if best.arc too low
-    if needs_regenerate(best, regen_floor, has_character):
+    if needs_regenerate(best, regen_floor, has_face_ref):
         print(f"[quality_max] Best ArcFace {best.arc_score:.3f} < floor {regen_floor:.2f}. "
               f"Boosting PuLID weight +0.15 and retrying once.")
         boosted_params = dict(params)
         boosted_params["pulid_weight"] = min(1.0, params["pulid_weight"] + 0.15)
-        _inject_identity(workflow, char_lora_path, face_anchor_remote, boosted_params, has_character,
+        _inject_identity(workflow, char_lora_path, face_anchor_remote, boosted_params, has_face_ref,
                          char_lora_strength=char_lora_strength)
         # Defensive re-injection: keeps secondary chain intact after the boosted
         # _inject_identity (sec_face_remote already uploaded; no second upload).
-        if has_character:
+        if has_char_lora or has_secondary_lora:
             _inject_secondary_loras(workflow, secondary_chars)
+        if has_face_ref:
             _inject_secondary_faceswap(workflow, sec_face_remote)
         retry_seed = base_seed + n_max * 1009
         retry_wf = copy.deepcopy(workflow)
@@ -1232,7 +1264,7 @@ def generate_ai_broll_max(
         if saved:
             retry_score = score_candidate(
                 saved,
-                character_image if has_character else None,
+                character_image if has_face_ref else None,
                 threshold=identity_threshold,
             )
             retry_score.seed = retry_seed

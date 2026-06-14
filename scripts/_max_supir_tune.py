@@ -51,7 +51,7 @@ def build_base():
     w = q._load_max_workflow()
     w.pop("_metadata", None)
     q._apply_model_precision(w, "fp16")
-    q._prune_unavailable(w, available, True, False)
+    q._prune_unavailable(w, available, True, True, False)
     q._inject_identity(w, None, face_remote, {}, True)
     q._inject_conditioning(w, PROMPT, None, None, {}, True)
     q._inject_sampling(w, {})
