@@ -674,7 +674,7 @@ const SUBSYSTEMS = [
   {key:'identity', probe:'PuLID/LoRA injection, secondary-char binding'},
 ]
 const FIND = (s) => `Repo root /Users/hyungkoookkim/Content. READ-ONLY (grep/Read only). Hunt FAIL-OPEN bugs (not happy paths the tests already cover) in the ${s.key} subsystem: ${s.probe}. Focus on silent-degradation, NaN/inf, and swallowed-error paths. EXCLUDE the OpenCV determinism fix (PRE-CLOSED, ARCHITECTURE §11.1) and workflow_selector.py (closed by bf1034a). Each finding needs a concrete reproducer.`
-const REFUTE = (f,i) => `Repo root /Users/hyungkoookkim/Content. READ-ONLY. A finder claims: ${f.subsystem} ${f.file_line} — "${f.fail_mode}" (repro: ${f.reproducer}). Try to REFUTE it — read the code + its guards/callers. Set \`refuted=true\` if you can PROVE it is NOT a real defect; set \`refuted=false\` only if you cannot disprove it after genuine effort. (Note the field direction: true = disproved, false = finding stands.) Skeptic #${i}.\`
+const REFUTE = (f,i) => `Repo root /Users/hyungkoookkim/Content. READ-ONLY. A finder claims: ${f.subsystem} ${f.file_line} — "${f.fail_mode}" (repro: ${f.reproducer}). Try to REFUTE it — read the code + its guards/callers. Set \`refuted=true\` if you can PROVE it is NOT a real defect; set \`refuted=false\` only if you cannot disprove it after genuine effort. (Note the field direction: true = disproved, false = finding stands.) Skeptic #${i}.`  <!-- v7: was \` (escaped) -> unterminated template literal; fixed to a plain closing backtick. Syntax-verified before run. -->
 
 phase('Find')
 const found = (await parallel(SUBSYSTEMS.map(s => () =>
