@@ -1,8 +1,8 @@
 # Program Hardening Roadmap — "Runs as Intended, Bug-Free" — Design Spec
 
 *Date: 2026-06-14 · Author: coordinator seat (Session-6), brainstormed with the
-user-principal · Status: design approved; spec-review v4 — closes all blocking from
-review rounds 1 (`wf_c37fb3eb-823`), 2 (`wf_7b0a23a9-0cd`), 3 (`wf_8d1be397-9b0`).*
+user-principal · Status: design approved; spec-review v5 — closes blocking from rounds
+1–4 (`wf_c37fb3eb-823`, `wf_7b0a23a9-0cd`, `wf_8d1be397-9b0`, `wf_44be214b-c7e`).*
 
 ## 0. Locked decisions (from brainstorming)
 
@@ -94,7 +94,9 @@ the `logs/` JSON) — within its narrowed code scope (§6a). The *fix* that flip
 green is always authored in-lane, never by the coordinator.
 
 **Acceptance for Phase 0:** seed migration committed; discovery run; `logs/discovery-<runid>.json`
-committed; every confirmed defect has an inventory row + test-only xfail pin; rejects
+committed; every confirmed defect has an inventory row + a **`strict=True`** test-only
+xfail pin whose reason is prefixed **`W<n>:<SEVERITY>:<id>`** (so the wave gate filters
+pins by wave mechanically, and a fixed-but-unremoved pin xpasses → CI red); rejects
 recorded; `ci_smoke` green.
 
 ## 4. Severity taxonomy
@@ -115,7 +117,7 @@ Acceptance bars name **checkable artifacts**:
 | Wave | Content | Lanes | Acceptance bar (coordinator-checkable) | Rough estimate* |
 |---|---|---|---|---|
 | **1 — Critical robustness** | NaN/inf-gate family, budget bypass, gate-bypass, crash paths | both pairs, by file proximity | every CRITICAL row `verified`; xfail green; **operator `verification-report` (GO)** in mailbox per item; **no open/provisional Wave-1 CRITICAL pin remains**; `ci_smoke` green | ~8–12 items, 2–3 sessions |
-| **2 — Silent-degradation + coverage** | swallow-and-continue holes; tests for HTTP mutators, audio DSP, resume/checkpoint; **+ commit the capability baseline** (§7) | Pair-A: image/identity · Pair-B: video/audio/assembly | every MAJOR row `verified` w/ operator GO; coverage landed; baseline render in `logs/`; no open Wave-2 pin remains; green | ~10–15 items, 3–4 sessions |
+| **2 — Silent-degradation + coverage** | swallow-and-continue holes; tests for HTTP mutators, audio DSP, resume/checkpoint; **+ commit the capability baseline** (§7) | Pair-A: image/identity · Pair-B: video/audio/assembly | every MAJOR row `verified` w/ operator GO; **coverage landed** (≥1 dedicated test for the `api_serve_file` guard + each destructive/state endpoint — `api_delete_project`, `api_pause`/`resume`, `api_restart_shot`, `api_proceed_assembly` — per the TEST-COVERAGE doc; `audio/effects.apply_voice_effect` + `audio/voiceover.get_voice_direction` 0→covered; resume/checkpoint restore path); baseline render in `logs/`; no open Wave-2 pin remains; green | ~10–15 items, 3–4 sessions |
 | **3 — Capability levers** *(pod-gated, best-effort)* | over-cook, secondary-char binding, dialogue/lip-sync quality | Pair-A (realism/identity) · Pair-B (dialogue/audio) | each lever **attempted + result recorded** (GO → improvement in `logs/`; HOLD/inconclusive → row `DEFERRED` w/ R-MEASURE artifact). A HOLD does **not** block Wave 4. | 2–3 pod burns |
 | **4 — E2E lock** | Tier-1 CI harness + one Tier-2 real render (§7) | coordinator-orchestrated | Tier-1 green in CI (stub-fidelity reviewed, §7); one Tier-2 render passes §7 thresholds | 2–3 sessions |
 
@@ -200,16 +202,21 @@ claim protocol) — **no coordinator grant needed.** **FAIL-rework cap (anti-hos
 after **3 consecutive FAIL verdicts** on one defect the holder must **release the lock**
 and re-queue/split the defect (or escalate to the coordinator / acting-coordinator), so a
 hard defect cannot hold a contested module (e.g. `auto_approve.py`, 6+ pinned xfails)
-hostage or stall the wave gate indefinitely.
+hostage or stall the wave gate indefinitely. A lock is thus deleted in **exactly two
+cases** — (normal) the operator's GO commit, or (anti-hostage) the holder after the
+3-FAIL cap; no other actor deletes a lock.
 
-**Cross-file commit co-sign scope:** any commit touching **more than one lane**, or a
-**cross-cutting module + a lane file**, requires co-sign from **every affected lane
-director**.
+**Cross-cutting / cross-file co-sign scope:** any commit touching a **cross-cutting
+module (even in isolation)**, **more than one lane**, or a cross-cutting module + a lane
+file, requires co-sign from **every affected lane director** — Tier-A (pre-commit, §6c)
+if CRITICAL, else Tier-B (a mailbox heads-up event, 48h proceed-if-no-objection).
 
 **Wave-1 pre-sequencing:** the coordinator records, in the inventory header at Wave-1
 open, a **first-mover** for each contested cross-cutting module
 (`auto_approve.py`/`core.py`/`web_server.py`) — defaulting to the pair that already
-holds an `open` xfail in that module — so Day-1 needs no ad-hoc decision.
+holds an `open` xfail in that module — so Day-1 needs no ad-hoc decision. Ties (both pairs
+hold open xfails in the module) break to the pair with **more** open pins there, then to
+**Pair-A** by convention; the resolved sequence is recorded in the inventory header.
 
 ### 6c. Per-defect lifecycle (the safe handoff chain)
 
@@ -283,6 +290,13 @@ The coordinator is on-demand; the protocol must not stall on its absence:
   coordinator ratification on return (which also corrects `lane-owner`). (a) is
   pathspec-scoped and limited to rows whose `lane-owner` is that pair. Lock files release
   per §6b (operator GO commit), independent of the coordinator.
+- **Write-permission rule (single decision):** the coordinator may write any row anytime; a
+  pair may write a row **only** when no coordinator is live AND either it advances status on
+  a row whose `lane-owner` is that pair, or it creates a provisional mid-wave CRITICAL row
+  while holding the §6b lock (cross-cutting) or in its own lane. **Lane classification is by
+  the §6b module list, not seat judgment** — a cross-cutting module is always cross-cutting,
+  so its provisional rows and fixes always route through the lock; a seat may not reclassify
+  it as own-lane to bypass the lock.
 - **Wave-gate SLA + trip-wire:** SLA = **24h default** (user-adjustable; recorded in the
   inventory header). A director's gate-request is the formal trigger: the moment it is
   posted and unserviced, the gate is **formally blocked → the pod goes OFF immediately**
@@ -310,8 +324,12 @@ The coordinator is on-demand; the protocol must not stall on its absence:
   - **identity arc ≥ max(0.80, baseline_arc + 0.05)** (0.80 anchored to GO history —
     Design-D man 0.870, ADR-025 portrait ON 0.8779 — and never below baseline+0.05);
   - **lip-sync offset ≤ 2 frames** vs the audio track, measured by a committed script
-    (`scripts/measure_lipsync_offset.py`, a Wave-4 deliverable) per R-MEASURE;
-  - **no over-cook** per the realism checklist (qualitative + structural over-cook checks).
+    (`scripts/measure_lipsync_offset.py`, authored as a **Wave-2 deliverable** so the
+    baseline can use it) per R-MEASURE;
+  - **no over-cook**, per this inline checklist (recorded with the render in `logs/`):
+    (a) no crystalline/metallic or plastic-skin hyper-detail on inspection; (b) hires-fix
+    scale and sampler steps at or below the production defaults (the structural over-cook
+    drivers — hires-901 + 28-step sampler per the realism memo); (c) no hue/saturation clipping.
   The **baseline render** (current-default arc/lip-sync/frame-samples) is committed to
   `logs/` as a **Wave-2 exit deliverable**, so "improvement vs baseline" is defined before
   Wave 3 runs.
