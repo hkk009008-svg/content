@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# coordination/bin/release-lock <wave> <module>
+# Delete a held lock (spec §6b: operator GO commit, or holder after 3-FAIL cap).
+set -euo pipefail
+[ $# -eq 2 ] || { echo "usage: release-lock <wave> <module>" >&2; exit 2; }
+wave="$1"; module="$2"
+cd "$(git rev-parse --show-toplevel)"
+flat="${module//\//__}"
+lock="coordination/locks/${wave}-${flat}.lock"
+[ -e "$lock" ] || { echo "no such lock: $lock" >&2; exit 0; }
+git rm -q -- "$lock"
+git commit -q -m "unlock(${wave}): ${module}" -- "$lock"
+# A failed release-push leaves the lock LIVE on origin while it looks released
+# locally — a silent wave-blocker. Exit nonzero so the caller must retry.
+if ! git push -q origin "HEAD:$(git rev-parse --abbrev-ref HEAD)"; then
+  git reset -q --hard "@{u}"   # restore the lock file locally so a retry re-attempts the full flow
+  echo "RELEASE PUSH FAILED: $lock still held on origin — fetch + retry" >&2; exit 1
+fi
+echo "RELEASED: $lock"

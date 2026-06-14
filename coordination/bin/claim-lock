@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# coordination/bin/claim-lock <wave> <module> <seat> <defect-id>
+# Git-native shared-module lock claim (spec §6b). Push-first: exit 0 == you won.
+set -euo pipefail
+[ $# -eq 4 ] || { echo "usage: claim-lock <wave> <module> <seat> <defect-id>" >&2; exit 2; }
+wave="$1"; module="$2"; seat="$3"; defect="$4"
+cd "$(git rev-parse --show-toplevel)"
+flat="${module//\//__}"               # cinema/context.py -> cinema__context.py
+lock="coordination/locks/${wave}-${flat}.lock"
+git fetch -q origin "$(git rev-parse --abbrev-ref HEAD)" \
+  || echo "WARNING: fetch failed, proceeding on stale view (push-first still protects)" >&2
+git merge -q --ff-only "@{u}" 2>/dev/null || true   # best-effort: see peer locks before claiming
+if [ -e "$lock" ]; then echo "LOST: $lock already held" >&2; exit 1; fi
+printf '%s %s %s %s\n' "$seat" "$wave" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$defect" > "$lock"
+git add -- "$lock"
+git commit -q -m "lock(${wave}): ${module} -> ${seat} (${defect})" -- "$lock"
+if git push -q origin "HEAD:$(git rev-parse --abbrev-ref HEAD)"; then
+  echo "WON: $lock"; exit 0
+else
+  git reset -q --hard "@{u}"          # undo local lock commit; we lost the race
+  echo "LOST: push rejected (peer claimed first)" >&2; exit 1
+fi
