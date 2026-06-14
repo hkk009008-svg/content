@@ -325,7 +325,10 @@ class TestApplyCorrectionFlagPropagation:
         """STRIP action whose output has NO audio (re-mux failed / silent) must NOT
         inherit the base flag — the assembler then fills with TTS (degraded, not a
         silent clip falsely claiming embedded audio)."""
-        ctrl = _make_correction_ctrl(tmp_path, {"has_dialogue": True, "audio_embedded": True})
+        ctrl = _make_correction_ctrl(
+            tmp_path,
+            {"has_dialogue": True, "audio_embedded": True, "dialogue_audio_in_clip": True},
+        )
 
         def _upscale(video_path, output_path, **kw):
             _make_clip(output_path, with_audio=False)  # strip → video-only
@@ -335,7 +338,11 @@ class TestApplyCorrectionFlagPropagation:
             result = ctrl.apply_correction("shot_1_0", "upscale", take_id="take_base")
 
         assert result["success"] is True, result
+        # BOTH flags must stay absent on a video-only STRIP — the single
+        # _has_audio_stream guard covers both; assert both so a future guard-split
+        # that leaks dialogue_audio_in_clip is caught (§3 verify NIT-2).
         assert result["take"]["metadata"].get("audio_embedded") is not True
+        assert result["take"]["metadata"].get("dialogue_audio_in_clip") is not True
 
     def test_preserve_variant_no_flag_when_base_unflagged(self, tmp_path):
         """PRESERVE action on an UNFLAGGED base → no flag fabricated (nothing to

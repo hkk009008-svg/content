@@ -983,7 +983,7 @@ def generate_lip_sync_video(
         )
 
 
-def _restore_audio_track(video_path: str, audio_source_path: str, output_path: str) -> bool:
+def _restore_audio_track(video_path: str, audio_source_path: str, output_path: str, *, engine: str = "rife") -> bool:
     """Mux the audio track from ``audio_source_path`` onto the (video-only)
     ``video_path`` → ``output_path``, stream-copying both (no re-encode).
 
@@ -994,6 +994,8 @@ def _restore_audio_track(video_path: str, audio_source_path: str, output_path: s
     error. ``-shortest`` guards against any duration drift between the interpolated
     video and the source audio.
 
+    ``engine`` only labels the failure log so a stripper re-mux (seedvr2 / face-swap)
+    is not misattributed to RIFE; it does not change the mux behavior.
     Returns True when ``output_path`` was written, False on any ffmpeg failure.
     """
     try:
@@ -1013,7 +1015,7 @@ def _restore_audio_track(video_path: str, audio_source_path: str, output_path: s
         )
         return os.path.exists(output_path)
     except (subprocess.CalledProcessError, OSError):
-        logger.warning("RIFE audio re-mux failed", exc_info=True, extra={"engine": "rife"})
+        logger.warning("%s audio re-mux failed", engine, exc_info=True, extra={"engine": engine})
         return False
 
 
@@ -1053,7 +1055,7 @@ def _remux_source_audio_in_place(video_only_path: str, source_video_path: str, *
         return False
     ok = False
     try:
-        ok = _restore_audio_track(noaudio, source_video_path, video_only_path)
+        ok = _restore_audio_track(noaudio, source_video_path, video_only_path, engine=engine)
     except Exception:
         ok = False
     if ok and os.path.exists(video_only_path):
