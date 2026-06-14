@@ -1,5 +1,6 @@
 import os
 import json
+import traceback
 import uuid
 import time
 
@@ -153,8 +154,14 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             print("[generate_ai_broll] Max tier returned None — falling back to production tier.")
         except ImportError as e:
             print(f"[generate_ai_broll] quality_max unavailable ({e}) — production tier.")
-        except Exception as e:
-            print(f"[generate_ai_broll] Max tier raised ({e}) — production tier.")
+        except Exception:
+            # Broad catch keeps the graceful production-tier fallback, but print the
+            # full traceback (not just the message) so a real max-tier breakage is
+            # diagnosable instead of silently degrading every opt-in max render.
+            print(
+                "[generate_ai_broll] Max tier raised — falling back to production tier:\n"
+                + traceback.format_exc()
+            )
 
     mode = "img2img" if init_image else "txt2img"
 

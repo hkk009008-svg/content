@@ -871,8 +871,8 @@ the `identity_strategy` promise into take metadata
 `ContinuityEngine.enhance_shot_prompt` ([domain/continuity_engine.py:588](domain/continuity_engine.py:588))
 for in-frame characters beyond the primary that have a registered reference
 (unregistered chars are skipped, mirroring validation). When `secondary_char_refs` is
-non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:515](phase_c_assembly.py:515)) takes the multi-char
-branch: `_allocate_ref_slots` ([phase_c_assembly.py:450](phase_c_assembly.py:450)) partitions the Kontext
+non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:522](phase_c_assembly.py:522)) takes the multi-char
+branch: `_allocate_ref_slots` ([phase_c_assembly.py:457](phase_c_assembly.py:457)) partitions the Kontext
 image-URL budget on a fixed-share 3/2/1 slot schedule (primary up to 3, first
 secondary up to 2, second secondary up to 1), and `_build_multichar_kontext_prompt`
 ([phase_c_assembly.py:474](phase_c_assembly.py:474)) emits per-character `@ImageN PRESERVE` blocks with a
