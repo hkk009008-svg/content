@@ -871,8 +871,8 @@ the `identity_strategy` promise into take metadata
 `ContinuityEngine.enhance_shot_prompt` ([domain/continuity_engine.py:588](domain/continuity_engine.py:588))
 for in-frame characters beyond the primary that have a registered reference
 (unregistered chars are skipped, mirroring validation). When `secondary_char_refs` is
-non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:522](phase_c_assembly.py:522)) takes the multi-char
-branch: `_allocate_ref_slots` ([phase_c_assembly.py:457](phase_c_assembly.py:457)) partitions the Kontext
+non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:540](phase_c_assembly.py:540)) takes the multi-char
+branch: `_allocate_ref_slots` ([phase_c_assembly.py:475](phase_c_assembly.py:475)) partitions the Kontext
 image-URL budget on a fixed-share 3/2/1 slot schedule (primary up to 3, first
 secondary up to 2, second secondary up to 1), and `_build_multichar_kontext_prompt`
 ([phase_c_assembly.py:474](phase_c_assembly.py:474)) emits per-character `@ImageN PRESERVE` blocks with a
@@ -975,12 +975,12 @@ orchestrates.
 ([cinema/shots/controller.py:381](cinema/shots/controller.py:381)), the dispatcher passes `secondary_char_refs`
 ([cinema/shots/controller.py:785](cinema/shots/controller.py:785)) through `generate_ai_broll` →
 `generate_ai_broll_max` as the `secondary_chars` list. Inside the max dispatch:
-`_inject_secondary_loras` ([quality_max.py:571](quality_max.py:571)) chains up to two extra LoraLoader nodes
+`_inject_secondary_loras` ([quality_max.py:574](quality_max.py:574)) chains up to two extra LoraLoader nodes
 (701/702) after the primary's node 700, clamped to `_SECONDARY_LORA_MAX_STRENGTH=0.55`
 ([quality_max.py:568](quality_max.py:568)), with each `lora_name` set to the artifact's basename for
-pod-side placement; `_assemble_max_prompt` ([quality_max.py:490](quality_max.py:490)) prepends LoRA trigger
+pod-side placement; `_assemble_max_prompt` ([quality_max.py:493](quality_max.py:493)) prepends LoRA trigger
 tokens (primary first, then each secondary's) before conditioning; and
-`_inject_secondary_faceswap` ([quality_max.py:629](quality_max.py:629)) splices a LoadImage(94) +
+`_inject_secondary_faceswap` ([quality_max.py:632](quality_max.py:632)) splices a LoadImage(94) +
 ReActorFaceSwap(611) node after the existing node 610, swapping face index "1" from the
 secondary's canonical image — MUST run after `_inject_post_passes` so the SUPIR-absent
 950-feed rewire sees it. All three injectors are retry-safe (idempotent pop/re-inject);
