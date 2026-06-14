@@ -167,7 +167,10 @@ def _validate_overlay_value(ui_key: str, value):
             return None, f"{ui_key}={value!r} is bool, expected {typ.__name__}; skipped"
         try:
             v = typ(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError: int(float('inf')) raises it (an ArithmeticError, not
+            # TypeError/ValueError) — a +inf/-inf on an int knob would otherwise
+            # propagate out of the overlay loop and abort the whole max-tier run.
             return None, f"{ui_key}={value!r} not coercible to {typ.__name__}; skipped"
         if typ is float and not math.isfinite(v):
             return None, f"{ui_key}={value!r} non-finite; skipped"
@@ -199,6 +202,16 @@ def _finite_or(value, default):
     except (TypeError, ValueError):
         return default
     return v if math.isfinite(v) else default
+
+
+def _clamp_img2img_denoise(value):
+    """Clamp a user img2img_denoise override to [0.2, 0.6]. Returns None for a
+    non-finite/non-coercible value so the caller keeps the per-shot template
+    default — mirroring _validate_overlay_value's reject-non-finite policy.
+    Makes what was previously an accidental min/max clamp-luck an explicit,
+    intentional guard (so non-finite no longer lands a spurious 0.6/0.2)."""
+    v = _finite_or(value, None)
+    return None if v is None else max(0.2, min(0.6, v))
 
 
 def _load_max_workflow() -> dict:
@@ -513,8 +526,14 @@ def _inject_identity(workflow: dict, char_lora: Optional[str], face_anchor_remot
             # the tier-default model/clip values SEPARATELY (preserves the original
             # independent-clip behavior — they aren't always equal, cf. _max_lora_test).
             # `is not None` so strength=0.0 is honored (not treated as falsy → tier default).
-            s_model = char_lora_strength if char_lora_strength is not None else params.get("lora_strength_model", 1.0)
-            s_clip = char_lora_strength if char_lora_strength is not None else params.get("lora_strength_clip", 1.0)
+            # _finite_or sanitizes a non-finite char_lora_strength (a NaN/inf
+            # token survives project.json's char_lora_strengths via json.load's
+            # allow_nan default) to None, so it falls back to the tier default
+            # rather than writing a non-finite weight into LoraLoader(700).
+            # 0.0 stays honored (finite, not None).
+            _cls = _finite_or(char_lora_strength, None)
+            s_model = _cls if _cls is not None else params.get("lora_strength_model", 1.0)
+            s_clip = _cls if _cls is not None else params.get("lora_strength_clip", 1.0)
             workflow["700"]["inputs"]["strength_model"] = s_model
             workflow["700"]["inputs"]["strength_clip"] = s_clip
         else:
@@ -581,10 +600,12 @@ def _inject_secondary_loras(workflow: dict, secondary_chars: Optional[list]):
     last = None
     for i, entry in enumerate(entries):
         nid = str(701 + i)
-        strength = entry.get("lora_strength")
-        strength = min(strength if strength is not None
-                       else _SECONDARY_LORA_MAX_STRENGTH,
-                       _SECONDARY_LORA_MAX_STRENGTH)
+        # _finite_or: a non-finite/non-coercible lora_strength (NaN survives
+        # project.json's char_lora_strengths) must fall back to the ceiling, not
+        # slip past the min() clamp — min(nan, 0.55) == nan. Also coerces a
+        # stringified "0.4" -> 0.4 and a missing value -> the ceiling default.
+        strength = _finite_or(entry.get("lora_strength"), _SECONDARY_LORA_MAX_STRENGTH)
+        strength = min(strength, _SECONDARY_LORA_MAX_STRENGTH)
         workflow[nid] = {
             "inputs": {
                 "lora_name": os.path.basename(entry["lora_path"]),
@@ -874,6 +895,29 @@ def _resolve_shot_info(
     return shot_info
 
 
+def _resolve_halt_thresholds(params):
+    """Best-of-N (halt_composite, halt_arc, regen_floor), finite-guarded.
+    _finite_or is a read-side BACKSTOP against a non-finite reaching params from
+    any path — the _validate_overlay_value chokepoint covers only the UI-overlay
+    path. Extracted so the guard is unit-testable (drop it -> the test fails)."""
+    return (
+        _finite_or(params.get("halt_threshold_composite", 0.92), 0.92),
+        _finite_or(params.get("halt_threshold_arc", 0.85), 0.85),
+        _finite_or(params.get("regenerate_floor_arc", 0.82), 0.82),
+    )
+
+
+def _resolve_identity_threshold(ctx):
+    """Identity acceptance bar for best-of-N scoring. _finite_or is the SOLE
+    guard here: identity_strictness reads via get_project_setting, bypassing the
+    _validate_overlay_value chokepoint, so a NaN token in project.json would
+    otherwise defeat the score gate (score < NaN is always False)."""
+    if ctx is None:
+        return 0.60
+    from cinema.context import get_project_setting
+    return _finite_or(get_project_setting(ctx, "identity_strictness", 0.60), 0.60)
+
+
 def generate_ai_broll_max(
     prompt: str,
     output_filename: str,
@@ -997,7 +1041,9 @@ def generate_ai_broll_max(
         _co = (ctx.global_settings or {}).get("continuity_options", {})
         _i2i = _co.get("img2img_denoise") if isinstance(_co, dict) else None
         if isinstance(_i2i, (int, float)):
-            params["denoise_default"] = max(0.2, min(0.6, float(_i2i)))
+            _i2i_clamped = _clamp_img2img_denoise(_i2i)
+            if _i2i_clamped is not None:
+                params["denoise_default"] = _i2i_clamped
 
     # Apply adaptive PuLID weight override (from continuity feedback loop)
     if pulid_weight_override is not None:
@@ -1080,9 +1126,7 @@ def generate_ai_broll_max(
     n_max = int(params.get("candidate_count", 8))
     batch = int(params.get("candidate_batch", 4))
     halt_min_n = int(params.get("halt_min_n", 4))
-    halt_composite = _finite_or(params.get("halt_threshold_composite", 0.92), 0.92)
-    halt_arc = _finite_or(params.get("halt_threshold_arc", 0.85), 0.85)
-    regen_floor = _finite_or(params.get("regenerate_floor_arc", 0.82), 0.82)
+    halt_composite, halt_arc, regen_floor = _resolve_halt_thresholds(params)
     halt_rule = params.get("halt_rule", "composite_only")
 
     scores: List[CandidateScore] = []
@@ -1098,10 +1142,7 @@ def generate_ai_broll_max(
     # passed=True regardless of similarity, polluting the rolling history that
     # feeds get_adaptive_pulid_weight. Pass the project's identity acceptance
     # bar so passed=True means "would have been acceptable as the final shot".
-    if ctx is not None:
-        identity_threshold = _finite_or(get_project_setting(ctx, "identity_strictness", 0.60), 0.60)
-    else:
-        identity_threshold = 0.60
+    identity_threshold = _resolve_identity_threshold(ctx)
 
     def _run_candidate(task):
         cand_index, cand_seed, cand_path, wf = task
