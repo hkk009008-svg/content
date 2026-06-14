@@ -1847,13 +1847,15 @@ class ShotController:
                             take["metadata"]["lipsync_score"],
                         )
                         # Cost-track the lipsync generation (Tier F NEW-2: lipsync was
-                        # previously untracked). Attribute to the winning cascade engine;
-                        # unpriced engines record $0.00 + a warning, same as other gens.
+                        # previously untracked). Attribute to the winning cascade engine,
+                        # namespaced LIPSYNC_<engine> so the cost key can't collide with a
+                        # same-named video engine (e.g. lipsync "kling" vs KLING_NATIVE)
+                        # and resolves against the LIPSYNC_* rows in API_COST_USD.
                         try:
                             _ls_engine = (_ls_cascade.get("cascade_metadata", {})
-                                          .get("engine") or "LIPSYNC")
+                                          .get("engine") or "default")
                             self.cost_tracker.record_api_call(
-                                _ls_engine, operation="lipsync",
+                                f"LIPSYNC_{_ls_engine}", operation="lipsync",
                                 shot_id=shot_id, video_id=self.project.get("id", ""),
                             )
                         except Exception:

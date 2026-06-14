@@ -492,6 +492,25 @@ class TestRecordAPICall:
         expected = API_COST_USD["VEO"] + API_COST_USD["FLUX_PRO"]
         assert cost_tracker.spent_usd == pytest.approx(expected)
 
+    # Lipsync is mandatory for dialogue shots (F1b). The controller records the
+    # cascade-winning engine as LIPSYNC_<engine> (cinema/shots/controller.py).
+    # Every name the cascade can emit (lip_sync.py `extra={"engine": ...}`) MUST
+    # be priced, or the budget gate silently undercounts each dialogue shot.
+    @pytest.mark.parametrize("cascade_engine", [
+        "syncSoV3", "MuseTalk", "LatentSync", "SyncV2",
+        "hedra", "kling", "omnihuman", "aurora",
+        None,  # cascade reports no engine → controller uses "default"
+    ])
+    def test_record_api_call_lipsync_engine_priced(self, cost_tracker, cascade_engine):
+        """Each lipsync cascade engine resolves to a non-zero, no-warning cost."""
+        import warnings
+        # Mirror the controller's namespacing: LIPSYNC_<engine|default>.
+        api_name = f"LIPSYNC_{cascade_engine or 'default'}"
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # any "Unknown API" warning fails here
+            cost = cost_tracker.record_api_call(api_name, operation="lipsync")
+        assert cost > 0.0, f"{api_name} priced at $0 — budget gate would undercount"
+
     @pytest.mark.parametrize("api_name,expected_provider", [
         ("SORA_2", "openai"),
         ("VEO", "google"),

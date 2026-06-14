@@ -26,6 +26,12 @@ readme = "README.md"
 # docs/STRATEGIC_REVIEW-2026-06-10.md: 0 green CI runs in 289).
 # tests/conftest.py's autouse sys.path fixture runs after collection — too late.
 pythonpath = ["."]
+# Scope collection to tests/ so a bare `pytest` / `--collect-only` doesn't recurse
+# into scripts/ — several ad-hoc harness scripts there (e.g. scripts/_hedra_test.py,
+# scripts/_lipsync_gen_test.py) read `.env` at import time and error collection when
+# no .env exists. CI already passes an explicit `tests/unit/` path (which overrides
+# this), so this only fixes the unscoped local run. No real tests live outside tests/.
+testpaths = ["tests"]
 
 [build-system]
 requires = ["setuptools>=68"]

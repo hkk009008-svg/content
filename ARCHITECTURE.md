@@ -120,18 +120,21 @@ two URLs — `/assemble` + `/proceed-assembly`, [web_server.py:2220-2221](web_se
 
 ### 3.1 Route inventory (grouped)
 
+Counts below sum to the verified total (66 routes / 65 view functions, §3
+headline; `grep -c '@app.route' web_server.py` → 66, 2026-06-14):
+
 | Group | Count | Examples |
 |---|---|---|
 | Static frontend | 2 | `GET /`, `GET /<path>` |
-| Config / cost | 3 | `GET /api/config`, `POST /api/cost-estimate` |
-| Project CRUD | 5 | `POST/GET/PUT/DELETE /api/projects[/<pid>]` |
-| Characters + LoRA + style-board | 10 | `POST /api/projects/<pid>/characters`, `POST .../train-lora`, … |
+| Global config / cost / cleanup | 3 | `GET /api/config`, `POST /api/cost-estimate`, `POST /api/cleanup-all` |
+| Project CRUD | 5 | `POST/GET /api/projects`, `GET/PUT/DELETE /api/projects/<pid>` |
+| Characters + LoRA + style-board | 6 | `POST .../characters`, `PUT/DELETE .../characters/<cid>`, `.../lora-status`, `POST .../train-lora`, `.../style-board` |
 | Objects | 3 | `POST/PUT/DELETE /api/projects/<pid>/objects` |
 | Locations | 3 | same shape |
-| Scenes + dialogue + decompose | 7 | `POST .../scenes/<sid>/decompose`, `POST .../style-rules` |
+| Scenes + dialogue + style-rules + language | 8 | `POST .../scenes/<sid>/decompose`, `.../generate-dialogue`, `.../scenes/reorder`, `.../style-rules`, `.../apply-language-defaults` |
 | Pipeline lifecycle + SSE | 7 | `POST /generate`, `GET /stream`, `POST /cancel`, `POST /pause`, `POST /resume`, `GET /pipeline-state`, `GET /checkpoint` |
-| Gate approvals + shot ops | 12 | `POST /shots/<sid>/plan/approve`, `POST .../keyframes/<take>/approve`, `POST .../final/<take>/approve`, `POST .../restart`, `POST .../regenerate`, `POST .../correct`, `POST .../diagnose` |
-| Assembly + cleanup + cost + files | 8 | `POST /assemble`, `GET /file`, `GET /export`, `POST /api/cleanup-all` |
+| Gate approvals + shot ops | 18 | `POST .../plan/{approve,reject}`, `.../keyframes/{generate,<take>/approve}`, `.../motion/generate`, `.../performance[/<take>/approve]`, `.../final/<take>/approve`, `.../{restart,regenerate,correct,diagnose,prompt}`, `.../takes/<take>/iterate`, `.../reject-auto-approve`, `.../upload-driving-video`, `.../screening/approve` |
+| Assembly + preview + files + live-cost | 10 | `POST /assemble[/re-assemble|/screen]`, `/proceed-assembly`, `GET /preview/<sid>`, `/export`, `/file`, `POST .../cleanup`, `GET .../cost-live`, `.../disk-usage` |
 | Capability reporting | 1 | `GET .../capability-scorecard` (read-only Part-4 dashboard backend; no pipeline spin) |
 
 ### 3.2 Threading & lifecycle storage
@@ -199,7 +202,7 @@ the live `CinemaPipeline` if running, else instantiates a fresh one sharing
 the cached `PipelineCore` — so **operators can approve plans even when no
 worker is active**, because gate state lives in `project.json`, not in memory.
 
-*Last verified: 2026-06-13*
+*Last verified: 2026-06-14*
 
 ---
 
@@ -868,8 +871,8 @@ the `identity_strategy` promise into take metadata
 `ContinuityEngine.enhance_shot_prompt` ([domain/continuity_engine.py:588](domain/continuity_engine.py:588))
 for in-frame characters beyond the primary that have a registered reference
 (unregistered chars are skipped, mirroring validation). When `secondary_char_refs` is
-non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:515](phase_c_assembly.py:515)) takes the multi-char
-branch: `_allocate_ref_slots` ([phase_c_assembly.py:450](phase_c_assembly.py:450)) partitions the Kontext
+non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:522](phase_c_assembly.py:522)) takes the multi-char
+branch: `_allocate_ref_slots` ([phase_c_assembly.py:457](phase_c_assembly.py:457)) partitions the Kontext
 image-URL budget on a fixed-share 3/2/1 slot schedule (primary up to 3, first
 secondary up to 2, second secondary up to 1), and `_build_multichar_kontext_prompt`
 ([phase_c_assembly.py:474](phase_c_assembly.py:474)) emits per-character `@ImageN PRESERVE` blocks with a
