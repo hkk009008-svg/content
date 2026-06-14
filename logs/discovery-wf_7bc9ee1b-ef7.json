@@ -1,0 +1,43 @@
+{
+  "run_id": "wf_7bc9ee1b-ef7",
+  "purpose": "Coordinator session-start independent confirmation that the 2 verified Wave-2 CRITICAL money fixes honestly hold the budget gate (provenance was 'Session-10 orchestration, separate subagents' with no live-operator mailbox GO artifact).",
+  "head_at_review": "2f2f46d (suite run); commits in chain db25c39 + 24ef8a0; reconciled at 935f8ac; coordinator wrap HEAD eabda0f",
+  "agents": "money-gate-reviewer x2 + lane-v-verifier (read-only, sonnet)",
+  "verdicts": {
+    "cost-spent-nan-poison (db25c39)": {
+      "money_gate_reviewer": "CONFIRM",
+      "gate_works_post_fix": true,
+      "evidence": "coerce non-finite cost_usd->0.0 + structural WARNING at log() chokepoint BEFORE the spent_usd increment; defense-in-depth isfinite guards at would_exceed + is_over_budget reads; both gate operands guarded (budget_usd via _finite_budget_or_block at construction, spent_usd at chokepoint + reads); gate does NOT block at log() (stays ALIVE); regression test passes 1/1.",
+      "residual": "NITS, analytics-only — RESOLVED as non-issue (see sqlite_nan_resolution)."
+    },
+    "shot-spent-usd-never-written / C-1 (24ef8a0)": {
+      "money_gate_reviewer": "CONFIRM",
+      "gate_works_post_fix": true,
+      "evidence": "get_shot_spent = SELECT COALESCE(SUM(cost_usd),0.0) WHERE shot_id=? (isfinite-guarded return); caller-injection shot['spent_usd']=get_shot_spent(id) at cinema/review/controller.py before the SINGLE production check_gate call site; same-object chain proven (_all_shots yields references, check_gate ctx no copy, _shot_over_budget reads same dict); shot.id is required (domain/models.py); both veto operands NaN-guarded; per-shot veto now LIVE end-to-end.",
+      "residual_gate_source_mismatch_PRE_EXISTING_not_introduced": [
+        "charmgr-cost-fresh-instance (domain/character_manager.py:350) — fresh throwaway CostTracker, no shot_id",
+        "audio/dialogue.py:594,644 + foley.py:186 + music.py:249,376 — 'cost_tracker or CostTracker()' throwaway fallback, no shot_id",
+        "scripts/_fal_man_lora_train.py:73 — script-only throwaway"
+      ]
+    },
+    "lane_v": {
+      "verdict": "GO",
+      "spec_match": true,
+      "c1_pin_nonvacuous": true,
+      "nan_pin_nonvacuous": true,
+      "suite": "2489 passed, 1 skipped, 29 xfailed, 0 failed (tests/unit -x); both pins RED->GREEN",
+      "lock_status": "no cross-cutting lock held/owed for either commit (cost_tracker.py pure-lane; C-1 used caller-injection, no auto_approve.py edit -> no W2-auto_approve.py.lock, no Tier-A co-sign)"
+    }
+  },
+  "sqlite_nan_resolution": {
+    "question": "Does SQLite SUM over a column containing NaN propagate NaN (nanReviewer) or collapse to NULL->0.0 (c1Reviewer)?",
+    "test": ".venv/bin/python: CREATE TABLE t(cost_usd REAL); INSERT [1.0, NaN, 2.0]; SELECT COALESCE(SUM(cost_usd),0.0)",
+    "result": "SUM([1.0, NaN, 2.0]) = 3.0 (finite); SUM([NaN]) = 0.0. SQLite stores NaN as NULL and SUM skips NULL.",
+    "conclusion": "c1Reviewer correct; nanReviewer's 'SUM propagates NaN' WRONG. NO reporting-NaN exposure. get_session_cost / get_video_cost / get_shot_spent are all NaN-safe from persisted rows. Residual closed."
+  },
+  "observations_non_blocking": [
+    "No motion/final per-shot budget veto: _shot_over_budget is registered only in _rules_for_image (image gate). Pre-existing, by-design, UNDOCUMENTED — candidate one-line inventory note (deliberate exemption) or follow-on row.",
+    "C-1 injection mutates the shot dict in-place (shot['spent_usd']=...) rather than a shallow copy. Gate-correct (value refreshed via get_shot_spent before every pass -> no stale-read; SQLite is the source of truth, not the persisted field). At most a cosmetic field in a persisted snapshot; no action."
+  ],
+  "coordinator_verdict": "VERIFIED STATUS OF BOTH CRITICAL MONEY ROWS HOLDS — independently confirmed, no new gate or reporting defects. Authored zero production code."
+}
