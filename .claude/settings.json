@@ -1,0 +1,26 @@
+{
+  "$comment": "Team-shared (checked-in) Claude Code config for the 4-seat fleet. Personal/machine config stays in .claude/settings.local.json (gitignored); both files merge, hooks are additive across them. Paths use $CLAUDE_PROJECT_DIR for portability.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-git-index.sh\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-smoke.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}
