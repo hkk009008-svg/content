@@ -1,0 +1,145 @@
+{
+  "summary": "Read-only verification of the web_research SPLIT-ruling premises + money-loss sweep ratification (coordinator; no production edits)",
+  "agentCount": 11,
+  "logs": [],
+  "result": {
+    "premises": [
+      {
+        "claim_id": "P1-webresearch-bounded",
+        "holds": false,
+        "refuted": true,
+        "evidence": "1. web_research.py:122-127 — `run_with_tools` signature with `max_tool_rounds: int = 3`; loop at line 154: `for round_num in range(max_tool_rounds):` — the tool loop itself IS bounded per call.\n\n2. llm/style_director.py:105-110 — ONE call to `run_with_tools(..., max_tool_rounds=3, ...)` from `generate_style_rules()`, which is called ONCE per project at cinema_pipeline.py:961 (inside `if not style_rules:`). This call is genuinely one-per-project.\n\n3. domain/scene_decomposer.py:557-574 — `run_with_tools(..., max_tool_rounds=2, ...)` is called inside `decompose_scene()`. At cinema_pipeline.py:995-1047 this runs inside `for scene_idx, scene in enumerate(scenes):` — once per scene, not once per project. A project with N scenes gets N separate `run_with_tools` calls from the decomposer, each burning up to 2 tool rounds.\n\n4. domain/dialogue_writer.py:92-106 — `run_with_tools(..., max_tool_rounds=2, ...)` called from `generate_dialogue()`. In cinema_pipeline.py:513-521 this is also called inside the same `for scene_idx, scene in enumerate(scenes):` loop.\n\n5. There is also a `competitive_decompose_scene` path (cinema_pipeline.py:1019) which calls the LLMEnsemble (no `run_with_tools` there, uses different path), plus `decompose_scene` as fallback (line 1025).\n\nREFUTATION: The claim says \"one planning pass, ... cannot run away with shot count.\" But `run_with_tools` is called once per SCENE (not once per project) from both `decompose_scene` and `generate_dialogue`. With a project of e.g. 10 scenes, that yields up to 20 web-research calls (10 × decompose + 10 × dialogue), each burning up to 2 tool rounds = up to 40 LLM/tool-round invocations, plus 1 style-director call (3 rounds). The spend scales linearly with scene count, not fixed per project run.",
+        "notes": "The claim is partially correct for the style-director path (llm/style_director.py:105-110 — genuinely one call per project, max_tool_rounds=3). The `run_with_tools` loop itself is correctly bounded: `for round_num in range(max_tool_rounds)` at web_research.py:154 ensures no infinite tool loop per call. However, the claim that web_research \"cannot run away with shot count\" is refuted: `decompose_scene` (domain/scene_decomposer.py:569) and `generate_dialogue` (domain/dialogue_writer.py:101) both call `run_with_tools` once per scene, so total web-research LLM spend scales with scene count. The claim should be scoped to \"the style-director planning pass is bounded (1 call × 3 rounds)\"; the decomposition and dialogue passes are bounded per scene but NOT per project run."
+      },
+      {
+        "claim_id": "P2-performance-unbounded-freshinstance",
+        "holds": true,
+        "refuted": false,
+        "evidence": "1. Fresh instances — all 4 files construct CostTracker() with no arguments inside a bare `_cost_log()` helper, called once per dispatch:\n   - performance/viggle.py:29-30: `from cost_tracker import CostTracker\\n        CostTracker().log_api(`\n   - performance/live_portrait.py:30-31: same pattern\n   - performance/act_one.py:32-34: same pattern\n   - performance/driving_video.py:35-37: same pattern\n\n2. No shared-tracker injection — function signatures accept no tracker parameter:\n   - viggle.py:26: `def _cost_log(shot_id: str = \"\", video_id: str = \"\") -> None:`\n   - live_portrait.py:27: `def _cost_log(duration_s: float, shot_id: str = \"\", video_id: str = \"\") -> None:`\n   - act_one.py:29: `def _cost_log(operation: str, duration_s: float, shot_id: str = \"\", video_id: str = \"\") -> None:`\n   - driving_video.py:33: `def _cost_log(provider: str, duration_s: float, shot_id: str, video_id: str) -> None:`\n   Public entry points (generate_viggle_performance, etc.) also accept no tracker param.\n\n3. Per-shot invocation — cinema/shots/controller.py:1075-1085 calls `dispatch()` once per shot inside `generate_performance_take`; performance/_router.py:32-117 has no loop — one `dispatch()` = one `_cost_log()` call.\n\n4. Gate invisibility — cost_tracker.py:407 shows `self.spent_usd += cost_usd` only inside `record_api_call`; `log_api` (line 333) delegates to `log` (line 257) which only writes SQLite, never touches `spent_usd`. The budget gate reads `self.spent_usd` via `is_over_budget()` (line 431). Fresh-instance `log_api` calls write SQLite on a throwaway object and the accumulator on the SHARED instance (cinema/core.py:113) is never touched.\n\n5. Contrast: audio/foley.py:185 and audio/dialogue.py:593 use `_tracker = cost_tracker or CostTracker()` — they accept injection. Performance modules have no such pattern.",
+        "notes": "The claim is fully confirmed. One nuance: `log_api` does write to SQLite (durable store), so the spend IS recorded in the database — but the in-process budget gate (`is_over_budget` / `would_exceed`) reads only `self.spent_usd` on the shared instance, which these throwaway instances never update. The spend is effectively invisible to the runtime budget enforcement gate. The \"unbounded with shot count\" characterization is accurate: N shots = N throwaway CostTracker() instances, zero accumulation on the shared tracker, zero gate enforcement. This matches the money-loss bug class documented in money_loss_gate_source_mismatch_bug_class.md."
+      },
+      {
+        "claim_id": "P3-doublecount-a-fix",
+        "holds": true,
+        "refuted": false,
+        "evidence": "cost_tracker.py:\n\n- `log` (line 257–290): inserts into SQLite only; no `self.spent_usd` increment anywhere in the body.\n- `log_api` (lines 333–352): delegates entirely to `self.log(...)` — no `self.spent_usd` increment.\n- `log_llm` (lines 292–331): computes cost and delegates entirely to `self.log(...)` — no `self.spent_usd` increment.\n- `record_api_call` (lines 354–408):\n  - line 399: `self.log_api(provider=provider, model=api_upper, operation=op, cost_usd=cost_usd, ...)` — calls log_api (which does NOT increment spent_usd)\n  - line 407: `self.spent_usd += cost_usd` — the SOLE place where spent_usd is incremented\n\ngrep confirmation: `grep -n \"spent_usd\" cost_tracker.py` returns only lines 30 (docstring), 227 (init to 0.0), 365 (docstring), 407 (the += increment), 422 (would_exceed read), 431 (is_over_budget read). No other write site exists.",
+        "notes": "The claim holds exactly. The call chain is: record_api_call → log_api (line 399) → log (SQLite only, no accumulator); then record_api_call independently does self.spent_usd += cost_usd at line 407. Neither log_api nor log_llm nor log touch self.spent_usd. Therefore, if Option-B (inject-shared-tracker) moves the increment into log_api or log_llm, the duplicate increment at record_api_call:407 must be removed to avoid double-counting. The (a) requirement in the R-BRIEF is structurally correct."
+      },
+      {
+        "claim_id": "P4-gate-reads-accumulator-only",
+        "holds": true,
+        "refuted": false,
+        "evidence": "cost_tracker.py:414-431 (would_exceed and is_over_budget):\n\n  def would_exceed(self, api_name: str) -> bool:\n      if self.budget_usd is None:\n          return False\n      cost = API_COST_USD.get(api_name.upper(), 0.0)\n      return (self.spent_usd + cost) > self.budget_usd\n\n  def is_over_budget(self) -> bool:\n      if self.budget_usd is None:\n          return False\n      return self.spent_usd > self.budget_usd\n\nBoth methods reference ONLY `self.spent_usd` (the in-process float accumulator, initialized to 0.0 at cost_tracker.py:227). No SQLite query is issued in either method body.\n\nModule docstring at cost_tracker.py:30-31 explicitly states:\n  \"``spent_usd`` accumulates in-process only; SQLite is the durable store, but the budget gate uses the fast in-memory counter.\"\n\nSQLite SELECT/SUM calls exist in the file (lines 446, 490, 541) but are scoped to query helpers (get_video_cost, get_session_cost, dump_report), NOT the gate methods.\n\nVerified via:\n  grep -n \"would_exceed\\|is_over_budget\\|spent_usd\\|sqlite\\|SELECT\\|SUM\" /Users/hyungkoookkim/Content/cost_tracker.py\n  Read cost_tracker.py:414-431 (gate bodies) and :20-31 (docstring)",
+        "notes": "The claim holds exactly as stated. Spend recorded on any OTHER CostTracker instance (e.g., a per-shot throwaway, a fresh instance created in a subprocess, or a resumed pipeline that constructs a new tracker) is invisible to these gate checks because self.spent_usd starts at 0.0 and accumulates only within the lifetime of the specific instance. This is the root of the C-1/C-2 money-loss bug class documented in the campaign."
+      },
+      {
+        "claim_id": "P5-audio-t5-precedent",
+        "holds": true,
+        "refuted": false,
+        "evidence": "/Users/hyungkoookkim/Content/audio/foley.py:181-188\n\nLines 181-188 (Read at offset=170, limit=30):\n```\n        # T5: use caller-supplied tracker when provided so spend accumulates on\n        # the pipeline's budget-aware tracker (cross-process persistence deferred).\n        try:\n            from cost_tracker import CostTracker\n            _tracker = cost_tracker or CostTracker()\n            _tracker.record_api_call(\"STABILITY_FOLEY\", operation=\"scene_foley\")\n        except Exception:\n            print(f\"   [FOLEY] cost record skipped (non-critical)\")\n```\n\ngrep confirmation: `grep -n \"_tracker = cost_tracker or CostTracker\" audio/foley.py` → line 185: `_tracker = cost_tracker or CostTracker()`",
+        "notes": "The inject-shared-tracker pattern is present exactly as described. Line 185 is `_tracker = cost_tracker or CostTracker()`, inside a try-block at lines 183-188. The comment on lines 181-182 explicitly names this pattern as \"T5: use caller-supplied tracker when provided so spend accumulates on the pipeline's budget-aware tracker\". The claim's stated line range (~181-186) matches the actual code (the pattern spans 181-188, with the key assignment at 185). No discrepancy found; the precedent Task 7 is claimed to mirror is verified present at HEAD."
+      },
+      {
+        "claim_id": "P6-webresearch-callers-planning",
+        "holds": true,
+        "refuted": false,
+        "evidence": "1. web_research.py:122-129 — signature: `def run_with_tools(client, model: str, system_prompt: str, user_prompt: str, max_tool_rounds: int = 3, response_format: dict = None) -> str:` — no cost_tracker or video_id param.\n\n2. llm/style_director.py:93,105 — imports and calls `run_with_tools(client, \"gpt-4o\", system_prompt=system_with_tools, user_prompt=..., max_tool_rounds=3, response_format={\"type\": \"json_object\"})`. grep for cost_tracker/video_id in this file: zero hits.\n\n3. domain/scene_decomposer.py:557,569 — imports and calls `run_with_tools(client, \"gpt-4o\", system_prompt=full_system_with_tools, user_prompt=user_prompt, max_tool_rounds=2, response_format={\"type\": \"json_object\"})`. grep for cost_tracker/video_id: zero hits.\n\n4. domain/dialogue_writer.py:92,101 — imports and calls `run_with_tools(client, \"gpt-4o\", system_prompt=system_with_tools, user_prompt=user_prompt, max_tool_rounds=2, response_format={\"type\": \"json_object\"})`. grep for cost_tracker/video_id: zero hits.\n\n5. cinema_pipeline.py:961 — `generate_style_rules(...)` called at 2% progress; cinema_pipeline.py:1019-1047 — `decompose_scene`/`competitive_decompose_scene` called before PLAN_REVIEW gate at line 1059. The pipeline's `self.cost_tracker` is passed only to audio functions (lines 552, 620, 632, 683), never to these planning callers. All three modules execute before the PLAN_REVIEW gate at line 1059.",
+        "notes": "The claim is fully accurate. All three callers (llm/style_director.py, domain/scene_decomposer.py, domain/dialogue_writer.py) are confirmed planning-phase modules: they run in the `generate()` method before the PLAN_REVIEW gate (cinema_pipeline.py:1059) and do not receive or pass the pipeline cost_tracker. The run_with_tools signature has no tracker or video_id parameter. There is one additional caller not mentioned in the claim — `generate_dialogue` (cinema_pipeline.py:513,521) is also called before PLAN_REVIEW via `_ensure_scene_audio`, but it calls domain/dialogue_writer.py which itself has no tracker threading. Threading the tracker into run_with_tools would therefore require plumbing it through the function signatures of all three planning modules plus run_with_tools itself — confirming it is deeper plumbing than a performance fix scoped to the render/audio path."
+      }
+    ],
+    "sweep": [
+      {
+        "claim_id": "C1-shot-spent-never-written",
+        "holds": true,
+        "refuted": false,
+        "evidence": "READ site (sole production occurrence):\n  /Users/hyungkoookkim/Content/cinema/auto_approve.py:627\n    `spent = shot_state.get(\"spent_usd\", 0) or 0`\n  Called at line 341-343 with `ctx[\"shot_state\"]` which is the raw shot dict from project.json (passed as `shot_state=shot` at cinema/review/controller.py:326).\n\nWRITE-site grep (definitive — no production writer):\n  Command: `grep -rn '\"spent_usd\"' /Users/hyungkoookkim/Content --include=\"*.py\" | grep -v \"worktrees\"`\n  Result: Only `/Users/hyungkoookkim/Content/cinema/auto_approve.py:627` (a .get READ) and test files:\n    - tests/unit/test_auto_approve.py:59  — fixture populates it artificially\n    - tests/unit/test_f1b_dialogue_lipsync.py:187,228  — test fixtures only\n    - tests/unit/test_discovery_auto_approve_xfail.py:123  — xfail test only\n  Zero production write sites found.\n\nModule docstring confirmation:\n  /Users/hyungkoookkim/Content/cinema/auto_approve.py:14-20 — lists the ONLY keys the module writes into shot dicts: `shot[\"auto_approve_audit\"]` and `shot[\"<gate>_auto_approved\"]`; `spent_usd` is absent.\n\nCostTracker has no bridge method:\n  Command: `grep -n \"def get_shot\\|def shot_spent\\|def spent_for_shot\\|get_shot_spent\" /Users/hyungkoookkim/Content/cost_tracker.py`\n  Result: (no output) — no `get_shot_spent()` or equivalent exists to populate shot dicts with per-shot spend.",
+        "notes": "The veto at auto_approve.py:627 reads `shot_state.get(\"spent_usd\", 0)` from the raw project.json shot dict. No production code anywhere in the repository writes a `\"spent_usd\"` key into any shot dict. The only occurrences of the string key `\"spent_usd\"` outside the single read site are in test fixtures that artificially inject the value. The `cost_tracker.spent_usd` object attribute is a separate accumulator on the CostTracker class and is never bridged into the per-shot dict. The per-shot veto is therefore structurally dead in production: the `.get(\"spent_usd\", 0)` call always returns the default 0, so `_shot_over_budget` can never fire based on actual shot spending. This matches the C-1 description from director2's handoff: \"spent_usd never written to shot dict; per-shot veto DEAD.\" The `CostTracker.get_shot_spent` SQLite-SUM bridge method described as the fix path does not yet exist (confirmed: grep returned no output)."
+      },
+      {
+        "claim_id": "C2-spent-reset-on-resume",
+        "holds": true,
+        "refuted": false,
+        "evidence": "/Users/hyungkoookkim/Content/cost_tracker.py:227 — `self.spent_usd: float = 0.0` (always initialized to zero in __init__, no seed from SQLite)\n\n/Users/hyungkoookkim/Content/cost_tracker.py:30-31 — module docstring explicitly states: \"`spent_usd` accumulates in-process only; SQLite is the durable store, but the budget gate uses the fast in-memory counter.\"\n\n/Users/hyungkoookkim/Content/cinema/core.py:113 — `cost_tracker=CostTracker(budget_usd=budget_usd)` — a fresh instance is constructed on every pipeline startup, including resume; no prior-spend argument exists.\n\n/Users/hyungkoookkim/Content/cinema/checkpoint.py:163-185 (`_restore_from_checkpoint`) — restores scene_clips, scene_audio, scene_foley, foley_audio_paths, shot_results, failed_shots, completed_scene_indices. No reference to cost_tracker or spent_usd anywhere in this file.\n\n/Users/hyungkoookkim/Content/cinema_pipeline.py:953-955 — resume path: `self._restore_from_checkpoint()` followed by `self._rebuild_review_clips(project)`. No spend rehydration step.\n\n/Users/hyungkoookkim/Content/cost_tracker.py:407 — `self.spent_usd += cost_usd` inside `record_api_call` is the only write site that increments the accumulator; SQLite SUM helpers (get_session_cost:490, get_video_cost:446) read the DB but never write the result back to self.spent_usd.",
+        "notes": "The claim holds exactly as stated. On checkpoint resume, `CostTracker.__init__` always sets `spent_usd = 0.0` and no rehydration path reads historical spend from SQLite into the in-process accumulator. The budget gate methods (`would_exceed`, `is_over_budget`) therefore operate against a zero baseline after resume, causing the resumed run to under-count total project spend. This is a design-open defect: the fix would be to sum `cost_log` rows for the current `video_id` at construction (or post-resume) and seed `self.spent_usd` with that total. No refute evidence was found."
+      },
+      {
+        "claim_id": "aa-nan-budget-total-subsumed",
+        "holds": true,
+        "refuted": false,
+        "evidence": "cinema/auto_approve.py:617-619 (commit baac518):\n```python\nif budget_total is not None and (\n        not isinstance(budget_total, (int, float)) or not math.isfinite(budget_total)):\n    return True\n```\nComment at lines 611-616 explicitly names the attack vector (NaN budget_total → truthy → per_shot_budget=NaN → spent>NaN always False → veto silently skips) and labels this fix \"Rule #13 sibling, complementary fix\" covering the direct project-dict read path.\n\nCoordinator ACK commit d6af412 log line: \"T1/T3 close op2 aa-inf-multiplier/aa-nan-budget-total\" — confirms the coordinator already reconciled aa-nan-budget-total as subsumed by T3 (baac518).\n\ngit log confirms baac518 exists: \"fix(campaign): aa-budget-nan-veto — fail-closed non-finite spent + budget_total in _shot_over_budget (W1 CRITICAL, Tier-A co-signed)\"",
+        "notes": "The guard covers both the `budget_total` non-finite path AND the `spent_usd` non-finite path (lines 631-632). The `is not None` check at line 617 preserves ADR-026 semantics: None means no cap (passes through to `if not budget_total: return False`), while NaN/inf are structural corruption that must fail-closed. No separate inventory row for aa-nan-budget-total is warranted; subsumption is confirmed by both the code and the coordinator's explicit reconciliation commit."
+      },
+      {
+        "claim_id": "siblings-charmgr-and-perfnogate",
+        "holds": true,
+        "refuted": false,
+        "evidence": "SUB-CLAIM 1 — character_manager fresh CostTracker:\n\ndomain/character_manager.py:349-353:\n    from cost_tracker import CostTracker\n    CostTracker().record_api_call(\n        \"FLUX_KONTEXT\",\n        operation=\"multi_angle_ref\",\n    )\nNo budget_usd argument is passed → cost_tracker.py:224: `self.budget_usd = budget_usd if budget_usd else None` resolves to None.\ncost_tracker.py:227: `self.spent_usd: float = 0.0` (fresh instance starts at zero).\ncost_tracker.py:419-420: `if self.budget_usd is None: return False` — would_exceed() always returns False on this instance.\nThe spend is recorded into the throwaway instance's accumulator, never reaching the gate-connected tracker on ShotController._core.cost_tracker.\n\nSUB-CLAIM 2 — performance phase has no would_exceed precheck:\n\ngrep -n \"would_exceed\" /Users/hyungkoookkim/Content/cinema/shots/controller.py → only line 1655 (inside generate_motion_take, not generate_performance_take).\ngrep -n \"would_exceed|CostTracker|cost_tracker|budget\" /Users/hyungkoookkim/Content/cinema/phases/performance.py → zero results.\ngenerate_performance_take spans controller.py:933–1534; awk NR>=933 && NR<=1534 grep for budget/would_exceed → zero matches.\nThe dispatch at controller.py:1076 (performance/_router.dispatch) fires unconditionally after routing + precondition checks with no budget gate.\nPerformance adapters (live_portrait.py:31, act_one.py:34, viggle.py:30, driving_video.py:37) also construct fresh CostTracker() instances — same money-loss bug family as sub-claim 1, but the precheck-gap defect is distinct: no would_exceed is called anywhere on the performance path before spend is committed.",
+        "notes": "Both sub-claims reproduce at HEAD (git working tree at /Users/hyungkoookkim/Content). Sub-claim 1 is narrowly confirmed at domain/character_manager.py:350 as claimed; note that the same fresh-CostTracker pattern appears in ALL four performance engine adapters (live_portrait, act_one, viggle, driving_video), meaning the money-loss scope is wider than \"character_manager\" alone — the claim is correct but understates the blast radius. Sub-claim 2 (perf-phase-no-gate) is a clean distinct defect class: there is literally no would_exceed call anywhere in the performance capture path (phase, controller method, or adapters), as opposed to the motion path which has one at controller.py:1655. The two defects are indeed distinct: sub-claim 1 is spend-invisible-to-gate (records to throwaway instance); sub-claim 2 is precheck-absent (no gate call at all before dispatching a paid API)."
+      },
+      {
+        "claim_id": "siblings-lipsync-costkey-and-cascade",
+        "holds": true,
+        "refuted": false,
+        "evidence": "CLAIM (1) — lipsync-postproc-costkey:\n\ncinema/shots/controller.py:2441-2447:\n    try:\n        _ls_engine = (_lipsync_cascade.get(\"cascade_metadata\", {})\n                      .get(\"engine\") or \"LIPSYNC\")\n        self.cost_tracker.record_api_call(\n            _ls_engine, operation=\"lipsync\",\n            shot_id=shot_id, video_id=self.project.get(\"id\", \"\"),\n        )\n\nThe raw engine name (e.g. \"syncsov3\") — or the bare fallback \"LIPSYNC\" — is passed without the LIPSYNC_ prefix. cost_tracker.py:49-96 confirms API_COST_USD has only LIPSYNC_* namespaced keys (e.g. \"LIPSYNC_SYNCSOV3\": 0.05); cost_tracker.py:372 returns 0.0 for any missing key. The correct prefix IS applied at controller.py:1858: `f\"LIPSYNC_{_ls_engine}\"`. xfail pin at tests/unit/test_discovery_cost_xfail.py:113-158 confirms the bug is unfixed (strict=True).\n\nCLAIM (2) — lipsync-precheck-cascade-gap:\n\ncinema/shots/controller.py:1655:\n    if self.cost_tracker.would_exceed(target_api):\n\ncost_tracker.py:414-422: `would_exceed(api_name)` looks up only the single video API cost.\n\ncinema/shots/controller.py:1783-1793:\n    # F1b: Mandatory lipsync pass for dialogue shots that are NOT audio-embedded.\n    # ...runs unconditionally during take generation so the gate always has a score.\n    if has_dialogue and not take[\"metadata\"].get(\"audio_embedded\"):\n\nThe F1b lipsync cascade fires after the video-only gate with no additional budget check. tests/unit/test_discovery_cost_xfail.py:22-30 documents this as test-infeasible and confirms no pin exists (no code fix at HEAD).",
+        "notes": "Both defects reproduce at HEAD. (1) The postprocess lipsync cost-key bug is at controller.py:2444 (not 2442 as stated — the call is on line 2444, the engine extraction starts at 2442); the claim's \"~2442\" spans this range correctly. The fallback value in the postprocess branch is \"LIPSYNC\" (not \"default\" as in the generate-motion path), which also misses any API_COST_USD key, so even the fallback path records $0. (2) The precheck-cascade-gap claim is accurate: would_exceed at line 1655 checks only target_api (video cost); the F1b block at line 1793 fires unconditionally for dialogue shots with no lipsync budget check. The test file marks confirmed[7] as test-infeasible with no strict xfail pin, which is consistent with the claim. Neither defect has been fixed."
+      }
+    ],
+    "summary": [
+      {
+        "id": "P1-webresearch-bounded",
+        "holds": false,
+        "refuted": true
+      },
+      {
+        "id": "P2-performance-unbounded-freshinstance",
+        "holds": true,
+        "refuted": false
+      },
+      {
+        "id": "P3-doublecount-a-fix",
+        "holds": true,
+        "refuted": false
+      },
+      {
+        "id": "P4-gate-reads-accumulator-only",
+        "holds": true,
+        "refuted": false
+      },
+      {
+        "id": "P5-audio-t5-precedent",
+        "holds": true,
+        "refuted": false
+      },
+      {
+        "id": "P6-webresearch-callers-planning",
+        "holds": true,
+        "refuted": false
+      },
+      {
+        "id": "C1-shot-spent-never-written",
+        "holds": true,
+        "refuted": false
+      },
+      {
+        "id": "C2-spent-reset-on-resume",
+        "holds": true,
+        "refuted": false
+      },
+      {
+        "id": "aa-nan-budget-total-subsumed",
+        "holds": true,
+        "refuted": false
+      },
+      {
+        "id": "siblings-charmgr-and-perfnogate",
+        "holds": true,
+        "refuted": false
+      },
+      {
+        "id": "siblings-lipsync-costkey-and-cascade",
+        "holds": true,
+        "refuted": false
+      }
+    ]
+  }
+}
