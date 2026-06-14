@@ -69,3 +69,12 @@ New driver `scripts/_prod_dual_masked_pulid.py` — fork `scripts/_prod_dual_lor
 ## 8. Cost / risk
 
 Pod-gated, best-effort (Wave-3). N=1 smoke ≈ one render; N=4 ≈ four. Risk is low-spend, graph-only (no training in Route A). If Route A under-binds after weight/mask tuning, escalate to Route B (aria-LoRA train) as a separate decision — that's the heavier investment and a fresh spend gate.
+
+## 9. Empirical addendum — director-1 fresh 8-config sweep (2026-06-15)
+
+After this plan was authored, director-1 relaunched ComfyUI fresh and burned a clean **8-config sweep** of `_prod_dual_lora_pulid.py` (seed 990011; artifacts local/gitignored: `logs/sweep_s*_mw*.jpg`, montage `logs/sweep_montage.jpg`, scores `logs/halves_rescore_20260615.json`). It **corrects §2's N=1 reading and re-weights the routes:**
+
+- **§2's "default = double-man" was a CACHE HIT, not the default graph.** Fresh at the documented default (strength 0.55, man-weight 0.85): a **distinct woman who binds (aria-LEFT 0.757)** + a **man who UNDER-binds (man-RIGHT 0.490)** — NOT a double-man. The `passb_prod_n1_00046.png` double-man was a stale cache of a *higher-strength* render.
+- **Strength series (man-weight 0.85):** man-RIGHT 0.490→0.495→0.514→0.519→**0.850** at strength 0.55→0.65→0.75→0.85→**0.95**; aria-LEFT 0.757→0.748→0.702→0.696→**0.659**. The **double-man bleed is a strength-0.95 behavior** (man binds 0.850 but overwrites aria — visual NO-GO).
+- **man-weight is a dead lever** (man flat ~0.49 from 0.85→1.0; aria degrades). §3's "asymmetric PuLID weights won't fix it" is confirmed empirically.
+- **⇒ Route A risk:** the man **needs a LoRA to cross 0.75** (PuLID-alone floors ~0.49 even at man-weight 1.0). Dropping the man LoRA entirely (Route A) will likely leave him **under-bound** — masking confines *where* each PuLID acts but can't make the man's PuLID-alone bind. **Recommend going to Route B sooner** (aria LoRA so both identities have equal-strength LoRAs, then mask both PuLIDs), or a Route-A+masked-man-LoRA hybrid. The crux is spatial confinement of the man's *global LoRA*, which `attn_mask` (a PuLID input) does not address.
