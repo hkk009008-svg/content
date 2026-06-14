@@ -31,6 +31,7 @@ from typing import Optional, Dict, List
 from dataclasses import dataclass
 from config.settings import settings as ENV_SETTINGS
 from cinema.fal_limits import FAL_TIMEOUT_TALKING_HEAD_S, FAL_TIMEOUT_VIDEO_S
+from cinema.context import _finite_or
 
 logger = logging.getLogger(__name__)
 
@@ -658,10 +659,10 @@ def _sync_gate_settings(settings: Optional[dict] = None) -> tuple:
     """
     s = settings or {}
     enabled = s.get("lipsync_quality_validation", True)
-    try:
-        threshold = float(s.get("lipsync_validation_threshold", 0.65))
-    except (TypeError, ValueError):
-        threshold = 0.65
+    # _finite_or (not a bare float()) so a NaN/inf lipsync_validation_threshold
+    # falls back to 0.65: float('nan') succeeds, and `score >= NaN` is always
+    # False, so a NaN bar would make every engine fail the sync gate.
+    threshold = _finite_or(s.get("lipsync_validation_threshold", 0.65), 0.65)
     return enabled, threshold
 
 

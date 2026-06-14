@@ -13,6 +13,7 @@ from statistics import mean
 from typing import Optional
 
 from cinema.aspect import resolve_output_dimensions, DEFAULT_ASPECT_RATIO
+from cinema.context import _finite_or
 
 # U3 — Final-media conformance constants.
 # LUFS pass = abs(value - target) <= tolerance (streaming-platform window,
@@ -128,11 +129,11 @@ def build_capability_scorecard(project: dict, *, project_dir: str) -> dict:
         from cinema.auto_approve import AutoApproveConfig
         cfg = AutoApproveConfig.from_project(project)
         identity_bar = getattr(cfg, "motion_min_identity", 0.6)
-        lipsync_bar = float(gs.get("lipsync_validation_threshold", 0.65))
+        lipsync_bar = _finite_or(gs.get("lipsync_validation_threshold", 0.65), 0.65)
     except Exception:
         logger.debug("capability scorecard: bar sourcing failed, using defaults", exc_info=True)
         identity_bar, lipsync_bar = 0.6, 0.65
-    coherence_bar = float(gs.get("coherence_threshold", 0.6))
+    coherence_bar = _finite_or(gs.get("coherence_threshold", 0.6), 0.6)
 
     ident_v, coh_v, motion_v, lip_v = [], [], [], []
     per_shot, provenance = [], []

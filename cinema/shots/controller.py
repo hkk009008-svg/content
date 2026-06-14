@@ -87,7 +87,7 @@ from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 from project_manager import MutationResult, mutate_project, make_take
 from llm.style_director import style_rules_to_prompt_suffix
 from character_manager import get_reference_image
-from cinema.context import PipelineContext
+from cinema.context import PipelineContext, _finite_or
 from phase_c_assembly import generate_ai_broll
 from phase_c_ffmpeg import generate_ai_video, stitch_modules, _probe_duration
 from phase_c_vision import face_swap_video_frames
@@ -808,7 +808,12 @@ class ShotController:
             # `identity_threshold` so the operator can raise/lower the bar
             # without touching every shot. Falls back to the per-shot value.
             strictness = settings.get("identity_strictness")
-            threshold = strictness if strictness is not None else cc.get("identity_threshold", 0.70)
+            # _finite_or preserves the existing None -> per-shot fallback (float(None)
+            # raises -> default) AND guards a NaN/inf identity_strictness: nan is not
+            # None, so without this `validate_image(threshold=nan)` makes every frame's
+            # `similarity >= nan` False -> identity always fails. NaN-fallback == the
+            # absent-setting fallback (per-shot identity_threshold). [Pair-A: confirm.]
+            threshold = _finite_or(strictness, cc.get("identity_threshold", 0.70))
             id_result = _get_shared_validator().validate_image(
                 img_path, primary_ref,
                 character_id=primary_char_id,
@@ -2257,12 +2262,12 @@ class ShotController:
                     coh = assess_coherence(str(image_path), prev_img)
                     result["scores"]["coherence"] = coh.overall_coherence_score
                     result["scores"]["color_drift"] = coh.color_drift
-                    _drift_threshold = _diag_settings.get("color_drift_sensitivity", 0.3)
+                    _drift_threshold = _finite_or(_diag_settings.get("color_drift_sensitivity", 0.3), 0.3)
                     if coh.color_drift > _drift_threshold:
                         result["recommendations"].append({"tool": "color_grade", "reason": "Color palette drift detected"})
                     # Per-project `coherence_threshold` triggers a regenerate
                     # recommendation when the overall coherence score is too low.
-                    _coherence_floor = _diag_settings.get("coherence_threshold", 0.6)
+                    _coherence_floor = _finite_or(_diag_settings.get("coherence_threshold", 0.6), 0.6)
                     if coh.overall_coherence_score < _coherence_floor:
                         result["recommendations"].append({"tool": "regenerate", "reason": "Low coherence vs previous shot"})
 

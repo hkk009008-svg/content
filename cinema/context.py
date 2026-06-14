@@ -39,6 +39,8 @@ add a new key, declare it as a dataclass field.
 
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass, field, fields, asdict
 from typing import Any, Iterator, Optional
 
@@ -179,3 +181,25 @@ def get_project_setting(ctx, key: str, default=None):
         return default
     v = gs.get(key)
     return default if v is None else v
+
+
+def _finite_or(value, default):
+    """Coerce ``value`` to a finite float, else return ``default``.
+
+    The canonical shared guard for numeric gate reads against a NaN/inf/
+    non-coercible per-project setting. A bare ``NaN`` token survives in
+    project.json because ``json.load`` defaults to ``allow_nan=True``, and a NaN
+    defeats every numeric gate because ``score < NaN`` and ``score >= NaN`` are
+    both False. ``float(NaN)`` succeeds, so a plain ``try/except`` around the
+    cast does NOT catch it — this helper does.
+
+    Placed beside ``get_project_setting`` as its read-side companion: callers
+    read a knob via ``get_project_setting`` (or a settings ``.get``) then
+    finite-guard it via ``_finite_or``. (quality_max keeps a documented-temporary
+    local copy at ``quality_max:191`` pending a trivial import-swap to this one.)
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    return v if math.isfinite(v) else default
