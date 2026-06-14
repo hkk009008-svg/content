@@ -258,7 +258,7 @@ Dataclass + dict API. Fields:
 - **Workspace:** `downloaded_vids: list`.
 - **Max-quality:** `prev_shot_latent`, `char_lora_paths`, `style_reference_paths`.
 
-Dict API methods at [cinema/context.py:116-148](cinema/context.py:116):
+Dict API methods at [cinema/context.py:118-150](cinema/context.py:118):
 `__getitem__`, `__setitem__`, `__contains__`, `__iter__`, `get`, `update`,
 `keys`, `items`, `values`, plus `as_dict()`. `__setitem__` falls back to
 `setattr` so legacy code can write undeclared keys.
@@ -877,8 +877,8 @@ keep-own-clothing constraint line; single-char shots never enter this branch
 (structural early-return). On Kontext failure the fallback path passes the
 ORIGINAL prompt unchanged to FLUX-Pro. Per-char identity scores land in
 `take["metadata"]["identity_per_char"]`
-([cinema/shots/controller.py:854](cinema/shots/controller.py:854)) and are surfaced as `identity_multi`
-in the capability scorecard ([cinema/capability_scorecard.py:165](cinema/capability_scorecard.py:165)).
+([cinema/shots/controller.py:859](cinema/shots/controller.py:859)) and are surfaced as `identity_multi`
+in the capability scorecard ([cinema/capability_scorecard.py:166](cinema/capability_scorecard.py:166)).
 
 ### 8.3 Max tier — `quality_max.py` (N=8 adaptive best-of)
 
@@ -1291,12 +1291,12 @@ ATTEMPT-0 is now a **direct** Character-3 call —
 the **dead** `fal-ai/hedra/character-3` FAL proxy (HTTP 404). Flow: create+upload
 image asset → create+upload audio asset → POST `/generations` → poll
 `/generations/{id}/status` → download. Invoked as ATTEMPT 0 from
-[lip_sync.py:809](lip_sync.py:809); key from `settings.hedra_api_key` (`.env`
+[lip_sync.py:810](lip_sync.py:810); key from `settings.hedra_api_key` (`.env`
 `HEDRA_API_KEY`). On any failure it returns `None` and the cascade falls through
 to Kling → Omnihuman → Creatify.
 
-**SyncNet quality gate** ([lip_sync.py:281](lip_sync.py:281) for overlay gate;
-[lip_sync.py:741](lip_sync.py:741) for generation gate) scores each
+**SyncNet quality gate** ([lip_sync.py:282](lip_sync.py:282) for overlay gate;
+[lip_sync.py:742](lip_sync.py:742) for generation gate) scores each
 engine's output against `lipsync_validation_threshold` (default 0.65).
 Below-threshold outputs stashed (`.{engine}.tmp`); if no engine clears the bar,
 the **highest-scored stashed candidate** is restored as the final output.
@@ -1441,7 +1441,7 @@ defaults at [cinema/shots/controller.py:810](cinema/shots/controller.py:810).
 
 `IdentityValidator.history` accumulates from:
 
-1. **Keyframe validation** — `cinema/shots/controller.py:812` and `:848`
+1. **Keyframe validation** — `cinema/shots/controller.py:817` and `:853`
 2. **N=8 best-of grading** — `face_validator_gate._arcface_score` → `validate_image(threshold=0.0)`
 3. **Performance gate scoring** — `performance/identity_gate._arcface_score` → `validate_image(threshold=0.0)`
 4. **Continuity video validation** — `domain/continuity_engine.py:630` → `validate_video`
@@ -1615,7 +1615,7 @@ Decision: `RETRY | ACCEPT_LENIENT | FAIL`. Negative-prompt phrases (from
 `llm.negative_prompts`) appended based on first failing character's reason.
 
 **Wired by T6 (`10a0eb4`, 2026-06-06):** called from
-`cinema/shots/controller.py:2169` inside `diagnose_clip(deep=True)`.
+`cinema/shots/controller.py:2174` inside `diagnose_clip(deep=True)`.
 The opt-in deep path is triggered by `POST /api/projects/<pid>/shots/<shot_id>/diagnose`
 with JSON body `{"deep": true}`.
 
@@ -1669,8 +1669,8 @@ post-failure (reactive vocabulary lookup, not upfront constraint builder).
 Consumers (as of T6, 2026-06-06):
 - `ChiefDirector.evaluate_generation_quality` — uses first failing character's reason.
 - `build_remediation_advisory` (new, `llm/negative_prompts.py:52`) — called from
-  `generate_keyframe_take` (defined at `cinema/shots/controller.py:609`; call at :835) and `diagnose_clip`
-  (`cinema/shots/controller.py:2169`); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
+  `generate_keyframe_take` (defined at `cinema/shots/controller.py:609`; call at :840) and `diagnose_clip`
+  (`cinema/shots/controller.py:2174`); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
 
 ### 13.8 `config/settings.py`
 
