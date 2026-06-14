@@ -841,7 +841,7 @@ Output ONLY the raw JSON array. No markdown wrapping."""
         print(f"   [Ensemble] Competitive decomposition failed: {e}")
         traceback.print_exc()
         print("   [Ensemble] Falling back to single-model decompose_scene()")
-        return decompose_scene(scene, characters, location, global_settings, style_rules)
+        return decompose_scene(scene, characters, location, global_settings, style_rules, cost_tracker=cost_tracker)
 
 
 def _fallback_decompose(
