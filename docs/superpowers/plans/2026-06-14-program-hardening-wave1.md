@@ -265,11 +265,11 @@ add the `W1:CRITICAL:<id>` prefix opportunistically.
 - Pin (RED): `tests/unit/test_budget_nan_gate_xfail.py`
 - Lock: `coordination/locks/W1-core.py.lock`
 
-- [ ] **PRE-STEP — resolve the design question BEFORE claiming the lock** (so the lock isn't
-  held while waiting on the principal): fail-safe **block** on NaN budget vs `None` = unlimited.
-  This is a behavior policy with money implications → **SURFACE, do not silently decide** (§6e) —
-  the Pair-B director surfaces the choice to the user-principal and records the decision in the
-  R-BRIEF + `DECISIONS.md`. Default lean: **fail-safe block** (a NaN cap is corruption, not "unlimited").
+- [x] **Design question RESOLVED (user-endorsed 2026-06-14, Session-8):** a NaN budget cap →
+  **fail-safe BLOCK** (a NaN cap is data corruption, not a deliberate "unlimited"; silently
+  allowing unbounded spend is the money-loss this row exists to close). `None` continues to mean
+  "no cap set." Pair-B director encodes this in the R-BRIEF and formalizes it as an ADR in
+  `DECISIONS.md` with the fix. (Decided up-front so the lock isn't held waiting on the principal.)
 - [ ] Claim `W1-core.py.lock` (Pair-B is first-mover). R-BRIEF (encodes the resolved policy) + **Pair-A** director Tier-A co-sign (mailbox before code).
 - [ ] Confirm RED (`--runxfail`): NaN `budget_limit_usd` survives `float()`; `bool(nan)=True` stores it; `would_exceed`/`is_over_budget` compare against NaN (always False) → unbounded spend masquerading as a set cap.
 - [ ] Implement per the resolved policy. **Hint:** finite-guard the budget read so a NaN cap is rejected/blocked, not treated as no-cap. Remove the pin.
