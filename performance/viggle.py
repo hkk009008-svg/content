@@ -23,11 +23,11 @@ from performance._poll import poll_task
 _POLL_INTERVAL_S = 3
 
 
-def _cost_log(shot_id: str = "", video_id: str = "") -> None:
+def _cost_log(shot_id: str = "", video_id: str = "", cost_tracker=None) -> None:
     """Viggle is per-clip pricing (~$0.10–$0.25)."""
     try:
         from cost_tracker import CostTracker
-        CostTracker().log_api(
+        (cost_tracker or CostTracker()).log_api(
             provider="viggle",
             model="motion_retarget",
             operation="performance_capture",
@@ -48,6 +48,7 @@ def generate_viggle_performance(
     shot_id: str = "",
     video_id: str = "",
     poll_timeout_s: int = 300,
+    cost_tracker=None,
 ) -> Optional[str]:
     """Viggle motion retargeting. Driving video is mandatory.
 
@@ -118,7 +119,7 @@ def generate_viggle_performance(
             return None
         if not safe_download(out_url, output_mp4):
             return None
-        _cost_log(shot_id, video_id)
+        _cost_log(shot_id, video_id, cost_tracker=cost_tracker)
         print(f"   ✅ Viggle: {output_mp4}")
         return output_mp4
     except Exception as e:

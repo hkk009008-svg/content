@@ -6,11 +6,14 @@ BUG CLASS: API spend paths that should update the in-process ``spent_usd`` accum
 gate and cost visibility.
 
 CATALOG:
-  - confirmed[4] costtracker-perf-uncounted (cost_tracker.py:282,303 — W1:CRITICAL):
-    ``log_api()`` and ``log_llm()`` write SQLite but do NOT increment ``self.spent_usd``;
-    only ``record_api_call()`` does (:367).  Performance / image phases that call
-    ``log_api()`` directly bypass the in-memory accumulator — budget gate sees $0 even
-    after real spend, allowing unlimited over-run.  PINNED below.
+  - confirmed[4] costtracker-perf-uncounted (cost_tracker.py — W1:CRITICAL): FIXED in
+    Wave-1 Task 7.  ``log()`` (the sole write chokepoint that log_api/log_llm delegate
+    to) now increments ``self.spent_usd``; ``record_api_call()``'s duplicate increment
+    was removed; and the shared ``cost_tracker`` is threaded through
+    ``performance/_router.dispatch`` into the 4 performance phases so per-shot spend
+    lands on the accumulator the budget gate reads.  Live regression:
+    tests/unit/test_costtracker_perf_uncounted_regression.py (the former two xfail pins
+    flipped XPASS and were promoted there).
 
   - confirmed[5] lipsync-postproc-costkey (controller.py:2442-2446 — W2:MAJOR):
     the postprocess lip_sync branch passes the raw engine name (e.g. ``"syncsov3"``) to
@@ -35,75 +38,13 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# confirmed[4] — log_api / log_llm do not increment spent_usd
+# confirmed[4] — costtracker-perf-uncounted: FIXED in Wave-1 Task 7.
+#   log()/log_api()/log_llm() now increment spent_usd at the log() chokepoint and
+#   the shared cost_tracker is threaded through performance/_router.dispatch into
+#   the 4 performance phases. The two former xfail pins (test_log_api_increments_
+#   spent_usd / test_log_llm_increments_spent_usd) flipped XPASS and were promoted
+#   to live regressions in tests/unit/test_costtracker_perf_uncounted_regression.py.
 # ---------------------------------------------------------------------------
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="W1:CRITICAL:costtracker-perf-uncounted cost_tracker.py:282,303: log_api() "
-    "writes to SQLite via self.log() but never does self.spent_usd += cost_usd "
-    "(only record_api_call() does at :367). Performance/image phases that call "
-    "log_api() directly leave spent_usd=0 so the budget gate always passes, "
-    "allowing unbounded spend. Fix: increment spent_usd inside log_api (and "
-    "log_llm); then this xpasses (strict) and the pin is removed.",
-)
-def test_log_api_increments_spent_usd(tmp_path):
-    """log_api() must update spent_usd so the budget gate sees real spend."""
-    from cost_tracker import CostTracker
-
-    db = str(tmp_path / "cost.db")
-    tracker = CostTracker(db_path=db, budget_usd=10.0)
-
-    assert tracker.spent_usd == 0.0, "precondition: starts at zero"
-
-    tracker.log_api(
-        provider="comfyui",
-        model="COMFYUI_PULID",
-        operation="image_generation",
-        cost_usd=0.04,
-    )
-
-    # The FIXED behaviour: log_api increments the in-process accumulator.
-    # Current (buggy) behaviour: spent_usd stays 0.0 -> XFAIL today.
-    assert tracker.spent_usd > 0.0, (
-        "log_api() recorded SQLite cost but spent_usd remained 0.0 — "
-        "the budget gate is blind to this spend (costtracker-perf-uncounted)"
-    )
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="W1:CRITICAL:costtracker-perf-uncounted cost_tracker.py:303: log_llm() "
-    "writes to SQLite via self.log() but never does self.spent_usd += cost_usd "
-    "(only record_api_call() does at :367). LLM phases that call log_llm() directly "
-    "leave spent_usd=0 so the budget gate always passes, allowing unbounded spend. "
-    "Fix: increment spent_usd inside log_llm; then this xpasses (strict) and the "
-    "pin is removed.",
-)
-def test_log_llm_increments_spent_usd(tmp_path):
-    """log_llm() must update spent_usd so the budget gate sees real LLM spend."""
-    from cost_tracker import CostTracker
-
-    db = str(tmp_path / "cost.db")
-    tracker = CostTracker(db_path=db, budget_usd=10.0)
-
-    assert tracker.spent_usd == 0.0, "precondition: starts at zero"
-
-    # claude-sonnet-4-6 is in PRICING: $3.00/M input, $15.00/M output
-    # 100k input tokens -> $0.30; cost_usd > 0 if accumulated correctly.
-    tracker.log_llm(
-        model="claude-sonnet-4-6",
-        operation="script_generation",
-        input_tokens=100_000,
-        output_tokens=1_000,
-    )
-
-    # The FIXED behaviour: log_llm increments the in-process accumulator.
-    # Current (buggy) behaviour: spent_usd stays 0.0 -> XFAIL today.
-    assert tracker.spent_usd > 0.0, (
-        "log_llm() recorded SQLite cost but spent_usd remained 0.0 — "
-        "the budget gate is blind to this LLM spend (costtracker-perf-uncounted)"
-    )
 
 
 # ---------------------------------------------------------------------------

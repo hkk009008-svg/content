@@ -30,11 +30,11 @@ _SADTALKER_POLL_TIMEOUT_S = 240
 _SADTALKER_POLL_INTERVAL_S = 2
 
 
-def _cost_log(provider: str, duration_s: float, shot_id: str, video_id: str) -> None:
+def _cost_log(provider: str, duration_s: float, shot_id: str, video_id: str, cost_tracker=None) -> None:
     try:
         from cost_tracker import CostTracker
         cost = {"hedra": 0.05, "sadtalker": 0.02}.get(provider, 0.02)
-        CostTracker().log_api(
+        (cost_tracker or CostTracker()).log_api(
             provider=provider, model="driving_face",
             operation="performance_capture_driving",
             cost_usd=cost + 0.005 * float(duration_s),
@@ -46,7 +46,7 @@ def _cost_log(provider: str, duration_s: float, shot_id: str, video_id: str) -> 
 
 def _synth_via_hedra(
     audio_path: str, keyframe_path: str, output_mp4: str, duration_s: float,
-    shot_id: str, video_id: str,
+    shot_id: str, video_id: str, cost_tracker=None,
 ) -> Optional[str]:
     """Hedra Character-3 audio→video via direct REST API.
 
@@ -108,7 +108,7 @@ def _synth_via_hedra(
             return None
         if not safe_download(out_url, output_mp4):
             return None
-        _cost_log("hedra", duration_s, shot_id, video_id)
+        _cost_log("hedra", duration_s, shot_id, video_id, cost_tracker=cost_tracker)
         print(f"   ✅ Hedra (direct) driving face: {output_mp4}")
         return output_mp4
     except Exception as e:
@@ -118,7 +118,7 @@ def _synth_via_hedra(
 
 def _synth_via_sadtalker(
     audio_path: str, keyframe_path: str, output_mp4: str, duration_s: float,
-    shot_id: str, video_id: str,
+    shot_id: str, video_id: str, cost_tracker=None,
 ) -> Optional[str]:
     """SadTalker via ComfyUI — free fallback when no Hedra access.
 
@@ -208,7 +208,7 @@ def _synth_via_sadtalker(
                 # exposes the proxy URL without TLS).
                 if not safe_download(view, output_mp4, allow_http=True):
                     return None
-                _cost_log("sadtalker", duration_s, shot_id, video_id)
+                _cost_log("sadtalker", duration_s, shot_id, video_id, cost_tracker=cost_tracker)
                 print(f"   ✅ SadTalker driving face: {output_mp4}")
                 return output_mp4
         return None
@@ -226,6 +226,7 @@ def synth_driving_face_from_audio(
     engine: str = "auto",     # 'auto' | 'hedra' | 'sadtalker'
     shot_id: str = "",
     video_id: str = "",
+    cost_tracker=None,
 ) -> Optional[Tuple[str, str]]:
     """Generate a driving face video from TTS audio + a still keyframe.
 
@@ -264,7 +265,7 @@ def synth_driving_face_from_audio(
         return (output_mp4, "cache")
 
     if engine in ("auto", "hedra"):
-        r = _synth_via_hedra(audio_path, keyframe_path, output_mp4, duration_s, shot_id, video_id)
+        r = _synth_via_hedra(audio_path, keyframe_path, output_mp4, duration_s, shot_id, video_id, cost_tracker=cost_tracker)
         if r:
             store_cache(key, output_mp4)
             return (r, "hedra")
@@ -272,7 +273,7 @@ def synth_driving_face_from_audio(
             return None
 
     if engine in ("auto", "sadtalker"):
-        r = _synth_via_sadtalker(audio_path, keyframe_path, output_mp4, duration_s, shot_id, video_id)
+        r = _synth_via_sadtalker(audio_path, keyframe_path, output_mp4, duration_s, shot_id, video_id, cost_tracker=cost_tracker)
         if r:
             store_cache(key, output_mp4)
             return (r, "sadtalker")

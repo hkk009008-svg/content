@@ -277,6 +277,14 @@ class CostTracker:
             (ts, provider, model, operation, input_tokens, output_tokens, cost_usd, shot_id, video_id),
         )
         self.conn.commit()
+        # spent_usd mirrors the persisted spend. Increment at this sole write
+        # chokepoint (log_api/log_llm both delegate here) so every logged cost
+        # reaches the in-process accumulator the budget gate reads
+        # (would_exceed/is_over_budget). Placed AFTER commit so a failed INSERT
+        # never inflates the accumulator. Previously only record_api_call did
+        # this, so log_api/log_llm spend (the 4 performance phases, etc.) was
+        # invisible to the gate — costtracker-perf-uncounted, W1:CRITICAL.
+        self.spent_usd += cost_usd
         return CostEntry(
             timestamp=ts,
             provider=provider,
@@ -404,7 +412,8 @@ class CostTracker:
             shot_id=shot_id,
             video_id=video_id,
         )
-        self.spent_usd += cost_usd
+        # spent_usd is incremented inside log() (the sole write chokepoint that
+        # log_api delegates to), so accumulating it again here would double-count.
         return cost_usd
 
     # ------------------------------------------------------------------

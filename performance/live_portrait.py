@@ -24,11 +24,11 @@ from performance._poll import poll_task
 _POLL_INTERVAL_S = 2
 
 
-def _cost_log(duration_s: float, shot_id: str = "", video_id: str = "") -> None:
+def _cost_log(duration_s: float, shot_id: str = "", video_id: str = "", cost_tracker=None) -> None:
     """Tiny fixed cost — Railway GPU amortization (~$0.02 per 5s clip)."""
     try:
         from cost_tracker import CostTracker
-        CostTracker().log_api(
+        (cost_tracker or CostTracker()).log_api(
             provider="comfyui",
             model="live_portrait",
             operation="performance_capture",
@@ -49,6 +49,7 @@ def generate_live_portrait_performance(
     shot_id: str = "",
     video_id: str = "",
     poll_timeout_s: int = 300,
+    cost_tracker=None,
 ) -> Optional[str]:
     """LivePortrait via ComfyUI — driving video required."""
     server_url = (getattr(settings, "comfyui_server_url", "") or "").rstrip("/")
@@ -155,7 +156,7 @@ def generate_live_portrait_performance(
                     # ComfyUI pod is internal-trusted; allow http.
                     if not safe_download(view, output_mp4, allow_http=True):
                         return None
-                    _cost_log(duration_s, shot_id, video_id)
+                    _cost_log(duration_s, shot_id, video_id, cost_tracker=cost_tracker)
                     print(f"   ✅ LivePortrait: {output_mp4}")
                     return output_mp4
         return None

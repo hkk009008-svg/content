@@ -26,12 +26,12 @@ from performance._poll import poll_task
 _POLL_INTERVAL_S = 3
 
 
-def _cost_log(operation: str, duration_s: float, shot_id: str = "", video_id: str = "") -> None:
+def _cost_log(operation: str, duration_s: float, shot_id: str = "", video_id: str = "", cost_tracker=None) -> None:
     """Best-effort cost log. Doesn't fail the call if tracking isn't wired."""
     try:
         from cost_tracker import CostTracker
         # Runway Act-One: ~$0.05/s of output video (confirm with their pricing page)
-        CostTracker().log_api(
+        (cost_tracker or CostTracker()).log_api(
             provider="runway",
             model="act_one",
             operation=operation,
@@ -54,6 +54,7 @@ def generate_act_one_performance(
     shot_id: str = "",
     video_id: str = "",
     poll_timeout_s: int = 300,
+    cost_tracker=None,
 ) -> Optional[str]:
     """Generate an Act-One performance clip.
 
@@ -122,14 +123,14 @@ def generate_act_one_performance(
             return None
         if not safe_download(out_url, output_mp4):
             return None
-        _cost_log("performance_capture", duration_s, shot_id, video_id)
+        _cost_log("performance_capture", duration_s, shot_id, video_id, cost_tracker=cost_tracker)
         print(f"   ✅ Act-One: {output_mp4}")
         return output_mp4
     except ImportError:
         # SDK not installed — fall through to raw REST
         return _raw_rest_call(api_key, keyframe_path, audio_path, output_mp4,
                               driving_video_path, duration_s, poll_timeout_s,
-                              shot_id, video_id)
+                              shot_id, video_id, cost_tracker=cost_tracker)
     except Exception as e:
         print(f"   [ACT-ONE] SDK call failed: {e}")
         return None
@@ -147,7 +148,7 @@ def _to_data_uri_or_path(path: str) -> str:
 def _raw_rest_call(
     api_key: str, keyframe_path: str, audio_path: str, output_mp4: str,
     driving_video_path: Optional[str], duration_s: float, poll_timeout_s: int,
-    shot_id: str, video_id: str,
+    shot_id: str, video_id: str, cost_tracker=None,
 ) -> Optional[str]:
     """Raw REST fallback when the Runway SDK isn't installed.
 
@@ -218,7 +219,7 @@ def _raw_rest_call(
             return None
         if not safe_download(out_url, output_mp4):
             return None
-        _cost_log("performance_capture", duration_s, shot_id, video_id)
+        _cost_log("performance_capture", duration_s, shot_id, video_id, cost_tracker=cost_tracker)
         print(f"   ✅ Act-One (REST): {output_mp4}")
         return output_mp4
     except Exception as e:

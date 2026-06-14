@@ -39,6 +39,7 @@ def _dispatch_inner(
     duration_s: float = 5.0,
     shot_id: str = "",
     video_id: str = "",
+    cost_tracker=None,
 ) -> Optional[str]:
     """Call the right adapter for the requested engine.
 
@@ -58,6 +59,7 @@ def _dispatch_inner(
             driving_video_path=driving_video_path,
             duration_s=duration_s,
             shot_id=shot_id, video_id=video_id,
+            cost_tracker=cost_tracker,
         )
 
     if engine == ENGINE_LIVE_PORTRAIT:
@@ -70,6 +72,7 @@ def _dispatch_inner(
             keyframe_path, driving_video_path, output_mp4,
             duration_s=duration_s,
             shot_id=shot_id, video_id=video_id,
+            cost_tracker=cost_tracker,
         )
 
     if engine == ENGINE_VIGGLE:
@@ -80,6 +83,7 @@ def _dispatch_inner(
         return generate_viggle_performance(
             keyframe_path, driving_video_path, output_mp4,
             shot_id=shot_id, video_id=video_id,
+            cost_tracker=cost_tracker,
         )
 
     print(f"   [DISPATCH] unknown engine '{engine}'; skipping")
@@ -96,8 +100,16 @@ def dispatch(
     duration_s: float = 5.0,
     shot_id: str = "",
     video_id: str = "",
+    cost_tracker=None,
 ) -> Optional[str]:
-    """Public entry. Acquires per-provider semaphore, then delegates."""
+    """Public entry. Acquires per-provider semaphore, then delegates.
+
+    ``cost_tracker`` (optional): the shared CostTracker the controller reads for
+    budget enforcement. When supplied it is threaded down to each phase's cost
+    log so per-shot performance spend lands on the shared accumulator instead of
+    a throwaway instance (costtracker-perf-uncounted). When None the phases fall
+    back to their own throwaway tracker (unchanged behaviour for other callers).
+    """
     if engine == ENGINE_SKIP or not engine:
         return None
     sem = _SEMAPHORES.get(engine)
@@ -107,6 +119,7 @@ def dispatch(
             keyframe_path=keyframe_path, audio_path=audio_path,
             driving_video_path=driving_video_path, output_mp4=output_mp4,
             duration_s=duration_s, shot_id=shot_id, video_id=video_id,
+            cost_tracker=cost_tracker,
         )
     with sem:
         return _dispatch_inner(
@@ -114,4 +127,5 @@ def dispatch(
             keyframe_path=keyframe_path, audio_path=audio_path,
             driving_video_path=driving_video_path, output_mp4=output_mp4,
             duration_s=duration_s, shot_id=shot_id, video_id=video_id,
+            cost_tracker=cost_tracker,
         )

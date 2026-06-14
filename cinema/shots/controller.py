@@ -1035,6 +1035,7 @@ class ShotController:
                     output_mp4=temp_driving,
                     duration_s=float(scene.get("duration_seconds", 5.0)),
                     shot_id=shot_id, video_id=str(project.get("id", "")),
+                    cost_tracker=self.cost_tracker,
                 )
                 if synth_result:
                     driving, driving_provider = synth_result
@@ -1082,6 +1083,7 @@ class ShotController:
                 duration_s=float(scene.get("duration_seconds", 5.0)),
                 shot_id=shot_id,
                 video_id=str(project.get("id", "")),
+                cost_tracker=self.cost_tracker,
             )
         except Exception as e:
             return {"success": False, "error": f"Performance dispatch raised: {e}"}
