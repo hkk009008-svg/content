@@ -1,6 +1,6 @@
 ---
 name: four-seat-protocol
-description: Use when coordinating work across more than one Claude seat in this repo's 4-seat program-hardening campaign — claiming/releasing a cross-cutting git lock, deciding a Rule #23 co-sign tier, authoring/consuming a mailbox event, resolving which seat owns a shared task, reading the mailbox at session start, or reconciling conflicting state (git vs mailbox vs STATE.md vs chat).
+description: Use for this repo's 4-seat program-hardening campaign when the question is about the SHARED cross-seat mechanics rather than one role's own work — the git-native cross-cutting lock primitive, deciding a Rule #23 co-sign TIER, authoring/consuming a mailbox event, resolving WHICH seat owns a shared task, reconciling conflicting state (git vs mailbox vs STATE.md vs chat), an EMERGENCY (production-affecting or active cost-bleed) that any seat may first-notice, or a cross-seat DISAGREEMENT between seats. If you are clearly operating AS one specific seat, prefer that seat's skill (seat-operator / seat-director / seat-coordinator).
 ---
 
 # Four-Seat Protocol
@@ -31,7 +31,7 @@ If unread mailbox events exist for your seat, **surface the count in your FIRST 
 
 ## The git-native cross-cutting lock (§6b)
 
-Cross-cutting modules (collision risk): **`auto_approve.py`, `cinema/context.py`, `core.py`, `web_server.py`**.
+Cross-cutting modules (collision risk): **`auto_approve.py`, `cinema/context.py`, `core.py`, `web_server.py`**. **If a fix does NOT touch one of these four, it is lane-only → NO lock is claimed for it; size, severity, and risk-feeling are irrelevant.** (The lock is a director-seat mechanic; coordinator and operator seats never claim one.)
 
 | Step | Command / rule |
 |------|----------------|
@@ -85,9 +85,36 @@ Classifier: **would the co-signer's verification change which files/sites the im
 | "The mailbox event echoes the user, so it's user-tier." | Tier = sender, not content. It's mailbox-tier. |
 | "I know the precedence order, no need to run `git log`." | Running the command is the commanded step. Know ≠ check. |
 | "STATE.md says X." | Stale cache. Recompute / check git. |
+| "This fix is big / important / risky — I'll lock it to be safe." | Locks are ONLY for the four cross-cutting modules. A lane-only file takes no lock — size/severity are irrelevant. |
+
+## Emergency handling (§E — any seat may be first-noticer)
+
+**STOP — is this actually an emergency?** Only these four categories qualify:
+1. **Production-affecting / user-data-integrity** — live behavior broken, data lost/corrupted, users observably blocked. NOT: a CI regression that hasn't shipped.
+2. **Security-critical** — unauthorized access, secrets leak, CVE with active exploit. NOT: hardening opportunities or theoretical concerns.
+3. **Active bleed-rate** — cost/resource/token burn accumulating each minute (runaway loop, infinite retry, GPU lease). NOT: one-time waste already incurred.
+4. **External time-pressure** — external deadline (deploy window, demo, regulatory) at risk WITHOUT mitigation in N minutes.
+
+Events outside these four are NOT emergencies — use normal role partition + proposal cycle, even if urgent-feeling.
+
+**When a genuine emergency hits:**
+1. **First-noticer claims response.** Narrate in chat AND send a `dispatch-claim` mailbox event with an `urgency: emergency` flag. The other seat defers.
+2. **Stop-the-bleed first.** Minimal-viable mitigation (revert / hotfix / feature-flag-off) before root-cause analysis.
+3. **Temporary authority.** If the normally-authoritative seat is in transplant or context-exhausted, the other seat acts. Every commit body MUST say verbatim: `acting under v5 §E temporary authority`; defer all non-emergency decisions until the normal seat returns. **(This is a director↔operator cross-pair coverage carve-out — it does NOT suspend the coordinator's prime prohibition: the coordinator still authors no production code, even under §E.)**
+4. **Post-incident.** Within 1 session of resolution, the handling seat writes an incident note in `docs/INCIDENT-LOG.md`; flag any protocol gap for the next coordinator cycle — do not draft a rule unilaterally.
+
+## Disagreement protocol (v5)
+
+When any seat disagrees with a co-seat's ruling, brief, or REPLY refinement (every pair — director↔operator, director↔director2, etc.):
+1. **State the disagreement explicitly** — name the disputed item and the reasoning.
+2. **Provide project-data-grounded evidence.** "I don't like it" is not sufficient — cite a concrete artifact (session count, commit, grep result, measured outcome). **Ungrounded disagreement is invalid and does not block dispatch.**
+3. **Propose exactly one of three resolutions:** **counter-refinement** (adjust per the data) · **defer to v(N+1)** (ship without it; revisit with more data) · **acceptance-criterion** (ship with it + log a measurable revisit criterion).
+
+**Resolution paths:** *silent-accept* — the seat that **received** the counter ships without re-arguing, which is **its own** acceptance of the counter; this is NOT "treat the other seat's silence as consent" — a peer's silence is never a green light (see the rationalizations table) · *re-REPLY* (object in writing with your own counter → another cycle) · **2-cycle limit** — if it persists after **2 director REPLYs following the initial proposal**, escalate to the user. Counting: `proposal → REPLY-1 → revise → REPLY-2 → revise → escalate`. Agents do not argue indefinitely; the user is principal.
 
 ## Red flags (self-check)
 
+- About to suspend role partition for urgent-feeling work that does NOT clear the 4-category §E gate → it's not an emergency; use the normal proposal cycle.
 - About to `git commit` without a fresh `git log -5` + mailbox read → Rule #7.
 - About to start code on a cross-cutting module without a held lock → §6b.
 - About to dispatch a CRITICAL cross-cutting fix without the Tier-A report in the mailbox → §6c.

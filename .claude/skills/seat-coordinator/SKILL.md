@@ -11,6 +11,23 @@ The coordinator is the **on-demand 5th cross-pair oversight seat** — spawned a
 
 **REQUIRED BACKGROUND:** the `four-seat-protocol` skill (locks, lifecycle, co-sign tiers, authority, git sharp edges). Sources: `docs/protocol/claude/four-seat-extension.md` §10; spec §6a (ownership matrix) + §6f (absence-resilience); `docs/REMEDIATION-INVENTORY.md` header.
 
+## Session-start orientation (do this first)
+
+Get oriented in one shot — the shared status script now accepts the coordinator seat (all four peers' heartbeats + every `-to-coordinator-`/`-to-all-` mailbox event; the coordinator is **UNPINNED**, so there is no cursor and the list is all-time):
+
+```bash
+python .claude/skills/four-seat-protocol/scripts/seat_status.py coordinator --wave <N>
+```
+
+**Run that FIRST** — it is the one command that surfaces your unread `-to-coordinator-`/`-to-all-` mailbox events; **surface that count in your first user-facing turn (Rule #8)** before any reconcile. Then produce the **gate proof** you will cite (R-EVIDENCE — never assert a gate state from memory):
+
+```bash
+python scripts/wave_gate_check.py <N>   # exit 0 = MET, 1 = UNMET
+python scripts/ci_smoke.py              # §15 smoke; must be clean before you trust the tree
+```
+
+The coordinator has no `seen/coordinator.txt` cursor and does **not** `consume-events` — it reconciles at the §6f triggers (session-start, wave-boundary gate, a director's gate-request), not via a watermark.
+
 ## The prime prohibition (the one rule that defines this seat)
 
 **The coordinator NEVER authors a behavior-changing fix — regardless of how small, how obvious, or how time-pressured.** "It's one line / it's urgent / no director is online" is the *exact* temptation the role boundary exists to resist. Every fix is authored **in-lane** by a director/operator.
@@ -32,6 +49,7 @@ You may prepare a **pre-brief skeleton** to reduce a director's burden, but the 
 ## Inventory writing (you are the sole primary writer)
 
 - **`verified` requires an operator `verification-report` GO.** A director note ("looks done") is **never** a co-sign substitute. impl≠verifier applies even when the director implemented directly.
+- **Provenance gap (NARROW — all three conditions, or it does not apply):** the confirmation-workflow path fires ONLY when **(a)** the row's `verified` was set by a *prior coordinator orchestrating dispatched subagents*, **(b)** no live-operator `verification-report` GO exists in the mailbox, **AND (c)** the row currently **blocks a live gate**. Then: do **not** revert on sight — first run an independent read-only confirmation workflow (`money-gate-reviewer` ×2 + `lane-v-verifier`; commit the log), hold `verified` if it passes / revert to `fixed` only if it fails. **It does NOT apply to:** a **solo or §6f user-authorized** verification path (that has its own provenance — note it, hold `verified`, do not re-run); a **closed-wave, non-gate-blocking** row (flag for the user at most — never generate a fresh workflow for "audit completeness"); or a row WITH a real operator GO (already converged — R-VERIFY-TIER forbids a 3rd pass).
 - Reconcile at **§6f triggers only**: (a) coordinator session-start, (b) wave-boundary gate, (c) a director's gate-request. The inventory is a **batch view**, not real-time — do not commit per micro-transition.
 - **Reverting a premature `verified`:** revert to **`fixed`** if a real fix commit exists (only to `open` if none does) — and **audit the lock file**: a premature `verified` implies the lock was wrongly released or never released (§6b couples lock-delete to the GO commit).
 - **Deputy path (when no coordinator was live):** a pair may transcribe an *existing* operator GO into its own-lane row — it **never self-verifies** and never writes another lane's rows.
@@ -40,8 +58,9 @@ You may prepare a **pre-brief skeleton** to reduce a director's burden, but the 
 ## Standing duties
 
 - Record the **Wave-1 first-mover sequence** for contested cross-cutting modules in the inventory header at wave-open (spec §6b).
+- **Issue the wave stub-contract spec BEFORE the first lane work of each new wave** (roadmap spec §7) — the coordinator-owned doc defining dual-mode stubs, the fault-injection matrix, the anti-vacuity rule, and review points. Pull the current wave's spec from `docs/superpowers/specs/` on demand; do **not** reproduce its content in this skill. Two coordinator review points: (1) contract/design review at issue; (2) artifact review of the finished suite before the wave counts toward done. Re-issue when a new row's fault mode isn't covered.
 - **Route + track** cross-lane Tier-A co-signs (don't author them — directors do); ratify mid-wave provisional CRITICAL rows on return.
-- Run **discovery / per-wave verification workflows** (read-only fan-out); commit `logs/discovery-<runid>.json`.
+- Run **discovery / per-wave verification workflows** (read-only fan-out) via the committed agent dispatch targets — **`lane-v-verifier`** (independent post-commit SHA verification, Lane V) and **`money-gate-reviewer`** (security-style review of any cost-gate diff in the wave); both are read-only. Commit `logs/discovery-<runid>.json`. **Trigger:** a wave-boundary verification pass or a coordinator-initiated discovery fan-out — **NOT** a standing per-commit post-fix trigger (that is the operator's role, Rule #9).
 - **Surface to the user-principal**: push, pod-spend, scope changes, mid-wave CRITICALs. Push is **user-gated** — you execute it on user auth, never unilaterally.
 - Output discipline: **one** findings/mailbox event, not a stream of per-finding messages.
 
