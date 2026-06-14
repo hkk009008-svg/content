@@ -1,0 +1,3 @@
+# Git-native shared-module locks (spec §6b). One file per held lock:
+# W<n>-<module>.lock containing "seat wave ts defect-id". Tracked so the
+# commit-push claim works; first-commit-wins is prevention, not recovery.
