@@ -6,14 +6,18 @@ via explicit pathspec). Predecessor: `docs/HANDOFF-coordinator-2026-06-14-s8-wav
 (Session-8; superseded). **This session DROVE WAVE-1 TO GATE-MET (8/8) AND PUSHED IT, then
 seeded Wave-2.** Trust git, not this prose.
 
-## State at wrap — TRUST GIT
-- **origin/main = `8b13310`** (the Wave-1-MET milestone stack, user-authorized "push").
-- **Local HEAD = `dbb0392`, 2 AHEAD of origin** — `84b176a` (coord pin-cell sync) + `dbb0392`
-  (operator2's own wrap handoff). **Push of these 2 is USER-GATED** (doc/test-only; the milestone
-  itself is already on origin). Push them with the next action on user auth.
-- **Wave-1 gate = MET** (`scripts/wave_gate_check.py 1` → `counts={verified: 8}`). Precise claim:
-  **the 8 PLANNED Wave-1 CRITICAL rows are verified — NOT "all money-loss closed."**
-- **Wave-2 gate = UNMET, 28 open** (`wave_gate_check.py 2`). NOT opened (see carry #1).
+## State at wrap — TRUST GIT (this tree is LIVE; run `git log -1` + `git rev-list --count origin/main..HEAD`)
+- **At final wrap: HEAD = origin/main = `5a4eb49`, 0 ahead / 0 behind — the FULL milestone + every wrap doc is PUSHED.**
+  (The Wave-1-MET milestone first landed at `8b13310`; the team then pushed all wrap docs + 2 more commits to `5a4eb49`.)
+  Push-state churned fast during wrap — **trust git, not these SHAs.** Once this handoff edit commits it will be 1 ahead until pushed.
+- **The tree was LIVE with another coordinator-actor during wrap** — commit **`d2c7066`** (NOT mine) cleared the
+  stale `aa-budget-nan-veto` "ratify-owed" inventory note (director-1-flagged `16:19:09Z`; director2 ACK `11:27:30Z`
+  discharged → T3 §6c co-sign loop CLOSED both sides). The inventory is clean on that point. If you resume as coordinator,
+  re-confirm there isn't a second coordinator-actor live before writing the inventory.
+- **Wave-1 gate = MET** (`scripts/wave_gate_check.py 1` → `counts={verified: 8}`). Precise: **the 8 PLANNED Wave-1
+  CRITICAL rows are verified — NOT "all money-loss closed."**
+- **Wave-2 gate = UNMET. Open inventory = 32 total: 28 Wave-2 rows + 4 `defer` rows** (`ckpt-nan-json-token`,
+  `ckpt-sceneclips-dead`, `ckpt-stage-notrestored`, `identity-arcface-embselect` — out of the Wave-2 gate). NOT opened (carry #1).
 - `ci_smoke.py` OK. No locks held. Pod last-known STOPPED (untouched this session).
 
 ## What Session-9 did (user-driven; principal = user)
@@ -63,12 +67,25 @@ seeded Wave-2.** Trust git, not this prose.
    Then **director2 leads with C-1** `shot-spent-usd-never-written` (the `get_shot_spent` bridge — pinned, ready;
    director2 holding on "go"), with `cost-spent-nan-poison` (CRITICAL) close behind. Every Wave-2 money row
    already has a CI pin (operator2) — coverage is honest.
-2. **2 local commits unpushed** (`84b176a` pin-sync + `dbb0392` op2 wrap) — push user-gated.
-3. **Wave-2 = 28 open rows** (money / identity / silent-gate / checkpoint / http). 2 new CRITICALs (C-1,
-   cost-spent-nan-poison). spec §11 residuals still open (measure_lipsync_offset, conftest policy, over-cook proxy).
+2. **Push-state is git-truth, not this prose.** At final wrap everything was pushed (HEAD=origin=`5a4eb49`, 0 ahead);
+   the tree churned fast (full-team wrap + `d2c7066` note-clearance all pushed within the window). This handoff edit
+   sits 1-ahead until pushed — **push user-gated**. Always `git rev-list --count origin/main..HEAD` before assuming.
+3. **Open inventory = 32 total: 28 Wave-2 rows + 4 `defer` rows** (money / identity / silent-gate / checkpoint / http);
+   2 new CRITICALs (C-1, cost-spent-nan-poison). The 4 `defer` (`ckpt-nan-json-token`, `ckpt-sceneclips-dead`,
+   `ckpt-stage-notrestored`, `identity-arcface-embselect`) are out of the Wave-2 gate. spec §11 residuals still open
+   (measure_lipsync_offset, conftest policy, over-cook proxy).
 4. **Milestone-claim discipline:** any future "gate MET" must be PRECISE ("the N planned rows", never "all X closed").
 5. **Fix directions recorded in the rows:** cost-spent-nan-poison = coerce+WARN (NOT block); cost-conn-crossthread-drop
    = check_same_thread=False + Lock; C-1 = get_shot_spent SQLite-SUM injected into the gate loop (integration test-infeasible).
+6. **STRATEGIC FORK — open USER decision before Wave-2 *Pair-A* starts** (surfaced by director-1 `16:19:09Z`):
+   **(A)** drive the Wave-2 Pair-A hardening rows (`has-char-lora-hole`/`secondary-lora-hole` share the `has_character`
+   root · `idgate-failopen` [CROSS-LANE Tier-A co-sign; potential CRITICAL gate-bypass] · `coherence-silent` ·
+   `identity-nan-arc-bypass`) **OR (C)** pivot to the pod-realism burn (ADR-024 dual-LoRA graft + ADR-025 max-wide
+   re-measure — needs pod START + user auth). Surface to the user when Wave-2 opens; do not assume (A).
+7. **Tech-debt carried (not lost):** T4 import-swap dedup deferred — operator-1 kept a local `_finite_or` byte-identical
+   to `cinema.context._finite_or` (quality_max.py); fold into a Wave-2 cleanup. **PROGRAM-MANUAL.md has 83 advisory
+   anchor-drifts** (director-1, this session) — fix-on-touch, **NOT gated by ci_smoke** (only ARCHITECTURE.md anchors
+   are hard-gated; see [[doc_checker_same_line_blindspot]]).
 
 ## Sharp edges / lessons (this session)
 - **Verify the PREMISE of a decision, not just the fix.** The web_research SPLIT rested on "bounded"; the fan-out
@@ -80,5 +97,12 @@ seeded Wave-2.** Trust git, not this prose.
   (a `ruling-verify-*.json` is gitignored). presence files are gitignored (on-disk edit IS the signal; no commit).
 - **Verify-then-push:** held director2's unverified `10c1566` until operator2's GO, pushed the verified stack (mirrors S8 `c8c1645`).
 - **Coordinator authored ZERO production code** — ruled, reconciled, gated, verified read-only; all fixes in-lane (director2) + verified (operator2).
+- **A handoff is a SNAPSHOT of a LIVE tree — make state claims git-relative.** A read-only handoff-audit (`wf_1dbed6c2-05d`)
+  caught this doc going stale *while it was being written*: the team re-activated, pushed everything to `5a4eb49`, and
+  another coordinator-actor landed `d2c7066` (note-clearance) — all after the first draft's hard SHAs. Lesson: at wrap,
+  re-run `git log -1`/`git rev-list --count` and fold the delta; don't hard-code `origin=X, N ahead` as if frozen.
+- **Watch for a second coordinator-actor.** `d2c7066` is a `coord(inventory)` commit this session did NOT author —
+  on a live tree the coordinator role can be picked up elsewhere. Confirm sole-coordinator before writing the inventory (§6f).
 
-HEAD at wrap `dbb0392` (origin `8b13310`, 2 ahead local — push user-gated). Coordinator OFFLINE.
+At final wrap: HEAD = origin = `5a4eb49` (0 ahead — full team wrapped AND pushed; this handoff edit is +1 until pushed,
+user-gated). Trust `git log`, not these SHAs. Full-team wrap — all 4 seats + coordinator OFFLINE.
