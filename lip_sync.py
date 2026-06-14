@@ -441,7 +441,24 @@ def _score_mouth_energy(video_path: str, audio_path: str) -> Optional[float]:
         import numpy as _np
         import subprocess as _sp
         import json as _json
+    except ImportError as exc:
+        # opencv / numpy absent — the scorer cannot run in this container at all.
+        # Fail open (return None) but make it LOUD: silently degrading here drops the
+        # pipeline back to the duration heuristic / neutral-1.0 fallback, re-creating
+        # the "everything passes -> random best-of" bug this scorer exists to fix (D1).
+        # NB: this guards ONLY the import statements, so a *downstream* ImportError from
+        # a partially-broken install falls through to the generic handler (with a
+        # traceback) instead of being mislabelled "dependency unavailable".
+        logger.warning(
+            "mouth-energy scorer: opencv/numpy import failed (%s) — lip-sync quality "
+            "gate DEGRADED to fallback; install opencv-python + numpy to enable "
+            "Provider-1.5 scoring",
+            exc,
+            extra={"provider": "mouth_energy", "degraded": True},
+        )
+        return None
 
+    try:
         # ── 1. Sample frames ──────────────────────────────────────────────
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -491,12 +508,15 @@ def _score_mouth_energy(video_path: str, audio_path: str) -> Optional[float]:
         mouth_detect_rate = (n_sampled - occlusion_count) / max(n_sampled, 1)
 
         if occlusion_count / max(n_sampled, 1) > 0.50:
-            # Fail-open is correct (this clip can't be scored), but a fail-open
-            # quality gate must be OBSERVABLE: WARNING, not INFO, so it surfaces at
-            # a production log floor instead of silently degrading the sync gate.
-            logger.warning(
+            # Per-clip unscorable input (e.g. wide/profile framing where the Haar
+            # cascade finds no mouth) — the scorer RAN correctly and concluded it
+            # can't score THIS clip. Observable at INFO, but NOT a WARNING: WARNING is
+            # reserved for structural scorer degradation (cv2 absent / unexpected
+            # crash) so the loud signal stays meaningful instead of spamming on
+            # legitimate cinematography.
+            logger.info(
                 "mouth-energy scorer: too many occluded frames — fail-open",
-                extra={"provider": "mouth_energy", "mouth_detect_rate": round(mouth_detect_rate, 3), "degraded": True},
+                extra={"provider": "mouth_energy", "mouth_detect_rate": round(mouth_detect_rate, 3)},
             )
             return None
 
@@ -538,7 +558,23 @@ def _score_mouth_energy(video_path: str, audio_path: str) -> Optional[float]:
                     energy_vals.append((brightness, e))
                 except (ValueError, TypeError):
                     continue
+        except FileNotFoundError:
+            # ffprobe binary absent — structural degradation (affects EVERY clip),
+            # the audio-energy mirror of the cv2-absent path: a silent None here drops
+            # the gate to the duration heuristic / neutral-1.0 (D1 bug class). LOUD.
+            logger.warning(
+                "mouth-energy scorer: ffprobe not found — audio-energy unavailable; "
+                "lip-sync quality gate DEGRADED to fallback (install ffmpeg)",
+                extra={"provider": "mouth_energy", "degraded": True},
+            )
+            return None
         except Exception:
+            # Per-clip ffprobe/astats failure on THIS audio — fall through to the next
+            # provider; observable (INFO) but not a structural-degradation WARNING.
+            logger.info(
+                "mouth-energy scorer: ffprobe astats failed for this clip — fail-open",
+                extra={"provider": "mouth_energy"},
+            )
             return None
 
         if len(energy_vals) < 4:
@@ -569,23 +605,11 @@ def _score_mouth_energy(video_path: str, audio_path: str) -> Optional[float]:
         )
         return score
 
-    except ImportError as exc:
-        # opencv / numpy absent — the scorer cannot run in this container at all.
-        # Fail open (return None) but make it LOUD: silently degrading here drops the
-        # pipeline back to the duration heuristic / neutral-1.0 fallback, re-creating
-        # the "everything passes -> random best-of" bug this scorer exists to fix (D1).
-        logger.warning(
-            "mouth-energy scorer: required dependency unavailable (%s) — lip-sync "
-            "quality gate DEGRADED to fallback; install opencv-python + numpy to "
-            "enable Provider-1.5 scoring",
-            exc,
-            extra={"provider": "mouth_energy", "degraded": True},
-        )
-        return None
     except Exception:
-        # Unexpected runtime failure — fail open (never block the pipeline), but do
-        # NOT swallow it silently; an invisible scorer crash is the same silent-gate-
-        # degradation hole (D1 bug class).
+        # Unexpected runtime failure (incl. a downstream ImportError from a partial
+        # install) — fail open (never block the pipeline), but do NOT swallow it
+        # silently; an invisible scorer crash is the same silent-gate-degradation
+        # hole (D1 bug class).
         logger.warning(
             "mouth-energy scorer: unexpected failure — fail-open (None)",
             exc_info=True,
@@ -660,15 +684,34 @@ def validate_lipsync_quality(
 
         vd = _dur(video_path)
         if vd <= 0:
+            logger.warning(
+                "lip-sync gate: cannot probe video duration — sync UNVALIDATED, "
+                "returning neutral 1.0 (gate passed without measuring)",
+                extra={"provider": "duration_heuristic", "degraded": True},
+            )
             return 1.0  # can't probe — neutral
         ad = _dur(audio_path) if audio_path and os.path.exists(audio_path) else vd
         diff_ratio = abs(vd - ad) / max(vd, ad, 0.1)
         # Each 1% drift costs 5pts of sync confidence; 20% drift → 0
         return max(0.0, 1.0 - diff_ratio * 5.0)
     except Exception:
-        pass  # ffprobe unavailable or returned unexpected output — neutral score returned below
+        # ffprobe unavailable or unexpected output — per-shot diagnostic; the gate
+        # no-op consequence is surfaced as a WARNING at the neutral return below.
+        logger.info(
+            "lip-sync gate: duration heuristic unavailable — falling through to neutral",
+            exc_info=True,
+            extra={"provider": "duration_heuristic"},
+        )
 
-    # No scorer available — neutral
+    # No scorer produced a score — neutral 1.0 means the sync gate did NOT validate
+    # anything. Surface it: a silent "1.0 = perfect" here passes every shot and
+    # re-creates the D1 bug class at the gate level (sweep finding lip_sync.py:668).
+    logger.warning(
+        "lip-sync quality gate: no scorer available (syncnet / mouth-energy / duration "
+        "heuristic all unavailable) — returning neutral 1.0; the sync gate is a NO-OP for "
+        "this shot. Install syncnet_python or opencv + ffmpeg to enable real validation.",
+        extra={"provider": "lipsync_gate", "degraded": True},
+    )
     return 1.0
 
 

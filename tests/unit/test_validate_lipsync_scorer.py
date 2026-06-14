@@ -291,3 +291,63 @@ def test_logs_frame_detection_rate(monkeypatch, tmp_path, caplog):
         "Expected an INFO log record with 'mouth_detect_rate' extra key. "
         f"Records found: {[(r.name, r.getMessage(), vars(r)) for r in caplog.records]}"
     )
+
+
+# ─────────────────────────────────────────────────────────────
+# GATE-LEVEL observability — the neutral-1.0 fall-through (sweep finding lip_sync.py:668)
+# validate_lipsync_quality returns 1.0 = "perfect OR unmeasurable". When it is the
+# latter (no scorer could measure), the gate PASSES every shot without validating.
+# That degradation must be observable (WARNING), same bug class as scorer D1.
+# ─────────────────────────────────────────────────────────────
+
+def test_gate_warns_when_no_scorer_available(monkeypatch, tmp_path, caplog):
+    """Every provider unavailable -> neutral 1.0 (gate no-op) MUST emit a WARNING."""
+    import lip_sync, subprocess
+
+    video_file = tmp_path / "fake.mp4"
+    audio_file = tmp_path / "fake.wav"
+    video_file.write_bytes(b"fake")
+    audio_file.write_bytes(b"fake")
+
+    # Provider 1 (syncnet) is not installed in the test env -> skipped naturally.
+    # _generation defaults False -> Provider 1.5 skipped.
+    # Provider 2 (ffprobe duration heuristic): make the ffprobe binary "absent".
+    def _no_ffprobe(*a, **k):
+        raise FileNotFoundError("ffprobe")
+    monkeypatch.setattr(subprocess, "run", _no_ffprobe)
+
+    with caplog.at_level("WARNING"):
+        result = lip_sync.validate_lipsync_quality(str(video_file), str(audio_file))
+
+    assert result == 1.0, "neutral fallback preserved when no scorer is available"
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings, (
+        "the sync gate returning neutral 1.0 (passing without validating) must WARN so an "
+        "operator knows sync is UNVALIDATED — none was logged"
+    )
+
+
+def test_gate_warns_when_video_unprobeable(monkeypatch, tmp_path, caplog):
+    """ffprobe reports 0 duration (corrupt/empty video) -> neutral 1.0 MUST WARN."""
+    import lip_sync, subprocess, json, types
+
+    video_file = tmp_path / "fake.mp4"
+    audio_file = tmp_path / "fake.wav"
+    video_file.write_bytes(b"fake")
+    audio_file.write_bytes(b"fake")
+
+    def _zero_dur(cmd, *a, **k):
+        return types.SimpleNamespace(
+            stdout=json.dumps({"format": {"duration": "0.0"}}), stderr="", returncode=0
+        )
+    monkeypatch.setattr(subprocess, "run", _zero_dur)
+
+    with caplog.at_level("WARNING"):
+        result = lip_sync.validate_lipsync_quality(str(video_file), str(audio_file))
+
+    assert result == 1.0, "neutral fallback preserved when the video can't be probed"
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings, (
+        "an unprobeable video falling through to neutral 1.0 (gate passed without "
+        "validating) must WARN — none was logged"
+    )

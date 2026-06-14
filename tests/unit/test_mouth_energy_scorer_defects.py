@@ -37,10 +37,55 @@ UNPROVEN HYPOTHESIS (needs a calibration experiment, NOT a unit test):
      before it can back any NO-GO (R-MEASURE). Pod / real-clip gated.
 """
 import sys
+import types
 
 import pytest
 
 import lip_sync
+
+
+def _install_fake_cv2(monkeypatch, *, video_capture=None, detects=True):
+    """Inject a minimal fake ``cv2`` so these tests exercise the scorer in a cv2-ABSENT
+    environment — the exact CI posture defect D1 targets (director2 test-gap, 05:29Z;
+    the old ``importorskip('cv2')`` SKIPPED in precisely that env).
+
+    detects=False makes the cascade find no mouth (drives the >50% occlusion branch);
+    video_capture overrides cv2.VideoCapture (e.g. to raise).
+    """
+    import numpy as np
+
+    fake = types.ModuleType("cv2")
+    fake.CAP_PROP_FRAME_COUNT = 7
+    fake.CAP_PROP_POS_FRAMES = 1
+    fake.COLOR_BGR2GRAY = 6
+    fake.data = types.SimpleNamespace(haarcascades="/fake/haarcascades/")
+
+    class _Cap:
+        def isOpened(self):
+            return True
+
+        def get(self, prop):
+            return 24.0 if prop == fake.CAP_PROP_FRAME_COUNT else 0.0
+
+        def set(self, *a, **k):
+            return True
+
+        def read(self):
+            return True, np.zeros((240, 320, 3), dtype=np.uint8)
+
+        def release(self):
+            pass
+
+    fake.VideoCapture = video_capture or (lambda *a, **k: _Cap())
+
+    class _Clf:
+        def detectMultiScale(self, *a, **k):
+            return np.array([[10, 150, 80, 30]]) if detects else np.empty((0, 4))
+
+    fake.CascadeClassifier = lambda *a, **k: _Clf()
+    fake.cvtColor = lambda frame, code: frame[:, :, 0]
+    monkeypatch.setitem(sys.modules, "cv2", fake)
+    return fake
 
 
 def test_mouth_energy_scorer_warns_when_cv2_absent(monkeypatch, caplog):
@@ -67,14 +112,14 @@ def test_mouth_energy_scorer_warns_when_cv2_absent(monkeypatch, caplog):
 def test_mouth_energy_scorer_warns_on_unexpected_failure(monkeypatch, caplog):
     """An unexpected (non-ImportError) failure must also fail open LOUDLY, not silently.
 
-    cv2 imports fine, but a downstream call blows up (here: VideoCapture raises). The
-    old outer ``except Exception: return None`` swallowed this with no log too — an
-    invisible scorer crash is the same silent-gate-degradation bug class as D1. The
-    fix must emit a WARNING while preserving the fail-open None.
+    cv2 imports fine (fake module), but VideoCapture blows up. The old outer
+    ``except Exception: return None`` swallowed this with no log — an invisible scorer
+    crash is the same silent-gate-degradation class as D1. Runs cv2-FREE so it executes
+    in the cv2-absent CI env D1 targets (was importorskip -> skipped there).
     """
-    cv2 = pytest.importorskip("cv2")  # generic-path test needs a real cv2 to get past import
-    monkeypatch.setattr(
-        cv2, "VideoCapture", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+    _install_fake_cv2(
+        monkeypatch,
+        video_capture=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
     with caplog.at_level("WARNING"):
@@ -82,54 +127,82 @@ def test_mouth_energy_scorer_warns_on_unexpected_failure(monkeypatch, caplog):
 
     assert result is None, "fail-open contract: unexpected failure must return None, never block"
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]
-    assert warnings, (
-        "expected a WARNING when the scorer hits an unexpected failure so the degraded "
-        "sync gate is observable — none was logged (silent swallow)"
+    assert warnings, "unexpected failure must be observable (WARNING) — none was logged"
+    assert any("unexpected failure" in r.getMessage().lower() for r in warnings)
+
+
+def test_mouth_energy_scorer_logs_occlusion_at_info_not_warning(monkeypatch, caplog):
+    """High occlusion is a PER-CLIP unscorable input, not a structural degradation.
+
+    The scorer ran correctly and concluded it can't score THIS clip (e.g. a wide /
+    profile framing where the Haar cascade finds no mouth). Observable at INFO (with
+    mouth_detect_rate) but NOT a WARNING — WARNING is reserved for true scorer
+    degradation (cv2 absent / crash / ffprobe absent) so the loud signal stays
+    meaningful instead of spamming on legitimate cinematography.
+    """
+    _install_fake_cv2(monkeypatch, detects=False)  # cascade finds no mouth -> 100% occlusion
+
+    with caplog.at_level("INFO"):
+        result = lip_sync._score_mouth_energy("/nonexistent/video.mp4", "/nonexistent/audio.wav")
+
+    assert result is None, "fail-open contract: high occlusion must return None"
+    info_logs = [r for r in caplog.records if hasattr(r, "mouth_detect_rate")]
+    assert info_logs, "occlusion fail-open must remain observable (an INFO log w/ mouth_detect_rate)"
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert not warnings, (
+        "occlusion is a per-clip unscorable input, NOT structural degradation — it must "
+        f"NOT emit a WARNING (would spam on legitimate framing). Got: {[r.getMessage() for r in warnings]}"
     )
 
 
-def test_mouth_energy_scorer_warns_on_high_occlusion(monkeypatch, caplog):
-    """A clip whose mouth can't be detected in >50% of frames fails open — but LOUDLY.
+def test_mouth_energy_scorer_partial_install_routes_to_unexpected_not_unavailable(monkeypatch, caplog):
+    """A partial OpenCV install (import cv2 OK, a C-extension load fails later with
+    ImportError) must NOT be mislabelled 'dependency unavailable'.
 
-    Provider-1.5 only runs on dialogue/generation shots, where a mostly-undetectable
-    mouth means the lip-sync overlay is probably bad. The fail-open None is correct;
-    the silent INFO-level log was the companion defect (invisible at a production
-    WARNING floor), the same observability bug class as D1.
+    The `except ImportError` guards ONLY the lazy import statements, so a downstream
+    ImportError falls through to the generic 'unexpected failure' handler.
     """
-    cv2 = pytest.importorskip("cv2")
-    import numpy as np
-
-    class _FakeCap:
-        def isOpened(self):
-            return True
-
-        def get(self, prop):
-            return 24.0 if prop == cv2.CAP_PROP_FRAME_COUNT else 0.0
-
-        def set(self, *a, **k):
-            return True
-
-        def read(self):
-            return True, np.zeros((240, 320, 3), dtype=np.uint8)
-
-        def release(self):
-            pass
-
-    monkeypatch.setattr(cv2, "VideoCapture", lambda *a, **k: _FakeCap())
-
-    class _NoDetect:  # finds NO mouth in any frame -> 100% occlusion
-        def detectMultiScale(self, *a, **k):
-            return np.empty((0, 4))
-
-    monkeypatch.setattr(cv2, "CascadeClassifier", lambda *a, **k: _NoDetect())
-    monkeypatch.setattr(cv2, "cvtColor", lambda frame, code: frame[:, :, 0])
+    _install_fake_cv2(
+        monkeypatch,
+        video_capture=lambda *a, **k: (_ for _ in ()).throw(
+            ImportError("libGL.so.1: cannot open shared object file")
+        ),
+    )
 
     with caplog.at_level("WARNING"):
         result = lip_sync._score_mouth_energy("/nonexistent/video.mp4", "/nonexistent/audio.wav")
 
-    assert result is None, "fail-open contract: high occlusion must return None"
+    assert result is None, "fail-open contract preserved on a partial-install ImportError"
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]
-    assert warnings, (
-        "expected a WARNING when >50% of frames are occluded so the fail-open is "
-        "observable at a production log threshold — none was logged"
+    assert warnings, "a downstream ImportError must still be observable (WARNING)"
+    msgs = " ".join(r.getMessage().lower() for r in warnings)
+    assert "unexpected failure" in msgs, (
+        "a downstream ImportError (import cv2 already succeeded) must route to the generic "
+        f"'unexpected failure' handler, not the 'dependency unavailable' message. Got: {msgs!r}"
     )
+
+
+def test_mouth_energy_scorer_warns_when_ffprobe_absent(monkeypatch, caplog):
+    """ffprobe absent (FileNotFoundError) is a STRUCTURAL degradation on the audio-energy
+    side — the mirror of cv2-absent — and must WARN, not silently return None.
+
+    Sweep finding + director2 convergence (the inner ffprobe except). Runs cv2-FREE: the
+    fake cv2 yields frames with a detected mouth so the scorer reaches the ffprobe astats
+    block, where ffprobe is then made 'absent'.
+    """
+    import subprocess
+
+    _install_fake_cv2(monkeypatch, detects=True)  # mouths detected -> past occlusion -> ffprobe block
+
+    def _no_ffprobe(*a, **k):
+        raise FileNotFoundError("ffprobe")
+
+    monkeypatch.setattr(subprocess, "run", _no_ffprobe)
+
+    with caplog.at_level("WARNING"):
+        result = lip_sync._score_mouth_energy("/nonexistent/video.mp4", "/nonexistent/audio.wav")
+
+    assert result is None, "fail-open contract: ffprobe-absent must return None, never block"
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings, "ffprobe-absent (structural) must WARN — none was logged (silent swallow)"
+    assert any("ffprobe" in r.getMessage().lower() for r in warnings)
