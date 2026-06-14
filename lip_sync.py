@@ -656,7 +656,21 @@ def validate_lipsync_quality(
         # syncnet_python's evaluate returns (offset, confidence, dists).
         # Confidence is the metric we want.
         _offset, conf, _dists = scorer.evaluate({}, video_path)
-        return max(0.0, min(1.0, float(conf) / 10.0))  # syncnet conf scale ~ 0-10
+        # Finite-guard the SyncNet confidence BEFORE the clamp: a NaN/inf conf
+        # fabricates a PERFECT score — max(0.0, min(1.0, nan/10)) == 1.0 because
+        # Python's min(1.0, nan) keeps 1.0 — silently passing the lip-sync gate on
+        # garbage. Treat non-finite as zero signal (failing) + WARN (structural
+        # silent-gate principle). Mirrors the mouth-energy sibling's isnan guard
+        # at _score_mouth_energy (:592).
+        conf_f = float(conf)
+        conf_safe = _finite_or(conf_f, 0.0)
+        if conf_safe != conf_f:  # non-finite conf was coerced (NaN != itself)
+            logger.warning(
+                "[LIPSYNC] SyncNet returned non-finite confidence %r for %s; "
+                "scoring 0.0 (no signal) instead of a fabricated pass",
+                conf, video_path,
+            )
+        return max(0.0, min(1.0, conf_safe / 10.0))  # syncnet conf scale ~ 0-10
     except Exception:
         # ImportError, attribute error, or model checkpoint missing — skip
         pass

@@ -27,16 +27,10 @@ import pytest
 # confirmed[2] — lipsync-syncnet-nan  (lip_sync.py:659)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="W2:MAJOR:lipsync-syncnet-nan lip_sync.py:659 validate_lipsync_quality: "
-    "SyncNet returning NaN confidence passes through max(0.0, min(1.0, nan/10.0)) = 1.0 "
-    "because Python min(1.0, nan) returns 1.0 (NaN comparison semantics), fabricating a "
-    "perfect lipsync score. Fix = finite-guard the SyncNet confidence before the clamp "
-    "(e.g. replace nan with 0.0); then this xpasses (strict) and the pin is removed.",
-)
 def test_syncnet_nan_confidence_does_not_produce_passing_score(monkeypatch, tmp_path):
-    """The NaN clamp fabricates 1.0 today; after fix it must return 0.0 (or non-passing)."""
+    """Regression (was strict-xfail pin, lipsync-syncnet-nan): a NaN SyncNet
+    confidence must map to 0.0, not the fabricated 1.0 that min(1.0, nan) produced.
+    FIXED at lip_sync.py:659 — finite-guard conf via _finite_or before the clamp + WARN."""
     import lip_sync
 
     # Create a minimal video-like file so the early path-exists guard passes.
