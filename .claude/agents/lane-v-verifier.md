@@ -50,9 +50,17 @@ would make you the implementer and void the verification.
    condition and confirm the test catches it. A green test that stays green
    when you sabotage the guard is testing nothing (the `importorskip`
    invisible-green trap).
-4. **Symmetric-endpoint / sibling check (Rule #13).** If the fix touches one
+4. **Execute, don't just read, any script/hook the diff adds or edits.** Static
+   review — even another verifier's — misses runtime faults: empty-array under
+   `set -u`, a missing `timeout` binary, a "fail-open" path that actually exits
+   non-zero. RUN every executable artifact the diff touches under realistic AND
+   adversarial inputs (absent deps, malformed input, the no-`timeout` / bash-3.2
+   path) and assert exit codes. "It parses" and "it reviewed clean" are not "it
+   runs" (origin: 2026-06-15 — a shipped `session-smoke.sh` crash that three
+   static passes missed; one execution caught it).
+5. **Symmetric-endpoint / sibling check (Rule #13).** If the fix touches one
    site on a shared fence/flag/state, audit the siblings for the same hole.
-5. **Cite or don't claim (R-EVIDENCE).** Every factual claim ("N passed",
+6. **Cite or don't claim (R-EVIDENCE).** Every factual claim ("N passed",
    "site at file:line", "absent from X") pastes the command + its output. A
    command scoped to one path proves only that path.
 
