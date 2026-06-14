@@ -41,3 +41,22 @@ def test_provisional_blocks_regardless_of_severity(tmp_path):
     wgc = _load()
     rep = wgc.gate_report(inv, wave=3)
     assert rep["verdict"] == "UNMET" and any(r["id"] == "p1" for r in rep["blockers"])
+
+def test_medium_open_does_not_block(tmp_path):
+    """MEDIUM/MINOR open rows must NOT trigger UNMET — only CRITICAL/MAJOR-not-verified or provisional do."""
+    inv = tmp_path / "INV.md"
+    inv.write_text(INVENTORY + "| med-1 | x | core.py:5 | MEDIUM | 3 | x | t | tests/m.py | A | | 1 | open | | |\n")
+    wgc = _load()
+    rep = wgc.gate_report(inv, wave=1)
+    # Wave 1 already has gate-nan (CRITICAL/open) blocking; med-1 must NOT be an additional blocker.
+    assert not any(r["id"] == "med-1" for r in rep["blockers"])
+
+def test_empty_wave_is_met(tmp_path):
+    """A wave with no rows must return MET (Task 4 Step 2 relies on empty-inventory -> MET)."""
+    inv = tmp_path / "INV.md"
+    inv.write_text(INVENTORY)  # waves 1 and 2 only — wave 99 is absent
+    wgc = _load()
+    rep = wgc.gate_report(inv, wave=99)
+    assert rep["verdict"] == "MET"
+    assert rep["blockers"] == []
+    assert rep["counts"] == {}

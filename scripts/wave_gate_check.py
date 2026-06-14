@@ -6,8 +6,11 @@ every CRITICAL/MAJOR row in the wave is `verified` and no `provisional` row rema
 Read-only — never mutates the inventory.
 """
 from __future__ import annotations
-import argparse, sys
+import argparse
+import sys
 from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _COLS = ("id", "subsystem", "file:line", "severity", "priority", "fail-mode",
          "repro", "xfail-pin", "lane-owner", "shared-lock", "wave", "status",
@@ -21,7 +24,7 @@ def _parse_rows(inventory_path: Path) -> list[dict]:
         if not line.startswith("|"):
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
-        if len(cells) != len(_COLS):           # header / separator / malformed
+        if len(cells) != len(_COLS):           # header / separator / malformed / pipe-in-value
             continue
         row = dict(zip(_COLS, cells))
         if row["id"] in ("id", "----", "") or set(row["id"]) <= {"-"}:
@@ -47,9 +50,9 @@ def gate_report(inventory_path: Path, wave: int) -> dict:
     }
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("wave", type=int)
-    ap.add_argument("--inventory", default="docs/REMEDIATION-INVENTORY.md", type=Path)
+    ap.add_argument("--inventory", default=_REPO_ROOT / "docs/REMEDIATION-INVENTORY.md", type=Path)
     args = ap.parse_args(argv)
     if not args.inventory.exists():
         print(f"inventory not found: {args.inventory}", file=sys.stderr)
