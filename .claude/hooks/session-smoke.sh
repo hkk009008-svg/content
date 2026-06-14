@@ -1,30 +1,38 @@
 #!/usr/bin/env bash
 # SessionStart: R-START §15 smoke tripwire. Runs scripts/ci_smoke.py and reports
-# PASS/FAIL as session context so a stale ARCHITECTURE.md / broken tree is
-# caught before any non-trivial work.
+# PASS/FAIL as session context so a stale ARCHITECTURE.md / broken tree is caught
+# before any non-trivial work.
 #
-# FAIL-OPEN: always exits 0 — this NEVER blocks a session from starting. A
-# `timeout` caps the import latency (torch/deepface). DeepFace model weights are
-# expected to be cached locally already (~/.deepface/weights); if not, the first
-# run is slow but bounded by the timeout.
+# FAIL-OPEN: always exits 0 — NEVER blocks a session from starting. The 180s
+# bound is enforced inside Python's subprocess.run(timeout=...) so it is portable
+# (no dependency on GNU `timeout`/`gtimeout`, which macOS does not ship) and
+# cannot leave the session hanging. DeepFace weights are expected cached locally
+# (~/.deepface/weights); a cold download would be bounded by the timeout.
 set -uo pipefail
 
-ROOT="${CLAUDE_PROJECT_DIR:-/Users/hyungkoookkim/Content}"
-cd "$ROOT" 2>/dev/null || exit 0
+# Derive the repo root from this script's own location (.claude/hooks/ -> root),
+# independent of $CLAUDE_PROJECT_DIR, cwd, or machine. Fail-open if unresolvable.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)" || exit 0
+[ -n "$ROOT" ] && cd "$ROOT" 2>/dev/null || exit 0
 
 PY="$ROOT/.venv/bin/python"
 [ -x "$PY" ] || PY="python3"
+command -v "$PY" >/dev/null 2>&1 || exit 0   # no interpreter -> fail-open
 
-# `timeout` is GNU coreutils; macOS ships it as `gtimeout` (or not at all).
-if command -v timeout >/dev/null 2>&1; then
-  TO=(timeout 180)
-elif command -v gtimeout >/dev/null 2>&1; then
-  TO=(gtimeout 180)
-else
-  TO=()
-fi
-
-if out="$("${TO[@]}" "$PY" scripts/ci_smoke.py 2>&1)"; then
+# Run the smoke under a hard 180s bound enforced by Python itself.
+if out="$("$PY" - "$PY" 2>&1 <<'PYWRAP'
+import subprocess, sys
+try:
+    r = subprocess.run([sys.argv[1], "scripts/ci_smoke.py"], timeout=180)
+    sys.exit(r.returncode)
+except subprocess.TimeoutExpired:
+    sys.stderr.write("ci_smoke.py exceeded 180s — aborted\n")
+    sys.exit(124)
+except Exception as exc:
+    sys.stderr.write("session-smoke wrapper error: %s\n" % exc)
+    sys.exit(125)
+PYWRAP
+)"; then
   echo "✅ §15 smoke OK — ARCHITECTURE.md runtime invariants hold (R-START tripwire)."
 else
   echo "⚠️  §15 smoke FAILED or timed out — ARCHITECTURE.md may be stale OR the working tree is broken."

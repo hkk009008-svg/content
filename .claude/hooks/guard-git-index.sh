@@ -28,19 +28,33 @@ import sys, json, shlex, re
 
 payload = sys.argv[1] if len(sys.argv) > 1 else ""
 try:
-    cmd = json.loads(payload).get("tool_input", {}).get("command", "")
+    data = json.loads(payload)
 except Exception:
-    sys.exit(0)  # fail-open
+    sys.exit(0)  # fail-open on malformed JSON
 
-if not cmd or "env -u GIT_INDEX_FILE" in cmd:
+# Robust extraction: any unexpected shape (non-dict payload, non-dict
+# tool_input, non-string command) -> fail-open, never crash/exit-nonzero.
+cmd = ""
+if isinstance(data, dict):
+    ti = data.get("tool_input")
+    if isinstance(ti, dict):
+        cmd = ti.get("command", "")
+if not isinstance(cmd, str) or not cmd or "env -u GIT_INDEX_FILE" in cmd:
     sys.exit(0)  # nothing to check / already safe
 
 # Git subcommands that read or write the index (so they care about which index).
 MUT = {"add", "commit", "stash", "reset", "rm", "restore", "mv", "read-tree",
        "checkout", "switch", "merge", "rebase", "cherry-pick", "apply", "clean"}
 
+# Scope note: this guard targets the ACCIDENTAL mistake — a seat that forgot the
+# `env -u GIT_INDEX_FILE` prefix on a normal `git <mutator>` / `pytest`. It is a
+# guardrail, not an anti-evasion sandbox: deliberately obfuscated forms
+# (`sh -c 'git commit'`, `git$(echo " ")commit`, `git-commit`) are out of scope —
+# the dispatch templates mandate the prefix, and chasing obfuscation in a
+# tokenizer only adds false positives. Detection keys off the COMMAND position
+# (first token after any VAR=val env assignments), so `git`/`pytest` appearing as
+# an ARGUMENT (e.g. `grep 'pytest' tests/`, `grep git add`) is correctly allowed.
 def offending_segment(c):
-    # Check each shell-separated segment of a compound command independently.
     for part in re.split(r"&&|\|\||;|\|", c):
         try:
             toks = shlex.split(part)
@@ -48,14 +62,24 @@ def offending_segment(c):
             continue
         if not toks:
             continue
-        joined = " ".join(toks)
-        # pytest in any form
-        if any(t == "pytest" for t in toks) or "-m pytest" in joined:
+        # command token = first token that is not a `VAR=val` env assignment
+        ci = 0
+        while ci < len(toks) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", toks[ci]):
+            ci += 1
+        if ci >= len(toks):
+            continue
+        cmd0 = toks[ci].split("/")[-1]  # basename of the invoked command
+        # pytest: `pytest …`, `.venv/bin/pytest …`, or `python[3] -m pytest …`
+        if cmd0 == "pytest":
             return part.strip()
-        # git: skip global flags (incl. -C <path> / -c <kv>) to find the subcommand
-        if "git" in toks:
-            i = toks.index("git")
-            j = i + 1
+        if cmd0.startswith("python") and any(
+            toks[k] == "-m" and k + 1 < len(toks) and toks[k + 1] == "pytest"
+            for k in range(ci + 1, len(toks))
+        ):
+            return part.strip()
+        # git index-mutator: command is git, subcommand (after global flags) in MUT
+        if cmd0 == "git":
+            j = ci + 1
             while j < len(toks) and toks[j].startswith("-"):
                 if toks[j] in ("-C", "-c") and j + 1 < len(toks):
                     j += 2
