@@ -1,0 +1,90 @@
+{
+  "runid": "wf_f57f0d89-bc2",
+  "kind": "wave2-triage",
+  "produced_by": "coordinator Session-12 (read-only triage workflow; 16 agents; authored NO production code)",
+  "head_at_run": "286b31e..e5fb465 (production .py unchanged across this range; triage findings valid at e5fb465)",
+  "date": "2026-06-14 (UTC); 2026-06-15 KST",
+  "scope": "all 26 open Wave-2 rows: verify defect at HEAD, check xfail-pin non-vacuity, cluster into batches, route locks + co-signs, adversarially re-check severity on money rows + idgate-failopen",
+  "headline": "2 MAJOR->CRITICAL severity upgrades (coordinator-flagged PROVISIONAL pending lane operator ratification per R-VERIFY-TIER); campaign goes from 0 open CRITICAL to 2 provisional open CRITICAL",
+
+  "severity_upgrades": [
+    {
+      "id": "idgate-failopen",
+      "from": "MAJOR",
+      "to": "CRITICAL",
+      "is_gate_bypass": true,
+      "reachable_in_production": true,
+      "evidence": "validate_identity_vision (phase_c_vision.py:351-353) returns default_pass {match:True, confidence:0.7} on ANY Anthropic API exception (and the no-api-key path :260-263). On the production cloud DEEPFACE_AVAILABLE=False (insightface/DeepFace pip-optional, not installed) so the vision-LLM fallback is the PRIMARY identity path. Call path: controller.py:817 validate_image -> identity/validator.py:399-403 (DEEPFACE off) -> _vision_llm_validate_image -> phase_c_vision.validate_identity_vision -> default_pass 0.7 -> validator.py:1346 matched = 0.7 >= threshold TRUE for every standard mode (portrait 0.70 / medium 0.65 / wide 0.55 / action 0.60) -> passed=True, overall_score=0.7 -> auto_approve.py:450 fallback 0.7 >= image_min_composite_fallback 0.60 -> auto-approved. Any transient API error silently passes every in-flight shot's identity gate with a forged 0.7.",
+      "pin_note": "Existing pin (test_lane_silent_gate_siblings_xfail.py::test_validate_identity_vision_warns_on_api_failure) tests only the OBSERVABILITY half (print->logger.warning). The fix must additionally make a Pair-A POLICY decision: fail-closed (return 0.0/match=False) vs pass-with-warning vs retry on transient API error. Co-sign scope must cover both print sites (:352, :262) + the no-api-key path."
+    },
+    {
+      "id": "charmgr-cost-fresh-instance",
+      "from": "MAJOR",
+      "to": "CRITICAL",
+      "is_gate_bypass": true,
+      "reachable_in_production": true,
+      "evidence": "domain/character_manager.py:350 constructs CostTracker() (budget_usd=None) throwaway and calls record_api_call('FLUX_KONTEXT'); spend never reaches PipelineCore.cost_tracker.spent_usd (the accumulator would_exceed/is_over_budget read). Byte-identical to W1 CRITICAL costtracker-perf-uncounted. Path: POST /api/projects/<pid>/characters -> web_server.py:587 create_character_with_images -> character_manager.py:179 _generate_multi_angle_refs (no tracker arg) -> :350 throwaway. Endpoint callable WITHOUT a running pipeline. 5 angles x $0.08 FLUX_KONTEXT = up to $0.40/character silently evades the budget gate; budget_usd=None means even the throwaway's own gate never fires; the cost block is wrapped in except Exception: print (Family-2 swallow compounding).",
+      "pin_note": "Pin test_charmgr_cost_fresh_instance_xfail.py is non-vacuous RED at HEAD. Fix = inject shared cost_tracker (audio-T5 pattern), batch with web_research-uncounted (same fix shape)."
+    }
+  ],
+
+  "severity_held_after_adversarial_recheck": {
+    "note": "These money rows were adversarially re-checked and CONFIRMED MAJOR/MEDIUM (NOT upgraded) — spend undercounts but the gate stays alive on the shared accumulator / overrun bounded / observable WARNING. Distinguishes money-loss from gate-bypass.",
+    "lipsync-postproc-costkey": "MAJOR (bounded $0.02-0.10 undercount; same shared accumulator; not gate-death)",
+    "web_research-uncounted": "MAJOR (throwaway-instance undercount, gate live; scales with scenes)",
+    "perf-phase-no-gate": "MAJOR (missing precheck, not a gate that returns permissive; spend IS counted post-Task-7; next gate fires)",
+    "cost-conn-crossthread-drop": "MAJOR (cross-thread conn drop loses spend, CONDITIONAL on concurrency, OBSERVABLE via logged WARNING+exc_info)",
+    "spent-usd-reset-on-resume": "MAJOR (cross-process resume $0 baseline; gate fires late not never; design-open)",
+    "lipsync-precheck-cascade-gap": "MEDIUM (bounded near-budget overrun; accumulator updated; next pre-gate stops it)"
+  },
+
+  "batches": [
+    {"batch":"A1-lora-decouple","lane":"Pair-A","rows":["has-char-lora-hole","secondary-lora-hole"],"lock":"none","cosign":"none","note":"shared has_character root @quality_max.py:1060; one ~24-site decouple refactor (has_face_ref vs has_char_lora)"},
+    {"batch":"A2-idgate-failopen","lane":"Pair-A","rows":["idgate-failopen"],"lock":"none","cosign":"Tier-A cross-lane: Pair-A briefs, Pair-B (director2) lands verification-report BEFORE dispatch","note":"CRITICAL upgrade; phase_c_vision.py is a Pair-B module w/ Pair-A identity content; FIRST priority"},
+    {"batch":"A3-identity-nan","lane":"Pair-A","rows":["identity-nan-arc-bypass"],"lock":"none","cosign":"none","note":"face_validator_gate.py isfinite guard one-liner"},
+    {"batch":"A4-coherence-silent","lane":"Pair-A","rows":["coherence-silent"],"lock":"none","cosign":"none","note":"pinned analyzer-side half + UNPINNED caller-side MAJOR half (controller.py:2266-2270 coh.valid-ignore); director decides scope/new-row"},
+    {"batch":"B1-lipsync-cluster","lane":"Pair-B","rows":["lipsync-syncnet-nan","audio-remux-notimeout"],"lock":"none","cosign":"none","note":"both lip_sync.py + same test file"},
+    {"batch":"B2-lipsync-veto","lane":"Pair-B","rows":["lipsync-veto"],"lock":"W2-auto_approve.py.lock","cosign":"none","note":"cross-cutting module; acquire lock, release via git rm in GO commit (§6b); lexicographic BEFORE web_server.py.lock"},
+    {"batch":"B3-http-cluster","lane":"Pair-B","rows":["http-clearperf-silent200","http-drivingvid-orphan","http-addchar-float-unguarded","http-null-json-body","http-styleboard-false201"],"lock":"W2-web_server.py.lock","cosign":"none","note":"5 rows one lock; http-addchar scope MUST extend to 4 float sites (567,1053,696,1154) per Rule#13"},
+    {"batch":"B4-checkpoint-cluster","lane":"Pair-B","rows":["ckpt-sceneidx-dead","ckpt-shotaudio-loss","ckpt-projectid-nocrosscheck"],"lock":"none","cosign":"none","note":"all cinema/checkpoint.py(+cinema_pipeline.py)"},
+    {"batch":"B5-money-tracker-threading","lane":"Pair-B","rows":["cost-conn-crossthread-drop"],"lock":"none","cosign":"none","note":"cost_tracker.py:228 check_same_thread=False + threading.Lock"},
+    {"batch":"B6-money-fresh-instance","lane":"Pair-B","rows":["web_research-uncounted","charmgr-cost-fresh-instance"],"lock":"none","cosign":"none","note":"charmgr=CRITICAL; both throwaway-instance; inject shared tracker; SECOND priority"},
+    {"batch":"B7-lipsync-costkey","lane":"Pair-B","rows":["lipsync-postproc-costkey"],"lock":"none","cosign":"none","note":"controller.py:2446 prefix LIPSYNC_ + fallback LIPSYNC_DEFAULT"},
+    {"batch":"B8-download-timeout","lane":"Pair-B","rows":["download-urllib-notimeout"],"lock":"none","cosign":"none","note":"phase_c_ffmpeg.py 7 urlretrieve sites (490/550/633/738/824/870/957)"},
+    {"batch":"B9-perf-take-meta","lane":"Pair-B","rows":["perf-take-meta"],"lock":"none","cosign":"none","note":"cinema_pipeline.py:703 one-token tuple extension"},
+    {"batch":"B10-audioflag-inherit","lane":"Pair-B","rows":["audioflag-inherit"],"lock":"none","cosign":"none","note":"controller.py:241 add WARNING before return; batchable w/ B9"},
+    {"batch":"B11-spent-reset-design-open","lane":"Pair-B","rows":["spent-usd-reset-on-resume"],"lock":"none","cosign":"Tier-B director2 (cross-file checkpoint.py+core.py+cost_tracker.py; Tier-A if constructor interface change touches gate read site)","note":"GATED on design pick (seed-at-construct vs post-resume inject) before a pin exists"},
+    {"batch":"B12-perf-phase-no-gate","lane":"Pair-B","rows":["perf-phase-no-gate"],"lock":"none","cosign":"none","note":"test-infeasible; add would_exceed precheck @controller.py:1076; director picks pin-feasible narrower guard or integration-note"},
+    {"batch":"B13-lipsync-precheck","lane":"Pair-B","rows":["lipsync-precheck-cascade-gap"],"lock":"none","cosign":"none","note":"MEDIUM test-infeasible; lowest priority"}
+  ],
+
+  "execution_order_summary": "A2-idgate (CRITICAL, route co-sign first) -> B6-money-fresh-instance (charmgr CRITICAL) -> B2-lipsync-veto (auto_approve.py.lock) -> B3-http-cluster (web_server.py.lock AFTER auto_approve released) -> A1-lora-decouple -> B1-lipsync-cluster -> B4-checkpoint -> B5-threading -> A3-identity-nan -> A4-coherence -> B7 -> B8 -> B9+B10 -> [B11 gated on design] -> B12 -> B13",
+
+  "cosign_routing": [
+    "A2-idgate-failopen: Tier-A cross-lane. Pair-A director authors brief; Pair-B director (director2) lands a mailbox verification-report BEFORE dispatch. Co-sign scope MUST include: (a) ack severity now CRITICAL (gate-bypass not just observability); (b) ratify the fail-closed-vs-pass-with-warning policy; (c) confirm fix covers both print sites :352 + :262 and the no-api-key path :260-263. COORDINATOR ROUTES (does not author).",
+    "B11-spent-usd-reset-on-resume: Tier-B awareness (director2) for cross-file scope; upgrade to Tier-A if the CostTracker constructor change touches the Pair-A gate read site."
+  ],
+
+  "data_integrity_flags": [
+    "idgate-failopen: MAJOR->CRITICAL (recorded this session, provisional). Prose: no-api-key return site is :260-263 (not :253-258).",
+    "charmgr-cost-fresh-instance: MAJOR->CRITICAL (recorded this session, provisional).",
+    "has-char-lora-hole: file:line :1006 STALE -> :1060 at HEAD (corrected this session).",
+    "secondary-lora-hole: file:line :1114 STALE -> :1119 at HEAD (corrected this session).",
+    "http-addchar-float-unguarded: Rule#13 scope GAP — inventory row cites 2 sites (567,1053); 2 MORE unguarded float() sites exist (api_update_character:696, api_update_object:1154). Row scope INCOMPLETE; pin may pass vacuously if fix covers only 2. Brief MUST cover all 4 + isfinite NaN/inf guard. (noted in inventory this session.)",
+    "coherence-silent: caller-side half (controller.py:2266-2270 coh.valid-ignore -> color_grade suppression) is MAJOR + UNPINNED + has NO own row. Aggregate severity understated. Director: expand A4 scope or file a new row. (noted in inventory this session.)",
+    "lipsync-veto: function _best_take_lipsync @ :485 (inventory cites :502 = docstring). drift only; not corrected in cell (see discovery log).",
+    "lipsync-postproc-costkey: record_api_call call site :2446 (inventory cites :2442 = comment). drift only.",
+    "lipsync-precheck-cascade-gap: would_exceed call :1657 (inventory cites :1655 = comment). drift only.",
+    "spent-usd-reset-on-resume: spans 3 files (checkpoint.py:163 + core.py:113 + cost_tracker.py:227); inventory cites only checkpoint.py:163."
+  ],
+
+  "completeness_critic_open_items": [
+    "coherence-silent UNPINNED caller-side MAJOR half needs a pin or a new row before it can be batched.",
+    "B11 design-open: cannot dispatch until director picks seed-at-construct vs post-resume injection + authors the pin (may need a 'resume-with-prior-spend' fault mode added to the §3 stub-contract fault matrix).",
+    "B12/B13 test-infeasible: re-examine whether Task-7's tracker-through-dispatch refactor now enables a lighter ShotController mock that makes a pin feasible.",
+    "Wave-2 gate count: confirm scripts/wave_gate_check.py treats CRITICAL vs MAJOR consistently after the 2 upgrades before wave close.",
+    "Stub-contract spec (docs/superpowers/specs/2026-06-15-wave2-stub-contract.md) §3: the Rule#13 extra http-addchar sites (696,1154 on UPDATE endpoints) were not in scope at issue; spec §8 re-issue trigger if the brief extends there.",
+    "Lock protocol: coordination/locks/ holds only .gitkeep (0 active claims) — expected, but the first-mover claim/release flow must be exercised when B2 (auto_approve.py) / B3 (web_server.py) dispatch.",
+    "Realism fork: this triage covers ONLY hardening rows. If Pair-A pivots to ADR-024 Route-B pod burn, A1/A3/A4 stay open — surface the tradeoff to the user (user has chosen Wave-2 as of Session-12)."
+  ]
+}
