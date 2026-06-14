@@ -639,9 +639,9 @@ canonical migration recipe at
 `cinema/review/controller.py`'s `_gate_map` is extended with
 `"PERFORMANCE_REVIEW" → "motion"`, wiring the motion-gate auto-approve
 rules (themselves shipped tested-but-dead in Session 11) into production.
-Helper at [cinema/auto_approve.py:621](cinema/auto_approve.py:621); conditional
+Helper at [cinema/auto_approve.py:635](cinema/auto_approve.py:635); conditional
 at [cinema/review/controller.py:280-281](cinema/review/controller.py:280).
-Parser at [cinema/auto_approve.py:630](cinema/auto_approve.py:630):
+Parser at [cinema/auto_approve.py:644](cinema/auto_approve.py:644):
 
 ```python
 return os.environ.get("CINEMA_AUTO_APPROVE_MOTION", "").strip().lower() in {

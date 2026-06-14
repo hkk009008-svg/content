@@ -23,6 +23,7 @@ Integration contract for Session 12:
 from __future__ import annotations
 
 import logging
+import math
 import os
 from dataclasses import dataclass, field
 from typing import Callable, Literal, Optional
@@ -448,7 +449,9 @@ def _best_take_composite(takes: list[dict]) -> float:
         if score is None:
             score = metadata.get("identity_score")
         if score is not None:
-            best = max(best, float(score))
+            s = float(score)
+            if math.isfinite(s):
+                best = max(best, s)
     return best
 
 
@@ -459,7 +462,9 @@ def _best_take_identity(takes: list[dict]) -> float:
         metadata = take.get("metadata") or {}
         score = metadata.get("identity_score")
         if score is not None:
-            best = max(best, float(score))
+            s = float(score)
+            if math.isfinite(s):
+                best = max(best, s)
     return best
 
 
@@ -471,7 +476,9 @@ def _best_take_motion_score(takes: list[dict]) -> float:
         # motion_fidelity is how the ShotController stores it (shots/controller.py:864)
         score = metadata.get("motion_fidelity") or metadata.get("motion_score")
         if score is not None:
-            best = max(best, float(score))
+            s = float(score)
+            if math.isfinite(s):
+                best = max(best, s)
     return best
 
 
@@ -506,9 +513,16 @@ def _best_take_lipsync(takes: list[dict]) -> float:
         if score is not None:
             any_score_present = True
             try:
-                best = max(best, float(score))
+                s = float(score)
             except (TypeError, ValueError):
                 continue
+            # math.isfinite AFTER the cast: float(inf) raises neither TypeError nor
+            # ValueError, so an inf/nan lipsync_score would slip through and set
+            # best=inf -> inf < threshold always False -> gate fail-open. Skip it
+            # (no accumulate); any_score_present stays True (set above) so a take with
+            # only a non-finite score still yields best=0.0 (fail-closed).
+            if math.isfinite(s):
+                best = max(best, s)
         elif metadata.get("audio_embedded"):
             # Native-audio take: voice is baked in; treat as perfect sync.
             any_score_present = True

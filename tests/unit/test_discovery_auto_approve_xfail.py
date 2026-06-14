@@ -73,17 +73,6 @@ def _config_image_composite_only(**overrides) -> AutoApproveConfig:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W1:CRITICAL:aa-inf-scorebypass (discovery wf_13f9d2f6-f93 confirmed[0]): "
-        "a take with composite=inf causes _best_take_composite to return inf; "
-        "inf < threshold is always False so the image-composite veto never fires "
-        "and check_gate returns auto_approved=True. "
-        "Fix: add math.isfinite guard in _best_take_composite (and the three sibling "
-        "helpers) so inf scores are treated as invalid and the gate rejects them."
-    ),
-)
 def test_inf_composite_score_must_not_auto_approve():
     """A take with composite=inf must NOT pass the image gate (auto_approved must be False).
 
