@@ -13,6 +13,7 @@ Each type optimizes: PuLID weight, guidance, steps, denoise — and at max tier
 also: SLG/FreeU scales, CN channel strengths, DetailDaemon, halt rules.
 """
 
+import math
 import re
 from typing import Dict, List, Optional
 
@@ -489,7 +490,11 @@ def get_workflow_params(
         # Note: comfyui_upscale is intentionally omitted; no "upscale" key exists
         # in WORKFLOW_TEMPLATES, so we don't invent one here.
         flux_guidance = settings.get("flux_guidance")
-        if flux_guidance is not None and isinstance(flux_guidance, (int, float)):
+        if (flux_guidance is not None and isinstance(flux_guidance, (int, float))
+                and math.isfinite(flux_guidance)):
+            # math.isfinite: a NaN/inf flux_guidance (survives project.json via
+            # json.load allow_nan) would inject a non-finite into FluxGuidance
+            # node 60 -> silent generation corruption. Skip -> template default.
             params["guidance"] = float(flux_guidance)
 
         comfyui_sampler = settings.get("comfyui_sampler")
@@ -497,14 +502,22 @@ def get_workflow_params(
             params["sampler"] = comfyui_sampler
 
         comfyui_steps = settings.get("comfyui_steps")
-        if comfyui_steps is not None and isinstance(comfyui_steps, (int, float)):
+        if (comfyui_steps is not None and isinstance(comfyui_steps, (int, float))
+                and math.isfinite(comfyui_steps)):
+            # math.isfinite BEFORE int(): int(float('nan')) raises ValueError and
+            # int(float('inf')) raises OverflowError — a non-finite comfyui_steps
+            # would crash param resolution instead of skipping the bad knob.
             params["steps"] = int(comfyui_steps)
 
         # img2img_denoise is nested under continuity_options (unlike the top-level
         # knobs above).  Validate in-range [0.2, 0.6] matching the slider bounds
         # in web_server.py:331 before writing — the JSON API can send any float.
         img2img_denoise = settings.get("continuity_options", {}).get("img2img_denoise")
-        if img2img_denoise is not None and isinstance(img2img_denoise, (int, float)):
+        if (img2img_denoise is not None and isinstance(img2img_denoise, (int, float))
+                and math.isfinite(img2img_denoise)):
+            # math.isfinite: the [0.2,0.6] clamp neutralises non-finite by luck
+            # (nan->0.6), silently overwriting the template default. Skip instead,
+            # matching quality_max._clamp_img2img_denoise's reject-non-finite policy.
             clamped = max(0.2, min(0.6, float(img2img_denoise)))
             params["denoise_default"] = clamped
 

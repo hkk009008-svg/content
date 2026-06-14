@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from workflow_selector import (
@@ -539,3 +541,58 @@ class TestImg2ImgDenoiseOverlay:
         assert params["sampler"] == "euler"
         assert params["steps"] == 30
         assert params["denoise_default"] == pytest.approx(0.4)
+
+
+# --- get_workflow_params: non-finite per-project numeric overlays (Rule#13) ---
+
+class TestGetWorkflowParamsNanGuards:
+    """A NaN/inf token survives project.json (json.load allow_nan default) and
+    defeats the isinstance guard on each numeric overlay. Each must be SKIPPED,
+    leaving the template default — NOT injected into a ComfyUI node:
+      - flux_guidance -> node 60 guidance: float(nan) = silent generation corruption.
+      - comfyui_steps -> int(nan) raises ValueError / int(inf) raises OverflowError
+        (crashes get_workflow_params instead of skipping the bad knob).
+      - img2img_denoise -> the [0.2,0.6] clamp neutralises non-finite by luck
+        (nan->0.6), overwriting the template default with a spurious value.
+    (flux_guidance surfaced by director2 §4 verify; the other two are siblings
+    found by the same Rule#13 sweep of the overlay block.)"""
+
+    def test_nan_flux_guidance_falls_back_to_default(self):
+        default = get_workflow_params("portrait")["guidance"]
+        p = get_workflow_params("portrait", settings={"flux_guidance": float("nan")})
+        assert math.isfinite(p["guidance"])
+        assert p["guidance"] == default
+
+    def test_inf_flux_guidance_falls_back_to_default(self):
+        default = get_workflow_params("portrait")["guidance"]
+        p = get_workflow_params("portrait", settings={"flux_guidance": float("inf")})
+        assert p["guidance"] == default
+
+    def test_valid_flux_guidance_overrides(self):
+        p = get_workflow_params("portrait", settings={"flux_guidance": 4.0})
+        assert p["guidance"] == pytest.approx(4.0)
+
+    def test_nan_comfyui_steps_does_not_raise_and_falls_back(self):
+        default = get_workflow_params("portrait")["steps"]
+        p = get_workflow_params("portrait", settings={"comfyui_steps": float("nan")})
+        assert p["steps"] == default
+
+    def test_inf_comfyui_steps_does_not_raise_and_falls_back(self):
+        default = get_workflow_params("portrait")["steps"]
+        p = get_workflow_params("portrait", settings={"comfyui_steps": float("inf")})
+        assert p["steps"] == default
+
+    def test_valid_comfyui_steps_overrides(self):
+        p = get_workflow_params("portrait", settings={"comfyui_steps": 30})
+        assert p["steps"] == 30
+
+    def test_nan_img2img_denoise_keeps_template_default(self):
+        default = get_workflow_params("portrait")["denoise_default"]
+        p = get_workflow_params(
+            "portrait", settings={"continuity_options": {"img2img_denoise": float("nan")}})
+        assert p["denoise_default"] == pytest.approx(default)
+
+    def test_valid_img2img_denoise_clamps_and_sets(self):
+        p = get_workflow_params(
+            "portrait", settings={"continuity_options": {"img2img_denoise": 0.9}})
+        assert p["denoise_default"] == pytest.approx(0.6)

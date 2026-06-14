@@ -995,8 +995,8 @@ per-char validation and the capability scorecard are unchanged from slice 1.
 A shot whose prompt carries a landscape keyword (`landscape`/`aerial`/`drone`/
 `skyline`/`panoramic`/`environment`/`scenery`/`no character`) **but has a
 registered character** is mis-classified `landscape` by the shared seam
-[`workflow_selector.classify_shot_type`](workflow_selector.py:416): the landscape
-keyword bucket ([`SHOT_TYPE_KEYWORDS`](workflow_selector.py:112)) wins even when
+[`workflow_selector.classify_shot_type`](workflow_selector.py:417): the landscape
+keyword bucket ([`SHOT_TYPE_KEYWORDS`](workflow_selector.py:113)) wins even when
 `characters_in_frame` is non-empty (rule 1's "no characters → landscape" shortcut
 is bypassed, but the keyword scan still returns `landscape`). The scan is
 **dict-order, first-match-wins** (portrait → action → wide → landscape → medium),
@@ -1009,9 +1009,9 @@ effect (zero face-lock), mutually exclusive by tier**:
   early-returns to the Kontext fallback with `character_image=None` — ComfyUI
   never runs and the **reference is dropped entirely** (strictly worse than the
   `pulid_weight=0.0` its own `landscape` template would set at
-  [workflow_selector.py:88](workflow_selector.py:88)).
+  [workflow_selector.py:89](workflow_selector.py:89)).
 - **Max tier (§8.3):** no early-return, but `MAX_QUALITY_TEMPLATES['landscape']`
-  ([workflow_selector.py:329-374](workflow_selector.py:329), via
+  ([workflow_selector.py:330-375](workflow_selector.py:330), via
   `get_max_quality_params`) writes `pulid_weight=0.0`,
   `lora_strength_model/clip=0.0`, `halt_threshold_arc=0.0`,
   `regenerate_floor_arc=0.0`. `_inject_identity` still runs (identity gating keys
@@ -1029,8 +1029,8 @@ effect (zero face-lock), mutually exclusive by tier**:
 
 **Root cause is the single shared seam.** Routing a landscape-keyword shot *with
 non-empty `characters_in_frame`* to `wide` (`pulid_weight=0.65` both tiers —
-production [workflow_selector.py:54](workflow_selector.py:54), max
-[workflow_selector.py:236-248](workflow_selector.py:236) which also restores
+production [workflow_selector.py:55](workflow_selector.py:55), max
+[workflow_selector.py:237-249](workflow_selector.py:237) which also restores
 `lora_strength=0.9`) or `medium` re-engages identity in **both** tiers at once —
 production keys its
 early-return on `shot_type`, the max template keys its zeroing on `shot_type`, so
@@ -1073,7 +1073,7 @@ bound, completed the 8-keyword set, and hardened the regen-floor anchor chain.*
 
 ## 9. Video routing — 5 templates × 11 engines
 
-### 9.1 `WORKFLOW_TEMPLATES` ([workflow_selector.py:21-109](workflow_selector.py:21))
+### 9.1 `WORKFLOW_TEMPLATES` ([workflow_selector.py:22-110](workflow_selector.py:22))
 
 | Shot type | `target_api` | `video_fallbacks` |
 |---|---|---|
@@ -1083,14 +1083,14 @@ bound, completed the 8-keyword set, and hardened the regen-floor anchor chain.*
 | `action` | `SORA_NATIVE` | `["KLING_NATIVE", "RUNWAY_GEN4", "LTX", "SEEDANCE"]` |
 | `landscape` | `LTX` | `["VEO_NATIVE", "KLING_NATIVE"]` |
 
-A parallel `MAX_QUALITY_TEMPLATES` dict at [workflow_selector.py:143-375](workflow_selector.py:143)
+A parallel `MAX_QUALITY_TEMPLATES` dict at [workflow_selector.py:144-376](workflow_selector.py:144)
 mirrors these with different fallback orderings.
 
 **SEEDANCE appears only in the `action` cascade** (last fallback). It is
 NOT a general multi-character fallback. Two-character dialogue shots
 classify as `medium` and route Kling → Runway → Sora → LTX.
 
-### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:416-460](workflow_selector.py:416))
+### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:417-461](workflow_selector.py:417))
 
 Empty `characters_in_frame` → `landscape`; otherwise concatenate `[SHOT]` +
 prompt + camera into a search string, first containment match wins; default `medium`.
@@ -1103,7 +1103,7 @@ prompt + camera into a search string, first containment match wins; default `med
 | `landscape` | landscape, aerial, drone, skyline, panoramic, environment, scenery, no character |
 | `medium` | medium, 50mm, mid-shot, waist, hip, american shot, cowboy shot, two-shot |
 
-### 9.3 `MOTION_FIDELITY_FLOORS` ([workflow_selector.py:400-407](workflow_selector.py:400))
+### 9.3 `MOTION_FIDELITY_FLOORS` ([workflow_selector.py:401-408](workflow_selector.py:401))
 
 | Shot type | Floor |
 |---|---|
