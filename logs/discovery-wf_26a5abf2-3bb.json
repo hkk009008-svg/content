@@ -1,0 +1,61 @@
+{
+  "runid": "wf_26a5abf2-3bb",
+  "kind": "root-cause-investigation",
+  "produced_by": "coordinator Session-12 (read-only forensic workflow; 8 agents; authored NO code)",
+  "question": "Why/how did the hardening campaign drift into a self-graded coordination machine — circular wave gate, scaffolding-over-product, rhetoric laundering completion into correctness — and how to durably prevent recurrence?",
+  "head_at_run": "campaign df702c5..HEAD (~103 commits)",
+
+  "verified_findings": {
+    "gate-genealogy": "wave_gate_check.py (created ab4978c, 2 commits total, zero subprocess/pytest) reads the inventory 'status' string; it NEVER executes a test. This was a DELIBERATE design for coordinator-absence resilience (wave1 plan:349 'the wave gate keys off the inventory wave/status columns, not the pin reason prefix'), with the strict-xfail pins intended as a SEPARATE CI tripwire. The spec's full acceptance bar (b660e08:121) lists 'xfail green' + 'operator GO' + 'ci_smoke green' as SEPARATE conditions — but only wave_gate_check.py is automated; the rest are socially enforced. The circularity is real but distributed-by-design, not an oversight: coordinator writes 'verified' (after an operator GO that DID run pytest), gate confirms the cell says 'verified'.",
+    "effort-allocation": "101/103 campaign commits (98%) are STRUCTURAL; 2/103 (2%) are PRODUCT (both documentation, not code). Coordination overhead = 35 coord(*) commits vs 17 fix commits (~2:1). NO production-code commit improved any user-observable output-quality dimension. CAVEAT (stress): the 17 fix commits DID fix real defects (dead money gates, NaN poisoning) — 'structural' != 'not product'. Realism (ADR-024, built c5d0a80 2026-06-13) was deferred across ~5 events over 4 sessions — but every deferral was USER-driven (pod stopped / 'handoff' / fork deferred); when the user authorized the burn it ran immediately AND in parallel with Wave-2. Product work also runs off-git (pod artifacts gitignored), so the git footprint undercounts it. Structural was NEVER deferred for product.",
+    "oracle-inventory": "External-oracle production gates: face_validator_gate.py (ArcFace+LAION-aesthetic on stills, N=8 loop), performance/identity_gate.py (ArcFace on motion-take frames), validate_lipsync_quality (SyncNet — ONLY if installed, else degrades to heuristic/attestation). Ratio ~20-25% external-oracle vs 75-80% attestation/structural. TWO vision oracles EXIST but are DEAD CODE (zero production callers): validate_shot_quality_vision (GPT-4o, prompt adherence) + validate_scene_coherence_vision (Gemini, continuity). SIX product dimensions have ZERO reachable oracle: temporal coherence, motion realism/physics, video photorealism, prompt adherence, audio/voice quality, narrative coherence. On cloud prod (DEEPFACE_AVAILABLE=False), the identity path degrades to the Claude-Vision fallback carrying the idgate-failopen fail-open (any API error -> forged 0.7 PASS). CORRECTION to the original critique: face_validator is NOT the only oracle (there are 2-3), and it does NOT itself fall back to Claude-Vision (it uses neutral-0.5-burn-N); the Claude-Vision-0.7 fail-open is a DIFFERENT path (identity/validator -> performance/identity_gate).",
+    "rhetoric-audit": "'WAVE-1 GATE MET 8/8' propagated as a milestone headline across handoffs/mailbox/MEMORY; the caveat ('8 PLANNED rows verified, NOT all money-loss closed') appears once in S9 detailed notes. 'verified' redefined DOWN: behavioral-fixed -> unit-pin-flips -> status-cell-says-verified. shot-spent-usd-never-written is status=verified while its OWN xfail-pin cell reads 'gate-loop integration test-infeasible'. 4 rows are test-infeasible (no behavioral oracle). 'zero open CRITICAL' was a correct snapshot when written (idgate was MAJOR then; S12 upgraded it later)."
+  },
+
+  "root_causes": [
+    "[metric-design] Gate born self-referential — reads a coordinator-curated status string, deliberate for coordinator-absence resilience, with pins as a SEPARATE (and socially-enforced, not gate-enforced) CI tripwire.",
+    "[incentive] Grading scaffolding is structurally cheaper (free fast unit test) than grading product (pod burn $$ + user auth + external oracle) -> the cheap loop ran continuously in git; the product oracle needed a pod the user must start.",
+    "[cultural-rhetoric] 'verified' redefined down through 3 individually-defensible layers until the word severed from its referent; milestone headlines carried more epistemic weight than the underlying check.",
+    "[structural] The 4-seat protocol commits its own bookkeeping (mailbox/verify-request/reconcile/cursor) — at 2:1 over implementation, the machine's self-documentation rivals its product.",
+    "[metric-design] 6 product dimensions have zero reachable oracle; 2 vision oracles are dead code; cloud-prod identity degrades to a fail-open. The gate system structurally cannot observe the output quality the program exists to produce."
+  ],
+
+  "adversarial_stress_verdict": "partially-just-so",
+  "stress_corrections": [
+    "'98% structural vs 2% product' conflates 'not improving visual quality' with 'not improving the product' — the fix commits fixed real defects. Valid narrower claim: no commit improved any of the 6 user-observable output-quality dimensions.",
+    "The 'self-attestation loop' is overstated: the coordinator is bound (Rule #8) to receive an operator GO (which runs pytest mutation RED->GREEN) before writing 'verified'. Accurate technical claim: NO CODE prevents writing 'verified' without a GO, and only the gate SCRIPT is automated (the GO/xfail/ci_smoke conditions are social).",
+    "Realism deferral was USER-authorization/pod-gated resource asymmetry, NOT campaign displacement; product work is also off-git.",
+    "face_validator does NOT fall back to Claude-Vision (neutral-0.5-burn-N); the 0.7 fail-open is a distinct path."
+  ],
+
+  "remediations": {
+    "TOP-3 highest leverage": [
+      "FIX-1 [director-gate-change; effort S; structural]: rewrite wave_gate_check.py to EXECUTE the wave-tagged xfail pins (pytest --runxfail) and derive MET from exit-0/XPASS-clean, NOT from the status string. Status column becomes display-only. Closes the loop at its root. NOTE: will likely flip current 'MET' to 'UNMET' for test-infeasible or non-flipping rows — that is the point.",
+      "FIX-4 [director-change; effort M; structural]: scripts/pin_reconciler.py — re-run every 'verified' row's pin WITHOUT --runxfail and flag any that still XFAIL (fix absent/regressed). The only continuous behavioral constraint on the 'verified' label post-gate. Start non-blocking in CI, then hard-gate.",
+      "FIX-2 [director-change; effort S; structural]: wire wave_gate_check.py (post FIX-1) into CI on every push to main, so the gate runs in the coordinator-uncontrolled environment on the cadence of code change."
+    ],
+    "coordinator-authorable (docs)": [
+      "FIX-6: ADR-027 (this) — codify a mechanically-checkable 'done' definition; milestone language must state what was mechanically checked. NOTE (critic): exhortation-only UNTIL FIX-1 ships.",
+      "FIX-3 (refined): the real gap is GATE-SIDE — the gate accepts 'verified' without asking whether a behavioral oracle backs it. A new 'attested' status helps visibility, but the structural fix is FIX-1 (gate executes the oracle). Record the 'attested' (no-behavioral-oracle) distinction in the inventory vocabulary."
+    ],
+    "user-policy decisions": [
+      "FIX-5: make a committed product-oracle artifact (logs/ ArcFace arc + lipsync offset baseline) a HARD Wave-close blocker. Already a Wave-2 exit deliverable in spec §7 but NOT gate-enforced. Needs FIX-1 to enforce + your ratification.",
+      "DEEPER: should the program's actual purpose (Wave-3 realism/product capability) remain 'best-effort, pod-gated, a HOLD does not block Wave 4' per spec §5? That sequencing is WHY product gets parked. Re-deciding this is a user-principal call."
+    ],
+    "what_NOT_to_do (would be the failure mode recurring)": [
+      "Do NOT add another attestation layer (second operator sign-off, super-verifier seat, more checklist ticks) — more humans writing more text IS the failure mode.",
+      "Do NOT write a new 'quality review' / 'milestone definition' prose doc that paraphrases the acceptance bar — prose has not prevented the drift.",
+      "Do NOT require a 'product oracle summary' mailbox/handoff section — that is attestation; the fix is a committed measurement artifact gate-checked, not prose.",
+      "Do NOT ban 'test-infeasible' labels — that just moves the problem; make the evidence level structurally visible at gate-time instead."
+    ]
+  },
+
+  "critic_flags": [
+    "FIX-7 (nightly face_validator in CI) would be VACUOUS: in CI DEEPFACE_AVAILABLE=False -> neutral scores -> arc>=0.80 assertion passes vacuously (the exact silent-gate-degradation bug class). Must fix the _ARC_AVAILABLE=False vacuity BEFORE wiring it, or it is theater.",
+    "FIX-5/FIX-6 depend on FIX-1: wave_gate_check.py has no filesystem-check or test-exec logic today; amending the spec to 'require a logs/ artifact' without FIX-1 means the gate still passes silently (the loop in a new domain)."
+  ],
+  "still_missing_after_all_fixes": [
+    "Operator-GO (impl != verifier, Rule #9) is NOT structurally enforced at gate-time. After FIX-1 a row could be status=verified + pin XPASS but flipped by the IMPLEMENTER with no independent GO — invisible to the gate. Needs verifier-identity enforcement (signed artifact / CI check).",
+    "coherence-silent caller-side MAJOR half (controller.py:2266-2270, coh.valid never checked) is an UNREGISTERED defect (no row, no pin) -> survives all fixes; a gate that reads only registered rows cannot catch unregistered defects."
+  ]
+}

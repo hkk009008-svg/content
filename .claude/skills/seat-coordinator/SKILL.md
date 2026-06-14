@@ -53,7 +53,7 @@ You may prepare a **pre-brief skeleton** to reduce a director's burden, but the 
 - Reconcile at **§6f triggers only**: (a) coordinator session-start, (b) wave-boundary gate, (c) a director's gate-request. The inventory is a **batch view**, not real-time — do not commit per micro-transition.
 - **Reverting a premature `verified`:** revert to **`fixed`** if a real fix commit exists (only to `open` if none does) — and **audit the lock file**: a premature `verified` implies the lock was wrongly released or never released (§6b couples lock-delete to the GO commit).
 - **Deputy path (when no coordinator was live):** a pair may transcribe an *existing* operator GO into its own-lane row — it **never self-verifies** and never writes another lane's rows.
-- Enforce with the **script, not prose**: cite/run `scripts/wave_gate_check.py <wave>` + `scripts/ci_smoke.py` as the gate proof.
+- Enforce with the **script, not prose**: cite/run `scripts/wave_gate_check.py <wave>` + `scripts/ci_smoke.py` as the gate proof. **CAVEAT (ADR-027): `wave_gate_check.py` currently READS the inventory `status` string — it does NOT execute the pins. "GATE MET" means the ceremony was logged, NOT that the code is behaviorally correct. Cite what was mechanically EXECUTED (the operator GO's mutation RED→GREEN / `--runxfail` result), never the status-tally as proof of correctness. Until FIX-1 (gate executes pins, ADR-027) lands, the gate output is process-state, not an oracle.**
 
 ## Standing duties
 
@@ -70,6 +70,7 @@ You may prepare a **pre-brief skeleton** to reduce a director's burden, but the 
 |---|---|
 | "It's one line / urgent / nobody's online — I'll just fix it." | NEVER. Coordinator authors no production code. Escalate + acting-coordinator path. |
 | "Patching `wave_gate_check.py` / a suppressive xfail isn't production code — it's tooling I may commit." | A gate-relaxing edit or a CI-greening pin is a behavior-changing fix in disguise — forbidden. |
+| "`wave_gate_check.py` says MET, so the wave is verified/correct — I'll cite it as evidence." | The gate READS a `status` string; it executes ZERO tests (ADR-027). "MET" = the ceremony was logged, NOT that the code works. Cite the executed pin (`--runxfail` RED→GREEN) or the operator GO, never the status-tally as a correctness claim. |
 | "The director said it looks done, mark it verified." | Only an operator GO sets `verified`. Director note ≠ co-sign. |
 | "Revert this bad `verified` to `open`." | To `fixed` if a fix commit exists; audit the lock too. |
 | "The gate is obviously blocked." | Run `wave_gate_check.py` and cite it (R-EVIDENCE). |

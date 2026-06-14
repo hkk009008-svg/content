@@ -1159,3 +1159,68 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   `docs/superpowers/plans/2026-06-14-program-hardening-wave1.md` (Task 6);
   `docs/REMEDIATION-INVENTORY.md` (`budget-nan` row); director2 scope-surface 10:28:08Z +
   Tier-A co-sign 10:35:37Z. Origin: director2's §4 verify (`a812ee4`, `wf_99bc3ff7-fe4`).
+
+## ADR-027 — Wave verification must EXECUTE the oracle, not READ the attestation (closing the gate-circularity)
+
+- **Status:** Diagnosis ADOPTED; coordinator-doctrine prevention ADOPTED (seat-coordinator
+  skill). The structural gate change (gate executes pins) + the product-oracle wave-close
+  requirement are RECOMMENDED — routed to a Pair-B director (gate/CI scripts are not
+  coordinator-authorable) and PENDING user-principal ratification of the policy parts.
+  Evidence: `logs/discovery-wf_26a5abf2-3bb.json` (read-only RCA, 8 agents, adversarially
+  stressed; verdict "partially-just-so").
+- **Context (the failure mode, user-principal critique 2026-06-15 — "an elaborate machine
+  for feeling confident"):** investigation confirmed the mechanism AND corrected its overreach.
+  - `wave_gate_check.py` derives "GATE MET" by reading the inventory `status` string — it
+    executes zero tests (verified: 2-commit history, no subprocess). The strict-xfail pins
+    (the behavioral oracle) were designed as a SEPARATE CI tripwire, but **only the gate
+    script is automated**; the operator-GO / xfail-green / `ci_smoke` conditions are socially
+    enforced. Net: "GATE MET" carries the rhetorical weight of "tests pass" while
+    mechanically meaning "the coordinator wrote `verified` (after an operator GO that did run
+    pytest)."
+  - "verified" was redefined DOWN (behavioral-fixed → unit-pin-flips → status-cell) — e.g.
+    `shot-spent-usd-never-written` is `verified` while its own pin cell reads "gate-loop
+    integration test-infeasible."
+  - ~20–25% of production gates are external-oracle; **6 product dimensions** (realism,
+    coherence, motion, audio, prompt adherence, narrative) have ZERO reachable oracle; 2
+    vision oracles are dead code; cloud-prod identity degrades to the `idgate-failopen`
+    fail-open. 98% of campaign commits are structural; ~2:1 coordination:implementation.
+  - **Corrections (adversarial stress):** the "structural" fixes DID fix real defects (the
+    narrow valid claim is: *no commit improved a user-observable output-quality dimension*);
+    the product deferral was USER-authorization/pod-gated resource asymmetry, not campaign
+    displacement (and product work runs off-git); the loop has a real operator-GO evidential
+    chain (no CODE enforces it, but it is not "from nothing"); `face_validator` does not
+    itself fall back to Claude-Vision.
+- **Decision:**
+  1. **"Done" is mechanically-checkable, oracle-backed — not status-string-backed.** A wave
+     is MET when the gate EXECUTES the wave's pins (`pytest --runxfail`, XPASS-clean), not
+     when a status column reads "verified" (FIX-1; director — changes gate PASS/FAIL).
+  2. **"verified" stays tied to a live test** via a committed `pin_reconciler.py` (re-runs
+     verified-row pins, flags regressions), CI-wired (FIX-4/FIX-2; director).
+  3. **≥1 committed product-oracle artifact** (`logs/` ArcFace arc + lipsync offset baseline)
+     is a HARD wave-close blocker from Wave-2 (already a spec §7 exit deliverable; not yet
+     gate-enforced) (FIX-5; user-policy + director; depends on FIX-1).
+  4. **Rows with no behavioral oracle are `attested`, not `verified`**, and need an explicit
+     user-principal exemption to pass a gate (inventory vocabulary; coordinator-doc).
+  5. **Anti-rhetoric (coordinator doctrine, ADOPTED now):** milestone language states what was
+     mechanically checked; a status-tally "GATE MET" is not cited as evidence of correctness.
+- **Consequences:**
+  - +: after FIX-1 a coordinator writing "verified" produces zero gate effect; the verdict
+    comes from execution. The status-tally can no longer be laundered into a correctness claim.
+  - +: `pin_reconciler` closes the "verified survives a silent regression" hole (11 verified
+    rows currently have no continuous check). A product oracle becomes mandatory at wave-close.
+  - −: **FIX-1 will likely flip the current "Wave-1 MET 8/8" → UNMET** for any test-infeasible
+    or non-XPASS-clean row — an honest re-grade, but a real, visible regression in reported
+    state. MUST be surfaced to the user before FIX-1 lands.
+  - −: two gaps remain UNCLOSED (recorded so they are not forgotten): (a) operator-GO
+    impl≠verifier (Rule #9) is still not gate-enforced; (b) unregistered defects (e.g. the
+    `coherence-silent` caller-side MAJOR half) cannot be caught by a gate that reads only
+    registered rows.
+  - −: FIX-7 (nightly oracle on committed fixtures) is DEFERRED until the `_ARC_AVAILABLE=False`
+    CI-vacuity is fixed — wiring it first would be a vacuous green (the silent-gate bug it is
+    meant to prevent).
+- **Cross-refs:** `logs/discovery-wf_26a5abf2-3bb.json`; `scripts/wave_gate_check.py` (FIX-1
+  target); `scripts/ci_smoke.py`; `face_validator_gate.py` + `performance/identity_gate.py`
+  (the real product oracles); `docs/superpowers/specs/2026-06-14-program-hardening-roadmap-design.md`
+  §5/§7 (acceptance bar + the spec↔implementation gap); `docs/REMEDIATION-INVENTORY.md`.
+  Origin: user-principal critique 2026-06-15 → coordinator Session-12 RCA `wf_26a5abf2-3bb`.
+  Implementation routing + policy ratification PENDING.
