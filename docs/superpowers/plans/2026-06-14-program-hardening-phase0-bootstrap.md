@@ -597,14 +597,14 @@ counts xfail *cases* (incl. parametrized / multi-assert pins); this enumerates *
 
 For each candidate, fill **all working fields**: `subsystem`, `file:line` (from the pin's
 reason/target), `severity` (§4 taxonomy), `priority` (intra-lane order), `fail-mode`,
-`repro`, `lane-owner` (§6b partition), `wave` (CRITICAL→1, MAJOR→2, …), and `status`
+`repro`, `lane-owner` (§6b partition), `wave` (CRITICAL→1, MAJOR→2, …), `priority` (leave
+**blank** at seed — directors set it per-wave in the R-BRIEF; `wave_gate_check` ignores it), and `status`
 (HEAD-check vocabulary). (`shared-lock` is only for cross-cutting rows; `verifier` is filled
 at verification time.) Paste the completed rows under the table in
 `docs/REMEDIATION-INVENTORY.md`. Cross-check each against HEAD: a module already
 fixed+verified (e.g. `workflow_selector.py`/`bf1034a`) is `verified`, not re-hunted.
 HEAD-check status mapping (§3): merged+verified-closed → `verified`; fix dispatched but not
-yet operator-verified → `fixing`; pinned-but-unfixed → `open`. Leave `priority` blank at
-seed time (directors set it per-wave in the R-BRIEF; `wave_gate_check` does not read it).
+yet operator-verified → `fixing`; pinned-but-unfixed → `open`.
 
 - [ ] **Step 3: Verify the gate checker reads the seeded inventory**
 
@@ -636,7 +636,8 @@ one finder per high-risk subsystem (§3) probing fail-open paths, then ≥2 inde
 
 - [ ] **Step 1: Author `coordination/workflows/discovery-bughunt.js`**
 
-First `mkdir -p coordination/workflows`, then write the script:
+Run `mkdir -p coordination/workflows` first (the directory may not exist yet), then write
+this script to `coordination/workflows/discovery-bughunt.js`:
 
 ```javascript
 export const meta = {
@@ -666,7 +667,7 @@ const SUBSYSTEMS = [
   {key:'identity', probe:'PuLID/LoRA injection, secondary-char binding'},
 ]
 const FIND = (s) => `Repo root /Users/hyungkoookkim/Content. READ-ONLY (grep/Read only). Hunt FAIL-OPEN bugs (not happy paths the tests already cover) in the ${s.key} subsystem: ${s.probe}. Focus on silent-degradation, NaN/inf, and swallowed-error paths. EXCLUDE the OpenCV determinism fix (PRE-CLOSED, ARCHITECTURE §11.1) and workflow_selector.py (closed by bf1034a). Each finding needs a concrete reproducer.`
-const REFUTE = (f,i) => `Repo root /Users/hyungkoookkim/Content. READ-ONLY. A finder claims: ${f.subsystem} ${f.file_line} — "${f.fail_mode}" (repro: ${f.reproducer}). Try to REFUTE it — read the code + its guards/callers and prove it is NOT a real defect. Set refuted=false (finding stands) only after genuine effort. Skeptic #${i}.`
+const REFUTE = (f,i) => `Repo root /Users/hyungkoookkim/Content. READ-ONLY. A finder claims: ${f.subsystem} ${f.file_line} — "${f.fail_mode}" (repro: ${f.reproducer}). Try to REFUTE it — read the code + its guards/callers. Set \`refuted=true\` if you can PROVE it is NOT a real defect; set \`refuted=false\` only if you cannot disprove it after genuine effort. (Note the field direction: true = disproved, false = finding stands.) Skeptic #${i}.\`
 
 phase('Find')
 const found = (await parallel(SUBSYSTEMS.map(s => () =>
@@ -693,7 +694,8 @@ return {  // refuter reasoning preserved in logs/discovery-<runid>.json (§3 fin
 
 Invoke via the Workflow tool: `Workflow({scriptPath: "coordination/workflows/discovery-bughunt.js"})`.
 When it completes, write its returned `{confirmed, rejected}` object verbatim to
-`logs/discovery-<runid>.json` (use the runId from the tool result).
+`logs/discovery-<runId>.json`, where `<runId>` is the **`Run ID`** field in the Workflow
+tool's result (e.g. `wf_ab12cd34`).
 Expected: a non-empty `confirmed` array (each finder typically surfaces ≥1 fail-open path);
 `rejected` holds the refuted candidates.
 
@@ -746,10 +748,15 @@ Expected: `UNMET`, `exit=1` (Wave 1 has open CRITICALs to fix — correct campai
 
 - [ ] **Step 4: Phase-0 done — hand off to the Wave-1 plan**
 
-Phase 0 is complete when: seed migration committed; `logs/discovery-<runid>.json` committed;
+Phase 0 is complete when: seed migration committed; `logs/discovery-<runId>.json` committed;
 every CONFIRMED defect has an inventory row + strict pin; rejects recorded; `ci_smoke` green.
-**Next:** write the Wave-1 implementation plan from the now-populated inventory (its tasks =
-the Wave-1 CRITICAL rows), per the campaign's one-plan-per-wave decomposition.
+
+**Next (Wave-1 planning):**
+1. Coordinator records the **Wave-1 cross-cutting first-mover sequence** in the inventory
+   header (spec §6b/§10 prerequisite — must precede Wave-1 open).
+2. Invoke **superpowers:writing-plans** to author
+   `docs/superpowers/plans/2026-06-14-program-hardening-wave1.md` from the now-populated
+   inventory (its tasks = the Wave-1 CRITICAL rows), per the one-plan-per-wave decomposition.
 
 ---
 
