@@ -512,7 +512,13 @@ def get_workflow_params(
         # img2img_denoise is nested under continuity_options (unlike the top-level
         # knobs above).  Validate in-range [0.2, 0.6] matching the slider bounds
         # in web_server.py:331 before writing — the JSON API can send any float.
-        img2img_denoise = settings.get("continuity_options", {}).get("img2img_denoise")
+        # isinstance(_co, dict): a present-but-null continuity_options (JSON null)
+        # makes settings.get(..., {}) return None (the {} default applies only to a
+        # MISSING key), so None.get('img2img_denoise') raises AttributeError. Mirror
+        # the dict-guard the sibling site quality_max.py:1044 already has. (bf1034a
+        # closed the main non-finite issue but its audit boundary missed this sibling.)
+        _co = settings.get("continuity_options", {})
+        img2img_denoise = _co.get("img2img_denoise") if isinstance(_co, dict) else None
         if (img2img_denoise is not None and isinstance(img2img_denoise, (int, float))
                 and math.isfinite(img2img_denoise)):
             # math.isfinite: the [0.2,0.6] clamp neutralises non-finite by luck

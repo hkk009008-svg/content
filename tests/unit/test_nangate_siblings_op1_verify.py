@@ -1,22 +1,20 @@
-"""Operator-1 post-commit verification of nan-gate commits 7b4d377 + bf1034a.
+"""Wave-1 regressions — nan-gate sibling sites of 7b4d377 + bf1034a (now FIXED).
 
-PROVENANCE: independent implementer!=verifier pass (workflow wf_25dce560-524).
-The two commits themselves PASS verification (all 8 guards mutation-proven
-load-bearing; all 35 new tests coupled/non-vacuous; 167 targeted + 2425 full-suite
-green). But the Rule#13 completeness sweep surfaced sibling sites of the SAME
-non-finite hazard class that the commits' audit boundary did NOT extend to.
+PROVENANCE: surfaced by operator-1's independent implementer!=verifier sweep
+(workflow wf_25dce560-524) of nan-gate commits 7b4d377 + bf1034a. Those commits
+themselves PASSED verification (8 guards mutation-proven; 35 tests coupled). The
+Rule#13 completeness sweep then surfaced sibling sites of the SAME non-finite hazard
+class outside their audit boundary, pinned strict=True (R-VERIFY-TIER(B): a
+confirmed-but-unfixed defect ships a strict-xfail pin in the confirming session).
 
-These are NOT regressions in 7b4d377/bf1034a — they are pre-existing class-siblings
-the audit (wf_cc849e2d) scoped out. Pinned strict=True so CI tracks them and
-XPASS-flags the fix landing (R-VERIFY-TIER(B): a confirmed-but-unfixed defect ships
-a strict-xfail pin in the confirming session). Fix disposition = director-1's
-cross-lane nan-gate hardening epic.
+Both Pair-A siblings were FIXED in Wave-1 of the program-hardening campaign and the
+strict-xfail pins removed -> these are now LIVE regressions (they go RED if the guard
+is reverted), strengthened beyond the original single-assert pins where noted:
+  - pulid-nan-node100     -> quality_max.py node-100 weight/start_at/end_at _finite_or
+  - null-continuity-crash -> workflow_selector.py:515 dict-guard
 
-A third confirmed sibling — phase_c_assembly.py:346 (img2img_denoise -> node 17
-denoise, identical clamp-luck; + a continuity_options=null AttributeError) — is
-Pair-B lane AND test-infeasible without extracting a helper from the inline
-generate_ai_broll body; reported cross-pair (do NOT pin in someone else's lane with
-a vacuous abstract test).
+A third confirmed sibling (phase_c_assembly img2img clamp-luck) is Pair-B lane and was
+addressed separately in that lane.
 """
 from __future__ import annotations
 
@@ -52,19 +50,13 @@ def test_nan_pulid_weight_must_not_reach_node_100():
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="OP1-VERIFY sibling of bf1034a: get_workflow_params crashes with "
-    "AttributeError when continuity_options is JSON null. settings.get("
-    "'continuity_options', {}) returns None (not the {} default — the key is "
-    "present-but-null), then None.get('img2img_denoise') raises "
-    "(workflow_selector.py:515). The sibling site quality_max.py:1041 already has "
-    "the isinstance(_co, dict) guard this block lacks. Pair-A; fold into the epic.",
-)
 def test_null_continuity_options_must_not_crash_param_resolution():
-    """A JSON-null continuity_options must not crash param resolution; the
-    img2img overlay should simply be skipped, leaving the template default.
-    Currently xfails (AttributeError); XPASSes when the dict-guard is added."""
+    """Regression (W1:CRITICAL:null-continuity-crash, FIXED): a JSON-null
+    continuity_options must not crash param resolution; the img2img overlay is
+    simply skipped, leaving the template default. get_workflow_params now dict-guards
+    the continuity_options read (workflow_selector.py:515), mirroring the sibling
+    guard at quality_max.py:1044. Was `AttributeError: 'NoneType'.get` before the fix
+    (settings.get('continuity_options', {}) returns None on present-but-null)."""
     from workflow_selector import get_workflow_params
 
     p = get_workflow_params("portrait", settings={"continuity_options": None})
