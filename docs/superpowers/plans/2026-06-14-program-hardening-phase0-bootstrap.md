@@ -250,7 +250,7 @@ echo "RELEASED: $lock"
 - [ ] **Step 5: Make executable + run tests to verify they pass**
 
 Run: `chmod +x coordination/bin/claim-lock coordination/bin/release-lock && env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_lock_protocol.py -v`
-Expected: PASS (5 passed)
+Expected: PASS (7 passed — the 5 above + 2 added at code-review: `test_claim_lock_resets_local_commit_on_push_failure` and `test_release_lock_restores_on_push_failure`, which exercise the scripts' own reset/restore branches directly via a broken remote; mutation-proven in commit 20c573c).
 
 - [ ] **Step 6: Commit**
 
