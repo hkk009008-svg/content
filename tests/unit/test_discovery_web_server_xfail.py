@@ -1,5 +1,6 @@
-"""Strict-xfail CI pins for 6 confirmed HTTP-mutator defects from the
-hardening-campaign discovery bug-hunt (wf_13f9d2f6-f93, confirmed[12..17]).
+"""Strict-xfail CI pins for 5 remaining HTTP-mutator defects from the
+hardening-campaign discovery bug-hunt (wf_13f9d2f6-f93, confirmed[12..17];
+confirmed[14] ws-reorder-deletes FIXED — pin removed, now a live regression).
 
 Each test asserts the FIXED behavior so it XFAILs today against unpatched code.
 When a site is fixed, its strict-xfail xpasses -> delete that pin.
@@ -11,9 +12,10 @@ CATALOG:
   confirmed[13] W2:MAJOR:http-drivingvid-orphan
     web_server.py:909,932 — file written before lock; mutate_project return
     discarded -> 201 even when shot not mutated (orphaned file / false-201).
-  confirmed[14] W1:CRITICAL:ws-reorder-deletes
-    web_server.py:1402 + domain/project_manager.py:1081 — reorder_scenes sets
-    latest['scenes'] = only the listed ids, permanently deleting unlisted scenes.
+  confirmed[14] W1:CRITICAL:ws-reorder-deletes — FIXED (pin removed)
+    web_server.py:1402 + domain/project_manager.py:1081 — reorder_scenes now
+    preserves any scene absent from the posted scene_ids (survivor pass); a
+    partial list reorders, never deletes. Kept as a live regression test below.
   confirmed[15] W2:MAJOR:http-addchar-float-unguarded
     web_server.py:567,1053 — bare float() on ip_adapter_weight with no guard ->
     ValueError 500 on non-numeric input (e.g. "abc").
@@ -24,7 +26,7 @@ CATALOG:
     web_server.py:984-1024 — returns 201 uploaded=0 when all file parts have
     empty filenames (outer guard only catches a completely absent field).
 
-TEST-INFEASIBLE entries: none — all six have a viable seam (direct domain
+TEST-INFEASIBLE entries: none — every defect had a viable seam (direct domain
 function for [14], Flask test_client for the rest).
 """
 import io
@@ -173,18 +175,13 @@ def test_upload_driving_video_mutator_miss_returns_non_201(client, tmp_path, mon
 
 # ---------------------------------------------------------------------------
 # confirmed[14] — W1:CRITICAL:ws-reorder-deletes  (direct domain-function seam)
+# FIXED: domain/project_manager.py reorder_scenes now preserves unlisted scenes
+# via a survivor pass (a partial scene_ids list reorders, never deletes). Pin
+# removed; this is now a live regression test guarding against the data
+# corruption.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W1:CRITICAL:ws-reorder-deletes domain/project_manager.py:1081 reorder_scenes "
-        "sets latest['scenes'] = only the scenes whose ids appear in scene_ids, "
-        "permanently deleting any scene absent from the list. Fix = validate that "
-        "scene_ids is a complete permutation of existing ids (or preserve unlisted "
-        "scenes); then this xpasses."
-    ),
-)
+
 def test_reorder_scenes_partial_list_preserves_unlisted_scenes(tmp_path, monkeypatch):
     """A partial scene_ids list must NOT delete the omitted scenes."""
     from domain import project_manager

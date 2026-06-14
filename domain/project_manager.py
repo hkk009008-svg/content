@@ -1073,10 +1073,22 @@ def reorder_scenes(project: dict, scene_ids: list[str], timeout: float = 10) -> 
             for i, scene in enumerate(latest_typed.scenes)
         }
         reordered = []
+        listed: set[str] = set()
         for index, scene_id in enumerate(scene_ids):
-            if scene_id in id_to_scene:
+            if scene_id in id_to_scene and scene_id not in listed:
                 scene = id_to_scene[scene_id]
                 scene["order"] = index
+                reordered.append(scene)
+                listed.add(scene_id)
+        # A partial scene_ids list must REORDER, never delete: preserve any
+        # scene absent from the posted list. The prior code rebuilt scenes from
+        # only the listed ids, so a partial-list POST permanently dropped the
+        # rest (ws-reorder-deletes, CRITICAL). Keep survivors in their original
+        # relative order after the listed ones, continuing the order index so it
+        # stays contiguous.
+        for scene in latest["scenes"]:
+            if scene["id"] not in listed:
+                scene["order"] = len(reordered)
                 reordered.append(scene)
         latest["scenes"] = reordered
         return MutationResult(None, save=True)
