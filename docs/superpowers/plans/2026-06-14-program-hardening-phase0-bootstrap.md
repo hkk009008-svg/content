@@ -373,6 +373,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("wave", type=int)
     ap.add_argument("--inventory", default="docs/REMEDIATION-INVENTORY.md", type=Path)
     args = ap.parse_args(argv)
+    if not args.inventory.exists():
+        print(f"inventory not found: {args.inventory}", file=sys.stderr)
+        return 2
     rep = gate_report(args.inventory, args.wave)
     print(f"Wave {rep['wave']} gate: {rep['verdict']}  counts={rep['counts']}")
     for b in rep["blockers"]:
@@ -569,7 +572,7 @@ Expected: PASS (2 passed)
 
 ```bash
 git add scripts/seed_inventory.py tests/unit/test_seed_inventory.py
-git commit -m "feat(campaign): seed_inventory.py — enumerate existing xfail pins as candidate rows"
+git commit -m "feat(campaign): seed_inventory.py — enumerate existing xfail pins as candidate rows" -- scripts/seed_inventory.py tests/unit/test_seed_inventory.py
 ```
 
 ### Task 6: Seed-migrate the existing pins (coordinator action)
@@ -599,6 +602,9 @@ reason/target), `severity` (§4 taxonomy), `priority` (intra-lane order), `fail-
 at verification time.) Paste the completed rows under the table in
 `docs/REMEDIATION-INVENTORY.md`. Cross-check each against HEAD: a module already
 fixed+verified (e.g. `workflow_selector.py`/`bf1034a`) is `verified`, not re-hunted.
+HEAD-check status mapping (§3): merged+verified-closed → `verified`; fix dispatched but not
+yet operator-verified → `fixing`; pinned-but-unfixed → `open`. Leave `priority` blank at
+seed time (directors set it per-wave in the R-BRIEF; `wave_gate_check` does not read it).
 
 - [ ] **Step 3: Verify the gate checker reads the seeded inventory**
 
@@ -629,6 +635,8 @@ one finder per high-risk subsystem (§3) probing fail-open paths, then ≥2 inde
 (closed by `bf1034a`).
 
 - [ ] **Step 1: Author `coordination/workflows/discovery-bughunt.js`**
+
+First `mkdir -p coordination/workflows`, then write the script:
 
 ```javascript
 export const meta = {
@@ -691,8 +699,11 @@ Expected: a non-empty `confirmed` array (each finder typically surfaces ≥1 fai
 
 ```bash
 mkdir -p coordination/workflows logs
+# A Workflow/subagent run can leave skip-worktree pollution in the index (hook v5.9 / memory).
+# If `git add` below silently no-ops or errors with a sparse-checkout message, clear it:
+#   git ls-files -v | awk '/^S/{print $2}' | xargs -r git update-index --no-skip-worktree --
 git add coordination/workflows/discovery-bughunt.js logs/discovery-*.json
-git commit -m "chore(campaign): discovery bug-hunt workflow + handoff artifact (confirmed + rejected)"
+git commit -m "chore(campaign): discovery bug-hunt workflow + handoff artifact (confirmed + rejected)" -- coordination/workflows/discovery-bughunt.js logs/
 ```
 
 - [ ] **Step 3: Transcribe CONFIRMED findings → inventory rows + strict xfail pins**
