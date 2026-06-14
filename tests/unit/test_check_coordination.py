@@ -210,6 +210,8 @@ def test_unknown_kind_is_advisory(tmp_path):
     issues = run(root, since=SINCE, now=NOW)
     assert any(i.kind == "unknown_kind" for i in advisories(issues))
     assert "coordination" in KNOWN_KINDS and "verification-report" in KNOWN_KINDS
+    # observed-in-practice kinds registered 2026-06-14 (cleared ci_smoke advisory)
+    assert "measurement-report" in KNOWN_KINDS and "wrap" in KNOWN_KINDS
 
 
 # ---------------------------------------------------------------------------

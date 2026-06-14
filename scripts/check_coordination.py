@@ -54,6 +54,7 @@ KNOWN_KINDS = frozenset({
     # observed-in-practice additions
     "coordination", "proposal", "proposal-reply", "acknowledgement",
     "reply", "fyi", "discussion", "convergence",
+    "measurement-report", "wrap",
 })
 
 # `coordinator` is a send-only pseudo-seat: a valid <from> only, never a <to>,
