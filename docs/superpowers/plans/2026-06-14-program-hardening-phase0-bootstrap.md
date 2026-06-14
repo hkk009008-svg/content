@@ -117,11 +117,12 @@ def two_clones(tmp_path):
         _run(["git", "clone", str(bare), str(c)], tmp_path)
         _git(["config", "user.email", f"{seat}@x"], c)
         _git(["config", "user.name", seat], c)
-        (c / "coordination" / "locks").mkdir(parents=True)
-        (c / "coordination" / "locks" / ".gitkeep").write_text("x\n")
-    # seed origin from A
+    # Create coordination/locks ONLY in seatA, commit+push it; seatB receives it via the
+    # pull below. Writing .gitkeep into seatB too would make its ff-merge abort on an
+    # untracked working-tree file.
+    (seatA / "coordination" / "locks").mkdir(parents=True)
+    (seatA / "coordination" / "locks" / ".gitkeep").write_text("x\n")
     _git(["add", "-A"], seatA); _git(["commit", "-m", "seed"], seatA)
-    _git(["push", "origin", "HEAD:main"], seatA)
     _git(["branch", "-M", "main"], seatA)
     _git(["push", "-u", "origin", "main"], seatA)
     _git(["pull", "--ff-only", "origin", "main"], seatB)
@@ -141,7 +142,10 @@ def test_second_claimant_aborts_via_precheck(two_clones):
     assert _run([str(BIN / "claim-lock"), "W1", "core.py", "operator", "bug-1"], seatA).returncode == 0
     r = _run([str(BIN / "claim-lock"), "W1", "core.py", "operator2", "bug-2"], seatB)
     assert r.returncode != 0, "second claimant must lose via the pre-check"
-    assert not (seatB / "coordination" / "locks" / "W1-core.py.lock").exists()
+    # the lock file IS present in seatB now (claim-lock fetch+merged seatA's lock into the
+    # worktree); prove seatB never wrote ITS OWN entry — i.e. it did not claim.
+    lockf = seatB / "coordination" / "locks" / "W1-core.py.lock"
+    assert "operator2" not in lockf.read_text()
 
 def test_release_deletes_and_pushes(two_clones):
     seatA, seatB = two_clones
@@ -197,8 +201,9 @@ wave="$1"; module="$2"; seat="$3"; defect="$4"
 cd "$(git rev-parse --show-toplevel)"
 flat="${module//\//__}"               # cinema/context.py -> cinema__context.py
 lock="coordination/locks/${wave}-${flat}.lock"
-git fetch -q origin "$(git rev-parse --abbrev-ref HEAD)" || true
-git merge -q --ff-only "@{u}" 2>/dev/null || true   # see peer locks before claiming
+git fetch -q origin "$(git rev-parse --abbrev-ref HEAD)" \
+  || echo "WARNING: fetch failed, proceeding on stale view (push-first still protects)" >&2
+git merge -q --ff-only "@{u}" 2>/dev/null || true   # best-effort: see peer locks before claiming
 if [ -e "$lock" ]; then echo "LOST: $lock already held" >&2; exit 1; fi
 printf '%s %s %s %s\n' "$seat" "$wave" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$defect" > "$lock"
 git add -- "$lock"
@@ -244,7 +249,7 @@ Expected: PASS (5 passed)
 
 ```bash
 git add coordination/bin/claim-lock coordination/bin/release-lock tests/unit/test_lock_protocol.py
-git commit -m "feat(campaign): git-native claim-lock/release-lock helpers (spec §6b, push-first claim)"
+git commit -m "feat(campaign): git-native claim-lock/release-lock helpers (spec §6b, push-first claim)" -- coordination/bin/claim-lock coordination/bin/release-lock tests/unit/test_lock_protocol.py
 ```
 
 ### Task 3: `wave_gate_check.py`
@@ -387,7 +392,7 @@ Expected: PASS (3 passed)
 
 ```bash
 git add scripts/wave_gate_check.py tests/unit/test_wave_gate_check.py
-git commit -m "feat(campaign): wave_gate_check.py — inventory-driven wave acceptance gate (spec §5/§6f)"
+git commit -m "feat(campaign): wave_gate_check.py — inventory-driven wave acceptance gate (spec §5/§6f)" -- scripts/wave_gate_check.py tests/unit/test_wave_gate_check.py
 ```
 
 ---
@@ -587,10 +592,13 @@ counts xfail *cases* (incl. parametrized / multi-assert pins); this enumerates *
 
 - [ ] **Step 2: Classify each row** (coordinator)
 
-For each candidate, fill `severity` (§4 taxonomy), `wave` (CRITICAL→1, MAJOR→2, etc.),
-`lane-owner` (§6b partition), and `status` (HEAD-check vocabulary). Paste the completed
-rows under the table in `docs/REMEDIATION-INVENTORY.md`. Cross-check each against HEAD: a
-module already fixed+verified (e.g. `workflow_selector.py`/`bf1034a`) is `verified`, not re-hunted.
+For each candidate, fill **all working fields**: `subsystem`, `file:line` (from the pin's
+reason/target), `severity` (§4 taxonomy), `priority` (intra-lane order), `fail-mode`,
+`repro`, `lane-owner` (§6b partition), `wave` (CRITICAL→1, MAJOR→2, …), and `status`
+(HEAD-check vocabulary). (`shared-lock` is only for cross-cutting rows; `verifier` is filled
+at verification time.) Paste the completed rows under the table in
+`docs/REMEDIATION-INVENTORY.md`. Cross-check each against HEAD: a module already
+fixed+verified (e.g. `workflow_selector.py`/`bf1034a`) is `verified`, not re-hunted.
 
 - [ ] **Step 3: Verify the gate checker reads the seeded inventory**
 
@@ -665,11 +673,11 @@ const judged = await parallel(found.map(f => () =>
       // CONFIRMED requires BOTH refuters to have returned AND neither to refute.
       // (Guard the vacuous-truth: [].every() === true would confirm a finding whose
       //  refuters both died — the opposite of safe. A missing verdict => not confirmed.)
-      return { finding:f, confirmed: ok.length === 2 && ok.every(v => !v.refuted) }; })))
+      return { finding:f, verdicts: ok, confirmed: ok.length === 2 && ok.every(v => !v.refuted) }; })))
 
-return {
-  confirmed: judged.filter(j => j.confirmed).map(j => j.finding),
-  rejected:  judged.filter(j => !j.confirmed).map(j => j.finding),
+return {  // refuter reasoning preserved in logs/discovery-<runid>.json (§3 finding-record)
+  confirmed: judged.filter(j => j.confirmed).map(j => ({ ...j.finding, refuters: j.verdicts })),
+  rejected:  judged.filter(j => !j.confirmed).map(j => ({ ...j.finding, refuters: j.verdicts })),
 }
 ```
 
