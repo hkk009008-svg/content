@@ -97,8 +97,10 @@ import pytest
 BIN = Path(__file__).resolve().parents[2] / "coordination" / "bin"
 
 def _run(cmd, cwd, **kw):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                          env={**os.environ, "GIT_INDEX_FILE": ""}, **kw)
+    # UNSET GIT_INDEX_FILE (do not zero it: GIT_INDEX_FILE="" makes `git add` fail
+    # rc=128 "unable to write new index file"). CLAUDE.md requires `env -u`.
+    env = {k: v for k, v in os.environ.items() if k != "GIT_INDEX_FILE"}
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env=env, **kw)
 
 def _git(args, cwd):
     r = _run(["git", *args], cwd)
@@ -131,11 +133,15 @@ def test_clean_claim_succeeds_and_pushes(two_clones):
     assert r.returncode == 0, r.stderr
     assert (seatA / "coordination" / "locks" / "W1-core.py.lock").exists()
 
-def test_second_claimant_is_rejected(two_clones):
+def test_second_claimant_aborts_via_precheck(two_clones):
+    # PRIMARY defense: claim-lock fetches+ff-merges first, so the 2nd seat SEES the lock
+    # file locally and aborts BEFORE committing/pushing. (The push-race is the secondary
+    # defense, tested separately below.)
     seatA, seatB = two_clones
     assert _run([str(BIN / "claim-lock"), "W1", "core.py", "operator", "bug-1"], seatA).returncode == 0
     r = _run([str(BIN / "claim-lock"), "W1", "core.py", "operator2", "bug-2"], seatB)
-    assert r.returncode != 0, "second claimant must lose (push rejected)"
+    assert r.returncode != 0, "second claimant must lose via the pre-check"
+    assert not (seatB / "coordination" / "locks" / "W1-core.py.lock").exists()
 
 def test_release_deletes_and_pushes(two_clones):
     seatA, seatB = two_clones
@@ -144,6 +150,29 @@ def test_release_deletes_and_pushes(two_clones):
     assert not (seatA / "coordination" / "locks" / "W1-core.py.lock").exists()
     _git(["pull", "--ff-only", "origin", "main"], seatB)
     assert not (seatB / "coordination" / "locks" / "W1-core.py.lock").exists()
+
+def test_push_rejection_rollback_primitive(two_clones):
+    # SECONDARY defense: a seat that passed its pre-check on a stale view and only loses at
+    # push must `git reset --hard origin/main` to drop its dangling local lock commit.
+    # We reproduce that exact end-state (origin advanced under a locally-committed lock).
+    seatA, seatB = two_clones
+    assert _run([str(BIN / "claim-lock"), "W1", "core.py", "operator", "a"], seatA).returncode == 0
+    lockB = seatB / "coordination" / "locks" / "W1-core.py.lock"
+    lockB.write_text("operator2 W1 t b\n")                # simulate a stale-view local commit
+    _git(["add", "--", "coordination/locks/W1-core.py.lock"], seatB)
+    _git(["commit", "-m", "racing lock"], seatB)
+    assert _run(["git", "push", "origin", "HEAD:main"], seatB).returncode != 0  # non-ff reject
+    _git(["fetch", "origin", "main"], seatB)
+    _git(["reset", "--hard", "origin/main"], seatB)        # the script's recovery branch
+    assert not lockB.exists(), "rollback must drop the loser's local lock"
+
+def test_lock_filename_flattens_slashes(two_clones):
+    # A cross-cutting module with a slash (spec §6b: cinema/context.py) must map to ONE
+    # deterministic lock filename, else two seats could 'hold' the same file under
+    # different names. Verifies the flat= replacement in claim-lock.
+    seatA, _ = two_clones
+    assert _run([str(BIN / "claim-lock"), "W1", "cinema/context.py", "operator", "c"], seatA).returncode == 0
+    assert (seatA / "coordination" / "locks" / "W1-cinema__context.py.lock").exists()
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -196,7 +225,11 @@ lock="coordination/locks/${wave}-${flat}.lock"
 [ -e "$lock" ] || { echo "no such lock: $lock" >&2; exit 0; }
 git rm -q -- "$lock"
 git commit -q -m "unlock(${wave}): ${module}" -- "$lock"
-git push -q origin "HEAD:$(git rev-parse --abbrev-ref HEAD)" || true
+# A failed release-push leaves the lock LIVE on origin while it looks released
+# locally — a silent wave-blocker. Exit nonzero so the caller must retry.
+if ! git push -q origin "HEAD:$(git rev-parse --abbrev-ref HEAD)"; then
+  echo "RELEASE PUSH FAILED: $lock still held on origin — retry" >&2; exit 1
+fi
 echo "RELEASED: $lock"
 ```
 
@@ -262,11 +295,14 @@ def test_met_when_all_verified(tmp_path):
     assert report["verdict"] == "MET"
     assert report["blockers"] == []
 
-def test_provisional_blocks(tmp_path):
+def test_provisional_blocks_regardless_of_severity(tmp_path):
+    # Wave 3 has no seeded rows, so a lone MINOR provisional cleanly isolates the
+    # provisional-check (Wave 1 was already UNMET from its open CRITICAL).
     inv = tmp_path / "INV.md"
-    inv.write_text(INVENTORY + "| p1 | gates | core.py:9 | CRITICAL | 1 | x | t | tests/p.py | A | | 1 | provisional | | mid-wave |\n")
+    inv.write_text(INVENTORY + "| p1 | x | core.py:9 | MINOR | 1 | x | t | tests/p.py | A | | 3 | provisional | | mid |\n")
     wgc = _load()
-    assert wgc.gate_report(inv, wave=1)["verdict"] == "UNMET"
+    rep = wgc.gate_report(inv, wave=3)
+    assert rep["verdict"] == "UNMET" and any(r["id"] == "p1" for r in rep["blockers"])
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -355,6 +391,9 @@ git commit -m "feat(campaign): wave_gate_check.py — inventory-driven wave acce
 ---
 
 ## Chunk 2: Inventory + seed migration
+
+**Prerequisite:** Chunk 1 is complete — Task 4 Step 2 and Task 6 Step 3 invoke
+`scripts/wave_gate_check.py` (created in Chunk 1 Task 3). Do not start Chunk 2 first.
 
 ### Task 4: Create the inventory artifact
 
@@ -534,7 +573,9 @@ owning lane (recorded in `notes`, not edited here — that is a lane fix).
 - [ ] **Step 1: Generate candidate rows**
 
 Run: `.venv/bin/python scripts/seed_inventory.py --tests tests > /tmp/seed_rows.md && wc -l /tmp/seed_rows.md`
-Expected: one row per xfail pin (~28+).
+Expected: one row per xfail **decorator** — **≈10** in the current suite (cross-check:
+`grep -rn 'mark.xfail' tests/ | grep -v __pycache__ | wc -l`). Note: the spec's "~28 pins"
+counts xfail *cases* (incl. parametrized / multi-assert pins); this enumerates *decorators*.
 
 - [ ] **Step 2: Classify each row** (coordinator)
 
@@ -561,44 +602,88 @@ git commit -m "chore(campaign): seed-migrate existing xfail pins into the remedi
 ### Task 7: Author + run the discovery Workflow
 
 **Files:**
+- Create: `coordination/workflows/discovery-bughunt.js` (committed for reproducibility)
 - Create (runtime): `logs/discovery-<runid>.json`
-- Modify: `docs/REMEDIATION-INVENTORY.md`
+- Modify: `docs/REMEDIATION-INVENTORY.md` + new `tests/unit/test_discovery_*_xfail.py` pins
 
-The discovery bug-hunt is a **coordinator-owned Workflow** (orchestration, not pytest-TDD).
-Author a workflow that fans adversarial agents across the §3 high-risk subsystems, each
-probing fail-open paths, then a **refute pass** (≥2 independent refuters per candidate, the
-§11-delegated mechanic) that must fail to disprove for a finding to be CONFIRMED. The
-workflow returns the structured finding records (`{subsystem, file:line, fail-mode,
-reproducer, severity-guess, refuter-verdict}`); the coordinator commits them to
-`logs/discovery-<runid>.json` (the §3 named handoff artifact).
+The discovery bug-hunt is a **coordinator-run Workflow** (orchestration, not pytest-TDD):
+one finder per high-risk subsystem (§3) probing fail-open paths, then ≥2 independent
+**refuters** per candidate; CONFIRMED iff no refuter disproves it. Sonnet for all agents
+(project directive). Excludes the PRE-CLOSED determinism fix (§5) and `workflow_selector.py`
+(closed by `bf1034a`).
 
-- [ ] **Step 1: Author the discovery workflow script**
+- [ ] **Step 1: Author `coordination/workflows/discovery-bughunt.js`**
 
-Subsystems (one finder agent each, §3): gates (`auto_approve`, `face_validator_gate`,
-`motion_gate`, `identity_gate`, `coherence_analyzer`); money (`core.py` budget,
-cost-estimation, lip-sync pricing); silent-degradation I/O (image/video decode, API-error
-swallow, ffmpeg/ffprobe); HTTP mutators (`web_server.py`); resume/checkpoint;
-identity/continuity (PuLID/LoRA, secondary-char). Each finder emits finding records via a
-StructuredOutput schema. Pipeline each finding through ≥2 refuters; CONFIRMED iff no refuter
-disproves it. Use Sonnet for all agents (project directive). Skip modules the seed marked
-`verified` (e.g. `workflow_selector.py`).
+```javascript
+export const meta = {
+  name: 'discovery-bughunt',
+  description: 'Phase 0 adversarial bug-hunt across high-risk subsystems + refute pass',
+  phases: [{ title: 'Find' }, { title: 'Refute' }],
+}
+const FINDING = {
+  type: 'object', additionalProperties: false, required: ['findings'],
+  properties: { findings: { type: 'array', items: {
+    type: 'object', additionalProperties: false,
+    required: ['subsystem','file_line','fail_mode','reproducer','severity_guess'],
+    properties: {
+      subsystem:{type:'string'}, file_line:{type:'string'}, fail_mode:{type:'string'},
+      reproducer:{type:'string'},
+      severity_guess:{type:'string',enum:['CRITICAL','MAJOR','MEDIUM','MINOR']},
+    }}}},
+}
+const VERDICT = { type:'object', additionalProperties:false, required:['refuted','reasoning'],
+  properties:{ refuted:{type:'boolean'}, reasoning:{type:'string'} } }
+const SUBSYSTEMS = [
+  {key:'gates', probe:'auto_approve, face_validator_gate, motion_gate, identity_gate, coherence_analyzer'},
+  {key:'money', probe:'core.py budget, cost-estimation, lip-sync pricing (unbounded-spend)'},
+  {key:'io', probe:'image/video decode, API-error swallow, ffmpeg/ffprobe failure'},
+  {key:'http', probe:'web_server.py destructive/state-mutating endpoints'},
+  {key:'checkpoint', probe:'resume/checkpoint state reconstruction'},
+  {key:'identity', probe:'PuLID/LoRA injection, secondary-char binding'},
+]
+const FIND = (s) => `Repo root /Users/hyungkoookkim/Content. READ-ONLY (grep/Read only). Hunt FAIL-OPEN bugs (not happy paths the tests already cover) in the ${s.key} subsystem: ${s.probe}. Focus on silent-degradation, NaN/inf, and swallowed-error paths. EXCLUDE the OpenCV determinism fix (PRE-CLOSED, ARCHITECTURE §11.1) and workflow_selector.py (closed by bf1034a). Each finding needs a concrete reproducer.`
+const REFUTE = (f,i) => `Repo root /Users/hyungkoookkim/Content. READ-ONLY. A finder claims: ${f.subsystem} ${f.file_line} — "${f.fail_mode}" (repro: ${f.reproducer}). Try to REFUTE it — read the code + its guards/callers and prove it is NOT a real defect. Set refuted=false (finding stands) only after genuine effort. Skeptic #${i}.`
+
+phase('Find')
+const found = (await parallel(SUBSYSTEMS.map(s => () =>
+  agent(FIND(s), {label:`find:${s.key}`, phase:'Find', schema:FINDING, model:'sonnet'}))))
+  .filter(Boolean).flatMap(r => r.findings)
+
+phase('Refute')
+const judged = await parallel(found.map(f => () =>
+  parallel([0,1].map(i => () =>
+    agent(REFUTE(f,i), {label:`refute:${f.file_line}`, phase:'Refute', schema:VERDICT, model:'sonnet'})))
+    .then(vs => ({ finding:f, confirmed: vs.filter(Boolean).every(v => v && !v.refuted) }))))
+
+return {
+  confirmed: judged.filter(j => j.confirmed).map(j => j.finding),
+  rejected:  judged.filter(j => !j.confirmed).map(j => j.finding),
+}
+```
 
 - [ ] **Step 2: Run discovery + commit the handoff artifact**
 
-Run the workflow; write the returned JSON to `logs/discovery-<runid>.json`.
+Invoke via the Workflow tool: `Workflow({scriptPath: "coordination/workflows/discovery-bughunt.js"})`.
+When it completes, write its returned `{confirmed, rejected}` object verbatim to
+`logs/discovery-<runid>.json` (use the runId from the tool result).
+Expected: a non-empty `confirmed` array (each finder typically surfaces ≥1 fail-open path);
+`rejected` holds the refuted candidates.
 
 ```bash
-git add logs/discovery-*.json
-git commit -m "chore(campaign): discovery bug-hunt handoff artifact (confirmed + rejected findings)" -- logs/
+mkdir -p coordination/workflows logs
+git add coordination/workflows/discovery-bughunt.js logs/discovery-*.json
+git commit -m "chore(campaign): discovery bug-hunt workflow + handoff artifact (confirmed + rejected)"
 ```
 
-- [ ] **Step 3: Transcribe CONFIRMED findings → inventory rows + author strict xfail pins**
+- [ ] **Step 3: Transcribe CONFIRMED findings → inventory rows + strict xfail pins**
 
-For each CONFIRMED finding the coordinator adds an inventory row (severity, wave, lane,
-status `open`) and authors a **`strict=True`** xfail pin whose reason is prefixed
-`W<n>:<SEVERITY>:<id>` (spec §3). REJECTED findings are recorded in the inventory `notes`
-as `REJECTED:<reason>` (never silently dropped). Commit inventory + pins together
-(test-only artifacts, coordinator-scoped, §6a).
+For each CONFIRMED finding the coordinator adds **one inventory row** (status `open`;
+severity = `severity_guess` re-checked against §4; wave + lane from §4/§6b) and authors a
+**`strict=True`** xfail pin whose reason is prefixed `W<n>:<SEVERITY>:<id>` (§3), the test
+reproducing `reproducer`. **REJECTED findings stay in `logs/discovery-<runid>.json` ONLY —
+they get NO inventory row** (avoids clutter); record only the rejected **count** in the
+inventory header (`## Campaign constants` → `- discovery rejected: <N> (see logs/)`). Commit
+inventory + pins together (test-only artifacts, coordinator-scoped, §6a).
 
 ```bash
 git add docs/REMEDIATION-INVENTORY.md tests/
@@ -614,10 +699,12 @@ git commit -m "chore(campaign): transcribe confirmed discovery findings -> inven
 Run: `.venv/bin/python scripts/ci_smoke.py`
 Expected: `OK` (exit 0). Newly-pinned defects are `xfail`, so the suite stays green.
 
-- [ ] **Step 2: every confirmed defect has a row + a strict pin**
+- [ ] **Step 2: every CONFIRMED *campaign* pin is strict (legacy pins excluded)**
 
-Run: `.venv/bin/python scripts/seed_inventory.py --tests tests | grep -c NON-STRICT`
-Expected: `0` new non-strict pins among the campaign pins (legacy non-strict pins, if any, are noted for lane upgrade).
+Campaign pins carry a `W<n>:` reason prefix; pre-existing legacy pins are out of scope here.
+Run: `.venv/bin/python scripts/seed_inventory.py --tests tests | grep 'NON-STRICT' | grep -c 'W[0-9]:'`
+Expected: `0` (no campaign-prefixed pin is non-strict). Legacy non-strict pins, if any, are
+listed for their owning lane to upgrade — not gated by Phase 0.
 
 - [ ] **Step 3: the wave gates reflect the populated inventory**
 
