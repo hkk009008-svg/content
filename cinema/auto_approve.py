@@ -27,6 +27,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Callable, Literal, Optional
 
+from cinema.context import _finite_or
+
 logger = logging.getLogger(__name__)
 
 Gate = Literal["plan", "image", "motion", "final"]
@@ -116,7 +118,15 @@ class AutoApproveConfig:
         quality_tier = gs.get("quality_tier", "production")
 
         def _get(key: str, default):
-            return raw.get(key, default)
+            v = raw.get(key, default)
+            # Finite-guard numeric reads: a NaN/inf threshold survives project.json
+            # (json.load allow_nan) and silently disables its veto rule — `nan > 0`
+            # is False, so the rule never registers and the gate passes everything.
+            # Coerce a non-finite numeric to the per-key default; leave bools
+            # (bool is a subclass of int) and non-numerics untouched.
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                return _finite_or(v, default)
+            return v
 
         # Tier-aware composite default: max-tier writes a real ``composite`` (~0.92-0.97),
         # so the 0.97 class default fits. Production-tier never writes composite — the gate's

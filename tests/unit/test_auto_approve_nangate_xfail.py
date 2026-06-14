@@ -31,9 +31,10 @@ gates.  RECOMMENDED FIX (one chokepoint): a ``_get_finite(key, default)`` in
 ``from_project`` = ``_finite_or(raw.get(key, default), default)`` over the 6 numeric
 fields, using the shared ``cinema.context._finite_or`` operator2 landed this session.
 
-Each pin is ``xfail(strict=True)`` so CI — not the next session's agents —
-re-verifies, and the pin flips to a HARD failure the moment the gate is fixed
-(prompting removal of that case).
+FIXED in Wave-1 (W1:CRITICAL:aa-nan-rules): the ``_get`` chokepoint in
+``from_project`` now finite-guards all 6 numeric reads (``_finite_or(v, default)``
+for non-bool int/float) — strict-xfail removed, so the 5 parametrized cases are LIVE
+regressions that go RED if the guard is reverted.
 """
 from __future__ import annotations
 
@@ -72,14 +73,6 @@ _NAN_GATE_CASES = [
 ]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="NOVEL §4 sweep family (wf_2ca5b0ae-e26): a NaN auto_approve threshold "
-    "makes `if config.<field> > 0` False so the veto rule is never registered and "
-    "the gate silently passes everything. Fix = finite-guard the numeric reads in "
-    "AutoApproveConfig.from_project via cinema.context._finite_or. Cross-lane "
-    "(Pair-A image/identity domain) -> director2 + Pair-A disposition owed.",
-)
 @pytest.mark.parametrize("setting_key,gate,rule_name", _NAN_GATE_CASES)
 def test_nan_threshold_still_registers_veto_rule(setting_key, gate, rule_name):
     """A NaN on an auto-approve numeric threshold must NOT drop its veto rule."""
