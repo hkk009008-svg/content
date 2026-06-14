@@ -59,7 +59,12 @@ domain/projects/*
 !domain/projects/.gitkeep
 
 # Pipeline run logs / scratch render output (per-clone runtime, not source)
-logs/
+# NB: ignore the CONTENTS (logs/*), not the dir itself, so the negation below can
+# re-include specific files (git cannot re-include a file under an excluded DIR).
+logs/*
+# EXCEPTION: hardening-campaign discovery handoff artifacts are source-of-record
+# (spec §3 — the committed JSON IS the refuter->coordinator boundary), not scratch.
+!logs/discovery-*.json
 
 # GitNexus index
 .gitnexus
