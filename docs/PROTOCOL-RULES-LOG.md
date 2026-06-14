@@ -30,7 +30,7 @@ and per-session invocation count. Updated manually at session-close by operator
 | 20 | Shared-state-accuracy (awareness gate recomputes unread `to:`-filtered + content-ts; STATE.md is a cache; per-event acks) | `cec6d72` | same session: RC3 (STATE.md count both-directions + mtime → director=4-vs-1) + RC4 (cursor lag). M2 fix validated old=3/new=1 (DRAFT §1). Codification per v5.7 + operator REPLY `ab9925d` |
 | 21 | Verdict-ahead-of-report (when peer seat is blocked, give verdict first, report later) | `_TBD_` | `6f3b809` verdict-first unblocked billed pod session |
 | 22 | Flag-before-burn (require review before running fee-spending scripts) | `_TBD_` | Unreviewed train script carried F1 fee-respend defect (`3a589da` guard) |
-| 23 | Lane ownership and cross-lane ADRs (a seat does substantive work only in its lane; cross-cutting ADRs need both directors' sign-off) | `_TBD_` | Scaling 2-seat to 4-seat team model; resolving lane overlap and architecture conflicts |
+| 23 | Lane ownership and cross-lane ADRs (a seat does substantive work only in its lane; cross-cutting ADRs need both directors' sign-off) | `b29f8dc` | Scaling 2-seat to 4-seat team model; resolving lane overlap and architecture conflicts |
 
 > Historical note: Rules #7 + #8 originally shipped with the placeholder
 > `_Protocol Bundle v2 ship_` in the "Codified" column because the rules-log
