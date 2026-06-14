@@ -25,7 +25,9 @@ verified GO, refined per my own adversarial review, and the lane swept for sibli
   **inner-ffprobe** (`lip_sync.py:541-542`) `FileNotFoundError`→WARNING (structural, audio-energy mirror of cv2-absent)
   / per-clip→INFO — **CONVERGED with director2's authoritative-verify finding + my contract lens**; (e) scorer tests
   rewritten **cv2-FREE** (fake `cv2` module) so they RUN, not `importorskip`-SKIP, in the cv2-absent CI env D1 targets;
-  +ffprobe-absent test +2 gate tests. **AWAITING director2's follow-up verify** (they offered).
+  +ffprobe-absent test +2 gate tests. **director2 VERIFIED GO** (`wf_c0b997ee-56b`, 05:56Z): 11 passed
+  cv2-free CONFIRMED, RED-proof non-vacuous (5 tests fail on revert), 68-passed blast radius; occlusion
+  revert ACCEPTED; remaining = D4 observability nits only (see Carries).
 - **`2cec903`** — R-VERIFY-TIER(B) pins for 3 confirmed sweep siblings (`tests/unit/test_lane_silent_gate_siblings_xfail.py`, 3 xfail).
 - **`509e86b`** — mailbox verification-report → director2 + cursor → 05:29:28Z.
 
@@ -36,7 +38,8 @@ the scorer ran but THIS clip is unscorable* (occlusion). Occlusion is per-clip (
 of the open D2 smile-cascade defect on *good* neutral-speech takes → WARNING there spams + false-alarms, desensitising
 operators to the real-degradation WARNINGs. director2 verified e0999d0 with occlusion=WARNING; **I surfaced the revert
 + reasoning in `509e86b` and it is OPEN to director2's objection as verifier.** If director2 disagrees, the level is
-a 1-line change.
+a 1-line change. **RESOLVED: director2 ACCEPTED the revert** (`wf_c0b997ee-56b`; their adversary independently
+classified occlusion as per-clip content, not structural) — they withdrew the nit. The principle stands.
 
 ## ⭐ THE SWEEP — 5 confirmed novel silent-gate-degradation siblings (the operator value-add)
 `wf_5bb228ae-0f8` (7 area-sweepers over the lane + per-finding refute-first verify; 1 candidate correctly REJECTED).
@@ -55,7 +58,16 @@ Same structural value-add as §3/§4 — the brief (epic #1) was a list of one; 
   `else` drops dialogue+foley → MUTE final cut for non-embedding engines (Kling/LTX); logs only "no BGM" (misleading).
 
 ## CARRIES
-- **director2 OWES the follow-up verify of `e8694e3`** (they offered) — esp. the occlusion→INFO call (objection-or-GO).
+- ~~director2 follow-up verify of `e8694e3`~~ **DISCHARGED** — director2 GO_WITH_NITS (`wf_c0b997ee-56b`, 05:56Z);
+  occlusion revert ACCEPTED. All four of my commits are now director2-verified or self-pinned.
+- **D4 observability nit batch (director2, NONE blocking → epic, with D2 smile-cascade + D3 pod calibration):**
+  (a) 5 content-silence `return None` paths in `_score_mouth_energy` (cap.isOpened / total_frames<=0 / empty
+  ffprobe frames [most diagnostic] / energy_vals<4 / zero-variance) → add INFO for field diagnosis; (b) the
+  ffprobe-absent INFO("falling through")+WARNING double-log → consolidate to the single WARNING; (c) docstring
+  disambiguate "1.0 = perfect OR unmeasurable" (measured-perfect vs fallback-neutral; value-indistinguishable today).
+- **`a71a533` touched `cinema/context._finite_or` (my canonical lane) — ACCEPTED, no objection** (director-1 to-all
+  FYI): added `OverflowError` to the except, byte-identical mirror with quality_max preserved (import-swap stays a
+  no-op), +1 mirror test. Strictly additive, LOW reachability (310-digit JSON int). Broader treatment → epic.
 - **The 4 pinned/documented siblings → director2's "auto_approve + lipsync + nan-gate hardening" epic** as the
   lipsync/lane silent-gate-degradation batch. `phase_c_vision:351` needs **Pair-A** (their lane; co-sign/own the fix).
 - **Epic sequencing UNCHANGED** (my 03:02 call still stands): #2 auto_approve `_get_finite` chokepoint (Pair-A co-sign),
@@ -78,6 +90,9 @@ Same structural value-add as §3/§4 — the brief (epic #1) was a list of one; 
   = the gate's MAX score = passes everything terminally. When sweeping a fail-open, check WHICH fallback value.
 
 ## COORDINATION STATE @ wrap
-HEAD `509e86b`; commits `e0999d0`(D1, director2 GO) · `e8694e3`(refine+siblings, awaiting verify) · `2cec903`(pins) ·
-`509e86b`(mailbox+cursor). ci_smoke GREEN. Cursor `seen/operator2.txt` → 2026-06-14T05:29:28Z (0 unread). Push
-user-gated (did NOT push). director2 ONLINE at last contact (05:29Z). Tree HOT (Pair-A + coordinator active).
+My commits: `e0999d0`(D1, director2 GO) · `e8694e3`(refine+siblings, **director2 GO** `wf_c0b997ee-56b`) ·
+`2cec903`(pins) · `509e86b`(mailbox+cursor) · `9f33290`(this handoff) + ACKs to director2/director (`06:02Z`).
+ci_smoke GREEN. Cursor `seen/operator2.txt` → 2026-06-14T05:56:33Z (0 unread). Push user-gated, ~7 ahead of origin
+(did NOT push; director2 to flag the clean push point now that the Pair-B batch is SETTLED — I told them I'm wrapping).
+director2 ONLINE (05:56Z); director-1 ONLINE (pod STOPPED by user). Tree HOT (Pair-A active). **Pair-B epic #1 lane
+work COMPLETE; the 4 siblings + D4 nits are queued for director2's hardening epic.**
