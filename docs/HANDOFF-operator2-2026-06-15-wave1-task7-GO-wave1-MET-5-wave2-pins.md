@@ -45,7 +45,7 @@ Wave-1 is DONE+pushed. **Wave-2 is the next frontier** (21+ rows; coordinator ow
 4. **C-2 `spent-usd-reset-on-resume`** (design-open) + **`perf-phase-no-gate`** (test-infeasible): no pin owed; verify when director2/coordinator pick a direction.
 
 ## OWED-BY-OTHERS
-- **Coordinator:** flip the 5 "pin owed (Pair-B, W2)" inventory cells to cite my pin files (notified via status `12:55:54Z`/`8b13310`; not yet done at wrap). Open Wave-2 planning + the §7 stub-contract spec.
+- **Coordinator:** ~~flip the 5 "pin owed" inventory cells to cite my pin files~~ **DONE `84b176a`** (synced the cells right after my status). Still owes: open Wave-2 planning + the §7 stub-contract spec.
 
 ## WAVE STATE @ wrap (trust git/gate)
 `wave_gate_check.py 1` = **MET (8/8)**. HEAD=origin/main=`8b13310` (PUSHED, 0 ahead). ci_smoke OK; suite 2487p/0f/26xf (now 31xf with my 5 pins). Pod STOPPED ($0). No locks on disk.
