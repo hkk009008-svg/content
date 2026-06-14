@@ -1,51 +1,56 @@
-"""R-VERIFY-TIER (B) CI pin for a confirmed-but-unfixed defect.
+"""Decision pin: MAX-tier wide pulid_start_at is deliberately HELD at 0.20.
 
-GAP: `MAX_QUALITY_TEMPLATES["wide"]["pulid_start_at"]` is 0.20 — the lone shot-type×tier
-cell that ADR-025's `pulid_start_at → 0.0` sweep missed. The production tier and the MAX
-portrait/medium/action cells were all moved to 0.0 (FLUX coarse-identity window: PuLID must
-bind from step 0). `pulid_max.json` node 100 is `ApplyPulidFlux` (FLUX-native, honors
-start_at), so the residual 0.20 ACTIVELY delays PuLID binding 20% into denoising on every
-MAX-tier wide shot — including the char-bearing landscapes that cf32ca3 now routes to "wide"
-— weakening identity recovery exactly where ADR-025 said it matters (validated OFF 0.6205 →
-ON 0.8779).
+HISTORY: this file began as a strict-xfail tracking a *suspected* ADR-025 gap —
+the hypothesis that `MAX_QUALITY_TEMPLATES["wide"]["pulid_start_at"]=0.20` was the
+lone shot-type cell the `pulid_start_at -> 0.0` sweep missed and "should" be 0.0
+like production-tier wide and the other MAX cells (node 100 is ApplyPulidFlux, so
+0.20 would delay PuLID binding 20% into denoising). Surfaced operator-1 (ea068bd);
+xfail-pinned (675f9b1); fix dispositioned POD-GATED (needs an R-MEASURE burn).
 
-Surfaced: operator-1 independent verification, ea068bd (findings → director-1).
-Dispositioned: director-1 PM7 handoff — fix 0.20→0.0 is POD-GATED (needs an R-MEASURE
-validation burn; fold into the owed char-aerial pod re-validation).
+RESOLVED 2026-06-14 -> HOLD. operator-1 ran that R-MEASURE A/B burn (`f1d7b2d`,
+`scripts/_max_wide_startat_ab.py`; report 2026-06-14T00:46:24Z): start_at=0.0 is
+NOT supported for wide. N=3 mean ArcFace arc OFF(0.20)=0.633 > ON(0.0)=0.575
+(delta -0.058, directionally AGAINST 0.0), and DECISIVELY all 6 renders came out
+severely over-cooked (structural max-base sheen) so ArcFace scored degraded pixels
+-> the numbers are noise, not a clean signal. The "0.20 delays binding and weakens
+identity" premise that justified the strict-xfail is therefore UNSUPPORTED by
+measurement, so this is no longer a tracked defect.
 
-The fix is pod-gated, but the gap is testable NOW. This strict-xfail makes CI carry the
-defect (not the next session's agents). When the value is fixed to 0.0 (+ burn), this test
-XPASSes and strict=True turns that into a CI failure — the signal to delete this file.
+INTERPRETATION: ADR-025's 0.0 win was a PORTRAIT/MEDIUM (large-face) result. Wide /
+small-face / landscape framing is a genuinely different identity regime; 0.0-for-wide
+is unverified and the one A/B that tested it leaned the other way. MAX wide therefore
+stays at 0.20 by *deliberate decision*, not by oversight.
 
-See memory: max_wide_pulid_startat_adr025_gap; realism_production_plus_char_lora (ADR-025).
+These tests now PIN that decision (they are NOT a strict-xfail defect tracker any
+more): moving MAX wide off 0.20 must be re-justified by a CLEAN burn (SUPIR-on +
+true-wide framing + N>=8), never a naive "match the other cells" edit. The higher-
+value Pair-A lever the burn surfaced is the structural max-wide OVER-COOK (ADR-024
+realism graft), which dwarfs start_at.
+
+See memory: max_wide_pulid_startat_adr025_gap (disposition=HOLD);
+realism_production_plus_char_lora (ADR-025).
 """
-import pytest
-
 from workflow_selector import MAX_QUALITY_TEMPLATES, WORKFLOW_TEMPLATES
 
 
+def test_max_wide_pulid_start_at_held_at_0_20():
+    """The decision pin. MAX-tier wide `pulid_start_at` is deliberately HELD at 0.20
+    (the f1d7b2d A/B did not support 0.0 for wide). If this fails because the value
+    moved, the change needs a clean re-measure burn behind it — do NOT "fix" it to
+    0.0 to match the other cells; wide is a different identity regime."""
+    assert MAX_QUALITY_TEMPLATES["wide"]["pulid_start_at"] == 0.20
+
+
 def test_production_wide_pulid_binds_from_step_zero():
-    """Reference (passes): ADR-025 moved production-tier wide to start_at=0.0 — the correct
-    end-state the MAX tier should match."""
+    """Context (passes): production-tier wide is 0.0 (ADR-025). Recorded as the
+    baseline the MAX-wide HOLD intentionally does NOT mirror — the tiers run
+    different sampler/identity stacks, so equal start_at is not required."""
     assert WORKFLOW_TEMPLATES["wide"]["pulid_start_at"] == 0.0
 
 
-def test_max_tier_non_wide_cells_already_bind_from_step_zero():
-    """Reference (passes): MAX portrait/medium/action were all swept to 0.0 — proving wide
-    is the LONE holdout, not a deliberate per-shot scheme."""
+def test_max_tier_non_wide_cells_bind_from_step_zero():
+    """Context (passes): MAX portrait/medium/action use 0.0 — the portrait/medium
+    (large-face) regime where ADR-025's start_at=0.0 win was measured. MAX wide is
+    the deliberate 0.20 exception, not a missed sweep."""
     for shot in ("portrait", "medium", "action"):
-        assert MAX_QUALITY_TEMPLATES[shot]["pulid_start_at"] == 0.0, shot
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="ADR-025 gap: MAX-tier wide pulid_start_at=0.20 is the lone cell the start_at->0.0 "
-    "sweep missed; node 100 is ApplyPulidFlux so it actively delays PuLID binding past the FLUX "
-    "coarse-identity window. Fix 0.20->0.0 is pod-gated (R-MEASURE burn; fold into char-aerial "
-    "re-validation). Surfaced operator-1 ea068bd; dispositioned director-1 PM7. Delete this file "
-    "when the value is fixed + burned (XPASS under strict=True will flag it).",
-)
-def test_max_wide_pulid_should_also_bind_from_step_zero():
-    """MAX-tier wide should bind PuLID from step 0 like the production tier and the other
-    MAX cells. Currently 0.20 → this assertion fails → xfail (the tracked gap)."""
-    assert MAX_QUALITY_TEMPLATES["wide"]["pulid_start_at"] == 0.0
+        assert MAX_QUALITY_TEMPLATES[shot]["pulid_start_at"] == 0.0
