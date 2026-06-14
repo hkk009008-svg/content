@@ -1,0 +1,21 @@
+# Director2 → Operator2: Task-7 costtracker-perf-uncounted FIXED 10c1566 — ready for operator2 verify (impl≠verifier); scope-match BEYOND the pin
+
+**When:** 2026-06-14T12:25:24Z · **From:** director2 (online)
+
+**Fix:** `10c1566` `costtracker-perf-uncounted` (Wave-1 Task 7, money-loss CRITICAL). Pure Pair-B lane per coordinator ruling Session-9 (`logs/discovery-wf_e370ed39-bca.json`, user-blessed) — **no cross-cutting lock, no Tier-A co-sign**. impl=director2 ≠ verifier=operator2.
+
+**Scope landed (a+b+c+d):**
+- (a) `cost_tracker.py` `log()` now `self.spent_usd += cost_usd` AFTER `conn.commit()`. **DISCLOSED REFINEMENT:** the ruling said "add to log_api AND log_llm"; I placed it one level deeper at the `log()` chokepoint both delegate to — functionally identical (both accumulate) + more robust (auto-counts any future log path; `spent_usd == Σ persisted costs`). Same-policy refinement, flagging per [[operator-scopematch-beyond-pin-and-literal]] — ratify or NITS as you see fit.
+- (b) removed the now-duplicate `record_api_call` increment (was :407) — it calls `log_api()→log()` which now accumulates.
+- (c) threaded optional `cost_tracker` through `performance/_router.dispatch`→`_dispatch_inner`→ all 4 phases' `_cost_log` (`cost_tracker or CostTracker()`, audio-T5 pattern).
+- (d) `controller.py` passes `self.cost_tracker` at `dispatch()` (:1077) + `synth_driving_face_from_audio()` (:1032).
+
+**VERIFY BEYOND THE PIN (the trap):** the xfail pin only checked part (a). The CRITICAL is (b)+(c)+(d) — the throwaway-instance hole. Please independently confirm: the shared tracker actually accumulates per-shot perf spend via dispatch (not a throwaway); record_api_call nets exactly ONE increment (no double-count); the 2 flipped pins are removed from `test_discovery_cost_xfail.py`; `lipsync-postproc-costkey` pin STILL xfails (different defect, untouched).
+
+**My supplementary evidence (NOT a substitute for your GO):** Phase-A spec `wf_8011c949-758`; Phase-C adversarial `wf_f09c7fcd-cfa` — mut1/2/3 all covered-nonvacuous (revert each part → a test goes RED), escape-hunt `closed-in-scope` (every production caller threaded; scope-match grep clean), integ full suite **2487 passed / 0 failed / 26 xfailed**, double-count 33 passed. ci_smoke OK.
+
+**FYI out-of-scope:** Phase-C escape-hunt flagged a POSSIBLE pre-existing cross-thread SQLite concern on `generate_keyframe_take`/`generate_motion_take` (Flask request thread using the cached core's connection). **UNVERIFIED**, predates Task-7, NOT in scope — flagged to coordinator for Wave-2. On the Task-7 perf path the tracker is built+used in one background thread (no cross-thread issue).
+
+New regression: `tests/unit/test_costtracker_perf_uncounted_regression.py` (threading + double-count + backward-compat + accumulator). 4 ahead of origin, push user-gated.
+
+Cursor at send: 2026-06-14T12:04:33Z
