@@ -25,30 +25,31 @@ import math
 import pytest
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="OP1-VERIFY sibling of 7b4d377: pulid_weight -> ComfyUI node 100 'weight' "
-    "is written via params.get() with NO _finite_or guard (quality_max.py:560), "
-    "unlike the char_lora_strength->700 / secondary->701 writes the commit DID guard. "
-    "Reachable with a non-finite from project.json: controller.py:778 reads "
-    "pulid_weight_override=cc.get('pulid_weight_override') (continuity config, no "
-    "chokepoint) -> generate_ai_broll_max -> params['pulid_weight']=nan -> node 100. "
-    "Silent render corruption. start_at/end_at (lines 561-562) share the gap. "
-    "Pair-A; fold into director-1's nan-gate hardening epic.",
-)
 def test_nan_pulid_weight_must_not_reach_node_100():
-    """A non-finite pulid_weight must not be written into the PuLID node-100
-    weight input. Currently xfails (nan reaches the node); XPASSes when the
-    node-100 PuLID params get the same _finite_or treatment as nodes 700/701."""
+    """Regression (W1:CRITICAL:pulid-nan-node100, FIXED): a non-finite PuLID
+    node-100 weight/start_at/end_at must never be written.
+
+    STRENGTHENED beyond the original weight-only pin to also assert start_at/end_at
+    (the pin-blind siblings at quality_max.py:564-565 operator-1 flagged): a
+    weight-only fix would XPASS the old single-assert pin while leaving those two
+    open. _inject_identity now wraps all three node-100 writes in _finite_or
+    (mirroring nodes 700/701), so each non-finite value falls back to its per-input
+    default (0.85 / 0.0 / 0.90). Reachable via controller.py pulid_weight_override
+    (continuity config, no overlay chokepoint) -> params -> node 100."""
     from quality_max import _inject_identity
 
     wf = {"100": {"inputs": {}}, "700": {"inputs": {}}}
-    params = {"pulid_weight": float("nan"), "lora_strength_model": 0.8,
+    params = {"pulid_weight": float("nan"), "pulid_start_at": float("nan"),
+              "pulid_end_at": float("nan"), "lora_strength_model": 0.8,
               "lora_strength_clip": 0.8}
     _inject_identity(wf, "alice.safetensors", None, params, True,
                      char_lora_strength=0.5)
-    w = wf["100"]["inputs"]["weight"]
-    assert math.isfinite(w), f"node 100 PuLID weight {w!r} is non-finite"
+    node100 = wf["100"]["inputs"]
+    for key in ("weight", "start_at", "end_at"):
+        assert math.isfinite(node100[key]), (
+            f"node 100 PuLID {key} {node100[key]!r} is non-finite "
+            f"(non-finite reached the PuLID node — _finite_or guard missing/reverted)"
+        )
 
 
 @pytest.mark.xfail(

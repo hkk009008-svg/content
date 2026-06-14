@@ -560,9 +560,14 @@ def _inject_identity(workflow: dict, char_lora: Optional[str], face_anchor_remot
     if face_anchor_remote and "93" in workflow:
         workflow["93"]["inputs"]["image"] = face_anchor_remote
     if "100" in workflow:
-        workflow["100"]["inputs"]["weight"] = params.get("pulid_weight", 0.85)
-        workflow["100"]["inputs"]["start_at"] = params.get("pulid_start_at", 0.0)
-        workflow["100"]["inputs"]["end_at"] = params.get("pulid_end_at", 0.90)
+        # _finite_or guards the PuLID(100) weight/start_at/end_at the same way the
+        # 700/701 LoRA strengths are guarded above: a non-finite (NaN/inf) value
+        # survives project.json via json.load's allow_nan and reaches here through
+        # pulid_weight_override (controller.py -> params, no overlay chokepoint),
+        # silently corrupting the PuLID node. Fall back to the per-input default.
+        workflow["100"]["inputs"]["weight"] = _finite_or(params.get("pulid_weight"), 0.85)
+        workflow["100"]["inputs"]["start_at"] = _finite_or(params.get("pulid_start_at"), 0.0)
+        workflow["100"]["inputs"]["end_at"] = _finite_or(params.get("pulid_end_at"), 0.90)
 
 
 # §3(b) bleed-mitigation ceiling for SECONDARY LoRA strength. The S3 spike

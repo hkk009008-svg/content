@@ -894,7 +894,7 @@ Workflow file: [pulid_max.json](pulid_max.json) (cached at module level with
 `_inject_post_passes` so the best-of-N `copy.deepcopy` fan-out inherits portrait
 dims. 16:9 / ctx-less = no-op (same gate as §8.2 — now OPEN post-T10).
 
-**Adaptive halt loop** ([quality_max.py:1163-1201](quality_max.py:1163)):
+**Adaptive halt loop** ([quality_max.py:1168-1206](quality_max.py:1168)):
 ```
 while len(scores) < n_max:
     starting_index = len(scores)
@@ -975,12 +975,12 @@ orchestrates.
 ([cinema/shots/controller.py:381](cinema/shots/controller.py:381)), the dispatcher passes `secondary_char_refs`
 ([cinema/shots/controller.py:785](cinema/shots/controller.py:785)) through `generate_ai_broll` →
 `generate_ai_broll_max` as the `secondary_chars` list. Inside the max dispatch:
-`_inject_secondary_loras` ([quality_max.py:574](quality_max.py:574)) chains up to two extra LoraLoader nodes
+`_inject_secondary_loras` ([quality_max.py:579](quality_max.py:579)) chains up to two extra LoraLoader nodes
 (701/702) after the primary's node 700, clamped to `_SECONDARY_LORA_MAX_STRENGTH=0.55`
-([quality_max.py:571](quality_max.py:571)), with each `lora_name` set to the artifact's basename for
+([quality_max.py:576](quality_max.py:576)), with each `lora_name` set to the artifact's basename for
 pod-side placement; `_assemble_max_prompt` ([quality_max.py:493](quality_max.py:493)) prepends LoRA trigger
 tokens (primary first, then each secondary's) before conditioning; and
-`_inject_secondary_faceswap` ([quality_max.py:632](quality_max.py:632)) splices a LoadImage(94) +
+`_inject_secondary_faceswap` ([quality_max.py:637](quality_max.py:637)) splices a LoadImage(94) +
 ReActorFaceSwap(611) node after the existing node 610, swapping face index "1" from the
 secondary's canonical image — MUST run after `_inject_post_passes` so the SUPIR-absent
 950-feed rewire sees it. All three injectors are retry-safe (idempotent pop/re-inject);
@@ -1018,10 +1018,10 @@ effect (zero face-lock), mutually exclusive by tier**:
   `get_max_quality_params`) writes `pulid_weight=0.0`,
   `lora_strength_model/clip=0.0`, `halt_threshold_arc=0.0`,
   `regenerate_floor_arc=0.0`. `_inject_identity` still runs (identity gating keys
-  on `has_character`/file-presence at [quality_max.py:1055](quality_max.py:1055),
+  on `has_character`/file-presence at [quality_max.py:1060](quality_max.py:1060),
   not `shot_type`), so the PuLID node + uploaded reference are physically present
   but **inert**, and the best-of-N identity rescue is dead — the +0.15 PuLID-boost
-  retry at [quality_max.py:1209](quality_max.py:1209) gates on
+  retry at [quality_max.py:1214](quality_max.py:1214) gates on
   [`needs_regenerate`](face_validator_gate.py:326), whose `arc_score <
   regenerate_floor_arc` test never holds at `regenerate_floor_arc=0.0` (and its
   `has_character` guard passes for a char-bearing shot, so the `0.0` floor — not
