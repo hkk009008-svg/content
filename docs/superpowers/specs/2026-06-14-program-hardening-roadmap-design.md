@@ -1,8 +1,10 @@
 # Program Hardening Roadmap — "Runs as Intended, Bug-Free" — Design Spec
 
 *Date: 2026-06-14 · Author: coordinator seat (Session-6), brainstormed with the
-user-principal · Status: design approved; spec-review v5 — closes blocking from rounds
-1–4 (`wf_c37fb3eb-823`, `wf_7b0a23a9-0cd`, `wf_8d1be397-9b0`, `wf_44be214b-c7e`).*
+user-principal · Status: design approved; v6 after **5 adversarial spec-review rounds**
+(`wf_c37fb3eb-823`, `wf_7b0a23a9-0cd`, `wf_8d1be397-9b0`, `wf_44be214b-c7e`,
+`wf_806e5d71-8f7`). All design-level blocking closed; operational residuals explicitly
+delegated to the implementation plan (§11). Ready for user review → writing-plans.*
 
 ## 0. Locked decisions (from brainstorming)
 
@@ -245,7 +247,10 @@ self-upgrade NITS→GO without reading the new diff, so guarantee #3 covers nit-
 **CRITICAL cross-cutting commit gate:** the Tier-A co-sign `verification-report` **must be
 in the mailbox before the fix commit lands** — this **overrides the async-OK convenience**
 and binds regardless of implementer identity (a director-as-implementer may **not**
-self-commit a CRITICAL cross-cutting fix ahead of the co-sign).
+self-commit a CRITICAL cross-cutting fix ahead of the co-sign). Because Tier-A approves
+**scope at brief-time**, the operator's verification of a CRITICAL cross-cutting fix
+additionally confirms the **landed diff matches the co-signed brief scope** — a scope
+deviation is a FAIL (this catches brief-vs-diff drift).
 
 **Director-as-implementer:** a director may implement a small fix directly or dispatch a
 subagent (dispatch required per R-ORCH at ≥5 subtasks or ≥800 LOC). Either way the
@@ -281,7 +286,9 @@ The coordinator is on-demand; the protocol must not stall on its absence:
   coordinator session-start, (b) every wave-boundary gate, (c) a director's explicit gate
   request. Between reconciles the inventory is a batch view (§2).
 - **Deputy-write path (scope):** when no coordinator is live, a pair may (a) **advance its
-  own-lane row status** (open→fixed→verified), and (b) **create a provisional row + xfail
+  own-lane row status** (open→`fixed`; the `verified` transition still requires the
+  operator's GO `verification-report` — the deputy only **transcribes** an existing GO into
+  the row when no coordinator is live, it never self-verifies), and (b) **create a provisional row + xfail
   pin for any mid-wave CRITICAL.** For a **cross-cutting** module the discovering seat
   **first claims the §6b lock** (push-first): the lock is the **dedup point** — only the
   lock-winner creates the provisional row, so two pairs that independently find the same
@@ -384,3 +391,29 @@ The coordinator is on-demand; the protocol must not stall on its absence:
   the pod spend (authority chain, §6e).
 - **Coordinator availability:** wave gates carry a 24h SLA + user-principal escalation +
   acting-coordinator path (§6f).
+
+## 11. Decisions delegated to the implementation plan (writing-plans)
+
+These are **execution constants, not architecture** — deliberately set in the
+implementation plan (the next artifact), not frozen here, so the design stays at the right
+altitude. Each was *surfaced* (not missed) by the 5-round spec review; the safety model
+above does not depend on their specific values, only that the plan fixes them:
+
+- **Discovery refute-pass mechanics (§3):** number of refuter agents (≥2), their structured
+  verdict artifact, and the confirmed/rejected criterion (e.g. both refuters fail to disprove).
+- **`scripts/measure_lipsync_offset.py` (§7):** owner (Pair-B lane), inputs/outputs, validation
+  vs human inspection, disagreement-handling. Authored at Wave 2.
+- **Over-cook objectivity (§7):** whether checklist items (a)/(c) get a quantitative proxy
+  (saturation-histogram / detail-frequency metric) or stay inspection-based with two-seat sign-off.
+- **`conftest.py` policy (§6a/§7):** whether coordinator-authored fixtures/stubs that can alter
+  test-time behavior need Tier-A co-sign, or are test-only by default.
+- **Pod-off executor (§6f):** which seat issues the pod-stop on a blocked gate when the
+  coordinator is absent, and how it signals the user.
+- **FAIL-cap counting (§6b):** whether a NITS verdict counts toward the 3-FAIL anti-hostage cap.
+- **Mid-wave CRITICAL in a module whose lock is held for a *different* `file:line` (§6b/§6f):**
+  the row/pin is recorded immediately (dedup is per `file:line`; lock is per module) while the
+  *fix* queues behind the lock — the plan specifies this record-without-lock path.
+- **MEDIUM-as-gate-item (§4/§5):** add "all pending MEDIUMs wave-assigned" to a wave acceptance
+  bar so MEDIUMs cannot float past the done-definition.
+- **Determinism re-verification (§5):** the exact command + artifact for the Wave-1
+  pre-closed-determinism re-check.
