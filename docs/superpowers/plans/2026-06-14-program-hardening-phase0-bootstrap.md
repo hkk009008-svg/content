@@ -168,7 +168,14 @@ def test_push_rejection_rollback_primitive(two_clones):
     assert _run(["git", "push", "origin", "HEAD:main"], seatB).returncode != 0  # non-ff reject
     _git(["fetch", "origin", "main"], seatB)
     _git(["reset", "--hard", "origin/main"], seatB)        # the script's recovery branch
-    assert not lockB.exists(), "rollback must drop the loser's local lock"
+    # The file still EXISTS — the winner's lock lives at this path on origin. The rollback
+    # guarantees the LOSER's dangling commit is gone: its content is dropped, replaced by
+    # the winner's (same-module race => both seats wrote the same path, so "file gone" is
+    # the wrong property; "loser's content gone" is right). [v7: corrected from the
+    # unsatisfiable `assert not lockB.exists()`; verified in commit ca086fc.]
+    body = lockB.read_text()
+    assert "operator2" not in body, "rollback must drop the loser's local lock content"
+    assert body.startswith("operator "), "the winner's lock content must be what remains"
 
 def test_lock_filename_flattens_slashes(two_clones):
     # A cross-cutting module with a slash (spec §6b: cinema/context.py) must map to ONE
