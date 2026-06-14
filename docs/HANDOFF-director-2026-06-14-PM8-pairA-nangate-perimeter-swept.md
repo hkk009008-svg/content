@@ -42,12 +42,23 @@ inputs. Two clean commits + coordination. Carries below.
 6. Coordinated: landing FYI + Carry#2 DEFER ACK + flux_guidance-done + budget-NaN co-sign.
 
 ## Carry-forwards
-1. **(Carry#1, POD-GATED) MAX-wide `pulid_start_at 0.20→0.0`** — the lone cell is now
-   `workflow_selector.py:246` (`"pulid_start_at": 0.20`; shifted +1 by my `import math`).
-   ADR-025 gap; R-MEASURE (needs the A/B burn, NOT blind). **Pod is STARTED (principal)
-   but ComfyUI returns HTTP 502** (booting / needs launch on :8188). operator-1 has
-   `scripts/_max_wide_startat_ab.py` prepped + WILL run the R-MEASURE A/B once it serves.
-   Sequence: ComfyUI up → make the 1-cell change → operator-1 validates → land if GO.
+1. **(Carry#1, MEASURED → HOLD) MAX-wide `pulid_start_at 0.20→0.0`** — lone cell
+   `workflow_selector.py:246`. operator-1 ran the R-MEASURE A/B (`f1d7b2d`,
+   `scripts/_max_wide_startat_ab.py`; report 00:46:24Z): **0.0 NOT supported for wide.**
+   N=3 mean arc: 0.20=0.633 vs 0.0=0.575 (delta −0.058, weakly worse); but DECISIVE =
+   all 6 renders severely OVER-COOKED (structural max-base sheen) → ArcFace scored on
+   degraded pixels → numbers are noise. Confounded (N=3 < per-seed range; SUPIR-OFF;
+   framing came out medium-not-wide). **DISPOSITION: HOLD — keep 0.20, do NOT land the
+   change on this data.** Consistent w/ ADR-025's 0.0 being a PORTRAIT/MEDIUM (large-face)
+   result; wide/small-face is a genuinely different regime (0.20 may be correct).
+   - **xfail pin `tests/unit/test_max_wide_pulid_startat_gap.py` (675f9b1)** asserts wide
+     SHOULD be 0.0 — premise now UNSUPPORTED. DISPOSITION: re-scope its reason to
+     "portrait/medium 0.0 proven; wide=0.0 unverified — one confounded A/B directionally-
+     against (f1d7b2d)"; do NOT assert 0.0 as the target. Small follow-up edit (op-1's call→mine).
+   - **Bigger lever the burn surfaced:** the structural max-wide OVER-COOK dwarfs start_at.
+     Higher-value Pair-A pod work = the **ADR-024 realism graft** (clean-sampler + grafted
+     FLUX identity / dual-LoRA, `scripts/_prod_dual_lora_pulid.py`, BUILT not burned).
+     start_at is deck chairs while the base render is non-photoreal.
 2. **(Carry#2, DEFERRED — accepted)** `has_character` LoRA-only hole. operator-1
    upgraded to LIVE bug (Rule#12: `_register_aria_lora.py:35` + post-train ref-delete),
    **xfail-pinned** `test_has_character_lora_only_hole.py`. Fix = DECOUPLE
@@ -74,7 +85,11 @@ inputs. Two clean commits + coordination. Carries below.
 ## State at wrap
 - HEAD `2db899c`; ~16 ahead of origin — **push USER-GATED** (origin last synced 325f750
   by coordinator fec4e76). Trust `git log -1`, not this.
-- ci_smoke OK (PROGRAM-MANUAL advisory drift only). Pod STARTED, ComfyUI 502.
+- ci_smoke OK (PROGRAM-MANUAL advisory drift only). **Pod is UP (Novita RTX 6000 Ada)
+  and BURNING IDLE COST** — principal's call pending (op-1 surfaced in parallel):
+  (a) **ADR-024 realism burn** [my rec — attacks the over-cook, the real photoreal blocker],
+  (b) re-measure start_at cleaner (SUPIR-on / wide-framing / N≥8, ~$0.50, low-value),
+  (c) stop pod ($0).
 - Pair-B (director2/operator2) LIVE running their own nan-gate hardening epic across the
   budget/auto_approve/lipsync lanes — convergent effort, lanes clean.
 
