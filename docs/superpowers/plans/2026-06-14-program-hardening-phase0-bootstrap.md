@@ -177,8 +177,9 @@ def test_lock_filename_flattens_slashes(two_clones):
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `.venv/bin/python -m pytest tests/unit/test_lock_protocol.py -v`
-Expected: FAIL (scripts `claim-lock`/`release-lock` do not exist → nonzero / FileNotFound)
+Run: `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_lock_protocol.py -v`
+Expected: FAIL (scripts `claim-lock`/`release-lock` do not exist → `FileNotFoundError`)
+(`env -u GIT_INDEX_FILE` matches the `test_coordination_bin.py` convention — a seat's phantom index would corrupt `git add` in the subprocess.)
 
 - [ ] **Step 3: Implement `coordination/bin/claim-lock`**
 
@@ -228,15 +229,16 @@ git commit -q -m "unlock(${wave}): ${module}" -- "$lock"
 # A failed release-push leaves the lock LIVE on origin while it looks released
 # locally — a silent wave-blocker. Exit nonzero so the caller must retry.
 if ! git push -q origin "HEAD:$(git rev-parse --abbrev-ref HEAD)"; then
-  echo "RELEASE PUSH FAILED: $lock still held on origin — retry" >&2; exit 1
+  git reset -q --hard "@{u}"   # restore the lock file locally so a retry re-attempts the full flow
+  echo "RELEASE PUSH FAILED: $lock still held on origin — fetch + retry" >&2; exit 1
 fi
 echo "RELEASED: $lock"
 ```
 
 - [ ] **Step 5: Make executable + run tests to verify they pass**
 
-Run: `chmod +x coordination/bin/claim-lock coordination/bin/release-lock && .venv/bin/python -m pytest tests/unit/test_lock_protocol.py -v`
-Expected: PASS (3 passed)
+Run: `chmod +x coordination/bin/claim-lock coordination/bin/release-lock && env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_lock_protocol.py -v`
+Expected: PASS (5 passed)
 
 - [ ] **Step 6: Commit**
 
@@ -430,6 +432,7 @@ Expected: `Wave 1 gate: MET  counts={}` (exit 0 — no rows yet)
 - [ ] **Step 3: Commit**
 
 ```bash
+git add docs/REMEDIATION-INVENTORY.md   # new file: a pathspec commit will NOT auto-stage an untracked path
 git commit -m "feat(campaign): seed docs/REMEDIATION-INVENTORY.md (schema + header)" -- docs/REMEDIATION-INVENTORY.md
 ```
 
@@ -538,9 +541,14 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tests", default="tests", type=Path)
     args = ap.parse_args(argv)
+    seen: dict[str, int] = {}
     for p in find_xfail_pins(args.tests):
         flag = "strict" if p["strict"] else "NON-STRICT"
-        print(f"| {_slug(p['reason'])} |  |  |  |  |  |  | {p['test_file']} |  |  |  | open |  | {flag}: {p['reason'][:60]} |")
+        sid = _slug(p["reason"])
+        seen[sid] = seen.get(sid, 0) + 1
+        if seen[sid] > 1:
+            sid = f"{sid}-{seen[sid]}"   # de-collide duplicate slugs (e.g. two 'sibling' pins)
+        print(f"| {sid} |  |  |  |  |  |  | {p['test_file']} |  |  |  | open |  | {flag}: {p['reason'][:60]} |")
     return 0
 
 if __name__ == "__main__":
@@ -653,7 +661,11 @@ phase('Refute')
 const judged = await parallel(found.map(f => () =>
   parallel([0,1].map(i => () =>
     agent(REFUTE(f,i), {label:`refute:${f.file_line}`, phase:'Refute', schema:VERDICT, model:'sonnet'})))
-    .then(vs => ({ finding:f, confirmed: vs.filter(Boolean).every(v => v && !v.refuted) }))))
+    .then(vs => { const ok = vs.filter(Boolean);
+      // CONFIRMED requires BOTH refuters to have returned AND neither to refute.
+      // (Guard the vacuous-truth: [].every() === true would confirm a finding whose
+      //  refuters both died — the opposite of safe. A missing verdict => not confirmed.)
+      return { finding:f, confirmed: ok.length === 2 && ok.every(v => !v.refuted) }; })))
 
 return {
   confirmed: judged.filter(j => j.confirmed).map(j => j.finding),
@@ -680,10 +692,11 @@ git commit -m "chore(campaign): discovery bug-hunt workflow + handoff artifact (
 For each CONFIRMED finding the coordinator adds **one inventory row** (status `open`;
 severity = `severity_guess` re-checked against §4; wave + lane from §4/§6b) and authors a
 **`strict=True`** xfail pin whose reason is prefixed `W<n>:<SEVERITY>:<id>` (§3), the test
-reproducing `reproducer`. **REJECTED findings stay in `logs/discovery-<runid>.json` ONLY —
-they get NO inventory row** (avoids clutter); record only the rejected **count** in the
-inventory header (`## Campaign constants` → `- discovery rejected: <N> (see logs/)`). Commit
-inventory + pins together (test-only artifacts, coordinator-scoped, §6a).
+reproducing `reproducer`. **REJECTED findings** are not added to the active table; they are
+recorded (a) in full in `logs/discovery-<runid>.json` and (b) one line each under a
+`## Rejected findings (discovery)` appendix in the inventory — `file:line — REJECTED:<reason>`
+— satisfying spec §3 ("noted in the inventory, never silently dropped"). Commit inventory +
+pins together (test-only artifacts, coordinator-scoped, §6a).
 
 ```bash
 git add docs/REMEDIATION-INVENTORY.md tests/
@@ -702,9 +715,10 @@ Expected: `OK` (exit 0). Newly-pinned defects are `xfail`, so the suite stays gr
 - [ ] **Step 2: every CONFIRMED *campaign* pin is strict (legacy pins excluded)**
 
 Campaign pins carry a `W<n>:` reason prefix; pre-existing legacy pins are out of scope here.
-Run: `.venv/bin/python scripts/seed_inventory.py --tests tests | grep 'NON-STRICT' | grep -c 'W[0-9]:'`
-Expected: `0` (no campaign-prefixed pin is non-strict). Legacy non-strict pins, if any, are
-listed for their owning lane to upgrade — not gated by Phase 0.
+Run: `.venv/bin/python scripts/seed_inventory.py --tests tests | grep 'NON-STRICT' | grep 'W[0-9]:' | wc -l`
+Expected: `0` (no campaign-prefixed pin is non-strict). `wc -l` is used instead of `grep -c`
+because `grep -c` exits nonzero on zero matches, which would look like a step failure. Legacy
+non-strict pins, if any, are listed for their owning lane to upgrade — not gated by Phase 0.
 
 - [ ] **Step 3: the wave gates reflect the populated inventory**
 
