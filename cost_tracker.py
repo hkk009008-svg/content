@@ -475,6 +475,36 @@ class CostTracker:
     # Query helpers
     # ------------------------------------------------------------------
 
+    def get_shot_spent(self, shot_id: str) -> float:
+        """Return the total cost logged against a specific shot_id.
+
+        Queries the durable SQLite store (not the in-process accumulator) so
+        the result survives process restarts and is usable for per-shot budget
+        veto checks.  Mirrors the get_session_cost COALESCE pattern to handle
+        NULL SUM (empty result set) without raising.
+
+        Returns 0.0 for an unknown / empty shot_id or when no rows exist.
+        The result is always finite: any non-finite value stored in cost_log
+        (e.g. from a pre-fix poison write) is treated as 0.0 so the caller
+        receives a safe value (cost-spent-nan-poison, W2:CRITICAL symmetric guard).
+
+        Bridge for the per-shot budget veto: _shot_over_budget in
+        cinema/auto_approve.py reads shot_state["spent_usd"] which no production
+        code wrote; caller-injection at cinema/review/controller.py before
+        check_gate() feeds this return value into shot_state — C-1,
+        shot-spent-usd-never-written, W2:CRITICAL.
+        """
+        if not shot_id:
+            return 0.0
+        row = self.conn.execute(
+            "SELECT COALESCE(SUM(cost_usd), 0.0) AS total FROM cost_log WHERE shot_id = ?",
+            (shot_id,),
+        ).fetchone()
+        total = row["total"] if row else 0.0
+        # Defense-in-depth: a pre-fix NaN persisted in cost_log must not poison
+        # the caller; coerce to 0.0 (fail-safe: veto fires on real over-cap spend).
+        return float(total) if math.isfinite(float(total)) else 0.0
+
     def get_video_cost(self, video_id: str) -> dict:
         """
         Return a cost breakdown for a single video project.

@@ -321,6 +321,18 @@ class ReviewController:
                     else:
                         takes = []
 
+                    # C-1 (shot-spent-usd-never-written, W2:CRITICAL): inject
+                    # live per-shot spend from the CostTracker SQLite store into
+                    # shot_state BEFORE check_gate so _shot_over_budget can read
+                    # a real value rather than always seeing 0 (the per-shot veto
+                    # was structurally DEAD without this). cost_tracker is reachable
+                    # via self._core (PipelineCore.cost_tracker); shot["id"] is the
+                    # shot_id key consistent with record_api_call call sites.
+                    _shot_id_for_gate = shot.get("id") or ""
+                    shot["spent_usd"] = self._core.cost_tracker.get_shot_spent(
+                        _shot_id_for_gate
+                    )
+
                     decision: AutoApproveDecision = check_gate(
                         aa_gate,
                         shot_state=shot,

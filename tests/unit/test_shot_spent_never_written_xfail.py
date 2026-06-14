@@ -1,49 +1,39 @@
-"""C-1 pin — shot-spent-usd-never-written (CRITICAL, money-loss).
+"""Regression test — shot-spent-usd-never-written (C-1) bridge fix.
 
-ROW: shot-spent-usd-never-written
-FILE: cinema/auto_approve.py:627 (read site) + cost_tracker.py (missing bridge)
-BUG: the per-shot budget veto _shot_over_budget reads shot_state.get("spent_usd", 0).
-     NO production code writes "spent_usd" into any shot dict, so the veto always
-     sees $0.00 and is structurally DEAD. The CostTracker DOES persist per-call
-     spend tagged with shot_id (cost_log.shot_id column), but there is no
-     CostTracker.get_shot_spent(shot_id) bridge to read it back, and nothing
-     injects that SUM into shot_state before check_gate.
+ROW: shot-spent-usd-never-written (C-1, W2:CRITICAL)
+BUG: the per-shot budget veto _shot_over_budget (cinema/auto_approve.py:608)
+     reads shot_state.get("spent_usd", 0). No production code ever wrote
+     "spent_usd" into any shot dict (only test fixtures), so the veto was
+     structurally DEAD (always saw $0.00).
 
-FIX (not landed, director2/Pair-B owns): add
-     CostTracker.get_shot_spent(shot_id) -> float = SQLite SUM(cost_usd) WHERE
-     shot_id=?, then inject it into shot_state in the gate loop
-     (cinema/review/controller.py) before check_gate. This pin covers the
-     bridge METHOD (the testable unit of the fix); the gate-loop injection that
-     makes the veto actually fire end-to-end is integration-level (needs a full
-     ShotController harness — tracked test-infeasible, cf. perf-phase-no-gate).
+     The CostTracker DID persist per-call spend tagged with shot_id in the
+     cost_log SQLite table, but there was no CostTracker.get_shot_spent(shot_id)
+     bridge to read it back, and nothing injected that SUM into shot_state
+     before check_gate.
 
-WHY NON-VACUOUS + FLIP-CORRECT: real spend is logged against two distinct
-     shot_ids; the test asserts get_shot_spent returns the per-shot SUM for one
-     (cross-shot isolation proves it is not just summing everything). Today the
-     method does not exist -> the call raises AttributeError -> XFAIL. When the
-     bridge lands, get_shot_spent returns the SUM -> XPASS (strict) -> remove pin.
+FIX (this commit):
+  Part 1 — BRIDGE (cost_tracker.py): CostTracker.get_shot_spent(shot_id) -> float
+    = SELECT COALESCE(SUM(cost_usd), 0.0) FROM cost_log WHERE shot_id = ?
+    Returns 0.0 for unknown/empty shot_id; coerces non-finite SQLite values to
+    0.0 (defense-in-depth, cost-spent-nan-poison symmetric guard).
+  Part 2 — INJECTION (cinema/review/controller.py): caller-injection before
+    check_gate() at the SINGLE production call site (controller.py:324).
+    shot_state["spent_usd"] = self._core.cost_tracker.get_shot_spent(shot["id"])
+    No auto_approve.py edit needed; cost_tracker is reachable via self._core.
+
+This test covers the bridge METHOD unit (the testable unit of the fix).
+The gate-loop injection end-to-end is integration-level (needs a full
+ShotController harness — test-infeasible, cf. perf-phase-no-gate).
 """
 import pytest
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "C-1:CRITICAL:shot-spent-usd-never-written cinema/auto_approve.py:627 + "
-        "cost_tracker.py: the per-shot veto reads shot_state['spent_usd'] which no "
-        "production code writes, so it is dead; the bridge "
-        "CostTracker.get_shot_spent(shot_id) = SQLite SUM(cost_usd) WHERE shot_id=? "
-        "does not exist. Fix = add get_shot_spent + inject into shot_state before "
-        "check_gate; then this xpasses and the pin is removed."
-    ),
-)
 def test_cost_tracker_get_shot_spent_sums_per_shot(tmp_path):
-    """CostTracker.get_shot_spent(shot_id) must return the per-shot SQLite SUM.
+    """CostTracker.get_shot_spent(shot_id) returns the per-shot SQLite SUM.
 
-    FIXED behaviour: spend logged against a shot_id is retrievable per-shot so
-    the gate loop can bridge it into shot_state and the per-shot veto can fire.
-
-    Today (buggy): the method does not exist -> AttributeError -> XFAIL.
+    Real spend is logged against two distinct shot_ids; the test asserts
+    get_shot_spent returns the per-shot SUM for one (cross-shot isolation
+    proves it is not just summing everything).
     """
     from cost_tracker import CostTracker
 
@@ -53,7 +43,7 @@ def test_cost_tracker_get_shot_spent_sums_per_shot(tmp_path):
     tracker.log_api(provider="google", model="VEO", operation="gen", cost_usd=6.0, shot_id="shot_001")
     tracker.log_api(provider="ltx", model="LTX", operation="gen", cost_usd=99.0, shot_id="shot_002")
 
-    # FIXED behaviour: the bridge returns the per-shot SUM (cross-shot isolated).
+    # Bridge must exist.
     assert hasattr(CostTracker, "get_shot_spent"), (
         "CostTracker.get_shot_spent(shot_id) bridge is missing — the per-shot "
         "budget veto reads shot_state['spent_usd'] which is never written "
@@ -63,4 +53,22 @@ def test_cost_tracker_get_shot_spent_sums_per_shot(tmp_path):
     assert got == pytest.approx(10.0), (
         f"get_shot_spent('shot_001')={got!r}, expected 10.0 (the per-shot SUM); "
         "shot_002's $99 must not leak in"
+    )
+
+    # Cross-shot isolation: shot_002 must not bleed into shot_001.
+    got_002 = tracker.get_shot_spent("shot_002")
+    assert got_002 == pytest.approx(99.0), (
+        f"get_shot_spent('shot_002')={got_002!r}, expected 99.0"
+    )
+
+    # Unknown shot_id must return 0.0 (not raise).
+    got_unknown = tracker.get_shot_spent("shot_999")
+    assert got_unknown == 0.0, (
+        f"get_shot_spent for unknown shot_id returned {got_unknown!r}, expected 0.0"
+    )
+
+    # Empty shot_id must return 0.0 (guard against bare queries).
+    got_empty = tracker.get_shot_spent("")
+    assert got_empty == 0.0, (
+        f"get_shot_spent('') returned {got_empty!r}, expected 0.0"
     )
