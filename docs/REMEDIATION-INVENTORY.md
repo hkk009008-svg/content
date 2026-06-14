@@ -6,7 +6,12 @@
 
 ## Campaign constants
 - **Wave-gate SLA:** 24h (§6f).
-- **Wave-1 cross-cutting first-mover sequence:** TO BE SET by coordinator at Wave-1 open (§6b), AFTER discovery (Task 7) so newly-found cross-cutting pins are included. Seed signal so far: `auto_approve.py` W1 pin is Pair-A (`aa-nan-rules`); `core.py` W1 pin is Pair-B (`budget-nan`).
+- **Wave-1 cross-cutting first-mover sequence (§6b — SET 2026-06-14 at Wave-1 open, coordinator Session-8):**
+  - `auto_approve.py` → **Pair-A** (holds all 3 open W1 CRITICAL pins: `aa-nan-rules`, `aa-inf-scorebypass`, `aa-budget-nan-veto`) — lock `W1-auto_approve.py.lock`.
+  - `core.py` → **Pair-B** (`budget-nan`) — lock `W1-core.py.lock`.
+  - `web_server.py` → **Pair-B** (`ws-reorder-deletes`) — **already fixed + verified `2c45f39`**, lock `W2-web_server.py.lock` released; no further first-mover action.
+  - No tie-break fired (each contested module's open W1 pins are single-lane). Acquire multiple cross-cutting locks in **lexicographic order** (`auto_approve.py` < `cinema/context.py` < `core.py` < `web_server.py`), holding none while waiting (§6b deadlock avoidance).
+  - **Plan:** `docs/superpowers/plans/2026-06-14-program-hardening-wave1.md` (8 CRITICAL rows; Tasks 1–7 open, Task 8 pre-closed).
 
 ## Schema
 `| id | subsystem | file:line | severity | priority | fail-mode | repro | xfail-pin | lane-owner | shared-lock | wave | status | verifier | notes |`
