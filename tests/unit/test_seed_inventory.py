@@ -22,7 +22,7 @@ def test_finds_strict_xfail(tmp_path):
     assert p["test_file"].endswith("test_a.py")
     assert "budget-nan" in p["reason"]
 
-def test_ignores_nonstrict_and_plain(tmp_path):
+def test_finds_nonstrict_xfail(tmp_path):
     t = tmp_path / "tests"; t.mkdir()
     (t / "test_b.py").write_text(
         'import pytest\n'

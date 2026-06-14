@@ -5,7 +5,9 @@ Emits to stdout; never writes the inventory (coordinator is the single writer, s
 Uses the AST so it is robust to formatting. Captures reason + strict for each xfail mark.
 """
 from __future__ import annotations
-import argparse, ast, sys
+import argparse
+import ast
+import sys
 from pathlib import Path
 
 def _xfail_marks(tree: ast.AST):
@@ -13,7 +15,8 @@ def _xfail_marks(tree: ast.AST):
         if not isinstance(node, ast.Call):
             continue
         f = node.func
-        # match pytest.mark.xfail(...) / mark.xfail(...)
+        # Matches any `*.xfail(...)` Attribute-call (covers pytest.mark.xfail and mark.xfail).
+        # Broad by design; a tests/ tree has no unrelated .xfail() calls (verified).
         if isinstance(f, ast.Attribute) and f.attr == "xfail":
             yield node
 
@@ -26,6 +29,9 @@ def find_xfail_pins(tests_root: Path) -> list[dict]:
             continue
         for call in _xfail_marks(tree):
             reason, strict = "", False
+            # Only literal (ast.Constant) reason=/strict= are captured; an f-string or
+            # variable expression is silently skipped (reason="" / strict=False). All
+            # current pins use literal strings, so this is a non-issue in practice.
             for kw in call.keywords:
                 if kw.arg == "reason" and isinstance(kw.value, ast.Constant):
                     reason = str(kw.value.value)
@@ -43,7 +49,7 @@ def _slug(reason: str) -> str:
     return (head[:32] or "unknown")
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--tests", default="tests", type=Path)
     args = ap.parse_args(argv)
     seen: dict[str, int] = {}
