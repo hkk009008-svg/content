@@ -66,6 +66,7 @@ Keep the manual true as the code evolves (same staleness discipline as `ARCHITEC
 | Rule provenance (codified SHAs, empirical basis, beneficiary/consent) | [docs/PROTOCOL-RULES-LOG.md](docs/PROTOCOL-RULES-LOG.md) |
 | The CLAUDE/AGENTS operative-split map | [docs/protocol/migration-map-claudemd-split.md](docs/protocol/migration-map-claudemd-split.md) |
 | Current leadership critique + forward direction | [docs/STRATEGIC_REVIEW-2026-06-10.md](docs/STRATEGIC_REVIEW-2026-06-10.md) |
+| Test-coverage gaps + prioritized test proposal | [docs/TEST-COVERAGE-ANALYSIS-2026-06-14.md](docs/TEST-COVERAGE-ANALYSIS-2026-06-14.md) |
 | Execute a roadmap session (operator manual, why + how + acceptance) | [docs/HANDOFF-roadmap-2026-05-24.md](docs/HANDOFF-roadmap-2026-05-24.md) |
 | Past handoffs (historical) | [docs/archive/](docs/archive/) |
 
