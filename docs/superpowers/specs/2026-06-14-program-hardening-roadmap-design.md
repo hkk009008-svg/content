@@ -1,8 +1,8 @@
 # Program Hardening Roadmap — "Runs as Intended, Bug-Free" — Design Spec
 
 *Date: 2026-06-14 · Author: coordinator seat (Session-6), brainstormed with the
-user-principal · Status: design approved; spec-review v3 — closes all blocking
-findings from review rounds 1 (`wf_c37fb3eb-823`) and 2 (`wf_7b0a23a9-0cd`).*
+user-principal · Status: design approved; spec-review v4 — closes all blocking from
+review rounds 1 (`wf_c37fb3eb-823`), 2 (`wf_7b0a23a9-0cd`), 3 (`wf_8d1be397-9b0`).*
 
 ## 0. Locked decisions (from brainstorming)
 
@@ -154,7 +154,15 @@ cannot be deferred to Wave N+1 without explicit user-principal authorization.
 
 **Coordinator code scope:** read-only on production code; **never authors a
 behavior-changing fix.** May commit **test-only artifacts (xfail pins, fixtures, stubs),
-inventory, `logs/`, and docs** — none carry production logic. Every fix is authored in-lane.
+inventory, `logs/`, and docs** — none carry production logic; all coordinator test
+commits are scoped to **test files only** (`tests/`, `conftest.py`), never production
+modules. Every fix is authored in-lane.
+
+**Canonical pin-writer (no three-writer race):** exactly one seat authors any given
+xfail pin. In **Phase 0** the coordinator is the *sole* pin author (pins arrive as the
+discovery-workflow batch). In **waves**, a *new* pin for a mid-wave defect is authored by
+the **lane seat** for a pure-lane defect, or via the lock + provisional-row protocol
+(§6b/§6f) for a cross-cutting defect.
 
 ### 6b. Lane partition + git-native shared-module lock
 
@@ -174,18 +182,25 @@ inventory, `logs/`, and docs** — none carry production logic. Every fix is aut
 3. If the push is **rejected** (a peer claimed first), the seat **lost** — it abandons,
    does **not** implement. **Implementation (own commit or dispatched subagent) begins
    ONLY after the lock push succeeds** — so a loser never has an in-flight fix. The
-   lock-push is the atomic claim point *before any code work*.
+   lock-push is the atomic claim point *before any code work*. A loser takes the next
+   available row in its lane; if the lost row was the lane's last, it waits for the lock
+   release and re-claims — it does not silently abandon the defect (the gate would block).
 
 **Deadlock avoidance (ordered acquisition):** a seat needing more than one cross-cutting
-module acquires the locks in a **fixed global order — lexicographic by module path** —
-and holds none while waiting. This eliminates the circular wait (no
+module acquires the locks in a **fixed global order — lexicographic by repo-relative POSIX
+path** (`auto_approve.py` < `cinema/context.py` < `core.py` < `web_server.py`) — and
+holds none while waiting. This eliminates the circular wait (no
 A-holds-`auto_approve`-wants-`core` / B-holds-`core`-wants-`auto_approve`).
 
 **Lock release (coordinator-independent):** the **operator deletes the lock file in the
 same commit as their `verification-report` GO** — the lock releases on `verified`, not on
 the fix-commit. On FAIL the lock is retained and the fixing seat reworks. Once the lock
 file is deleted, the module is **eligible to be claimed** by the next seat (re-run the
-claim protocol) — **no coordinator grant needed.**
+claim protocol) — **no coordinator grant needed.** **FAIL-rework cap (anti-hostage):**
+after **3 consecutive FAIL verdicts** on one defect the holder must **release the lock**
+and re-queue/split the defect (or escalate to the coordinator / acting-coordinator), so a
+hard defect cannot hold a contested module (e.g. `auto_approve.py`, 6+ pinned xfails)
+hostage or stall the wave gate indefinitely.
 
 **Cross-file commit co-sign scope:** any commit touching **more than one lane**, or a
 **cross-cutting module + a lane file**, requires co-sign from **every affected lane
@@ -216,6 +231,14 @@ co-signer sees the **full change-set scope**, never a blank check. **No CRITICAL
 cross-cutting code lands before Tier-A co-sign — whether authored by a director's own
 commit or a dispatched implementer.** Non-critical cross-lane items may use Tier-B
 (48h proceed-if-no-objection).
+
+**NITS path (no unverified-fix escape):** a `NITS` verdict means the fixing seat addresses
+the nits and the **operator re-verifies the nit-fix diff before issuing GO** — never a
+self-upgrade NITS→GO without reading the new diff, so guarantee #3 covers nit-fixes too.
+**CRITICAL cross-cutting commit gate:** the Tier-A co-sign `verification-report` **must be
+in the mailbox before the fix commit lands** — this **overrides the async-OK convenience**
+and binds regardless of implementer identity (a director-as-implementer may **not**
+self-commit a CRITICAL cross-cutting fix ahead of the co-sign).
 
 **Director-as-implementer:** a director may implement a small fix directly or dispatch a
 subagent (dispatch required per R-ORCH at ≥5 subtasks or ≥800 LOC). Either way the
@@ -252,10 +275,14 @@ The coordinator is on-demand; the protocol must not stall on its absence:
   request. Between reconciles the inventory is a batch view (§2).
 - **Deputy-write path (scope):** when no coordinator is live, a pair may (a) **advance its
   own-lane row status** (open→fixed→verified), and (b) **create a provisional row + xfail
-  pin for any mid-wave CRITICAL** (including cross-cutting), flagged `provisional`, for
-  coordinator ratification on return. Both are pathspec-scoped; (a) is limited to rows
-  whose `lane-owner` is that pair. Lock files release per §6b (operator GO commit),
-  independent of the coordinator.
+  pin for any mid-wave CRITICAL.** For a **cross-cutting** module the discovering seat
+  **first claims the §6b lock** (push-first): the lock is the **dedup point** — only the
+  lock-winner creates the provisional row, so two pairs that independently find the same
+  `file:line` cannot create dual racing rows. Provisional rows are keyed by `file:line`
+  (a second for the same `file:line` is disallowed); the row is flagged `provisional` for
+  coordinator ratification on return (which also corrects `lane-owner`). (a) is
+  pathspec-scoped and limited to rows whose `lane-owner` is that pair. Lock files release
+  per §6b (operator GO commit), independent of the coordinator.
 - **Wave-gate SLA + trip-wire:** SLA = **24h default** (user-adjustable; recorded in the
   inventory header). A director's gate-request is the formal trigger: the moment it is
   posted and unserviced, the gate is **formally blocked → the pod goes OFF immediately**
@@ -275,13 +302,15 @@ The coordinator is on-demand; the protocol must not stall on its absence:
   (proving the gate fires). Stub ownership: the lane that covers the provider. The
   coordinator runs the **stub-fidelity review at two points** — (1) a **contract/design
   review** of the stub specs *before* Wave-4 stub implementation, and (2) an **artifact
-  review** of the finished suite before it counts toward done; stubs authored earlier
-  (e.g. a Wave-2 coverage stub) are re-checked at the artifact review for drift.
+  review** of the finished suite before it counts toward done. The coordinator **issues
+  the stub-contract spec before Wave 2 opens** (not just before Wave 4) so Wave-2 stub
+  authors target it; earlier stubs are still re-checked for drift at the artifact review.
 - **Tier 2 (milestone, pod-gated):** a real burn → photoreal video w/ synced audio,
   scored against **pre-committed thresholds**:
   - **identity arc ≥ max(0.80, baseline_arc + 0.05)** (0.80 anchored to GO history —
     Design-D man 0.870, ADR-025 portrait ON 0.8779 — and never below baseline+0.05);
-  - **lip-sync offset ≤ 2 frames** vs the audio track;
+  - **lip-sync offset ≤ 2 frames** vs the audio track, measured by a committed script
+    (`scripts/measure_lipsync_offset.py`, a Wave-4 deliverable) per R-MEASURE;
   - **no over-cook** per the realism checklist (qualitative + structural over-cook checks).
   The **baseline render** (current-default arc/lip-sync/frame-samples) is committed to
   `logs/` as a **Wave-2 exit deliverable**, so "improvement vs baseline" is defined before
@@ -327,7 +356,11 @@ The coordinator is on-demand; the protocol must not stall on its absence:
   fires — a Phase-0 precondition owned by the coordinator.
 - **Campaign constants in the inventory header:** wave-gate SLA (default 24h) and the
   Wave-1 cross-cutting first-mover sequence (§6b).
-- **Cross-cutting lock assignment:** runtime, git-native (§6b), not pre-frozen.
+- **Lock directory:** create `coordination/locks/` with a tracked `.gitkeep` as a Phase-0
+  prerequisite (git does not track empty dirs; the commit-push lock needs the dir present).
+- **Cross-cutting lock assignment:** lock *acquisition* is runtime/git-native (§6b); the
+  Wave-1 *first-mover priority* is coordinator-set in the inventory header at wave-open
+  (directors check the header before racing).
 - **Capability baseline:** committed to `logs/` as a Wave-2 exit deliverable (§7).
 - **Pod authorization:** Waves 3 / Tier-2 do not begin until the user-principal authorizes
   the pod spend (authority chain, §6e).
