@@ -284,6 +284,25 @@ class CostTracker:
         # never inflates the accumulator. Previously only record_api_call did
         # this, so log_api/log_llm spend (the 4 performance phases, etc.) was
         # invisible to the gate — costtracker-perf-uncounted, W1:CRITICAL.
+        #
+        # Guard against NaN/inf cost_usd: a non-finite value poisons the
+        # accumulator (0.0 + NaN = NaN) so that every subsequent gate check
+        # silently returns False (NaN > budget is always False in IEEE 754).
+        # This is the spend-accumulator sibling of the budget_usd guard
+        # (_finite_budget_or_block, ADR-026) — Rule #13 symmetric-endpoint gap
+        # (cost-spent-nan-poison, W2:CRITICAL). Coerce to 0.0 (fail-safe: keep
+        # the gate ALIVE for real subsequent spend) and emit a WARNING so
+        # operators can diagnose the upstream source of the bad cost value.
+        if not math.isfinite(cost_usd):
+            warnings.warn(
+                f"[cost_tracker] Non-finite cost_usd={cost_usd!r} coerced to 0.0 "
+                f"in log() (operation={operation!r}); upstream cost calculation "
+                f"produced NaN/inf — check the caller for division by zero or "
+                f"NaN duration. Gate stays ALIVE for real subsequent spend "
+                f"(cost-spent-nan-poison, ADR-026 symmetric-endpoint guard).",
+                stacklevel=3,
+            )
+            cost_usd = 0.0
         self.spent_usd += cost_usd
         return CostEntry(
             timestamp=ts,
@@ -424,9 +443,16 @@ class CostTracker:
         """Pre-emptive check: would recording this call push us over budget?
 
         Returns False when ``budget_usd`` is None (no limit).
+
+        Defense-in-depth (cost-spent-nan-poison, Rule #13 symmetric guard):
+        if spent_usd is somehow non-finite (e.g. from a race or a direct
+        assignment bypassing log()), treat it as over-budget (fail-safe FIRES
+        the gate) rather than silently returning False (NaN > cap is False).
         """
         if self.budget_usd is None:
             return False
+        if not math.isfinite(self.spent_usd):
+            return True  # fail-safe: non-finite spend → gate fires
         cost = API_COST_USD.get(api_name.upper(), 0.0)
         return (self.spent_usd + cost) > self.budget_usd
 
@@ -434,9 +460,15 @@ class CostTracker:
         """Post-fact check: has cumulative in-process spend exceeded the cap?
 
         Returns False when ``budget_usd`` is None (no limit).
+
+        Defense-in-depth (cost-spent-nan-poison, Rule #13 symmetric guard):
+        if spent_usd is non-finite, treat it as over-budget (fail-safe FIRES
+        the gate) rather than silently returning False (NaN > cap is False).
         """
         if self.budget_usd is None:
             return False
+        if not math.isfinite(self.spent_usd):
+            return True  # fail-safe: non-finite spend → gate fires
         return self.spent_usd > self.budget_usd
 
     # ------------------------------------------------------------------
