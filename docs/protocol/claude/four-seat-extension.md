@@ -178,5 +178,11 @@ cross-pair view, not the constant presence. (This is the on-demand framing of th
 - **Output.** Land findings as a **single** findings/doc commit (or one mailbox
   event) — not a stream of per-finding events. The send-only `coordinator` mailbox
   vocab (`fd334d3`) stays valid for this but is used sparingly.
-- **Commits** only under explicit user direction, via a seeded
-  `.git/index-coordinator` + pathspec partial commit; push stays USER-gated.
+- **Commits.** "Read-only" means read-only on **production code** — never authors a
+  behavior-changing fix. The coordinator **MAY** commit (explicit pathspec, via a
+  seeded `.git/index-coordinator`) the **spec §6a "may commit" scope**: test-only
+  artifacts (xfail pins, fixtures, stubs), the inventory, docs, `logs/`, and
+  coordination tooling — these do NOT each need per-commit user direction. A
+  permitted commit must NOT change a gate's PASS/FAIL outcome or write a
+  suppressive/vacuous xfail (that is a behavior-changing fix in disguise — equally
+  forbidden). **Push stays USER-gated** in all cases.
