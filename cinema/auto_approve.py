@@ -608,6 +608,15 @@ def _any_take_has_fallback(takes: list[dict]) -> bool:
 def _shot_over_budget(shot_state: dict, project: dict, multiplier: float) -> bool:
     """True if the shot's spent_usd exceeds ``multiplier`` × per-shot budget."""
     budget_total = (project.get("global_settings") or {}).get("budget_limit_usd", 0)
+    # Fail-closed on a corrupt (non-finite or non-numeric) per-shot budget cap: a NaN
+    # budget_total is truthy so `if not budget_total` is False, then per_shot_budget=nan
+    # and `spent > nan` is always False -> the over-budget veto silently dies. `is not
+    # None` excludes a null cap, which stays "no cap" per ADR-026 (None/0 = no cap).
+    # Direct project-dict read (NOT via CostTracker) -> the cost_tracker budget-nan
+    # chokepoint does not cover this path; Rule #13 sibling, complementary fix.
+    if budget_total is not None and (
+            not isinstance(budget_total, (int, float)) or not math.isfinite(budget_total)):
+        return True
     if not budget_total:
         return False  # no budget set → can't be over budget
     scenes = project.get("scenes", [])
@@ -616,6 +625,11 @@ def _shot_over_budget(shot_state: dict, project: dict, multiplier: float) -> boo
         return False
     per_shot_budget = budget_total / total_shots
     spent = shot_state.get("spent_usd", 0) or 0
+    # Fail-closed: a NaN/inf spent_usd survives `or 0` (NaN is truthy), and
+    # `spent > threshold` is always False under IEEE 754 -> the veto silently skips.
+    # Treat a non-finite spend as invalid and fire the veto (manual review).
+    if isinstance(spent, float) and not math.isfinite(spent):
+        return True
     return float(spent) > multiplier * per_shot_budget
 
 

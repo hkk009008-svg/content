@@ -39,8 +39,10 @@ rather than the score *accumulation* path).  Cross-lane scope audit is
 owed before editing; CI pins it here so the next session's CI, not an ad-hoc
 agent, detects when the guard lands.
 
-Each pin is ``xfail(strict=True)`` so CI flags it as XPASS the moment the
-guard is added — prompting removal of the case (or a reason update).
+FIXED in Wave-1 — both pins removed -> live regressions (they go RED if the guards are
+reverted): aa-inf-scorebypass (math.isfinite in the 4 _best_take_* helpers) and
+aa-budget-nan-veto (fail-closed non-finite spent + budget_total guards in
+_shot_over_budget).
 """
 from __future__ import annotations
 
@@ -105,18 +107,6 @@ def test_inf_composite_score_must_not_auto_approve():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W1:CRITICAL:aa-budget-nan-veto (discovery wf_13f9d2f6-f93 confirmed[1]): "
-        "_shot_over_budget uses `spent = shot_state.get('spent_usd', 0) or 0`; "
-        "NaN is truthy so `nan or 0` returns nan, and `float(nan) > threshold` is "
-        "always False under IEEE 754, so the budget veto silently returns False even "
-        "when spent_usd is NaN. "
-        "Fix: replace the or-0 idiom with math.isfinite(spent) or _finite_or so NaN "
-        "spent_usd is detected and the veto fires (returns True)."
-    ),
-)
 def test_nan_spent_usd_must_fire_budget_veto():
     """A NaN spent_usd must cause _shot_over_budget to return True (veto fires).
 
