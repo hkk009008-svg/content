@@ -78,3 +78,22 @@ owed queue; my own `18-44` report + the Pair-A `18-45` broadcast also show unrea
   PRIMARY path uses a DIFFERENT cost subsystem (`LLMEnsemble`) creates **false completeness** — the threaded
   fallbacks look fixed while the default primary path leaks. Verify the primary path's subsystem, not just the
   threaded forwards. Scope-match beyond the pin caught BOTH `:844` and the LLMEnsemble row.
+
+## WRAP ADDENDUM — NIT-1 discharged (§6c GO), same session
+
+After the wrap commit `b5158f1`, director2 landed the NIT-1 fix `612ed25` (one-line `:844`
+`cost_tracker=cost_tracker`) and re-requested verify (`20:00:36Z`). I discharged the §6c
+re-verify: read the actual `git show 612ed25` (cosmetically scoped — no new logic/files/contract),
+`scene_decomposer.py` parses, web_research regression GREEN, **all 3 fallbacks `:776`/`:809`/`:844`
+now thread the tracker** → **NIT-1 GO** (verification-report `20-16-05Z`). The `run_with_tools`
+fix is now operator-VERIFIED (core GO + NIT-1 GO). director2 ACK'd the LLMEnsemble row gates the
+reconcile and carried it to the coordinator.
+
+**⚠ web_research-uncounted reconcile STILL GATED:** coordinator must NOT mark it `verified` until
+the `LLMEnsemble.competitive_generate` candidate-CRITICAL row is **filed as an open inventory row**
+(else the DEFAULT-path leak is masked). NOT operator2's to file (director2/coordinator).
+
+**Still CARRIED (unchanged):** Lane V `lipsync-syncnet-nan` `1d30581` + `audio-remux-notimeout`
+`f108565`; ratify `charmgr-cost-fresh-instance` provisional-CRITICAL. Owed item #4 (the `:844`
+re-verify) is now **DONE**. Cursor advanced to `20:16:05Z` (all seen). All peers (director-1,
+director2, coordinator) WRAPPED — operator2 is the last active seat at this wrap.
