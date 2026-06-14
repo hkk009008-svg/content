@@ -75,6 +75,20 @@ API_COST_USD: dict[str, float] = {
     "FAL_STABLE_AUDIO":  0.10,    # per ~47s BGM clip via FAL Stable Audio (production default)
     # Post-processing APIs (per clip / per call)
     "FAL_RIFE":          0.04,    # per clip RIFE frame-interpolation via fal-ai/rife/video
+    # Lipsync engines (per dialogue clip). The cascade-winning engine is recorded
+    # as LIPSYNC_<engine> (namespaced at cinema/shots/controller.py to avoid
+    # colliding with same-named video engines, e.g. lipsync "kling" vs video
+    # KLING_NATIVE). Lipsync is MANDATORY for dialogue shots (F1b), so an unpriced
+    # cascade silently undercounts the budget gate. Estimates; calibrate vs invoice.
+    "LIPSYNC_SYNCSOV3":    0.05,   # sync.so v3 overlay (best generalist) via FAL
+    "LIPSYNC_MUSETALK":    0.02,   # MuseTalk mouth-only overlay via FAL
+    "LIPSYNC_LATENTSYNC":  0.03,   # LatentSync overlay fallback via FAL
+    "LIPSYNC_SYNCV2":      0.10,   # Sync Lipsync v2 (premium) overlay via FAL
+    "LIPSYNC_HEDRA":       0.10,   # Hedra Character-3 generation (native API)
+    "LIPSYNC_KLING":       0.05,   # Kling lipsync generation via FAL
+    "LIPSYNC_OMNIHUMAN":   0.10,   # Omnihuman v1.5 generation via FAL
+    "LIPSYNC_AURORA":      0.05,   # Creatify Aurora generation via FAL
+    "LIPSYNC_DEFAULT":     0.05,   # fallback when the cascade reports no engine name
 }
 
 
