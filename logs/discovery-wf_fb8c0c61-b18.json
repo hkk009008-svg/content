@@ -1,0 +1,42 @@
+{
+  "run_id": "wf_fb8c0c61-b18",
+  "seat": "coordinator",
+  "kind": "candidate-row confirmation (read-only fan-out)",
+  "question": "Confirm/refute + severity-grade the LLMEnsemble.competitive_generate money-visibility leak before filing a Wave-2 inventory row",
+  "row_filed": "llmensemble-cost-uncounted",
+  "decision": "CONFIRM",
+  "severity": "CRITICAL",
+  "refuted": false,
+  "convergence": "operator2 flag (lane) + 3 coordinator-dispatched independent seats (money-gate-reviewer + lane-v reachability + adversarial refuter) — exceeds R-VERIFY-TIER 2-seat convergence",
+  "pin": {
+    "path": "tests/unit/test_llmensemble_cost_uncounted_xfail.py",
+    "shape": "structural-threading (decoupled from undecided recording site / token-math)",
+    "executed": "1 xfailed (normal) / 1 FAILED (--runxfail, AssertionError init=None,gen=None) — leaky success path exercised, non-vacuous",
+    "flip": "XPASS when the gate-connected cost_tracker reaches the LLMEnsemble ctor or competitive_generate()"
+  },
+  "core_leak": {
+    "site": "domain/scene_decomposer.py:758-765 (success path builds bare LLMEnsemble(), calls competitive_generate without cost_tracker)",
+    "module": "llm/ensemble.py (zero cost_tracker/log_llm/log_api/record_api_call refs across 487 lines; usage read :286-293 only for a cache print)",
+    "default_path": true,
+    "default_evidence": "cinema_pipeline.py:1017 competitive_generation defaults True; project_manager.py:327",
+    "scales_with_scenes": true,
+    "magnitude": "~3 untracked LLM calls/scene (2 candidates gpt-4o+claude-sonnet-4-6 + 1 judge claude-sonnet-4-6); judge JSONDecodeError retry +1; unbounded across scene count",
+    "gate_invisible": true,
+    "gate_write_read": "write cost_tracker.py:306 (self.spent_usd += cost_usd) / gate read :472 (spent_usd > budget_usd) — neither reached",
+    "tracker_only_on_fallback": "cost_tracker forwarded ONLY to fallback decompose_scene at :776/:809/:844; SUCCESS path drops it",
+    "family": "money-loss gate-source-mismatch — byte-identical to costtracker-perf-uncounted (W1 CRITICAL) + charmgr-cost-fresh-instance (W2)"
+  },
+  "secondary_leak_DISPUTED": {
+    "site": "cinema/shots/controller.py:709-718 -> prompt_optimizer.py:402 (builds a 3rd fresh LLMEnsemble, no cost_tracker)",
+    "dispute": "money-gate + refuter: prompt_optimizer_enabled defaults False (controller.py:684) => non-default => MAJOR/conditional; lane-v: defaults True (project_manager.py:338). NOT resolved by coordinator — lane confirms default-ness + scopes severity.",
+    "rule13": "symmetric-endpoint: a complete fix must cover this sibling construction site too (or document the exemption)"
+  },
+  "agent_verdicts": {
+    "money_gate_reviewer": {"verdict": "confirm", "severity": "CRITICAL", "default_path": true, "scales_with_scenes": true, "gate_invisible": true},
+    "lane_v_reachability": {"verdict": "confirm", "severity": "CRITICAL", "default_path": true, "scales_with_scenes": true, "gate_invisible": true},
+    "adversarial_refuter": {"verdict": "confirm", "refuted": false, "note": "refutation failed on all fronts: prompt_optimizer non-default checked; no wrapper/caller logs the spend; no outer accumulator captures usage"}
+  },
+  "blocks": "Reconciling web_research-uncounted (f5a95ec/612ed25) as 'gated' — this is a DISTINCT separate-module sibling, NOT worsened by f5a95ec; web_research's own run_with_tools path is gated by f5a95ec.",
+  "lane": "Pair-B (planning-LLM money lane; pure-lane, no cross-cutting lock, no co-sign). director2 disposition + impl, operator2 Lane V GO owed.",
+  "full_agent_output": "/private/tmp/claude-501/-Users-hyungkoookkim-Content/.../tasks/wxh2sv2vn.output (transcript: subagents/workflows/wf_fb8c0c61-b18)"
+}
