@@ -215,6 +215,14 @@ def test_reorder_scenes_partial_list_preserves_unlisted_scenes(tmp_path, monkeyp
         f"(surviving ids: {final_ids})"
     )
 
+    # The survivor pass assigns unlisted scenes a continuing order index, so the
+    # order field must remain a contiguous 0..n-1 sequence. Guards against a
+    # future "preserve" refactor that drops or duplicates the index.
+    final_orders = sorted(sc["order"] for sc in final["scenes"])
+    assert final_orders == list(range(len(final["scenes"]))), (
+        f"order fields are not contiguous after a partial reorder: {final_orders}"
+    )
+
 
 # ---------------------------------------------------------------------------
 # confirmed[15] — W2:MAJOR:http-addchar-float-unguarded
