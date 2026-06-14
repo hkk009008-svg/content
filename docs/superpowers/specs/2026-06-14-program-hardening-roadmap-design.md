@@ -138,6 +138,12 @@ The gate counts pins (the acceptance bars require "no open/provisional Wave-N CR
 pin remains"), so a provisional CRITICAL blocks the gate even before reconciliation. It
 cannot be deferred to Wave N+1 without explicit user-principal authorization.
 
+**AMENDMENT (ADR-027, user-ratified 2026-06-15) — the gate must EXECUTE the oracle, and every wave-close needs a product oracle.** Root cause + evidence: ADR-027 + `logs/discovery-wf_26a5abf2-3bb.json`.
+- The wave gate's authority is the **EXECUTED pin suite** (`pytest --runxfail`, XPASS-clean), NOT the inventory `status` string. `wave_gate_check.py` reading `status` is **process-state, not proof** (it executes zero tests); a row counts as gate-cleared only when its pin actually flips under execution **and** an independent operator GO exists (impl≠verifier). [FIX-1, routed to a director — changes gate PASS/FAIL; will re-grade the current Wave-1 "MET" honestly.]
+- From **Wave-2 onward**, a wave does NOT close without **≥1 committed product-oracle artifact** in `logs/` (ArcFace arc score + lip-sync offset on a baseline render, via a committed R-MEASURE script). This elevates the §7 "baseline render in logs/" exit deliverable into a **HARD gate condition** — a wave cannot green on structural rows alone. [FIX-5.]
+- Rows with **no behavioral oracle** (test-infeasible) are **`attested`**, not `verified`, and need an explicit user-principal exemption token to pass a gate.
+- Two gaps remain UNCLOSED (recorded, not hidden): operator-GO impl≠verifier is not yet gate-enforced; unregistered defects cannot be caught by a gate that reads only registered rows.
+
 ## 6. Role distribution & coordination safety
 
 ### 6a. Ownership matrix
