@@ -545,7 +545,7 @@ at [domain/project_manager.py:71](domain/project_manager.py:71).
 | Function | Provider | Tooling |
 |---|---|---|
 | `decompose_scene` ([domain/scene_decomposer.py:436](domain/scene_decomposer.py:436)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
-| `competitive_decompose_scene` ([domain/scene_decomposer.py:624](domain/scene_decomposer.py:624)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
+| `competitive_decompose_scene` ([domain/scene_decomposer.py:626](domain/scene_decomposer.py:626)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
 
 **Persona:** CineDecompose v1.0 with 5 hard constraints:
 - HC1 IDENTITY_FIREWALL — LLM must NEVER describe face/hair/skin/eye color
@@ -1518,7 +1518,7 @@ prefers Suno V5 with FAL Stable Audio as fallback; loops in assembly.
 
 ### 12.6 Final-assembly audio mux — engine-dependent voice source
 
-`_assemble_final` ([cinema_pipeline.py:1323](cinema_pipeline.py:1323)) muxes the
+`_assemble_final` ([cinema_pipeline.py:1324](cinema_pipeline.py:1324)) muxes the
 final video's audio with an FFmpeg `amix` filtergraph over up to three sources
 (voice/dialogue + BGM + foley). The **voice source is motion-engine-dependent**:
 

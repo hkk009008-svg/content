@@ -439,6 +439,7 @@ def decompose_scene(
     location: dict,
     global_settings: dict,
     style_rules: Optional[dict] = None,
+    cost_tracker=None,
 ) -> List[dict]:
     """
     Takes a user-defined scene and produces 2-5 shot breakdowns via GPT-4o.
@@ -572,6 +573,7 @@ Only use tools if they would genuinely improve shot quality. Skip if the scene i
             user_prompt=user_prompt,
             max_tool_rounds=2,
             response_format={"type": "json_object"},
+            cost_tracker=cost_tracker,  # T5: gate planning LLM spend on pipeline budget
         )
         parsed = json.loads(raw)
 
@@ -627,6 +629,7 @@ def competitive_decompose_scene(
     location: dict,
     global_settings: dict,
     style_rules: Optional[dict] = None,
+    cost_tracker=None,
 ) -> List[dict]:
     """
     Multi-LLM competitive scene decomposition.
@@ -770,7 +773,7 @@ Output ONLY the raw JSON array. No markdown wrapping."""
         winning_raw = result.winner_content
         if winning_raw is None:
             print("   [Ensemble] Winning candidate was None — falling back to decompose_scene()")
-            return decompose_scene(scene, characters, location, global_settings, style_rules)
+            return decompose_scene(scene, characters, location, global_settings, style_rules, cost_tracker=cost_tracker)
 
         # ------------------------------------------------------------------
         # 8. Parse the winning output into a shot list
@@ -803,7 +806,7 @@ Output ONLY the raw JSON array. No markdown wrapping."""
 
         if not shots:
             print("   [Ensemble] Could not extract shots from winner — falling back to decompose_scene()")
-            return decompose_scene(scene, characters, location, global_settings, style_rules)
+            return decompose_scene(scene, characters, location, global_settings, style_rules, cost_tracker=cost_tracker)
 
         # ------------------------------------------------------------------
         # 9. Validate and enrich each shot (camera, visual_effect, target_api)

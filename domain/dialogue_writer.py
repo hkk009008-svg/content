@@ -15,6 +15,7 @@ def generate_dialogue(
     mood: str = "neutral",
     style: str = "natural, cinematic",
     language: str = "English",
+    cost_tracker=None,
 ) -> List[dict]:
     """
     Takes a scene's action description and generates dialogue lines
@@ -104,6 +105,7 @@ Only use tools if they would genuinely improve dialogue quality."""
             user_prompt=user_prompt,
             max_tool_rounds=2,
             response_format={"type": "json_object"},
+            cost_tracker=cost_tracker,  # T5: gate planning LLM spend on pipeline budget
         )
         parsed = json.loads(raw)
         # Handle all GPT-4o response shapes:

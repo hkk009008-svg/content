@@ -17,6 +17,7 @@ def generate_style_rules(
     aspect_ratio: str = "16:9",
     reference_films: str = "",
     use_web_research: bool = True,
+    cost_tracker=None,
 ) -> dict:
     """
     Generates consistent style rules for the entire production.
@@ -108,6 +109,7 @@ Use tools proactively to make the style guide as professional as possible."""
             user_prompt="Generate the comprehensive style guide. Use web search to research professional cinematography techniques. Output ONLY raw JSON.",
             max_tool_rounds=3,
             response_format={"type": "json_object"},
+            cost_tracker=cost_tracker,  # T5: gate planning LLM spend on pipeline budget
         )
         rules = json.loads(raw)
         defaults = _default_style_rules(mood, color_palette, music_mood)

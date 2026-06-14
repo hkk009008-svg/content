@@ -510,7 +510,7 @@ class CinemaPipeline:
         proj_settings = self.project.get("global_settings", {}) if hasattr(self, "project") else {}
         lang = proj_settings.get("language", "English")
         if characters and not dialogue and action:
-            dialogue_lines = generate_dialogue(scene, characters, scene.get("mood", "neutral"), language=lang)
+            dialogue_lines = generate_dialogue(scene, characters, scene.get("mood", "neutral"), language=lang, cost_tracker=self.cost_tracker)
         elif dialogue:
             if isinstance(dialogue, list):
                 dialogue_lines = dialogue
@@ -518,7 +518,7 @@ class CinemaPipeline:
                 # LLM-generated dialogue — nondeterministic per run; these won't
                 # cache-hit across fresh instances (different dialogue_lines each
                 # call), but explicit dialogue lists (the common case) do.
-                dialogue_lines = generate_dialogue(scene, characters, scene.get("mood", "neutral"), language=lang)
+                dialogue_lines = generate_dialogue(scene, characters, scene.get("mood", "neutral"), language=lang, cost_tracker=self.cost_tracker)
         else:
             return None
 
@@ -964,6 +964,7 @@ class CinemaPipeline:
                 color_palette=settings.get("color_palette", ""),
                 music_mood=settings.get("music_mood", "suspense"),
                 aspect_ratio=settings.get("aspect_ratio", DEFAULT_ASPECT_RATIO),
+                cost_tracker=self.cost_tracker,  # T5: gate planning LLM spend on pipeline budget
             )
             # P1-3 migration template (S10 + part 9 Variant 1; B-006-broad-A) --
             # inner mutator-scope validate under the per-project lock.
@@ -1016,15 +1017,15 @@ class CinemaPipeline:
                 use_competitive = settings.get("competitive_generation", True)
                 if use_competitive:
                     try:
-                        shots = competitive_decompose_scene(scene, chars_in_scene, location, settings, style_rules)
+                        shots = competitive_decompose_scene(scene, chars_in_scene, location, settings, style_rules, cost_tracker=self.cost_tracker)
                     except Exception:
                         logger.exception(
                             "Competitive decomposition failed, falling back to standard",
                             extra={"scene_id": scene_id},
                         )
-                        shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules)
+                        shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules, cost_tracker=self.cost_tracker)
                 else:
-                    shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules)
+                    shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules, cost_tracker=self.cost_tracker)
 
                 # CHIEF DIRECTOR VALIDATION — review shots before generation
                 self.progress("DIRECTOR", "Chief Director reviewing shots...", 13 + scene_idx)
@@ -1044,7 +1045,7 @@ class CinemaPipeline:
                         extra={"scene_id": scene_id},
                     )
                     # Regenerate with stricter constraints
-                    shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules)
+                    shots = decompose_scene(scene, chars_in_scene, location, settings, style_rules, cost_tracker=self.cost_tracker)
 
                 # Persist the ChiefDirector verdict onto each shot so the
                 # PLAN_REVIEW auto-approve gate can read it. This is the writer

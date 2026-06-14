@@ -126,6 +126,7 @@ def run_with_tools(
     user_prompt: str,
     max_tool_rounds: int = 3,
     response_format: dict = None,
+    cost_tracker=None,
 ) -> str:
     """
     Run a GPT-4o call with Tavily/Firecrawl tools available.
@@ -169,7 +170,10 @@ def run_with_tools(
                     from cost_tracker import CostTracker
                     usage = getattr(response, "usage", None)
                     if usage is not None:
-                        CostTracker().log_llm(
+                        # T5 pattern: route onto the caller-supplied gate-connected
+                        # tracker so planning spend counts toward the budget; fall
+                        # back to a throwaway only when no tracker was threaded in.
+                        (cost_tracker or CostTracker()).log_llm(
                             model=model,
                             operation=f"web_research_tool_round_{round_num + 1}",
                             input_tokens=getattr(usage, "prompt_tokens", 0),
@@ -209,7 +213,9 @@ def run_with_tools(
         from cost_tracker import CostTracker
         usage = getattr(response, "usage", None)
         if usage is not None:
-            CostTracker().log_llm(
+            # T5 pattern: route Phase-2 final-response spend onto the caller's
+            # gate-connected tracker (throwaway fallback only when unthreaded).
+            (cost_tracker or CostTracker()).log_llm(
                 model=model,
                 operation="web_research_final",
                 input_tokens=getattr(usage, "prompt_tokens", 0),
