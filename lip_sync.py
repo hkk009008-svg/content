@@ -1093,9 +1093,14 @@ def _restore_audio_track(video_path: str, audio_source_path: str, output_path: s
             ],
             check=True,
             capture_output=True,
+            timeout=30,  # bound a stalled ffmpeg (stream-copy remux); matches the file's
+                         # ffmpeg/ffprobe timeout convention. A hang would otherwise block
+                         # the pipeline thread indefinitely (no OS keepalive on local pipe).
         )
         return os.path.exists(output_path)
-    except (subprocess.CalledProcessError, OSError):
+    except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired):
+        # TimeoutExpired is NOT a CalledProcessError/OSError subclass — without it a
+        # stalled ffmpeg would convert an infinite hang into an uncaught crash.
         logger.warning("%s audio re-mux failed", engine, exc_info=True, extra={"engine": engine})
         return False
 

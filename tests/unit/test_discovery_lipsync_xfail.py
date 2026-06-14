@@ -76,16 +76,10 @@ def test_syncnet_nan_confidence_does_not_produce_passing_score(monkeypatch, tmp_
 # confirmed[9] — audio-remux-notimeout  (lip_sync.py:1069-1082)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="W2:MAJOR:audio-remux-notimeout lip_sync.py:1069-1082 _restore_audio_track: "
-    "subprocess.run(['ffmpeg', ...], check=True, capture_output=True) has no timeout= "
-    "argument, unlike peer subprocess.run calls in the file. A hanging ffmpeg blocks the "
-    "pipeline indefinitely. Fix = add timeout=<N> to the call; then this xpasses (strict) "
-    "and the pin is removed.",
-)
 def test_restore_audio_track_subprocess_run_has_timeout(monkeypatch):
-    """_restore_audio_track must pass timeout= to subprocess.run; today it does not."""
+    """Regression (was strict-xfail pin, audio-remux-notimeout): _restore_audio_track's
+    ffmpeg subprocess.run must pass timeout= so a stalled remux can't hang the pipeline.
+    FIXED at lip_sync.py:1083 — timeout=30 + TimeoutExpired added to the except."""
     import lip_sync
 
     captured_kwargs: list = []
