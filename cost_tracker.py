@@ -23,11 +23,15 @@ Construct ``CostTracker(budget_usd=N)`` to enable the soft cap. Call
 ``would_exceed(api_name)`` before an API call and ``is_over_budget()``
 after to gate the pipeline. Both return False when ``budget_usd`` is None
 (no limit); a falsy budget (0 / 0.0) is coerced to None at construction —
-it is the project-settings sentinel for "unlimited", not a zero cap.
+it is the project-settings sentinel for "unlimited", not a zero cap. A
+non-finite (NaN/inf) or non-coercible cap is corruption, not "unlimited":
+it is coerced to a blocking sentinel so the gate fail-safe BLOCKS rather
+than silently disabling enforcement (ADR-026).
 ``spent_usd`` accumulates in-process only; SQLite is the durable store,
 but the budget gate uses the fast in-memory counter.
 """
 
+import math
 import sqlite3
 import os
 import warnings
@@ -156,6 +160,37 @@ class CostEntry:
 # Cost tracker
 # ---------------------------------------------------------------------------
 
+# A non-finite (NaN/inf) or non-coercible budget cap is data corruption, not a
+# deliberate "unlimited" — coerce it onto the negatives-block fail-safe (ADR-026,
+# user-endorsed 2026-06-14) so the gate BLOCKS rather than silently disabling
+# enforcement. Any non-negative spend exceeds this sentinel.
+_NONFINITE_BUDGET_BLOCK: float = -1.0
+
+
+def _finite_budget_or_block(value) -> float:
+    """Coerce a budget cap to a finite float, else the blocking sentinel.
+
+    NaN/inf survive ``float()`` and a NaN defeats every comparison
+    (``x > NaN`` is always False), so a non-finite cap silently disables the
+    budget gate while ``budget_usd is not None`` masquerades as a set cap. A
+    non-coercible value (e.g. a typo'd string) is corruption too. Both map to
+    ``_NONFINITE_BUDGET_BLOCK`` so spend is fail-safe BLOCKED, consistent with
+    the kept-negatives-block philosophy in ``CostTracker.__init__``.
+
+    A documented-temporary local guard rather than an import of
+    ``cinema.context._finite_or``: that import is circular-safe (verified) but
+    inverts the layering — ``cost_tracker`` is a low-level root util — and would
+    drag the ``cinema.context`` dependency tree into a foundational module;
+    consolidation is deferred to the dedicated import-swap pass. Mirrors the
+    ``quality_max:191`` documented-temporary local-copy precedent.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return _NONFINITE_BUDGET_BLOCK
+    return v if math.isfinite(v) else _NONFINITE_BUDGET_BLOCK
+
+
 class CostTracker:
     """
     Persistent cost tracker backed by SQLite.
@@ -180,7 +215,12 @@ class CostTracker:
         # budget_limit_usd to 0; the UI documents 0 = unlimited (NF-2,
         # docs/STRATEGIC_REVIEW-2026-06-10.md). Negative values are KEPT
         # deliberately: they block all spend (fail-safe) rather than
-        # coercing to unlimited (fail-open on a typo).
+        # coercing to unlimited (fail-open on a typo). A non-finite (NaN/inf)
+        # cap is corruption, not "unlimited" — it would defeat every comparison
+        # (x > NaN is always False) and silently disable the gate; coerce it
+        # onto the same negatives-block fail-safe (ADR-026).
+        if budget_usd is not None:
+            budget_usd = _finite_budget_or_block(budget_usd)
         self.budget_usd = budget_usd if budget_usd else None
         # Fast in-process accumulator for the budget gate.  The SQLite
         # store is the durable record; this counter is reset each process.

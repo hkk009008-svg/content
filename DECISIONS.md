@@ -1095,3 +1095,67 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   `docs/superpowers/plans/2026-06-13-production-pulid-flux-fix.md`;
   `logs/prod_pulid_acceptance_20260613.json`; ADR-024 (DATA-INTEGRITY follow-up
   resolved here); operator verification-report `77eb334`.
+
+## ADR-026 — A non-finite budget cap fails SAFE (blocks spend), it is not "unlimited"
+
+- **Date:** 2026-06-14
+- **Status:** Accepted — user-endorsed (Session-8, program-hardening Wave-1 Task 6
+  `budget-nan`). Shipping default; FIX push USER-gated.
+- **Context:** `CostTracker(budget_usd=N)` is the program's spend gate. The storage
+  idiom `self.budget_usd = budget_usd if budget_usd else None` (cost_tracker.py)
+  encodes a deliberate fail-safe philosophy: falsy (`0` / `0.0` / `None`) = NO cap
+  (the project-settings "unlimited" sentinel, NF-2), while **negative caps are KEPT
+  on purpose because they block all spend** (`spent > -1` is always True). A
+  **non-finite** budget defeated this: `bool(NaN) is True` so a NaN was KEPT, but
+  `would_exceed`/`is_over_budget` compare against it (`(spent+cost) > NaN`,
+  `spent > NaN`) and **every comparison against NaN is False** — so a NaN cap
+  **silently disabled all spend enforcement for the whole session while
+  `budget_usd is not None` masqueraded as a set cap** (money-loss; the reason the row
+  was reclassified MAJOR→CRITICAL). `+inf` is the same shape (reads as limitless).
+  `float(NaN)`/`float("inf")` succeed, so the upstream `try/except` at `cinema/core.py:101`
+  does not catch it. The open design question was: a NaN cap → (a) fail-safe BLOCK, or
+  (b) coerce to `None` = unlimited? These diverge, so it was surfaced, not silently decided.
+- **Decision:** **(a) fail-safe BLOCK.** A non-finite (NaN/inf) or non-coercible budget
+  cap is **data corruption, not a deliberate "unlimited"** — silently allowing unbounded
+  spend on a corrupt value is exactly the money-loss this gate exists to prevent, and it
+  contradicts the kept-negatives-block philosophy already in the code. Implementation
+  **maps corruption onto that existing block mechanism** at the **single storage
+  chokepoint** `cost_tracker.py` (`CostTracker.__init__`, the SOLE write site for
+  `self.budget_usd` — all construction paths funnel through it): a local guard
+  `_finite_budget_or_block(value)` coerces a non-finite/non-coercible cap to a blocking
+  sentinel (`-1.0`) so the gate fires. `None`/`0`/`0.0` still mean no cap; finite values
+  (incl. negatives) are unchanged.
+- **Scope (pure Pair-B lane, not cross-cutting):** the inventory anchored the row at
+  `cinema/core.py:101` (the upstream read), but impact analysis showed the fix belongs at
+  the `cost_tracker.py` storage chokepoint — a `core.py` guard would be **redundant, not
+  defense-in-depth** (it covers nothing the chokepoint misses and would duplicate the
+  sentinel logic across two files). So the fix touches **no cross-cutting module**
+  (`W1-core.py.lock`/Tier-A co-sign do not fire). A **complementary** sibling — a NaN
+  `budget_limit_usd` read **directly** at `auto_approve.py:586` (`_shot_over_budget`,
+  the per-shot veto, a path the `cost_tracker` chokepoint never reaches) — is closed
+  **fail-closed in Pair-A's `aa-budget-nan-veto` fix** (director2 Tier-A co-sign,
+  10:35:37Z), so the NaN-budget class is closed across both gate paths.
+- **Local guard, not an `import cinema.context._finite_or`:** the import is circular-safe
+  (verified — `cinema.lifecycle` is a leaf), but `cost_tracker.py` is a low-level root
+  util and importing the larger `cinema.context` inverts the layering + drags its dep
+  tree into a foundational module; a small local guard is the lower-blast-radius choice,
+  consistent with the documented-temporary local-copy precedent at `quality_max:191`.
+  Consolidation onto `_finite_or` is deferred to the dedicated import-swap pass.
+- **Consequences:**
+  - +: A corrupt budget cap now **blocks** spend (fail-safe) instead of silently allowing
+    unbounded spend — the money-loss CRITICAL is closed at the chokepoint that covers
+    every CostTracker construction path (direct, `core.py:113`, Task-7 fresh instances).
+  - +: The bare pin (`test_budget_nan_gate_xfail.py`, "not stored as NaN") was
+    fix-agnostic (it would have passed a policy-VIOLATING None=unlimited coercion); it is
+    now a live regression that asserts the **block behavior** (NaN/inf → `would_exceed`
+    + `is_over_budget` True), locking in this policy.
+  - −: A corrupt cap renders as `$-1.00` in the controller "Pausing" message
+    (`controller.py:1506/1660`) — cosmetically odd, but that message fires **only when
+    the gate trips**, i.e. the fail-safe block working (vs. today's silent unlimited).
+    Corruption-only path; acceptable.
+- **Cross-refs:** `cost_tracker.py` (`_finite_budget_or_block` + `__init__` chokepoint);
+  `tests/unit/test_budget_nan_gate_xfail.py` (pin → live regression); `cinema/core.py:99-104`
+  (upstream read, unchanged); `cinema/auto_approve.py:586` (complementary sibling, Pair-A);
+  `docs/superpowers/plans/2026-06-14-program-hardening-wave1.md` (Task 6);
+  `docs/REMEDIATION-INVENTORY.md` (`budget-nan` row); director2 scope-surface 10:28:08Z +
+  Tier-A co-sign 10:35:37Z. Origin: director2's §4 verify (`a812ee4`, `wf_99bc3ff7-fe4`).
