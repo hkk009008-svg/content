@@ -58,7 +58,9 @@ def test_second_claimant_aborts_via_precheck(two_clones):
 
 def test_release_deletes_and_pushes(two_clones):
     seatA, seatB = two_clones
-    _run([str(BIN / "claim-lock"), "W1", "core.py", "operator", "bug-1"], seatA)
+    # Assert the claim won first — else a silently-failed claim would make the release
+    # pass vacuously (release-lock exits 0 when there's no lock to delete).
+    assert _run([str(BIN / "claim-lock"), "W1", "core.py", "operator", "bug-1"], seatA).returncode == 0
     assert _run([str(BIN / "release-lock"), "W1", "core.py"], seatA).returncode == 0
     assert not (seatA / "coordination" / "locks" / "W1-core.py.lock").exists()
     _git(["pull", "--ff-only", "origin", "main"], seatB)
@@ -92,3 +94,27 @@ def test_lock_filename_flattens_slashes(two_clones):
     seatA, _ = two_clones
     assert _run([str(BIN / "claim-lock"), "W1", "cinema/context.py", "operator", "c"], seatA).returncode == 0
     assert (seatA / "coordination" / "locks" / "W1-cinema__context.py.lock").exists()
+
+def test_claim_lock_resets_local_commit_on_push_failure(two_clones):
+    # Directly exercises claim-lock's OWN reset branch (the `else` after a failed push,
+    # `git reset -q --hard @{u}`) — not just the git primitive. Break the remote so the
+    # push fails for real; the script must roll back its local lock commit and exit
+    # nonzero, leaving NO dangling lock behind (else a loser would believe it holds it).
+    seatA, _ = two_clones
+    _git(["remote", "set-url", "origin", "/nonexistent/origin.git"], seatA)
+    r = _run([str(BIN / "claim-lock"), "W1", "core.py", "operator", "bug-1"], seatA)
+    assert r.returncode != 0, "a failed push must make claim-lock report LOST"
+    assert not (seatA / "coordination" / "locks" / "W1-core.py.lock").exists(), \
+        "claim-lock must reset its dangling local lock commit on push failure"
+
+def test_release_lock_restores_on_push_failure(two_clones):
+    # Symmetric to the above: release-lock must NOT leave a lock looking-released-locally
+    # while it is still live on origin. On a failed release-push the script restores the
+    # lock locally (`git reset -q --hard @{u}`) and exits nonzero so the caller retries.
+    seatA, _ = two_clones
+    assert _run([str(BIN / "claim-lock"), "W1", "core.py", "operator", "bug-1"], seatA).returncode == 0
+    _git(["remote", "set-url", "origin", "/nonexistent/origin.git"], seatA)
+    r = _run([str(BIN / "release-lock"), "W1", "core.py"], seatA)
+    assert r.returncode != 0, "a failed release-push must report failure so the caller retries"
+    assert (seatA / "coordination" / "locks" / "W1-core.py.lock").exists(), \
+        "release-lock must restore the lock locally when the release-push fails"
