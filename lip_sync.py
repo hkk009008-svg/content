@@ -491,9 +491,12 @@ def _score_mouth_energy(video_path: str, audio_path: str) -> Optional[float]:
         mouth_detect_rate = (n_sampled - occlusion_count) / max(n_sampled, 1)
 
         if occlusion_count / max(n_sampled, 1) > 0.50:
-            logger.info(
+            # Fail-open is correct (this clip can't be scored), but a fail-open
+            # quality gate must be OBSERVABLE: WARNING, not INFO, so it surfaces at
+            # a production log floor instead of silently degrading the sync gate.
+            logger.warning(
                 "mouth-energy scorer: too many occluded frames — fail-open",
-                extra={"provider": "mouth_energy", "mouth_detect_rate": round(mouth_detect_rate, 3)},
+                extra={"provider": "mouth_energy", "mouth_detect_rate": round(mouth_detect_rate, 3), "degraded": True},
             )
             return None
 
@@ -566,8 +569,28 @@ def _score_mouth_energy(video_path: str, audio_path: str) -> Optional[float]:
         )
         return score
 
+    except ImportError as exc:
+        # opencv / numpy absent — the scorer cannot run in this container at all.
+        # Fail open (return None) but make it LOUD: silently degrading here drops the
+        # pipeline back to the duration heuristic / neutral-1.0 fallback, re-creating
+        # the "everything passes -> random best-of" bug this scorer exists to fix (D1).
+        logger.warning(
+            "mouth-energy scorer: required dependency unavailable (%s) — lip-sync "
+            "quality gate DEGRADED to fallback; install opencv-python + numpy to "
+            "enable Provider-1.5 scoring",
+            exc,
+            extra={"provider": "mouth_energy", "degraded": True},
+        )
+        return None
     except Exception:
-        # Total fail-open — never block the pipeline
+        # Unexpected runtime failure — fail open (never block the pipeline), but do
+        # NOT swallow it silently; an invisible scorer crash is the same silent-gate-
+        # degradation hole (D1 bug class).
+        logger.warning(
+            "mouth-energy scorer: unexpected failure — fail-open (None)",
+            exc_info=True,
+            extra={"provider": "mouth_energy", "degraded": True},
+        )
         return None
 
 
