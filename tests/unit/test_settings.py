@@ -17,7 +17,9 @@ class TestNewSettingsFields:
     def test_suno_api_base_field_has_documented_default(self, monkeypatch):
         monkeypatch.delenv("SUNO_API_BASE", raising=False)
         s = Settings.from_env()
-        assert s.suno_api_base == "https://api.suno.ai/v1"
+        # sunoapi.org is the production provider (audio/music.py); the default was
+        # moved off the old api.suno.ai/v1 stub in c8f931d (Suno V5 router wiring).
+        assert s.suno_api_base == "https://api.sunoapi.org"
 
     def test_suno_api_base_reads_from_env(self, monkeypatch):
         monkeypatch.setenv("SUNO_API_BASE", "https://api.suno.dev/v2")
