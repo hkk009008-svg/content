@@ -200,6 +200,9 @@ def _finite_or(value, default):
     """
     try:
         v = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: float(10**309) raises it (an ArithmeticError, not a
+        # Type/ValueError) for an astronomically large JSON integer — must fall
+        # back like any other bad value, not propagate and abort the run.
         return default
     return v if math.isfinite(v) else default

@@ -1,5 +1,6 @@
 import os
 import json
+import math
 import traceback
 import uuid
 import time
@@ -72,6 +73,28 @@ class RunPodComfyUI:
         if response.status_code == 200:
             return response.json()
         return {}
+
+
+def _resolve_ui_denoise(ctx):
+    """Resolve a standard-tier img2img_denoise override from continuity_options,
+    finite-guarded and clamped to [0.2, 0.6]. Returns None — "keep the caller's
+    denoise default" — for an absent / non-dict / non-numeric / non-finite value.
+
+    A bare NaN survives project.json (json.load allow_nan=True); a raw
+    max(0.2, min(0.6, nan)) clamp-lucks to 0.6, silently overriding the caller. The
+    math.isfinite guard skips it instead. Mirrors bf1034a's same-knob guard in
+    workflow_selector and quality_max._clamp_img2img_denoise's reject-non-finite
+    policy + its isinstance(continuity_options, dict) check. Extracted (vs inline)
+    so the gate is unit-testable — drop math.isfinite and the nan test goes red."""
+    if ctx is None:
+        return None
+    gs = ctx.global_settings or {}
+    co = gs.get("continuity_options") if isinstance(gs, dict) else None
+    raw = co.get("img2img_denoise") if isinstance(co, dict) else None
+    if not isinstance(raw, (int, float)) or not math.isfinite(raw):
+        return None
+    return max(0.2, min(0.6, float(raw)))
+
 
 def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
                        init_image=None, denoise_strength=1.0, characters=None,
@@ -339,12 +362,7 @@ def generate_ai_broll(prompt, output_filename, seed=None, character_image=None,
             # Set denoise strength in BasicScheduler (node 17).
             # img2img_denoise from global_settings.continuity_options overrides the
             # caller-supplied denoise_strength when present (slider: min 0.2, max 0.6).
-            _ui_denoise = None
-            if ctx is not None:
-                _co = (ctx.global_settings or {}).get("continuity_options", {})
-                _raw = _co.get("img2img_denoise")
-                if _raw is not None and isinstance(_raw, (int, float)):
-                    _ui_denoise = max(0.2, min(0.6, float(_raw)))
+            _ui_denoise = _resolve_ui_denoise(ctx)
             effective_denoise = _ui_denoise if _ui_denoise is not None else denoise_strength
             workflow["17"]["inputs"]["denoise"] = effective_denoise
             print(f"      ↳ img2img mode: denoise={effective_denoise:.2f} from {os.path.basename(init_image)}")

@@ -77,6 +77,13 @@ class TestSharedFiniteOr:
         from cinema.context import _finite_or
         assert _finite_or(0.0, 0.6) == pytest.approx(0.0)
 
+    def test_huge_int_returns_default(self):
+        """float(10**309) raises OverflowError (NOT Type/ValueError); a huge JSON integer
+        must fall back to the default, not propagate uncaught. Kept byte-identical with
+        quality_max's TestFiniteOrHelper.test_huge_int_returns_default (the mirror)."""
+        from cinema.context import _finite_or
+        assert _finite_or(10 ** 309, 0.5) == pytest.approx(0.5)
+
 
 # ---------------------------------------------------------------------------
 # lip_sync._sync_gate_settings — lipsync_validation_threshold (MAJOR)

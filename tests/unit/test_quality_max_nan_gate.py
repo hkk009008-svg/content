@@ -140,6 +140,13 @@ class TestFiniteOrHelper:
         assert _finite_or("abc", None) is None
         assert _finite_or(0.0, None) == pytest.approx(0.0)  # 0.0 is finite, preserved
 
+    def test_huge_int_returns_default(self):
+        """float(10**309) raises OverflowError (an ArithmeticError, NOT Type/ValueError),
+        so a try/except over (TypeError, ValueError) lets it propagate. A huge JSON integer
+        in project.json's char_lora_strengths must fall back to the default, not abort the
+        max-tier run. Mirrors _validate_overlay_value's OverflowError guard (7b4d377)."""
+        assert _finite_or(10 ** 309, 0.5) == pytest.approx(0.5)
+
 
 # ---------------------------------------------------------------------------
 # _finite_or callsite integration — exercise the exact read-expressions

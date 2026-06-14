@@ -813,7 +813,7 @@ end-to-end. Resolve alongside Part 2 / the api-engine toggle wiring.
 
 ### 8.1 Branching
 
-[phase_c_assembly.py:128](phase_c_assembly.py:128):
+[phase_c_assembly.py:151](phase_c_assembly.py:151):
 ```python
 if quality_tier == "max":
     try: return generate_ai_broll_max(...)  # quality_max.py
@@ -852,7 +852,7 @@ to `cost_log` via `record_api_call`, so a pod generation logs
 The cost site previously hardcoded the api_name from `quality_tier`,
 mislabeling every pod generation as `fal` (e.g. cycle-17 cost_log row 1065).
 
-`RunPodComfyUI` class ([phase_c_assembly.py:35-73](phase_c_assembly.py:35)):
+`RunPodComfyUI` class ([phase_c_assembly.py:37-75](phase_c_assembly.py:37)):
 
 | Method | Endpoint | Notes |
 |---|---|---|
@@ -875,7 +875,7 @@ non-empty, `_fal_flux_fallback` ([phase_c_assembly.py:540](phase_c_assembly.py:5
 branch: `_allocate_ref_slots` ([phase_c_assembly.py:475](phase_c_assembly.py:475)) partitions the Kontext
 image-URL budget on a fixed-share 3/2/1 slot schedule (primary up to 3, first
 secondary up to 2, second secondary up to 1), and `_build_multichar_kontext_prompt`
-([phase_c_assembly.py:474](phase_c_assembly.py:474)) emits per-character `@ImageN PRESERVE` blocks with a
+([phase_c_assembly.py:499](phase_c_assembly.py:499)) emits per-character `@ImageN PRESERVE` blocks with a
 keep-own-clothing constraint line; single-char shots never enter this branch
 (structural early-return). On Kontext failure the fallback path passes the
 ORIGINAL prompt unchanged to FLUX-Pro. Per-char identity scores land in
@@ -894,7 +894,7 @@ Workflow file: [pulid_max.json](pulid_max.json) (cached at module level with
 `_inject_post_passes` so the best-of-N `copy.deepcopy` fan-out inherits portrait
 dims. 16:9 / ctx-less = no-op (same gate as §8.2 — now OPEN post-T10).
 
-**Adaptive halt loop** ([quality_max.py:1160-1198](quality_max.py:1160)):
+**Adaptive halt loop** ([quality_max.py:1163-1201](quality_max.py:1163)):
 ```
 while len(scores) < n_max:
     starting_index = len(scores)
@@ -977,7 +977,7 @@ orchestrates.
 `generate_ai_broll_max` as the `secondary_chars` list. Inside the max dispatch:
 `_inject_secondary_loras` ([quality_max.py:574](quality_max.py:574)) chains up to two extra LoraLoader nodes
 (701/702) after the primary's node 700, clamped to `_SECONDARY_LORA_MAX_STRENGTH=0.55`
-([quality_max.py:568](quality_max.py:568)), with each `lora_name` set to the artifact's basename for
+([quality_max.py:571](quality_max.py:571)), with each `lora_name` set to the artifact's basename for
 pod-side placement; `_assemble_max_prompt` ([quality_max.py:493](quality_max.py:493)) prepends LoRA trigger
 tokens (primary first, then each secondary's) before conditioning; and
 `_inject_secondary_faceswap` ([quality_max.py:632](quality_max.py:632)) splices a LoadImage(94) +
@@ -1008,7 +1008,7 @@ in `search_text` — e.g. "drone tracking shot" resolves to `action`, not
 `landscape`. Both image tiers then lose identity — **different mechanism, same net
 effect (zero face-lock), mutually exclusive by tier**:
 
-- **Production (§8.2):** [phase_c_assembly.py:223-227](phase_c_assembly.py:223)
+- **Production (§8.2):** [phase_c_assembly.py:246-250](phase_c_assembly.py:246)
   early-returns to the Kontext fallback with `character_image=None` — ComfyUI
   never runs and the **reference is dropped entirely** (strictly worse than the
   `pulid_weight=0.0` its own `landscape` template would set at
@@ -1018,17 +1018,17 @@ effect (zero face-lock), mutually exclusive by tier**:
   `get_max_quality_params`) writes `pulid_weight=0.0`,
   `lora_strength_model/clip=0.0`, `halt_threshold_arc=0.0`,
   `regenerate_floor_arc=0.0`. `_inject_identity` still runs (identity gating keys
-  on `has_character`/file-presence at [quality_max.py:1052](quality_max.py:1052),
+  on `has_character`/file-presence at [quality_max.py:1055](quality_max.py:1055),
   not `shot_type`), so the PuLID node + uploaded reference are physically present
   but **inert**, and the best-of-N identity rescue is dead — the +0.15 PuLID-boost
-  retry at [quality_max.py:1206](quality_max.py:1206) gates on
+  retry at [quality_max.py:1209](quality_max.py:1209) gates on
   [`needs_regenerate`](face_validator_gate.py:326), whose `arc_score <
   regenerate_floor_arc` test never holds at `regenerate_floor_arc=0.0` (and its
   `has_character` guard passes for a char-bearing shot, so the `0.0` floor — not
   the guard — is the operative kill). The char LoRA fires only if the project explicitly
   sets a non-zero per-character `char_lora_strengths`
   ([cinema/shots/controller.py:334](cinema/shots/controller.py:334), applied at
-  [quality_max.py:535](quality_max.py:535)).
+  [quality_max.py:538](quality_max.py:538)).
 
 **Root cause is the single shared seam.** Routing a landscape-keyword shot *with
 non-empty `characters_in_frame`* to `wide` (`pulid_weight=0.65` both tiers —
