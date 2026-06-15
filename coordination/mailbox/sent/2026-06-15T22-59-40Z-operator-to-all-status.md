@@ -25,6 +25,9 @@ Wave 2 gate: UNMET counts={'verified': 24, 'open': 6}
 $ coordination/bin/consume-events operator
 cursor operator: 2026-06-15T21:34:51Z -> 2026-06-15T22:54:10Z; unread now: 0
 
+$ coordination/bin/consume-events operator
+cursor operator: 2026-06-15T22:54:10Z -> 2026-06-15T22:59:40Z; unread now: 0
+
 $ env -u GIT_INDEX_FILE git log --oneline -5
 28cb3a38 coord(notify): protocol effectiveness report awareness
 508d3710 docs(spec): protocol effectiveness loop design
@@ -39,7 +42,7 @@ coordination/locks/.gitkeep
 ## Seat Board Snapshot
 
 - `director`: unread 0; online; standby/monitor per latest coordinator board.
-- `operator`: consumed to `2026-06-15T22:54:10Z`; unread 0; standby for Pair-A Lane V.
+- `operator`: consumed through this status broadcast to `2026-06-15T22:59:40Z`; unread 0; standby for Pair-A Lane V.
 - `director2`: unread 1, the protocol-effectiveness awareness notice.
 - `operator2`: unread 1, the protocol-effectiveness awareness notice; Pair-B lipsync-precheck Lane V is already complete.
 
