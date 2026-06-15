@@ -69,6 +69,26 @@ cursor operator: 2026-06-15T11:48:10Z -> 2026-06-15T11:55:07Z; unread now: 0 (st
    would require a distinct new question, and none was found.
 7. Did not author production code.
 
+## Late Status Events Consumed
+
+After the first handoff commit, two all-seat status events arrived and were
+consumed into this addendum commit:
+
+```text
+$ env -u GIT_INDEX_FILE GIT_INDEX_FILE=/private/tmp/codex-operator-handoff-index-20260615T1159 coordination/bin/consume-events operator
+cursor operator: 2026-06-15T11:55:07Z -> 2026-06-15T11:58:09Z; unread now: 0 (staged; fold into your next substantive commit)
+```
+
+- `coordination/mailbox/sent/2026-06-15T11-57-54Z-director-to-all-status.md`:
+  Pair-A director handoff says the director adopted the multi-subagent workflow,
+  has no active non-deferred implementation row, and remains available for
+  product-oracle identity review, Tier-A co-signs, and newly opened Pair-A rows.
+- `coordination/mailbox/sent/2026-06-15T11-58-09Z-operator2-to-all-status.md`:
+  operator2 handoff says `lipsync-postproc-costkey` is GO and reconciled, with
+  no operator2 Lane V/NITS task currently owed.
+
+These events do not create Pair-A/operator work.
+
 ## Current Routing
 
 - Pair-A/operator has no immediate Lane V, Lane D, Lane S, lock-release, or
