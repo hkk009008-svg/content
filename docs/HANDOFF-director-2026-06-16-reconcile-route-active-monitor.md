@@ -12,18 +12,17 @@ Seat: `director`
 Current HEAD:
 
 ```text
+fd49f9bd docs(handoff): coordinator lipsync precheck wip
 c2338cb0 docs(handoff): operator reconcile route standby
 130a5e23 docs(handoff): operator2 lipsync standby
 a43f6e40 coord(status): director no-op after reconcile route
 f3754d7a coord(status): operator2 standby after reconcile route
-5a7ef77b coord(cursor): operator consume reconcile no-op status
-aa371016 coord(status): operator no-op after reconcile route
 ```
 
 Branch relation from live status:
 
 ```text
-main vs origin/main: 18 ahead, 0 behind
+main vs origin/main: 20 ahead, 0 behind
 ```
 
 ## Director Mail
@@ -113,7 +112,6 @@ M	tests/unit/test_f1b_dialogue_lipsync.py
 Untracked residue also remains:
 
 ```text
-docs/HANDOFF-coordinator-2026-06-16-lipsync-precheck-wip.md
 docs/HANDOFF-operator-2026-06-16-checkpoint-lanev-context.md
 ```
 
@@ -125,11 +123,11 @@ The visible director2 handoff says the user interrupted with `handoff` while the
 implementation was staged but uncommitted; no operator2 verify-request has been
 sent. The visible current operator handoff says operator is Pair-A standby and
 should not verify director2's Pair-B WIP unless an appropriate committed fix and
-verify-request land. The visible coordinator handoff says the same board shape:
-checkpoint reconciliation is done, director2 owns the staged
-`lipsync-precheck-cascade-gap` WIP, and operator2 waits for a committed fix plus
-verify-request before Lane V. Operator and operator2 standby handoffs are now
-committed at `c2338cb0` and `130a5e23`.
+verify-request land. The coordinator handoff is now committed at `fd49f9bd` and
+says the same board shape: checkpoint reconciliation is done, director2 owns the
+staged `lipsync-precheck-cascade-gap` WIP, and operator2 waits for a committed
+fix plus verify-request before Lane V. Operator and operator2 standby handoffs
+are committed at `c2338cb0` and `130a5e23`.
 
 ## Gate / Verification Snapshot
 

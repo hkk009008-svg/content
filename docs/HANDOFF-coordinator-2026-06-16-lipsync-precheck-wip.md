@@ -5,14 +5,15 @@ this prose if they diverge.
 
 ## State At Handoff
 
-Timestamp: `2026-06-15T20:13:49Z` (`2026-06-16T05:13:49+0900` Asia/Seoul).
+Timestamp: `2026-06-15T20:15:39Z` (`2026-06-16T05:15:39+0900` Asia/Seoul).
 
 Coordinator is unpinned. No coordinator cursor exists and no coordinator cursor
 was consumed.
 
-Current HEAD:
+Baseline immediately before this coordinator handoff commit:
 
 ```text
+1c63cd56 docs(handoff): director reconcile route handoff
 c2338cb0 docs(handoff): operator reconcile route standby
 130a5e23 docs(handoff): operator2 lipsync standby
 a43f6e40 coord(status): director no-op after reconcile route
@@ -20,13 +21,13 @@ f3754d7a coord(status): operator2 standby after reconcile route
 5a7ef77b coord(cursor): operator consume reconcile no-op status
 aa371016 coord(status): operator no-op after reconcile route
 940e26d7 coord(cursor): operator2 consume coordinator route
-7743da64 coord(reconcile): verify checkpoint rows
 ```
 
-Branch relation from live coordinator status:
+Branch relation from final live coordinator status after the coordinator handoff
+commit:
 
 ```text
-main vs origin/main: 18 ahead, 0 behind
+main vs origin/main: 20 ahead, 0 behind
 ```
 
 ## Mailbox / Seat State
@@ -42,10 +43,9 @@ latest visible all-scope events:
 - 2026-06-15T20-04-46Z-operator2-to-all-status.md
 ```
 
-All four peer heartbeats were online at `a43f6e40` during the final live
-coordinator refresh; after the last refresh, operator2 also landed
-`130a5e23 docs(handoff): operator2 lipsync standby`, then operator landed
-`c2338cb0 docs(handoff): operator reconcile route standby`.
+All four peer heartbeats were online during the final live coordinator refresh.
+Recent seat handoff commits landed in quick succession: operator2 `130a5e23`,
+operator `c2338cb0`, and director `1c63cd56`.
 
 Seat cursors / unread from live status:
 
@@ -139,13 +139,15 @@ Also present but not coordinator-owned:
 
 ```text
 ?? docs/HANDOFF-operator-2026-06-16-checkpoint-lanev-context.md
+D  docs/HANDOFF-director-2026-06-16-reconcile-route-active-monitor.md
 ?? docs/HANDOFF-director-2026-06-16-reconcile-route-active-monitor.md
 ```
 
 Operator's latest committed status says the checkpoint-context draft is stale
 relative to current checkpoint reconciliation; preserve it unless operating as
 the operator seat or explicitly asked to clean it. The director active-monitor
-handoff is also seat-owned residue; do not stage it from the coordinator seat.
+handoff shows a stale `D/??` pair from a seat-local/temp-index commit; do not
+stage or refresh it from the coordinator seat unless explicitly asked.
 
 ## Gate / Smoke / Artifacts
 
