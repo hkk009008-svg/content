@@ -543,7 +543,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 **Role:** converts a per-shot prompt into a 1344×768 keyframe (the anchor for all downstream video). Production tier = FLUX-Dev on RunPod ComfyUI with PuLID face-lock (FAL fallbacks); optional **max** tier = N=8 adaptive best-of with ArcFace/Aesthetic scoring, Union ControlNet, Redux, FaceDetailer, ReActor, SUPIR 4K. Performance capture (Act-One/LivePortrait/Viggle) lives alongside.
 
-**Canonical modules:** `phase_c_assembly.py` (606 LOC, the image generator — despite the "assembly" name), `quality_max.py` (1001 LOC), `workflow_selector.py`, `face_validator_gate.py`, `cinema/shots/controller.py` (2206 LOC), plus the `performance/` package and ComfyUI graphs `pulid.json` / `pulid_max.json`.
+**Canonical modules:** `phase_c_assembly.py` (606 LOC, the image generator — despite the "assembly" name), `quality_max.py` (1001 LOC), `workflow_selector.py`, `face_validator_gate.py`, `cinema/shots/controller.py` (2670 LOC), plus the `performance/` package and ComfyUI graphs `pulid.json` / `pulid_max.json`.
 
 | Name | file:line | What it does |
 |---|---|---|
@@ -676,7 +676,7 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 | `pipeline_context.py` vs `cinema/context.py` | top-level vs `cinema/` | 15-line prompt-string loader vs typed `PipelineContext` dataclass. |
 | `headless=True` does NOT use `NullLifecycle` | `cinema/lifecycle.py:70` | Headless still uses `ThreadedLifecycle`; `RunState.headless` makes `_wait_for_gate` raise. `NullLifecycle.wait_for_gate` returns `True` unconditionally — using it would silently skip gate enforcement. |
 | PLAN_REVIEW headless stall (FIXED) | `cinema_pipeline.py:1064`, `cinema/auto_approve.py:235` | Without `record_director_review_on_shots`, `_rules_for_plan` always vetoed → headless hang. Now called unconditionally; MODIFIED→APPROVED (cycle-17, `138d7c7`). |
-| `evaluate_generation_quality` wired by T6 | `llm/chief_director.py:406` | Full 2×2 mutation matrix; **now called** by `diagnose_clip(deep=True)` in `cinema/shots/controller.py:2241` (T6, `10a0eb4`); vision-grounded since `d974c15` (take + reference images attached to the LLM call). |
+| `evaluate_generation_quality` wired by T6 | `llm/chief_director.py:406` | Full 2×2 mutation matrix; **now called** by `diagnose_clip(deep=True)` in `cinema/shots/controller.py:2272` (T6, `10a0eb4`); vision-grounded since `d974c15` (take + reference images attached to the LLM call). |
 | `style_director` is OpenAI-only | `llm/style_director.py:38` | No Anthropic path — asymmetric with the Anthropic-first ChiefDirector/CinemaDirector. |
 | Veo `reference_images` silently dropped (Bug #4) | `veo_native.py:155` | Vertex rejects image+reference both set; identity comes from the start frame only. `driving_video_path` also unwired on Veo (only Sora wires it). |
 | VEO_NATIVE has no quota guard | `phase_c_ffmpeg.py:313` | The 1800s cooldown TTL is set/checked only by the FAL-proxy `VEO` branch. |

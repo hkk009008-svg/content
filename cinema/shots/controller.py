@@ -1716,13 +1716,44 @@ class ShotController:
         # cinema/phases/motion_render.py. Soft cap: API_COST_USD estimates
         # are ±30% and price only the resolved primary — a fallback-cascade
         # winner can cost several times the admitted estimate. The motion
-        # phase loop aborts on the structured "budget" refusal below.
-        if self.cost_tracker.would_exceed(target_api):
+        # phase loop aborts on the structured "budget" refusal below. Dialogue
+        # overlay shots also require the F1b lip-sync pass after video generation,
+        # so precheck that required second call with the same multi-call envelope
+        # pattern used by the performance Mode-B gate.
+        engine_info = API_REGISTRY.get(target_api.upper(), {})
+        needs_lipsync_precheck = has_dialogue and not _should_tag_audio_embedded(
+            engine_info,
+            has_dialogue,
+            _voice_mode,
+        )
+        if needs_lipsync_precheck:
+            from cost_tracker import API_COST_USD
+
+            estimated_cost = (
+                API_COST_USD.get(target_api.upper(), 0.0)
+                + API_COST_USD.get("LIPSYNC_DEFAULT", 0.0)
+            )
+            would_exceed_budget = self.cost_tracker.would_exceed_cost(estimated_cost)
+        else:
+            would_exceed_budget = self.cost_tracker.would_exceed(target_api)
+
+        if would_exceed_budget:
+            if needs_lipsync_precheck:
+                budget_detail = (
+                    f"Estimated {target_api} plus mandatory lip-sync cost "
+                    f"${estimated_cost:.3f} would push spend "
+                    f"${self.cost_tracker.spent_usd:.2f} past budget cap "
+                    f"${self.cost_tracker.budget_usd:.2f}. Pausing before generation."
+                )
+            else:
+                budget_detail = (
+                    f"Estimated {target_api} cost would push spend "
+                    f"${self.cost_tracker.spent_usd:.2f} past budget cap "
+                    f"${self.cost_tracker.budget_usd:.2f}. Pausing before generation."
+                )
             self.progress(
                 "BUDGET_EXCEEDED",
-                f"Estimated {target_api} cost would push spend "
-                f"${self.cost_tracker.spent_usd:.2f} past budget cap "
-                f"${self.cost_tracker.budget_usd:.2f}. Pausing before generation.",
+                budget_detail,
                 -1,
                 scene_id=scene_id,
                 shot_id=shot_id,

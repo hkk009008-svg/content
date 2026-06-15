@@ -91,6 +91,7 @@ class TestAutoRoutingDecisions:
         # Pre-spend gate (P0-2): an unconfigured MagicMock is truthy and
         # would fire the would_exceed gate before generation.
         cost_tracker.would_exceed.return_value = False
+        cost_tracker.would_exceed_cost.return_value = False
         core.cost_tracker = cost_tracker
 
         ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)

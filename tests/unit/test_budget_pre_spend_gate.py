@@ -91,6 +91,7 @@ class TestPreSpendBudgetGate:
         cost_tracker = MagicMock()
         cost_tracker.is_over_budget.return_value = False
         cost_tracker.would_exceed.return_value = False
+        cost_tracker.would_exceed_cost.return_value = False
         cost_tracker.spent_usd = 0.0
         cost_tracker.budget_usd = None
         core.cost_tracker = cost_tracker
@@ -176,6 +177,59 @@ class TestPreSpendBudgetGate:
         resolved = WORKFLOW_TEMPLATES["medium"]["target_api"]
         assert resolved != "AUTO"
         cost_tracker.would_exceed.assert_called_once_with(resolved)
+
+    def test_dialogue_overlay_refuses_when_video_plus_lipsync_exceeds_budget(self, tmp_path):
+        """Dialogue overlay shots must precheck video plus mandatory F1b lipsync."""
+        from cost_tracker import CostTracker
+
+        project = self._make_project(target_api="AUTO")
+        project["global_settings"]["dialogue_voice_mode"] = "overlay"
+        shot = project["scenes"][0]["shots"][0]
+        shot["optimizer_cache"] = {
+            "spec": {
+                "purpose": "dialogue_close_up",
+                "suggested_video_api": "VEO_NATIVE",
+            }
+        }
+
+        ctrl, host, lifecycle, _mock_tracker = self._build_controller(project, tmp_path)
+        tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=1.00)
+        tracker.spent_usd = 0.67
+        ctrl._core.cost_tracker = tracker
+
+        audio_file = str(tmp_path / "shot_tts.mp3")
+        open(audio_file, "wb").write(b"fake_audio")
+        host._ensure_shot_audio.return_value = audio_file
+        ref_image_file = str(tmp_path / "ref_char1.jpg")
+        open(ref_image_file, "wb").write(b"fake_jpg")
+        veo_clip = str(tmp_path / "veo_clip.mp4")
+        open(veo_clip, "wb").write(b"fake_veo")
+        ls_clip = str(tmp_path / "ls_clip.mp4")
+        open(ls_clip, "wb").write(b"fake_ls")
+        ctrl._finalize_motion_take = MagicMock(
+            return_value={"success": True, "take": {}, "video": ls_clip, "identity_score": 0.0}
+        )
+
+        gen_vid = MagicMock(return_value=veo_clip)
+        gen_ls = MagicMock(return_value=ls_clip)
+        with (
+            patch("cinema.shots.controller.generate_ai_video", gen_vid),
+            patch("cinema.shots.controller.generate_lip_sync_video", gen_ls),
+            patch("lip_sync.generate_lip_sync_video", gen_ls),
+            patch("lip_sync.validate_lipsync_quality", return_value=0.91),
+            patch("cinema.shots.controller.get_reference_image", return_value=ref_image_file),
+            patch("cinema.shots.controller._probe_duration", return_value=3.5),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result.get("success") is False
+        assert result.get("error_kind") == "budget"
+        gen_vid.assert_not_called()
+        gen_ls.assert_not_called()
+        lifecycle.pause.assert_called_once()
+        events = [c.args[0] for c in lifecycle.report_progress.call_args_list if c.args]
+        assert "BUDGET_EXCEEDED" in events
 
     def test_proceeds_when_within_budget(self, tmp_path):
         """Control: would_exceed False → generation proceeds, no pause."""

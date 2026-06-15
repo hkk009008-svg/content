@@ -26,14 +26,12 @@ CATALOG:
     the controller call site.
 
   - confirmed[7] lipsync-precheck-cascade-gap (controller.py:1655 — W2:MEDIUM):
-    ``would_exceed(target_api)`` checks only the video-API cost; the mandatory F1b
-    lipsync cascade fires unconditionally afterwards and its cost (~$0.05-0.10/shot)
-    is not accounted for.  A shot right below the cap passes the gate and then pushes
-    cumulative spend over budget.  TEST-INFEASIBLE at unit level — the gate is embedded
-    inside ``generate_motion_take()``, a ~400-line method with deep ShotController
-    dependencies (SQLite project state, lifecycle FSM, ComfyUI worker pool, cascade
-    runner).  No clean seam exists to exercise the gate logic in isolation without a
-    full integration harness.  Documented for the epic; no pin.
+    FIXED by live regression
+    tests/unit/test_budget_pre_spend_gate.py::TestPreSpendBudgetGate::
+    test_dialogue_overlay_refuses_when_video_plus_lipsync_exceeds_budget.  The
+    motion pre-spend gate now prices the resolved video API plus
+    ``LIPSYNC_DEFAULT`` when an overlay-mode dialogue shot structurally requires
+    the mandatory F1b lip-sync pass.
 
 When a defect is fixed its xfail flips to XPASS (strict=True) → delete that pin.
 """
