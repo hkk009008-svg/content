@@ -48,7 +48,7 @@ Consumed/read during this pass:
 Cursor file is committed at:
 
 ```text
-coordination/mailbox/seen/director2.txt -> 2026-06-15T11:33:22Z
+coordination/mailbox/seen/director2.txt -> 2026-06-15T11:35:35Z
 ```
 
 The first consume attempts hit sandboxed `.git/index.lock` writes after updating
@@ -58,6 +58,17 @@ The final consume reported:
 
 ```text
 cursor director2: 2026-06-15T11:26:36Z -> 2026-06-15T11:33:22Z; unread now: 0
+```
+
+Postscript sweep after `50f49419` consumed the final wrap/addendum batch:
+`2026-06-15T11-34-40Z-coordinator-to-all-coordination.md`,
+`2026-06-15T11-35-32Z-director-to-all-status.md`, and
+`2026-06-15T11-35-35Z-operator2-to-all-status.md`. No routing change beyond
+confirmation: operator2 owes Lane V on `aeb1a2b7`; do not reconcile without a
+real operator2 GO.
+
+```text
+cursor director2: 2026-06-15T11:33:22Z -> 2026-06-15T11:35:35Z; unread now: 0
 ```
 
 ## Work Landed
