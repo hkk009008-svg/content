@@ -15,10 +15,8 @@ verifies. When a site is fixed, its xfail xpasses (strict) -> delete that pin.
 
 CATALOG / lane ownership:
   - cinema/shots/controller.py:241 `_inherit_audio_flags_from_base` (MAJOR, Pair-B/mine):
-    swallowed import/call of phase_c_ffmpeg._has_audio_stream -> audio-embedding flags
-    silently NOT inherited -> the assembler treats the variant as audio-less, generates
-    scene-TTS and REPLACES the take's real voice (voice-loss regression — documented in
-    the function's own docstring). PINNED below.
+    fixed 2026-06-15 by emitting a WARNING when phase_c_ffmpeg._has_audio_stream
+    raises before conservatively skipping audio-flag inheritance; live regression below.
   - coherence_analyzer.py:202 `_invalid_coherence` (minor, shared; caller is Pair-B):
     fixed 2026-06-15 by emitting a WARNING when an unreadable image produces
     `valid=False`; the caller-side `.valid` ignore is tracked separately as
@@ -38,14 +36,6 @@ import types
 import pytest
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="controller.py:241 _inherit_audio_flags_from_base: when phase_c_ffmpeg."
-    "_has_audio_stream raises (absent export / ffprobe missing), the except returns "
-    "silently with NO log -> the variant loses its audio flags -> scene-TTS overwrites "
-    "the take's real voice (voice-loss). Fix = WARN before the silent return; then this "
-    "xpasses (strict) and the pin is removed.",
-)
 def test_inherit_audio_flags_warns_when_has_audio_stream_raises(monkeypatch, caplog):
     import phase_c_ffmpeg
     from cinema.shots import controller

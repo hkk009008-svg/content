@@ -239,6 +239,11 @@ def _inherit_audio_flags_from_base(base_take: Optional[dict], variant: dict) -> 
         if not _has_audio_stream(path):
             return
     except Exception:
+        logger.warning(
+            "audio flag inheritance skipped; could not confirm variant audio stream",
+            exc_info=True,
+            extra={"variant_path": path},
+        )
         return
     base_meta = base_take.get("metadata") or {}
     variant.setdefault("metadata", {})
