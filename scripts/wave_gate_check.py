@@ -10,6 +10,7 @@ Read-only - never mutates the inventory.
 """
 from __future__ import annotations
 import argparse
+import fnmatch
 import json
 import math
 import os
@@ -123,7 +124,7 @@ def _committed_product_oracle_paths() -> tuple[list[Path], str | None]:
         "--name-only",
         "HEAD",
         "--",
-        _PRODUCT_ORACLE_PATTERN,
+        "logs",
     ]
     env = os.environ.copy()
     env.pop("GIT_INDEX_FILE", None)
@@ -140,11 +141,11 @@ def _committed_product_oracle_paths() -> tuple[list[Path], str | None]:
         return [], str(exc)
     if proc.returncode != 0:
         return [], (proc.stderr or proc.stdout or "git ls-tree failed").strip()
-    paths = [
-        _REPO_ROOT / line.strip()
-        for line in proc.stdout.splitlines()
-        if line.strip()
-    ]
+    paths = []
+    for line in proc.stdout.splitlines():
+        rel = line.strip()
+        if rel and fnmatch.fnmatch(rel, _PRODUCT_ORACLE_PATTERN):
+            paths.append(_REPO_ROOT / rel)
     return paths, None
 
 def _finite_number(value: object) -> bool:
@@ -156,7 +157,7 @@ def _finite_number(value: object) -> bool:
 
 def _product_oracle_issue(path: Path, wave: int) -> str | None:
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(_product_oracle_text(path))
     except (OSError, json.JSONDecodeError) as exc:
         return f"{path}: unreadable JSON ({exc})"
     if not isinstance(data, dict):
@@ -172,6 +173,29 @@ def _product_oracle_issue(path: Path, wave: int) -> str | None:
     if not isinstance(lipsync, dict) or not _finite_number(lipsync.get("offset_frames")):
         return f"{path}: missing finite lipsync.offset_frames"
     return None
+
+def _product_oracle_text(path: Path) -> str:
+    """Read artifact content from HEAD when the path belongs to the repo."""
+    try:
+        rel = path.resolve().relative_to(_REPO_ROOT.resolve())
+    except (OSError, ValueError):
+        return path.read_text()
+
+    args = ["git", "show", f"HEAD:{rel.as_posix()}"]
+    env = os.environ.copy()
+    env.pop("GIT_INDEX_FILE", None)
+    proc = subprocess.run(
+        args,
+        cwd=_REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        msg = (proc.stderr or proc.stdout or "git show failed").strip()
+        raise OSError(msg)
+    return proc.stdout
 
 def _display_path(path: Path) -> str:
     try:

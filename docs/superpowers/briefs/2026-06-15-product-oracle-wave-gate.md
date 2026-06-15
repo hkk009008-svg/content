@@ -91,3 +91,20 @@ Expected:
 - unit tests pass;
 - Wave 2 remains UNMET and prints a product-oracle blocker in addition to existing open-pin blockers;
 - smoke remains OK.
+
+## Operator2 FAIL repair - 2026-06-15
+
+Operator2 Lane V on `4300e4e` found two implementation gaps:
+
+- `git ls-tree HEAD -- logs/product-oracle-*.json` does not discover committed
+  artifacts; the repaired implementation lists committed `logs/` entries and
+  filters `logs/product-oracle-*.json` in Python.
+- artifact validation read mutable worktree content; the repaired implementation
+  reads repo-owned artifact content via `git show HEAD:<path>`.
+
+Regression coverage:
+
+```bash
+env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_wave_gate_check.py::test_wave2_discovers_valid_committed_product_oracle_artifact tests/unit/test_wave_gate_check.py::test_wave2_reads_committed_product_oracle_artifact_not_worktree -q
+# 2 passed
+```
