@@ -137,6 +137,55 @@ def test_secondary_lora_injected_when_primary_has_no_face_ref():
     )
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="secondary-lora-hole: node 701 must be model-chain reachable from BasicGuider "
+    "when the primary has no face ref; 23c99e3 inserts 701 but leaves 22.model on 700",
+)
+def test_secondary_lora_model_output_reaches_guider_when_primary_has_no_face_ref():
+    """A secondary LoRA must affect the executing model chain, not only CLIP.
+
+    This covers the no-primary-face-ref stack where PuLID(100) has already been
+    pruned. In that topology, _inject_secondary_loras cannot rely on rewiring
+    100.model; it must ensure the last secondary LoRA reaches BasicGuider(22).
+    """
+    import quality_max as qm
+
+    wf = qm._load_max_workflow()
+    wf.pop("_metadata", None)
+    available = {n["class_type"] for n in wf.values()
+                 if isinstance(n, dict) and "class_type" in n}
+
+    qm._prune_unavailable(wf, available, has_face_ref=False,
+                          has_char_lora=True, has_init=False)
+    qm._inject_identity(wf, "primary_char_v1.safetensors", None, {}, has_face_ref=False)
+    qm._inject_secondary_loras(
+        wf,
+        [{"lora_path": "secondary_char_v1.safetensors", "lora_strength": 0.45}],
+    )
+
+    visited = set()
+    stack = ["22"]
+    while stack:
+        cur = stack.pop()
+        if cur in visited:
+            continue
+        visited.add(cur)
+        node = wf.get(cur)
+        if not isinstance(node, dict):
+            continue
+        model_ref = node.get("inputs", {}).get("model")
+        if isinstance(model_ref, list) and len(model_ref) == 2:
+            src = str(model_ref[0])
+            if src in wf:
+                stack.append(src)
+
+    assert "701" in visited, (
+        "secondary LoraLoader(701) is not reachable from BasicGuider(22) via "
+        f"model edges; reachable model-chain nodes: {visited}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # confirmed[29]: Wdefer:MINOR:identity-arcface-embselect
 # identity/validator.py:940-943
