@@ -1518,7 +1518,7 @@ prefers Suno V5 with FAL Stable Audio as fallback; loops in assembly.
 
 ### 12.6 Final-assembly audio mux — engine-dependent voice source
 
-`_assemble_final` ([cinema_pipeline.py:1324](cinema_pipeline.py:1324)) muxes the
+`_assemble_final` ([cinema_pipeline.py:1327](cinema_pipeline.py:1327)) muxes the
 final video's audio with an FFmpeg `amix` filtergraph over up to three sources
 (voice/dialogue + BGM + foley). The **voice source is motion-engine-dependent**:
 

@@ -1033,6 +1033,30 @@ class ShotController:
             )
             return {"success": True, "skipped": True, "engine": engine, "error": pre_err}
 
+        # Pre-spend budget gate: performance capture dispatch is paid and now
+        # writes to the shared CostTracker. Refuse before Mode-B driving synth
+        # or the main engine can launch.
+        if self.cost_tracker.would_exceed(engine):
+            self.progress(
+                "BUDGET_EXCEEDED",
+                f"Estimated {engine} performance cost would push spend "
+                f"${self.cost_tracker.spent_usd:.2f} past budget cap "
+                f"${self.cost_tracker.budget_usd:.2f}. Pausing before performance capture.",
+                -1,
+                scene_id=scene_id,
+                shot_id=shot_id,
+                spent=self.cost_tracker.spent_usd,
+                budget=self.cost_tracker.budget_usd,
+                performance_engine=engine,
+            )
+            self._lifecycle.pause()
+            return {
+                "success": False,
+                "error": "Budget cap reached — performance capture not started",
+                "error_kind": "budget",
+                "engine": engine,
+            }
+
         # --- 3. Driving video — Mode A (operator upload) wins, else Mode B synth ---
         driving = (shot.get("driving_video_path") or "").strip()
         source_mode = driving_video_source(shot)

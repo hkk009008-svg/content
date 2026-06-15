@@ -78,6 +78,16 @@ class PerformanceCapturePhase:
                         skip_count += 1
                     else:
                         ok_count += 1
+                elif result.get("error_kind") == "budget":
+                    return PhaseResult(
+                        ok=False,
+                        message=(
+                            f"budget cap reached at {shot['id']} — performance phase "
+                            f"stopped (ok={ok_count}, skip={skip_count}, "
+                            f"fail={fail_count})"
+                        ),
+                        elapsed_s=time.time() - start,
+                    )
                 else:
                     fail_count += 1
                     self._on_failure(scene["id"], shot["id"], result.get("error", ""))

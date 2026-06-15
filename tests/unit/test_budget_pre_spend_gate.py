@@ -306,3 +306,160 @@ class TestBudgetPhaseAbort:
         assert gen.generate_motion_take.call_count == 1
         assert result.ok is False
         assert "budget" in result.message.lower()
+
+
+class TestPerformancePreSpendBudgetGate:
+    """generate_performance_take refuses paid retargeting before dispatch."""
+
+    def _build_controller(self, project: dict, tmp_path):
+        from cinema.shots.controller import ShotController
+
+        keyframe_path = str(tmp_path / "keyframe.jpg")
+        open(keyframe_path, "wb").write(b"fake_jpg")
+
+        host = MagicMock()
+        host._refresh_project_snapshot.return_value = project
+        host._resolve_take_path.return_value = keyframe_path
+        host._ensure_scene_audio.return_value = ""
+        host._save_checkpoint.return_value = None
+
+        lifecycle = MagicMock()
+        lifecycle.report_progress.return_value = None
+        runstate = MagicMock()
+        runstate.update_progress_pointer.return_value = None
+
+        core = MagicMock()
+        core.project = project
+        core.project_dir = str(tmp_path)
+        core.continuity = MagicMock()
+        cost_tracker = MagicMock()
+        cost_tracker.is_over_budget.return_value = False
+        cost_tracker.would_exceed.return_value = False
+        cost_tracker.spent_usd = 0.80
+        cost_tracker.budget_usd = 1.00
+        core.cost_tracker = cost_tracker
+
+        ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
+        ctrl._take_output_path = MagicMock(
+            side_effect=lambda shot_id, take_id, ext: str(tmp_path / f"{take_id}{ext}")
+        )
+        ctrl._mutate_shot = MagicMock(side_effect=lambda shot_id, mutator: {"id": "perf_take"})
+        return ctrl, lifecycle, cost_tracker
+
+    def _make_project(self, tmp_path):
+        driving = tmp_path / "drive.mp4"
+        driving.write_bytes(b"fake_mp4")
+        return {
+            "id": "proj_perf_budget_gate_test",
+            "characters": [{"id": "char_1", "name": "Alice"}],
+            "global_settings": {},
+            "scenes": [{
+                "id": "scene_1",
+                "title": "Scene",
+                "duration_seconds": 5.0,
+                "characters_present": ["char_1"],
+                "shots": [{
+                    "id": "shot_1_0",
+                    "prompt": "Action shot",
+                    "plan_status": "approved",
+                    "shot_type": "action",
+                    "characters_in_frame": ["char_1"],
+                    "approved_keyframe_take_id": "kf_t1",
+                    "driving_video_path": str(driving),
+                }],
+            }],
+        }
+
+    def test_refuses_performance_dispatch_when_would_exceed(self, tmp_path):
+        project = self._make_project(tmp_path)
+        ctrl, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
+        cost_tracker.would_exceed.return_value = True
+
+        dispatch = MagicMock()
+        with patch("performance._router.dispatch", dispatch):
+            result = ctrl.generate_performance_take("scene_1", "shot_1_0")
+
+        assert result.get("success") is False
+        assert result.get("error_kind") == "budget"
+        assert result.get("engine") == "VIGGLE"
+        dispatch.assert_not_called()
+        lifecycle.pause.assert_called_once()
+        cost_tracker.would_exceed.assert_called_once_with("VIGGLE")
+        events = [c.args[0] for c in lifecycle.report_progress.call_args_list if c.args]
+        assert "BUDGET_EXCEEDED" in events
+
+    def test_proceeds_when_performance_budget_allows(self, tmp_path):
+        project = self._make_project(tmp_path)
+        ctrl, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
+        cost_tracker.would_exceed.return_value = False
+
+        def _dispatch(*args, **kwargs):
+            output = kwargs["output_mp4"]
+            open(output, "wb").write(b"fake_mp4")
+            return output
+
+        with (
+            patch("performance._router.dispatch", side_effect=_dispatch) as dispatch,
+            patch("performance.identity_gate.validate_performance_take", return_value=None),
+        ):
+            result = ctrl.generate_performance_take("scene_1", "shot_1_0")
+
+        assert result.get("success") is True
+        dispatch.assert_called_once()
+        lifecycle.pause.assert_not_called()
+        cost_tracker.would_exceed.assert_called_once_with("VIGGLE")
+
+
+class TestPerformancePhaseBudgetAbort:
+    """PerformanceCapturePhase stops at a structured budget refusal."""
+
+    _BUDGET_REFUSAL = {
+        "success": False,
+        "error": "Budget cap reached — performance capture not started",
+        "error_kind": "budget",
+    }
+
+    def _make_ctx(self):
+        lc = MagicMock()
+        lc.is_cancelled.return_value = False
+        return MagicMock(lifecycle=lc)
+
+    def _make_project(self, n_shots=3):
+        shots = [
+            {"id": f"s1_{i}", "approved_keyframe_take_id": "kf_001"}
+            for i in range(n_shots)
+        ]
+        return {"id": "proj_perf_budget_abort", "scenes": [{"id": "scene_1", "shots": shots}]}
+
+    def test_performance_loop_aborts_on_budget_refusal(self):
+        from cinema.phases.performance import PerformanceCapturePhase
+
+        gen = MagicMock()
+        gen.generate_performance_take.return_value = self._BUDGET_REFUSAL
+        on_failure = MagicMock()
+        phase = PerformanceCapturePhase(
+            shot_generator=gen, project=self._make_project(), on_failure=on_failure,
+        )
+
+        result = phase.run(self._make_ctx())
+
+        assert gen.generate_performance_take.call_count == 1
+        on_failure.assert_not_called()
+        assert result.ok is False
+        assert "budget" in result.message.lower()
+
+    def test_performance_loop_continues_on_ordinary_failure(self):
+        from cinema.phases.performance import PerformanceCapturePhase
+
+        gen = MagicMock()
+        gen.generate_performance_take.return_value = {"success": False, "error": "boom"}
+        on_failure = MagicMock()
+        phase = PerformanceCapturePhase(
+            shot_generator=gen, project=self._make_project(), on_failure=on_failure,
+        )
+
+        result = phase.run(self._make_ctx())
+
+        assert gen.generate_performance_take.call_count == 3
+        assert on_failure.call_count == 3
+        assert result.ok is True

@@ -60,6 +60,10 @@ API_COST_USD: dict[str, float] = {
     "RUNWAY":        0.40,
     "FAL_SVD":       0.20,    # per ~5s clip via fal-ai/fast-svd (conservative estimate; calibrate against fal.ai invoice)
     "SEEDANCE":      0.30,    # per ~5s clip via Seedance 2.0 (conservative estimate; calibrate against Seedance invoice)
+    # Performance-capture APIs (per ~5s clip; mirrors performance/* _cost_log estimates).
+    "ACT_ONE":        0.25,    # Runway Act-One retargeting, approx $0.05/s.
+    "LIVE_PORTRAIT":  0.04,    # ComfyUI LivePortrait amortized GPU cost.
+    "VIGGLE":         0.20,    # Viggle full-body motion retargeting.
     # Image APIs (per still)
     "COMFYUI_PULID": 0.04,   # FLUX+PuLID on the ComfyUI pod (GPU-time estimate)
     "FLUX_PULID":    0.05,

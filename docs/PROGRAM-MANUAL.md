@@ -277,7 +277,7 @@ generate(resume=False)
       └─ progress("COMPLETE", final_path, 100%)
 ```
 
-**Phases vs. gates.** The three render loops (keyframe, performance, motion) are `Phase`-protocol objects that receive a shared `PipelineContext` and return a `PhaseResult`; the four review gates and SCREENING are **inline** in the orchestrator, not phases. A key behavioral fact: **all three phases always return `ok=True` even when individual shots fail** (`cinema/phases/keyframe_render.py:105-108`) — partial failures route through an `on_failure` callback into `RunState.failed_shots` and are reworked from the review UI; the pipeline does not abort on a failed shot.
+**Phases vs. gates.** The three render loops (keyframe, performance, motion) are `Phase`-protocol objects that receive a shared `PipelineContext` and return a `PhaseResult`; the four review gates and SCREENING are **inline** in the orchestrator, not phases. Ordinary per-shot failures route through an `on_failure` callback into `RunState.failed_shots` and are reworked from the review UI; structured budget refusals are the exception, stopping performance or motion without spending further.
 
 **Progress and cancellation.** Every stage emits a progress event through `lifecycle.report_progress()` → the per-project SSE queue → the browser. Phases poll `ctx.lifecycle.is_cancelled()` at scene and shot boundaries, so `POST /cancel` interrupts mid-loop. `pause()`/`resume()` block on a `threading.Event`.
 
@@ -651,7 +651,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 | Name | file:line | What it does |
 |---|---|---|
-| `CostTracker` | `cost_tracker.py:145` | SQLite ledger (`data/experiments.db`) + budget gate. `spent_usd` is an in-process accumulator (NOT loaded from SQLite on init). |
+| `CostTracker` | `cost_tracker.py:145` | SQLite ledger (`data/experiments.db`) + budget gate. `spent_usd` is an in-process accumulator initialized at construction and rehydrated from durable project rows on checkpoint resume. |
 | `record_api_call` | `cost_tracker.py:300` | Primary API logging path. |
 | `log_llm` | `cost_tracker.py:238` | LLM logging path; auto-detects provider from `PRICING` (`:85`) and silently records `$0.00` for unknown models. |
 | `would_exceed` | `cost_tracker.py:360` | Pre-call budget predicate — wired as the pre-spend gate in `generate_motion_take` (`cinema/shots/controller.py:1529`) since 2026-06-10 (P0-2). |
@@ -682,9 +682,9 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 | `close_up` unreachable in motion floors | `workflow_selector.py:400` | `MOTION_FIDELITY_FLOORS` has a `close_up` key but `classify_shot_type` never returns it. |
 | Several live shot/project fields not in Pydantic models | `Shot` (`domain/models.py:82`) / `Project` (`domain/models.py:166`) | `objects`, `performance_engine`, `driving_video_path`, `director_review`, `screening_approved`, `needs_reassembly`, `auto_approve_audit` live via `extra="allow"`. Strict mode warns; default absorbs. |
 | `shot_id` not globally unique | `domain/project_manager.py:405` | `shot_{scene_id}_{idx}` can collide across projects (cycle-6/S13 F1 CRITICAL) — always pair with `project_id` on endpoints. |
-| Audio/performance `CostTracker()` instances bypass the budget gate | `audio/dialogue.py`, `audio/music.py`, `performance/*` | Each constructs a fresh no-budget tracker; spend lands in the DB but does NOT update the core's `spent_usd`. Budget governance covers video/image gen only. |
+| Audio `CostTracker()` instances bypass the budget gate | `audio/dialogue.py`, `audio/music.py` | Audio helpers can still construct fresh no-budget trackers; performance capture now threads the core tracker through the adapters and has a pre-spend gate. |
 | `EXPERIMENTS_DB_PATH` wired env-direct, not via `Settings` | `cost_tracker.py:157` vs `config/settings.py:128`, `cinema/core.py:113` | Since T7 (`4af8c05`) `CostTracker.__init__` resolves `db_path` arg > `EXPERIMENTS_DB_PATH` env > `data/experiments.db`, so the env var takes effect for every tracker. `Settings.experiments_db_path` is never threaded into the constructor — decorative; both read the same env var. |
-| `spent_usd` resets per process | `cost_tracker.py:166` | Not loaded from SQLite on init — budget gate is per-run, not cumulative-lifetime. |
+| `spent_usd` rehydration is resume-scoped | `cost_tracker.py:166`, `cost_tracker.py:518`, `cinema/checkpoint.py:182` | New trackers start at zero, but checkpoint resume seeds the accumulator from SQLite rows for the current project. Fresh non-resume processes remain per-run, not cumulative-lifetime. |
 | Single SSE consumer | `web_server.py:1577` | A second `/stream` tab drains the shared queue; both miss events. |
 | `_running_cores` not invalidated on settings edit | `web_server.py:109` | Out-of-band `settings.json` edits need a server restart. |
 | Re-assemble must call `_assemble_approved_takes_core` directly | `web_server.py:2371`, `cinema_pipeline.py:783` | Calling the full `assemble_approved_takes()` from a Flask thread during screening deadlocks (the approve signal targets the original pipeline). |
@@ -700,7 +700,7 @@ This section walks the pipeline stage by stage in execution order, exactly as `C
 Two structural facts shape every stage below and are worth stating once:
 
 - **The real orchestrator is `cinema_pipeline.CinemaPipeline` (`cinema_pipeline.py:49`).** There is a *second, unrelated* class also named `CinemaPipeline` at `cinema/pipeline.py:80` — a generic list-of-`Phase` driver that is **not** wired into the production `generate()` path. Wherever this section says "the orchestrator," it means `cinema_pipeline.py`.
-- **Three render stages are `Phase` objects** (keyframe, performance, motion) implementing the `Phase` Protocol (`cinema/phases/base.py:61`). The **gates between them are not phases** — they are inline `_wait_for_gate(...)` calls in the orchestrator. All three render phases return `PhaseResult(ok=True)` even when individual shots fail (`cinema/phases/keyframe_render.py:105-108`); a stage never aborts the run on per-shot failure. Failed shots are surfaced through the `on_failure` callback into `failed_shots` and the review UI.
+- **Three render stages are `Phase` objects** (keyframe, performance, motion) implementing the `Phase` Protocol (`cinema/phases/base.py:61`). The **gates between them are not phases** — they are inline `_wait_for_gate(...)` calls in the orchestrator. Ordinary per-shot failures stay non-aborting and surface through `on_failure` into `failed_shots`; structured budget refusals stop performance or motion so the run does not keep walking shots that would be refused identically.
 
 ### Stage map and progress checkpoints
 
@@ -986,7 +986,7 @@ During the wait the operator: hits `POST .../assemble/screen` for the timeline m
 
 ---
 
-**Cross-cutting note on the cost gate (assembly-relevant):** the budget gate (`would_exceed` at `cost_tracker.py:360`, `is_over_budget` at `cost_tracker.py:370`) accounts for video/image generation only. Audio modules (`audio/dialogue.py`, `audio/music.py`, `audio/foley.py`) and performance modules each construct **isolated** `CostTracker()` instances that log to the same SQLite DB but do **not** add to the core tracker's `spent_usd` — so audio API spend runs uncapped, and `spent_usd` resets per process (it is not loaded from SQLite on init). Operators relying on `budget_limit_usd` for hard governance should know it bounds the generation stages, not the full run.
+**Cross-cutting note on the cost gate (assembly-relevant):** the budget gate (`would_exceed`, `is_over_budget`) covers image/video generation and performance capture through the shared `CostTracker`. Audio modules (`audio/dialogue.py`, `audio/music.py`, `audio/foley.py`) still have isolated helper paths, so operators relying on `budget_limit_usd` should treat standalone audio spend as a remaining limitation unless the caller explicitly threads the core tracker.
 
 ---
 
@@ -1195,8 +1195,8 @@ Location consistency is automatic: each location carries a fixed `seed` and a ve
 | video API | `LTX` ($0.06–0.10/shot) | `SORA_NATIVE`/`VEO_NATIVE` ($0.40–0.80) |
 
 **Budget governance** — three caveats that bite operators:
-1. `budget_limit_usd` only gates **video/image** generation in `ShotController` (the pre-spend `would_exceed` gate at `cinema/shots/controller.py:1505` + the post-call `is_over_budget` check at `:1352`); **audio API costs run uncapped** (audio modules create isolated `CostTracker()` instances that log to the DB but don't update the core tracker's `spent_usd`).
-2. `CostTracker.spent_usd` **resets to 0 each process** — it is not loaded from SQLite on init (`cost_tracker.py:166`). A server restart mid-project zeroes the in-memory budget counter.
+1. `budget_limit_usd` gates image/video generation and performance capture through `ShotController` pre-spend checks; **standalone audio API costs can still run uncapped** when audio helpers create isolated `CostTracker()` instances that log to the DB but do not update the core tracker's `spent_usd`.
+2. New `CostTracker` instances start with `spent_usd=0.0` (`cost_tracker.py:166`), but checkpoint resume rehydrates the accumulator from SQLite rows for the current project (`cinema/checkpoint.py:182` -> `cost_tracker.py:518`). Fresh non-resume processes are still per-run, not cumulative-lifetime.
 3. `EXPERIMENTS_DB_PATH` works **via the environment only**: since T7 (`4af8c05`) every `CostTracker` resolves it at construction (`db_path` arg > env var > `data/experiments.db`, `cost_tracker.py:145`), but `Settings.experiments_db_path` is never threaded into the constructor (`cinema/core.py:113`) — set the env var, not the settings field.
 
 > **Cost-estimate note:** `API_REGISTRY` and `cost_tracker.API_COST_USD` disagree on a few engines (e.g. VEO_NATIVE: $0.40 in the registry, $0.30 in the cost table). Both are ±30% estimates — calibrate against real invoices before trusting either for budgeting.
@@ -1251,7 +1251,7 @@ Triggered via `POST .../shots/<sid>/correct` (`web_server.py:2139`) or auto-reco
 **To minimize cost:**
 1. `quality_tier="production"`, `competitive_generation=false`, `quality_judge_llm="auto"`.
 2. Pin cheap engines: `shot.target_api="LTX"` for non-dialogue B-roll.
-3. Set a real `budget_limit_usd` (remembering it caps video/image only and resets on restart).
+3. Set a real `budget_limit_usd` (remembering it caps image/video plus performance capture; standalone audio helper spend remains the caveat, and checkpoint resume rehydrates prior project spend).
 4. `lipsync_quality_validation=false` to skip extra cascade attempts where sync quality isn't critical.
 
 **To run fully unattended / headless** (no human ever touches a gate):
@@ -1891,7 +1891,7 @@ Set via `PUT /api/projects/<pid>` with `{"global_settings": {...}}`. The capabil
 | `lipsync_quality_validation` + `lipsync_validation_threshold` | `True` / `0.65` | SyncNet gate toggle + floor |
 | `dialogue_mode_enabled` | `True` | ElevenLabs v3 Dialogue Mode for 2+ speakers |
 | `forced_alignment_enabled` | `False` | Emits `.alignment.json` word-timing sidecar |
-| `budget_limit_usd` | `0`/`None` (unlimited) | `CostTracker.budget_usd`; pauses pipeline when exceeded (per-process only — D-config-3) |
+| `budget_limit_usd` | `0`/`None` (unlimited) | `CostTracker.budget_usd`; pauses pipeline when exceeded; checkpoint resume rehydrates prior project spend (D-config-3) |
 | `auto_approve.*` | see §7.3.5 | Per-gate veto thresholds |
 
 #### 7.3.5 Auto-approve veto config (`global_settings.auto_approve`)
@@ -1993,8 +1993,8 @@ This is the most common operational failure and has three distinct causes — al
 
 - **Diagnose:** Spend exceeds `budget_limit_usd` but the pipeline keeps running.
 - **Causes & fixes (all known limitations):**
-  - `CostTracker.spent_usd` starts at 0.0 each process and is **not** loaded from SQLite — a mid-project server restart resets the counter, so the gate is per-process-run, not cumulative lifetime (D-config-3).
-  - Audio + performance modules construct **isolated** `CostTracker()` instances (no `budget_usd`); their spend lands in the DB but never adds to the core's `spent_usd`. Only video/image generation is actually gated (D-config-2).
+  - `CostTracker.spent_usd` starts at 0.0 on construction, but checkpoint resume rehydrates it from SQLite rows for the current project; a fresh non-resume process is still per-run, not cumulative lifetime (D-config-3).
+  - Audio helper paths can still construct **isolated** `CostTracker()` instances (no `budget_usd`); performance capture now threads the core tracker and pre-spend-gates the resolved performance engine (D-config-2 partially resolved).
   - `EXPERIMENTS_DB_PATH` is honored by every tracker (env read in `CostTracker.__init__` default path, `cost_tracker.py:157`, T7 `4af8c05`); only the `Settings.experiments_db_path` field is decorative (D-config-1 resolved).
 
 #### SSE progress stream behaves oddly
@@ -2069,8 +2069,8 @@ An older audit listed `storyboard_mode` as having "zero callers" — that is **s
 | ID | Issue | Verified |
 |---|---|---|
 | D-config-1 | `EXPERIMENTS_DB_PATH` formerly unwired — RESOLVED by T7 (`4af8c05`) | `cinema/core.py:113` still builds `CostTracker(budget_usd=budget_usd)` with no `db_path`, but `cost_tracker.py:145` resolves `db_path or os.environ.get("EXPERIMENTS_DB_PATH", "data/experiments.db")` — env var honored by every tracker (explicit `db_path` arg wins) |
-| D-config-2 | Audio/performance modules use isolated `CostTracker()` (no budget); only video/image is gated | confirmed across `audio/*`, `performance/*` |
-| D-config-3 | `spent_usd` is per-process, not loaded from SQLite; resets on restart | `cost_tracker.py:166` |
+| D-config-2 | Audio helper paths can use isolated `CostTracker()` (no budget); performance capture is now shared-tracker-gated | confirmed remaining audio limitation across `audio/*`; performance fixed by `perf-phase-no-gate` |
+| D-config-3 | `spent_usd` initializes per process, with checkpoint-resume rehydration from durable project rows | `cost_tracker.py:166`, `cost_tracker.py:518`, `cinema/checkpoint.py:182` |
 
 #### Schema-vs-live-dict divergences (Pydantic `extra="allow"`)
 

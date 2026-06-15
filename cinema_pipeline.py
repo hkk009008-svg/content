@@ -1122,7 +1122,10 @@ class CinemaPipeline:
             project=project,
             on_failure=_on_performance_fail,
         ).run(ctx)
-        self.progress("PERFORMANCE_DONE", performance_result.message, 62)
+        if performance_result.ok:
+            self.progress("PERFORMANCE_DONE", performance_result.message, 62)
+        else:
+            self.progress("PERFORMANCE_HALTED", performance_result.message, 60)
         if self.lifecycle.is_cancelled():
             self.progress("CANCELLED", "Pipeline cancelled by user", 0)
             return None

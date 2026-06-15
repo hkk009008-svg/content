@@ -747,3 +747,8 @@ class TestApiCostUsdCompleteness:
     def test_fal_svd_priced_in_api_cost_usd(self):
         assert "FAL_SVD" in API_COST_USD
         assert API_COST_USD["FAL_SVD"] > 0
+
+    @pytest.mark.parametrize("engine", ["ACT_ONE", "LIVE_PORTRAIT", "VIGGLE"])
+    def test_performance_capture_engines_priced_in_api_cost_usd(self, engine):
+        assert engine in API_COST_USD
+        assert API_COST_USD[engine] > 0
