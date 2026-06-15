@@ -1,5 +1,5 @@
-"""R-VERIFY-TIER(B) CI pins for three confirmed identity/quality defects from
-the Phase-0 hardening-campaign discovery bug-hunt (discovery-wf_13f9d2f6-f93.json).
+"""Wave-2 identity/quality regressions from the Phase-0 hardening-campaign
+discovery bug-hunt (discovery-wf_13f9d2f6-f93.json).
 
 Confirmed indices and prefixes:
   confirmed[3]  W2:MEDIUM:identity-nan-arc-bypass
@@ -7,10 +7,11 @@ Confirmed indices and prefixes:
   confirmed[29] Wdefer:MINOR:identity-arcface-embselect
 
 All three were confirmed by refute-first verifiers in the discovery workflow (two
-independent passes each, finalVerdict=CONFIRMED, production-reachable). Dispositioned
-as DEFERRED; pinned here so CI, not the next session's agents, re-verifies.
+independent passes each, finalVerdict=CONFIRMED, production-reachable). The
+Wave-2 rows are now live regressions after their fixes; the Wdefer row remains
+recorded as a TEST-INFEASIBLE skip with its rationale below.
 
-When a defect is fixed, the XPASS (strict) is the signal to revise or delete the pin.
+When a remaining strict pin is fixed, XPASS is the signal to revise or delete it.
 Mirror style: tests/unit/test_has_character_lora_only_hole.py,
               tests/unit/test_lane_silent_gate_siblings_xfail.py.
 """
