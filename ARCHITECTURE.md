@@ -980,7 +980,7 @@ orchestrates.
 ([quality_max.py:576](quality_max.py:576)), with each `lora_name` set to the artifact's basename for
 pod-side placement; `_assemble_max_prompt` ([quality_max.py:517](quality_max.py:517)) prepends LoRA trigger
 tokens (primary first, then each secondary's) before conditioning; and
-`_inject_secondary_faceswap` ([quality_max.py:665](quality_max.py:665)) splices a LoadImage(94) +
+`_inject_secondary_faceswap` ([quality_max.py:674](quality_max.py:674)) splices a LoadImage(94) +
 ReActorFaceSwap(611) node after the existing node 610, swapping face index "1" from the
 secondary's canonical image — MUST run after `_inject_post_passes` so the SUPIR-absent
 950-feed rewire sees it. All three injectors are retry-safe (idempotent pop/re-inject);
