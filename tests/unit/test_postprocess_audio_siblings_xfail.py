@@ -1,18 +1,14 @@
-"""R-VERIFY-TIER(B) debt pins — out-of-scope audio-flag siblings surfaced by the
-§3 completeness sweep (operator2 wf_69ba3ee7) and left UNFIXED in commit 1eec3cd.
+"""Postprocess-audio sibling coverage from the §3 completeness sweep.
 
-Each is an agent-confirmed defect adjacent to the §3 audio-flag-propagation family
-but in a DIFFERENT subsystem (auto-approve gate / review-approval + assembler take
-resolution).  Per CLAUDE.md R-VERIFY-TIER(B), an agent-confirmed defect not fixed
-this session ships an ``xfail(strict=True)`` pin so CI — not the next session's
-agents — re-verifies, and the pin flips to a hard failure the moment the underlying
-behavior is corrected (prompting removal of the pin).
+``test_performance_take_as_final_metadata_is_resolved`` is now the live
+regression for the fixed `perf-take-meta` row: performance takes approved as final
+must expose their embedded-audio metadata to assembly.  The remaining strict xfail
+tracks only the unfixed `lipsync-veto` sibling in the auto-approve subsystem.
 
-director2 disposition is owed on the fix shape for both (reported in the §3
-verification-report).  Two further siblings (capability_scorecard blind-spot —
-MINOR, advisory display; storyboard-batch F1b lipsync-skip — MAJOR, needs the
-_run_storyboard_scene integration harness) are labeled test-infeasible-this-turn in
-the handoff rather than pinned here.
+Two further siblings (capability_scorecard blind-spot — MINOR, advisory display;
+storyboard-batch F1b lipsync-skip — MAJOR, needs the _run_storyboard_scene
+integration harness) are labeled test-infeasible-this-turn in the handoff rather
+than pinned here.
 """
 
 from __future__ import annotations
