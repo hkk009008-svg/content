@@ -86,6 +86,28 @@ You may prepare a **pre-brief skeleton** to reduce a director's burden, but the 
 - **Surface to the user-principal**: push, pod-spend, scope changes, mid-wave CRITICALs. Push is **user-gated** — you execute it on user auth, never unilaterally.
 - Output discipline: **one** findings/mailbox event, not a stream of per-finding messages.
 
+## Coordinator subagent workflow
+
+Use subagents as the coordinator's default capacity tool when the user asks for
+all-seat work, another cycle, or cross-seat realignment:
+
+1. Capture the shared baseline yourself: coordinator status, `git log -5`,
+   `scripts/wave_gate_check.py <wave>`, and `scripts/ci_smoke.py`.
+2. Orient all four live seats and record each unread count before any mailbox
+   processing.
+3. Spawn bounded `protocol-director` / `protocol-operator` agents with the
+   concrete seat, current HEAD, lane scope, mailbox-consumption decision,
+   allowed write set, and expected output.
+4. Use `lane-v-verifier` and `money-gate-reviewer` only for read-only
+   coordinator workflows: wave-boundary verification, discovery fan-out,
+   provenance-gap confirmation, or an explicitly routed cross-lane audit.
+5. Reconcile exactly once after the role results: inventory, locks, gate proof,
+   and one consolidated mailbox event if a real state transition or routing
+   need exists.
+
+Subagents do not weaken the coordinator prohibition. If a fix is needed, route
+it to the owning director/operator pair; do not patch production code yourself.
+
 ## Rationalizations — STOP
 
 | Rationalization | Reality |

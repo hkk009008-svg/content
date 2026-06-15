@@ -21,6 +21,10 @@ Cycle adaptation:
 - If a verify request exists, consume the mailbox intentionally, read the actual
   landed diff with git, run focused tests and any mutation/readback probe needed
   for the brief, then emit exactly one GO/NITS/FAIL verification-report.
+- Use read-only verifier subagents as part of Lane V when useful:
+  `lane-v-verifier` for ordinary landed diffs and `money-gate-reviewer` for
+  budget/cost-gate diffs. Their reports are evidence for synthesis; they are
+  not a live operator `verification-report` by themselves.
 - Fold the consumed cursor into the verification-report commit when one is
   written. Do not update the remediation inventory while a coordinator is live.
 

@@ -123,6 +123,28 @@ and stops. If a candidate row requires `coordination/bin/claim-lock`, remember
 that the helper fetches and pushes; push is user-gated, so choose eligible
 no-lock work or stop for authorization when push has not been granted.
 
+## Seat-Local Subagent Adoption
+
+Subagents are now part of every live seat's normal Codex workflow. They increase
+capacity, but they never move authority across role boundaries.
+
+- Coordinator: uses `protocol-director` / `protocol-operator` for all-seat
+  cycles, and read-only `lane-v-verifier` / `money-gate-reviewer` only at
+  coordinator-appropriate discovery, confirmation, or wave-boundary triggers.
+- Directors (`director`, `director2`): may use subagents for bounded
+  exploration, Rule #12/#13 evidence gathering, implementation shards, and
+  specialist pre-review. The director still owns the R-BRIEF, lock/co-sign
+  gates, dispatch decision, and verify-request.
+- Operators (`operator`, `operator2`): may use read-only subagents for cold
+  context Lane V and specialist review. The operator still reads the real diff,
+  decides GO/NITS/FAIL, sends the `verification-report`, and performs any
+  same-commit lock release.
+
+Every subagent prompt must include the concrete seat, HEAD, unread count, lane
+scope, allowed write set, mailbox consumption decision, and expected output.
+Never run two implementation subagents in parallel on shared files. Idle seats
+return no-op evidence rather than inventing work.
+
 ## Codex Launch Pattern
 
 For CLI-based live seats, launch Codex from the shared working tree with a seat

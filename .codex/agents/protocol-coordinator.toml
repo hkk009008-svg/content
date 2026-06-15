@@ -29,6 +29,10 @@ All-seat subagent cycle default:
 - Orient all four live seats first and include their unread counts in the role
   prompts. Idle seats should return no-op evidence; active seats should stay
   inside their lane and role boundary.
+- Treat subagents as the normal capacity mechanism for each seat: directors may
+  use bounded exploration/implementation/specialist-review subagents, operators
+  may use read-only verifier subagents, and the coordinator reconciles the
+  resulting artifacts once.
 - Do not use subagents to bypass push-gated locks, impl≠verifier, or the
   coordinator prohibition on production fixes.
 - After role results land, reconcile once: inventory, locks, gate evidence, and

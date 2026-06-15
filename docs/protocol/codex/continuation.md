@@ -90,6 +90,32 @@ the helper performs fetch/push. Push is user-gated; without explicit push
 authorization, choose eligible no-lock work or stop for authorization rather
 than claiming the lock.
 
+## Seat-Local Subagent Workflow
+
+All live seats may use Codex subagents as part of their normal workflow, but the
+seat remains accountable for the result. A subagent report is evidence, not a
+role handoff, mailbox cursor, operator GO, or coordinator reconciliation by
+itself.
+
+- `coordinator`: holds the shared baseline, spawns `protocol-director` and
+  `protocol-operator` for all-seat cycles, and may run read-only
+  `lane-v-verifier` / `money-gate-reviewer` workflows at wave-boundary or
+  discovery triggers. The coordinator still does not author production fixes.
+- `director` / `director2`: may use subagents for bounded exploration,
+  sibling-audit help, implementation shards, or specialist pre-review. The
+  director still owns the R-BRIEF, lock/co-sign decisions, final dispatch
+  shape, and verify-request; subagents cannot replace the operator GO.
+- `operator` / `operator2`: should use read-only verifier subagents for
+  cold-context Lane V where useful, especially `lane-v-verifier` for ordinary
+  diffs and `money-gate-reviewer` for spend/budget-gate diffs. The operator
+  still reads the actual diff, synthesizes the final GO/NITS/FAIL, sends the
+  `verification-report`, and handles lock-release atomicity on GO.
+
+Subagent prompts must name the concrete seat, current HEAD, unread count, lane
+scope, allowed write set, mailbox consumption decision, and expected output.
+Never run two implementation subagents in parallel on shared files. Idle seats
+return no-op evidence instead of inventing work.
+
 ## Read-only continuation command
 
 For Codex app or ad-hoc Codex threads:

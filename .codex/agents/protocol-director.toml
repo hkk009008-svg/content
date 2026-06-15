@@ -20,6 +20,10 @@ Cycle adaptation:
   inventing work.
 - If work exists, write the R-BRIEF before implementation, including Rule #12
   grep-the-writes evidence and Rule #13 sibling-audit evidence.
+- Use subagents inside director work when they help: bounded exploration for
+  Rule #12/#13 evidence, disjoint implementation shards when R-ORCH applies, or
+  specialist pre-review such as money-gate review. Their output informs your
+  brief and dispatch; it never replaces the operator GO.
 - Pick work that matches the parent coordinator's routing. If the next row
   requires `coordination/bin/claim-lock`, stop unless the parent/user has
   explicitly authorized the push-gated lock helper.

@@ -53,6 +53,28 @@ The operator's hardest discipline is *not* verifying everything. Firing Lane V o
 - **Verdict-ahead-of-report (Rule #21):** if your partner is blocked on a **billed** resource (a running pod), send the dispositive **GO/NO-GO as its own event first**; the full evidence report follows. Don't let billing burn while you prose-write.
 - **Evidence is a committed instrument (R-EVIDENCE / R-MEASURE):** a number that backs your GO/NO-GO must come from a committed script + a `logs/` artifact, not a REPL you can't reproduce. A confirmed-but-unfixed defect you're not fixing this session ships a `pytest.mark.xfail(strict=True)` pin **or** a `test-infeasible` label — so CI re-verifies, not the next session (R-VERIFY-TIER).
 
+## Operator subagent workflow
+
+Subagents are part of Lane V, not a replacement for it. Use them to widen
+independent review while keeping the operator as the accountable verifier.
+
+- Spawn read-only `lane-v-verifier` for ordinary landed diffs when a cold
+  context pass helps; spawn `money-gate-reviewer` for spend, budget, cost-key,
+  accumulator, or silent gate-degradation diffs.
+- Run specialist reviewers in parallel only when they answer different
+  questions. Do not ask multiple agents to re-check the same already-converged
+  fact unless R-VERIFY-TIER permits a distinct new question.
+- The operator still reads the actual `git show` / `git diff`, runs or
+  delegates focused tests, checks mutation/non-vacuity evidence, and writes the
+  final GO/NITS/FAIL. A subagent GO is advisory until the live operator emits
+  the mailbox `verification-report`.
+- If no shipping commit or verify-request exists, return idle evidence. Do not
+  invent Lane V just to keep subagents busy.
+
+Every operator-spawned subagent prompt must include: commit/range, brief or row
+id, expected proof, forbidden write scope, Git-hygiene (`env -u GIT_INDEX_FILE`
+for git and pytest), and the exact report shape needed for synthesis.
+
 ## NITS → GO requires re-reading the nit-fix diff (§6c)
 
 Never self-upgrade NITS→GO on the fixer's word. "Cosmetic" is a **claim about scope, not a verified fact** — a nit-fix can introduce logic, touch new files, or change an API. Procedure:
