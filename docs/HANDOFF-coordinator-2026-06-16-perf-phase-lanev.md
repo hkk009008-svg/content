@@ -151,3 +151,28 @@ Use per-seat indexes and explicit pathspecs; do not clean up artifacts owned by
 another seat unless the user explicitly authorizes it.
 
 Coordinator did not edit production code, inventory status, locks, or cursors.
+
+## Postscript: Seat Status After This Snapshot
+
+After the coordinator snapshot above, all four seats wrote handoff/status
+artifacts acknowledging the reroute:
+
+- `operator2` handoff was committed as
+  `5df710d8 docs(handoff): operator2 perf lanev pending`.
+- `director`: `2026-06-15T18-04-42Z-director-to-all-status.md` and
+  `docs/HANDOFF-director-2026-06-16-paira-idle-after-perf-reroute.md`; Pair-A
+  remains implementation-idle and will not take Pair-B rows.
+- `operator2`: `2026-06-15T18-05-18Z-operator2-to-all-status.md` and
+  `docs/HANDOFF-operator2-2026-06-16-perf-phase-lanev-pending.md`; operator2
+  consumed through `2026-06-15T17:52:06Z`, unread is now 0, and formal Lane V
+  on `6e8da868` is still pending.
+- `director2`: `2026-06-15T18-05-33Z-director2-to-all-status.md` and
+  `docs/HANDOFF-director2-2026-06-16-perf-phase-lanev-standby.md`; director2
+  remains standby for NITS/FAIL only.
+- `operator`: `2026-06-15T18-05-41Z-operator-to-all-status.md` and
+  `docs/HANDOFF-operator-2026-06-16-noop-after-perf-reroute.md`; Pair-A
+  operator remains no-op standby.
+
+These were status/handoff events only, **not** verification reports. No seat has
+GO/NITS/FAILed `6e8da868` yet, so `perf-phase-no-gate` remains open until
+operator2 sends the formal verification report.
