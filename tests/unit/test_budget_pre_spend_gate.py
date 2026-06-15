@@ -1,10 +1,11 @@
 """Pre-spend budget gate on generate_motion_take (P0-2 wiring of NF-2).
 
-``CostTracker.would_exceed`` has promised pre-call gating since the module
-was written ("Call ``would_exceed(api_name)`` before an API call" —
-cost_tracker.py module docstring) but had zero production callers; only the
-post-fact ``is_over_budget()`` gate at _finalize_motion_take step 9 was
-wired. These tests pin the wiring: when the estimated cost of the resolved
+``CostTracker`` has promised pre-call gating since the module was written
+("Call ``would_exceed(api_name)`` before an API call" — cost_tracker.py
+module docstring); motion generation now uses the multi-call
+``would_exceed_cost()`` helper so mandatory attached work can be included in
+the same pre-spend envelope. These tests pin the wiring: when the estimated
+cost of the resolved
 target_api would push spend past the cap, generate_motion_take must refuse
 to launch the generation, pause the lifecycle, and report failure — BEFORE
 any video API is called.
@@ -55,7 +56,7 @@ if not hasattr(sys.modules["kling_native"], "KlingNativeAPI"):
 
 
 class TestPreSpendBudgetGate:
-    """generate_motion_take refuses to spend when would_exceed(target_api)."""
+    """generate_motion_take refuses to spend when the estimated envelope exceeds budget."""
 
     def _build_controller(self, project: dict, tmp_path):
         """Build a minimal ShotController with mocked host + core.
@@ -91,6 +92,7 @@ class TestPreSpendBudgetGate:
         cost_tracker = MagicMock()
         cost_tracker.is_over_budget.return_value = False
         cost_tracker.would_exceed.return_value = False
+        cost_tracker.would_exceed_cost.return_value = False
         cost_tracker.spent_usd = 0.0
         cost_tracker.budget_usd = None
         core.cost_tracker = cost_tracker
@@ -126,9 +128,11 @@ class TestPreSpendBudgetGate:
 
     def test_refuses_generation_when_would_exceed(self, tmp_path):
         """Gate fires: no video API call, lifecycle paused, failure returned."""
+        from cost_tracker import API_COST_USD
+
         project = self._make_project(target_api="KLING_NATIVE")
         ctrl, host, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
-        cost_tracker.would_exceed.return_value = True
+        cost_tracker.would_exceed_cost.return_value = True
         # The gate formats these as floats — must be real numbers, not MagicMock.
         cost_tracker.spent_usd = 0.80
         cost_tracker.budget_usd = 1.00
@@ -147,7 +151,7 @@ class TestPreSpendBudgetGate:
         assert result.get("error_kind") == "budget"
         gen_vid.assert_not_called()
         lifecycle.pause.assert_called_once()
-        cost_tracker.would_exceed.assert_called_once_with("KLING_NATIVE")
+        cost_tracker.would_exceed_cost.assert_called_once_with(API_COST_USD["KLING_NATIVE"])
         # The refusal must be visible to the UI: a BUDGET_EXCEEDED progress
         # event is emitted (ctrl.progress proxies lifecycle.report_progress).
         events = [c.args[0] for c in lifecycle.report_progress.call_args_list if c.args]
@@ -155,13 +159,14 @@ class TestPreSpendBudgetGate:
 
     def test_auto_shot_gate_uses_resolved_engine(self, tmp_path):
         """Anti-mutation pin: the gate must price the RESOLVED engine, not the
-        raw 'AUTO' sentinel (API_COST_USD.get('AUTO') is 0.0 — gating on it
+        raw 'AUTO' sentinel (API_COST_USD.get('AUTO') is 0.0 — estimating it
         would silently disable the pre-spend estimate for AUTO shots)."""
+        from cost_tracker import API_COST_USD
         from workflow_selector import WORKFLOW_TEMPLATES
 
         project = self._make_project(target_api="AUTO")
         ctrl, host, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
-        cost_tracker.would_exceed.return_value = True
+        cost_tracker.would_exceed_cost.return_value = True
         cost_tracker.spent_usd = 0.80
         cost_tracker.budget_usd = 1.00
 
@@ -175,13 +180,13 @@ class TestPreSpendBudgetGate:
         assert result.get("success") is False
         resolved = WORKFLOW_TEMPLATES["medium"]["target_api"]
         assert resolved != "AUTO"
-        cost_tracker.would_exceed.assert_called_once_with(resolved)
+        cost_tracker.would_exceed_cost.assert_called_once_with(API_COST_USD[resolved])
 
     def test_proceeds_when_within_budget(self, tmp_path):
         """Control: would_exceed False → generation proceeds, no pause."""
         project = self._make_project(target_api="KLING_NATIVE")
         ctrl, host, lifecycle, cost_tracker = self._build_controller(project, tmp_path)
-        cost_tracker.would_exceed.return_value = False
+        cost_tracker.would_exceed_cost.return_value = False
 
         clip = str(tmp_path / "clip.mp4")
         open(clip, "wb").write(b"fake_mp4")
