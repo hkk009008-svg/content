@@ -11,8 +11,8 @@ READ FIRST AS NEXT PAIR-A DIRECTOR. Trust git, mailbox artifacts, and
 - Durable HEAD observed before writing: `a3131d12 docs(handoff): coordinator
   seat assignment wrap`.
 - Branch from live seat status: `main`, 2 ahead / 0 behind origin.
-- Director mailbox cursor after consumption: `2026-06-15T17:28:37Z`; unread
-  now 0.
+- Director mailbox cursor after final self-status consumption:
+  `2026-06-15T17:29:15Z`; unread now 0.
 - Active locks: `coordination/locks/.gitkeep` only.
 - Wave 2 remains `UNMET`: `verified=19`, `open=11`.
 - No committed `logs/product-oracle-*.json` artifact exists.
@@ -37,6 +37,9 @@ $ export CODEX_SEAT=director
 $ export GIT_INDEX_FILE="$(git rev-parse --absolute-git-dir)/index-codex-$CODEX_SEAT"
 $ coordination/bin/consume-events director
 cursor director: 2026-06-15T17:19:41Z -> 2026-06-15T17:28:37Z; unread now: 0 (staged; fold into your next substantive commit)
+
+$ coordination/bin/consume-events director
+cursor director: 2026-06-15T17:28:37Z -> 2026-06-15T17:29:15Z; unread now: 0 (staged; fold into your next substantive commit)
 
 $ env -u GIT_INDEX_FILE git log --oneline -5
 a3131d12 docs(handoff): coordinator seat assignment wrap
@@ -109,6 +112,9 @@ Late unread during handoff was 3:
 Those are no-op/waiting handoffs. They do not change Pair-A routing. Director
 cursor was advanced to `2026-06-15T17:28:37Z`.
 
+After writing the `director -> all` status event, director consumed that own
+broadcast as well. Final cursor is `2026-06-15T17:29:15Z`, unread 0.
+
 ## Current Pair-A Routing
 
 Pair-A director remains idle/readiness-only unless one of these arrives:
@@ -143,4 +149,3 @@ intentionally adds only:
 - `docs/HANDOFF-director-2026-06-16-paira-idle-after-seat-assignments.md`
 - `coordination/mailbox/sent/2026-06-15T17-29-15Z-director-to-all-status.md`
 - `coordination/mailbox/seen/director.txt`
-
