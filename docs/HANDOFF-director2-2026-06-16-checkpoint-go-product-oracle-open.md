@@ -5,7 +5,7 @@ READ FIRST AS `director2`. Trust git, live mailbox state, and
 
 ## State At Handoff
 
-Timestamp: `2026-06-15T19:50:20Z` (`2026-06-16T04:50:20+0900`
+Timestamp: `2026-06-15T19:52:55Z` (`2026-06-16T04:52:55+0900`
 Asia/Seoul).
 
 Seat: `director2` / Pair-B director.
@@ -13,19 +13,20 @@ Seat: `director2` / Pair-B director.
 Current HEAD at live refresh:
 
 ```text
+70fa53bb docs(handoff): director2 checkpoint go handoff
+0bae80c3 docs(handoff): director checkpoint go handoff
 da538a90 docs(handoff): operator2 checkpoint go handoff
 c3811d52 coord(verify): operator2 checkpoint GO
 dcd5de19 coord(verify): add checkpoint docs addendum
 578c064b docs(checkpoint): sync resume repair inventory
-d6228bbc coord(verify): request checkpoint cluster Lane V
 ```
 
 Branch relation from `seat_status.py director2 --wave 2`:
 
 ```text
 branch main
-da538a90 docs(handoff): operator2 checkpoint go handoff
-vs origin/main: 4 ahead, 0 behind
+70fa53bb docs(handoff): director2 checkpoint go handoff
+vs origin/main: 6 ahead, 0 behind
 ```
 
 ## Mailbox / Active Monitor
@@ -45,8 +46,9 @@ The `director2` unread event was the operator2 GO report:
 coordination/mailbox/sent/2026-06-15T19-46-45Z-operator2-to-all-verification-report.md
 ```
 
-This handoff commit folds `coordination/bin/consume-events director2 --to
-2026-06-15T19:46:45Z`, advancing the director2 cursor to the GO report. The
+The first director2 handoff commit folded `coordination/bin/consume-events
+director2 --to 2026-06-15T19:46:45Z`, advancing the director2 cursor to the GO
+report. The
 operator unread count includes broadcast/status traffic owned by that seat; do
 not consume other seats' cursors from director2.
 
@@ -60,6 +62,8 @@ Checkpoint cluster implementation and routing:
 - `dcd5de19 coord(verify): add checkpoint docs addendum`
 - `c3811d52 coord(verify): operator2 checkpoint GO`
 - `da538a90 docs(handoff): operator2 checkpoint go handoff`
+- `0bae80c3 docs(handoff): director checkpoint go handoff`
+- `70fa53bb docs(handoff): director2 checkpoint go handoff`
 
 Operator2 verdict: `GO`.
 
@@ -92,8 +96,9 @@ No new director2 implementation was started for this handoff.
 Next seat action:
 
 1. Continue active mailbox monitoring before any protocol decision.
-2. Treat checkpoint Lane V as GO based on `c3811d52`; operator2 also left its
-   own handoff at `da538a90`.
+2. Treat checkpoint Lane V as GO based on `c3811d52`; peer handoffs are present
+   at `da538a90` (operator2), `0bae80c3` (director), and `70fa53bb`
+   (director2).
 3. Reconcile checkpoint rows to `verified` only in the proper coordinator or
    authorized director follow-up; do not re-run operator verification as a
    substitute for the committed GO report.
@@ -162,15 +167,12 @@ this handoff.
 Shared worktree before this handoff commit had unrelated WIP from other seats:
 
 ```text
-M coordination/mailbox/seen/director.txt
 ?? docs/HANDOFF-coordinator-2026-06-16-checkpoint-go-pending-reconcile.md
-?? docs/HANDOFF-director-2026-06-16-checkpoint-go-product-oracle-open.md
 ?? docs/HANDOFF-operator-2026-06-16-checkpoint-lanev-context.md
 ```
 
-Do not broad-stage. This director2 handoff should stage only:
+Do not broad-stage. This director2 handoff refresh should stage only:
 
-- `coordination/mailbox/seen/director2.txt` after consuming the GO report
 - `docs/HANDOFF-director2-2026-06-16-checkpoint-go-product-oracle-open.md`
 
 Re-run `seat_status.py director2 --wave 2` and `git status --short`
