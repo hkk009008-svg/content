@@ -224,14 +224,6 @@ class TestCoherenceColorDriftRegenGate:
         assert "regenerate" not in tools
         assert "color_grade" not in tools
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "coherence-caller-valid-ignored: diagnose_clip must check "
-            "SceneCoherenceResult.valid before trusting scores; see "
-            "docs/REMEDIATION-INVENTORY.md"
-        ),
-    )
     def test_invalid_coherence_result_is_not_recorded_as_clean_score(self, tmp_path, caplog):
         """Production-path pin: an invalid analyzer result must not become
         clean-looking coherence/color_drift scores in diagnose_clip.
@@ -259,7 +251,47 @@ class TestCoherenceColorDriftRegenGate:
         assert not {
             rec.get("tool") for rec in result.get("recommendations", [])
         }.intersection({"color_grade", "regenerate"})
+        assert result.get("coherence_error") == "cannot read current_image: '/broken.png'"
         assert any(
             rec.levelname == "WARNING" and "coherence" in rec.getMessage().lower()
             for rec in caplog.records
         ), "invalid coherence must be observable at WARNING level"
+
+    def test_invalid_coherence_result_is_not_passed_to_deep_advisory(self, tmp_path):
+        """The same invalid coherence object must not reach ChiefDirector as a real score."""
+        gs = {
+            "coherence_check_enabled": True,
+            "coherence_threshold": 0.6,
+            "color_drift_sensitivity": 0.3,
+            "advisory": {"deep_enabled": True},
+        }
+        ctrl, _ = _build_two_shot_controller(tmp_path, gs)
+        coh_obj = SimpleNamespace(
+            overall_coherence_score=0.0,
+            color_drift=0.0,
+            lighting_consistency=0.0,
+            composition_similarity=0.0,
+            recommendations=[],
+            valid=False,
+            error="cannot read current_image: '/broken.png'",
+        )
+        fake_settings = SimpleNamespace(anthropic_api_key="test-key", openai_api_key="")
+        mock_cd_instance = MagicMock()
+        mock_cd_instance.evaluate_generation_quality.return_value = {
+            "diagnosis": "",
+            "prompt_mutation": "",
+            "mutation_focus": "",
+            "decision": "KEEP",
+            "visual_findings": "",
+        }
+        mock_cd_class = MagicMock(return_value=mock_cd_instance)
+
+        with patch("coherence_analyzer.assess_coherence", return_value=coh_obj), \
+             patch("config.settings.settings", fake_settings), \
+             patch("llm.chief_director.ChiefDirector", mock_cd_class):
+            result = ctrl.diagnose_clip("s_1", deep=True)
+
+        assert result.get("coherence_error") == "cannot read current_image: '/broken.png'"
+        assert mock_cd_instance.evaluate_generation_quality.called
+        call_kwargs = mock_cd_instance.evaluate_generation_quality.call_args.kwargs
+        assert call_kwargs["coherence_result"] is None

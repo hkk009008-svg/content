@@ -2264,16 +2264,29 @@ class ShotController:
                 if os.path.exists(prev_img):
                     from coherence_analyzer import assess_coherence
                     coh = assess_coherence(str(image_path), prev_img)
-                    result["scores"]["coherence"] = coh.overall_coherence_score
-                    result["scores"]["color_drift"] = coh.color_drift
-                    _drift_threshold = _finite_or(_diag_settings.get("color_drift_sensitivity", 0.3), 0.3)
-                    if coh.color_drift > _drift_threshold:
-                        result["recommendations"].append({"tool": "color_grade", "reason": "Color palette drift detected"})
-                    # Per-project `coherence_threshold` triggers a regenerate
-                    # recommendation when the overall coherence score is too low.
-                    _coherence_floor = _finite_or(_diag_settings.get("coherence_threshold", 0.6), 0.6)
-                    if coh.overall_coherence_score < _coherence_floor:
-                        result["recommendations"].append({"tool": "regenerate", "reason": "Low coherence vs previous shot"})
+                    if getattr(coh, "valid", True) is False:
+                        coherence_error = getattr(coh, "error", "") or "invalid coherence result"
+                        logger.warning(
+                            "Ignoring invalid coherence result from diagnose_clip",
+                            extra={
+                                "shot_id": shot_id,
+                                "take_id": result["take_id"],
+                                "coherence_error": coherence_error,
+                            },
+                        )
+                        result["coherence_error"] = coherence_error
+                        coh = None
+                    else:
+                        result["scores"]["coherence"] = coh.overall_coherence_score
+                        result["scores"]["color_drift"] = coh.color_drift
+                        _drift_threshold = _finite_or(_diag_settings.get("color_drift_sensitivity", 0.3), 0.3)
+                        if coh.color_drift > _drift_threshold:
+                            result["recommendations"].append({"tool": "color_grade", "reason": "Color palette drift detected"})
+                        # Per-project `coherence_threshold` triggers a regenerate
+                        # recommendation when the overall coherence score is too low.
+                        _coherence_floor = _finite_or(_diag_settings.get("coherence_threshold", 0.6), 0.6)
+                        if coh.overall_coherence_score < _coherence_floor:
+                            result["recommendations"].append({"tool": "regenerate", "reason": "Low coherence vs previous shot"})
 
         if deep:
             from config.settings import settings as _settings
