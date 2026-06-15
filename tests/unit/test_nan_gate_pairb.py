@@ -223,3 +223,43 @@ class TestCoherenceColorDriftRegenGate:
         tools = {r["tool"] for r in result.get("recommendations", [])}
         assert "regenerate" not in tools
         assert "color_grade" not in tools
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "coherence-caller-valid-ignored: diagnose_clip must check "
+            "SceneCoherenceResult.valid before trusting scores; see "
+            "docs/REMEDIATION-INVENTORY.md"
+        ),
+    )
+    def test_invalid_coherence_result_is_not_recorded_as_clean_score(self, tmp_path, caplog):
+        """Production-path pin: an invalid analyzer result must not become
+        clean-looking coherence/color_drift scores in diagnose_clip.
+        """
+        gs = {
+            "coherence_check_enabled": True,
+            "coherence_threshold": 0.6,
+            "color_drift_sensitivity": 0.3,
+        }
+        ctrl, _ = _build_two_shot_controller(tmp_path, gs)
+        coh_obj = SimpleNamespace(
+            overall_coherence_score=0.0,
+            color_drift=0.0,
+            valid=False,
+            error="cannot read current_image: '/broken.png'",
+        )
+
+        with patch("coherence_analyzer.assess_coherence", return_value=coh_obj):
+            with caplog.at_level("WARNING"):
+                result = ctrl.diagnose_clip("s_1")
+
+        scores = result.get("scores", {})
+        assert "coherence" not in scores
+        assert "color_drift" not in scores
+        assert not {
+            rec.get("tool") for rec in result.get("recommendations", [])
+        }.intersection({"color_grade", "regenerate"})
+        assert any(
+            rec.levelname == "WARNING" and "coherence" in rec.getMessage().lower()
+            for rec in caplog.records
+        ), "invalid coherence must be observable at WARNING level"
