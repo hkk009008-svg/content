@@ -77,7 +77,18 @@ cinema/shots/controller.py:2270:                    if coh.color_drift > _drift_
 cinema/shots/controller.py:2275:                    if coh.overall_coherence_score < _coherence_floor:
 ```
 
-The caller site is unique in production, so the fix belongs at the caller guard, not in every consumer.
+The production `assess_coherence(...)` caller is unique, so the immediate fix belongs at the controller caller guard. Director2's Tier-A co-sign also found a same-object sibling in the deep advisory handoff:
+
+```
+cinema/shots/controller.py:2311:                            coherence_result=coh,
+llm/chief_director.py:451:        if coherence_result is not None:
+llm/chief_director.py:452:            coherent = coherence_result.overall_coherence_score >= 0.6
+llm/chief_director.py:518:        if coherence_result is not None:
+llm/chief_director.py:520:                "overall_score": round(coherence_result.overall_coherence_score, 3),
+llm/chief_director.py:521:                "color_drift": round(coherence_result.color_drift, 3),
+```
+
+An invalid placeholder `coh` must not be handed to `ChiefDirector.evaluate_generation_quality()` as a real coherence measurement.
 
 ## Rule #13 - Sibling Audit
 
@@ -85,7 +96,8 @@ Shared gate state: one `coh` object feeds two downstream decisions in the same b
 
 - `color_drift` drives `color_grade` at `controller.py:2270`.
 - `overall_coherence_score` drives `regenerate` at `controller.py:2275`.
-- Both must sit behind the same `valid` guard. Fixing only `color_drift` would leave `coherence=0.0` recorded as a real low score and may over-fire regeneration from an invalid analyzer result.
+- The same `coh` object is passed into the deep advisory call at `controller.py:2311`, where `ChiefDirector` reads the same score fields without a `valid` guard.
+- All three consumers must sit behind the same `valid` guard. Fixing only `color_drift` would leave `coherence=0.0` recorded as a real low score and may over-fire regeneration from an invalid analyzer result; fixing only the score writes would still let the deep advisory path reason over invalid placeholder scores.
 
 Sibling row: `coherence-silent` (`coherence_analyzer.py:202`) already pins the analyzer-side missing WARNING in `tests/unit/test_lane_silent_gate_siblings_xfail.py::test_assess_coherence_warns_when_image_unreadable`. This brief does not replace that row; it fixes the caller-side contract.
 
@@ -123,9 +135,11 @@ Mirror nearby controller warnings that include `extra={"shot_id": shot_id}` (for
 At `cinema/shots/controller.py:2266`, immediately after `coh = assess_coherence(...)`:
 
 1. If `getattr(coh, "valid", True) is False`, log a WARNING with `shot_id`, `take_id`, and `coh.error`/reason.
-2. Do not write `scores["coherence"]` or `scores["color_drift"]`.
-3. Do not emit `color_grade` or `regenerate` recommendations from invalid placeholder scores.
-4. Preserve existing behavior for valid analyzer results, including:
+2. Set `result["coherence_error"] = coh.error or "invalid coherence result"` so the diagnostic API carries an explicit machine-readable signal.
+3. Do not write `scores["coherence"]` or `scores["color_drift"]`.
+4. Do not emit `color_grade` or `regenerate` recommendations from invalid placeholder scores.
+5. Prevent invalid `coh` from reaching the deep advisory handoff. Preferred: set `coh = None` after recording `coherence_error`; alternatively pass `coherence_result=None` explicitly at `controller.py:2311`.
+6. Preserve existing behavior for valid analyzer results, including:
    - high `color_drift` -> `color_grade`
    - low `overall_coherence_score` -> `regenerate`
    - `coherence_check_enabled=False` still skips the block
@@ -145,7 +159,9 @@ The pin calls the production `ShotController.diagnose_clip()` path using the exi
 - no `scores["coherence"]`
 - no `scores["color_drift"]`
 - no `color_grade`/`regenerate` recommendations from placeholder scores
+- `coherence_error` is present
 - WARNING is logged
+- invalid `coh` is not passed to `ChiefDirector.evaluate_generation_quality()` when `deep=True`
 
 Required commands:
 
@@ -156,10 +172,13 @@ env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_nan_gate_pairb.
 
 Expected now: `--runxfail` RED for the caller bug; normal slice reports the new pin as xfailed. After the production fix lands, the normal slice should XPASS until the pin is converted to a live regression.
 
-## Dispatch Boundary
+## Co-Sign / Dispatch Boundary
 
-Do not implement until director2's Tier-A co-sign lands in the mailbox. The co-sign should verify at source, not by trusting this brief, and should explicitly answer:
+Director2 Tier-A co-sign landed as GO in `coordination/mailbox/sent/2026-06-15T04-13-32Z-director2-to-director-verification-report.md` (`2450848`). Source-verified clarifications accepted:
 
-1. Is the caller-only guard sufficient, or should the implementation also fold analyzer-side `coherence-silent` in the same commit?
-2. Does the guard belong only around score/recommendation writes, or should `result` include a separate diagnostic field such as `coherence_error`?
-3. Are there any Pair-B controller siblings beyond `diagnose_clip()` that read `SceneCoherenceResult` scores?
+1. Caller-only guard is sufficient for this row if it covers score writes, recommendations, and the deep advisory handoff.
+2. Do not fold analyzer-side `coherence-silent`; that row/pin remains separate.
+3. Add explicit `coherence_error` plus WARNING.
+4. No other production `assess_coherence(...)` caller was found, but the same-object deep handoff must be covered.
+
+Clear to implement under this scope. Operator-1 later verifies the landed diff against this co-signed scope; drift = FAIL.
