@@ -5,23 +5,23 @@ READ FIRST AS coordinator. Trust git, mailbox artifacts, and
 
 ## State At Wrap
 
-Timestamp: `2026-06-15T19:04:22Z`
-(`2026-06-16T04:04:22+0900` Asia/Seoul).
+Timestamp: `2026-06-15T19:20:46Z`
+(`2026-06-16T04:20:46+0900` Asia/Seoul).
 
 HEAD before writing this handoff:
 
 ```text
-e6205050 coord(route): notify wave2 seat tasks
-8da10dc2 coord(handoff): verify mode-b budget gate
-38e892e3 coord(verify): operator2 go mode-b budget gate
-9128d90d docs(handoff): operator route mode-b lanev
-1b3509cf coord(verify): request mode-b budget Lane V
+90c1fee7 docs(handoff): director2 checkpoint handoff
+d2c4b72c docs(handoff): operator2 standby after codex rules
+9b56d399 docs(handoff): director protocol codified
+4d077c9c coord(protocol): document codex mailbox index guard
+fa11b793 coord(protocol): clarify mail consumption rule
 ```
 
 Branch state from coordinator status:
 
 ```text
-main vs origin/main: 32 ahead, 0 behind
+main vs origin/main: 38 ahead, 0 behind
 ```
 
 Coordinator/all-scope mailbox count:
@@ -37,7 +37,32 @@ consumed.
 
 ## What Just Landed
 
-Latest durable commit:
+Latest durable commits:
+
+- `90c1fee7 docs(handoff): director2 checkpoint handoff`
+  - Adds `docs/HANDOFF-director2-2026-06-16-PM1.md`.
+  - Advances `coordination/mailbox/seen/director2.txt`.
+  - No new mailbox event; the latest routing event remains the `18:58:49Z`
+    coordinator task board.
+- `d2c4b72c docs(handoff): operator2 standby after codex rules`
+  - Adds `docs/HANDOFF-operator2-2026-06-16-standby-after-codex-rules.md`.
+  - Advances `coordination/mailbox/seen/operator2.txt`.
+  - No new mailbox event; the latest routing event remains the `18:58:49Z`
+    coordinator task board.
+- `9b56d399 docs(handoff): director protocol codified`
+  - Adds `docs/HANDOFF-director-2026-06-16-protocol-codified.md`.
+  - No new mailbox event; the latest routing event remains the `18:58:49Z`
+    coordinator task board.
+- `4d077c9c coord(protocol): document codex mailbox index guard`
+  - Updates `coordination/README.md` with the Codex mailbox/index guard.
+  - Advances `coordination/mailbox/seen/director.txt` to the latest
+    coordinator task-board mail.
+- `fa11b793 coord(protocol): clarify mail consumption rule`
+  - Clarifies that "always read mail" means inspect live mail first; cursor
+    consumption is a separate intentional mutation.
+- `ab8beb4c coord(protocol): codify codex live rules`
+  - Codifies live Codex protocol rules in AGENTS/protocol/skill docs and the
+    rules log.
 
 - `e6205050 coord(route): notify wave2 seat tasks`
   - Adds
@@ -54,31 +79,40 @@ Latest durable commit:
   - Routes operator to consume stale unread mail and remain Pair-A verifier
     standby.
 
-No push was performed. Push remains user-gated.
+No push was performed. The user requested `push`, coordinator status was
+refreshed for a pre-push check, then the newer instruction changed to
+`handoff`. Main remains `38 ahead, 0 behind`; re-read mail before any future
+push.
 
 ## Live Seat Mail State
 
-Fresh per-seat status after the task-board commit:
+Fresh per-seat status after the latest handoff refresh:
 
 ```text
 director  UNREAD: 0
+  cursor: 2026-06-15T18:58:49Z
 operator  UNREAD: 3
   - 2026-06-15T18-42-44Z-operator2-to-all-verification-report.md
   - 2026-06-15T18-45-12Z-coordinator-to-all-coordination.md
   - 2026-06-15T18-58-49Z-coordinator-to-all-coordination.md
-director2 UNREAD: 1
-  - 2026-06-15T18-58-49Z-coordinator-to-all-coordination.md
-operator2 UNREAD: 1
-  - 2026-06-15T18-58-49Z-coordinator-to-all-coordination.md
+  cursor: 2026-06-15T18:30:29Z
+director2 UNREAD: 0
+  cursor: 2026-06-15T18:58:49Z
+operator2 UNREAD: 0
+  cursor: 2026-06-15T18:58:49Z
 ```
 
-Peer heartbeats in coordinator status were all ONLINE on `e6205050`:
+Receipt split: director, director2, and operator2 have consumed the
+`18:58:49Z` coordinator task board. Operator still has that task board plus two
+older all-scope events unread.
+
+Peer heartbeats in coordinator status were all ONLINE at the final refresh:
 
 ```text
-director   ONLINE
-director2  ONLINE
-operator   ONLINE
-operator2  ONLINE
+director   ONLINE @ 9b56d399
+director2  ONLINE @ 90c1fee7
+operator   ONLINE @ 90c1fee7
+operator2  ONLINE @ d2c4b72c
 ```
 
 ## Gate Proof
@@ -181,6 +215,8 @@ shared index if the shared index shows a bogus `D/??` pair afterward.
    director2 owns the no-lock checkpoint cluster; operator2 verifies after a
    committed fix and verify request; director/operator remain role-safe
    monitors.
-5. Do not claim `W2-web_server.py.lock` or `W2-auto_approve.py.lock` unless
+5. Operator still needs to consume three unread all-scope events if operating
+   as the live `operator` seat.
+6. Do not claim `W2-web_server.py.lock` or `W2-auto_approve.py.lock` unless
    push/lock side effects are explicitly authorized by the user-principal.
-6. Do not author production fixes as coordinator.
+7. Do not author production fixes as coordinator.
