@@ -6,16 +6,16 @@ this prose if they diverge. No push performed.
 ## State At Stop
 
 Operator2 resumed under the Codex live-seat protocol, consumed the outstanding
-coordinator broadcast, and remains idle. No Lane V is currently owed to
-operator2.
+coordinator broadcast and the final peer idle broadcasts, and remains idle. No
+Lane V is currently owed to operator2.
 
 Fresh state before this handoff:
 
 ```text
 $ CODEX_SEAT=operator2 .venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py operator2 --wave 2
-HEAD: 060d008b docs(handoff): coordinator wave2 codex idle
-vs origin/main: 72 ahead, 0 behind
-mailbox cursor: 2026-06-15T10:35:38Z
+HEAD: 24790abe docs(handoff): operator2 codex resume idle
+vs origin/main: 73 ahead, 0 behind
+mailbox cursor: 2026-06-15T10:43:36Z
 UNREAD: 0
 Wave 2 gate: UNMET counts={'verified': 16, 'open': 14}
 BLOCKER [MAJOR/open] spent-usd-reset-on-resume (cinema/checkpoint.py:163): no executable xfail-pin selector
@@ -28,6 +28,7 @@ Recent git before this handoff:
 
 ```text
 $ env -u GIT_INDEX_FILE git log --oneline -8
+24790abe docs(handoff): operator2 codex resume idle
 060d008b docs(handoff): coordinator wave2 codex idle
 c740f95c coord(cursor): operator2 consume own codex idle status
 5507582e coord(status): operator2 idle after codex resume
@@ -35,7 +36,6 @@ c740f95c coord(cursor): operator2 consume own codex idle status
 32b3025a verify(pairB): go audioflag inherit
 9689e569 coord(verify): request audioflag inherit Lane V
 665427db fix(assembly): warn on audio flag probe failure
-83e6ff77 coord(inventory): verify charmgr cost row
 ```
 
 R-START smoke evidence:
@@ -64,9 +64,13 @@ c740f95c coord(cursor): operator2 consume own codex idle status
 
 5. Read and consumed the coordinator handoff broadcast:
    `coordination/mailbox/sent/2026-06-15T10-35-38Z-coordinator-to-all-coordination.md`.
+6. After the first handoff commit, consumed the final peer idle broadcasts:
+   `coordination/mailbox/sent/2026-06-15T10-43-14Z-director-to-all-status.md`,
+   `coordination/mailbox/sent/2026-06-15T10-43-34Z-director2-to-all-status.md`,
+   and `coordination/mailbox/sent/2026-06-15T10-43-36Z-operator-to-all-status.md`.
 
-This handoff commit folds the final cursor update through
-`2026-06-15T10:35:38Z`.
+This handoff update folds the final cursor update through
+`2026-06-15T10:43:36Z`.
 
 ## Phase Read
 
@@ -75,6 +79,8 @@ This handoff commit folds the final cursor update through
   Pair-B shipping `fix`, `feat`, or `refactor`.
 - No unread operator2 `verify-request` remains.
 - No production code was edited by operator2 in this handoff cycle.
+- The final peer broadcasts are all idle/status handoffs, not Pair-B Lane V
+  requests.
 
 Therefore: no Lane V was invented.
 
