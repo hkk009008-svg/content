@@ -71,6 +71,29 @@ def test_create_character_with_images_threads_project_tracker_to_angles(tmp_path
     assert captured["video_id"] == "proj-charmgr"
 
 
+def test_project_budget_corruption_keeps_angle_tracker_gate_active(tmp_path, monkeypatch):
+    from domain.character_manager import _cost_tracker_from_project
+
+    monkeypatch.setenv("EXPERIMENTS_DB_PATH", str(tmp_path / "cost.db"))
+    project = {
+        "id": "proj-charmgr",
+        "global_settings": {"budget_limit_usd": "abc"},
+    }
+
+    tracker = None
+    try:
+        tracker = _cost_tracker_from_project(project)
+
+        assert tracker is not None
+        assert tracker.budget_usd is not None, (
+            "malformed project budget became an unlimited CostTracker"
+        )
+        assert tracker.would_exceed("FLUX_KONTEXT") is True
+    finally:
+        if tracker is not None:
+            tracker.close()
+
+
 def test_multi_angle_refs_spend_lands_on_shared_tracker(tmp_path):
     """Spend from FLUX_KONTEXT multi-angle calls must land on a caller-supplied tracker.
 

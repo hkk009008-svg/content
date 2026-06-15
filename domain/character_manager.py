@@ -102,14 +102,15 @@ def _char_dir(project_id: str, char_id: str) -> str:
     return d
 
 
-def _budget_usd_from_project(project: dict) -> Optional[float]:
+def _budget_usd_from_project(project: dict) -> Optional[object]:
     budget_usd = (project.get("global_settings") or {}).get("budget_limit_usd")
     if budget_usd is None:
         return None
     try:
         return float(budget_usd)
-    except (TypeError, ValueError):
-        return None
+    except (TypeError, ValueError, OverflowError):
+        # Preserve corrupted caps for CostTracker's fail-closed coercion.
+        return budget_usd
 
 
 def _cost_tracker_from_project(project: dict):
