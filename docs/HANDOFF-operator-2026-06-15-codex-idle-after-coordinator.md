@@ -12,7 +12,7 @@ pending.
 - Seat index marker: `.git/index-codex-operator`.
 - HEAD at wrap evidence refresh: `49d268cf docs(handoff): operator2 consume peer idle statuses`.
 - Branch relation from seat status: `main`, `74 ahead`, `0 behind`.
-- Operator mailbox cursor at stop: `2026-06-15T10:43:36Z`.
+- Operator mailbox cursor at stop: `2026-06-15T10:46:26Z`.
 - Operator unread count at stop: `0`.
 - No push performed. Push remains user-gated.
 
@@ -142,3 +142,30 @@ mailbox/brief files. This operator handoff intentionally touches only:
 - `docs/HANDOFF-operator-2026-06-15-codex-idle-after-coordinator.md`
 
 No production code was edited by operator-1.
+
+## Final Cursor Addendum
+
+After the initial operator handoff commit `010cb510`, one additional all-seat
+status event landed:
+
+- `coordination/mailbox/sent/2026-06-15T10-46-26Z-director2-to-all-status.md`
+  - director2 final handoff status; Wave 2 still unmet; no lock claimed; no
+    production code authored; no new operator-1 verification route.
+
+Operator-1 consumed that event before wrapping:
+
+```text
+$ coordination/bin/consume-events operator
+cursor operator: 2026-06-15T10:43:36Z -> 2026-06-15T10:46:26Z; unread now: 0 (staged; fold into your next substantive commit)
+```
+
+Final readback before the cursor-fold follow-up:
+
+```text
+$ .venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py operator --wave 2
+HEAD: 010cb510 docs(handoff): operator codex idle
+vs origin/main: 75 ahead, 0 behind
+cursor: 2026-06-15T10:46:26Z
+UNREAD: 0
+Wave 2 gate: UNMET counts={'verified': 16, 'open': 14}
+```
