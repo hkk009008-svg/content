@@ -8,6 +8,7 @@ import subprocess
 from typing import TYPE_CHECKING, Optional
 from config.settings import settings
 from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S
+from performance._net import safe_download
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,15 @@ def generate_ai_video(
                 "engine": winning_engine,
                 "attempts": list(attempted_apis),
             }
+
+    def _download_video_or_cascade(video_url: str, engine: str) -> bool:
+        if safe_download(video_url, output_mp4) is None:
+            logger.warning(
+                "Generated video download failed — cascading",
+                extra={"engine": engine, "output_mp4": output_mp4},
+            )
+            return False
+        return True
 
     # Shot-type-aware negative prompt — tailored to what each shot type actually suffers from.
     # Guard is `not negative_prompt` (not `is None`): callers commonly pass "" for a shot with
@@ -453,7 +463,6 @@ def generate_ai_video(
         try:
             from runwayml import RunwayML
             client = RunwayML(api_key=settings.runwayml_api_secret)
-            import urllib.request
 
             logger.info("Runway Gen-4 I2V with style lock", extra={"engine": "RUNWAY_GEN4"})
 
@@ -487,7 +496,8 @@ def generate_ai_video(
 
             if task.status == "SUCCEEDED" and task.output:
                 video_url = task.output[0] if isinstance(task.output, list) else task.output
-                urllib.request.urlretrieve(video_url, output_mp4)
+                if not _download_video_or_cascade(video_url, "RUNWAY_GEN4"):
+                    return try_next_api()
                 logger.info("Runway Gen-4 success", extra={"engine": "RUNWAY_GEN4", "output_mp4": output_mp4})
                 if not _accept_or_reject(output_mp4, _aspect):
                     logger.warning(
@@ -514,8 +524,6 @@ def generate_ai_video(
         fal_key = settings.fal_key
         if fal_key and FAL_AVAILABLE:
             try:
-                import urllib.request
-
                 logger.info("fal.ai Sora 2 I2V (25s continuous)", extra={"engine": "SORA_2"})
 
                 start_url = fal_client.upload_file(image_path)
@@ -547,7 +555,8 @@ def generate_ai_video(
 
                 video_url = result.get("video", {}).get("url")
                 if video_url:
-                    urllib.request.urlretrieve(video_url, output_mp4)
+                    if not _download_video_or_cascade(video_url, "SORA_2"):
+                        return try_next_api()
                     logger.info("Sora 2 success", extra={"engine": "SORA_2", "output_mp4": output_mp4})
                     if not _accept_or_reject(output_mp4, _aspect):
                         logger.warning(
@@ -581,8 +590,6 @@ def generate_ai_video(
         fal_key = settings.fal_key
         if fal_key and FAL_AVAILABLE:
             try:
-                import urllib.request
-
                 logger.info("fal.ai Veo 3.1 reference-to-video", extra={"engine": "VEO"})
 
                 # Upload reference images for subject preservation
@@ -630,7 +637,8 @@ def generate_ai_video(
 
                 video_url = result.get("video", {}).get("url")
                 if video_url:
-                    urllib.request.urlretrieve(video_url, output_mp4)
+                    if not _download_video_or_cascade(video_url, "VEO"):
+                        return try_next_api()
                     logger.info("VEO success", extra={"engine": "VEO", "output_mp4": output_mp4})
                     if not _accept_or_reject(output_mp4, _aspect):
                         logger.warning(
@@ -664,8 +672,6 @@ def generate_ai_video(
             max_attempts = 2
             for attempt in range(1, max_attempts + 1):
                 try:
-                    import urllib.request
-
                     logger.info(
                         "fal.ai Kling 3.0 Pro I2V",
                         extra={"engine": "KLING_3_0", "attempt": attempt, "max_attempts": max_attempts},
@@ -735,7 +741,8 @@ def generate_ai_video(
 
                     video_url = result.get("video", {}).get("url")
                     if video_url:
-                        urllib.request.urlretrieve(video_url, output_mp4)
+                        if not _download_video_or_cascade(video_url, "KLING_3_0"):
+                            return try_next_api()
                         logger.info("Kling success", extra={"engine": "KLING_3_0", "output_mp4": output_mp4})
                         if not _accept_or_reject(output_mp4, _aspect):
                             logger.warning(
@@ -820,8 +827,8 @@ def generate_ai_video(
 
                 video_url = result.get("video", {}).get("url")
                 if video_url:
-                    import urllib.request
-                    urllib.request.urlretrieve(video_url, output_mp4)
+                    if not _download_video_or_cascade(video_url, "FAL_SVD"):
+                        return try_next_api()
                     if not _accept_or_reject(output_mp4, _aspect):
                         logger.warning(
                             "Aspect backstop: wrong orientation — rejecting → cascade",
@@ -866,8 +873,8 @@ def generate_ai_video(
                 )
                 completed_task = video_task.wait_for_task_output()
                 final_video_url = completed_task.output[0]
-                import urllib.request
-                urllib.request.urlretrieve(final_video_url, output_mp4)
+                if not _download_video_or_cascade(final_video_url, "RUNWAY"):
+                    return try_next_api()
                 if not _accept_or_reject(output_mp4, _aspect):
                     logger.warning(
                         "Aspect backstop: wrong orientation — rejecting → cascade",
@@ -953,8 +960,8 @@ def generate_ai_video(
                     if status in ("completed", "success"):
                         video_url = poll_resp.get("video_url") or poll_resp.get("output", {}).get("video_url")
                         if video_url:
-                            import urllib.request
-                            urllib.request.urlretrieve(video_url, output_mp4)
+                            if not _download_video_or_cascade(video_url, "SEEDANCE"):
+                                return try_next_api()
                             logger.info(
                                 "Seedance video downloaded",
                                 extra={"engine": "SEEDANCE", "output_mp4": output_mp4},

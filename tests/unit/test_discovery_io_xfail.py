@@ -1,73 +1,131 @@
-"""R-VERIFY-TIER(B) xfail pin — discovery-wf_13f9d2f6-f93, confirmed[8].
+"""Live regression for discovery-wf_13f9d2f6-f93, confirmed[8].
 
 BUG: W2:MAJOR:download-urllib-notimeout
-  phase_c_ffmpeg.py:490,550,633,738,824,870,957 — all seven video-download sites call
-  urllib.request.urlretrieve(url, path) with NO timeout argument, and there is no
-  socket.setdefaulttimeout() anywhere in the module. A stalled CDN that sends data slowly
-  will block the pipeline thread indefinitely; the except-Exception guard on each branch
-  only fires for connection/DNS errors at the poll/submit phase, not for a slow-read CDN
-  transfer already underway. Fix = set socket.setdefaulttimeout(N) before the first
-  urlretrieve call (or wrap downloads in urllib.request.urlopen with a timeout and shutil.
-  copyfileobj). When fixed the xfail xpasses (strict) -> delete this pin.
+  phase_c_ffmpeg.py had seven video-download sites calling
+  urllib.request.urlretrieve(url, path) with no timeout. A stalled CDN transfer
+  could block the pipeline thread indefinitely. The fixed shape routes all seven
+  provider branches through a local helper that calls performance._net.safe_download.
 
 Source: logs/discovery-wf_13f9d2f6-f93.json confirmed[8]; refuters returned
-  refuted=False (all seven bare call sites confirmed, no socket.setdefaulttimeout in repo).
+  refuted=False (all seven bare call sites confirmed).
 """
 
 import ast
 import pathlib
 
-import pytest
-
 _MODULE_PATH = pathlib.Path(__file__).parent.parent.parent / "phase_c_ffmpeg.py"
+_EXPECTED_ENGINES = {
+    "RUNWAY_GEN4",
+    "SORA_2",
+    "VEO",
+    "KLING_3_0",
+    "FAL_SVD",
+    "RUNWAY",
+    "SEEDANCE",
+}
 
 # ---------------------------------------------------------------------------
-# Static source approach: the download sites are only reachable through the
-# large generate_ai_video() dispatch function, so a behavioural monkeypatch
-# would require constructing heavy API mocks for seven different engine paths.
-# Instead we assert the FIXED state on the real source text — a genuine check
-# against the live code, not a vacuous constant. (See brief: "source-assert is
-# acceptable as long as it targets the REAL code.")
+# Static source approach: the seven download branches are buried inside the
+# large generate_ai_video() cascade. Building full API mocks for every engine is
+# heavier than the row needs; AST checks still target the real production source
+# and prove the non-vacuous fixed shape.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:MAJOR:download-urllib-notimeout phase_c_ffmpeg.py:490,550,633,738,824,870,957 "
-        "urllib.request.urlretrieve called at 7 download sites with no timeout and no "
-        "socket.setdefaulttimeout() anywhere in the module; a stalled CDN blocks the "
-        "pipeline thread indefinitely. Fix = socket.setdefaulttimeout or urlopen+timeout "
-        "wrapper before downloads; then this xpasses (strict) and the pin is removed."
-    ),
-)
+def _dotted_name(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = _dotted_name(node.value)
+        return f"{base}.{node.attr}" if base else node.attr
+    return None
+
+
 def test_urlretrieve_download_sites_have_timeout_protection():
-    """Assert the fixed state: a socket timeout guard exists in phase_c_ffmpeg.
-
-    Today: no socket.setdefaulttimeout() call and no timeout-bearing urlopen
-    wrapper exist in the module -> assertion fails -> XFAIL (expected failure).
-
-    When fixed: the assertion passes -> strict xfail flips to XPASS -> delete pin.
-    """
+    """Assert every Phase-C video provider download is timeout-protected."""
     source = _MODULE_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
 
-    # Confirm the module still contains bare urlretrieve calls (defect still present).
-    # If all 7 sites are removed/replaced, the xfail premise changes; document that.
-    urlretrieve_count = source.count("urllib.request.urlretrieve")
-    assert urlretrieve_count > 0, (
-        "phase_c_ffmpeg.py contains no urllib.request.urlretrieve calls — "
-        "if all download sites were replaced, re-scope this pin."
+    raw_urlretrieve_calls = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and (
+            _dotted_name(node.func) == "urlretrieve"
+            or (_dotted_name(node.func) or "").endswith(".urlretrieve")
+        )
+    ]
+    assert raw_urlretrieve_calls == [], (
+        "phase_c_ffmpeg.py must not use raw urlretrieve for provider video "
+        f"downloads; found call(s) at {raw_urlretrieve_calls}."
     )
 
-    # The FIXED condition: at least one of these timeout mechanisms must be present.
-    has_socket_default_timeout = "socket.setdefaulttimeout(" in source
-    has_urlopen_with_timeout = (
-        "urllib.request.urlopen(" in source and "timeout=" in source
+    assert any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "performance._net"
+        and any(alias.name == "safe_download" for alias in node.names)
+        for node in tree.body
+    ), (
+        "phase_c_ffmpeg.py must import safe_download from performance._net, "
+        "the shared timeout/size/scheme-checked download helper."
     )
 
-    assert has_socket_default_timeout or has_urlopen_with_timeout, (
-        f"phase_c_ffmpeg.py has {urlretrieve_count} bare urllib.request.urlretrieve "
-        "call(s) with no timeout protection: no socket.setdefaulttimeout() and no "
-        "urlopen(timeout=...) wrapper found. A stalled CDN transfer blocks the pipeline "
-        "thread indefinitely. (W2:MAJOR:download-urllib-notimeout)"
+    generate = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "generate_ai_video"
     )
+    helper_defs = [
+        node for node in generate.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_download_video_or_cascade"
+    ]
+    assert len(helper_defs) == 1
+    helper = helper_defs[0]
+
+    module_safe_calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and _dotted_name(node.func) == "safe_download"
+    ]
+    helper_safe_calls = [
+        node for node in ast.walk(helper)
+        if isinstance(node, ast.Call)
+        and _dotted_name(node.func) == "safe_download"
+    ]
+    assert len(module_safe_calls) == 1
+    assert helper_safe_calls == module_safe_calls
+    safe_call = helper_safe_calls[0]
+    assert [arg.id for arg in safe_call.args[:2] if isinstance(arg, ast.Name)] == [
+        "video_url",
+        "output_mp4",
+    ]
+
+    guarded_calls = []
+    for node in ast.walk(generate):
+        if (
+            isinstance(node, ast.If)
+            and isinstance(node.test, ast.UnaryOp)
+            and isinstance(node.test.op, ast.Not)
+            and isinstance(node.test.operand, ast.Call)
+            and _dotted_name(node.test.operand.func) == "_download_video_or_cascade"
+            and any(
+                isinstance(stmt, ast.Return)
+                and isinstance(stmt.value, ast.Call)
+                and _dotted_name(stmt.value.func) == "try_next_api"
+                for stmt in node.body
+            )
+        ):
+            guarded_calls.append(node.test.operand)
+
+    engines = {
+        call.args[1].value
+        for call in guarded_calls
+        if len(call.args) >= 2 and isinstance(call.args[1], ast.Constant)
+    }
+    assert len(guarded_calls) == 7
+    assert engines == _EXPECTED_ENGINES
+    assert {
+        call.args[0].id
+        for call in guarded_calls
+        if call.args and isinstance(call.args[0], ast.Name)
+    } <= {"video_url", "final_video_url"}
