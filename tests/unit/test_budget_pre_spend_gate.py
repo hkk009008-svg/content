@@ -21,6 +21,8 @@ import sys
 import types
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 # ---------------------------------------------------------------------------
 # Helpers — minimal stubs so we can import domain modules without the
@@ -408,6 +410,85 @@ class TestPerformancePreSpendBudgetGate:
         dispatch.assert_called_once()
         lifecycle.pause.assert_not_called()
         cost_tracker.would_exceed.assert_called_once_with("VIGGLE")
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "perf-phase-no-gate: Mode-B driving synth plus performance engine "
+            "can exceed the cap after the engine-only precheck; see "
+            "docs/REMEDIATION-INVENTORY.md"
+        ),
+    )
+    def test_mode_b_refuses_when_combined_driving_and_engine_cost_exceeds_budget(self, tmp_path):
+        """Correct behavior: refuse before Mode-B synth when combined spend exceeds cap."""
+        from cost_tracker import CostTracker
+
+        audio = tmp_path / "scene.mp3"
+        audio.write_bytes(b"fake_mp3")
+        driving = tmp_path / "driving.mp4"
+
+        project = {
+            "id": "proj_perf_mode_b_budget_gap",
+            "characters": [{"id": "char_1", "name": "Alice"}],
+            "global_settings": {},
+            "scenes": [{
+                "id": "scene_1",
+                "title": "Scene",
+                "duration_seconds": 5.0,
+                "characters_present": ["char_1"],
+                "shots": [{
+                    "id": "shot_1_0",
+                    "prompt": "Medium dialogue shot",
+                    "plan_status": "approved",
+                    "shot_type": "medium",
+                    "characters_in_frame": ["char_1"],
+                    "dialogue": "hello there",
+                    "approved_keyframe_take_id": "kf_t1",
+                }],
+            }],
+        }
+        ctrl, lifecycle, _mock_tracker = self._build_controller(project, tmp_path)
+        ctrl._host._ensure_scene_audio.return_value = str(audio)
+        tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=1.00)
+        tracker.spent_usd = 0.70
+        ctrl._core.cost_tracker = tracker
+
+        def _synth(**kwargs):
+            driving.write_bytes(b"fake_driving")
+            tracker.log_api(
+                provider="hedra",
+                model="driving_face",
+                operation="performance_capture_driving",
+                cost_usd=0.075,
+            )
+            return str(driving), "hedra"
+
+        def _dispatch(*args, **kwargs):
+            output = kwargs["output_mp4"]
+            open(output, "wb").write(b"fake_mp4")
+            tracker.log_api(
+                provider="runway",
+                model="act_one",
+                operation="performance_capture",
+                cost_usd=0.25,
+            )
+            return output
+
+        try:
+            with (
+                patch("performance.driving_video.synth_driving_face_from_audio", side_effect=_synth) as synth,
+                patch("performance._router.dispatch", side_effect=_dispatch) as dispatch,
+                patch("performance.identity_gate.validate_performance_take", return_value=None),
+            ):
+                result = ctrl.generate_performance_take("scene_1", "shot_1_0")
+
+            assert result.get("success") is False
+            assert result.get("error_kind") == "budget"
+            synth.assert_not_called()
+            dispatch.assert_not_called()
+            lifecycle.pause.assert_called_once()
+        finally:
+            tracker.close()
 
 
 class TestPerformancePhaseBudgetAbort:
