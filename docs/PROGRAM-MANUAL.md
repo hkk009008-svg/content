@@ -159,15 +159,15 @@ flowchart TD
     IDEA["Idea / script<br/>(scenes, characters, locations)"] --> STYLE
 
     subgraph PLANNING["Planning — LLM brain layer (llm/)"]
-        STYLE["STYLE<br/>generate_style_rules()<br/>cinema_pipeline.py:955-993"]
-        STYLE --> DECOMP["SCENE_DECOMPOSE (per scene)<br/>competitive_decompose_scene / decompose_scene<br/>cinema_pipeline.py:1010-1057"]
+        STYLE["STYLE<br/>generate_style_rules()<br/>cinema_pipeline.py:958-993"]
+        STYLE --> DECOMP["SCENE_DECOMPOSE (per scene)<br/>competitive_decompose_scene / decompose_scene<br/>cinema_pipeline.py:997-1068"]
         DECOMP --> RESEARCH{{"Research augmentation<br/>Tavily / Firecrawl<br/>research_cinematography()"}}
         RESEARCH --> DECOMP
-        DECOMP --> DIRVAL["ChiefDirector.validate_shot_prompts<br/>HC1-HC8 → APPROVED/MODIFIED/REJECTED<br/>+ record_director_review_on_shots (1054)"]
-        DIRVAL --> DIALOGUE["Per-scene dialogue + audio<br/>_ensure_scene_audio (1057)"]
+        DECOMP --> DIRVAL["ChiefDirector.validate_shot_prompts<br/>HC1-HC8 → APPROVED/MODIFIED/REJECTED<br/>+ record_director_review_on_shots (1064)"]
+        DIRVAL --> DIALOGUE["Per-scene dialogue + audio<br/>_ensure_scene_audio (1067)"]
     end
 
-    DIRVAL --> G1{{"GATE 1: PLAN_REVIEW<br/>cinema_pipeline.py:1059"}}
+    DIRVAL --> G1{{"GATE 1: PLAN_REVIEW<br/>cinema_pipeline.py:1070"}}
 
     subgraph IMAGE["Keyframe generation — image tiers"]
         G1 --> KF["KEYFRAME_RENDER<br/>KeyframeRenderPhase.run (1089)"]
@@ -221,11 +221,11 @@ flowchart TD
 
 | # | Stage | What happens | Primary modules |
 |---|---|---|---|
-| 1 | **STYLE** | Once per run. If `global_settings.style_rules` is empty, `generate_style_rules()` (GPT-4o, optionally Tavily-grounded) produces a 7-key style dict (cinematography, color grading, lighting, photorealism…) persisted to the project. A `style_rules_to_prompt_suffix` is appended to every downstream image prompt. | `llm/style_director.py:12`; called `cinema_pipeline.py:955-993` |
-| 2 | **SCENE_DECOMPOSE** | Per scene (only if the scene has no shots yet). Converts scene prose → 2–5 API-routed shot records. `competitive_generation=True` runs GPT-4o vs Claude in parallel with a judge; otherwise single GPT-4o. Each shot gets `prompt`, `camera`, `visual_effect`, `target_api`, `characters_in_frame`. | `domain/scene_decomposer.py:436`/`:624`; called `cinema_pipeline.py:1010-1057` |
+| 1 | **STYLE** | Once per run. If `global_settings.style_rules` is empty, `generate_style_rules()` (GPT-4o, optionally Tavily-grounded) produces a 7-key style dict (cinematography, color grading, lighting, photorealism…) persisted to the project. A `style_rules_to_prompt_suffix` is appended to every downstream image prompt. | `llm/style_director.py:12`; called `cinema_pipeline.py:958-993` |
+| 2 | **SCENE_DECOMPOSE** | Per scene (only if the scene has no shots yet). Converts scene prose → 2–5 API-routed shot records. `competitive_generation=True` runs GPT-4o vs Claude in parallel with a judge; otherwise single GPT-4o. Each shot gets `prompt`, `camera`, `visual_effect`, `target_api`, `characters_in_frame`. | `domain/scene_decomposer.py:436`/`:624`; called `cinema_pipeline.py:997-1068` |
 | 2a | **Research augmentation** | Optional, silently skipped if `TAVILY_API_KEY`/`FIRECRAWL_API_KEY` absent. A GPT-4o tool-loop (`run_with_tools`) injects live cinematography/location/music references into decomposition and dialogue prompts to ground output in real craft. | `research_engine.py:44`, `web_research.py:122` |
-| 2b | **Director review** | `ChiefDirector.validate_shot_prompts` enforces hard constraints HC1–HC8 (identity firewall, schema lock, lighting lock, face-direction) and returns APPROVED / MODIFIED / REJECTED. **Critical:** `record_director_review_on_shots(shots, review)` then writes `shot["director_review"]` — the field the PLAN gate reads. | `llm/chief_director.py:296`; `cinema/auto_approve.py:235`; called `cinema_pipeline.py:1054` |
-| 2c | **Dialogue + scene audio** | Per scene, `generate_dialogue` (LLM) → `generate_dialogue_voiceover` (ElevenLabs Dialogue Mode for 2+ speakers, or Cartesia Sonic 2 for Korean) produces an MP3 cached for later mux. BGM is pre-generated upfront. | `audio/dialogue.py:431`; `cinema_pipeline.py:1057` (audio), `:993` (BGM) |
+| 2b | **Director review** | `ChiefDirector.validate_shot_prompts` enforces hard constraints HC1–HC8 (identity firewall, schema lock, lighting lock, face-direction) and returns APPROVED / MODIFIED / REJECTED. **Critical:** `record_director_review_on_shots(shots, review)` then writes `shot["director_review"]` — the field the PLAN gate reads. | `llm/chief_director.py:296`; `cinema/auto_approve.py:235`; called `cinema_pipeline.py:1064` |
+| 2c | **Dialogue + scene audio** | Per scene, `generate_dialogue` (LLM) → `generate_dialogue_voiceover` (ElevenLabs Dialogue Mode for 2+ speakers, or Cartesia Sonic 2 for Korean) produces an MP3 cached for later mux. BGM is pre-generated upfront. | `audio/dialogue.py:431`; `cinema_pipeline.py:1067` (audio), `:995` (BGM) |
 | 3 | **KEYFRAME_RENDER** | Per unapproved shot, `generate_keyframe_take` builds the prompt via `ContinuityEngine.enhance_shot_prompt`, optionally optimizes it, then calls `generate_ai_broll`: FLUX-Dev + PuLID on a ComfyUI/RunPod pod is primary; FAL FLUX Kontext → FLUX-Pro → Schnell → Pollinations are cloud fallbacks. The optional **max tier** runs N=8 adaptive best-of with ArcFace+aesthetic scoring, ControlNet, Redux, FaceDetailer, ReActor, and SUPIR 4K upscale. | `phase_c_assembly.py:99`, `quality_max.py:701`; phase wrapper `cinema/phases/keyframe_render.py:68`; called `cinema_pipeline.py:1089` |
 | 4 | **PERFORMANCE_CAPTURE** | Per shot with an approved keyframe, retargets a performance onto the still: ACT_ONE / LIVE_PORTRAIT / VIGGLE, or SKIP (the domain router decides via `route_performance_engine`). Shots routed to SKIP are passed over with no generation. | `cinema/phases/performance.py:35`, `domain/performance.py:103`; called `cinema_pipeline.py:1119` |
 | 5 | **MOTION_RENDER** | Per shot, `generate_motion_take` turns the keyframe into a clip via the **video cascade** (`generate_ai_video`): Kling→Sora→Runway→LTX→Veo→Kling-3.0→…, filtering disabled engines and retrying on total exhaustion. Dialogue shots route first to **Veo native audio** (the only `native_audio=True` engine); non-embedded dialogue clips get a mandatory lip-sync pass. A storyboard batch path (Kling Native) handles 2–6-shot scenes in one call when all keyframes exist and the aspect is non-portrait (M-1 guard — portrait always takes the per-shot path). | `phase_c_ffmpeg.py:54`, `cinema/phases/motion_render.py:342`; called `cinema_pipeline.py:1166` |
@@ -245,19 +245,20 @@ flowchart TD
 generate(resume=False)
  │
  ├─ _refresh_project_snapshot()              # load → model_validate → swap in place (443)
- ├─ [resume] _restore_from_checkpoint() + _rebuild_review_clips()   (954-955)
- │
- ├─ STYLE       generate_style_rules() → mutate_project()           (955-993)  ~2%
- ├─ _ensure_bgm(settings)                                            (993)     pre-generate BGM
- │
- ├─ for each scene:                                                  (1010-1057) SCENE_DECOMPOSE
- │    ├─ competitive_decompose_scene() / decompose_scene()
- │    ├─ ChiefDirector.validate_shot_prompts(shots, scene)
- │    ├─ record_director_review_on_shots(shots, review)             (1054)  ← writes director_review
- │    ├─ update_scene_shots(); _save_checkpoint()
- │    └─ _ensure_scene_audio(scene, chars)                          (1057)
- │
- ├─ ╔═ GATE 1 ═╗ _wait_for_gate("PLAN_REVIEW", …, 25)               (1059)
+ ├─ [resume] _restore_from_checkpoint() + _rebuild_review_clips()   (954-956)
+│
+ ├─ STYLE       generate_style_rules() → mutate_project()           (958-993)  ~2%
+ ├─ _ensure_bgm(settings)                                            (995)     pre-generate BGM
+│
+ ├─ for each scene: skip restored completed indices, then process    (997-1068) SCENE_DECOMPOSE
+│    ├─ competitive_decompose_scene() / decompose_scene()
+│    ├─ ChiefDirector.validate_shot_prompts(shots, scene)
+ │    ├─ record_director_review_on_shots(shots, review)             (1064)  ← writes director_review
+│    ├─ update_scene_shots(); _save_checkpoint()
+ │    ├─ _ensure_scene_audio(scene, chars)                          (1067)
+ │    └─ _save_checkpoint(completed_scene_idx=scene_idx)            (1068)
+│
+ ├─ ╔═ GATE 1 ═╗ _wait_for_gate("PLAN_REVIEW", …, 25)               (1070)
  │
  ├─ KeyframeRenderPhase(self, project).run(ctx)                     (1089)     ~50%
  ├─ ╔═ GATE 2 ═╗ _wait_for_gate("KEYFRAME_REVIEW", …, 55)           (1099)
@@ -297,7 +298,7 @@ Each gate is implemented by `ReviewController._wait_for_gate` (`cinema/review/co
 
 > **PERFORMANCE_REVIEW auto-skip.** When *every* shot is SKIP-routed or has no approved keyframe, the gate is bypassed entirely (`cinema_pipeline.py:1140`) — a SKIP-only production never stops here.
 
-> **The historically dangerous gate is PLAN_REVIEW.** If shots are loaded without running through decomposition, `director_review` is never written and `_rules_for_plan` vetoes forever — the cycle-17 headless stall. The fix is the unconditional `record_director_review_on_shots` call at `cinema_pipeline.py:1054`, and **MODIFIED is now normalized to APPROVED** at the gate (`cinema/auto_approve.py:267`, decision `138d7c7`) so a director-corrected scene no longer dead-ends.
+> **The historically dangerous gate is PLAN_REVIEW.** If shots are loaded without running through decomposition, `director_review` is never written and `_rules_for_plan` vetoes forever — the cycle-17 headless stall. The fix is the unconditional `record_director_review_on_shots` call at `cinema_pipeline.py:1064`, and **MODIFIED is now normalized to APPROVED** at the gate (`cinema/auto_approve.py:267`, decision `138d7c7`) so a director-corrected scene no longer dead-ends.
 
 ### 2.4 Headless vs. interactive — the same machine, two run modes
 
@@ -323,7 +324,7 @@ flowchart LR
 
 ### 2.5 Checkpoints and resume
 
-After every scene-loop iteration and after each audio step, `CheckpointStore._save_checkpoint` (`cinema/checkpoint.py:87`) atomically writes `temp/pipeline_state.json` (`tempfile.mkstemp` + `os.replace`), serializing `current_stage`/`scene_id`/`shot_id`, completed scene indices, scene clips/audio/foley, shot results, and failed shots. `generate(resume=True)` calls `_restore_from_checkpoint()` (`cinema/checkpoint.py:167`), which rehydrates `RunState` wholesale and marks any referenced media that has gone missing as `"lost"`. The in-memory `review_clips` manifest is *not* persisted, so resume separately calls `_rebuild_review_clips(project)` (`cinema_pipeline.py:308`). On successful completion `_clear_checkpoint()` removes the file. The web surface exposes resumability read-only via `GET …/checkpoint` → `checkpoint_info()` (`cinema/services.py:100`), which reads the JSON without constructing a pipeline.
+After every scene-loop iteration and after each audio step, `CheckpointStore._save_checkpoint` (`cinema/checkpoint.py:87`) atomically writes `temp/pipeline_state.json` (`tempfile.mkstemp` + `os.replace`), serializing `current_stage`/`scene_id`/`shot_id`, completed scene indices, scene clips/audio/foley, per-shot audio, shot results, and failed shots. `generate(resume=True)` calls `_restore_from_checkpoint()` (`cinema/checkpoint.py:167`), which rejects cross-project checkpoints, rehydrates `RunState` wholesale, and marks any referenced media that has gone missing as `"lost"`. The in-memory `review_clips` manifest is *not* persisted, so resume separately calls `_rebuild_review_clips(project)` (`cinema_pipeline.py:308`). On successful completion `_clear_checkpoint()` removes the file. The web surface exposes resumability read-only via `GET …/checkpoint` → `checkpoint_info()` (`cinema/services.py:100`), which reads the JSON without constructing a pipeline.
 
 > **Re-assembly avoids a deadlock by design.** The SCREENING re-assemble endpoint calls `_assemble_approved_takes_core()` (`cinema_pipeline.py:783`) directly rather than the public `assemble_approved_takes()`. The public method appends the SCREENING gate-wait, and a fresh per-request `CinemaPipeline` constructed in a Flask thread is *not* the instance that `signal_gate` will unblock — calling it there would hang the request (`cinema_pipeline.py:783-851`, orchestration gotcha #9).
 
@@ -360,7 +361,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 **Role:** `cinema_pipeline.CinemaPipeline` is the sole run driver. It owns the ordered gate sequence and `generate()` main loop, composes the three controllers (shot / review / checkpoint) over one shared `RunState`, and performs final assembly. Long-lived dependencies live on `PipelineCore`; per-run mutable state on `RunState`; pause/cancel/gate mechanics on `ThreadedLifecycle`.
 
-**Canonical modules:** `cinema_pipeline.py` (1677 LOC, the orchestrator), `cinema/core.py`, `cinema/runstate.py`, `cinema/lifecycle.py`, `cinema/context.py`, `pipeline_context.py` (top-level LLM-prompt loader), `cinema/pipeline.py` (generic driver, not the orchestrator).
+**Canonical modules:** `cinema_pipeline.py` (1691 LOC, the orchestrator), `cinema/core.py`, `cinema/runstate.py`, `cinema/lifecycle.py`, `cinema/context.py`, `pipeline_context.py` (top-level LLM-prompt loader), `cinema/pipeline.py` (generic driver, not the orchestrator).
 
 | Name | file:line | What it does |
 |---|---|---|
@@ -373,7 +374,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `CinemaPipeline._build_scene_packages` | `cinema_pipeline.py:709` | Resolves approved take paths per scene; detects "all shots `audio_embedded`" to suppress double-voice TTS. |
 | `build_pipeline_core` | `cinema/core.py:75` | Factory: loads project, mkdirs, constructs `PipelineCore(project, dirs, ContinuityEngine, ChiefDirector, CostTracker, LLMEnsemble)`. Raises `ValueError` if project absent. |
 | `PipelineCore` | `cinema/core.py:62` | Dataclass of long-lived services (project dict, dirs, continuity, director, cost_tracker, ensemble). Process-cached in `web_server._running_cores`. |
-| `RunState` | `cinema/runstate.py:60` | Dataclass: all per-run mutable state (`shot_results`, `scene_clips`, `scene_audio`, `failed_shots`, `current_stage`, `headless`, `completed_scene_indices`). One instance, shared by all controllers. |
+| `RunState` | `cinema/runstate.py:60` | Dataclass: all per-run mutable state (`shot_results`, `scene_clips`, `scene_audio`, `shot_audio`, `scene_foley`, `foley_audio_paths`, `failed_shots`, `current_stage`, `headless`, `completed_scene_indices`). One instance, shared by all controllers. |
 | `ThreadedLifecycle` | `cinema/lifecycle.py:110` | Event-backed pause/cancel/gate-wait. `wait_for_gate(name, predicate, poll=0.5)`, `signal_gate(name)` for early wake, `check_pause()`. |
 | `NullLifecycle` | `cinema/lifecycle.py:70` | No-op lifecycle whose `wait_for_gate` returns `True` unconditionally. **NOT used by `CinemaPipeline`** — was the deleted CLI's lifecycle. See §3.13 gotcha. |
 | `PipelineContext` | `cinema/context.py:51` | Typed shared state passed INTO phase `.run()` calls (`global_settings`, `lifecycle`, audio paths, `char_lora_paths`, …). Dict-compat layer (`__getitem__`/`.get()`) keeps legacy dict-style phases working. |
@@ -425,7 +426,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 
 **Role:** enforces the five operator review gates (PLAN_REVIEW, KEYFRAME_REVIEW, PERFORMANCE_REVIEW, REVIEW, SCREENING). A veto-rule auto-approve engine pre-clears shots meeting quality thresholds; in headless mode an unclearable gate raises a diagnosable error instead of polling forever. A JSON checkpoint persists `RunState` after every scene for crash-resume; the post-assembly SCREENING gate lets the operator preview, iterate, and re-assemble before sign-off.
 
-**Canonical modules:** `cinema/review/controller.py` (700 LOC), `cinema/auto_approve.py` (762 LOC), `cinema/screening.py` (684 LOC), `cinema/checkpoint.py` (185 LOC), `cinema/runstate.py`.
+**Canonical modules:** `cinema/review/controller.py` (700 LOC), `cinema/auto_approve.py` (762 LOC), `cinema/screening.py` (684 LOC), `cinema/checkpoint.py` (203 LOC), `cinema/runstate.py`.
 
 | Name | file:line | What it does |
 |---|---|---|
@@ -436,7 +437,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `ReviewController.approve_shot_plan` | `cinema/review/controller.py:633` | Human approval of a shot plan. |
 | `ReviewController.approve_take` | `cinema/review/controller.py:647` | Validates collection membership (a keyframe can't be approved as final) and walks `source_take_id` for `approved_motion_take_id`. |
 | `AutoApproveConfig` | `cinema/auto_approve.py:74` | All thresholds from `global_settings.auto_approve`. Defaults: `image_min_composite=0.97`/fallback `0.78`, `motion_min_identity=0.85`, `final_min_lipsync=0.8`, `final_require_human_if_upstream_auto=True`. |
-| `record_director_review_on_shots` | `cinema/auto_approve.py:246` | **Writer** of `shot["director_review"]`; called unconditionally after `validate_shot_prompts` (`cinema_pipeline.py:1054`). Normalizes MODIFIED→APPROVED (cycle-17). Its absence was the headless-stall root cause. |
+| `record_director_review_on_shots` | `cinema/auto_approve.py:246` | **Writer** of `shot["director_review"]`; called unconditionally after `validate_shot_prompts` (`cinema_pipeline.py:1064`). Normalizes MODIFIED→APPROVED (cycle-17). Its absence was the headless-stall root cause. |
 | `_rules_for_plan` | `cinema/auto_approve.py:214` | Two vetoes: decision≠APPROVED; non-empty violations. Reads `director_review`. |
 | `check_gate` | `cinema/auto_approve.py:663` | Public entry; returns `AutoApproveDecision`. Catches all exceptions (`deferred=True` on eval error); returns not-approved if config disabled. |
 | `_screening_stage_enabled` | `cinema/screening.py:104` | Flag: `global_settings.screening_stage_enabled` > `CINEMA_SCREENING_STAGE` env > default ON. |
@@ -674,7 +675,7 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 | Two `CinemaPipeline` classes | `cinema_pipeline.py:49` vs `cinema/pipeline.py:80` | Orchestrator vs generic driver. Path disambiguates. |
 | `pipeline_context.py` vs `cinema/context.py` | top-level vs `cinema/` | 15-line prompt-string loader vs typed `PipelineContext` dataclass. |
 | `headless=True` does NOT use `NullLifecycle` | `cinema/lifecycle.py:70` | Headless still uses `ThreadedLifecycle`; `RunState.headless` makes `_wait_for_gate` raise. `NullLifecycle.wait_for_gate` returns `True` unconditionally — using it would silently skip gate enforcement. |
-| PLAN_REVIEW headless stall (FIXED) | `cinema_pipeline.py:1054`, `cinema/auto_approve.py:235` | Without `record_director_review_on_shots`, `_rules_for_plan` always vetoed → headless hang. Now called unconditionally; MODIFIED→APPROVED (cycle-17, `138d7c7`). |
+| PLAN_REVIEW headless stall (FIXED) | `cinema_pipeline.py:1064`, `cinema/auto_approve.py:235` | Without `record_director_review_on_shots`, `_rules_for_plan` always vetoed → headless hang. Now called unconditionally; MODIFIED→APPROVED (cycle-17, `138d7c7`). |
 | `evaluate_generation_quality` wired by T6 | `llm/chief_director.py:406` | Full 2×2 mutation matrix; **now called** by `diagnose_clip(deep=True)` in `cinema/shots/controller.py:2241` (T6, `10a0eb4`); vision-grounded since `d974c15` (take + reference images attached to the LLM call). |
 | `style_director` is OpenAI-only | `llm/style_director.py:38` | No Anthropic path — asymmetric with the Anthropic-first ChiefDirector/CinemaDirector. |
 | Veo `reference_images` silently dropped (Bug #4) | `veo_native.py:155` | Vertex rejects image+reference both set; identity comes from the start frame only. `driving_video_path` also unwired on Veo (only Sora wires it). |
@@ -684,7 +685,7 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 | `shot_id` not globally unique | `domain/project_manager.py:405` | `shot_{scene_id}_{idx}` can collide across projects (cycle-6/S13 F1 CRITICAL) — always pair with `project_id` on endpoints. |
 | Audio `CostTracker()` instances bypass the budget gate | `audio/dialogue.py`, `audio/music.py` | Audio helpers can still construct fresh no-budget trackers; performance capture now threads the core tracker through the adapters and pre-spend-gates both the resolved performance engine and expected Mode-B driving synth. |
 | `EXPERIMENTS_DB_PATH` wired env-direct, not via `Settings` | `cost_tracker.py:157` vs `config/settings.py:128`, `cinema/core.py:113` | Since T7 (`4af8c05`) `CostTracker.__init__` resolves `db_path` arg > `EXPERIMENTS_DB_PATH` env > `data/experiments.db`, so the env var takes effect for every tracker. `Settings.experiments_db_path` is never threaded into the constructor — decorative; both read the same env var. |
-| `spent_usd` rehydration is resume-scoped | `cost_tracker.py:166`, `cost_tracker.py:518`, `cinema/checkpoint.py:182` | New trackers start at zero, but checkpoint resume seeds the accumulator from SQLite rows for the current project. Fresh non-resume processes remain per-run, not cumulative-lifetime. |
+| `spent_usd` rehydration is resume-scoped | `cost_tracker.py:166`, `cost_tracker.py:518`, `cinema/checkpoint.py:197` | New trackers start at zero, but checkpoint resume seeds the accumulator from SQLite rows for the current project. Fresh non-resume processes remain per-run, not cumulative-lifetime. |
 | Single SSE consumer | `web_server.py:1577` | A second `/stream` tab drains the shared queue; both miss events. |
 | `_running_cores` not invalidated on settings edit | `web_server.py:109` | Out-of-band `settings.json` edits need a server restart. |
 | Re-assemble must call `_assemble_approved_takes_core` directly | `web_server.py:2371`, `cinema_pipeline.py:783` | Calling the full `assemble_approved_takes()` from a Flask thread during screening deadlocks (the approve signal targets the original pipeline). |
@@ -714,7 +715,7 @@ Two structural facts shape every stage below and are worth stating once:
 | 5 | Assembly + audio mix | inline | `assemble_approved_takes()` | up to 95% | SCREENING (95%, optional) |
 | 6 | Cleanup + complete | inline | `cleanup_project()` | 100% | — |
 
-Verified call sites: PLAN_REVIEW gate `cinema_pipeline.py:1059`; keyframe phase `:1089`; KEYFRAME_REVIEW `:1099`; performance phase `:1119`; PERFORMANCE_REVIEW `:1140`; motion phase `:1166`; REVIEW `:1179`; assembly `:1186`.
+Verified call sites: PLAN_REVIEW gate `cinema_pipeline.py:1070`; keyframe phase `:1100`; KEYFRAME_REVIEW `:1110`; performance phase `:1130`; PERFORMANCE_REVIEW `:1153`; motion phase `:1180`; REVIEW `:1201`; assembly `:1208`.
 
 ```mermaid
 flowchart TD
@@ -740,7 +741,7 @@ flowchart TD
 **INPUTS:** `project.global_settings` (`music_mood`, `color_palette`, `aspect_ratio`, pre-existing `style_rules`, `music_mastering`); the project snapshot reloaded from disk by `_refresh_project_snapshot()` (`cinema_pipeline.py:443`).
 
 **PROCESSING:**
-1. `generate_style_rules(project_name, mood, color_palette, music_mood, aspect_ratio)` (`llm/style_director.py:12`) produces a 7-key style dict (`director_vision`, `cinematography_rules`, `color_grading_palette`, `lighting_rules`, `sound_design`, `photorealism_rules`, `composition_rules`), persisted via `mutate_project` (`cinema_pipeline.py:955-993`).
+1. `generate_style_rules(project_name, mood, color_palette, music_mood, aspect_ratio)` (`llm/style_director.py:12`) produces a 7-key style dict (`director_vision`, `cinematography_rules`, `color_grading_palette`, `lighting_rules`, `sound_design`, `photorealism_rules`, `composition_rules`), persisted via `mutate_project` (`cinema_pipeline.py:958-993`).
 2. `_ensure_bgm(settings)` (`cinema_pipeline.py:627`) generates BGM upfront via `generate_fal_bgm(..., duration=47)`, then optionally masters it via `master_music(..., preset="cinema_master")`.
 
 **KEY FUNCTIONS:** `generate_style_rules` (`llm/style_director.py:12`, OpenAI-only — see failure mode); `style_rules_to_prompt_suffix` (`llm/style_director.py:189`, the string appended to every downstream image prompt); `_ensure_bgm` (`cinema_pipeline.py:627`).
@@ -760,16 +761,16 @@ flowchart TD
 **INPUTS:** Per scene: `scene` dict (`title`, `action`, `dialogue`, `mood`, `duration_seconds`, `characters_present`, `location_id`), the matched `characters` and `location` dicts, `global_settings`, and the `style_rules` from Stage 0. The injected `PIPELINE_CONTEXT` string (`pipeline_context.py:15`, loaded from `config/prompts/pipeline_context.md`) rides along in every LLM system prompt.
 
 **PROCESSING (per scene with empty `shots`):**
-1. **Route:** `use_competitive = settings.get("competitive_generation", True)` (`cinema_pipeline.py:1016`).
+1. **Route:** `use_competitive = settings.get("competitive_generation", True)` (`cinema_pipeline.py:1026`).
 2. **Decompose:** `competitive_decompose_scene()` (`domain/scene_decomposer.py:626`) runs GPT-4o + Claude-Sonnet in parallel via `LLMEnsemble.competitive_generate(task_type="decompose")` and a judge picks the winner; or `decompose_scene()` (`domain/scene_decomposer.py:436`) runs a single GPT-4o tool-loop call. Shot count: `target_shots = max(2, min(5, int(duration_seconds / 2.5)))` (`domain/scene_decomposer.py:497`).
-3. **Validate (ChiefDirector pre-gen gate):** `self.director.validate_shot_prompts(shots, scene)` (`cinema_pipeline.py:1031`; `llm/chief_director.py:296`) enforces hard constraints HC1–HC8 and returns `APPROVED` / `MODIFIED` / `REJECTED`.
-4. **Record the verdict — critical:** `record_director_review_on_shots(shots, review)` (`cinema_pipeline.py:1054`; `cinema/auto_approve.py:235`) writes `shot["director_review"]` onto every shot. **This call is load-bearing for headless runs** (see failure mode).
+3. **Validate (ChiefDirector pre-gen gate):** `self.director.validate_shot_prompts(shots, scene)` (`cinema_pipeline.py:1041`; `llm/chief_director.py:296`) enforces hard constraints HC1–HC8 and returns `APPROVED` / `MODIFIED` / `REJECTED`.
+4. **Record the verdict — critical:** `record_director_review_on_shots(shots, review)` (`cinema_pipeline.py:1064`; `cinema/auto_approve.py:235`) writes `shot["director_review"]` onto every shot. **This call is load-bearing for headless runs** (see failure mode).
 5. **Persist:** `update_scene_shots(project, scene_id, shots)` (`domain/scene_decomposer.py:890`) writes shots under the per-project lock.
 6. **Per-scene dialogue:** `_ensure_scene_audio(scene, chars)` (`cinema_pipeline.py:499`) calls `generate_dialogue` → `generate_dialogue_voiceover`, caching the MP3.
 7. `_save_checkpoint()` after each scene.
 
 **DECISION POINTS:**
-- **Competitive vs single-model** (`cinema_pipeline.py:1016`). Competitive doubles LLM cost but consistently wins on quality.
+- **Competitive vs single-model** (`cinema_pipeline.py:1026`). Competitive doubles LLM cost but consistently wins on quality.
 - **MODIFIED → APPROVED normalization.** `record_director_review_on_shots` normalizes a `MODIFIED` verdict to a gate-decision of `APPROVED` (`cinema/auto_approve.py:246`, cycle-17 user decision, commit `138d7c7`). The raw verdict is preserved in `chief_director_verdict`. Any older doc that calls MODIFIED a *blocking* state is stale.
 - **REJECTED → re-decompose.** A REJECTED scene re-runs `decompose_scene` with stricter constraints (`cinema_pipeline.py:1047`).
 
@@ -777,7 +778,7 @@ flowchart TD
 
 **FAILURE MODES + RECOVERY:**
 - **LLM unavailable / parse failure.** `decompose_scene` falls back to `_fallback_decompose` (`domain/scene_decomposer.py:844`) — exactly two hardcoded shots (an establishing wide + a medium close-up). `validate_shot_prompts` is fail-safe-for-throughput: on a None client or persistent `JSONDecodeError` (after ≤1 retry) it returns `APPROVED` with no modifications (`llm/chief_director.py:296-357`).
-- **PLAN_REVIEW headless stall (FIXED, cycle-17).** Before `record_director_review_on_shots` was called unconditionally, `_rules_for_plan`'s `plan_decision_not_approved` veto always fired (because `shot["director_review"]` was never written), so a headless run polled forever. The fix wires the writer at `cinema_pipeline.py:1054`. **If you load shots that never passed through this call, the PLAN gate will veto.**
+- **PLAN_REVIEW headless stall (FIXED, cycle-17).** Before `record_director_review_on_shots` was called unconditionally, `_rules_for_plan`'s `plan_decision_not_approved` veto always fired (because `shot["director_review"]` was never written), so a headless run polled forever. The fix wires the writer at `cinema_pipeline.py:1064`. **If you load shots that never passed through this call, the PLAN gate will veto.**
 
 ---
 
@@ -1029,7 +1030,7 @@ Five of those are **mandatory operator gates** (PLAN_REVIEW, KEYFRAME_REVIEW, PE
 | 13 | **Screen & sign off** | `POST .../assemble/screen` → `.../screening/approve` (`web_server.py:2194`, `:2280`) | Preview the assembled cut, iterate shots, then approve. |
 | 14 | **Retrieve the film** | `GET /api/projects/<pid>/export` (`web_server.py:2613`) | Streams `exports/final_cinema.mp4` (1920×1080@30fps, H.264, AAC, EBU R128). |
 
-> **Divergence to know (decompose path):** The on-demand `POST .../scenes/<sid>/decompose` endpoint always uses the single-model `decompose_scene` (`web_server.py:1400`). The *competitive* GPT-4o-vs-Claude ensemble path (`competitive_decompose_scene`) only runs inside the automated pipeline when `competitive_generation=True` (`cinema_pipeline.py:1016`). If you want the higher-quality ensemble decomposition, let the pipeline do it — don't pre-decompose via the UI button.
+> **Divergence to know (decompose path):** The on-demand `POST .../scenes/<sid>/decompose` endpoint always uses the single-model `decompose_scene` (`web_server.py:1400`). The *competitive* GPT-4o-vs-Claude ensemble path (`competitive_decompose_scene`) only runs inside the automated pipeline when `competitive_generation=True` (`cinema_pipeline.py:1026`). If you want the higher-quality ensemble decomposition, let the pipeline do it — don't pre-decompose via the UI button.
 
 #### The five gates and how to clear each
 
@@ -1178,7 +1179,7 @@ the default since 2026-06-03. This realizes a *consistent character voice* (Veo 
 | `coherence_check_enabled` | True | Per-shot color/lighting/composition coherence scoring vs. the prior shot (`assess_coherence`) | `coherence_analyzer.py:219` |
 | `color_drift_sensitivity` | 0.3 | Lower = more aggressive color-correction recommendations | `global_settings` |
 | `coherence_threshold` | 0.6 (read with fallback; **not** scaffolded by default — set it explicitly) | Overall coherence floor below which a regenerate is recommended | `cinema/shots/controller.py:1932` |
-| `scene_transitions` | False | Cross-dissolve between scenes via ffmpeg `xfade` instead of hard cuts | `cinema_pipeline.py:1327` |
+| `scene_transitions` | False | Cross-dissolve between scenes via ffmpeg `xfade` instead of hard cuts | `cinema_pipeline.py:1337` |
 | `transition_duration` | 0.5 s | xfade length; clamped to 0.4× shortest clip | `phase_c_ffmpeg.py:1539` |
 
 Location consistency is automatic: each location carries a fixed `seed` and a verbatim `prompt_fragment` injected into every shot at that location (`domain/location_manager.py:117`, `:198`).
@@ -1196,7 +1197,7 @@ Location consistency is automatic: each location carries a fixed `seed` and a ve
 
 **Budget governance** — three caveats that bite operators:
 1. `budget_limit_usd` gates image/video generation and performance capture through `ShotController` pre-spend checks; **standalone audio API costs can still run uncapped** when audio helpers create isolated `CostTracker()` instances that log to the DB but do not update the core tracker's `spent_usd`.
-2. New `CostTracker` instances start with `spent_usd=0.0` (`cost_tracker.py:201`), but checkpoint resume rehydrates the accumulator from SQLite rows for the current project (`cinema/checkpoint.py:182` -> `cost_tracker.py:518`). Fresh non-resume processes are still per-run, not cumulative-lifetime.
+2. New `CostTracker` instances start with `spent_usd=0.0` (`cost_tracker.py:201`), but checkpoint resume rehydrates the accumulator from SQLite rows for the current project (`cinema/checkpoint.py:197` -> `cost_tracker.py:518`). Fresh non-resume processes are still per-run, not cumulative-lifetime.
 3. `EXPERIMENTS_DB_PATH` works **via the environment only**: since T7 (`4af8c05`) every `CostTracker` resolves it at construction (`db_path` arg > env var > `data/experiments.db`, `cost_tracker.py:201`), but `Settings.experiments_db_path` is never threaded into the constructor (`cinema/core.py:113`) — set the env var, not the settings field.
 
 > **Cost-estimate note:** `API_REGISTRY` and `cost_tracker.API_COST_USD` disagree on a few engines (e.g. VEO_NATIVE: $0.40 in the registry, $0.30 in the cost table). Both are ±30% estimates — calibrate against real invoices before trusting either for budgeting.
@@ -1278,7 +1279,7 @@ Set under `global_settings.auto_approve` (deserialized by `AutoApproveConfig.fro
 
 All verified at `cinema/auto_approve.py:80`–99. Write them with `PUT /api/projects/<pid>` `{"global_settings": {"auto_approve": {…}}}` (`web_server.py:506`).
 
-> **The headless plan-gate fix you inherit (cycle-17):** PLAN_REVIEW auto-approve reads `shot["director_review"]`, which is written by `record_director_review_on_shots` *immediately after* the ChiefDirector validates each scene (`cinema_pipeline.py:1054`, `cinema/auto_approve.py:235`). A `MODIFIED` verdict is now normalized to `APPROVED` so a director-corrected scene no longer dead-ends a headless run. If you build your own runner that loads shots without going through decompose, you must call `record_director_review_on_shots` yourself or PLAN_REVIEW will veto forever.
+> **The headless plan-gate fix you inherit (cycle-17):** PLAN_REVIEW auto-approve reads `shot["director_review"]`, which is written by `record_director_review_on_shots` *immediately after* the ChiefDirector validates each scene (`cinema_pipeline.py:1064`, `cinema/auto_approve.py:235`). A `MODIFIED` verdict is now normalized to `APPROVED` so a director-corrected scene no longer dead-ends a headless run. If you build your own runner that loads shots without going through decompose, you must call `record_director_review_on_shots` yourself or PLAN_REVIEW will veto forever.
 
 ### 5.6 Behavior-Changing Environment Variables
 
@@ -1337,7 +1338,7 @@ graph TD
 | Field (on shot, unless noted) | Written by | Read by | What it carries forward |
 |---|---|---|---|
 | `global_settings` (project-level) | Web UI (`PUT /api/projects/<pid>`) | every subsystem via `get_project_setting(ctx, key, default)` | all user-tunable knobs (tier, thresholds, language, `api_engines`, …) |
-| `director_review` | `record_director_review_on_shots` (`cinema/auto_approve.py:235`), called at `cinema_pipeline.py:1054` | PLAN_REVIEW auto-approve `_rules_for_plan` (`auto_approve.py:214`) | ChiefDirector's APPROVED/MODIFIED/REJECTED verdict; **MODIFIED is normalized to APPROVED** (the cycle-17 `138d7c7` decision) |
+| `director_review` | `record_director_review_on_shots` (`cinema/auto_approve.py:235`), called at `cinema_pipeline.py:1064` | PLAN_REVIEW auto-approve `_rules_for_plan` (`auto_approve.py:214`) | ChiefDirector's APPROVED/MODIFIED/REJECTED verdict; **MODIFIED is normalized to APPROVED** (the cycle-17 `138d7c7` decision) |
 | `plan_status` | `approve_shot_plan` / auto-approve | PLAN_REVIEW gate predicate (`controller.py:645`) | `"approved"` unlocks keyframe generation |
 | `target_api` | scene decomposer / operator (`PUT .../shots/<id>`) | video cascade routing (`cinema/shots/controller.py:1310`) + image routing | which engine to try first; `"AUTO"` triggers smart routing |
 | `approved_keyframe_take_id` | `approve_take(kind="keyframe")` | KeyframeRenderPhase skip-gate, performance/motion `init_image` chain | the anchor still for all downstream video |
@@ -1434,7 +1435,7 @@ stateDiagram-v2
 
 **Auto-approve thresholds** live in `global_settings.auto_approve` (`AutoApproveConfig`, `cinema/auto_approve.py:74`). The veto rules per gate: PLAN (decision-not-APPROVED, has-violations), IMAGE (composite below threshold — dynamic 0.97 PuLID / 0.78 fallback, cascade-fallback, over-budget), MOTION (identity/motion-score floors — **opt-in via `CINEMA_AUTO_APPROVE_MOTION=1`**), FINAL (lipsync floor, and the `final_require_human_if_upstream_auto` safety net). That last default is the most common footgun for unattended runs: if any earlier gate auto-approved a shot, the REVIEW gate forces a human unless you set `final_require_human_if_upstream_auto=false`.
 
-**Checkpointing and resume.** `CheckpointStore` (`cinema/checkpoint.py`) atomically writes `temp/pipeline_state.json` (via `tempfile.mkstemp` + `os.replace`) after **each scene** and after each audio step (`_save_checkpoint`, `checkpoint.py:87`). It serializes the `RunState` fields wholesale: `current_stage/scene_id/shot_id`, `completed_scene_indices`, `scene_clips`, `scene_audio`, `scene_foley`, `foley_audio_paths`, `shot_results`, `failed_shots`. On `generate(resume=True)`, `_restore_from_checkpoint` (`checkpoint.py:167`) rehydrates those fields and marks any referenced file that's gone as `"lost"`. One subtlety: `review_clips` is **not** persisted in the checkpoint — it is rebuilt in-memory by a separate `_rebuild_review_clips` call on resume (`cinema_pipeline.py:308`).
+**Checkpointing and resume.** `CheckpointStore` (`cinema/checkpoint.py`) atomically writes `temp/pipeline_state.json` (via `tempfile.mkstemp` + `os.replace`) after **each scene** and after each audio step (`_save_checkpoint`, `checkpoint.py:87`). It serializes the `RunState` fields wholesale: `current_stage/scene_id/shot_id`, `completed_scene_indices`, `scene_clips`, `scene_audio`, `shot_audio`, `scene_foley`, `foley_audio_paths`, `shot_results`, `failed_shots`. On `generate(resume=True)`, `_restore_from_checkpoint` (`checkpoint.py:167`) rejects a project-id mismatch, rehydrates those fields, and marks any referenced file that's gone as `"lost"`. One subtlety: `review_clips` is **not** persisted in the checkpoint — it is rebuilt in-memory by a separate `_rebuild_review_clips` call on resume (`cinema_pipeline.py:308`).
 
 **Screening (the post-assembly gate).** After `_assemble_final` produces the mp4, if screening is enabled (`CINEMA_SCREENING_STAGE` default ON, overridable per-project) the pipeline parks at the SCREENING gate at 95%. The operator hits `POST .../assemble/screen` to get a timeline manifest, may iterate individual shots (each iterate calls `mark_shot_needs_reassembly`), may call `POST .../assemble/re-assemble` to re-stitch only the dirty shots, and finally `POST .../screening/approve` → `mark_screening_approved` → the gate's predicate flips True. To wake the blocking waiter promptly, the approve endpoint also calls `pipeline.lifecycle.signal_gate(SCREENING_STAGE_NAME)` (`web_server.py:2359`); if the live pipeline object isn't reachable, the 0.5s poll is the fallback (verified `web_server.py:2359-2362`).
 
@@ -1607,7 +1608,7 @@ The pipeline's single entry point is `web_server.py` → `cinema_pipeline.py`; t
 | Path | LOC | Role |
 |---|---|---|
 | `web_server.py` | 2664 | Flask app (port 8080), the **sole** human entry point: REST CRUD, SSE progress stream, pipeline control, module-level concurrency state |
-| `cinema_pipeline.py` | 1677 | `CinemaPipeline` — the real orchestrator. Owns `generate()`, the 12-stage gate sequence, `_assemble_final`, scene-audio/foley/BGM helpers, checkpoint delegation |
+| `cinema_pipeline.py` | 1691 | `CinemaPipeline` — the real orchestrator. Owns `generate()`, the 12-stage gate sequence, `_assemble_final`, scene-audio/foley/BGM helpers, checkpoint delegation |
 | `cinema/core.py` | 115 | `PipelineCore` + `build_pipeline_core()` — long-lived services (project dict, dirs, `ContinuityEngine`, `ChiefDirector`, `CostTracker`, `LLMEnsemble`) |
 | `cinema/runstate.py` | 157 | `RunState` dataclass — the single shared home for per-run mutable state; one instance, shared by all three controllers |
 | `cinema/lifecycle.py` | 208 | `LifecycleService` protocol + `NullLifecycle` (no-op, **not** wired into `CinemaPipeline`) + `ThreadedLifecycle` (interactive, event-backed) |
@@ -1633,7 +1634,7 @@ The pipeline's single entry point is `web_server.py` → `cinema_pipeline.py`; t
 | `cinema/review/controller.py` | 700 | `ReviewController` — gate-wait logic, auto-approve integration, per-shot approval mutations, review-clip manifest |
 | `cinema/auto_approve.py` | 762 | Veto-rule engine: per-gate rule builders, `check_gate`, `record_director_review_on_shots` |
 | `cinema/screening.py` | 684 | Post-assembly SCREENING stage: feature flag, timeline manifest, `screening_approved` flag, `needs_reassembly` dirty-tracking |
-| `cinema/checkpoint.py` | 185 | `CheckpointStore` — atomic JSON checkpoint save/load/restore into `RunState` |
+| `cinema/checkpoint.py` | 203 | `CheckpointStore` — atomic JSON checkpoint save/load/restore into `RunState` |
 | `domain/project_manager.py` | 1235 | **Canonical** persistence: factories, `normalize_*_schema`, `mutate_project` RMW primitive, per-project filelock, shot-package I/O |
 | `domain/models.py` | 179 | Pydantic v2 schema (validation-only, warn-by-default); the live data type is a plain dict |
 | `domain/shot_types.py` | 51 | Shot-type constants + `normalize_shot_type` alias normalizer |
@@ -1739,7 +1740,7 @@ The functions an engineer reaches for most, grouped by task. All `file:line` ref
 | `ReviewController._wait_for_gate` | `cinema/review/controller.py:507` | Runs auto-approve pass, then blocks (web) or raises `GateNotSatisfiedError` (headless, line 546) |
 | `ReviewController._gate_satisfied` | `cinema/review/controller.py:224` | Per-gate predicate (plan/keyframe/performance/final approval-ID checks) |
 | `check_gate` | `cinema/auto_approve.py:663` | Public auto-approve entry; returns `AutoApproveDecision`; catches all exceptions → `deferred=True` |
-| `record_director_review_on_shots` | `cinema/auto_approve.py:246` | **Writes** `shot["director_review"]`; called at `cinema_pipeline.py:1054`. Without it the PLAN gate hangs headless runs (D-gate-1) |
+| `record_director_review_on_shots` | `cinema/auto_approve.py:246` | **Writes** `shot["director_review"]`; called at `cinema_pipeline.py:1064`. Without it the PLAN gate hangs headless runs (D-gate-1) |
 | `approve_shot_plan` / `approve_take` | `cinema/review/controller.py:645 / 659` | Human approval mutations for the four review gates |
 | `mark_screening_approved` | `cinema/screening.py:307` | Sets `screening_approved=True`; unblocks the SCREENING waiter |
 
@@ -1978,7 +1979,7 @@ This is the most common operational failure and has three distinct causes — al
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Hangs forever at PLAN_REVIEW | `shot["director_review"]` never written → veto always fires | Ensure `record_director_review_on_shots` runs after `validate_shot_prompts` (now unconditional at `cinema_pipeline.py:1054`). Don't load shots into a run bypassing decompose (D-gate-1) |
+| Hangs forever at PLAN_REVIEW | `shot["director_review"]` never written → veto always fires | Ensure `record_director_review_on_shots` runs after `validate_shot_prompts` (now unconditional at `cinema_pipeline.py:1064`). Don't load shots into a run bypassing decompose (D-gate-1) |
 | Dead-ends on a MODIFIED verdict | (Historical) MODIFIED used to block | Fixed: MODIFIED is now normalized to gate-decision APPROVED (`auto_approve.py:267`, commit `138d7c7`) |
 | Never reaches COMPLETE despite all auto-approve thresholds met | `final_require_human_if_upstream_auto=True` forces a human at REVIEW if any earlier gate auto-approved | Set `auto_approve.final_require_human_if_upstream_auto=false` for fully unattended runs (D-gate-2) |
 
@@ -2070,7 +2071,7 @@ An older audit listed `storyboard_mode` as having "zero callers" — that is **s
 |---|---|---|
 | D-config-1 | `EXPERIMENTS_DB_PATH` formerly unwired — RESOLVED by T7 (`4af8c05`) | `cinema/core.py:113` still builds `CostTracker(budget_usd=budget_usd)` with no `db_path`, but `cost_tracker.py:201` resolves `db_path or os.environ.get("EXPERIMENTS_DB_PATH", "data/experiments.db")` — env var honored by every tracker (explicit `db_path` arg wins) |
 | D-config-2 | Audio helper paths can use isolated `CostTracker()` (no budget); performance capture is now shared-tracker-gated | confirmed remaining audio limitation across `audio/*`; performance fixed by `perf-phase-no-gate` |
-| D-config-3 | `spent_usd` initializes per process, with checkpoint-resume rehydration from durable project rows | `cost_tracker.py:166`, `cost_tracker.py:518`, `cinema/checkpoint.py:182` |
+| D-config-3 | `spent_usd` initializes per process, with checkpoint-resume rehydration from durable project rows | `cost_tracker.py:166`, `cost_tracker.py:518`, `cinema/checkpoint.py:197` |
 
 #### Schema-vs-live-dict divergences (Pydantic `extra="allow"`)
 
