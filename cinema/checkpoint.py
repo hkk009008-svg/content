@@ -178,6 +178,11 @@ class CheckpointStore:
         completed = set(state.get("completed_scene_indices", []))
         self._runstate.completed_scene_indices = completed
 
+        cost_tracker = getattr(self._core, "cost_tracker", None)
+        rehydrate = getattr(cost_tracker, "rehydrate_spent_usd_from_video", None)
+        if callable(rehydrate):
+            rehydrate(str(self.project.get("id", "")))
+
         n = len(completed)
         if n > 0:
             self.progress("RESUME", f"Resuming from checkpoint -- {n} scene(s) already complete", 5)

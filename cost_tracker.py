@@ -511,6 +511,41 @@ class CostTracker:
         # the caller; coerce to 0.0 (fail-safe: veto fires on real over-cap spend).
         return float(total) if math.isfinite(float(total)) else 0.0
 
+    def rehydrate_spent_usd_from_video(self, video_id: str) -> float:
+        """Restore the in-process budget accumulator from durable project rows.
+
+        ``spent_usd`` is the fast value read by ``would_exceed`` and
+        ``is_over_budget``. SQLite is the durable source, so checkpoint resume
+        must seed the accumulator from rows already recorded for the current
+        project/video id before any new paid call is admitted.
+
+        Returns the value assigned to ``self.spent_usd``.
+        """
+        if not video_id:
+            with self._conn_lock:
+                self.spent_usd = 0.0
+                return self.spent_usd
+
+        with self._conn_lock:
+            row = self.conn.execute(
+                "SELECT COALESCE(SUM(cost_usd), 0.0) AS total FROM cost_log WHERE video_id = ?",
+                (video_id,),
+            ).fetchone()
+            total = row["total"] if row else 0.0
+            try:
+                spent = float(total)
+            except (TypeError, ValueError, OverflowError):
+                spent = float("inf")
+            if not math.isfinite(spent):
+                warnings.warn(
+                    f"[cost_tracker] Non-finite persisted spend total={total!r} "
+                    f"for video_id={video_id!r}; budget gate will fail closed.",
+                    stacklevel=2,
+                )
+                spent = float("inf")
+            self.spent_usd = spent
+            return self.spent_usd
+
     def get_video_cost(self, video_id: str) -> dict:
         """
         Return a cost breakdown for a single video project.
