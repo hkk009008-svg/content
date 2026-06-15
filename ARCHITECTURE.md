@@ -229,24 +229,24 @@ propagate by reference. Forwarder block at
 | Step | What happens | File:line |
 |---|---|---|
 | 1 | `_refresh_project_snapshot()`; early-return if no scenes | [cinema_pipeline.py:947-951](cinema_pipeline.py:947) |
-| 2 | If `resume=True`: `_restore_from_checkpoint()` + `_rebuild_review_clips` | :953-955 |
+| 2 | If `resume=True`: `_restore_from_checkpoint()` + `_rebuild_review_clips` | :953-956 |
 | 3 | STYLE — `generate_style_rules` → persist | :958-991 |
-| 4 | `_ensure_bgm(settings)` (Suno V5 preferred / FAL fallback, 47s duration) | :993 |
-| 5 | Per scene: decompose (competitive or single) → ChiefDirector validate → ensure scene audio → checkpoint | :995-1055 |
-| 6 | **GATE 1 PLAN_REVIEW** @ 25% | :1059 |
-| 7 | Build `PipelineContext` with lifecycle + global_settings + language | :1072-1077 |
-| 8 | **KeyframeRenderPhase.run(ctx)** | :1089-1093 |
-| 9 | Cancellation check | :1095-1097 |
-| 10 | **GATE 2 KEYFRAME_REVIEW** @ 55% | :1099 |
-| 11 | Refresh project snapshot | :1103 |
-| 12 | **PerformanceCapturePhase.run(ctx)** | :1119-1123 |
-| 13 | Cancellation check | :1125-1127 |
-| 14 | **GATE 3 PERFORMANCE_REVIEW** @ 65% — bypassed when every shot has `performance_engine=="SKIP"` or `approved_performance_take_id`. Emits `PERFORMANCE_SKIPPED_GATE` event. | :1133-1153 |
-| 15 | **MotionRenderPhase.run(ctx)** | :1166-1170 |
-| 16 | Cancellation check | :1180-1182 |
-| 17 | Refresh + `_rebuild_review_clips` + checkpoint | :1184-1186 |
-| 18 | **GATE 4 REVIEW** @ 82% → on satisfaction call `proceed_to_assembly()` | :1187 |
-| 19 | `assemble_approved_takes()` → `_assemble_final(...)`: stitch (hard cuts; opt-in scene-boundary cross-dissolve, default-off `scene_transitions`) + color grade + BGM mix + two-pass loudnorm → final mp4 | :1190-1195 |
+| 4 | `_ensure_bgm(settings)` (Suno V5 preferred / FAL fallback, 47s duration) | :995 |
+| 5 | Per scene: skip restored completed indices, decompose (competitive or single), ChiefDirector validate, ensure scene audio, checkpoint with `completed_scene_idx` | :997-1068 |
+| 6 | **GATE 1 PLAN_REVIEW** @ 25% | :1070 |
+| 7 | Build `PipelineContext` with lifecycle + global_settings + language | :1083-1088 |
+| 8 | **KeyframeRenderPhase.run(ctx)** | :1100-1104 |
+| 9 | Cancellation check | :1106-1108 |
+| 10 | **GATE 2 KEYFRAME_REVIEW** @ 55% | :1110 |
+| 11 | Refresh project snapshot | :1114 |
+| 12 | **PerformanceCapturePhase.run(ctx)** | :1130-1134 |
+| 13 | Cancellation check | :1139-1141 |
+| 14 | **GATE 3 PERFORMANCE_REVIEW** @ 65% — bypassed when every shot has `performance_engine=="SKIP"` or `approved_performance_take_id`. Emits `PERFORMANCE_SKIPPED_GATE` event. | :1146-1167 |
+| 15 | **MotionRenderPhase.run(ctx)** | :1180-1184 |
+| 16 | Cancellation check | :1194-1196 |
+| 17 | Refresh + `_rebuild_review_clips` + checkpoint | :1198-1200 |
+| 18 | **GATE 4 REVIEW** @ 82% → on satisfaction call `proceed_to_assembly()` | :1201 |
+| 19 | `assemble_approved_takes()` → `_assemble_final(...)`: stitch (hard cuts; opt-in scene-boundary cross-dissolve, default-off `scene_transitions`) + color grade + BGM mix + two-pass loudnorm → final mp4 | :1208-1210 |
 
 ### 4.2 `PipelineContext` ([cinema/context.py](cinema/context.py))
 
@@ -331,6 +331,8 @@ Per-run mutable. All collection fields use `default_factory`:
 - `review_clips: dict` — shot_id → review-clip manifest
 - `scene_clips: dict` — scene_id → list of clip paths
 - `scene_audio: dict` — scene_id → audio path
+- `shot_audio: dict` — shot_id → per-shot TTS audio path
+- `scene_foley: dict` / `foley_audio_paths: list` — foley artifacts for assembly
 - `failed_shots: list`
 - `current_stage / current_scene_id / current_shot_id: str` — progress triple
 - `completed_scene_indices: set` — checkpoint-resume bookkeeping
@@ -344,11 +346,13 @@ rename). On any `BaseException`, the temp file is removed.
 
 **Persisted fields:** `project_id`, `current_stage`, `current_scene_id`,
 `current_shot_id`, `completed_scene_indices` (sorted list — JSON has no sets),
-`scene_clips`, `scene_audio`, `shot_results`, `failed_shots`, `scene_foley`,
-`foley_audio_paths`.
+`scene_clips`, `scene_audio`, `shot_audio`, `shot_results`, `failed_shots`,
+`scene_foley`, `foley_audio_paths`.
 
-**On resume:** missing `image`/`video` paths set to None with
-`status="lost"` ([cinema/checkpoint.py:117-134](cinema/checkpoint.py:117)).
+**On resume:** `_restore_from_checkpoint()` rejects a checkpoint whose
+`project_id` does not match the current project, restores `RunState`, and marks
+missing `image`/`video` paths as None with `status="lost"`
+([cinema/checkpoint.py:121-138](cinema/checkpoint.py:121)).
 
 File: `<temp_dir>/pipeline_state.json` (constant `CHECKPOINT_FILE`).
 
@@ -1518,7 +1522,7 @@ prefers Suno V5 with FAL Stable Audio as fallback; loops in assembly.
 
 ### 12.6 Final-assembly audio mux — engine-dependent voice source
 
-`_assemble_final` ([cinema_pipeline.py:1327](cinema_pipeline.py:1327)) muxes the
+`_assemble_final` ([cinema_pipeline.py:1337](cinema_pipeline.py:1337)) muxes the
 final video's audio with an FFmpeg `amix` filtergraph over up to three sources
 (voice/dialogue + BGM + foley). The **voice source is motion-engine-dependent**:
 

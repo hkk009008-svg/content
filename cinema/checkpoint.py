@@ -13,12 +13,12 @@ State expected from RunState
 
 Read by the save path:
   current_stage, current_scene_id, current_shot_id,
-  completed_scene_indices, scene_clips, scene_audio,
+  completed_scene_indices, scene_clips, scene_audio, shot_audio,
   shot_results, failed_shots
 
 Written by the restore path (FULL ASSIGNMENT to the runstate
 dataclass fields, which are mutable by default):
-  scene_clips, scene_audio, shot_results, failed_shots,
+  scene_clips, scene_audio, shot_audio, shot_results, failed_shots,
   completed_scene_indices
 
 The previous Slice-3b version used a CheckpointStoreHost protocol to
@@ -89,6 +89,9 @@ class CheckpointStore:
         Persist pipeline state to disk after each meaningful step.
         Uses atomic write (temp + replace) to avoid half-written files.
         """
+        if completed_scene_idx >= 0:
+            self._runstate.completed_scene_indices.add(completed_scene_idx)
+
         state = {
             "project_id": self.project["id"],
             "current_stage": self._runstate.current_stage,
@@ -97,6 +100,7 @@ class CheckpointStore:
             "completed_scene_indices": sorted(self._runstate.completed_scene_indices),
             "scene_clips": self._runstate.scene_clips,
             "scene_audio": self._runstate.scene_audio,
+            "shot_audio": self._runstate.shot_audio,
             "scene_foley": self._runstate.scene_foley,
             "foley_audio_paths": list(self._runstate.foley_audio_paths),
             "shot_results": self._runstate.shot_results,
@@ -169,8 +173,17 @@ class CheckpointStore:
         if not state:
             return set()
 
+        saved_project_id = state.get("project_id")
+        current_project_id = self.project.get("id")
+        if saved_project_id and current_project_id and saved_project_id != current_project_id:
+            raise ValueError(
+                "Checkpoint project_id mismatch: "
+                f"saved {saved_project_id!r}, current {current_project_id!r}"
+            )
+
         self._runstate.scene_clips = state.get("scene_clips", {})
         self._runstate.scene_audio = state.get("scene_audio", {})
+        self._runstate.shot_audio = state.get("shot_audio", {})
         self._runstate.scene_foley = state.get("scene_foley", {})
         self._runstate.foley_audio_paths = state.get("foley_audio_paths", [])
         self._runstate.shot_results = state.get("shot_results", {})

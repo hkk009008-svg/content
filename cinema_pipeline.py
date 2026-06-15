@@ -950,8 +950,9 @@ class CinemaPipeline:
             self.progress("ERROR", "No scenes defined in project", 0)
             return None
 
+        completed_scene_indices = set()
         if resume:
-            self._restore_from_checkpoint()
+            completed_scene_indices = self._restore_from_checkpoint()
             self._rebuild_review_clips(project)
 
         settings = project.get("global_settings", {})
@@ -1000,6 +1001,14 @@ class CinemaPipeline:
 
             scene_id = scene["id"]
             scene_title = scene.get("title", f"Scene {scene_idx + 1}")
+            if scene_idx in completed_scene_indices:
+                self.progress(
+                    "RESUME",
+                    f"Skipping completed scene {scene_idx+1}/{len(scenes)}: {scene_title}",
+                    10 + scene_idx,
+                )
+                continue
+
             self.progress("SCENE", f"Processing scene {scene_idx+1}/{len(scenes)}: {scene_title}", 10 + scene_idx)
             self.current_stage = "SCENE"
             self.current_scene_id = scene_id
@@ -1056,6 +1065,7 @@ class CinemaPipeline:
                 update_scene_shots(project, scene_id, shots)
                 self._save_checkpoint()
             self._ensure_scene_audio(scene, chars_in_scene)
+            self._save_checkpoint(completed_scene_idx=scene_idx)
 
         if not self._wait_for_gate("PLAN_REVIEW", "Approve all shot plans to continue", 25):
             self.progress("CANCELLED", "Pipeline cancelled during shot-plan review", 0)

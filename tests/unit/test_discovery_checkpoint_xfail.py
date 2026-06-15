@@ -1,4 +1,4 @@
-"""R-VERIFY-TIER(B) pins — checkpoint/resume defects found by the hardening-campaign
+"""Checkpoint/resume regressions and R-VERIFY-TIER(B) pins found by the hardening-campaign
 discovery bug-hunt (wf_13f9d2f6-f93, confirmed[18..23]).
 
 BUG CLASS: CheckpointStore._save_checkpoint / _restore_from_checkpoint round-trip loses
@@ -14,7 +14,8 @@ CATALOG (cinema/checkpoint.py):
   confirmed[22] Wdefer:MINOR:ckpt-sceneclips-dead   :98,172
   confirmed[23] Wdefer:MINOR:ckpt-stage-notrestored :94-96
 
-When a site is fixed its xfail xpasses (strict) — delete the pin then.
+Fixed sites stay here as ordinary regression tests. Deferred sites remain
+strict xfail pins until their production fixes land.
 """
 
 from __future__ import annotations
@@ -55,37 +56,16 @@ def _make_store(tmp_path, runstate, project_id="proj-1"):
 
 # ---------------------------------------------------------------------------
 # confirmed[18] W2:MAJOR:ckpt-sceneidx-dead
-# completed_scene_indices is saved/restored by the checkpoint layer, but it is
-# NEVER populated by the runtime (no .add() call site exists in
-# cinema_pipeline.py or elsewhere — only the restore path writes to it).
-# So resume_info always reports "completed_scenes": 0 regardless of actual
-# progress, and the "skip already-done scenes" logic is always a no-op.
+# completed_scene_indices is saved/restored by the checkpoint layer and must be
+# populated by the runtime completion hook so resume_info reports real progress
+# and resume can skip already-completed scene work.
 #
-# The pin tests the SAVE side of the round-trip: after manually adding an index
-# to the set, save + restore, and assert the index survives.  This currently
-# XFAILs because the set is never added to at runtime (so a real resume saves
-# an empty set and restores an empty set — silent zero), but the round-trip
-# mechanics themselves are actually correct.
-#
-# Revised formulation (matches the confirmed defect more precisely): call
-# _save_checkpoint BEFORE any .add() (simulating real runtime behaviour where
-# no code populates the set), then restore and assert that resume_info reports
-# the correct count.  The defect is that completed_scene_indices is NEVER
-# updated during a run, so resume_info always returns 0 completed scenes.
+# This regression exercises the SAVE side of the runtime hook: call
+# _save_checkpoint(completed_scene_idx=0), restore, and assert that the completed
+# scene index survives.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:MAJOR:ckpt-sceneidx-dead cinema/checkpoint.py:87,97,178 "
-        "completed_scene_indices is saved/restored correctly but is NEVER populated "
-        "at runtime (no .add() call site in cinema_pipeline.py) so the set is always "
-        "empty at save-time and resume_info always reports 0 completed scenes even "
-        "after scenes finish. Fix = add runstate.completed_scene_indices.add(scene_idx) "
-        "in the per-scene completion hook; then this xpasses (strict) and the pin is removed."
-    ),
-)
 def test_ckpt_sceneidx_populated_at_runtime(tmp_path):
     """completed_scene_indices must be non-empty after a scene completes so that
     a subsequent save/restore round-trip carries the right count to resume_info."""
@@ -94,44 +74,29 @@ def test_ckpt_sceneidx_populated_at_runtime(tmp_path):
     rs = RunState()
     store = _make_store(tmp_path, rs)
 
-    # Simulate a scene completing: in the fixed world the pipeline calls
-    # rs.completed_scene_indices.add(0) after finishing scene index 0.
-    # In the current (broken) world NO call site does this, so the set stays empty.
-    # We assert the FIXED behaviour: after save + restore the count is 1.
+    # Simulate a scene completing through the checkpoint hook that pipeline
+    # code can call after finishing scene index 0.
 
-    # The broken path: nothing populates the set before save.
-    store._save_checkpoint()
+    store._save_checkpoint(completed_scene_idx=0)
 
     # Restore into a fresh runstate.
     rs2 = RunState()
     store2 = _make_store(tmp_path, rs2)
     store2._restore_from_checkpoint()
 
-    # Fixed expectation: 1 scene would have been recorded.  Today this is 0 (the bug).
     assert len(rs2.completed_scene_indices) == 1, (
         "completed_scene_indices must survive a checkpoint round-trip "
-        "(currently always 0 because no code populates it at runtime)"
+        "after the scene-completion checkpoint hook records an index"
     )
 
 
 # ---------------------------------------------------------------------------
 # confirmed[19] W2:MEDIUM:ckpt-shotaudio-loss
-# RunState.shot_audio (per-shot TTS cache, dict[str, str]) is NOT included in
-# the state dict written by _save_checkpoint, so every paid TTS call for
-# individual shots is re-generated from scratch on resume.
+# RunState.shot_audio (per-shot TTS cache, dict[str, str]) must be included in
+# the checkpoint state so individual-shot TTS outputs can be reused after resume.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:MEDIUM:ckpt-shotaudio-loss cinema/checkpoint.py:87-115 "
-        "RunState.shot_audio is NOT included in the _save_checkpoint state dict "
-        "so per-shot TTS audio paths are lost on resume and re-generated (re-paid). "
-        "Fix = add 'shot_audio': self._runstate.shot_audio to the state dict and "
-        "restore it in _restore_from_checkpoint; then this xpasses (strict)."
-    ),
-)
 def test_ckpt_shotaudio_survives_round_trip(tmp_path):
     """shot_audio must survive a save/restore round-trip."""
     from cinema.runstate import RunState
@@ -146,16 +111,15 @@ def test_ckpt_shotaudio_survives_round_trip(tmp_path):
     store2._restore_from_checkpoint()
 
     assert rs2.shot_audio == {"shot-1": "/audio/shot1.wav", "shot-2": "/audio/shot2.wav"}, (
-        "shot_audio lost across checkpoint round-trip "
-        "(field absent from _save_checkpoint state dict)"
+        "shot_audio must survive a checkpoint round-trip"
     )
 
 
 # ---------------------------------------------------------------------------
 # confirmed[20] W2:MEDIUM:ckpt-projectid-nocrosscheck
-# project_id IS saved (line 93) but _restore_from_checkpoint never reads it
-# back or compares it to the current project.  A checkpoint from project A
-# silently restores into a run for project B.
+# project_id is saved and _restore_from_checkpoint must compare it to the
+# current project. A checkpoint from project A must not silently restore into a
+# run for project B.
 #
 # The FIXED behaviour: restoring a checkpoint whose project_id != the current
 # project raises ValueError (or similar) before corrupting the runstate.
@@ -166,17 +130,6 @@ def test_ckpt_shotaudio_survives_round_trip(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:MEDIUM:ckpt-projectid-nocrosscheck cinema/checkpoint.py:93 "
-        "project_id is saved but _restore_from_checkpoint never compares it to the "
-        "current project's id so a cross-project checkpoint loads silently, "
-        "corrupting scene_clips/shot_results for the wrong project. "
-        "Fix = read saved project_id and raise ValueError when it mismatches; "
-        "then this xpasses (strict)."
-    ),
-)
 def test_ckpt_projectid_crosscheck_on_restore(tmp_path):
     """Restoring a checkpoint whose project_id differs from the current project
     must raise rather than silently loading the mismatched state."""
