@@ -1163,10 +1163,12 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
 ## ADR-027 — Wave verification must EXECUTE the oracle, not READ the attestation (closing the gate-circularity)
 
 - **Status:** Diagnosis ADOPTED; coordinator-doctrine prevention ADOPTED (seat-coordinator
-  skill). FIX-1/FIX-2/FIX-4 are implemented in the gate/tooling surface
+  skill). FIX-1/FIX-2/FIX-4/FIX-5 are implemented in the gate/tooling surface
   (`scripts/wave_gate_check.py`, `scripts/pin_reconciler.py`, `.github/workflows/ci.yml`,
-  `scripts/ci_smoke.py`). The product-oracle wave-close requirement remains not yet
-  gate-enforced. Evidence: `logs/discovery-wf_26a5abf2-3bb.json` (read-only RCA, 8 agents,
+  `scripts/ci_smoke.py`, `.gitignore`). Product-oracle wave-close is gate-enforced
+  for Wave 2+ by requiring a committed `logs/product-oracle-*.json` artifact with
+  finite ArcFace and lip-sync measurements for the requested wave. Evidence:
+  `logs/discovery-wf_26a5abf2-3bb.json` (read-only RCA, 8 agents,
   adversarially stressed; verdict "partially-just-so").
   Implementation evidence (director2 local, 2026-06-15): `env -u GIT_INDEX_FILE
   .venv/bin/python scripts/check_no_ceremony.py` -> exit 0, R3/R4 PASS;
@@ -1224,13 +1226,14 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   - −: FIX-7 (nightly oracle on committed fixtures) is DEFERRED until the `_ARC_AVAILABLE=False`
     CI-vacuity is fixed — wiring it first would be a vacuous green (the silent-gate bug it is
     meant to prevent).
-- **Cross-refs:** `logs/discovery-wf_26a5abf2-3bb.json`; `scripts/wave_gate_check.py` (FIX-1);
+- **Cross-refs:** `logs/discovery-wf_26a5abf2-3bb.json`; `scripts/wave_gate_check.py` (FIX-1/FIX-5);
   `scripts/pin_reconciler.py` (FIX-4); `.github/workflows/ci.yml` + `scripts/ci_smoke.py`
   (FIX-2/ADR-028 hard wiring); `face_validator_gate.py` + `performance/identity_gate.py`
   (the real product oracles); `docs/superpowers/specs/2026-06-14-program-hardening-roadmap-design.md`
   §5/§7 (acceptance bar + the spec↔implementation gap); `docs/REMEDIATION-INVENTORY.md`.
   Origin: user-principal critique 2026-06-15 → coordinator Session-12 RCA `wf_26a5abf2-3bb`.
-  Product-oracle gate enforcement remains pending.
+  Product-oracle gate enforcement landed via
+  `docs/superpowers/briefs/2026-06-15-product-oracle-wave-gate.md`.
 
 ## ADR-028 — Ceremony is forbidden from the verification core, and a detector enforces it
 

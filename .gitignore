@@ -65,6 +65,9 @@ logs/*
 # EXCEPTION: hardening-campaign discovery handoff artifacts are source-of-record
 # (spec §3 — the committed JSON IS the refuter->coordinator boundary), not scratch.
 !logs/discovery-*.json
+# EXCEPTION: Wave 2+ close requires a committed product-oracle measurement artifact
+# (ADR-027 FIX-5 / R-MEASURE), not a local scratch render.
+!logs/product-oracle-*.json
 
 # GitNexus index
 .gitnexus

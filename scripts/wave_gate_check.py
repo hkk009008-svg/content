@@ -10,6 +10,8 @@ Read-only - never mutates the inventory.
 """
 from __future__ import annotations
 import argparse
+import json
+import math
 import os
 import re
 import shlex
@@ -28,6 +30,8 @@ _SELECTOR_RE = re.compile(
     r"(?P<selector>(?:\.?/)?tests/[A-Za-z0-9_./-]+\.py(?:::[^\s;,()]+)*)"
 )
 _XFAIL_SIGNAL_RE = re.compile(r"\b(?:XFAIL|XPASS|xfailed|xpassed)\b")
+_PRODUCT_ORACLE_MIN_WAVE = 2
+_PRODUCT_ORACLE_PATTERN = "logs/product-oracle-*.json"
 
 PytestRunner = Callable[[list[str]], dict]
 
@@ -110,6 +114,82 @@ def _run_pytest_selectors(selectors: list[str]) -> dict:
         "stderr": proc.stderr,
     }
 
+def _committed_product_oracle_paths() -> tuple[list[Path], str | None]:
+    """Return product-oracle artifacts committed in HEAD, ignoring seat-local indexes."""
+    args = [
+        "git",
+        "ls-tree",
+        "-r",
+        "--name-only",
+        "HEAD",
+        "--",
+        _PRODUCT_ORACLE_PATTERN,
+    ]
+    env = os.environ.copy()
+    env.pop("GIT_INDEX_FILE", None)
+    try:
+        proc = subprocess.run(
+            args,
+            cwd=_REPO_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:
+        return [], str(exc)
+    if proc.returncode != 0:
+        return [], (proc.stderr or proc.stdout or "git ls-tree failed").strip()
+    paths = [
+        _REPO_ROOT / line.strip()
+        for line in proc.stdout.splitlines()
+        if line.strip()
+    ]
+    return paths, None
+
+def _finite_number(value: object) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
+
+def _product_oracle_issue(path: Path, wave: int) -> str | None:
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        return f"{path}: unreadable JSON ({exc})"
+    if not isinstance(data, dict):
+        return f"{path}: top-level JSON value is not an object"
+    if data.get("artifact_kind") != "product-oracle":
+        return f"{path}: artifact_kind is not product-oracle"
+    if data.get("wave") != wave:
+        return f"{path}: wave is not {wave}"
+    arcface = data.get("arcface")
+    if not isinstance(arcface, dict) or not _finite_number(arcface.get("arc_score")):
+        return f"{path}: missing finite arcface.arc_score"
+    lipsync = data.get("lipsync")
+    if not isinstance(lipsync, dict) or not _finite_number(lipsync.get("offset_frames")):
+        return f"{path}: missing finite lipsync.offset_frames"
+    return None
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(_REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+def _product_oracle_report(paths: list[Path], wave: int) -> dict:
+    valid: list[str] = []
+    invalid: list[str] = []
+    for path in paths:
+        issue = _product_oracle_issue(path, wave)
+        if issue:
+            invalid.append(issue)
+        else:
+            valid.append(_display_path(path))
+    return {"valid": valid, "invalid": invalid}
+
 def _has_xfail_signal(pytest_result: dict | None) -> bool:
     if not pytest_result:
         return False
@@ -122,6 +202,7 @@ def gate_report(
     wave: int,
     *,
     runner: PytestRunner | None = None,
+    product_oracle_paths: list[Path] | None = None,
 ) -> dict:
     rows = [r for r in _parse_rows(inventory_path) if r["wave"] == str(wave)]
     counts: dict[str, int] = {}
@@ -149,12 +230,40 @@ def gate_report(
         pytest_result
         and (pytest_result["exit_code"] != 0 or _has_xfail_signal(pytest_result))
     )
+    product_oracle_blockers: list[str] = []
+    product_oracles = {"valid": [], "invalid": []}
+    if rows and wave >= _PRODUCT_ORACLE_MIN_WAVE:
+        if product_oracle_paths is None:
+            product_oracle_paths, product_oracle_error = _committed_product_oracle_paths()
+        else:
+            product_oracle_error = None
+        product_oracles = _product_oracle_report(product_oracle_paths, wave)
+        if product_oracle_error:
+            product_oracle_blockers.append(
+                f"could not list committed {_PRODUCT_ORACLE_PATTERN} artifacts: "
+                f"{product_oracle_error}"
+            )
+        if not product_oracles["valid"]:
+            required = (
+                f"Wave {wave} requires a committed {_PRODUCT_ORACLE_PATTERN} artifact "
+                f"with artifact_kind=product-oracle, wave={wave}, finite "
+                "arcface.arc_score, and finite lipsync.offset_frames"
+            )
+            if product_oracles["invalid"]:
+                required += f"; invalid artifacts: {'; '.join(product_oracles['invalid'][:3])}"
+            product_oracle_blockers.append(required)
     blockers = no_oracle_blockers + provisional_blockers
     return {
         "wave": wave,
-        "verdict": "MET" if not blockers and not pytest_blocking else "UNMET",
+        "verdict": (
+            "MET"
+            if not blockers and not pytest_blocking and not product_oracle_blockers
+            else "UNMET"
+        ),
         "counts": counts,
         "blockers": blockers,
+        "product_oracle_blockers": product_oracle_blockers,
+        "product_oracles": product_oracles,
         "gate_rows": gate_rows,
         "selectors": selectors,
         "selectors_by_row": selectors_by_row,
@@ -184,6 +293,10 @@ def main(argv: list[str] | None = None) -> int:
             f"  BLOCKER [{b['severity']}/{b['status']}] {b['id']} "
             f"({b['file:line']}): {b['block_reason']}"
         )
+    for blocker in rep["product_oracle_blockers"]:
+        print(f"  PRODUCT ORACLE BLOCKER: {blocker}")
+    for artifact in rep["product_oracles"]["valid"]:
+        print(f"  PRODUCT ORACLE: {artifact}")
     if rep["pytest"]:
         print(f"  PYTEST: exit={rep['pytest']['exit_code']} command={rep['pytest']['command']}")
         output = "\n".join(

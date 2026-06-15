@@ -1,5 +1,6 @@
 # tests/unit/test_wave_gate_check.py
 import importlib.util
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,6 +16,14 @@ INVENTORY = """\
 | no-oracle | gates | core.py:7 | MAJOR | 2 | no oracle | t | test-infeasible | A | | 1 | open | | |
 | med-open | gates | core.py:8 | MEDIUM | 3 | medium | t | tests/unit/test_medium_xfail.py | A | | 1 | open | | |
 | p1 | x | core.py:9 | MINOR | 1 | x | t | tests/unit/test_p1_xfail.py | A | | 3 | provisional | | mid |
+"""
+
+WAVE2_INVENTORY = """\
+# Remediation Inventory
+
+| id | subsystem | file:line | severity | priority | fail-mode | repro | xfail-pin | lane-owner | shared-lock | wave | status | verifier | notes |
+|----|-----------|-----------|----------|----------|-----------|-------|-----------|------------|-------------|------|--------|----------|-------|
+| wave2-budget | money | cost_tracker.py:101 | CRITICAL | 1 | nan bypass | t | tests/unit/test_budget_nan_gate_xfail.py | B |  | 2 | verified | op2 |  |
 """
 
 
@@ -39,6 +48,21 @@ def _runner(exit_code=0, stdout="2 passed\n"):
 
     run.calls = calls
     return run
+
+def _write_product_oracle(tmp_path, *, wave=2, payload=None):
+    logs = tmp_path / "logs"
+    logs.mkdir(exist_ok=True)
+    path = logs / f"product-oracle-wave{wave}.json"
+    if payload is None:
+        payload = {
+            "artifact_kind": "product-oracle",
+            "wave": wave,
+            "instrument": "scripts/measure_lipsync_offset.py",
+            "arcface": {"arc_score": 0.84},
+            "lipsync": {"offset_frames": 1.5},
+        }
+    path.write_text(json.dumps(payload))
+    return path
 
 
 def test_gate_executes_critical_major_selectors_and_ignores_status_for_verdict(tmp_path):
@@ -139,3 +163,64 @@ def test_selector_extraction_expands_shorthand_nodes():
         "tests/unit/test_phase_c_vision.py::TestValidateIdentityVisionEncodeFailure",
         "tests/unit/test_identity_validator.py::test_marker",
     ]
+
+
+def test_wave1_does_not_require_product_oracle_artifact(tmp_path):
+    inv = tmp_path / "INV.md"
+    inv.write_text(INVENTORY.replace("| no-oracle |", "| med2 |").replace("test-infeasible", "tests/unit/test_major_xfail.py"))
+    wgc = _load()
+    runner = _runner(exit_code=0)
+
+    report = wgc.gate_report(inv, wave=1, runner=runner, product_oracle_paths=[])
+
+    assert report["verdict"] == "MET"
+    assert report["product_oracle_blockers"] == []
+
+
+def test_wave2_requires_product_oracle_artifact_even_when_pins_pass(tmp_path):
+    inv = tmp_path / "INV.md"
+    inv.write_text(WAVE2_INVENTORY)
+    wgc = _load()
+    runner = _runner(exit_code=0)
+
+    report = wgc.gate_report(inv, wave=2, runner=runner, product_oracle_paths=[])
+
+    assert report["verdict"] == "UNMET"
+    assert report["product_oracles"]["valid"] == []
+    assert report["product_oracle_blockers"]
+    assert "logs/product-oracle-*.json" in report["product_oracle_blockers"][0]
+
+
+def test_wave2_accepts_valid_product_oracle_artifact(tmp_path):
+    inv = tmp_path / "INV.md"
+    inv.write_text(WAVE2_INVENTORY)
+    artifact = _write_product_oracle(tmp_path, wave=2)
+    wgc = _load()
+    runner = _runner(exit_code=0)
+
+    report = wgc.gate_report(inv, wave=2, runner=runner, product_oracle_paths=[artifact])
+
+    assert report["verdict"] == "MET"
+    assert report["product_oracle_blockers"] == []
+    assert report["product_oracles"]["valid"] == [str(artifact)]
+
+
+def test_wave2_rejects_malformed_product_oracle_artifact(tmp_path):
+    inv = tmp_path / "INV.md"
+    inv.write_text(WAVE2_INVENTORY)
+    artifact = _write_product_oracle(
+        tmp_path,
+        wave=2,
+        payload={
+            "artifact_kind": "product-oracle",
+            "wave": 2,
+            "arcface": {"arc_score": 0.84},
+        },
+    )
+    wgc = _load()
+    runner = _runner(exit_code=0)
+
+    report = wgc.gate_report(inv, wave=2, runner=runner, product_oracle_paths=[artifact])
+
+    assert report["verdict"] == "UNMET"
+    assert any("lipsync.offset_frames" in issue for issue in report["product_oracles"]["invalid"])
