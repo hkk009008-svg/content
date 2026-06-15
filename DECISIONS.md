@@ -1276,7 +1276,8 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   `lipsync-postproc-costkey`, `idgate-observability`) → owning lanes. New row
   `coherence-caller-valid-ignored` filed in the inventory. ci_smoke/CI hard-wiring of the
   detector → Pair-B, gated on FIX-1/2 green. **User ratification of the hard-wiring policy
-  PENDING.**
+  RATIFIED (user-principal, 2026-06-15): once FIX-1/2 land (R3/R4 green), ci_smoke + CI MUST
+  run `check_no_ceremony.py` as a HARD gate.**
 - **Cross-refs:** `scripts/check_no_ceremony.py`; `logs/discovery-wf_73983b84-d46.json`;
   ADR-027 (FIX-1/FIX-2); `docs/REMEDIATION-INVENTORY.md`. Origin: user-principal directive
   2026-06-15 → coordinator Session-13 ceremony hunt.
