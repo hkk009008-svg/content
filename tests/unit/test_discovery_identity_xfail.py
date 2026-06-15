@@ -90,11 +90,9 @@ def test_needs_regenerate_returns_true_for_nan_arc_score():
 # by the same root cause (has_character keyed off face-ref only) but manifests on a
 # SECONDARY character's LoRA, not the primary's. Mirror that pin's structure.
 #
-# Fix = decouple has_face_ref / has_char_lora (~24 sites, director-1 design backlog);
-# the has_character gate at line 1114 must be changed so that secondary LoRA injection
-# fires when has_char_lora OR has_secondary_lora is True (independent of face-ref).
-# `_inject_secondary_loras` already handles the no-node-700 case (uses ["112",0] /
-# ["11",0] as chain base). When the fix lands this xpasses (strict) -> delete pin.
+# The injection gate was fixed by decoupling has_face_ref / has_char_lora.
+# A residual reachability regression below pins the MODEL output: a secondary
+# LoraLoader must reach BasicGuider(22), not only CLIPTextEncode(122).
 def test_secondary_lora_injected_when_primary_has_no_face_ref():
     """When primary has no face reference but a secondary character has a lora_path,
     _inject_secondary_loras should still inject the secondary LoRA.
@@ -137,11 +135,6 @@ def test_secondary_lora_injected_when_primary_has_no_face_ref():
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="secondary-lora-hole: node 701 must be model-chain reachable from BasicGuider "
-    "when the primary has no face ref; 23c99e3 inserts 701 but leaves 22.model on 700",
-)
 def test_secondary_lora_model_output_reaches_guider_when_primary_has_no_face_ref():
     """A secondary LoRA must affect the executing model chain, not only CLIP.
 

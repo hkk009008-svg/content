@@ -615,11 +615,10 @@ def _inject_secondary_loras(workflow: dict, secondary_chars: Optional[list]):
     future _inject_identity changes).
     Chain base = node 700 when the primary kept its LoRA, else the base
     loaders (112 model / 11 clip — the LoRA-less-primary path prunes 700).
-    Consumers (100.model, 122.clip, 600.clip) move to the LAST chained node —
-    hardcoded like _inject_identity's rewires (the complete 700-consumer set
-    in the static graph). _inject_secondary_faceswap scans dynamically instead
-    because _inject_post_passes REWIRES 610-consumers at runtime; no such
-    dynamic writer exists for the model/clip chain. Don't "unify" the two.
+    Consumers (100.model, 122.clip, 600.clip) move to the LAST chained node.
+    When PuLID(100) was already pruned, move the live MODEL consumer of the
+    base (for example 22.model -> 700) instead, so the secondary LoRA is not a
+    CLIP-only orphan.
     Strength clamp ≤0.55 per secondary (§3b bleed mitigation; S3 tunes).
     lora_name takes the artifact's BASENAME — pod-side placement into
     ComfyUI's loras/ dir is the slice-2 pod-session step (spec §7.2).
@@ -633,7 +632,9 @@ def _inject_secondary_loras(workflow: dict, secondary_chars: Optional[list]):
         model_src, clip_src = ["700", 0], ["700", 1]
     else:
         model_src, clip_src = ["112", 0], ["11", 0]
+    base_model_src = list(model_src)
     last = None
+    inserted = set()
     for i, entry in enumerate(entries):
         nid = str(701 + i)
         # _finite_or: a non-finite/non-coercible lora_strength (NaN survives
@@ -654,8 +655,16 @@ def _inject_secondary_loras(workflow: dict, secondary_chars: Optional[list]):
         }
         model_src, clip_src = [nid, 0], [nid, 1]
         last = nid
+        inserted.add(nid)
     if "100" in workflow:
         workflow["100"]["inputs"]["model"] = [last, 0]
+    else:
+        for nid, node in workflow.items():
+            if nid in inserted or not isinstance(node, dict):
+                continue
+            inputs = node.get("inputs", {})
+            if inputs.get("model") == base_model_src:
+                inputs["model"] = [last, 0]
     if "122" in workflow:
         workflow["122"]["inputs"]["clip"] = [last, 1]
     if "600" in workflow:
