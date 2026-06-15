@@ -1,0 +1,134 @@
+{
+  "arcface": {
+    "aggregation": "mean_finite_sample_scores",
+    "arc_score": 0.606526,
+    "max_score": 0.699671,
+    "min_score": 0.530614,
+    "requested_sample_count": 8,
+    "sample_count": 8,
+    "samples": [
+      {
+        "index": 0,
+        "passed": true,
+        "score": 0.622448,
+        "skipped": false,
+        "time_seconds": 0.2425
+      },
+      {
+        "index": 1,
+        "passed": true,
+        "score": 0.699671,
+        "skipped": false,
+        "time_seconds": 0.7275
+      },
+      {
+        "index": 2,
+        "passed": true,
+        "score": 0.612194,
+        "skipped": false,
+        "time_seconds": 1.2125
+      },
+      {
+        "index": 3,
+        "passed": true,
+        "score": 0.530614,
+        "skipped": false,
+        "time_seconds": 1.6975
+      },
+      {
+        "index": 4,
+        "passed": true,
+        "score": 0.577799,
+        "skipped": false,
+        "time_seconds": 2.1825
+      },
+      {
+        "index": 5,
+        "passed": true,
+        "score": 0.610066,
+        "skipped": false,
+        "time_seconds": 2.6675
+      },
+      {
+        "index": 6,
+        "passed": true,
+        "score": 0.601309,
+        "skipped": false,
+        "time_seconds": 3.1525
+      },
+      {
+        "index": 7,
+        "passed": true,
+        "score": 0.598105,
+        "skipped": false,
+        "time_seconds": 3.6375
+      }
+    ],
+    "threshold": 0.0
+  },
+  "artifact_kind": "product-oracle",
+  "command": "/Users/hyungkoookkim/Content/.venv/bin/python scripts/measure_product_oracle.py --wave 2 --video logs/lipsync_gen_v2studio.mp4 --reference-image logs/ref_lighting.jpg --output logs/product-oracle-wave2.json",
+  "created_at_utc": "2026-06-15T23:17:45Z",
+  "inputs": {
+    "reference_image": {
+      "path": "logs/ref_lighting.jpg",
+      "sha256": "1640b178e8f7591d85f726a8d72c6da07f33465ddd6279590f5885cc804c21ef"
+    },
+    "video": {
+      "duration_seconds": 3.88,
+      "fps": 25.0,
+      "frame_count": 97,
+      "height": 704,
+      "path": "logs/lipsync_gen_v2studio.mp4",
+      "sha256": "aad6aa4fdf13da0a5e61427542f532930f447cf95b8da0d24042685cf37a1827",
+      "width": 1248
+    }
+  },
+  "instrument": "scripts/measure_product_oracle.py",
+  "lipsync": {
+    "audio_signal": "per_video_frame_rms",
+    "correlation": 0.370732,
+    "face_detect_rate": 1.0,
+    "fps": 25.0,
+    "max_lag_frames": 12,
+    "mouth_signal": "lower_face_frame_difference",
+    "offset_frames": -1.0,
+    "offset_seconds": -0.04,
+    "paired_samples": 95,
+    "sample_rate_hz": 16000,
+    "sign_convention": "positive offset_frames means mouth motion lags audio",
+    "top_lags": [
+      {
+        "correlation": 0.370732,
+        "lag_frames": -1,
+        "paired_samples": 95
+      },
+      {
+        "correlation": 0.302308,
+        "lag_frames": 0,
+        "paired_samples": 96
+      },
+      {
+        "correlation": 0.299144,
+        "lag_frames": -3,
+        "paired_samples": 93
+      },
+      {
+        "correlation": 0.283298,
+        "lag_frames": -2,
+        "paired_samples": 94
+      },
+      {
+        "correlation": 0.282347,
+        "lag_frames": -4,
+        "paired_samples": 92
+      }
+    ]
+  },
+  "notes": [
+    "Source media are local runtime artifacts; this committed JSON preserves input hashes and measured values.",
+    "ArcFace uses IdentityValidator.validate_image on sampled frames with threshold=0.0.",
+    "Lip-sync offset is a deterministic mouth-motion/audio-energy cross-correlation, not a SyncNet confidence score."
+  ],
+  "wave": 2
+}
