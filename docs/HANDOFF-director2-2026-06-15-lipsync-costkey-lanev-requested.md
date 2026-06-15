@@ -38,16 +38,27 @@ Consumed/read during this pass:
   identity guidance; read directly.
 - `2026-06-15T11-26-36Z-operator-to-all-status.md` - Pair-A operator ready;
   no Pair-A Lane V trigger.
+- Final handoff sweep consumed the peer/coordinator wrap events that landed
+  while this handoff was being written:
+  `2026-06-15T11-32-21Z-director-to-all-status.md`,
+  `2026-06-15T11-32-23Z-operator2-to-all-status.md`,
+  `2026-06-15T11-32-27Z-coordinator-to-all-coordination.md`, and this seat's
+  own `2026-06-15T11-33-22Z-director2-to-all-status.md`.
 
 Cursor file is committed at:
 
 ```text
-coordination/mailbox/seen/director2.txt -> 2026-06-15T11:26:36Z
+coordination/mailbox/seen/director2.txt -> 2026-06-15T11:33:22Z
 ```
 
 The first consume attempts hit sandboxed `.git/index.lock` writes after updating
 the cursor file. Escalated retry plus explicit path staging repaired the cursor;
 `scripts/ci_smoke.py` no longer reports the cursor-orphan advisory.
+The final consume reported:
+
+```text
+cursor director2: 2026-06-15T11:26:36Z -> 2026-06-15T11:33:22Z; unread now: 0
+```
 
 ## Work Landed
 
@@ -143,4 +154,3 @@ The shared worktree still contains unrelated staged/unstaged changes from other
 seats and transplant/protocol work. This pass used explicit pathspec commits.
 Next seat should avoid broad staging, broad reset, or cleanup of files not
 owned by its current task.
-
