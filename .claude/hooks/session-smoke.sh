@@ -16,8 +16,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)" || exit 0
 [ -n "$ROOT" ] && cd "$ROOT" 2>/dev/null || exit 0
 
 PY="$ROOT/.venv/bin/python"
-[ -x "$PY" ] || PY="python3"
-command -v "$PY" >/dev/null 2>&1 || exit 0   # no interpreter -> fail-open
+if [ ! -x "$PY" ]; then
+  echo "⚠️  §15 smoke SKIPPED — project venv missing at .venv/bin/python."
+  echo "    Bootstrap with: /opt/homebrew/bin/python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+  exit 0
+fi
 
 # Run the smoke under a hard 180s bound enforced by Python itself.
 if out="$("$PY" - "$PY" 2>&1 <<'PYWRAP'
