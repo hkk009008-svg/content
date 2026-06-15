@@ -1,9 +1,9 @@
 """Postprocess-audio sibling coverage from the §3 completeness sweep.
 
-``test_performance_take_as_final_metadata_is_resolved`` is now the live
-regression for the fixed `perf-take-meta` row: performance takes approved as final
-must expose their embedded-audio metadata to assembly.  The remaining strict xfail
-tracks only the unfixed `lipsync-veto` sibling in the auto-approve subsystem.
+``test_performance_take_as_final_metadata_is_resolved`` is the live regression
+for the fixed `perf-take-meta` row: performance takes approved as final must
+expose their embedded-audio metadata to assembly.  The `lipsync-veto` sibling is
+also a live regression for the auto-approve subsystem.
 
 Two further siblings (capability_scorecard blind-spot — MINOR, advisory display;
 storyboard-batch F1b lipsync-skip — MAJOR, needs the _run_storyboard_scene
@@ -12,8 +12,6 @@ than pinned here.
 """
 
 from __future__ import annotations
-
-import pytest
 
 
 def test_performance_take_as_final_metadata_is_resolved():
@@ -34,16 +32,6 @@ def test_performance_take_as_final_metadata_is_resolved():
     assert meta.get("audio_embedded") is True
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="sibling wf_69ba3ee7 S2 (MAJOR): _best_take_lipsync (cinema/auto_approve.py:502) "
-    "credits lipsync_score and audio_embedded but NOT dialogue_audio_in_clip, and a "
-    "postprocess lip_sync variant carries no lipsync_score — so a shot whose sync was "
-    "FIXED by a manual lip_sync correction is still vetoed on the base motion take's "
-    "0.0 score. Fix = credit dialogue_audio_in_clip as a pass OR write lipsync_score "
-    "onto the lip_sync postprocess variant (validate_lipsync_quality). director2 "
-    "disposition owed (auto-approve subsystem, not §3's assembler scope).",
-)
 def test_best_take_lipsync_credits_successful_postprocess_lipsync():
     """A successful postprocess lip_sync correction must lift the shot's lipsync gate
     score above the failed base motion take's 0.0 — otherwise the auto-approve 'final'
@@ -55,5 +43,5 @@ def test_best_take_lipsync_credits_successful_postprocess_lipsync():
         {"id": "pp_lipsync", "metadata": {"action": "lip_sync", "dialogue_audio_in_clip": True}},
     ]
     score = _best_take_lipsync(takes)
-    # Today: returns 0.0 (the postprocess fix is invisible to the gate) → fails (xfail).
+    # Regression: the postprocess fix must be visible to the final gate.
     assert score >= 0.8

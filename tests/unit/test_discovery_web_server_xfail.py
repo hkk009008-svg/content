@@ -1,9 +1,8 @@
-"""Strict-xfail CI pins for 5 remaining HTTP-mutator defects from the
-hardening-campaign discovery bug-hunt (wf_13f9d2f6-f93, confirmed[12..17];
-confirmed[14] ws-reorder-deletes FIXED — pin removed, now a live regression).
+"""Live regressions for HTTP-mutator defects from the hardening-campaign
+discovery bug-hunt (wf_13f9d2f6-f93, confirmed[12..17]).
 
-Each test asserts the FIXED behavior so it XFAILs today against unpatched code.
-When a site is fixed, its strict-xfail xpasses -> delete that pin.
+These began as strict-xfail CI pins. Fixed rows stay here as ordinary
+regressions so the old bypasses cannot silently return.
 
 CATALOG:
   confirmed[12] W2:MAJOR:http-clearperf-silent200
@@ -66,6 +65,36 @@ def _add_scene_and_shot(pid, monkeypatch, tmp_path):
     return scene["id"], shot["id"]
 
 
+def _add_character_record(pid, monkeypatch, tmp_path):
+    """Add one character record directly to project storage; return character id."""
+    from domain import project_manager
+    monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path), raising=False)
+    character = project_manager.make_character("Existing Char", "desc")
+
+    def _mutate(latest):
+        latest["characters"].append(character)
+        from domain.project_manager import MutationResult
+        return MutationResult(character, save=True)
+
+    project_manager.mutate_project(pid, _mutate, timeout=5)
+    return character["id"]
+
+
+def _add_object_record(pid, monkeypatch, tmp_path):
+    """Add one object record directly to project storage; return object id."""
+    from domain import project_manager
+    monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path), raising=False)
+    obj = project_manager.make_object("Existing Object", "desc")
+
+    def _mutate(latest):
+        latest.setdefault("objects", []).append(obj)
+        from domain.project_manager import MutationResult
+        return MutationResult(obj, save=True)
+
+    project_manager.mutate_project(pid, _mutate, timeout=5)
+    return obj["id"]
+
+
 @pytest.fixture
 def client():
     import web_server
@@ -78,15 +107,6 @@ def client():
 # confirmed[12] — W2:MAJOR:http-clearperf-silent200
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:MAJOR:http-clearperf-silent200 web_server.py:972 api_clear_performance "
-        "discards the mutate_project return value and always returns HTTP 200 "
-        "{cleared: True} even when shot_id does not exist. Fix = check the return "
-        "value and return 404 when the shot was not found; then this xpasses."
-    ),
-)
 def test_clear_performance_nonexistent_shot_returns_404(client, tmp_path, monkeypatch):
     """DELETE on a nonexistent shot_id should be 404, not 200 cleared=True."""
     from domain import project_manager
@@ -105,17 +125,6 @@ def test_clear_performance_nonexistent_shot_returns_404(client, tmp_path, monkey
 # confirmed[13] — W2:MAJOR:http-drivingvid-orphan
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:MAJOR:http-drivingvid-orphan web_server.py:932 api_upload_driving_video "
-        "discards the mutate_project return value and always returns HTTP 201 "
-        "{uploaded: True} even when the inner mutator found no matching shot (e.g. "
-        "shot deleted between outer lookup and lock acquisition). Fix = check the "
-        "return value and return 404/409 when driving_video_path was not persisted; "
-        "then this xpasses."
-    ),
-)
 def test_upload_driving_video_mutator_miss_returns_non_201(client, tmp_path, monkeypatch):
     """Simulate a TOCTOU where the shot disappears before the mutator runs.
 
@@ -228,16 +237,6 @@ def test_reorder_scenes_partial_list_preserves_unlisted_scenes(tmp_path, monkeyp
 # confirmed[15] — W2:MAJOR:http-addchar-float-unguarded
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:MAJOR:http-addchar-float-unguarded web_server.py:567 api_add_character "
-        "calls bare float() on ip_adapter_weight before the try/except ValueError "
-        "block, so a non-numeric value raises an uncaught ValueError -> Flask 500. "
-        "Fix = move the float() call inside the try/except (or add a separate guard) "
-        "and return HTTP 400; then this xpasses."
-    ),
-)
 def test_add_character_non_numeric_ip_weight_returns_400(client, tmp_path, monkeypatch):
     """Submitting ip_adapter_weight='abc' must yield 400, not 500."""
     from domain import project_manager
@@ -260,15 +259,6 @@ def test_add_character_non_numeric_ip_weight_returns_400(client, tmp_path, monke
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:MAJOR:http-addchar-float-unguarded web_server.py:1053 api_add_object "
-        "calls bare float() on ip_adapter_weight with no exception handler at all, "
-        "so a non-numeric value raises an uncaught ValueError -> Flask 500. "
-        "Fix = wrap in try/except ValueError and return HTTP 400; then this xpasses."
-    ),
-)
 def test_add_object_non_numeric_ip_weight_returns_400(client, tmp_path, monkeypatch):
     """Submitting ip_adapter_weight='abc' via /objects must yield 400, not 500."""
     from domain import project_manager
@@ -292,20 +282,86 @@ def test_add_object_non_numeric_ip_weight_returns_400(client, tmp_path, monkeypa
     )
 
 
+def test_update_character_non_numeric_ip_weight_returns_400(client, tmp_path, monkeypatch):
+    """Submitting ip_adapter_weight='abc' via character update must yield 400."""
+    from domain import project_manager
+    monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path), raising=False)
+    pid, _ = _make_project_dir(tmp_path, monkeypatch)
+    cid = _add_character_record(pid, monkeypatch, tmp_path)
+
+    resp = client.put(
+        f"/api/projects/{pid}/characters/{cid}",
+        json={"ip_adapter_weight": "abc"},
+    )
+    assert resp.status_code == 400, (
+        f"Expected 400 for non-numeric ip_adapter_weight in character update, "
+        f"got {resp.status_code}: {resp.data!r}"
+    )
+
+
+def test_update_object_non_numeric_ip_weight_returns_400(client, tmp_path, monkeypatch):
+    """Submitting ip_adapter_weight='abc' via object update must yield 400."""
+    from domain import project_manager
+    monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path), raising=False)
+    pid, _ = _make_project_dir(tmp_path, monkeypatch)
+    oid = _add_object_record(pid, monkeypatch, tmp_path)
+
+    resp = client.put(
+        f"/api/projects/{pid}/objects/{oid}",
+        json={"ip_adapter_weight": "abc"},
+    )
+    assert resp.status_code == 400, (
+        f"Expected 400 for non-numeric ip_adapter_weight in object update, "
+        f"got {resp.status_code}: {resp.data!r}"
+    )
+
+
+def test_ip_adapter_weight_rejects_non_finite_values_on_all_mutators(client, tmp_path, monkeypatch):
+    """NaN/inf ip_adapter_weight values must be rejected at every write site."""
+    from domain import project_manager
+    monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path), raising=False)
+    pid, _ = _make_project_dir(tmp_path, monkeypatch)
+    cid = _add_character_record(pid, monkeypatch, tmp_path)
+    oid = _add_object_record(pid, monkeypatch, tmp_path)
+
+    cases = [
+        (
+            "add character",
+            client.post,
+            f"/api/projects/{pid}/characters",
+            {"data": {"name": "Bad Char", "description": "desc", "ip_adapter_weight": "nan"}},
+        ),
+        (
+            "add object",
+            client.post,
+            f"/api/projects/{pid}/objects",
+            {"data": {"name": "Bad Object", "description": "desc", "ip_adapter_weight": "inf"}},
+        ),
+        (
+            "update character",
+            client.put,
+            f"/api/projects/{pid}/characters/{cid}",
+            {"json": {"ip_adapter_weight": "-inf"}},
+        ),
+        (
+            "update object",
+            client.put,
+            f"/api/projects/{pid}/objects/{oid}",
+            {"json": {"ip_adapter_weight": "nan"}},
+        ),
+    ]
+    for label, method, url, kwargs in cases:
+        resp = method(url, **kwargs)
+        assert resp.status_code == 400, (
+            f"Expected 400 for non-finite ip_adapter_weight on {label}, "
+            f"got {resp.status_code}: {resp.data!r}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # confirmed[16] — W2:MEDIUM:http-null-json-body
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:MEDIUM:http-null-json-body web_server.py:1966 api_update_shot_prompt "
-        "calls request.json.get(...) without a null guard; Content-Type: "
-        "application/json with body null makes request.json return None -> "
-        "None.get() AttributeError -> Flask 500. Fix = (request.json or {}).get(...) "
-        "and return 400; then this xpasses."
-    ),
-)
 def test_update_shot_prompt_null_json_body_returns_400(client, tmp_path, monkeypatch):
     """PUT with Content-Type: application/json and body null must yield 400, not 500."""
     from domain import project_manager
@@ -325,16 +381,6 @@ def test_update_shot_prompt_null_json_body_returns_400(client, tmp_path, monkeyp
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:MEDIUM:http-null-json-body web_server.py:2610 api_cleanup uses the "
-        "ternary `request.json.get(...) if request.is_json else False`; when body "
-        "is null, request.is_json is True but request.json is None -> "
-        "None.get() AttributeError -> Flask 500. Fix = (request.json or {}).get(...); "
-        "then this xpasses."
-    ),
-)
 def test_cleanup_null_json_body_returns_non_500(client, tmp_path, monkeypatch):
     """POST /cleanup with body null must not crash with 500."""
     from domain import project_manager
@@ -353,14 +399,6 @@ def test_cleanup_null_json_body_returns_non_500(client, tmp_path, monkeypatch):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:MEDIUM:http-null-json-body web_server.py:2656 api_cleanup_all uses the "
-        "same ternary pattern as api_cleanup; null body -> None.get() AttributeError "
-        "-> Flask 500. Fix = (request.json or {}).get(...); then this xpasses."
-    ),
-)
 def test_cleanup_all_null_json_body_returns_non_500(client):
     """POST /cleanup-all with body null must not crash with 500."""
     resp = client.post(
@@ -379,16 +417,6 @@ def test_cleanup_all_null_json_body_returns_non_500(client):
 # confirmed[17] — W2:MEDIUM:http-styleboard-false201
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:MEDIUM:http-styleboard-false201 web_server.py:984-1024 api_upload_style_board "
-        "outer guard only catches a completely absent 'references' field; when all "
-        "FileStorage objects have empty filenames the inner loop skips them, saved=[], "
-        "nothing is stored, but the endpoint still returns 201 {uploaded: 0}. "
-        "Fix = return 400 when saved is empty after the loop; then this xpasses."
-    ),
-)
 def test_upload_style_board_empty_filenames_returns_400(client, tmp_path, monkeypatch):
     """Uploading a 'references' part with an empty filename must yield 400, not 201."""
     from domain import project_manager

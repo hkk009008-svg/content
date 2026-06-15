@@ -5,6 +5,7 @@ Serves the React frontend and exposes all project/character/location/scene endpo
 """
 
 import logging
+import math
 import os
 import warnings
 from functools import wraps
@@ -109,6 +110,22 @@ _GATE_STAGES = frozenset({
 _running_cores: dict[str, PipelineCore] = {}
 _cores_lock = threading.Lock()
 HTTP_PROJECT_TIMEOUT = 2.0
+
+
+def _parse_ip_adapter_weight(value) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("ip_adapter_weight must be a finite number")
+    if not math.isfinite(parsed):
+        raise ValueError("ip_adapter_weight must be a finite number")
+    return parsed
+
+
+def _json_object_or_none():
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else None
+
 
 # S21 (cycle-9 Surface B): re-assembly busy tracking.
 # The re-assembly endpoint runs a heavyweight ffmpeg pipeline
@@ -564,7 +581,10 @@ def api_add_character(pid):
     name = request.form.get("name", "Unnamed Character")
     description = request.form.get("description", "")
     voice_id = request.form.get("voice_id", "")
-    ip_weight = float(request.form.get("ip_adapter_weight", "0.85"))
+    try:
+        ip_weight = _parse_ip_adapter_weight(request.form.get("ip_adapter_weight", "0.85"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     # Save uploaded reference images
     images = request.files.getlist("reference_images")
@@ -622,9 +642,17 @@ def api_update_character(pid, cid):
 
     # Accept both JSON and form data
     if request.is_json:
-        data = request.json
+        data = request.json or {}
     else:
         data = request.form.to_dict()
+    try:
+        ip_weight = (
+            _parse_ip_adapter_weight(data["ip_adapter_weight"])
+            if "ip_adapter_weight" in data
+            else None
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     # Handle reference image uploads.
     #
@@ -692,8 +720,8 @@ def api_update_character(pid, cid):
                 for field in ["name", "description", "voice_id", "physical_traits"]:
                     if field in data:
                         latest_char[field] = data[field]
-                if "ip_adapter_weight" in data:
-                    latest_char["ip_adapter_weight"] = float(data["ip_adapter_weight"])
+                if ip_weight is not None:
+                    latest_char["ip_adapter_weight"] = ip_weight
                 if saved_paths:
                     refs = latest_char.setdefault("reference_images", [])
                     for save_path in saved_paths:
@@ -929,8 +957,14 @@ def api_upload_driving_video(pid, sid):
                     return MutationResult(dest_path, save=True)
         return MutationResult(None, save=False)
 
-    mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT, snapshot=project)
-    return jsonify({"uploaded": True, "path": dest_path}), 201
+    saved_path = mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT, snapshot=project)
+    if not saved_path:
+        try:
+            os.remove(dest_path)
+        except OSError:
+            pass
+        return jsonify({"error": "Shot not found"}), 404
+    return jsonify({"uploaded": True, "path": saved_path}), 201
 
 
 @app.route("/api/projects/<pid>/shots/<sid>/performance", methods=["DELETE"])
@@ -969,7 +1003,9 @@ def api_clear_performance(pid, sid):
                     return MutationResult(True, save=True)
         return MutationResult(None, save=False)
 
-    mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT, snapshot=project)
+    cleared = mutate_project(pid, _mutate, timeout=HTTP_PROJECT_TIMEOUT, snapshot=project)
+    if not cleared:
+        return jsonify({"error": "Shot not found"}), 404
     return jsonify({"cleared": True})
 
 
@@ -1004,6 +1040,8 @@ def api_upload_style_board(pid):
             path = os.path.join(style_dir, safe_name)
             f.save(path)
             saved.append(path)
+    if not saved:
+        return jsonify({"error": "No valid image filenames uploaded"}), 400
 
     def _mutate(latest):
         # P1-3 part 12 (Variant 1 simplified): inner validate for race
@@ -1050,7 +1088,10 @@ def api_add_object(pid):
     branding_constraints = data.get("branding_constraints", "")
     scale_reference = data.get("scale_reference", "")
     texture_anchor = data.get("texture_anchor", "")
-    ip_weight = float(data.get("ip_adapter_weight", "0.85"))
+    try:
+        ip_weight = _parse_ip_adapter_weight(data.get("ip_adapter_weight", "0.85"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     # Create the object FIRST to claim a unique id, then save uploaded references
     # into <project>/objects/<obj_id>/. The previous flow used a shared
@@ -1115,7 +1156,15 @@ def api_update_object(pid, oid):
     if not obj:
         return jsonify({"error": "Object not found"}), 404
 
-    data = request.json if request.is_json else request.form.to_dict()
+    data = (request.json or {}) if request.is_json else request.form.to_dict()
+    try:
+        ip_weight = (
+            _parse_ip_adapter_weight(data["ip_adapter_weight"])
+            if "ip_adapter_weight" in data
+            else None
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     # Handle additional reference image uploads
     saved_paths = []
@@ -1151,8 +1200,8 @@ def api_update_object(pid, oid):
                       "texture_anchor"]:
             if field in data:
                 latest_obj[field] = data[field]
-        if "ip_adapter_weight" in data:
-            latest_obj["ip_adapter_weight"] = float(data["ip_adapter_weight"])
+        if ip_weight is not None:
+            latest_obj["ip_adapter_weight"] = ip_weight
         if saved_paths:
             refs = latest_obj.setdefault("reference_images", [])
             for p in saved_paths:
@@ -1963,7 +2012,10 @@ def api_update_shot_prompt(pid, shot_id):
     if not request.is_json:
         return jsonify({"error": "JSON body required"}), 400
 
-    new_prompt = request.json.get("prompt", "")
+    data = _json_object_or_none()
+    if data is None:
+        return jsonify({"error": "JSON object required"}), 400
+    new_prompt = data.get("prompt", "")
 
     def _mutate_project(project: dict):
         # P1-3 part 12 (Variant 1 full): inner validate + typed-iterate-
@@ -2607,8 +2659,10 @@ def api_cleanup(pid):
     """Clean up temporary files from a project."""
     from cleanup import cleanup_project, get_project_disk_usage
 
-    aggressive = request.json.get("aggressive", False) if request.is_json else False
-    dry_run = request.json.get("dry_run", False) if request.is_json else False
+    data = _json_object_or_none() if request.is_json else {}
+    data = data or {}
+    aggressive = data.get("aggressive", False)
+    dry_run = data.get("dry_run", False)
 
     result = cleanup_project(pid, aggressive=aggressive, dry_run=dry_run)
     result["disk_usage"] = get_project_disk_usage(pid)
@@ -2653,7 +2707,9 @@ def api_cleanup_all():
     """Clean up all projects."""
     from cleanup import cleanup_all_projects
 
-    aggressive = request.json.get("aggressive", False) if request.is_json else False
+    data = _json_object_or_none() if request.is_json else {}
+    data = data or {}
+    aggressive = data.get("aggressive", False)
     result = cleanup_all_projects(aggressive=aggressive)
     return jsonify(result)
 

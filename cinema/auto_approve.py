@@ -488,6 +488,8 @@ def _best_take_lipsync(takes: list[dict]) -> float:
     Default semantics (F1b fix):
     - Non-dialogue takes (no take has ``has_dialogue=True``): return 1.0 (N/A pass).
     - Audio-embedded dialogue takes (``audio_embedded=True``): return 1.0 (native sync pass).
+    - Postprocess lip-sync variants with ``dialogue_audio_in_clip=True``: return
+      1.0 (operator-applied sync pass).
     - Dialogue takes with a real ``lipsync_score``: return the max score (existing behaviour).
     - Dialogue takes with NO ``lipsync_score`` AND NOT ``audio_embedded``: return 0.0
       (fail — the lipsync pass was skipped or failed; do not silently approve).
@@ -525,6 +527,12 @@ def _best_take_lipsync(takes: list[dict]) -> float:
                 best = max(best, s)
         elif metadata.get("audio_embedded"):
             # Native-audio take: voice is baked in; treat as perfect sync.
+            any_score_present = True
+            best = max(best, 1.0)
+        elif metadata.get("dialogue_audio_in_clip"):
+            # A postprocess lip-sync correction writes a new clip whose dialogue
+            # audio is already embedded; credit that successful correction even
+            # when the variant has no separate lipsync_score.
             any_score_present = True
             best = max(best, 1.0)
         elif metadata.get("has_dialogue"):
