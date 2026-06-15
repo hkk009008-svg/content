@@ -1,40 +1,41 @@
-# Director Handoff - protocol notices consumed, active monitor
+# Director Handoff - authorized route pending, product-oracle next
 
 READ FIRST AS `director`. Trust current git/filesystem, live mailbox state, and
 `docs/REMEDIATION-INVENTORY.md` over this prose if they diverge.
 
 ## State At Handoff
 
-Timestamp: `2026-06-15T23:06:11Z` (`2026-06-16T08:06:11+0900 KST`).
+Timestamp: `2026-06-15T23:08:10Z` (`2026-06-16T08:08:10+0900 KST`).
 
 Seat: `director`
 
 Current HEAD at evidence refresh:
 
 ```text
+d7e98a46 docs(handoff): director protocol notices consumed
+875c1ab2 coord(route): authorized wave2 product oracle and locks
 148a81df coord(cursor): director consume protocol notice
 ef1c56b8 coord(status): operator fold self-broadcast cursor
 d029a00a coord(cursor): operator2 consume standby notices
 bb53e0d5 coord(cursor): director2 consume protocol notice
 b20bc811 coord(status): operator standby after protocol notice
 28cb3a38 coord(notify): protocol effectiveness report awareness
-508d3710 docs(spec): protocol effectiveness loop design
-9d7589e4 docs(handoff): coordinator lipsync precheck reconciled
 ```
 
 Branch relation from live status:
 
 ```text
-main vs origin/main: 19 ahead, 8 behind
+main vs origin/main: 21 ahead, 8 behind
 ```
 
 ## Director Mail
 
-Fresh director status before writing this handoff:
+Fresh director status before this handoff update:
 
 ```text
 cursor: 2026-06-15T22:59:40Z
-UNREAD: 0
+UNREAD: 1
+- 2026-06-15T23-07-16Z-coordinator-to-all-coordination.md
 ```
 
 The current director cursor was committed in:
@@ -56,6 +57,14 @@ Mail read/absorbed before that cursor:
   operator resumed, consumed the same protocol notices, and reported no Pair-A
   Lane V pending.
 
+New unread route read for this handoff but intentionally not consumed:
+
+- `2026-06-15T23-07-16Z-coordinator-to-all-coordination.md`:
+  coordinator records user-principal authorization (`authorized.`) for the side
+  effects named in the route: product-oracle artifact write/pod/paid-API spend
+  as needed, plus Pair-B lock-claim/push side effects for `lipsync-veto` and
+  the HTTP rows. This route assigns `director` to product-oracle artifact work.
+
 No mailbox event was sent by this director handoff.
 
 ## Seat Board
@@ -63,23 +72,27 @@ No mailbox event was sent by this director handoff.
 Fresh live seat snapshots before writing this handoff:
 
 ```text
-director:  cursor 2026-06-15T22:59:40Z, unread 0, online
-operator:  cursor 2026-06-15T22:59:40Z, unread 0, online
-director2: cursor 2026-06-15T22:59:40Z, unread 0, online
-operator2: cursor 2026-06-15T22:59:40Z, unread 0, online
+director:  cursor 2026-06-15T22:59:40Z, unread 1, online
+operator:  cursor 2026-06-15T22:59:40Z, unread 1, online
+director2: cursor 2026-06-15T22:59:40Z, unread 1, online
+operator2: cursor 2026-06-15T22:59:40Z, unread 1, online
 ```
 
 Interpretation:
 
-- `director`: no active Pair-A implementation, verify request, Tier-A co-sign,
-  or product-oracle review request. Active monitor only.
-- `operator`: Pair-A Lane V standby; no fresh verify request.
-- `director2`: Pair-B lipsync-precheck row is reconciled/verified; no unread
-  route remains.
-- `operator2`: Pair-B Lane V standby; no unread route remains.
+- `director`: actionable route now pending. Advance the Wave 2 product-oracle
+  blocker with committed/reproducible R-MEASURE instrumentation and
+  `logs/product-oracle-*.json`, or report the exact missing input/service.
+- `operator`: product-oracle checker after director lands the artifact; no
+  Pair-B Lane V duplication.
+- `director2`: Pair-B implementation owner for the lock-authorized
+  `lipsync-veto` and HTTP rows. Must protect dirty WIP before using lock
+  helpers.
+- `operator2`: Pair-B Lane V verifier for director2 verify-request(s).
 
-All seats are caught up on the latest coordinator/operator protocol notices as
-of this handoff evidence.
+All seats still need to consume/read the `2026-06-15T23-07-16Z` coordinator
+route on pickup. Receipt evidence here means only that the route exists and was
+seen by this handoff writer, not that the seats have acted on it.
 
 ## Gate / Smoke / Locks
 
@@ -131,17 +144,23 @@ $ find logs -maxdepth 1 -type f -name 'product-oracle-*.json' -print | sort
 # no output
 ```
 
-Push, lock-claim/push side effects, pod spend, and paid API spend remain
-unauthorized. Do not claim `W2-auto_approve.py.lock` or
-`W2-web_server.py.lock` from this director seat without explicit user/coordinator
-authorization because the lock helper performs fetch/push side effects.
+The `2026-06-15T23-07-16Z` coordinator route records user authorization for
+product-oracle write/pod/paid-API spend as needed and Pair-B lock-claim/push
+side effects. This director route allows `logs/product-oracle-*.json`,
+measurement helper/script/test/docs if needed, and mailbox status/route
+artifacts; it does not authorize production-code edits from the director seat.
+
+The Pair-B lock helpers are still dangerous in the current dirty shared tree:
+the route explicitly warns that `coordination/bin/claim-lock` can
+`git reset --hard @{u}` on push rejection. Protect dirty WIP before any seat
+runs lock helpers.
 
 ## Workspace Hygiene
 
 Status before writing this handoff:
 
 ```text
-## main...origin/main [ahead 19, behind 8]
+## main...origin/main [ahead 21, behind 8]
  M .agents/skills/four-seat-protocol/SKILL.md
  M docs/protocol/codex/continuation.md
  M scripts/continuation_readiness.py
@@ -165,6 +184,15 @@ $ env -u GIT_INDEX_FILE git diff --cached --name-status
 # no output
 ```
 
+A transient stale shared-index `D/??` pair appeared for
+`coordination/mailbox/sent/2026-06-15T23-07-16Z-coordinator-to-all-coordination.md`
+after the coordinator route landed during the first handoff commit window. It
+was refreshed with:
+
+```text
+$ env -u GIT_INDEX_FILE git reset -q -- coordination/mailbox/sent/2026-06-15T23-07-16Z-coordinator-to-all-coordination.md
+```
+
 Do not stage, delete, revert, or "clean up" the listed WIP from a future
 director pickup unless ownership is explicitly transferred. Those paths appear
 to be Codex-protocol transplant, coordinator, director2, and operator artifacts.
@@ -177,9 +205,16 @@ to be Codex-protocol transplant, coordinator, director2, and operator artifacts.
 2. Read any new director/all mail before making a routing, handoff, inventory,
    gate, or status claim. Consume only if intentionally advancing live director
    state.
-3. Remain active monitor for product-oracle identity/ArcFace review, Tier-A
-   co-signs, explicit Pair-A work, or coordinator-directed support.
-4. Do not duplicate operator2's Pair-B lipsync-precheck GO and do not verify
+3. Read `2026-06-15T23-07-16Z-coordinator-to-all-coordination.md` first. It is
+   the binding route for this handoff.
+4. For director work, advance the product-oracle blocker only: create/commit a
+   valid `logs/product-oracle-*.json` with `artifact_kind="product-oracle"`,
+   `wave=2`, finite `arcface.arc_score`, and finite `lipsync.offset_frames`,
+   produced by committed/reproducible R-MEASURE instrumentation. If baseline
+   media or services are missing, report the exact blocker and do not fabricate
+   values.
+5. Route the completed artifact to `operator` for independent check.
+6. Do not duplicate operator2's Pair-B lipsync-precheck GO and do not verify
    director-authored work; impl != verifier.
-5. Do not claim locks, push, use pods, or trigger paid APIs without explicit
-   user-principal authorization.
+7. Do not edit production code from this director route. Pair-B lock/code work
+   belongs to `director2`/`operator2`.
