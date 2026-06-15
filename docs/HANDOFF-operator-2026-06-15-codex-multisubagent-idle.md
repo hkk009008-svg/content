@@ -89,6 +89,16 @@ cursor operator: 2026-06-15T11:55:07Z -> 2026-06-15T11:58:09Z; unread now: 0 (st
 
 These events do not create Pair-A/operator work.
 
+One later director wrap status was also consumed after this addendum. It
+repeats that Pair-A director has no active non-deferred implementation row,
+that `lipsync-postproc-costkey` is reconciled, and that Wave 2 remains unmet.
+It does not create Pair-A/operator work.
+
+```text
+$ env -u GIT_INDEX_FILE GIT_INDEX_FILE=/private/tmp/codex-operator-handoff-index-20260615T1200 coordination/bin/consume-events operator
+cursor operator: 2026-06-15T11:58:09Z -> 2026-06-15T12:00:13Z; unread now: 0 (staged; fold into your next substantive commit)
+```
+
 ## Current Routing
 
 - Pair-A/operator has no immediate Lane V, Lane D, Lane S, lock-release, or
