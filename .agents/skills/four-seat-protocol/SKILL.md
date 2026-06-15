@@ -58,6 +58,21 @@ The command is read-only. It reports:
 
 Do not call `coordination/bin/consume-events` in readiness mode.
 
+## Handoff Draft Checklist
+
+When the user asks for a handoff or a clean-session transplant, the evidence
+scaffold can be generated without mutating protocol state:
+
+```bash
+.venv/bin/python scripts/draft_handoff.py <seat> --wave 2 --smoke --output
+```
+
+This is only a draft. It automates git/mailbox/gate/smoke/lock evidence and a
+clean-session prompt, but the current seat still owns the judgment fields and
+must refresh live state before finalizing. The command must not be treated as
+cursor consumption, a mailbox route, an operator GO, or a coordinator
+reconciliation.
+
 ## Live Seat Checklist
 
 For a real seat, run:
@@ -259,6 +274,8 @@ before project hooks run.
   GO required by the protocol plus executed evidence.
 - Measurement-backed GO/NO-GO numbers require committed instruments and
   `logs/` artifacts.
+- `scripts/draft_handoff.py` is a review scaffold, not live truth; rerun
+  `seat_status.py` and read mailbox bodies before acting from it.
 - For state-asserting docs or commits, run
   `env -u GIT_INDEX_FILE git log --oneline -5` immediately before writing and
   again immediately before commit.
@@ -267,6 +284,7 @@ before project hooks run.
 
 - Codex continuation doc: `docs/protocol/codex/continuation.md`
 - Readiness report: `scripts/continuation_readiness.py`
+- Handoff draft: `scripts/draft_handoff.py`
 - Seat status: `.agents/skills/four-seat-protocol/scripts/seat_status.py`
 - Coordination rules: `coordination/README.md`
 - Agent-neutral protocol: `docs/protocol/agents/`

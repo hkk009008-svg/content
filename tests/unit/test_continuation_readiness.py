@@ -74,3 +74,4 @@ def test_render_codex_reports_transplant_artifacts(tmp_path, capsys):
     assert "hooks: present" in out
     assert "readiness-bridge.toml" in out
     assert "CODEX_SEAT=<seat>" in out
+    assert "scripts/draft_handoff.py <seat> --wave 2 --output" in out

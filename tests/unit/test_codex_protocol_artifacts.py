@@ -70,7 +70,7 @@ def test_protocol_coordinator_agent_uses_tight_reconcile_loop():
     assert "Do not consume mailbox cursors" in instructions
     assert "no-op status report" in instructions
     assert "one consolidated mailbox" in instructions
-    assert "All-seat subagent cycle default" in instructions
+    assert "Capacity-max cycle default" in instructions
     assert "protocol-director" in instructions
     assert "protocol-operator" in instructions
 
@@ -82,10 +82,11 @@ def test_codex_protocol_skill_points_to_readiness_and_seat_commands():
 
     assert "name: four-seat-protocol" in text
     assert "scripts/continuation_readiness.py" in text
+    assert "scripts/draft_handoff.py" in text
     assert "seat_status.py <seat> --wave 2" in text
     assert "coordination/bin/consume-events <seat>" in text
     assert "Never silently upgrade from bridge mode into a seat." in text
-    assert "Default Subagent Cycle" in text
+    assert "Capacity-Max Default Cycle" in text
     assert "protocol-director" in text
     assert "protocol-operator" in text
 
@@ -95,11 +96,12 @@ def test_codex_continuation_defines_subagent_cycle_default():
         encoding="utf-8"
     )
 
-    assert "Subagent-Driven Seat Cycle" in text
-    assert "coordinator-held subagent cycle" in text
+    assert "Capacity-Max Default Workflow" in text
+    assert "capacity-max loop" in text
+    assert "scripts/draft_handoff.py" in text
     assert "protocol-director" in text
     assert "protocol-operator" in text
-    assert "Readiness bridge mode never auto-spawns seats" in text
+    assert "Readiness bridge mode is still read-only and never auto-spawns seats" in text
 
 
 def test_seat_coordinator_skill_defines_noop_fast_path():

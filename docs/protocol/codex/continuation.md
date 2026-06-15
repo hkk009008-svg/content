@@ -15,6 +15,8 @@ onto Codex-native surfaces.
 | Session lifecycle guardrails | `.codex/hooks.json` + `.codex/hooks/*.sh` |
 | Read-only state report | `scripts/continuation_readiness.py` |
 | Live seat orientation | `.agents/skills/four-seat-protocol/scripts/seat_status.py` |
+| Reviewable handoff draft | `scripts/draft_handoff.py` |
+| Protocol effectiveness loop | `scripts/protocol_effectiveness_report.py` |
 
 The remaining `.claude/` script path is intentional for now: Codex wrappers
 reuse the same tested shell/Python implementation instead of forking protocol
@@ -205,6 +207,38 @@ For execution-readiness checks:
 This command reports git, mailbox unread counts, Wave state, ADR-028 ceremony
 state, environment status, and installed Codex transplant artifacts. It exits
 successfully as a report command even when Wave or ceremony gates are red.
+
+## Partly Automated Handoff Draft
+
+For a live seat or coordinator handoff, use the draft command to capture current
+evidence into a reviewable Markdown scaffold:
+
+```bash
+.venv/bin/python scripts/draft_handoff.py <seat> --wave 2 --smoke --output
+```
+
+The draft command is read-only with respect to protocol state: it does not
+consume mailbox cursors, send mailbox events, edit inventory, or decide that a
+seat is done. The current seat must still review the output, fill in the
+judgment fields, and refresh live state again before committing or handing off
+when other seats are active. Treat the generated transplant prompt as a clean
+session starter, not as a replacement for `seat_status.py` and mailbox-body
+review.
+
+## Protocol Effectiveness Report
+
+For a coordinator cycle wrap or handoff input, run the read-only effectiveness
+report:
+
+```bash
+.venv/bin/python scripts/protocol_effectiveness_report.py --wave 2
+```
+
+Use `--stdout-only` when a summary is needed without writing the JSON artifact.
+The report classifies observed progress, blockers, no-op evidence, stale claims,
+and coordination volume from existing durable evidence. It is an input to the
+next coordinator capacity board, not a wave gate, operator GO, inventory
+authority, mailbox receipt proof, or routing automation.
 
 ## Live-seat launch
 
