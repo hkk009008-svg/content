@@ -18,6 +18,7 @@ ArcFace alone, just with less discrimination on the aesthetic axis.
 
 from __future__ import annotations
 
+import math
 import os
 import threading
 from dataclasses import dataclass
@@ -338,4 +339,6 @@ def needs_regenerate(
         return False
     if not best.has_arc:
         return False
+    if not math.isfinite(best.arc_score):
+        return True
     return best.arc_score < regenerate_floor_arc

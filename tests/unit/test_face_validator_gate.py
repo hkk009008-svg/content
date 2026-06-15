@@ -1,5 +1,6 @@
 """Tests for face_validator_gate.py — score_candidate, should_halt, needs_regenerate, select_best."""
 
+import math
 import pytest
 
 from face_validator_gate import (
@@ -317,6 +318,16 @@ class TestNeedsRegenerate:
             image_path="/fake/img.jpg",
             seed=0,
             arc_score=0.3,
+            has_arc=True,
+        )
+        assert needs_regenerate(best, regenerate_floor_arc=0.5, has_character=True) is True
+
+    def test_nonfinite_arc_triggers_regenerate(self):
+        """Non-finite arc_score with has_arc=True is an invalid measurement, so retry."""
+        best = CandidateScore(
+            image_path="/fake/img.jpg",
+            seed=0,
+            arc_score=math.nan,
             has_arc=True,
         )
         assert needs_regenerate(best, regenerate_floor_arc=0.5, has_character=True) is True

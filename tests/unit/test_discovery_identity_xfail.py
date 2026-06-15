@@ -37,23 +37,11 @@ import pytest
 #       exceptions, not silent NaN propagation).
 #   (b) A CandidateScore deserialized from a cached project state with arc_score=NaN.
 #
-# Fix: add `if not math.isfinite(best.arc_score): return True` (or equivalent) before
-# the comparison in needs_regenerate, or add an isnan guard in _arcface_score /
-# score_candidate. When fixed this pin xpasses (strict) -> delete it.
-@pytest.mark.xfail(
-    strict=True,
-    reason="W2:MEDIUM:identity-nan-arc-bypass face_validator_gate.py:326-341: "
-    "needs_regenerate returns False for arc_score=NaN+has_arc=True because "
-    "float('nan') < threshold is False in Python. NaN enters via corrupted "
-    "DeepFace embedding (numpy propagates silently past except-guard) or "
-    "cached CandidateScore. Fix = isfinite guard before comparison in "
-    "needs_regenerate; when fixed this xpasses (strict) and the pin is removed. "
-    "Surfaced: discovery-wf_13f9d2f6-f93.json confirmed[3]. "
-    "Ref: identity/validator.py:1082-1085, face_validator_gate.py:199-201.",
-)
+# Fixed by adding an isfinite guard before the raw arc_score comparison in
+# needs_regenerate. This remains as a live regression for the Wave-2 row.
 def test_needs_regenerate_returns_true_for_nan_arc_score():
     """needs_regenerate with arc_score=NaN, has_arc=True should return True
-    (non-finite score must trigger regen). Currently returns False -> XFAIL."""
+    (non-finite score must trigger regen)."""
     from face_validator_gate import CandidateScore, needs_regenerate
 
     best = CandidateScore(
