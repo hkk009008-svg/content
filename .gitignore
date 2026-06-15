@@ -80,6 +80,17 @@ logs/*
 .claude/hooks/.last-index-sync-*
 .claude/hooks/.skip-worktree-cleared.log
 
+# Claude skill evaluation workspaces/logs (local benchmark output, not source)
+.claude/skill-eval/
+
+# Codex local config and hook marker state (per-clone runtime state, not source)
+.codex/config.toml
+.codex/config.toml.bak-*
+.codex/migrate-to-codex-report.txt
+.codex/hooks/.last-state-head
+.codex/hooks/.last-index-sync-*
+.codex/hooks/.skip-worktree-cleared.log
+
 # Hookify local rules (per-clone runtime guardrails, not source — see /hookify)
 .claude/hookify.*.local.md
 

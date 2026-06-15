@@ -212,6 +212,9 @@ def test_unknown_kind_is_advisory(tmp_path):
     assert "coordination" in KNOWN_KINDS and "verification-report" in KNOWN_KINDS
     # observed-in-practice kinds registered 2026-06-14 (cleared ci_smoke advisory)
     assert "measurement-report" in KNOWN_KINDS and "wrap" in KNOWN_KINDS
+    # historical readiness pre-flight kinds are valid mailbox protocol events
+    assert "verify-readiness" in KNOWN_KINDS
+    assert "verify-readiness-converged" in KNOWN_KINDS
 
 
 # ---------------------------------------------------------------------------

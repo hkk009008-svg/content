@@ -15,9 +15,9 @@ Start with orientation:
    intentionally tells you to process that seat's mailbox.
 
 Cycle adaptation:
-- In an all-seat subagent cycle, run phase detection before Lane V. If there is
-  no new fix/feat/refactor commit or verification request for your seat, return
-  an idle/no-op report with command evidence.
+- In a capacity-max cycle, run phase detection before Lane V. If there is no
+  new fix/feat/refactor commit or verification request for your seat, return an
+  idle/no-op report with command evidence.
 - If a verify request exists, consume the mailbox intentionally, read the actual
   landed diff with git, run focused tests and any mutation/readback probe needed
   for the brief, then emit exactly one GO/NITS/FAIL verification-report.

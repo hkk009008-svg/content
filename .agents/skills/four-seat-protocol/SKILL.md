@@ -95,27 +95,36 @@ work, never for bridge mode.
   active per-seat index.
 - Use explicit pathspecs for staging and commits when committing is requested.
 
-## Default Subagent Cycle
+## Capacity-Max Default Cycle
 
-When the user explicitly asks to run **all seats**, complete **one more cycle**,
-or coordinate multiple live seats from Codex, use a coordinator-held subagent
-cycle by default:
+When the user explicitly enters a live seat, asks a coordinator to continue, or
+asks Codex to advance a cycle, use the capacity-max workflow by default unless
+the user asks for a narrower single-seat/read-only pass.
 
 1. The parent/coordinator captures the shared baseline:
    `seat_status.py coordinator --wave 2`, `git log --oneline -5`,
    `scripts/wave_gate_check.py 2`, and `scripts/ci_smoke.py`.
-2. Orient `director`, `director2`, `operator`, and `operator2` with
+2. Build a capacity board from mailbox deltas, inventory rows, active locks,
+   gate output, and landed-but-unverified diffs. Assign each seat one of:
+   implementation/briefing, co-sign/product-oracle review, Lane V verification,
+   routing-only, or idle/no-op.
+3. Orient `director`, `director2`, `operator`, and `operator2` with
    `.agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`;
    surface each unread count before any mailbox processing.
-3. Spawn bounded role agents from `.codex/agents/`: `protocol-director` for
-   director seats and `protocol-operator` for operator seats. The prompt must
-   name the concrete seat, current HEAD, lane scope, mailbox consumption
-   decision, allowed write set, and expected output.
-4. Directors brief/route/implement within their lane; operators verify only
-   actual landed diffs and send GO/NITS/FAIL reports; idle seats return no-op
-   evidence. The parent does not ask a seat to cross its role boundary.
-5. The coordinator reconciles once after role results: inventory, locks,
-   gate evidence, and one consolidated mailbox event only when a real state
+4. Spawn bounded role agents from `.codex/agents/` for every live seat in the
+   cycle: `protocol-director` for director seats and `protocol-operator` for
+   operator seats. Idle seats return no-op evidence so the coordinator knows
+   the slot was checked.
+5. The prompt must name the concrete seat, current HEAD, unread count, lane
+   scope, mailbox consumption decision, allowed write set, lock/push status,
+   and expected output. Directors may use bounded subagents for lane evidence,
+   implementation shards, or pre-review; operators may use read-only verifier
+   sidecars while still owning the final GO/NITS/FAIL.
+6. Run implementation in parallel only when files/locks are disjoint. Never run
+   two implementation agents on shared files or behind the same push-gated lock.
+   Pull operator verification forward for already-landed diffs.
+7. The coordinator reconciles once after role results: inventory, locks, gate
+   evidence, and one consolidated mailbox event only when a real state
    transition or routing need exists.
 
 This default does not apply to readiness bridge mode. A bridge reports state
@@ -128,9 +137,10 @@ no-lock work or stop for authorization when push has not been granted.
 Subagents are now part of every live seat's normal Codex workflow. They increase
 capacity, but they never move authority across role boundaries.
 
-- Coordinator: uses `protocol-director` / `protocol-operator` for all-seat
-  cycles, and read-only `lane-v-verifier` / `money-gate-reviewer` only at
-  coordinator-appropriate discovery, confirmation, or wave-boundary triggers.
+- Coordinator: uses `protocol-director` / `protocol-operator` as the default
+  capacity mechanism for live cycles, and read-only `lane-v-verifier` /
+  `money-gate-reviewer` only at coordinator-appropriate discovery,
+  confirmation, provenance-gap, or wave-boundary triggers.
 - Directors (`director`, `director2`): may use subagents for bounded
   exploration, Rule #12/#13 evidence gathering, implementation shards, and
   specialist pre-review. The director still owns the R-BRIEF, lock/co-sign

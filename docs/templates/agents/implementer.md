@@ -85,7 +85,7 @@ burns context discovering things you already know, and the report comes
 back vague.
 
 For spec and code-quality reviewer prompts, see
-`docs/templates/claude/reviewer.md` (both prompt bodies live there) —
+`docs/templates/agents/reviewer.md` (both prompt bodies live there) —
 the structure transfers directly to non-Claude tools.
 
 ## Hardening notes — provenance for the implementer-template additions

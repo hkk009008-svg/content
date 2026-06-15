@@ -1,6 +1,6 @@
 ---
-name: comfyui-mastery
-description: Use when building, modifying, debugging, or understanding ComfyUI workflows, nodes, or API-format JSON. Use when generating images via ComfyUI, configuring samplers, ControlNet, PuLID, IP-Adapter, AnimateDiff, or any custom node. Use when integrating ComfyUI with RunPod, Railway, or production pipelines.
+name: "comfyui-mastery"
+description: "Use when building, modifying, debugging, or understanding ComfyUI workflows, nodes, or API-format JSON. Use when generating images via ComfyUI, configuring samplers, ControlNet, PuLID, IP-Adapter, AnimateDiff, or any custom node. Use when integrating ComfyUI with RunPod, Railway, or production pipelines."
 ---
 
 # ComfyUI Mastery
@@ -80,9 +80,16 @@ ComfyUI is a node-based execution graph for Stable Diffusion and FLUX models. Wo
 ## This Project's Integration
 
 The A24 Engine uses ComfyUI as the primary image generation backend:
-- **Workflow**: `pulid.json` — 15-node FLUX + PuLID pipeline
-- **Server**: RunPod GPU endpoint (RTX 4090) at `COMFYUI_SERVER_URL`
+- **Workflows**: `pulid.json` — 22-node FLUX + PuLID production pipeline
+  (incl. PAG + RealESRGAN hires chain); `pulid_max.json` — 60-node max tier
+  (N=8 adaptive best-of + SUPIR + 4K downsample, driven by
+  `quality_max.generate_ai_broll_max`; falls back to production if absent)
+- **Server**: self-hosted ComfyUI pod at `COMFYUI_SERVER_URL` — currently a
+  Novita RTX 6000 Ada (CUDA 12.4 → cu124 wheels; see OPERATIONS.md GPU/CUDA
+  matrix). Host-agnostic; the `RunPodComfyUI` class name is historical.
 - **API class**: `RunPodComfyUI` in `phase_c_assembly.py`
-- **Shot optimization**: `workflow_selector.py` — 5 shot-type templates
+- **Shot optimization**: `workflow_selector.py` — 5 shot classes
+  (portrait/medium/wide/action/landscape) × two tiers (`WORKFLOW_TEMPLATES`
+  production, `MAX_QUALITY_TEMPLATES` max)
 - **Cascade**: ComfyUI → FAL.ai Kontext → FAL.ai FLUX-Pro
 - See `a24-integration.md` for full annotated architecture

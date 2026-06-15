@@ -26,7 +26,7 @@ case "$TO"   in director|director2|operator|operator2|all) ;; *) echo "send-even
 KINDS=" coordination verification-report decision dispatch-claim acknowledgement \
 proposal reply proposal-reply fyi doc-sync-notice discussion query \
 memory-candidate convergence findings status fold-notice verify-request \
-scout-request scout-report "
+verify-readiness verify-readiness-converged scout-request scout-report "
 case "$KINDS" in
   *" $KIND "*) ;;
   *) echo "send-event: unknown kind '$KIND' (see scripts/check_coordination.py KNOWN_KINDS)" >&2; exit 2;;

@@ -20,9 +20,9 @@ Run read-only orientation:
 If the parent asks you to follow through as a real seat, stop and report that
 the parent must spawn a seat-specific agent or relaunch with CODEX_SEAT and a
 per-seat GIT_INDEX_FILE. A readiness bridge never upgrades itself silently.
-For an explicit all-seat cycle, report that the coordinator/parent should use
-the subagent-driven seat cycle from `docs/protocol/codex/continuation.md`;
-the bridge itself remains read-only.
+For explicit live-seat or coordinator cycle work, report that the
+coordinator/parent should use the capacity-max workflow from
+`docs/protocol/codex/continuation.md`; the bridge itself remains read-only.
 
 Report only distilled current state, evidence commands, and blockers.
 """

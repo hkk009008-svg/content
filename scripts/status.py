@@ -123,6 +123,7 @@ def latest_adr(text: str) -> Optional[tuple[int, str]]:
 # ---------------------------------------------------------------------------
 
 _STATUS_ORDER = ["live", "wired", "stubbed", "parked", "dead"]
+_MAILBOX_SEATS = ("director", "director2", "operator", "operator2")
 
 
 def render_manifest(components: Optional[list]) -> list[str]:
@@ -228,10 +229,9 @@ def render(data: dict) -> str:
 
     # --- Coordination ---
     a("## Coordination (mailbox)")
-    a(f"  operator  cursor={data['mailbox_operator_cursor']}  "
-      f"unread={data['mailbox_operator_unread']}")
-    a(f"  director  cursor={data['mailbox_director_cursor']}  "
-      f"unread={data['mailbox_director_unread']}")
+    for seat in _MAILBOX_SEATS:
+        a(f"  {seat:<9} cursor={data.get(f'mailbox_{seat}_cursor', '(missing)')}  "
+          f"unread={data.get(f'mailbox_{seat}_unread', '(missing)')}")
     a("  source:  coordination/mailbox/seen/*.txt + coordination/mailbox/sent/")
     a("")
 
@@ -343,31 +343,21 @@ def collect_mailbox(repo_root: Path) -> dict:
     except Exception as e:
         unavail = f"(unavailable: {e})"
         return {
-            "mailbox_operator_unread": unavail,
-            "mailbox_operator_cursor": unavail,
-            "mailbox_director_unread": unavail,
-            "mailbox_director_cursor": unavail,
+            f"mailbox_{seat}_{field}": unavail
+            for seat in _MAILBOX_SEATS
+            for field in ("unread", "cursor")
         }
 
-    op_cursor = _read_cursor(seen_dir / "operator.txt")
-    dir_cursor = _read_cursor(seen_dir / "director.txt")
-
-    try:
-        op_unread = count_unread(op_cursor, event_filenames, "operator")
-    except Exception as e:
-        op_unread = f"(unavailable: {e})"
-
-    try:
-        dir_unread = count_unread(dir_cursor, event_filenames, "director")
-    except Exception as e:
-        dir_unread = f"(unavailable: {e})"
-
-    return {
-        "mailbox_operator_unread": op_unread,
-        "mailbox_operator_cursor": op_cursor,
-        "mailbox_director_unread": dir_unread,
-        "mailbox_director_cursor": dir_cursor,
-    }
+    data = {}
+    for seat in _MAILBOX_SEATS:
+        cursor = _read_cursor(seen_dir / f"{seat}.txt")
+        try:
+            unread = count_unread(cursor, event_filenames, seat)
+        except Exception as e:
+            unread = f"(unavailable: {e})"
+        data[f"mailbox_{seat}_cursor"] = cursor
+        data[f"mailbox_{seat}_unread"] = unread
+    return data
 
 
 def collect_adr(repo_root: Path) -> dict:
@@ -491,7 +481,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         "seat",
         nargs="?",
         default=None,
-        help="seat for 'mailbox-unread': operator | director",
+        help="seat for 'mailbox-unread': director | director2 | operator | operator2",
     )
     parser.add_argument(
         "--write",
@@ -510,8 +500,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     # two proven sharp edges: full-filename-vs-bare-prefix over-count, and
     # field-split capturing trailing text).
     if args.command == "mailbox-unread":
-        if args.seat not in ("operator", "director"):
-            parser.error("mailbox-unread requires a seat: operator | director")
+        if args.seat not in _MAILBOX_SEATS:
+            parser.error(
+                "mailbox-unread requires a seat: "
+                "director | director2 | operator | operator2"
+            )
         print(collect_mailbox(repo_root)[f"mailbox_{args.seat}_unread"])
         return 0
     if args.command is not None:

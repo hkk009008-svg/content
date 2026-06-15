@@ -39,15 +39,21 @@ Optimize for a clean decision, not activity:
 
 1. **Orient.** Run `seat_status.py coordinator --wave <N>`, `git log --oneline
    -5`, `scripts/wave_gate_check.py <N>`, and `scripts/ci_smoke.py`.
-2. **Find deltas.** Compare mailbox events after the latest coordinator event,
-   the current inventory rows, active lock files, and gate output.
-3. **Decide.** Write only when there is a real state transition, routing need,
+2. **Build the capacity board.** Compare mailbox events after the latest
+   coordinator event, the current inventory rows, active lock files, gate
+   output, and landed-but-unverified diffs. Assign each seat active work,
+   verification, co-sign/product-oracle review, routing-only, or no-op evidence.
+3. **Use the seats.** For cycle-advance work, dispatch every eligible live seat:
+   active seats do bounded lane work, operators verify real diffs promptly, and
+   idle seats return no-op evidence. Never parallelize implementation on shared
+   files/locks.
+4. **Decide.** Write only when there is a real state transition, routing need,
    lock correction, wave-open/close artifact, or user-facing escalation.
-4. **No-op fast path.** If the latest coordinator reconciliation already covers
+5. **No-op fast path.** If the latest coordinator reconciliation already covers
    the newest operator/director evidence, no locks need action, and the gate is
    still red for already-recorded blockers, do not send a new mailbox event and
    do not churn the inventory. Report the no-op with command evidence.
-5. **One batch.** When writing is justified, batch related inventory/doc/log
+6. **One batch.** When writing is justified, batch related inventory/doc/log
    updates and send one consolidated mailbox event.
 
 ## The prime prohibition (the one rule that defines this seat)
@@ -86,22 +92,27 @@ You may prepare a **pre-brief skeleton** to reduce a director's burden, but the 
 - **Surface to the user-principal**: push, pod-spend, scope changes, mid-wave CRITICALs. Push is **user-gated** — you execute it on user auth, never unilaterally.
 - Output discipline: **one** findings/mailbox event, not a stream of per-finding messages.
 
-## Coordinator subagent workflow
+## Coordinator capacity-max workflow
 
-Use subagents as the coordinator's default capacity tool when the user asks for
-all-seat work, another cycle, or cross-seat realignment:
+Use subagents as the coordinator's default capacity tool whenever the user asks
+the coordinator to continue, advance a cycle, realign seats, or otherwise move
+live work forward:
 
 1. Capture the shared baseline yourself: coordinator status, `git log -5`,
    `scripts/wave_gate_check.py <wave>`, and `scripts/ci_smoke.py`.
-2. Orient all four live seats and record each unread count before any mailbox
+2. Build a capacity board from inventory rows, mailbox deltas, locks, gate
+   blockers, product-oracle needs, and landed-but-unverified diffs.
+3. Orient all four live seats and record each unread count before any mailbox
    processing.
-3. Spawn bounded `protocol-director` / `protocol-operator` agents with the
-   concrete seat, current HEAD, lane scope, mailbox-consumption decision,
-   allowed write set, and expected output.
-4. Use `lane-v-verifier` and `money-gate-reviewer` only for read-only
+4. Spawn bounded `protocol-director` / `protocol-operator` agents for every
+   live seat in the cycle with the concrete seat, current HEAD, unread count,
+   lane scope, mailbox-consumption decision, allowed write set, lock/push
+   status, and expected output. Seats without active work must return no-op
+   evidence.
+5. Use `lane-v-verifier` and `money-gate-reviewer` only for read-only
    coordinator workflows: wave-boundary verification, discovery fan-out,
    provenance-gap confirmation, or an explicitly routed cross-lane audit.
-5. Reconcile exactly once after the role results: inventory, locks, gate proof,
+6. Reconcile exactly once after the role results: inventory, locks, gate proof,
    and one consolidated mailbox event if a real state transition or routing
    need exists.
 

@@ -106,12 +106,17 @@ def git_log(root: str, n: int):
 
 
 def mailbox(root: str, seat: str):
-    section(f"mailbox — unread for '{seat}' (live recompute, read-only)")
+    if seat == "coordinator":
+        section("mailbox — coordinator/all scope (live recompute, read-only)")
+    else:
+        section(f"mailbox — unread for '{seat}' (live recompute, read-only)")
     seen = os.path.join(root, "coordination", "mailbox", "seen", f"{seat}.txt")
     sent = os.path.join(root, "coordination", "mailbox", "sent")
     cursor_dt = None
     cursor_raw = "(missing)"
-    if os.path.exists(seen):
+    if seat == "coordinator":
+        cursor_raw = "(not used; coordinator is unpinned)"
+    elif os.path.exists(seen):
         with open(seen) as fh:
             cursor_raw = fh.readline().strip()
         cursor_dt = _parse_cursor_ts(cursor_raw)
@@ -132,7 +137,10 @@ def mailbox(root: str, seat: str):
             continue
         if cursor_dt is None or ts > cursor_dt:
             unread.append(f)
-    print(f"UNREAD: {len(unread)}")
+    if seat == "coordinator":
+        print(f"ALL-SCOPE EVENTS: {len(unread)}")
+    else:
+        print(f"UNREAD: {len(unread)}")
     for f in unread[-12:]:  # newest tail, cap the print
         print(f"  • {f}")
     if len(unread) > 12:
@@ -141,10 +149,9 @@ def mailbox(root: str, seat: str):
         print("→ Rule #8: surface this count in your FIRST user-facing turn; "
               "consume via coordination/bin/consume-events " + seat)
     elif unread:
-        print("→ Rule #8: surface this count in your FIRST user-facing turn. "
-              "Coordinator is UNPINNED (no cursor) — the list is ALL "
-              "-to-coordinator-/-to-all- events all-time; reconcile per §6f, "
-              "there is no watermark to consume.")
+        print("→ Coordinator is UNPINNED (no cursor) — this is the ALL-TIME "
+              "-to-coordinator-/-to-all- scope for §6f reconciliation, not "
+              "consumable unread mail.")
 
 
 def heartbeats(root: str, me: str, stale_min: int):

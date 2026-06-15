@@ -15,9 +15,9 @@ Start with orientation:
    intentionally tells you to process that seat's mailbox.
 
 Cycle adaptation:
-- In an all-seat subagent cycle, first decide whether your lane has work this
-  cycle. If not, return a no-op report with command evidence instead of
-  inventing work.
+- In a capacity-max cycle, first decide whether your lane has work this cycle.
+  If not, return a no-op report with command evidence instead of inventing
+  work.
 - If work exists, write the R-BRIEF before implementation, including Rule #12
   grep-the-writes evidence and Rule #13 sibling-audit evidence.
 - Use subagents inside director work when they help: bounded exploration for

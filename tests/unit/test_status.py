@@ -194,8 +194,12 @@ class TestRender:
             "git_dirty": 3,
             "mailbox_operator_unread": 0,
             "mailbox_operator_cursor": "2026-05-28T20:38:34Z",
+            "mailbox_operator2_unread": 2,
+            "mailbox_operator2_cursor": "2026-05-28T20:38:34Z",
             "mailbox_director_unread": 9,
             "mailbox_director_cursor": "2026-05-28T11:52:29Z",
+            "mailbox_director2_unread": 3,
+            "mailbox_director2_cursor": "2026-05-28T11:52:29Z",
             "latest_adr": "ADR-017 — Storyboard B-integrate",
             "doc_integrity": "clean",
             "pod_status": "DOWN",
@@ -223,6 +227,8 @@ class TestRender:
     def test_contains_mailbox_unread_counts(self):
         out = render(self._make_data())
         assert "9" in out   # director unread
+        assert "director2" in out
+        assert "operator2" in out
 
     def test_contains_latest_adr(self):
         out = render(self._make_data())
@@ -368,8 +374,12 @@ class TestRenderManifest:
             "git_dirty": 0,
             "mailbox_operator_unread": 0,
             "mailbox_operator_cursor": "2026-05-29T00:00:00Z",
+            "mailbox_operator2_unread": 0,
+            "mailbox_operator2_cursor": "2026-05-29T00:00:00Z",
             "mailbox_director_unread": 0,
             "mailbox_director_cursor": "2026-05-29T00:00:00Z",
+            "mailbox_director2_unread": 0,
+            "mailbox_director2_cursor": "2026-05-29T00:00:00Z",
             "latest_adr": "ADR-017",
             "doc_integrity": "clean",
             "pod_status": "DOWN",
@@ -413,16 +423,27 @@ class TestMailboxUnreadSubcommand:
             "2026-06-09T01-00-00Z-director-to-operator-coordination.md",
             "2026-06-09T02-00-00Z-director-to-operator-coordination.md",
             "2026-06-09T03-00-00Z-operator-to-director-verification-report.md",
+            "2026-06-09T04-00-00Z-director-to-all-coordination.md",
+            "2026-06-09T05-00-00Z-director-to-operator2-verification-report.md",
         ):
             (sent / name).write_text("x", encoding="utf-8")
         (seen / "operator.txt").write_text(operator_cursor + "\n", encoding="utf-8")
         (seen / "director.txt").write_text("2026-06-09T00:00:00Z\n", encoding="utf-8")
+        (seen / "operator2.txt").write_text("2026-06-09T00:00:00Z\n", encoding="utf-8")
+        (seen / "director2.txt").write_text("2026-06-09T00:00:00Z\n", encoding="utf-8")
         return sent
 
     def test_prints_live_unread_count_for_seat(self, tmp_path, monkeypatch, capsys):
         self._seed(tmp_path)
         monkeypatch.setattr(status, "_REPO_ROOT", tmp_path)
         rc = main(["mailbox-unread", "operator"])
+        assert rc == 0
+        assert capsys.readouterr().out.strip() == "3"
+
+    def test_prints_live_unread_count_for_pair_b_seat(self, tmp_path, monkeypatch, capsys):
+        self._seed(tmp_path)
+        monkeypatch.setattr(status, "_REPO_ROOT", tmp_path)
+        rc = main(["mailbox-unread", "operator2"])
         assert rc == 0
         assert capsys.readouterr().out.strip() == "2"
 
@@ -446,7 +467,7 @@ class TestMailboxUnreadSubcommand:
         monkeypatch.setattr(status, "_collect_all", _boom)
         rc = main(["mailbox-unread", "operator"])
         assert rc == 0
-        assert capsys.readouterr().out.strip() == "2"
+        assert capsys.readouterr().out.strip() == "3"
 
     def test_invalid_seat_errors(self, tmp_path, monkeypatch):
         self._seed(tmp_path)

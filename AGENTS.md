@@ -13,6 +13,17 @@ templates, `Skill` invocation, `TaskCreate`/`TaskUpdate`,
 etc.). Claude Code agents read **both** files; this one defines the
 principles, `CLAUDE.md` defines the mechanics.
 
+**Codex specifically:** Codex reads this file directly, then uses
+`docs/protocol/codex/continuation.md` plus the repo skill
+`.agents/skills/four-seat-protocol/SKILL.md` for Codex-native mechanics
+(`update_plan`, Codex subagents, `.codex/agents`, `.codex/hooks.json`, and
+`apply_patch`). Codex agents are readiness bridges by default; they become
+director/operator/coordinator seats only on explicit user instruction. Once
+explicitly in live coordinator/cycle work, Codex uses the capacity-max workflow
+from the continuation doc by default: every eligible seat is oriented and either
+does bounded role work or returns no-op evidence, with one coordinator
+reconciliation at the end.
+
 **Non-Claude agents:** read this file as your source of truth. Translate
 the principles ("fresh context per task", "two-stage review",
 "verify-before-acting") into your tool's analogous mechanisms (new chat
@@ -85,10 +96,12 @@ Keep the manual true as the code evolves (same staleness discipline as `ARCHITEC
 | Run / configure / troubleshoot | [OPERATIONS.md](OPERATIONS.md) |
 | See WHY the architecture is shaped this way (ADR log) | [DECISIONS.md](DECISIONS.md) |
 | Full process detail (core / orchestration / director-operator / failure-modes) | [docs/protocol/agents/](docs/protocol/agents/) |
+| Continue the four-seat process from Codex | [docs/protocol/codex/continuation.md](docs/protocol/codex/continuation.md) |
 | Sub-task / implementer prompt body | [docs/templates/agents/](docs/templates/agents/) |
 | Rule provenance (codified SHAs, empirical basis, beneficiary/consent) | [docs/PROTOCOL-RULES-LOG.md](docs/PROTOCOL-RULES-LOG.md) |
 | The CLAUDE/AGENTS operative-split map | [docs/protocol/migration-map-claudemd-split.md](docs/protocol/migration-map-claudemd-split.md) |
 | Current leadership critique + forward direction | [docs/STRATEGIC_REVIEW-2026-06-10.md](docs/STRATEGIC_REVIEW-2026-06-10.md) |
+| Test-coverage gaps + prioritized test proposal | [docs/TEST-COVERAGE-ANALYSIS-2026-06-14.md](docs/TEST-COVERAGE-ANALYSIS-2026-06-14.md) |
 | Execute a roadmap session (operator manual, why + how + acceptance) | [docs/HANDOFF-roadmap-2026-05-24.md](docs/HANDOFF-roadmap-2026-05-24.md) |
 | Past handoffs (historical) | [docs/archive/](docs/archive/) |
 
@@ -120,7 +133,7 @@ Action: cite the producing command's output in the same change (paste command +
 output, or `verified via $ <cmd> → <result>`). A command scoped to one path proves
 only that path — re-run at the wider scope before making a wider claim. If you
 cannot run the verifying command, label the claim **unverified** rather than
-asserting it.
+asserting it. Never apply authority-voice over an unverified factual claim.
 Evidence: the command + its output, in the doc/commit body (cite or don't claim).
 Details: docs/protocol/agents/core.md (ADR-013; the 24-vs-1 origin story).
 
@@ -137,10 +150,26 @@ Evidence: script path + `logs/` artifact cited next to the number.
 Details: docs/PROTOCOL-RULES-LOG.md (R-MEASURE entry; origin = the 2026-06-11
 half-crop numbers that backed S2/S3 verdicts from REPL-only measurement).
 
+# Verification tiering (R-VERIFY-TIER)
+Scope: both
+Trigger: about to launch a 3rd+ independent verification pass on a claim two seats
+already confirmed; OR confirming a code defect you are NOT fixing this session.
+Action: (A) For doc-only notes about an already-known/deferred defect, convergence =
+TWO independent seats confirming the same file:line claims (a Rule #23 co-sign counts
+as one). A 3rd pass is allowed ONLY for a genuinely different question, stated before
+launch. Does NOT relax per-commit production-code verification (Lane V / Rule #9).
+(B) An agent-confirmed defect left unfixed this session must ship a
+`pytest.mark.xfail(strict=True, reason=...)` pin in the same session, or be labeled
+`test-infeasible` with a one-line reason in the handoff — so CI, not the next
+session's agents, re-verifies.
+Evidence: the stated new question for any 3rd pass; the xfail pin (or test-infeasible label).
+Details: docs/protocol/agents/core.md (R-VERIFY-TIER); origin = audit wf_6be2ee18-f4b
+(the §8.5 char-landscape note drew ~25-31 agent-runs across 4 passes for one doc paragraph).
+
 # Multi-task orchestration (R-ORCH)
 Scope: both
 Trigger: a plan with ≥5 independent sub-tasks OR ≥800 LOC of total change; or a
-user-referenced plan file.
+user-referenced plan file under `docs/superpowers/plans/`.
 Action: orchestrate — do NOT implement in main context. Main holds the plan + task
 state + a short summary per task; a fresh-context implementer (new subagent / new
 chat session) does each task, then a spec review + a code-quality review of the
@@ -182,7 +211,7 @@ Action: invoke the matching project skill BEFORE writing or judging the code —
 work. When a skill prior shapes a verdict, name it in the work product (the
 2026-06-11 S2 dual-PuLID verdicts leaned on comfyui-mastery's single-face
 prior + `ApplyPulidAdvanced.attn_mask` escape hatch).
-Details: .claude/skills/comfyui-mastery/SKILL.md; .claude/skills/ai-video-gen/SKILL.md.
+Details: .agents/skills/comfyui-mastery/SKILL.md; .agents/skills/ai-video-gen/SKILL.md.
 
 ## Rule #12 — grep-the-writes
 Scope: both
@@ -207,7 +236,7 @@ ADRs, push decisions) and **operator-seats** (independent post-commit verificati
 doc-sync, mailbox reports). Four seats / two pairs of one team; specialization, not hierarchy;
 all serve the user-principal. A `coordinator` pseudo-seat is spawned **on demand** at
 multi-pair-wrap boundaries for read-only cross-pair audit — not a standing concurrent
-seat (see `docs/protocol/claude/four-seat-extension.md` §10). Load-bearing invariants:
+seat (see `docs/protocol/agents/four-seat-extension.md`). Load-bearing invariants:
 
 - **User is principal.** User direct instructions override everything.
 - **Authority precedence:** user > git commits (durable record) > mailbox `sent/`
@@ -220,6 +249,13 @@ Full governance — Rules #7–#23, the disagreement protocol, emergency handlin
 taxonomy, and mailbox protocol — lives in **docs/protocol/agents/director-operator.md**;
 read it only when coordinating with the other seat. Rule provenance (codified SHAs,
 empirical basis, beneficiary/consent) is in docs/PROTOCOL-RULES-LOG.md.
+
+- **Rule #23 co-sign is TIERED** (Lever #7, audit `wf_6be2ee18-f4b`; body in
+  `docs/protocol/agents/director-operator.md`). Classifier: *would the
+  co-signer's verification change which files/sites the implementation touches?*
+  **Tier A** (yes) = co-signer lands a mailbox `verification-report` BEFORE dispatch
+  (async-OK via workflow+mailbox, no session restart). **Tier B** (no) = awareness
+  heads-up, 48h proceed-if-no-objection. Unsure → Tier A.
 
 # Coordinating with CLAUDE.md
 

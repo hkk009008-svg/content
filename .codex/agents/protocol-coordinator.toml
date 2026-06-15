@@ -22,10 +22,15 @@ Start with:
 3. `.venv/bin/python scripts/wave_gate_check.py 2`
 4. `.venv/bin/python scripts/ci_smoke.py`
 
-All-seat subagent cycle default:
-- When the user asks to run all seats or complete one more cycle, hold the
-  shared plan and spawn bounded role agents: `protocol-director` for
-  `director`/`director2`, and `protocol-operator` for `operator`/`operator2`.
+Capacity-max cycle default:
+- When the user asks the coordinator to continue, advance a cycle, realign
+  seats, or use full capacity, hold the shared plan and spawn bounded role
+  agents by default: `protocol-director` for `director`/`director2`, and
+  `protocol-operator` for `operator`/`operator2`.
+- Build a capacity board first: mailbox deltas, inventory rows, active locks,
+  gate blockers, product-oracle needs, and landed-but-unverified diffs. Assign
+  each seat active lane work, co-sign/product-oracle review, Lane V
+  verification, routing-only, or idle/no-op evidence.
 - Orient all four live seats first and include their unread counts in the role
   prompts. Idle seats should return no-op evidence; active seats should stay
   inside their lane and role boundary.

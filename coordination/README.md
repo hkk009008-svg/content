@@ -1,6 +1,6 @@
 # Coordination Directory
 
-Inter-session coordination scaffold for the director-operator parallel-Claude
+Inter-session coordination scaffold for the director-operator four-seat agent
 protocol. See [CLAUDE.md](../CLAUDE.md) / [AGENTS.md](../AGENTS.md) `# Director-Operator Concurrent Operation`
 for the full discipline (Rules 1–20).
 
@@ -49,6 +49,47 @@ for the full discipline (Rules 1–20).
   hook-stamped `updated:` mask stale prose). Gitignored + per-clone.
   Transition: a session predating the split has no heartbeat file — fall back
   to its .md `updated:` until the first heartbeat appears.
+
+## Readiness bridge
+
+Use `python scripts/continuation_readiness.py` when a non-seat agent needs to
+resume understanding of the four-seat process without claiming a seat. It reports
+current git state, live unread counts for all four seats, Wave 2 gate state,
+ADR-028 ceremony status, and the verification-environment status. It is
+read-only: it does not consume cursors, send mailbox events, edit the
+remediation inventory, or claim director/operator work.
+
+For a real seat resume, use the seat-specific orientation command instead:
+`python .agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`,
+then intentionally consume events with `coordination/bin/consume-events <seat>`
+only after surfacing the unread count per Rule #8.
+
+## Codex transplant
+
+Codex-native continuation details live in
+`docs/protocol/codex/continuation.md`. The repo also provides:
+
+- `.agents/skills/four-seat-protocol/SKILL.md` — reusable Codex workflow for
+  readiness bridge and explicit seat continuation.
+- `.codex/agents/*.toml` — explicit-use Codex custom agents for
+  `readiness-bridge`, `protocol-director`, `protocol-operator`,
+  `protocol-coordinator`, `lane-v-verifier`, and `money-gate-reviewer`.
+- `.codex/hooks.json` + `.codex/hooks/*.sh` — Codex lifecycle wrappers for the
+  existing smoke, heartbeat/state, and git-index guard scripts.
+
+For a CLI live-seat Codex launch:
+
+```bash
+cd /Users/hyungkoookkim/Content
+export CODEX_SEAT=<director|director2|operator|operator2>
+export GIT_INDEX_FILE="$(git rev-parse --absolute-git-dir)/index-codex-$CODEX_SEAT"
+[ -f "$GIT_INDEX_FILE" ] || git read-tree HEAD
+codex
+```
+
+Codex may require `/hooks` review/trust before repo-local hooks run. If a Codex
+thread is not launched with `CODEX_SEAT` and a per-seat index, keep it in
+readiness bridge mode unless the user explicitly accepts one-off seat work.
 
 ## Authority (Rule #8)
 

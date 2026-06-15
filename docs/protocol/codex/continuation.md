@@ -55,35 +55,50 @@ Coordinator:
 - Must not mark correctness verified without the required operator GO and
   executed evidence.
 
-## Subagent-Driven Seat Cycle
+## Capacity-Max Default Workflow
 
-When the user explicitly asks Codex to run **all seats**, complete **one more
-cycle**, or otherwise coordinate multiple live seats, the default Codex
-implementation is a coordinator-held subagent cycle:
+After the user explicitly enters a live seat, asks a coordinator to continue,
+or asks Codex to advance a cycle, the default is the **capacity-max** workflow.
+It uses every role that can add signal without crossing ownership boundaries:
+active seats do lane work, seats with no current work return no-op evidence,
+operators verify as soon as real diffs or verify requests exist, and the
+coordinator reconciles once at the end.
 
-1. The parent/coordinator context captures the shared baseline:
+Readiness bridge mode is still read-only and never auto-spawns seats. A user may
+also ask for a deliberately single-seat or read-only pass; otherwise live
+coordinator/cycle work should use the capacity-max loop:
+
+1. The parent/coordinator captures the shared baseline:
    `seat_status.py coordinator --wave 2`, `git log --oneline -5`,
    `scripts/wave_gate_check.py 2`, and `scripts/ci_smoke.py`.
-2. The parent orients all four live seats with
-   `.agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`
-   and surfaces each unread count before any mailbox processing.
-3. The parent spawns bounded role agents from `.codex/agents/`:
-   `protocol-director` for `director` / `director2`, and
-   `protocol-operator` for `operator` / `operator2`.
-4. Each spawned seat prompt names the concrete seat, current HEAD, unread
-   count, lane ownership, allowed write scope, and whether mailbox consumption
-   is intentional for that seat.
-5. Directors may brief, route, or implement within their lane; operators verify
-   only actual landed diffs and emit GO/NITS/FAIL reports; idle seats return
-   no-op evidence instead of inventing work.
-6. The parent waits for the needed role results, then the coordinator reconciles
-   inventory/locks/mailbox exactly once if a real transition occurred.
+2. Build a short capacity board from mailbox deltas, `docs/REMEDIATION-INVENTORY.md`,
+   active locks, gate output, and any landed-but-unverified diffs. Classify each
+   slot as implementation/briefing, co-sign/product-oracle review, Lane V
+   verification, routing-only, or idle/no-op.
+3. Orient all four live seats with
+   `.agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`;
+   record and surface each unread count before any mailbox processing.
+4. Dispatch bounded role agents from `.codex/agents/` for every live seat in the
+   cycle: `protocol-director` for `director` / `director2`, and
+   `protocol-operator` for `operator` / `operator2`. Idle seats still return
+   no-op evidence so the coordinator knows they were checked.
+5. Each spawned prompt names the concrete seat, current HEAD, unread count, lane
+   ownership, mailbox-consumption decision, allowed write set, locks/push status,
+   and expected output. Directors may use bounded exploration/implementation or
+   specialist pre-review subagents inside their lane; operators may use
+   read-only `lane-v-verifier` and `money-gate-reviewer` sidecars while still
+   owning the final GO/NITS/FAIL.
+6. Run implementation in parallel only when file/lock ownership is disjoint.
+   Never run two implementation agents on shared files or behind the same
+   push-gated lock. Pull verification forward for already-landed diffs instead
+   of leaving operators idle.
+7. The parent waits for role results, then the coordinator reconciles
+   inventory/locks/mailbox exactly once if a real transition occurred, or reports
+   the no-op with command evidence.
 
-This default applies only after an explicit live-seat or all-seat instruction.
-Readiness bridge mode never auto-spawns seats. Subagents do not relax the
-director/operator boundary: a director still cannot verify its own work, an
-operator still should not author production fixes, and the coordinator still
-does not author production code.
+Subagents do not relax the director/operator boundary: a director still cannot
+verify its own work, an operator still should not author production fixes, and
+the coordinator still does not author production code.
 
 If the next ordered row requires `coordination/bin/claim-lock`, remember that
 the helper performs fetch/push. Push is user-gated; without explicit push
@@ -98,7 +113,7 @@ role handoff, mailbox cursor, operator GO, or coordinator reconciliation by
 itself.
 
 - `coordinator`: holds the shared baseline, spawns `protocol-director` and
-  `protocol-operator` for all-seat cycles, and may run read-only
+  `protocol-operator` for capacity-max cycles, and may run read-only
   `lane-v-verifier` / `money-gate-reviewer` workflows at wave-boundary or
   discovery triggers. The coordinator still does not author production fixes.
 - `director` / `director2`: may use subagents for bounded exploration,
@@ -198,9 +213,10 @@ Project custom agents live under `.codex/agents/`:
 - `money-gate-reviewer`: read-only reviewer for budget/cost-gate diffs.
 
 Use them only when the parent asks for subagents or role-specific delegation.
-Codex does not spawn subagents automatically in readiness bridge mode. For an
-explicit live-seat or all-seat cycle, the parent/coordinator should use the
-subagent-driven seat cycle above as the default implementation.
+Codex does not spawn subagents automatically in readiness bridge mode. For
+explicit live-seat, coordinator, or cycle-advance work, the parent/coordinator
+should use the capacity-max workflow above as the default implementation unless
+the user explicitly asks for a narrower pass.
 
 ## Evidence discipline
 
