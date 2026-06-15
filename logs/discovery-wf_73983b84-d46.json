@@ -1,0 +1,215 @@
+{
+  "run_id": "wf_73983b84-d46",
+  "seat": "coordinator",
+  "kind": "ceremony hunt (read-only fan-out, 5 lenses + adversarial verify)",
+  "directive": "user-principal: check thoroughly for ceremony of any kind and forbid it from the core",
+  "definition": "ceremony = appearance of verification/enforcement without substance (relied-on green not backed by execution)",
+  "totals": {
+    "raw": 47,
+    "deduped": 42,
+    "confirmed": 33,
+    "refuted": 9
+  },
+  "distinct_confirmed": [
+    {
+      "id": "wave-gate-status-read",
+      "kind": "status-as-proof",
+      "location": "scripts/wave_gate_check.py:40",
+      "severity": "CRITICAL",
+      "owner": "already-tracked",
+      "substance_missing": "Actual pytest execution of the xfail pins (pytest --runxfail) that would flip RED on an un-fixed defect. FIX-1 (routed to Pair-B director) rewrites wave_gate_check.py to execute pins rather than read status; as of the current HEAD this fix is unlanded."
+    },
+    {
+      "id": "idgate-failopen-forged-pass",
+      "kind": "fail-open-gate",
+      "location": "phase_c_vision.py:253-258",
+      "severity": "CRITICAL",
+      "owner": "already-tracked",
+      "substance_missing": "Fail-closed behavior on API error: return the skip/missing result or raise so the gate fails rather than passes. Also: the error is print()d not logged, so the forged pass is invisible in the log stream. The existing xfail pin at tests/unit/test_lane_silent_gate_siblings_xfail.py:101 tests only the observability (logging) half, not the fail-open outcome itself."
+    },
+    {
+      "id": "llmensemble-cost-uncounted",
+      "kind": "noop-enforcement",
+      "location": "llm/ensemble.py:146",
+      "severity": "CRITICAL",
+      "owner": "already-tracked",
+      "substance_missing": "cost_tracker threading into LLMEnsemble and per-call log_llm/record_api_call in _generate_anthropic, _generate_openai, _generate_gemini. The prompt_optimizer secondary path (controller.py:709 -> prompt_optimizer.py:402 builds a third fresh LLMEnsemble) is a sibling leak; prompt_optimizer_enabled defaults True per domain/project_manager.py:338."
+    },
+    {
+      "id": "charmgr-cost-fresh-instance",
+      "kind": "noop-enforcement",
+      "location": "domain/character_manager.py:350",
+      "severity": "CRITICAL",
+      "owner": "already-tracked",
+      "substance_missing": "Inject the shared cost_tracker as a parameter (the audio-T5 pattern). xfail pin at tests/unit/test_charmgr_cost_fresh_instance_xfail.py confirms the bug is live: TypeErrror on cost_tracker= kwarg because the param does not exist."
+    },
+    {
+      "id": "identity-nan-arc-bypass",
+      "kind": "fail-open-gate",
+      "location": "face_validator_gate.py:199-201",
+      "severity": "MAJOR",
+      "owner": "already-tracked",
+      "substance_missing": "A math.isfinite check on the arc return value before setting has_arc=True. The missing guard is at face_validator_gate.py:199: `if arc is not None and math.isfinite(arc):`"
+    },
+    {
+      "id": "idgate-observability-pin-masks-gate-bypass",
+      "kind": "vacuous-test",
+      "location": "tests/unit/test_lane_silent_gate_siblings_xfail.py:101-142",
+      "severity": "MAJOR",
+      "owner": "already-tracked",
+      "substance_missing": "A pin that asserts fail-closed behavior: after a fix, validate_identity_vision on API error must return confidence < every threshold (or raise), not confidence=0.7. The current pin cannot detect whether the gate bypass is fixed because it simultaneously asserts the broken return value as a precondition."
+    },
+    {
+      "id": "http-addchar-float-partial-pin-coverage",
+      "kind": "noop-enforcement",
+      "location": "tests/unit/test_discovery_web_server_xfail.py:231-292",
+      "severity": "MAJOR",
+      "owner": "already-tracked",
+      "substance_missing": "Xfail pins for the 2 update-route float() sites: api_update_character (web_server.py:696) and api_update_object (web_server.py:1155) sending 'abc' as ip_adapter_weight and asserting 400, not 500."
+    },
+    {
+      "id": "lipsync-postproc-costkey-misshapen-pin",
+      "kind": "vacuous-test",
+      "location": "tests/unit/test_discovery_cost_xfail.py:54-99",
+      "severity": "MAJOR",
+      "owner": "already-tracked",
+      "substance_missing": "The pin must call the production code path in controller.py (or check that _ls_engine is prefixed at the call site) rather than calling record_api_call with the buggy key directly. A source-assert checking that controller.py:2447 contains 'LIPSYNC_' prefix would work, mirroring the download-urllib-notimeout approach."
+    },
+    {
+      "id": "coherence-silent-valid-ignored",
+      "kind": "dead-oracle",
+      "location": "cinema/shots/controller.py:2266",
+      "severity": "MAJOR",
+      "owner": "already-tracked",
+      "substance_missing": "Caller must check `if coh.valid:` before reading coh.color_drift and coh.overall_coherence_score. An invalid result should emit a WARNING (per the silent-gate-degradation principle) rather than silently returning 0.0 scores that look like real measurements."
+    },
+    {
+      "id": "lipsync-gate-neutral-one",
+      "kind": "fail-open-gate",
+      "location": "lip_sync.py:720-729",
+      "severity": "MAJOR",
+      "owner": "already-tracked",
+      "substance_missing": "When no scorer is available the function must return None (or raise) so callers can distinguish 'perfect sync verified' from 'sync unmeasurable'. The WARNING is logged but the 1.0 return value propagates to the scorecard dimension and the auto-approve lipsync gate as if it were a real measurement."
+    },
+    {
+      "id": "coherence-valid-ignored",
+      "kind": "noop-enforcement",
+      "location": "cinema/shots/controller.py:2266-2270",
+      "severity": "MAJOR",
+      "owner": "already-tracked",
+      "substance_missing": "The caller must check coh.valid before acting on any score. When valid=False the scores must be omitted from result['scores'] or flagged as invalid so the operator and auto-approve gate know coherence was not measurable."
+    },
+    {
+      "id": "identity-nan-arc-bypass",
+      "kind": "noop-enforcement",
+      "location": "face_validator_gate.py:326-341",
+      "severity": "MAJOR",
+      "owner": "already-tracked",
+      "substance_missing": "An `if not math.isfinite(best.arc_score): return True` guard before the comparison in needs_regenerate, or an isfinite guard in _arcface_score / score_candidate at the point where has_arc is set."
+    },
+    {
+      "id": "prompt-optimizer-llmensemble-cost-leak",
+      "kind": "noop-enforcement",
+      "location": "llm/prompt_optimizer.py:401-402",
+      "severity": "MAJOR",
+      "owner": "already-tracked",
+      "substance_missing": "Thread the pipeline's shared CostTracker into optimize_shot_prompt and into the LLMEnsemble it constructs. Note: the controller defaults opt_enabled from settings.get('prompt_optimizer_enabled', False) but new projects default to True (domain/project_manager.py:338), so this is ON by default for new projects."
+    },
+    {
+      "id": "ci-never-runs-runxfail",
+      "kind": "noop-enforcement",
+      "location": ".github/workflows/ci.yml:124",
+      "severity": "MAJOR",
+      "owner": "already-tracked",
+      "substance_missing": "The CI `pytest-unit` job must include a second step (or a separate job) running `pytest tests/unit/ --runxfail -q` so that strict-xfail pins that unexpectedly pass are caught. FIX-2 (ADR-027) would wire this. Currently absent."
+    },
+    {
+      "id": "wave1-met-backed-only-by-status-tally",
+      "kind": "status-as-proof",
+      "location": "docs/HANDOFF-coordinator-2026-06-14-s9-wave1-MET-8of8-pushed-wave2-seeded.md:17",
+      "severity": "MAJOR",
+      "owner": "already-tracked",
+      "substance_missing": "The milestone commit should have been gated on `pytest --runxfail` XPASS-clean exit-0, not on `wave_gate_check.py` exit-0. Until FIX-1 lands, the 'Wave-1 MET' claim means only that 8 rows have 'verified' typed next to them."
+    },
+    {
+      "id": "coherence-valid-flag-ignored",
+      "kind": "fail-open-gate",
+      "location": "cinema/shots/controller.py:2266-2270",
+      "severity": "MAJOR",
+      "owner": "production-lane",
+      "substance_missing": "A coh.valid guard before reading scores: if not coh.valid: skip recording scores and log a WARNING. The coherence-silent row in the inventory notes this caller-side half as 'MAJOR and UNPINNED' with 'NO own row + NO pin'. The pin at test_lane_silent_gate_siblings_xfail.py:84 tests only the analyzer-side observability (coherence_analyzer.py:202 no logging), not this caller-side valid-flag-ignore."
+    },
+    {
+      "id": "quality-control-image-dead-oracle",
+      "kind": "dead-oracle",
+      "location": "phase_c_vision.py:119,124",
+      "severity": "MAJOR",
+      "owner": "production-lane",
+      "substance_missing": "The function must be integrated into the shot generation loop (e.g. called from diagnose_clip or the auto-approve path) or marked deprecated. Its existence alongside passing tests creates a false impression that GPT-4o quality checks are active in the pipeline."
+    },
+    {
+      "id": "ckpt-sceneidx-dead-vacuous-pin",
+      "kind": "vacuous-test",
+      "location": "tests/unit/test_discovery_checkpoint_xfail.py:78-114",
+      "severity": "MAJOR",
+      "owner": "coordinator-tooling",
+      "substance_missing": "The test must simulate the post-fix pipeline behavior by calling rs.completed_scene_indices.add(0) BEFORE _save_checkpoint (as the docstring says the fixed pipeline does), or must call the production pipeline code path that would now add to the set. Without this, the xfail is a permanent fixture that can never xpass."
+    },
+    {
+      "id": "secondary-lora-regression-bypasses-gate",
+      "kind": "vacuous-test",
+      "location": "tests/unit/test_discovery_identity_xfail.py:98-137",
+      "severity": "MAJOR",
+      "owner": "coordinator-tooling",
+      "substance_missing": "A call to the production generate_ai_broll_max() function with mocked I/O, asserting that secondary LoRA node 701 appears in the returned workflow when primary has no face-ref but secondary has a lora_path. The test must exercise the actual gate at quality_max.py:1149 to be a useful regression guard."
+    },
+    {
+      "id": "coherence-silent-no-logging",
+      "kind": "noop-enforcement",
+      "location": "coherence_analyzer.py:202",
+      "severity": "MINOR",
+      "owner": "already-tracked",
+      "substance_missing": "A logger.warning() call in _invalid_coherence() or at the cv2.imread failure sites (coherence_analyzer.py:236-239). The existing xfail pin tests/unit/test_lane_silent_gate_siblings_xfail.py:84 tests exactly this: it will XPASS (flipping strict) when a WARNING is added."
+    }
+  ],
+  "refuted": [
+    {
+      "id": "wave2-no-product-oracle",
+      "why_not": "Adversarial refutation succeeds. The finding describes a prospective gap (FIX-5) that is explicitly documented as \"not yet gate-enforced\" and \"PENDING user-principal ratification\" in DECISIONS.md:1199-1201, and is named in REMEDIATION-INVEN"
+    },
+    {
+      "id": "quality-control-image-dead-oracle",
+      "why_not": "Adversarial verification: the finding's factual premises are confirmed but the ceremony classification does not hold.\n\nCONFIRMED FACTS (re-derived, not taken from finding):\n- `quality_control_image` at phase_c_vision.py:119 and `validate_sh"
+    },
+    {
+      "id": "validate-shot-quality-default-pass",
+      "why_not": "Ceremony requires a relied-on green signal that is not backed by real execution. That precondition fails here.\n\nREFUTATION \u2014 zero-caller proof:\n\nCommand: `grep -rn \"quality_control_image\" /Users/hyungkoookkim/Content --include=\"*.py\" | grep"
+    },
+    {
+      "id": "validate-scene-coherence-vision-default-pass",
+      "why_not": "Adversarial refutation succeeds. The fail-open behavior at phase_c_vision.py:361-375 and :436-438 is real code, but the function validate_scene_coherence_vision has ZERO production callers. Two grep sweeps confirm: the only references in no"
+    },
+    {
+      "id": "validate-scene-coherence-vision-dead-oracle",
+      "why_not": "The dead-oracle fact is confirmed: validate_scene_coherence_vision (phase_c_vision.py:356) has zero production call sites. grep -rn 'validate_scene_coherence_vision' --include='*.py' (excluding .claude/.venv/tests) returns only the definiti"
+    },
+    {
+      "id": "perf-take-meta-voice-loss",
+      "why_not": "The defect at cinema_pipeline.py:703 is real and confirmed. `_approved_take_metadata` searches only (\"motion_takes\", \"postprocess_variants\") \u2014 \"performance_takes\" is absent \u2014 so when a performance take is approved as final, the function ret"
+    },
+    {
+      "id": "coherence-pin-importorskip-cv2",
+      "why_not": "REFUTED. The finding's core claim \u2014 that cv2 is absent from the CI runner, causing the xfail pin to silently skip \u2014 is false.\n\nEvidence chain:\n- requirements.txt:31 `opencv-python>=4.10` is present in the dependency file.\n- .github/workflow"
+    },
+    {
+      "id": "test-infeasible-rows-labeled-verified",
+      "why_not": "Adversarial check refutes the ceremony claim. The three test-infeasible rows exist at HEAD as described (REMEDIATION-INVENTORY.md:52,68,74 \u2014 lipsync-precheck-cascade-gap/MEDIUM/wave2, identity-arcface-embselect/MINOR/wave-defer, perf-phase-"
+    },
+    {
+      "id": "tier-b-cosign-48h-proceed-no-scope-check",
+      "why_not": "Adversarial refutation succeeds. The finding misidentifies an unenforced coordination timeout as ceremony. The ADR-027 ceremony definition requires a relied-on signal that can be GREEN while the underlying check is unexecuted. Tier-B emits "
+    }
+  ],
+  "enforcement": "scripts/check_no_ceremony.py (R1 xfail-strict / R2 invisible-green / R3 gate-executes / R4 ci-runxfail); ADR-028",
+  "full_output": "tasks/whx76cq48.output (117KB; transcript subagents/workflows/wf_73983b84-d46)"
+}

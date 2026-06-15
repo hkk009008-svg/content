@@ -1224,3 +1224,59 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   §5/§7 (acceptance bar + the spec↔implementation gap); `docs/REMEDIATION-INVENTORY.md`.
   Origin: user-principal critique 2026-06-15 → coordinator Session-12 RCA `wf_26a5abf2-3bb`.
   Implementation routing + policy ratification PENDING.
+
+## ADR-028 — Ceremony is forbidden from the verification core, and a detector enforces it
+
+- **Status:** ACCEPTED (coordinator Session-13, 2026-06-15). Direct user-principal directive:
+  "check thoroughly for ceremony of any kind and forbid it from the core." Extends ADR-027.
+- **Definition — "ceremony":** anything that produces the APPEARANCE of verification,
+  enforcement, or assurance WITHOUT the substance — a relied-on green/PASS/`verified`/score/
+  verdict that is NOT backed by actually executing the check it claims to perform. ADR-027's
+  gate-circularity is the archetype; the family also includes vacuous/soft xfail pins,
+  fail-open gates, dead oracles, and doc verdicts asserted without cited evidence.
+- **Context — the S13 ceremony hunt** (`logs/discovery-wf_73983b84-d46.json`, read-only 5-lens
+  fan-out + adversarial verify; 42 deduped → 33 confirmed / 9 refuted): every CRITICAL ceremony
+  was already-tracked (the status-read gate, `idgate-failopen`, `llmensemble-cost-uncounted`,
+  `charmgr-cost-fresh-instance`). The NEW yield is **meta-ceremony** — the verification
+  apparatus itself does not execute: `wave_gate_check.py` reads the `status` column (R3) and CI
+  never runs `--runxfail` (R4, `.github/workflows/ci.yml:124`), so the 70+ strict-xfail pins are
+  never run as a gate; and ≥3 individual pins are vacuous/mis-shaped (`secondary-lora` passes on
+  REVERTED production code; `ckpt-sceneidx` can never xpass; `lipsync-postproc-costkey` +
+  `idgate-observability` pin only the wrong half).
+- **Decision:**
+  1. **Ceremony is forbidden from the verification + enforcement core.** Doctrine prose alone is
+     insufficient — ADR-027 proved ceremony lived in the gate DESPITE the rules. Enforcement is
+     therefore **mechanical**: `scripts/check_no_ceremony.py` (committed S13) hard-fails (exit 1)
+     on detectable ceremony — R1 xfail-strictness (`strict=True`+`reason=`, AST), R2 invisible-
+     green (importorskip/skip in pin files that would silently skip), R3 gate-executes-pins, R4
+     ci-runs-`--runxfail`. It only ADDS signal; it never relaxes a gate or suppresses a defect.
+  2. **Sequencing (so enforcement is not itself ceremony, and does not red-light peers mid-wave):**
+     the detector is a standing standalone gate NOW (it hard-fails R3/R4 honestly when run).
+     ADR-027 **FIX-1** makes R3 pass (gate executes the pins); **FIX-2** makes R4 pass (CI runs
+     `--runxfail`). The moment R3/R4 are green, `ci_smoke.py` AND CI **MUST** invoke
+     `check_no_ceremony.py` as a HARD gate so it cannot be skipped. Wiring it hard BEFORE FIX-1/2
+     would break every seat's session-start smoke for a known-tracked reason — so the wiring is
+     gated on FIX-1/2, not on this ADR.
+  3. **Pin vacuity is only partly mechanizable.** `--runxfail` in CI (FIX-2) catches XPASS (a
+     landed fix that should have flipped a pin), but it does NOT catch a pin that passes on
+     reverted/broken code (the `secondary-lora` failure mode). That requires the per-pin operator
+     mutation-RED discipline (Rule #9) and stays a lane responsibility; the detector cannot
+     replace it.
+- **Consequences:**
+  - +: new ceremony (a soft xfail, an invisible-green skip, a status-only gate, a CI without
+    `--runxfail`) cannot land silently — the detector goes red.
+  - +: the detector is green where it already should be (R1: 25/25 pins strict+reason) so it is
+    respected, not ignored; it converts to all-green automatically when FIX-1/2 land.
+  - −: R3/R4 are RED today (the honest state) and the detector is NOT yet wired into ci_smoke —
+    until FIX-1/2 land + the wiring, enforcement depends on running the script.
+  - −: vacuity detection is incomplete (see decision 3); ≥3 existing vacuous pins are routed to
+    lanes to re-shape, NOT fixed by this ADR.
+- **Routing:** FIX-1 + FIX-2 → Pair-B director (already routed by ADR-027; this ADR adds the
+  detector as their acceptance check). Vacuous-pin re-shape (`secondary-lora`, `ckpt-sceneidx`,
+  `lipsync-postproc-costkey`, `idgate-observability`) → owning lanes. New row
+  `coherence-caller-valid-ignored` filed in the inventory. ci_smoke/CI hard-wiring of the
+  detector → Pair-B, gated on FIX-1/2 green. **User ratification of the hard-wiring policy
+  PENDING.**
+- **Cross-refs:** `scripts/check_no_ceremony.py`; `logs/discovery-wf_73983b84-d46.json`;
+  ADR-027 (FIX-1/FIX-2); `docs/REMEDIATION-INVENTORY.md`. Origin: user-principal directive
+  2026-06-15 → coordinator Session-13 ceremony hunt.
