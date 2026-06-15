@@ -1,51 +1,22 @@
-"""R-VERIFY-TIER(B) pin — cost-conn-crossthread-drop (W2:MAJOR, money).
+"""Regression test — cost-conn-crossthread-drop (W2:MAJOR, money).
 
-BUG: cost_tracker.py:228 creates the SQLite connection with the default
-check_same_thread=True.  The shared CostTracker instance (core.py) is
-constructed on the pipeline background thread; Flask request threads then
-call record_api_call() -> log_api() -> log() -> conn.execute() on that same
-connection object from a DIFFERENT thread.  sqlite3 raises
-ProgrammingError("SQLite objects created in a thread can only be used in
-that same thread") on the foreign-thread conn.execute at cost_tracker.py:271.
-The exception propagates out of record_api_call, the cost entry is dropped,
-and the budget accumulator (spent_usd) is not incremented — budget undercount.
+FIXED: cost_tracker.py opens the shared SQLite connection with
+check_same_thread=False and serializes connection access plus spent_usd mutation
+with a lock.  The shared CostTracker instance (core.py) may be constructed on
+one thread while Flask request threads call record_api_call() -> log_api() ->
+log() from another thread; the call must persist the row and update spent_usd.
 
 (coordinator-filed Wave-2 row 04108cb; X1+X2 hold, X3 refuted = the prod call
 sites log a WARNING so it is observable, not silent. This pin reproduces it at
 the CostTracker level where the raw call deterministically raises.)
 
-FIX (not landed): pass check_same_thread=False to sqlite3.connect() at
-cost_tracker.py:228 and add a threading.Lock around conn writes so that
-concurrent threads do not interleave commits.  When fixed, the cross-thread
-record_api_call call succeeds: no exception, spent_usd > 0, and a SQLite
-row is present.
-
-NON-VACUITY STRATEGY: construct a real CostTracker on the main thread,
-then call record_api_call('VEO') from a second threading.Thread.  Capture
-any exception raised inside the thread.  Assert the FIXED behaviour: no
-exception AND spent_usd > 0 AND a row is present in the DB.  Today the
-foreign-thread conn.execute raises ProgrammingError -> xfail.
+NON-VACUITY STRATEGY: construct a real CostTracker on the main thread, then
+call record_api_call('VEO') from a second threading.Thread. Capture any exception
+raised inside the thread. Assert no exception AND spent_usd > 0 AND a row is
+present in the DB.
 """
 import sqlite3
 import threading
-
-import pytest
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:MAJOR:cost-conn-crossthread-drop cost_tracker.py:228: "
-        "sqlite3.connect() uses default check_same_thread=True; the shared "
-        "CostTracker.conn is created on the pipeline thread but Flask request "
-        "threads call record_api_call() -> log() -> conn.execute (line 271) "
-        "from a foreign thread, raising sqlite3.ProgrammingError and dropping "
-        "the cost entry (budget undercount). "
-        "Fix: check_same_thread=False + threading.Lock around conn writes; "
-        "then cross-thread record_api_call succeeds, spent_usd > 0, and the "
-        "SQLite row is present — this pin flips XPASS and is removed."
-    ),
-)
 def test_cross_thread_record_api_call_succeeds(tmp_path):
     """record_api_call() from a second thread must not raise and must record spend.
 

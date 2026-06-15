@@ -34,6 +34,7 @@ but the budget gate uses the fast in-memory counter.
 import math
 import sqlite3
 import os
+import threading
 import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -225,7 +226,8 @@ class CostTracker:
         # Fast in-process accumulator for the budget gate.  The SQLite
         # store is the durable record; this counter is reset each process.
         self.spent_usd: float = 0.0
-        self.conn = sqlite3.connect(self.db_path)
+        self._conn_lock = threading.RLock()
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self._create_table()
 
@@ -234,21 +236,22 @@ class CostTracker:
     # ------------------------------------------------------------------
 
     def _create_table(self):
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS cost_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT DEFAULT (datetime('now')),
-                provider TEXT,
-                model TEXT,
-                operation TEXT,
-                input_tokens INTEGER DEFAULT 0,
-                output_tokens INTEGER DEFAULT 0,
-                cost_usd REAL DEFAULT 0.0,
-                shot_id TEXT,
-                video_id TEXT
-            );
-        """)
-        self.conn.commit()
+        with self._conn_lock:
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS cost_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT DEFAULT (datetime('now')),
+                    provider TEXT,
+                    model TEXT,
+                    operation TEXT,
+                    input_tokens INTEGER DEFAULT 0,
+                    output_tokens INTEGER DEFAULT 0,
+                    cost_usd REAL DEFAULT 0.0,
+                    shot_id TEXT,
+                    video_id TEXT
+                );
+            """)
+            self.conn.commit()
 
     # ------------------------------------------------------------------
     # Logging helpers
@@ -268,23 +271,6 @@ class CostTracker:
         """Insert a cost record into the database."""
         # Timezone-aware UTC; datetime.utcnow() is deprecated in 3.12+.
         ts = datetime.now(timezone.utc).isoformat()
-        self.conn.execute(
-            """
-            INSERT INTO cost_log
-                (timestamp, provider, model, operation, input_tokens, output_tokens, cost_usd, shot_id, video_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (ts, provider, model, operation, input_tokens, output_tokens, cost_usd, shot_id, video_id),
-        )
-        self.conn.commit()
-        # spent_usd mirrors the persisted spend. Increment at this sole write
-        # chokepoint (log_api/log_llm both delegate here) so every logged cost
-        # reaches the in-process accumulator the budget gate reads
-        # (would_exceed/is_over_budget). Placed AFTER commit so a failed INSERT
-        # never inflates the accumulator. Previously only record_api_call did
-        # this, so log_api/log_llm spend (the 4 performance phases, etc.) was
-        # invisible to the gate — costtracker-perf-uncounted, W1:CRITICAL.
-        #
         # Guard against NaN/inf cost_usd: a non-finite value poisons the
         # accumulator (0.0 + NaN = NaN) so that every subsequent gate check
         # silently returns False (NaN > budget is always False in IEEE 754).
@@ -303,7 +289,22 @@ class CostTracker:
                 stacklevel=3,
             )
             cost_usd = 0.0
-        self.spent_usd += cost_usd
+        with self._conn_lock:
+            self.conn.execute(
+                """
+                INSERT INTO cost_log
+                    (timestamp, provider, model, operation, input_tokens, output_tokens, cost_usd, shot_id, video_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (ts, provider, model, operation, input_tokens, output_tokens, cost_usd, shot_id, video_id),
+            )
+            self.conn.commit()
+            # spent_usd mirrors the persisted spend. Increment at this sole write
+            # chokepoint (log_api/log_llm both delegate here) so every logged cost
+            # reaches the in-process accumulator the budget gate reads
+            # (would_exceed/is_over_budget). Placed AFTER commit so a failed INSERT
+            # never inflates the accumulator.
+            self.spent_usd += cost_usd
         return CostEntry(
             timestamp=ts,
             provider=provider,
@@ -451,10 +452,12 @@ class CostTracker:
         """
         if self.budget_usd is None:
             return False
-        if not math.isfinite(self.spent_usd):
+        with self._conn_lock:
+            spent = self.spent_usd
+        if not math.isfinite(spent):
             return True  # fail-safe: non-finite spend → gate fires
         cost = API_COST_USD.get(api_name.upper(), 0.0)
-        return (self.spent_usd + cost) > self.budget_usd
+        return (spent + cost) > self.budget_usd
 
     def is_over_budget(self) -> bool:
         """Post-fact check: has cumulative in-process spend exceeded the cap?
@@ -467,9 +470,11 @@ class CostTracker:
         """
         if self.budget_usd is None:
             return False
-        if not math.isfinite(self.spent_usd):
+        with self._conn_lock:
+            spent = self.spent_usd
+        if not math.isfinite(spent):
             return True  # fail-safe: non-finite spend → gate fires
-        return self.spent_usd > self.budget_usd
+        return spent > self.budget_usd
 
     # ------------------------------------------------------------------
     # Query helpers
@@ -496,10 +501,11 @@ class CostTracker:
         """
         if not shot_id:
             return 0.0
-        row = self.conn.execute(
-            "SELECT COALESCE(SUM(cost_usd), 0.0) AS total FROM cost_log WHERE shot_id = ?",
-            (shot_id,),
-        ).fetchone()
+        with self._conn_lock:
+            row = self.conn.execute(
+                "SELECT COALESCE(SUM(cost_usd), 0.0) AS total FROM cost_log WHERE shot_id = ?",
+                (shot_id,),
+            ).fetchone()
         total = row["total"] if row else 0.0
         # Defense-in-depth: a pre-fix NaN persisted in cost_log must not poison
         # the caller; coerce to 0.0 (fail-safe: veto fires on real over-cap spend).
@@ -513,9 +519,10 @@ class CostTracker:
             total_usd, llm_usd, api_usd,
             breakdown_by_provider, breakdown_by_operation, shot_count
         """
-        rows = self.conn.execute(
-            "SELECT * FROM cost_log WHERE video_id = ?", (video_id,)
-        ).fetchall()
+        with self._conn_lock:
+            rows = self.conn.execute(
+                "SELECT * FROM cost_log WHERE video_id = ?", (video_id,)
+            ).fetchall()
 
         total_usd = 0.0
         llm_usd = 0.0
@@ -557,10 +564,11 @@ class CostTracker:
         """
         # Timezone-aware UTC; datetime.utcnow() is deprecated in 3.12+.
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
-        row = self.conn.execute(
-            "SELECT COALESCE(SUM(cost_usd), 0.0) AS total FROM cost_log WHERE timestamp >= ?",
-            (cutoff,),
-        ).fetchone()
+        with self._conn_lock:
+            row = self.conn.execute(
+                "SELECT COALESCE(SUM(cost_usd), 0.0) AS total FROM cost_log WHERE timestamp >= ?",
+                (cutoff,),
+            ).fetchone()
         return round(row["total"], 6)
 
     def get_cost_per_second(self, video_id: str, video_duration_seconds: float) -> float:
@@ -609,7 +617,8 @@ class CostTracker:
         Includes total spend, spend by provider, spend by operation,
         and cost efficiency metrics.
         """
-        rows = self.conn.execute("SELECT * FROM cost_log").fetchall()
+        with self._conn_lock:
+            rows = self.conn.execute("SELECT * FROM cost_log").fetchall()
         if not rows:
             return "No cost data recorded yet."
 
@@ -680,4 +689,5 @@ class CostTracker:
 
     def close(self):
         """Close the underlying database connection."""
-        self.conn.close()
+        with self._conn_lock:
+            self.conn.close()
