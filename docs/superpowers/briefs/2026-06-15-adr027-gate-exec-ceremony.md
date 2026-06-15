@@ -12,7 +12,7 @@ Lane V verifies the landed diff.
 `status` column. It executes zero oracle tests, so a coordinator status edit can
 produce a green gate without the gate itself proving the pins still pass.
 
-Current evidence:
+Pre-implementation evidence captured at brief authoring:
 
 ```
 $ .venv/bin/python scripts/wave_gate_check.py 1

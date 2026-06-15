@@ -123,6 +123,16 @@ jobs:
         # pythonpath in pyproject.toml — bare `pytest` here relies on it.
         run: pytest tests/unit/ --tb=short -q
 
+      - name: Run executable Wave 1 pin gate
+        # ADR-027: the wave gate executes inventory selectors via pytest --runxfail.
+        # A red result here is an honest gate failure, not a status-column failure.
+        run: |
+          python -m pytest tests/unit/test_auto_approve_nangate_xfail.py --runxfail -q
+          python scripts/wave_gate_check.py 1
+
+      - name: Run no-ceremony detector
+        run: python scripts/check_no_ceremony.py
+
   tsc:
     name: TypeScript --noEmit
     runs-on: ubuntu-latest

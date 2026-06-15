@@ -1163,11 +1163,17 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
 ## ADR-027 — Wave verification must EXECUTE the oracle, not READ the attestation (closing the gate-circularity)
 
 - **Status:** Diagnosis ADOPTED; coordinator-doctrine prevention ADOPTED (seat-coordinator
-  skill). The structural gate change (gate executes pins) + the product-oracle wave-close
-  requirement are RECOMMENDED — routed to a Pair-B director (gate/CI scripts are not
-  coordinator-authorable) and PENDING user-principal ratification of the policy parts.
-  Evidence: `logs/discovery-wf_26a5abf2-3bb.json` (read-only RCA, 8 agents, adversarially
-  stressed; verdict "partially-just-so").
+  skill). FIX-1/FIX-2/FIX-4 are implemented in the gate/tooling surface
+  (`scripts/wave_gate_check.py`, `scripts/pin_reconciler.py`, `.github/workflows/ci.yml`,
+  `scripts/ci_smoke.py`). The product-oracle wave-close requirement remains not yet
+  gate-enforced. Evidence: `logs/discovery-wf_26a5abf2-3bb.json` (read-only RCA, 8 agents,
+  adversarially stressed; verdict "partially-just-so").
+  Implementation evidence (director2 local, 2026-06-15): `env -u GIT_INDEX_FILE
+  .venv/bin/python scripts/check_no_ceremony.py` -> exit 0, R3/R4 PASS;
+  `env -u GIT_INDEX_FILE .venv/bin/python scripts/wave_gate_check.py 1` -> exit 1,
+  `counts={'verified': 8}`, pytest exit 1 from broad selectors pulling open pins;
+  `env -u GIT_INDEX_FILE .venv/bin/python scripts/pin_reconciler.py` -> exit 0,
+  verified rows=13, issues=2 (`costtracker-perf-uncounted`, `ws-reorder-deletes`).
 - **Context (the failure mode, user-principal critique 2026-06-15 — "an elaborate machine
   for feeling confident"):** investigation confirmed the mechanism AND corrected its overreach.
   - `wave_gate_check.py` derives "GATE MET" by reading the inventory `status` string — it
@@ -1218,12 +1224,13 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   - −: FIX-7 (nightly oracle on committed fixtures) is DEFERRED until the `_ARC_AVAILABLE=False`
     CI-vacuity is fixed — wiring it first would be a vacuous green (the silent-gate bug it is
     meant to prevent).
-- **Cross-refs:** `logs/discovery-wf_26a5abf2-3bb.json`; `scripts/wave_gate_check.py` (FIX-1
-  target); `scripts/ci_smoke.py`; `face_validator_gate.py` + `performance/identity_gate.py`
+- **Cross-refs:** `logs/discovery-wf_26a5abf2-3bb.json`; `scripts/wave_gate_check.py` (FIX-1);
+  `scripts/pin_reconciler.py` (FIX-4); `.github/workflows/ci.yml` + `scripts/ci_smoke.py`
+  (FIX-2/ADR-028 hard wiring); `face_validator_gate.py` + `performance/identity_gate.py`
   (the real product oracles); `docs/superpowers/specs/2026-06-14-program-hardening-roadmap-design.md`
   §5/§7 (acceptance bar + the spec↔implementation gap); `docs/REMEDIATION-INVENTORY.md`.
   Origin: user-principal critique 2026-06-15 → coordinator Session-12 RCA `wf_26a5abf2-3bb`.
-  Implementation routing + policy ratification PENDING.
+  Product-oracle gate enforcement remains pending.
 
 ## ADR-028 — Ceremony is forbidden from the verification core, and a detector enforces it
 
@@ -1251,12 +1258,10 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
      green (importorskip/skip in pin files that would silently skip), R3 gate-executes-pins, R4
      ci-runs-`--runxfail`. It only ADDS signal; it never relaxes a gate or suppresses a defect.
   2. **Sequencing (so enforcement is not itself ceremony, and does not red-light peers mid-wave):**
-     the detector is a standing standalone gate NOW (it hard-fails R3/R4 honestly when run).
-     ADR-027 **FIX-1** makes R3 pass (gate executes the pins); **FIX-2** makes R4 pass (CI runs
-     `--runxfail`). The moment R3/R4 are green, `ci_smoke.py` AND CI **MUST** invoke
-     `check_no_ceremony.py` as a HARD gate so it cannot be skipped. Wiring it hard BEFORE FIX-1/2
-     would break every seat's session-start smoke for a known-tracked reason — so the wiring is
-     gated on FIX-1/2, not on this ADR.
+     the detector started as a standalone gate that hard-failed R3/R4 honestly. ADR-027
+     **FIX-1** now makes R3 pass (gate executes the pins); **FIX-2** now makes R4 pass
+     (CI runs `--runxfail`). `ci_smoke.py` and CI invoke `check_no_ceremony.py` as a
+     HARD gate so it cannot be skipped.
   3. **Pin vacuity is only partly mechanizable.** `--runxfail` in CI (FIX-2) catches XPASS (a
      landed fix that should have flipped a pin), but it does NOT catch a pin that passes on
      reverted/broken code (the `secondary-lora` failure mode). That requires the per-pin operator
@@ -1265,19 +1270,18 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
 - **Consequences:**
   - +: new ceremony (a soft xfail, an invisible-green skip, a status-only gate, a CI without
     `--runxfail`) cannot land silently — the detector goes red.
-  - +: the detector is green where it already should be (R1: 25/25 pins strict+reason) so it is
-    respected, not ignored; it converts to all-green automatically when FIX-1/2 land.
-  - −: R3/R4 are RED today (the honest state) and the detector is NOT yet wired into ci_smoke —
-    until FIX-1/2 land + the wiring, enforcement depends on running the script.
+  - +: the detector is green on hard rules after FIX-1/FIX-2 (R1 strictness passes; R2 remains a
+    warning for latent invisible-green risks), so it is respected, not ignored.
+  - −: R3/R4 were red before FIX-1/FIX-2. They are now wired into `ci_smoke.py` and CI, but
+    the executable wave gates are honestly red while broad selectors/open pins remain.
   - −: vacuity detection is incomplete (see decision 3); ≥3 existing vacuous pins are routed to
     lanes to re-shape, NOT fixed by this ADR.
-- **Routing:** FIX-1 + FIX-2 → Pair-B director (already routed by ADR-027; this ADR adds the
-  detector as their acceptance check). Vacuous-pin re-shape (`secondary-lora`, `ckpt-sceneidx`,
+- **Routing:** FIX-1 + FIX-2 → Pair-B director (implemented in gate/CI tooling; operator2
+  verification still owed). Vacuous-pin re-shape (`secondary-lora`, `ckpt-sceneidx`,
   `lipsync-postproc-costkey`, `idgate-observability`) → owning lanes. New row
-  `coherence-caller-valid-ignored` filed in the inventory. ci_smoke/CI hard-wiring of the
-  detector → Pair-B, gated on FIX-1/2 green. **User ratification of the hard-wiring policy
-  RATIFIED (user-principal, 2026-06-15): once FIX-1/2 land (R3/R4 green), ci_smoke + CI MUST
-  run `check_no_ceremony.py` as a HARD gate.**
+  `coherence-caller-valid-ignored` filed in the inventory. **User ratification of the
+  hard-wiring policy RATIFIED (user-principal, 2026-06-15): ci_smoke + CI now run
+  `check_no_ceremony.py` as a HARD gate.**
 - **Cross-refs:** `scripts/check_no_ceremony.py`; `logs/discovery-wf_73983b84-d46.json`;
   ADR-027 (FIX-1/FIX-2); `docs/REMEDIATION-INVENTORY.md`. Origin: user-principal directive
   2026-06-15 → coordinator Session-13 ceremony hunt.

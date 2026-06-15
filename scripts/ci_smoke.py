@@ -167,6 +167,13 @@ def main() -> int:
             return 1
         print("WARNING: coordination FATALs are non-blocking in CI")
 
+    # ADR-028: hard-fail local/CI smoke when verification ceremony is detected.
+    import check_no_ceremony as _cnc
+
+    _ceremony_exit = _cnc.main()
+    if _ceremony_exit:
+        return _ceremony_exit
+
     print("OK")
     return 0
 
