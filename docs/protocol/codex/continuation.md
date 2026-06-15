@@ -286,5 +286,6 @@ the user explicitly asks for a narrower pass.
   `verification-report` GO plus executed evidence.
 - Measurement-backed verdicts require committed instruments and citable
   `logs/` artifacts.
-- For state-asserting writes, run `git log --oneline -5` immediately before
-  the write and again immediately before commit.
+- For state-asserting writes, run
+  `env -u GIT_INDEX_FILE git log --oneline -5` immediately before the write and
+  again immediately before commit.

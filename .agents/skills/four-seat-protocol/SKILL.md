@@ -119,7 +119,8 @@ Mailbox discipline:
   claim, or state-asserting protocol write. For coordinator work, use
   `seat_status.py coordinator --wave <N>` plus recent
   `coordination/mailbox/sent/` entries; never consume coordinator mail. For
-  live seats, consume/read unread mail by default unless explicitly read-only.
+  live seats, read unread mail by default; consume cursors only when
+  intentionally advancing live-seat state.
 - Refresh live state again before finalizing a handoff or commit when other
   seats are active. Mailbox counts and HEADs can change while a handoff is being
   written.
@@ -161,8 +162,8 @@ the user asks for a narrower single-seat/read-only pass.
    unread counts, before assigning work.
 3. Orient `director`, `director2`, `operator`, and `operator2` with
    `.agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`;
-   surface each unread count before mailbox processing, then consume/read live
-   seat mail unless an explicit read-only exception applies.
+   surface each unread count before mailbox processing, then read live-seat
+   mail. Consume cursors only when intentionally advancing live-seat state.
 4. Spawn bounded role agents from `.codex/agents/` for every live seat in the
    cycle: `protocol-director` for director seats and `protocol-operator` for
    operator seats. Idle seats return no-op evidence so the coordinator knows
@@ -258,8 +259,9 @@ before project hooks run.
   GO required by the protocol plus executed evidence.
 - Measurement-backed GO/NO-GO numbers require committed instruments and
   `logs/` artifacts.
-- For state-asserting docs or commits, run `git log --oneline -5` immediately
-  before writing and again immediately before commit.
+- For state-asserting docs or commits, run
+  `env -u GIT_INDEX_FILE git log --oneline -5` immediately before writing and
+  again immediately before commit.
 
 ## Related Files
 

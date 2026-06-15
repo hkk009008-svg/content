@@ -31,7 +31,7 @@ and per-session invocation count. Updated manually at session-close by operator
 | 21 | Verdict-ahead-of-report (when peer seat is blocked, give verdict first, report later) | `7e9f4ac` | `6f3b809` verdict-first unblocked billed pod session |
 | 22 | Flag-before-burn (require review before running fee-spending scripts) | `7e9f4ac` | Unreviewed train script carried F1 fee-respend defect (`3a589da` guard) |
 | 23 | Lane ownership and cross-lane ADRs (a seat does substantive work only in its lane; cross-cutting ADRs need both directors' sign-off) | `b29f8dc` | Scaling 2-seat to 4-seat team model; resolving lane overlap and architecture conflicts |
-| 24 | Live-seat mailbox-first (surface unread, then consume/read live-seat mail before idle/routing/verdict decisions; coordinator remains unpinned/read-only) | `_Codex protocol hardening ship_` | User direct instruction "always read mail"; director initially left coordinator GO/routing mail unread until prompted |
+| 24 | Live-seat mailbox-first (surface unread, then read live-seat mail before idle/routing/verdict decisions; cursor consumption is intentional; coordinator remains unpinned/read-only) | `_Codex protocol hardening ship_` | User direct instruction "always read mail"; director initially left coordinator GO/routing mail unread until prompted |
 | 25 | Codex seat-index HEAD-drift guard (inspect active seat index after mailbox consume; repair stale index and re-stage only intended cursor) | `_Codex protocol hardening ship_` | Consuming coordinator route mail after `e6205050` briefly staged a bogus deletion for the newly introduced coordinator event in `index-codex-director` |
 | 26 | Protocol-learning persistence (capacity/efficiency observations become durable memory and, when general, protocol docs/rules) | `_Codex protocol hardening ship_` | User direct instruction to preserve observations that increase protocol efficacy/efficiency |
 
@@ -756,13 +756,13 @@ and `.agents/skills/`. Registry Rules #24-#26 are the durable rule entries for
 hardening pass.
 
 - **R-CODEX-MAIL** — read live mailbox state before handoff, routing,
-  inventory/gate claims, or state-asserting protocol writes. Live seats
-  consume/read unread mail by default after surfacing the unread count; a
-  read-only/no-consume user instruction is the exception. Coordinator is
-  unpinned and reads all-scope mail without cursor mutation. Refresh before
-  finalizing if seats are active. Basis: coordinator handoff/routing turns where
-  unread counts changed during the session; the user explicitly corrected the
-  process to "always read mail".
+  inventory/gate claims, or state-asserting protocol writes. Live seats read
+  unread mail by default after surfacing the unread count; `consume-events` is a
+  separate intentional cursor mutation. Coordinator is unpinned and reads
+  all-scope mail without cursor mutation. Refresh before finalizing if seats are
+  active. Basis: coordinator handoff/routing turns where unread counts changed
+  during the session; the user explicitly corrected the process to "always read
+  mail".
 - **R-CODEX-CONSOLIDATE** — cross-seat coordinator routing should be one
   consolidated `coordinator-to-all` task-board event naming every seat's task,
   unread/cursor context, lock/push/spend status, allowed write set, and expected
@@ -771,7 +771,7 @@ hardening pass.
 - **R-CODEX-RECEIPT** — after a consolidated task-board event, verify receipt
   with `seat_status.py <seat> --wave <N>` for each live seat; receipt proves
   mailbox/cursor state, not completion of assigned work. Basis: the post-route
-  refresh showed a split board (`director=0`, `operator=3`, `director2=0`,
+  refresh showed a split board (`director=0`, `operator=3`, `director2=1`,
   `operator2=1`) after `e6205050`.
 - **R-CODEX-INDEX** — ordinary git/pytest commands run with
   `env -u GIT_INDEX_FILE`; coordinator-only docs/mailbox/log commits in a dirty
