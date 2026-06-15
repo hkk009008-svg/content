@@ -23,8 +23,10 @@ the coordinator is **UNPINNED**, so there is no cursor and the list is all-time)
 
 **Run that FIRST** — it surfaces your coordinator/all-scope mailbox count;
 **surface that count in your first user-facing turn (Rule #8)** before any
-reconcile. Then produce the **gate proof** you will cite (R-EVIDENCE — never
-assert a gate state from memory):
+reconcile. Read the latest coordinator/all mailbox bodies before deciding;
+the coordinator has no cursor, so "read mail" is inspection, not consumption.
+Then produce the **gate proof** you will cite (R-EVIDENCE — never assert a gate
+state from memory):
 
 ```bash
 .venv/bin/python scripts/wave_gate_check.py <N>   # exit 0 = MET, 1 = UNMET
@@ -41,7 +43,8 @@ Optimize for a clean decision, not activity:
    -5`, `scripts/wave_gate_check.py <N>`, and `scripts/ci_smoke.py`.
 2. **Build the capacity board.** Compare mailbox events after the latest
    coordinator event, the current inventory rows, active lock files, gate
-   output, and landed-but-unverified diffs. Assign each seat active work,
+   output, and landed-but-unverified diffs. Read the relevant mailbox event
+   bodies, not just counts or filenames. Assign each seat active work,
    verification, co-sign/product-oracle review, routing-only, or no-op evidence.
 3. **Use the seats.** For cycle-advance work, dispatch every eligible live seat:
    active seats do bounded lane work, operators verify real diffs promptly, and
@@ -55,6 +58,53 @@ Optimize for a clean decision, not activity:
    do not churn the inventory. Report the no-op with command evidence.
 6. **One batch.** When writing is justified, batch related inventory/doc/log
    updates and send one consolidated mailbox event.
+
+## Broadcast receipt checks
+
+After sending a consolidated `coordinator-to-all` routing notice, verify receipt
+before assuming the board has landed everywhere:
+
+1. Read the latest coordinator/all mailbox event.
+2. Refresh `director`, `operator`, `director2`, and `operator2` with
+   `seat_status.py <seat> --wave <N>`.
+3. Compare each seat cursor and unread set against the latest broadcast.
+4. Report any split, for example seats that have consumed the routing notice
+   versus seats that still show it unread.
+
+Receipt evidence is coordination evidence only. It does not prove assigned work
+is complete, and it should not trigger another mailbox event unless the split
+creates a real routing need or user-facing escalation.
+
+## Codex coordinator state rules
+
+- **Always read mail first.** Before any coordinator handoff, routing event,
+  inventory/gate claim, or user-facing status, run coordinator status and read
+  recent `coordination/mailbox/sent/` entries. The coordinator is unpinned:
+  never consume a coordinator cursor.
+- **Refresh before finalizing.** Re-run live status immediately before committing
+  a state-transfer artifact or state-asserting coordinator event when other
+  seats are online. Update the artifact if unread counts, HEAD, latest mail, or
+  gate state moved while you were writing.
+- **Consolidate routing.** Send one `coordinator-to-all` task-board event for
+  cross-seat routing unless a narrower direct route is required. Include every
+  seat's task, unread/cursor context, lock/push/spend status, allowed write set,
+  and expected output.
+- **Do not duplicate covered mail.** If the latest coordinator event already
+  covers current evidence and no transition occurred, write a handoff/no-op
+  report instead of another mailbox event.
+- **Protect the shared index.** Ordinary git/pytest commands use
+  `env -u GIT_INDEX_FILE`. When the shared index is dirty and a coordinator-only
+  docs/mailbox/log commit is required, commit from a scoped temporary index:
+  `env -u GIT_INDEX_FILE GIT_INDEX_FILE=<temp-index> git ...`; inspect staged
+  scope before committing, then refresh only the committed path in the shared
+  index if it appears as a stale `D/??` pair.
+- **Prefer no-lock work without push authorization.** If push, pod spend, paid
+  API spend, or `claim-lock` side effects are not authorized, route eligible
+  no-lock work or stop for the user-principal instead of touching push-gated
+  locks.
+- **Keep bare handoffs narrow.** A bare `handoff` request means a state-transfer
+  artifact from live evidence. Do not invent implementation, verification,
+  inventory churn, or mailbox noise.
 
 ## The prime prohibition (the one rule that defines this seat)
 
@@ -101,9 +151,11 @@ live work forward:
 1. Capture the shared baseline yourself: coordinator status, `git log -5`,
    `scripts/wave_gate_check.py <wave>`, and `scripts/ci_smoke.py`.
 2. Build a capacity board from inventory rows, mailbox deltas, locks, gate
-   blockers, product-oracle needs, and landed-but-unverified diffs.
+   blockers, product-oracle needs, and landed-but-unverified diffs. Read the
+   relevant mailbox bodies before assigning work.
 3. Orient all four live seats and record each unread count before any mailbox
-   processing.
+   processing. If a coordinator broadcast already exists, compare seat cursors
+   and unread sets against that broadcast so receipt splits are visible.
 4. Spawn bounded `protocol-director` / `protocol-operator` agents for every
    live seat in the cycle with the concrete seat, current HEAD, unread count,
    lane scope, mailbox-consumption decision, allowed write set, lock/push

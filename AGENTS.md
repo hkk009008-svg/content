@@ -24,6 +24,15 @@ from the continuation doc by default: every eligible seat is oriented and either
 does bounded role work or returns no-op evidence, with one coordinator
 reconciliation at the end.
 
+Codex live protocol rules are codified in
+`docs/protocol/codex/continuation.md` and mirrored in `.agents/skills/`.
+In short: read live mailbox state before protocol decisions, do not consume
+coordinator mail, route cross-seat work with one consolidated coordinator event,
+verify broadcast receipt seat-by-seat, use `env -u GIT_INDEX_FILE` for ordinary
+git/pytest, use a scoped temporary index for coordinator-only commits when the
+shared index is dirty, and prefer eligible no-lock work when push/lock side
+effects are not user-authorized.
+
 **Non-Claude agents:** read this file as your source of truth. Translate
 the principles ("fresh context per task", "two-stage review",
 "verify-before-acting") into your tool's analogous mechanisms (new chat
@@ -244,6 +253,12 @@ seat (see `docs/protocol/agents/four-seat-extension.md`). Load-bearing invariant
 - **Git is the tiebreaker.** Before acting on a shared task, run `git log --oneline -3`;
   the first commit to land wins.
 - **Signal via artifacts** (mailbox event / presence file), not chat alone.
+- **Codex mailbox freshness:** before a Codex live-seat/coordinator handoff,
+  routing event, or state-asserting protocol write, read live mailbox state from
+  the relevant `seat_status.py ... --wave <N>` command and recent
+  `coordination/mailbox/sent/` entries. A bare `handoff` request means a narrow
+  state-transfer artifact unless the user explicitly asks for implementation or
+  verification.
 
 Full governance — Rules #7–#23, the disagreement protocol, emergency handling, phase
 taxonomy, and mailbox protocol — lives in **docs/protocol/agents/director-operator.md**;

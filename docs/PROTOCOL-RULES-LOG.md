@@ -31,6 +31,9 @@ and per-session invocation count. Updated manually at session-close by operator
 | 21 | Verdict-ahead-of-report (when peer seat is blocked, give verdict first, report later) | `7e9f4ac` | `6f3b809` verdict-first unblocked billed pod session |
 | 22 | Flag-before-burn (require review before running fee-spending scripts) | `7e9f4ac` | Unreviewed train script carried F1 fee-respend defect (`3a589da` guard) |
 | 23 | Lane ownership and cross-lane ADRs (a seat does substantive work only in its lane; cross-cutting ADRs need both directors' sign-off) | `b29f8dc` | Scaling 2-seat to 4-seat team model; resolving lane overlap and architecture conflicts |
+| 24 | Live-seat mailbox-first (surface unread, then consume/read live-seat mail before idle/routing/verdict decisions; coordinator remains unpinned/read-only) | `_Codex protocol hardening ship_` | User direct instruction "always read mail"; director initially left coordinator GO/routing mail unread until prompted |
+| 25 | Codex seat-index HEAD-drift guard (inspect active seat index after mailbox consume; repair stale index and re-stage only intended cursor) | `_Codex protocol hardening ship_` | Consuming coordinator route mail after `e6205050` briefly staged a bogus deletion for the newly introduced coordinator event in `index-codex-director` |
+| 26 | Protocol-learning persistence (capacity/efficiency observations become durable memory and, when general, protocol docs/rules) | `_Codex protocol hardening ship_` | User direct instruction to preserve observations that increase protocol efficacy/efficiency |
 
 > Historical note: Rules #7 + #8 originally shipped with the placeholder
 > `_Protocol Bundle v2 ship_` in the "Codified" column because the rules-log
@@ -114,8 +117,21 @@ analysis for Rules 1-11, performed during v5 ship; extended to Rules
 | 18 (Doc-maintenance verifier-scoped dispatch) | both | consolidation cost lands on operator (Lane D mechanical-slice carve-out; consent required + given bounded) + both benefit from kept-true docs; claim-edits stay senior-reviewed |
 | 19 (Live-presence-over-inferred-idle) | both | both owe presence-file maintenance; both gain accurate peer-liveness; operator consented (REPLY `ab9925d`) |
 | 20 (Shared-state-accuracy) | both | both seats' awareness gate recomputes truth; symmetric; operator consented (REPLY `ab9925d`) |
+| 21 (Verdict-ahead-of-report) | both | either seat can unblock peer/user first and finish the fuller report after; also protects billed-clock user time |
+| 22 (Flag-before-burn) | user | primarily protects user spend from unreviewed fee-burning scripts; both seats benefit downstream |
+| 23 (Lane ownership and cross-lane ADRs) | both | preserves both lane boundaries and requires sign-off for cross-lane architecture |
+| 24 (Live-seat mailbox-first) | user | closes missed-mail/user-as-relay gaps; both seats gain fresher routing truth |
+| 25 (Codex seat-index HEAD-drift guard) | both | protects every live Codex seat from stale-index staged-scope corruption |
+| 26 (Protocol-learning persistence) | user | preserves user-principal protocol improvements as durable state; both seats benefit from reusable learning |
 
-**Distribution snapshot (cycle-17, post-v5.7 ship):**
+**Distribution snapshot (2026-06-16, post-Codex protocol hardening):**
+- `both`: 16 (Rules 1, 2, 3, 5, 7, 10, 14, 15, 16, 17, 18, 19, 20, 21, 23, 25) — symmetric disciplines
+- `user`: 5 (Rules 8, 11, 22, 24, 26) — close gaps in user-supervision, spend protection, and durable protocol learning
+- `operator-seat`: 3 (Rules 4, 6, 9) — operational layer where races occur
+- `director-seat`: 2 (Rules 12, 13) — constrain director-seat's specialization work
+- (was 13 both / 2 user / 3 operator-seat / 2 director-seat = 20 at cycle-17; Rules #21–#26 add 3 `both` and 3 `user`; total **26 rules**)
+
+**Prior snapshot (cycle-17, post-v5.7 ship):**
 - `both`: 13 (Rules 1, 2, 3, 5, 7, 10, 14, 15, 16, 17, 18, 19, 20) — symmetric disciplines
 - `user`: 2 (Rules 8, 11) — close gaps in user-supervision
 - `operator-seat`: 3 (Rules 4, 6, 9) — operational layer where races occur
@@ -729,6 +745,58 @@ session table.
   regression the brief's caller-grep missed; the determinism-siblings ACK was Tier B
   and round-tripped in <10min. Body in four-seat-extension.md §6. Beneficiary: both
   (unblocks cross-pair throughput without weakening scope-determining review).
+
+## 2026-06-16 addendum — Codex live-protocol state rules (user-directed)
+
+User-directed codification after live coordinator operation on Wave 2. The
+rules are Codex-specific mechanics, mirrored in `docs/protocol/codex/continuation.md`
+and `.agents/skills/`. Registry Rules #24-#26 are the durable rule entries for
+`R-CODEX-MAIL`, `R-CODEX-SEATINDEX`, and `R-CODEX-LEARN`; the remaining
+`R-CODEX-*` bullets are related operational mechanics codified in the same
+hardening pass.
+
+- **R-CODEX-MAIL** — read live mailbox state before handoff, routing,
+  inventory/gate claims, or state-asserting protocol writes. Live seats
+  consume/read unread mail by default after surfacing the unread count; a
+  read-only/no-consume user instruction is the exception. Coordinator is
+  unpinned and reads all-scope mail without cursor mutation. Refresh before
+  finalizing if seats are active. Basis: coordinator handoff/routing turns where
+  unread counts changed during the session; the user explicitly corrected the
+  process to "always read mail".
+- **R-CODEX-CONSOLIDATE** — cross-seat coordinator routing should be one
+  consolidated `coordinator-to-all` task-board event naming every seat's task,
+  unread/cursor context, lock/push/spend status, allowed write set, and expected
+  output. Basis: `e6205050 coord(route): notify wave2 seat tasks`, which avoided
+  four divergent seat-specific task messages.
+- **R-CODEX-RECEIPT** — after a consolidated task-board event, verify receipt
+  with `seat_status.py <seat> --wave <N>` for each live seat; receipt proves
+  mailbox/cursor state, not completion of assigned work. Basis: the post-route
+  refresh showed a split board (`director=0`, `operator=3`, `director2=0`,
+  `operator2=1`) after `e6205050`.
+- **R-CODEX-INDEX** — ordinary git/pytest commands run with
+  `env -u GIT_INDEX_FILE`; coordinator-only docs/mailbox/log commits in a dirty
+  shared index use a scoped temporary index and staged-scope inspection. Basis:
+  the PreToolUse hook blocked a command containing `git read-tree HEAD` and
+  `git status --short` while `GIT_INDEX_FILE` was set.
+- **R-CODEX-SEATINDEX** — for live-seat cursor-only consumes after `HEAD` moved,
+  refresh the seat-local index to `HEAD` and verify the staged scope is only
+  `M coordination/mailbox/seen/<seat>.txt`. If there is intentional staged work,
+  reconcile deliberately instead of blindly resetting. Basis: stale seat-local
+  indexes produced bogus deletion scope after newer mailbox files landed.
+- **R-CODEX-NOLOCK** — when push, pod spend, paid API spend, or lock-claim side
+  effects are not user-authorized, route eligible no-lock work first or stop for
+  authorization. Basis: Wave 2 task-board routing selected the no-lock checkpoint
+  cluster while HTTP and `auto_approve.py` rows remained push/lock-gated.
+- **R-CODEX-HANDOFF** — a bare `handoff` request means a narrow state-transfer
+  artifact from live evidence, not invented implementation, verification,
+  inventory churn, or mailbox noise. Basis: repeated Content repo handoff turns
+  where stale snapshots and broad staging were the primary risk.
+- **R-CODEX-LEARN** — when a live protocol observation would improve capacity,
+  efficacy, or efficiency, preserve it as durable memory if the user has
+  authorized memory updates; if broadly reusable, codify it in the relevant
+  protocol docs/skills with evidence. Basis: user-principal explicitly asked to
+  keep such observations in memory and then to turn those rules into codified
+  state.
 
 ## Retirement criteria
 

@@ -64,11 +64,13 @@ For a real seat, run:
 
 ```bash
 .venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2
-git log --oneline -5
+env -u GIT_INDEX_FILE git log --oneline -5
 ```
 
 Then surface the unread count in the first user-facing response before
-processing events. Consume intentionally only after that:
+processing events. Always read the unread mailbox files before deciding the
+seat is idle, routed, blocked, or ready to verify. Cursor consumption is a
+separate intentional mutation. If the live seat intentionally consumes mail:
 
 ```bash
 coordination/bin/consume-events <seat>
@@ -76,6 +78,22 @@ coordination/bin/consume-events <seat>
 
 Consumption mutates and stages the cursor. That is correct only for live-seat
 work, never for bridge mode.
+
+Mailbox discipline:
+
+- Do not decide from unread counts alone. Open the relevant unread
+  `coordination/mailbox/sent/*.md` files and let the newest binding mail shape
+  the seat decision.
+- Coordinator is unpinned: read coordinator/all mailbox state, but never run
+  `consume-events coordinator`.
+- If a live seat consumes mail after `HEAD` advanced, inspect the active
+  seat-local staged scope before committing. A stale per-seat index can stage
+  bogus deletions for files introduced by newer commits. Refresh that index to
+  `HEAD` and re-stage only the intended cursor file before a cursor-only commit
+  when there is no other intentional staged work. If there is intentional staged
+  work, reconcile the mixed index deliberately and preserve owned paths.
+- The expected staged scope for a mailbox-only consume is exactly
+  `M coordination/mailbox/seen/<seat>.txt`.
 
 ## Codex Mechanics
 
@@ -95,6 +113,38 @@ work, never for bridge mode.
   active per-seat index.
 - Use explicit pathspecs for staging and commits when committing is requested.
 
+## Codex Live-Protocol Rules
+
+- Read live mailbox state before any handoff, routing event, inventory/gate
+  claim, or state-asserting protocol write. For coordinator work, use
+  `seat_status.py coordinator --wave <N>` plus recent
+  `coordination/mailbox/sent/` entries; never consume coordinator mail. For
+  live seats, consume/read unread mail by default unless explicitly read-only.
+- Refresh live state again before finalizing a handoff or commit when other
+  seats are active. Mailbox counts and HEADs can change while a handoff is being
+  written.
+- Cross-seat coordinator routing should be one consolidated
+  `coordinator-to-all` event unless a direct route is explicitly required. Name
+  each seat's task, unread/cursor context, lock/push/spend status, allowed write
+  set, and expected output.
+- After sending a consolidated task-board event, verify receipt with
+  `seat_status.py <seat> --wave <N>` for each live seat. Receipt evidence only
+  proves mailbox/cursor state; it does not prove assigned work is complete.
+- If the shared index is dirty but a coordinator-only docs/mailbox/log commit
+  is needed, use a scoped temporary index:
+  `env -u GIT_INDEX_FILE GIT_INDEX_FILE=<temp-index> git ...`. Inspect staged
+  scope under that index before committing. If the committed path later appears
+  as a stale `D/??` pair in the shared index, refresh only that path.
+- When push, pod spend, paid API spend, or lock-claim side effects are not
+  user-authorized, route eligible no-lock work first or stop for authorization.
+- A bare `handoff` request means a narrow state-transfer artifact from live
+  evidence, not new implementation, verification, inventory churn, or mailbox
+  noise.
+- When a protocol observation would improve capacity, efficacy, or efficiency,
+  preserve it as durable memory if the user has authorized memory updates; if it
+  is broadly reusable, codify it in the relevant protocol docs/rules log with
+  evidence.
+
 ## Capacity-Max Default Cycle
 
 When the user explicitly enters a live seat, asks a coordinator to continue, or
@@ -102,15 +152,17 @@ asks Codex to advance a cycle, use the capacity-max workflow by default unless
 the user asks for a narrower single-seat/read-only pass.
 
 1. The parent/coordinator captures the shared baseline:
-   `seat_status.py coordinator --wave 2`, `git log --oneline -5`,
+   `seat_status.py coordinator --wave 2`, `env -u GIT_INDEX_FILE git log --oneline -5`,
    `scripts/wave_gate_check.py 2`, and `scripts/ci_smoke.py`.
 2. Build a capacity board from mailbox deltas, inventory rows, active locks,
    gate output, and landed-but-unverified diffs. Assign each seat one of:
    implementation/briefing, co-sign/product-oracle review, Lane V verification,
-   routing-only, or idle/no-op.
+   routing-only, or idle/no-op. Read the relevant mailbox bodies, not only the
+   unread counts, before assigning work.
 3. Orient `director`, `director2`, `operator`, and `operator2` with
    `.agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`;
-   surface each unread count before any mailbox processing.
+   surface each unread count before mailbox processing, then consume/read live
+   seat mail unless an explicit read-only exception applies.
 4. Spawn bounded role agents from `.codex/agents/` for every live seat in the
    cycle: `protocol-director` for director seats and `protocol-operator` for
    operator seats. Idle seats return no-op evidence so the coordinator knows
@@ -155,6 +207,32 @@ scope, allowed write set, mailbox consumption decision, and expected output.
 Never run two implementation subagents in parallel on shared files. Idle seats
 return no-op evidence rather than inventing work.
 
+## Coordinator Broadcast Receipt
+
+After a coordinator sends a consolidated `coordinator-to-all` routing notice,
+do not assume every seat has consumed or acted on it. A follow-up coordinator
+check should:
+
+1. Read the latest coordinator/all mailbox event.
+2. Re-run `seat_status.py <seat> --wave 2` for all four live seats.
+3. Compare each seat cursor and unread set against the latest coordinator
+   broadcast.
+4. Report any receipt split explicitly. Receipt evidence proves only that mail
+   landed or remains unread; it does not prove assigned work is complete.
+
+If the latest coordinator reconciliation covers the newest evidence, no locks
+need action, and the gate remains red for already-recorded blockers, use the
+no-op fast path instead of sending another mailbox event.
+
+## Protocol Learning
+
+When a live protocol observation would improve future capacity, efficacy, or
+efficiency, preserve it as durable memory if the user has authorized memory
+updates. If the observation is broadly reusable, codify it in the relevant
+protocol docs or skill instructions with current evidence and provenance. Prefer
+reusable lessons over transient snapshots such as exact unread counts or
+time-specific blockers.
+
 ## Codex Launch Pattern
 
 For CLI-based live seats, launch Codex from the shared working tree with a seat
@@ -163,8 +241,9 @@ marker and per-seat index:
 ```bash
 cd /Users/hyungkoookkim/Content
 export CODEX_SEAT=<director|director2|operator|operator2>
-export GIT_INDEX_FILE="$(git rev-parse --absolute-git-dir)/index-codex-$CODEX_SEAT"
-[ -f "$GIT_INDEX_FILE" ] || git read-tree HEAD
+CODEX_GIT_DIR="$(env -u GIT_INDEX_FILE git rev-parse --absolute-git-dir)"
+export GIT_INDEX_FILE="$CODEX_GIT_DIR/index-codex-$CODEX_SEAT"
+[ -f "$GIT_INDEX_FILE" ] || env -u GIT_INDEX_FILE git read-tree --index-output="$GIT_INDEX_FILE" HEAD
 codex
 ```
 
