@@ -375,6 +375,36 @@ class TestApplyCorrectionFlagPropagation:
         assert result["success"] is True, result
         assert result["take"]["metadata"].get("dialogue_audio_in_clip") is True
 
+    def test_lip_sync_variant_records_namespaced_lipsync_cost(self, tmp_path):
+        """Postprocess lip_sync records the cascade winner with a LIPSYNC_* key.
+
+        Regression for lipsync-postproc-costkey: the correction path used to pass
+        raw cascade engine names such as ``syncSoV3`` to CostTracker, so the table
+        lookup missed ``LIPSYNC_SYNCSOV3`` and charged $0.00.
+        """
+        from cost_tracker import API_COST_USD, CostTracker
+
+        ctrl = _make_correction_ctrl(tmp_path, {"has_dialogue": True})
+        tracker = CostTracker(db_path=str(tmp_path / "cost.db"), budget_usd=10.0)
+        ctrl._core.cost_tracker = tracker
+
+        def _lipsync(*a, **k):
+            out = k.get("output_path")
+            _make_clip(out, with_audio=True)
+            k["_cascade_out"]["cascade_metadata"] = {"engine": "syncSoV3"}
+            return out
+
+        with patch("cinema.shots.controller.generate_lip_sync_video", _lipsync), \
+             patch("cinema.shots.controller.get_reference_image", return_value=str(tmp_path / "ref.jpg")):
+            result = ctrl.apply_correction("shot_1_0", "lip_sync", take_id="take_base")
+
+        assert result["success"] is True, result
+        assert tracker.spent_usd == pytest.approx(API_COST_USD["LIPSYNC_SYNCSOV3"])
+        row = tracker.conn.execute(
+            "SELECT model, operation, shot_id, video_id FROM cost_log ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        assert tuple(row) == ("LIPSYNC_SYNCSOV3", "lipsync", "shot_1_0", "proj_1")
+
 
 # ===========================================================================
 # C1 closure — the assembler honors the flag on a POSTPROCESS variant

@@ -211,6 +211,14 @@ def _should_tag_audio_embedded(
     )
 
 
+def _lipsync_cost_api_key(engine: object) -> str:
+    """Return the CostTracker API key for a lip-sync cascade engine."""
+    raw = str(engine or "default").strip() or "default"
+    if raw.upper().startswith("LIPSYNC_"):
+        return raw
+    return f"LIPSYNC_{raw}"
+
+
 def _inherit_audio_flags_from_base(base_take: Optional[dict], variant: dict) -> None:
     """Propagate a base take's audio-embedding flags onto a postprocess variant
     when the variant's output clip actually carries an audio stream.
@@ -1863,7 +1871,7 @@ class ShotController:
                             _ls_engine = (_ls_cascade.get("cascade_metadata", {})
                                           .get("engine") or "default")
                             self.cost_tracker.record_api_call(
-                                f"LIPSYNC_{_ls_engine}", operation="lipsync",
+                                _lipsync_cost_api_key(_ls_engine), operation="lipsync",
                                 shot_id=shot_id, video_id=self.project.get("id", ""),
                             )
                         except Exception:
@@ -2458,12 +2466,14 @@ class ShotController:
                         if "cascade_metadata" in _lipsync_cascade:
                             variant["cascade_metadata"] = _lipsync_cascade["cascade_metadata"]
                         # Cost-track the lipsync correction (Tier F NEW-2: previously
-                        # untracked). Attribute to the winning cascade engine.
+                        # untracked). Attribute to the winning cascade engine,
+                        # namespaced LIPSYNC_<engine> like the motion path so it
+                        # resolves against API_COST_USD.
                         try:
                             _ls_engine = (_lipsync_cascade.get("cascade_metadata", {})
-                                          .get("engine") or "LIPSYNC")
+                                          .get("engine") or "default")
                             self.cost_tracker.record_api_call(
-                                _ls_engine, operation="lipsync",
+                                _lipsync_cost_api_key(_ls_engine), operation="lipsync",
                                 shot_id=shot_id, video_id=self.project.get("id", ""),
                             )
                         except Exception:
