@@ -439,7 +439,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `AutoApproveConfig` | `cinema/auto_approve.py:74` | All thresholds from `global_settings.auto_approve`. Defaults: `image_min_composite=0.97`/fallback `0.78`, `motion_min_identity=0.85`, `final_min_lipsync=0.8`, `final_require_human_if_upstream_auto=True`. |
 | `record_director_review_on_shots` | `cinema/auto_approve.py:246` | **Writer** of `shot["director_review"]`; called unconditionally after `validate_shot_prompts` (`cinema_pipeline.py:1064`). Normalizes MODIFIED→APPROVED (cycle-17). Its absence was the headless-stall root cause. |
 | `_rules_for_plan` | `cinema/auto_approve.py:214` | Two vetoes: decision≠APPROVED; non-empty violations. Reads `director_review`. |
-| `check_gate` | `cinema/auto_approve.py:663` | Public entry; returns `AutoApproveDecision`. Catches all exceptions (`deferred=True` on eval error); returns not-approved if config disabled. |
+| `check_gate` | `cinema/auto_approve.py:664` | Public entry; returns `AutoApproveDecision`. Catches all exceptions (`deferred=True` on eval error); returns not-approved if config disabled. |
 | `_screening_stage_enabled` | `cinema/screening.py:104` | Flag: `global_settings.screening_stage_enabled` > `CINEMA_SCREENING_STAGE` env > default ON. |
 | `_build_timeline_manifest` | `cinema/screening.py:177` | Per-shot `{start_s, end_s, take}` list; `verify_files=True` mirrors `_assemble_final`'s on-disk inclusion rule. |
 | `mark_screening_approved` | `cinema/screening.py:307` | Persist `screening_approved`. |
@@ -676,7 +676,7 @@ These are the load-bearing gotchas a developer will hit; each is verified agains
 | `pipeline_context.py` vs `cinema/context.py` | top-level vs `cinema/` | 15-line prompt-string loader vs typed `PipelineContext` dataclass. |
 | `headless=True` does NOT use `NullLifecycle` | `cinema/lifecycle.py:70` | Headless still uses `ThreadedLifecycle`; `RunState.headless` makes `_wait_for_gate` raise. `NullLifecycle.wait_for_gate` returns `True` unconditionally — using it would silently skip gate enforcement. |
 | PLAN_REVIEW headless stall (FIXED) | `cinema_pipeline.py:1064`, `cinema/auto_approve.py:235` | Without `record_director_review_on_shots`, `_rules_for_plan` always vetoed → headless hang. Now called unconditionally; MODIFIED→APPROVED (cycle-17, `138d7c7`). |
-| `evaluate_generation_quality` wired by T6 | `llm/chief_director.py:406` | Full 2×2 mutation matrix; **now called** by `diagnose_clip(deep=True)` in `cinema/shots/controller.py:2241` (T6, `10a0eb4`); vision-grounded since `d974c15` (take + reference images attached to the LLM call). |
+| `evaluate_generation_quality` wired by T6 | `llm/chief_director.py:406` | Full 2×2 mutation matrix; **now called** by `diagnose_clip(deep=True)` in `cinema/shots/controller.py:2266` (T6, `10a0eb4`); vision-grounded since `d974c15` (take + reference images attached to the LLM call). |
 | `style_director` is OpenAI-only | `llm/style_director.py:38` | No Anthropic path — asymmetric with the Anthropic-first ChiefDirector/CinemaDirector. |
 | Veo `reference_images` silently dropped (Bug #4) | `veo_native.py:155` | Vertex rejects image+reference both set; identity comes from the start frame only. `driving_video_path` also unwired on Veo (only Sora wires it). |
 | VEO_NATIVE has no quota guard | `phase_c_ffmpeg.py:313` | The 1800s cooldown TTL is set/checked only by the FAL-proxy `VEO` branch. |
@@ -786,7 +786,7 @@ flowchart TD
 
 The first of five gates. Each gate runs the same machinery (`ReviewController._wait_for_gate`, `cinema/review/controller.py:507`): set `runstate.current_stage`, emit progress, run an **auto-approve pre-screen**, then either block on the operator (web) or fail fast (headless).
 
-**Auto-approve pre-screen** (`_run_auto_approve_pass`, `cinema/review/controller.py:253`): for every unapproved shot, `check_gate("plan", ...)` (`cinema/auto_approve.py:663`) evaluates the plan veto rules (`_rules_for_plan`, `cinema/auto_approve.py:214`):
+**Auto-approve pre-screen** (`_run_auto_approve_pass`, `cinema/review/controller.py:253`): for every unapproved shot, `check_gate("plan", ...)` (`cinema/auto_approve.py:664`) evaluates the plan veto rules (`_rules_for_plan`, `cinema/auto_approve.py:214`):
 - `plan_decision_not_approved` — fires if `director_review.decision != "APPROVED"`.
 - `plan_has_violations` — fires if `director_review.violations` is non-empty.
 
@@ -853,7 +853,7 @@ The first of five gates. Each gate runs the same machinery (`ReviewController._w
 
 ### KEYFRAME_REVIEW gate (55%)
 
-Same machinery as PLAN_REVIEW. Auto-approve runs `_rules_for_image` (`cinema/auto_approve.py:291`): `image_composite_below_threshold` (threshold `image_min_composite=0.97`, or the `image_min_composite_fallback=0.78` bar when any take used a fallback engine), `image_cascade_fallback` (vetoes any cascade-fallback take when `image_veto_on_fallback=True`), `image_over_budget`. On approval, `approved_keyframe_take_id` is set to the highest-composite take (`pick_best_take_by_composite`, `cinema/auto_approve.py:544`). **Gate predicate** (`cinema/review/controller.py:224`): all shots have `approved_keyframe_take_id`. Web operators approve via `POST .../keyframes/<take_id>/approve` → `approve_take(..., "keyframe")` (`cinema/review/controller.py:659`).
+Same machinery as PLAN_REVIEW. Auto-approve runs `_rules_for_image` (`cinema/auto_approve.py:291`): `image_composite_below_threshold` (threshold `image_min_composite=0.97`, or the `image_min_composite_fallback=0.78` bar when any take used a fallback engine), `image_cascade_fallback` (vetoes any cascade-fallback take when `image_veto_on_fallback=True`), `image_over_budget`. On approval, `approved_keyframe_take_id` is set to the highest-composite take (`pick_best_take_by_composite`, `cinema/auto_approve.py:545`). **Gate predicate** (`cinema/review/controller.py:224`): all shots have `approved_keyframe_take_id`. Web operators approve via `POST .../keyframes/<take_id>/approve` → `approve_take(..., "keyframe")` (`cinema/review/controller.py:659`).
 
 ---
 
@@ -936,10 +936,10 @@ Driving-video mode (`driving_video_source`, `domain/performance.py:145`): `"uplo
 ### REVIEW gate (82%)
 
 The last per-shot gate before assembly. `_rebuild_review_clips(project)` builds the in-memory manifest first (`cinema/review/controller.py:618`). Auto-approve runs `_rules_for_final` (`cinema/auto_approve.py:395`) over `postprocess_variants + motion_takes`:
-- `final_lipsync_below_threshold` — dialogue-aware: returns 1.0 (pass) for non-dialogue shots and for `audio_embedded=True` takes; 0.0 for a dialogue shot with no lipsync score and no embedded audio. Threshold `final_min_lipsync=0.8`.
+- `final_lipsync_below_threshold` — dialogue-aware: returns 1.0 (pass) for non-dialogue shots and for `audio_embedded=True` or `dialogue_audio_in_clip=True` takes; 0.0 for a dialogue shot with no lipsync score and no embedded-dialogue proof. Threshold `final_min_lipsync=0.8`.
 - `final_upstream_was_auto_approved` — **safety net**: if any earlier gate auto-approved this shot, force human review at REVIEW (`final_require_human_if_upstream_auto=True` by default).
 
-On approval, `approved_final_take_id` (and `approved_motion_take_id` via the `source_take_id` chain) is set to the best take (`pick_best_take_for_final` prefers non-fallback, then highest composite, `cinema/auto_approve.py:575`). **Gate predicate** (`cinema/review/controller.py:224`): all shots have `approved_final_take_id`.
+On approval, `approved_final_take_id` (and `approved_motion_take_id` via the `source_take_id` chain) is set to the best take (`pick_best_take_for_final` prefers non-fallback, then highest composite, `cinema/auto_approve.py:576`). **Gate predicate** (`cinema/review/controller.py:224`): all shots have `approved_final_take_id`.
 
 > **Footgun for unattended runs:** `final_require_human_if_upstream_auto=True` blocks a *fully* headless completion even when every other rule passes — by design. To complete fully unattended, set it to `false` in `global_settings.auto_approve` (after the pipeline is calibrated). This is the single most common headless dead-end after the cycle-17 PLAN fix.
 
@@ -1739,7 +1739,7 @@ The functions an engineer reaches for most, grouped by task. All `file:line` ref
 |---|---|---|
 | `ReviewController._wait_for_gate` | `cinema/review/controller.py:507` | Runs auto-approve pass, then blocks (web) or raises `GateNotSatisfiedError` (headless, line 546) |
 | `ReviewController._gate_satisfied` | `cinema/review/controller.py:224` | Per-gate predicate (plan/keyframe/performance/final approval-ID checks) |
-| `check_gate` | `cinema/auto_approve.py:663` | Public auto-approve entry; returns `AutoApproveDecision`; catches all exceptions → `deferred=True` |
+| `check_gate` | `cinema/auto_approve.py:664` | Public auto-approve entry; returns `AutoApproveDecision`; catches all exceptions → `deferred=True` |
 | `record_director_review_on_shots` | `cinema/auto_approve.py:246` | **Writes** `shot["director_review"]`; called at `cinema_pipeline.py:1064`. Without it the PLAN gate hangs headless runs (D-gate-1) |
 | `approve_shot_plan` / `approve_take` | `cinema/review/controller.py:645 / 659` | Human approval mutations for the four review gates |
 | `mark_screening_approved` | `cinema/screening.py:307` | Sets `screening_approved=True`; unblocks the SCREENING waiter |
@@ -2059,7 +2059,7 @@ Confusingly similar, different things: `pipeline_context.py` (15 LOC) loads the 
 | `format_dialogue_for_voiceover`, `dialogue_to_narration_text` | Dialogue helpers | **Removed entirely** — both functions are gone repo-wide; the pipeline uses `audio.dialogue.generate_dialogue_voiceover` directly |
 | `TemporalConsistencyManager.record_shot_generated` / `reset_scene` | Temporal chaining | **Uncalled in production** — chaining relies on `approved_anchor_image` passed explicitly; the in-memory `last_generated_image` path is functionally dead |
 | `LTX _fal_transition` / `_native_transition` | Keyframe interpolation | **Unreachable from the cascade** — `generate_ai_video` never calls them; only direct `LTXVideoAPI` use reaches them |
-| `summarize_audit` | PostRunSummary endpoint | Defined (`auto_approve.py:774`) but **no web endpoint calls it** |
+| `summarize_audit` | PostRunSummary endpoint | Defined (`auto_approve.py:775`) but **no web endpoint calls it** |
 
 #### `storyboard_mode` is read and wired
 
