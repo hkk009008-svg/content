@@ -9,6 +9,9 @@ Keys are the `.value` strings from `identity/types.FailureReason` — see
 the B.0 audit in docs/superpowers/plans/2026-05-23-quality-uplift.md §5.2
 for the taxonomy. `multiple_faces_ambiguous` is defined in the enum but
 never emitted by identity/validator.py; intentionally NOT mapped.
+`identity_unverified` is emitted when the identity oracle could not run;
+it is intentionally NOT mapped because prompt wording cannot remediate an
+unavailable validator.
 `passed` is the success sentinel, never a failure reason.
 
 Used by llm.chief_director when assembling prompt mutations after a

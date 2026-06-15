@@ -28,6 +28,7 @@ class FailureReason(Enum):
     PASSED = "passed"
     GENERATED_IMAGE_MISSING = "generated_image_missing"
     VIDEO_ZERO_FRAMES = "video_zero_frames"
+    IDENTITY_UNVERIFIED = "identity_unverified"
 
 
 @dataclass

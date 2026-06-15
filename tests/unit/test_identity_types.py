@@ -25,6 +25,7 @@ class TestFailureReason:
             "SMALL_FACE_REGION",
             "POOR_LIGHTING",
             "PASSED",
+            "IDENTITY_UNVERIFIED",
         ]
         for name in expected:
             assert hasattr(FailureReason, name), f"FailureReason missing {name}"

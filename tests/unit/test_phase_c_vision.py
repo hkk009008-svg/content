@@ -54,6 +54,11 @@ def _no_anthropic_settings():
     return dataclasses.replace(_real_settings, anthropic_api_key="")
 
 
+def _anthropic_settings():
+    """Settings with a non-empty anthropic_api_key."""
+    return dataclasses.replace(_real_settings, anthropic_api_key="anthropic-test-key")
+
+
 def _no_gemini_settings():
     """Settings with both gemini_api_key and google_api_key cleared."""
     return dataclasses.replace(_real_settings, gemini_api_key="", google_api_key="")
@@ -448,21 +453,26 @@ class TestValidateShotQualityVision:
 
 class TestValidateIdentityVision:
 
-    def test_no_anthropic_key_returns_default_pass(self):
-        """No anthropic_api_key → default_pass (match=True, confidence=0.7, source='default')."""
-        with patch.object(pcv, "settings", _no_anthropic_settings()):
+    def test_no_anthropic_key_fails_closed_with_error_marker(self, caplog):
+        """No anthropic_api_key -> fail-closed marker, never fabricated confidence=0.7."""
+        with patch.object(pcv, "settings", _no_anthropic_settings()), \
+             caplog.at_level("WARNING"):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
-        assert result == {
-            "match": True, "confidence": 0.7, "issues": [], "source": "default"
-        }
+        assert result["match"] is False
+        assert result["confidence"] == 0.0
+        assert result["error"] is True
+        assert result["error_reason"] == "missing_anthropic_api_key"
+        assert result["source"] == "error"
+        assert any("missing ANTHROPIC_API_KEY" in r.message for r in caplog.records)
 
     def test_reference_missing_returns_skip_marker(self):
         """Reference image not found → skip marker (match=True, skip=True, confidence=None)."""
         def _exists(p):
             return "/gen" in p  # gen exists, ref doesn't
 
-        with patch.object(pcv.os.path, "exists", side_effect=_exists):
+        with patch.object(pcv, "settings", _anthropic_settings()), \
+             patch.object(pcv.os.path, "exists", side_effect=_exists):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
         assert result["skip"] is True
@@ -475,7 +485,8 @@ class TestValidateIdentityVision:
         def _exists(p):
             return "/ref" in p  # ref exists, gen doesn't
 
-        with patch.object(pcv.os.path, "exists", side_effect=_exists):
+        with patch.object(pcv, "settings", _anthropic_settings()), \
+             patch.object(pcv.os.path, "exists", side_effect=_exists):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
         assert result["missing_generated"] is True
@@ -490,7 +501,8 @@ class TestValidateIdentityVision:
         mock_resp.content[0].text = json.dumps({"confidence": 0.85, "issues": []})
         mock_client.messages.create.return_value = mock_resp
 
-        with patch.object(pcv.os.path, "exists", return_value=True), \
+        with patch.object(pcv, "settings", _anthropic_settings()), \
+             patch.object(pcv.os.path, "exists", return_value=True), \
              patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("anthropic.Anthropic", return_value=mock_client):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
@@ -506,7 +518,8 @@ class TestValidateIdentityVision:
         mock_resp.content[0].text = json.dumps({"confidence": 0.5, "issues": []})
         mock_client.messages.create.return_value = mock_resp
 
-        with patch.object(pcv.os.path, "exists", return_value=True), \
+        with patch.object(pcv, "settings", _anthropic_settings()), \
+             patch.object(pcv.os.path, "exists", return_value=True), \
              patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("anthropic.Anthropic", return_value=mock_client):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
@@ -527,7 +540,8 @@ class TestValidateIdentityVision:
         mock_resp.content[0].text = json.dumps({"confidence": 0.7, "issues": []})
         mock_client.messages.create.return_value = mock_resp
 
-        with patch.object(pcv.os.path, "exists", return_value=True), \
+        with patch.object(pcv, "settings", _anthropic_settings()), \
+             patch.object(pcv.os.path, "exists", return_value=True), \
              patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("anthropic.Anthropic", return_value=mock_client):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
@@ -549,7 +563,8 @@ class TestValidateIdentityVision:
         mock_resp.content[0].text = json.dumps({"confidence": 0.69, "issues": []})
         mock_client.messages.create.return_value = mock_resp
 
-        with patch.object(pcv.os.path, "exists", return_value=True), \
+        with patch.object(pcv, "settings", _anthropic_settings()), \
+             patch.object(pcv.os.path, "exists", return_value=True), \
              patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("anthropic.Anthropic", return_value=mock_client):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
@@ -557,15 +572,26 @@ class TestValidateIdentityVision:
         # DOCUMENTED-INTENTIONAL: advisory match key; prod gate re-thresholds (validator re-computes matched)
         assert result["match"] is False
 
-    def test_api_exception_returns_default_pass(self):
-        """Exception during Anthropic call → caught, returns default_pass."""
-        with patch.object(pcv.os.path, "exists", return_value=True), \
+    def test_api_exception_retries_then_fails_closed(self, caplog):
+        """Exception during Anthropic call -> retry, then fail-closed marker."""
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = RuntimeError("api error")
+
+        with patch.object(pcv, "settings", _anthropic_settings()), \
+             patch.object(pcv.os.path, "exists", return_value=True), \
              patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
-             patch("anthropic.Anthropic", side_effect=RuntimeError("api error")):
+             patch.object(pcv.time, "sleep", return_value=None), \
+             patch("anthropic.Anthropic", return_value=mock_client), \
+             caplog.at_level("WARNING"):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
-        assert result["match"] is True
-        assert result["source"] == "default"
+        assert mock_client.messages.create.call_count == 3
+        assert result["match"] is False
+        assert result["confidence"] == 0.0
+        assert result["error"] is True
+        assert result["error_reason"] == "provider_error"
+        assert result["source"] == "error"
+        assert any("failing closed" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
@@ -711,38 +737,50 @@ class TestValidateShotQualityVisionEncodeFailure:
 
 
 class TestValidateIdentityVisionEncodeFailure:
-    """encode_image_for_llm returns None → default_pass, no API call made."""
+    """encode_image_for_llm returns None -> fail-closed marker, no API call made."""
 
-    def test_encode_failure_ref_returns_default_pass_no_api_call(self):
-        """ref encode fails → default_pass, Anthropic client not called."""
+    def test_encode_failure_ref_fails_closed_no_api_call(self, caplog):
+        """ref encode fails -> error marker, Anthropic messages not called."""
         mock_client = MagicMock()
 
         def _encode(path):
             return None if "ref" in path else "AAAA"
 
-        with patch.object(pcv.os.path, "exists", return_value=True), \
+        with patch.object(pcv, "settings", _anthropic_settings()), \
+             patch.object(pcv.os.path, "exists", return_value=True), \
              patch.object(pcv, "encode_image_for_llm", side_effect=_encode), \
-             patch("anthropic.Anthropic", return_value=mock_client):
+             patch("anthropic.Anthropic", return_value=mock_client), \
+             caplog.at_level("WARNING"):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
-        assert result["source"] == "default"
-        assert result["match"] is True
+        assert result["source"] == "error"
+        assert result["match"] is False
+        assert result["confidence"] == 0.0
+        assert result["error"] is True
+        assert result["error_reason"] == "image_encode_failed"
+        assert any("image encode failed" in r.message for r in caplog.records)
         mock_client.messages.create.assert_not_called()
 
-    def test_encode_failure_gen_returns_default_pass_no_api_call(self):
-        """gen encode fails → default_pass, Anthropic client not called."""
+    def test_encode_failure_gen_fails_closed_no_api_call(self, caplog):
+        """gen encode fails -> error marker, Anthropic messages not called."""
         mock_client = MagicMock()
 
         def _encode(path):
             return None if "gen" in path else "AAAA"
 
-        with patch.object(pcv.os.path, "exists", return_value=True), \
+        with patch.object(pcv, "settings", _anthropic_settings()), \
+             patch.object(pcv.os.path, "exists", return_value=True), \
              patch.object(pcv, "encode_image_for_llm", side_effect=_encode), \
-             patch("anthropic.Anthropic", return_value=mock_client):
+             patch("anthropic.Anthropic", return_value=mock_client), \
+             caplog.at_level("WARNING"):
             result = pcv.validate_identity_vision("/ref.jpg", "/gen.jpg")
 
-        assert result["source"] == "default"
-        assert result["match"] is True
+        assert result["source"] == "error"
+        assert result["match"] is False
+        assert result["confidence"] == 0.0
+        assert result["error"] is True
+        assert result["error_reason"] == "image_encode_failed"
+        assert any("image encode failed" in r.message for r in caplog.records)
         mock_client.messages.create.assert_not_called()
 
     def test_anthropic_payload_declares_image_jpeg_for_both_images(self):
@@ -752,7 +790,8 @@ class TestValidateIdentityVisionEncodeFailure:
         mock_resp.content[0].text = json.dumps({"confidence": 0.9, "issues": []})
         mock_client.messages.create.return_value = mock_resp
 
-        with patch.object(pcv.os.path, "exists", return_value=True), \
+        with patch.object(pcv, "settings", _anthropic_settings()), \
+             patch.object(pcv.os.path, "exists", return_value=True), \
              patch.object(pcv, "encode_image_for_llm", return_value="AAAA"), \
              patch("anthropic.Anthropic", return_value=mock_client):
             pcv.validate_identity_vision("/ref.png", "/gen.png")

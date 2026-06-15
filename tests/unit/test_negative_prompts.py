@@ -34,8 +34,8 @@ def test_every_active_failure_reason_returns_non_empty(reason):
     Keys are from the B.0 audit of identity/types.FailureReason — only
     reasons that actually get assigned by identity/validator.py are
     covered. `multiple_faces_ambiguous` is in the enum but never set,
-    so it's intentionally excluded; including a key for it would
-    create a dead entry that never gets hit.
+    so it's intentionally excluded; `identity_unverified` means the
+    validator could not run, so prompt text cannot remediate it.
     """
     from llm.negative_prompts import get_negative_prompt_for_failure
     result = get_negative_prompt_for_failure(reason)
@@ -69,6 +69,15 @@ def test_unknown_reason_returns_empty():
     result = get_negative_prompt_for_failure("xyzzy_unknown")
     assert result == "", (
         f"unknown reason must return empty (opt-in semantics); got: {result!r}"
+    )
+
+
+def test_identity_unverified_returns_empty():
+    from llm.negative_prompts import get_negative_prompt_for_failure
+    result = get_negative_prompt_for_failure("identity_unverified")
+    assert result == "", (
+        "identity_unverified is an oracle-availability failure, not a prompt-remediable "
+        f"image defect; got: {result!r}"
     )
 
 

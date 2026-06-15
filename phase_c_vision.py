@@ -2,6 +2,8 @@ import cv2
 import os
 import json
 import base64
+import logging
+import time
 from pipeline_context import PIPELINE_CONTEXT
 from config.settings import settings
 from cinema.fal_limits import FAL_TIMEOUT_VIDEO_S
@@ -12,6 +14,23 @@ try:
 except ImportError:
     VISION_AVAILABLE = False
     print("⚠️ [VISION WARNING] DeepFace/Tensorflow unavailable via PIP. Identity validation loop bypassed.")
+
+
+logger = logging.getLogger(__name__)
+_IDENTITY_API_MAX_ATTEMPTS = 3
+_IDENTITY_API_RETRY_BACKOFF_SECONDS = 0.1
+
+
+def _identity_error_result(reason: str, issue: str) -> dict:
+    """Fail-closed marker for identity checks that could not run."""
+    return {
+        "match": False,
+        "confidence": 0.0,
+        "issues": [issue],
+        "source": "error",
+        "error": True,
+        "error_reason": reason,
+    }
 
 
 def _get_shared_validator():
@@ -250,17 +269,13 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
     Replaces broken DeepFace with LLM visual reasoning.
     Returns: {"match": bool, "confidence": 0.0-1.0, "issues": [...]}
     """
-    default_pass = {
-        "match": True,
-        "confidence": 0.7,
-        "issues": [],
-        "source": "default",
-    }
-
     api_key = settings.anthropic_api_key
     if not api_key:
-        print("[VISION-ID] WARNING: No ANTHROPIC_API_KEY — returning default pass")
-        return default_pass
+        logger.warning("[VISION-ID] Identity validation unavailable: missing ANTHROPIC_API_KEY")
+        return _identity_error_result(
+            "missing_anthropic_api_key",
+            "identity check unavailable: missing ANTHROPIC_API_KEY",
+        )
 
     if not os.path.exists(reference_path):
         print(f"[VISION-ID] WARNING: Reference image not found: {reference_path}")
@@ -276,8 +291,16 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
         ref_b64 = encode_image_for_llm(reference_path)
         gen_b64 = encode_image_for_llm(generated_path)
         if ref_b64 is None or gen_b64 is None:
-            print(f"[VISION-ID] WARNING: Image encode failed (ref={ref_b64 is None}, gen={gen_b64 is None})")
-            return default_pass
+            logger.warning(
+                "[VISION-ID] Identity validation unavailable: image encode failed "
+                "(ref_failed=%s, gen_failed=%s)",
+                ref_b64 is None,
+                gen_b64 is None,
+            )
+            return _identity_error_result(
+                "image_encode_failed",
+                "identity check unavailable: image encode failed",
+            )
 
         system_prompt = (
             "You are an identity verification expert. Compare these two images and determine "
@@ -294,38 +317,51 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
             + PIPELINE_CONTEXT
         )
 
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=500,
-            system=system_prompt,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
+        for attempt in range(1, _IDENTITY_API_MAX_ATTEMPTS + 1):
+            try:
+                response = client.messages.create(
+                    model="claude-sonnet-4-6",
+                    max_tokens=500,
+                    system=system_prompt,
+                    messages=[
                         {
-                            "type": "text",
-                            "text": "Image 1 is the REFERENCE (ground truth). Image 2 is the GENERATED image. Are they the same person?",
-                        },
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/jpeg",
-                                "data": ref_b64,
-                            },
-                        },
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/jpeg",
-                                "data": gen_b64,
-                            },
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "Image 1 is the REFERENCE (ground truth). Image 2 is the GENERATED image. Are they the same person?",
+                                },
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "image/jpeg",
+                                        "data": ref_b64,
+                                    },
+                                },
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "image/jpeg",
+                                        "data": gen_b64,
+                                    },
+                                },
+                            ],
                         },
                     ],
-                },
-            ],
-        )
+                )
+                break
+            except Exception:
+                if attempt >= _IDENTITY_API_MAX_ATTEMPTS:
+                    raise
+                logger.warning(
+                    "[VISION-ID] Claude identity validation attempt %s/%s failed; retrying",
+                    attempt,
+                    _IDENTITY_API_MAX_ATTEMPTS,
+                    exc_info=True,
+                )
+                time.sleep(_IDENTITY_API_RETRY_BACKOFF_SECONDS * attempt)
 
         raw = response.content[0].text.strip()
         if raw.startswith("```"):
@@ -349,8 +385,11 @@ def validate_identity_vision(reference_path: str, generated_path: str) -> dict:
         return result
 
     except Exception as e:
-        print(f"[VISION-ID] Claude identity validation failed: {e}")
-        return default_pass
+        logger.warning("[VISION-ID] Claude identity validation failed; failing closed", exc_info=True)
+        return _identity_error_result(
+            "provider_error",
+            f"identity check unavailable: {e}",
+        )
 
 
 def validate_scene_coherence_vision(shot_images: list[str]) -> dict:

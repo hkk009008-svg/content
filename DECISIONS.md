@@ -1281,3 +1281,25 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
 - **Cross-refs:** `scripts/check_no_ceremony.py`; `logs/discovery-wf_73983b84-d46.json`;
   ADR-027 (FIX-1/FIX-2); `docs/REMEDIATION-INVENTORY.md`. Origin: user-principal directive
   2026-06-15 → coordinator Session-13 ceremony hunt.
+
+## ADR-029 — Identity vision fallback fails closed when the oracle cannot run
+
+- **Status:** ACCEPTED (director-1, 2026-06-15; director2 Tier-A co-sign GO at
+  `d832850`; operator-1 Lane V verification owed).
+- **Decision:** `validate_identity_vision` no longer fabricates a passing
+  `confidence=0.7` when Anthropic config is missing, image encoding fails, or the provider
+  call fails. Those cases now return an explicit `error=True` marker with
+  `confidence=0.0`; `IdentityValidator` maps that marker to an `identity_unverified`
+  non-pass for both image and video vision-fallback paths.
+- **Rationale:** when DeepFace is unavailable, the vision fallback is the production identity
+  oracle. Treating an unavailable oracle as a passing score is ceremony: it makes the gate
+  look executed while allowing the wrong identity to pass.
+- **Evidence:** `rg -n "missing ANTHROPIC_API_KEY" phase_c_vision.py` -> lines 274/277;
+  `rg -n "image encode failed" phase_c_vision.py` -> lines 295/302;
+  `rg -n "failing closed" phase_c_vision.py` -> line 388;
+  `rg -n "if result.get(\"error\")" identity/validator.py` -> lines 1404/1533.
+  Focused verification:
+  `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_phase_c_vision.py tests/unit/test_identity_validator.py tests/unit/test_identity_types.py tests/unit/test_negative_prompts.py tests/unit/test_lane_silent_gate_siblings_xfail.py -q`
+  -> `205 passed, 2 xfailed in 2.98s`.
+- **Cross-refs:** `docs/superpowers/briefs/2026-06-15-idgate-failopen.md`;
+  `docs/REMEDIATION-INVENTORY.md` row `idgate-failopen`; ADR-028.

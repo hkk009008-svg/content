@@ -13,6 +13,7 @@ Baseline: 1337 tests collected / 1334 passed / 3 skipped before this file.
 """
 
 from unittest.mock import MagicMock, patch, PropertyMock
+import types
 import numpy as np
 import pytest
 
@@ -1122,12 +1123,16 @@ def test_generated_image_missing_reason_exists():
     assert FailureReason.GENERATED_IMAGE_MISSING.value == "generated_image_missing"
 
 
+def test_identity_unverified_reason_exists():
+    assert FailureReason.IDENTITY_UNVERIFIED.value == "identity_unverified"
+
+
 # ---------------------------------------------------------------------------
 # Part-3 T5: _vision_llm_validate_image skip/fail marker mapping
 # ---------------------------------------------------------------------------
 
 class TestVisionFallbackMarkerMapping:
-    """Test that _vision_llm_validate_image maps skip/missing_generated markers
+    """Test that _vision_llm_validate_image maps vision fallback markers
     from validate_identity_vision through to IdentityValidationResult correctly.
     """
 
@@ -1165,3 +1170,161 @@ class TestVisionFallbackMarkerMapping:
 
         assert result.passed is False
         assert result.skipped is False
+
+    def test_vision_error_marker_returns_identity_unverified_image_failure(self):
+        """vision_fallback returns error=True -> validate_image returns a non-pass."""
+        error_marker = {
+            "match": False,
+            "confidence": 0.0,
+            "error": True,
+            "error_reason": "provider_error",
+            "issues": ["identity check unavailable: provider error"],
+            "source": "error",
+        }
+        mock_fallback = MagicMock(return_value=error_marker)
+
+        with patch("identity.validator.os.path.exists", return_value=True), \
+             patch("identity.validator.DEEPFACE_AVAILABLE", False):
+            validator = IdentityValidator(vision_fallback=mock_fallback)
+            result = validator.validate_image(
+                "/gen.jpg", "/ref.jpg",
+                character_id="char_a",
+                character_name="Alice",
+                shot_type="medium",
+                threshold=0.65,
+            )
+
+        assert result.passed is False
+        assert result.skipped is False
+        assert result.overall_score == 0.0
+        assert result.metadata["failure_reason"] == FailureReason.IDENTITY_UNVERIFIED.value
+        assert result.metadata["error_reason"] == "provider_error"
+        char = result.character_results["char_a"]
+        assert char.primary_failure_reason == FailureReason.IDENTITY_UNVERIFIED
+        assert char.matched is False
+
+    def test_vision_error_marker_returns_identity_unverified_video_failure(self):
+        """Video vision fallback error markers fail the identity gate."""
+        error_marker = {
+            "match": False,
+            "confidence": 0.0,
+            "error": True,
+            "error_reason": "missing_anthropic_api_key",
+            "issues": ["identity check unavailable: missing ANTHROPIC_API_KEY"],
+            "source": "error",
+        }
+        mock_fallback = MagicMock(return_value=error_marker)
+        mock_cap = _make_mock_cap(total_frames=30, fps=24.0)
+        fake_frame = b"\x00" * 10
+
+        with patch("identity.validator.os.path.exists", return_value=True), \
+             patch("identity.validator.DEEPFACE_AVAILABLE", False), \
+             patch("identity.validator.cv2.VideoCapture", return_value=mock_cap):
+            mock_cap.read.return_value = (True, fake_frame)
+            validator = IdentityValidator(vision_fallback=mock_fallback)
+            with patch("identity.validator.cv2.imwrite"), \
+                 patch("identity.validator.os.remove"):
+                result = validator.validate_video(
+                    video_path="/fake.mp4",
+                    character_configs=[
+                        {"id": "char_a", "reference_image": "/ref.jpg", "name": "Alice"}
+                    ],
+                    shot_type="medium",
+                    threshold=0.65,
+                )
+
+        assert result.passed is False
+        assert result.skipped is False
+        assert result.overall_score == 0.0
+        assert result.metadata["failure_reason"] == FailureReason.IDENTITY_UNVERIFIED.value
+        assert result.metadata["vision_errors"]["char_a"]["error_reason"] == "missing_anthropic_api_key"
+        char = result.character_results["char_a"]
+        assert char.primary_failure_reason == FailureReason.IDENTITY_UNVERIFIED
+        assert char.matched is False
+
+    def test_no_key_phase_fallback_fails_identity_gate(self, caplog):
+        """No Anthropic key in the actual phase fallback returns passed=False."""
+        import phase_c_vision
+
+        with patch.object(
+            phase_c_vision,
+            "settings",
+            types.SimpleNamespace(anthropic_api_key=""),
+        ), \
+             patch("identity.validator.os.path.exists", return_value=True), \
+             patch("identity.validator.DEEPFACE_AVAILABLE", False), \
+             caplog.at_level("WARNING"):
+            validator = IdentityValidator(vision_fallback=phase_c_vision.validate_identity_vision)
+            result = validator.validate_image(
+                "/gen.jpg", "/ref.jpg",
+                character_id="char_a",
+                shot_type="medium",
+                threshold=0.65,
+            )
+
+        assert result.passed is False
+        assert result.metadata["failure_reason"] == FailureReason.IDENTITY_UNVERIFIED.value
+        assert result.metadata["error_reason"] == "missing_anthropic_api_key"
+        assert any("missing ANTHROPIC_API_KEY" in r.message for r in caplog.records)
+
+    def test_encode_failure_phase_fallback_fails_identity_gate(self, caplog):
+        """Image encode failure in the actual phase fallback returns passed=False."""
+        import phase_c_vision
+
+        mock_client = MagicMock()
+
+        with patch.object(
+            phase_c_vision,
+            "settings",
+            types.SimpleNamespace(anthropic_api_key="k"),
+        ), \
+             patch("identity.validator.os.path.exists", return_value=True), \
+             patch("identity.validator.DEEPFACE_AVAILABLE", False), \
+             patch.object(phase_c_vision, "encode_image_for_llm", return_value=None), \
+             patch("anthropic.Anthropic", return_value=mock_client), \
+             caplog.at_level("WARNING"):
+            validator = IdentityValidator(vision_fallback=phase_c_vision.validate_identity_vision)
+            result = validator.validate_image(
+                "/gen.jpg", "/ref.jpg",
+                character_id="char_a",
+                shot_type="medium",
+                threshold=0.65,
+            )
+
+        assert result.passed is False
+        assert result.metadata["failure_reason"] == FailureReason.IDENTITY_UNVERIFIED.value
+        assert result.metadata["error_reason"] == "image_encode_failed"
+        assert any("image encode failed" in r.message for r in caplog.records)
+        mock_client.messages.create.assert_not_called()
+
+    def test_provider_error_phase_fallback_fails_identity_gate(self, caplog):
+        """Provider/API failure in the actual phase fallback returns passed=False."""
+        import phase_c_vision
+
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = RuntimeError("anthropic API down")
+
+        with patch.object(
+            phase_c_vision,
+            "settings",
+            types.SimpleNamespace(anthropic_api_key="k"),
+        ), \
+             patch("identity.validator.os.path.exists", return_value=True), \
+             patch("identity.validator.DEEPFACE_AVAILABLE", False), \
+             patch.object(phase_c_vision, "encode_image_for_llm", return_value="b64"), \
+             patch.object(phase_c_vision, "_IDENTITY_API_RETRY_BACKOFF_SECONDS", 0), \
+             patch("anthropic.Anthropic", return_value=mock_client), \
+             caplog.at_level("WARNING"):
+            validator = IdentityValidator(vision_fallback=phase_c_vision.validate_identity_vision)
+            result = validator.validate_image(
+                "/gen.jpg", "/ref.jpg",
+                character_id="char_a",
+                shot_type="medium",
+                threshold=0.65,
+            )
+
+        assert mock_client.messages.create.call_count == 3
+        assert result.passed is False
+        assert result.metadata["failure_reason"] == FailureReason.IDENTITY_UNVERIFIED.value
+        assert result.metadata["error_reason"] == "provider_error"
+        assert any("failing closed" in r.message for r in caplog.records)

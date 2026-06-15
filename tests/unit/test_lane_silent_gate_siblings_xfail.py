@@ -25,11 +25,9 @@ CATALOG / lane ownership:
     `.valid`, so color_drift=0.0 silently suppresses the color_grade gate (0.0 > 0.3 =
     False). PINNED below (the analyzer-side silence; the caller-side `.valid` ignore is the
     deeper half — see report to director2).
-  - phase_c_vision.py:351 `validate_identity_vision` (MAJOR, Pair-A/identity lane):
-    on any Anthropic API/JSON error the LLM identity-gate fallback `print`s (not logs) and
-    returns default_pass = {match:True, confidence:0.7}. That 0.7 PASSES the identity gate
-    for every non-strict mode (wide 0.55 / medium 0.65 / action 0.60) on an API outage.
-    PINNED below (observability half); the fail-open-to-PASS policy is Pair-A's call.
+  - phase_c_vision.py:351 `validate_identity_vision` (Pair-A identity lane):
+    fixed 2026-06-15 by promoting the old observability-only xfail below into a live
+    fail-closed regression; API/JSON errors now return an explicit non-pass marker.
   - cinema_pipeline.py:1599 `_assemble_final` (minor, Pair-B/mine) — TEST-INFEASIBLE here
     (large assembly method, needs a full stitched/dialogue/foley/bgm fixture). When BGM
     generation fails, the `else` branch drops the prepared dialogue+foley tracks and copies
@@ -98,14 +96,7 @@ def test_assess_coherence_warns_when_image_unreadable(caplog):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="phase_c_vision.py:351 validate_identity_vision: on an Anthropic API error the "
-    "identity-gate fallback print()s (not logs) and returns default_pass (confidence 0.7, "
-    "which PASSES every non-strict identity threshold). Fix = logger.warning so the gate "
-    "fail-open is visible in the log stream; then this xpasses (strict). [Pair-A lane]",
-)
-def test_validate_identity_vision_warns_on_api_failure(monkeypatch, tmp_path, caplog):
+def test_validate_identity_vision_fails_closed_on_api_failure(monkeypatch, tmp_path, caplog):
     import phase_c_vision
 
     ref = tmp_path / "ref.jpg"
@@ -117,6 +108,7 @@ def test_validate_identity_vision_warns_on_api_failure(monkeypatch, tmp_path, ca
     # frozen-dataclass setattr restriction.
     monkeypatch.setattr(phase_c_vision, "settings", types.SimpleNamespace(anthropic_api_key="k"))
     monkeypatch.setattr(phase_c_vision, "encode_image_for_llm", lambda p: "b64", raising=False)
+    monkeypatch.setattr(phase_c_vision, "_IDENTITY_API_RETRY_BACKOFF_SECONDS", 0)
 
     import anthropic
 
@@ -133,10 +125,12 @@ def test_validate_identity_vision_warns_on_api_failure(monkeypatch, tmp_path, ca
     with caplog.at_level("WARNING"):
         result = phase_c_vision.validate_identity_vision(str(ref), str(gen))
 
-    # Current behaviour: fails open to a PASS (the bug consequence).
-    assert result.get("confidence") == 0.7 and result.get("match") is True
+    assert result.get("error") is True
+    assert result.get("error_reason") == "provider_error"
+    assert result.get("confidence") == 0.0
+    assert result.get("match") is False
     warnings = [r for r in caplog.records if r.levelname == "WARNING"]
     assert warnings, (
-        "the identity gate failing open to a PASS on an API error must be observable in the "
-        "log stream (WARNING), not just a stdout print — none was logged"
+        "the identity gate failing closed on an API error must be observable in the "
+        "log stream (WARNING), not just a stdout print - none was logged"
     )

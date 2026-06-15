@@ -1314,6 +1314,65 @@ class IdentityValidator:
             metadata={"failure_reason": failure_reason.value},
         )
 
+    def _identity_unverified_result(
+        self,
+        shot_type: str,
+        threshold: float,
+        character_id: str = "",
+        character_name: str = "",
+        frame_position_ratio: float = 0.0,
+        frames_sampled: int = 1,
+        video_duration_seconds: float = 0.0,
+        error_reason: str = "identity_check_unavailable",
+        issues=None,
+    ) -> IdentityValidationResult:
+        """FAIL: the identity oracle could not run; never treat as a skip/pass."""
+        if issues is None:
+            issue_list = ["identity check unavailable"]
+        elif isinstance(issues, str):
+            issue_list = [issues]
+        else:
+            issue_list = list(issues)
+
+        failure = FailureReason.IDENTITY_UNVERIFIED
+        frame_sample = FrameSample(
+            frame_index=0,
+            frame_position_ratio=frame_position_ratio,
+            face_detected=False,
+            face_confidence=0.0,
+            face_area_ratio=0.0,
+            face_angle_estimate="unknown",
+            similarity=0.0,
+            matched=False,
+            failure_reason=failure,
+        )
+        char_result = CharacterIdentityResult(
+            character_id=character_id,
+            character_name=character_name or character_id,
+            best_similarity=0.0,
+            mean_similarity=0.0,
+            min_similarity=0.0,
+            frame_results=[frame_sample],
+            matched=False,
+            primary_failure_reason=failure,
+            suggested_pulid_adjustment=self._compute_pulid_delta(0.0, False),
+        )
+        return IdentityValidationResult(
+            passed=False,
+            overall_score=0.0,
+            character_results={character_id: char_result} if character_id else {},
+            frames_sampled=frames_sampled,
+            video_duration_seconds=video_duration_seconds,
+            shot_type=shot_type,
+            threshold_used=threshold,
+            skipped=False,
+            metadata={
+                "failure_reason": failure.value,
+                "error_reason": error_reason,
+                "issues": issue_list,
+            },
+        )
+
     def _vision_llm_validate_image(
         self,
         image_path: str,
@@ -1342,6 +1401,21 @@ class IdentityValidator:
             return self._skipped_result(shot_type, threshold)
         if result.get("missing_generated"):
             return self._missing_output_result(shot_type, threshold)
+        if result.get("error"):
+            validation_result = self._identity_unverified_result(
+                shot_type=shot_type,
+                threshold=threshold,
+                character_id=character_id,
+                character_name=character_name,
+                error_reason=result.get("error_reason", "identity_check_unavailable"),
+                issues=result.get("issues"),
+            )
+            self.history.append(validation_result)
+            print(
+                "      ❌ Vision-LLM identity: check unavailable "
+                f"({validation_result.metadata['error_reason']})"
+            )
+            return validation_result
 
         confidence = result.get("confidence", 0.0)
         matched = confidence >= threshold
@@ -1439,6 +1513,7 @@ class IdentityValidator:
 
         # Validate middle frame (best representative) per character
         character_results = {}
+        vision_errors = {}
         mid_frame = frame_paths[len(frame_paths) // 2]
 
         for cfg in character_configs:
@@ -1455,6 +1530,25 @@ class IdentityValidator:
                     "with vision_fallback=..., or use identity.make_validator()."
                 )
             result = self._vision_fallback(ref_img, mid_frame)
+            if result.get("error"):
+                failure_result = self._identity_unverified_result(
+                    shot_type=shot_type,
+                    threshold=threshold,
+                    character_id=cid,
+                    character_name=char_name,
+                    frame_position_ratio=0.5,
+                    frames_sampled=len(frame_paths),
+                    video_duration_seconds=duration,
+                    error_reason=result.get("error_reason", "identity_check_unavailable"),
+                    issues=result.get("issues"),
+                )
+                character_results[cid] = failure_result.character_results[cid]
+                vision_errors[cid] = {
+                    "error_reason": failure_result.metadata["error_reason"],
+                    "issues": failure_result.metadata["issues"],
+                }
+                continue
+
             confidence = result.get("confidence", 0.0)
             matched = confidence >= threshold
             failure = FailureReason.PASSED if matched else FailureReason.WRONG_PERSON
@@ -1491,6 +1585,10 @@ class IdentityValidator:
             frames_sampled=len(frame_paths),
             video_duration_seconds=duration,
             shot_type=shot_type, threshold_used=threshold,
+            metadata={
+                "failure_reason": FailureReason.IDENTITY_UNVERIFIED.value,
+                "vision_errors": vision_errors,
+            } if vision_errors else {},
         )
 
         self.history.append(validation_result)
