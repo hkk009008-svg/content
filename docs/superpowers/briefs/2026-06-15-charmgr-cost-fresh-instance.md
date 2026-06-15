@@ -145,6 +145,9 @@ Explicit non-goals:
 
 ## Verification The Operator/CI Will Run
 
+Specialist reviewer: operator2 should include the `money-gate-reviewer` lens
+for the gate-source-mismatch question before returning Lane V GO.
+
 Expected local commands:
 
 ```bash
