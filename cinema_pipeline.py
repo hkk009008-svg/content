@@ -694,13 +694,13 @@ class CinemaPipeline:
     def _approved_take_metadata(shot: dict) -> dict:
         """Return the metadata dict of the shot's approved final take, or {}.
 
-        Look up approved_final_take_id in motion_takes then postprocess_variants.
+        Look up approved_final_take_id in final-video take collections.
         Used by _build_scene_packages to check audio_embedded on approved takes.
         """
         take_id = shot.get("approved_final_take_id", "")
         if not take_id:
             return {}
-        for collection in ("motion_takes", "postprocess_variants"):
+        for collection in ("motion_takes", "postprocess_variants", "performance_takes"):
             for take in shot.get(collection) or []:
                 if isinstance(take, dict) and take.get("id") == take_id:
                     return take.get("metadata") or {}

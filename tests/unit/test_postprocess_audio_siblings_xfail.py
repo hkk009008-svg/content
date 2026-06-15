@@ -20,15 +20,6 @@ from __future__ import annotations
 import pytest
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="sibling wf_69ba3ee7 S3 (MEDIUM): _approved_take_metadata searches only "
-    "(motion_takes, postprocess_variants) — a Hedra/SadTalker PERFORMANCE take "
-    "approved as final (cinema/review/controller.py:674 allows it) resolves to {} → "
-    "the assembler muxes scene-TTS over the performance take's embedded voice "
-    "(voice-replacement). Fix = add 'performance_takes' to the search tuple at "
-    "cinema_pipeline.py:703. director2 disposition owed.",
-)
 def test_performance_take_as_final_metadata_is_resolved():
     """A performance take approved as the shot's final take must have its metadata
     (audio flags) seen by the assembler, exactly like a motion/postprocess take."""
@@ -44,7 +35,6 @@ def test_performance_take_as_final_metadata_is_resolved():
         ],
     }
     meta = CinemaPipeline._approved_take_metadata(shot)
-    # Today: returns {} (performance_takes not searched) → this assert fails (xfail).
     assert meta.get("audio_embedded") is True
 
 
