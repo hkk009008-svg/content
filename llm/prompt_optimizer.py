@@ -363,6 +363,7 @@ def optimize_shot_prompt(
     primary_subject: str = "character",
     intent_notes: str = "",
     ensemble=None,
+    cost_tracker=None,
 ) -> dict:
     """Translate raw user intent into a structured shot generation spec.
 
@@ -383,6 +384,7 @@ def optimize_shot_prompt(
                          callers unaffected.
         ensemble:        Optional pre-built LLMEnsemble. If None, builds one or
                          falls back to heuristic path on import failure.
+        cost_tracker:    Optional shared CostTracker for budget-gated LLM spend.
 
     Returns:
         A dict matching the JSON schema in _OPTIMIZER_SYSTEM_PROMPT. Always
@@ -399,7 +401,7 @@ def optimize_shot_prompt(
     if ensemble is None:
         try:
             from llm.ensemble import LLMEnsemble
-            ensemble = LLMEnsemble(global_settings)
+            ensemble = LLMEnsemble(global_settings, cost_tracker=cost_tracker)
         except Exception as e:
             print(f"[prompt_optimizer] LLM unavailable ({e}); using fallback path.")
             return _fallback_optimize(
@@ -476,6 +478,7 @@ def batch_optimize_scene(
     location: dict,
     global_settings: dict,
     ensemble=None,
+    cost_tracker=None,
 ) -> list:
     """Run optimize_shot_prompt across every shot in a scene.
 
@@ -502,6 +505,7 @@ def batch_optimize_scene(
             scene_context=scene_context,
             has_dialogue=has_dialogue,
             ensemble=ensemble,
+            cost_tracker=cost_tracker,
         )
         out.append({"shot_id": shot.get("id"), "spec": spec})
     return out

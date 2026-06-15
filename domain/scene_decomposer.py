@@ -756,7 +756,7 @@ Output ONLY the raw JSON array. No markdown wrapping."""
     # 7. Run competitive generation via LLMEnsemble
     # ------------------------------------------------------------------
     try:
-        ensemble = LLMEnsemble()
+        ensemble = LLMEnsemble(cost_tracker=cost_tracker)
         result = ensemble.competitive_generate(
             task_type="decompose",
             system_prompt=full_system,

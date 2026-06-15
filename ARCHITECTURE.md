@@ -1550,7 +1550,7 @@ Native (silent video). Closed by `b11edd4` (standalone-dialogue mux) +
 
 ## 13. LLM coordination
 
-### 13.1 `LLMEnsemble` ([llm/ensemble.py:93](llm/ensemble.py:93))
+### 13.1 `LLMEnsemble` ([llm/ensemble.py:94](llm/ensemble.py:94))
 
 **Pattern: parallel quorum, NOT fallback.**
 
@@ -1576,7 +1576,7 @@ Native (silent video). Closed by `b11edd4` (standalone-dialogue mux) +
 
 ### 13.2 Gemini is opt-in but wired
 
-`_generate_gemini` ([llm/ensemble.py:329-363](llm/ensemble.py:329)) is fully
+`_generate_gemini` ([llm/ensemble.py:383-417](llm/ensemble.py:383)) is fully
 implemented. Gemini client constructed lazily when `GEMINI_API_KEY` OR
 `GOOGLE_API_KEY` is set. Judge override map exposes `gemini-pro → gemini-2.5-pro`.
 

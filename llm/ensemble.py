@@ -10,6 +10,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
+import warnings
 from dataclasses import dataclass, field
 from typing import Any
 from config.settings import settings as env_settings   # aliased to avoid clash with the per-instance `settings: dict` ctor arg below
@@ -93,7 +94,7 @@ _DEFAULT_JUDGE = "claude-sonnet-4-6"
 class LLMEnsemble:
     """Orchestrates competitive generation across multiple LLM providers."""
 
-    def __init__(self, settings: dict | None = None) -> None:
+    def __init__(self, settings: dict | None = None, cost_tracker: Any | None = None) -> None:
         # Lazy-import clients so the module can be imported even when the
         # underlying SDKs are not installed (they just need to be present
         # at call time).
@@ -108,6 +109,7 @@ class LLMEnsemble:
             api_key=env_settings.openai_api_key,
             timeout=120.0,
         )
+        self.cost_tracker = cost_tracker
 
         # Gemini is optional — only construct the client when a key is
         # configured. The judge_map below references "gemini-pro" which
@@ -138,6 +140,39 @@ class LLMEnsemble:
                     "gemini-pro": "gemini-2.5-pro",
                 }
                 self.judge_model_override = judge_map.get(judge_pref)
+
+    def _log_llm_usage(
+        self,
+        model: str,
+        operation: str,
+        input_tokens: Any,
+        output_tokens: Any,
+    ) -> None:
+        """Record LLM token usage on the shared budget tracker when present."""
+        if self.cost_tracker is None:
+            return
+
+        try:
+            input_count = int(input_tokens or 0)
+            output_count = int(output_tokens or 0)
+        except (TypeError, ValueError):
+            return
+
+        if input_count <= 0 and output_count <= 0:
+            return
+
+        try:
+            self.cost_tracker.log_llm(
+                model=model,
+                operation=operation,
+                input_tokens=input_count,
+                output_tokens=output_count,
+            )
+        except Exception as exc:  # noqa: BLE001
+            warnings.warn(
+                f"[LLMEnsemble] Failed to record LLM usage for {model!r}: {exc}",
+                stacklevel=2,
+            )
 
     # ------------------------------------------------------------------
     # Public API
@@ -191,6 +226,7 @@ class LLMEnsemble:
                     user_prompt,
                     json_mode,
                     tool_schema,
+                    operation="llm_ensemble_candidate",
                 ): model
                 for model in models
             }
@@ -235,6 +271,7 @@ class LLMEnsemble:
         user_prompt: str,
         json_mode: bool = False,
         tool_schema: dict | None = None,
+        operation: str = "llm_ensemble_call",
     ) -> tuple[str, Any]:
         """Route a generation request to the correct provider.
 
@@ -244,20 +281,20 @@ class LLMEnsemble:
         try:
             if model.startswith("claude"):
                 return self._generate_anthropic(
-                    model, system_prompt, user_prompt, tool_schema,
+                    model, system_prompt, user_prompt, tool_schema, operation=operation,
                 )
             elif model.startswith("gpt") or model.startswith("o4"):
                 return self._generate_openai(
-                    model, system_prompt, user_prompt, json_mode,
+                    model, system_prompt, user_prompt, json_mode, operation=operation,
                 )
             elif model.startswith("gemini"):
                 return self._generate_gemini(
-                    model, system_prompt, user_prompt, json_mode,
+                    model, system_prompt, user_prompt, json_mode, operation=operation,
                 )
             else:
                 # Unknown provider -- attempt OpenAI-compatible call.
                 return self._generate_openai(
-                    model, system_prompt, user_prompt, json_mode,
+                    model, system_prompt, user_prompt, json_mode, operation=operation,
                 )
         except Exception as exc:  # noqa: BLE001
             print(f"[LLMEnsemble] Generation failed for {model}: {exc}")
@@ -269,6 +306,7 @@ class LLMEnsemble:
         system_prompt: str,
         user_prompt: str,
         tool_schema: dict | None = None,
+        operation: str = "llm_ensemble_call",
     ) -> tuple[str, Any]:
         """Call the Anthropic messages API."""
         kwargs: dict[str, Any] = {
@@ -286,6 +324,8 @@ class LLMEnsemble:
             cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
             cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
             input_tokens = getattr(response.usage, "input_tokens", 0) or 0
+            output_tokens = getattr(response.usage, "output_tokens", 0) or 0
+            self._log_llm_usage(model, operation, input_tokens, output_tokens)
             if cache_read > 0 or cache_creation > 0:
                 print(
                     f"   [LLM-CACHE] model={model} input={input_tokens} "
@@ -310,6 +350,7 @@ class LLMEnsemble:
         system_prompt: str,
         user_prompt: str,
         json_mode: bool = False,
+        operation: str = "llm_ensemble_call",
     ) -> tuple[str, Any]:
         """Call the OpenAI chat completions API."""
         kwargs: dict[str, Any] = {
@@ -323,6 +364,19 @@ class LLMEnsemble:
             kwargs["response_format"] = {"type": "json_object"}
 
         response = self.openai_client.chat.completions.create(**kwargs)
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            input_tokens = (
+                getattr(usage, "prompt_tokens", None)
+                or getattr(usage, "input_tokens", 0)
+                or 0
+            )
+            output_tokens = (
+                getattr(usage, "completion_tokens", None)
+                or getattr(usage, "output_tokens", 0)
+                or 0
+            )
+            self._log_llm_usage(model, operation, input_tokens, output_tokens)
         content = response.choices[0].message.content
         return (model, content)
 
@@ -332,6 +386,7 @@ class LLMEnsemble:
         system_prompt: str,
         user_prompt: str,
         json_mode: bool = False,
+        operation: str = "llm_ensemble_call",
     ) -> tuple[str, Any]:
         """Call the Google Gemini generateContent API.
 
@@ -355,6 +410,11 @@ class LLMEnsemble:
             contents=user_prompt,
             config=types.GenerateContentConfig(**config_kwargs),
         )
+        usage = getattr(response, "usage_metadata", None)
+        if usage is not None:
+            input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+            output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+            self._log_llm_usage(model, operation, input_tokens, output_tokens)
         return (model, response.text)
 
     # ------------------------------------------------------------------
@@ -419,6 +479,7 @@ class LLMEnsemble:
                         judge_model,
                         "You are an impartial quality judge. Respond only with valid JSON.",
                         prompt,
+                        operation="llm_ensemble_judge",
                     )
                 elif judge_model.startswith("gemini"):
                     _, raw = self._generate_gemini(
@@ -426,6 +487,7 @@ class LLMEnsemble:
                         "You are an impartial quality judge. Respond only with valid JSON.",
                         prompt,
                         json_mode=True,
+                        operation="llm_ensemble_judge",
                     )
                 else:
                     _, raw = self._generate_openai(
@@ -433,6 +495,7 @@ class LLMEnsemble:
                         "You are an impartial quality judge. Respond only with valid JSON.",
                         prompt,
                         json_mode=True,
+                        operation="llm_ensemble_judge",
                     )
                 return raw
             # ---------------------------------------------------------------------

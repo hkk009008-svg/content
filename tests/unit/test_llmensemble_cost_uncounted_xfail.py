@@ -1,62 +1,22 @@
-"""R-VERIFY-TIER(B) pin — llmensemble-cost-uncounted (W2:CRITICAL, money).
+"""Regression tests — llmensemble-cost-uncounted (W2:CRITICAL, money).
 
 ROW: llmensemble-cost-uncounted
 FILE: llm/ensemble.py:146 (competitive_generate) + domain/scene_decomposer.py:759
-BUG: competitive_decompose_scene() accepts a gate-connected ``cost_tracker`` but on
-  its SUCCESS path builds a bare ``LLMEnsemble()`` (scene_decomposer.py:759) and calls
-  competitive_generate() WITHOUT threading the tracker.  LLMEnsemble has no
-  cost-tracking at all (grep: zero cost_tracker/log_llm/log_api/record_api_call in the
-  487-line module; usage is read at :286-293 only to print a cache diagnostic).  The
-  tracker is forwarded ONLY to the fallback decompose_scene calls (:776/:809/:844) — so
-  a SUCCESSFUL competitive run (the DEFAULT path; ``competitive_generation`` defaults
-  True at cinema_pipeline.py:1017) leaks every LLM call.  ~3 LLM calls/scene (2
-  candidates gpt-4o + claude-sonnet + 1 judge), scaling with scene count, invisible to
-  PipelineCore.cost_tracker.spent_usd (write cost_tracker.py:306 / gate read :472).
-  Same money-loss gate-source-mismatch family as costtracker-perf-uncounted (W1
-  CRITICAL) and charmgr-cost-fresh-instance (W2).
-  Confirmed: operator2 flag + coordinator wf_fb8c0c61-b18 (money-gate-reviewer +
-  lane-v reachability + adversarial refuter — unanimous CONFIRM/CRITICAL; refuter
-  failed to refute on all fronts).
-
-FIX (not landed): thread the gate-connected cost_tracker into the LLMEnsemble that
-  competitive_decompose_scene constructs (and have LLMEnsemble record per-call spend on
-  it) — mirror the audio-T5 injection pattern.  After the fix the tracker reaches the
-  ensemble -> this xpasses (strict=True) -> the lane converts/removes the pin.
-
-NON-VACUITY + FLIP-CORRECT: the pin spies the LLMEnsemble that scene_decomposer builds
-  and captures whether the gate-connected cost_tracker reaches EITHER its constructor OR
-  competitive_generate().  Today scene_decomposer builds ``LLMEnsemble()`` with no
-  tracker -> captured is None -> XFAIL.  After the threading fix the spy sees the shared
-  tracker -> XPASS.  Deliberately DECOUPLED from token-math / log_llm internals: the
-  recording SITE is undecided and EnsembleResult carries no usage, so a spend-assert pin
-  would be shape-coupled to the unwritten fix (the lipsync-postproc-costkey mis-shape
-  trap).  That the threaded tracker is actually USED to record spend is verified at
-  operator Lane V via mutation, not pinned here.
+BUG FIXED: competitive_decompose_scene() accepts a gate-connected ``cost_tracker`` and
+  must thread it into the success-path LLMEnsemble. LLMEnsemble must then record
+  candidate/judge LLM token usage through ``CostTracker.log_llm()`` so the budget gate's
+  in-process ``spent_usd`` accumulator sees planning spend.
 """
 
+import types
 import unittest.mock as mock
 
-import pytest
 
-
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:CRITICAL:llmensemble-cost-uncounted llm/ensemble.py:146 + "
-        "domain/scene_decomposer.py:759: competitive_decompose_scene builds a bare "
-        "LLMEnsemble() on the success path and never threads the gate-connected "
-        "cost_tracker; LLMEnsemble has zero cost-tracking; ~3 LLM calls/scene leak, "
-        "invisible to the budget gate. Fix = thread the shared tracker into the "
-        "ensemble (audio-T5 pattern); then the tracker reaches the ensemble and this "
-        "xpasses."
-    ),
-)
 def test_competitive_decompose_threads_tracker_into_ensemble(tmp_path):
     """The gate-connected cost_tracker must reach the competitive LLMEnsemble.
 
-    Spies the LLMEnsemble scene_decomposer constructs and asserts the shared tracker
-    reaches its constructor or competitive_generate(). Today neither happens (bare
-    ``LLMEnsemble()``) -> XFAIL. After the threading fix -> XPASS.
+    Spies the LLMEnsemble scene_decomposer constructs and asserts the shared tracker reaches
+    its constructor or competitive_generate().
     """
     import domain.scene_decomposer as sd
     from llm.ensemble import EnsembleResult
@@ -127,3 +87,86 @@ def test_competitive_decompose_threads_tracker_into_ensemble(tmp_path):
         f"(init={captured['init']!r}, gen={captured['gen']!r}) — competitive planning "
         "spend is invisible to the budget gate"
     )
+
+
+def test_ensemble_openai_usage_records_on_shared_tracker(tmp_path):
+    """A successful ensemble LLM call must move CostTracker.spent_usd."""
+    from cost_tracker import CostTracker
+    from llm.ensemble import LLMEnsemble
+
+    shared = CostTracker(db_path=str(tmp_path / "shared.db"), budget_usd=100.0)
+    ensemble = LLMEnsemble.__new__(LLMEnsemble)
+    ensemble.cost_tracker = shared
+
+    response = types.SimpleNamespace(
+        usage=types.SimpleNamespace(prompt_tokens=1_000_000, completion_tokens=500_000),
+        choices=[types.SimpleNamespace(message=types.SimpleNamespace(content='{"ok": true}'))],
+    )
+    create = mock.Mock(return_value=response)
+    ensemble.openai_client = types.SimpleNamespace(
+        chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create))
+    )
+
+    model, content = ensemble._generate_openai(
+        "gpt-4o",
+        "system",
+        "user",
+        json_mode=True,
+        operation="llm_ensemble_candidate",
+    )
+
+    assert (model, content) == ("gpt-4o", '{"ok": true}')
+    assert shared.spent_usd > 0.0
+
+
+def test_prompt_optimizer_constructs_ensemble_with_shared_tracker(tmp_path, monkeypatch):
+    """The default-on prompt optimizer sibling must thread the shared tracker too."""
+    import llm.ensemble as ensemble_module
+    from cost_tracker import CostTracker
+    from llm.prompt_optimizer import optimize_shot_prompt
+
+    shared = CostTracker(db_path=str(tmp_path / "shared.db"), budget_usd=100.0)
+    captured = {"settings": "UNSET", "cost_tracker": "UNSET"}
+
+    class _SpyEnsemble:
+        def __init__(self, settings=None, cost_tracker=None):
+            captured["settings"] = settings
+            captured["cost_tracker"] = cost_tracker
+
+        def competitive_generate(self, *args, **kwargs):
+            from llm.ensemble import EnsembleResult
+
+            return EnsembleResult(
+                winner_index=0,
+                winner_content={
+                    "image_prompt": "a woman stands alone in an empty corridor",
+                    "video_prompt": "slow dolly-in",
+                    "purpose": "static_portrait",
+                    "shot_type": "portrait",
+                    "suggested_image_api": "FLUX_DEV",
+                    "suggested_video_api": "AUTO",
+                    "suggested_lipsync": None,
+                    "negative_constraints": "plastic skin",
+                    "identity_anchor": "Jane: dark hair, pale skin",
+                    "camera": "85mm f/1.4",
+                    "lighting": "cold rim light",
+                    "color_palette": "cold blue",
+                    "reasoning": "static portrait, character lead",
+                },
+                scores=[1.0],
+                reasoning="canned",
+                candidates=[None],
+                models_used=["gpt-4o"],
+                judge_model="claude-sonnet-4-6",
+            )
+
+    monkeypatch.setattr(ensemble_module, "LLMEnsemble", _SpyEnsemble)
+
+    optimize_shot_prompt(
+        user_input="a woman stands in a corridor",
+        global_settings={"music_mood": "noir"},
+        cost_tracker=shared,
+    )
+
+    assert captured["settings"] == {"music_mood": "noir"}
+    assert captured["cost_tracker"] is shared
