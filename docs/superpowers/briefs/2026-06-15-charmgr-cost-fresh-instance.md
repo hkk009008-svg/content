@@ -130,10 +130,30 @@ $ rg -n "CostTracker\(budget_usd=|cost_tracker or _cost_tracker_from_project|_co
 ./cinema/core.py:113:        cost_tracker=CostTracker(budget_usd=budget_usd),
 ```
 
-Audit result: direct `CostTracker` construction and `cinema/core.py` let the
-canonical constructor enforce corrupted caps. Character manager must mirror
-that behavior for malformed project settings instead of translating corruption
-to the `None`/unlimited sentinel.
+Audit result: direct `CostTracker` construction lets the canonical constructor
+enforce corrupted caps; `auto_approve.py` has its own explicit corrupt-cap
+guard because it reads the project dict directly. `cinema/core.py` is a residual
+sibling risk: it still pre-coerces malformed strings to `None` before constructing
+`CostTracker`, so it does **not** prove the canonical constructor behavior.
+Character manager must avoid that mistake for malformed project settings instead
+of translating corruption to the `None`/unlimited sentinel.
+
+```text
+$ env -u GIT_INDEX_FILE .venv/bin/python - <<'PY'
+from cost_tracker import CostTracker
+raw = "abc"
+try:
+    core_precoerced = float(raw) if raw else None
+except (TypeError, ValueError):
+    core_precoerced = None
+tracker = CostTracker(db_path=":memory:", budget_usd=core_precoerced)
+try:
+    print("core_precoerced=", repr(core_precoerced), "tracker_budget=", repr(tracker.budget_usd), "would_exceed=", tracker.would_exceed("FLUX_KONTEXT"))
+finally:
+    tracker.close()
+PY
+core_precoerced= None tracker_budget= None would_exceed= False
+```
 
 Do not fold `perf-phase-no-gate` here: that is a separate pre-spend gate row.
 Do not fold `web_server.py` HTTP hardening here: B3 owns the web lock and must
