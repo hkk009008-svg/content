@@ -1300,6 +1300,6 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   `rg -n "if result.get(\"error\")" identity/validator.py` -> lines 1404/1533.
   Focused verification:
   `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_phase_c_vision.py tests/unit/test_identity_validator.py tests/unit/test_identity_types.py tests/unit/test_negative_prompts.py tests/unit/test_lane_silent_gate_siblings_xfail.py -q`
-  -> `205 passed, 2 xfailed in 2.98s`.
+  -> `205 passed, 2 xfailed in 2.74s`.
 - **Cross-refs:** `docs/superpowers/briefs/2026-06-15-idgate-failopen.md`;
   `docs/REMEDIATION-INVENTORY.md` row `idgate-failopen`; ADR-028.
