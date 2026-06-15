@@ -1,46 +1,82 @@
-"""R-VERIFY-TIER(B) pin — charmgr-cost-fresh-instance (W2:MAJOR, money).
+"""Regression coverage for charmgr-cost-fresh-instance (W2 provisional CRITICAL).
 
 ROW: charmgr-cost-fresh-instance
 FILE: domain/character_manager.py:350
-BUG: _generate_multi_angle_refs constructs a fresh CostTracker() (no budget_usd,
-  no shared instance) and calls record_api_call('FLUX_KONTEXT', ...) on it for every
-  angle generated.  Spend lands on that throwaway accumulator and is invisible to the
-  gate-connected CostTracker the pipeline holds.  5 angles x $0.08 = ~$0.40 per
-  character silently bypasses the budget gate.  Same family as costtracker-perf-uncounted.
+BUG: _generate_multi_angle_refs used to construct a fresh CostTracker() and call
+  record_api_call('FLUX_KONTEXT', ...) on it for every angle generated. Spend landed
+  on a throwaway accumulator instead of the caller/project tracker.
 
-FIX (not landed): inject the shared cost_tracker as a parameter, mirroring the
-  audio-T5 pattern.  After the fix, the call accepts cost_tracker= and the shared
-  tracker's spent_usd > 0 — this xpass flips (strict=True) -> delete the pin.
-
-NON-VACUITY + FLIP-CORRECT: the test passes cost_tracker=shared_tracker to
-  _generate_multi_angle_refs. Today the param does not exist -> TypeError -> XFAIL.
-  After the fix the param is accepted, FAL is mocked so execution reaches the
-  cost-record line, and spend lands on the shared tracker -> XPASS.
+FIX: create_character_with_images threads a tracker into _generate_multi_angle_refs,
+  and the write site mirrors the audio-T5 cost_tracker-or-fallback pattern.
 """
 
 import os
-import pytest
 from unittest.mock import MagicMock, patch
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "W2:MAJOR:charmgr-cost-fresh-instance domain/character_manager.py:350: "
-        "_generate_multi_angle_refs builds a fresh CostTracker() throwaway and calls "
-        "record_api_call('FLUX_KONTEXT') on it; spend is invisible to the shared "
-        "gate-connected tracker (5 angles x $0.08 ~= $0.40 lost per character). "
-        "Fix = inject shared cost_tracker param (audio-T5 pattern); then "
-        "shared_tracker.spent_usd > 0 and this xpasses."
-    ),
-)
+def test_create_character_with_images_threads_project_tracker_to_angles(tmp_path, monkeypatch):
+    import cost_tracker as cost_tracker_mod
+    import domain.character_manager as cm
+
+    class FakeCostTracker:
+        def __init__(self, budget_usd=None):
+            self.budget_usd = budget_usd
+
+    captured = {}
+
+    def fake_generate(canonical_path, char_path, description, cost_tracker=None, video_id=""):
+        captured["cost_tracker"] = cost_tracker
+        captured["video_id"] = video_id
+        return [canonical_path]
+
+    project_root = tmp_path / "projects"
+    canonical_path = tmp_path / "canonical.jpg"
+    canonical_path.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 12)
+
+    project = {
+        "id": "proj-charmgr",
+        "characters": [],
+        "global_settings": {"budget_limit_usd": "12.5", "language": "en"},
+    }
+
+    monkeypatch.setattr(cost_tracker_mod, "CostTracker", FakeCostTracker)
+    monkeypatch.setattr(cm, "DEEPFACE_AVAILABLE", False)
+    monkeypatch.setattr(cm, "get_project_dir", lambda pid: str(project_root / pid))
+    monkeypatch.setattr(
+        cm,
+        "_find_canonical_from_uploads",
+        lambda character, char_path: str(canonical_path),
+    )
+    monkeypatch.setattr(cm, "_generate_multi_angle_refs", fake_generate)
+    monkeypatch.setattr(
+        cm,
+        "assign_voice",
+        lambda project, language="", gender="": "voice-test",
+    )
+    monkeypatch.setattr(
+        cm,
+        "add_character",
+        lambda project, character, timeout=10: project["characters"].append(character),
+    )
+
+    cm.create_character_with_images(
+        project,
+        name="Tracked Character",
+        description="cost tracking caller path",
+        reference_image_paths=[str(canonical_path)],
+    )
+
+    assert isinstance(captured["cost_tracker"], FakeCostTracker)
+    assert captured["cost_tracker"].budget_usd == 12.5
+    assert captured["video_id"] == "proj-charmgr"
+
+
 def test_multi_angle_refs_spend_lands_on_shared_tracker(tmp_path):
     """Spend from FLUX_KONTEXT multi-angle calls must land on a caller-supplied tracker.
 
     Passes cost_tracker=shared_tracker (the injection seam the fix adds) and patches
     fal_client + urlretrieve so the function reaches the cost-recording block without
-    real network I/O.  Today the param does not exist -> TypeError -> XFAIL. After the
-    fix the shared CostTracker accumulates nonzero spend -> XPASS.
+    real network I/O. The shared CostTracker must accumulate nonzero spend.
     """
     from cost_tracker import CostTracker, API_COST_USD
 
@@ -97,8 +133,6 @@ def test_multi_angle_refs_spend_lands_on_shared_tracker(tmp_path):
         from domain.character_manager import _generate_multi_angle_refs
 
         # Pass the shared tracker via the injection seam the fix adds.
-        # TODAY: TypeError (no cost_tracker param) -> XFAIL.
-        # AFTER FIX: param accepted, spend routes to shared_tracker.
         _generate_multi_angle_refs(
             canonical_path=canonical_path,
             char_path=char_path,

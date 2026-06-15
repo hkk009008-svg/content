@@ -102,6 +102,24 @@ def _char_dir(project_id: str, char_id: str) -> str:
     return d
 
 
+def _budget_usd_from_project(project: dict) -> Optional[float]:
+    budget_usd = (project.get("global_settings") or {}).get("budget_limit_usd")
+    if budget_usd is None:
+        return None
+    try:
+        return float(budget_usd)
+    except (TypeError, ValueError):
+        return None
+
+
+def _cost_tracker_from_project(project: dict):
+    try:
+        from cost_tracker import CostTracker
+        return CostTracker(budget_usd=_budget_usd_from_project(project))
+    except Exception:
+        return None
+
+
 def create_character_with_images(
     project: dict,
     name: str,
@@ -111,6 +129,7 @@ def create_character_with_images(
     ip_adapter_weight: float = 0.85,
     commit_timeout: float = 10,
     gender: str = "",
+    cost_tracker=None,
 ) -> dict:
     """
     Creates a character from REAL uploaded photos.
@@ -176,7 +195,14 @@ def create_character_with_images(
     # 3. Generate multi-angle reference sheet for Kling subject binding
     multi_angles = []
     if canonical:
-        multi_angles = _generate_multi_angle_refs(canonical, char_path, description)
+        angle_cost_tracker = cost_tracker or _cost_tracker_from_project(project)
+        multi_angles = _generate_multi_angle_refs(
+            canonical,
+            char_path,
+            description,
+            cost_tracker=angle_cost_tracker,
+            video_id=pid,
+        )
     character["multi_angle_refs"] = multi_angles
     print(f"   [ANGLES] Generated {len(multi_angles)} angle references")
 
@@ -248,6 +274,8 @@ def _generate_multi_angle_refs(
     canonical_path: str,
     char_path: str,
     description: str,
+    cost_tracker=None,
+    video_id: str = "",
 ) -> List[str]:
     """
     Generate multi-angle reference images from the canonical front-facing photo.
@@ -347,9 +375,11 @@ def _generate_multi_angle_refs(
             # best-effort pattern; non-fatal if tracker import fails.
             try:
                 from cost_tracker import CostTracker
-                CostTracker().record_api_call(
+                _tracker = cost_tracker or CostTracker()
+                _tracker.record_api_call(
                     "FLUX_KONTEXT",
                     operation="multi_angle_ref",
+                    video_id=video_id,
                 )
             except Exception:
                 print(f"   [ANGLE] cost record skipped for {cfg['name']} (non-critical)")
