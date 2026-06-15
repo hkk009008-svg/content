@@ -1,7 +1,11 @@
 # tests/unit/test_wave_gate_check.py
 import importlib.util
 import json
+import os
+import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("wgc", ROOT / "scripts" / "wave_gate_check.py")
@@ -63,6 +67,19 @@ def _write_product_oracle(tmp_path, *, wave=2, payload=None):
         }
     path.write_text(json.dumps(payload))
     return path
+
+
+def _git(cwd, *args):
+    env = os.environ.copy()
+    env.pop("GIT_INDEX_FILE", None)
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
 
 
 def test_gate_executes_critical_major_selectors_and_ignores_status_for_verdict(tmp_path):
@@ -203,6 +220,33 @@ def test_wave2_accepts_valid_product_oracle_artifact(tmp_path):
     assert report["verdict"] == "MET"
     assert report["product_oracle_blockers"] == []
     assert report["product_oracles"]["valid"] == [str(artifact)]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "product-oracle-head-path-discovery: committed logs/product-oracle-*.json "
+        "artifacts are not discovered from HEAD"
+    ),
+)
+def test_wave2_discovers_valid_committed_product_oracle_artifact(tmp_path, monkeypatch):
+    inv = tmp_path / "INV.md"
+    inv.write_text(WAVE2_INVENTORY)
+    artifact = _write_product_oracle(tmp_path, wave=2)
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "operator2@example.invalid")
+    _git(tmp_path, "config", "user.name", "operator2 regression pin")
+    _git(tmp_path, "add", str(artifact.relative_to(tmp_path)))
+    _git(tmp_path, "commit", "-q", "-m", "valid committed product oracle")
+    wgc = _load()
+    monkeypatch.setattr(wgc, "_REPO_ROOT", tmp_path)
+    runner = _runner(exit_code=0)
+
+    report = wgc.gate_report(inv, wave=2, runner=runner)
+
+    assert report["verdict"] == "MET"
+    assert report["product_oracle_blockers"] == []
+    assert report["product_oracles"]["valid"] == ["logs/product-oracle-wave2.json"]
 
 
 def test_wave2_rejects_malformed_product_oracle_artifact(tmp_path):
