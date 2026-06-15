@@ -10,10 +10,13 @@ Subsystems:
 """
 
 from dataclasses import dataclass, field
+import logging
 from typing import List, Dict, Optional
 
 import cv2
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -201,6 +204,7 @@ class CompositionAnalyzer:
 
 def _invalid_coherence(reason: str) -> SceneCoherenceResult:
     """Build a SceneCoherenceResult signalling inputs couldn't be analyzed."""
+    logger.warning("Coherence analysis skipped: %s", reason)
     return SceneCoherenceResult(
         overall_coherence_score=0.0,
         color_drift=0.0,

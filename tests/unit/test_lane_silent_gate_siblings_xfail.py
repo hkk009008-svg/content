@@ -20,11 +20,9 @@ CATALOG / lane ownership:
     scene-TTS and REPLACES the take's real voice (voice-loss regression — documented in
     the function's own docstring). PINNED below.
   - coherence_analyzer.py:202 `_invalid_coherence` (minor, shared; caller is Pair-B):
-    an unreadable image -> color_drift=0.0, valid=False, and the module emits NO log at
-    any level (zero logging imports). The sole caller (controller.py:~2264) never checks
-    `.valid`, so color_drift=0.0 silently suppresses the color_grade gate (0.0 > 0.3 =
-    False). PINNED below (the analyzer-side silence; the caller-side `.valid` ignore is the
-    deeper half — see report to director2).
+    fixed 2026-06-15 by emitting a WARNING when an unreadable image produces
+    `valid=False`; the caller-side `.valid` ignore is tracked separately as
+    `coherence-caller-valid-ignored`.
   - phase_c_vision.py:351 `validate_identity_vision` (Pair-A identity lane):
     fixed 2026-06-15 by promoting the old observability-only xfail below into a live
     fail-closed regression; API/JSON errors now return an explicit non-pass marker.
@@ -72,13 +70,6 @@ def test_inherit_audio_flags_warns_when_has_audio_stream_raises(monkeypatch, cap
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="coherence_analyzer.py:202 _invalid_coherence: an unreadable image yields "
-    "color_drift=0.0 / valid=False with NO log (the module has zero logging), silently "
-    "suppressing the color_grade gate. Fix = WARN when assess_coherence can't decode an "
-    "input; then this xpasses (strict) and the pin is removed.",
-)
 def test_assess_coherence_warns_when_image_unreadable(caplog):
     pytest.importorskip("cv2")  # assess_coherence uses cv2.imread; module needs cv2 to load
     import coherence_analyzer
