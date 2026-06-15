@@ -659,6 +659,19 @@ class TestBudgetGate:
         assert tracker.would_exceed("SORA_2") is True
         tracker.close()
 
+    def test_would_exceed_cost_checks_combined_envelope(self, db_path):
+        tracker = CostTracker(db_path=db_path, budget_usd=1.00)
+        tracker.spent_usd = 0.70
+        assert tracker.would_exceed_cost(0.25) is False
+        assert tracker.would_exceed_cost(0.325) is True
+        tracker.close()
+
+    @pytest.mark.parametrize("bad_cost", [float("nan"), float("inf"), "not-a-number"])
+    def test_would_exceed_cost_fails_closed_for_invalid_estimate(self, db_path, bad_cost):
+        tracker = CostTracker(db_path=db_path, budget_usd=1.00)
+        assert tracker.would_exceed_cost(bad_cost) is True
+        tracker.close()
+
     def test_is_over_budget_no_cap(self, db_path):
         """Without a budget cap, is_over_budget always returns False."""
         tracker = CostTracker(db_path=db_path, budget_usd=None)
@@ -752,3 +765,26 @@ class TestApiCostUsdCompleteness:
     def test_performance_capture_engines_priced_in_api_cost_usd(self, engine):
         assert engine in API_COST_USD
         assert API_COST_USD[engine] > 0
+
+    @pytest.mark.parametrize(
+        "api_name, expected",
+        [
+            ("PERFORMANCE_DRIVING_HEDRA", 0.075),
+            ("PERFORMANCE_DRIVING_SADTALKER", 0.045),
+        ],
+    )
+    def test_mode_b_driving_providers_priced_in_api_cost_usd(self, api_name, expected):
+        assert api_name in API_COST_USD
+        assert API_COST_USD[api_name] == pytest.approx(expected)
+
+
+class TestEstimatedCostBudgetGate:
+    def test_would_exceed_cost_checks_multi_call_envelope(self):
+        tracker = CostTracker(db_path=":memory:", budget_usd=1.00)
+        try:
+            tracker.spent_usd = 0.70
+
+            assert tracker.would_exceed_cost(0.325) is True
+            assert tracker.would_exceed_cost(0.20) is False
+        finally:
+            tracker.close()

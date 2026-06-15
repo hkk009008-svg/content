@@ -1033,21 +1033,48 @@ class ShotController:
             )
             return {"success": True, "skipped": True, "engine": engine, "error": pre_err}
 
-        # Pre-spend budget gate: performance capture dispatch is paid and now
-        # writes to the shared CostTracker. Refuse before Mode-B driving synth
-        # or the main engine can launch.
-        if self.cost_tracker.would_exceed(engine):
+        duration_s = float(scene.get("duration_seconds", 5.0))
+        driving = (shot.get("driving_video_path") or "").strip()
+        source_mode = driving_video_source(shot)
+        needs_mode_b_driving = not driving and source_mode == "tts_auto" and bool(audio_path)
+
+        # Pre-spend budget gate: performance capture dispatch and Mode-B
+        # driving synth are paid writes to the shared CostTracker. Refuse before
+        # either can launch.
+        if needs_mode_b_driving:
+            from cost_tracker import API_COST_USD
+            from performance.driving_video import estimate_driving_face_cost
+
+            driving_cost = estimate_driving_face_cost("hedra", duration_s)
+            estimated_cost = API_COST_USD.get(engine.upper(), 0.0) + driving_cost
+            would_exceed_budget = self.cost_tracker.would_exceed_cost(estimated_cost)
+            if would_exceed_budget:
+                budget_detail = (
+                    f"Estimated {engine} performance plus Mode-B driving cost "
+                    f"${estimated_cost:.3f} would push spend ${self.cost_tracker.spent_usd:.2f} "
+                    f"past budget cap ${self.cost_tracker.budget_usd:.2f}. "
+                    "Pausing before performance capture."
+                )
+        else:
+            would_exceed_budget = self.cost_tracker.would_exceed(engine)
+            if would_exceed_budget:
+                budget_detail = (
+                    f"Estimated {engine} performance cost would push spend "
+                    f"${self.cost_tracker.spent_usd:.2f} past budget cap "
+                    f"${self.cost_tracker.budget_usd:.2f}. Pausing before performance capture."
+                )
+
+        if would_exceed_budget:
             self.progress(
                 "BUDGET_EXCEEDED",
-                f"Estimated {engine} performance cost would push spend "
-                f"${self.cost_tracker.spent_usd:.2f} past budget cap "
-                f"${self.cost_tracker.budget_usd:.2f}. Pausing before performance capture.",
+                budget_detail,
                 -1,
                 scene_id=scene_id,
                 shot_id=shot_id,
                 spent=self.cost_tracker.spent_usd,
                 budget=self.cost_tracker.budget_usd,
                 performance_engine=engine,
+                mode_b_driving=needs_mode_b_driving,
             )
             self._lifecycle.pause()
             return {
@@ -1058,8 +1085,6 @@ class ShotController:
             }
 
         # --- 3. Driving video — Mode A (operator upload) wins, else Mode B synth ---
-        driving = (shot.get("driving_video_path") or "").strip()
-        source_mode = driving_video_source(shot)
         # Initialize BEFORE the branch so Mode A (operator upload) doesn't NameError.
         # Mode A reuses the operator's video → no synth → provider stays None.
         driving_provider: Optional[str] = None
@@ -1071,7 +1096,7 @@ class ShotController:
                     audio_path=audio_path,
                     keyframe_path=source_image,
                     output_mp4=temp_driving,
-                    duration_s=float(scene.get("duration_seconds", 5.0)),
+                    duration_s=duration_s,
                     shot_id=shot_id, video_id=str(project.get("id", "")),
                     cost_tracker=self.cost_tracker,
                 )
@@ -1095,7 +1120,7 @@ class ShotController:
                     "tts_auto" if driving else "none"
                 ),
                 "audio_path": audio_path,
-                "duration_s": float(scene.get("duration_seconds", 5.0)),
+                "duration_s": duration_s,
                 "driving_provider": driving_provider,  # "hedra" | "sadtalker" | "cache" | None
             },
         )
@@ -1118,7 +1143,7 @@ class ShotController:
                 audio_path=audio_path or None,
                 driving_video_path=driving or None,
                 output_mp4=perf_path,
-                duration_s=float(scene.get("duration_seconds", 5.0)),
+                duration_s=duration_s,
                 shot_id=shot_id,
                 video_id=str(project.get("id", "")),
                 cost_tracker=self.cost_tracker,

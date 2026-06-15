@@ -64,6 +64,8 @@ API_COST_USD: dict[str, float] = {
     "ACT_ONE":        0.25,    # Runway Act-One retargeting, approx $0.05/s.
     "LIVE_PORTRAIT":  0.04,    # ComfyUI LivePortrait amortized GPU cost.
     "VIGGLE":         0.20,    # Viggle full-body motion retargeting.
+    "PERFORMANCE_DRIVING_HEDRA":      0.075,  # Mode-B Hedra driving face, 5s estimate.
+    "PERFORMANCE_DRIVING_SADTALKER":  0.045,  # Mode-B SadTalker driving face, 5s estimate.
     # Image APIs (per still)
     "COMFYUI_PULID": 0.04,   # FLUX+PuLID on the ComfyUI pod (GPU-time estimate)
     "FLUX_PULID":    0.05,
@@ -461,6 +463,24 @@ class CostTracker:
         if not math.isfinite(spent):
             return True  # fail-safe: non-finite spend → gate fires
         cost = API_COST_USD.get(api_name.upper(), 0.0)
+        return (spent + cost) > self.budget_usd
+
+    def would_exceed_cost(self, estimated_cost_usd: float) -> bool:
+        """Pre-emptive check for a caller-computed multi-call spend envelope."""
+        if self.budget_usd is None:
+            return False
+        try:
+            cost = float(estimated_cost_usd)
+        except (TypeError, ValueError):
+            return True
+        if not math.isfinite(cost):
+            return True
+        if cost < 0:
+            cost = 0.0
+        with self._conn_lock:
+            spent = self.spent_usd
+        if not math.isfinite(spent):
+            return True
         return (spent + cost) > self.budget_usd
 
     def is_over_budget(self) -> bool:

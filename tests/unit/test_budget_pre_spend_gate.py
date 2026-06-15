@@ -411,14 +411,6 @@ class TestPerformancePreSpendBudgetGate:
         lifecycle.pause.assert_not_called()
         cost_tracker.would_exceed.assert_called_once_with("VIGGLE")
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "perf-phase-no-gate: Mode-B driving synth plus performance engine "
-            "can exceed the cap after the engine-only precheck; see "
-            "docs/REMEDIATION-INVENTORY.md"
-        ),
-    )
     def test_mode_b_refuses_when_combined_driving_and_engine_cost_exceeds_budget(self, tmp_path):
         """Correct behavior: refuse before Mode-B synth when combined spend exceeds cap."""
         from cost_tracker import CostTracker
@@ -487,8 +479,26 @@ class TestPerformancePreSpendBudgetGate:
             synth.assert_not_called()
             dispatch.assert_not_called()
             lifecycle.pause.assert_called_once()
+            assert tracker.spent_usd == pytest.approx(0.70)
+            assert not driving.exists()
         finally:
             tracker.close()
+
+    def test_mode_b_budget_pause_parks_at_performance_review_not_cancel(self):
+        """Budget refusal pauses the run; review/cancel remains operator-owned."""
+        from cinema.lifecycle import ThreadedLifecycle
+
+        lifecycle = ThreadedLifecycle()
+
+        lifecycle.pause()
+
+        assert lifecycle.is_paused() is True
+        assert lifecycle.is_cancelled() is False
+        assert lifecycle.wait_for_gate(
+            "PERFORMANCE_REVIEW",
+            lambda: True,
+            poll_interval=0.01,
+        ) is True
 
 
 class TestPerformancePhaseBudgetAbort:

@@ -13,6 +13,7 @@ Provider chain (try in order, fall through on failure):
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Optional, Tuple
 
@@ -29,15 +30,30 @@ _HEDRA_POLL_INTERVAL_S = 3
 _SADTALKER_POLL_TIMEOUT_S = 240
 _SADTALKER_POLL_INTERVAL_S = 2
 
+_DRIVING_FACE_BASE_COST_USD = {"hedra": 0.05, "sadtalker": 0.02}
+_DRIVING_FACE_COST_PER_SECOND_USD = 0.005
+
+
+def estimate_driving_face_cost(provider: str, duration_s: float) -> float:
+    """Estimate Mode-B driving-face spend for a provider and clip duration."""
+    try:
+        duration = float(duration_s)
+    except (TypeError, ValueError):
+        duration = 5.0
+    if not math.isfinite(duration) or duration < 0:
+        duration = 5.0
+    provider_key = (provider or "sadtalker").lower()
+    base = _DRIVING_FACE_BASE_COST_USD.get(provider_key, _DRIVING_FACE_BASE_COST_USD["sadtalker"])
+    return round(base + _DRIVING_FACE_COST_PER_SECOND_USD * duration, 4)
+
 
 def _cost_log(provider: str, duration_s: float, shot_id: str, video_id: str, cost_tracker=None) -> None:
     try:
         from cost_tracker import CostTracker
-        cost = {"hedra": 0.05, "sadtalker": 0.02}.get(provider, 0.02)
         (cost_tracker or CostTracker()).log_api(
             provider=provider, model="driving_face",
             operation="performance_capture_driving",
-            cost_usd=cost + 0.005 * float(duration_s),
+            cost_usd=estimate_driving_face_cost(provider, duration_s),
             shot_id=shot_id, video_id=video_id,
         )
     except Exception:
