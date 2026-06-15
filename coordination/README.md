@@ -61,8 +61,11 @@ remediation inventory, or claim director/operator work.
 
 For a real seat resume, use the seat-specific orientation command instead:
 `python .agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`,
-then intentionally consume events with `coordination/bin/consume-events <seat>`
-only after surfacing the unread count per Rule #8.
+then surface the unread count per Rule #8. Live seats consume and read unread
+events with `coordination/bin/consume-events <seat>` by default before deciding
+the seat is idle, routed, blocked, or ready to verify, unless the user explicitly
+asks for a read-only/no-consume check. Coordinator is unpinned: read
+coordinator/all mailbox state, but never run `consume-events coordinator`.
 
 ## Codex transplant
 
@@ -82,14 +85,35 @@ For a CLI live-seat Codex launch:
 ```bash
 cd /Users/hyungkoookkim/Content
 export CODEX_SEAT=<director|director2|operator|operator2>
-export GIT_INDEX_FILE="$(git rev-parse --absolute-git-dir)/index-codex-$CODEX_SEAT"
-[ -f "$GIT_INDEX_FILE" ] || git read-tree HEAD
+CODEX_GIT_DIR="$(env -u GIT_INDEX_FILE git rev-parse --absolute-git-dir)"
+export GIT_INDEX_FILE="$CODEX_GIT_DIR/index-codex-$CODEX_SEAT"
+[ -f "$GIT_INDEX_FILE" ] || env -u GIT_INDEX_FILE git read-tree --index-output="$GIT_INDEX_FILE" HEAD
 codex
 ```
 
 Codex may require `/hooks` review/trust before repo-local hooks run. If a Codex
 thread is not launched with `CODEX_SEAT` and a per-seat index, keep it in
 readiness bridge mode unless the user explicitly accepts one-off seat work.
+Use the hook-safe `--index-output` seed above for missing Codex indexes; direct
+`git read-tree HEAD` under exported `GIT_INDEX_FILE` is blocked by the Codex
+git-index guard.
+
+Codex live-seat mailbox consumption stages only
+`coordination/mailbox/seen/<seat>.txt` in the seat-local index. After consuming,
+inspect that active seat index with `git diff --cached --name-status`; a
+mailbox-only consume should show exactly `M coordination/mailbox/seen/<seat>.txt`.
+If `HEAD` advanced after the index was seeded, a stale seat index can stage bogus
+deletions for files introduced by the newer commit. When there is no intentional
+staged seat work, refresh the seat index to `HEAD` and re-stage only the cursor
+using the hook-approved wrapper:
+
+```bash
+env -u GIT_INDEX_FILE bash -lc 'idx="$(git rev-parse --absolute-git-dir)/index-codex-<seat>"; git read-tree --index-output="$idx" HEAD; GIT_INDEX_FILE="$idx" git add coordination/mailbox/seen/<seat>.txt; GIT_INDEX_FILE="$idx" git diff --cached --name-status'
+```
+
+If there is intentional staged implementation/doc work and `HEAD` moved, do not
+blindly reset the index; reconcile the mixed state deliberately and preserve the
+seat-owned staged paths.
 
 ## Authority (Rule #8)
 
@@ -120,7 +144,9 @@ during the session require no user-surface — Tier-1 throughput preserved.
 3. **After every commit** — STATE.md's hook auto-update surfaces new unread
    count (passive notification).
 4. **On receipt of any user direct instruction** that may interact with
-   pending events.
+   pending events. For live seats, read/consume pending mail before acting on
+   the instruction unless the user explicitly asks for read-only/no-consume
+   behavior.
 
 ## Event format
 
@@ -316,6 +342,11 @@ this case). The one case left manual is **mixed** state (you have staged work
 AND the peer moved HEAD): the hook deliberately abstains, so resolve it with
 `git read-tree -m`. The launch seed above (`[ -f … ] || git read-tree HEAD`)
 still stands — the hook needs an existing index to maintain.
+
+For Codex live seats, still inspect staged scope after mailbox consumption. If a
+cursor-only consume stages a deletion for a file introduced by a newer `HEAD`,
+the index was stale at the moment of consumption; repair the seat index as
+documented in the Codex transplant section above, then re-stage only the cursor.
 
 **Skip-worktree pollution is also hook-cleared (v5.9).** Harness child
 processes (Workflow/subagent runs) have twice left skip-worktree bits in the
