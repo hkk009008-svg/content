@@ -5,7 +5,7 @@ READ FIRST AS `operator2`. Trust git, live mailbox state, and
 
 ## State At Handoff
 
-Timestamp: `2026-06-15T23:10:48Z` (`2026-06-16T08:10:48+0900`
+Timestamp: `2026-06-15T23:12:03Z` (`2026-06-16T08:12:03+0900`
 Asia/Seoul).
 
 User requested a bare `handoff`; this file is a narrow state-transfer artifact,
@@ -15,6 +15,8 @@ verdict.
 Current HEAD at evidence refresh:
 
 ```text
+63e83f9f docs(handoff): operator product oracle checker route
+e5f1a798 docs(handoff): operator2 standby for authorized wave2 route
 f68a0d7b docs(handoff): refresh director authorized route
 d7e98a46 docs(handoff): director protocol notices consumed
 875c1ab2 coord(route): authorized wave2 product oracle and locks
@@ -22,19 +24,14 @@ d7e98a46 docs(handoff): director protocol notices consumed
 ef1c56b8 coord(status): operator fold self-broadcast cursor
 d029a00a coord(cursor): operator2 consume standby notices
 bb53e0d5 coord(cursor): director2 consume protocol notice
-b20bc811 coord(status): operator standby after protocol notice
-28cb3a38 coord(notify): protocol effectiveness report awareness
-508d3710 docs(spec): protocol effectiveness loop design
-9d7589e4 docs(handoff): coordinator lipsync precheck reconciled
-2b55d7ca docs(handoff): operator2 lipsync reconciled standby
 ```
 
 Branch relation from live `operator2` status:
 
 ```text
 branch main
-f68a0d7b docs(handoff): refresh director authorized route
-vs origin/main: 22 ahead, 8 behind
+63e83f9f docs(handoff): operator product oracle checker route
+vs origin/main: 24 ahead, 8 behind
 ```
 
 Operator2 live mailbox before this handoff:
@@ -109,19 +106,20 @@ unlock commit. On FAIL, retain the lock.
 - `director`: online at `f68a0d7b`, unread `1`
   (`2026-06-15T23-07-16Z-coordinator-to-all-coordination.md`). Product-oracle
   route owner per coordinator event.
-- `operator`: online at `f68a0d7b`, unread `1`
-  (`2026-06-15T23-07-16Z-coordinator-to-all-coordination.md`). Product-oracle
-  checker / Pair-A standby after artifact lands.
+- `operator`: online at `63e83f9f`, unread state already handled in its own
+  product-oracle checker handoff. Pair-A product-oracle checker / standby after
+  artifact lands.
 - `director2`: online at `f68a0d7b`, unread `1`
   (`2026-06-15T23-07-16Z-coordinator-to-all-coordination.md`). Pair-B
   implementation owner once it safely handles dirty-tree and lock-claim
   hazards.
-- `operator2`: online at `f68a0d7b`, unread `1`
+- `operator2`: live status refreshed at HEAD `63e83f9f`, unread `1`
   (`2026-06-15T23-07-16Z-coordinator-to-all-coordination.md`). Pair-B Lane V
   standby; no current implementation commit or verify-request is pending.
 
-All four seat statuses showed Wave 2 still UNMET with
-`counts={'verified': 24, 'open': 6}`.
+The final `operator2` status after this handoff's first commit showed HEAD
+`63e83f9f`, `operator2` cursor `2026-06-15T22:59:40Z`, `UNREAD: 1`, and Wave 2
+still UNMET with `counts={'verified': 24, 'open': 6}`.
 
 ## Gate / Smoke / Locks
 
