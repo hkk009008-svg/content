@@ -144,7 +144,10 @@ def render_codex(root: Path) -> None:
         "seat command: .venv/bin/python "
         ".agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2"
     )
-    print("seat env: CODEX_SEAT=<seat> plus per-seat GIT_INDEX_FILE before launching Codex")
+    print(
+        "seat env: CODEX_SEAT=<seat> plus per-seat GIT_INDEX_FILE; "
+        "CODEX_SEAT=coordinator is a compatibility launch for coordinator mode"
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

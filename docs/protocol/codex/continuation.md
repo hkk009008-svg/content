@@ -99,9 +99,9 @@ inferred values.
 
 | Variable | Values | Meaning |
 |---|---|---|
-| `CODEX_AGENT_MODE` | `readiness-bridge`, `live-seat`, `coordinator`, `subagent` | Selects the harness behavior. Defaults to `readiness-bridge` unless `CODEX_SEAT` names a live seat. |
+| `CODEX_AGENT_MODE` | `readiness-bridge`, `live-seat`, `coordinator`, `subagent` | Selects the harness behavior. Defaults to `readiness-bridge` unless `CODEX_SEAT` names a live protocol role. |
 | `CODEX_AGENT_ROLE` | `readiness-bridge`, `director`, `director2`, `operator`, `operator2`, `coordinator`, verifier/specialist role | Names the Codex part being inhabited. |
-| `CODEX_SEAT` | `director`, `director2`, `operator`, `operator2` | Binds a live seat. Leave unset for readiness bridge and coordinator. |
+| `CODEX_SEAT` | `director`, `director2`, `operator`, `operator2`, `coordinator` | Binds a live seat. `coordinator` is a compatibility spelling for coordinator mode and remains unpinned. |
 | `CODEX_CAPABILITY_MODE` | `read-only`, `seat-local`, `capacity-max`, `parent-scoped` | States whether the process reports, works in one seat, or coordinates full capacity. |
 | `CODEX_MUTATION_SCOPE` | `none`, `seat-owned`, `coordination-only`, `read-only-verification`, `parent-scoped` | Documents which durable state may be mutated after protocol checks. |
 | `CODEX_AUTHORITY_SCOPE` | `report-only`, `seat-owned`, `all-scope-reconcile`, `parent-scoped` | Documents whose authority boundary this process inhabits. |
@@ -113,7 +113,7 @@ inferred values.
 | `CODEX_DECISION_BOUNDARY` | `no-seat-authority`, `lane-owned-seat`, `all-scope-routing-no-production-fixes`, `parent-scoped-no-seat-authority` | Documents which decisions this part may make without upgrading roles. |
 | `CODEX_NEXT_ACTION_POLICY` | `report-then-stop-or-request-role`, `read-mail-then-act-or-report-idle`, `build-board-reconcile-once`, `return-evidence-then-stop` | Documents the default next move after orientation. |
 | `CODEX_SIDE_EFFECT_POLICY` | `user-consent-required` | Documents that push, lock-claim side effects, paid API spend, and pod spend remain user-gated outside env. |
-| `GIT_INDEX_FILE` | `<git-dir>/index-codex-$CODEX_SEAT` | Uses a per-seat index for live-seat cursor/status staging in the shared working tree. |
+| `GIT_INDEX_FILE` | `<git-dir>/index-codex-$CODEX_SEAT` | Uses a per-seat or coordinator-local index while ordinary git/pytest still follows `CODEX_GIT_POLICY`. |
 
 Runtime defaults:
 
@@ -139,6 +139,11 @@ Runtime defaults:
   `CODEX_OUTPUT_CONTRACT=seat-artifact-or-operator-request`,
   `CODEX_DECISION_BOUNDARY=lane-owned-seat`, and
   `CODEX_NEXT_ACTION_POLICY=read-mail-then-act-or-report-idle`.
+- With `CODEX_SEAT=coordinator`, the executable model accepts it as a
+  compatibility spelling for coordinator mode. It infers
+  `CODEX_AGENT_MODE=coordinator`, `CODEX_AGENT_ROLE=coordinator`,
+  `CODEX_CAPABILITY_MODE=capacity-max`, and the same coordinator policies below;
+  it does not create a coordinator cursor or permit `consume-events coordinator`.
 - For coordinator sessions, set `CODEX_AGENT_MODE=coordinator`,
   `CODEX_AGENT_ROLE=coordinator`, `CODEX_CAPABILITY_MODE=capacity-max`, and
   `CODEX_MUTATION_SCOPE=coordination-only`. Its behavior is
@@ -260,6 +265,25 @@ the helper performs fetch/push. Push is user-gated; without explicit push
 authorization, choose eligible no-lock work or stop for authorization rather
 than claiming the lock.
 
+## Rotating Planning Relay
+
+Use the **Rotating Planning Relay** when an important cross-seat plan needs
+all-seat review before work is distributed. The fixed cyclic order is
+`director -> operator -> director2 -> operator2`; whichever live seat starts
+the plan is `step 1`, then the baton follows that order and wraps after
+`operator2` back to `director` until exactly four live-seat turns have happened.
+The final live seat sends the result to coordinator/all-scope for reconciliation.
+
+When the coordinator starts the planning cycle, use the coordinator-started
+case instead: `coordinator -> all four seats -> coordinator`. The coordinator
+fans out the planning question to all seats, reads the seat responses back, and
+then distributes one consolidated `coordinator-to-all` task board. In plain
+language: one consolidated coordinator-to-all task board.
+
+Relay mailbox events are planning evidence only. No production work,
+verification verdict, lock, push, or inventory change is implied unless a later
+coordinator task board explicitly routes that action.
+
 ## Codex Live-Protocol Rules
 
 These rules are mandatory for live Codex seats and coordinator sessions:
@@ -281,6 +305,13 @@ These rules are mandatory for live Codex seats and coordinator sessions:
   a coordinator check refreshes all four seats and compares each cursor/unread
   set against that broadcast. Report any receipt split explicitly. Receipt
   evidence proves mail state only; it does not prove assigned work is complete.
+- **R-CODEX-RELAY:** use the Rotating Planning Relay for important cross-seat
+  plans before distributing work. A live-seat-started relay treats the starter
+  as step 1 and passes the planning baton through
+  `director -> operator -> director2 -> operator2` with wraparound until all
+  four live seats have responded, then coordinator reconciles. A
+  coordinator-started plan fans out to all four seats, gathers responses back to
+  coordinator, and ends in one consolidated `coordinator-to-all` task board.
 - **R-CODEX-INDEX:** ordinary git and pytest commands in a seat session use
   `env -u GIT_INDEX_FILE`. If a coordinator-only docs/mailbox/log commit is
   needed while the shared index is dirty, use a scoped temporary index:
@@ -440,6 +471,19 @@ export CODEX_SIDE_EFFECT_POLICY=user-consent-required
 env -u GIT_INDEX_FILE git log --oneline -5
 .venv/bin/python scripts/wave_gate_check.py 2
 .venv/bin/python scripts/ci_smoke.py
+```
+
+Compatibility launchers may instead set `CODEX_SEAT=coordinator` and a
+coordinator-local `GIT_INDEX_FILE`; the executable model treats that as
+coordinator mode, not a consumable live-seat cursor:
+
+```bash
+cd /Users/hyungkoookkim/Content
+export CODEX_SEAT=coordinator
+CODEX_GIT_DIR="$(env -u GIT_INDEX_FILE git rev-parse --absolute-git-dir)"
+export GIT_INDEX_FILE="$CODEX_GIT_DIR/index-codex-coordinator"
+[ -f "$GIT_INDEX_FILE" ] || env -u GIT_INDEX_FILE git read-tree --index-output="$GIT_INDEX_FILE" HEAD
+codex
 ```
 
 If a live seat intentionally consumes mailbox events:

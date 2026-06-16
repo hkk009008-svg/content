@@ -64,7 +64,7 @@ RUNTIME_ENV_VARIABLES = (
     (
         "CODEX_AGENT_MODE",
         "readiness-bridge | live-seat | coordinator | subagent",
-        "selects the harness behavior; defaults to readiness-bridge unless CODEX_SEAT names a live seat",
+        "selects the harness behavior; defaults to readiness-bridge unless CODEX_SEAT names a live protocol role",
     ),
     (
         "CODEX_AGENT_ROLE",
@@ -73,8 +73,8 @@ RUNTIME_ENV_VARIABLES = (
     ),
     (
         "CODEX_SEAT",
-        "director | director2 | operator | operator2",
-        "binds a live seat; unset for readiness bridge and coordinator",
+        "director | director2 | operator | operator2 | coordinator",
+        "binds a live seat; coordinator is a compatibility alias for coordinator mode and remains unpinned",
     ),
     (
         "CODEX_CAPABILITY_MODE",
@@ -134,7 +134,7 @@ RUNTIME_ENV_VARIABLES = (
     (
         "GIT_INDEX_FILE",
         "<git-dir>/index-codex-$CODEX_SEAT",
-        "uses a per-seat index for live-seat cursor/status staging in a shared working tree",
+        "uses a per-seat or coordinator-local index while ordinary git/pytest still follows CODEX_GIT_POLICY",
     ),
 )
 
@@ -155,10 +155,21 @@ COORDINATOR_INVARIANTS = (
     "do not author production fixes",
 )
 
+PLANNING_RELAY_ORDER = ("director", "operator", "director2", "operator2")
+
+PLANNING_RELAY_RULES = (
+    "Use the Rotating Planning Relay when an important cross-seat plan needs all-seat review before work is distributed.",
+    "For a live-seat-started plan, the starter is step 1 and the baton moves through the fixed cyclic order: director -> operator -> director2 -> operator2; the order wraps after operator2 back to director.",
+    "A live-seat-started relay runs exactly four live-seat turns, then the final seat sends the result to coordinator/all-scope for reconciliation.",
+    "For a coordinator-started plan, coordinator fans out to all four seats, gathers responses back to coordinator, then distributes one consolidated coordinator-to-all task board.",
+    "Relay mailbox events are planning evidence only; no production work, verification verdict, lock, push, or inventory change is implied unless a later coordinator task board explicitly routes it.",
+)
+
 LIVE_LOOP_STEPS = (
     "Orient from seat_status.py plus git log before protocol decisions.",
     "Read mailbox bodies and committed files; do not decide from counts alone.",
     "Classify the live role: readiness bridge, named seat, or coordinator.",
+    "Use the Rotating Planning Relay for important cross-seat plans before distributing work.",
     "Run gate scripts and smoke commands only as evidence, not as operator GO.",
     "Send one coordinator-to-all route if needed, then verify receipt seat-by-seat.",
     "Push remains user-gated; locks, paid spend, and pod spend require explicit consent.",
@@ -270,6 +281,18 @@ def render_live_loop() -> str:
     )
 
 
+def render_planning_relay() -> str:
+    """Return the all-seat planning relay contract as Markdown."""
+    lines = [
+        "Rotating Planning Relay:",
+        "canonical seat order: " + " -> ".join(PLANNING_RELAY_ORDER),
+    ]
+    lines.extend(f"- {rule}" for rule in PLANNING_RELAY_RULES)
+    lines.append("coordinator-started plan: coordinator -> all four seats -> coordinator")
+    lines.append("distribution: one consolidated coordinator-to-all task board")
+    return "\n".join(lines)
+
+
 def is_agent_extension_name(name: str) -> bool:
     """Return whether *name* is an optional self-codified agent extension."""
     return (
@@ -304,6 +327,15 @@ def _mode_from_role(role: str) -> str:
     return ""
 
 
+def _mode_from_seat(seat: str) -> str:
+    """Infer a runtime mode from CODEX_SEAT compatibility spellings."""
+    if seat in SEATS:
+        return "live-seat"
+    if seat == "coordinator":
+        return "coordinator"
+    return ""
+
+
 def infer_runtime_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
     """Infer the Codex runtime contract from an environment-like mapping."""
     env = environ or {}
@@ -314,11 +346,13 @@ def infer_runtime_env(environ: Mapping[str, str] | None = None) -> dict[str, str
     if explicit_mode:
         mode = explicit_mode
     elif explicit_role:
-        mode = _mode_from_role(explicit_role) or (
-            "live-seat" if seat in SEATS else "readiness-bridge"
+        mode = (
+            _mode_from_role(explicit_role)
+            or _mode_from_seat(seat)
+            or "readiness-bridge"
         )
-    elif seat in SEATS:
-        mode = "live-seat"
+    elif _mode_from_seat(seat):
+        mode = _mode_from_seat(seat)
     else:
         mode = "readiness-bridge"
 
@@ -331,6 +365,8 @@ def infer_runtime_env(environ: Mapping[str, str] | None = None) -> dict[str, str
 
     if mode == "live-seat" and seat in SEATS:
         seat_display = seat
+    elif mode == "coordinator" and seat == "coordinator":
+        seat_display = "coordinator"
     elif seat:
         seat_display = f"(ignored: {seat})"
     else:
@@ -465,7 +501,8 @@ def render_runtime_env_contract(environ: Mapping[str, str] | None = None) -> str
         (
             "contract rules:",
             "- readiness-bridge is the default when CODEX_AGENT_MODE and CODEX_SEAT are unset.",
-            "- CODEX_SEAT selects a live seat only for director/director2/operator/operator2.",
+            "- CODEX_SEAT selects a live seat for director/director2/operator/operator2.",
+            "- CODEX_SEAT=coordinator is a compatibility spelling for coordinator mode; coordinator remains unpinned and never has a consumable cursor.",
             "- CODEX_AGENT_ROLE can infer coordinator, live-seat, or subagent mode when CODEX_AGENT_MODE is unset.",
             "- behavior variables are inferred from mode and role unless explicitly narrowed by the launcher.",
             "- coordinator remains unpinned; no coordinator cursor is consumed.",
@@ -512,6 +549,7 @@ def render_surface_summary() -> str:
         "durable artifacts: " + ", ".join(DURABLE_STATE_ARTIFACTS),
         "core agent modules: " + ", ".join(CORE_AGENT_MODULES),
         "coordinator invariants: " + "; ".join(COORDINATOR_INVARIANTS),
+        "planning relay: " + " ".join(PLANNING_RELAY_RULES),
         "agent extension namespace: .codex/agents/agentNN.toml guardrail extensions",
         "runtime env contract: "
         + ", ".join(name for name, _, _ in RUNTIME_ENV_VARIABLES),
@@ -530,6 +568,9 @@ def main() -> int:
     print()
     print("## Live Loop")
     print(render_live_loop())
+    print()
+    print("## Rotating Planning Relay")
+    print(render_planning_relay())
     print()
     print("## Protocol Assembly Map")
     print(render_protocol_assembly_map())

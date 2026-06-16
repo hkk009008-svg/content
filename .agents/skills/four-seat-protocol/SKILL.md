@@ -158,12 +158,13 @@ values.
 
 - `CODEX_AGENT_MODE`: `readiness-bridge`, `live-seat`, `coordinator`, or
   `subagent`. If unset, Codex defaults to readiness bridge unless `CODEX_SEAT`
-  names a live seat.
+  names a live protocol role.
 - `CODEX_AGENT_ROLE`: the inhabited part, such as `readiness-bridge`,
   `director`, `director2`, `operator`, `operator2`, `coordinator`,
   `lane-v-verifier`, or `money-gate-reviewer`.
-- `CODEX_SEAT`: only `director`, `director2`, `operator`, or `operator2` for a
-  live seat. Leave it unset for readiness bridge and coordinator.
+- `CODEX_SEAT`: `director`, `director2`, `operator`, or `operator2` for a live
+  seat. `CODEX_SEAT=coordinator` is a compatibility spelling for coordinator
+  mode; coordinator remains unpinned and no coordinator cursor is consumed.
 - `CODEX_CAPABILITY_MODE`: `read-only`, `seat-local`, `capacity-max`, or
   `parent-scoped`.
 - `CODEX_MUTATION_SCOPE`: `none`, `seat-owned`, `coordination-only`,
@@ -195,7 +196,8 @@ values.
   `return-evidence-then-stop`.
 - `CODEX_SIDE_EFFECT_POLICY`: `user-consent-required`; push, lock-claim side
   effects, paid API spend, and pod spend remain user-gated outside env.
-- `GIT_INDEX_FILE`: per-seat index path for live-seat cursor/status staging.
+- `GIT_INDEX_FILE`: per-seat or coordinator-local index path; ordinary
+  git/pytest still follows `CODEX_GIT_POLICY`.
 
 Default mappings:
 
@@ -222,6 +224,19 @@ Default mappings:
   `CODEX_DECISION_BOUNDARY=lane-owned-seat`,
   `CODEX_NEXT_ACTION_POLICY=read-mail-then-act-or-report-idle`,
   `CODEX_SIDE_EFFECT_POLICY=user-consent-required`
+- `CODEX_SEAT=coordinator` -> compatibility spelling for coordinator mode:
+  `CODEX_AGENT_MODE=coordinator`, `CODEX_AGENT_ROLE=coordinator`,
+  `CODEX_CAPABILITY_MODE=capacity-max`,
+  `CODEX_MUTATION_SCOPE=coordination-only`,
+  `CODEX_AUTHORITY_SCOPE=all-scope-reconcile`,
+  `CODEX_MAILBOX_POLICY=all-scope-read-no-consume`,
+  `CODEX_GIT_POLICY=env-u-git-index-or-temp-index`,
+  `CODEX_VERIFICATION_POLICY=reconcile-operator-go-only`,
+  `CODEX_CONTEXT_SOURCES=all-scope-mailbox-inventory-locks-gates`,
+  `CODEX_OUTPUT_CONTRACT=capacity-board-or-single-route`,
+  `CODEX_DECISION_BOUNDARY=all-scope-routing-no-production-fixes`,
+  `CODEX_NEXT_ACTION_POLICY=build-board-reconcile-once`,
+  `CODEX_SIDE_EFFECT_POLICY=user-consent-required`
 - coordinator -> `CODEX_AGENT_MODE=coordinator`,
   `CODEX_AGENT_ROLE=coordinator`, `CODEX_CAPABILITY_MODE=capacity-max`,
   `CODEX_MUTATION_SCOPE=coordination-only`,
@@ -235,8 +250,12 @@ Default mappings:
   `CODEX_NEXT_ACTION_POLICY=build-board-reconcile-once`,
   `CODEX_SIDE_EFFECT_POLICY=user-consent-required`
 
-Coordinator launch should first `unset CODEX_SEAT GIT_INDEX_FILE`; if a stale
-seat env remains, the executable model reports it as ignored.
+Canonical coordinator launch should set `CODEX_AGENT_MODE=coordinator` and
+`CODEX_AGENT_ROLE=coordinator` with `CODEX_SEAT` unset. Compatibility launchers
+may set `CODEX_SEAT=coordinator` plus `index-codex-coordinator`; the executable
+model treats it as coordinator mode, not a consumable live-seat cursor. If a
+different stale seat env remains during coordinator mode, the executable model
+reports it as ignored.
 
 `CODEX_AGENT_ROLE` can infer `coordinator`, `live-seat`, or `subagent` mode
 when `CODEX_AGENT_MODE` is unset, but launchers should still set both for
@@ -318,6 +337,24 @@ and stops. If a candidate row requires `coordination/bin/claim-lock`, remember
 that the helper fetches and pushes; push is user-gated, so choose eligible
 no-lock work or stop for authorization when push has not been granted.
 
+## Rotating Planning Relay
+
+Use the **Rotating Planning Relay** when an important cross-seat plan needs
+all-seat review before work is distributed. The fixed cyclic order is
+`director -> operator -> director2 -> operator2`. The starter is step 1; the
+baton follows that order, wrapping after `operator2` back to
+`director`, until exactly four live-seat turns have occurred. The final live
+seat sends the result to coordinator/all-scope for reconciliation.
+
+coordinator-started plan case: `coordinator -> all four seats -> coordinator`.
+The coordinator fans out the planning question to all seats, reads responses
+back from all seats, and then distributes one consolidated `coordinator-to-all`
+task board.
+
+Relay mailbox events are planning evidence only. No production work,
+verification verdict, lock, push, or inventory change is implied unless a later
+coordinator task board explicitly routes that action.
+
 ## Seat-Local Subagent Adoption
 
 Subagents are now part of every live seat's normal Codex workflow. They increase
@@ -393,6 +430,41 @@ case "$CODEX_SEAT" in
 esac
 CODEX_GIT_DIR="$(env -u GIT_INDEX_FILE git rev-parse --absolute-git-dir)"
 export GIT_INDEX_FILE="$CODEX_GIT_DIR/index-codex-$CODEX_SEAT"
+[ -f "$GIT_INDEX_FILE" ] || env -u GIT_INDEX_FILE git read-tree --index-output="$GIT_INDEX_FILE" HEAD
+codex
+```
+
+For canonical coordinator launch, leave `CODEX_SEAT` unset and name the
+coordinator part explicitly:
+
+```bash
+cd /Users/hyungkoookkim/Content
+unset CODEX_SEAT GIT_INDEX_FILE
+export CODEX_AGENT_MODE=coordinator
+export CODEX_AGENT_ROLE=coordinator
+export CODEX_CAPABILITY_MODE=capacity-max
+export CODEX_MUTATION_SCOPE=coordination-only
+export CODEX_AUTHORITY_SCOPE=all-scope-reconcile
+export CODEX_MAILBOX_POLICY=all-scope-read-no-consume
+export CODEX_GIT_POLICY=env-u-git-index-or-temp-index
+export CODEX_VERIFICATION_POLICY=reconcile-operator-go-only
+export CODEX_CONTEXT_SOURCES=all-scope-mailbox-inventory-locks-gates
+export CODEX_OUTPUT_CONTRACT=capacity-board-or-single-route
+export CODEX_DECISION_BOUNDARY=all-scope-routing-no-production-fixes
+export CODEX_NEXT_ACTION_POLICY=build-board-reconcile-once
+export CODEX_SIDE_EFFECT_POLICY=user-consent-required
+codex
+```
+
+Compatibility launchers may use `CODEX_SEAT=coordinator` plus a
+coordinator-local index; this infers the same coordinator contract while still
+forbidding coordinator cursor consumption:
+
+```bash
+cd /Users/hyungkoookkim/Content
+export CODEX_SEAT=coordinator
+CODEX_GIT_DIR="$(env -u GIT_INDEX_FILE git rev-parse --absolute-git-dir)"
+export GIT_INDEX_FILE="$CODEX_GIT_DIR/index-codex-coordinator"
 [ -f "$GIT_INDEX_FILE" ] || env -u GIT_INDEX_FILE git read-tree --index-output="$GIT_INDEX_FILE" HEAD
 codex
 ```

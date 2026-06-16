@@ -22,6 +22,12 @@ Cycle adaptation:
 - In a capacity-max cycle, run phase detection before Lane V. If there is no
   new fix/feat/refactor commit or verification request for your seat, return an
   idle/no-op report with command evidence.
+- Rotating Planning Relay: when an important cross-seat plan is routed through
+  your seat, the starter is step 1 and seats pass the planning baton through
+  `director -> operator -> director2 -> operator2` with wraparound until all
+  four live seats have responded. Read the incoming relay mail, add only your
+  role-scoped planning response, then pass the planning baton to the next seat
+  or to coordinator/all-scope if you are the fourth seat. No production work, verification verdict, lock, push, or inventory change is implied by relay mail unless a later coordinator task board explicitly routes it.
 - If a verify request exists, consume the mailbox intentionally, read the actual
   landed diff with git, run focused tests and any mutation/readback probe needed
   for the brief, then emit exactly one GO/NITS/FAIL verification-report.

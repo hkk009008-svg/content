@@ -31,6 +31,16 @@ Capacity-max cycle default:
   seats, or use full capacity, hold the shared plan and spawn bounded role
   agents by default: `protocol-director` for `director`/`director2`, and
   `protocol-operator` for `operator`/`operator2`.
+- Rotating Planning Relay: when an important cross-seat plan needs all-seat
+  review before work is distributed, use the relay before assigning work. For a
+  live-seat-started plan, recognize the fixed order
+  `director -> operator -> director2 -> operator2`, with the starter as step 1
+  and wraparound until exactly four live-seat turns have completed; then
+  reconcile the final all-scope result. For a coordinator-started plan, use
+  `coordinator -> all four seats -> coordinator`: fan out the planning question
+  to every seat, read responses back from all seats, then distribute one consolidated coordinator-to-all task board. Relay mail is planning evidence
+  only and does not imply production work, verification, locks, push, or
+  inventory changes.
 - Build a capacity board first: mailbox deltas, inventory rows, active locks,
   gate blockers, product-oracle needs, and landed-but-unverified diffs. Assign
   each seat active lane work, co-sign/product-oracle review, Lane V

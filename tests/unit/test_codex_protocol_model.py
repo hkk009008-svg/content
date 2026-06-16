@@ -41,6 +41,21 @@ def test_coordinator_invariants_pin_unpinned_cursor_and_single_route() -> None:
     assert "one coordinator-to-all route if needed" in summary
 
 
+def test_render_planning_relay_codifies_rotating_baton_and_coordinator_start() -> None:
+    relay = model.render_planning_relay()
+
+    assert "Rotating Planning Relay" in relay
+    assert "important cross-seat plan" in relay
+    assert "starter is step 1" in relay
+    assert "director -> operator -> director2 -> operator2" in relay
+    assert "wraps after operator2 back to director" in relay
+    assert "exactly four live-seat turns" in relay
+    assert "coordinator-started plan" in relay
+    assert "coordinator -> all four seats -> coordinator" in relay
+    assert "one consolidated coordinator-to-all task board" in relay
+    assert "no production work, verification verdict, lock, push, or inventory change is implied" in relay
+
+
 def test_agent_extension_modules_are_guardrails_not_role_replacements() -> None:
     assert model.is_agent_extension_name("agent01.toml")
     assert model.is_agent_extension_name("agent42.toml")
@@ -153,6 +168,33 @@ def test_runtime_env_contract_infers_mode_from_explicit_role() -> None:
     assert "CODEX_AGENT_ROLE=money-gate-reviewer" in verifier_text
     assert "CODEX_MUTATION_SCOPE=read-only-verification" in verifier_text
     assert "CODEX_VERIFICATION_POLICY=read-only-review-no-go" in verifier_text
+
+
+def test_runtime_env_contract_accepts_coordinator_seat_compatibility_alias() -> None:
+    text = model.render_runtime_env_contract(
+        {
+            "CODEX_SEAT": "coordinator",
+            "GIT_INDEX_FILE": "/repo/.git/index-codex-coordinator",
+        }
+    )
+
+    assert "CODEX_AGENT_MODE=coordinator" in text
+    assert "CODEX_AGENT_ROLE=coordinator" in text
+    assert "CODEX_SEAT=coordinator" in text
+    assert "CODEX_CAPABILITY_MODE=capacity-max" in text
+    assert "CODEX_MUTATION_SCOPE=coordination-only" in text
+    assert "CODEX_AUTHORITY_SCOPE=all-scope-reconcile" in text
+    assert "CODEX_MAILBOX_POLICY=all-scope-read-no-consume" in text
+    assert "CODEX_GIT_POLICY=env-u-git-index-or-temp-index" in text
+    assert "CODEX_VERIFICATION_POLICY=reconcile-operator-go-only" in text
+    assert "CODEX_CONTEXT_SOURCES=all-scope-mailbox-inventory-locks-gates" in text
+    assert "CODEX_OUTPUT_CONTRACT=capacity-board-or-single-route" in text
+    assert "CODEX_DECISION_BOUNDARY=all-scope-routing-no-production-fixes" in text
+    assert "CODEX_NEXT_ACTION_POLICY=build-board-reconcile-once" in text
+    assert "GIT_INDEX_FILE=/repo/.git/index-codex-coordinator" in text
+    assert "CODEX_SEAT=coordinator is a compatibility spelling" in text
+    assert "coordinator remains unpinned; no coordinator cursor is consumed" in text
+    assert "(ignored: coordinator)" not in text
 
 
 def test_runtime_env_contract_codifies_side_effect_policy() -> None:

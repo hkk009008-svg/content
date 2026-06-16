@@ -125,6 +125,9 @@ def test_protocol_coordinator_agent_uses_tight_reconcile_loop():
     assert "protocol-operator" in instructions
     assert "harness" in instructions
     assert "mailbox bodies" in instructions
+    assert "Rotating Planning Relay" in instructions
+    assert "coordinator -> all four seats -> coordinator" in instructions
+    assert "one consolidated coordinator-to-all task board" in instructions
 
 
 def test_codex_protocol_skill_points_to_readiness_and_seat_commands():
@@ -164,6 +167,12 @@ def test_codex_protocol_skill_points_to_readiness_and_seat_commands():
     assert "seat-read-consume-intentional" in text
     assert "independent-go-nits-fail" in text
     assert "unset CODEX_SEAT GIT_INDEX_FILE" in text
+    assert "CODEX_SEAT=coordinator" in text
+    assert "compatibility spelling" in text
+    assert "Rotating Planning Relay" in text
+    assert "starter is step 1" in text
+    assert "coordinator-started plan" in text
+    assert "coordinator -> all four seats -> coordinator" in text
     assert "user-consent-required" in text
     assert "Codex-side transplant" not in text
 
@@ -203,8 +212,30 @@ def test_codex_continuation_defines_subagent_cycle_default():
     assert "all-scope-read-no-consume" in text
     assert "request-operator-go" in text
     assert "unset CODEX_SEAT GIT_INDEX_FILE" in text
+    assert "CODEX_SEAT=coordinator" in text
+    assert "compatibility spelling" in text
+    assert "Rotating Planning Relay" in text
+    assert "director -> operator -> director2 -> operator2" in text
+    assert "coordinator -> all four seats -> coordinator" in text
+    assert "one consolidated coordinator-to-all task board" in text
     assert "user-consent-required" in text
     assert "Codex-side transplant" not in text
+
+
+def test_live_role_agents_obey_rotating_planning_relay():
+    director = (ROOT / ".codex" / "agents" / "protocol-director.toml").read_text(
+        encoding="utf-8"
+    )
+    operator = (ROOT / ".codex" / "agents" / "protocol-operator.toml").read_text(
+        encoding="utf-8"
+    )
+
+    for text in (director, operator):
+        assert "Rotating Planning Relay" in text
+        assert "important cross-seat plan" in text
+        assert "starter is step 1" in text
+        assert "pass the planning baton" in text
+        assert "No production work, verification verdict, lock, push, or inventory change is implied" in text
 
 
 def test_protocol_assembly_map_doc_codifies_folder_intent():

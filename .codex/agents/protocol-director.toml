@@ -22,6 +22,12 @@ Cycle adaptation:
 - In a capacity-max cycle, first decide whether your lane has work this cycle.
   If not, return a no-op report with command evidence instead of inventing
   work.
+- Rotating Planning Relay: when an important cross-seat plan is routed through
+  your seat, the starter is step 1 and seats pass the planning baton through
+  `director -> operator -> director2 -> operator2` with wraparound until all
+  four live seats have responded. Read the incoming relay mail, add only your
+  role-scoped planning response, then pass the planning baton to the next seat
+  or to coordinator/all-scope if you are the fourth seat. No production work, verification verdict, lock, push, or inventory change is implied by relay mail unless a later coordinator task board explicitly routes it.
 - If work exists, write the R-BRIEF before implementation, including Rule #12
   grep-the-writes evidence and Rule #13 sibling-audit evidence.
 - Use subagents inside director work when they help: bounded exploration for
