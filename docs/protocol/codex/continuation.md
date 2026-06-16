@@ -90,6 +90,40 @@ locks, push, spend, or author production changes. It can report the durable
 state and blockers, then stop or ask the parent to launch the appropriate core
 role agent.
 
+## Runtime environment contract
+
+Codex instances expose their part in the whole through a small runtime
+environment contract. The executable source is
+`scripts/codex_protocol_model.py`; the readiness report prints the currently
+inferred values.
+
+| Variable | Values | Meaning |
+|---|---|---|
+| `CODEX_AGENT_MODE` | `readiness-bridge`, `live-seat`, `coordinator`, `subagent` | Selects the harness behavior. Defaults to `readiness-bridge` unless `CODEX_SEAT` names a live seat. |
+| `CODEX_AGENT_ROLE` | `readiness-bridge`, `director`, `director2`, `operator`, `operator2`, `coordinator`, verifier/specialist role | Names the Codex part being inhabited. |
+| `CODEX_SEAT` | `director`, `director2`, `operator`, `operator2` | Binds a live seat. Leave unset for readiness bridge and coordinator. |
+| `CODEX_CAPABILITY_MODE` | `read-only`, `seat-local`, `capacity-max`, `parent-scoped` | States whether the process reports, works in one seat, or coordinates full capacity. |
+| `CODEX_MUTATION_SCOPE` | `none`, `seat-owned`, `coordination-only`, `read-only-verification`, `parent-scoped` | Documents which durable state may be mutated after protocol checks. |
+| `GIT_INDEX_FILE` | `<git-dir>/index-codex-$CODEX_SEAT` | Uses a per-seat index for live-seat cursor/status staging in the shared working tree. |
+
+Runtime defaults:
+
+- With no env, the inferred contract is `CODEX_AGENT_MODE=readiness-bridge`,
+  `CODEX_AGENT_ROLE=readiness-bridge`, `CODEX_CAPABILITY_MODE=read-only`, and
+  `CODEX_MUTATION_SCOPE=none`.
+- With `CODEX_SEAT=director|director2|operator|operator2`, the inferred
+  contract is `CODEX_AGENT_MODE=live-seat`, `CODEX_AGENT_ROLE=$CODEX_SEAT`,
+  `CODEX_CAPABILITY_MODE=seat-local`, and `CODEX_MUTATION_SCOPE=seat-owned`.
+- For coordinator sessions, set `CODEX_AGENT_MODE=coordinator`,
+  `CODEX_AGENT_ROLE=coordinator`, `CODEX_CAPABILITY_MODE=capacity-max`, and
+  `CODEX_MUTATION_SCOPE=coordination-only`. The coordinator remains unpinned;
+  no coordinator cursor is consumed.
+- For spawned verifier/specialist subagents, the parent prompt remains the
+  authority boundary. Use `CODEX_AGENT_MODE=subagent` only as a descriptive
+  marker; the parent still names allowed files, scope, and expected output.
+- env does not authorize push, lock-claim side effects, paid API spend, or pod
+  spend; user consent still gates them.
+
 ## Mode selection
 
 Default mode is **readiness bridge**. A Codex thread is not a director,
@@ -312,7 +346,11 @@ For CLI seats in one shared working tree:
 
 ```bash
 cd /Users/hyungkoookkim/Content
+export CODEX_AGENT_MODE=live-seat
 export CODEX_SEAT=<director|director2|operator|operator2>
+export CODEX_AGENT_ROLE="$CODEX_SEAT"
+export CODEX_CAPABILITY_MODE=seat-local
+export CODEX_MUTATION_SCOPE=seat-owned
 CODEX_GIT_DIR="$(env -u GIT_INDEX_FILE git rev-parse --absolute-git-dir)"
 export GIT_INDEX_FILE="$CODEX_GIT_DIR/index-codex-$CODEX_SEAT"
 [ -f "$GIT_INDEX_FILE" ] || env -u GIT_INDEX_FILE git read-tree --index-output="$GIT_INDEX_FILE" HEAD
@@ -329,6 +367,10 @@ env -u GIT_INDEX_FILE git log --oneline -5
 For an explicit coordinator session, start with:
 
 ```bash
+export CODEX_AGENT_MODE=coordinator
+export CODEX_AGENT_ROLE=coordinator
+export CODEX_CAPABILITY_MODE=capacity-max
+export CODEX_MUTATION_SCOPE=coordination-only
 .venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py coordinator --wave 2
 env -u GIT_INDEX_FILE git log --oneline -5
 .venv/bin/python scripts/wave_gate_check.py 2

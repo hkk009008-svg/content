@@ -149,6 +149,42 @@ Mailbox discipline:
   active per-seat index.
 - Use explicit pathspecs for staging and commits when committing is requested.
 
+## Runtime Env Contract
+
+Codex instances should describe their current part in the whole through this
+runtime environment contract. `scripts/codex_protocol_model.py` is the
+executable source, and `scripts/continuation_readiness.py` prints the inferred
+values.
+
+- `CODEX_AGENT_MODE`: `readiness-bridge`, `live-seat`, `coordinator`, or
+  `subagent`. If unset, Codex defaults to readiness bridge unless `CODEX_SEAT`
+  names a live seat.
+- `CODEX_AGENT_ROLE`: the inhabited part, such as `readiness-bridge`,
+  `director`, `director2`, `operator`, `operator2`, `coordinator`,
+  `lane-v-verifier`, or `money-gate-reviewer`.
+- `CODEX_SEAT`: only `director`, `director2`, `operator`, or `operator2` for a
+  live seat. Leave it unset for readiness bridge and coordinator.
+- `CODEX_CAPABILITY_MODE`: `read-only`, `seat-local`, `capacity-max`, or
+  `parent-scoped`.
+- `CODEX_MUTATION_SCOPE`: `none`, `seat-owned`, `coordination-only`,
+  `read-only-verification`, or `parent-scoped`.
+- `GIT_INDEX_FILE`: per-seat index path for live-seat cursor/status staging.
+
+Default mappings:
+
+- no env -> `CODEX_AGENT_MODE=readiness-bridge`,
+  `CODEX_AGENT_ROLE=readiness-bridge`, `CODEX_CAPABILITY_MODE=read-only`,
+  `CODEX_MUTATION_SCOPE=none`
+- `CODEX_SEAT=<seat>` -> `CODEX_AGENT_MODE=live-seat`,
+  `CODEX_AGENT_ROLE=<seat>`, `CODEX_CAPABILITY_MODE=seat-local`,
+  `CODEX_MUTATION_SCOPE=seat-owned`
+- coordinator -> `CODEX_AGENT_MODE=coordinator`,
+  `CODEX_AGENT_ROLE=coordinator`, `CODEX_CAPABILITY_MODE=capacity-max`,
+  `CODEX_MUTATION_SCOPE=coordination-only`
+
+env does not authorize push, lock-claim side effects, paid API spend, or pod
+spend; user consent still gates them.
+
 ## Codex Live-Protocol Rules
 
 - Read live mailbox state before any handoff, routing event, inventory/gate
@@ -277,7 +313,11 @@ marker and per-seat index:
 
 ```bash
 cd /Users/hyungkoookkim/Content
+export CODEX_AGENT_MODE=live-seat
 export CODEX_SEAT=<director|director2|operator|operator2>
+export CODEX_AGENT_ROLE="$CODEX_SEAT"
+export CODEX_CAPABILITY_MODE=seat-local
+export CODEX_MUTATION_SCOPE=seat-owned
 CODEX_GIT_DIR="$(env -u GIT_INDEX_FILE git rev-parse --absolute-git-dir)"
 export GIT_INDEX_FILE="$CODEX_GIT_DIR/index-codex-$CODEX_SEAT"
 [ -f "$GIT_INDEX_FILE" ] || env -u GIT_INDEX_FILE git read-tree --index-output="$GIT_INDEX_FILE" HEAD

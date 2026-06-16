@@ -147,6 +147,12 @@ def test_codex_protocol_skill_points_to_readiness_and_seat_commands():
     assert "guardrail extensions" in text
     assert "Start-Session Inhabitance" in text
     assert "inhabit the Codex harness as a readiness bridge" in text
+    assert "Runtime Env Contract" in text
+    assert "CODEX_AGENT_MODE" in text
+    assert "CODEX_AGENT_ROLE" in text
+    assert "CODEX_CAPABILITY_MODE" in text
+    assert "CODEX_MUTATION_SCOPE" in text
+    assert "env does not authorize push" in text
     assert "Codex-side transplant" not in text
 
 
@@ -168,6 +174,12 @@ def test_codex_continuation_defines_subagent_cycle_default():
     assert "guardrail extensions" in text
     assert "Start-session inhabitance" in text
     assert "inhabit the Codex harness as a readiness bridge" in text
+    assert "Runtime environment contract" in text
+    assert "CODEX_AGENT_MODE" in text
+    assert "CODEX_AGENT_ROLE" in text
+    assert "CODEX_CAPABILITY_MODE" in text
+    assert "CODEX_MUTATION_SCOPE" in text
+    assert "env does not authorize push" in text
     assert "Codex-side transplant" not in text
 
 

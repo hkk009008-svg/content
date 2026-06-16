@@ -69,6 +69,47 @@ def test_render_start_session_inhabitance_contract() -> None:
     assert "explicit seat or coordinator instruction" in text
 
 
+def test_runtime_env_contract_infers_live_seat_and_user_gated_side_effects() -> None:
+    text = model.render_runtime_env_contract(
+        {
+            "CODEX_SEAT": "director",
+            "GIT_INDEX_FILE": "/repo/.git/index-codex-director",
+        }
+    )
+
+    assert "Runtime env contract" in text
+    assert "CODEX_AGENT_MODE=live-seat" in text
+    assert "CODEX_AGENT_ROLE=director" in text
+    assert "CODEX_SEAT=director" in text
+    assert "CODEX_CAPABILITY_MODE=seat-local" in text
+    assert "CODEX_MUTATION_SCOPE=seat-owned" in text
+    assert "GIT_INDEX_FILE=/repo/.git/index-codex-director" in text
+    assert "env does not authorize push, lock-claim side effects, paid API spend, or pod spend" in text
+
+
+def test_runtime_env_contract_defaults_to_readiness_and_models_coordinator() -> None:
+    readiness_text = model.render_runtime_env_contract({})
+    coordinator_text = model.render_runtime_env_contract(
+        {
+            "CODEX_AGENT_MODE": "coordinator",
+            "CODEX_AGENT_ROLE": "coordinator",
+            "CODEX_CAPABILITY_MODE": "capacity-max",
+        }
+    )
+
+    assert "CODEX_AGENT_MODE=readiness-bridge" in readiness_text
+    assert "CODEX_AGENT_ROLE=readiness-bridge" in readiness_text
+    assert "CODEX_CAPABILITY_MODE=read-only" in readiness_text
+    assert "CODEX_MUTATION_SCOPE=none" in readiness_text
+    assert "GIT_INDEX_FILE=(unset)" in readiness_text
+
+    assert "CODEX_AGENT_MODE=coordinator" in coordinator_text
+    assert "CODEX_AGENT_ROLE=coordinator" in coordinator_text
+    assert "CODEX_CAPABILITY_MODE=capacity-max" in coordinator_text
+    assert "CODEX_MUTATION_SCOPE=coordination-only" in coordinator_text
+    assert "coordinator remains unpinned; no coordinator cursor is consumed" in coordinator_text
+
+
 def test_render_protocol_assembly_map_places_portions_by_folder_intent() -> None:
     text = model.render_protocol_assembly_map()
 

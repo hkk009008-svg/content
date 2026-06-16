@@ -9,6 +9,7 @@ claiming director/operator work.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ from codex_protocol_model import (
     DURABLE_STATE_ARTIFACTS,
     MODEL_SOURCE,
     render_agent_extension_summary,
+    render_runtime_env_contract,
     render_start_session_inhabitance,
     render_surface_summary,
 )
@@ -132,6 +134,7 @@ def render_codex(root: Path) -> None:
     print("durable state: " + ", ".join(DURABLE_STATE_ARTIFACTS))
     print(render_agent_extension_summary(agents))
     print(render_start_session_inhabitance(agents))
+    print(render_runtime_env_contract(os.environ))
     print(f"skill: {'present' if skill.exists() else 'missing'} ({skill})")
     print(f"hooks: {'present' if hooks.exists() else 'missing'} ({hooks})")
     print(f"custom agents: {', '.join(agents) if agents else '(none)'}")

@@ -57,7 +57,17 @@ def test_main_identifies_readiness_bridge_role(tmp_path, monkeypatch, capsys):
     assert "no seat claim, cursor consumption, mailbox send, or inventory edit" in out
 
 
-def test_render_codex_reports_harness_model_artifacts(tmp_path, capsys):
+def test_render_codex_reports_harness_model_artifacts(tmp_path, monkeypatch, capsys):
+    for key in (
+        "CODEX_AGENT_MODE",
+        "CODEX_AGENT_ROLE",
+        "CODEX_SEAT",
+        "CODEX_CAPABILITY_MODE",
+        "CODEX_MUTATION_SCOPE",
+        "GIT_INDEX_FILE",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
     skill = tmp_path / ".agents" / "skills" / "four-seat-protocol"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text("---\nname: four-seat-protocol\n---\n", encoding="utf-8")
@@ -79,6 +89,11 @@ def test_render_codex_reports_harness_model_artifacts(tmp_path, capsys):
     assert "agent guardrail extensions: agent01.toml" in out
     assert "do not replace built-in role agents" in out
     assert "Next start session" in out
+    assert "Runtime env contract" in out
+    assert "CODEX_AGENT_MODE=readiness-bridge" in out
+    assert "CODEX_AGENT_ROLE=readiness-bridge" in out
+    assert "CODEX_CAPABILITY_MODE=read-only" in out
+    assert "CODEX_MUTATION_SCOPE=none" in out
     assert "inhabit the Codex harness as readiness bridge" in out
     assert "explicit seat or coordinator instruction" in out
     assert "readiness-bridge.toml" in out

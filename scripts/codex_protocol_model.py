@@ -7,6 +7,8 @@ without touching mailbox state, locks, git indexes, or production pipeline code.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 MODEL_SOURCE = "scripts/codex_protocol_model.py"
 CENTRAL_INVARIANT = "durable shared state beats chat memory"
 
@@ -46,6 +48,39 @@ AGENT_EXTENSION_RULES = (
     "extensions may codify seat-local guardrails, routing advice, and situational awareness",
     "extensions extend the harness; they do not replace built-in role agents",
     "extensions never override seat authority, mailbox cursor rules, or user-gated push",
+)
+
+RUNTIME_ENV_VARIABLES = (
+    (
+        "CODEX_AGENT_MODE",
+        "readiness-bridge | live-seat | coordinator | subagent",
+        "selects the harness behavior; defaults to readiness-bridge unless CODEX_SEAT names a live seat",
+    ),
+    (
+        "CODEX_AGENT_ROLE",
+        "readiness-bridge | director | director2 | operator | operator2 | coordinator | verifier/specialist role",
+        "names the part this Codex instance plays in the four-seat whole",
+    ),
+    (
+        "CODEX_SEAT",
+        "director | director2 | operator | operator2",
+        "binds a live seat; unset for readiness bridge and coordinator",
+    ),
+    (
+        "CODEX_CAPABILITY_MODE",
+        "read-only | seat-local | capacity-max | parent-scoped",
+        "states whether this process reports, works in one seat, or coordinates full capacity",
+    ),
+    (
+        "CODEX_MUTATION_SCOPE",
+        "none | seat-owned | coordination-only | read-only-verification | parent-scoped",
+        "documents which durable state this process may mutate after protocol checks",
+    ),
+    (
+        "GIT_INDEX_FILE",
+        "<git-dir>/index-codex-$CODEX_SEAT",
+        "uses a per-seat index for live-seat cursor/status staging in a shared working tree",
+    ),
 )
 
 START_SESSION_STEPS = (
@@ -201,6 +236,79 @@ def render_agent_extension_summary(agent_names: list[str] | tuple[str, ...] = ()
     return "\n".join(lines)
 
 
+def infer_runtime_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Infer the Codex runtime contract from an environment-like mapping."""
+    env = environ or {}
+    seat = env.get("CODEX_SEAT", "")
+    explicit_mode = env.get("CODEX_AGENT_MODE", "")
+    explicit_role = env.get("CODEX_AGENT_ROLE", "")
+
+    if explicit_mode:
+        mode = explicit_mode
+    elif seat in SEATS:
+        mode = "live-seat"
+    else:
+        mode = "readiness-bridge"
+
+    if explicit_role:
+        role = explicit_role
+    elif mode == "live-seat" and seat in SEATS:
+        role = seat
+    else:
+        role = mode
+
+    capability_defaults = {
+        "readiness-bridge": "read-only",
+        "live-seat": "seat-local",
+        "coordinator": "capacity-max",
+        "subagent": "parent-scoped",
+    }
+    mutation_defaults = {
+        "readiness-bridge": "none",
+        "live-seat": "seat-owned",
+        "coordinator": "coordination-only",
+        "subagent": "parent-scoped",
+        "lane-v-verifier": "read-only-verification",
+        "money-gate-reviewer": "read-only-verification",
+    }
+
+    capability = env.get("CODEX_CAPABILITY_MODE", capability_defaults.get(mode, "parent-scoped"))
+    mutation = env.get(
+        "CODEX_MUTATION_SCOPE",
+        mutation_defaults.get(role, mutation_defaults.get(mode, "parent-scoped")),
+    )
+
+    return {
+        "CODEX_AGENT_MODE": mode,
+        "CODEX_AGENT_ROLE": role,
+        "CODEX_SEAT": seat or "(unset)",
+        "CODEX_CAPABILITY_MODE": capability,
+        "CODEX_MUTATION_SCOPE": mutation,
+        "GIT_INDEX_FILE": env.get("GIT_INDEX_FILE", "(unset)"),
+    }
+
+
+def render_runtime_env_contract(environ: Mapping[str, str] | None = None) -> str:
+    """Return the executable runtime environment contract for Codex agents."""
+    values = infer_runtime_env(environ)
+    lines = [
+        "Runtime env contract:",
+        *(f"{name}={values[name]}" for name, _, _ in RUNTIME_ENV_VARIABLES),
+        "contract variables:",
+    ]
+    lines.extend(f"- {name}: {allowed}; {meaning}" for name, allowed, meaning in RUNTIME_ENV_VARIABLES)
+    lines.extend(
+        (
+            "contract rules:",
+            "- readiness-bridge is the default when CODEX_AGENT_MODE and CODEX_SEAT are unset.",
+            "- CODEX_SEAT selects a live seat only for director/director2/operator/operator2.",
+            "- coordinator remains unpinned; no coordinator cursor is consumed.",
+            "- env does not authorize push, lock-claim side effects, paid API spend, or pod spend; user consent still gates them.",
+        )
+    )
+    return "\n".join(lines)
+
+
 def render_start_session_inhabitance(agent_names: list[str] | tuple[str, ...] = ()) -> str:
     """Return the fresh-session contract for inhabiting the Codex harness."""
     lines = [
@@ -238,6 +346,8 @@ def render_surface_summary() -> str:
         "core agent modules: " + ", ".join(CORE_AGENT_MODULES),
         "coordinator invariants: " + "; ".join(COORDINATOR_INVARIANTS),
         "agent extension namespace: .codex/agents/agentNN.toml guardrail extensions",
+        "runtime env contract: CODEX_AGENT_MODE, CODEX_AGENT_ROLE, CODEX_SEAT, "
+        "CODEX_CAPABILITY_MODE, CODEX_MUTATION_SCOPE, GIT_INDEX_FILE",
         "Codex surfaces:",
     ]
     lines.extend(f"- {path}: {purpose}" for path, purpose in CODEX_SURFACES)
@@ -259,6 +369,9 @@ def main() -> int:
     print()
     print("## Surface Summary")
     print(render_surface_summary())
+    print()
+    print("## Runtime Env Contract")
+    print(render_runtime_env_contract())
     return 0
 
 
