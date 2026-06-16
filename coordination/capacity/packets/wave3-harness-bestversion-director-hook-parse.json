@@ -22,7 +22,10 @@
     "env -u GIT_INDEX_FILE git add remains allowed",
     "send a fresh director-to-operator verify-request naming the exact commit"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "implementation commit: 14525ee4 fix(codex): make git-index guard quote-aware",
+    "verify-request: coordination/mailbox/sent/2026-06-16T20-08-24Z-director-to-operator-verify-request.md"
+  ],
   "next_recipient": "operator",
-  "status": "active"
+  "status": "done"
 }

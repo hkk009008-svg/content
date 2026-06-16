@@ -1,0 +1,23 @@
+{
+  "id": "wave3-harness-bestversion-operator-hook-repair-lanev",
+  "wave": 3,
+  "cycle": "2026-06-16-protocol-harness-best-version-repair-a",
+  "owner": "operator",
+  "packet_type": "operator-verification",
+  "row_ids": [
+    "protocol-harness-best-version-task1"
+  ],
+  "allowed_paths": [],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-harness-bestversion-director-hook-env-bypass-repair"
+  ],
+  "acceptance": [
+    "after director repair verify-request, independently issue GO, NITS, or FAIL",
+    "verify the env-u bypass is closed per segment, not by raw string presence",
+    "verify quoted rg pipe remains allowed and bare pytest/git add remain blocked under a seat index"
+  ],
+  "done_evidence": [],
+  "next_recipient": null,
+  "status": "blocked"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "wave3-harness-bestversion-repair-coordinator-route",
+  "wave": 3,
+  "cycle": "2026-06-16-protocol-harness-best-version-repair-a",
+  "owner": "coordinator",
+  "packet_type": "coordinator-route",
+  "row_ids": [
+    "protocol-harness-best-version-task1",
+    "protocol-harness-best-version-task2"
+  ],
+  "allowed_paths": [
+    "coordination/capacity/packets",
+    "coordination/mailbox/sent"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-harness-bestversion-coordinator-join"
+  ],
+  "acceptance": [
+    "route the operator FAIL back to director for a narrow hook guard repair",
+    "route the operator2 NITS back to director2 for a narrow process resolution",
+    "operators receive separate follow-up Lane V boundaries",
+    "no push, lock, pod, paid API, or production generation side effect is opened"
+  ],
+  "done_evidence": [],
+  "next_recipient": "director",
+  "status": "active"
+}

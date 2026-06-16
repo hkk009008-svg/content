@@ -22,7 +22,10 @@
     "operators receive separate Lane V boundaries",
     "no push, lock, pod, paid API, or production generation side effect is opened"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "task-board route: coordination/mailbox/sent/2026-06-16T20-00-52Z-coordinator-to-all-coordination.md",
+    "superseded by verdict route: coordination/mailbox/sent/2026-06-16T20-28-41Z-coordinator-to-all-coordination.md"
+  ],
   "next_recipient": "director",
-  "status": "active"
+  "status": "done"
 }

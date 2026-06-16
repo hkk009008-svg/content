@@ -1,0 +1,33 @@
+{
+  "id": "wave3-harness-bestversion-coordinator-join",
+  "wave": 3,
+  "cycle": "2026-06-16-protocol-harness-best-version-core-a",
+  "owner": "coordinator",
+  "packet_type": "coordinator-join",
+  "row_ids": [
+    "protocol-harness-best-version-task1",
+    "protocol-harness-best-version-task2"
+  ],
+  "allowed_paths": [
+    "coordination/capacity/packets",
+    "coordination/mailbox/sent"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-harness-bestversion-operator-hook-lanev",
+    "wave3-harness-bestversion-operator2-mailbox-cli-lanev"
+  ],
+  "acceptance": [
+    "record operator FAIL and operator2 NITS as the verdict boundary for the initial harness best-version route",
+    "open a follow-up repair route instead of treating Wave 3 gate MET as protocol closure"
+  ],
+  "done_evidence": [
+    "capacity board evidence: env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave 3",
+    "smoke OK evidence: env -u GIT_INDEX_FILE .venv/bin/python scripts/ci_smoke.py -> OK",
+    "operator FAIL: coordination/mailbox/sent/2026-06-16T20-22-20Z-operator-to-director-verification-report.md",
+    "operator2 NITS: coordination/mailbox/sent/2026-06-16T20-21-55Z-operator2-to-director2-verification-report.md",
+    "next trigger: wave3-harness-bestversion-repair-coordinator-route"
+  ],
+  "next_recipient": "coordinator",
+  "status": "done"
+}

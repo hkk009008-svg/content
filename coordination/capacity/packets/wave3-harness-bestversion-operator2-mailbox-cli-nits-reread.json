@@ -1,0 +1,28 @@
+{
+  "id": "wave3-harness-bestversion-operator2-mailbox-cli-nits-reread",
+  "wave": 3,
+  "cycle": "2026-06-16-protocol-harness-best-version-repair-a",
+  "owner": "operator2",
+  "packet_type": "operator-verification",
+  "row_ids": [
+    "protocol-harness-best-version-task2"
+  ],
+  "allowed_paths": [],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-harness-bestversion-director2-mailbox-cli-nits-resolution"
+  ],
+  "acceptance": [
+    "after director2 NITS-resolution note or verify-request, independently issue GO, NITS, or FAIL",
+    "confirm Task 2 behavior remains verified and the commit-scope artifact has an acceptable process resolution"
+  ],
+  "done_evidence": [],
+  "next_recipient": null,
+  "status": "active",
+  "verify_request": "coordination/mailbox/sent/2026-06-16T20-25-32Z-director2-to-operator2-coordination.md",
+  "target_commit": "06a20f97",
+  "scope_files": [
+    "coordination/mailbox/sent/2026-06-16T20-25-32Z-director2-to-operator2-coordination.md",
+    "docs/HANDOFF-director2-2026-06-17-mailbox-cli-nits-response.md"
+  ]
+}

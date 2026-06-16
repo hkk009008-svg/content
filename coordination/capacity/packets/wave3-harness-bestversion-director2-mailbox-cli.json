@@ -23,7 +23,10 @@
     "send-event removes a created mail file when git add fails",
     "send a fresh director2-to-operator2 verify-request naming the exact commit"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "implementation commit: 1dbeca53 fix(protocol): harden mailbox cli parsing",
+    "verify-request: coordination/mailbox/sent/2026-06-16T20-11-48Z-director2-to-operator2-verify-request.md"
+  ],
   "next_recipient": "operator2",
-  "status": "active"
+  "status": "done"
 }

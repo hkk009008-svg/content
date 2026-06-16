@@ -1,0 +1,28 @@
+{
+  "id": "wave3-harness-bestversion-director-hook-env-bypass-repair",
+  "wave": 3,
+  "cycle": "2026-06-16-protocol-harness-best-version-repair-a",
+  "owner": "director",
+  "packet_type": "director-implementation",
+  "row_ids": [
+    "protocol-harness-best-version-task1"
+  ],
+  "allowed_paths": [
+    ".codex/hooks/guard-git-index.sh",
+    "tests/unit/test_codex_guard_git_index.py"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-harness-bestversion-repair-coordinator-route"
+  ],
+  "acceptance": [
+    "repair the raw env -u GIT_INDEX_FILE anywhere bypass reported by operator",
+    "add or flip tests so a safe first segment cannot mask a later bare git add under a seat index",
+    "include background '&' and stderr-pipe '|&' segment boundaries if the parser fix touches segment splitting",
+    "preserve the quoted rg pipe regression and bare pytest/git blocking behavior",
+    "send a fresh director-to-operator verify-request naming the exact repair commit"
+  ],
+  "done_evidence": [],
+  "next_recipient": "operator",
+  "status": "active"
+}

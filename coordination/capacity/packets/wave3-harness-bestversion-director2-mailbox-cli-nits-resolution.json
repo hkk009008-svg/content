@@ -1,0 +1,31 @@
+{
+  "id": "wave3-harness-bestversion-director2-mailbox-cli-nits-resolution",
+  "wave": 3,
+  "cycle": "2026-06-16-protocol-harness-best-version-repair-a",
+  "owner": "director2",
+  "packet_type": "director-brief",
+  "row_ids": [
+    "protocol-harness-best-version-task2"
+  ],
+  "allowed_paths": [
+    "coordination/mailbox/sent",
+    "docs"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-harness-bestversion-repair-coordinator-route"
+  ],
+  "acceptance": [
+    "read the operator2 NITS report for 1dbeca53",
+    "send a narrow director2-to-operator2 NITS-resolution note or verify-request explaining why the extra Task 1 mailbox artifact is a process-scope artifact and not a Task 2 behavior defect",
+    "do not delete the real director-to-operator verify-request artifact",
+    "do not edit mailbox CLI behavior unless operator2 or director2 finds an actual behavior defect"
+  ],
+  "done_evidence": [
+    "NITS-resolution commit: 06a20f97 director2(coord): resolve mailbox cli NITS scope",
+    "NITS-resolution event: coordination/mailbox/sent/2026-06-16T20-25-32Z-director2-to-operator2-coordination.md",
+    "handoff artifact: docs/HANDOFF-director2-2026-06-17-mailbox-cli-nits-response.md"
+  ],
+  "next_recipient": "operator2",
+  "status": "done"
+}

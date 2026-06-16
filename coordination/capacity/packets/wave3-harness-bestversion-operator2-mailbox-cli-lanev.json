@@ -17,7 +17,17 @@
     "verify consume-events parser errors leave cursors unchanged",
     "verify send-event cleanup leaves no staged or sent mailbox residue on git add failure"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "NITS verification-report: coordination/mailbox/sent/2026-06-16T20-21-55Z-operator2-to-director2-verification-report.md",
+    "NITS reason: Task 2 behavior verified, but 1dbeca53 also contains the Task 1 director-to-operator verify-request artifact"
+  ],
   "next_recipient": null,
-  "status": "blocked"
+  "status": "done",
+  "verify_request": "coordination/mailbox/sent/2026-06-16T20-11-48Z-director2-to-operator2-verify-request.md",
+  "target_commit": "1dbeca53",
+  "scope_files": [
+    "coordination/bin/consume-events",
+    "coordination/bin/send-event",
+    "tests/unit/test_coordination_bin.py"
+  ]
 }

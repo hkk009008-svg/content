@@ -1,0 +1,22 @@
+{
+  "id": "wave3-harness-bestversion-director2-standby-after-nits-response",
+  "wave": 3,
+  "cycle": "2026-06-16-protocol-harness-best-version-repair-a",
+  "owner": "director2",
+  "packet_type": "idle",
+  "row_ids": [
+    "protocol-harness-best-version-task2"
+  ],
+  "allowed_paths": [],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-harness-bestversion-director2-mailbox-cli-nits-resolution"
+  ],
+  "acceptance": [
+    "stand by after the committed NITS-resolution response",
+    "act only if operator2 returns NITS or FAIL on the process resolution"
+  ],
+  "done_evidence": [],
+  "next_recipient": null,
+  "status": "blocked"
+}
