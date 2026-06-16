@@ -7,6 +7,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 HOOK = ROOT / ".codex" / "hooks" / "guard-git-index.sh"
@@ -45,3 +47,16 @@ def test_bare_git_add_is_blocked_under_seat_index() -> None:
 def test_env_u_git_index_prefix_is_allowed() -> None:
     result = _run_hook("env -u GIT_INDEX_FILE git add scripts/protocol_capacity.py")
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "protocol-harness-guard-env-u-bypass: raw env-u substring allows a "
+        "later unsafe git segment"
+    ),
+)
+def test_env_u_prefix_only_allows_its_own_segment() -> None:
+    result = _run_hook("env -u GIT_INDEX_FILE git status; git add scripts/protocol_capacity.py")
+    assert result.returncode == 2
+    assert "git add" in result.stderr
