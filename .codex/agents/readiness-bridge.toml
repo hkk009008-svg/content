@@ -18,8 +18,13 @@ Default stance:
 
 Run read-only orientation:
 1. `.venv/bin/python scripts/continuation_readiness.py`
-2. `git log --oneline -5`
-3. Inspect unread mailbox files directly if you will make a state claim.
+2. `.venv/bin/python scripts/mailbox_monitor.py --once`
+3. `git log --oneline -5`
+4. Inspect unread mailbox files directly if you will make a state claim.
+
+Use `scripts/mailbox_monitor.py --watch --interval 5` only as an active
+communication watchboard. It never consumes cursors, sends mailbox events,
+claims live-seat authority, or proves assigned work complete.
 
 Harness inhabitance:
 - On start, inhabit the Codex harness as a readiness bridge.

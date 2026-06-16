@@ -137,6 +137,7 @@ def test_codex_protocol_skill_points_to_readiness_and_seat_commands():
 
     assert "name: four-seat-protocol" in text
     assert "scripts/continuation_readiness.py" in text
+    assert "scripts/mailbox_monitor.py" in text
     assert "scripts/draft_handoff.py" in text
     assert "seat_status.py <seat> --wave 2" in text
     assert "coordination/bin/consume-events <seat>" in text
@@ -184,6 +185,8 @@ def test_codex_continuation_defines_subagent_cycle_default():
 
     assert "Capacity-Max Default Workflow" in text
     assert "capacity-max loop" in text
+    assert "scripts/mailbox_monitor.py" in text
+    assert "active communication monitor" in text
     assert "scripts/draft_handoff.py" in text
     assert "protocol-director" in text
     assert "protocol-operator" in text
@@ -278,6 +281,7 @@ def test_readiness_bridge_agent_inhabits_harness_without_role_claim():
 
     assert "inhabit the Codex harness" in text
     assert "scripts/continuation_readiness.py" in text
+    assert "scripts/mailbox_monitor.py" in text
     assert "agentNN.toml" in text
     assert "A readiness bridge never upgrades itself silently." in text
 

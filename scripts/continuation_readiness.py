@@ -139,6 +139,7 @@ def render_codex(root: Path) -> None:
     print(f"hooks: {'present' if hooks.exists() else 'missing'} ({hooks})")
     print(f"custom agents: {', '.join(agents) if agents else '(none)'}")
     print("bridge command: .venv/bin/python scripts/continuation_readiness.py --smoke")
+    print("mailbox monitor: .venv/bin/python scripts/mailbox_monitor.py --once")
     print("handoff draft: .venv/bin/python scripts/draft_handoff.py <seat> --wave 2 --output")
     print(
         "seat command: .venv/bin/python "

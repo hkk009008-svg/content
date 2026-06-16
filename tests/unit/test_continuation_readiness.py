@@ -117,4 +117,5 @@ def test_render_codex_reports_harness_model_artifacts(tmp_path, monkeypatch, cap
     assert "readiness-bridge.toml" in out
     assert "CODEX_SEAT=<seat>" in out
     assert "CODEX_SEAT=coordinator" in out
+    assert "scripts/mailbox_monitor.py --once" in out
     assert "scripts/draft_handoff.py <seat> --wave 2 --output" in out

@@ -64,6 +64,18 @@ Run the project command:
 Use `--smoke` when the user asks for execution readiness or before making a
 verification-environment claim.
 
+For active communication awareness without claiming a seat, run the read-only
+mailbox monitor:
+
+```bash
+.venv/bin/python scripts/mailbox_monitor.py --once
+.venv/bin/python scripts/mailbox_monitor.py --watch --interval 5
+```
+
+The monitor reports live unread counts, latest unread event per seat,
+coordinator broadcast receipt splits, and heartbeat freshness. It never
+consumes cursors, sends mailbox events, or substitutes for live-seat work.
+
 The command is read-only. It reports:
 
 - current HEAD and origin relation

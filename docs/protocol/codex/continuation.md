@@ -388,6 +388,21 @@ This command reports git, mailbox unread counts, Wave state, ADR-028 ceremony
 state, environment status, and installed Codex harness model artifacts. It exits
 successfully as a report command even when Wave or ceremony gates are red.
 
+## Active Communication Monitor
+
+For active communication awareness during bridge or coordinator work, use the
+active communication monitor, a read-only mailbox watchboard:
+
+```bash
+.venv/bin/python scripts/mailbox_monitor.py --once
+.venv/bin/python scripts/mailbox_monitor.py --watch --interval 5
+```
+
+The monitor reports per-seat unread counts, latest unread event, coordinator
+broadcast receipt splits, and heartbeat freshness. It is a watchboard only: it
+does not consume cursors, send mailbox events, claim live-seat authority, prove
+assigned work complete, or replace mailbox-body review before acting.
+
 ## Partly Automated Handoff Draft
 
 For a live seat or coordinator handoff, use the draft command to capture current

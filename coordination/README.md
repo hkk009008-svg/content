@@ -59,6 +59,13 @@ ADR-028 ceremony status, and the verification-environment status. It is
 read-only: it does not consume cursors, send mailbox events, edit the
 remediation inventory, or claim director/operator work.
 
+Use `python scripts/mailbox_monitor.py --once` for an active communication
+snapshot, or `python scripts/mailbox_monitor.py --watch --interval 5` while a
+bridge/coordinator needs to notice mailbox or heartbeat changes. The monitor is
+read-only: it reports unread counts, latest unread events, coordinator broadcast
+receipt splits, and heartbeat freshness, but it never consumes cursors, sends
+mailbox events, claims live-seat authority, or proves assigned work complete.
+
 For a real seat resume, use the seat-specific orientation command instead:
 `python .agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`,
 then surface the unread count per Rule #8. Live seats consume and read unread
