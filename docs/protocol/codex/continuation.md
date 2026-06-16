@@ -1,581 +1,114 @@
-# Codex continuation protocol
+# Codex Continuation Adapter
 
-This document renders the executable Codex harness model from
-`scripts/codex_protocol_model.py` into runtime instructions. It does not
-replace `AGENTS.md` or the agent-agnostic protocol under
-`docs/protocol/agents/`; it maps those durable repo rules onto Codex-native
-surfaces.
+This is the short Codex adapter for the executable harness kernel in
+`scripts/codex_protocol_model.py`. The active invariant is: durable shared state beats chat memory. Read git, mailbox bodies, cursors, locks, logs, gate evidence, and operator reports before trusting stale prose.
 
-Central invariant: durable shared state beats chat memory. Treat git commits,
-committed files, mailbox bodies, `sent/` events, seen cursors, locks, logs,
-gate evidence, and operator verification reports as the source of protocol
-truth.
+For folder ownership, use `docs/protocol/protocol-assembly-map.md`. For full
+agent-neutral governance, use `docs/protocol/agents/`. This file only maps the
+kernel onto Codex commands and runtime choices.
 
-## Harness model
+## Runtime modes
 
-```mermaid
-flowchart TD
-    user["User principal"]
-    harness["Codex CLI harness"]
-    state["Durable shared state"]
-    mailbox["Mailbox sent/ + seen cursors"]
-    seats["director / director2 / operator / operator2"]
-    coordinator["coordinator"]
-    gate["Gate + receipt loop"]
+- Readiness bridge: default mode. Report current durable state and blockers.
+  Do not consume cursors, send mailbox, claim locks, push, spend, edit
+  inventory, or author production changes.
+- Live seat: only when the user or parent prompt explicitly names `director`,
+  `director2`, `operator`, or `operator2`. Work inside that seat's authority.
+- Coordinator: only when explicitly asked to reconcile, route, gate, or operate
+  cross-seat state. The coordinator is unpinned and never consumes a
+  coordinator cursor.
+- Subagent: bounded by the parent prompt. Subagents do not inherit live-seat or
+  coordinator authority unless the prompt explicitly grants it.
 
-    user --> harness
-    harness --> state
-    state --> mailbox
-    mailbox --> seats
-    mailbox --> coordinator
-    seats --> gate
-    coordinator --> gate
-    gate --> state
-```
-
-## Live loop
-
-1. Orient from `seat_status.py` plus `git log` before protocol decisions.
-2. Always check mail before protocol decisions and state-asserting writes:
-   refresh live mailbox state, read mailbox bodies and committed files, and do
-   not decide from counts alone.
-3. Classify the live role: readiness bridge, named seat, or coordinator.
-4. Use the Rotating Planning Relay for important cross-seat plans before
-   distributing work.
-5. Run gate scripts and smoke commands only as evidence, not as operator GO.
-6. Send one `coordinator-to-all` route if needed, then verify receipt
-   seat-by-seat.
-7. When a full coordinator/live-seat cycle reaches a real completion boundary
-   and assigned tasks are complete, write a durable handoff before transplant
-   or context switch, including fresh git/mailbox/gate/smoke state and the
-   exact next trigger.
-8. Push remains user-gated; locks, paid spend, and pod spend require explicit
-   consent.
-
-## Codex surfaces
-
-| Need | Codex surface |
-|---|---|
-| Durable repo rules | `AGENTS.md` |
-| Protocol folder-intent map | `docs/protocol/protocol-assembly-map.md` |
-| Reusable continuation workflow | `.agents/skills/four-seat-protocol/SKILL.md` |
-| Explicit spawned role agents | `.codex/agents/*.toml` |
-| Session lifecycle guardrails | `.codex/hooks.json` + `.codex/hooks/*.sh` |
-| Read-only state report | `scripts/continuation_readiness.py` |
-| Live seat orientation | `.agents/skills/four-seat-protocol/scripts/seat_status.py` |
-| Reviewable handoff draft | `scripts/draft_handoff.py` |
-| Protocol effectiveness loop | `scripts/protocol_effectiveness_report.py` |
-| Executable harness model | `scripts/codex_protocol_model.py` |
-
-The remaining `.claude/` script path is intentional for now: Codex wrappers
-reuse the same tested shell/Python implementation instead of forking protocol
-logic. Codex-facing instructions live in this file, `.agents/skills/`, and
-`.codex/`.
-
-## Agent guardrail extensions
-
-The built-in role agents remain the core harness modules:
-`readiness-bridge`, `protocol-coordinator`, `protocol-director`,
-`protocol-operator`, `lane-v-verifier`, and `money-gate-reviewer`.
-
-Optional `.codex/agents/agentNN.toml` files are self-codified guardrail
-extensions. They can capture working seat heuristics, situational-awareness
-loops, and synergistic routing advice as durable modules, but they extend the
-harness; they do not replace built-in role agents, seat authority, mailbox
-cursor rules, or user-gated push.
-
-## Start-session inhabitance
-
-A fresh Codex session should inhabit the Codex harness as a readiness bridge
-unless the user or parent prompt gives an explicit seat or coordinator
-instruction. The bridge starts from
-`.venv/bin/python scripts/continuation_readiness.py`, reads the model-backed
-Codex Harness Model section, and treats any discovered `agentNN.toml` files as
-guardrail extensions only.
-
-Readiness bridge mode does not consume cursors, send mailbox events, claim
-locks, push, spend, or author production changes. It can report the durable
-state and blockers, then stop or ask the parent to launch the appropriate core
-role agent.
-
-## Runtime environment contract
-
-Codex instances expose their part in the whole through a small runtime
-environment contract. The executable source is
-`scripts/codex_protocol_model.py`; the readiness report prints the currently
-inferred values.
-
-| Variable | Values | Meaning |
-|---|---|---|
-| `CODEX_AGENT_MODE` | `readiness-bridge`, `live-seat`, `coordinator`, `subagent` | Selects the harness behavior. Defaults to `readiness-bridge` unless `CODEX_SEAT` names a live protocol role. |
-| `CODEX_AGENT_ROLE` | `readiness-bridge`, `director`, `director2`, `operator`, `operator2`, `coordinator`, verifier/specialist role | Names the Codex part being inhabited. |
-| `CODEX_SEAT` | `director`, `director2`, `operator`, `operator2`, `coordinator` | Binds a live seat. `coordinator` is a compatibility spelling for coordinator mode and remains unpinned. |
-| `CODEX_CAPABILITY_MODE` | `read-only`, `seat-local`, `capacity-max`, `parent-scoped` | States whether the process reports, works in one seat, or coordinates full capacity. |
-| `CODEX_MUTATION_SCOPE` | `none`, `seat-owned`, `coordination-only`, `read-only-verification`, `parent-scoped` | Documents which durable state may be mutated after protocol checks. |
-| `CODEX_AUTHORITY_SCOPE` | `report-only`, `seat-owned`, `all-scope-reconcile`, `parent-scoped` | Documents whose authority boundary this process inhabits. |
-| `CODEX_MAILBOX_POLICY` | `read-only-no-consume`, `seat-read-consume-intentional`, `all-scope-read-no-consume`, `parent-scoped` | Documents whether mailbox state may be read, consumed, or routed. |
-| `CODEX_GIT_POLICY` | `env-u-git-index-read-only`, `per-seat-index-for-cursor-status`, `env-u-git-index-or-temp-index`, `env-u-git-index-parent-scoped` | Documents how git and the shared worktree index should be touched. |
-| `CODEX_VERIFICATION_POLICY` | `report-evidence-only`, `request-operator-go`, `independent-go-nits-fail`, `reconcile-operator-go-only`, `read-only-review-no-go`, `parent-scoped-no-go` | Documents whether this process can verify, request verification, or only report evidence. |
-| `CODEX_CONTEXT_SOURCES` | `repo-docs-mailbox-gates-readonly`, `seat-mailbox-owned-files-gate-evidence`, `all-scope-mailbox-inventory-locks-gates`, `parent-prompt-plus-allowed-artifacts` | Documents which durable context this part should read before acting. |
-| `CODEX_OUTPUT_CONTRACT` | `readiness-report-and-blockers`, `seat-artifact-or-operator-request`, `capacity-board-or-single-route`, `bounded-findings-to-parent` | Documents what this part owes back to the whole before stopping. |
-| `CODEX_DECISION_BOUNDARY` | `no-seat-authority`, `lane-owned-seat`, `all-scope-routing-no-production-fixes`, `parent-scoped-no-seat-authority` | Documents which decisions this part may make without upgrading roles. |
-| `CODEX_NEXT_ACTION_POLICY` | `report-then-stop-or-request-role`, `read-mail-then-act-or-report-idle`, `build-board-reconcile-once`, `return-evidence-then-stop` | Documents the default next move after orientation. |
-| `CODEX_SIDE_EFFECT_POLICY` | `user-consent-required` | Documents that push, lock-claim side effects, paid API spend, and pod spend remain user-gated outside env. |
-| `GIT_INDEX_FILE` | `<git-dir>/index-codex-$CODEX_SEAT` | Uses a per-seat or coordinator-local index while ordinary git/pytest still follows `CODEX_GIT_POLICY`. |
-
-Runtime defaults:
-
-- With no env, the inferred contract is `CODEX_AGENT_MODE=readiness-bridge`,
-  `CODEX_AGENT_ROLE=readiness-bridge`, `CODEX_CAPABILITY_MODE=read-only`, and
-  `CODEX_MUTATION_SCOPE=none`. Its behavior is `CODEX_AUTHORITY_SCOPE=report-only`,
-  `CODEX_MAILBOX_POLICY=read-only-no-consume`,
-  `CODEX_GIT_POLICY=env-u-git-index-read-only`, and
-  `CODEX_VERIFICATION_POLICY=report-evidence-only`. Its context/output behavior
-  is `CODEX_CONTEXT_SOURCES=repo-docs-mailbox-gates-readonly`,
-  `CODEX_OUTPUT_CONTRACT=readiness-report-and-blockers`,
-  `CODEX_DECISION_BOUNDARY=no-seat-authority`, and
-  `CODEX_NEXT_ACTION_POLICY=report-then-stop-or-request-role`.
-- With `CODEX_SEAT=director|director2|operator|operator2`, the inferred
-  contract is `CODEX_AGENT_MODE=live-seat`, `CODEX_AGENT_ROLE=$CODEX_SEAT`,
-  `CODEX_CAPABILITY_MODE=seat-local`, `CODEX_MUTATION_SCOPE=seat-owned`,
-  `CODEX_AUTHORITY_SCOPE=seat-owned`,
-  `CODEX_MAILBOX_POLICY=seat-read-consume-intentional`, and
-  `CODEX_GIT_POLICY=per-seat-index-for-cursor-status`. Director seats use
-  `CODEX_VERIFICATION_POLICY=request-operator-go`; operator seats use
-  `CODEX_VERIFICATION_POLICY=independent-go-nits-fail`. Live seats use
-  `CODEX_CONTEXT_SOURCES=seat-mailbox-owned-files-gate-evidence`,
-  `CODEX_OUTPUT_CONTRACT=seat-artifact-or-operator-request`,
-  `CODEX_DECISION_BOUNDARY=lane-owned-seat`, and
-  `CODEX_NEXT_ACTION_POLICY=read-mail-then-act-or-report-idle`.
-- With `CODEX_SEAT=coordinator`, the executable model accepts it as a
-  compatibility spelling for coordinator mode. It infers
-  `CODEX_AGENT_MODE=coordinator`, `CODEX_AGENT_ROLE=coordinator`,
-  `CODEX_CAPABILITY_MODE=capacity-max`, and the same coordinator policies below;
-  it does not create a coordinator cursor or permit `consume-events coordinator`.
-- For coordinator sessions, set `CODEX_AGENT_MODE=coordinator`,
-  `CODEX_AGENT_ROLE=coordinator`, `CODEX_CAPABILITY_MODE=capacity-max`, and
-  `CODEX_MUTATION_SCOPE=coordination-only`. Its behavior is
-  `CODEX_AUTHORITY_SCOPE=all-scope-reconcile`,
-  `CODEX_MAILBOX_POLICY=all-scope-read-no-consume`,
-  `CODEX_GIT_POLICY=env-u-git-index-or-temp-index`, and
-  `CODEX_VERIFICATION_POLICY=reconcile-operator-go-only`. The coordinator
-  uses `CODEX_CONTEXT_SOURCES=all-scope-mailbox-inventory-locks-gates`,
-  `CODEX_OUTPUT_CONTRACT=capacity-board-or-single-route`,
-  `CODEX_DECISION_BOUNDARY=all-scope-routing-no-production-fixes`, and
-  `CODEX_NEXT_ACTION_POLICY=build-board-reconcile-once`. The coordinator
-  remains unpinned; no coordinator cursor is consumed.
-- For spawned verifier/specialist subagents, the parent prompt remains the
-  authority boundary. Use `CODEX_AGENT_MODE=subagent` only as a descriptive
-  marker; the parent still names allowed files, scope, and expected output.
-  `lane-v-verifier` and `money-gate-reviewer` use
-  `CODEX_VERIFICATION_POLICY=read-only-review-no-go`,
-  `CODEX_CONTEXT_SOURCES=parent-prompt-plus-allowed-artifacts`,
-  `CODEX_OUTPUT_CONTRACT=bounded-findings-to-parent`,
-  `CODEX_DECISION_BOUNDARY=parent-scoped-no-seat-authority`, and
-  `CODEX_NEXT_ACTION_POLICY=return-evidence-then-stop`.
-- `CODEX_AGENT_ROLE` can infer `coordinator`, `live-seat`, or `subagent` mode
-  when `CODEX_AGENT_MODE` is unset, but launchers should still set both for
-  clarity.
-- `CODEX_SIDE_EFFECT_POLICY=user-consent-required` is global: env describes the
-  process part, but never authorizes push, lock-claim side effects, paid API
-  spend, or pod spend.
-
-## Mode selection
-
-Default mode is **readiness bridge**. A Codex thread is not a director,
-operator, or coordinator unless the user explicitly says so.
+## First Commands
 
 Readiness bridge:
 
-- May run read-only orientation and summarize state.
-- Must not consume mailbox cursors.
-- Must not send mailbox events.
-- Must not edit remediation inventory, handoffs, or presence.
-- Must not claim director/operator ownership.
-
-Live seat:
-
-- Requires an explicit seat name: `director`, `director2`, `operator`, or
-  `operator2`.
-- Must surface unread count before processing mailbox events.
-- Reads unread mailbox events by default before deciding the seat is idle,
-  routed, blocked, or ready to verify. Cursor consumption is a separate
-  intentional mutation that stages cursor files.
-- Must follow the seat ownership rules in `docs/protocol/agents/`.
-
-Coordinator:
-
-- On-demand only.
-- Starts with the coordinator seat-status command, not the generic readiness
-  bridge.
-- Reads live coordinator/all mailbox state and recent `coordination/mailbox/sent/`
-  entries before any routing, handoff, inventory, or gate claim. Decisions are
-  made from mailbox bodies, not filenames or counts alone.
-- Reconciles and routes; it does not author production fixes.
-- Has no cursor and must not run `consume-events`.
-- Writes only for a real state transition, routing need, lock correction,
-  wave-open/close artifact, or user-facing escalation; otherwise it reports a
-  no-op with command evidence.
-- Must not mark correctness verified without the required operator GO and
-  executed evidence.
-
-## Capacity-Max Default Workflow
-
-After the user explicitly enters a live seat, asks a coordinator to continue,
-or asks Codex to advance a cycle, the default is the **capacity-max** workflow.
-It uses every role that can add signal without crossing ownership boundaries:
-active seats do lane work, seats with no current work return no-op evidence,
-operators verify as soon as real diffs or verify requests exist, and the
-coordinator reconciles once at the end.
-
-Readiness bridge mode is still read-only and never auto-spawns seats. A user may
-also ask for a deliberately single-seat or read-only pass; otherwise live
-coordinator/cycle work should use the capacity-max loop:
-
-1. The parent/coordinator captures the shared baseline:
-   `seat_status.py coordinator --wave 2`, `env -u GIT_INDEX_FILE git log --oneline -5`,
-   `scripts/wave_gate_check.py 2`, and `scripts/ci_smoke.py`.
-2. Build a short capacity board from mailbox deltas, `docs/REMEDIATION-INVENTORY.md`,
-   active locks, gate output, and any landed-but-unverified diffs. Classify each
-   slot as implementation/briefing, co-sign/product-oracle review, Lane V
-   verification, routing-only, or idle/no-op after reading the relevant mailbox
-   bodies.
-3. Orient all four live seats with
-   `.agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`;
-   record and surface each unread count before mailbox processing, then read
-   unread mail for live seats. Consume cursors only when intentionally advancing
-   the live seat. After a consolidated coordinator broadcast, compare each seat
-   cursor and unread set against that broadcast so receipt splits are explicit.
-4. Dispatch bounded role agents from `.codex/agents/` for every live seat in the
-   cycle: `protocol-director` for `director` / `director2`, and
-   `protocol-operator` for `operator` / `operator2`. Idle seats still return
-   no-op evidence so the coordinator knows they were checked.
-5. Each spawned prompt names the concrete seat, current HEAD, unread count, lane
-   ownership, mailbox-consumption decision, allowed write set, locks/push status,
-   and expected output. Directors may use bounded exploration/implementation or
-   specialist pre-review subagents inside their lane; operators may use
-   read-only `lane-v-verifier` and `money-gate-reviewer` sidecars while still
-   owning the final GO/NITS/FAIL.
-6. Run implementation in parallel only when file/lock ownership is disjoint.
-   Never run two implementation agents on shared files or behind the same
-   push-gated lock. Pull verification forward for already-landed diffs instead
-   of leaving operators idle.
-7. The parent waits for role results, then the coordinator reconciles
-   inventory/locks/mailbox exactly once if a real transition occurred, or reports
-   the no-op with command evidence.
-8. If the cycle reached a real completion boundary and assigned tasks are
-   complete, the last active seat or coordinator writes the durable handoff
-   before transplant/context switch. It refreshes live state, records what was
-   consumed or routed, preserves dirty-tree caveats, and names the exact next
-   trigger.
-
-Subagents do not relax the director/operator boundary: a director still cannot
-verify its own work, an operator still should not author production fixes, and
-the coordinator still does not author production code.
-
-If the next ordered row requires `coordination/bin/claim-lock`, remember that
-the helper performs fetch/push. Push is user-gated; without explicit push
-authorization, choose eligible no-lock work or stop for authorization rather
-than claiming the lock.
-
-## Rotating Planning Relay
-
-Use the **Rotating Planning Relay** when an important cross-seat plan needs
-all-seat review before work is distributed. The fixed cyclic order is
-`director -> operator -> director2 -> operator2`; whichever live seat starts
-the plan is `step 1`, then the baton follows that order and wraps after
-`operator2` back to `director` until exactly four live-seat turns have happened.
-The final live seat sends the result to coordinator/all-scope for reconciliation.
-
-When the coordinator starts the planning cycle, use the coordinator-started
-case instead: `coordinator -> all four seats -> coordinator`. The coordinator
-fans out the planning question to all seats, reads the seat responses back, and
-then distributes one consolidated `coordinator-to-all` task board. In plain
-language: one consolidated coordinator-to-all task board.
-
-Relay mailbox events are planning evidence only. No production work,
-verification verdict, lock, push, or inventory change is implied unless a later
-coordinator task board explicitly routes that action.
-
-## Codex Live-Protocol Rules
-
-These rules are mandatory for live Codex seats and coordinator sessions:
-
-- **R-CODEX-MAIL:** always check mail before any protocol decision, handoff,
-  routing event, inventory/gate claim, or state-asserting protocol write. Live
-  seats read pending seat mail by default after surfacing the unread count;
-  cursor consumption is a separate intentional live-seat mutation. Use
-  `seat_status.py <seat> --wave <N>` for seat-local unread state and
-  `seat_status.py coordinator --wave <N>` plus recent
-  `coordination/mailbox/sent/` entries for coordinator/all state. Decisions are
-  made from mailbox bodies, not unread counts alone. Refresh again immediately
-  before finalizing a handoff or commit if other seats are active.
-- **R-CODEX-CONSOLIDATE:** cross-seat coordinator routing should be one
-  consolidated `coordinator-to-all` mailbox event unless a narrower direct route
-  is explicitly required. The event should name each seat's task, unread/cursor
-  context, lock/push/spend status, allowed write set, and expected output.
-- **R-CODEX-RECEIPT:** after a consolidated `coordinator-to-all` routing notice,
-  a coordinator check refreshes all four seats and compares each cursor/unread
-  set against that broadcast. Report any receipt split explicitly. Receipt
-  evidence proves mail state only; it does not prove assigned work is complete.
-- **R-CODEX-RELAY:** use the Rotating Planning Relay for important cross-seat
-  plans before distributing work. A live-seat-started relay treats the starter
-  as step 1 and passes the planning baton through
-  `director -> operator -> director2 -> operator2` with wraparound until all
-  four live seats have responded, then coordinator reconciles. A
-  coordinator-started plan fans out to all four seats, gathers responses back to
-  coordinator, and ends in one consolidated `coordinator-to-all` task board.
-- **R-CODEX-INDEX:** ordinary git and pytest commands in a seat session use
-  `env -u GIT_INDEX_FILE`. If a coordinator-only docs/mailbox/log commit is
-  needed while the shared index is dirty, use a scoped temporary index:
-  `env -u GIT_INDEX_FILE GIT_INDEX_FILE=<temp-index> git ...`. Inspect
-  `git diff --cached --name-status` under that temp index before committing,
-  and refresh only the committed path in the shared index if it appears as a
-  stale `D/??` pair afterward.
-- **R-CODEX-SEATINDEX:** after live-seat mailbox consumption, inspect the active
-  seat index before committing. Expected cursor-only scope is exactly
-  `M coordination/mailbox/seen/<seat>.txt`. If `HEAD` advanced after the seat
-  index was seeded, stale indexes can stage bogus deletions for files introduced
-  by the newer commit; when there is no intentional staged seat work, refresh the
-  seat index to `HEAD` and re-stage only the cursor. If there is intentional
-  staged work, do not blindly reset the index; reconcile the mixed state
-  deliberately and preserve owned paths.
-- **R-CODEX-NOLOCK:** when push, pod spend, paid API spend, or lock-claim side
-  effects are not user-authorized, route eligible no-lock work first or stop for
-  authorization. Do not claim push-gated locks as an implementation shortcut.
-- **R-CODEX-HANDOFF:** a bare `handoff` request means a narrow state-transfer
-  artifact from live evidence. Do not invent implementation, verification,
-  inventory churn, or mailbox noise unless the evidence shows a real transition
-  or the user asks for that work.
-- **R-CODEX-CYCLE-HANDOFF:** when a full coordinator/live-seat cycle reaches a
-  real completion boundary and the assigned tasks are complete, the last active
-  Codex seat or coordinator writes a durable handoff before transplant or
-  context switch. The handoff must refresh live git/mailbox/gate/smoke state,
-  record what was consumed or routed, preserve dirty-tree caveats, and name the
-  exact next trigger.
-- **R-CODEX-LEARN:** when a live protocol observation would improve capacity,
-  efficacy, or efficiency, preserve it as durable memory if the user has
-  authorized memory updates; if the observation is broadly reusable, codify it
-  in the relevant protocol docs and rules log with evidence/provenance.
-
-## Seat-Local Subagent Workflow
-
-All live seats may use Codex subagents as part of their normal workflow, but the
-seat remains accountable for the result. A subagent report is evidence, not a
-role handoff, mailbox cursor, operator GO, or coordinator reconciliation by
-itself.
-
-`scripts/check_coordination.py` enforces this boundary for coordinator
-handoffs: a coordinator "All-Seat Handoff" must cite real live-seat
-mailbox/handoff artifacts for `director`, `operator`, `director2`, and
-`operator2`, or explicitly state that live-seat handoffs are still owed.
-
-- `coordinator`: holds the shared baseline, spawns `protocol-director` and
-  `protocol-operator` for capacity-max cycles, and may run read-only
-  `lane-v-verifier` / `money-gate-reviewer` workflows at wave-boundary or
-  discovery triggers. The coordinator still does not author production fixes.
-- `director` / `director2`: may use subagents for bounded exploration,
-  sibling-audit help, implementation shards, or specialist pre-review. The
-  director still owns the R-BRIEF, lock/co-sign decisions, final dispatch
-  shape, and verify-request; subagents cannot replace the operator GO.
-- `operator` / `operator2`: should use read-only verifier subagents for
-  cold-context Lane V where useful, especially `lane-v-verifier` for ordinary
-  diffs and `money-gate-reviewer` for spend/budget-gate diffs. The operator
-  still reads the actual diff, synthesizes the final GO/NITS/FAIL, sends the
-  `verification-report`, and handles lock-release atomicity on GO.
-
-Subagent prompts must name the concrete seat, current HEAD, unread count, lane
-scope, allowed write set, mailbox consumption decision, and expected output.
-Never run two implementation subagents in parallel on shared files. Idle seats
-return no-op evidence instead of inventing work.
-
-## Read-only continuation command
-
-For Codex app or ad-hoc Codex threads:
-
 ```bash
 .venv/bin/python scripts/continuation_readiness.py
-```
-
-For execution-readiness checks:
-
-```bash
-.venv/bin/python scripts/continuation_readiness.py --smoke
-```
-
-This command reports git, mailbox unread counts, Wave state, ADR-028 ceremony
-state, environment status, and installed Codex harness model artifacts. It exits
-successfully as a report command even when Wave or ceremony gates are red.
-
-## Active Communication Monitor
-
-For active communication awareness during bridge or coordinator work, use the
-active communication monitor, a read-only mailbox watchboard:
-
-```bash
-.venv/bin/python scripts/mailbox_monitor.py --once
-.venv/bin/python scripts/mailbox_monitor.py --watch --interval 5
-```
-
-The monitor reports per-seat unread counts, latest unread event, coordinator
-broadcast receipt splits, and heartbeat freshness. It is a watchboard only: it
-does not consume cursors, send mailbox events, claim live-seat authority, prove
-assigned work complete, or replace mailbox-body review before acting.
-
-## Partly Automated Handoff Draft
-
-For a live seat or coordinator handoff, use the draft command to capture current
-evidence into a reviewable Markdown scaffold:
-
-```bash
-.venv/bin/python scripts/draft_handoff.py <seat> --wave 2 --smoke --output
-```
-
-The draft command is read-only with respect to protocol state: it does not
-consume mailbox cursors, send mailbox events, edit inventory, or decide that a
-seat is done. The current seat must still review the output, fill in the
-judgment fields, and refresh live state again before committing or handing off
-when other seats are active. Treat the generated clean-session prompt as a
-starter, not as a replacement for `seat_status.py` and mailbox-body review.
-
-## Protocol Effectiveness Report
-
-For a coordinator cycle wrap or handoff input, run the read-only effectiveness
-report:
-
-```bash
-.venv/bin/python scripts/protocol_effectiveness_report.py --wave 2
-```
-
-Use `--stdout-only` when a summary is needed without writing the JSON artifact.
-The report classifies observed progress, blockers, no-op evidence, stale claims,
-and coordination volume from existing durable evidence. It is an input to the
-next coordinator capacity board, not a wave gate, operator GO, inventory
-authority, mailbox receipt proof, or routing automation.
-
-## Live-seat launch
-
-For CLI seats in one shared working tree:
-
-```bash
-cd /Users/hyungkoookkim/Content
-export CODEX_AGENT_MODE=live-seat
-export CODEX_SEAT=<director|director2|operator|operator2>
-export CODEX_AGENT_ROLE="$CODEX_SEAT"
-export CODEX_CAPABILITY_MODE=seat-local
-export CODEX_MUTATION_SCOPE=seat-owned
-export CODEX_AUTHORITY_SCOPE=seat-owned
-export CODEX_MAILBOX_POLICY=seat-read-consume-intentional
-export CODEX_GIT_POLICY=per-seat-index-for-cursor-status
-export CODEX_CONTEXT_SOURCES=seat-mailbox-owned-files-gate-evidence
-export CODEX_OUTPUT_CONTRACT=seat-artifact-or-operator-request
-export CODEX_DECISION_BOUNDARY=lane-owned-seat
-export CODEX_NEXT_ACTION_POLICY=read-mail-then-act-or-report-idle
-export CODEX_SIDE_EFFECT_POLICY=user-consent-required
-case "$CODEX_SEAT" in
-  director|director2) export CODEX_VERIFICATION_POLICY=request-operator-go ;;
-  operator|operator2) export CODEX_VERIFICATION_POLICY=independent-go-nits-fail ;;
-esac
-CODEX_GIT_DIR="$(env -u GIT_INDEX_FILE git rev-parse --absolute-git-dir)"
-export GIT_INDEX_FILE="$CODEX_GIT_DIR/index-codex-$CODEX_SEAT"
-[ -f "$GIT_INDEX_FILE" ] || env -u GIT_INDEX_FILE git read-tree --index-output="$GIT_INDEX_FILE" HEAD
-codex
-```
-
-Inside the session, start with:
-
-```bash
-.venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py "$CODEX_SEAT" --wave 2
 env -u GIT_INDEX_FILE git log --oneline -5
 ```
 
-For an explicit coordinator session, start with:
+Live seat:
 
 ```bash
-unset CODEX_SEAT GIT_INDEX_FILE
-export CODEX_AGENT_MODE=coordinator
-export CODEX_AGENT_ROLE=coordinator
-export CODEX_CAPABILITY_MODE=capacity-max
-export CODEX_MUTATION_SCOPE=coordination-only
-export CODEX_AUTHORITY_SCOPE=all-scope-reconcile
-export CODEX_MAILBOX_POLICY=all-scope-read-no-consume
-export CODEX_GIT_POLICY=env-u-git-index-or-temp-index
-export CODEX_VERIFICATION_POLICY=reconcile-operator-go-only
-export CODEX_CONTEXT_SOURCES=all-scope-mailbox-inventory-locks-gates
-export CODEX_OUTPUT_CONTRACT=capacity-board-or-single-route
-export CODEX_DECISION_BOUNDARY=all-scope-routing-no-production-fixes
-export CODEX_NEXT_ACTION_POLICY=build-board-reconcile-once
-export CODEX_SIDE_EFFECT_POLICY=user-consent-required
+.venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2
+env -u GIT_INDEX_FILE git log --oneline -5
+```
+
+Coordinator:
+
+```bash
 .venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py coordinator --wave 2
 env -u GIT_INDEX_FILE git log --oneline -5
 .venv/bin/python scripts/wave_gate_check.py 2
 .venv/bin/python scripts/ci_smoke.py
 ```
 
-Compatibility launchers may instead set `CODEX_SEAT=coordinator` and a
-coordinator-local `GIT_INDEX_FILE`; the executable model treats that as
-coordinator mode, not a consumable live-seat cursor:
+Use `<wave>` when the active wave is not 2:
 
 ```bash
-cd /Users/hyungkoookkim/Content
-export CODEX_SEAT=coordinator
-CODEX_GIT_DIR="$(env -u GIT_INDEX_FILE git rev-parse --absolute-git-dir)"
-export GIT_INDEX_FILE="$CODEX_GIT_DIR/index-codex-coordinator"
-[ -f "$GIT_INDEX_FILE" ] || env -u GIT_INDEX_FILE git read-tree --index-output="$GIT_INDEX_FILE" HEAD
-codex
+.venv/bin/python scripts/wave_gate_check.py <wave>
 ```
 
-If a live seat intentionally consumes mailbox events:
+## Mailbox-First Rule
+
+mailbox-first decisions: always check mail before protocol decisions or
+state-asserting writes. Counts are not enough: read the relevant
+`coordination/mailbox/sent/*.md` bodies and let the newest binding event shape
+the decision. Cursor consumption is a separate live-seat mutation:
 
 ```bash
-coordination/bin/consume-events "$CODEX_SEAT"
+coordination/bin/consume-events <seat>
 ```
 
-`consume-events` mutates and stages `coordination/mailbox/seen/<seat>.txt`.
-Inspect the active seat index afterward; a cursor-only consume should stage only
-that seat's cursor file.
-Never run it in readiness bridge mode.
-Never run it for the coordinator; the coordinator is unpinned and reconciles
-from all-time coordinator/all mailbox evidence at the §6f triggers.
+Do not run that command from readiness bridge mode. Do not consume coordinator
+mail.
 
-## Codex hooks
+## Side-Effect Gate
 
-`.codex/hooks.json` registers Codex lifecycle hooks:
+The kernel names `user-gated side effects`: push, lock-claim side effects, paid
+API spend, and pod spend require explicit user consent. Use
+`env -u GIT_INDEX_FILE` for ordinary git and pytest commands unless you are
+deliberately maintaining a seat-local or scoped temporary index.
 
-- `SessionStart`: delegates to the R-START smoke tripwire.
-- `PreToolUse` on `Bash`: delegates to the git-index guard.
-- `PostToolUse` on `Bash|apply_patch|Edit|Write`: delegates to the state and
-  heartbeat updater.
+The coordinator may route and reconcile but does not author behavior-changing
+production fixes. A verified inventory transition still needs an operator
+`verification-report` GO plus executed evidence; a gate script is process
+evidence, not row-correctness proof.
 
-The wrappers bridge `CODEX_SEAT` to the legacy `CLAUDE_SEAT` variable used by
-the shared hook implementation. Codex may require `/hooks` review/trust before
-repo-local hooks run.
+## Optional Tools
 
-## Custom agents
+- `scripts/mailbox_monitor.py --once` or `--watch --interval 5`: read-only
+  mailbox awareness without claiming a seat.
+- `scripts/draft_handoff.py <seat> --wave 2 --smoke --output`: draft a
+  handoff evidence scaffold; refresh live state before finalizing it.
+- `scripts/protocol_effectiveness_report.py`: read-only diagnostics. It does
+  not route work, consume mail, or decide inventory state.
+- `.codex/agents/agentNN.toml`: optional guardrail extensions. They do not
+  replace seat authority, mailbox cursor rules, or user-gated push.
 
-Project custom agents live under `.codex/agents/`:
+## Subagents
 
-- `readiness-bridge`: read-only orientation; never upgrades itself into a seat.
-- `protocol-director`: explicit `director`/`director2` work.
-- `protocol-operator`: explicit `operator`/`operator2` work.
-- `protocol-coordinator`: explicit cross-seat reconciliation.
-- `lane-v-verifier`: read-only independent Lane V verification.
-- `money-gate-reviewer`: read-only reviewer for budget/cost-gate diffs.
+Use project role agents only when the parent prompt asks for that role:
+`protocol-director`, `protocol-operator`, `protocol-coordinator`,
+`lane-v-verifier`, or `money-gate-reviewer`. Keep the parent responsible for
+final synthesis and for any user-gated action.
 
-Use them only when the parent asks for subagents or role-specific delegation.
-Codex does not spawn subagents automatically in readiness bridge mode. For
-explicit live-seat, coordinator, or cycle-advance work, the parent/coordinator
-should use the capacity-max workflow above as the default implementation unless
-the user explicitly asks for a narrower pass.
+## Verification Commands
 
-## Evidence discipline
+Run the narrow command that proves the current claim:
 
-- `scripts/wave_gate_check.py` reports process state; it is not a correctness
-  proof.
-- A `verified` transition requires the protocol's operator
-  `verification-report` GO plus executed evidence.
-- Measurement-backed verdicts require committed instruments and citable
-  `logs/` artifacts.
-- For state-asserting writes, run
-  `env -u GIT_INDEX_FILE git log --oneline -5` immediately before the write and
-  again immediately before commit.
+```bash
+env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_codex_protocol_artifacts.py -q
+env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_codex_protocol_model.py -q
+env -u GIT_INDEX_FILE .venv/bin/python scripts/ci_smoke.py
+.venv/bin/python scripts/wave_gate_check.py <wave>
+```
+
+For a commit or handoff, also inspect scope:
+
+```bash
+env -u GIT_INDEX_FILE git status --short
+env -u GIT_INDEX_FILE git diff --stat
+```

@@ -130,98 +130,73 @@ def test_protocol_coordinator_agent_uses_tight_reconcile_loop():
     assert "one consolidated coordinator-to-all task board" in instructions
 
 
-def test_codex_protocol_skill_points_to_readiness_and_seat_commands():
+def test_codex_adapters_are_kernel_backed_and_do_not_require_default_ceremony():
+    paths = [
+        ROOT / "docs" / "protocol" / "codex" / "continuation.md",
+        ROOT / ".agents" / "skills" / "four-seat-protocol" / "SKILL.md",
+        ROOT / ".agents" / "skills" / "seat-coordinator" / "SKILL.md",
+        ROOT / "AGENTS.md",
+    ]
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        assert "scripts/codex_protocol_model.py" in text
+        assert "durable shared state beats chat memory" in text
+        assert "mailbox-first" in text.lower() or "check mail" in text.lower()
+        assert "proof bundle" not in text.lower()
+        assert "proof-bundle" not in text.lower()
+        assert "Rotating Planning Relay" not in text
+        assert "Idle seats return no-op evidence" not in text
+        assert "every eligible seat" not in text
+
+
+def test_codex_protocol_skill_points_to_runtime_checklists():
     text = (ROOT / ".agents" / "skills" / "four-seat-protocol" / "SKILL.md").read_text(
         encoding="utf-8"
     )
 
     assert "name: four-seat-protocol" in text
+    assert "scripts/codex_protocol_model.py" in text
+    assert "durable shared state beats chat memory" in text
+    assert "Source order" in text
+    assert "Mode selection" in text
+    assert "Readiness bridge" in text
+    assert "Live seat" in text
+    assert "Coordinator" in text
     assert "scripts/continuation_readiness.py" in text
     assert "scripts/mailbox_monitor.py" in text
     assert "scripts/draft_handoff.py" in text
     assert "seat_status.py <seat> --wave 2" in text
     assert "coordination/bin/consume-events <seat>" in text
     assert "Never silently upgrade from bridge mode into a seat." in text
-    assert "Capacity-Max Default Cycle" in text
-    assert "protocol-director" in text
-    assert "protocol-operator" in text
-    assert "scripts/codex_protocol_model.py" in text
-    assert "durable shared state beats chat memory" in text
-    assert "agentNN.toml" in text
-    assert "guardrail extensions" in text
-    assert "Start-Session Inhabitance" in text
-    assert "inhabit the Codex harness as a readiness bridge" in text
-    assert "Runtime Env Contract" in text
-    assert "CODEX_AGENT_MODE" in text
-    assert "CODEX_AGENT_ROLE" in text
-    assert "CODEX_CAPABILITY_MODE" in text
-    assert "CODEX_MUTATION_SCOPE" in text
-    assert "CODEX_AUTHORITY_SCOPE" in text
-    assert "CODEX_MAILBOX_POLICY" in text
-    assert "CODEX_GIT_POLICY" in text
-    assert "CODEX_VERIFICATION_POLICY" in text
-    assert "CODEX_CONTEXT_SOURCES" in text
-    assert "CODEX_OUTPUT_CONTRACT" in text
-    assert "CODEX_DECISION_BOUNDARY" in text
-    assert "CODEX_NEXT_ACTION_POLICY" in text
-    assert "CODEX_SIDE_EFFECT_POLICY" in text
-    assert "seat-read-consume-intentional" in text
-    assert "independent-go-nits-fail" in text
-    assert "unset CODEX_SEAT GIT_INDEX_FILE" in text
-    assert "CODEX_SEAT=coordinator" in text
-    assert "compatibility spelling" in text
-    assert "Rotating Planning Relay" in text
-    assert "starter is step 1" in text
-    assert "coordinator-started plan" in text
-    assert "coordinator -> all four seats -> coordinator" in text
+    assert "env -u GIT_INDEX_FILE" in text
+    assert "Do not consume coordinator mail" in text
     assert "user-consent-required" in text
     assert "Codex-side transplant" not in text
 
 
-def test_codex_continuation_defines_subagent_cycle_default():
+def test_codex_continuation_is_compact_kernel_adapter():
     text = (ROOT / "docs" / "protocol" / "codex" / "continuation.md").read_text(
         encoding="utf-8"
     )
 
-    assert "Capacity-Max Default Workflow" in text
-    assert "capacity-max loop" in text
+    assert "scripts/codex_protocol_model.py" in text
+    assert "durable shared state beats chat memory" in text
+    assert "Runtime modes" in text
+    assert "Readiness bridge" in text
+    assert "Live seat" in text
+    assert "Coordinator" in text
+    assert "scripts/continuation_readiness.py" in text
+    assert "seat_status.py <seat> --wave 2" in text
+    assert "seat_status.py coordinator --wave 2" in text
+    assert "mailbox-first decisions" in text
+    assert "user-gated side effects" in text
     assert "scripts/mailbox_monitor.py" in text
-    assert "active communication monitor" in text
     assert "scripts/draft_handoff.py" in text
+    assert "scripts/protocol_effectiveness_report.py" in text
     assert "protocol-director" in text
     assert "protocol-operator" in text
-    assert "Readiness bridge mode is still read-only and never auto-spawns seats" in text
-    assert "scripts/codex_protocol_model.py" in text
-    assert "Codex CLI harness" in text
-    assert "durable shared state beats chat memory" in text
-    assert "agentNN.toml" in text
-    assert "guardrail extensions" in text
-    assert "Start-session inhabitance" in text
-    assert "inhabit the Codex harness as a readiness bridge" in text
-    assert "Runtime environment contract" in text
-    assert "CODEX_AGENT_MODE" in text
-    assert "CODEX_AGENT_ROLE" in text
-    assert "CODEX_CAPABILITY_MODE" in text
-    assert "CODEX_MUTATION_SCOPE" in text
-    assert "CODEX_AUTHORITY_SCOPE" in text
-    assert "CODEX_MAILBOX_POLICY" in text
-    assert "CODEX_GIT_POLICY" in text
-    assert "CODEX_VERIFICATION_POLICY" in text
-    assert "CODEX_CONTEXT_SOURCES" in text
-    assert "CODEX_OUTPUT_CONTRACT" in text
-    assert "CODEX_DECISION_BOUNDARY" in text
-    assert "CODEX_NEXT_ACTION_POLICY" in text
-    assert "CODEX_SIDE_EFFECT_POLICY" in text
-    assert "all-scope-read-no-consume" in text
-    assert "request-operator-go" in text
-    assert "unset CODEX_SEAT GIT_INDEX_FILE" in text
-    assert "CODEX_SEAT=coordinator" in text
-    assert "compatibility spelling" in text
-    assert "Rotating Planning Relay" in text
-    assert "director -> operator -> director2 -> operator2" in text
-    assert "coordinator -> all four seats -> coordinator" in text
-    assert "one consolidated coordinator-to-all task board" in text
-    assert "user-consent-required" in text
+    assert "scripts/ci_smoke.py" in text
+    assert "scripts/wave_gate_check.py <wave>" in text
     assert "Codex-side transplant" not in text
 
 
@@ -291,7 +266,11 @@ def test_seat_coordinator_skill_defines_noop_fast_path():
         encoding="utf-8"
     )
 
+    assert "scripts/codex_protocol_model.py" in text
+    assert "durable shared state beats chat memory" in text
     assert "seat_status.py coordinator --wave <N>" in text
     assert "No-op fast path" in text
     assert "do not send a new mailbox event" in text
-    assert "ADR-027 means the gate now executes" in text
+    assert "scripts/wave_gate_check.py <wave>" in text
+    assert "Coordinator may write" in text
+    assert "user-consent-required" in text

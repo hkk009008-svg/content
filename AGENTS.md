@@ -19,13 +19,12 @@ executable harness model in `scripts/codex_protocol_model.py`,
 `.agents/skills/four-seat-protocol/SKILL.md` for Codex-native mechanics
 (`update_plan`, Codex subagents, `.codex/agents`, `.codex/hooks.json`, and
 `apply_patch`). Codex agents are readiness bridges by default; they become
-director/operator/coordinator seats only on explicit user instruction. Once
-explicitly in live coordinator/cycle work, Codex uses the capacity-max workflow
-from the continuation doc by default: every eligible seat is oriented and either
-does bounded role work or returns no-op evidence, with one coordinator
-reconciliation at the end. When that full cycle reaches a real completion
-boundary and tasks are complete, the last active Codex seat/coordinator writes a
-durable handoff before transplant or context switch.
+director/operator/coordinator seats only on explicit user instruction. The
+kernel owns the active invariant set: durable shared state beats chat memory,
+mailbox-first decisions, explicit mode, env-u git policy, user-gated side
+effects, coordinator no-production-fix authority, and operator GO requirements.
+Use the continuation adapter for first commands, optional tools, and the narrow
+handoff rule at real transfer boundaries.
 
 Codex start-session inhabitance: fresh sessions inhabit the Codex harness as a
 readiness bridge unless the user or parent prompt names a live seat or
@@ -35,7 +34,9 @@ guardrail extensions and do not replace seat authority, mailbox cursor rules,
 or user-gated push.
 
 Codex live protocol rules are codified in
-`docs/protocol/codex/continuation.md` and mirrored in `.agents/skills/`.
+`scripts/codex_protocol_model.py`, adapted in
+`docs/protocol/codex/continuation.md`, and mirrored as checklists in
+`.agents/skills/`.
 In short: always check mail before protocol decisions or state-asserting
 writes; read the relevant mailbox bodies instead of deciding from counts alone,
 do not consume coordinator mail, route cross-seat work with one consolidated
