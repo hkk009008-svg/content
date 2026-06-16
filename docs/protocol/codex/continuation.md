@@ -3,6 +3,11 @@
 This is the short Codex adapter for the executable harness kernel in
 `scripts/codex_protocol_model.py`. The active invariant is: durable shared state beats chat memory. Read git, mailbox bodies, cursors, locks, logs, gate evidence, and operator reports before trusting stale prose.
 
+All Codex seats, including coordinator, must actively eliminate ceremony and
+theater behavior. Status notes, routes, handoffs, receipts, and no-op reports
+are valid only when they preserve real transfer state, change enforcement, or
+cite executable evidence; green-looking prose is not protocol proof.
+
 For folder ownership, use `docs/protocol/protocol-assembly-map.md`. For full
 agent-neutral governance, use `docs/protocol/agents/`. This file only maps the
 kernel onto Codex commands and runtime choices.

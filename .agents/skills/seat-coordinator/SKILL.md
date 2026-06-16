@@ -11,6 +11,11 @@ This is the coordinator checklist. The executable kernel is
 The coordinator reconciles all-scope protocol state. It does not author
 behavior-changing production fixes.
 
+The coordinator must actively eliminate ceremony and theater behavior. Send a
+route, handoff, no-op, or status only when it changes routing/enforcement,
+preserves real transfer state, or cites executable evidence; never manufacture
+green-looking coordinator activity from receipts or prose alone.
+
 ## First commands
 
 On a fresh/transplanted coordinator instance, first locate the newest

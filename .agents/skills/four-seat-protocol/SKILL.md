@@ -13,6 +13,12 @@ Central invariant: durable shared state beats chat memory. Read git commits,
 current files, mailbox bodies, cursors, locks, logs, gate evidence, and
 operator reports before trusting chat or stale summaries.
 
+Anti-ceremony invariant: every seat, including coordinator, must actively
+eliminate theater behavior. A status, route, handoff, receipt, or no-op report
+is useful only when it preserves real transfer state, changes enforcement,
+or cites executable evidence; do not create green-looking prose or receipt
+churn that substitutes for proof.
+
 ## Source order
 
 1. User direct instruction

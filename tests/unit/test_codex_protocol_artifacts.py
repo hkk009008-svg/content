@@ -449,6 +449,7 @@ def test_codex_continuation_is_compact_kernel_adapter():
     assert "seat_status.py <seat> --wave 2" in text
     assert "seat_status.py coordinator --wave 2" in text
     assert "mailbox-first decisions" in text
+    assert "actively eliminate ceremony" in text
     assert "user-gated side effects" in text
     assert "scripts/mailbox_monitor.py" in text
     assert "scripts/draft_handoff.py" in text
@@ -513,6 +514,7 @@ def test_seat_coordinator_skill_defines_noop_fast_path():
 
     assert "scripts/codex_protocol_model.py" in text
     assert "durable shared state beats chat memory" in text
+    assert "actively eliminate ceremony" in text
     assert "seat_status.py coordinator --wave <N>" in text
     assert "No-op fast path" in text
     assert "do not send a new mailbox event" in text

@@ -41,6 +41,10 @@ Current synthesis:
 - All three current audit mails identify edge hardening, not a total protocol failure.
 - No current director2-authored protocol-audit mail matched the audit terms above.
 - The operator GO at `2026-06-16T18-18-49Z-operator-to-all-verification-report.md` is limited to `010b24d5`; it does not verify later hard-gate commit `33f2de0f`.
+- A later operator Lane V report found the `33f2de0f` handoff-artifact gate
+  still accepts invented `docs/HANDOFF-*.md` strings when the file does not
+  exist. Task 5 below must therefore validate committed/root-relative artifact
+  existence, not just text shape.
 - Current branch snapshot during this plan: `f115c36f coord(cursor): director consume sent audit findings`; working tree was clean before this plan file was added; Wave 3 gate was `MET`; `scripts/ci_smoke.py` was `OK` with the known `verify-addendum` advisory and R2 warnings.
 
 ## File Structure
@@ -54,9 +58,9 @@ Current synthesis:
 - Create `scripts/protocol_mailbox.py`: shared mailbox vocabulary loader for Python scripts.
 - Modify `scripts/check_coordination.py`: import `KNOWN_KINDS` from the shared loader.
 - Modify `scripts/protocol_effectiveness_report.py`: import coordination kinds from the same source.
-- Modify `scripts/protocol_capacity.py`: add packet state, optional structured `handoff_artifact`, and expose no-packet state in JSON.
+- Modify `scripts/protocol_capacity.py`: add packet state, optional structured `handoff_artifact`, validate cited handoff artifact existence under the report root, and expose no-packet state in JSON.
 - Modify `scripts/protocol_capacity_board.py`: add `--require-packets` and clearer empty-board rendering.
-- Modify `tests/unit/test_protocol_capacity_board.py`: cover inactive empty waves, `--require-packets`, and structured handoff artifacts.
+- Modify `tests/unit/test_protocol_capacity_board.py`: cover inactive empty waves, `--require-packets`, structured handoff artifacts, and nonexistent handoff artifact rejection.
 - Create `scripts/protocol_doctor.py`: read-only strict protocol validation wrapper.
 - Create `tests/unit/test_protocol_doctor.py`: monkeypatch command runner and assert strict command ordering and failure propagation.
 - Optional best-version task: modify `coordination/bin/claim-lock`, `coordination/bin/release-lock`, and `tests/unit/test_lock_protocol.py` to require an explicit protocol authorization environment variable before push-capable lock side effects.
@@ -602,7 +606,7 @@ env -u GIT_INDEX_FILE git add scripts/protocol_capacity.py scripts/protocol_capa
 env -u GIT_INDEX_FILE git commit -m "fix(protocol): label inactive capacity boards"
 ```
 
-### Task 5: Structured Handoff Artifact Field
+### Task 5: Structured And Existing Handoff Artifact Field
 
 **Files:**
 - Modify: `scripts/protocol_capacity.py`
@@ -616,6 +620,10 @@ Add:
 
 ```python
 def test_closed_standby_cycle_accepts_structured_handoff_artifact(tmp_path: Path) -> None:
+    artifact = tmp_path / "docs/HANDOFF-coordinator-2026-06-17-wave4-standby.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("# real handoff\n", encoding="utf-8")
+
     for packet in [
         _packet(
             "wave4-join",
@@ -658,7 +666,7 @@ def test_closed_standby_cycle_accepts_structured_handoff_artifact(tmp_path: Path
     assert report.blocking_issues == []
 
 
-def test_closed_standby_cycle_rejects_bad_structured_handoff_artifact(tmp_path: Path) -> None:
+def test_closed_standby_cycle_rejects_bad_structured_handoff_artifact_path(tmp_path: Path) -> None:
     _write_packet(
         tmp_path,
         _packet(
@@ -679,6 +687,29 @@ def test_closed_standby_cycle_rejects_bad_structured_handoff_artifact(tmp_path: 
 
     messages = "\n".join(issue["message"] for issue in report.blocking_issues)
     assert "handoff_artifact must cite docs/HANDOFF-*.md" in messages
+
+
+def test_closed_standby_cycle_rejects_nonexistent_handoff_artifact(tmp_path: Path) -> None:
+    _write_packet(
+        tmp_path,
+        _packet(
+            "wave4-join",
+            "coordinator",
+            packet_type="coordinator-join",
+            status="done",
+            done_evidence=[
+                "capacity board valid",
+                "smoke OK",
+                "next trigger: standby; no routed next work",
+            ],
+            handoff_artifact="docs/HANDOFF-coordinator-2026-06-17-wave4-standby.md",
+        ),
+    )
+
+    report = capacity.collect_capacity_report(tmp_path, 4)
+
+    messages = "\n".join(issue["message"] for issue in report.blocking_issues)
+    assert "handoff_artifact file missing" in messages
 ```
 
 - [ ] **Step 2: Run RED tests**
@@ -706,7 +737,7 @@ In `_parse_packet`, parse it as:
         handoff_artifact = None
 ```
 
-- [ ] **Step 4: Use structured artifact in join validation**
+- [ ] **Step 4: Use structured artifact and validate file existence in join validation**
 
 In `_validate_join_gate`, before checking `HANDOFF_ARTIFACT_RE`, add:
 
@@ -715,6 +746,12 @@ In `_validate_join_gate`, before checking `HANDOFF_ARTIFACT_RE`, add:
             if structured_handoff and not HANDOFF_ARTIFACT_RE.search(structured_handoff):
                 missing.append("handoff_artifact must cite docs/HANDOFF-*.md")
             if (
+                structured_handoff
+                and HANDOFF_ARTIFACT_RE.search(structured_handoff)
+                and not (root / structured_handoff).is_file()
+            ):
+                missing.append("handoff_artifact file missing")
+            if (
                 HANDOFF_REQUIRED_RE.search(evidence)
                 and not structured_handoff
                 and not HANDOFF_ARTIFACT_RE.search(evidence)
@@ -722,7 +759,11 @@ In `_validate_join_gate`, before checking `HANDOFF_ARTIFACT_RE`, add:
                 missing.append("handoff artifact")
 ```
 
-Remove the old two-condition block to avoid duplicate messages.
+Thread the report root into join validation cleanly instead of importing global
+repo state. A good shape is to change `_validate_join_gate(packets)` to
+`_validate_join_gate(packets, root)` and call it from `_validate_packets` or
+from `collect_capacity_report` where `root_path` is already available. Remove
+the old two-condition block to avoid duplicate messages.
 
 - [ ] **Step 5: Run GREEN tests**
 
