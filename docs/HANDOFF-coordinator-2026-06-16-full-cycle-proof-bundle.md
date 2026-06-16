@@ -51,8 +51,10 @@ Fresh all-seat status before this handoff showed:
   - `2026-06-16T06-02-09Z-operator2-to-all-status.md`
 - `operator`: unread `1`
   - `2026-06-16T06-02-09Z-operator2-to-all-status.md`
-- `director2`: unread `2` at first refresh, then consumed through
-  `2026-06-16T06:02:09Z` after reading the GO report and all-seat status.
+- `director2`: unread `2` at first refresh, then consumed the GO report and
+  operator2 all-seat status through `2026-06-16T06:02:09Z`. The matching
+  director2 handoff status event was self-consumed through
+  `2026-06-16T06:06:26Z` in the handoff refresh commit.
 - `operator2`: unread `0`, cursor `2026-06-16T06:02:09Z`.
 
 Read-only mailbox monitor after the operator2 GO commit initially showed:
@@ -69,14 +71,13 @@ operator2 unread=0
 The remaining unread mail for `director` and `operator` is awareness/status
 mail, not blocking Task 3 completion.
 
-After this handoff draft was written, an additional uncommitted director2
-all-seat handoff status appeared:
+After this handoff draft was written, an additional director2 all-seat handoff
+status was created:
 
 - `coordination/mailbox/sent/2026-06-16T06-06-26Z-director2-to-all-status.md`
 
-That status restates the same Task 3 GO/handoff conclusion. Treat it as live
-mailbox state to preserve or commit from the appropriate seat/coordinator
-context, not as a new Task 3 blocker.
+That status restates the same Task 3 GO/handoff conclusion and is committed
+with this refresh. It is not a new Task 3 blocker.
 
 ## Task 3 result
 
@@ -124,7 +125,7 @@ env -u GIT_INDEX_FILE .venv/bin/python scripts/check_coordination.py
 exit 0
 ```
 
-## Dirty tree to preserve
+## Dirty Tree And Commit Scope
 
 Before this handoff correction, the shared tree still had unrelated state:
 
@@ -135,9 +136,13 @@ Before this handoff correction, the shared tree still had unrelated state:
 ?? coordination/mailbox/sent/2026-06-16T06-06-26Z-director2-to-all-status.md
 ```
 
-This handoff correction intentionally folds only this handoff file. The dirty
-seat cursors and director2 all-seat status are live protocol state to preserve;
-do not sweep them into unrelated commits.
+This handoff refresh intentionally folds only:
+
+- `coordination/mailbox/seen/director2.txt`
+- `coordination/mailbox/sent/2026-06-16T06-06-26Z-director2-to-all-status.md`
+- `docs/HANDOFF-coordinator-2026-06-16-full-cycle-proof-bundle.md`
+
+Leave the unrelated `operator` cursor and root `SEAT_PROTOCOL.md` untouched.
 
 Use explicit pathspecs and `env -u GIT_INDEX_FILE` for ordinary git/pytest.
 
