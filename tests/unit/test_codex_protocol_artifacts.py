@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
 import tomllib
 from pathlib import Path
@@ -44,6 +45,14 @@ def test_codex_hook_scripts_are_native_and_bridge_codex_seat():
 def test_codex_presence_session_marker_is_gitignored():
     text = (ROOT / ".gitignore").read_text(encoding="utf-8")
     assert ".codex/presence-seat.*" in text
+
+
+def test_codex_hook_scripts_are_executable():
+    hooks_dir = ROOT / ".codex" / "hooks"
+
+    for name in ("session-smoke.sh", "guard-git-index.sh", "update-state.sh"):
+        mode = (hooks_dir / name).stat().st_mode
+        assert mode & stat.S_IXUSR
 
 
 def test_session_smoke_does_not_fallback_to_system_python(tmp_path):
