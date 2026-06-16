@@ -54,6 +54,7 @@ coordination/mailbox/sent/2026-06-16T20-08-24Z-director-to-operator-verify-reque
 Director2 sent:
 
 ```text
+06a20f97 director2(coord): resolve mailbox cli NITS scope
 coordination/mailbox/sent/2026-06-16T20-25-32Z-director2-to-operator2-coordination.md
 ```
 
@@ -67,14 +68,40 @@ Resolution:
   separate operator verdict:
   `3d141d5c operator(verify): FAIL git-index guard quote-aware`.
 
+## Coordinator Repair Route Read
+
+After `06a20f97` landed, director2 read and consumed the coordinator repair
+route:
+
+```text
+coordination/mailbox/sent/2026-06-16T20-25-30Z-coordinator-to-all-coordination.md
+director2 cursor: 2026-06-16T20:21:55Z -> 2026-06-16T20:25:30Z
+```
+
+That route's director2 assignment is already satisfied by `06a20f97`: it asked
+director2 to read the operator2 NITS body and send a narrow NITS-resolution
+note or verify-request explaining the process resolution for the extra Task 1
+mailbox artifact in `1dbeca53`, without deleting the artifact or editing
+mailbox CLI behavior unless a real behavior defect was found.
+
 ## Dirty Caveats
 
 Dirty / peer-owned state observed while preparing this handoff:
 
 ```text
- M coordination/mailbox/seen/director.txt
+ M coordination/capacity/packets/wave3-harness-bestversion-coordinator-route.json
+ M coordination/capacity/packets/wave3-harness-bestversion-director-hook-parse.json
+ M coordination/capacity/packets/wave3-harness-bestversion-director2-mailbox-cli.json
+ M coordination/capacity/packets/wave3-harness-bestversion-operator-hook-lanev.json
+ M coordination/capacity/packets/wave3-harness-bestversion-operator2-mailbox-cli-lanev.json
+?? coordination/capacity/packets/wave3-harness-bestversion-coordinator-join.json
+?? coordination/capacity/packets/wave3-harness-bestversion-director-hook-env-bypass-repair.json
+?? coordination/capacity/packets/wave3-harness-bestversion-director2-mailbox-cli-nits-resolution.json
+?? coordination/capacity/packets/wave3-harness-bestversion-operator-hook-repair-lanev.json
+?? coordination/capacity/packets/wave3-harness-bestversion-operator2-mailbox-cli-nits-reread.json
+?? coordination/capacity/packets/wave3-harness-bestversion-repair-coordinator-route.json
+?? coordination/mailbox/sent/2026-06-16T20-25-30Z-coordinator-to-all-coordination.md
 ?? docs/HANDOFF-coordinator-2026-06-17-handoff-traversal-fail.md
-?? docs/HANDOFF-director-2026-06-17-harness-bestversion-lanev-pending.md
 ```
 
 Do not commit, revert, or clean those from a director2 context.
@@ -85,6 +112,7 @@ edit, or inventory transition was opened by this handoff.
 ## Exact Next Trigger
 
 - `continue as operator2` to run the narrow NITS-resolution recheck against
+  `06a20f97` and
   `coordination/mailbox/sent/2026-06-16T20-25-32Z-director2-to-operator2-coordination.md`
   and issue final GO/NITS/FAIL for Task 2.
 - `continue as director` to repair the separate Pair-A Task 1 FAIL reported in
