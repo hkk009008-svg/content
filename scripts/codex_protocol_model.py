@@ -138,6 +138,15 @@ RUNTIME_ENV_VARIABLES = (
     ),
 )
 
+SEAT_CONTRACT_FIELDS = (
+    ("S-ROLE", "role/env"),
+    ("S-OBJ", "objective"),
+    ("S-PERM", "permissions"),
+    ("S-SCOPE", "scope"),
+    ("S-VERIFY", "verification"),
+    ("S-DONE", "done"),
+)
+
 START_SESSION_STEPS = (
     "Start as readiness bridge unless an explicit seat or coordinator instruction is present.",
     "Run scripts/continuation_readiness.py to load the Codex Harness Model.",
@@ -510,6 +519,32 @@ def render_runtime_env_contract(environ: Mapping[str, str] | None = None) -> str
             "- CODEX_SIDE_EFFECT_POLICY is always user-consent-required for push, lock-claim side effects, paid API spend, and pod spend.",
         )
     )
+    return "\n".join(lines)
+
+
+def render_seat_contract(
+    environ: Mapping[str, str] | None = None,
+    *,
+    objective: str = "(unset)",
+    permissions: str = "(unset)",
+    scope: str = "(unset)",
+    verification: str = "(unset)",
+    done: str = "(unset)",
+) -> str:
+    """Return the six-field live-seat contract without touching durable state."""
+    values = infer_runtime_env(environ)
+    role_value = f"{values['CODEX_AGENT_MODE']} / {values['CODEX_AGENT_ROLE']}"
+    lines = [
+        "Seat contract:",
+        f"S-ROLE: {role_value}",
+        f"S-OBJ: {objective}",
+        f"S-PERM: {permissions}",
+        f"S-SCOPE: {scope}",
+        f"S-VERIFY: {verification}",
+        f"S-DONE: {done}",
+        "source order: user > git > mailbox > handoff > defaults",
+        "side effects: push, lock, paid API spend, and pod spend require user consent",
+    ]
     return "\n".join(lines)
 
 

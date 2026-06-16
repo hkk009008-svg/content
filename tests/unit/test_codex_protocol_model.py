@@ -111,6 +111,28 @@ def test_runtime_env_contract_infers_live_seat_and_user_gated_side_effects() -> 
     assert "env does not authorize push, lock-claim side effects, paid API spend, or pod spend" in text
 
 
+def test_render_seat_contract_includes_six_fields_and_source_order() -> None:
+    text = model.render_seat_contract(
+        {
+            "CODEX_SEAT": "director2",
+            "GIT_INDEX_FILE": "/repo/.git/index-codex-director2",
+        },
+        objective="draft R-BRIEF",
+        permissions="edit=yes commit=yes push=no spend=no lock=no",
+        scope="docs/superpowers/briefs/example.md",
+        verification="pytest tests/unit/test_example.py -q",
+        done="HEAD changed-files unread verification push next-trigger",
+    )
+
+    assert "S-ROLE: live-seat / director2" in text
+    assert "S-OBJ: draft R-BRIEF" in text
+    assert "S-PERM: edit=yes commit=yes push=no spend=no lock=no" in text
+    assert "S-SCOPE: docs/superpowers/briefs/example.md" in text
+    assert "S-VERIFY: pytest tests/unit/test_example.py -q" in text
+    assert "S-DONE: HEAD changed-files unread verification push next-trigger" in text
+    assert "source order: user > git > mailbox > handoff > defaults" in text
+
+
 def test_runtime_env_contract_models_operator_and_specialist_authority() -> None:
     operator_text = model.render_runtime_env_contract(
         {
