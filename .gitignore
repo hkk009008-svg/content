@@ -112,3 +112,4 @@ STATUS.md
 # v5.7 M1 — real-time presence signals (per-clone, like STATE.md; not source)
 coordination/presence/
 .claude/presence-seat.*
+.codex/presence-seat.*

@@ -41,6 +41,11 @@ def test_codex_hook_scripts_are_native_and_bridge_codex_seat():
     assert ".codex/hooks" in update_state
 
 
+def test_codex_presence_session_marker_is_gitignored():
+    text = (ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert ".codex/presence-seat.*" in text
+
+
 def test_session_smoke_does_not_fallback_to_system_python(tmp_path):
     """Missing project venv should not run system python with missing deps."""
     hooks_dir = tmp_path / ".claude" / "hooks"
