@@ -37,6 +37,12 @@ SEATS = ("director", "director2", "operator", "operator2")
 DIRECTOR_SEATS = ("director", "director2")
 OPERATOR_SEATS = ("operator", "operator2")
 READ_ONLY_VERIFIER_ROLES = ("lane-v-verifier", "money-gate-reviewer")
+SPAWNED_ROLE_AGENT_ROLES = (
+    "protocol-coordinator",
+    "protocol-director",
+    "protocol-operator",
+    *READ_ONLY_VERIFIER_ROLES,
+)
 
 CORE_AGENT_MODULES = (
     "lane-v-verifier.toml",
@@ -99,6 +105,31 @@ RUNTIME_ENV_VARIABLES = (
         "CODEX_VERIFICATION_POLICY",
         "report-evidence-only | request-operator-go | independent-go-nits-fail | reconcile-operator-go-only | read-only-review-no-go | parent-scoped-no-go",
         "documents whether this process can verify, request verification, or only report evidence",
+    ),
+    (
+        "CODEX_CONTEXT_SOURCES",
+        "repo-docs-mailbox-gates-readonly | seat-mailbox-owned-files-gate-evidence | all-scope-mailbox-inventory-locks-gates | parent-prompt-plus-allowed-artifacts",
+        "documents which durable context this part should read before acting",
+    ),
+    (
+        "CODEX_OUTPUT_CONTRACT",
+        "readiness-report-and-blockers | seat-artifact-or-operator-request | capacity-board-or-single-route | bounded-findings-to-parent",
+        "documents what this part owes back to the whole before stopping",
+    ),
+    (
+        "CODEX_DECISION_BOUNDARY",
+        "no-seat-authority | lane-owned-seat | all-scope-routing-no-production-fixes | parent-scoped-no-seat-authority",
+        "documents which decisions this part may make without upgrading roles",
+    ),
+    (
+        "CODEX_NEXT_ACTION_POLICY",
+        "report-then-stop-or-request-role | read-mail-then-act-or-report-idle | build-board-reconcile-once | return-evidence-then-stop",
+        "documents the default next move after orientation",
+    ),
+    (
+        "CODEX_SIDE_EFFECT_POLICY",
+        "user-consent-required",
+        "documents that push, lock-claim side effects, paid API spend, and pod spend require user consent outside env",
     ),
     (
         "GIT_INDEX_FILE",
@@ -260,6 +291,19 @@ def render_agent_extension_summary(agent_names: list[str] | tuple[str, ...] = ()
     return "\n".join(lines)
 
 
+def _mode_from_role(role: str) -> str:
+    """Infer a runtime mode from an explicit role when CODEX_AGENT_MODE is unset."""
+    if role in SEATS:
+        return "live-seat"
+    if role == "coordinator":
+        return "coordinator"
+    if role in SPAWNED_ROLE_AGENT_ROLES:
+        return "subagent"
+    if role == "readiness-bridge":
+        return "readiness-bridge"
+    return ""
+
+
 def infer_runtime_env(environ: Mapping[str, str] | None = None) -> dict[str, str]:
     """Infer the Codex runtime contract from an environment-like mapping."""
     env = environ or {}
@@ -269,6 +313,10 @@ def infer_runtime_env(environ: Mapping[str, str] | None = None) -> dict[str, str
 
     if explicit_mode:
         mode = explicit_mode
+    elif explicit_role:
+        mode = _mode_from_role(explicit_role) or (
+            "live-seat" if seat in SEATS else "readiness-bridge"
+        )
     elif seat in SEATS:
         mode = "live-seat"
     else:
@@ -331,6 +379,30 @@ def infer_runtime_env(environ: Mapping[str, str] | None = None) -> dict[str, str
         "coordinator": "reconcile-operator-go-only",
         "subagent": "parent-scoped-no-go",
     }
+    context_defaults = {
+        "readiness-bridge": "repo-docs-mailbox-gates-readonly",
+        "live-seat": "seat-mailbox-owned-files-gate-evidence",
+        "coordinator": "all-scope-mailbox-inventory-locks-gates",
+        "subagent": "parent-prompt-plus-allowed-artifacts",
+    }
+    output_defaults = {
+        "readiness-bridge": "readiness-report-and-blockers",
+        "live-seat": "seat-artifact-or-operator-request",
+        "coordinator": "capacity-board-or-single-route",
+        "subagent": "bounded-findings-to-parent",
+    }
+    decision_defaults = {
+        "readiness-bridge": "no-seat-authority",
+        "live-seat": "lane-owned-seat",
+        "coordinator": "all-scope-routing-no-production-fixes",
+        "subagent": "parent-scoped-no-seat-authority",
+    }
+    next_action_defaults = {
+        "readiness-bridge": "report-then-stop-or-request-role",
+        "live-seat": "read-mail-then-act-or-report-idle",
+        "coordinator": "build-board-reconcile-once",
+        "subagent": "return-evidence-then-stop",
+    }
     if role in DIRECTOR_SEATS:
         verification_default = "request-operator-go"
     elif role in OPERATOR_SEATS:
@@ -344,6 +416,22 @@ def infer_runtime_env(environ: Mapping[str, str] | None = None) -> dict[str, str
     mailbox = env.get("CODEX_MAILBOX_POLICY", mailbox_defaults.get(mode, "parent-scoped"))
     git_policy = env.get("CODEX_GIT_POLICY", git_defaults.get(mode, "env-u-git-index-parent-scoped"))
     verification = env.get("CODEX_VERIFICATION_POLICY", verification_default)
+    context_sources = env.get(
+        "CODEX_CONTEXT_SOURCES",
+        context_defaults.get(mode, "parent-prompt-plus-allowed-artifacts"),
+    )
+    output_contract = env.get(
+        "CODEX_OUTPUT_CONTRACT",
+        output_defaults.get(mode, "bounded-findings-to-parent"),
+    )
+    decision_boundary = env.get(
+        "CODEX_DECISION_BOUNDARY",
+        decision_defaults.get(mode, "parent-scoped-no-seat-authority"),
+    )
+    next_action = env.get(
+        "CODEX_NEXT_ACTION_POLICY",
+        next_action_defaults.get(mode, "return-evidence-then-stop"),
+    )
 
     return {
         "CODEX_AGENT_MODE": mode,
@@ -355,6 +443,11 @@ def infer_runtime_env(environ: Mapping[str, str] | None = None) -> dict[str, str
         "CODEX_MAILBOX_POLICY": mailbox,
         "CODEX_GIT_POLICY": git_policy,
         "CODEX_VERIFICATION_POLICY": verification,
+        "CODEX_CONTEXT_SOURCES": context_sources,
+        "CODEX_OUTPUT_CONTRACT": output_contract,
+        "CODEX_DECISION_BOUNDARY": decision_boundary,
+        "CODEX_NEXT_ACTION_POLICY": next_action,
+        "CODEX_SIDE_EFFECT_POLICY": "user-consent-required",
         "GIT_INDEX_FILE": env.get("GIT_INDEX_FILE", "(unset)"),
     }
 
@@ -373,9 +466,11 @@ def render_runtime_env_contract(environ: Mapping[str, str] | None = None) -> str
             "contract rules:",
             "- readiness-bridge is the default when CODEX_AGENT_MODE and CODEX_SEAT are unset.",
             "- CODEX_SEAT selects a live seat only for director/director2/operator/operator2.",
+            "- CODEX_AGENT_ROLE can infer coordinator, live-seat, or subagent mode when CODEX_AGENT_MODE is unset.",
             "- behavior variables are inferred from mode and role unless explicitly narrowed by the launcher.",
             "- coordinator remains unpinned; no coordinator cursor is consumed.",
             "- env does not authorize push, lock-claim side effects, paid API spend, or pod spend; user consent still gates them.",
+            "- CODEX_SIDE_EFFECT_POLICY is always user-consent-required for push, lock-claim side effects, paid API spend, and pod spend.",
         )
     )
     return "\n".join(lines)
@@ -418,9 +513,8 @@ def render_surface_summary() -> str:
         "core agent modules: " + ", ".join(CORE_AGENT_MODULES),
         "coordinator invariants: " + "; ".join(COORDINATOR_INVARIANTS),
         "agent extension namespace: .codex/agents/agentNN.toml guardrail extensions",
-        "runtime env contract: CODEX_AGENT_MODE, CODEX_AGENT_ROLE, CODEX_SEAT, "
-        "CODEX_CAPABILITY_MODE, CODEX_MUTATION_SCOPE, CODEX_AUTHORITY_SCOPE, "
-        "CODEX_MAILBOX_POLICY, CODEX_GIT_POLICY, CODEX_VERIFICATION_POLICY, GIT_INDEX_FILE",
+        "runtime env contract: "
+        + ", ".join(name for name, _, _ in RUNTIME_ENV_VARIABLES),
         "Codex surfaces:",
     ]
     lines.extend(f"- {path}: {purpose}" for path, purpose in CODEX_SURFACES)

@@ -68,6 +68,11 @@ def test_render_codex_reports_harness_model_artifacts(tmp_path, monkeypatch, cap
         "CODEX_MAILBOX_POLICY",
         "CODEX_GIT_POLICY",
         "CODEX_VERIFICATION_POLICY",
+        "CODEX_CONTEXT_SOURCES",
+        "CODEX_OUTPUT_CONTRACT",
+        "CODEX_DECISION_BOUNDARY",
+        "CODEX_NEXT_ACTION_POLICY",
+        "CODEX_SIDE_EFFECT_POLICY",
         "GIT_INDEX_FILE",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -102,6 +107,11 @@ def test_render_codex_reports_harness_model_artifacts(tmp_path, monkeypatch, cap
     assert "CODEX_MAILBOX_POLICY=read-only-no-consume" in out
     assert "CODEX_GIT_POLICY=env-u-git-index-read-only" in out
     assert "CODEX_VERIFICATION_POLICY=report-evidence-only" in out
+    assert "CODEX_CONTEXT_SOURCES=repo-docs-mailbox-gates-readonly" in out
+    assert "CODEX_OUTPUT_CONTRACT=readiness-report-and-blockers" in out
+    assert "CODEX_DECISION_BOUNDARY=no-seat-authority" in out
+    assert "CODEX_NEXT_ACTION_POLICY=report-then-stop-or-request-role" in out
+    assert "CODEX_SIDE_EFFECT_POLICY=user-consent-required" in out
     assert "inhabit the Codex harness as readiness bridge" in out
     assert "explicit seat or coordinator instruction" in out
     assert "readiness-bridge.toml" in out

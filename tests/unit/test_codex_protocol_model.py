@@ -87,6 +87,11 @@ def test_runtime_env_contract_infers_live_seat_and_user_gated_side_effects() -> 
     assert "CODEX_MAILBOX_POLICY=seat-read-consume-intentional" in text
     assert "CODEX_GIT_POLICY=per-seat-index-for-cursor-status" in text
     assert "CODEX_VERIFICATION_POLICY=request-operator-go" in text
+    assert "CODEX_CONTEXT_SOURCES=seat-mailbox-owned-files-gate-evidence" in text
+    assert "CODEX_OUTPUT_CONTRACT=seat-artifact-or-operator-request" in text
+    assert "CODEX_DECISION_BOUNDARY=lane-owned-seat" in text
+    assert "CODEX_NEXT_ACTION_POLICY=read-mail-then-act-or-report-idle" in text
+    assert "CODEX_SIDE_EFFECT_POLICY=user-consent-required" in text
     assert "GIT_INDEX_FILE=/repo/.git/index-codex-director" in text
     assert "env does not authorize push, lock-claim side effects, paid API spend, or pod spend" in text
 
@@ -115,6 +120,51 @@ def test_runtime_env_contract_models_operator_and_specialist_authority() -> None
     assert "CODEX_AUTHORITY_SCOPE=parent-scoped" in specialist_text
     assert "CODEX_MAILBOX_POLICY=parent-scoped" in specialist_text
     assert "CODEX_VERIFICATION_POLICY=read-only-review-no-go" in specialist_text
+    assert "CODEX_CONTEXT_SOURCES=parent-prompt-plus-allowed-artifacts" in specialist_text
+    assert "CODEX_OUTPUT_CONTRACT=bounded-findings-to-parent" in specialist_text
+    assert "CODEX_DECISION_BOUNDARY=parent-scoped-no-seat-authority" in specialist_text
+    assert "CODEX_NEXT_ACTION_POLICY=return-evidence-then-stop" in specialist_text
+
+
+def test_runtime_env_contract_infers_mode_from_explicit_role() -> None:
+    coordinator_text = model.render_runtime_env_contract(
+        {
+            "CODEX_AGENT_ROLE": "coordinator",
+        }
+    )
+    verifier_text = model.render_runtime_env_contract(
+        {
+            "CODEX_AGENT_ROLE": "money-gate-reviewer",
+        }
+    )
+
+    assert "CODEX_AGENT_MODE=coordinator" in coordinator_text
+    assert "CODEX_CAPABILITY_MODE=capacity-max" in coordinator_text
+    assert "CODEX_MUTATION_SCOPE=coordination-only" in coordinator_text
+    assert "CODEX_AUTHORITY_SCOPE=all-scope-reconcile" in coordinator_text
+    assert "CODEX_MAILBOX_POLICY=all-scope-read-no-consume" in coordinator_text
+    assert "CODEX_VERIFICATION_POLICY=reconcile-operator-go-only" in coordinator_text
+    assert "CODEX_CONTEXT_SOURCES=all-scope-mailbox-inventory-locks-gates" in coordinator_text
+    assert "CODEX_OUTPUT_CONTRACT=capacity-board-or-single-route" in coordinator_text
+    assert "CODEX_DECISION_BOUNDARY=all-scope-routing-no-production-fixes" in coordinator_text
+    assert "CODEX_NEXT_ACTION_POLICY=build-board-reconcile-once" in coordinator_text
+
+    assert "CODEX_AGENT_MODE=subagent" in verifier_text
+    assert "CODEX_AGENT_ROLE=money-gate-reviewer" in verifier_text
+    assert "CODEX_MUTATION_SCOPE=read-only-verification" in verifier_text
+    assert "CODEX_VERIFICATION_POLICY=read-only-review-no-go" in verifier_text
+
+
+def test_runtime_env_contract_codifies_side_effect_policy() -> None:
+    text = model.render_runtime_env_contract(
+        {
+            "CODEX_SEAT": "operator",
+            "GIT_INDEX_FILE": "/repo/.git/index-codex-operator",
+        }
+    )
+
+    assert "CODEX_SIDE_EFFECT_POLICY=user-consent-required" in text
+    assert "push, lock-claim side effects, paid API spend, and pod spend" in text
 
 
 def test_runtime_env_contract_defaults_to_readiness_and_models_coordinator() -> None:
@@ -136,6 +186,11 @@ def test_runtime_env_contract_defaults_to_readiness_and_models_coordinator() -> 
     assert "CODEX_MAILBOX_POLICY=read-only-no-consume" in readiness_text
     assert "CODEX_GIT_POLICY=env-u-git-index-read-only" in readiness_text
     assert "CODEX_VERIFICATION_POLICY=report-evidence-only" in readiness_text
+    assert "CODEX_CONTEXT_SOURCES=repo-docs-mailbox-gates-readonly" in readiness_text
+    assert "CODEX_OUTPUT_CONTRACT=readiness-report-and-blockers" in readiness_text
+    assert "CODEX_DECISION_BOUNDARY=no-seat-authority" in readiness_text
+    assert "CODEX_NEXT_ACTION_POLICY=report-then-stop-or-request-role" in readiness_text
+    assert "CODEX_SIDE_EFFECT_POLICY=user-consent-required" in readiness_text
     assert "GIT_INDEX_FILE=(unset)" in readiness_text
 
     assert "CODEX_AGENT_MODE=coordinator" in coordinator_text
@@ -147,6 +202,10 @@ def test_runtime_env_contract_defaults_to_readiness_and_models_coordinator() -> 
     assert "CODEX_MAILBOX_POLICY=all-scope-read-no-consume" in coordinator_text
     assert "CODEX_GIT_POLICY=env-u-git-index-or-temp-index" in coordinator_text
     assert "CODEX_VERIFICATION_POLICY=reconcile-operator-go-only" in coordinator_text
+    assert "CODEX_CONTEXT_SOURCES=all-scope-mailbox-inventory-locks-gates" in coordinator_text
+    assert "CODEX_OUTPUT_CONTRACT=capacity-board-or-single-route" in coordinator_text
+    assert "CODEX_DECISION_BOUNDARY=all-scope-routing-no-production-fixes" in coordinator_text
+    assert "CODEX_NEXT_ACTION_POLICY=build-board-reconcile-once" in coordinator_text
     assert "coordinator remains unpinned; no coordinator cursor is consumed" in coordinator_text
 
 

@@ -180,6 +180,21 @@ values.
   `request-operator-go`, `independent-go-nits-fail`,
   `reconcile-operator-go-only`, `read-only-review-no-go`, or
   `parent-scoped-no-go`.
+- `CODEX_CONTEXT_SOURCES`: `repo-docs-mailbox-gates-readonly`,
+  `seat-mailbox-owned-files-gate-evidence`,
+  `all-scope-mailbox-inventory-locks-gates`, or
+  `parent-prompt-plus-allowed-artifacts`.
+- `CODEX_OUTPUT_CONTRACT`: `readiness-report-and-blockers`,
+  `seat-artifact-or-operator-request`, `capacity-board-or-single-route`, or
+  `bounded-findings-to-parent`.
+- `CODEX_DECISION_BOUNDARY`: `no-seat-authority`, `lane-owned-seat`,
+  `all-scope-routing-no-production-fixes`, or
+  `parent-scoped-no-seat-authority`.
+- `CODEX_NEXT_ACTION_POLICY`: `report-then-stop-or-request-role`,
+  `read-mail-then-act-or-report-idle`, `build-board-reconcile-once`, or
+  `return-evidence-then-stop`.
+- `CODEX_SIDE_EFFECT_POLICY`: `user-consent-required`; push, lock-claim side
+  effects, paid API spend, and pod spend remain user-gated outside env.
 - `GIT_INDEX_FILE`: per-seat index path for live-seat cursor/status staging.
 
 Default mappings:
@@ -189,27 +204,47 @@ Default mappings:
   `CODEX_MUTATION_SCOPE=none`, `CODEX_AUTHORITY_SCOPE=report-only`,
   `CODEX_MAILBOX_POLICY=read-only-no-consume`,
   `CODEX_GIT_POLICY=env-u-git-index-read-only`,
-  `CODEX_VERIFICATION_POLICY=report-evidence-only`
+  `CODEX_VERIFICATION_POLICY=report-evidence-only`,
+  `CODEX_CONTEXT_SOURCES=repo-docs-mailbox-gates-readonly`,
+  `CODEX_OUTPUT_CONTRACT=readiness-report-and-blockers`,
+  `CODEX_DECISION_BOUNDARY=no-seat-authority`,
+  `CODEX_NEXT_ACTION_POLICY=report-then-stop-or-request-role`,
+  `CODEX_SIDE_EFFECT_POLICY=user-consent-required`
 - `CODEX_SEAT=<seat>` -> `CODEX_AGENT_MODE=live-seat`,
   `CODEX_AGENT_ROLE=<seat>`, `CODEX_CAPABILITY_MODE=seat-local`,
   `CODEX_MUTATION_SCOPE=seat-owned`, `CODEX_AUTHORITY_SCOPE=seat-owned`,
   `CODEX_MAILBOX_POLICY=seat-read-consume-intentional`,
   `CODEX_GIT_POLICY=per-seat-index-for-cursor-status`,
   `CODEX_VERIFICATION_POLICY=request-operator-go` for director seats or
-  `independent-go-nits-fail` for operator seats
+  `independent-go-nits-fail` for operator seats,
+  `CODEX_CONTEXT_SOURCES=seat-mailbox-owned-files-gate-evidence`,
+  `CODEX_OUTPUT_CONTRACT=seat-artifact-or-operator-request`,
+  `CODEX_DECISION_BOUNDARY=lane-owned-seat`,
+  `CODEX_NEXT_ACTION_POLICY=read-mail-then-act-or-report-idle`,
+  `CODEX_SIDE_EFFECT_POLICY=user-consent-required`
 - coordinator -> `CODEX_AGENT_MODE=coordinator`,
   `CODEX_AGENT_ROLE=coordinator`, `CODEX_CAPABILITY_MODE=capacity-max`,
   `CODEX_MUTATION_SCOPE=coordination-only`,
   `CODEX_AUTHORITY_SCOPE=all-scope-reconcile`,
   `CODEX_MAILBOX_POLICY=all-scope-read-no-consume`,
   `CODEX_GIT_POLICY=env-u-git-index-or-temp-index`,
-  `CODEX_VERIFICATION_POLICY=reconcile-operator-go-only`
+  `CODEX_VERIFICATION_POLICY=reconcile-operator-go-only`,
+  `CODEX_CONTEXT_SOURCES=all-scope-mailbox-inventory-locks-gates`,
+  `CODEX_OUTPUT_CONTRACT=capacity-board-or-single-route`,
+  `CODEX_DECISION_BOUNDARY=all-scope-routing-no-production-fixes`,
+  `CODEX_NEXT_ACTION_POLICY=build-board-reconcile-once`,
+  `CODEX_SIDE_EFFECT_POLICY=user-consent-required`
 
 Coordinator launch should first `unset CODEX_SEAT GIT_INDEX_FILE`; if a stale
 seat env remains, the executable model reports it as ignored.
 
-env does not authorize push, lock-claim side effects, paid API spend, or pod
-spend; user consent still gates them.
+`CODEX_AGENT_ROLE` can infer `coordinator`, `live-seat`, or `subagent` mode
+when `CODEX_AGENT_MODE` is unset, but launchers should still set both for
+clarity.
+
+`CODEX_SIDE_EFFECT_POLICY=user-consent-required` is global: env describes the
+process part, but never authorizes push, lock-claim side effects, paid API
+spend, or pod spend.
 
 ## Codex Live-Protocol Rules
 
@@ -347,6 +382,11 @@ export CODEX_MUTATION_SCOPE=seat-owned
 export CODEX_AUTHORITY_SCOPE=seat-owned
 export CODEX_MAILBOX_POLICY=seat-read-consume-intentional
 export CODEX_GIT_POLICY=per-seat-index-for-cursor-status
+export CODEX_SIDE_EFFECT_POLICY=user-consent-required
+export CODEX_CONTEXT_SOURCES=seat-mailbox-owned-files-gate-evidence
+export CODEX_OUTPUT_CONTRACT=seat-artifact-or-operator-request
+export CODEX_DECISION_BOUNDARY=lane-owned-seat
+export CODEX_NEXT_ACTION_POLICY=read-mail-then-act-or-report-idle
 case "$CODEX_SEAT" in
   director|director2) export CODEX_VERIFICATION_POLICY=request-operator-go ;;
   operator|operator2) export CODEX_VERIFICATION_POLICY=independent-go-nits-fail ;;

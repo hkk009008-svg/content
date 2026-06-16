@@ -108,6 +108,11 @@ inferred values.
 | `CODEX_MAILBOX_POLICY` | `read-only-no-consume`, `seat-read-consume-intentional`, `all-scope-read-no-consume`, `parent-scoped` | Documents whether mailbox state may be read, consumed, or routed. |
 | `CODEX_GIT_POLICY` | `env-u-git-index-read-only`, `per-seat-index-for-cursor-status`, `env-u-git-index-or-temp-index`, `env-u-git-index-parent-scoped` | Documents how git and the shared worktree index should be touched. |
 | `CODEX_VERIFICATION_POLICY` | `report-evidence-only`, `request-operator-go`, `independent-go-nits-fail`, `reconcile-operator-go-only`, `read-only-review-no-go`, `parent-scoped-no-go` | Documents whether this process can verify, request verification, or only report evidence. |
+| `CODEX_CONTEXT_SOURCES` | `repo-docs-mailbox-gates-readonly`, `seat-mailbox-owned-files-gate-evidence`, `all-scope-mailbox-inventory-locks-gates`, `parent-prompt-plus-allowed-artifacts` | Documents which durable context this part should read before acting. |
+| `CODEX_OUTPUT_CONTRACT` | `readiness-report-and-blockers`, `seat-artifact-or-operator-request`, `capacity-board-or-single-route`, `bounded-findings-to-parent` | Documents what this part owes back to the whole before stopping. |
+| `CODEX_DECISION_BOUNDARY` | `no-seat-authority`, `lane-owned-seat`, `all-scope-routing-no-production-fixes`, `parent-scoped-no-seat-authority` | Documents which decisions this part may make without upgrading roles. |
+| `CODEX_NEXT_ACTION_POLICY` | `report-then-stop-or-request-role`, `read-mail-then-act-or-report-idle`, `build-board-reconcile-once`, `return-evidence-then-stop` | Documents the default next move after orientation. |
+| `CODEX_SIDE_EFFECT_POLICY` | `user-consent-required` | Documents that push, lock-claim side effects, paid API spend, and pod spend remain user-gated outside env. |
 | `GIT_INDEX_FILE` | `<git-dir>/index-codex-$CODEX_SEAT` | Uses a per-seat index for live-seat cursor/status staging in the shared working tree. |
 
 Runtime defaults:
@@ -117,7 +122,11 @@ Runtime defaults:
   `CODEX_MUTATION_SCOPE=none`. Its behavior is `CODEX_AUTHORITY_SCOPE=report-only`,
   `CODEX_MAILBOX_POLICY=read-only-no-consume`,
   `CODEX_GIT_POLICY=env-u-git-index-read-only`, and
-  `CODEX_VERIFICATION_POLICY=report-evidence-only`.
+  `CODEX_VERIFICATION_POLICY=report-evidence-only`. Its context/output behavior
+  is `CODEX_CONTEXT_SOURCES=repo-docs-mailbox-gates-readonly`,
+  `CODEX_OUTPUT_CONTRACT=readiness-report-and-blockers`,
+  `CODEX_DECISION_BOUNDARY=no-seat-authority`, and
+  `CODEX_NEXT_ACTION_POLICY=report-then-stop-or-request-role`.
 - With `CODEX_SEAT=director|director2|operator|operator2`, the inferred
   contract is `CODEX_AGENT_MODE=live-seat`, `CODEX_AGENT_ROLE=$CODEX_SEAT`,
   `CODEX_CAPABILITY_MODE=seat-local`, `CODEX_MUTATION_SCOPE=seat-owned`,
@@ -125,7 +134,11 @@ Runtime defaults:
   `CODEX_MAILBOX_POLICY=seat-read-consume-intentional`, and
   `CODEX_GIT_POLICY=per-seat-index-for-cursor-status`. Director seats use
   `CODEX_VERIFICATION_POLICY=request-operator-go`; operator seats use
-  `CODEX_VERIFICATION_POLICY=independent-go-nits-fail`.
+  `CODEX_VERIFICATION_POLICY=independent-go-nits-fail`. Live seats use
+  `CODEX_CONTEXT_SOURCES=seat-mailbox-owned-files-gate-evidence`,
+  `CODEX_OUTPUT_CONTRACT=seat-artifact-or-operator-request`,
+  `CODEX_DECISION_BOUNDARY=lane-owned-seat`, and
+  `CODEX_NEXT_ACTION_POLICY=read-mail-then-act-or-report-idle`.
 - For coordinator sessions, set `CODEX_AGENT_MODE=coordinator`,
   `CODEX_AGENT_ROLE=coordinator`, `CODEX_CAPABILITY_MODE=capacity-max`, and
   `CODEX_MUTATION_SCOPE=coordination-only`. Its behavior is
@@ -133,14 +146,26 @@ Runtime defaults:
   `CODEX_MAILBOX_POLICY=all-scope-read-no-consume`,
   `CODEX_GIT_POLICY=env-u-git-index-or-temp-index`, and
   `CODEX_VERIFICATION_POLICY=reconcile-operator-go-only`. The coordinator
+  uses `CODEX_CONTEXT_SOURCES=all-scope-mailbox-inventory-locks-gates`,
+  `CODEX_OUTPUT_CONTRACT=capacity-board-or-single-route`,
+  `CODEX_DECISION_BOUNDARY=all-scope-routing-no-production-fixes`, and
+  `CODEX_NEXT_ACTION_POLICY=build-board-reconcile-once`. The coordinator
   remains unpinned; no coordinator cursor is consumed.
 - For spawned verifier/specialist subagents, the parent prompt remains the
   authority boundary. Use `CODEX_AGENT_MODE=subagent` only as a descriptive
   marker; the parent still names allowed files, scope, and expected output.
   `lane-v-verifier` and `money-gate-reviewer` use
-  `CODEX_VERIFICATION_POLICY=read-only-review-no-go`.
-- env does not authorize push, lock-claim side effects, paid API spend, or pod
-  spend; user consent still gates them.
+  `CODEX_VERIFICATION_POLICY=read-only-review-no-go`,
+  `CODEX_CONTEXT_SOURCES=parent-prompt-plus-allowed-artifacts`,
+  `CODEX_OUTPUT_CONTRACT=bounded-findings-to-parent`,
+  `CODEX_DECISION_BOUNDARY=parent-scoped-no-seat-authority`, and
+  `CODEX_NEXT_ACTION_POLICY=return-evidence-then-stop`.
+- `CODEX_AGENT_ROLE` can infer `coordinator`, `live-seat`, or `subagent` mode
+  when `CODEX_AGENT_MODE` is unset, but launchers should still set both for
+  clarity.
+- `CODEX_SIDE_EFFECT_POLICY=user-consent-required` is global: env describes the
+  process part, but never authorizes push, lock-claim side effects, paid API
+  spend, or pod spend.
 
 ## Mode selection
 
@@ -372,6 +397,11 @@ export CODEX_MUTATION_SCOPE=seat-owned
 export CODEX_AUTHORITY_SCOPE=seat-owned
 export CODEX_MAILBOX_POLICY=seat-read-consume-intentional
 export CODEX_GIT_POLICY=per-seat-index-for-cursor-status
+export CODEX_CONTEXT_SOURCES=seat-mailbox-owned-files-gate-evidence
+export CODEX_OUTPUT_CONTRACT=seat-artifact-or-operator-request
+export CODEX_DECISION_BOUNDARY=lane-owned-seat
+export CODEX_NEXT_ACTION_POLICY=read-mail-then-act-or-report-idle
+export CODEX_SIDE_EFFECT_POLICY=user-consent-required
 case "$CODEX_SEAT" in
   director|director2) export CODEX_VERIFICATION_POLICY=request-operator-go ;;
   operator|operator2) export CODEX_VERIFICATION_POLICY=independent-go-nits-fail ;;
@@ -401,6 +431,11 @@ export CODEX_AUTHORITY_SCOPE=all-scope-reconcile
 export CODEX_MAILBOX_POLICY=all-scope-read-no-consume
 export CODEX_GIT_POLICY=env-u-git-index-or-temp-index
 export CODEX_VERIFICATION_POLICY=reconcile-operator-go-only
+export CODEX_CONTEXT_SOURCES=all-scope-mailbox-inventory-locks-gates
+export CODEX_OUTPUT_CONTRACT=capacity-board-or-single-route
+export CODEX_DECISION_BOUNDARY=all-scope-routing-no-production-fixes
+export CODEX_NEXT_ACTION_POLICY=build-board-reconcile-once
+export CODEX_SIDE_EFFECT_POLICY=user-consent-required
 .venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py coordinator --wave 2
 env -u GIT_INDEX_FILE git log --oneline -5
 .venv/bin/python scripts/wave_gate_check.py 2

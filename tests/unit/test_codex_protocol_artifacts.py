@@ -156,10 +156,15 @@ def test_codex_protocol_skill_points_to_readiness_and_seat_commands():
     assert "CODEX_MAILBOX_POLICY" in text
     assert "CODEX_GIT_POLICY" in text
     assert "CODEX_VERIFICATION_POLICY" in text
+    assert "CODEX_CONTEXT_SOURCES" in text
+    assert "CODEX_OUTPUT_CONTRACT" in text
+    assert "CODEX_DECISION_BOUNDARY" in text
+    assert "CODEX_NEXT_ACTION_POLICY" in text
+    assert "CODEX_SIDE_EFFECT_POLICY" in text
     assert "seat-read-consume-intentional" in text
     assert "independent-go-nits-fail" in text
     assert "unset CODEX_SEAT GIT_INDEX_FILE" in text
-    assert "env does not authorize push" in text
+    assert "user-consent-required" in text
     assert "Codex-side transplant" not in text
 
 
@@ -190,10 +195,15 @@ def test_codex_continuation_defines_subagent_cycle_default():
     assert "CODEX_MAILBOX_POLICY" in text
     assert "CODEX_GIT_POLICY" in text
     assert "CODEX_VERIFICATION_POLICY" in text
+    assert "CODEX_CONTEXT_SOURCES" in text
+    assert "CODEX_OUTPUT_CONTRACT" in text
+    assert "CODEX_DECISION_BOUNDARY" in text
+    assert "CODEX_NEXT_ACTION_POLICY" in text
+    assert "CODEX_SIDE_EFFECT_POLICY" in text
     assert "all-scope-read-no-consume" in text
     assert "request-operator-go" in text
     assert "unset CODEX_SEAT GIT_INDEX_FILE" in text
-    assert "env does not authorize push" in text
+    assert "user-consent-required" in text
     assert "Codex-side transplant" not in text
 
 
