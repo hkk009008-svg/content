@@ -168,19 +168,45 @@ values.
   `parent-scoped`.
 - `CODEX_MUTATION_SCOPE`: `none`, `seat-owned`, `coordination-only`,
   `read-only-verification`, or `parent-scoped`.
+- `CODEX_AUTHORITY_SCOPE`: `report-only`, `seat-owned`,
+  `all-scope-reconcile`, or `parent-scoped`.
+- `CODEX_MAILBOX_POLICY`: `read-only-no-consume`,
+  `seat-read-consume-intentional`, `all-scope-read-no-consume`, or
+  `parent-scoped`.
+- `CODEX_GIT_POLICY`: `env-u-git-index-read-only`,
+  `per-seat-index-for-cursor-status`, `env-u-git-index-or-temp-index`, or
+  `env-u-git-index-parent-scoped`.
+- `CODEX_VERIFICATION_POLICY`: `report-evidence-only`,
+  `request-operator-go`, `independent-go-nits-fail`,
+  `reconcile-operator-go-only`, `read-only-review-no-go`, or
+  `parent-scoped-no-go`.
 - `GIT_INDEX_FILE`: per-seat index path for live-seat cursor/status staging.
 
 Default mappings:
 
 - no env -> `CODEX_AGENT_MODE=readiness-bridge`,
   `CODEX_AGENT_ROLE=readiness-bridge`, `CODEX_CAPABILITY_MODE=read-only`,
-  `CODEX_MUTATION_SCOPE=none`
+  `CODEX_MUTATION_SCOPE=none`, `CODEX_AUTHORITY_SCOPE=report-only`,
+  `CODEX_MAILBOX_POLICY=read-only-no-consume`,
+  `CODEX_GIT_POLICY=env-u-git-index-read-only`,
+  `CODEX_VERIFICATION_POLICY=report-evidence-only`
 - `CODEX_SEAT=<seat>` -> `CODEX_AGENT_MODE=live-seat`,
   `CODEX_AGENT_ROLE=<seat>`, `CODEX_CAPABILITY_MODE=seat-local`,
-  `CODEX_MUTATION_SCOPE=seat-owned`
+  `CODEX_MUTATION_SCOPE=seat-owned`, `CODEX_AUTHORITY_SCOPE=seat-owned`,
+  `CODEX_MAILBOX_POLICY=seat-read-consume-intentional`,
+  `CODEX_GIT_POLICY=per-seat-index-for-cursor-status`,
+  `CODEX_VERIFICATION_POLICY=request-operator-go` for director seats or
+  `independent-go-nits-fail` for operator seats
 - coordinator -> `CODEX_AGENT_MODE=coordinator`,
   `CODEX_AGENT_ROLE=coordinator`, `CODEX_CAPABILITY_MODE=capacity-max`,
-  `CODEX_MUTATION_SCOPE=coordination-only`
+  `CODEX_MUTATION_SCOPE=coordination-only`,
+  `CODEX_AUTHORITY_SCOPE=all-scope-reconcile`,
+  `CODEX_MAILBOX_POLICY=all-scope-read-no-consume`,
+  `CODEX_GIT_POLICY=env-u-git-index-or-temp-index`,
+  `CODEX_VERIFICATION_POLICY=reconcile-operator-go-only`
+
+Coordinator launch should first `unset CODEX_SEAT GIT_INDEX_FILE`; if a stale
+seat env remains, the executable model reports it as ignored.
 
 env does not authorize push, lock-claim side effects, paid API spend, or pod
 spend; user consent still gates them.
@@ -318,6 +344,13 @@ export CODEX_SEAT=<director|director2|operator|operator2>
 export CODEX_AGENT_ROLE="$CODEX_SEAT"
 export CODEX_CAPABILITY_MODE=seat-local
 export CODEX_MUTATION_SCOPE=seat-owned
+export CODEX_AUTHORITY_SCOPE=seat-owned
+export CODEX_MAILBOX_POLICY=seat-read-consume-intentional
+export CODEX_GIT_POLICY=per-seat-index-for-cursor-status
+case "$CODEX_SEAT" in
+  director|director2) export CODEX_VERIFICATION_POLICY=request-operator-go ;;
+  operator|operator2) export CODEX_VERIFICATION_POLICY=independent-go-nits-fail ;;
+esac
 CODEX_GIT_DIR="$(env -u GIT_INDEX_FILE git rev-parse --absolute-git-dir)"
 export GIT_INDEX_FILE="$CODEX_GIT_DIR/index-codex-$CODEX_SEAT"
 [ -f "$GIT_INDEX_FILE" ] || env -u GIT_INDEX_FILE git read-tree --index-output="$GIT_INDEX_FILE" HEAD

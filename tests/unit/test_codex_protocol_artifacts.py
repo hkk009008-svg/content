@@ -152,6 +152,13 @@ def test_codex_protocol_skill_points_to_readiness_and_seat_commands():
     assert "CODEX_AGENT_ROLE" in text
     assert "CODEX_CAPABILITY_MODE" in text
     assert "CODEX_MUTATION_SCOPE" in text
+    assert "CODEX_AUTHORITY_SCOPE" in text
+    assert "CODEX_MAILBOX_POLICY" in text
+    assert "CODEX_GIT_POLICY" in text
+    assert "CODEX_VERIFICATION_POLICY" in text
+    assert "seat-read-consume-intentional" in text
+    assert "independent-go-nits-fail" in text
+    assert "unset CODEX_SEAT GIT_INDEX_FILE" in text
     assert "env does not authorize push" in text
     assert "Codex-side transplant" not in text
 
@@ -179,6 +186,13 @@ def test_codex_continuation_defines_subagent_cycle_default():
     assert "CODEX_AGENT_ROLE" in text
     assert "CODEX_CAPABILITY_MODE" in text
     assert "CODEX_MUTATION_SCOPE" in text
+    assert "CODEX_AUTHORITY_SCOPE" in text
+    assert "CODEX_MAILBOX_POLICY" in text
+    assert "CODEX_GIT_POLICY" in text
+    assert "CODEX_VERIFICATION_POLICY" in text
+    assert "all-scope-read-no-consume" in text
+    assert "request-operator-go" in text
+    assert "unset CODEX_SEAT GIT_INDEX_FILE" in text
     assert "env does not authorize push" in text
     assert "Codex-side transplant" not in text
 

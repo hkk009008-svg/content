@@ -83,8 +83,38 @@ def test_runtime_env_contract_infers_live_seat_and_user_gated_side_effects() -> 
     assert "CODEX_SEAT=director" in text
     assert "CODEX_CAPABILITY_MODE=seat-local" in text
     assert "CODEX_MUTATION_SCOPE=seat-owned" in text
+    assert "CODEX_AUTHORITY_SCOPE=seat-owned" in text
+    assert "CODEX_MAILBOX_POLICY=seat-read-consume-intentional" in text
+    assert "CODEX_GIT_POLICY=per-seat-index-for-cursor-status" in text
+    assert "CODEX_VERIFICATION_POLICY=request-operator-go" in text
     assert "GIT_INDEX_FILE=/repo/.git/index-codex-director" in text
     assert "env does not authorize push, lock-claim side effects, paid API spend, or pod spend" in text
+
+
+def test_runtime_env_contract_models_operator_and_specialist_authority() -> None:
+    operator_text = model.render_runtime_env_contract(
+        {
+            "CODEX_SEAT": "operator2",
+            "GIT_INDEX_FILE": "/repo/.git/index-codex-operator2",
+        }
+    )
+    specialist_text = model.render_runtime_env_contract(
+        {
+            "CODEX_AGENT_MODE": "subagent",
+            "CODEX_AGENT_ROLE": "lane-v-verifier",
+        }
+    )
+
+    assert "CODEX_AGENT_ROLE=operator2" in operator_text
+    assert "CODEX_VERIFICATION_POLICY=independent-go-nits-fail" in operator_text
+    assert "CODEX_AUTHORITY_SCOPE=seat-owned" in operator_text
+
+    assert "CODEX_AGENT_MODE=subagent" in specialist_text
+    assert "CODEX_AGENT_ROLE=lane-v-verifier" in specialist_text
+    assert "CODEX_MUTATION_SCOPE=read-only-verification" in specialist_text
+    assert "CODEX_AUTHORITY_SCOPE=parent-scoped" in specialist_text
+    assert "CODEX_MAILBOX_POLICY=parent-scoped" in specialist_text
+    assert "CODEX_VERIFICATION_POLICY=read-only-review-no-go" in specialist_text
 
 
 def test_runtime_env_contract_defaults_to_readiness_and_models_coordinator() -> None:
@@ -94,6 +124,7 @@ def test_runtime_env_contract_defaults_to_readiness_and_models_coordinator() -> 
             "CODEX_AGENT_MODE": "coordinator",
             "CODEX_AGENT_ROLE": "coordinator",
             "CODEX_CAPABILITY_MODE": "capacity-max",
+            "CODEX_SEAT": "director2",
         }
     )
 
@@ -101,13 +132,36 @@ def test_runtime_env_contract_defaults_to_readiness_and_models_coordinator() -> 
     assert "CODEX_AGENT_ROLE=readiness-bridge" in readiness_text
     assert "CODEX_CAPABILITY_MODE=read-only" in readiness_text
     assert "CODEX_MUTATION_SCOPE=none" in readiness_text
+    assert "CODEX_AUTHORITY_SCOPE=report-only" in readiness_text
+    assert "CODEX_MAILBOX_POLICY=read-only-no-consume" in readiness_text
+    assert "CODEX_GIT_POLICY=env-u-git-index-read-only" in readiness_text
+    assert "CODEX_VERIFICATION_POLICY=report-evidence-only" in readiness_text
     assert "GIT_INDEX_FILE=(unset)" in readiness_text
 
     assert "CODEX_AGENT_MODE=coordinator" in coordinator_text
     assert "CODEX_AGENT_ROLE=coordinator" in coordinator_text
+    assert "CODEX_SEAT=(ignored: director2)" in coordinator_text
     assert "CODEX_CAPABILITY_MODE=capacity-max" in coordinator_text
     assert "CODEX_MUTATION_SCOPE=coordination-only" in coordinator_text
+    assert "CODEX_AUTHORITY_SCOPE=all-scope-reconcile" in coordinator_text
+    assert "CODEX_MAILBOX_POLICY=all-scope-read-no-consume" in coordinator_text
+    assert "CODEX_GIT_POLICY=env-u-git-index-or-temp-index" in coordinator_text
+    assert "CODEX_VERIFICATION_POLICY=reconcile-operator-go-only" in coordinator_text
     assert "coordinator remains unpinned; no coordinator cursor is consumed" in coordinator_text
+
+
+def test_main_renders_current_environment(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("CODEX_SEAT", "director2")
+    monkeypatch.setenv("GIT_INDEX_FILE", "/repo/.git/index-codex-director2")
+
+    assert model.main() == 0
+
+    out = capsys.readouterr().out
+    assert "CODEX_AGENT_MODE=live-seat" in out
+    assert "CODEX_AGENT_ROLE=director2" in out
+    assert "CODEX_AUTHORITY_SCOPE=seat-owned" in out
+    assert "CODEX_VERIFICATION_POLICY=request-operator-go" in out
+    assert "GIT_INDEX_FILE=/repo/.git/index-codex-director2" in out
 
 
 def test_render_protocol_assembly_map_places_portions_by_folder_intent() -> None:

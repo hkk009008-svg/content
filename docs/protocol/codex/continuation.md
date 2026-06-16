@@ -104,23 +104,41 @@ inferred values.
 | `CODEX_SEAT` | `director`, `director2`, `operator`, `operator2` | Binds a live seat. Leave unset for readiness bridge and coordinator. |
 | `CODEX_CAPABILITY_MODE` | `read-only`, `seat-local`, `capacity-max`, `parent-scoped` | States whether the process reports, works in one seat, or coordinates full capacity. |
 | `CODEX_MUTATION_SCOPE` | `none`, `seat-owned`, `coordination-only`, `read-only-verification`, `parent-scoped` | Documents which durable state may be mutated after protocol checks. |
+| `CODEX_AUTHORITY_SCOPE` | `report-only`, `seat-owned`, `all-scope-reconcile`, `parent-scoped` | Documents whose authority boundary this process inhabits. |
+| `CODEX_MAILBOX_POLICY` | `read-only-no-consume`, `seat-read-consume-intentional`, `all-scope-read-no-consume`, `parent-scoped` | Documents whether mailbox state may be read, consumed, or routed. |
+| `CODEX_GIT_POLICY` | `env-u-git-index-read-only`, `per-seat-index-for-cursor-status`, `env-u-git-index-or-temp-index`, `env-u-git-index-parent-scoped` | Documents how git and the shared worktree index should be touched. |
+| `CODEX_VERIFICATION_POLICY` | `report-evidence-only`, `request-operator-go`, `independent-go-nits-fail`, `reconcile-operator-go-only`, `read-only-review-no-go`, `parent-scoped-no-go` | Documents whether this process can verify, request verification, or only report evidence. |
 | `GIT_INDEX_FILE` | `<git-dir>/index-codex-$CODEX_SEAT` | Uses a per-seat index for live-seat cursor/status staging in the shared working tree. |
 
 Runtime defaults:
 
 - With no env, the inferred contract is `CODEX_AGENT_MODE=readiness-bridge`,
   `CODEX_AGENT_ROLE=readiness-bridge`, `CODEX_CAPABILITY_MODE=read-only`, and
-  `CODEX_MUTATION_SCOPE=none`.
+  `CODEX_MUTATION_SCOPE=none`. Its behavior is `CODEX_AUTHORITY_SCOPE=report-only`,
+  `CODEX_MAILBOX_POLICY=read-only-no-consume`,
+  `CODEX_GIT_POLICY=env-u-git-index-read-only`, and
+  `CODEX_VERIFICATION_POLICY=report-evidence-only`.
 - With `CODEX_SEAT=director|director2|operator|operator2`, the inferred
   contract is `CODEX_AGENT_MODE=live-seat`, `CODEX_AGENT_ROLE=$CODEX_SEAT`,
-  `CODEX_CAPABILITY_MODE=seat-local`, and `CODEX_MUTATION_SCOPE=seat-owned`.
+  `CODEX_CAPABILITY_MODE=seat-local`, `CODEX_MUTATION_SCOPE=seat-owned`,
+  `CODEX_AUTHORITY_SCOPE=seat-owned`,
+  `CODEX_MAILBOX_POLICY=seat-read-consume-intentional`, and
+  `CODEX_GIT_POLICY=per-seat-index-for-cursor-status`. Director seats use
+  `CODEX_VERIFICATION_POLICY=request-operator-go`; operator seats use
+  `CODEX_VERIFICATION_POLICY=independent-go-nits-fail`.
 - For coordinator sessions, set `CODEX_AGENT_MODE=coordinator`,
   `CODEX_AGENT_ROLE=coordinator`, `CODEX_CAPABILITY_MODE=capacity-max`, and
-  `CODEX_MUTATION_SCOPE=coordination-only`. The coordinator remains unpinned;
-  no coordinator cursor is consumed.
+  `CODEX_MUTATION_SCOPE=coordination-only`. Its behavior is
+  `CODEX_AUTHORITY_SCOPE=all-scope-reconcile`,
+  `CODEX_MAILBOX_POLICY=all-scope-read-no-consume`,
+  `CODEX_GIT_POLICY=env-u-git-index-or-temp-index`, and
+  `CODEX_VERIFICATION_POLICY=reconcile-operator-go-only`. The coordinator
+  remains unpinned; no coordinator cursor is consumed.
 - For spawned verifier/specialist subagents, the parent prompt remains the
   authority boundary. Use `CODEX_AGENT_MODE=subagent` only as a descriptive
   marker; the parent still names allowed files, scope, and expected output.
+  `lane-v-verifier` and `money-gate-reviewer` use
+  `CODEX_VERIFICATION_POLICY=read-only-review-no-go`.
 - env does not authorize push, lock-claim side effects, paid API spend, or pod
   spend; user consent still gates them.
 
@@ -351,6 +369,13 @@ export CODEX_SEAT=<director|director2|operator|operator2>
 export CODEX_AGENT_ROLE="$CODEX_SEAT"
 export CODEX_CAPABILITY_MODE=seat-local
 export CODEX_MUTATION_SCOPE=seat-owned
+export CODEX_AUTHORITY_SCOPE=seat-owned
+export CODEX_MAILBOX_POLICY=seat-read-consume-intentional
+export CODEX_GIT_POLICY=per-seat-index-for-cursor-status
+case "$CODEX_SEAT" in
+  director|director2) export CODEX_VERIFICATION_POLICY=request-operator-go ;;
+  operator|operator2) export CODEX_VERIFICATION_POLICY=independent-go-nits-fail ;;
+esac
 CODEX_GIT_DIR="$(env -u GIT_INDEX_FILE git rev-parse --absolute-git-dir)"
 export GIT_INDEX_FILE="$CODEX_GIT_DIR/index-codex-$CODEX_SEAT"
 [ -f "$GIT_INDEX_FILE" ] || env -u GIT_INDEX_FILE git read-tree --index-output="$GIT_INDEX_FILE" HEAD
@@ -367,10 +392,15 @@ env -u GIT_INDEX_FILE git log --oneline -5
 For an explicit coordinator session, start with:
 
 ```bash
+unset CODEX_SEAT GIT_INDEX_FILE
 export CODEX_AGENT_MODE=coordinator
 export CODEX_AGENT_ROLE=coordinator
 export CODEX_CAPABILITY_MODE=capacity-max
 export CODEX_MUTATION_SCOPE=coordination-only
+export CODEX_AUTHORITY_SCOPE=all-scope-reconcile
+export CODEX_MAILBOX_POLICY=all-scope-read-no-consume
+export CODEX_GIT_POLICY=env-u-git-index-or-temp-index
+export CODEX_VERIFICATION_POLICY=reconcile-operator-go-only
 .venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py coordinator --wave 2
 env -u GIT_INDEX_FILE git log --oneline -5
 .venv/bin/python scripts/wave_gate_check.py 2

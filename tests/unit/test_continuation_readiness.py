@@ -64,6 +64,10 @@ def test_render_codex_reports_harness_model_artifacts(tmp_path, monkeypatch, cap
         "CODEX_SEAT",
         "CODEX_CAPABILITY_MODE",
         "CODEX_MUTATION_SCOPE",
+        "CODEX_AUTHORITY_SCOPE",
+        "CODEX_MAILBOX_POLICY",
+        "CODEX_GIT_POLICY",
+        "CODEX_VERIFICATION_POLICY",
         "GIT_INDEX_FILE",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -94,6 +98,10 @@ def test_render_codex_reports_harness_model_artifacts(tmp_path, monkeypatch, cap
     assert "CODEX_AGENT_ROLE=readiness-bridge" in out
     assert "CODEX_CAPABILITY_MODE=read-only" in out
     assert "CODEX_MUTATION_SCOPE=none" in out
+    assert "CODEX_AUTHORITY_SCOPE=report-only" in out
+    assert "CODEX_MAILBOX_POLICY=read-only-no-consume" in out
+    assert "CODEX_GIT_POLICY=env-u-git-index-read-only" in out
+    assert "CODEX_VERIFICATION_POLICY=report-evidence-only" in out
     assert "inhabit the Codex harness as readiness bridge" in out
     assert "explicit seat or coordinator instruction" in out
     assert "readiness-bridge.toml" in out

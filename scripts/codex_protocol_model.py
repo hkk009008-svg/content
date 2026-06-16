@@ -7,6 +7,7 @@ without touching mailbox state, locks, git indexes, or production pipeline code.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 
 MODEL_SOURCE = "scripts/codex_protocol_model.py"
@@ -33,6 +34,9 @@ DURABLE_STATE_ARTIFACTS = (
 )
 
 SEATS = ("director", "director2", "operator", "operator2")
+DIRECTOR_SEATS = ("director", "director2")
+OPERATOR_SEATS = ("operator", "operator2")
+READ_ONLY_VERIFIER_ROLES = ("lane-v-verifier", "money-gate-reviewer")
 
 CORE_AGENT_MODULES = (
     "lane-v-verifier.toml",
@@ -75,6 +79,26 @@ RUNTIME_ENV_VARIABLES = (
         "CODEX_MUTATION_SCOPE",
         "none | seat-owned | coordination-only | read-only-verification | parent-scoped",
         "documents which durable state this process may mutate after protocol checks",
+    ),
+    (
+        "CODEX_AUTHORITY_SCOPE",
+        "report-only | seat-owned | all-scope-reconcile | parent-scoped",
+        "documents whose authority boundary this process inhabits",
+    ),
+    (
+        "CODEX_MAILBOX_POLICY",
+        "read-only-no-consume | seat-read-consume-intentional | all-scope-read-no-consume | parent-scoped",
+        "documents whether mailbox state may be read, consumed, or routed",
+    ),
+    (
+        "CODEX_GIT_POLICY",
+        "env-u-git-index-read-only | per-seat-index-for-cursor-status | env-u-git-index-or-temp-index | env-u-git-index-parent-scoped",
+        "documents how git and the shared worktree index should be touched",
+    ),
+    (
+        "CODEX_VERIFICATION_POLICY",
+        "report-evidence-only | request-operator-go | independent-go-nits-fail | reconcile-operator-go-only | read-only-review-no-go | parent-scoped-no-go",
+        "documents whether this process can verify, request verification, or only report evidence",
     ),
     (
         "GIT_INDEX_FILE",
@@ -257,6 +281,13 @@ def infer_runtime_env(environ: Mapping[str, str] | None = None) -> dict[str, str
     else:
         role = mode
 
+    if mode == "live-seat" and seat in SEATS:
+        seat_display = seat
+    elif seat:
+        seat_display = f"(ignored: {seat})"
+    else:
+        seat_display = "(unset)"
+
     capability_defaults = {
         "readiness-bridge": "read-only",
         "live-seat": "seat-local",
@@ -277,13 +308,53 @@ def infer_runtime_env(environ: Mapping[str, str] | None = None) -> dict[str, str
         "CODEX_MUTATION_SCOPE",
         mutation_defaults.get(role, mutation_defaults.get(mode, "parent-scoped")),
     )
+    authority_defaults = {
+        "readiness-bridge": "report-only",
+        "live-seat": "seat-owned",
+        "coordinator": "all-scope-reconcile",
+        "subagent": "parent-scoped",
+    }
+    mailbox_defaults = {
+        "readiness-bridge": "read-only-no-consume",
+        "live-seat": "seat-read-consume-intentional",
+        "coordinator": "all-scope-read-no-consume",
+        "subagent": "parent-scoped",
+    }
+    git_defaults = {
+        "readiness-bridge": "env-u-git-index-read-only",
+        "live-seat": "per-seat-index-for-cursor-status",
+        "coordinator": "env-u-git-index-or-temp-index",
+        "subagent": "env-u-git-index-parent-scoped",
+    }
+    verification_defaults = {
+        "readiness-bridge": "report-evidence-only",
+        "coordinator": "reconcile-operator-go-only",
+        "subagent": "parent-scoped-no-go",
+    }
+    if role in DIRECTOR_SEATS:
+        verification_default = "request-operator-go"
+    elif role in OPERATOR_SEATS:
+        verification_default = "independent-go-nits-fail"
+    elif role in READ_ONLY_VERIFIER_ROLES:
+        verification_default = "read-only-review-no-go"
+    else:
+        verification_default = verification_defaults.get(mode, "parent-scoped-no-go")
+
+    authority = env.get("CODEX_AUTHORITY_SCOPE", authority_defaults.get(mode, "parent-scoped"))
+    mailbox = env.get("CODEX_MAILBOX_POLICY", mailbox_defaults.get(mode, "parent-scoped"))
+    git_policy = env.get("CODEX_GIT_POLICY", git_defaults.get(mode, "env-u-git-index-parent-scoped"))
+    verification = env.get("CODEX_VERIFICATION_POLICY", verification_default)
 
     return {
         "CODEX_AGENT_MODE": mode,
         "CODEX_AGENT_ROLE": role,
-        "CODEX_SEAT": seat or "(unset)",
+        "CODEX_SEAT": seat_display,
         "CODEX_CAPABILITY_MODE": capability,
         "CODEX_MUTATION_SCOPE": mutation,
+        "CODEX_AUTHORITY_SCOPE": authority,
+        "CODEX_MAILBOX_POLICY": mailbox,
+        "CODEX_GIT_POLICY": git_policy,
+        "CODEX_VERIFICATION_POLICY": verification,
         "GIT_INDEX_FILE": env.get("GIT_INDEX_FILE", "(unset)"),
     }
 
@@ -302,6 +373,7 @@ def render_runtime_env_contract(environ: Mapping[str, str] | None = None) -> str
             "contract rules:",
             "- readiness-bridge is the default when CODEX_AGENT_MODE and CODEX_SEAT are unset.",
             "- CODEX_SEAT selects a live seat only for director/director2/operator/operator2.",
+            "- behavior variables are inferred from mode and role unless explicitly narrowed by the launcher.",
             "- coordinator remains unpinned; no coordinator cursor is consumed.",
             "- env does not authorize push, lock-claim side effects, paid API spend, or pod spend; user consent still gates them.",
         )
@@ -347,7 +419,8 @@ def render_surface_summary() -> str:
         "coordinator invariants: " + "; ".join(COORDINATOR_INVARIANTS),
         "agent extension namespace: .codex/agents/agentNN.toml guardrail extensions",
         "runtime env contract: CODEX_AGENT_MODE, CODEX_AGENT_ROLE, CODEX_SEAT, "
-        "CODEX_CAPABILITY_MODE, CODEX_MUTATION_SCOPE, GIT_INDEX_FILE",
+        "CODEX_CAPABILITY_MODE, CODEX_MUTATION_SCOPE, CODEX_AUTHORITY_SCOPE, "
+        "CODEX_MAILBOX_POLICY, CODEX_GIT_POLICY, CODEX_VERIFICATION_POLICY, GIT_INDEX_FILE",
         "Codex surfaces:",
     ]
     lines.extend(f"- {path}: {purpose}" for path, purpose in CODEX_SURFACES)
@@ -371,7 +444,7 @@ def main() -> int:
     print(render_surface_summary())
     print()
     print("## Runtime Env Contract")
-    print(render_runtime_env_contract())
+    print(render_runtime_env_contract(os.environ))
     return 0
 
 
