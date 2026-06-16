@@ -13,6 +13,34 @@ if str(_SCRIPTS_DIR) not in sys.path:
 import codex_protocol_model as model  # noqa: E402
 
 
+def test_kernel_names_active_invariants_and_demoted_runtime_concepts() -> None:
+    text = model.render_kernel_contract()
+
+    assert "Active kernel invariants" in text
+    assert "durable shared state beats chat memory" in text
+    assert "mailbox-first decisions" in text
+    assert "explicit mode" in text
+    assert "user-gated side effects" in text
+    assert "operator verification-report GO" in text
+    assert "Demoted optional concepts" in text
+    assert "capacity-max cycle: explicit coordinator tool" in text
+    assert "no-op evidence: only after a seat was actually queried or oriented" in text
+    assert "Rotating Planning Relay: optional rare cross-seat planning pattern" in text
+    assert "proof-bundle language: use concrete evidence names" in text
+
+
+def test_live_loop_uses_concrete_evidence_and_not_default_ceremony() -> None:
+    loop = model.render_live_loop()
+
+    assert "mailbox bodies" in loop
+    assert "gate output" in loop
+    assert "smoke output" in loop
+    assert "diff scope" in loop
+    assert "Use the Rotating Planning Relay" not in loop
+    assert "no-op evidence so the coordinator knows" not in loop
+    assert "proof bundle" not in loop.lower()
+
+
 def test_render_mermaid_contains_required_harness_nodes() -> None:
     diagram = model.render_mermaid()
 

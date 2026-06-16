@@ -13,6 +13,61 @@ from collections.abc import Mapping
 MODEL_SOURCE = "scripts/codex_protocol_model.py"
 CENTRAL_INVARIANT = "durable shared state beats chat memory"
 
+ACTIVE_KERNEL_INVARIANTS = (
+    (
+        "durable shared state beats chat memory",
+        "read git, mailbox bodies, cursors, locks, logs, gate evidence, and operator reports before stale prose",
+    ),
+    (
+        "mailbox-first decisions",
+        "check mail and read relevant bodies before protocol decisions or state-asserting writes",
+    ),
+    ("explicit mode", "readiness bridge, live seat, coordinator, and subagent stay distinct"),
+    (
+        "coordinator is unpinned",
+        "coordinator reads all-scope mail and never consumes a coordinator cursor",
+    ),
+    (
+        "env-u git policy",
+        "ordinary git and pytest use env -u GIT_INDEX_FILE unless maintaining a seat index",
+    ),
+    (
+        "user-gated side effects",
+        "push, lock-claim side effects, paid API spend, and pod spend require explicit user consent",
+    ),
+    (
+        "coordinator no production fixes",
+        "coordinator may route and reconcile but not author behavior-changing production fixes",
+    ),
+    (
+        "operator verification-report GO",
+        "verified transitions require operator GO plus executed evidence",
+    ),
+    (
+        "wave gate is evidence",
+        "wave_gate_check.py is process evidence, not row-correctness proof",
+    ),
+    (
+        "single consolidated route",
+        "cross-seat awareness uses one coordinator event when routing is warranted",
+    ),
+)
+
+DEMOTED_RUNTIME_CONCEPTS = (
+    (
+        "capacity-max cycle",
+        "explicit coordinator tool for active multi-seat work, not every status check",
+    ),
+    ("no-op evidence", "only after a seat was actually queried or oriented"),
+    ("Rotating Planning Relay", "optional rare cross-seat planning pattern"),
+    ("protocol-effectiveness report", "read-only diagnostics only"),
+    (
+        "proof-bundle language",
+        "use concrete evidence names: status, git log, mailbox bodies, gate output, smoke output, and diff scope",
+    ),
+    ("handoff ceremony", "narrow handoff only at real transfer boundaries or explicit request"),
+)
+
 HARNESS_COMPONENTS = (
     ("user", "User principal", "explicit instruction and consent"),
     ("harness", "Codex CLI harness", "readiness bridge or explicit live role"),
@@ -182,7 +237,7 @@ LIVE_LOOP_STEPS = (
     "refresh live mailbox state, read mailbox bodies and committed files, "
     "and do not decide from counts alone.",
     "Classify the live role: readiness bridge, named seat, or coordinator.",
-    "Use the Rotating Planning Relay for important cross-seat plans before distributing work.",
+    "Name concrete evidence before acting: mailbox bodies, gate output, smoke output, and diff scope.",
     "Run gate scripts and smoke commands only as evidence, not as operator GO.",
     "Send one coordinator-to-all route if needed, then verify receipt seat-by-seat.",
     "When a full coordinator/live-seat cycle reaches a real completion boundary and assigned tasks are complete, write a durable handoff before transplant or context switch, including fresh git/mailbox/gate/smoke state and the exact next trigger.",
@@ -293,6 +348,20 @@ def render_live_loop() -> str:
     return "\n".join(
         f"{index}. {step}" for index, step in enumerate(LIVE_LOOP_STEPS, start=1)
     )
+
+
+def render_kernel_contract() -> str:
+    """Return the thin-kernel contract and demoted optional concepts."""
+    lines = ["Active kernel invariants"]
+    lines.extend(
+        f"- {name}: {description}" for name, description in ACTIVE_KERNEL_INVARIANTS
+    )
+    lines.append("")
+    lines.append("Demoted optional concepts")
+    lines.extend(
+        f"- {name}: {description}" for name, description in DEMOTED_RUNTIME_CONCEPTS
+    )
+    return "\n".join(lines)
 
 
 def render_planning_relay() -> str:
