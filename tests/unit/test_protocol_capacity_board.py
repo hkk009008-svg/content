@@ -381,6 +381,10 @@ def test_closed_standby_cycle_requires_handoff_artifact(tmp_path: Path) -> None:
 
 
 def test_closed_standby_cycle_accepts_handoff_artifact(tmp_path: Path) -> None:
+    handoff = tmp_path / "docs/HANDOFF-coordinator-2026-06-17-wave4-standby.md"
+    handoff.parent.mkdir(parents=True, exist_ok=True)
+    handoff.write_text("# Handoff\n\nDurable closeout artifact.\n", encoding="utf-8")
+
     for packet in [
         _packet(
             "wave4-join",
@@ -421,6 +425,50 @@ def test_closed_standby_cycle_accepts_handoff_artifact(tmp_path: Path) -> None:
     report = capacity.collect_capacity_report(tmp_path, 4)
 
     assert report.blocking_issues == []
+
+
+def test_closed_standby_cycle_rejects_missing_handoff_artifact(tmp_path: Path) -> None:
+    for packet in [
+        _packet(
+            "wave4-join",
+            "coordinator",
+            packet_type="coordinator-join",
+            status="done",
+            done_evidence=[
+                "capacity board valid",
+                "smoke OK",
+                "next trigger: standby; no routed next work",
+                "handoff: docs/HANDOFF-coordinator-2026-06-17-wave4-standby.md",
+            ],
+        ),
+        _packet(
+            "wave4-director-done",
+            "director",
+            status="done",
+            done_evidence=[
+                "committed diff",
+                "verify-request coordination/mailbox/sent/request.md",
+            ],
+        ),
+        _packet(
+            "wave4-operator-done",
+            "operator",
+            packet_type="operator-verification",
+            status="done",
+            done_evidence=["GO coordination/mailbox/sent/go.md"],
+        )
+        | {
+            "verify_request": "coordination/mailbox/sent/request.md",
+            "target_commit": "abc1234",
+            "scope_files": ["identity/validator.py"],
+        },
+    ]:
+        _write_packet(tmp_path, packet)
+
+    report = capacity.collect_capacity_report(tmp_path, 4)
+
+    messages = "\n".join(issue["message"] for issue in report.blocking_issues)
+    assert "handoff artifact" in messages
 
 
 def test_exact_exception_bypasses_matching_issue_only(tmp_path: Path) -> None:

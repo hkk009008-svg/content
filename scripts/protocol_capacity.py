@@ -200,7 +200,7 @@ def collect_capacity_report(root: Path | str, wave: int) -> CapacityReport:
     exception_issues: list[dict[str, Any]] = []
     packets = _load_packets(root_path, wave, packet_issues)
     exceptions = _load_exceptions(root_path, exception_issues)
-    issues = [*packet_issues, *exception_issues, *_validate_packets(packets)]
+    issues = [*packet_issues, *exception_issues, *_validate_packets(packets, root_path)]
     issues = _apply_exceptions(issues, exceptions)
     return CapacityReport(
         root=str(root_path),
@@ -438,7 +438,7 @@ def _parse_exception(
     )
 
 
-def _validate_packets(packets: list[Packet]) -> list[dict[str, Any]]:
+def _validate_packets(packets: list[Packet], root: Path) -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
     issues.extend(_validate_coverage(packets))
     issues.extend(_validate_wip_limit(packets))
@@ -446,7 +446,7 @@ def _validate_packets(packets: list[Packet]) -> list[dict[str, Any]]:
     issues.extend(_validate_dependencies(packets))
     issues.extend(_validate_director_done_boundary(packets))
     issues.extend(_validate_operator_verification_boundary(packets))
-    issues.extend(_validate_join_gate(packets))
+    issues.extend(_validate_join_gate(packets, root))
     return issues
 
 
@@ -627,7 +627,7 @@ def _validate_operator_verification_boundary(packets: list[Packet]) -> list[dict
     return issues
 
 
-def _validate_join_gate(packets: list[Packet]) -> list[dict[str, Any]]:
+def _validate_join_gate(packets: list[Packet], root: Path) -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
     cycles = sorted({packet.cycle for packet in packets})
     for cycle in cycles:
@@ -658,10 +658,7 @@ def _validate_join_gate(packets: list[Packet]) -> list[dict[str, Any]]:
                 )
                 if needle not in evidence
             ]
-            if (
-                HANDOFF_REQUIRED_RE.search(evidence)
-                and not HANDOFF_ARTIFACT_RE.search(evidence)
-            ):
+            if HANDOFF_REQUIRED_RE.search(evidence) and not _has_handoff_artifact(evidence, root):
                 missing.append("handoff artifact")
             if missing:
                 issues.append(
@@ -673,6 +670,13 @@ def _validate_join_gate(packets: list[Packet]) -> list[dict[str, Any]]:
                     )
                 )
     return issues
+
+
+def _has_handoff_artifact(evidence: str, root: Path) -> bool:
+    for match in HANDOFF_ARTIFACT_RE.finditer(evidence):
+        if (root / match.group(0)).is_file():
+            return True
+    return False
 
 
 def _apply_exceptions(
