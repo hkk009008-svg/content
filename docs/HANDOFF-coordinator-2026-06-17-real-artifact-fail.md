@@ -1,6 +1,7 @@
 # Coordinator Handoff - Real Handoff Artifact Gate FAIL
 
 Generated: `2026-06-16T19:01:59Z` (`2026-06-17 KST`)
+Refreshed: `2026-06-16T19:06:40Z`
 Repo: `/Users/hyungkoookkim/Content`
 
 This is a narrow coordinator state-transfer handoff. Trust current git,
@@ -23,17 +24,21 @@ API spend remain user-gated.
 
 ## Live State At Handoff
 
-- HEAD: `30e5ab83 coord(cursor): operator consume real artifact FAIL`.
-- Branch: `main`, `4 ahead / 0 behind origin/main`.
-- Working tree at handoff creation: clean before this handoff file.
+- HEAD after concurrent seat handoffs:
+  `67ecff95 docs(handoff): note operator final dirty caveat`.
+- Branch: `main`, `10 ahead / 0 behind origin/main`.
+- Working tree at final refresh also contained operator2-owned WIP:
+  `M coordination/mailbox/seen/operator2.txt` and
+  `?? docs/HANDOFF-operator2-2026-06-17-real-artifact-fail-standby.md`.
+  Do not commit or revert those from coordinator context.
 - Coordinator all-scope mailbox: `236` events; coordinator has no cursor.
 - Latest relevant mailbox body:
   `coordination/mailbox/sent/2026-06-16T18-59-42Z-operator-to-all-verification-report.md`.
 - Mailbox monitor:
-  - `director` unread `1`: the `18-59-42Z` operator FAIL.
-  - `director2` unread `1`: the same broadcast FAIL.
+  - `director` unread `0`; cursor at `2026-06-16T18:59:42Z`.
+  - `director2` unread `0`; cursor at `2026-06-16T18:59:42Z`.
   - `operator` unread `0`; cursor at `2026-06-16T18:59:42Z`.
-  - `operator2` unread `1`: the same broadcast FAIL.
+  - `operator2` unread `0`; cursor at `2026-06-16T18:59:42Z`.
 
 ## Gate And Smoke Truth
 
@@ -58,6 +63,19 @@ operator FAIL below. Do not treat the gate alone as protocol GO.
 - `30e5ab83 coord(cursor): operator consume real artifact FAIL`
   advanced `coordination/mailbox/seen/operator.txt` through the operator's own
   broadcast report.
+- `03a889e0 docs(handoff): director2 real artifact fail standby`
+  recorded director2 awareness/standby for the same FAIL.
+- `d30b623a docs(handoff): operator real artifact FAIL standby`
+  recorded operator standby after issuing the FAIL.
+- `16e4f2cb docs(handoff): director consume real artifact FAIL`
+  advanced the director cursor and created the current director read-first
+  handoff:
+  `docs/HANDOFF-director-2026-06-17-real-artifact-fail-consumed.md`.
+- `34621272 docs(handoff): refresh operator FAIL standby state`
+  refreshed operator standby state after all seats consumed the `18-59-42Z`
+  FAIL broadcast.
+- `67ecff95 docs(handoff): note operator final dirty caveat`
+  recorded operator's final dirty-state caveat after peer handoff commits.
 
 ## Binding FAIL Summary
 
@@ -94,10 +112,17 @@ continue as director
 Director should read and consume:
 
 ```text
+docs/HANDOFF-director-2026-06-17-real-artifact-fail-consumed.md
+```
+
+The operator FAIL itself is already consumed by director, but remains the
+binding defect evidence:
+
+```text
 coordination/mailbox/sent/2026-06-16T18-59-42Z-operator-to-all-verification-report.md
 ```
 
-Then implement the narrow fix in:
+Director should implement the narrow fix in:
 
 ```text
 scripts/protocol_capacity.py
@@ -117,4 +142,3 @@ After the fix commit, director should send a fresh `director -> operator`
 verify-request for that new commit. No push, lock claim/release, pod/API spend,
 dependency edit, production generation, or inventory transition is authorized by
 this handoff.
-
