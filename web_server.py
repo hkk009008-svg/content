@@ -113,6 +113,8 @@ HTTP_PROJECT_TIMEOUT = 2.0
 
 
 def _parse_ip_adapter_weight(value) -> float:
+    if isinstance(value, bool):
+        raise ValueError("ip_adapter_weight must be a finite number")
     try:
         parsed = float(value)
     except (TypeError, ValueError):

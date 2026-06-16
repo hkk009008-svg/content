@@ -358,6 +358,42 @@ def test_ip_adapter_weight_rejects_non_finite_values_on_all_mutators(client, tmp
         )
 
 
+def test_ip_adapter_weight_rejects_boolean_json_values(client, tmp_path, monkeypatch):
+    """JSON booleans are not numeric operator weights even though float(True) works."""
+    from domain import project_manager
+    monkeypatch.setattr(project_manager, "PROJECTS_DIR", str(tmp_path), raising=False)
+    pid, _ = _make_project_dir(tmp_path, monkeypatch)
+    cid = _add_character_record(pid, monkeypatch, tmp_path)
+    oid = _add_object_record(pid, monkeypatch, tmp_path)
+
+    cases = [
+        (
+            "add object",
+            client.post,
+            f"/api/projects/{pid}/objects",
+            {"json": {"name": "Bool Object", "description": "desc", "ip_adapter_weight": True}},
+        ),
+        (
+            "update character",
+            client.put,
+            f"/api/projects/{pid}/characters/{cid}",
+            {"json": {"ip_adapter_weight": False}},
+        ),
+        (
+            "update object",
+            client.put,
+            f"/api/projects/{pid}/objects/{oid}",
+            {"json": {"ip_adapter_weight": True}},
+        ),
+    ]
+    for label, method, url, kwargs in cases:
+        resp = method(url, **kwargs)
+        assert resp.status_code == 400, (
+            f"Expected 400 for boolean ip_adapter_weight on {label}, "
+            f"got {resp.status_code}: {resp.data!r}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # confirmed[16] — W2:MEDIUM:http-null-json-body
 # ---------------------------------------------------------------------------
