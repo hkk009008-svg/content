@@ -131,6 +131,11 @@ def test_core_role_prompts_are_compact_kernel_adapters():
                 "seat_status.py <seat> --wave 2",
                 "git log --oneline -5",
             ),
+            "behavior_source": (
+                "Canonical behavior source: `director2` for both `director` "
+                "and `director2`; concrete seat identity still controls "
+                "mailbox, cursor, and git-index paths."
+            ),
             "mutation": "Allowed mutation: seat-owned docs/code within route",
             "authority": "Director does not issue operator GO.",
             "output": "Expected output: brief/fix/verify-request or blocked handoff.",
@@ -140,6 +145,11 @@ def test_core_role_prompts_are_compact_kernel_adapters():
             "commands": (
                 "seat_status.py <seat> --wave 2",
                 "git log --oneline -5",
+            ),
+            "behavior_source": (
+                "Canonical behavior source: `operator` for both `operator` "
+                "and `operator2`; concrete seat identity still controls "
+                "mailbox, cursor, and git-index paths."
             ),
             "mutation": (
                 "Allowed mutation: verification report/cursor/docs only unless "
@@ -177,6 +187,8 @@ def test_core_role_prompts_are_compact_kernel_adapters():
         assert expected["mutation"] in text
         assert expected["authority"] in text
         assert expected["output"] in text
+        if "behavior_source" in expected:
+            assert expected["behavior_source"] in text
         for command in expected["commands"]:
             assert command in text
         for term in forbidden_terms:

@@ -11,6 +11,8 @@ Mode: explicit concrete operator seat. Use only when the parent prompt names
 `operator` or `operator2`, or explicitly routes operator-seat work for that
 concrete seat.
 
+Canonical behavior source: `operator` for both `operator` and `operator2`; concrete seat identity still controls mailbox, cursor, and git-index paths.
+
 First commands:
 1. `.venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`
 2. `env -u GIT_INDEX_FILE git log --oneline -5`
