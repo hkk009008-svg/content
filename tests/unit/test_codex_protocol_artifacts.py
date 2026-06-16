@@ -29,16 +29,16 @@ def test_codex_hooks_are_parseable_and_delegate_to_wrappers():
     assert any(".codex/hooks/update-state.sh" in command for command in commands)
 
 
-def test_codex_hook_wrappers_exist_and_bridge_codex_seat():
+def test_codex_hook_scripts_are_native_and_bridge_codex_seat():
     hooks_dir = ROOT / ".codex" / "hooks"
 
     for name in ("session-smoke.sh", "guard-git-index.sh", "update-state.sh"):
         text = (hooks_dir / name).read_text(encoding="utf-8")
-        assert ".claude/hooks" in text
+        assert ".claude/hooks" not in text
 
     update_state = (hooks_dir / "update-state.sh").read_text(encoding="utf-8")
     assert "CODEX_SEAT" in update_state
-    assert "CLAUDE_SEAT" in update_state
+    assert ".codex/hooks" in update_state
 
 
 def test_session_smoke_does_not_fallback_to_system_python(tmp_path):
