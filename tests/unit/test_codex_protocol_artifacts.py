@@ -108,26 +108,76 @@ def test_codex_custom_agents_are_valid_toml_with_required_fields():
         )
 
 
-def test_protocol_coordinator_agent_uses_tight_reconcile_loop():
-    agent = tomllib.loads(
-        (ROOT / ".codex" / "agents" / "protocol-coordinator.toml").read_text(
-            encoding="utf-8"
-        )
-    )
-    instructions = agent["developer_instructions"]
+def test_core_role_prompts_are_compact_kernel_adapters():
+    expectations = {
+        "protocol-coordinator.toml": {
+            "mode": "Mode: explicit coordinator",
+            "commands": (
+                "seat_status.py coordinator --wave 2",
+                "git log --oneline -5",
+                "scripts/wave_gate_check.py 2",
+                "scripts/ci_smoke.py",
+            ),
+            "mutation": "Allowed mutation: coordination/docs/logs only",
+            "authority": "Coordinator may route and reconcile but not author production fixes.",
+            "output": "Expected output: capacity board, single consolidated route, or no-op report.",
+        },
+        "protocol-director.toml": {
+            "mode": "Mode: explicit concrete director seat",
+            "commands": (
+                "seat_status.py <seat> --wave 2",
+                "git log --oneline -5",
+            ),
+            "mutation": "Allowed mutation: seat-owned docs/code within route",
+            "authority": "Director does not issue operator GO.",
+            "output": "Expected output: brief/fix/verify-request or blocked handoff.",
+        },
+        "protocol-operator.toml": {
+            "mode": "Mode: explicit concrete operator seat",
+            "commands": (
+                "seat_status.py <seat> --wave 2",
+                "git log --oneline -5",
+            ),
+            "mutation": (
+                "Allowed mutation: verification report/cursor/docs only unless "
+                "user overrides"
+            ),
+            "authority": "Operator does not author production fixes by default.",
+            "output": "Expected output: GO/NITS/FAIL or no target report.",
+        },
+    }
 
-    assert "seat_status.py coordinator --wave 2" in instructions
-    assert "Do not consume mailbox cursors" in instructions
-    assert "no-op status report" in instructions
-    assert "one consolidated mailbox" in instructions
-    assert "Capacity-max cycle default" in instructions
-    assert "protocol-director" in instructions
-    assert "protocol-operator" in instructions
-    assert "harness" in instructions
-    assert "mailbox bodies" in instructions
-    assert "Rotating Planning Relay" in instructions
-    assert "coordinator -> all four seats -> coordinator" in instructions
-    assert "one consolidated coordinator-to-all task board" in instructions
+    forbidden_terms = (
+        "rotating planning relay",
+        "proof bundle",
+        "proof-bundle",
+        "idle/no-op evidence",
+        "no-op evidence",
+        "capacity-max",
+    )
+
+    for name, expected in expectations.items():
+        data = tomllib.loads(
+            (ROOT / ".codex" / "agents" / name).read_text(encoding="utf-8")
+        )
+        text = data["developer_instructions"]
+        normalized = text.lower()
+
+        assert "scripts/codex_protocol_model.py" in text
+        assert "durable shared state beats chat memory" in text
+        assert "First commands" in text
+        assert "Authority boundary" in text
+        assert "Allowed mutation" in text
+        assert "Expected output" in text
+        assert "Always check mail" in text
+        assert expected["mode"] in text
+        assert expected["mutation"] in text
+        assert expected["authority"] in text
+        assert expected["output"] in text
+        for command in expected["commands"]:
+            assert command in text
+        for term in forbidden_terms:
+            assert term not in normalized
 
 
 def test_codex_adapters_are_kernel_backed_and_do_not_require_default_ceremony():
@@ -139,14 +189,20 @@ def test_codex_adapters_are_kernel_backed_and_do_not_require_default_ceremony():
     ]
     for path in paths:
         text = path.read_text(encoding="utf-8")
+        normalized = text.lower()
         assert "scripts/codex_protocol_model.py" in text
         assert "durable shared state beats chat memory" in text
-        assert "mailbox-first" in text.lower() or "check mail" in text.lower()
-        assert "proof bundle" not in text.lower()
-        assert "proof-bundle" not in text.lower()
-        assert "Rotating Planning Relay" not in text
-        assert "Idle seats return no-op evidence" not in text
-        assert "every eligible seat" not in text
+        assert "mailbox-first" in normalized or "check mail" in normalized
+        for term in (
+            "proof bundle",
+            "proof-bundle",
+            "rotating planning relay",
+            "idle seats return no-op evidence",
+            "every eligible seat",
+            "no-op evidence",
+            "capacity-max",
+        ):
+            assert term not in normalized
 
 
 def test_codex_protocol_skill_points_to_runtime_checklists():
@@ -198,22 +254,6 @@ def test_codex_continuation_is_compact_kernel_adapter():
     assert "scripts/ci_smoke.py" in text
     assert "scripts/wave_gate_check.py <wave>" in text
     assert "Codex-side transplant" not in text
-
-
-def test_live_role_agents_obey_rotating_planning_relay():
-    director = (ROOT / ".codex" / "agents" / "protocol-director.toml").read_text(
-        encoding="utf-8"
-    )
-    operator = (ROOT / ".codex" / "agents" / "protocol-operator.toml").read_text(
-        encoding="utf-8"
-    )
-
-    for text in (director, operator):
-        assert "Rotating Planning Relay" in text
-        assert "important cross-seat plan" in text
-        assert "starter is step 1" in text
-        assert "pass the planning baton" in text
-        assert "No production work, verification verdict, lock, push, or inventory change is implied" in text
 
 
 def test_protocol_assembly_map_doc_codifies_folder_intent():
