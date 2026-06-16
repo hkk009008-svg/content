@@ -27,7 +27,10 @@ PACKET_TYPES = {
 STATUSES = {"ready", "active", "blocked", "done", "excepted"}
 ACTIVE_STATUSES = {"ready", "active"}
 CURRENT_STATUSES = {"ready", "active", "blocked"}
-HANDOFF_ARTIFACT_RE = re.compile(r"\bdocs/HANDOFF-[^\s`]+\.md\b", re.IGNORECASE)
+HANDOFF_ARTIFACT_RE = re.compile(
+    r"^(?:handoff(?: artifact)?\s*:\s*)?`?(docs/HANDOFF-[^/\s`]+\.md)`?$",
+    re.IGNORECASE,
+)
 HANDOFF_REQUIRED_RE = re.compile(
     r"\b("
     r"standby|idle|no routed next work|no current work|no new [a-z -]*task|"
@@ -674,8 +677,11 @@ def _validate_join_gate(packets: list[Packet], root: Path) -> list[dict[str, Any
 
 
 def _has_handoff_artifact(evidence: str, root: Path) -> bool:
-    for match in HANDOFF_ARTIFACT_RE.finditer(evidence):
-        rel_path = Path(match.group(0))
+    for line in evidence.splitlines():
+        match = HANDOFF_ARTIFACT_RE.fullmatch(line.strip())
+        if not match:
+            continue
+        rel_path = Path(match.group(1))
         if rel_path.parts[:1] != ("docs",) or len(rel_path.parts) != 2:
             continue
         name = rel_path.name

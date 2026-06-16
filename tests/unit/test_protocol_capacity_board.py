@@ -6,9 +6,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
-
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
@@ -524,13 +521,6 @@ def test_closed_standby_cycle_rejects_normalized_non_handoff_file(tmp_path: Path
     assert "handoff artifact" in messages
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "handoff-artifact-absolute-path: absolute-prefixed evidence still "
-        "satisfies the root-relative handoff gate; see operator FAIL on 27d3a3ee"
-    ),
-)
 def test_closed_standby_cycle_rejects_absolute_prefixed_handoff_path(tmp_path: Path) -> None:
     docs_dir = tmp_path / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
