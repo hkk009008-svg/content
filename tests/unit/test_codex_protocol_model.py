@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 from pathlib import Path
 
@@ -39,6 +41,30 @@ def test_live_loop_uses_concrete_evidence_and_not_default_ceremony() -> None:
     assert "Use the Rotating Planning Relay" not in loop
     assert "no-op evidence so the coordinator knows" not in loop
     assert "proof bundle" not in loop.lower()
+
+
+def test_main_output_keeps_optional_relay_out_of_startup_surface() -> None:
+    stream = io.StringIO()
+
+    with contextlib.redirect_stdout(stream):
+        rc = model.main()
+
+    output = stream.getvalue()
+    assert rc == 0
+    assert "## Kernel Contract" in output
+    assert "Active kernel invariants" in output
+    assert "Demoted optional concepts" in output
+    assert "Rotating Planning Relay" not in output
+    assert "planning relay:" not in output.lower()
+
+
+def test_surface_summary_omits_trigger_specific_relay_doctrine() -> None:
+    summary = model.render_surface_summary()
+
+    assert "Rotating Planning Relay" not in summary
+    assert "planning relay:" not in summary.lower()
+    assert "Active kernel invariants" in summary
+    assert "Demoted optional concepts" in summary
 
 
 def test_render_mermaid_contains_required_harness_nodes() -> None:

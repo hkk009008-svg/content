@@ -118,7 +118,10 @@ def test_core_role_prompts_are_compact_kernel_adapters():
                 "scripts/wave_gate_check.py 2",
                 "scripts/ci_smoke.py",
             ),
-            "mutation": "Allowed mutation: coordination/docs/logs only",
+            "mutation": (
+                "Allowed mutation: coordination/docs/logs plus test-only pins "
+                "or fixtures only."
+            ),
             "authority": "Coordinator may route and reconcile but not author production fixes.",
             "output": "Expected output: capacity board, single consolidated route, or no-op report.",
         },

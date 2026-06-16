@@ -350,8 +350,15 @@ def render_live_loop() -> str:
     )
 
 
-def render_kernel_contract() -> str:
+def render_kernel_contract(*, include_trigger_specific: bool = True) -> str:
     """Return the thin-kernel contract and demoted optional concepts."""
+    demoted_concepts = DEMOTED_RUNTIME_CONCEPTS
+    if not include_trigger_specific:
+        demoted_concepts = tuple(
+            concept
+            for concept in DEMOTED_RUNTIME_CONCEPTS
+            if concept[0] != "Rotating Planning Relay"
+        )
     lines = ["Active kernel invariants"]
     lines.extend(
         f"- {name}: {description}" for name, description in ACTIVE_KERNEL_INVARIANTS
@@ -359,7 +366,7 @@ def render_kernel_contract() -> str:
     lines.append("")
     lines.append("Demoted optional concepts")
     lines.extend(
-        f"- {name}: {description}" for name, description in DEMOTED_RUNTIME_CONCEPTS
+        f"- {name}: {description}" for name, description in demoted_concepts
     )
     return "\n".join(lines)
 
@@ -653,13 +660,20 @@ def render_protocol_assembly_map() -> str:
 
 def render_surface_summary() -> str:
     """Return a compact Markdown summary of surfaces and invariants."""
+    demoted_names = (
+        name
+        for name, _ in DEMOTED_RUNTIME_CONCEPTS
+        if name != "Rotating Planning Relay"
+    )
     lines = [
         f"source: {MODEL_SOURCE}",
         f"central invariant: {CENTRAL_INVARIANT}",
         "durable artifacts: " + ", ".join(DURABLE_STATE_ARTIFACTS),
         "core agent modules: " + ", ".join(CORE_AGENT_MODULES),
         "coordinator invariants: " + "; ".join(COORDINATOR_INVARIANTS),
-        "planning relay: " + " ".join(PLANNING_RELAY_RULES),
+        "Active kernel invariants: "
+        + ", ".join(name for name, _ in ACTIVE_KERNEL_INVARIANTS),
+        "Demoted optional concepts: " + ", ".join(demoted_names),
         "agent extension namespace: .codex/agents/agentNN.toml guardrail extensions",
         "runtime env contract: "
         + ", ".join(name for name, _, _ in RUNTIME_ENV_VARIABLES),
@@ -679,8 +693,8 @@ def main() -> int:
     print("## Live Loop")
     print(render_live_loop())
     print()
-    print("## Rotating Planning Relay")
-    print(render_planning_relay())
+    print("## Kernel Contract")
+    print(render_kernel_contract(include_trigger_specific=False))
     print()
     print("## Protocol Assembly Map")
     print(render_protocol_assembly_map())

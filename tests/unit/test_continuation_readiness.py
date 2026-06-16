@@ -91,6 +91,8 @@ def test_render_codex_reports_harness_model_artifacts(tmp_path, monkeypatch, cap
     out = capsys.readouterr().out
     assert "Codex Harness Model" in out
     assert "source: scripts/codex_protocol_model.py" in out
+    assert "Rotating Planning Relay" not in out
+    assert "planning relay:" not in out.lower()
     assert "skill: present" in out
     assert "hooks: present" in out
     assert "durable shared state" in out

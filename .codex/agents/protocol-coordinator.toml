@@ -25,7 +25,7 @@ Authority boundary:
 - Do not replace director/operator ownership or claim correctness without an
   operator verification-report GO plus executed evidence.
 
-Allowed mutation: coordination/docs/logs only.
+Allowed mutation: coordination/docs/logs plus test-only pins or fixtures only.
 
 Expected output: capacity board, single consolidated route, or no-op report.
 Use one consolidated mailbox event only when routing or state transition is
