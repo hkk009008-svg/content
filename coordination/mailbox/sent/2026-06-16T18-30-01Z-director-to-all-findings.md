@@ -1,0 +1,52 @@
+# Director → All: Protocol harness audit recommendations for coordinator
+
+**When:** 2026-06-16T18:30:01Z · **From:** director (online)
+
+Coordinator/all-scope delivery note: the user-principal asked to mail the director protocol/harness/guardrail audit to coordinator. `coordinator` is unpinned/send-only in the mailbox vocabulary, so this is addressed to `all` for coordinator-readable all-scope review.
+
+## Director Audit Verdict
+
+The protocol and harness are mostly working as intended, but not airtight. The core executable model is solid: `scripts/codex_protocol_model.py` centralizes durable-state-first, mailbox-first, same-seat handoff, explicit modes, coordinator-unpinned behavior, env-u git policy, user-gated side effects, coordinator no-production-fix authority, operator GO, and capacity route validation.
+
+The weakest layer is the operator interface around the harness: shell helper parsing, hook parsing, enum drift, and status wording that can look greener than it really is.
+
+## Evidence Checked
+
+At director wrap:
+- HEAD: `5d8ad03a coord(cursor): director consume protocol audit notes`.
+- Director unread: `0`.
+- Wave 3 gate: `MET counts={'verified': 3}` with `logs/product-oracle-wave3.json`.
+- `env -u GIT_INDEX_FILE .venv/bin/python scripts/ci_smoke.py` -> `OK`, with only the known historical `verify-addendum` advisory and R2 invisible-green warnings.
+- Protocol/tooling tests: `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_codex_protocol_model.py tests/unit/test_codex_protocol_artifacts.py tests/unit/test_continuation_readiness.py tests/unit/test_protocol_capacity_board.py tests/unit/test_mailbox_monitor.py tests/unit/test_seat_status.py tests/unit/test_draft_handoff.py tests/unit/test_wave_gate_check.py tests/unit/test_coordination_bin.py tests/unit/test_check_coordination.py -q` -> `118 passed in 0.95s`.
+- `env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave 3 --validate-route coordination/mailbox/sent/2026-06-16T17-26-44Z-coordinator-to-all-coordination.md` correctly rejected the old closeout as not a task-board route and as having no capacity packets.
+
+## What Is Working
+
+1. `scripts/codex_protocol_model.py` is the right thin kernel and keeps the main invariants coherent across Codex surfaces.
+2. `continuation_readiness.py`, `seat_status.py`, `mailbox_monitor.py`, `wave_gate_check.py`, `ci_smoke.py`, and `protocol_capacity_board.py` provide real executable evidence instead of prose-only state.
+3. Capacity route validation fails closed for task-board routes with no capacity packets; operator GO for that fix is in `coordination/mailbox/sent/2026-06-16T18-18-49Z-operator-to-all-verification-report.md`.
+4. The current dirty handoff-artifact gate WIP is directionally good: closed/standby/idle/transfer evidence should cite a durable `docs/HANDOFF-*.md` artifact rather than ending as chat-only state.
+
+## Critique / Risks
+
+1. IMPORTANT: `.codex/hooks/guard-git-index.sh` has a live false positive. It blocked a harmless `rg` search because the quoted regex contained `|pytest|`; the parser splits on `|` before respecting shell quoting.
+2. IMPORTANT: `coordination/bin/consume-events` has no real `--help` or unknown-argument rejection beyond `--to`, so extra args can be ignored after role parsing.
+3. IMPORTANT: `coordination/bin/send-event` writes the mailbox file before `git add`; if staging fails, it can leave an untracked event behind.
+4. NITS: mailbox kind definitions drift. `protocol_effectiveness_report.py` knows `verify-addendum`, but `scripts/check_coordination.py` and `send-event` do not, so smoke keeps warning on a historical event.
+5. NITS: standalone `protocol_capacity_board.py --wave 3` prints `valid: true` with zero packets. Route validation catches the dangerous route case, but board rendering should say `inactive/no packets` or offer `--require-packets`.
+6. SCOPE: dirty protocol WIP in `.agents/skills/four-seat-protocol/SKILL.md`, `.agents/skills/seat-coordinator/SKILL.md`, `docs/protocol/codex/continuation.md`, `scripts/protocol_capacity.py`, and `tests/unit/test_protocol_capacity_board.py` is not covered by the operator GO at `5d64e516`; fresh Lane V is needed before calling it verified.
+
+## Recommended Improvement Order
+
+1. Fix `guard-git-index.sh` tokenization and add a regression for quoted shell metacharacters.
+2. Harden mailbox CLIs: add `-h/--help`, reject unknown args, and make `send-event` atomic/cleanup-safe on staging failure.
+3. Centralize mailbox kind definitions for sender, linter, docs, and effectiveness report.
+4. Change empty capacity-board output to `valid: true (inactive; no packets)` or add `--require-packets` for coordinator route workflows.
+5. Finish the handoff-artifact gate WIP, then request fresh operator Lane V on the full protocol diff.
+6. Add a strict `scripts/protocol_doctor.py` wrapper for protocol commits: coordination lint, capacity board, route validation when applicable, artifact tests, and smoke.
+
+## Boundaries
+
+This findings note is not a task-board route, operator GO, lock claim/release, push authorization, pod/API spend authorization, dependency edit authorization, production generation authorization, or inventory transition. Coordinator should treat it as hardening backlog input unless the user-principal explicitly asks for implementation/routing.
+
+Cursor at send: 2026-06-16T18:26:02Z
