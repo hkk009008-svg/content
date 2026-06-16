@@ -1,0 +1,27 @@
+{
+  "id": "wave3-handoff-traversal-director-redo",
+  "wave": 3,
+  "cycle": "2026-06-16-handoff-traversal-redo",
+  "owner": "director",
+  "packet_type": "director-implementation",
+  "row_ids": [
+    "protocol-handoff-traversal-root-relative"
+  ],
+  "allowed_paths": [
+    "scripts/protocol_capacity.py",
+    "tests/unit/test_protocol_capacity_board.py"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-handoff-traversal-coordinator-route"
+  ],
+  "acceptance": [
+    "reject raw evidence paths that are absolute or prefixed before an embedded docs/HANDOFF-*.md substring",
+    "raw evidence path must be root-relative and exactly a top-level docs/HANDOFF-*.md artifact",
+    "strict xfail test_closed_standby_cycle_rejects_absolute_prefixed_handoff_path flips to a normal passing test",
+    "fresh director-to-operator verify-request names the fix commit"
+  ],
+  "done_evidence": [],
+  "next_recipient": "operator",
+  "status": "active"
+}

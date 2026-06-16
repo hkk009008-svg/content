@@ -1,0 +1,23 @@
+{
+  "id": "wave3-handoff-traversal-operator-lanev",
+  "wave": 3,
+  "cycle": "2026-06-16-handoff-traversal-redo",
+  "owner": "operator",
+  "packet_type": "operator-verification",
+  "row_ids": [
+    "protocol-handoff-traversal-root-relative"
+  ],
+  "allowed_paths": [],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-handoff-traversal-director-redo"
+  ],
+  "acceptance": [
+    "after director lands a fix and verify-request, independently issue GO, NITS, or FAIL",
+    "verify the strict xfail was removed or converted and the formerly xfailed case passes normally",
+    "verify route/capacity checks still reject non-root-relative handoff evidence"
+  ],
+  "done_evidence": [],
+  "next_recipient": null,
+  "status": "blocked"
+}

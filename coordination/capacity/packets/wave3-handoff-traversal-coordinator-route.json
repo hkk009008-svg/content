@@ -1,0 +1,24 @@
+{
+  "id": "wave3-handoff-traversal-coordinator-route",
+  "wave": 3,
+  "cycle": "2026-06-16-handoff-traversal-redo",
+  "owner": "coordinator",
+  "packet_type": "coordinator-route",
+  "row_ids": [
+    "protocol-handoff-traversal-root-relative"
+  ],
+  "allowed_paths": [
+    "coordination/capacity/packets",
+    "coordination/mailbox/sent"
+  ],
+  "lock_keys": [],
+  "dependencies": [],
+  "acceptance": [
+    "coordinator route names the binding operator FAIL",
+    "capacity board validates the route before commit",
+    "no push, lock, pod, paid API, or production generation side effect is opened"
+  ],
+  "done_evidence": [],
+  "next_recipient": "director",
+  "status": "active"
+}

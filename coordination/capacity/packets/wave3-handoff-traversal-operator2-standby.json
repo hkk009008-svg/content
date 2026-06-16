@@ -1,0 +1,21 @@
+{
+  "id": "wave3-handoff-traversal-operator2-standby",
+  "wave": 3,
+  "cycle": "2026-06-16-handoff-traversal-redo",
+  "owner": "operator2",
+  "packet_type": "blocked",
+  "row_ids": [
+    "protocol-handoff-traversal-root-relative"
+  ],
+  "allowed_paths": [],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-handoff-traversal-operator-lanev"
+  ],
+  "acceptance": [
+    "stand by unless coordinator or user opens a distinct Pair-B protocol-hardening verification task"
+  ],
+  "done_evidence": [],
+  "next_recipient": null,
+  "status": "blocked"
+}
