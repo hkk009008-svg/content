@@ -16,7 +16,7 @@ The per-pair director owns the **strategic layer within its lane**: writes R-BRI
 Get your bearings in **one shot** instead of re-deriving it by hand — HEAD + ahead/behind, recent commits, **your** live unread mailbox, peer ONLINE/STALE state, and the wave gate:
 
 ```bash
-python .claude/skills/four-seat-protocol/scripts/seat_status.py director --wave <N>
+python .agents/skills/four-seat-protocol/scripts/seat_status.py director --wave <N>
 #   (use director2 if you are the Pair-B director; this is the shared umbrella tool)
 ```
 

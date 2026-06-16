@@ -263,6 +263,13 @@ def test_codex_protocol_skill_points_to_runtime_checklists():
     assert "Codex-side transplant" not in text
 
 
+def test_codex_facing_skills_do_not_route_to_claude_skill_paths():
+    for path in sorted((ROOT / ".agents" / "skills").glob("*/SKILL.md")):
+        text = path.read_text(encoding="utf-8")
+        assert ".claude/skills/" not in text, path
+        assert "python .claude" not in text, path
+
+
 def test_codex_continuation_is_compact_kernel_adapter():
     text = (ROOT / "docs" / "protocol" / "codex" / "continuation.md").read_text(
         encoding="utf-8"

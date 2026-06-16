@@ -16,7 +16,7 @@ The per-pair operator is the **independent post-commit verifier** for everything
 Before any verification work, get your bearings in **one shot** instead of re-deriving it by hand. A bundled composite runs the whole ritual read-only — HEAD + ahead/behind, recent commits, **your** live unread-mailbox count, each peer's heartbeat ONLINE/STALE state, and the wave gate:
 
 ```bash
-python .claude/skills/four-seat-protocol/scripts/seat_status.py operator --wave <N>
+python .agents/skills/four-seat-protocol/scripts/seat_status.py operator --wave <N>
 #   (use operator2 if you are the Pair-B operator; the script is the shared umbrella tool)
 ```
 
