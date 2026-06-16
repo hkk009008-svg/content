@@ -71,6 +71,7 @@ Execution style:
   bounded work. Implementation shards require implementer -> spec review ->
   quality review -> seat synthesis before the live seat routes or requests
   verification.
+- Live seats and coordinator may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
 - Subagents are not protocol seats and may not consume cursors, send mailbox
   events, issue GO, push, claim locks, start pods, or spend paid API budget.
 - Keep status updates concise and evidence-backed. Final answers should name

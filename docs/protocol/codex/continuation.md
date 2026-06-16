@@ -114,12 +114,15 @@ evidence, not row-correctness proof.
 
 Use project role agents only when the parent prompt asks for that role:
 `protocol-director`, `protocol-operator`, `protocol-coordinator`,
-`lane-v-verifier`, or `money-gate-reviewer`. Keep the parent responsible for
-final synthesis and for any user-gated action.
+`lane-v-verifier`, or `money-gate-reviewer`. A live seat or coordinator may
+create that parent prompt at seat discretion when bounded subagent work would
+add signal; this does not require a separate user request for delegation. Keep
+the parent responsible for final synthesis and for any user-gated action.
 
 ## Seat Subagent Development
 
 Core rule: seats retain authority; subagents own bounded work.
+Live seats and coordinator may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
 
 - Director/director2 may dispatch bounded implementer subagents for independent
   implementation slices, but the director seat still owns the brief,

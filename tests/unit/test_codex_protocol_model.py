@@ -169,6 +169,8 @@ def test_render_seat_subagent_development_codifies_all_seat_boundaries() -> None
     assert "director/director2: dispatch bounded implementer subagents" in text
     assert "operator/operator2: use read-only verifier helpers" in text
     assert "coordinator: use read-only reconciliation helpers" in text
+    assert "Live seats and coordinator may choose bounded subagents at seat discretion" in text
+    assert "does not require a separate user request for delegation" in text
     assert "implementer -> spec review -> quality review -> seat synthesis" in text
     assert "no mailbox cursor, mailbox event, operator GO, coordinator route, push, lock, pod spend, or paid API spend" in text
 

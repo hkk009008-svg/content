@@ -258,6 +258,7 @@ PLANNING_RELAY_RULES = (
 
 SEAT_SUBAGENT_DEVELOPMENT_RULES = (
     "Core rule: seats retain authority; subagents own bounded work.",
+    "Live seats and coordinator may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.",
     "director/director2: dispatch bounded implementer subagents for independent implementation slices, then require spec review, quality review, and director-seat synthesis before any verify-request.",
     "operator/operator2: use read-only verifier helpers for diff inspection, focused reproduction, or edge-case review; the operator seat still owns GO/NITS/FAIL.",
     "coordinator: use read-only reconciliation helpers for inventory, mailbox, lock, gate, or plan-readiness checks; the coordinator still owns the consolidated route or no-op report.",

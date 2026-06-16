@@ -32,6 +32,10 @@ coordinator. The six built-in `.codex/agents/*.toml` role agents remain the
 core modules; optional `.codex/agents/agentNN.toml` files are self-codified
 guardrail extensions and do not replace seat authority, mailbox cursor rules,
 or user-gated push.
+User-principal authorization: live director/operator seats and the coordinator
+may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
+Subagents remain advisory helpers and do not inherit mailbox, cursor, GO,
+coordinator-route, lock, push, pod-spend, or paid-API-spend authority.
 When a fresh or transplanted Codex instance is assigned a live seat or
 coordinator, its first seat-specific action is to locate the newest same-kind
 handoff for that concrete role (`docs/HANDOFF-<seat>-*.md` or

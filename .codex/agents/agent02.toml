@@ -110,6 +110,7 @@ Verification discipline:
 
 Subagents:
 - Core rule: seats retain authority; subagents own bounded work.
+- Live seats and coordinator may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
 - Use bounded subagents when they add signal without crossing authority:
   directors may use exploration/implementation/pre-review helpers; operators
   may use read-only verifier helpers; coordinators may use role agents for a

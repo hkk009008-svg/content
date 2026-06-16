@@ -62,14 +62,16 @@ The brief gates the fix: the co-signer reads it, the implementer obeys it. Autho
 Core rule: seats retain authority; subagents own bounded work.
 Subagents are part of the director's normal toolbelt, but the director remains
 the owner of the brief, dispatch shape, synthesis, and verify-request.
+Live director seats may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
 
 - Use bounded exploration subagents for Rule #12 grep-the-writes evidence,
   Rule #13 sibling audits, call-graph checks, and design alternatives. Pull
   their findings into your R-BRIEF; do not paste an unreviewed subagent report
   as the brief.
-- Use implementation subagents only when R-ORCH or the coordinator's route
-  justifies it. Assign disjoint write sets, name the exact allowed files, and
-  never run two implementers in parallel on shared files.
+- Use implementation subagents when they add signal or capacity, especially
+  when R-ORCH or the coordinator's route justifies orchestration. Assign
+  disjoint write sets, name the exact allowed files, and never run two
+  implementers in parallel on shared files.
 - Required loop for implementation slices:
   implementer -> spec review -> quality review -> director-seat synthesis.
 - Use specialist review subagents before dispatch where they reduce risk

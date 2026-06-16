@@ -36,6 +36,7 @@ Authority boundary:
   protocol requires one.
 
 Seat Subagent Development:
+- Live director seats may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
 - Director/director2 may dispatch bounded implementer subagents.
 - Use the loop: implementer -> spec review -> quality review -> director-seat
   synthesis.

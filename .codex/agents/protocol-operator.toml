@@ -36,6 +36,7 @@ Authority boundary:
   verification-report GO expected by the protocol.
 
 Seat Subagent Development:
+- Live operator seats may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
 - Operator/operator2 may dispatch read-only verifier helpers.
 - Use helper findings for diff inspection, focused reproduction, or edge-case
   review only.

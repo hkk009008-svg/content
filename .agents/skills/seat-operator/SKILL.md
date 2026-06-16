@@ -63,6 +63,7 @@ The operator's hardest discipline is *not* verifying everything. Firing Lane V o
 Core rule: seats retain authority; subagents own bounded work.
 Subagents are part of Lane V, not a replacement for it. Use them to widen
 independent review while keeping the operator as the accountable verifier.
+Live operator seats may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
 
 - Spawn read-only `lane-v-verifier` for ordinary landed diffs when a cold
   context pass helps; spawn `money-gate-reviewer` for spend, budget, cost-key,

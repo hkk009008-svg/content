@@ -383,6 +383,8 @@ def test_seat_subagent_development_contract_is_pinned_across_codex_surfaces():
         text = path.read_text(encoding="utf-8")
         assert "Seat Subagent Development" in text, path
         assert "seats retain authority; subagents own bounded work" in text, path
+        assert "Live seats and coordinator may choose bounded subagents at seat discretion" in text, path
+        assert "does not require a separate user request for delegation" in text, path
         assert "implementer -> spec review -> quality review -> seat synthesis" in text, path
         assert "Subagents do not consume cursors, send mailbox events, issue GO, route coordinator work, push, claim locks, start pods, or spend paid API budget." in text, path
 
@@ -407,6 +409,8 @@ def test_seat_subagent_development_contract_is_pinned_across_codex_surfaces():
         )["developer_instructions"]
         assert "Seat Subagent Development" in text, name
         assert "Subagents are not protocol seats." in text, name
+        assert "seat discretion" in text, name
+        assert "does not require a separate user request for delegation" in text, name
         for phrase in phrases:
             assert phrase in text, name
 
@@ -418,6 +422,8 @@ def test_seat_subagent_development_contract_is_pinned_across_codex_surfaces():
         text = path.read_text(encoding="utf-8")
         assert "Seat Subagent Development" in text, path
         assert "seats retain authority; subagents own bounded work" in text, path
+        assert "seat discretion" in text, path
+        assert "does not require a separate user request for delegation" in text, path
         assert "Subagents do not consume cursors" in text, path
 
 

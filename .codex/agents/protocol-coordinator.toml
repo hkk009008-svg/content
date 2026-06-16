@@ -29,6 +29,7 @@ Authority boundary:
   operator verification-report GO plus executed evidence.
 
 Seat Subagent Development:
+- Coordinator may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
 - Coordinator may dispatch read-only reconciliation helpers.
 - Use helper findings for inventory, mailbox, lock, gate, or plan-readiness
   checks only.

@@ -75,6 +75,7 @@ Capacity-max behavior:
 
 Seat Subagent Development:
 - Core rule: seats retain authority; subagents own bounded work.
+- Live seats and coordinator may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
 - Directors may use bounded implementer subagents only with disjoint write
   sets, spec review, quality review, and director-seat synthesis.
 - Operators may use read-only verifier helpers, but the live operator still
