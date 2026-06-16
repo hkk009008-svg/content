@@ -473,10 +473,6 @@ def test_closed_standby_cycle_rejects_missing_handoff_artifact(tmp_path: Path) -
     assert "handoff artifact" in messages
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="handoff-artifact-path-traversal: normalized non-handoff path satisfies gate",
-)
 def test_closed_standby_cycle_rejects_normalized_non_handoff_file(tmp_path: Path) -> None:
     decoy_dir = tmp_path / "docs/HANDOFF-decoy"
     decoy_dir.mkdir(parents=True, exist_ok=True)

@@ -649,6 +649,7 @@ def _validate_join_gate(packets: list[Packet], root: Path) -> list[dict[str, Any
             continue
         for join in joins:
             evidence = _evidence_text(join)
+            raw_evidence = _raw_evidence_text(join)
             missing = [
                 label
                 for label, needle in (
@@ -658,7 +659,7 @@ def _validate_join_gate(packets: list[Packet], root: Path) -> list[dict[str, Any
                 )
                 if needle not in evidence
             ]
-            if HANDOFF_REQUIRED_RE.search(evidence) and not _has_handoff_artifact(evidence, root):
+            if HANDOFF_REQUIRED_RE.search(raw_evidence) and not _has_handoff_artifact(raw_evidence, root):
                 missing.append("handoff artifact")
             if missing:
                 issues.append(
@@ -674,7 +675,21 @@ def _validate_join_gate(packets: list[Packet], root: Path) -> list[dict[str, Any
 
 def _has_handoff_artifact(evidence: str, root: Path) -> bool:
     for match in HANDOFF_ARTIFACT_RE.finditer(evidence):
-        if (root / match.group(0)).is_file():
+        rel_path = Path(match.group(0))
+        if rel_path.parts[:1] != ("docs",) or len(rel_path.parts) != 2:
+            continue
+        name = rel_path.name
+        if not (name.startswith("HANDOFF-") and name.endswith(".md")):
+            continue
+        artifact = root / rel_path
+        try:
+            docs_dir = (root / "docs").resolve(strict=True)
+            resolved_artifact = artifact.resolve(strict=True)
+        except OSError:
+            continue
+        if resolved_artifact.parent != docs_dir:
+            continue
+        if artifact.is_file():
             return True
     return False
 
@@ -815,7 +830,11 @@ def _optional_str(value: Any) -> str | None:
 
 
 def _evidence_text(packet: Packet) -> str:
-    return "\n".join(packet.done_evidence).lower()
+    return _raw_evidence_text(packet).lower()
+
+
+def _raw_evidence_text(packet: Packet) -> str:
+    return "\n".join(packet.done_evidence)
 
 
 def _display_path(path: Path) -> str:
