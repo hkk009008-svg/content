@@ -54,12 +54,30 @@ MUT = {"add", "commit", "stash", "reset", "rm", "restore", "mv", "read-tree",
 # tokenizer only adds false positives. Detection keys off the COMMAND position
 # (first token after any VAR=val env assignments), so `git`/`pytest` appearing as
 # an ARGUMENT (e.g. `grep 'pytest' tests/`, `grep git add`) is correctly allowed.
-def offending_segment(c):
-    for part in re.split(r"&&|\|\||;|\|", c):
-        try:
-            toks = shlex.split(part)
-        except Exception:
+def command_segments(c):
+    try:
+        lex = shlex.shlex(c, posix=True, punctuation_chars=";&|")
+        lex.whitespace_split = True
+        toks = list(lex)
+    except Exception:
+        return []
+
+    segments = []
+    current = []
+    for tok in toks:
+        if tok in {";", "|", "||", "&&"}:
+            if current:
+                segments.append(current)
+                current = []
             continue
+        current.append(tok)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def offending_segment(c):
+    for toks in command_segments(c):
         if not toks:
             continue
         # command token = first token that is not a `VAR=val` env assignment
@@ -69,14 +87,15 @@ def offending_segment(c):
         if ci >= len(toks):
             continue
         cmd0 = toks[ci].split("/")[-1]  # basename of the invoked command
+        segment_for_message = " ".join(toks)
         # pytest: `pytest …`, `.venv/bin/pytest …`, or `python[3] -m pytest …`
         if cmd0 == "pytest":
-            return part.strip()
+            return segment_for_message
         if cmd0.startswith("python") and any(
             toks[k] == "-m" and k + 1 < len(toks) and toks[k + 1] == "pytest"
             for k in range(ci + 1, len(toks))
         ):
-            return part.strip()
+            return segment_for_message
         # git index-mutator: command is git, subcommand (after global flags) in MUT
         if cmd0 == "git":
             j = ci + 1
@@ -86,7 +105,7 @@ def offending_segment(c):
                 else:
                     j += 1
             if j < len(toks) and toks[j] in MUT:
-                return part.strip()
+                return segment_for_message
     return None
 
 bad = offending_segment(cmd)
