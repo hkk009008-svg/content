@@ -35,7 +35,11 @@
 set -euo pipefail
 export LC_ALL=C
 
-cd "$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+_repo_git() {
+  env -u GIT_INDEX_FILE git "$@"
+}
+
+cd "$(_repo_git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 
 # Sweep stale index.lock files older than 5 minutes to prevent git contention livelocks
 find .git/index.lock -mmin +5 -exec rm -f {} \; 2>/dev/null || true
@@ -63,7 +67,7 @@ _stamp_presence() {
   [ -n "$seat" ] || return 0
   mkdir -p coordination/presence
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    "$(git rev-parse --short HEAD 2>/dev/null || echo '?')" \
+    "$(_repo_git rev-parse --short HEAD 2>/dev/null || echo '?')" \
     > "coordination/presence/${seat}-heartbeat.ts"
   return 0
 }
@@ -139,7 +143,7 @@ _clear_skip_worktree() {
 }
 
 MARKER=".claude/hooks/.last-state-head"
-CURRENT=$(git rev-parse HEAD 2>/dev/null || exit 0)
+CURRENT=$(_repo_git rev-parse HEAD 2>/dev/null || exit 0)
 LAST=$(cat "$MARKER" 2>/dev/null || echo "")
 
 # v5.9: clear index pollution first (sane index before sync logic; both run
@@ -159,12 +163,12 @@ if [ "$CURRENT" = "$LAST" ] && [ -f STATE.md ]; then
 fi
 
 HEAD_SHA="$CURRENT"
-HEAD_SUBJECT=$(git log -1 --format='%s' HEAD)
-BRANCH=$(git rev-parse --abbrev-ref HEAD)
-AHEAD=$(git rev-list --count "origin/${BRANCH}..HEAD" 2>/dev/null || echo "?")
-BEHIND=$(git rev-list --count "HEAD..origin/${BRANCH}" 2>/dev/null || echo "?")
+HEAD_SUBJECT=$(_repo_git log -1 --format='%s' HEAD)
+BRANCH=$(_repo_git rev-parse --abbrev-ref HEAD)
+AHEAD=$(_repo_git rev-list --count "origin/${BRANCH}..HEAD" 2>/dev/null || echo "?")
+BEHIND=$(_repo_git rev-list --count "HEAD..origin/${BRANCH}" 2>/dev/null || echo "?")
 
-WT_LINES=$(git status --porcelain 2>/dev/null)
+WT_LINES=$(_repo_git status --porcelain 2>/dev/null)
 if [ -z "$WT_LINES" ]; then
   WT_STATE="clean"
 else
@@ -175,7 +179,7 @@ fi
 # Smoke + pytest from latest commit body (cheaper than re-running, and the
 # commit body is the truth at commit time; if the working tree has drifted
 # since, both fields explicitly suggest manual re-run).
-SMOKE_LINE=$(git log -1 --format='%B' HEAD | grep -E "ci_smoke\.py" -A1 | tail -1 || true)
+SMOKE_LINE=$(_repo_git log -1 --format='%B' HEAD | grep -E "ci_smoke\.py" -A1 | tail -1 || true)
 if echo "$SMOKE_LINE" | grep -q "OK"; then
   SMOKE_RESULT="OK (per commit body)"
 elif echo "$SMOKE_LINE" | grep -qE "FAIL|error"; then
@@ -184,7 +188,7 @@ else
   SMOKE_RESULT="unknown (not in commit body; re-run manually)"
 fi
 
-PYTEST_LINE=$(git log -1 --format='%B' HEAD | grep -Eo '[0-9]+ passed, [0-9]+ skipped(, [0-9]+ failed)?' | head -1 || true)
+PYTEST_LINE=$(_repo_git log -1 --format='%B' HEAD | grep -Eo '[0-9]+ passed, [0-9]+ skipped(, [0-9]+ failed)?' | head -1 || true)
 [ -z "$PYTEST_LINE" ] && PYTEST_LINE="(not in commit body; re-run manually for ground truth)"
 
 # Mailbox unread counts (v5.7 M2): count events ADDRESSED to <role> whose
@@ -234,4 +238,4 @@ cat > STATE.md <<EOF
 EOF
 
 # Record HEAD so subsequent Bash calls skip regen unless HEAD moves again.
-git rev-parse HEAD > "$MARKER"
+_repo_git rev-parse HEAD > "$MARKER"
