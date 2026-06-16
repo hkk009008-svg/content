@@ -348,6 +348,11 @@ the user asks for a narrower single-seat/read-only pass.
 7. The coordinator reconciles once after role results: inventory, locks, gate
    evidence, and one consolidated mailbox event only when a real state
    transition or routing need exists.
+8. If the cycle reached a real completion boundary and assigned tasks are
+   complete, the last active seat or coordinator writes the durable handoff
+   before transplant/context switch. It refreshes live state, records what was
+   consumed or routed, preserves dirty-tree caveats, and names the exact next
+   trigger.
 
 This default does not apply to readiness bridge mode. A bridge reports state
 and stops. If a candidate row requires `coordination/bin/claim-lock`, remember

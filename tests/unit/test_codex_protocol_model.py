@@ -34,6 +34,15 @@ def test_render_live_loop_contains_operational_evidence_sources() -> None:
     assert "Push remains user-gated" in loop
 
 
+def test_render_live_loop_codifies_cycle_end_handoff_before_transplant() -> None:
+    loop = model.render_live_loop()
+
+    assert "cycle reaches a real completion boundary" in loop
+    assert "assigned tasks are complete" in loop
+    assert "durable handoff before transplant or context switch" in loop
+    assert "exact next trigger" in loop
+
+
 def test_coordinator_invariants_pin_unpinned_cursor_and_single_route() -> None:
     summary = model.render_surface_summary()
 

@@ -181,6 +181,7 @@ LIVE_LOOP_STEPS = (
     "Use the Rotating Planning Relay for important cross-seat plans before distributing work.",
     "Run gate scripts and smoke commands only as evidence, not as operator GO.",
     "Send one coordinator-to-all route if needed, then verify receipt seat-by-seat.",
+    "When a full coordinator/live-seat cycle reaches a real completion boundary and assigned tasks are complete, write a durable handoff before transplant or context switch, including fresh git/mailbox/gate/smoke state and the exact next trigger.",
     "Push remains user-gated; locks, paid spend, and pod spend require explicit consent.",
 )
 

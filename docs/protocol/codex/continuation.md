@@ -38,10 +38,16 @@ flowchart TD
 1. Orient from `seat_status.py` plus `git log` before protocol decisions.
 2. Read mailbox bodies and committed files; do not decide from counts alone.
 3. Classify the live role: readiness bridge, named seat, or coordinator.
-4. Run gate scripts and smoke commands only as evidence, not as operator GO.
-5. Send one `coordinator-to-all` route if needed, then verify receipt
+4. Use the Rotating Planning Relay for important cross-seat plans before
+   distributing work.
+5. Run gate scripts and smoke commands only as evidence, not as operator GO.
+6. Send one `coordinator-to-all` route if needed, then verify receipt
    seat-by-seat.
-6. Push remains user-gated; locks, paid spend, and pod spend require explicit
+7. When a full coordinator/live-seat cycle reaches a real completion boundary
+   and assigned tasks are complete, write a durable handoff before transplant
+   or context switch, including fresh git/mailbox/gate/smoke state and the
+   exact next trigger.
+8. Push remains user-gated; locks, paid spend, and pod spend require explicit
    consent.
 
 ## Codex surfaces
@@ -255,6 +261,11 @@ coordinator/cycle work should use the capacity-max loop:
 7. The parent waits for role results, then the coordinator reconciles
    inventory/locks/mailbox exactly once if a real transition occurred, or reports
    the no-op with command evidence.
+8. If the cycle reached a real completion boundary and assigned tasks are
+   complete, the last active seat or coordinator writes the durable handoff
+   before transplant/context switch. It refreshes live state, records what was
+   consumed or routed, preserves dirty-tree caveats, and names the exact next
+   trigger.
 
 Subagents do not relax the director/operator boundary: a director still cannot
 verify its own work, an operator still should not author production fixes, and
