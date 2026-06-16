@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Iterable
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 
 def _repo_rel(path: Path) -> str:
