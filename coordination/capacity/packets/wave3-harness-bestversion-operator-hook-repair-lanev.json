@@ -17,7 +17,17 @@
     "verify the env-u bypass is closed per segment, not by raw string presence",
     "verify quoted rg pipe remains allowed and bare pytest/git add remain blocked under a seat index"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "GO: coordination/mailbox/sent/2026-06-16T20-42-38Z-operator-to-director-verification-report.md",
+    "operator evidence: targeted hook tests passed, --runxfail hook tests passed, direct hook matrix passed, non-vacuity probe flipped old bypass cases from allow to block",
+    "capacity board, route validation, Wave 3 gate, and ci_smoke remained green"
+  ],
   "next_recipient": null,
-  "status": "blocked"
+  "status": "done",
+  "verify_request": "coordination/mailbox/sent/2026-06-16T20-34-59Z-director-to-operator-verify-request.md",
+  "target_commit": "421fc358",
+  "scope_files": [
+    ".codex/hooks/guard-git-index.sh",
+    "tests/unit/test_codex_guard_git_index.py"
+  ]
 }

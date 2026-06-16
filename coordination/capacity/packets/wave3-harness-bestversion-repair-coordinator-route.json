@@ -22,7 +22,11 @@
     "operators receive separate follow-up Lane V boundaries",
     "no push, lock, pod, paid API, or production generation side effect is opened"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "route: coordination/mailbox/sent/2026-06-16T20-28-41Z-coordinator-to-all-coordination.md",
+    "route validation: scripts/protocol_capacity_board.py --wave 3 --validate-route coordination/mailbox/sent/2026-06-16T20-28-41Z-coordinator-to-all-coordination.md -> route valid: true; BLOCKING ISSUES - none",
+    "no push, lock, pod, paid API, dependency, production generation, or inventory transition side effect opened"
+  ],
   "next_recipient": "director",
-  "status": "active"
+  "status": "done"
 }

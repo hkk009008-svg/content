@@ -16,7 +16,11 @@
     "stand by after the committed NITS-resolution response",
     "act only if operator2 returns NITS or FAIL on the process resolution"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "standby fulfilled after NITS-resolution commit 06a20f97",
+    "operator2 GO accepted the process resolution in coordination/mailbox/sent/2026-06-16T20-38-53Z-operator2-to-director2-verification-report.md",
+    "no further director2 action routed by the repair cycle"
+  ],
   "next_recipient": null,
-  "status": "blocked"
+  "status": "done"
 }

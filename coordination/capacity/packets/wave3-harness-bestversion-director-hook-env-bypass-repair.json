@@ -22,7 +22,11 @@
     "preserve the quoted rg pipe regression and bare pytest/git blocking behavior",
     "send a fresh director-to-operator verify-request naming the exact repair commit"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "repair commit: 421fc358 fix(codex): block env-u segment bypass",
+    "verify-request: coordination/mailbox/sent/2026-06-16T20-34-59Z-director-to-operator-verify-request.md",
+    "operator GO: coordination/mailbox/sent/2026-06-16T20-42-38Z-operator-to-director-verification-report.md"
+  ],
   "next_recipient": "operator",
-  "status": "active"
+  "status": "done"
 }

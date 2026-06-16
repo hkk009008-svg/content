@@ -16,9 +16,13 @@
     "after director2 NITS-resolution note or verify-request, independently issue GO, NITS, or FAIL",
     "confirm Task 2 behavior remains verified and the commit-scope artifact has an acceptable process resolution"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "GO: coordination/mailbox/sent/2026-06-16T20-38-53Z-operator2-to-director2-verification-report.md",
+    "operator2 evidence: resolution diff read, tests/unit/test_coordination_bin.py passed, coordination CLI syntax check passed, capacity board and route validation remained green",
+    "Task 2 behavior remains verified; the original NITS is closed as process metadata"
+  ],
   "next_recipient": null,
-  "status": "active",
+  "status": "done",
   "verify_request": "coordination/mailbox/sent/2026-06-16T20-25-32Z-director2-to-operator2-coordination.md",
   "target_commit": "06a20f97",
   "scope_files": [
