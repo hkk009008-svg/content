@@ -10,8 +10,14 @@
 # the same enum scripts/check_coordination.py enforces.
 set -euo pipefail
 
-usage() { echo "usage: send-event <from> <to> <kind> <subject...>  (body on stdin)" >&2; exit 2; }
-[ $# -ge 4 ] || usage
+usage() { echo "usage: send-event <from> <to> <kind> <subject...>  (body on stdin)"; }
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  usage
+  exit 0
+fi
+
+[ $# -ge 4 ] || { usage >&2; exit 2; }
 FROM=$1; TO=$2; KIND=$3; shift 3; SUBJECT="$*"
 
 # Seats: 4-seat protocol (two director-operator pairs). `all` is a broadcast
@@ -44,12 +50,21 @@ TO_TITLE="$(tr '[:lower:]' '[:upper:]' <<< "${TO:0:1}")${TO:1}"
 CURSOR=$(head -1 "$ROOT/coordination/mailbox/seen/$FROM.txt" 2>/dev/null || echo "unknown")
 BODY=$(cat)
 
+TMP=$(mktemp "$ROOT/coordination/mailbox/sent/.${TS_DASH}-${FROM}-to-${TO}-${KIND}.XXXXXX.tmp")
+cleanup_tmp() { rm -f "$TMP"; }
+trap cleanup_tmp EXIT
+
 {
   printf '# %s → %s: %s\n\n' "$FROM_TITLE" "$TO_TITLE" "$SUBJECT"
   printf '**When:** %s · **From:** %s (online)\n\n' "$TS_COLON" "$FROM"
   if [ -n "$BODY" ]; then printf '%s\n\n' "$BODY"; fi
   printf 'Cursor at send: %s\n' "$CURSOR"
-} > "$F"
+} > "$TMP"
 
-git -C "$ROOT" add -- "$REL"
+mv "$TMP" "$F"
+if ! git -C "$ROOT" add -- "$REL"; then
+  rm -f "$F"
+  echo "send-event: git add failed; removed $REL" >&2
+  exit 1
+fi
 echo "created $REL (staged; commit with explicit pathspec)"

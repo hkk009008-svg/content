@@ -26,7 +26,8 @@ CONSUME_EVENTS = _REPO_ROOT / "coordination" / "bin" / "consume-events"
 
 EVENT_NAME_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z-"
-    r"(director|operator)-to-(director|operator)-[a-z0-9-]+\.md$"
+    r"(director|director2|operator|operator2|coordinator)-to-"
+    r"(director|director2|operator|operator2|all)-[a-z0-9-]+\.md$"
 )
 
 
@@ -45,7 +46,9 @@ def repo(tmp_path):
     sent.mkdir(parents=True)
     seen.mkdir(parents=True)
     (seen / "director.txt").write_text("2026-06-01T00:00:00Z\n")
+    (seen / "director2.txt").write_text("2026-06-01T00:00:00Z\n")
     (seen / "operator.txt").write_text("2026-06-01T00:00:00Z\n")
+    (seen / "operator2.txt").write_text("2026-06-01T00:00:00Z\n")
     return tmp_path
 
 
@@ -104,6 +107,31 @@ def test_send_event_rejects_self_addressed(repo):
     assert not list((repo / "coordination" / "mailbox" / "sent").iterdir())
 
 
+def test_send_event_help_is_read_only(repo):
+    r = _run(SEND_EVENT, ["--help"], repo)
+    assert r.returncode == 0
+    assert "usage: send-event" in r.stdout
+    assert not list((repo / "coordination" / "mailbox" / "sent").iterdir())
+    assert _staged(repo) == []
+
+
+def test_send_event_removes_mail_file_when_git_add_fails(repo):
+    lock = repo / ".git" / "index.lock"
+    lock.write_text("locked\n")
+    try:
+        r = _run(
+            SEND_EVENT,
+            ["operator", "director", "coordination", "subject"],
+            repo,
+            stdin="body\n",
+        )
+    finally:
+        lock.unlink(missing_ok=True)
+    assert r.returncode != 0
+    assert not list((repo / "coordination" / "mailbox" / "sent").iterdir())
+    assert _staged(repo) == []
+
+
 # ---------------------------------------------------------------------------
 # consume-events
 # ---------------------------------------------------------------------------
@@ -114,6 +142,27 @@ def _seed_events(repo):
         (sent / f"{ts}-operator-to-director-coordination.md").write_text("x\n")
     # An event in the other direction must NOT count for director.
     (sent / "2026-06-12T12-00-00Z-director-to-operator-reply.md").write_text("x\n")
+
+
+def test_consume_events_help_does_not_mutate_cursor(repo):
+    seen = repo / "coordination" / "mailbox" / "seen" / "director.txt"
+    before = seen.read_text()
+    r = _run(CONSUME_EVENTS, ["director", "--help"], repo)
+    assert r.returncode == 0
+    assert "usage: consume-events" in r.stdout
+    assert seen.read_text() == before
+    assert _staged(repo) == []
+
+
+def test_consume_events_rejects_unknown_arg_without_mutation(repo):
+    _seed_events(repo)
+    seen = repo / "coordination" / "mailbox" / "seen" / "director.txt"
+    before = seen.read_text()
+    r = _run(CONSUME_EVENTS, ["director", "--wat"], repo)
+    assert r.returncode == 2
+    assert "unknown argument" in r.stderr
+    assert seen.read_text() == before
+    assert _staged(repo) == []
 
 
 def test_consume_events_advances_to_newest_and_stages(repo):

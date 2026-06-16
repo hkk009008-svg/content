@@ -3,7 +3,7 @@
 # newest event addressed to it (or an explicit --to target), and stage the
 # cursor file (explicit pathspec; never commits).
 #
-#   usage: consume-events <director|operator> [--to <ISO-UTC timestamp>]
+#   usage: consume-events <director|director2|operator|operator2> [--to <ISO-UTC timestamp>]
 #
 # This is the ONLY sanctioned writer of seen/*.txt under protocol v6.0: the
 # cursor file is the single source of truth, and the advance rides the seat's
@@ -11,16 +11,44 @@
 # that match no real event — the two ways hand-edited cursors went wrong.
 set -euo pipefail
 
+usage() {
+  echo "usage: consume-events <director|director2|operator|operator2> [--to <timestamp>]"
+}
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  usage
+  exit 0
+fi
+
 ROLE=${1:-}
 # 4-seat protocol (two director-operator pairs). `all` is a broadcast TARGET,
 # not a consuming role — there is no seen/all.txt; every real seat consumes
 # events addressed to itself OR to `all` (see addressed() below).
 case "$ROLE" in director|director2|operator|operator2) ;; *)
-  echo "usage: consume-events <director|director2|operator|operator2> [--to <timestamp>]" >&2; exit 2;; esac
+  usage >&2; exit 2;; esac
 shift
 TARGET=""
-if [ "${1:-}" = "--to" ]; then
-  TARGET=${2:?--to needs a timestamp}
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --to)
+      shift
+      [ $# -gt 0 ] || { echo "consume-events: --to needs a timestamp" >&2; exit 2; }
+      TARGET=$1
+      shift
+      ;;
+    *)
+      echo "consume-events: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [ -n "$TARGET" ]; then
   case "$TARGET" in
     [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z) ;;
     [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]-[0-9][0-9]-[0-9][0-9]Z) ;;
