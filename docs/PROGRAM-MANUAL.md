@@ -239,7 +239,7 @@ flowchart TD
 
 `CinemaPipeline.__init__` (`cinema_pipeline.py:55`) composes the run from four collaborators that all share **one** `RunState` reference: long-lived services live on `PipelineCore` (project dict, dirs, `ContinuityEngine`, `ChiefDirector`, `CostTracker`, `LLMEnsemble`); per-run mutable state on `RunState`; pause/cancel/gate-wait/progress on `ThreadedLifecycle`; and the three controllers `ShotController` / `ReviewController` / `CheckpointStore`. The `headless` flag is set here and read by every gate.
 
-`generate(resume=False)` (`cinema_pipeline.py:942`) then runs the ordered sequence below. Each gate call is the synchronization point between the worker thread and the outside world.
+`generate(resume=False)` (`cinema_pipeline.py:967`) then runs the ordered sequence below. Each gate call is the synchronization point between the worker thread and the outside world.
 
 ```
 generate(resume=False)
@@ -326,7 +326,7 @@ flowchart LR
 
 After every scene-loop iteration and after each audio step, `CheckpointStore._save_checkpoint` (`cinema/checkpoint.py:87`) atomically writes `temp/pipeline_state.json` (`tempfile.mkstemp` + `os.replace`), serializing `current_stage`/`scene_id`/`shot_id`, completed scene indices, scene clips/audio/foley, per-shot audio, shot results, and failed shots. `generate(resume=True)` calls `_restore_from_checkpoint()` (`cinema/checkpoint.py:167`), which rejects cross-project checkpoints, rehydrates `RunState` wholesale, and marks any referenced media that has gone missing as `"lost"`. The in-memory `review_clips` manifest is *not* persisted, so resume separately calls `_rebuild_review_clips(project)` (`cinema_pipeline.py:308`). On successful completion `_clear_checkpoint()` removes the file. The web surface exposes resumability read-only via `GET …/checkpoint` → `checkpoint_info()` (`cinema/services.py:100`), which reads the JSON without constructing a pipeline.
 
-> **Re-assembly avoids a deadlock by design.** The SCREENING re-assemble endpoint calls `_assemble_approved_takes_core()` (`cinema_pipeline.py:783`) directly rather than the public `assemble_approved_takes()`. The public method appends the SCREENING gate-wait, and a fresh per-request `CinemaPipeline` constructed in a Flask thread is *not* the instance that `signal_gate` will unblock — calling it there would hang the request (`cinema_pipeline.py:783-851`, orchestration gotcha #9).
+> **Re-assembly avoids a deadlock by design.** The SCREENING re-assemble endpoint calls `_assemble_approved_takes_core()` (`cinema_pipeline.py:808`) directly rather than the public `assemble_approved_takes()`. The public method appends the SCREENING gate-wait, and a fresh per-request `CinemaPipeline` constructed in a Flask thread is *not* the instance that `signal_gate` will unblock — calling it there would hang the request (`cinema_pipeline.py:783-851`, orchestration gotcha #9).
 
 ### 2.6 One run, narrated end to end
 
@@ -446,7 +446,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `mark_shot_needs_reassembly` | `cinema/screening.py:371` | Dirty-track a shot for re-assembly. |
 | `clear_needs_reassembly` | `cinema/screening.py:421` | Race-safe clear (`only_shots=` preserves concurrently dirtied shots). |
 | `CheckpointStore._save_checkpoint` | `cinema/checkpoint.py:87` | Atomic JSON write (mkstemp+`os.replace`) of RunState. |
-| `_restore_from_checkpoint` | `cinema/checkpoint.py:167` | Rehydrate RunState on resume, marking missing files `"lost"`. |
+| `_restore_from_checkpoint` | `cinema/checkpoint.py:186` | Rehydrate RunState on resume, marking missing files `"lost"`. |
 
 ### 3.5 Domain / State (the data model & persistence)
 
@@ -949,22 +949,22 @@ On approval, `approved_final_take_id` (and `approved_motion_take_id` via the `so
 
 **INPUTS:** Approved final takes (collected in scene order), per-scene dialogue MP3s, per-scene foley MP3s, the BGM MP3, and `global_settings` (`mood`, `scene_transitions`, `transition_duration`, `music_mastering`).
 
-**PROCESSING** (`assemble_approved_takes`, `cinema_pipeline.py:853` → `_assemble_approved_takes_core`, `:783` → `_assemble_final`, `:1337`):
+**PROCESSING** (`assemble_approved_takes`, `cinema_pipeline.py:878` → `_assemble_approved_takes_core`, `:808` → `_assemble_final`, `:1362`):
 1. `_refresh_project_snapshot()` then re-assert the REVIEW gate as a guard.
 2. `_build_scene_packages(project)` (`cinema_pipeline.py:709`) resolves each approved take path and collects per-scene audio/foley. **All-embedded detection:** when every approved shot in a scene has `metadata.audio_embedded=True`, standalone TTS is suppressed to avoid double-voice from Veo/Omnihuman.
-3. `_assemble_final(scene_data, bgm_path, settings)` (`cinema_pipeline.py:1337`):
+3. `_assemble_final(scene_data, bgm_path, settings)` (`cinema_pipeline.py:1362`):
    a. **Normalize** each clip to 1920×1080@30fps (`scale + pad + fps`, `libx264 crf=20`, `aac 192k`).
    b. **Stitch** — hard-cut concat demuxer by default, OR `xfade_concat` cross-dissolve per scene boundary when `scene_transitions=True` (`phase_c_ffmpeg.py:1666`), with transition clamped to `0.4 * min(durations)`.
    c. **Color grade** via `apply_color_grade()` (`phase_c_ffmpeg.py:1251`) using a mood→preset map (`COLOR_GRADE_PRESETS`, `phase_c_ffmpeg.py:1239`).
    d. **Tri-mix audio:** voice (1.0) + BGM (0.12) + foley (0.20). Voice source binds dynamically: `[0:a]` when audio is embedded, else the standalone dialogue MP3; `amix duration=longest` for the standalone path, `first` when embedded.
    e. **Two-pass loudnorm** EBU R128 (`two_pass_loudnorm`, `phase_c_ffmpeg.py:1389`; defaults -14 LUFS / 11 LU / -1.5 dBTP).
 
-**KEY FUNCTIONS:** `_assemble_final` (`cinema_pipeline.py:1337`); `_build_scene_packages` (`:709`); `xfade_concat` (`phase_c_ffmpeg.py:1666`) / `_build_xfade_filtergraph` (`:1597`); `apply_color_grade` (`phase_c_ffmpeg.py:1251`); `two_pass_loudnorm` (`phase_c_ffmpeg.py:1389`).
+**KEY FUNCTIONS:** `_assemble_final` (`cinema_pipeline.py:1362`); `_build_scene_packages` (`:709`); `xfade_concat` (`phase_c_ffmpeg.py:1666`) / `_build_xfade_filtergraph` (`:1597`); `apply_color_grade` (`phase_c_ffmpeg.py:1251`); `two_pass_loudnorm` (`phase_c_ffmpeg.py:1389`).
 
 **DECISION POINTS:**
 - **Stitch mode** — `scene_transitions` (default `False`).
 - **Voice source** — embedded vs standalone, decided per the all-embedded detection.
-- **Re-assembly bypass (S21).** The web re-assemble endpoint calls `_assemble_approved_takes_core()` **directly** (`cinema_pipeline.py:783`), skipping the SCREENING gate-wait — calling the full public `assemble_approved_takes()` from a Flask request thread during screening would deadlock (the gate predicate polls `is_screening_approved()`, which is False by design, and the request's fresh pipeline is not the instance `signal_gate` will unblock).
+- **Re-assembly bypass (S21).** The web re-assemble endpoint calls `_assemble_approved_takes_core()` **directly** (`cinema_pipeline.py:808`), skipping the SCREENING gate-wait — calling the full public `assemble_approved_takes()` from a Flask request thread during screening would deadlock (the gate predicate polls `is_screening_approved()`, which is False by design, and the request's fresh pipeline is not the instance `signal_gate` will unblock).
 
 **OUTPUTS:** `exports/final_cinema.mp4` — 1920×1080@30fps, H.264, AAC, EBU R128 normalized, color-graded, with optional scene transitions and the dialogue+BGM+foley mix. Per-stage intermediates land in `temp/` (`*_norm.mp4`, `stitched.mp4`, `graded.mp4`).
 
@@ -983,7 +983,7 @@ During the wait the operator: hits `POST .../assemble/screen` for the timeline m
 
 **Cleanup & complete** (`cinema_pipeline.py:905-935`): `cleanup_project(pid, aggressive=False)` purges intermediate temp artifacts (always-delete patterns only; generated media preserved unless `aggressive=True`); `cost_tracker.get_video_cost()` logs the spend breakdown; `_clear_checkpoint()` removes `temp/pipeline_state.json`; a final `COMPLETE` progress event fires at 100%.
 
-**FAILURE MODES + RECOVERY:** Cleanup is non-fatal — wrapped in try/except, a failure logs and the run still completes (`cinema_pipeline.py:906-913`). Across the whole run, **checkpointing** (`_save_checkpoint`, `cinema/checkpoint.py:87`, atomic via `mkstemp + os.replace`) is written after every scene and audio step, so a crashed run resumes via `generate(resume=True)` → `_restore_from_checkpoint` (`cinema/checkpoint.py:167`), which rehydrates `RunState` and marks any vanished referenced files as `"lost"`.
+**FAILURE MODES + RECOVERY:** Cleanup is non-fatal — wrapped in try/except, a failure logs and the run still completes (`cinema_pipeline.py:906-913`). Across the whole run, **checkpointing** (`_save_checkpoint`, `cinema/checkpoint.py:99`, atomic via `mkstemp + os.replace`) is written after every scene and audio step, so a crashed run resumes via `generate(resume=True)` → `_restore_from_checkpoint` (`cinema/checkpoint.py:186`), which rehydrates `RunState` and marks any vanished referenced files as `"lost"`.
 
 ---
 
@@ -1349,7 +1349,7 @@ graph TD
 | `cascade_metadata` (on take) | `_record_video_cascade` (`phase_c_ffmpeg.py:119`) | audit / `audio_embedded` decision | which engine actually won + attempt list |
 | `screening_approved` (project-level) | `mark_screening_approved` (`screening.py:307`) | SCREENING gate predicate | operator sign-off on the assembled cut |
 | `needs_reassembly[]` (project-level) | `mark_shot_needs_reassembly` | re-assemble endpoint | shots iterated during screening that need re-stitching |
-| `final_video_path` / `exports/final_cinema.mp4` | `_assemble_final` (`cinema_pipeline.py:1337`) | export endpoint, `screening/approve` precondition | the deliverable |
+| `final_video_path` / `exports/final_cinema.mp4` | `_assemble_final` (`cinema_pipeline.py:1362`) | export endpoint, `screening/approve` precondition | the deliverable |
 
 The crucial architectural property: **takes are append-only history, and "approval" is a pointer.** A shot accumulates many `keyframe_takes`/`motion_takes`; approving one just writes its id into the corresponding `approved_*_take_id` field. The take a downstream stage consumes is always resolved through the approval pointer, never by "latest". This is what makes iteration (regenerate, screen-and-redo) safe — old takes are never destroyed.
 
@@ -1357,7 +1357,7 @@ The crucial architectural property: **takes are append-only history, and "approv
 
 ### 6.2 How each subsystem hands off to the next
 
-The orchestrator's `generate()` method (`cinema_pipeline.py:942`) is the spine. It does **not** hold media in memory and pass it along — instead, each stage **mutates the persisted project dict** (via `mutate_project`) and **re-reads a fresh snapshot** (`_refresh_project_snapshot`, `cinema_pipeline.py:443`) at the next gate boundary. The hand-off medium is the project JSON on disk, not function arguments. `_refresh_project_snapshot` is called 6+ times through `generate()`; critically it **validates before swapping** `self.project` (`cinema_pipeline.py:443`, cycle-11 fix) so a validation failure leaves the in-memory state coherent, and it rebuilds the `ContinuityEngine`'s typed-id-keyed `characters`/`locations` dicts each time.
+The orchestrator's `generate()` method (`cinema_pipeline.py:967`) is the spine. It does **not** hold media in memory and pass it along — instead, each stage **mutates the persisted project dict** (via `mutate_project`) and **re-reads a fresh snapshot** (`_refresh_project_snapshot`, `cinema_pipeline.py:443`) at the next gate boundary. The hand-off medium is the project JSON on disk, not function arguments. `_refresh_project_snapshot` is called 6+ times through `generate()`; critically it **validates before swapping** `self.project` (`cinema_pipeline.py:443`, cycle-11 fix) so a validation failure leaves the in-memory state coherent, and it rebuilds the `ContinuityEngine`'s typed-id-keyed `characters`/`locations` dicts each time.
 
 ```mermaid
 flowchart TD
@@ -1386,7 +1386,7 @@ The hand-off contracts, stage by stage:
 2. **Plan → Keyframe.** Once PLAN_REVIEW clears, `KeyframeRenderPhase.run(ctx)` (`cinema/phases/keyframe_render.py:68`) iterates shots, skipping any with `approved_keyframe_take_id`, and calls `generate_keyframe_take` (delegated to `ShotController`). The keyframe is the anchor still; its identity score lands in `take.metadata.identity_score`.
 3. **Keyframe → Performance.** `PerformanceCapturePhase` (`cinema/phases/performance.py:19`) skips shots that are SKIP-routed, have no approved keyframe, or already have an approved performance take. The performance take (a driving-video / retarget) becomes optional conditioning for the motion stage.
 4. **Performance → Motion.** `MotionRenderPhase` (`cinema/phases/motion_render.py:57`) turns the approved keyframe into a video clip via the cascade (§6.4). It has a **storyboard batch path** (Kling Native, non-portrait aspect only — M-1 guard, 2–6 unapproved shots all with keyframes) that generates one combined clip and splits it (`split_video_into_segments`), falling through to per-shot on any failure.
-5. **Motion → Review → Assembly.** After motion, `_rebuild_review_clips` builds the in-memory manifest the web UI reads, and the REVIEW gate waits for `approved_final_take_id` on every shot. Then `assemble_approved_takes` resolves those approved takes' paths in `_build_scene_packages` (`cinema_pipeline.py:709`) and `_assemble_final` (`cinema_pipeline.py:1337`) produces `exports/final_cinema.mp4`.
+5. **Motion → Review → Assembly.** After motion, `_rebuild_review_clips` builds the in-memory manifest the web UI reads, and the REVIEW gate waits for `approved_final_take_id` on every shot. Then `assemble_approved_takes` resolves those approved takes' paths in `_build_scene_packages` (`cinema_pipeline.py:709`) and `_assemble_final` (`cinema_pipeline.py:1362`) produces `exports/final_cinema.mp4`.
 
 A key correctness detail in the final hand-off: **the audio source for assembly depends on which video engine won.** `_build_scene_packages` detects whether every approved take in a scene has `metadata.audio_embedded=True` (Veo/Omnihuman embed dialogue; Kling image2video does not). If all embedded, standalone TTS is suppressed to avoid double-voice; if mixed, TTS is kept for the non-embedded shots and `_assemble_final` binds the voice filtergraph label to the right input index dynamically (the C-B2 fix).
 
@@ -1435,7 +1435,7 @@ stateDiagram-v2
 
 **Auto-approve thresholds** live in `global_settings.auto_approve` (`AutoApproveConfig`, `cinema/auto_approve.py:74`). The veto rules per gate: PLAN (decision-not-APPROVED, has-violations), IMAGE (composite below threshold — dynamic 0.97 PuLID / 0.78 fallback, cascade-fallback, over-budget), MOTION (identity/motion-score floors — **opt-in via `CINEMA_AUTO_APPROVE_MOTION=1`**), FINAL (lipsync floor, and the `final_require_human_if_upstream_auto` safety net). That last default is the most common footgun for unattended runs: if any earlier gate auto-approved a shot, the REVIEW gate forces a human unless you set `final_require_human_if_upstream_auto=false`.
 
-**Checkpointing and resume.** `CheckpointStore` (`cinema/checkpoint.py`) atomically writes `temp/pipeline_state.json` (via `tempfile.mkstemp` + `os.replace`) after **each scene** and after each audio step (`_save_checkpoint`, `checkpoint.py:87`). It serializes the `RunState` fields wholesale: `current_stage/scene_id/shot_id`, `completed_scene_indices`, `scene_clips`, `scene_audio`, `shot_audio`, `scene_foley`, `foley_audio_paths`, `shot_results`, `failed_shots`. On `generate(resume=True)`, `_restore_from_checkpoint` (`checkpoint.py:167`) rejects a project-id mismatch, rehydrates those fields, and marks any referenced file that's gone as `"lost"`. One subtlety: `review_clips` is **not** persisted in the checkpoint — it is rebuilt in-memory by a separate `_rebuild_review_clips` call on resume (`cinema_pipeline.py:308`).
+**Checkpointing and resume.** `CheckpointStore` (`cinema/checkpoint.py`) atomically writes `temp/pipeline_state.json` (via `tempfile.mkstemp` + `os.replace`) after **each scene** and after each audio step (`_save_checkpoint`, `checkpoint.py:99`). It serializes the `RunState` fields wholesale: `current_stage/scene_id/shot_id`, `completed_scene_indices`, `scene_clips`, `scene_audio`, `shot_audio`, `scene_foley`, `foley_audio_paths`, `shot_results`, `failed_shots`. On `generate(resume=True)`, `_restore_from_checkpoint` (`checkpoint.py:167`) rejects a project-id mismatch, rehydrates those fields, and marks any referenced file that's gone as `"lost"`. One subtlety: `review_clips` is **not** persisted in the checkpoint — it is rebuilt in-memory by a separate `_rebuild_review_clips` call on resume (`cinema_pipeline.py:308`).
 
 **Screening (the post-assembly gate).** After `_assemble_final` produces the mp4, if screening is enabled (`CINEMA_SCREENING_STAGE` default ON, overridable per-project) the pipeline parks at the SCREENING gate at 95%. The operator hits `POST .../assemble/screen` to get a timeline manifest, may iterate individual shots (each iterate calls `mark_shot_needs_reassembly`), may call `POST .../assemble/re-assemble` to re-stitch only the dirty shots, and finally `POST .../screening/approve` → `mark_screening_approved` → the gate's predicate flips True. To wake the blocking waiter promptly, the approve endpoint also calls `pipeline.lifecycle.signal_gate(SCREENING_STAGE_NAME)` (`web_server.py:2359`); if the live pipeline object isn't reachable, the 0.5s poll is the fallback (verified `web_server.py:2359-2362`).
 
@@ -1988,7 +1988,7 @@ This is the most common operational failure and has three distinct causes — al
 #### Re-assembly deadlock (Flask request hangs)
 
 - **Diagnose:** A re-assemble or screening call never returns; the worker is parked at the SCREENING gate.
-- **Fix:** The re-assemble endpoint must call `_assemble_approved_takes_core()` (`cinema_pipeline.py:783`), NOT the public `assemble_approved_takes()` — the latter appends the SCREENING gate-wait, and the fresh per-request `CinemaPipeline` is not the instance `signal_gate` will unblock (D-9, `web_server.py:2371`). `screening/approve` requires `exports/final_cinema.mp4` to exist or returns 409 (`web_server.py:2282`).
+- **Fix:** The re-assemble endpoint must call `_assemble_approved_takes_core()` (`cinema_pipeline.py:808`), NOT the public `assemble_approved_takes()` — the latter appends the SCREENING gate-wait, and the fresh per-request `CinemaPipeline` is not the instance `signal_gate` will unblock (D-9, `web_server.py:2371`). `screening/approve` requires `exports/final_cinema.mp4` to exist or returns 409 (`web_server.py:2282`).
 
 #### Budget gate doesn't fire
 
@@ -2043,7 +2043,7 @@ Each top-level file is a **9-line `from domain.X import *` re-export shim**; the
 
 #### Two classes named `CinemaPipeline` (D-1)
 
-`cinema/pipeline.py:80` is a **generic list-of-`Phase` driver**; `cinema_pipeline.py:942` is the **real orchestrator**. The generic driver is NOT used inside `generate()` — phases are run directly with `.run(ctx)`. Any doc saying "CinemaPipeline" without a path is ambiguous; the orchestrator is always `cinema_pipeline.CinemaPipeline`.
+`cinema/pipeline.py:80` is a **generic list-of-`Phase` driver**; `cinema_pipeline.py:967` is the **real orchestrator**. The generic driver is NOT used inside `generate()` — phases are run directly with `.run(ctx)`. Any doc saying "CinemaPipeline" without a path is ambiguous; the orchestrator is always `cinema_pipeline.CinemaPipeline`.
 
 #### `pipeline_context.py` vs `cinema/context.py` (D-3)
 

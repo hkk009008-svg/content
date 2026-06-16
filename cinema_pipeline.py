@@ -710,11 +710,26 @@ class CinemaPipeline:
         active_project = project or self.project
         scene_packages = []
         missing_shots: list[str] = []
-        self.scene_clips = {}
+        restored_scene_clips = (
+            dict(self.scene_clips) if isinstance(self.scene_clips, dict) else {}
+        )
+        updated_scene_clips: dict[str, list[str]] = {}
 
         for scene in active_project.get("scenes", []):
             scene_id = scene.get("id", "")
-            clips = []
+            restored_clips = restored_scene_clips.get(scene_id)
+            clips = (
+                list(restored_clips)
+                if (
+                    isinstance(restored_clips, list)
+                    and restored_clips
+                    and all(
+                        isinstance(path, str) and path and os.path.exists(path)
+                        for path in restored_clips
+                    )
+                )
+                else []
+            )
             # F1b assembler guard: track whether EVERY approved shot in this
             # scene has audio_embedded=True.  We only suppress standalone TTS
             # when ALL shots are embedded — mixed scenes keep TTS for the
@@ -722,19 +737,29 @@ class CinemaPipeline:
             # embedded shot is less bad than silent non-embedded shots).
             approved_shot_count = 0
             all_embedded_count = 0
-            for shot in scene.get("shots", []):
-                final_take_id = shot.get("approved_final_take_id", "")
-                final_path = self._resolve_take_path(shot, final_take_id)
-                if not final_path or not os.path.exists(final_path):
-                    missing_shots.append(shot.get("id", ""))
-                    continue
-                clips.append(final_path)
-                approved_shot_count += 1
-                take_meta = self._approved_take_metadata(shot)
-                if take_meta.get("audio_embedded") or take_meta.get("dialogue_audio_in_clip"):
-                    all_embedded_count += 1
+            if clips:
+                for shot in scene.get("shots", []):
+                    if not shot.get("approved_final_take_id", ""):
+                        continue
+                    approved_shot_count += 1
+                    take_meta = self._approved_take_metadata(shot)
+                    if take_meta.get("audio_embedded") or take_meta.get("dialogue_audio_in_clip"):
+                        all_embedded_count += 1
+            else:
+                for shot in scene.get("shots", []):
+                    final_take_id = shot.get("approved_final_take_id", "")
+                    final_path = self._resolve_take_path(shot, final_take_id)
+                    if not final_path or not os.path.exists(final_path):
+                        missing_shots.append(shot.get("id", ""))
+                        continue
+                    clips.append(final_path)
+                    approved_shot_count += 1
+                    take_meta = self._approved_take_metadata(shot)
+                    if take_meta.get("audio_embedded") or take_meta.get("dialogue_audio_in_clip"):
+                        all_embedded_count += 1
 
-            self.scene_clips[scene_id] = clips
+            updated_scene_clips[scene_id] = clips
+            self.scene_clips = updated_scene_clips
             characters = scene_characters(active_project.get("characters", []), scene)
             # Suppress standalone TTS only when EVERY approved shot is embedded.
             # Mixed-embedded scenes: include TTS to avoid silent non-embedded shots.

@@ -18,8 +18,8 @@ Read by the save path:
 
 Written by the restore path (FULL ASSIGNMENT to the runstate
 dataclass fields, which are mutable by default):
-  scene_clips, scene_audio, shot_audio, shot_results, failed_shots,
-  completed_scene_indices
+  current_stage, current_scene_id, current_shot_id, scene_clips, scene_audio,
+  shot_audio, shot_results, failed_shots, completed_scene_indices
 
 The previous Slice-3b version used a CheckpointStoreHost protocol to
 declare these as writable host attributes. After V1.1 #5, the host
@@ -29,6 +29,7 @@ abstraction collapses -- the runstate IS the contract.
 from __future__ import annotations
 
 import json
+import math
 import os
 from typing import TYPE_CHECKING
 
@@ -84,6 +85,17 @@ class CheckpointStore:
     def _checkpoint_path(self) -> str:
         return os.path.join(self.temp_dir, self.CHECKPOINT_FILE)
 
+    @staticmethod
+    def _json_safe(value):
+        """Return a JSON-safe copy of checkpoint state."""
+        if isinstance(value, float):
+            return value if math.isfinite(value) else None
+        if isinstance(value, dict):
+            return {key: CheckpointStore._json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [CheckpointStore._json_safe(item) for item in value]
+        return value
+
     def _save_checkpoint(self, completed_scene_idx: int = -1):
         """
         Persist pipeline state to disk after each meaningful step.
@@ -111,7 +123,14 @@ class CheckpointStore:
         fd, tmp = _tmp.mkstemp(suffix=".json.tmp", dir=self.temp_dir)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(state, f, indent=2, ensure_ascii=False, default=str)
+                json.dump(
+                    self._json_safe(state),
+                    f,
+                    indent=2,
+                    ensure_ascii=False,
+                    default=str,
+                    allow_nan=False,
+                )
             os.replace(tmp, path)
         except BaseException:
             if os.path.exists(tmp):
@@ -190,6 +209,11 @@ class CheckpointStore:
         self._runstate.failed_shots = state.get("failed_shots", [])
         completed = set(state.get("completed_scene_indices", []))
         self._runstate.completed_scene_indices = completed
+        self._runstate.update_progress_pointer(
+            str(state.get("current_stage") or ""),
+            str(state.get("current_scene_id") or ""),
+            str(state.get("current_shot_id") or ""),
+        )
 
         cost_tracker = getattr(self._core, "cost_tracker", None)
         rehydrate = getattr(cost_tracker, "rehydrate_spent_usd_from_video", None)

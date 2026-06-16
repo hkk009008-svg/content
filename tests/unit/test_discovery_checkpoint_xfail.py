@@ -14,8 +14,8 @@ CATALOG (cinema/checkpoint.py):
   confirmed[22] Wdefer:MINOR:ckpt-sceneclips-dead   :98,172
   confirmed[23] Wdefer:MINOR:ckpt-stage-notrestored :94-96
 
-Fixed sites stay here as ordinary regression tests. Deferred sites remain
-strict xfail pins until their production fixes land.
+Fixed and formerly deferred sites stay here as ordinary regression tests once
+their production fixes land.
 """
 
 from __future__ import annotations
@@ -159,16 +159,6 @@ def test_ckpt_projectid_crosscheck_on_restore(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Wdefer:MINOR:ckpt-nan-json-token cinema/checkpoint.py:110 "
-        "json.dump(default=str) does NOT prevent NaN/Infinity from being written as "
-        "non-standard JSON tokens (Python json bypasses default= for floats). "
-        "Fix = use a custom encoder that maps nan/inf to null before serialisation; "
-        "then this xpasses (strict)."
-    ),
-)
 def test_ckpt_nan_not_written_as_nonstandard_token(tmp_path):
     """A checkpoint containing NaN in shot_results must serialise to valid JSON
     (no literal NaN/Infinity/nan token in the file)."""
@@ -211,31 +201,18 @@ def test_ckpt_nan_not_written_as_nonstandard_token(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Wdefer:MINOR:ckpt-sceneclips-dead cinema/checkpoint.py:98,172 "
-        "scene_clips is saved and restored by CheckpointStore BUT "
-        "_build_scene_packages (cinema_pipeline.py:713) unconditionally resets "
-        "self.scene_clips = {} so the restored value is always discarded before it "
-        "can be used to skip already-assembled scenes. "
-        "Fix = guard the reset behind a skip-if-already-restored flag or skip scenes "
-        "whose clips are already present in the restored dict; then this xpasses (strict)."
-    ),
-)
 def test_ckpt_sceneclips_restored_value_survives_build(tmp_path):
     """scene_clips restored from a checkpoint must not be silently discarded.
 
-    We cannot easily call _build_scene_packages in a unit test (it walks
-    real on-disk paths), so this pin exercises the round-trip contract directly:
-    scene_clips set on the runstate must be the same object after restore.
-    The xfail is anchored to the confirmed defect that the pipeline DISCARDS this
-    restored value (pipeline:713), not to a checkpoint serialisation bug.
+    This exercises both the checkpoint round-trip and the runtime assembly
+    surface that used to discard restored scene clips before they could be used.
     """
     from cinema.runstate import RunState
 
     rs = RunState()
-    rs.scene_clips = {"scene-1": ["/clips/s1c1.mp4", "/clips/s1c2.mp4"]}
+    restored_clip = tmp_path / "restored-scene-1.mp4"
+    restored_clip.write_bytes(b"restored scene clip")
+    rs.scene_clips = {"scene-1": [str(restored_clip)]}
     store = _make_store(tmp_path, rs)
     store._save_checkpoint()
 
@@ -244,25 +221,53 @@ def test_ckpt_sceneclips_restored_value_survives_build(tmp_path):
     store2._restore_from_checkpoint()
 
     # Round-trip must succeed at the checkpoint layer.
-    assert rs2.scene_clips == {"scene-1": ["/clips/s1c1.mp4", "/clips/s1c2.mp4"]}, (
+    assert rs2.scene_clips == {"scene-1": [str(restored_clip)]}, (
         "scene_clips lost across checkpoint round-trip"
     )
 
-    # The deeper defect: _build_scene_packages resets scene_clips unconditionally,
-    # so even a perfect restore is thrown away. The fixed pipeline must check whether
-    # scene_clips is already populated for a scene before rebuilding it. We document
-    # this here as the actual production-reachable consequence; the assertion above
-    # catches any regression in the checkpoint layer itself.
-    # (Assert the FIXED pipeline behaviour: restored clips are not discarded.)
     from cinema_pipeline import CinemaPipeline  # type: ignore[import]
 
-    # Verify the defect at source: line 713 resets unconditionally.
-    import inspect
-    src = inspect.getsource(CinemaPipeline._build_scene_packages)
-    # In the fixed world this line would be gone or gated.
-    assert "self.scene_clips = {}" not in src, (
-        "_build_scene_packages unconditionally resets scene_clips (pipeline:713), "
-        "discarding any value restored from checkpoint — this is the confirmed defect"
+    pipeline = object.__new__(CinemaPipeline)
+    pipeline._runstate = rs2
+    pipeline._ensure_scene_audio = lambda scene, characters: None
+    pipeline._ensure_scene_foley = lambda scene: ""
+    pipeline._resolve_take_path = lambda shot, take_id: str(tmp_path / "missing.mp4")
+
+    project = {
+        "characters": [],
+        "scenes": [
+            {
+                "id": "scene-1",
+                "shots": [
+                    {
+                        "id": "shot-restored",
+                        "approved_final_take_id": "take-restored",
+                    }
+                ],
+            },
+            {
+                "id": "scene-2",
+                "shots": [
+                    {
+                        "id": "shot-missing",
+                        "approved_final_take_id": "take-missing",
+                    }
+                ],
+            },
+        ],
+    }
+
+    scene_packages, missing_shots = pipeline._build_scene_packages(project)
+
+    assert scene_packages[0]["clips"] == [str(restored_clip)], (
+        "restored scene_clips should be reused when their files still exist"
+    )
+    assert rs2.scene_clips["scene-1"] == [str(restored_clip)], (
+        "_build_scene_packages discarded valid scene_clips restored from checkpoint"
+    )
+    assert "shot-missing" in missing_shots, (
+        "missing approved take files must still be reported for scenes without "
+        "valid restored clips"
     )
 
 
@@ -275,18 +280,6 @@ def test_ckpt_sceneclips_restored_value_survives_build(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Wdefer:MINOR:ckpt-stage-notrestored cinema/checkpoint.py:94-96 "
-        "current_stage / current_scene_id / current_shot_id are saved but NOT "
-        "restored in _restore_from_checkpoint so the progress pointer triple is "
-        "always ('', '', '') after a resume, breaking stage-aware resume logic and "
-        "UI status display. "
-        "Fix = add the three assignments in _restore_from_checkpoint; "
-        "then this xpasses (strict)."
-    ),
-)
 def test_ckpt_stage_progress_pointer_restored(tmp_path):
     """current_stage/current_scene_id/current_shot_id must survive a round-trip."""
     from cinema.runstate import RunState

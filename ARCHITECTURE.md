@@ -217,7 +217,7 @@ worker is active**, because gate state lives in `project.json`, not in memory.
 | `self._runstate` | `RunState` | [cinema/runstate.py:60](cinema/runstate.py:60), fresh per `__init__` |
 | `self._shot_ctrl` | `ShotController` | [cinema/shots/controller.py](cinema/shots/controller.py) |
 | `self._review_ctrl` | `ReviewController` | [cinema/review/controller.py](cinema/review/controller.py) |
-| `self._checkpoint` | `CheckpointStore` | [cinema/checkpoint.py:43](cinema/checkpoint.py:43) |
+| `self._checkpoint` | `CheckpointStore` | [cinema/checkpoint.py:44](cinema/checkpoint.py:44) |
 
 All three sub-controllers share the same `RunState` reference — mutations
 propagate by reference. Forwarder block at
@@ -228,7 +228,7 @@ propagate by reference. Forwarder block at
 
 | Step | What happens | File:line |
 |---|---|---|
-| 1 | `_refresh_project_snapshot()`; early-return if no scenes | [cinema_pipeline.py:947-951](cinema_pipeline.py:947) |
+| 1 | `_refresh_project_snapshot()`; early-return if no scenes | [cinema_pipeline.py:443-447](cinema_pipeline.py:443) |
 | 2 | If `resume=True`: `_restore_from_checkpoint()` + `_rebuild_review_clips` | :953-956 |
 | 3 | STYLE — `generate_style_rules` → persist | :958-991 |
 | 4 | `_ensure_bgm(settings)` (Suno V5 preferred / FAL fallback, 47s duration) | :995 |
@@ -1522,7 +1522,7 @@ prefers Suno V5 with FAL Stable Audio as fallback; loops in assembly.
 
 ### 12.6 Final-assembly audio mux — engine-dependent voice source
 
-`_assemble_final` ([cinema_pipeline.py:1337](cinema_pipeline.py:1337)) muxes the
+`_assemble_final` ([cinema_pipeline.py:1362](cinema_pipeline.py:1362)) muxes the
 final video's audio with an FFmpeg `amix` filtergraph over up to three sources
 (voice/dialogue + BGM + foley). The **voice source is motion-engine-dependent**:
 
