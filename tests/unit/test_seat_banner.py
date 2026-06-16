@@ -43,3 +43,25 @@ def test_require_complete_rejects_missing_fields(capsys) -> None:
     err = capsys.readouterr().err
     assert rc == 2
     assert "missing contract fields" in err
+
+
+def test_require_complete_rejects_whitespace_only_fields(capsys) -> None:
+    rc = seat_banner.main(
+        [
+            "--objective",
+            "ok",
+            "--permissions",
+            "   ",
+            "--scope",
+            "   ",
+            "--verify",
+            "   ",
+            "--done",
+            "   ",
+            "--require-complete",
+        ]
+    )
+
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "permissions, scope, verify, done" in err
