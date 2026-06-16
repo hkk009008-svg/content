@@ -49,8 +49,21 @@ d30b623a docs(handoff): operator real artifact FAIL standby
 30e5ab83 coord(cursor): operator consume real artifact FAIL
 ```
 
-Final branch/worktree state observed after that movement: `main`, `8 ahead / 0
-behind origin/main`, clean worktree, operator `UNREAD: 0`.
+Refresh state observed after that movement: `main`, `8 ahead / 0 behind
+origin/main`, clean worktree, operator `UNREAD: 0`.
+
+Final closeout check after commit `34621272` showed operator state still clean
+for mailbox purposes but unrelated peer WIP present:
+
+```text
+HEAD 34621272 docs(handoff): refresh operator FAIL standby state
+vs origin/main: 9 ahead, 0 behind
+operator UNREAD: 0
+M  coordination/mailbox/seen/operator2.txt
+ M docs/HANDOFF-coordinator-2026-06-17-real-artifact-fail.md
+```
+
+Those final dirty paths are not operator-owned for this handoff.
 
 Locks:
 
