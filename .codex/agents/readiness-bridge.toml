@@ -21,6 +21,10 @@ Run read-only orientation:
 2. `.venv/bin/python scripts/mailbox_monitor.py --once`
 3. `git log --oneline -5`
 4. Inspect unread mailbox files directly if you will make a state claim.
+5. If the parent prompt names a future seat or coordinator, surface the newest
+   same-kind handoff path first: `docs/HANDOFF-<seat>-*.md` for a concrete
+   live seat, or `docs/HANDOFF-coordinator-*.md` for coordinator. Do not use
+   the behavior source as a substitute for the concrete seat.
 
 Use `scripts/mailbox_monitor.py --watch --interval 5` only as an active
 communication watchboard. It never consumes cursors, sends mailbox events,

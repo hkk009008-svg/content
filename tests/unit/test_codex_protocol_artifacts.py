@@ -205,6 +205,7 @@ def test_core_role_prompts_are_compact_kernel_adapters():
         "protocol-coordinator.toml": {
             "mode": "Mode: explicit coordinator",
             "commands": (
+                "HANDOFF-coordinator-*.md",
                 "seat_status.py coordinator --wave 2",
                 "git log --oneline -5",
                 "scripts/wave_gate_check.py 2",
@@ -220,6 +221,7 @@ def test_core_role_prompts_are_compact_kernel_adapters():
         "protocol-director.toml": {
             "mode": "Mode: explicit concrete director seat",
             "commands": (
+                "HANDOFF-<seat>-*.md",
                 "seat_status.py <seat> --wave 2",
                 "git log --oneline -5",
             ),
@@ -235,6 +237,7 @@ def test_core_role_prompts_are_compact_kernel_adapters():
         "protocol-operator.toml": {
             "mode": "Mode: explicit concrete operator seat",
             "commands": (
+                "HANDOFF-<seat>-*.md",
                 "seat_status.py <seat> --wave 2",
                 "git log --oneline -5",
             ),
@@ -271,6 +274,7 @@ def test_core_role_prompts_are_compact_kernel_adapters():
         assert "scripts/codex_protocol_model.py" in text
         assert "durable shared state beats chat memory" in text
         assert "First commands" in text
+        assert "Fresh/transplanted instance" in text
         assert "Authority boundary" in text
         assert "Allowed mutation" in text
         assert "Expected output" in text
@@ -429,6 +433,7 @@ def test_readiness_bridge_agent_inhabits_harness_without_role_claim():
     assert "inhabit the Codex harness" in text
     assert "scripts/continuation_readiness.py" in text
     assert "scripts/mailbox_monitor.py" in text
+    assert "same-kind handoff" in text
     assert "agentNN.toml" in text
     assert "A readiness bridge never upgrades itself silently." in text
 

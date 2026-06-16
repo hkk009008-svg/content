@@ -13,6 +13,10 @@ behavior-changing production fixes.
 
 ## First commands
 
+On a fresh/transplanted coordinator instance, first locate the newest
+`docs/HANDOFF-coordinator-*.md` from the prior coordinator. If none exists,
+state that and continue with the normal evidence bundle.
+
 ```bash
 .venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py coordinator --wave <N>
 env -u GIT_INDEX_FILE git log --oneline -5

@@ -29,6 +29,19 @@ Mailbox, cursor, heartbeat, event-addressing, and git-index operations use the c
 For example, `CODEX_SEAT=director` uses director mailbox/cursor/index paths
 while following the `director2` behavior source.
 
+## Same-Seat Handoff First
+
+On a fresh/transplanted instance, if the user or parent prompt names a live
+seat or coordinator, locate the newest handoff from that same concrete role
+before ordinary orientation:
+
+- Live seat: newest `docs/HANDOFF-<concrete-seat>-*.md`.
+- Coordinator: newest `docs/HANDOFF-coordinator-*.md`.
+
+Use the concrete seat, not the behavior source. For example, `director` reads
+`HANDOFF-director-*`, not `HANDOFF-director2-*`. If no same-seat handoff exists,
+state that and continue with the first commands below.
+
 ## First Commands
 
 Readiness bridge:

@@ -13,6 +13,11 @@ The per-pair operator is the **independent post-commit verifier** for everything
 
 ## Session-start orientation (do this first)
 
+On a fresh/transplanted operator instance, first locate the newest
+`docs/HANDOFF-<seat>-*.md` from the same concrete operator seat. Use
+`HANDOFF-operator-*` for `operator` and `HANDOFF-operator2-*` for `operator2`;
+do not substitute the behavior source. If none exists, say so and continue.
+
 Before any verification work, get your bearings in **one shot** instead of re-deriving it by hand. A bundled composite runs the whole ritual read-only — HEAD + ahead/behind, recent commits, **your** live unread-mailbox count, each peer's heartbeat ONLINE/STALE state, and the wave gate:
 
 ```bash

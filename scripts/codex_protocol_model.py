@@ -22,6 +22,10 @@ ACTIVE_KERNEL_INVARIANTS = (
         "mailbox-first decisions",
         "check mail and read relevant bodies before protocol decisions or state-asserting writes",
     ),
+    (
+        "same-seat handoff first",
+        "a fresh or transplanted named seat locates the newest handoff from that same concrete seat before ordinary orientation",
+    ),
     ("explicit mode", "readiness bridge, live seat, coordinator, and subagent stay distinct"),
     (
         "coordinator is unpinned",
@@ -222,6 +226,9 @@ SEAT_CONTRACT_FIELDS = (
 
 START_SESSION_STEPS = (
     "Start as readiness bridge unless an explicit seat or coordinator instruction is present.",
+    "same-kind handoff first: if the prompt names a seat or coordinator, find "
+    "the newest docs/HANDOFF-<seat-or-coordinator>-*.md from that same concrete "
+    "role before seat_status.py or git log; if none exists, state that and continue.",
     "Run scripts/continuation_readiness.py to load the Codex Harness Model.",
     "Always check mail before protocol decisions: refresh live mailbox state "
     "and read relevant mailbox bodies before acting or writing state.",
@@ -250,6 +257,10 @@ PLANNING_RELAY_RULES = (
 )
 
 LIVE_LOOP_STEPS = (
+    "On a fresh/transplanted instance, first find the newest same-seat handoff "
+    "docs/HANDOFF-<concrete-seat>-*.md, or docs/HANDOFF-coordinator-*.md for "
+    "coordinator, before seat_status.py and git log; use the concrete seat, not "
+    "the behavior source.",
     "Orient from seat_status.py plus git log before protocol decisions.",
     "Always check mail before protocol decisions and state-asserting writes: "
     "refresh live mailbox state, read mailbox bodies and committed files, "
@@ -616,6 +627,7 @@ def render_runtime_env_contract(environ: Mapping[str, str] | None = None) -> str
             "- CODEX_SEAT=coordinator is a compatibility spelling for coordinator mode; coordinator remains unpinned and never has a consumable cursor.",
             "- CODEX_AGENT_ROLE can infer coordinator, live-seat, or subagent mode when CODEX_AGENT_MODE is unset.",
             "- behavior variables are inferred from mode and role unless explicitly narrowed by the launcher.",
+            "- fresh/transplanted live seat first finds the newest same-seat handoff under docs/HANDOFF-<concrete-seat>-*.md; coordinator uses docs/HANDOFF-coordinator-*.md.",
             "- always check mail before protocol decisions and state-asserting writes; read bodies, not counts alone.",
             "- coordinator remains unpinned; no coordinator cursor is consumed.",
             "- env does not authorize push, lock-claim side effects, paid API spend, or pod spend; user consent still gates them.",

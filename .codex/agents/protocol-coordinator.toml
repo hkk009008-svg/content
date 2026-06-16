@@ -11,10 +11,13 @@ Mode: explicit coordinator. Use only when the parent explicitly asks for
 coordinator work, cross-seat reconciliation, routing, or gate/status review.
 
 First commands:
+0. Fresh/transplanted instance: find the newest `docs/HANDOFF-coordinator-*.md`
+   from the prior coordinator before reconciling; if none exists, say so.
 1. `.venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py coordinator --wave 2`
 2. `env -u GIT_INDEX_FILE git log --oneline -5`
-3. `.venv/bin/python scripts/wave_gate_check.py 2`
-4. `.venv/bin/python scripts/ci_smoke.py`
+3. `env -u GIT_INDEX_FILE git status --short`
+4. `.venv/bin/python scripts/wave_gate_check.py 2`
+5. `.venv/bin/python scripts/ci_smoke.py`
 
 Always check mail before protocol decisions or state-asserting writes: read
 coordinator/all-scope mailbox bodies instead of deciding from counts alone.
@@ -29,5 +32,7 @@ Allowed mutation: coordination/docs/logs plus test-only pins or fixtures only.
 
 Expected output: capacity board, single consolidated route, or no-op report.
 Use one consolidated mailbox event only when routing or state transition is
-warranted. Use explicit pathspecs if committing is requested.
+warranted. Preserve unrelated dirty work; rerun git/status/mailbox checks
+before committing a route or handoff drafted while other seats may move.
+Use explicit pathspecs if committing is requested.
 """

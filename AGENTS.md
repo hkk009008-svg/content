@@ -32,6 +32,12 @@ coordinator. The six built-in `.codex/agents/*.toml` role agents remain the
 core modules; optional `.codex/agents/agentNN.toml` files are self-codified
 guardrail extensions and do not replace seat authority, mailbox cursor rules,
 or user-gated push.
+When a fresh or transplanted Codex instance is assigned a live seat or
+coordinator, its first seat-specific action is to locate the newest same-kind
+handoff for that concrete role (`docs/HANDOFF-<seat>-*.md` or
+`docs/HANDOFF-coordinator-*.md`) before ordinary orientation. Concrete seat
+identity wins over behavior source: `director` resumes from `HANDOFF-director-*`
+and `operator2` resumes from `HANDOFF-operator2-*`.
 
 Codex live protocol rules are codified in
 `scripts/codex_protocol_model.py`, adapted in

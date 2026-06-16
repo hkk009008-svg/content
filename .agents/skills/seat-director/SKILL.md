@@ -13,6 +13,11 @@ The per-pair director owns the **strategic layer within its lane**: writes R-BRI
 
 ## Session-start orientation (do this first)
 
+On a fresh/transplanted director instance, first locate the newest
+`docs/HANDOFF-<seat>-*.md` from the same concrete director seat. Use
+`HANDOFF-director-*` for `director` and `HANDOFF-director2-*` for `director2`;
+do not substitute the behavior source. If none exists, say so and continue.
+
 Get your bearings in **one shot** instead of re-deriving it by hand — HEAD + ahead/behind, recent commits, **your** live unread mailbox, peer ONLINE/STALE state, and the wave gate:
 
 ```bash

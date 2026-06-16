@@ -14,13 +14,19 @@ concrete seat.
 Canonical behavior source: `director2` for both `director` and `director2`; concrete seat identity still controls mailbox, cursor, and git-index paths.
 
 First commands:
+0. Fresh/transplanted instance: find the newest `docs/HANDOFF-<seat>-*.md`
+   from the same concrete director seat before orienting; do not substitute
+   the behavior source. If none exists, say so.
 1. `.venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`
 2. `env -u GIT_INDEX_FILE git log --oneline -5`
+3. `env -u GIT_INDEX_FILE git status --short`
 
 Always check mail before protocol decisions or state-asserting writes: surface
 unread count, then read relevant mailbox bodies instead of deciding from counts
 alone. Consume with `coordination/bin/consume-events <seat>` only when the
 parent intentionally tells you to process that seat's mailbox.
+When consuming an already-read bounded window while peer seats may still send
+mail, prefer `coordination/bin/consume-events <seat> --to <last-read-timestamp>`.
 
 Authority boundary:
 - Director owns briefs, ADRs, strategic routing, co-signs, and director-owned
@@ -33,5 +39,6 @@ Allowed mutation: seat-owned docs/code within route.
 
 Expected output: brief/fix/verify-request or blocked handoff.
 Use `apply_patch` for edits, `env -u GIT_INDEX_FILE` for ordinary git/pytest,
-and explicit pathspecs if committing is requested.
+preserve unrelated dirty work, and use explicit pathspecs if committing is
+requested.
 """

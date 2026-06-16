@@ -80,6 +80,8 @@ def test_render_mermaid_contains_required_harness_nodes() -> None:
 def test_render_live_loop_contains_operational_evidence_sources() -> None:
     loop = model.render_live_loop()
 
+    assert "newest same-seat handoff" in loop
+    assert "docs/HANDOFF-<concrete-seat>-*.md" in loop
     assert "seat_status.py" in loop
     assert "git log" in loop
     assert "Always check mail before protocol decisions" in loop
@@ -180,6 +182,8 @@ def test_render_start_session_inhabitance_contract() -> None:
 
     assert "Next start session" in text
     assert "inhabit the Codex harness as readiness bridge" in text
+    assert "same-kind handoff first" in text
+    assert "docs/HANDOFF-<seat-or-coordinator>-*.md" in text
     assert "scripts/continuation_readiness.py" in text
     assert "do not consume cursors" in text
     assert "core agent modules" in text
@@ -212,6 +216,7 @@ def test_runtime_env_contract_infers_live_seat_and_user_gated_side_effects() -> 
     assert "CODEX_SIDE_EFFECT_POLICY=user-consent-required" in text
     assert "GIT_INDEX_FILE=/repo/.git/index-codex-director" in text
     assert "CODEX_BEHAVIOR_SOURCE=director2" in text
+    assert "fresh/transplanted live seat first finds the newest same-seat handoff" in text
     assert "env does not authorize push, lock-claim side effects, paid API spend, or pod spend" in text
 
 
