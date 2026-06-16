@@ -112,9 +112,10 @@ env -u GIT_INDEX_FILE git log --oneline -5
 ```
 
 Then surface the unread count in the first user-facing response before
-processing events. Always read the unread mailbox files before deciding the
-seat is idle, routed, blocked, or ready to verify. Cursor consumption is a
-separate intentional mutation. If the live seat intentionally consumes mail:
+processing events. Always check mail before protocol decisions or
+state-asserting writes: read the unread mailbox files before deciding the seat
+is idle, routed, blocked, or ready to verify. Cursor consumption is a separate
+intentional mutation. If the live seat intentionally consumes mail:
 
 ```bash
 coordination/bin/consume-events <seat>
@@ -279,12 +280,13 @@ spend, or pod spend.
 
 ## Codex Live-Protocol Rules
 
-- Read live mailbox state before any handoff, routing event, inventory/gate
-  claim, or state-asserting protocol write. For coordinator work, use
-  `seat_status.py coordinator --wave <N>` plus recent
+- Always check mail before any protocol decision, handoff, routing event,
+  inventory/gate claim, or state-asserting protocol write. For coordinator
+  work, use `seat_status.py coordinator --wave <N>` plus recent
   `coordination/mailbox/sent/` entries; never consume coordinator mail. For
-  live seats, read unread mail by default; consume cursors only when
-  intentionally advancing live-seat state.
+  live seats, read unread mail by default and read mailbox bodies instead of
+  deciding from counts alone; consume cursors only when intentionally advancing
+  live-seat state.
 - Refresh live state again before finalizing a handoff or commit when other
   seats are active. Mailbox counts and HEADs can change while a handoff is being
   written.

@@ -36,7 +36,9 @@ flowchart TD
 ## Live loop
 
 1. Orient from `seat_status.py` plus `git log` before protocol decisions.
-2. Read mailbox bodies and committed files; do not decide from counts alone.
+2. Always check mail before protocol decisions and state-asserting writes:
+   refresh live mailbox state, read mailbox bodies and committed files, and do
+   not decide from counts alone.
 3. Classify the live role: readiness bridge, named seat, or coordinator.
 4. Use the Rotating Planning Relay for important cross-seat plans before
    distributing work.
@@ -299,10 +301,10 @@ coordinator task board explicitly routes that action.
 
 These rules are mandatory for live Codex seats and coordinator sessions:
 
-- **R-CODEX-MAIL:** read live mailbox state before any handoff, routing event,
-  inventory/gate claim, or state-asserting protocol write. Live seats read
-  pending seat mail by default after surfacing the unread count; cursor
-  consumption is a separate intentional live-seat mutation. Use
+- **R-CODEX-MAIL:** always check mail before any protocol decision, handoff,
+  routing event, inventory/gate claim, or state-asserting protocol write. Live
+  seats read pending seat mail by default after surfacing the unread count;
+  cursor consumption is a separate intentional live-seat mutation. Use
   `seat_status.py <seat> --wave <N>` for seat-local unread state and
   `seat_status.py coordinator --wave <N>` plus recent
   `coordination/mailbox/sent/` entries for coordinator/all state. Decisions are

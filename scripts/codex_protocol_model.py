@@ -150,6 +150,8 @@ SEAT_CONTRACT_FIELDS = (
 START_SESSION_STEPS = (
     "Start as readiness bridge unless an explicit seat or coordinator instruction is present.",
     "Run scripts/continuation_readiness.py to load the Codex Harness Model.",
+    "Always check mail before protocol decisions: refresh live mailbox state "
+    "and read relevant mailbox bodies before acting or writing state.",
     "Use durable shared state first: git commits, mailbox bodies, cursors, locks, logs, and gate evidence.",
     "Guardrail: do not consume cursors, send mailbox events, claim locks, push, or spend from readiness bridge mode.",
     "Treat built-in role agents as core agent modules and agentNN.toml files as guardrail extensions.",
@@ -158,7 +160,7 @@ START_SESSION_STEPS = (
 
 COORDINATOR_INVARIANTS = (
     "never consume coordinator cursor",
-    "read coordinator/all-scope mailbox bodies before routing claims",
+    "always check coordinator/all-scope mailbox bodies before routing claims",
     "one coordinator-to-all route if needed",
     "route from durable evidence, not chat memory",
     "do not author production fixes",
@@ -176,7 +178,9 @@ PLANNING_RELAY_RULES = (
 
 LIVE_LOOP_STEPS = (
     "Orient from seat_status.py plus git log before protocol decisions.",
-    "Read mailbox bodies and committed files; do not decide from counts alone.",
+    "Always check mail before protocol decisions and state-asserting writes: "
+    "refresh live mailbox state, read mailbox bodies and committed files, "
+    "and do not decide from counts alone.",
     "Classify the live role: readiness bridge, named seat, or coordinator.",
     "Use the Rotating Planning Relay for important cross-seat plans before distributing work.",
     "Run gate scripts and smoke commands only as evidence, not as operator GO.",
@@ -515,6 +519,7 @@ def render_runtime_env_contract(environ: Mapping[str, str] | None = None) -> str
             "- CODEX_SEAT=coordinator is a compatibility spelling for coordinator mode; coordinator remains unpinned and never has a consumable cursor.",
             "- CODEX_AGENT_ROLE can infer coordinator, live-seat, or subagent mode when CODEX_AGENT_MODE is unset.",
             "- behavior variables are inferred from mode and role unless explicitly narrowed by the launcher.",
+            "- always check mail before protocol decisions and state-asserting writes; read bodies, not counts alone.",
             "- coordinator remains unpinned; no coordinator cursor is consumed.",
             "- env does not authorize push, lock-claim side effects, paid API spend, or pod spend; user consent still gates them.",
             "- CODEX_SIDE_EFFECT_POLICY is always user-consent-required for push, lock-claim side effects, paid API spend, and pod spend.",

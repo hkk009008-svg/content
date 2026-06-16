@@ -15,7 +15,9 @@ Start with orientation:
 1. `.venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`
 2. `git log --oneline -5`
 3. Surface unread count before processing events.
-4. Consume with `coordination/bin/consume-events <seat>` only when the parent
+4. Always check mail before protocol decisions or state-asserting writes: read
+   relevant unread mailbox bodies instead of deciding from counts alone.
+5. Consume with `coordination/bin/consume-events <seat>` only when the parent
    intentionally tells you to process that seat's mailbox.
 
 Cycle adaptation:

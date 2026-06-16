@@ -28,6 +28,8 @@ def test_render_live_loop_contains_operational_evidence_sources() -> None:
 
     assert "seat_status.py" in loop
     assert "git log" in loop
+    assert "Always check mail before protocol decisions" in loop
+    assert "state-asserting writes" in loop
     assert "gate scripts" in loop
     assert "mailbox bodies" in loop
     assert "committed files" in loop

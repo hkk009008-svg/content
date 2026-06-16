@@ -25,6 +25,8 @@ Start with:
 2. `git log --oneline -5`
 3. `.venv/bin/python scripts/wave_gate_check.py 2`
 4. `.venv/bin/python scripts/ci_smoke.py`
+5. Always check mail before protocol decisions or state-asserting writes: read
+   coordinator/all-scope mailbox bodies instead of deciding from counts alone.
 
 Capacity-max cycle default:
 - When the user asks the coordinator to continue, advance a cycle, realign
