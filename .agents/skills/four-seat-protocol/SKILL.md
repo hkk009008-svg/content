@@ -1,13 +1,18 @@
 ---
 name: four-seat-protocol
-description: Use in this repo when asked to continue, inspect, transplant, or operate the four-seat director/operator protocol from Codex; covers readiness bridge mode, seat orientation, mailbox rules, Wave gates, and Codex-specific mechanics. Do not use for ordinary feature work unless the user mentions a seat, mailbox, handoff, wave, continuation, readiness, or protocol.
+description: Use in this repo when asked to continue, inspect, hand off, or operate the four-seat director/operator protocol from Codex; covers readiness bridge mode, seat orientation, mailbox rules, Wave gates, and Codex-specific mechanics. Do not use for ordinary feature work unless the user mentions a seat, mailbox, handoff, wave, continuation, readiness, or protocol.
 ---
 
 # Four-Seat Protocol for Codex
 
-This skill is the Codex-side entry point for the Content repo's four-seat
-director/operator process. It ports the Claude-era protocol into Codex surfaces
-without making Codex pretend to be Claude Code.
+This skill is the Codex runtime checklist for the Content repo's four-seat
+director/operator process. The executable harness structure lives in
+`scripts/codex_protocol_model.py`; the model-backed operating doc is
+`docs/protocol/codex/continuation.md`.
+
+Central invariant: durable shared state beats chat memory. Treat git commits,
+committed files, mailbox bodies, `sent/` events, seen cursors, locks, logs,
+gate evidence, and operator verification reports as protocol truth.
 
 ## Source Order
 
@@ -36,6 +41,18 @@ Default to **readiness bridge** unless the user explicitly names a live role.
 
 Never silently upgrade from bridge mode into a seat.
 
+## Start-Session Inhabitance
+
+A fresh Codex session should inhabit the Codex harness as a readiness bridge
+unless the user or parent prompt names a live seat or coordinator. Start with
+`.venv/bin/python scripts/continuation_readiness.py`, read the model-backed
+Codex Harness Model section, and treat `agentNN.toml` files as guardrail
+extensions only.
+
+Bridge mode may report durable state and blockers, but it must not consume
+cursors, send mailbox events, claim locks, push, spend, edit inventory, or
+author production changes.
+
 ## Readiness Bridge Checklist
 
 Run the project command:
@@ -54,13 +71,13 @@ The command is read-only. It reports:
 - Wave gate state
 - ADR-028 ceremony gate state
 - environment/smoke status
-- Codex transplant artifacts
+- Codex harness model artifacts
 
 Do not call `coordination/bin/consume-events` in readiness mode.
 
 ## Handoff Draft Checklist
 
-When the user asks for a handoff or a clean-session transplant, the evidence
+When the user asks for a handoff or a clean-session transfer, the evidence
 scaffold can be generated without mutating protocol state:
 
 ```bash
@@ -123,6 +140,10 @@ Mailbox discipline:
   verifier roles are explicitly requested.
 - Keep main context responsible for decisions and final synthesis; use
   subagents for bounded exploration, verification, or role-specific work.
+- Treat optional `.codex/agents/agentNN.toml` files as self-codified
+  guardrail extensions: working, synergistic modules that may add seat-local
+  heuristics or situational-awareness loops, but never replace the built-in
+  role agents, seat authority, mailbox cursor rules, or user-gated push.
 - If `GIT_INDEX_FILE` is set, prefix git and pytest shell commands with
   `env -u GIT_INDEX_FILE` unless the task is explicitly about maintaining the
   active per-seat index.
@@ -283,6 +304,7 @@ before project hooks run.
 ## Related Files
 
 - Codex continuation doc: `docs/protocol/codex/continuation.md`
+- Codex harness model: `scripts/codex_protocol_model.py`
 - Readiness report: `scripts/continuation_readiness.py`
 - Handoff draft: `scripts/draft_handoff.py`
 - Seat status: `.agents/skills/four-seat-protocol/scripts/seat_status.py`

@@ -1,4 +1,4 @@
-"""Tests for Codex-side four-seat protocol transplant artifacts."""
+"""Tests for Codex-side four-seat protocol harness artifacts."""
 
 from __future__ import annotations
 
@@ -76,8 +76,9 @@ def test_session_smoke_does_not_fallback_to_system_python(tmp_path):
 def test_codex_custom_agents_are_valid_toml_with_required_fields():
     agents_dir = ROOT / ".codex" / "agents"
     agent_files = sorted(agents_dir.glob("*.toml"))
+    agent_names = {path.name for path in agent_files}
 
-    assert {path.name for path in agent_files} == {
+    required_agent_names = {
         "lane-v-verifier.toml",
         "money-gate-reviewer.toml",
         "protocol-coordinator.toml",
@@ -85,12 +86,26 @@ def test_codex_custom_agents_are_valid_toml_with_required_fields():
         "protocol-operator.toml",
         "readiness-bridge.toml",
     }
+    assert required_agent_names <= agent_names
+    extra_agent_names = agent_names - required_agent_names
+    assert all(
+        name.startswith("agent")
+        and name.endswith(".toml")
+        and len(name) == len("agent00.toml")
+        and name[5:7].isdigit()
+        for name in extra_agent_names
+    )
     for path in agent_files:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
         assert data["name"]
         assert data["description"]
         assert data["developer_instructions"]
         assert ".claude/skills/four-seat-protocol" not in data["developer_instructions"]
+        instructions = data["developer_instructions"].lower()
+        assert (
+            "durable shared state" in instructions
+            or "git commits and mailbox" in instructions
+        )
 
 
 def test_protocol_coordinator_agent_uses_tight_reconcile_loop():
@@ -108,6 +123,8 @@ def test_protocol_coordinator_agent_uses_tight_reconcile_loop():
     assert "Capacity-max cycle default" in instructions
     assert "protocol-director" in instructions
     assert "protocol-operator" in instructions
+    assert "harness" in instructions
+    assert "mailbox bodies" in instructions
 
 
 def test_codex_protocol_skill_points_to_readiness_and_seat_commands():
@@ -124,6 +141,13 @@ def test_codex_protocol_skill_points_to_readiness_and_seat_commands():
     assert "Capacity-Max Default Cycle" in text
     assert "protocol-director" in text
     assert "protocol-operator" in text
+    assert "scripts/codex_protocol_model.py" in text
+    assert "durable shared state beats chat memory" in text
+    assert "agentNN.toml" in text
+    assert "guardrail extensions" in text
+    assert "Start-Session Inhabitance" in text
+    assert "inhabit the Codex harness as a readiness bridge" in text
+    assert "Codex-side transplant" not in text
 
 
 def test_codex_continuation_defines_subagent_cycle_default():
@@ -137,6 +161,58 @@ def test_codex_continuation_defines_subagent_cycle_default():
     assert "protocol-director" in text
     assert "protocol-operator" in text
     assert "Readiness bridge mode is still read-only and never auto-spawns seats" in text
+    assert "scripts/codex_protocol_model.py" in text
+    assert "Codex CLI harness" in text
+    assert "durable shared state beats chat memory" in text
+    assert "agentNN.toml" in text
+    assert "guardrail extensions" in text
+    assert "Start-session inhabitance" in text
+    assert "inhabit the Codex harness as a readiness bridge" in text
+    assert "Codex-side transplant" not in text
+
+
+def test_protocol_assembly_map_doc_codifies_folder_intent():
+    text = (ROOT / "docs" / "protocol" / "protocol-assembly-map.md").read_text(
+        encoding="utf-8"
+    )
+    continuation = (ROOT / "docs" / "protocol" / "codex" / "continuation.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Protocol Assembly Map" in text
+    assert "lowest folder that can own it without ambiguity" in text
+    assert "docs/protocol/agents/" in text
+    assert "docs/protocol/codex/continuation.md" in text
+    assert ".agents/skills/" in text
+    assert ".codex/agents/*.toml" in text
+    assert "coordination/mailbox/sent/" in text
+    assert "coordination/mailbox/seen/" in text
+    assert "coordination/locks/" in text
+    assert "docs/REMEDIATION-INVENTORY.md" in text
+    assert "docs/superpowers/briefs/" in text
+    assert "scripts/" in text
+    assert "logs/" in text
+    assert "tests/unit/" in text
+    assert "docs/protocol/protocol-assembly-map.md" in continuation
+
+
+def test_root_agents_file_points_codex_start_to_harness_model():
+    text = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+    assert "scripts/codex_protocol_model.py" in text
+    assert "inhabit the Codex harness" in text
+    assert "agentNN.toml" in text
+
+
+def test_readiness_bridge_agent_inhabits_harness_without_role_claim():
+    text = (ROOT / ".codex" / "agents" / "readiness-bridge.toml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "inhabit the Codex harness" in text
+    assert "scripts/continuation_readiness.py" in text
+    assert "agentNN.toml" in text
+    assert "A readiness bridge never upgrades itself silently." in text
 
 
 def test_seat_coordinator_skill_defines_noop_fast_path():

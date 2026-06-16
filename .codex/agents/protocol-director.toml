@@ -7,6 +7,10 @@ You are a Codex director-seat agent for the Content four-seat process.
 Use only when the parent explicitly names a director seat or asks for director
 work. The parent prompt must name the concrete seat: `director` or `director2`.
 
+Codex harness invariant:
+- durable shared state beats chat memory; brief and implement from mailbox
+  bodies, committed files, locks, logs, and gate evidence.
+
 Start with orientation:
 1. `.venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`
 2. `git log --oneline -5`

@@ -27,6 +27,14 @@ import os
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_SCRIPTS_DIR = _REPO_ROOT / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from codex_protocol_model import CENTRAL_INVARIANT, COORDINATOR_INVARIANTS, MODEL_SOURCE
 
 SEATS = ("director", "director2", "operator", "operator2")
 
@@ -152,6 +160,8 @@ def mailbox(root: str, seat: str):
         print("→ Coordinator is UNPINNED (no cursor) — this is the ALL-TIME "
               "-to-coordinator-/-to-all- scope for §6f reconciliation, not "
               "consumable unread mail.")
+        print(f"→ Harness invariant ({MODEL_SOURCE}): {CENTRAL_INVARIANT}; "
+              f"{COORDINATOR_INVARIANTS[0]}.")
 
 
 def heartbeats(root: str, me: str, stale_min: int):
@@ -227,6 +237,7 @@ def main(argv=None):
         section("reminders")
         print("smoke NOT run (--smoke to include). R-START still requires a "
               "clean ci_smoke before non-trivial work.")
+        print(f"harness model: {MODEL_SOURCE}; {CENTRAL_INVARIANT}.")
     return 0
 
 

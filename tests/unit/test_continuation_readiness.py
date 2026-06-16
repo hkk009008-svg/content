@@ -57,7 +57,7 @@ def test_main_identifies_readiness_bridge_role(tmp_path, monkeypatch, capsys):
     assert "no seat claim, cursor consumption, mailbox send, or inventory edit" in out
 
 
-def test_render_codex_reports_transplant_artifacts(tmp_path, capsys):
+def test_render_codex_reports_harness_model_artifacts(tmp_path, capsys):
     skill = tmp_path / ".agents" / "skills" / "four-seat-protocol"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text("---\nname: four-seat-protocol\n---\n", encoding="utf-8")
@@ -65,13 +65,22 @@ def test_render_codex_reports_transplant_artifacts(tmp_path, capsys):
     codex_agents.mkdir(parents=True)
     (tmp_path / ".codex" / "hooks.json").write_text("{}", encoding="utf-8")
     (codex_agents / "readiness-bridge.toml").write_text("name='readiness-bridge'\n", encoding="utf-8")
+    (codex_agents / "agent01.toml").write_text("name='agent01'\n", encoding="utf-8")
 
     readiness.render_codex(tmp_path)
 
     out = capsys.readouterr().out
-    assert "Codex Transplant" in out
+    assert "Codex Harness Model" in out
+    assert "source: scripts/codex_protocol_model.py" in out
     assert "skill: present" in out
     assert "hooks: present" in out
+    assert "durable shared state" in out
+    assert "Mailbox sent/ + seen cursors" in out
+    assert "agent guardrail extensions: agent01.toml" in out
+    assert "do not replace built-in role agents" in out
+    assert "Next start session" in out
+    assert "inhabit the Codex harness as readiness bridge" in out
+    assert "explicit seat or coordinator instruction" in out
     assert "readiness-bridge.toml" in out
     assert "CODEX_SEAT=<seat>" in out
     assert "scripts/draft_handoff.py <seat> --wave 2 --output" in out

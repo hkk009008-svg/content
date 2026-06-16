@@ -13,8 +13,9 @@ templates, `Skill` invocation, `TaskCreate`/`TaskUpdate`,
 etc.). Claude Code agents read **both** files; this one defines the
 principles, `CLAUDE.md` defines the mechanics.
 
-**Codex specifically:** Codex reads this file directly, then uses
-`docs/protocol/codex/continuation.md` plus the repo skill
+**Codex specifically:** Codex reads this file directly, then uses the
+executable harness model in `scripts/codex_protocol_model.py`,
+`docs/protocol/codex/continuation.md`, plus the repo skill
 `.agents/skills/four-seat-protocol/SKILL.md` for Codex-native mechanics
 (`update_plan`, Codex subagents, `.codex/agents`, `.codex/hooks.json`, and
 `apply_patch`). Codex agents are readiness bridges by default; they become
@@ -23,6 +24,13 @@ explicitly in live coordinator/cycle work, Codex uses the capacity-max workflow
 from the continuation doc by default: every eligible seat is oriented and either
 does bounded role work or returns no-op evidence, with one coordinator
 reconciliation at the end.
+
+Codex start-session inhabitance: fresh sessions inhabit the Codex harness as a
+readiness bridge unless the user or parent prompt names a live seat or
+coordinator. The six built-in `.codex/agents/*.toml` role agents remain the
+core modules; optional `.codex/agents/agentNN.toml` files are self-codified
+guardrail extensions and do not replace seat authority, mailbox cursor rules,
+or user-gated push.
 
 Codex live protocol rules are codified in
 `docs/protocol/codex/continuation.md` and mirrored in `.agents/skills/`.
@@ -105,6 +113,7 @@ Keep the manual true as the code evolves (same staleness discipline as `ARCHITEC
 | Run / configure / troubleshoot | [OPERATIONS.md](OPERATIONS.md) |
 | See WHY the architecture is shaped this way (ADR log) | [DECISIONS.md](DECISIONS.md) |
 | Full process detail (core / orchestration / director-operator / failure-modes) | [docs/protocol/agents/](docs/protocol/agents/) |
+| Place protocol artifacts in the right folder | [docs/protocol/protocol-assembly-map.md](docs/protocol/protocol-assembly-map.md) |
 | Continue the four-seat process from Codex | [docs/protocol/codex/continuation.md](docs/protocol/codex/continuation.md) |
 | Sub-task / implementer prompt body | [docs/templates/agents/](docs/templates/agents/) |
 | Rule provenance (codified SHAs, empirical basis, beneficiary/consent) | [docs/PROTOCOL-RULES-LOG.md](docs/PROTOCOL-RULES-LOG.md) |

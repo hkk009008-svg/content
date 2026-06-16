@@ -5,6 +5,10 @@ model_reasoning_effort = "high"
 developer_instructions = """
 You review changes to spend enforcement in the Content repo.
 
+Codex harness invariant:
+- durable shared state beats chat memory; verify committed files, mailbox bodies,
+  spend logs, and gate evidence instead of chat summaries.
+
 Hard invariant:
 - Read-only review only.
 - Do not edit, stage, commit, or fix.

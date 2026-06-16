@@ -1,15 +1,55 @@
 # Codex continuation protocol
 
-This document is the Codex-side transplant of the repo's four-seat
-director/operator process. It does not replace `AGENTS.md` or the
-agent-agnostic protocol under `docs/protocol/agents/`; it maps that protocol
-onto Codex-native surfaces.
+This document renders the executable Codex harness model from
+`scripts/codex_protocol_model.py` into runtime instructions. It does not
+replace `AGENTS.md` or the agent-agnostic protocol under
+`docs/protocol/agents/`; it maps those durable repo rules onto Codex-native
+surfaces.
+
+Central invariant: durable shared state beats chat memory. Treat git commits,
+committed files, mailbox bodies, `sent/` events, seen cursors, locks, logs,
+gate evidence, and operator verification reports as the source of protocol
+truth.
+
+## Harness model
+
+```mermaid
+flowchart TD
+    user["User principal"]
+    harness["Codex CLI harness"]
+    state["Durable shared state"]
+    mailbox["Mailbox sent/ + seen cursors"]
+    seats["director / director2 / operator / operator2"]
+    coordinator["coordinator"]
+    gate["Gate + receipt loop"]
+
+    user --> harness
+    harness --> state
+    state --> mailbox
+    mailbox --> seats
+    mailbox --> coordinator
+    seats --> gate
+    coordinator --> gate
+    gate --> state
+```
+
+## Live loop
+
+1. Orient from `seat_status.py` plus `git log` before protocol decisions.
+2. Read mailbox bodies and committed files; do not decide from counts alone.
+3. Classify the live role: readiness bridge, named seat, or coordinator.
+4. Run gate scripts and smoke commands only as evidence, not as operator GO.
+5. Send one `coordinator-to-all` route if needed, then verify receipt
+   seat-by-seat.
+6. Push remains user-gated; locks, paid spend, and pod spend require explicit
+   consent.
 
 ## Codex surfaces
 
 | Need | Codex surface |
 |---|---|
 | Durable repo rules | `AGENTS.md` |
+| Protocol folder-intent map | `docs/protocol/protocol-assembly-map.md` |
 | Reusable continuation workflow | `.agents/skills/four-seat-protocol/SKILL.md` |
 | Explicit spawned role agents | `.codex/agents/*.toml` |
 | Session lifecycle guardrails | `.codex/hooks.json` + `.codex/hooks/*.sh` |
@@ -17,11 +57,38 @@ onto Codex-native surfaces.
 | Live seat orientation | `.agents/skills/four-seat-protocol/scripts/seat_status.py` |
 | Reviewable handoff draft | `scripts/draft_handoff.py` |
 | Protocol effectiveness loop | `scripts/protocol_effectiveness_report.py` |
+| Executable harness model | `scripts/codex_protocol_model.py` |
 
 The remaining `.claude/` script path is intentional for now: Codex wrappers
 reuse the same tested shell/Python implementation instead of forking protocol
 logic. Codex-facing instructions live in this file, `.agents/skills/`, and
 `.codex/`.
+
+## Agent guardrail extensions
+
+The built-in role agents remain the core harness modules:
+`readiness-bridge`, `protocol-coordinator`, `protocol-director`,
+`protocol-operator`, `lane-v-verifier`, and `money-gate-reviewer`.
+
+Optional `.codex/agents/agentNN.toml` files are self-codified guardrail
+extensions. They can capture working seat heuristics, situational-awareness
+loops, and synergistic routing advice as durable modules, but they extend the
+harness; they do not replace built-in role agents, seat authority, mailbox
+cursor rules, or user-gated push.
+
+## Start-session inhabitance
+
+A fresh Codex session should inhabit the Codex harness as a readiness bridge
+unless the user or parent prompt gives an explicit seat or coordinator
+instruction. The bridge starts from
+`.venv/bin/python scripts/continuation_readiness.py`, reads the model-backed
+Codex Harness Model section, and treats any discovered `agentNN.toml` files as
+guardrail extensions only.
+
+Readiness bridge mode does not consume cursors, send mailbox events, claim
+locks, push, spend, or author production changes. It can report the durable
+state and blockers, then stop or ask the parent to launch the appropriate core
+role agent.
 
 ## Mode selection
 
@@ -205,7 +272,7 @@ For execution-readiness checks:
 ```
 
 This command reports git, mailbox unread counts, Wave state, ADR-028 ceremony
-state, environment status, and installed Codex transplant artifacts. It exits
+state, environment status, and installed Codex harness model artifacts. It exits
 successfully as a report command even when Wave or ceremony gates are red.
 
 ## Partly Automated Handoff Draft
@@ -221,9 +288,8 @@ The draft command is read-only with respect to protocol state: it does not
 consume mailbox cursors, send mailbox events, edit inventory, or decide that a
 seat is done. The current seat must still review the output, fill in the
 judgment fields, and refresh live state again before committing or handing off
-when other seats are active. Treat the generated transplant prompt as a clean
-session starter, not as a replacement for `seat_status.py` and mailbox-body
-review.
+when other seats are active. Treat the generated clean-session prompt as a
+starter, not as a replacement for `seat_status.py` and mailbox-body review.
 
 ## Protocol Effectiveness Report
 

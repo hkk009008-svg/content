@@ -13,6 +13,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+from codex_protocol_model import (
+    DURABLE_STATE_ARTIFACTS,
+    MODEL_SOURCE,
+    render_agent_extension_summary,
+    render_start_session_inhabitance,
+    render_surface_summary,
+)
 from status import collect_mailbox
 
 SEATS = ("director", "director2", "operator", "operator2")
@@ -115,12 +122,16 @@ def render_environment(root: Path, smoke: bool) -> None:
 
 
 def render_codex(root: Path) -> None:
-    section("Codex Transplant")
+    section("Codex Harness Model")
     skill = root / ".agents" / "skills" / "four-seat-protocol" / "SKILL.md"
     hooks = root / ".codex" / "hooks.json"
     agents_dir = root / ".codex" / "agents"
     agents = sorted(p.name for p in agents_dir.glob("*.toml")) if agents_dir.exists() else []
 
+    print(_trim(render_surface_summary(), lines=8))
+    print("durable state: " + ", ".join(DURABLE_STATE_ARTIFACTS))
+    print(render_agent_extension_summary(agents))
+    print(render_start_session_inhabitance(agents))
     print(f"skill: {'present' if skill.exists() else 'missing'} ({skill})")
     print(f"hooks: {'present' if hooks.exists() else 'missing'} ({hooks})")
     print(f"custom agents: {', '.join(agents) if agents else '(none)'}")
