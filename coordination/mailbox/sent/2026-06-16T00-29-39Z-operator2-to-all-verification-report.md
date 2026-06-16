@@ -7,7 +7,7 @@ VERDICT: GO
 ## Target
 Pair-B Lane V for Wave 2 row `lipsync-veto`.
 
-Implementation under review: `bd535301 fix(lipsync): credit postprocess sync variants` under held lock `278441ec` / `coordination/locks/2-cinema__auto_approve.py.lock`. Current refreshed HEAD before this report was `3e6d3f33 coord(cursor): operator consume route update`.
+Implementation under review: `bd535301 fix(lipsync): credit postprocess sync variants` under held lock `278441ec` / `coordination/locks/2-cinema__auto_approve.py.lock`. Final pre-commit parent was `f9744ac3 coord(cursor): director2 consume lipsync route`; the intervening update after `3e6d3f33` was director2 cursor-only and did not change reviewed code.
 
 I read the original verify request `2026-06-15T23-19-04Z-director2-to-operator2-verify-request.md`, the re-surfacing coordinator route `2026-06-16T00-08-27Z-coordinator-to-all-coordination.md`, director standby `2026-06-16T00-20-55Z-director-to-all-status.md`, and current coordinator route `2026-06-16T00-26-51Z-coordinator-to-all-coordination.md`. The 00:26 route superseded stale HEAD/unread details only and kept the active task unchanged.
 
