@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
@@ -439,6 +441,61 @@ def test_closed_standby_cycle_rejects_missing_handoff_artifact(tmp_path: Path) -
                 "smoke OK",
                 "next trigger: standby; no routed next work",
                 "handoff: docs/HANDOFF-coordinator-2026-06-17-wave4-standby.md",
+            ],
+        ),
+        _packet(
+            "wave4-director-done",
+            "director",
+            status="done",
+            done_evidence=[
+                "committed diff",
+                "verify-request coordination/mailbox/sent/request.md",
+            ],
+        ),
+        _packet(
+            "wave4-operator-done",
+            "operator",
+            packet_type="operator-verification",
+            status="done",
+            done_evidence=["GO coordination/mailbox/sent/go.md"],
+        )
+        | {
+            "verify_request": "coordination/mailbox/sent/request.md",
+            "target_commit": "abc1234",
+            "scope_files": ["identity/validator.py"],
+        },
+    ]:
+        _write_packet(tmp_path, packet)
+
+    report = capacity.collect_capacity_report(tmp_path, 4)
+
+    messages = "\n".join(issue["message"] for issue in report.blocking_issues)
+    assert "handoff artifact" in messages
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="handoff-artifact-path-traversal: normalized non-handoff path satisfies gate",
+)
+def test_closed_standby_cycle_rejects_normalized_non_handoff_file(tmp_path: Path) -> None:
+    decoy_dir = tmp_path / "docs/HANDOFF-decoy"
+    decoy_dir.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "docs/PROGRAM-MANUAL.md").write_text(
+        "# Not A Handoff\n",
+        encoding="utf-8",
+    )
+
+    for packet in [
+        _packet(
+            "wave4-join",
+            "coordinator",
+            packet_type="coordinator-join",
+            status="done",
+            done_evidence=[
+                "capacity board valid",
+                "smoke OK",
+                "next trigger: standby; no routed next work",
+                "handoff: docs/HANDOFF-decoy/../PROGRAM-MANUAL.md",
             ],
         ),
         _packet(
