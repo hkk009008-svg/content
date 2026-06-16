@@ -55,6 +55,10 @@ ACTIVE_KERNEL_INVARIANTS = (
         "single consolidated route",
         "cross-seat awareness uses one coordinator event when routing is warranted",
     ),
+    (
+        "capacity-board route validation",
+        "active coordinator task-board routes run protocol_capacity_board.py and --validate-route before commit",
+    ),
 )
 
 DEMOTED_RUNTIME_CONCEPTS = (
@@ -242,6 +246,7 @@ COORDINATOR_INVARIANTS = (
     "never consume coordinator cursor",
     "always check coordinator/all-scope mailbox bodies before routing claims",
     "one coordinator-to-all route if needed",
+    "capacity-board route validation before any active coordinator task-board route",
     "route from durable evidence, not chat memory",
     "do not author production fixes",
 )
@@ -281,6 +286,7 @@ LIVE_LOOP_STEPS = (
     "Classify the live role: readiness bridge, named seat, or coordinator.",
     "Name concrete evidence before acting: mailbox bodies, gate output, smoke output, and diff scope.",
     "Run gate scripts and smoke commands only as evidence, not as operator GO.",
+    "Before any active coordinator task-board route, run `scripts/protocol_capacity_board.py --wave <wave>` and validate the draft with `scripts/protocol_capacity_board.py --wave <wave> --validate-route coordination/mailbox/sent/<event>.md`; fix named gate failures before committing the route.",
     "Send one coordinator-to-all route if needed, then verify receipt seat-by-seat.",
     "When a full coordinator/live-seat cycle reaches a real completion boundary and assigned tasks are complete, write a durable handoff before transplant or context switch, including fresh git/mailbox/gate/smoke state and the exact next trigger.",
     "Push remains user-gated; locks, paid spend, and pod spend require explicit consent.",

@@ -1,0 +1,24 @@
+{
+  "id": "EX-2026-06-17-wave4-identity-fixture",
+  "created_at": "2026-06-17T00:00:00Z",
+  "approving_actor": "user-principal",
+  "bypassed_gate": "G6",
+  "reason": "live multi-detection DeepFace fixture is unavailable locally",
+  "scope": {
+    "packet_ids": [
+      "wave4-identity-arcface-embselect-operator"
+    ],
+    "row_ids": [
+      "identity-arcface-embselect"
+    ],
+    "paths": [
+      "identity/validator.py"
+    ]
+  },
+  "expiry": {
+    "type": "condition",
+    "value": "fixture committed or row marked test-infeasible in inventory"
+  },
+  "convergence_condition": "operator records test-infeasible verification report and coordinator reconciles inventory",
+  "status": "active"
+}

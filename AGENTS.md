@@ -54,6 +54,11 @@ coordinator event, verify broadcast receipt seat-by-seat, use
 `env -u GIT_INDEX_FILE` for ordinary git/pytest, use a scoped temporary index
 for coordinator-only commits when the shared index is dirty, and prefer
 eligible no-lock work when push/lock side effects are not user-authorized.
+Active coordinator task-board routes must first pass the hard-gated capacity
+board:
+`env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave <wave>`
+and
+`env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave <wave> --validate-route coordination/mailbox/sent/<event>.md`.
 
 **Non-Claude agents:** read this file as your source of truth. Translate
 the principles ("fresh context per task", "two-stage review",

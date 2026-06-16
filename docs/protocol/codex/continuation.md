@@ -67,6 +67,14 @@ env -u GIT_INDEX_FILE git log --oneline -5
 .venv/bin/python scripts/ci_smoke.py
 ```
 
+Before committing an active coordinator task-board route, render the hard-gated
+capacity board and validate the draft route:
+
+```bash
+env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave <wave>
+env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave <wave> --validate-route coordination/mailbox/sent/<event>.md
+```
+
 Use `<wave>` when the active wave is not 2:
 
 ```bash
@@ -107,6 +115,9 @@ evidence, not row-correctness proof.
   handoff evidence scaffold; refresh live state before finalizing it.
 - `scripts/protocol_effectiveness_report.py`: read-only diagnostics. It does
   not route work, consume mail, or decide inventory state.
+- `scripts/protocol_capacity_board.py --wave <wave>`: read-only hard-gated
+  capacity board; use `--validate-route coordination/mailbox/sent/<event>.md`
+  before active coordinator task-board route commits.
 - `.codex/agents/agentNN.toml`: optional guardrail extensions. They do not
   replace seat authority, mailbox cursor rules, or user-gated push.
 

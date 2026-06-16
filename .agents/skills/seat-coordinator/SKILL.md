@@ -24,6 +24,13 @@ env -u GIT_INDEX_FILE git log --oneline -5
 .venv/bin/python scripts/ci_smoke.py
 ```
 
+Before committing an active coordinator task-board route:
+
+```bash
+env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave <wave>
+env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave <wave> --validate-route coordination/mailbox/sent/<event>.md
+```
+
 Surface the coordinator/all-scope mailbox count before reconciling. Then read
 the relevant mailbox bodies. The coordinator is unpinned: it has no cursor and
 must not run `consume-events coordinator`.
@@ -47,6 +54,9 @@ gate's result by relaxing the gate.
 - Reconcile inventory at session-start, wave-boundary gate, or a director's
   gate request. Batch writes instead of committing per micro-transition.
 - Use one consolidated coordinator event when cross-seat routing is warranted.
+- Active coordinator task-board routes must pass
+  `scripts/protocol_capacity_board.py --wave <wave>` plus
+  `--validate-route coordination/mailbox/sent/<event>.md` before commit.
 
 ## No-op fast path
 

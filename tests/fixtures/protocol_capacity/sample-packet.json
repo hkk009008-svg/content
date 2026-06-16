@@ -1,0 +1,24 @@
+{
+  "id": "wave4-identity-arcface-embselect-director",
+  "wave": 4,
+  "cycle": "2026-06-17-wave4-open",
+  "owner": "director",
+  "packet_type": "director-implementation",
+  "row_ids": [
+    "identity-arcface-embselect"
+  ],
+  "allowed_paths": [
+    "identity/validator.py",
+    "tests/unit/test_identity_arcface_embselect.py"
+  ],
+  "lock_keys": [],
+  "dependencies": [],
+  "acceptance": [
+    "brief names write sites",
+    "focused regression or test-infeasible label",
+    "verify-request sent to operator"
+  ],
+  "done_evidence": [],
+  "next_recipient": "operator",
+  "status": "ready"
+}

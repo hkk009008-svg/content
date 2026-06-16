@@ -108,6 +108,16 @@ def test_coordinator_invariants_pin_unpinned_cursor_and_single_route() -> None:
     assert "one coordinator-to-all route if needed" in summary
 
 
+def test_capacity_board_gate_is_required_before_active_task_board_routes() -> None:
+    loop = model.render_live_loop()
+    summary = model.render_surface_summary()
+
+    assert "scripts/protocol_capacity_board.py --wave <wave>" in loop
+    assert "--validate-route coordination/mailbox/sent/<event>.md" in loop
+    assert "active coordinator task-board route" in loop
+    assert "capacity-board route validation" in summary
+
+
 def test_live_seat_behavior_sources_preserve_concrete_identity() -> None:
     assert model.SEAT_BEHAVIOR_SOURCE == {
         "director": "director2",
