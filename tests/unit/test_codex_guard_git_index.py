@@ -49,14 +49,15 @@ def test_env_u_git_index_prefix_is_allowed() -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "protocol-harness-guard-env-u-bypass: raw env-u substring allows a "
-        "later unsafe git segment"
-    ),
+@pytest.mark.parametrize(
+    "command",
+    [
+        "env -u GIT_INDEX_FILE git status; git add scripts/protocol_capacity.py",
+        "env -u GIT_INDEX_FILE git status & git add scripts/protocol_capacity.py",
+        "env -u GIT_INDEX_FILE git status |& git add scripts/protocol_capacity.py",
+    ],
 )
-def test_env_u_prefix_only_allows_its_own_segment() -> None:
-    result = _run_hook("env -u GIT_INDEX_FILE git status; git add scripts/protocol_capacity.py")
+def test_env_u_prefix_only_allows_its_own_segment(command: str) -> None:
+    result = _run_hook(command)
     assert result.returncode == 2
     assert "git add" in result.stderr

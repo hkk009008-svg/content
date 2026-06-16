@@ -39,8 +39,8 @@ if isinstance(data, dict):
     ti = data.get("tool_input")
     if isinstance(ti, dict):
         cmd = ti.get("command", "")
-if not isinstance(cmd, str) or not cmd or "env -u GIT_INDEX_FILE" in cmd:
-    sys.exit(0)  # nothing to check / already safe
+if not isinstance(cmd, str) or not cmd:
+    sys.exit(0)  # nothing to check
 
 # Git subcommands that read or write the index (so they care about which index).
 MUT = {"add", "commit", "stash", "reset", "rm", "restore", "mv", "read-tree",
@@ -65,7 +65,7 @@ def command_segments(c):
     segments = []
     current = []
     for tok in toks:
-        if tok in {";", "|", "||", "&&"}:
+        if tok in {";", "&", "|", "|&", "||", "&&"}:
             if current:
                 segments.append(current)
                 current = []
@@ -76,14 +76,67 @@ def command_segments(c):
     return segments
 
 
+def _assignment_token(tok):
+    return re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tok) is not None
+
+
+def _command_index(toks):
+    ci = 0
+    while ci < len(toks) and _assignment_token(toks[ci]):
+        ci += 1
+    return ci
+
+
+def _env_wrapped_command(toks, ci):
+    if ci >= len(toks) or toks[ci].split("/")[-1] != "env":
+        return ci, False
+
+    i = ci + 1
+    unsets_git_index = False
+    resets_git_index = False
+    while i < len(toks):
+        tok = toks[i]
+        if tok == "--":
+            i += 1
+            break
+        if tok == "-u" and i + 1 < len(toks):
+            unsets_git_index = unsets_git_index or toks[i + 1] == "GIT_INDEX_FILE"
+            i += 2
+            continue
+        if tok.startswith("--unset="):
+            unsets_git_index = unsets_git_index or tok.split("=", 1)[1] == "GIT_INDEX_FILE"
+            i += 1
+            continue
+        if tok == "--unset" and i + 1 < len(toks):
+            unsets_git_index = unsets_git_index or toks[i + 1] == "GIT_INDEX_FILE"
+            i += 2
+            continue
+        if tok in {"-i", "--ignore-environment"}:
+            i += 1
+            continue
+        if _assignment_token(tok):
+            resets_git_index = resets_git_index or tok.split("=", 1)[0] == "GIT_INDEX_FILE"
+            i += 1
+            continue
+        if tok.startswith("-"):
+            i += 1
+            continue
+        break
+    return i, unsets_git_index and not resets_git_index
+
+
 def offending_segment(c):
     for toks in command_segments(c):
         if not toks:
             continue
-        # command token = first token that is not a `VAR=val` env assignment
-        ci = 0
-        while ci < len(toks) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", toks[ci]):
-            ci += 1
+        # command token = first token that is not a `VAR=val` env assignment.
+        # `env -u GIT_INDEX_FILE` is safe only for the segment it prefixes.
+        ci = _command_index(toks)
+        if ci >= len(toks):
+            continue
+        ci, env_unsets_git_index = _env_wrapped_command(toks, ci)
+        if env_unsets_git_index:
+            continue
         if ci >= len(toks):
             continue
         cmd0 = toks[ci].split("/")[-1]  # basename of the invoked command
