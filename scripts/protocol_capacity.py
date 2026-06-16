@@ -698,6 +698,8 @@ def _validate_route_file(path: Path, report: CapacityReport) -> list[dict[str, A
         issues.append(_issue("G7", f"{name}: route is missing task-board marker"))
 
     expected_ids = {packet.id for packet in report.packets}
+    if not expected_ids:
+        issues.append(_issue("G7", f"no capacity packets for wave {report.wave}"))
     named_ids = {packet_id for packet_id in expected_ids if packet_id in body}
     missing = sorted(expected_ids - named_ids)
     if missing:

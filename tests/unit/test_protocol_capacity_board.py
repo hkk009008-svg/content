@@ -428,6 +428,15 @@ Packet IDs:
     assert "missing join condition" in messages
 
 
+def test_validate_route_rejects_task_board_without_capacity_packets(tmp_path: Path) -> None:
+    route = _write_route(tmp_path, _valid_route_body())
+
+    result = capacity.validate_route(tmp_path, 4, route)
+
+    assert not result.valid
+    assert any("no capacity packets for wave 4" in issue["message"] for issue in result.blocking_issues)
+
+
 def test_validate_route_rejects_forbidden_side_effects(tmp_path: Path) -> None:
     _write_valid_cycle(tmp_path)
     route = _write_route(
