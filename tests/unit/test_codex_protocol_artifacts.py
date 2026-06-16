@@ -220,6 +220,24 @@ def test_codex_adapters_are_kernel_backed_and_do_not_require_default_ceremony():
             assert term not in normalized
 
 
+def test_codex_live_seat_docs_name_behavior_source_without_identity_deletion():
+    paths = [
+        ROOT / "docs" / "protocol" / "codex" / "continuation.md",
+        ROOT / ".agents" / "skills" / "four-seat-protocol" / "SKILL.md",
+    ]
+
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        assert (
+            "Behavior source map: `director -> director2`, `director2 -> director2`, "
+            "`operator -> operator`, `operator2 -> operator`."
+        ) in text
+        assert (
+            "Mailbox, cursor, heartbeat, event-addressing, and git-index operations "
+            "use the concrete seat, not the behavior source."
+        ) in text
+
+
 def test_codex_protocol_skill_points_to_runtime_checklists():
     text = (ROOT / ".agents" / "skills" / "four-seat-protocol" / "SKILL.md").read_text(
         encoding="utf-8"

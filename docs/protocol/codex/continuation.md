@@ -20,6 +20,15 @@ kernel onto Codex commands and runtime choices.
 - Subagent: bounded by the parent prompt. Subagents do not inherit live-seat or
   coordinator authority unless the prompt explicitly grants it.
 
+## Live-Seat Behavior Sources
+
+Concrete live-seat identity and canonical behavior source are separate.
+Behavior source map: `director -> director2`, `director2 -> director2`, `operator -> operator`, `operator2 -> operator`.
+
+Mailbox, cursor, heartbeat, event-addressing, and git-index operations use the concrete seat, not the behavior source.
+For example, `CODEX_SEAT=director` uses director mailbox/cursor/index paths
+while following the `director2` behavior source.
+
 ## First Commands
 
 Readiness bridge:
