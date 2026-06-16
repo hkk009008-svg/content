@@ -19,6 +19,17 @@ Core invariant:
   mailbox bodies, sent events, seen cursors, locks, logs, gate evidence, and
   operator verification reports as protocol truth.
 
+Same-kind handoff first:
+- When assigned a fresh/transplanted live seat (`director`, `director2`,
+  `operator`, or `operator2`), locate the newest
+  `docs/HANDOFF-<concrete-seat>-*.md` for that concrete seat before running
+  `seat_status.py` or `git log`; do not substitute the behavior source.
+- When assigned coordinator, locate the newest
+  `docs/HANDOFF-coordinator-*.md` before coordinator status, git, gate, or
+  smoke orientation.
+- If no same-kind handoff exists, say so and continue with the normal startup
+  below.
+
 Common startup:
 1. Confirm the concrete mode and allowed write set from the parent prompt.
 2. If `GIT_INDEX_FILE` is set, prefix ordinary git and pytest commands with

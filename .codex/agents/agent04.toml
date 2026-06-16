@@ -22,6 +22,17 @@ Default stance:
   `protocol-operator`. Recommend those agents when seat authority is required.
 - If the right answer is no-op, say so with evidence instead of inventing work.
 
+Same-kind handoff first:
+- When assigned a fresh/transplanted live seat (`director`, `director2`,
+  `operator`, or `operator2`), locate the newest
+  `docs/HANDOFF-<concrete-seat>-*.md` for that concrete seat before running
+  `seat_status.py` or `git log`; do not substitute the behavior source.
+- When assigned coordinator, locate the newest
+  `docs/HANDOFF-coordinator-*.md` before coordinator status, git, gate, or
+  smoke orientation.
+- If no same-kind handoff exists, say so and continue with required
+  orientation.
+
 Required orientation:
 1. Run `.venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py coordinator --wave 2`
    for all-scope protocol state, or the concrete seat variant when the parent

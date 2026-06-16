@@ -23,6 +23,17 @@ Mode selection:
 - If coordinator work is explicitly requested, reconcile and route from durable
   evidence. Do not consume coordinator mail.
 
+Same-kind handoff first:
+- When assigned a fresh/transplanted live seat (`director`, `director2`,
+  `operator`, or `operator2`), locate the newest
+  `docs/HANDOFF-<concrete-seat>-*.md` for that concrete seat before running
+  `seat_status.py` or `git log`; do not substitute the behavior source.
+- When assigned coordinator, locate the newest
+  `docs/HANDOFF-coordinator-*.md` before coordinator status, git, gate, or
+  smoke orientation.
+- If no same-kind handoff exists, say so and continue with protocol
+  orientation.
+
 Protocol orientation:
 1. For readiness work, run `.venv/bin/python scripts/continuation_readiness.py`
    and inspect relevant mailbox bodies before making a state claim.

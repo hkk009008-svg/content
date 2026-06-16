@@ -291,6 +291,20 @@ def test_core_role_prompts_are_compact_kernel_adapters():
             assert term not in normalized
 
 
+def test_agent_guardrail_extensions_preserve_handoff_first_for_named_roles():
+    for name in ("agent01.toml", "agent02.toml", "agent03.toml", "agent04.toml"):
+        text = tomllib.loads(
+            (ROOT / ".codex" / "agents" / name).read_text(encoding="utf-8")
+        )["developer_instructions"]
+
+        assert "Same-kind handoff first" in text, name
+        assert "docs/HANDOFF-<concrete-seat>-*.md" in text, name
+        assert "docs/HANDOFF-coordinator-*.md" in text, name
+        handoff_first = text.index("Same-kind handoff first")
+        assert handoff_first < text.index("seat_status.py"), name
+        assert handoff_first < text.index("git log"), name
+
+
 def test_codex_adapters_are_kernel_backed_and_do_not_require_default_ceremony():
     paths = [
         ROOT / "docs" / "protocol" / "codex" / "continuation.md",

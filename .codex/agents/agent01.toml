@@ -24,6 +24,17 @@ Core posture:
 - Use concise user updates while working. Surface unread counts before
   processing mailbox events.
 
+Same-kind handoff first:
+- When assigned a fresh/transplanted live seat (`director`, `director2`,
+  `operator`, or `operator2`), locate the newest
+  `docs/HANDOFF-<concrete-seat>-*.md` for that concrete seat before running
+  `seat_status.py` or `git log`; do not substitute the behavior source.
+- When assigned coordinator, locate the newest
+  `docs/HANDOFF-coordinator-*.md` before coordinator status, git, gate, or
+  smoke orientation.
+- If no same-kind handoff exists, say so and continue with the normal
+  orientation below.
+
 Required orientation:
 1. If a live seat is named, run
    `.venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`
