@@ -1,0 +1,23 @@
+{
+  "id": "wave3-harness-bestversion-operator2-mailbox-cli-lanev",
+  "wave": 3,
+  "cycle": "2026-06-16-protocol-harness-best-version-core-a",
+  "owner": "operator2",
+  "packet_type": "operator-verification",
+  "row_ids": [
+    "protocol-harness-best-version-task2"
+  ],
+  "allowed_paths": [],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-harness-bestversion-director2-mailbox-cli"
+  ],
+  "acceptance": [
+    "after director2 verify-request, independently issue GO, NITS, or FAIL",
+    "verify consume-events parser errors leave cursors unchanged",
+    "verify send-event cleanup leaves no staged or sent mailbox residue on git add failure"
+  ],
+  "done_evidence": [],
+  "next_recipient": null,
+  "status": "blocked"
+}

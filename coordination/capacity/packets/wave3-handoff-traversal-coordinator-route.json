@@ -18,7 +18,11 @@
     "capacity board validates the route before commit",
     "no push, lock, pod, paid API, or production generation side effect is opened"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "route: coordination/mailbox/sent/2026-06-16T19-46-40Z-coordinator-to-all-coordination.md",
+    "route validation: scripts/protocol_capacity_board.py --wave 3 --validate-route coordination/mailbox/sent/2026-06-16T19-46-40Z-coordinator-to-all-coordination.md -> route valid: true",
+    "no push, lock, pod, paid API, or production generation side effect opened"
+  ],
   "next_recipient": "director",
-  "status": "active"
+  "status": "done"
 }

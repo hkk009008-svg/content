@@ -1,0 +1,28 @@
+{
+  "id": "wave3-harness-bestversion-coordinator-route",
+  "wave": 3,
+  "cycle": "2026-06-16-protocol-harness-best-version-core-a",
+  "owner": "coordinator",
+  "packet_type": "coordinator-route",
+  "row_ids": [
+    "protocol-harness-best-version-task1",
+    "protocol-harness-best-version-task2"
+  ],
+  "allowed_paths": [
+    "coordination/capacity/packets",
+    "coordination/mailbox/sent"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-handoff-traversal-coordinator-join"
+  ],
+  "acceptance": [
+    "route uses docs/superpowers/plans/2026-06-17-protocol-harness-best-version.md",
+    "parallel tasks do not share files",
+    "operators receive separate Lane V boundaries",
+    "no push, lock, pod, paid API, or production generation side effect is opened"
+  ],
+  "done_evidence": [],
+  "next_recipient": "director",
+  "status": "active"
+}

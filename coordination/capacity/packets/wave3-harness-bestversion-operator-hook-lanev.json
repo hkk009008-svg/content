@@ -1,0 +1,23 @@
+{
+  "id": "wave3-harness-bestversion-operator-hook-lanev",
+  "wave": 3,
+  "cycle": "2026-06-16-protocol-harness-best-version-core-a",
+  "owner": "operator",
+  "packet_type": "operator-verification",
+  "row_ids": [
+    "protocol-harness-best-version-task1"
+  ],
+  "allowed_paths": [],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-harness-bestversion-director-hook-parse"
+  ],
+  "acceptance": [
+    "after director verify-request, independently issue GO, NITS, or FAIL",
+    "verify the hook parser respects quoted shell punctuation",
+    "verify git/pytest blocking behavior remains enforced under GIT_INDEX_FILE"
+  ],
+  "done_evidence": [],
+  "next_recipient": null,
+  "status": "blocked"
+}

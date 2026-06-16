@@ -15,7 +15,10 @@
   "acceptance": [
     "stand by unless coordinator or user opens a distinct Pair-B protocol-hardening task"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "standby fulfilled; no Pair-B implementation was opened by the handoff traversal route",
+    "next routed Pair-B work is the separate protocol harness best-version mailbox CLI task"
+  ],
   "next_recipient": null,
-  "status": "blocked"
+  "status": "done"
 }

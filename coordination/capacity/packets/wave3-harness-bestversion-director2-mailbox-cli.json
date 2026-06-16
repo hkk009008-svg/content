@@ -1,0 +1,29 @@
+{
+  "id": "wave3-harness-bestversion-director2-mailbox-cli",
+  "wave": 3,
+  "cycle": "2026-06-16-protocol-harness-best-version-core-a",
+  "owner": "director2",
+  "packet_type": "director-implementation",
+  "row_ids": [
+    "protocol-harness-best-version-task2"
+  ],
+  "allowed_paths": [
+    "coordination/bin/consume-events",
+    "coordination/bin/send-event",
+    "tests/unit/test_coordination_bin.py"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-harness-bestversion-coordinator-route"
+  ],
+  "acceptance": [
+    "implement Task 2 from docs/superpowers/plans/2026-06-17-protocol-harness-best-version.md",
+    "consume-events help and unknown-argument paths do not mutate cursors",
+    "send-event help is read-only",
+    "send-event removes a created mail file when git add fails",
+    "send a fresh director2-to-operator2 verify-request naming the exact commit"
+  ],
+  "done_evidence": [],
+  "next_recipient": "operator2",
+  "status": "active"
+}

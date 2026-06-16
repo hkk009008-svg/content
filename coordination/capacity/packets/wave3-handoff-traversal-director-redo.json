@@ -21,7 +21,11 @@
     "strict xfail test_closed_standby_cycle_rejects_absolute_prefixed_handoff_path flips to a normal passing test",
     "fresh director-to-operator verify-request names the fix commit"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "commit: 0c047755 fix(protocol): require root-relative handoff artifact evidence",
+    "verify-request: coordination/mailbox/sent/2026-06-16T19-51-26Z-director-to-operator-verify-request.md",
+    "focused tests: test_closed_standby_cycle_rejects_absolute_prefixed_handoff_path -> 1 passed; tests/unit/test_protocol_capacity_board.py -> 24 passed"
+  ],
   "next_recipient": "operator",
-  "status": "active"
+  "status": "done"
 }

@@ -15,7 +15,10 @@
   "acceptance": [
     "stand by unless coordinator or user opens a distinct Pair-B protocol-hardening verification task"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "standby fulfilled; no operator2 Lane V target was opened by the handoff traversal route",
+    "next routed operator2 work is the separate protocol harness best-version mailbox CLI Lane V"
+  ],
   "next_recipient": null,
-  "status": "blocked"
+  "status": "done"
 }

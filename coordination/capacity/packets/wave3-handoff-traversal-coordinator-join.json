@@ -1,0 +1,37 @@
+{
+  "id": "wave3-handoff-traversal-coordinator-join",
+  "wave": 3,
+  "cycle": "2026-06-16-handoff-traversal-redo",
+  "owner": "coordinator",
+  "packet_type": "coordinator-join",
+  "row_ids": [
+    "protocol-handoff-traversal-root-relative"
+  ],
+  "allowed_paths": [
+    "coordination/capacity/packets",
+    "coordination/mailbox/sent",
+    "docs/HANDOFF-coordinator-2026-06-17-handoff-traversal-go-closeout.md"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave3-handoff-traversal-coordinator-route",
+    "wave3-handoff-traversal-director-redo",
+    "wave3-handoff-traversal-operator-lanev",
+    "wave3-handoff-traversal-director2-standby",
+    "wave3-handoff-traversal-operator2-standby"
+  ],
+  "acceptance": [
+    "operator GO closes the handoff traversal root-relative evidence gate",
+    "capacity board remains valid",
+    "ci_smoke remains OK",
+    "durable coordinator handoff artifact records the next route"
+  ],
+  "done_evidence": [
+    "capacity board evidence: scripts/protocol_capacity_board.py --wave 3 -> valid: true; BLOCKING ISSUES - none",
+    "smoke OK evidence: scripts/ci_smoke.py -> OK; known verify-addendum advisory and R2 warnings only",
+    "next trigger: continue as director for hook parsing and continue as director2 for mailbox CLI hardening",
+    "handoff: docs/HANDOFF-coordinator-2026-06-17-handoff-traversal-go-closeout.md"
+  ],
+  "next_recipient": null,
+  "status": "done"
+}

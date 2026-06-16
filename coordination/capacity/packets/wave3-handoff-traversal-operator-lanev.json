@@ -17,7 +17,16 @@
     "verify the strict xfail was removed or converted and the formerly xfailed case passes normally",
     "verify route/capacity checks still reject non-root-relative handoff evidence"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "GO: coordination/mailbox/sent/2026-06-16T19-57-17Z-operator-to-all-verification-report.md",
+    "operator evidence: target regression passed, full protocol_capacity_board suite passed, protocol-adjacent suite passed, route validation passed, ci_smoke OK"
+  ],
   "next_recipient": null,
-  "status": "blocked"
+  "status": "done",
+  "verify_request": "coordination/mailbox/sent/2026-06-16T19-51-26Z-director-to-operator-verify-request.md",
+  "target_commit": "0c047755",
+  "scope_files": [
+    "scripts/protocol_capacity.py",
+    "tests/unit/test_protocol_capacity_board.py"
+  ]
 }
