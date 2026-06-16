@@ -38,6 +38,20 @@ A  docs/HANDOFF-director-2026-06-17-real-artifact-fail-consumed.md
 Those paths are not operator-owned for this handoff and were not included in
 the operator handoff commit. Use explicit pathspecs if committing around them.
 
+Post-commit refresh: peer seats committed their handoffs after the operator
+handoff commit. Final observed HEAD for this turn moved to:
+
+```text
+16e4f2cb docs(handoff): director consume real artifact FAIL
+d30b623a docs(handoff): operator real artifact FAIL standby
+03a889e0 docs(handoff): director2 real artifact fail standby
+88fa6906 docs(handoff): coordinator real artifact fail
+30e5ab83 coord(cursor): operator consume real artifact FAIL
+```
+
+Final branch/worktree state observed after that movement: `main`, `8 ahead / 0
+behind origin/main`, clean worktree, operator `UNREAD: 0`.
+
 Locks:
 
 ```text
