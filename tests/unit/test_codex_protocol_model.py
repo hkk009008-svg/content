@@ -106,6 +106,44 @@ def test_coordinator_invariants_pin_unpinned_cursor_and_single_route() -> None:
     assert "one coordinator-to-all route if needed" in summary
 
 
+def test_live_seat_behavior_sources_preserve_concrete_identity() -> None:
+    assert model.SEAT_BEHAVIOR_SOURCE == {
+        "director": "director2",
+        "director2": "director2",
+        "operator": "operator",
+        "operator2": "operator",
+    }
+    assert model.behavior_source_for_seat("director") == "director2"
+    assert model.behavior_source_for_seat("director2") == "director2"
+    assert model.behavior_source_for_seat("operator") == "operator"
+    assert model.behavior_source_for_seat("operator2") == "operator"
+    assert model.behavior_source_for_seat("coordinator") is None
+    assert model.behavior_source_for_seat("not-a-seat") is None
+
+    director_text = model.render_runtime_env_contract(
+        {
+            "CODEX_SEAT": "director",
+            "GIT_INDEX_FILE": "/repo/.git/index-codex-director",
+        }
+    )
+    operator2_text = model.render_runtime_env_contract(
+        {
+            "CODEX_SEAT": "operator2",
+            "GIT_INDEX_FILE": "/repo/.git/index-codex-operator2",
+        }
+    )
+
+    assert "CODEX_AGENT_ROLE=director" in director_text
+    assert "CODEX_SEAT=director" in director_text
+    assert "CODEX_BEHAVIOR_SOURCE=director2" in director_text
+    assert "GIT_INDEX_FILE=/repo/.git/index-codex-director" in director_text
+
+    assert "CODEX_AGENT_ROLE=operator2" in operator2_text
+    assert "CODEX_SEAT=operator2" in operator2_text
+    assert "CODEX_BEHAVIOR_SOURCE=operator" in operator2_text
+    assert "GIT_INDEX_FILE=/repo/.git/index-codex-operator2" in operator2_text
+
+
 def test_render_planning_relay_codifies_rotating_baton_and_coordinator_start() -> None:
     relay = model.render_planning_relay()
 
@@ -173,6 +211,7 @@ def test_runtime_env_contract_infers_live_seat_and_user_gated_side_effects() -> 
     assert "CODEX_NEXT_ACTION_POLICY=read-mail-then-act-or-report-idle" in text
     assert "CODEX_SIDE_EFFECT_POLICY=user-consent-required" in text
     assert "GIT_INDEX_FILE=/repo/.git/index-codex-director" in text
+    assert "CODEX_BEHAVIOR_SOURCE=director2" in text
     assert "env does not authorize push, lock-claim side effects, paid API spend, or pod spend" in text
 
 
@@ -215,6 +254,7 @@ def test_runtime_env_contract_models_operator_and_specialist_authority() -> None
     assert "CODEX_AGENT_ROLE=operator2" in operator_text
     assert "CODEX_VERIFICATION_POLICY=independent-go-nits-fail" in operator_text
     assert "CODEX_AUTHORITY_SCOPE=seat-owned" in operator_text
+    assert "CODEX_BEHAVIOR_SOURCE=operator" in operator_text
 
     assert "CODEX_AGENT_MODE=subagent" in specialist_text
     assert "CODEX_AGENT_ROLE=lane-v-verifier" in specialist_text
@@ -226,6 +266,7 @@ def test_runtime_env_contract_models_operator_and_specialist_authority() -> None
     assert "CODEX_OUTPUT_CONTRACT=bounded-findings-to-parent" in specialist_text
     assert "CODEX_DECISION_BOUNDARY=parent-scoped-no-seat-authority" in specialist_text
     assert "CODEX_NEXT_ACTION_POLICY=return-evidence-then-stop" in specialist_text
+    assert "CODEX_BEHAVIOR_SOURCE=(none)" in specialist_text
 
 
 def test_runtime_env_contract_infers_mode_from_explicit_role() -> None:
@@ -349,6 +390,7 @@ def test_main_renders_current_environment(monkeypatch, capsys) -> None:
     assert "CODEX_AGENT_ROLE=director2" in out
     assert "CODEX_AUTHORITY_SCOPE=seat-owned" in out
     assert "CODEX_VERIFICATION_POLICY=request-operator-go" in out
+    assert "CODEX_BEHAVIOR_SOURCE=director2" in out
     assert "GIT_INDEX_FILE=/repo/.git/index-codex-director2" in out
 
 

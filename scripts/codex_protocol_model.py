@@ -91,6 +91,19 @@ DURABLE_STATE_ARTIFACTS = (
 SEATS = ("director", "director2", "operator", "operator2")
 DIRECTOR_SEATS = ("director", "director2")
 OPERATOR_SEATS = ("operator", "operator2")
+SEAT_BEHAVIOR_SOURCE = {
+    "director": "director2",
+    "director2": "director2",
+    "operator": "operator",
+    "operator2": "operator",
+}
+
+
+def behavior_source_for_seat(seat: str) -> str | None:
+    """Return the canonical behavior source for a concrete live seat."""
+    return SEAT_BEHAVIOR_SOURCE.get(seat)
+
+
 READ_ONLY_VERIFIER_ROLES = ("lane-v-verifier", "money-gate-reviewer")
 SPAWNED_ROLE_AGENT_ROLES = (
     "protocol-coordinator",
@@ -130,6 +143,11 @@ RUNTIME_ENV_VARIABLES = (
         "CODEX_SEAT",
         "director | director2 | operator | operator2 | coordinator",
         "binds a live seat; coordinator is a compatibility alias for coordinator mode and remains unpinned",
+    ),
+    (
+        "CODEX_BEHAVIOR_SOURCE",
+        "director2 | operator | (none)",
+        "names the canonical live-seat behavior source while CODEX_SEAT remains the concrete mailbox, cursor, and git-index identity",
     ),
     (
         "CODEX_CAPABILITY_MODE",
@@ -461,6 +479,7 @@ def infer_runtime_env(environ: Mapping[str, str] | None = None) -> dict[str, str
         seat_display = f"(ignored: {seat})"
     else:
         seat_display = "(unset)"
+    behavior_source = behavior_source_for_seat(role) if mode == "live-seat" else None
 
     capability_defaults = {
         "readiness-bridge": "read-only",
@@ -563,6 +582,7 @@ def infer_runtime_env(environ: Mapping[str, str] | None = None) -> dict[str, str
         "CODEX_AGENT_MODE": mode,
         "CODEX_AGENT_ROLE": role,
         "CODEX_SEAT": seat_display,
+        "CODEX_BEHAVIOR_SOURCE": behavior_source or "(none)",
         "CODEX_CAPABILITY_MODE": capability,
         "CODEX_MUTATION_SCOPE": mutation,
         "CODEX_AUTHORITY_SCOPE": authority,
@@ -592,6 +612,7 @@ def render_runtime_env_contract(environ: Mapping[str, str] | None = None) -> str
             "contract rules:",
             "- readiness-bridge is the default when CODEX_AGENT_MODE and CODEX_SEAT are unset.",
             "- CODEX_SEAT selects a live seat for director/director2/operator/operator2.",
+            "- CODEX_BEHAVIOR_SOURCE names the canonical live-seat behavior source; CODEX_SEAT remains the concrete mailbox, cursor, and git-index identity.",
             "- CODEX_SEAT=coordinator is a compatibility spelling for coordinator mode; coordinator remains unpinned and never has a consumable cursor.",
             "- CODEX_AGENT_ROLE can infer coordinator, live-seat, or subagent mode when CODEX_AGENT_MODE is unset.",
             "- behavior variables are inferred from mode and role unless explicitly narrowed by the launcher.",
