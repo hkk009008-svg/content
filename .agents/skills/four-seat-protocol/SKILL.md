@@ -305,6 +305,11 @@ spend, or pod spend.
 - A bare `handoff` request means a narrow state-transfer artifact from live
   evidence, not new implementation, verification, inventory churn, or mailbox
   noise.
+- When a full coordinator/live-seat cycle reaches a real completion boundary
+  and the assigned tasks are complete, the last active Codex seat or coordinator
+  writes a durable handoff before transplant or context switch. Refresh live
+  git/mailbox/gate/smoke state, record what was consumed or routed, preserve
+  dirty-tree caveats, and name the exact next trigger.
 - When a protocol observation would improve capacity, efficacy, or efficiency,
   preserve it as durable memory if the user has authorized memory updates; if it
   is broadly reusable, codify it in the relevant protocol docs/rules log with

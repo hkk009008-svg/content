@@ -334,6 +334,12 @@ These rules are mandatory for live Codex seats and coordinator sessions:
   artifact from live evidence. Do not invent implementation, verification,
   inventory churn, or mailbox noise unless the evidence shows a real transition
   or the user asks for that work.
+- **R-CODEX-CYCLE-HANDOFF:** when a full coordinator/live-seat cycle reaches a
+  real completion boundary and the assigned tasks are complete, the last active
+  Codex seat or coordinator writes a durable handoff before transplant or
+  context switch. The handoff must refresh live git/mailbox/gate/smoke state,
+  record what was consumed or routed, preserve dirty-tree caveats, and name the
+  exact next trigger.
 - **R-CODEX-LEARN:** when a live protocol observation would improve capacity,
   efficacy, or efficiency, preserve it as durable memory if the user has
   authorized memory updates; if the observation is broadly reusable, codify it

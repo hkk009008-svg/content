@@ -23,7 +23,9 @@ director/operator/coordinator seats only on explicit user instruction. Once
 explicitly in live coordinator/cycle work, Codex uses the capacity-max workflow
 from the continuation doc by default: every eligible seat is oriented and either
 does bounded role work or returns no-op evidence, with one coordinator
-reconciliation at the end.
+reconciliation at the end. When that full cycle reaches a real completion
+boundary and tasks are complete, the last active Codex seat/coordinator writes a
+durable handoff before transplant or context switch.
 
 Codex start-session inhabitance: fresh sessions inhabit the Codex harness as a
 readiness bridge unless the user or parent prompt names a live seat or
