@@ -487,12 +487,11 @@ def _best_take_lipsync(takes: list[dict]) -> float:
 
     Default semantics (F1b fix):
     - Non-dialogue takes (no take has ``has_dialogue=True``): return 1.0 (N/A pass).
-    - Audio-embedded dialogue takes (``audio_embedded=True``): return 1.0 (native sync pass).
-    - Postprocess lip-sync variants with ``dialogue_audio_in_clip=True``: return
-      1.0 (operator-applied sync pass).
+    - Audio-embedded dialogue takes (``audio_embedded=True`` or
+      ``dialogue_audio_in_clip=True``): return 1.0 (native/postprocess sync pass).
     - Dialogue takes with a real ``lipsync_score``: return the max score (existing behaviour).
-    - Dialogue takes with NO ``lipsync_score`` AND NOT ``audio_embedded``: return 0.0
-      (fail — the lipsync pass was skipped or failed; do not silently approve).
+    - Dialogue takes with NO ``lipsync_score`` AND NOT embedded-dialogue proof:
+      return 0.0 (fail — the lipsync pass was skipped or failed; do not silently approve).
 
     Fixed v1.1 (Session 11 review): was returning the FIRST take's score
     instead of the MAX, inconsistent with _best_take_composite / _identity
@@ -502,7 +501,7 @@ def _best_take_lipsync(takes: list[dict]) -> float:
 
     F1b: The original 1.0 blind default masked dialogue shots that went through
     generation with no lipsync pass.  The fix distinguishes: if any take is
-    dialogue AND it has neither a lipsync_score nor audio_embedded=True, that
+    dialogue AND it has neither a lipsync_score nor embedded-dialogue proof, that
     take is syncing-unverified and should be caught by the gate.
     """
     best = 0.0
@@ -525,18 +524,12 @@ def _best_take_lipsync(takes: list[dict]) -> float:
             # only a non-finite score still yields best=0.0 (fail-closed).
             if math.isfinite(s):
                 best = max(best, s)
-        elif metadata.get("audio_embedded"):
-            # Native-audio take: voice is baked in; treat as perfect sync.
-            any_score_present = True
-            best = max(best, 1.0)
-        elif metadata.get("dialogue_audio_in_clip"):
-            # A postprocess lip-sync correction writes a new clip whose dialogue
-            # audio is already embedded; credit that successful correction even
-            # when the variant has no separate lipsync_score.
+        elif metadata.get("audio_embedded") or metadata.get("dialogue_audio_in_clip"):
+            # Voice is baked into this clip, either natively or by postprocess lip_sync.
             any_score_present = True
             best = max(best, 1.0)
         elif metadata.get("has_dialogue"):
-            # Dialogue take with no lipsync_score and no audio_embedded:
+            # Dialogue take with no lipsync_score and no embedded-dialogue proof:
             # lipsync either didn't run or failed — this is the blind gap.
             any_dialogue_unverified = True
 

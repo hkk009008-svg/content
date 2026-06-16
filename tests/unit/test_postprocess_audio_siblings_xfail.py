@@ -1,9 +1,13 @@
 """Postprocess-audio sibling coverage from the §3 completeness sweep.
 
-``test_performance_take_as_final_metadata_is_resolved`` is the live regression
-for the fixed `perf-take-meta` row: performance takes approved as final must
-expose their embedded-audio metadata to assembly.  The `lipsync-veto` sibling is
-also a live regression for the auto-approve subsystem.
+``test_performance_take_as_final_metadata_is_resolved`` is now the live
+regression for the fixed `perf-take-meta` row: performance takes approved as final
+must expose their embedded-audio metadata to assembly.
+
+``test_best_take_lipsync_credits_successful_postprocess_lipsync`` is now the live
+regression for the fixed `lipsync-veto` row: a successful manual `lip_sync`
+postprocess variant with `dialogue_audio_in_clip=True` must be visible to the
+auto-approve final gate.
 
 Two further siblings (capability_scorecard blind-spot — MINOR, advisory display;
 storyboard-batch F1b lipsync-skip — MAJOR, needs the _run_storyboard_scene

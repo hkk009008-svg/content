@@ -644,6 +644,8 @@ class TestGenerateMotionTakeOverlayWiring:
         # would fire the would_exceed gate before generation.
         cost_tracker.would_exceed.return_value = False
         cost_tracker.would_exceed_cost.return_value = False
+        cost_tracker.spent_usd = 0.0
+        cost_tracker.budget_usd = None
         core.cost_tracker = cost_tracker
 
         ctrl = ShotController(core=core, lifecycle=lifecycle, host=host, runstate=runstate)
@@ -890,6 +892,54 @@ class TestGenerateMotionTakeOverlayWiring:
         assert lipsync_score == pytest.approx(0.0), (
             f"Failed lipsync must write lipsync_score=0.0 to take metadata; got {lipsync_score!r}"
         )
+
+    def test_overlay_dialogue_budget_gate_counts_mandatory_lipsync_before_video(self, tmp_path):
+        """Near-budget overlay dialogue refuses before video when video+lipsync exceeds cap."""
+        from cost_tracker import API_COST_USD
+
+        project = self._make_overlay_dialogue_project(tmp_path, voice_mode="overlay")
+        ctrl, host = self._build_controller(project, tmp_path)
+
+        audio_file = str(tmp_path / "shot_tts.mp3")
+        open(audio_file, "wb").write(b"fake_audio_bytes")
+        ref_image_file = str(tmp_path / "ref_char1.jpg")
+        open(ref_image_file, "wb").write(b"fake_jpg")
+        veo_clip = str(tmp_path / "veo_clip.mp4")
+        open(veo_clip, "wb").write(b"fake_veo")
+        ls_clip = str(tmp_path / "ls_clip.mp4")
+        open(ls_clip, "wb").write(b"fake_ls")
+        host._ensure_shot_audio.return_value = audio_file
+
+        tracker = ctrl.cost_tracker
+        tracker.spent_usd = 0.26
+        tracker.budget_usd = 0.60
+        assert tracker.spent_usd + API_COST_USD["VEO_NATIVE"] <= tracker.budget_usd
+        expected_envelope = API_COST_USD["VEO_NATIVE"] + API_COST_USD["LIPSYNC_DEFAULT"]
+        assert tracker.spent_usd + expected_envelope > tracker.budget_usd
+        tracker.would_exceed.return_value = False
+        tracker.would_exceed_cost.side_effect = (
+            lambda estimated_cost: tracker.spent_usd + estimated_cost > tracker.budget_usd
+        )
+
+        with (
+            patch("cinema.shots.controller.generate_ai_video", return_value=veo_clip) as mock_gen_vid,
+            patch("cinema.shots.controller.generate_lip_sync_video", return_value=ls_clip) as mock_gen_ls_ctrl,
+            patch("lip_sync.generate_lip_sync_video", return_value=ls_clip) as mock_gen_ls_lip,
+            patch("lip_sync.validate_lipsync_quality", return_value=0.91),
+            patch("cinema.shots.controller.get_reference_image", return_value=ref_image_file),
+            patch("cinema.shots.controller._probe_duration", return_value=3.5),
+            patch("workflow_selector.classify_shot_type", return_value="medium"),
+        ):
+            result = ctrl.generate_motion_take("scene_1", "shot_1_0")
+
+        assert result.get("success") is False
+        assert result.get("error_kind") == "budget"
+        mock_gen_vid.assert_not_called()
+        mock_gen_ls_ctrl.assert_not_called()
+        mock_gen_ls_lip.assert_not_called()
+        ctrl._lifecycle.pause.assert_called_once()
+        tracker.would_exceed_cost.assert_called_once()
+        assert tracker.would_exceed_cost.call_args.args[0] == pytest.approx(expected_envelope)
 
     def _make_native_two_char_project(self) -> dict:
         """Native-mode dialogue project where characters_in_frame ⊂ characters_present.

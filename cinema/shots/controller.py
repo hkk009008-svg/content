@@ -1714,12 +1714,13 @@ class ShotController:
         # endpoint, phase loop, regenerate, iterate, retry); the F2b
         # storyboard BATCH launch is gated separately in
         # cinema/phases/motion_render.py. Soft cap: API_COST_USD estimates
-        # are ±30% and price only the resolved primary — a fallback-cascade
-        # winner can cost several times the admitted estimate. The motion
-        # phase loop aborts on the structured "budget" refusal below. Dialogue
-        # overlay shots also require the F1b lip-sync pass after video generation,
-        # so precheck that required second call with the same multi-call envelope
-        # pattern used by the performance Mode-B gate.
+        # are ±30% and price the resolved primary plus structurally mandatory
+        # post-processing. A fallback-cascade winner can still cost several
+        # times the admitted estimate. The motion phase loop aborts on the
+        # structured "budget" refusal below. Dialogue overlay shots also require
+        # the F1b lip-sync pass after video generation, so precheck that required
+        # second call with the same multi-call envelope pattern used by the
+        # performance Mode-B gate.
         engine_info = API_REGISTRY.get(target_api.upper(), {})
         needs_lipsync_precheck = has_dialogue and not _should_tag_audio_embedded(
             engine_info,
@@ -1740,7 +1741,7 @@ class ShotController:
         if would_exceed_budget:
             if needs_lipsync_precheck:
                 budget_detail = (
-                    f"Estimated {target_api} plus mandatory lip-sync cost "
+                    f"Estimated {target_api} motion plus mandatory lip-sync cost "
                     f"${estimated_cost:.3f} would push spend "
                     f"${self.cost_tracker.spent_usd:.2f} past budget cap "
                     f"${self.cost_tracker.budget_usd:.2f}. Pausing before generation."

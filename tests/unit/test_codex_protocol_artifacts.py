@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -36,6 +39,38 @@ def test_codex_hook_wrappers_exist_and_bridge_codex_seat():
     update_state = (hooks_dir / "update-state.sh").read_text(encoding="utf-8")
     assert "CODEX_SEAT" in update_state
     assert "CLAUDE_SEAT" in update_state
+
+
+def test_session_smoke_does_not_fallback_to_system_python(tmp_path):
+    """Missing project venv should not run system python with missing deps."""
+    hooks_dir = tmp_path / ".claude" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    shutil.copy2(ROOT / ".claude" / "hooks" / "session-smoke.sh", hooks_dir)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    marker = tmp_path / "python3-called"
+    fake_python = fake_bin / "python3"
+    fake_python.write_text(
+        f"#!/usr/bin/env bash\nprintf called > {marker}\nexit 99\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+    result = subprocess.run(
+        ["bash", str(hooks_dir / "session-smoke.sh")],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert not marker.exists()
+    assert "project venv missing" in result.stdout
 
 
 def test_codex_custom_agents_are_valid_toml_with_required_fields():
