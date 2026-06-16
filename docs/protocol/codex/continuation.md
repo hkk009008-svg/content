@@ -346,6 +346,11 @@ seat remains accountable for the result. A subagent report is evidence, not a
 role handoff, mailbox cursor, operator GO, or coordinator reconciliation by
 itself.
 
+`scripts/check_coordination.py` enforces this boundary for coordinator
+handoffs: a coordinator "All-Seat Handoff" must cite real live-seat
+mailbox/handoff artifacts for `director`, `operator`, `director2`, and
+`operator2`, or explicitly state that live-seat handoffs are still owed.
+
 - `coordinator`: holds the shared baseline, spawns `protocol-director` and
   `protocol-operator` for capacity-max cycles, and may run read-only
   `lane-v-verifier` / `money-gate-reviewer` workflows at wave-boundary or

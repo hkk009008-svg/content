@@ -21,6 +21,10 @@ ADVISORY — drift that needs a human eye but doesn't break the machinery
            (orphan cursor, missing/mismatched **When:** envelope, novel kind).
 INFO     — unread-count report (always emitted, never a failure).
 
+Also hard-fails coordinator "All-Seat Handoff" artifacts that do not cite real
+live-seat mailbox/handoff artifacts for all four seats. Subagent reports are
+advisory evidence, not live-seat protocol authority.
+
 The envelope checks are gated on --since (default 2026-06-11, the v6.0
 adoption date): pre-adoption events used a YAML-frontmatter format and are
 exempt. Filename checks are NOT gated — all 270 legacy events were verified
@@ -76,6 +80,26 @@ _CURSOR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 _SEEN_ONLY_RE = re.compile(r"^coordination/mailbox/seen/[^/]+\.txt$")
 
 _WHEN_RE = re.compile(r"\*\*When:\*\*\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)")
+
+_ALL_SEAT_HANDOFF_RE = re.compile(r"^#{1,3}\s+All[- ]Seat Handoff\b", re.I | re.M)
+_PENDING_LIVE_SEAT_MARKERS = (
+    "does not claim that the four live seats completed handoffs",
+    "live-seat work still owed",
+    "still need to publish their own seat-owned",
+    "real live-seat artifacts to land",
+)
+_LIVE_SEAT_ARTIFACT_RES = {
+    role: (
+        re.compile(rf"\bdocs/HANDOFF-{role}-\d{{4}}-\d{{2}}-\d{{2}}", re.I),
+        re.compile(
+            rf"\bcoordination/mailbox/sent/\d{{4}}-\d{{2}}-\d{{2}}T"
+            rf"\d{{2}}-\d{{2}}-\d{{2}}Z-{role}-to-"
+            rf"(?:director|director2|operator|operator2|all)-[a-z0-9-]+\.md\b",
+            re.I,
+        ),
+    )
+    for role in ROLES
+}
 
 
 @dataclass
@@ -211,8 +235,48 @@ def _check_standalone_cursor_commits(git_root, n: int = 30) -> list[CoordIssue]:
     return issues
 
 
+def _has_live_seat_artifact(text: str, role: str) -> bool:
+    return any(rx.search(text) for rx in _LIVE_SEAT_ARTIFACT_RES[role])
+
+
+def _check_coordinator_handoff_theater(docs_root: Path | str | None) -> list[CoordIssue]:
+    """FATAL: coordinator cannot substitute helper output for live-seat handoffs.
+
+    A coordinator artifact may route all seats, and it may record that live-seat
+    handoffs are still owed. But if it presents an "All-Seat Handoff" as a
+    completed aggregate, it must cite real live-seat mailbox or handoff artifacts
+    for all four seats. Spawned subagent reports are advisory evidence only.
+    """
+    if docs_root is None:
+        return []
+    docs_root = Path(docs_root)
+    if not docs_root.is_dir():
+        return []
+
+    issues: list[CoordIssue] = []
+    for path in sorted(docs_root.glob("HANDOFF-coordinator-*.md")):
+        text = path.read_text(errors="replace")
+        lower = text.lower()
+        if not _ALL_SEAT_HANDOFF_RE.search(text):
+            continue
+        if any(marker in lower for marker in _PENDING_LIVE_SEAT_MARKERS):
+            continue
+        missing = [role for role in ROLES if not _has_live_seat_artifact(text, role)]
+        if missing:
+            issues.append(CoordIssue(
+                f"docs/{path.name}",
+                "coordinator_handoff_theater",
+                "FATAL",
+                "coordinator All-Seat Handoff lacks live-seat artifacts for "
+                f"{', '.join(missing)}; subagent reports do not satisfy live-seat "
+                "handoffs, cursors, or operator/coordinator authority",
+            ))
+    return issues
+
+
 def run(coord_root: Path | str, since: str = "2026-06-11",
-        now: str | None = None, git_root: Path | str | None = None) -> list[CoordIssue]:
+        now: str | None = None, git_root: Path | str | None = None,
+        docs_root: Path | str | None = None) -> list[CoordIssue]:
     coord_root = Path(coord_root)
     if now is None:
         now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -223,6 +287,7 @@ def run(coord_root: Path | str, since: str = "2026-06-11",
     issues += _unread_report(coord_root, names)
     if git_root is not None:
         issues += _check_standalone_cursor_commits(git_root)
+    issues += _check_coordinator_handoff_theater(docs_root)
     return issues
 
 
@@ -237,9 +302,12 @@ def main(argv=None) -> int:
     ap.add_argument("--git-root", default=None,
                     help="repo root; when given, ADVISORY-flag standalone cursor-only "
                          "commits in recent history (lever #5). Omitted = skipped.")
+    ap.add_argument("--docs-root", default=str(repo_root / "docs"),
+                    help="docs/ directory for coordinator handoff protocol checks")
     args = ap.parse_args(argv)
 
-    issues = run(args.root, since=args.since, now=args.now, git_root=args.git_root)
+    issues = run(args.root, since=args.since, now=args.now, git_root=args.git_root,
+                 docs_root=args.docs_root)
     fatal = [i for i in issues if i.severity == "FATAL"]
     advisory = [i for i in issues if i.severity == "ADVISORY"]
     for i in issues:

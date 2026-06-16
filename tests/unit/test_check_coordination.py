@@ -294,3 +294,80 @@ def test_cursor_commit_with_sent_event_is_not_flagged(tmp_path):
     root = make_coord(tmp_path)
     issues = run(root, since=SINCE, now=NOW, git_root=repo)
     assert not any(i.kind == "standalone_cursor_commit" for i in issues)
+
+
+# ── anti-theater live-seat handoff guard ──
+
+def test_coordinator_all_seat_handoff_without_live_artifacts_is_fatal(tmp_path):
+    root = make_coord(
+        tmp_path,
+        events={GOOD_EVENT_NAME: GOOD_EVENT_BODY},
+        cursors={"operator": "2026-06-12T10:00:00Z"},
+    )
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "HANDOFF-coordinator-2026-06-16-all-seats.md").write_text(
+        "# HANDOFF - coordinator - all seats\n\n"
+        "## All-Seat Handoff\n\n"
+        "### director\n"
+        "Observed unread: 2. Recommended next action: write the realism plan.\n\n"
+        "### operator\n"
+        "Observed unread: 1. No concrete verify target.\n\n"
+        "### director2\n"
+        "Observed unread: 2. Open the checkpoint batch.\n\n"
+        "### operator2\n"
+        "Observed unread: 1. Standby for later Lane V.\n"
+    )
+
+    issues = run(root, since=SINCE, now=NOW, docs_root=docs)
+
+    assert any(
+        i.kind == "coordinator_handoff_theater" and i.severity == "FATAL"
+        for i in issues
+    )
+
+
+def test_route_only_coordinator_handoff_with_pending_live_seats_is_allowed(tmp_path):
+    root = make_coord(
+        tmp_path,
+        events={GOOD_EVENT_NAME: GOOD_EVENT_BODY},
+        cursors={"operator": "2026-06-12T10:00:00Z"},
+    )
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "HANDOFF-coordinator-2026-06-16-route.md").write_text(
+        "# HANDOFF - coordinator - relay-plan route\n\n"
+        "This artifact records the coordinator route only. It does not claim that "
+        "spawned Codex subagents are live protocol seats, and it does not claim "
+        "that the four live seats completed handoffs.\n\n"
+        "## Live-Seat Work Still Owed\n\n"
+        "director, operator, director2, and operator2 still need to publish their "
+        "own seat-owned status or handoff artifacts.\n"
+    )
+
+    issues = run(root, since=SINCE, now=NOW, docs_root=docs)
+
+    assert not any(i.kind == "coordinator_handoff_theater" for i in issues)
+
+
+def test_coordinator_all_seat_handoff_with_each_live_seat_artifact_is_allowed(tmp_path):
+    root = make_coord(
+        tmp_path,
+        events={GOOD_EVENT_NAME: GOOD_EVENT_BODY},
+        cursors={"operator": "2026-06-12T10:00:00Z"},
+    )
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "HANDOFF-coordinator-2026-06-16-all-seats.md").write_text(
+        "# HANDOFF - coordinator - all seats\n\n"
+        "## All-Seat Handoff\n\n"
+        "Live seat artifacts:\n"
+        "- docs/HANDOFF-director-2026-06-16-wave3-plan.md\n"
+        "- docs/HANDOFF-operator-2026-06-16-wave3-plan.md\n"
+        "- docs/HANDOFF-director2-2026-06-16-checkpoint-plan.md\n"
+        "- docs/HANDOFF-operator2-2026-06-16-checkpoint-plan.md\n"
+    )
+
+    issues = run(root, since=SINCE, now=NOW, docs_root=docs)
+
+    assert not any(i.kind == "coordinator_handoff_theater" for i in issues)

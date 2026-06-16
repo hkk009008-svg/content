@@ -154,7 +154,7 @@ def main() -> int:
     # here — the CLI prints it.
     import check_coordination as _cc
 
-    _coord_issues = _cc.run(_repo_root / "coordination")
+    _coord_issues = _cc.run(_repo_root / "coordination", docs_root=_repo_root / "docs")
     _coord_fatal = [_i for _i in _coord_issues if _i.severity == "FATAL"]
     _coord_adv = [_i for _i in _coord_issues if _i.severity == "ADVISORY"]
     for _i in _coord_adv:
