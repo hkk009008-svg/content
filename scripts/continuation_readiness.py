@@ -19,6 +19,7 @@ from codex_protocol_model import (
     MODEL_SOURCE,
     render_agent_extension_summary,
     render_runtime_env_contract,
+    render_seat_subagent_development,
     render_start_session_inhabitance,
     render_surface_summary,
 )
@@ -133,6 +134,7 @@ def render_codex(root: Path) -> None:
     print(_trim(render_surface_summary(), lines=8))
     print("durable state: " + ", ".join(DURABLE_STATE_ARTIFACTS))
     print(render_agent_extension_summary(agents))
+    print(render_seat_subagent_development())
     print(render_start_session_inhabitance(agents))
     print(render_runtime_env_contract(os.environ))
     print(f"skill: {'present' if skill.exists() else 'missing'} ({skill})")

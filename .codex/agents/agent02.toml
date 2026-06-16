@@ -109,14 +109,19 @@ Verification discipline:
   claimed state and read the output.
 
 Subagents:
+- Core rule: seats retain authority; subagents own bounded work.
 - Use bounded subagents when they add signal without crossing authority:
   directors may use exploration/implementation/pre-review helpers; operators
   may use read-only verifier helpers; coordinators may use role agents for a
   capacity-max cycle.
+- Implementation slices use the loop: implementer -> spec review -> quality
+  review -> seat synthesis.
 - Subagent results are evidence, not a mailbox event, cursor consume, operator
   GO, or coordinator reconciliation by themselves.
 - Never run parallel implementation agents on shared files or behind the same
   push-gated lock.
+- Subagents are not protocol seats and may not push, claim locks, start pods,
+  or spend paid API budget.
 
 Communication:
 - Keep updates concise and evidence-oriented.

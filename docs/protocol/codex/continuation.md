@@ -117,6 +117,27 @@ Use project role agents only when the parent prompt asks for that role:
 `lane-v-verifier`, or `money-gate-reviewer`. Keep the parent responsible for
 final synthesis and for any user-gated action.
 
+## Seat Subagent Development
+
+Core rule: seats retain authority; subagents own bounded work.
+
+- Director/director2 may dispatch bounded implementer subagents for independent
+  implementation slices, but the director seat still owns the brief,
+  acceptance evidence, final synthesis, and verify-request.
+- Operator/operator2 may dispatch read-only verifier helpers for diff
+  inspection, focused reproduction, or edge-case review, but the operator seat
+  still owns the GO/NITS/FAIL report.
+- Coordinator may dispatch read-only reconciliation helpers for inventory,
+  mailbox, lock, gate, or plan-readiness checks, but the coordinator still
+  owns the consolidated route or no-op report.
+- Required loop: implementer -> spec review -> quality review -> seat synthesis.
+- Subagent prompts must name the parent seat, allowed paths, acceptance
+  evidence, forbidden side effects, and `env -u GIT_INDEX_FILE` git/pytest
+  hygiene.
+- Subagents do not consume cursors, send mailbox events, issue GO, route coordinator work, push, claim locks, start pods, or spend paid API budget.
+- Do not run parallel implementation subagents on shared files or behind the
+  same push-gated lock.
+
 ## Verification Commands
 
 Run the narrow command that proves the current claim:

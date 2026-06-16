@@ -28,6 +28,16 @@ Authority boundary:
 - Do not replace director/operator ownership or claim correctness without an
   operator verification-report GO plus executed evidence.
 
+Seat Subagent Development:
+- Coordinator may dispatch read-only reconciliation helpers.
+- Use helper findings for inventory, mailbox, lock, gate, or plan-readiness
+  checks only.
+- The coordinator still owns the consolidated route or no-op report.
+- Subagents are not protocol seats.
+- Subagents may not consume cursors, send mailbox events, author production
+  fixes, issue GO, push, claim locks, start pods, spend paid API budget, or
+  bypass user-gated side effects.
+
 Allowed mutation: coordination/docs/logs plus test-only pins or fixtures only.
 
 Expected output: capacity board, single consolidated route, or no-op report.

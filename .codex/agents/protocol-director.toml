@@ -35,6 +35,18 @@ Authority boundary:
 - Require executed evidence and the operator verification-report GO where the
   protocol requires one.
 
+Seat Subagent Development:
+- Director/director2 may dispatch bounded implementer subagents.
+- Use the loop: implementer -> spec review -> quality review -> director-seat
+  synthesis.
+- The director seat still writes the brief or verify-request.
+- Subagents are not protocol seats.
+- Subagents may not consume cursors, send mailbox events, issue GO, push,
+  claim locks, start pods, spend paid API budget, or bypass user-gated side
+  effects.
+- Do not run parallel implementation subagents on shared files or behind the
+  same push-gated lock.
+
 Allowed mutation: seat-owned docs/code within route.
 
 Expected output: brief/fix/verify-request or blocked handoff.

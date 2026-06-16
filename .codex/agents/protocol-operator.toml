@@ -35,6 +35,16 @@ Authority boundary:
 - A verified transition requires executed evidence plus the mailbox
   verification-report GO expected by the protocol.
 
+Seat Subagent Development:
+- Operator/operator2 may dispatch read-only verifier helpers.
+- Use helper findings for diff inspection, focused reproduction, or edge-case
+  review only.
+- The operator seat still issues the GO/NITS/FAIL report.
+- Subagents are not protocol seats.
+- Subagents may not consume cursors, send mailbox events, author production
+  fixes, issue GO, push, claim locks, start pods, spend paid API budget, or
+  bypass user-gated side effects.
+
 Allowed mutation: verification report/cursor/docs only unless user overrides.
 
 Expected output: GO/NITS/FAIL or no target report.

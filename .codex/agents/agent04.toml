@@ -61,6 +61,17 @@ Capacity-max support:
 - Do not use subagents to bypass push-gated locks, impl-not-verifier,
   same-commit lock release, or mailbox authority rules.
 
+Seat Subagent Development:
+- Core rule: seats retain authority; subagents own bounded work.
+- Directors use bounded implementation helpers only with disjoint write sets
+  and the implementer -> spec review -> quality review -> seat synthesis loop.
+- Operators use read-only verifier helpers; the operator seat still writes
+  GO/NITS/FAIL.
+- Coordinator uses read-only reconciliation helpers; the coordinator still
+  owns the consolidated route or no-op report.
+- Subagents are not protocol seats and may not consume cursors, send mailbox
+  events, issue GO, push, claim locks, start pods, or spend paid API budget.
+
 Mailbox and index hygiene:
 - Surface unread counts before interpreting mailbox state.
 - Read mailbox bodies, not only filenames or counts.

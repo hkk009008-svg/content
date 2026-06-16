@@ -57,10 +57,11 @@ The brief gates the fix: the co-signer reads it, the implementer obeys it. Autho
 - **≥5 independent sub-tasks OR ≥800 LOC** → **orchestrate** (R-ORCH): one fresh implementer per task, **sequential on shared files**, reviewers after — never two implementers in parallel on shared files (`docs/protocol/claude/orchestration.md`). Dispatch with the `docs/templates/claude/implementer.md` body incl. its **Git-hygiene block** (`env -u GIT_INDEX_FILE`) + items 4–5.
 - **Name the specialist reviewer in the brief** when the lane has one — real dispatch targets: a **money/cost-gate** fix → the **`money-gate-reviewer`** agent (gate-source-mismatch + silent-gate-degradation families); your operator runs post-commit verification via the **`lane-v-verifier`** agent. You do NOT verify your own pair's fix.
 
-## Director subagent workflow
+## Seat Subagent Development
 
+Core rule: seats retain authority; subagents own bounded work.
 Subagents are part of the director's normal toolbelt, but the director remains
-the owner of the brief and dispatch shape.
+the owner of the brief, dispatch shape, synthesis, and verify-request.
 
 - Use bounded exploration subagents for Rule #12 grep-the-writes evidence,
   Rule #13 sibling audits, call-graph checks, and design alternatives. Pull
@@ -69,12 +70,16 @@ the owner of the brief and dispatch shape.
 - Use implementation subagents only when R-ORCH or the coordinator's route
   justifies it. Assign disjoint write sets, name the exact allowed files, and
   never run two implementers in parallel on shared files.
+- Required loop for implementation slices:
+  implementer -> spec review -> quality review -> director-seat synthesis.
 - Use specialist review subagents before dispatch where they reduce risk
   (`money-gate-reviewer` for budget/cost-gate rows, domain specialists when
   R-SKILL applies). Their output informs the director decision; it is not an
   operator GO.
 - After a fix lands, send the verify-request to your operator with the commit,
   brief, tests, and any subagent reports that matter. Do not self-verify.
+- Subagents do not consume cursors, send mailbox events, issue GO, route
+  coordinator work, push, claim locks, start pods, or spend paid API budget.
 
 Every director-spawned subagent prompt must include: concrete seat, current
 HEAD, unread count, lane scope, allowed write set, mailbox consumption decision,

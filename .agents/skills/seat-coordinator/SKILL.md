@@ -55,6 +55,23 @@ state, no locks need action, and the gate is still blocked for already-recorded
 reasons, do not send a new mailbox event and do not churn the inventory. Report
 the no-op with the commands you ran.
 
+## Seat Subagent Development
+
+Core rule: seats retain authority; subagents own bounded work.
+
+Coordinator may use read-only reconciliation helpers for inventory, mailbox,
+lock, gate, plan-readiness, or receipt checks. Their output is evidence for the
+coordinator, not a route or correctness decision by itself.
+
+- Coordinator still owns the consolidated route, no-op report, handoff, or
+  inventory reconciliation.
+- Subagents must be read-only unless the parent prompt explicitly names a
+  coordinator-owned docs/test/log artifact to prepare.
+- Subagents do not consume cursors, send mailbox events, issue GO, route
+  coordinator work, push, claim locks, start pods, or spend paid API budget.
+- Do not run parallel implementation subagents on shared files or behind the
+  same push-gated lock.
+
 ## Coordinator may write
 
 Coordinator may write only with explicit path scope:

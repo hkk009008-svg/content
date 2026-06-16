@@ -58,8 +58,9 @@ The operator's hardest discipline is *not* verifying everything. Firing Lane V o
 - **Verdict-ahead-of-report (Rule #21):** if your partner is blocked on a **billed** resource (a running pod), send the dispositive **GO/NO-GO as its own event first**; the full evidence report follows. Don't let billing burn while you prose-write.
 - **Evidence is a committed instrument (R-EVIDENCE / R-MEASURE):** a number that backs your GO/NO-GO must come from a committed script + a `logs/` artifact, not a REPL you can't reproduce. A confirmed-but-unfixed defect you're not fixing this session ships a `pytest.mark.xfail(strict=True)` pin **or** a `test-infeasible` label — so CI re-verifies, not the next session (R-VERIFY-TIER).
 
-## Operator subagent workflow
+## Seat Subagent Development
 
+Core rule: seats retain authority; subagents own bounded work.
 Subagents are part of Lane V, not a replacement for it. Use them to widen
 independent review while keeping the operator as the accountable verifier.
 
@@ -75,6 +76,8 @@ independent review while keeping the operator as the accountable verifier.
   the mailbox `verification-report`.
 - If no shipping commit or verify-request exists, return idle evidence. Do not
   invent Lane V just to keep subagents busy.
+- Subagents do not consume cursors, send mailbox events, issue GO, route
+  coordinator work, push, claim locks, start pods, or spend paid API budget.
 
 Every operator-spawned subagent prompt must include: commit/range, brief or row
 id, expected proof, forbidden write scope, Git-hygiene (`env -u GIT_INDEX_FILE`

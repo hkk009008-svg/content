@@ -256,6 +256,18 @@ PLANNING_RELAY_RULES = (
     "Relay mailbox events are planning evidence only; no production work, verification verdict, lock, push, or inventory change is implied unless a later coordinator task board explicitly routes it.",
 )
 
+SEAT_SUBAGENT_DEVELOPMENT_RULES = (
+    "Core rule: seats retain authority; subagents own bounded work.",
+    "director/director2: dispatch bounded implementer subagents for independent implementation slices, then require spec review, quality review, and director-seat synthesis before any verify-request.",
+    "operator/operator2: use read-only verifier helpers for diff inspection, focused reproduction, or edge-case review; the operator seat still owns GO/NITS/FAIL.",
+    "coordinator: use read-only reconciliation helpers for inventory, mailbox, lock, gate, or plan-readiness checks; the coordinator still owns the consolidated route or no-op report.",
+    "Required loop: implementer -> spec review -> quality review -> seat synthesis.",
+    "Subagents receive only the parent prompt, allowed paths, acceptance evidence, and side-effect limits; they do not inherit mailbox, cursor, lock, push, spend, or seat authority.",
+    "Subagent output is evidence for the parent seat, not durable protocol state by itself.",
+    "A subagent cannot create a mailbox cursor, mailbox event, operator GO, coordinator route, push, lock, pod spend, or paid API spend unless the live seat/coordinator with authority performs that action under user-gated rules.",
+    "Do not run parallel implementation subagents on shared files or behind the same push-gated lock.",
+)
+
 LIVE_LOOP_STEPS = (
     "On a fresh/transplanted instance, first find the newest same-seat handoff "
     "docs/HANDOFF-<concrete-seat>-*.md, or docs/HANDOFF-coordinator-*.md for "
@@ -409,6 +421,18 @@ def render_planning_relay() -> str:
     lines.extend(f"- {rule}" for rule in PLANNING_RELAY_RULES)
     lines.append("coordinator-started plan: coordinator -> all four seats -> coordinator")
     lines.append("distribution: one consolidated coordinator-to-all task board")
+    return "\n".join(lines)
+
+
+def render_seat_subagent_development() -> str:
+    """Return the all-seat contract for bounded subagent-driven work."""
+    lines = ["Seat Subagent Development:"]
+    lines.extend(f"- {rule}" for rule in SEAT_SUBAGENT_DEVELOPMENT_RULES)
+    lines.append(
+        "blocked side effects: no mailbox cursor, mailbox event, operator GO, "
+        "coordinator route, push, lock, pod spend, or paid API spend from a "
+        "subagent alone"
+    )
     return "\n".join(lines)
 
 
@@ -707,6 +731,7 @@ def render_surface_summary() -> str:
         "Active kernel invariants: "
         + ", ".join(name for name, _ in ACTIVE_KERNEL_INVARIANTS),
         "Demoted optional concepts: " + ", ".join(demoted_names),
+        "Seat Subagent Development: seats retain authority; subagents own bounded work",
         "agent extension namespace: .codex/agents/agentNN.toml guardrail extensions",
         "runtime env contract: "
         + ", ".join(name for name, _, _ in RUNTIME_ENV_VARIABLES),
@@ -728,6 +753,9 @@ def main() -> int:
     print()
     print("## Kernel Contract")
     print(render_kernel_contract(include_trigger_specific=False))
+    print()
+    print("## Seat Subagent Development")
+    print(render_seat_subagent_development())
     print()
     print("## Protocol Assembly Map")
     print(render_protocol_assembly_map())

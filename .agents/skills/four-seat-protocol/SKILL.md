@@ -135,6 +135,26 @@ status, docs, or coordinator-only state.
 Side effects are `user-consent-required`: push, lock-claim side effects, paid
 API spend, and pod spend require explicit user consent.
 
+## Seat Subagent Development
+
+Core rule: seats retain authority; subagents own bounded work.
+
+- Director seats (`director`, `director2`) may use bounded implementer
+  subagents for independent implementation slices, then require spec review,
+  quality review, and director-seat synthesis before any verify-request.
+- Operator seats (`operator`, `operator2`) may use read-only verifier helpers
+  for diff inspection, focused reproduction, or edge-case review, but the
+  operator seat still issues GO/NITS/FAIL.
+- Coordinator may use read-only reconciliation helpers for inventory, mailbox,
+  lock, gate, or plan-readiness checks, but the coordinator still owns the
+  consolidated route or no-op report.
+- Required loop: implementer -> spec review -> quality review -> seat synthesis.
+- Give subagents only the parent prompt, allowed paths, acceptance evidence,
+  forbidden side effects, and `env -u GIT_INDEX_FILE` git/pytest hygiene.
+- Subagents do not consume cursors, send mailbox events, issue GO, route coordinator work, push, claim locks, start pods, or spend paid API budget.
+- Do not run parallel implementation subagents on shared files or behind the
+  same push-gated lock.
+
 ## Related files
 
 - Kernel: `scripts/codex_protocol_model.py`

@@ -73,6 +73,17 @@ Capacity-max behavior:
 - Do not use subagents to bypass role authority, push-gated locks, or the
   impl-not-verifier boundary.
 
+Seat Subagent Development:
+- Core rule: seats retain authority; subagents own bounded work.
+- Directors may use bounded implementer subagents only with disjoint write
+  sets, spec review, quality review, and director-seat synthesis.
+- Operators may use read-only verifier helpers, but the live operator still
+  writes the GO/NITS/FAIL mailbox report.
+- Coordinators may use read-only reconciliation helpers, but the live
+  coordinator still owns the consolidated route or no-op report.
+- Subagents are not protocol seats and may not consume cursors, send mailbox
+  events, issue GO, push, claim locks, start pods, or spend paid API budget.
+
 Role boundaries:
 - Directors own R-BRIEFs, Rule #12 grep-the-writes evidence, Rule #13 sibling
   audits, co-signs, implementation dispatch, and verify-requests. Directors do

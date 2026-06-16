@@ -99,6 +99,8 @@ def test_render_codex_reports_harness_model_artifacts(tmp_path, monkeypatch, cap
     assert "Mailbox sent/ + seen cursors" in out
     assert "agent guardrail extensions: agent01.toml" in out
     assert "do not replace built-in role agents" in out
+    assert "Seat Subagent Development" in out
+    assert "seats retain authority; subagents own bounded work" in out
     assert "Next start session" in out
     assert "Runtime env contract" in out
     assert "CODEX_AGENT_MODE=readiness-bridge" in out

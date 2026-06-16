@@ -161,6 +161,18 @@ def test_render_planning_relay_codifies_rotating_baton_and_coordinator_start() -
     assert "no production work, verification verdict, lock, push, or inventory change is implied" in relay
 
 
+def test_render_seat_subagent_development_codifies_all_seat_boundaries() -> None:
+    text = model.render_seat_subagent_development()
+
+    assert "Seat Subagent Development" in text
+    assert "seats retain authority; subagents own bounded work" in text
+    assert "director/director2: dispatch bounded implementer subagents" in text
+    assert "operator/operator2: use read-only verifier helpers" in text
+    assert "coordinator: use read-only reconciliation helpers" in text
+    assert "implementer -> spec review -> quality review -> seat synthesis" in text
+    assert "no mailbox cursor, mailbox event, operator GO, coordinator route, push, lock, pod spend, or paid API spend" in text
+
+
 def test_agent_extension_modules_are_guardrails_not_role_replacements() -> None:
     assert model.is_agent_extension_name("agent01.toml")
     assert model.is_agent_extension_name("agent42.toml")

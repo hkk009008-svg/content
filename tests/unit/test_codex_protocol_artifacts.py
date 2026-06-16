@@ -373,6 +373,54 @@ def test_codex_protocol_skill_points_to_runtime_checklists():
     assert "Codex-side transplant" not in text
 
 
+def test_seat_subagent_development_contract_is_pinned_across_codex_surfaces():
+    shared_paths = [
+        ROOT / "docs" / "protocol" / "codex" / "continuation.md",
+        ROOT / ".agents" / "skills" / "four-seat-protocol" / "SKILL.md",
+    ]
+
+    for path in shared_paths:
+        text = path.read_text(encoding="utf-8")
+        assert "Seat Subagent Development" in text, path
+        assert "seats retain authority; subagents own bounded work" in text, path
+        assert "implementer -> spec review -> quality review -> seat synthesis" in text, path
+        assert "Subagents do not consume cursors, send mailbox events, issue GO, route coordinator work, push, claim locks, start pods, or spend paid API budget." in text, path
+
+    expectations = {
+        "protocol-director.toml": (
+            "Director/director2 may dispatch bounded implementer subagents.",
+            "The director seat still writes the brief or verify-request.",
+        ),
+        "protocol-operator.toml": (
+            "Operator/operator2 may dispatch read-only verifier helpers.",
+            "The operator seat still issues the GO/NITS/FAIL report.",
+        ),
+        "protocol-coordinator.toml": (
+            "Coordinator may dispatch read-only reconciliation helpers.",
+            "The coordinator still owns the consolidated route or no-op report.",
+        ),
+    }
+
+    for name, phrases in expectations.items():
+        text = tomllib.loads(
+            (ROOT / ".codex" / "agents" / name).read_text(encoding="utf-8")
+        )["developer_instructions"]
+        assert "Seat Subagent Development" in text, name
+        assert "Subagents are not protocol seats." in text, name
+        for phrase in phrases:
+            assert phrase in text, name
+
+    for path in (
+        ROOT / ".agents" / "skills" / "seat-director" / "SKILL.md",
+        ROOT / ".agents" / "skills" / "seat-operator" / "SKILL.md",
+        ROOT / ".agents" / "skills" / "seat-coordinator" / "SKILL.md",
+    ):
+        text = path.read_text(encoding="utf-8")
+        assert "Seat Subagent Development" in text, path
+        assert "seats retain authority; subagents own bounded work" in text, path
+        assert "Subagents do not consume cursors" in text, path
+
+
 def test_codex_facing_skills_do_not_route_to_claude_skill_paths():
     for path in sorted((ROOT / ".agents" / "skills").glob("*/SKILL.md")):
         text = path.read_text(encoding="utf-8")

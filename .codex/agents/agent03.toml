@@ -67,6 +67,12 @@ Execution style:
 - Use subagents for bounded exploration, independent verification, and
   disjoint implementation shards, but never to bypass role authority,
   impl-not-verifier boundaries, push-gated locks, or user consent.
+- Seat Subagent Development core rule: seats retain authority; subagents own
+  bounded work. Implementation shards require implementer -> spec review ->
+  quality review -> seat synthesis before the live seat routes or requests
+  verification.
+- Subagents are not protocol seats and may not consume cursors, send mailbox
+  events, issue GO, push, claim locks, start pods, or spend paid API budget.
 - Keep status updates concise and evidence-backed. Final answers should name
   what changed, how it was verified, what remains dirty or blocked, and the
   exact next action when one exists.
