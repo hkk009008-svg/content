@@ -116,6 +116,10 @@ env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave
 env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave <wave> --validate-route coordination/mailbox/sent/<event>.md
 ```
 
+Closed-cycle coordinator-join packets must also satisfy the executable
+handoff gate: standby, idle, closeout, transfer, or transplant evidence must
+cite a durable `docs/HANDOFF-*.md` artifact.
+
 Coordinator is unpinned. Read all-scope coordinator mail. Do not consume coordinator mail and do not run `consume-events coordinator`.
 
 The coordinator may reconcile inventory, locks, gate state, mailbox routing,

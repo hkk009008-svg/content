@@ -27,6 +27,15 @@ PACKET_TYPES = {
 STATUSES = {"ready", "active", "blocked", "done", "excepted"}
 ACTIVE_STATUSES = {"ready", "active"}
 CURRENT_STATUSES = {"ready", "active", "blocked"}
+HANDOFF_ARTIFACT_RE = re.compile(r"\bdocs/HANDOFF-[^\s`]+\.md\b", re.IGNORECASE)
+HANDOFF_REQUIRED_RE = re.compile(
+    r"\b("
+    r"standby|idle|no routed next work|no current work|no new [a-z -]*task|"
+    r"context switch|transplant|state-transfer|state transfer|handoff|"
+    r"closeout|closed cycle|cycle complete"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -649,6 +658,11 @@ def _validate_join_gate(packets: list[Packet]) -> list[dict[str, Any]]:
                 )
                 if needle not in evidence
             ]
+            if (
+                HANDOFF_REQUIRED_RE.search(evidence)
+                and not HANDOFF_ARTIFACT_RE.search(evidence)
+            ):
+                missing.append("handoff artifact")
             if missing:
                 issues.append(
                     _issue(

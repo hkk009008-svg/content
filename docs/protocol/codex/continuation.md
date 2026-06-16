@@ -75,6 +75,11 @@ env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave
 env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave <wave> --validate-route coordination/mailbox/sent/<event>.md
 ```
 
+Closed-cycle coordinator-join packets are also hard-gated: standby, idle,
+closeout, transfer, or transplant evidence must cite a durable
+`docs/HANDOFF-*.md` artifact instead of ending on a chat-only or generic
+`next trigger`.
+
 Use `<wave>` when the active wave is not 2:
 
 ```bash
