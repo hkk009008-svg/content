@@ -524,6 +524,61 @@ def test_closed_standby_cycle_rejects_normalized_non_handoff_file(tmp_path: Path
     assert "handoff artifact" in messages
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "handoff-artifact-absolute-path: absolute-prefixed evidence still "
+        "satisfies the root-relative handoff gate; see operator FAIL on 27d3a3ee"
+    ),
+)
+def test_closed_standby_cycle_rejects_absolute_prefixed_handoff_path(tmp_path: Path) -> None:
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "HANDOFF-valid.md").write_text("# Real Handoff\n", encoding="utf-8")
+
+    for packet in [
+        _packet(
+            "wave4-join",
+            "coordinator",
+            packet_type="coordinator-join",
+            status="done",
+            done_evidence=[
+                "capacity board valid",
+                "smoke OK",
+                "next trigger: standby; no routed next work",
+                "handoff: /tmp/outside/docs/HANDOFF-valid.md",
+            ],
+        ),
+        _packet(
+            "wave4-director-done",
+            "director",
+            status="done",
+            done_evidence=[
+                "committed diff",
+                "verify-request coordination/mailbox/sent/request.md",
+            ],
+        ),
+        _packet(
+            "wave4-operator-done",
+            "operator",
+            packet_type="operator-verification",
+            status="done",
+            done_evidence=["GO coordination/mailbox/sent/go.md"],
+        )
+        | {
+            "verify_request": "coordination/mailbox/sent/request.md",
+            "target_commit": "abc1234",
+            "scope_files": ["identity/validator.py"],
+        },
+    ]:
+        _write_packet(tmp_path, packet)
+
+    report = capacity.collect_capacity_report(tmp_path, 4)
+
+    messages = "\n".join(issue["message"] for issue in report.blocking_issues)
+    assert "handoff artifact" in messages
+
+
 def test_exact_exception_bypasses_matching_issue_only(tmp_path: Path) -> None:
     _write_valid_cycle(tmp_path)
     _write_packet(
