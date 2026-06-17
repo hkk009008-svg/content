@@ -54,6 +54,7 @@ class Packet:
     dependencies: tuple[str, ...]
     acceptance: tuple[str, ...]
     done_evidence: tuple[str, ...]
+    handoff_artifact: str | None
     next_recipient: str | None
     status: str
     verify_request: str | None
@@ -87,6 +88,7 @@ class Packet:
             "dependencies": list(self.dependencies),
             "acceptance": list(self.acceptance),
             "done_evidence": list(self.done_evidence),
+            "handoff_artifact": self.handoff_artifact,
             "next_recipient": self.next_recipient,
             "status": self.status,
             "verify_request": self.verify_request,
@@ -379,6 +381,10 @@ def _parse_packet(
         local_issues.append(f"invalid next_recipient {next_recipient!r}")
     if "scope_files" in data and not _is_str_list(data.get("scope_files")):
         local_issues.append("scope_files must be a list of strings")
+    handoff_artifact = data.get("handoff_artifact")
+    if handoff_artifact is not None and not isinstance(handoff_artifact, str):
+        local_issues.append("handoff_artifact must be a string")
+        handoff_artifact = None
 
     if local_issues:
         for message in local_issues:
@@ -397,6 +403,7 @@ def _parse_packet(
         dependencies=tuple(data["dependencies"]),
         acceptance=tuple(data["acceptance"]),
         done_evidence=tuple(data["done_evidence"]),
+        handoff_artifact=handoff_artifact,
         next_recipient=next_recipient,
         status=str(data["status"]),
         verify_request=_optional_str(data.get("verify_request")),
@@ -674,6 +681,7 @@ def _validate_join_gate(packets: list[Packet], root: Path) -> list[dict[str, Any
         for join in joins:
             evidence = _evidence_text(join)
             raw_evidence = _raw_evidence_text(join)
+            structured_handoff = join.handoff_artifact or ""
             missing = [
                 label
                 for label, needle in (
@@ -683,7 +691,17 @@ def _validate_join_gate(packets: list[Packet], root: Path) -> list[dict[str, Any
                 )
                 if needle not in evidence
             ]
-            if HANDOFF_REQUIRED_RE.search(raw_evidence) and not _has_handoff_artifact(raw_evidence, root):
+            if structured_handoff:
+                rel_path = _handoff_artifact_path(structured_handoff)
+                if rel_path is None:
+                    missing.append("handoff_artifact must cite docs/HANDOFF-*.md")
+                elif not _handoff_artifact_file_exists(rel_path, root):
+                    missing.append("handoff_artifact file missing")
+            if (
+                HANDOFF_REQUIRED_RE.search(raw_evidence)
+                and not structured_handoff
+                and not _has_handoff_artifact(raw_evidence, root)
+            ):
                 missing.append("handoff artifact")
             if missing:
                 issues.append(
@@ -699,26 +717,35 @@ def _validate_join_gate(packets: list[Packet], root: Path) -> list[dict[str, Any
 
 def _has_handoff_artifact(evidence: str, root: Path) -> bool:
     for line in evidence.splitlines():
-        match = HANDOFF_ARTIFACT_RE.fullmatch(line.strip())
-        if not match:
-            continue
-        rel_path = Path(match.group(1))
-        if rel_path.parts[:1] != ("docs",) or len(rel_path.parts) != 2:
-            continue
-        name = rel_path.name
-        if not (name.startswith("HANDOFF-") and name.endswith(".md")):
-            continue
-        artifact = root / rel_path
-        try:
-            docs_dir = (root / "docs").resolve(strict=True)
-            resolved_artifact = artifact.resolve(strict=True)
-        except OSError:
-            continue
-        if resolved_artifact.parent != docs_dir:
-            continue
-        if artifact.is_file():
+        rel_path = _handoff_artifact_path(line)
+        if rel_path and _handoff_artifact_file_exists(rel_path, root):
             return True
     return False
+
+
+def _handoff_artifact_path(value: str) -> Path | None:
+    match = HANDOFF_ARTIFACT_RE.fullmatch(value.strip())
+    if not match:
+        return None
+    rel_path = Path(match.group(1))
+    if rel_path.parts[:1] != ("docs",) or len(rel_path.parts) != 2:
+        return None
+    name = rel_path.name
+    if not (name.startswith("HANDOFF-") and name.endswith(".md")):
+        return None
+    return rel_path
+
+
+def _handoff_artifact_file_exists(rel_path: Path, root: Path) -> bool:
+    artifact = root / rel_path
+    try:
+        docs_dir = (root / "docs").resolve(strict=True)
+        resolved_artifact = artifact.resolve(strict=True)
+    except OSError:
+        return False
+    if resolved_artifact.parent != docs_dir:
+        return False
+    return artifact.is_file()
 
 
 def _apply_exceptions(

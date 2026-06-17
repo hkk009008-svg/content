@@ -6,8 +6,6 @@ import json
 import sys
 from pathlib import Path
 
-import pytest
-
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
@@ -35,6 +33,7 @@ def _packet(
     deps: list[str] | None = None,
     rows: list[str] | None = None,
     done_evidence: list[str] | None = None,
+    handoff_artifact: str | None = None,
     next_recipient: str | None = None,
 ) -> dict:
     if packet_type is None:
@@ -44,7 +43,7 @@ def _packet(
             packet_type = "operator-verification"
         else:
             packet_type = "director-implementation"
-    return {
+    payload = {
         "id": packet_id,
         "wave": wave,
         "cycle": cycle,
@@ -59,6 +58,9 @@ def _packet(
         "next_recipient": next_recipient,
         "status": status,
     }
+    if handoff_artifact is not None:
+        payload["handoff_artifact"] = handoff_artifact
+    return payload
 
 
 def _write_packet(root: Path, payload: dict) -> None:
@@ -454,14 +456,6 @@ def test_closed_standby_cycle_accepts_handoff_artifact(tmp_path: Path) -> None:
     assert report.blocking_issues == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "protocol-harness-structured-handoff-artifact: capacity packets ignore "
-        "structured handoff_artifact; see docs/superpowers/plans/"
-        "2026-06-17-protocol-harness-best-version.md Task 5"
-    ),
-)
 def test_closed_standby_cycle_accepts_structured_handoff_artifact(tmp_path: Path) -> None:
     handoff = tmp_path / "docs/HANDOFF-coordinator-2026-06-17-wave4-standby.md"
     handoff.parent.mkdir(parents=True, exist_ok=True)
@@ -478,8 +472,8 @@ def test_closed_standby_cycle_accepts_structured_handoff_artifact(tmp_path: Path
                 "smoke OK",
                 "next trigger: standby; no routed next work",
             ],
-        )
-        | {"handoff_artifact": "docs/HANDOFF-coordinator-2026-06-17-wave4-standby.md"},
+            handoff_artifact="docs/HANDOFF-coordinator-2026-06-17-wave4-standby.md",
+        ),
         _packet(
             "wave4-director-done",
             "director",
@@ -507,6 +501,56 @@ def test_closed_standby_cycle_accepts_structured_handoff_artifact(tmp_path: Path
     report = capacity.collect_capacity_report(tmp_path, 4)
 
     assert report.blocking_issues == []
+
+
+def test_closed_standby_cycle_rejects_bad_structured_handoff_artifact_path(
+    tmp_path: Path,
+) -> None:
+    _write_packet(
+        tmp_path,
+        _packet(
+            "wave4-join",
+            "coordinator",
+            packet_type="coordinator-join",
+            status="done",
+            done_evidence=[
+                "capacity board valid",
+                "smoke OK",
+                "next trigger: standby; no routed next work",
+            ],
+            handoff_artifact="notes/chat-only.md",
+        ),
+    )
+
+    report = capacity.collect_capacity_report(tmp_path, 4)
+
+    messages = "\n".join(issue["message"] for issue in report.blocking_issues)
+    assert "handoff_artifact must cite docs/HANDOFF-*.md" in messages
+
+
+def test_closed_standby_cycle_rejects_nonexistent_structured_handoff_artifact(
+    tmp_path: Path,
+) -> None:
+    _write_packet(
+        tmp_path,
+        _packet(
+            "wave4-join",
+            "coordinator",
+            packet_type="coordinator-join",
+            status="done",
+            done_evidence=[
+                "capacity board valid",
+                "smoke OK",
+                "next trigger: standby; no routed next work",
+            ],
+            handoff_artifact="docs/HANDOFF-coordinator-2026-06-17-wave4-standby.md",
+        ),
+    )
+
+    report = capacity.collect_capacity_report(tmp_path, 4)
+
+    messages = "\n".join(issue["message"] for issue in report.blocking_issues)
+    assert "handoff_artifact file missing" in messages
 
 
 def test_closed_standby_cycle_rejects_missing_handoff_artifact(tmp_path: Path) -> None:
