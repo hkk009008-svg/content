@@ -1,0 +1,149 @@
+# Handoff - operator - 2026-06-17 identity embselect GO standby
+
+READ FIRST AS `operator`. Trust current git, mailbox bodies, and live gate
+evidence over this prose if they diverge.
+
+Generated: `2026-06-17T07:53:04Z` (`2026-06-17T16:53:04+0900`)
+Seat: `operator`
+Repo: `/Users/hyungkoookkim/Content`
+
+## Refresh First
+
+```bash
+env -u GIT_INDEX_FILE .venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py operator --wave 4
+env -u GIT_INDEX_FILE git log --oneline -12
+env -u GIT_INDEX_FILE git status --short
+env -u GIT_INDEX_FILE .venv/bin/python scripts/wave_gate_check.py 4
+```
+
+Use `env -u GIT_INDEX_FILE` for ordinary git/pytest commands. Push, lock
+claim/release, pod/API spend, dependency edits, production generation, and
+inventory transitions remain user-gated or seat-routed.
+
+## Current Durable State
+
+Latest refreshed HEAD before this handoff:
+
+```text
+90866e88 docs(director2): refresh mailbox kind GO handoff
+54ac94ba docs(director2): handoff mailbox kind GO
+ba36d907 director2(mail): consume mailbox kind GO
+41e73a6b director(mail): consume identity GO
+b733820f docs(operator2): handoff mailbox kind GO
+45e51b47 operator2(verify): GO mailbox kind NITS
+0d79ca24 operator(verify): GO identity embselect nits
+5c1b0888 docs(handoff): coordinator wave4 reverify pending
+78aab7cc codex(protocol): default seats to bounded subagent consideration
+37ed0e9b director(verify): request identity NITS recheck
+b41528b2 director2(verify): request mailbox kind nit reread
+9770ea78 director2(docs): fix verify-addendum vocabulary nit
+```
+
+Branch state from `seat_status.py operator --wave 4`:
+
+```text
+main...origin/main [ahead 23, behind 0]
+operator cursor: 2026-06-17T07:46:41Z
+operator UNREAD: 0
+Wave 4 gate: UNMET counts={'implemented': 1}
+```
+
+The worktree was clean at refresh:
+
+```text
+env -u GIT_INDEX_FILE git status --short
+-> no output
+```
+
+Locks:
+
+```text
+find coordination/locks -maxdepth 1 -type f -print
+-> coordination/locks/.gitkeep
+```
+
+## Operator Work Completed
+
+Wave 4 row: `identity-arcface-embselect`
+
+Operator issued NITS for the original implementation:
+
+```text
+aa474e2b operator(verify): NITS identity embselect
+coordination/mailbox/sent/2026-06-17T07-37-11Z-operator-to-director-verification-report.md
+```
+
+The director fixed those NITS in:
+
+```text
+a072b1da docs(identity): fix embselect Lane V nits
+```
+
+Operator then re-read the nit-fix diff and issued GO:
+
+```text
+0d79ca24 operator(verify): GO identity embselect nits
+coordination/mailbox/sent/2026-06-17T07-49-37Z-operator-to-director-verification-report.md
+```
+
+Evidence in the GO report:
+
+```text
+env -u GIT_INDEX_FILE git show --patch --find-renames --find-copies a072b1da9f363f7585502333c55881407bd10535 -- docs/BRIEF-director-2026-06-17-identity-arcface-embselect.md docs/PROGRAM-MANUAL.md coordination/mailbox/seen/director.txt
+-> NITS-fix diff was docs/cursor-only; no production code changed.
+
+rg -n "452:|811:|813:|960:|976:|989:|identity/validator.py:133|identity/validator.py:267" docs/BRIEF-director-2026-06-17-identity-arcface-embselect.md docs/PROGRAM-MANUAL.md
+-> no matches
+
+env -u GIT_INDEX_FILE .venv/bin/python scripts/check_doc_claims.py docs/PROGRAM-MANUAL.md docs/BRIEF-director-2026-06-17-identity-arcface-embselect.md
+-> All anchors checked - no drift.
+
+env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_discovery_identity_xfail.py::test_get_embedding_uses_largest_ok_face_not_first_detection -q
+-> 1 passed in 1.68s
+
+env -u GIT_INDEX_FILE .venv/bin/python scripts/ci_smoke.py
+-> OK; only known R2 invisible-green warning for tests/unit/test_lane_silent_gate_siblings_xfail.py:64.
+```
+
+## Still Open
+
+Operator has no open Lane V route after `0d79ca24`.
+
+The Wave 4 executable gate is still not closed:
+
+```text
+env -u GIT_INDEX_FILE .venv/bin/python scripts/wave_gate_check.py 4
+-> Wave 4 gate: UNMET counts={'implemented': 1}
+-> PRODUCT ORACLE BLOCKER: Wave 4 requires a committed logs/product-oracle-*.json artifact with artifact_kind=product-oracle, wave=4, finite arcface.arc_score, and finite lipsync.offset_frames.
+```
+
+Inventory still needs reconciliation after the operator GO:
+
+```text
+docs/REMEDIATION-INVENTORY.md:70
+identity-arcface-embselect ... status implemented ... pending operator Lane V
+```
+
+That inventory state is stale relative to the durable operator GO at `0d79ca24`.
+Do not claim Wave 4 closed from the operator report alone; coordinator/director
+must reconcile the row status and Wave 4 still needs the product-oracle artifact.
+
+## Dirty Tree Caveat
+
+The final pre-handoff refresh was clean. If a later resume sees staged or dirty
+state, treat it as newer live-seat work and inspect it before acting.
+
+## Exact Next Trigger
+
+Stand by as `operator`.
+
+Next lawful operator actions:
+
+- A new committed `director -> operator` verify-request.
+- A coordinator route asking operator to verify a Wave 4 artifact, especially a
+  committed `logs/product-oracle-wave4.json` generated by a committed script.
+- `push` only if the user-principal explicitly authorizes publication.
+
+Do not invent additional verification, push, claim or release locks, spend
+API/pod budget, edit dependencies, generate production artifacts, or transition
+inventory from this operator handoff.
