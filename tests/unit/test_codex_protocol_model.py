@@ -181,6 +181,9 @@ def test_render_seat_subagent_development_codifies_all_seat_boundaries() -> None
     assert "coordinator: use read-only reconciliation helpers" in text
     assert "Live seats and coordinator may choose bounded subagents at seat discretion" in text
     assert "does not require a separate user request for delegation" in text
+    assert "Default behavior: every live seat and coordinator actively considers bounded subagents" in text
+    assert "uses them when they add independent signal, capacity, or fresh verification" in text
+    assert "Direct work remains acceptable for small, tightly coupled, or authority-sensitive work" in text
     assert "implementer -> spec review -> quality review -> seat synthesis" in text
     assert "no mailbox cursor, mailbox event, operator GO, coordinator route, push, lock, pod spend, or paid API spend" in text
 

@@ -30,6 +30,7 @@ Authority boundary:
 
 Seat Subagent Development:
 - Coordinator may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
+- Default to considering read-only reconciliation helpers for non-trivial cross-seat, inventory, gate, mailbox, lock, or plan-readiness checks. Use them when they add independent signal without creating ceremony; direct reconciliation remains acceptable for simple no-op checks.
 - Coordinator may dispatch read-only reconciliation helpers.
 - Use helper findings for inventory, mailbox, lock, gate, or plan-readiness
   checks only.

@@ -156,6 +156,7 @@ API spend, and pod spend require explicit user consent.
 
 Core rule: seats retain authority; subagents own bounded work.
 Live seats and coordinator may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
+Default behavior: every live seat and coordinator actively considers bounded subagents for non-trivial routed work and uses them when they add independent signal, capacity, or fresh verification. Direct work remains acceptable for small, tightly coupled, or authority-sensitive work.
 
 - Director seats (`director`, `director2`) may use bounded implementer
   subagents for independent implementation slices, then require spec review,

@@ -37,6 +37,7 @@ Authority boundary:
 
 Seat Subagent Development:
 - Live director seats may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
+- Default to considering bounded exploration, implementation, and review helpers for non-trivial routed work. Use them when they add independent signal or capacity; direct work remains acceptable for small, tightly coupled, or authority-sensitive fixes.
 - Director/director2 may dispatch bounded implementer subagents.
 - Use the loop: implementer -> spec review -> quality review -> director-seat
   synthesis.

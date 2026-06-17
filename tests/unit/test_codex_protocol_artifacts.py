@@ -385,19 +385,24 @@ def test_seat_subagent_development_contract_is_pinned_across_codex_surfaces():
         assert "seats retain authority; subagents own bounded work" in text, path
         assert "Live seats and coordinator may choose bounded subagents at seat discretion" in text, path
         assert "does not require a separate user request for delegation" in text, path
+        assert "Default behavior: every live seat and coordinator actively considers bounded subagents" in text, path
+        assert "uses them when they add independent signal, capacity, or fresh verification" in text, path
         assert "implementer -> spec review -> quality review -> seat synthesis" in text, path
         assert "Subagents do not consume cursors, send mailbox events, issue GO, route coordinator work, push, claim locks, start pods, or spend paid API budget." in text, path
 
     expectations = {
         "protocol-director.toml": (
+            "Default to considering bounded exploration, implementation, and review helpers for non-trivial routed work.",
             "Director/director2 may dispatch bounded implementer subagents.",
             "The director seat still writes the brief or verify-request.",
         ),
         "protocol-operator.toml": (
+            "Default to considering read-only verifier helpers for non-trivial Lane V work.",
             "Operator/operator2 may dispatch read-only verifier helpers.",
             "The operator seat still issues the GO/NITS/FAIL report.",
         ),
         "protocol-coordinator.toml": (
+            "Default to considering read-only reconciliation helpers for non-trivial cross-seat, inventory, gate, mailbox, lock, or plan-readiness checks.",
             "Coordinator may dispatch read-only reconciliation helpers.",
             "The coordinator still owns the consolidated route or no-op report.",
         ),
@@ -424,7 +429,20 @@ def test_seat_subagent_development_contract_is_pinned_across_codex_surfaces():
         assert "seats retain authority; subagents own bounded work" in text, path
         assert "seat discretion" in text, path
         assert "does not require a separate user request for delegation" in text, path
+        assert "Default behavior: every live seat and coordinator actively considers bounded subagents" in text, path
         assert "Subagents do not consume cursors" in text, path
+
+    for path in (
+        ROOT / ".codex" / "agents" / "agent01.toml",
+        ROOT / ".codex" / "agents" / "agent02.toml",
+        ROOT / ".codex" / "agents" / "agent03.toml",
+        ROOT / ".codex" / "agents" / "agent04.toml",
+    ):
+        text = tomllib.loads(path.read_text(encoding="utf-8"))["developer_instructions"]
+        assert "Seat Subagent Development" in text, path
+        assert "seats retain authority; subagents own bounded work" in text, path
+        assert "Default behavior: every live seat and coordinator actively considers bounded subagents" in text, path
+        assert "Subagents are not protocol seats" in text, path
 
 
 def test_codex_facing_skills_do_not_route_to_claude_skill_paths():

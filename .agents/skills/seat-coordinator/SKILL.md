@@ -78,6 +78,7 @@ the no-op with the commands you ran.
 
 Core rule: seats retain authority; subagents own bounded work.
 Live seats and coordinator may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
+Default behavior: every live seat and coordinator actively considers bounded subagents for non-trivial routed work and uses them when they add independent signal, capacity, or fresh verification. Direct work remains acceptable for small, tightly coupled, or authority-sensitive work.
 
 Coordinator may use read-only reconciliation helpers for inventory, mailbox,
 lock, gate, plan-readiness, or receipt checks. Their output is evidence for the

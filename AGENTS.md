@@ -34,6 +34,10 @@ guardrail extensions and do not replace seat authority, mailbox cursor rules,
 or user-gated push.
 User-principal authorization: live director/operator seats and the coordinator
 may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
+Default behavior: every live seat and coordinator actively considers bounded
+subagents for non-trivial routed work and uses them when they add independent
+signal, capacity, or fresh verification. Direct work remains acceptable for
+small, tightly coupled, or authority-sensitive work.
 Subagents remain advisory helpers and do not inherit mailbox, cursor, GO,
 coordinator-route, lock, push, pod-spend, or paid-API-spend authority.
 When a fresh or transplanted Codex instance is assigned a live seat or

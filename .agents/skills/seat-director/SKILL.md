@@ -63,6 +63,7 @@ Core rule: seats retain authority; subagents own bounded work.
 Subagents are part of the director's normal toolbelt, but the director remains
 the owner of the brief, dispatch shape, synthesis, and verify-request.
 Live director seats may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
+Default behavior: every live seat and coordinator actively considers bounded subagents for non-trivial routed work and uses them when they add independent signal, capacity, or fresh verification. Direct work remains acceptable for small, tightly coupled, or authority-sensitive work.
 
 - Use bounded exploration subagents for Rule #12 grep-the-writes evidence,
   Rule #13 sibling audits, call-graph checks, and design alternatives. Pull
