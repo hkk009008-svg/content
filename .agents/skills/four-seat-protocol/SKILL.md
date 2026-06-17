@@ -122,6 +122,13 @@ env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave
 env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave <wave> --validate-route coordination/mailbox/sent/<event>.md
 ```
 
+Strict read-only protocol validation:
+
+```bash
+env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_doctor.py --wave <wave>
+env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_doctor.py --wave <wave> --route coordination/mailbox/sent/<event>.md
+```
+
 Closed-cycle coordinator-join packets must also satisfy the executable
 handoff gate: standby, idle, closeout, transfer, or transplant evidence must
 cite a durable `docs/HANDOFF-*.md` artifact.

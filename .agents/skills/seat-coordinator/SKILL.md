@@ -36,6 +36,13 @@ env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave
 env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave <wave> --validate-route coordination/mailbox/sent/<event>.md
 ```
 
+For a strict read-only protocol validation bundle:
+
+```bash
+env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_doctor.py --wave <wave>
+env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_doctor.py --wave <wave> --route coordination/mailbox/sent/<event>.md
+```
+
 Closed-cycle coordinator-join packets are hard-gated for durable transfer:
 standby, idle, closeout, transfer, or transplant evidence must cite a
 `docs/HANDOFF-*.md` artifact.
@@ -66,6 +73,9 @@ gate's result by relaxing the gate.
 - Active coordinator task-board routes must pass
   `scripts/protocol_capacity_board.py --wave <wave>` plus
   `--validate-route coordination/mailbox/sent/<event>.md` before commit.
+- Use `scripts/protocol_doctor.py --wave <wave>` as the strict read-only
+  validation bundle; add `--route coordination/mailbox/sent/<event>.md` for
+  active route validation. It does not replace operator GO.
 - When preserving packet/evidence snapshots for future reference, copy them
   under `docs/archive/coordination-evidence/<YYYY-MM-DD-short-cycle>/`; packet
   JSON snapshots go in that bundle's `packets/` subfolder. Do not move live
