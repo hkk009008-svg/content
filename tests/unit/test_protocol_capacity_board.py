@@ -150,6 +150,32 @@ def test_valid_cycle_renders_one_packet_per_actor(tmp_path: Path) -> None:
     assert "wave4-identity-director" in capacity.render_capacity_board(report)
 
 
+def test_empty_wave_renders_inactive_no_packets(tmp_path: Path) -> None:
+    report = capacity.collect_capacity_report(tmp_path, 4)
+
+    assert report.packet_state == "inactive-no-packets"
+    rendered = capacity.render_capacity_board(report)
+    assert "packet state: inactive-no-packets" in rendered
+    assert "valid: true" in rendered
+
+
+def test_require_packets_fails_empty_wave(tmp_path: Path, capsys) -> None:
+    rc = board.main(["--root", str(tmp_path), "--wave", "4", "--require-packets"])
+
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "inactive-no-packets" in out
+    assert "G9: no capacity packets for wave 4" in out
+
+
+def test_require_packets_passes_when_packets_exist(tmp_path: Path, capsys) -> None:
+    _write_valid_cycle(tmp_path)
+
+    rc = board.main(["--root", str(tmp_path), "--wave", "4", "--require-packets"])
+
+    assert rc == 0
+
+
 def test_malformed_packet_json_fails_closed(tmp_path: Path) -> None:
     packet_dir = tmp_path / "coordination/capacity/packets"
     packet_dir.mkdir(parents=True)

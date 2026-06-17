@@ -25,6 +25,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="coordinator task-board mailbox event to validate",
     )
+    parser.add_argument(
+        "--require-packets",
+        action="store_true",
+        help="exit nonzero when a wave has no capacity packets",
+    )
     args = parser.parse_args(argv)
 
     if args.validate_route:
@@ -40,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result.valid else 1
 
     report = protocol_capacity.collect_capacity_report(Path(args.root), args.wave)
+    if args.require_packets:
+        report = protocol_capacity.require_packets(report)
     if args.json:
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True))
     else:
