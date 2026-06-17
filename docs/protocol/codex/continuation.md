@@ -80,6 +80,13 @@ env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave
 env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave <wave> --validate-route coordination/mailbox/sent/<event>.md
 ```
 
+For a strict read-only protocol validation bundle, run the protocol doctor:
+
+```bash
+env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_doctor.py --wave <wave>
+env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_doctor.py --wave <wave> --route coordination/mailbox/sent/<event>.md
+```
+
 Closed-cycle coordinator-join packets are also hard-gated: standby, idle,
 closeout, transfer, or transplant evidence must cite a durable
 `docs/HANDOFF-*.md` artifact instead of ending on a chat-only or generic
@@ -156,6 +163,9 @@ evidence, not row-correctness proof.
 - `scripts/protocol_capacity_board.py --wave <wave>`: read-only hard-gated
   capacity board; use `--validate-route coordination/mailbox/sent/<event>.md`
   before active coordinator task-board route commits.
+- `scripts/protocol_doctor.py --wave <wave>`: strict read-only protocol bundle;
+  use `--route coordination/mailbox/sent/<event>.md` when validating an active
+  coordinator task-board route. It is evidence, not an operator GO substitute.
 - `.codex/agents/agentNN.toml`: optional guardrail extensions. They do not
   replace seat authority, mailbox cursor rules, or user-gated push.
 
