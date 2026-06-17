@@ -142,6 +142,10 @@ class CapacityReport:
         return [issue for issue in self.issues if not issue.get("excepted_by")]
 
     @property
+    def packet_state(self) -> str:
+        return "active" if self.packets else "inactive-no-packets"
+
+    @property
     def actor_rows(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for owner in SEAT_ORDER:
@@ -163,6 +167,7 @@ class CapacityReport:
             "artifact_kind": "protocol-capacity-board",
             "root": self.root,
             "wave": self.wave,
+            "packet_state": self.packet_state,
             "packets": [packet.to_dict() for packet in self.packets],
             "exceptions": [exception.to_dict() for exception in self.exceptions],
             "actor_rows": self.actor_rows,
@@ -229,11 +234,27 @@ def validate_route(root: Path | str, wave: int, route_path: Path | str) -> Route
     )
 
 
+def require_packets(report: CapacityReport) -> CapacityReport:
+    if report.packets:
+        return report
+    return CapacityReport(
+        root=report.root,
+        wave=report.wave,
+        packets=report.packets,
+        exceptions=report.exceptions,
+        issues=(
+            *report.issues,
+            _issue("G9", f"no capacity packets for wave {report.wave}"),
+        ),
+    )
+
+
 def render_capacity_board(report: CapacityReport) -> str:
     lines = [
         "# Protocol Capacity Board",
         f"wave: {report.wave}",
         f"valid: {str(not report.blocking_issues).lower()}",
+        f"packet state: {report.packet_state}",
         "",
         "ACTORS",
     ]
