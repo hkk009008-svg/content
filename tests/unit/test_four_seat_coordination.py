@@ -38,6 +38,8 @@ FOUR_CURSORS = {
     "operator2": "2026-06-01T00:00:00Z",
 }
 
+FIXTURE_KINDS = ("coordination", "decision", "fyi")
+
 
 def _make_coord(tmp_path, events=None, cursors=None):
     root = tmp_path / "coordination"
@@ -119,6 +121,10 @@ def repo(tmp_path):
     seen = tmp_path / "coordination" / "mailbox" / "seen"
     sent.mkdir(parents=True)
     seen.mkdir(parents=True)
+    (tmp_path / "coordination" / "mailbox" / "kinds.txt").write_text(
+        "\n".join(FIXTURE_KINDS) + "\n",
+        encoding="utf-8",
+    )
     for role, ts in FOUR_CURSORS.items():
         (seen / f"{role}.txt").write_text(ts + "\n")
     return tmp_path
