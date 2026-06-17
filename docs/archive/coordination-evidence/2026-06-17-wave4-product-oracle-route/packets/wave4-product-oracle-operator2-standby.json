@@ -1,0 +1,22 @@
+{
+  "id": "wave4-product-oracle-operator2-standby",
+  "wave": 4,
+  "cycle": "2026-06-17-wave4-product-oracle-a",
+  "owner": "operator2",
+  "packet_type": "idle",
+  "row_ids": [
+    "protocol-smoke-verify-addendum-kind"
+  ],
+  "allowed_paths": [],
+  "lock_keys": [],
+  "dependencies": [
+    "wave4-product-oracle-coordinator-route"
+  ],
+  "acceptance": [
+    "stand by; mailbox-kind cleanup is operator2 GO",
+    "do not duplicate operator product-oracle Lane V unless a later coordinator/user route assigns it"
+  ],
+  "done_evidence": [],
+  "next_recipient": null,
+  "status": "blocked"
+}

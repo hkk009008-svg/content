@@ -1,0 +1,27 @@
+{
+  "id": "wave4-product-oracle-director-artifact",
+  "wave": 4,
+  "cycle": "2026-06-17-wave4-product-oracle-a",
+  "owner": "director",
+  "packet_type": "director-implementation",
+  "row_ids": [
+    "identity-arcface-embselect"
+  ],
+  "allowed_paths": [
+    "logs/product-oracle-wave4.json"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave4-product-oracle-coordinator-route"
+  ],
+  "acceptance": [
+    "produce committed logs/product-oracle-wave4.json only from already-available local inputs and committed measurement tooling",
+    "artifact_kind must be product-oracle",
+    "wave must be 4",
+    "arcface.arc_score and lipsync.offset_frames must be finite",
+    "if missing media, pod runtime, paid API spend, dependency edits, production generation, or fresh external generation is required, stop and report the exact blocker instead"
+  ],
+  "done_evidence": [],
+  "next_recipient": "operator",
+  "status": "ready"
+}

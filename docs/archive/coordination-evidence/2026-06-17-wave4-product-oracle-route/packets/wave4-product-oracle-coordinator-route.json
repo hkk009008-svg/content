@@ -1,0 +1,27 @@
+{
+  "id": "wave4-product-oracle-coordinator-route",
+  "wave": 4,
+  "cycle": "2026-06-17-wave4-product-oracle-a",
+  "owner": "coordinator",
+  "packet_type": "coordinator-route",
+  "row_ids": [
+    "identity-arcface-embselect"
+  ],
+  "allowed_paths": [
+    "coordination/capacity/packets",
+    "coordination/mailbox/sent",
+    "docs/REMEDIATION-INVENTORY.md"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave4-bug-error-coordinator-join"
+  ],
+  "acceptance": [
+    "record the Wave 4 identity row as verified from operator GO",
+    "reroute only the product-oracle artifact blocker",
+    "do not authorize push, lock side effects, pod spend, paid API spend, dependency edits, production generation, or production pipeline edits"
+  ],
+  "done_evidence": [],
+  "next_recipient": "director",
+  "status": "active"
+}

@@ -66,6 +66,10 @@ gate's result by relaxing the gate.
 - Active coordinator task-board routes must pass
   `scripts/protocol_capacity_board.py --wave <wave>` plus
   `--validate-route coordination/mailbox/sent/<event>.md` before commit.
+- When preserving packet/evidence snapshots for future reference, copy them
+  under `docs/archive/coordination-evidence/<YYYY-MM-DD-short-cycle>/`; packet
+  JSON snapshots go in that bundle's `packets/` subfolder. Do not move live
+  packets out of `coordination/capacity/packets/`.
 
 ## No-op fast path
 

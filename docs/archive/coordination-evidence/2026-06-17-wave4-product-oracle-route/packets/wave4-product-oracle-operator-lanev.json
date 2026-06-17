@@ -1,0 +1,25 @@
+{
+  "id": "wave4-product-oracle-operator-lanev",
+  "wave": 4,
+  "cycle": "2026-06-17-wave4-product-oracle-a",
+  "owner": "operator",
+  "packet_type": "operator-verification",
+  "row_ids": [
+    "identity-arcface-embselect"
+  ],
+  "allowed_paths": [],
+  "lock_keys": [],
+  "dependencies": [
+    "wave4-product-oracle-director-artifact"
+  ],
+  "acceptance": [
+    "wait for a fresh director-to-operator verify-request naming the product-oracle artifact commit",
+    "verify the artifact is committed at HEAD and not worktree-only",
+    "verify finite arcface.arc_score and lipsync.offset_frames",
+    "verify scripts/wave_gate_check.py 4 recognizes the artifact",
+    "issue one GO, NITS, or FAIL verification-report"
+  ],
+  "done_evidence": [],
+  "next_recipient": null,
+  "status": "blocked"
+}

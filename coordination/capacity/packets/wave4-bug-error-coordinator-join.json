@@ -1,0 +1,37 @@
+{
+  "id": "wave4-bug-error-coordinator-join",
+  "wave": 4,
+  "cycle": "2026-06-17-wave4-bug-error-cleanup-a",
+  "owner": "coordinator",
+  "packet_type": "coordinator-join",
+  "row_ids": [
+    "identity-arcface-embselect",
+    "protocol-smoke-verify-addendum-kind"
+  ],
+  "allowed_paths": [
+    "coordination/capacity/packets",
+    "coordination/mailbox/sent",
+    "docs/REMEDIATION-INVENTORY.md"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave4-bug-error-operator-identity-lanev",
+    "wave4-bug-error-operator2-mailbox-kind-lanev"
+  ],
+  "acceptance": [
+    "both Wave 4 reverify loops returned GO",
+    "mailbox monitor shows all four seats unread=0",
+    "capacity board is valid",
+    "smoke is OK",
+    "route the remaining Wave 4 product-oracle blocker"
+  ],
+  "done_evidence": [
+    "capacity board valid before product-oracle reroute",
+    "smoke OK",
+    "operator GO coordination/mailbox/sent/2026-06-17T07-49-37Z-operator-to-director-verification-report.md",
+    "operator2 GO coordination/mailbox/sent/2026-06-17T07-49-57Z-operator2-to-director2-verification-report.md",
+    "next trigger: continue as director for Wave 4 product-oracle artifact"
+  ],
+  "next_recipient": "director",
+  "status": "done"
+}
