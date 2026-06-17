@@ -342,6 +342,30 @@ cognitive-load distribution, not hierarchy.
 - Both seats use the same commit-body etiquette + Rule #7 + Rule #5
   — these are TEAM disciplines.
 
+**Pair Operating Contract.** Efficient pair work is a short artifact baton, not
+parallel narration:
+
+- director -> operator is the fast path inside each pair: director scopes and
+  sends the smallest sufficient artifact; operator verifies only that artifact
+  or landed commit.
+- Every baton handoff is a mailbox artifact, not chat: brief, verify-request,
+  verification-report, or handoff with commit/range, paths, tests, exclusions,
+  and exact next trigger.
+- Director sends one verify-request per implementation or brief once scope is
+  stable; operator waits for a fresh verify-request or shipping commit.
+- No duplicate Lane V for docs-only, status-only, or handoff-only commits; when
+  phase is ambiguous, default to inaction or idle evidence rather than
+  speculative verification.
+- No receipt/status churn: send mail only when it changes ownership, preserves
+  evidence, requests verification, returns GO/NITS/FAIL, or blocks on
+  user-gated side effects.
+- When both seats are active, do not edit the same files or rerun the same task;
+  first commit to land wins and the other seat narrows or stands down after
+  git/mailbox refresh.
+- Effectiveness means a closed loop: director artifact -> operator
+  verification-report GO/NITS/FAIL -> director consumes the report or
+  coordinator closes; gate scripts never substitute for operator GO.
+
 ## Codification bias check (Rule #11)
 
 **Rule #11: Codification bias check.** When proposing a new rule,

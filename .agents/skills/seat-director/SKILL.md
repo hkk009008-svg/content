@@ -57,6 +57,34 @@ The brief gates the fix: the co-signer reads it, the implementer obeys it. Autho
 - **≥5 independent sub-tasks OR ≥800 LOC** → **orchestrate** (R-ORCH): one fresh implementer per task, **sequential on shared files**, reviewers after — never two implementers in parallel on shared files (`docs/protocol/claude/orchestration.md`). Dispatch with the `docs/templates/claude/implementer.md` body incl. its **Git-hygiene block** (`env -u GIT_INDEX_FILE`) + items 4–5.
 - **Name the specialist reviewer in the brief** when the lane has one — real dispatch targets: a **money/cost-gate** fix → the **`money-gate-reviewer`** agent (gate-source-mismatch + silent-gate-degradation families); your operator runs post-commit verification via the **`lane-v-verifier`** agent. You do NOT verify your own pair's fix.
 
+## Pair Operating Contract
+
+- director -> operator is the fast path inside each pair: director scopes and
+  sends the smallest sufficient artifact; operator verifies only that artifact
+  or landed commit.
+- Every baton handoff is a mailbox artifact, not chat: brief, verify-request,
+  verification-report, or handoff with commit/range, paths, tests, exclusions,
+  and exact next trigger.
+- Director sends one verify-request per implementation or brief once scope is
+  stable; include commit/range, brief path, evidence commands, known excluded
+  workspace state, and expected verdict.
+- Operator waits for a fresh verify-request or shipping commit; no duplicate Lane V
+  for docs-only, status-only, or handoff-only commits, and no speculative
+  verification when phase is ambiguous.
+- No receipt/status churn: send mail only when it changes ownership, preserves
+  evidence, requests verification, returns GO/NITS/FAIL, or blocks on
+  user-gated side effects.
+- When both seats are active, do not edit the same files or rerun the same
+  task; first commit to land wins and the other seat narrows or stands down
+  after git/mailbox refresh.
+- At boundaries, stop with exact next trigger and durable handoff only when
+  context is transferring; avoid broad recaps when mailbox/gate state already
+  proves standby.
+- Effectiveness means a closed loop: director artifact -> operator
+  verification-report GO/NITS/FAIL -> director consumes the report or
+  coordinator closes; gate scripts never substitute for operator
+  verification-report GO.
+
 ## Seat Subagent Development
 
 Core rule: seats retain authority; subagents own bounded work.

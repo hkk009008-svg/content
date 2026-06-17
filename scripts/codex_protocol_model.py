@@ -261,6 +261,17 @@ PLANNING_RELAY_RULES = (
     "Relay mailbox events are planning evidence only; no production work, verification verdict, lock, push, or inventory change is implied unless a later coordinator task board explicitly routes it.",
 )
 
+PAIR_OPERATING_RULES = (
+    "director -> operator is the fast path inside each pair: director scopes and sends the smallest sufficient artifact; operator verifies only that artifact or landed commit.",
+    "Every baton handoff is a mailbox artifact, not chat: brief, verify-request, verification-report, or handoff with commit/range, paths, tests, exclusions, and exact next trigger.",
+    "Director sends one verify-request per implementation or brief once scope is stable; include commit/range, brief path, evidence commands, known excluded workspace state, and expected verdict.",
+    "Operator waits for a fresh verify-request or shipping commit; no duplicate Lane V for docs-only, status-only, or handoff-only commits, and no speculative verification when phase is ambiguous.",
+    "No receipt/status churn: send mail only when it changes ownership, preserves evidence, requests verification, returns GO/NITS/FAIL, or blocks on user-gated side effects.",
+    "When both seats are active, do not edit the same files or rerun the same task; first commit to land wins and the other seat narrows or stands down after git/mailbox refresh.",
+    "At boundaries, stop with exact next trigger and durable handoff only when context is transferring; avoid broad recaps when mailbox/gate state already proves standby.",
+    "Effectiveness means a closed loop: director artifact -> operator verification-report GO/NITS/FAIL -> director consumes the report or coordinator closes; gate scripts never substitute for operator verification-report GO.",
+)
+
 SEAT_SUBAGENT_DEVELOPMENT_RULES = (
     "Core rule: seats retain authority; subagents own bounded work.",
     "Live seats and coordinator may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.",
@@ -429,6 +440,13 @@ def render_planning_relay() -> str:
     lines.extend(f"- {rule}" for rule in PLANNING_RELAY_RULES)
     lines.append("coordinator-started plan: coordinator -> all four seats -> coordinator")
     lines.append("distribution: one consolidated coordinator-to-all task board")
+    return "\n".join(lines)
+
+
+def render_pair_operating_contract() -> str:
+    """Return the efficient director/operator pair contract as Markdown."""
+    lines = ["Pair Operating Contract:"]
+    lines.extend(f"- {rule}" for rule in PAIR_OPERATING_RULES)
     return "\n".join(lines)
 
 
@@ -739,6 +757,7 @@ def render_surface_summary() -> str:
         "Active kernel invariants: "
         + ", ".join(name for name, _ in ACTIVE_KERNEL_INVARIANTS),
         "Demoted optional concepts: " + ", ".join(demoted_names),
+        "Pair Operating Contract: director -> operator is the fast path; mailbox artifact, not chat",
         "Seat Subagent Development: seats retain authority; subagents own bounded work",
         "agent extension namespace: .codex/agents/agentNN.toml guardrail extensions",
         "runtime env contract: "
@@ -761,6 +780,9 @@ def main() -> int:
     print()
     print("## Kernel Contract")
     print(render_kernel_contract(include_trigger_specific=False))
+    print()
+    print("## Pair Operating Contract")
+    print(render_pair_operating_contract())
     print()
     print("## Seat Subagent Development")
     print(render_seat_subagent_development())

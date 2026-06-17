@@ -299,6 +299,16 @@ taxonomy, and mailbox protocol — lives in **docs/protocol/agents/director-oper
 read it only when coordinating with the other seat. Rule provenance (codified SHAs,
 empirical basis, beneficiary/consent) is in docs/PROTOCOL-RULES-LOG.md.
 
+- **Pair Operating Contract:** efficient pair work is the short director ->
+  operator artifact loop. Director scopes the smallest sufficient
+  brief/fix/verify-request; operator verifies only the named artifact or landed
+  commit; all baton passes are a mailbox artifact, not chat; no duplicate Lane V
+  for docs/status/handoff-only commits; No receipt/status churn unless it
+  changes ownership, preserves evidence, requests verification, returns
+  GO/NITS/FAIL, or blocks on user-gated side effects; first commit to land wins
+  after git/mailbox refresh; close the loop with an operator verification-report
+  GO/NITS/FAIL and an exact next trigger.
+
 - **Rule #23 co-sign is TIERED** (Lever #7, audit `wf_6be2ee18-f4b`; body in
   `docs/protocol/agents/director-operator.md`). Classifier: *would the
   co-signer's verification change which files/sites the implementation touches?*

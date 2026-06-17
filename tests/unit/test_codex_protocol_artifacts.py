@@ -445,6 +445,47 @@ def test_seat_subagent_development_contract_is_pinned_across_codex_surfaces():
         assert "Subagents are not protocol seats" in text, path
 
 
+def test_pair_operating_contract_is_pinned_across_codex_surfaces():
+    shared_paths = [
+        ROOT / "docs" / "protocol" / "codex" / "continuation.md",
+        ROOT / ".agents" / "skills" / "four-seat-protocol" / "SKILL.md",
+        ROOT / ".agents" / "skills" / "seat-director" / "SKILL.md",
+        ROOT / ".agents" / "skills" / "seat-operator" / "SKILL.md",
+    ]
+
+    for path in shared_paths:
+        text = path.read_text(encoding="utf-8")
+        assert "Pair Operating Contract" in text, path
+        assert "director -> operator is the fast path" in text, path
+        assert "mailbox artifact, not chat" in text, path
+        assert "Director sends one verify-request" in text, path
+        assert "Operator waits for a fresh verify-request or shipping commit" in text, path
+        assert "no duplicate Lane V" in text, path
+        assert "No receipt/status churn" in text, path
+        assert "first commit to land wins" in text, path
+        assert "exact next trigger" in text, path
+
+    expectations = {
+        "protocol-director.toml": (
+            "Pair Operating Contract",
+            "Director sends one verify-request",
+            "exact next trigger",
+        ),
+        "protocol-operator.toml": (
+            "Pair Operating Contract",
+            "Operator waits for a fresh verify-request or shipping commit",
+            "no duplicate Lane V",
+        ),
+    }
+
+    for name, phrases in expectations.items():
+        text = tomllib.loads(
+            (ROOT / ".codex" / "agents" / name).read_text(encoding="utf-8")
+        )["developer_instructions"]
+        for phrase in phrases:
+            assert phrase in text, name
+
+
 def test_codex_facing_skills_do_not_route_to_claude_skill_paths():
     for path in sorted((ROOT / ".agents" / "skills").glob("*/SKILL.md")):
         text = path.read_text(encoding="utf-8")

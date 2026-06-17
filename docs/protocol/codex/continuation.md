@@ -117,6 +117,34 @@ production fixes. A verified inventory transition still needs an operator
 `verification-report` GO plus executed evidence; a gate script is process
 evidence, not row-correctness proof.
 
+## Pair Operating Contract
+
+- director -> operator is the fast path inside each pair: director scopes and
+  sends the smallest sufficient artifact; operator verifies only that artifact
+  or landed commit.
+- Every baton handoff is a mailbox artifact, not chat: brief, verify-request,
+  verification-report, or handoff with commit/range, paths, tests, exclusions,
+  and exact next trigger.
+- Director sends one verify-request per implementation or brief once scope is
+  stable; include commit/range, brief path, evidence commands, known excluded
+  workspace state, and expected verdict.
+- Operator waits for a fresh verify-request or shipping commit; no duplicate Lane V
+  for docs-only, status-only, or handoff-only commits, and no speculative
+  verification when phase is ambiguous.
+- No receipt/status churn: send mail only when it changes ownership, preserves
+  evidence, requests verification, returns GO/NITS/FAIL, or blocks on
+  user-gated side effects.
+- When both seats are active, do not edit the same files or rerun the same
+  task; first commit to land wins and the other seat narrows or stands down
+  after git/mailbox refresh.
+- At boundaries, stop with exact next trigger and durable handoff only when
+  context is transferring; avoid broad recaps when mailbox/gate state already
+  proves standby.
+- Effectiveness means a closed loop: director artifact -> operator
+  verification-report GO/NITS/FAIL -> director consumes the report or
+  coordinator closes; gate scripts never substitute for operator
+  verification-report GO.
+
 ## Optional Tools
 
 - `scripts/mailbox_monitor.py --once` or `--watch --interval 5`: read-only

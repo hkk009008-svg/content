@@ -35,6 +35,20 @@ Authority boundary:
 - Require executed evidence and the operator verification-report GO where the
   protocol requires one.
 
+Pair Operating Contract:
+- director -> operator is the fast path inside each pair.
+- Every baton handoff is a mailbox artifact, not chat.
+- Director sends one verify-request per implementation or brief once scope is
+  stable; include commit/range, brief path, evidence commands, known excluded
+  workspace state, expected verdict, and exact next trigger.
+- No receipt/status churn; send mail only when it changes ownership, preserves
+  evidence, requests verification, returns GO/NITS/FAIL, or blocks on user-gated
+  side effects.
+- When both seats are active, do not edit the same files or rerun the same task;
+  first commit to land wins after git/mailbox refresh.
+- The pair loop is closed only after operator verification-report GO/NITS/FAIL
+  and the next owner is explicit.
+
 Seat Subagent Development:
 - Live director seats may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
 - Default to considering bounded exploration, implementation, and review helpers for non-trivial routed work. Use them when they add independent signal or capacity; direct work remains acceptable for small, tightly coupled, or authority-sensitive fixes.

@@ -35,6 +35,21 @@ Authority boundary:
 - A verified transition requires executed evidence plus the mailbox
   verification-report GO expected by the protocol.
 
+Pair Operating Contract:
+- director -> operator is the fast path inside each pair.
+- Every baton handoff is a mailbox artifact, not chat.
+- Operator waits for a fresh verify-request or shipping commit; no duplicate Lane V
+  for docs-only, status-only, or handoff-only commits.
+- When phase is ambiguous, do not speculate; return idle evidence or wait for a
+  fresh verify-request.
+- No receipt/status churn; send mail only when it changes ownership, preserves
+  evidence, requests verification, returns GO/NITS/FAIL, or blocks on user-gated
+  side effects.
+- When both seats are active, do not edit the same files or rerun the same task;
+  first commit to land wins after git/mailbox refresh.
+- The pair loop is closed only after operator verification-report GO/NITS/FAIL
+  and the next owner is explicit.
+
 Seat Subagent Development:
 - Live operator seats may choose bounded subagents at seat discretion; this does not require a separate user request for delegation.
 - Default to considering read-only verifier helpers for non-trivial Lane V work. Use them when a cold-context pass, mutation probe, or specialist review would add independent signal; return idle evidence when no shipping target exists.

@@ -42,6 +42,34 @@ The operator's hardest discipline is *not* verifying everything. Firing Lane V o
 
 **When the phase is ambiguous, default to inaction** — a speculative Lane V on a non-shipping commit burns tokens and signal. (Full taxonomy + exit signals: `docs/protocol/claude/director-operator.md` "Phase taxonomy".)
 
+## Pair Operating Contract
+
+- director -> operator is the fast path inside each pair: director scopes and
+  sends the smallest sufficient artifact; operator verifies only that artifact
+  or landed commit.
+- Every baton handoff is a mailbox artifact, not chat: brief, verify-request,
+  verification-report, or handoff with commit/range, paths, tests, exclusions,
+  and exact next trigger.
+- Director sends one verify-request per implementation or brief once scope is
+  stable; include commit/range, brief path, evidence commands, known excluded
+  workspace state, and expected verdict.
+- Operator waits for a fresh verify-request or shipping commit; no duplicate Lane V
+  for docs-only, status-only, or handoff-only commits, and no speculative
+  verification when phase is ambiguous.
+- No receipt/status churn: send mail only when it changes ownership, preserves
+  evidence, requests verification, returns GO/NITS/FAIL, or blocks on
+  user-gated side effects.
+- When both seats are active, do not edit the same files or rerun the same
+  task; first commit to land wins and the other seat narrows or stands down
+  after git/mailbox refresh.
+- At boundaries, stop with exact next trigger and durable handoff only when
+  context is transferring; avoid broad recaps when mailbox/gate state already
+  proves standby.
+- Effectiveness means a closed loop: director artifact -> operator
+  verification-report GO/NITS/FAIL -> director consumes the report or
+  coordinator closes; gate scripts never substitute for operator
+  verification-report GO.
+
 ## impl≠verifier is about NON-AUTHORSHIP, not seat identity
 
 - You verify because you **did not author** the fix — not merely because you are "the operator." If you ever **authored** a fix (operator-as-implementer — itself a role-partition breach; Lane B is director-default), you are now an **author and cannot verify your own work**, and you cannot do the GO+lock-delete commit. Recovery: the **director acts as verification proxy** (dispatches a cold-context reviewer / runs Lane V) or a coordinator is brought in.

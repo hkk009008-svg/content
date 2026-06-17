@@ -188,6 +188,21 @@ def test_render_seat_subagent_development_codifies_all_seat_boundaries() -> None
     assert "no mailbox cursor, mailbox event, operator GO, coordinator route, push, lock, pod spend, or paid API spend" in text
 
 
+def test_render_pair_operating_contract_codifies_efficient_pair_loop() -> None:
+    text = model.render_pair_operating_contract()
+
+    assert "Pair Operating Contract" in text
+    assert "director -> operator is the fast path" in text
+    assert "mailbox artifact, not chat" in text
+    assert "Director sends one verify-request" in text
+    assert "Operator waits for a fresh verify-request or shipping commit" in text
+    assert "no duplicate Lane V" in text
+    assert "No receipt/status churn" in text
+    assert "first commit to land wins" in text
+    assert "exact next trigger" in text
+    assert "operator verification-report GO" in text
+
+
 def test_agent_extension_modules_are_guardrails_not_role_replacements() -> None:
     assert model.is_agent_extension_name("agent01.toml")
     assert model.is_agent_extension_name("agent42.toml")
