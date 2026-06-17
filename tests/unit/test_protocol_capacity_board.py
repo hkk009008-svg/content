@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
@@ -423,6 +425,61 @@ def test_closed_standby_cycle_accepts_handoff_artifact(tmp_path: Path) -> None:
                 "handoff: docs/HANDOFF-coordinator-2026-06-17-wave4-standby.md",
             ],
         ),
+        _packet(
+            "wave4-director-done",
+            "director",
+            status="done",
+            done_evidence=[
+                "committed diff",
+                "verify-request coordination/mailbox/sent/request.md",
+            ],
+        ),
+        _packet(
+            "wave4-operator-done",
+            "operator",
+            packet_type="operator-verification",
+            status="done",
+            done_evidence=["GO coordination/mailbox/sent/go.md"],
+        )
+        | {
+            "verify_request": "coordination/mailbox/sent/request.md",
+            "target_commit": "abc1234",
+            "scope_files": ["identity/validator.py"],
+        },
+    ]:
+        _write_packet(tmp_path, packet)
+
+    report = capacity.collect_capacity_report(tmp_path, 4)
+
+    assert report.blocking_issues == []
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "protocol-harness-structured-handoff-artifact: capacity packets ignore "
+        "structured handoff_artifact; see docs/superpowers/plans/"
+        "2026-06-17-protocol-harness-best-version.md Task 5"
+    ),
+)
+def test_closed_standby_cycle_accepts_structured_handoff_artifact(tmp_path: Path) -> None:
+    handoff = tmp_path / "docs/HANDOFF-coordinator-2026-06-17-wave4-standby.md"
+    handoff.parent.mkdir(parents=True, exist_ok=True)
+    handoff.write_text("# Handoff\n\nDurable closeout artifact.\n", encoding="utf-8")
+
+    for packet in [
+        _packet(
+            "wave4-join",
+            "coordinator",
+            packet_type="coordinator-join",
+            status="done",
+            done_evidence=[
+                "capacity board valid",
+                "smoke OK",
+                "next trigger: standby; no routed next work",
+            ],
+        )
+        | {"handoff_artifact": "docs/HANDOFF-coordinator-2026-06-17-wave4-standby.md"},
         _packet(
             "wave4-director-done",
             "director",
