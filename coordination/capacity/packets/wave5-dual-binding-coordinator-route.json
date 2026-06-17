@@ -1,0 +1,29 @@
+{
+  "id": "wave5-dual-binding-coordinator-route",
+  "wave": 5,
+  "cycle": "2026-06-17-wave5-dual-character-binding-planning-a",
+  "owner": "coordinator",
+  "packet_type": "coordinator-route",
+  "row_ids": [
+    "capability-dual-character-binding"
+  ],
+  "allowed_paths": [
+    "coordination/capacity/packets",
+    "coordination/mailbox/sent"
+  ],
+  "lock_keys": [],
+  "dependencies": [],
+  "acceptance": [
+    "open Wave 5 as a no-spend capability-planning cycle, not a remediation defect wave",
+    "route Pair-A to refresh the dual-character binding evidence and choose the next brief-ready identity mechanism",
+    "route Pair-B to refresh pod/spend/readiness constraints for any later render or training burn",
+    "do not authorize push, lock side effects, pod spend, paid API spend, dependency edits, production generation, or production pipeline edits"
+  ],
+  "done_evidence": [
+    "route sent: coordination/mailbox/sent/2026-06-17T08-22-41Z-coordinator-to-all-coordination.md",
+    "route starts from clean Wave 4 closeout: docs/HANDOFF-coordinator-2026-06-17-wave4-product-oracle-closeout.md",
+    "inventory at route time: docs/REMEDIATION-INVENTORY.md has 42 verified rows and no non-verified rows"
+  ],
+  "next_recipient": "director",
+  "status": "active"
+}

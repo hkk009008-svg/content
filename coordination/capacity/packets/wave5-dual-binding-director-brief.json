@@ -1,0 +1,28 @@
+{
+  "id": "wave5-dual-binding-director-brief",
+  "wave": 5,
+  "cycle": "2026-06-17-wave5-dual-character-binding-planning-a",
+  "owner": "director",
+  "packet_type": "director-brief",
+  "row_ids": [
+    "capability-dual-character-binding"
+  ],
+  "allowed_paths": [
+    "docs/superpowers/briefs",
+    "docs/HANDOFF-director-*.md"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave5-dual-binding-coordinator-route"
+  ],
+  "acceptance": [
+    "read docs/superpowers/plans/2026-06-15-dual-char-attn-mask-binding.md, its 2026-06-15 empirical addendum, current ARCHITECTURE.md multi-character keyframe sections, and current source before deciding",
+    "produce a no-spend Pair-A brief that selects the next dual-character binding direction, naming why Route B, Route A plus masked-man-LoRA hybrid, or another bounded mechanism is preferred",
+    "the brief must include visual-primary GO criteria, secondary ArcFace guard criteria, deterministic figure-selection requirement, required artifacts, and explicit user-spend gates",
+    "if the work requires live pod rendering, paid API spend, LoRA training, or production code edits, stop and report the exact blocker instead of doing it as coordinator-routed planning",
+    "send a director-to-operator verify-request naming the brief path and evidence; do not request Lane V on a render artifact unless the user separately authorizes the spend"
+  ],
+  "done_evidence": [],
+  "next_recipient": "operator",
+  "status": "ready"
+}

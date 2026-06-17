@@ -1,0 +1,28 @@
+{
+  "id": "wave5-dual-binding-director2-readiness",
+  "wave": 5,
+  "cycle": "2026-06-17-wave5-dual-character-binding-planning-a",
+  "owner": "director2",
+  "packet_type": "director-brief",
+  "row_ids": [
+    "capability-dual-binding-spend-readiness"
+  ],
+  "allowed_paths": [
+    "docs/superpowers/briefs",
+    "docs/HANDOFF-director2-*.md"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave5-dual-binding-coordinator-route"
+  ],
+  "acceptance": [
+    "read OPERATIONS.md pod setup and idle-cost sections, docs/PROGRAM-MANUAL.md capability-max spend caveats, current cost/pod source touchpoints, and the Pair-A dual-binding plan before deciding",
+    "produce a no-spend Pair-B readiness brief for any later dual-binding render or LoRA-training burn: pod preflight, idle-stop discipline, budget/cost caveats, required user authorization, and measurement artifacts",
+    "the brief must distinguish free local planning from user-gated pod spend, paid API spend, training spend, and production generation",
+    "if a missing guardrail looks like a production defect, route it as a future seat-owned brief instead of patching production code in this planning cycle",
+    "send a director2-to-operator2 verify-request naming the readiness brief path and evidence"
+  ],
+  "done_evidence": [],
+  "next_recipient": "operator2",
+  "status": "ready"
+}

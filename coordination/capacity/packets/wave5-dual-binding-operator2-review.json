@@ -1,0 +1,24 @@
+{
+  "id": "wave5-dual-binding-operator2-review",
+  "wave": 5,
+  "cycle": "2026-06-17-wave5-dual-character-binding-planning-a",
+  "owner": "operator2",
+  "packet_type": "operator-verification",
+  "row_ids": [
+    "capability-dual-binding-spend-readiness"
+  ],
+  "allowed_paths": [],
+  "lock_keys": [],
+  "dependencies": [
+    "wave5-dual-binding-director2-readiness"
+  ],
+  "acceptance": [
+    "stand by until a fresh director2-to-operator2 verify-request names the Wave 5 Pair-B readiness brief",
+    "verify the brief's side-effect gates, pod/spend constraints, budget caveats, and measurement-artifact requirements against current source and operations docs",
+    "issue one GO, NITS, or FAIL verification-report on whether the readiness brief is safe for a later user-authorized spend/render decision",
+    "do not start pod spend, paid API spend, production generation, lock claims, or production code edits"
+  ],
+  "done_evidence": [],
+  "next_recipient": null,
+  "status": "blocked"
+}
