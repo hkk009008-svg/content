@@ -101,6 +101,21 @@ def test_send_event_rejects_unknown_kind(repo):
     assert not list((repo / "coordination" / "mailbox" / "sent").iterdir())
 
 
+def test_send_event_accepts_verify_addendum_kind(repo):
+    r = _run(
+        SEND_EVENT,
+        ["director2", "operator2", "verify-addendum", "follow-up evidence"],
+        repo,
+        stdin="extra verification context\n",
+    )
+    assert r.returncode == 0, r.stderr
+    sent = repo / "coordination" / "mailbox" / "sent"
+    files = [p.name for p in sent.iterdir()]
+    assert len(files) == 1
+    assert files[0].endswith("-director2-to-operator2-verify-addendum.md")
+    assert _staged(repo) == [f"coordination/mailbox/sent/{files[0]}"]
+
+
 def test_send_event_rejects_self_addressed(repo):
     r = _run(SEND_EVENT, ["operator", "operator", "coordination", "x"], repo)
     assert r.returncode != 0

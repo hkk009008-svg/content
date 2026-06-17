@@ -58,7 +58,7 @@ KNOWN_KINDS = frozenset({
     # observed-in-practice additions
     "coordination", "proposal", "proposal-reply", "acknowledgement",
     "reply", "fyi", "discussion", "convergence",
-    "measurement-report", "wrap", "verify-readiness",
+    "measurement-report", "wrap", "verify-addendum", "verify-readiness",
     "verify-readiness-converged",
 })
 

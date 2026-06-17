@@ -27,6 +27,7 @@ from check_coordination import (  # noqa: E402
     run,
     main,
 )
+import protocol_effectiveness_report as effectiveness  # noqa: E402
 
 # A deterministic "now" for every test — checks must not read the wall clock
 # when the caller supplies one.
@@ -215,6 +216,17 @@ def test_unknown_kind_is_advisory(tmp_path):
     # historical readiness pre-flight kinds are valid mailbox protocol events
     assert "verify-readiness" in KNOWN_KINDS
     assert "verify-readiness-converged" in KNOWN_KINDS
+
+
+def test_verify_addendum_kind_matches_effectiveness_vocabulary(tmp_path):
+    name = "2026-06-12T10-00-00Z-director2-to-operator2-verify-addendum.md"
+    root = make_coord(tmp_path, events={name: GOOD_EVENT_BODY})
+
+    issues = run(root, since=SINCE, now=NOW)
+
+    assert "verify-addendum" in KNOWN_KINDS
+    assert "verify-addendum" in effectiveness.COORDINATION_KINDS
+    assert not any(i.kind == "unknown_kind" for i in advisories(issues))
 
 
 # ---------------------------------------------------------------------------
