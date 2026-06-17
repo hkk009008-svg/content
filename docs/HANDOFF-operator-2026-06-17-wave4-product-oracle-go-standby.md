@@ -24,9 +24,11 @@ were the reliable view.
 
 ## Current Durable State
 
-Latest refreshed HEAD before this handoff:
+Latest final refresh after the GO and handoff commits:
 
 ```text
+b11f9340 docs(handoff): operator wave4 oracle GO standby
+8c3342c6 docs(handoff): director wave4 oracle GO consumed
 ea448b9c operator(verify): GO wave4 product oracle
 6fa3f75a director2(mail): consume wave4 product oracle route
 465b34b1 docs(handoff): refresh director oracle handoff caveats
@@ -41,12 +43,12 @@ e1f2fb8c docs(handoff): operator identity embselect standby
 54ac94ba docs(director2): handoff mailbox kind GO
 ```
 
-Operator status after the GO commit:
+Operator status at final refresh:
 
 ```text
 branch main
-ea448b9c operator(verify): GO wave4 product oracle
-vs origin/main: 5 ahead, 0 behind
+b11f9340 docs(handoff): operator wave4 oracle GO standby
+vs origin/main: 7 ahead, 0 behind
 operator cursor: 2026-06-17T07:58:23Z
 operator UNREAD: 0
 Wave 4 gate: MET counts={'verified': 1}
@@ -129,7 +131,7 @@ FAIL reasons.
 
 ## Dirty Tree Caveat
 
-At handoff time, the default index also had unrelated director-owned staged
+During drafting, the default index briefly had unrelated director-owned staged
 changes:
 
 ```text
@@ -141,8 +143,15 @@ env -u GIT_INDEX_FILE git diff -- coordination/mailbox/seen/director.txt
 -> 2026-06-17T07:54:34Z -> 2026-06-17T08:04:43Z
 ```
 
-These are director cursor/handoff updates, not operator-owned work. Do not
-revert them from the operator seat.
+Those director cursor/handoff updates were committed by another seat before the
+final refresh:
+
+```text
+8c3342c6 docs(handoff): director wave4 oracle GO consumed
+
+env -u GIT_INDEX_FILE git status --short
+-> no output
+```
 
 ## Current Boundary
 
