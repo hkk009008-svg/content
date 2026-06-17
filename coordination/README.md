@@ -188,7 +188,8 @@ The `**When:**` timestamp must match the filename timestamp (linted by
 `scripts/check_coordination.py`). The kind lives in the FILENAME position;
 the linter accepts the enum below PLUS the observed-in-practice additions:
 `coordination` | `proposal` | `proposal-reply` | `acknowledgement` | `reply` |
-`fyi` | `discussion` | `convergence` | `measurement-report` | `wrap`.
+`fyi` | `discussion` | `convergence` | `measurement-report` | `wrap` |
+`verify-addendum`.
 
 **Kind enum (v5 update):**
 
