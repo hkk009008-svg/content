@@ -21,9 +21,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from protocol_mailbox import COORDINATION_KINDS, SEATS
 from status import collect_mailbox
 
-SEATS = ("director", "director2", "operator", "operator2")
 INVENTORY_COLS = (
     "id",
     "subsystem",
@@ -47,28 +47,6 @@ CLASSIFICATIONS = {
     "no_op_evidence",
     "stale_or_conflicted",
     "unknown",
-}
-COORDINATION_KINDS = {
-    "acknowledgement",
-    "coordination",
-    "decision",
-    "dispatch-claim",
-    "doc-sync-notice",
-    "findings",
-    "fold-notice",
-    "fyi",
-    "measurement-report",
-    "memory-candidate",
-    "proposal",
-    "proposal-reply",
-    "query",
-    "reply",
-    "status",
-    "verify-addendum",
-    "verify-readiness",
-    "verify-readiness-converged",
-    "verify-request",
-    "wrap",
 }
 MAILBOX_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)-"

@@ -23,6 +23,33 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SEND_EVENT = _REPO_ROOT / "coordination" / "bin" / "send-event"
 CONSUME_EVENTS = _REPO_ROOT / "coordination" / "bin" / "consume-events"
+CANONICAL_KINDS = (
+    "acknowledgement",
+    "convergence",
+    "coordination",
+    "decision",
+    "dispatch-claim",
+    "discussion",
+    "doc-sync-notice",
+    "findings",
+    "fold-notice",
+    "fyi",
+    "measurement-report",
+    "memory-candidate",
+    "proposal",
+    "proposal-reply",
+    "query",
+    "reply",
+    "scout-report",
+    "scout-request",
+    "status",
+    "verification-report",
+    "verify-addendum",
+    "verify-readiness",
+    "verify-readiness-converged",
+    "verify-request",
+    "wrap",
+)
 
 EVENT_NAME_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z-"
@@ -45,6 +72,10 @@ def repo(tmp_path):
     seen = tmp_path / "coordination" / "mailbox" / "seen"
     sent.mkdir(parents=True)
     seen.mkdir(parents=True)
+    (tmp_path / "coordination" / "mailbox" / "kinds.txt").write_text(
+        "\n".join(CANONICAL_KINDS) + "\n",
+        encoding="utf-8",
+    )
     (seen / "director.txt").write_text("2026-06-01T00:00:00Z\n")
     (seen / "director2.txt").write_text("2026-06-01T00:00:00Z\n")
     (seen / "operator.txt").write_text("2026-06-01T00:00:00Z\n")
@@ -114,6 +145,24 @@ def test_send_event_accepts_verify_addendum_kind(repo):
     assert len(files) == 1
     assert files[0].endswith("-director2-to-operator2-verify-addendum.md")
     assert _staged(repo) == [f"coordination/mailbox/sent/{files[0]}"]
+
+
+def test_send_event_accepts_kind_from_shared_registry(repo):
+    registry = repo / "coordination" / "mailbox" / "kinds.txt"
+    registry.write_text(registry.read_text(encoding="utf-8") + "test-registry-kind\n", encoding="utf-8")
+
+    r = _run(
+        SEND_EVENT,
+        ["operator", "director", "test-registry-kind", "registry-backed"],
+        repo,
+        stdin="body\n",
+    )
+
+    assert r.returncode == 0, r.stderr
+    sent = repo / "coordination" / "mailbox" / "sent"
+    files = [p.name for p in sent.iterdir()]
+    assert len(files) == 1
+    assert files[0].endswith("-operator-to-director-test-registry-kind.md")
 
 
 def test_send_event_rejects_self_addressed(repo):

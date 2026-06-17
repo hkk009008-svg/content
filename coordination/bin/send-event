@@ -7,7 +7,7 @@
 # The trailing "Cursor at send:" line is read from the SENDER's seen file at
 # write time — it cannot drift from the file the way hand-written cursor
 # prose did (the 2026-06-10 three-way divergence). Kinds are validated against
-# the same enum scripts/check_coordination.py enforces.
+# the shared coordination/mailbox/kinds.txt registry.
 set -euo pipefail
 
 usage() { echo "usage: send-event <from> <to> <kind> <subject...>  (body on stdin)"; }
@@ -19,6 +19,7 @@ fi
 
 [ $# -ge 4 ] || { usage >&2; exit 2; }
 FROM=$1; TO=$2; KIND=$3; shift 3; SUBJECT="$*"
+ROOT=$(git rev-parse --show-toplevel)
 
 # Seats: 4-seat protocol (two director-operator pairs). `all` is a broadcast
 # TARGET only — never a sender. `coordinator` is the mirror: a send-only pseudo-
@@ -29,16 +30,16 @@ case "$FROM" in director|director2|operator|operator2|coordinator) ;; *) echo "s
 case "$TO"   in director|director2|operator|operator2|all) ;; *) echo "send-event: bad <to>: $TO (director|director2|operator|operator2|all)" >&2; exit 2;; esac
 [ "$FROM" != "$TO" ] || { echo "send-event: refusing self-addressed event" >&2; exit 2; }
 
-KINDS=" coordination verification-report decision dispatch-claim acknowledgement \
-proposal reply proposal-reply fyi doc-sync-notice discussion query \
-memory-candidate convergence findings status fold-notice verify-request \
-verify-addendum verify-readiness verify-readiness-converged scout-request scout-report "
-case "$KINDS" in
-  *" $KIND "*) ;;
-  *) echo "send-event: unknown kind '$KIND' (see scripts/check_coordination.py KNOWN_KINDS)" >&2; exit 2;;
-esac
+KIND_FILE="$ROOT/coordination/mailbox/kinds.txt"
+if [ ! -f "$KIND_FILE" ]; then
+  echo "send-event: missing mailbox kind registry: $KIND_FILE" >&2
+  exit 2
+fi
+if ! grep -Fxq -- "$KIND" "$KIND_FILE"; then
+  echo "send-event: unknown kind '$KIND' (see $KIND_FILE)" >&2
+  exit 2
+fi
 
-ROOT=$(git rev-parse --show-toplevel)
 TS_DASH=$(date -u +%Y-%m-%dT%H-%M-%SZ)
 TS_COLON="${TS_DASH:0:11}$(echo "${TS_DASH:11:8}" | tr '-' ':')Z"
 REL="coordination/mailbox/sent/$TS_DASH-$FROM-to-$TO-$KIND.md"
