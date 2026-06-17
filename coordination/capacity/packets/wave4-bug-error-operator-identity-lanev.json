@@ -1,0 +1,24 @@
+{
+  "id": "wave4-bug-error-operator-identity-lanev",
+  "wave": 4,
+  "cycle": "2026-06-17-wave4-bug-error-cleanup-a",
+  "owner": "operator",
+  "packet_type": "operator-verification",
+  "row_ids": [
+    "identity-arcface-embselect"
+  ],
+  "allowed_paths": [],
+  "lock_keys": [],
+  "dependencies": [
+    "wave4-bug-error-director-identity-embselect"
+  ],
+  "acceptance": [
+    "wait for a fresh director-to-operator verify-request before Lane V",
+    "verify the actual diff or test-infeasible artifact, not the coordinator route alone",
+    "check focused identity selectors and non-vacuity where the director adds an executable regression",
+    "issue one GO, NITS, or FAIL verification-report"
+  ],
+  "done_evidence": [],
+  "next_recipient": null,
+  "status": "blocked"
+}

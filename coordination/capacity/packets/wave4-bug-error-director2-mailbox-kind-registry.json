@@ -1,0 +1,33 @@
+{
+  "id": "wave4-bug-error-director2-mailbox-kind-registry",
+  "wave": 4,
+  "cycle": "2026-06-17-wave4-bug-error-cleanup-a",
+  "owner": "director2",
+  "packet_type": "director-implementation",
+  "row_ids": [
+    "protocol-smoke-verify-addendum-kind"
+  ],
+  "allowed_paths": [
+    "coordination/bin/send-event",
+    "coordination/mailbox/kinds.txt",
+    "scripts/check_coordination.py",
+    "scripts/protocol_effectiveness_report.py",
+    "scripts/protocol_mailbox.py",
+    "tests/unit/test_check_coordination.py",
+    "tests/unit/test_coordination_bin.py"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave4-bug-error-coordinator-route"
+  ],
+  "acceptance": [
+    "clean up the historical verify-addendum unknown_kind smoke advisory by centralizing or aligning mailbox kind vocabulary",
+    "keep this track protocol/harness-only and do not touch production pipeline modules",
+    "prove send-event and check_coordination agree that verify-addendum is a known kind",
+    "run tests/unit/test_check_coordination.py and tests/unit/test_coordination_bin.py plus scripts/ci_smoke.py",
+    "send a fresh director2-to-operator2 verify-request naming the exact commit"
+  ],
+  "done_evidence": [],
+  "next_recipient": "operator2",
+  "status": "ready"
+}

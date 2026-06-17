@@ -1,0 +1,24 @@
+{
+  "id": "wave4-bug-error-operator2-mailbox-kind-lanev",
+  "wave": 4,
+  "cycle": "2026-06-17-wave4-bug-error-cleanup-a",
+  "owner": "operator2",
+  "packet_type": "operator-verification",
+  "row_ids": [
+    "protocol-smoke-verify-addendum-kind"
+  ],
+  "allowed_paths": [],
+  "lock_keys": [],
+  "dependencies": [
+    "wave4-bug-error-director2-mailbox-kind-registry"
+  ],
+  "acceptance": [
+    "wait for a fresh director2-to-operator2 verify-request before Lane V",
+    "verify send-event/check_coordination/protocol_effectiveness_report kind vocabulary alignment on the actual diff",
+    "run focused coordination tests and scripts/ci_smoke.py",
+    "issue one GO, NITS, or FAIL verification-report"
+  ],
+  "done_evidence": [],
+  "next_recipient": null,
+  "status": "blocked"
+}

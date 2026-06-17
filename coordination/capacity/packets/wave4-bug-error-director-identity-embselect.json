@@ -1,0 +1,32 @@
+{
+  "id": "wave4-bug-error-director-identity-embselect",
+  "wave": 4,
+  "cycle": "2026-06-17-wave4-bug-error-cleanup-a",
+  "owner": "director",
+  "packet_type": "director-implementation",
+  "row_ids": [
+    "identity-arcface-embselect"
+  ],
+  "allowed_paths": [
+    "identity/validator.py",
+    "identity/types.py",
+    "tests/unit/test_identity_validator.py",
+    "tests/unit/test_discovery_identity_xfail.py",
+    "docs/REMEDIATION-INVENTORY.md",
+    "docs/BRIEF-director-2026-06-17-identity-arcface-embselect.md"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave4-bug-error-coordinator-route"
+  ],
+  "acceptance": [
+    "read ai-video-gen identity-validation context before judging the row",
+    "audit _get_embedding and _ref_embedding_largest_ok plus validate_image and validate_video sibling paths",
+    "either make the multi-detection reference-face selection executable with a focused regression or leave a durable test-infeasible proof with one-line reason",
+    "if implementation lands, keep scope to identity/validator.py, identity/types.py as needed, focused identity tests, and inventory/doc artifacts",
+    "send a fresh director-to-operator verify-request naming the exact commit or test-infeasible artifact"
+  ],
+  "done_evidence": [],
+  "next_recipient": "operator",
+  "status": "ready"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "wave4-bug-error-coordinator-route",
+  "wave": 4,
+  "cycle": "2026-06-17-wave4-bug-error-cleanup-a",
+  "owner": "coordinator",
+  "packet_type": "coordinator-route",
+  "row_ids": [
+    "identity-arcface-embselect",
+    "protocol-smoke-verify-addendum-kind"
+  ],
+  "allowed_paths": [
+    "coordination/capacity/packets",
+    "coordination/mailbox/sent",
+    "docs/REMEDIATION-INVENTORY.md"
+  ],
+  "lock_keys": [],
+  "dependencies": [],
+  "acceptance": [
+    "Wave 3 closeout is current and all seats consumed the last coordinator broadcast",
+    "open Wave 4 bug/error cleanup with one consolidated coordinator-to-all route",
+    "route identity-arcface-embselect to director and operator",
+    "route verify-addendum smoke-warning cleanup to director2 and operator2",
+    "no push, lock claim, pod, paid API, dependency edit, or production generation side effect is opened"
+  ],
+  "done_evidence": [],
+  "next_recipient": "director",
+  "status": "active"
+}
