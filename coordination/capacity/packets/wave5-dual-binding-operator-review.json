@@ -18,7 +18,20 @@
     "issue one GO, NITS, or FAIL verification-report on the brief and its readiness for a later user-authorized spend/render decision",
     "do not consume coordinator mail and do not start pod spend, paid API spend, production generation, or production code edits"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "verify-request: coordination/mailbox/sent/2026-06-17T08-27-33Z-director-to-operator-verify-request.md",
+    "target commit: 3ba1529a director(plan): route wave5 dual binding brief",
+    "verification-report GO: coordination/mailbox/sent/2026-06-17T08-41-04Z-operator-to-director-verification-report.md",
+    "scripts/protocol_capacity_board.py --wave 5 -> valid: true; BLOCKING ISSUES none",
+    "scripts/protocol_capacity_board.py --wave 5 --validate-route coordination/mailbox/sent/2026-06-17T08-22-41Z-coordinator-to-all-coordination.md -> route valid: true",
+    "tests/unit/test_protocol_capacity_board.py -q -> 24 passed",
+    "scripts/ci_smoke.py -> OK with known R2 warning only"
+  ],
   "next_recipient": null,
-  "status": "blocked"
+  "status": "ready",
+  "verify_request": "coordination/mailbox/sent/2026-06-17T08-27-33Z-director-to-operator-verify-request.md",
+  "target_commit": "3ba1529a",
+  "scope_files": [
+    "docs/superpowers/briefs/2026-06-17-wave5-dual-binding-pair-a.md"
+  ]
 }
