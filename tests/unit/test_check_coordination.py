@@ -28,6 +28,7 @@ from check_coordination import (  # noqa: E402
     main,
 )
 import protocol_effectiveness_report as effectiveness  # noqa: E402
+import protocol_mailbox  # noqa: E402
 
 # A deterministic "now" for every test — checks must not read the wall clock
 # when the caller supplies one.
@@ -227,6 +228,14 @@ def test_verify_addendum_kind_matches_effectiveness_vocabulary(tmp_path):
     assert "verify-addendum" in KNOWN_KINDS
     assert "verify-addendum" in effectiveness.COORDINATION_KINDS
     assert not any(i.kind == "unknown_kind" for i in advisories(issues))
+
+
+def test_mailbox_kind_registry_is_the_shared_vocabulary_source():
+    registry = protocol_mailbox.load_known_kinds()
+
+    assert "verify-addendum" in registry
+    assert KNOWN_KINDS == registry
+    assert effectiveness.COORDINATION_KINDS == registry - {"verification-report"}
 
 
 # ---------------------------------------------------------------------------

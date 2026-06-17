@@ -40,27 +40,15 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from protocol_mailbox import KNOWN_KINDS, SEATS
 from status import count_unread
 
 # 4-seat protocol (two director-operator pairs). `all` is a broadcast TARGET
 # only — NOT a role (no seen/all.txt); every real seat counts `-to-all-` events
 # as addressed to it (see _check_cursors orphan test + status.count_unread).
-# Keep in sync with coordination/bin/{send-event,consume-events} + status._EVENT_RE.
-ROLES = ("director", "director2", "operator", "operator2")
-
-# Union of the kinds documented in coordination/README.md and every kind
-# observed in filename position across the 270 events extant at adoption.
-KNOWN_KINDS = frozenset({
-    # README enum (v2/v4/v5)
-    "dispatch-claim", "findings", "decision", "query", "status",
-    "fold-notice", "verify-request", "verification-report",
-    "doc-sync-notice", "scout-request", "scout-report", "memory-candidate",
-    # observed-in-practice additions
-    "coordination", "proposal", "proposal-reply", "acknowledgement",
-    "reply", "fyi", "discussion", "convergence",
-    "measurement-report", "wrap", "verify-addendum", "verify-readiness",
-    "verify-readiness-converged",
-})
+# Seat names stay aligned with coordination/bin/{send-event,consume-events}
+# and status._EVENT_RE; mailbox kinds come from protocol_mailbox.KNOWN_KINDS.
+ROLES = SEATS
 
 # `coordinator` is a send-only pseudo-seat: a valid <from> only, never a <to>,
 # no seen cursor (mirror of `all`, which is <to>-only). Deliberately NOT added

@@ -33,10 +33,15 @@ for the full discipline (Rules 1–20).
   **ACKs:** an `acknowledgement` event that carries substantive body (role
   resolution, retraction, findings) stays a `sent/` event file; a bare "received"
   ACK that adds nothing beyond the cursor should be a cursor advance only.
+- `mailbox/kinds.txt` — canonical mailbox kind vocabulary, one kind per line.
+  `bin/send-event`, `scripts/check_coordination.py`, and
+  `scripts/protocol_effectiveness_report.py` load this registry through
+  `scripts/protocol_mailbox.py` (`wc -l coordination/mailbox/kinds.txt` → 25,
+  2026-06-18).
 - `scripts/check_coordination.py` (repo root) — lints all of the above (cursor
-  parseable/non-future/non-orphan, filename convention, envelope, kind enum,
-  unread report). Wired into `scripts/ci_smoke.py`: FATAL hard-fails locally,
-  warns in CI; ADVISORY warns; INFO silent.
+  parseable/non-future/non-orphan, filename convention, envelope, registered
+  kind, unread report). Wired into `scripts/ci_smoke.py`: FATAL hard-fails
+  locally, warns in CI; ADVISORY warns; INFO silent.
 - `mailbox/archive/` — Old events moved out of `sent/` for log hygiene (manual
   move by operator).
 - `presence/<seat>-heartbeat.ts` — (v6.0 Tier 2) HOOK-OWNED liveness: a single
@@ -186,12 +191,9 @@ Cursor at send: 2026-06-11T09:00:00Z
 
 The `**When:**` timestamp must match the filename timestamp (linted by
 `scripts/check_coordination.py`). The kind lives in the FILENAME position;
-the linter accepts the enum below PLUS the observed-in-practice additions:
-`coordination` | `proposal` | `proposal-reply` | `acknowledgement` | `reply` |
-`fyi` | `discussion` | `convergence` | `measurement-report` | `wrap` |
-`verify-addendum`.
+the current accepted vocabulary is `coordination/mailbox/kinds.txt`.
 
-**Kind enum (v5 update):**
+**Kind registry (current):**
 
 - **v2 (original):** `dispatch-claim` | `findings` | `decision` | `query` |
   `status` | `fold-notice`
@@ -203,6 +205,10 @@ the linter accepts the enum below PLUS the observed-in-practice additions:
   project-specific gotchas) for director-seat to write or decline
   via `decision`. Closes the latency on operator-observed memory
   candidates without changing memory write authority.
+- **Observed-in-practice additions:** `acknowledgement` | `convergence` |
+  `coordination` | `discussion` | `fyi` | `measurement-report` | `proposal` |
+  `proposal-reply` | `reply` | `verify-addendum` | `verify-readiness` |
+  `verify-readiness-converged` | `wrap`
 
 `verification-report` event format (per Rule #9 Lane V):
 
