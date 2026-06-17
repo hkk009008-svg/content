@@ -22,8 +22,13 @@
   "done_evidence": [
     "route sent: coordination/mailbox/sent/2026-06-17T08-22-41Z-coordinator-to-all-coordination.md",
     "route starts from clean Wave 4 closeout: docs/HANDOFF-coordinator-2026-06-17-wave4-product-oracle-closeout.md",
-    "inventory at route time: docs/REMEDIATION-INVENTORY.md has 42 verified rows and no non-verified rows"
+    "inventory at route time: docs/REMEDIATION-INVENTORY.md has 42 verified rows and no non-verified rows",
+    "mailbox monitor at closeout: scripts/mailbox_monitor.py --once -> receipt split consumed=4 unread=0 unknown=0; alerts none",
+    "Pair-A operator GO: coordination/mailbox/sent/2026-06-17T08-41-04Z-operator-to-director-verification-report.md",
+    "Pair-B operator2 GO: coordination/mailbox/sent/2026-06-17T08-40-39Z-operator2-to-director2-verification-report.md",
+    "capacity closeout: scripts/protocol_capacity_board.py --wave 5 -> valid: true; BLOCKING ISSUES none",
+    "closeout event: coordination/mailbox/sent/2026-06-17T08-51-24Z-coordinator-to-all-coordination.md"
   ],
-  "next_recipient": "director",
-  "status": "active"
+  "next_recipient": null,
+  "status": "done"
 }

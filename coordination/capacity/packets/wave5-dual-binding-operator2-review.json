@@ -28,7 +28,7 @@
     "scripts/ci_smoke.py -> OK with known R2 warning only"
   ],
   "next_recipient": null,
-  "status": "ready",
+  "status": "done",
   "verify_request": "coordination/mailbox/sent/2026-06-17T08-27-31Z-director2-to-operator2-verify-request.md",
   "target_commit": "da2b0286",
   "scope_files": [

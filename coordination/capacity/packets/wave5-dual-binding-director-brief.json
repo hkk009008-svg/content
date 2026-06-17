@@ -22,7 +22,12 @@
     "if the work requires live pod rendering, paid API spend, LoRA training, or production code edits, stop and report the exact blocker instead of doing it as coordinator-routed planning",
     "send a director-to-operator verify-request naming the brief path and evidence; do not request Lane V on a render artifact unless the user separately authorizes the spend"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "brief commit: 3ba1529a director(plan): route wave5 dual binding brief",
+    "brief path: docs/superpowers/briefs/2026-06-17-wave5-dual-binding-pair-a.md",
+    "verify-request: coordination/mailbox/sent/2026-06-17T08-27-33Z-director-to-operator-verify-request.md",
+    "operator GO: coordination/mailbox/sent/2026-06-17T08-41-04Z-operator-to-director-verification-report.md"
+  ],
   "next_recipient": "operator",
-  "status": "ready"
+  "status": "done"
 }

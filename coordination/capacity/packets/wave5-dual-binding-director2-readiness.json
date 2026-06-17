@@ -22,7 +22,12 @@
     "if a missing guardrail looks like a production defect, route it as a future seat-owned brief instead of patching production code in this planning cycle",
     "send a director2-to-operator2 verify-request naming the readiness brief path and evidence"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "brief commit: da2b0286 director2(plan): route wave5 readiness review",
+    "brief path: docs/superpowers/briefs/2026-06-17-wave5-dual-binding-pairb-readiness.md",
+    "verify-request: coordination/mailbox/sent/2026-06-17T08-27-31Z-director2-to-operator2-verify-request.md",
+    "operator2 GO: coordination/mailbox/sent/2026-06-17T08-40-39Z-operator2-to-director2-verification-report.md"
+  ],
   "next_recipient": "operator2",
-  "status": "ready"
+  "status": "done"
 }
