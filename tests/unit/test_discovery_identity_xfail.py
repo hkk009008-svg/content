@@ -8,8 +8,7 @@ Confirmed indices and prefixes:
 
 All three were confirmed by refute-first verifiers in the discovery workflow (two
 independent passes each, finalVerdict=CONFIRMED, production-reachable). The
-Wave-2 rows are now live regressions after their fixes; the Wdefer row remains
-recorded as a TEST-INFEASIBLE skip with its rationale below.
+rows are now live regressions after their fixes.
 
 When a remaining strict pin is fixed, XPASS is the signal to revise or delete it.
 Mirror style: tests/unit/test_has_character_lora_only_hole.py,
@@ -18,6 +17,7 @@ Mirror style: tests/unit/test_has_character_lora_only_hole.py,
 import math
 import os
 
+import numpy as np
 import pytest
 
 
@@ -172,36 +172,49 @@ def test_secondary_lora_model_output_reaches_guider_when_primary_has_no_face_ref
 # confirmed[29]: Wdefer:MINOR:identity-arcface-embselect
 # identity/validator.py:940-943
 # ---------------------------------------------------------------------------
-# TEST-INFEASIBLE: the defect is a reference-embedding selection divergence between
-# the production gate (`_get_embedding` -> emb_list[0], first detection, arbitrary
-# order) and the binding instrument (`_ref_embedding_largest_ok` -> largest OK bbox).
-# This is explicitly documented in the codebase at validator.py:283-286 and flagged
-# as a Rule #13 follow-up (SPEC-P1-1 §6 scope clarification).
-#
-# A test that reproduces the divergence requires a real multi-detection reference
-# image where DeepFace detection order is NOT largest-OK-first. Synthesizing such a
-# fixture reliably is not feasible without a full DeepFace environment and controlled
-# multi-face image assets. Using a fake/stub would make the test vacuous (it would
-# not exercise the real _get_embedding vs _ref_embedding_largest_ok path).
-# importorskip(deepface) avoids ERROR, but even with deepface available there is no
-# guaranteed fixture that produces multiple detections in the wrong order.
-#
-# DISPOSITION: documented here for CI tracking. The defect is real (code confirms it
-# at validator.py:283-286), severity MINOR (divergence only on multi-detection refs,
-# AND the instrument/binding path already uses the correct guard). Director-1 carries
-# this as a Rule #13 follow-up on identity/validator.py.
-@pytest.mark.skip(
-    reason="TEST-INFEASIBLE: Wdefer:MINOR:identity-arcface-embselect "
-    "identity/validator.py:940-943. Defect is a reference-embedding selection "
-    "divergence (production uses emb_list[0]; instrument uses largest-OK bbox). "
-    "Reproducing it requires a real multi-face DeepFace fixture where detection "
-    "order is NOT largest-OK-first — no reliable synthetic fixture possible without "
-    "a live DeepFace environment + controlled multi-face image assets. The defect is "
-    "real (explicitly documented at validator.py:283-286 as Rule #13 follow-up). "
-    "Severity MINOR; director-1 carries as a queued follow-up. "
-    "Surfaced: discovery-wf_13f9d2f6-f93.json confirmed[29].",
-)
-def test_get_embedding_uses_largest_ok_face_not_first_detection():
-    """Placeholder for the Wdefer:MINOR:identity-arcface-embselect defect.
-    TEST-INFEASIBLE — see module docstring and skip reason above."""
-    pass
+# Live regression: the DeepFace detector can return multiple faces in arbitrary
+# order, but the reference embedding should match the binding instrument's
+# largest-OK selection rather than emb_list[0].
+def test_get_embedding_uses_largest_ok_face_not_first_detection(monkeypatch):
+    import identity.validator as validator_module
+
+    first_small = np.array([1.0, 0.0, 0.0])
+    second_largest_ok = np.array([0.0, 1.0, 0.0])
+    detections = [
+        {
+            "embedding": first_small.tolist(),
+            "facial_area": {"x": 5, "y": 5, "w": 80, "h": 80},
+            "face_confidence": 0.99,
+        },
+        {
+            "embedding": second_largest_ok.tolist(),
+            "facial_area": {"x": 20, "y": 20, "w": 160, "h": 160},
+            "face_confidence": 0.99,
+        },
+    ]
+
+    class FakeImage:
+        size = (400, 400)
+
+    class FakePILImage:
+        @staticmethod
+        def open(_path):
+            return FakeImage()
+
+    monkeypatch.setattr(validator_module, "DEEPFACE_AVAILABLE", True)
+    monkeypatch.setattr(validator_module, "_PIL_AVAILABLE", True)
+    monkeypatch.setattr(validator_module, "_PILImage", FakePILImage)
+    monkeypatch.setattr(
+        validator_module,
+        "_represent_deterministic",
+        lambda _path: detections,
+    )
+
+    validator = validator_module.IdentityValidator()
+
+    embedding = validator._get_embedding("/ref-with-two-faces.jpg", "char_ref")
+
+    assert np.array_equal(embedding, second_largest_ok), (
+        "_get_embedding must select the largest OK detection for reference images "
+        "instead of trusting arbitrary DeepFace detection order"
+    )

@@ -163,6 +163,49 @@ def _classify_face_detection(
     return "OK"
 
 
+def _largest_ok_embedding(
+    image_path: str, emb_list: List[Dict]
+) -> Optional[np.ndarray]:
+    """Return the embedding for the largest OK detection, or None.
+
+    This mirrors the reference selection semantics used by the binding
+    instrument so production reference reads do not depend on DeepFace detection
+    order.
+    """
+    if not emb_list:
+        return None
+
+    try:
+        if _PIL_AVAILABLE and _PILImage is not None:
+            img = _PILImage.open(image_path)
+            img_w, img_h = img.size
+        else:
+            img_cv = cv2.imread(image_path)
+            if img_cv is None:
+                return None
+            img_h, img_w = img_cv.shape[:2]
+    except Exception:
+        return None
+
+    best_ok_key: Optional[Tuple[float, int, int, int, int]] = None
+    best_ok_emb: Optional[np.ndarray] = None
+
+    for entry in emb_list:
+        fa = entry.get("facial_area", {})
+        w, h = fa.get("w", 0), fa.get("h", 0)
+        conf = float(entry.get("face_confidence") or 0.0)
+        if _classify_face_detection(w, h, img_w, img_h, conf) != "OK":
+            continue
+
+        area = float(w * h)
+        key = (area, -fa.get("x", 0), -fa.get("y", 0), -w, -h)
+        if best_ok_key is None or key > best_ok_key:
+            best_ok_key = key
+            best_ok_emb = np.array(entry["embedding"])
+
+    return best_ok_emb
+
+
 def _figure_read_score(
     image_path: str,
     ref_emb: np.ndarray,
@@ -281,10 +324,9 @@ def _ref_embedding_largest_ok(ref_path: str, ref_name: str = "ref") -> Optional[
     When that fallback fires (WARNING printed) the returned embedding is
     non-None and UNGUARDED — callers cannot tell it from a guarded read, and
     _compute_binding_scores records note='' (not 'REF_EMBEDDING_FAILED') for it
-    (completeness item B, director disposition 2026-06-12). Scope note: this
-    largest-OK guard covers the INSTRUMENT/binding ref reads only; production
-    validate_image:326 / validate_video:685 still use _get_embedding[0]
-    (SPEC-P1-1 §6 scope clarification; Rule #13 follow-up queued).
+    (completeness item B, director disposition 2026-06-12). Production
+    validate_image / validate_video reference reads now share the same
+    largest-OK selection through _get_embedding.
 
     Returns None if DEEPFACE_AVAILABLE is False or any exception occurs.
     """
@@ -939,7 +981,9 @@ class IdentityValidator:
         try:
             emb_list = _represent_deterministic(image_path)
             if emb_list:
-                emb = np.array(emb_list[0]["embedding"])
+                emb = _largest_ok_embedding(image_path, emb_list)
+                if emb is None:
+                    emb = np.array(emb_list[0]["embedding"])
                 if cache_key:
                     self.embedding_cache[cache_key] = emb
                     # Persist to disk for future runs

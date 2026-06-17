@@ -577,7 +577,7 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `ContinuityEngine.validate_shot` | `domain/continuity_engine.py:583` | Delegates to `IdentityValidator.validate_video` for post-gen video identity. |
 | `TemporalConsistencyManager.get_denoise_strength` | `domain/continuity_engine.py:368` | Context-aware denoise (0.30–0.55). |
 | `should_use_img2img` | `domain/continuity_engine.py:353` | img2img only same-scene, `shot_index>0`. |
-| `IdentityValidator.validate_video` | `identity/validator.py:133` | Adaptive sampling (`_compute_sample_positions` `:957`, 3–10 frames by shot type) → `_analyze_frame` (`:1000`, GhostFaceNet cosine) → aggregate → `IdentityValidationResult`. |
+| `IdentityValidator.validate_video` | `identity/validator.py:133` | Adaptive sampling (`_compute_sample_positions` `:1001`, 3–10 frames by shot type) → `_analyze_frame` (`:1044`, GhostFaceNet cosine) → aggregate → `IdentityValidationResult`. |
 | `IdentityValidator.get_rolling_stats` | `identity/validator.py:267` | Window over history → `suggested_pulid_delta` (success<0.5→+0.10, etc.). Drives adaptive PuLID weight. |
 | `SHOT_TYPE_THRESHOLDS` | `identity/types.py:96` | Per-type strict/standard/lenient thresholds. |
 | `get_threshold_for_shot` | `identity/types.py:105` | Attempt-based interpolation toward lenient. |
