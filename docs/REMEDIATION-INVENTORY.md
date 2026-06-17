@@ -79,7 +79,7 @@
 
 ## Closed / excluded-from-discovery (HEAD-checked verified, spec §3/§5)
 These are NOT re-hunted by the Phase-0 discovery workflow (Task 7 excludes them); Wave 1 carries only a re-verification check, not a fresh fix.
-- **`workflow_selector.py`** — the main non-finite/param issue is closed by `bf1034a` (re-verify only). NOTE: `null-continuity-crash` above is a *separate, still-open* sibling crash in the same module that `bf1034a`'s audit boundary did not extend to.
+- **`workflow_selector.py`** — the main non-finite/param issue is closed by `bf1034a` (re-verify only). NOTE: `null-continuity-crash` above was a separate sibling crash in the same module that `bf1034a`'s audit boundary did not extend to; it is now tracked above as `verified` with operator-1 GO evidence.
 - **Determinism (OpenCV thread-race)** — closed: `cv2.setNumThreads(1)` + deterministic tie-break (`ARCHITECTURE.md` §11.1, 30/30 byte-identical). Wave-1 re-verification only; Phase-0 discovery must not re-discover it.
 
 ## Discovery cross-references (seeded rows independently reconfirmed)
