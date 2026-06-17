@@ -21,7 +21,13 @@
     "arcface.arc_score and lipsync.offset_frames must be finite",
     "if missing media, pod runtime, paid API spend, dependency edits, production generation, or fresh external generation is required, stop and report the exact blocker instead"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "artifact commit: a4f44dc2 director(product-oracle): add wave4 oracle artifact",
+    "artifact path: logs/product-oracle-wave4.json",
+    "verify-request: coordination/mailbox/sent/2026-06-17T07-58-23Z-director-to-operator-verify-request.md",
+    "measurement command: scripts/measure_product_oracle.py --wave 4 --video logs/lipsync_gen_v2studio.mp4 --reference-image logs/ref_lighting.jpg --output logs/product-oracle-wave4.json",
+    "artifact values: arcface.arc_score=0.606526; lipsync.offset_frames=-1.0"
+  ],
   "next_recipient": "operator",
-  "status": "ready"
+  "status": "done"
 }

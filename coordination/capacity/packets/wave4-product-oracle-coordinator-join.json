@@ -1,0 +1,44 @@
+{
+  "id": "wave4-product-oracle-coordinator-join",
+  "wave": 4,
+  "cycle": "2026-06-17-wave4-product-oracle-a",
+  "owner": "coordinator",
+  "packet_type": "coordinator-join",
+  "row_ids": [
+    "identity-arcface-embselect"
+  ],
+  "allowed_paths": [
+    "coordination/capacity/packets",
+    "coordination/mailbox/sent",
+    "docs/HANDOFF-coordinator-2026-06-17-wave4-product-oracle-closeout.md"
+  ],
+  "lock_keys": [],
+  "dependencies": [
+    "wave4-product-oracle-coordinator-route",
+    "wave4-product-oracle-director-artifact",
+    "wave4-product-oracle-operator-lanev",
+    "wave4-product-oracle-director2-standby",
+    "wave4-product-oracle-operator2-standby"
+  ],
+  "acceptance": [
+    "operator GO closes the Wave 4 product-oracle artifact requirement",
+    "all seats consumed the active coordinator route",
+    "Wave 4 gate is MET",
+    "capacity board remains valid",
+    "ci_smoke remains OK",
+    "durable coordinator handoff artifact records closeout and next trigger"
+  ],
+  "done_evidence": [
+    "operator GO: coordination/mailbox/sent/2026-06-17T08-04-43Z-operator-to-director-verification-report.md",
+    "mailbox monitor: scripts/mailbox_monitor.py --once -> receipt split consumed=4 unread=0 unknown=0; alerts none",
+    "capacity board evidence: scripts/protocol_capacity_board.py --wave 4 -> valid: true; BLOCKING ISSUES - none",
+    "route validation evidence: scripts/protocol_capacity_board.py --wave 4 --validate-route coordination/mailbox/sent/2026-06-17T08-07-39Z-coordinator-to-all-coordination.md -> route valid: true; BLOCKING ISSUES - none",
+    "wave gate evidence: scripts/wave_gate_check.py 4 -> MET; PRODUCT ORACLE: logs/product-oracle-wave4.json",
+    "smoke OK evidence: scripts/ci_smoke.py -> OK; known R2 invisible-green warning only",
+    "closed cycle: Wave 4 product-oracle cycle complete; no new route opened",
+    "handoff: docs/HANDOFF-coordinator-2026-06-17-wave4-product-oracle-closeout.md",
+    "next trigger: await explicit user publication instruction after resolving or preserving seat-owned staged director handoff/cursor state"
+  ],
+  "next_recipient": null,
+  "status": "done"
+}

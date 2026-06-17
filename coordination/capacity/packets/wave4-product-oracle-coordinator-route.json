@@ -21,7 +21,13 @@
     "reroute only the product-oracle artifact blocker",
     "do not authorize push, lock side effects, pod spend, paid API spend, dependency edits, production generation, or production pipeline edits"
   ],
-  "done_evidence": [],
-  "next_recipient": "director",
-  "status": "active"
+  "done_evidence": [
+    "route sent: coordination/mailbox/sent/2026-06-17T07-54-34Z-coordinator-to-all-coordination.md",
+    "all seats consumed latest coordinator route: scripts/mailbox_monitor.py --once -> receipt split consumed=4 unread=0 unknown=0",
+    "operator GO closed product-oracle artifact verification: coordination/mailbox/sent/2026-06-17T08-04-43Z-operator-to-director-verification-report.md",
+    "wave gate closeout: scripts/wave_gate_check.py 4 -> MET; PRODUCT ORACLE: logs/product-oracle-wave4.json",
+    "closeout event: coordination/mailbox/sent/2026-06-17T08-07-39Z-coordinator-to-all-coordination.md"
+  ],
+  "next_recipient": null,
+  "status": "done"
 }

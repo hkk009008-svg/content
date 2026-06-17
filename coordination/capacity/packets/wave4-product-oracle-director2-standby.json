@@ -16,7 +16,11 @@
     "stand by; mailbox-kind cleanup is operator2 GO",
     "do not open Pair-B implementation unless a later coordinator/user route assigns it"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "standby route consumed: coordination/mailbox/seen/director2.txt -> 2026-06-17T07:54:34Z",
+    "mailbox monitor closeout: director2 unread=0",
+    "no Pair-B implementation opened in the product-oracle cycle"
+  ],
   "next_recipient": null,
-  "status": "blocked"
+  "status": "done"
 }

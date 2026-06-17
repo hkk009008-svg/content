@@ -19,7 +19,19 @@
     "verify scripts/wave_gate_check.py 4 recognizes the artifact",
     "issue one GO, NITS, or FAIL verification-report"
   ],
-  "done_evidence": [],
+  "done_evidence": [
+    "verify-request: coordination/mailbox/sent/2026-06-17T07-58-23Z-director-to-operator-verify-request.md",
+    "target commit: a4f44dc2 director(product-oracle): add wave4 oracle artifact",
+    "verification-report GO: coordination/mailbox/sent/2026-06-17T08-04-43Z-operator-to-director-verification-report.md",
+    "operator reran measurement to /private/tmp/product-oracle-wave4-operator.json and reproduced arcface.arc_score=0.606526 lipsync.offset_frames=-1.000",
+    "tests/unit/test_measure_product_oracle.py -q -> 4 passed",
+    "scripts/wave_gate_check.py 4 -> MET; PRODUCT ORACLE: logs/product-oracle-wave4.json"
+  ],
   "next_recipient": null,
-  "status": "blocked"
+  "status": "done",
+  "verify_request": "coordination/mailbox/sent/2026-06-17T07-58-23Z-director-to-operator-verify-request.md",
+  "target_commit": "a4f44dc2",
+  "scope_files": [
+    "logs/product-oracle-wave4.json"
+  ]
 }
