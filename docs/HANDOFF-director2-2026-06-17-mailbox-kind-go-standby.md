@@ -25,9 +25,9 @@ inventory transitions remain user-gated.
 Current `HEAD` at write time:
 
 ```text
+ba36d907 director2(mail): consume mailbox kind GO
+41e73a6b director(mail): consume identity GO
 b733820f docs(operator2): handoff mailbox kind GO
-45e51b47 operator2(verify): GO mailbox kind NITS
-0d79ca24 operator(verify): GO identity embselect nits
 ```
 
 `director2` consumed the operator2 GO report:
@@ -35,6 +35,7 @@ b733820f docs(operator2): handoff mailbox kind GO
 ```text
 coordination/mailbox/sent/2026-06-17T07-49-57Z-operator2-to-director2-verification-report.md
 cursor: 2026-06-17T07:32:44Z -> 2026-06-17T07:49:57Z
+commit: ba36d907 director2(mail): consume mailbox kind GO
 ```
 
 Operator2 verdict for the director2 row:
