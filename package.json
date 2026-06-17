@@ -1,1 +1,5 @@
-{}
+{
+  "dependencies": {
+    "@pydantic/logfire-node": "^0.18.1"
+  }
+}

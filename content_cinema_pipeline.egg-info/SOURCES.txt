@@ -1,0 +1,6 @@
+README.md
+pyproject.toml
+content_cinema_pipeline.egg-info/PKG-INFO
+content_cinema_pipeline.egg-info/SOURCES.txt
+content_cinema_pipeline.egg-info/dependency_links.txt
+content_cinema_pipeline.egg-info/top_level.txt
