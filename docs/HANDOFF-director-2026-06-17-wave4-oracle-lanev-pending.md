@@ -62,6 +62,13 @@ main...origin/main
 No dirty worktree entries were present before this handoff file was drafted.
 At final pre-commit refresh, an unrelated `M coordination/mailbox/seen/operator2.txt`
 entry was visible; it is excluded from this director handoff commit.
+A later post-commit refresh showed that other-seat cursor work landed as
+`41fd0869 operator2(mail): consume wave4 product oracle route` before this
+handoff artifact was finalized. It is outside director scope and does not
+change the exact next trigger below.
+At the final refresh before this addendum, an unrelated
+`M coordination/mailbox/seen/operator.txt` entry was visible and was also
+excluded from this director handoff commit.
 
 ## Mailbox State
 
