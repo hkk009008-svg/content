@@ -577,8 +577,8 @@ A second naming hazard recurs throughout: **two classes named `CinemaPipeline`**
 | `ContinuityEngine.validate_shot` | `domain/continuity_engine.py:583` | Delegates to `IdentityValidator.validate_video` for post-gen video identity. |
 | `TemporalConsistencyManager.get_denoise_strength` | `domain/continuity_engine.py:368` | Context-aware denoise (0.30–0.55). |
 | `should_use_img2img` | `domain/continuity_engine.py:353` | img2img only same-scene, `shot_index>0`. |
-| `IdentityValidator.validate_video` | `identity/validator.py:133` | Adaptive sampling (`_compute_sample_positions` `:1001`, 3–10 frames by shot type) → `_analyze_frame` (`:1044`, GhostFaceNet cosine) → aggregate → `IdentityValidationResult`. |
-| `IdentityValidator.get_rolling_stats` | `identity/validator.py:267` | Window over history → `suggested_pulid_delta` (success<0.5→+0.10, etc.). Drives adaptive PuLID weight. |
+| `IdentityValidator.validate_video` | `identity/validator.py:768` | Adaptive sampling (`_compute_sample_positions` `:1001`, 3–10 frames by shot type) → `_analyze_frame` (`:1044`, GhostFaceNet cosine) → aggregate → `IdentityValidationResult`. |
+| `IdentityValidator.get_rolling_stats` | `identity/validator.py:902` | Window over history → `suggested_pulid_delta` (success<0.5→+0.10, etc.). Drives adaptive PuLID weight. |
 | `SHOT_TYPE_THRESHOLDS` | `identity/types.py:96` | Per-type strict/standard/lenient thresholds. |
 | `get_threshold_for_shot` | `identity/types.py:105` | Attempt-based interpolation toward lenient. |
 | `make_validator` | `identity/__init__.py:40` | Factory (wires `vision_fallback`). Always use this — bare `IdentityValidator` lacks the fallback. |
@@ -1760,8 +1760,8 @@ The functions an engineer reaches for most, grouped by task. All `file:line` ref
 | Function | Location | What it does |
 |---|---|---|
 | `ContinuityEngine.enhance_shot_prompt` | `domain/continuity_engine.py:446` | Builds enhanced prompt + `continuity_config` (img2img, seed, refs, thresholds) |
-| `IdentityValidator.validate_video` | `identity/validator.py:133` | Adaptive 3–10 frame sampling, GhostFaceNet cosine similarity |
-| `IdentityValidator.get_rolling_stats` | `identity/validator.py:267` | Window-10 history → `suggested_pulid_delta` feedback |
+| `IdentityValidator.validate_video` | `identity/validator.py:768` | Adaptive 3–10 frame sampling, GhostFaceNet cosine similarity |
+| `IdentityValidator.get_rolling_stats` | `identity/validator.py:902` | Window-10 history → `suggested_pulid_delta` feedback |
 | `score_candidate` / `should_halt` | `face_validator_gate.py:171 / 228` | Composite = `0.6·arc + 0.4·aesthetic`; halt when `n≥min_n AND best≥threshold` |
 | `assess_coherence` | `coherence_analyzer.py:219` | `overall = (1-color_drift)·0.4 + lighting·0.3 + composition·0.3`; check `result.valid` first |
 | `two_pass_loudnorm` | `phase_c_ffmpeg.py:1389` | EBU R128 normalize to −14 LUFS / −1.5 dBTP |

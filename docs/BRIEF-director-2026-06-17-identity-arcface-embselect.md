@@ -20,12 +20,12 @@ TARGET SYMBOL: production reference embedding write paths (`ref_emb`,
 
 ```text
 $ rg -n "_get_embedding\(|ref_embeddings\[cid\] = emb|ref_emb = self\._get_embedding|embedding_cache\[cache_key\] = emb" identity/validator.py
-452:        ref_emb = self._get_embedding(reference_path, character_id)
-811:            emb = self._get_embedding(ref_img, cid)
-813:                ref_embeddings[cid] = emb
-960:    def _get_embedding(self, image_path: str, cache_key: str = "") -> Optional[np.ndarray]:
-976:                    self.embedding_cache[cache_key] = emb
-989:                    self.embedding_cache[cache_key] = emb
+451:        ref_emb = self._get_embedding(reference_path, character_id)
+810:            emb = self._get_embedding(ref_img, cid)
+812:                ref_embeddings[cid] = emb
+959:    def _get_embedding(self, image_path: str, cache_key: str = "") -> Optional[np.ndarray]:
+975:                    self.embedding_cache[cache_key] = emb
+988:                    self.embedding_cache[cache_key] = emb
 ```
 
 Runtime write sites are in `validate_image` and `validate_video`; both route
