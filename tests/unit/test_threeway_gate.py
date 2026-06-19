@@ -212,3 +212,58 @@ def test_run_gate_is_idempotent_under_double_invocation(live_repo, seatkit):
     state = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
     completes = [e for e in store.all_events() if e.kind == "merge_completed"]
     assert len(completes) == 1
+
+
+def test_run_gate_rejects_nonexistent_integration_sha_not_raises(live_repo, seatkit):
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    ghost = "0" * 39 + "1"                       # 40-hex, no such object
+    events = _valid_events_for(base, branch, ghost, privs, bus_id="prod")
+    for ev in events:
+        store.append(ev, privs[ev.signer.split(":", 1)[0]])
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main")
+    assert res.outcome == "REJECTED", res.reason          # must NOT raise
+    assert "integration_sha" in res.reason or "known commit" in res.reason
+    # the protected ref must NOT have moved (fail-closed)
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == base
+
+
+def test_run_gate_backstop_rejects_when_gate_side_plumbing_raises(
+        live_repo, seatkit, monkeypatch):
+    """F2 layer-2 (the gate backstop). The predicate's nonexistent-SHA guard checks
+    integration_sha/staging_base but NOT the gate-side merge recompute: a residual
+    git-plumbing failure on the attested SHA (e.g. commit_tree exit 128) must become
+    a REJECTED GateResult, never an escaping CalledProcessError — run_gate stays TOTAL.
+
+    The predicate guard (layer 1) and this backstop (layer 2) are independent; the
+    existing F2 tests only reach REJECTED via the guard, so this drives a
+    CalledProcessError PAST the predicate (all SHAs real -> MERGEABLE) and INTO the
+    gate's recompute, where the except must catch it. (A ghost branch_sha cannot
+    reach here: gitcas.merge_tree uses check=False and returns 'not clean' instead of
+    raising, so we make the gate-side commit_tree raise directly.)"""
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    from threeway import gitcas
+    tree, clean = gitcas.merge_tree(r, base, branch)
+    assert clean
+    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge c1")
+    for ev in _valid_events_for(base, branch, integ, privs):
+        store.append(ev, privs[ev.signer.split(":", 1)[0]])
+
+    # the predicate now reaches MERGEABLE; detonate the gate-side recompute exactly
+    # where the backstop's try wraps it (the §6.4 commit_tree on the attested SHA).
+    def _boom(*a, **k):
+        raise subprocess.CalledProcessError(128, ["git", "commit-tree"])
+    monkeypatch.setattr("threeway.gate.gitcas.commit_tree", _boom)
+
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    # backstop did NOT let the exception escape; this is the gate's reason, not the
+    # predicate guard's ("integration_sha is not a known commit").
+    assert res.outcome == "REJECTED", res.reason
+    assert "git plumbing failed on attested SHA" in res.reason
+    # fail-closed: the protected ref did NOT move.
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == base
