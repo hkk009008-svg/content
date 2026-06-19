@@ -80,6 +80,14 @@ jobs:
   pytest-unit:
     name: pytest tests/unit/
     runs-on: ubuntu-latest
+    # Offline invariant restored (was 15→40 while six tests made real network calls and
+    # pushed the suite to ~27 min). Those tests — phase_c_video_aspect, ltx_native,
+    # llmensemble_cost_uncounted, quality_max_multichar, project_persistence,
+    # style_director — were mocking the wrong boundary; they now stub the one the code
+    # actually crosses (safe_download / fal_client / urllib.urlopen / research_cinematography).
+    # Verified fully offline: 2947 passed in ~2 min with ZERO outbound socket attempts.
+    # Restored to 15 — ample margin over the ~2-min runtime (most of which is the
+    # real-subprocess test_threeway_* git-CAS concurrency tests, not network).
     timeout-minutes: 15
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
@@ -90,7 +98,7 @@ jobs:
       # branches on ANTHROPIC_API_KEY presence (6F without it). Local runs
       # get real keys from .env; CI gets inert placeholders so the suite
       # exercises the same configuration. No test calls the network
-      # (offline suite, ~1 min). Hermeticity refactor (lazy/injectable
+      # (offline suite, ~2 min). Hermeticity refactor (lazy/injectable
       # LLMEnsemble) is a named follow-up per the adversarial review of
       # docs/STRATEGIC_REVIEW-2026-06-10.md Session 1.
       OPENAI_API_KEY: ci-dummy-not-a-real-key

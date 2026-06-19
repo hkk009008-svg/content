@@ -20,6 +20,9 @@ Rules:
   R4  ci-runs-runxfail     a CI workflow must run the pin suite with --runxfail               [FIX-2]
   R5  utv-not-a-row-status  `unable_to_verify` is a reviewer/operator VERDICT, never an inventory
                            row `status` — else it bypasses wave_gate_check blocking (ADR-027)  [ADR-032]
+  R6  report-cites-exec-pin  a verification-report whose verdict is `pass` must cite an executed
+                           `--runxfail` pin run in commands[] — a GO with no pin re-execution is
+                           ceremony (the consumer re-runs it to detect fabrication)            [ADR-032]
 
 This script never modifies anything and never relaxes a gate; it only ADDS signal.
 It is NOT itself a status-reader — it parses/executes against live source.
@@ -214,6 +217,60 @@ def rule_utv_not_a_row_status() -> tuple[str, list[str]]:
     return "PASS", ["no inventory row uses unable_to_verify as a status (it is a verdict only)"]
 
 
+def _pass_reports_missing_runxfail(named_results: list[tuple[str, dict]]) -> list[str]:
+    """Violations for `pass`-verdict reviewer-results that cite no executed --runxfail pin.
+
+    Pure over (label, result) pairs so the gate logic is unit-testable without a mailbox.
+    Only the `pass` verdict is gated: `issues`/`unable_to_verify` make no GO claim, so they
+    do not owe a pin re-execution.
+    """
+    bad: list[str] = []
+    for label, result in named_results:
+        if result.get("verdict") != "pass":
+            continue
+        commands = result.get("commands")
+        if not isinstance(commands, list):
+            commands = []  # wrong-type commands -> treated as "no pin cited" (clean FAIL, not crash)
+        if not any(
+            isinstance(c, dict) and "--runxfail" in (c.get("command") or "")
+            for c in commands
+        ):
+            bad.append(
+                f"{label}: verdict 'pass' but no command in commands[] cites an executed "
+                "--runxfail pin run — a GO with no pin re-execution is ceremony (ADR-032 R6)"
+            )
+    return bad
+
+
+def rule_report_cites_executed_pin(repo_root: pathlib.Path = ROOT) -> tuple[str, list[str]]:
+    """R6 — a `pass` verification-report must cite an executed `--runxfail` pin run.
+
+    The reviewer Evidence preamble (ADR-032) makes pin re-execution the anti-ceremony
+    keystone: a `pass` that never re-ran the implementer's pins with --runxfail is an
+    appearance-of-verification with no substance. High-precision: fires ONLY on a present
+    `reviewer-result/1` block whose verdict is `pass`. Today's mailbox has zero blocks, so
+    R6 is inert until reviewers begin emitting the schema — at which point it has teeth.
+    Parsing is delegated to the consumer (consume_reviewer_result) so there is ONE parser.
+    """
+    try:
+        import consume_reviewer_result as _crr
+    except Exception as exc:  # pragma: no cover - defensive (consumer should always import)
+        return "PASS", [f"reviewer-result consumer unavailable ({exc}); R6 inert"]
+    try:
+        results = _crr.iter_reviewer_results(repo_root)
+    except _crr.ResultParseError as exc:
+        return "FAIL", [f"malformed reviewer-result block — {exc}"]
+    named = [(path.name, result) for path, result in results]
+    violations = _pass_reports_missing_runxfail(named)
+    if violations:
+        return "FAIL", violations
+    if named:
+        return "PASS", [
+            f"{len(named)} reviewer-result block(s); every pass cites an executed --runxfail pin"
+        ]
+    return "PASS", ["no reviewer-result blocks in the mailbox yet (R6 inert until reviewers emit the schema)"]
+
+
 def main() -> int:
     print("CEREMONY CHECK — forbid appearance-of-verification-without-substance (ADR-027 / ADR-028)\n")
     hard_fail = False
@@ -245,6 +302,12 @@ def main() -> int:
     for v in r5[1:]:
         print(f"     ! {v}")
     hard_fail |= r5_status == "FAIL"
+
+    r6_status, r6 = rule_report_cites_executed_pin()
+    print(f"R6 report-cites-exec-pin .. {r6_status}  {r6[0]}")
+    for v in r6[1:]:
+        print(f"     ! {v}")
+    hard_fail |= r6_status == "FAIL"
 
     print()
     if hard_fail:

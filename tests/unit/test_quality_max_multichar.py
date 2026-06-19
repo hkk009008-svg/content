@@ -10,7 +10,7 @@ import copy
 import json
 import os
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -339,18 +339,26 @@ def test_phase_c_assembly_production_tier_does_not_call_max():
     old_qm = sys.modules.get("quality_max")
     sys.modules["quality_max"] = fake_qm
     try:
-        # Production path is network-coupled (FAL/ComfyUI); accept any raise/return
-        # as long as generate_ai_broll_max is never invoked.
-        try:
-            phase_c_assembly.generate_ai_broll(
-                "test prompt",
-                "/tmp/out.jpg",
-                quality_tier="production",
-                char_lora_trigger="TOKwoman",
-                secondary_char_refs=secondary,
-            )
-        except Exception:
-            pass  # network I/O, missing config, etc. — all acceptable
+        # Production path is network-coupled (pod/FAL/Pollinations); accept any
+        # raise/return as long as generate_ai_broll_max is never invoked. Mock the
+        # network seams so it stays offline instead of burning ~85s of real
+        # connect-timeouts:
+        #   - RunPodComfyUI (pod) goes through phase_c_assembly's module-level `requests`
+        #   - fal_client is imported inside the function → stub via sys.modules
+        #   - the Pollinations last-resort uses urllib.request.urlopen (NOT `requests`)
+        with patch.object(phase_c_assembly, "requests", MagicMock()), \
+             patch("urllib.request.urlopen", MagicMock()), \
+             patch.dict(sys.modules, {"fal_client": MagicMock()}):
+            try:
+                phase_c_assembly.generate_ai_broll(
+                    "test prompt",
+                    "/tmp/out.jpg",
+                    quality_tier="production",
+                    char_lora_trigger="TOKwoman",
+                    secondary_char_refs=secondary,
+                )
+            except Exception:
+                pass  # mock-shaped responses, missing config, etc. — all acceptable
     finally:
         if old_qm is None:
             sys.modules.pop("quality_max", None)

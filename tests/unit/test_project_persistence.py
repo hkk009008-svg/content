@@ -394,9 +394,15 @@ class WebServerPersistenceTests(ProjectPersistenceBase):
             ),
         ]
 
+        # The style-rules endpoint calls generate_style_rules (Tavily + OpenAI →
+        # api.tavily.com/api.openai.com) BEFORE the mutate_project the patcher forces
+        # to ProjectLockError. Stub it so the test never reaches the network; harmless
+        # for the non-style cases, which don't call it.
         for label, method, path, kwargs, patcher in cases:
             with self.subTest(label=label):
-                with patcher:
+                with mock.patch.object(
+                    self.web_server, "generate_style_rules", return_value={}
+                ), patcher:
                     response = getattr(self.client, method)(path, **kwargs)
                 self.assertEqual(response.status_code, 409)
                 self.assertEqual(response.get_json()["code"], "project_locked")

@@ -249,7 +249,7 @@ and is run by `ci_smoke.py` — verify by executing it.)
 - [ ] **D5:** hardened re-review of `feat/threeway-slice2-exec` `612d6109` exercising the Evidence
   preamble + pin re-execution against `tests/unit/test_threeway_envelope.py` / `_refstore.py` pins.
 
-## Deferred follow-up (file as a tracked slice)
+## Deferred follow-up (file as a tracked slice) — ✅ DONE (ADR-033)
 
 A `scripts/` consumer that parses the `reviewer-result/1` block from a verification-report,
 **re-runs the reported pytest to detect a fabricated summary**, maps reviewer-severity →
@@ -257,3 +257,16 @@ inventory-severity, proposes `REMEDIATION-INVENTORY.md` status transitions, adds
 `check_no_ceremony.py` **R6** (a `pass` report cites an executed `--runxfail` run), and is wired
 into `ci_smoke`. Build before promoting any mailbox-level JSON block to MANDATORY — until then
 the block stays OPTIONAL so the schema is never an unconsumed (ceremonial) artifact.
+
+**Built 2026-06-20 (ADR-033, branch `feat/reviewer-result-consumer`):**
+`scripts/consume_reviewer_result.py` (parse + schema-validate + fabrication re-run + severity map
++ inventory-transition proposals; the re-runner executes only a canonical pytest argv — never a
+shell, arbitrary binary, env-injected PATH, or out-of-repo target), `check_no_ceremony.py` **R6**
+(`report-cites-executed-pin`, wired into `main()` + `ci_smoke`), and the `smoke_check()`
+schema-validation half wired into `ci_smoke` (the fabrication re-run is the on-demand CLI, NOT
+smoke — re-running historical pins against today's HEAD would false-alarm). TDD: `83 passed`
+(`tests/unit/test_consume_reviewer_result.py` 75 + `test_check_no_ceremony_r6.py` 8); `ci_smoke.py`
+→ OK; R6 non-vacuity proven. Three independent adversarial reviews (Opus) found + closed an
+arbitrary-code-execution class in the re-runner (see ADR-033 Decision 6). The mailbox-level JSON
+block **remains OPTIONAL** — promoting it to MANDATORY is a separate future decision (ADR-033
+Decision 5), NOT done here.

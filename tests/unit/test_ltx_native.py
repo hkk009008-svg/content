@@ -506,6 +506,11 @@ def test_native_urlerror_no_fal_key_returns_none(monkeypatch, tmp_path):
     img.write_bytes(b"imgdata")
     out = str(tmp_path / "out.mp4")
 
+    # _native_generate uploads the frame via fal_client.upload_file (→ rest.fal.ai)
+    # before it ever reaches urlopen, whenever FAL_AVAILABLE — stub it so the native
+    # attempt stays offline (sibling tests already mock this; this one missed it).
+    monkeypatch.setattr(ltx_native.fal_client, "upload_file", lambda path: "http://cdn/img.jpg")
+
     url_error = urllib.request.URLError(reason="Connection refused")
     monkeypatch.setattr(
         ltx_native.urllib.request, "urlopen", MagicMock(side_effect=url_error)

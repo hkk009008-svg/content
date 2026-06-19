@@ -174,6 +174,17 @@ def main() -> int:
     if _ceremony_exit:
         return _ceremony_exit
 
+    # ADR-032: consume any reviewer-result/1 blocks present in the mailbox. This is the
+    # SCHEMA-VALIDATION half only — it never re-runs pytest (re-running a historical
+    # event's pins against today's HEAD would false-alarm; the fabrication re-run is the
+    # on-demand `consume_reviewer_result.py <event>` CLI). Zero blocks (today) -> silent 0;
+    # a present-but-invalid block hard-fails. Mirrors the check_no_ceremony invocation above.
+    import consume_reviewer_result as _crr
+
+    _consume_exit = _crr.smoke_check(_repo_root)
+    if _consume_exit:
+        return _consume_exit
+
     print("OK")
     return 0
 

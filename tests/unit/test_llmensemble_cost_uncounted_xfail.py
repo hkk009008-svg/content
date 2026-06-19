@@ -70,9 +70,12 @@ def test_competitive_decompose_threads_tracker_into_ensemble(tmp_path):
     location = {"description": "a sunlit room"}
     global_settings = {"color_palette": "natural cinematic"}
 
+    # competitive_decompose_scene also calls research_engine.research_cinematography
+    # (Tavily web search → api.tavily.com) for optional research context, independent
+    # of LLMEnsemble/decompose_scene. Stub it so the test stays fully offline.
     with mock.patch.object(sd, "LLMEnsemble", _SpyEnsemble), mock.patch.object(
         sd, "decompose_scene", _no_network_fallback
-    ):
+    ), mock.patch("research_engine.research_cinematography", return_value=None):
         sd.competitive_decompose_scene(
             scene,
             characters,

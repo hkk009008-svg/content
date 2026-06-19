@@ -112,6 +112,12 @@ class TestVeoFalAspect:
                 phase_c_ffmpeg.fal_client = stub_fal
                 phase_c_ffmpeg.FAL_AVAILABLE = True
                 phase_c_ffmpeg.settings = stub_settings
+                # The fal path downloads the subscribe-returned video URL via
+                # performance._net.safe_download (bound into phase_c_ffmpeg at import) —
+                # NOT urllib.urlretrieve. On a fake URL safe_download hits the network
+                # (~20s connect timeout) then cascades. Stub it to "succeed" so the path
+                # stays offline; the subscribe-aspect assertion runs before the download.
+                phase_c_ffmpeg.safe_download = lambda url, out: out
                 phase_c_ffmpeg.generate_ai_video(
                     image_path="/tmp/f.png",
                     camera_motion="zoom_in_slow",
@@ -183,6 +189,9 @@ class TestSora2FalAspect:
                 phase_c_ffmpeg.fal_client = stub_fal
                 phase_c_ffmpeg.FAL_AVAILABLE = True
                 phase_c_ffmpeg.settings = stub_settings
+                # Same boundary as the VEO fal helper: stub safe_download so the
+                # subscribe-returned URL isn't really downloaded (offline + no cascade).
+                phase_c_ffmpeg.safe_download = lambda url, out: out
                 phase_c_ffmpeg.generate_ai_video(
                     image_path="/tmp/f.png",
                     camera_motion="zoom_in_slow",
@@ -285,6 +294,13 @@ class TestRunwayGen4Model:
                  patch("time.sleep"):
                 import phase_c_ffmpeg
                 phase_c_ffmpeg.settings = stub_settings
+                # The RUNWAY_GEN4 branch downloads via performance._net.safe_download
+                # (bound into phase_c_ffmpeg at import) — NOT urllib.request.urlretrieve.
+                # On a fake URL safe_download returns None, which _download_video_or_cascade
+                # treats as a failed download and CASCADES to the gen3a engine — so the last
+                # create() call the test inspects would be gen3a_turbo, not gen4_turbo. Stub it
+                # to "succeed" (return the out path) so the gen4 happy path is exercised.
+                phase_c_ffmpeg.safe_download = lambda url, out: out
                 phase_c_ffmpeg.generate_ai_video(
                     image_path=tmp_image,
                     camera_motion="zoom_in_slow",
@@ -401,6 +417,12 @@ class TestRunwayGen3aRatio:
                  patch("urllib.request.urlretrieve"):
                 import phase_c_ffmpeg
                 phase_c_ffmpeg.settings = stub_settings
+                # The gen3a route downloads completed_task.output[0] via
+                # performance._net.safe_download (requests) — NOT urllib.urlretrieve.
+                # On the fake cdn.runway.ml URL it hits the network then cascades to
+                # Kling (api.klingai.com). Stub it to "succeed" so the route stays
+                # offline; the create-ratio assertion runs before the download.
+                phase_c_ffmpeg.safe_download = lambda url, out: out
                 phase_c_ffmpeg.generate_ai_video(
                     image_path=tmp_image,
                     camera_motion="zoom_in_slow",
