@@ -34,7 +34,14 @@ def two_clones(tmp_path):
     _git(["add", "-A"], seatA); _git(["commit", "-m", "seed"], seatA)
     _git(["branch", "-M", "main"], seatA)
     _git(["push", "-u", "origin", "main"], seatA)
-    _git(["pull", "--ff-only", "origin", "main"], seatB)
+    # Put seatB on 'main' WITH upstream tracking, deterministically — independent of git's
+    # init.defaultBranch. CI runners default to 'master', so a bare clone of the (initially
+    # empty) origin leaves seatB on 'master'; `pull --ff-only origin main` would advance
+    # 'master' to main's commit but keep seatB ON 'master' with no @{u}. claim-lock then
+    # fetches/pushes 'master' (not 'main'), so the lock-collision these tests assert never
+    # happens and the second claimant wrongly "wins". checkout -B pins main + @{u}=origin/main.
+    _git(["fetch", "origin"], seatB)
+    _git(["checkout", "-B", "main", "origin/main"], seatB)
     return seatA, seatB
 
 def test_clean_claim_succeeds_and_pushes(two_clones):
