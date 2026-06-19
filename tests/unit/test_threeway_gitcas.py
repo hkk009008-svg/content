@@ -45,6 +45,43 @@ def _has(repo, name):
                           capture_output=True, env=_env()).returncode == 0
 
 
+def _new_repo(tmp_path):
+    r = tmp_path / "r"
+    r.mkdir()
+    _git(r, "init", "-q")
+    _git(r, "config", "user.email", "t@e.st")
+    _git(r, "config", "user.name", "t")
+    (r / "base.txt").write_text("base\n")
+    _git(r, "add", "-A")
+    _git(r, "commit", "-q", "-m", "base")
+    return r        # returns the repo PATH only (not the fixture's tuple)
+
+
+def _new_bare(path):                       # the authoritative bus remote (spec §8)
+    _git(path.parent, "init", "--bare", "-q", str(path))
+    return path
+
+
+def _clone(bare, dest):                    # a seat's working clone of the authority
+    _git(dest.parent, "clone", "-q", str(bare), str(dest))
+    _git(dest, "config", "user.email", "t@e.st")
+    _git(dest, "config", "user.name", "t")
+    return dest
+
+
+def test_write_blob_and_read_back(tmp_path):
+    r = _new_repo(tmp_path)
+    oid = gitcas.write_blob(r, b'{"k": 1}\n')
+    assert len(oid) == 40
+    assert gitcas.read_blob(r, oid) == b'{"k": 1}\n'
+
+
+def test_read_blob_at_commit_path_missing_returns_none(tmp_path):
+    r = _new_repo(tmp_path)
+    head = _git(r, "rev-parse", "HEAD").stdout.strip()
+    assert gitcas.read_blob_at(r, head, "index/00000001") is None
+
+
 def test_changed_paths(repo):
     r, base, branch = repo
     assert gitcas.changed_paths(r, base, branch) == ["feat.txt"]

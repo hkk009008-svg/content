@@ -70,6 +70,28 @@ def cas_update_ref(repo, ref: str, new_oid: str, expected_old: str) -> bool:
     return p.returncode == 0
 
 
+# NB: blob I/O deliberately does NOT route through gitcas._run — _run forces text=True,
+# which would corrupt read_blob's raw bytes. Keep these as raw subprocess.run(env=_env()).
+def write_blob(repo, data: bytes) -> str:
+    """Write a blob into the object store; return its 40-hex OID. No working tree."""
+    p = subprocess.run(["git", "-C", str(repo), "hash-object", "-w", "--stdin"],
+                       input=data, capture_output=True, env=_env(), check=True)
+    return p.stdout.decode().strip()
+
+
+def read_blob(repo, oid: str) -> bytes:
+    p = subprocess.run(["git", "-C", str(repo), "cat-file", "blob", oid],
+                       capture_output=True, env=_env(), check=True)
+    return p.stdout
+
+
+def read_blob_at(repo, commit_ish: str, path: str) -> bytes | None:
+    """Read blob bytes at <commit>:<path>; None if the path is absent."""
+    p = subprocess.run(["git", "-C", str(repo), "cat-file", "blob", f"{commit_ish}:{path}"],
+                       capture_output=True, env=_env(), check=False)
+    return p.stdout if p.returncode == 0 else None
+
+
 class BusInitRefusedError(Exception):
     """Raised when preflight finds prior refs/threeway/* state and force is not set.
 
