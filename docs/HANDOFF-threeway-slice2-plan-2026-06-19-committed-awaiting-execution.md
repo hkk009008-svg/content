@@ -7,21 +7,22 @@ ADR-030 (Slice 1) in `DECISIONS.md`.
 
 ## TL;DR — what "continue task" means now
 
-Slice 1 is **done, merged, pushed** (`origin/main`). Slice 2 has a **complete, multi-agent-reviewed
-implementation plan that is committed on its own branch** — it has NOT been implemented. **"Continue
-task" = EXECUTE the Slice 2 plan** via `superpowers:subagent-driven-development` (Opus implementers),
-in a fresh worktree off the plan branch. Do **not** re-plan, do **not** re-execute Slice 1.
+Slice 1 is **done, merged, pushed** (`origin/main`). Slice 2 has a **complete, audit-revised,
+multi-agent-reviewed implementation plan that is committed AND PUSHED on its own branch**
+(`origin/docs/threeway-slice2-plan`) — it has NOT been implemented. **"Continue task" = EXECUTE the
+Slice 2 plan** via `superpowers:subagent-driven-development` (Opus implementers), in a fresh worktree off
+the plan branch. Do **not** re-plan, do **not** re-execute Slice 1.
 
-## Exact state (verify with `git log -1` + `git branch` — trust git, not this prose)
+## Exact state — PUSHED (verify with `git fetch` + `git log -1` — trust git, not this prose)
 
-- **`main`** == `origin/main` @ `04977b2d` (Slice 1). Plus this handoff commit (local, unpushed).
-- **Plan branch: `docs/threeway-slice2-plan` @ `e7920e8f`** — two commits (`817a68ca` original plan +
-  `e7920e8f` audit revision). The Slice 2 plan is now **1365 lines**, REVISED per an external audit
-  (3 blockers + 5 hardening issues) and re-reviewed (4 git/python-running agents; Tasks 8/9 approved,
-  Tasks 3/10 blockers fixed + verified). **NOT merged to `main`, NOT pushed.** On `main` the plan files
-  do not exist — read them from the branch.
+- **`main` == `origin/main` @ `779b768a`** (Slice 1 `04977b2d` + 2 handoff commits). **PUSHED.**
+- **Plan branch: `docs/threeway-slice2-plan` @ `e7920e8f` — PUSHED to `origin/docs/threeway-slice2-plan`**
+  (two commits: `817a68ca` original plan + `e7920e8f` audit revision). The Slice 2 plan is **1365 lines**,
+  REVISED per an external audit (3 blockers + 5 hardening) and re-reviewed (4 git/python-running agents;
+  Tasks 8/9 approved, Tasks 3/10 blockers fixed + verified). **NOT merged to `main`** (the plan lives only
+  on its branch). To get the plan files: `git fetch origin` then read from `origin/docs/threeway-slice2-plan`.
 - **Plan files (on the branch):** `docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.md`
-  + the deferral stub `…-slice2.5-legacy-bus-migration.md`.
+  + the deferral stub `…-slice2.5-legacy-bus-migration.md`. (NOT on `main`.)
 - `package.json` / `package-lock.json`: the pre-existing unrelated `codex-chatgpt-control`
   working-tree change was **reverted**. **NEVER commit it.**
 - `.venv/` lives only in the **main checkout**; a worktree needs a symlink (see Execution §3).
@@ -75,11 +76,13 @@ The plan was revised against an external audit. Key design moves the implementer
 
 ## How to execute (the "continue task" procedure)
 
-1. `git log -1` and `git branch` — confirm `docs/threeway-slice2-plan @ 817a68ca` exists.
-2. Read the plan: `git show docs/threeway-slice2-plan:docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.md`
+1. `git fetch origin` — the plan branch is on origin. Confirm `origin/docs/threeway-slice2-plan @ e7920e8f`
+   (`git rev-parse origin/docs/threeway-slice2-plan`).
+2. Read the plan: `git show origin/docs/threeway-slice2-plan:docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.md`
    (or check out the branch).
 3. Fresh worktree off the plan branch (so the plan + base are present):
-   `git worktree add .worktrees/threeway-slice2 docs/threeway-slice2-plan`
+   `git worktree add .worktrees/threeway-slice2 origin/docs/threeway-slice2-plan` (creates a local branch
+   from the pushed tip; or `git switch -c docs/threeway-slice2-plan origin/docs/threeway-slice2-plan` first)
    then symlink the venv: `ln -s /Users/hyungkoookkim/Content/.venv .worktrees/threeway-slice2/.venv`
    (`.worktrees/` is gitignored).
 4. Run `superpowers:subagent-driven-development`: one **OPUS** implementer per task + a spec-compliance
