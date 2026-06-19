@@ -651,6 +651,45 @@ def test_safe_argv_still_accepts_env_unset_idiom():
     assert argv is not None and argv[0] == "env"
 
 
+# --- C1.2: residual ACE vectors that survived the C1.1 env-assignment fix -----
+#   (a) a malicious `env` TOKEN: `Path('/tmp/evil/env').name == 'env'` used to qualify
+#       as the env prefix, so the post-env launcher (.venv/bin/python, in-repo) passed
+#       the escape check while subprocess.run still exec'd argv[0] = /tmp/evil/env.
+#   (b) a BARE-basename launcher (`pytest`, `python`) is resolved via PATH — the
+#       redirection vector itself; require a path separator (per the C1 hardening rec).
+
+def test_safe_argv_rejects_malicious_env_token_path():
+    # The env token must be the bare word `env`; a path whose basename is `env`
+    # (which subprocess.run would actually exec) must NOT qualify as the env prefix.
+    assert crr.safe_pytest_argv(
+        "/tmp/evil/env -u GIT_INDEX_FILE .venv/bin/python -m pytest "
+        "tests/unit/test_consume_reviewer_result.py -q") is None
+
+
+def test_safe_argv_rejects_bare_basename_pytest_launcher():
+    # No path separator -> resolved via PATH -> the redirection vector. Refuse.
+    assert crr.safe_pytest_argv("pytest tests/unit/test_x.py -q") is None
+
+
+def test_safe_argv_rejects_bare_basename_python_launcher():
+    assert crr.safe_pytest_argv("python -m pytest tests/unit/test_x.py -q") is None
+
+
+def test_recheck_never_execs_a_malicious_env_token(tmp_path):
+    # Defense in depth: even with an in-repo post-env launcher and an in-repo target,
+    # recheck must NEVER spawn `/tmp/evil/env`. Real repo_root so .venv/bin/python is
+    # the in-repo (whitelisted) launcher — proving it's the env TOKEN that's refused.
+    import json
+    calls: list = []
+    target = "tests/unit/test_consume_reviewer_result.py"  # a real in-repo path
+    result = json.loads(_pass_block(commands=[
+        {"command": f"/tmp/evil/env -u GIT_INDEX_FILE .venv/bin/python -m pytest {target} -q",
+         "exit_code": 0, "summary": "1 passed in 0.10s"}
+    ]))
+    crr.recheck_commands(result, str(crr._REPO_ROOT), run=_runner_returning(0, "x", calls=calls))
+    assert calls == []  # the attacker's env binary is never executed
+
+
 # --- C2: never execute a re-run whose target escapes the repo root -----------
 
 def test_recheck_refuses_target_outside_repo(tmp_path):

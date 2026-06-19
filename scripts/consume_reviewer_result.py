@@ -212,13 +212,18 @@ def parse_pytest_summary(text: str) -> dict[str, int]:
 def safe_pytest_argv(command: str) -> list[str] | None:
     """Return a clean argv IFF `command` is a safe-to-re-run pytest invocation, else None.
 
-    SECURITY: the command string comes from an UNTRUSTED mailbox event. We require that
-    pytest is the thing actually EXECUTED — a presence check ("`pytest` appears as a token")
-    is bypassable (`python evil.py pytest`, `env ./evil pytest`). So we enforce STRUCTURE:
+    SECURITY: the command string comes from an UNTRUSTED mailbox event, and the returned
+    argv is handed straight to subprocess.run(argv) (NO shell). A presence check ("`pytest`
+    appears as a token") is bypassable (`python evil.py pytest`, `env ./evil pytest`,
+    `env PATH=/tmp/evil pytest`), so we enforce STRUCTURE:
       (a) no shell metacharacters; (b) parses cleanly with shlex;
-      (c) after an optional `env [-u NAME | NAME=value]*` prefix, the launcher is EITHER
-          a `python`-family interpreter immediately followed by `-m pytest`,
-          OR a `pytest` console-script basename run directly.
+      (c) an optional env prefix is the BARE word `env` followed by ONLY `-u NAME` unsets
+          (the repo idiom `env -u GIT_INDEX_FILE …`). A `VAR=value` assignment (PATH=,
+          PYTHONPATH=, LD_PRELOAD=, …) is REFUSED — it redirects what env/the interpreter
+          loads. A path-y `env` token (`/tmp/evil/env`) does NOT qualify as the prefix;
+      (d) the launcher carries a path separator (a bare basename is PATH-resolved — the
+          redirection vector) and is EITHER a `python`-family interpreter immediately
+          followed by `-m pytest`, OR a `pytest` console-script basename run directly.
     Anything else (a script path, an arbitrary binary under env, a git/util command, a
     shell-chained payload) returns None and is NEVER executed. We never use shell=True.
 
@@ -236,11 +241,15 @@ def safe_pytest_argv(command: str) -> list[str] | None:
         return None
 
     rest = argv
-    if Path(rest[0]).name == "env":
+    if rest[0] == "env":
         # Strip an env prefix of ONLY `-u NAME` unsets (the repo idiom
-        # `env -u GIT_INDEX_FILE …`). A NAME=value ASSIGNMENT is an injection vector
-        # — `env PATH=/tmp/evil pytest` makes env resolve a hostile `pytest` (ACE) —
-        # so any assignment or other env option is rejected outright.
+        # `env -u GIT_INDEX_FILE …`). The token must be the BARE word `env`: a path
+        # whose basename is `env` (e.g. `/tmp/evil/env`) is what subprocess.run would
+        # actually exec as argv[0], so it must NOT qualify as the prefix (else the
+        # downstream launcher check vets `.venv/bin/python` while env runs the attacker
+        # binary). A NAME=value ASSIGNMENT is an injection vector too — `env
+        # PATH=/tmp/evil pytest` makes env resolve a hostile `pytest` (ACE) — so any
+        # assignment or other env option is refused outright.
         rest = rest[1:]
         i = 0
         while i < len(rest) and rest[i] == "-u" and i + 1 < len(rest):
@@ -251,6 +260,13 @@ def safe_pytest_argv(command: str) -> list[str] | None:
     if not rest:
         return None
 
+    # The launcher (what env execs / the interpreter) must carry a path separator. A
+    # bare basename (`pytest`, `python`) is resolved via PATH — the redirection vector
+    # the C1 hardening set out to close. A separator'd launcher (`.venv/bin/python`, an
+    # absolute interpreter path) is resolved directly; recheck_commands then confines it
+    # to repo_root via _path_escapes_repo.
+    if "/" not in rest[0] and "\\" not in rest[0]:
+        return None
     launcher = Path(rest[0]).name
     if _PYTEST_RE.match(launcher):
         return argv  # pytest console script run directly
@@ -374,8 +390,12 @@ def recheck_commands(result: dict, repo_root, *, run=None) -> list[FabricationFi
         argv = safe_pytest_argv(command)
         if argv is None:
             continue  # not a re-runnable pin (git/util command, or unsafe) — skip
-        if _path_escapes_repo(_pytest_launcher(argv), repo_root, allow_sys_executable=True):
-            continue  # launcher is an arbitrary binary outside repo_root — refuse to execute
+        # Confine BOTH the token subprocess.run actually execs (argv[0]) and its
+        # post-env launcher: a `/tmp/evil/env` prefix would otherwise leave the escape
+        # check vetting the in-repo `.venv/bin/python` while env spawns the attacker.
+        if _path_escapes_repo(argv[0], repo_root, allow_sys_executable=True) or \
+                _path_escapes_repo(_pytest_launcher(argv), repo_root, allow_sys_executable=True):
+            continue  # exec'd binary or its launcher escapes repo_root — refuse
         if _target_escapes_repo(argv, repo_root):
             continue  # target resolves outside repo_root — refuse to execute (untrusted conftest)
         reported_summary = parse_pytest_summary(cmd.get("summary", ""))
