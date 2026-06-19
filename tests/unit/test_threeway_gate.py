@@ -129,3 +129,86 @@ def test_non_load_bearing_kind_passes_through_unverified(seatkit):
     # passes through without raising (non-load-bearing → not verified)
     state = verify_and_reduce([ev], registry_dir=reg, bus_id="prod")
     assert state is not None
+
+
+# ---------------------------------------------------------------------------
+# Write-side end-to-end (§6.4): exact-SHA CAS merge + idempotent recovery.
+# ---------------------------------------------------------------------------
+from threeway.store import EventStore
+from threeway.gate import run_gate, GateResult
+
+
+def _git(repo, *a):
+    return subprocess.run(["git", "-C", str(repo), *a], check=True,
+                          capture_output=True, text=True, env=_env())
+
+
+@pytest.fixture()
+def live_repo(tmp_path):
+    """A repo with a protected test-main ref and a builder branch (clean merge)."""
+    r = tmp_path / "repo"; r.mkdir()
+    _git(r, "init", "-q")
+    _git(r, "config", "user.email", "t@e.st"); _git(r, "config", "user.name", "t")
+    (r / "base.txt").write_text("base\n")
+    _git(r, "add", "-A"); _git(r, "commit", "-qm", "base")
+    base = _git(r, "rev-parse", "HEAD").stdout.strip()
+    _git(r, "update-ref", "refs/threeway/test-main", base)
+    _git(r, "checkout", "-q", "-b", "feat")
+    (r / "cinema").mkdir()
+    (r / "cinema" / "foo.py").write_text("x = 1\n")
+    _git(r, "add", "-A"); _git(r, "commit", "-qm", "feat")
+    branch = _git(r, "rev-parse", "HEAD").stdout.strip()
+    return r, base, branch
+
+
+def _valid_events_for(base, branch, integ, privs, bus_id="prod"):
+    """Build a complete, correctly-SIGNED T1 event set bound to real SHAs, via the
+    Task-15 helper threeway.loop.build_candidate_events."""
+    from threeway.loop import build_candidate_events
+    return build_candidate_events(base, branch, integ, privs, bus_id=bus_id)
+
+
+def test_run_gate_merges_clean_candidate_via_cas(live_repo, seatkit):
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    # stage: coordinator computes integration_sha via merge-tree+commit-tree, using
+    # the SAME deterministic message the gate recomputes with ("threeway merge c1"),
+    # so the gate's exact-SHA equality check passes.
+    from threeway import gitcas
+    tree, clean = gitcas.merge_tree(r, base, branch)
+    assert clean
+    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge c1")
+    for ev in _valid_events_for(base, branch, integ, privs):
+        store.append(ev, privs[ev.signer.split(":", 1)[0]])
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "COMPLETED", res.reason
+    # test-main now points at the merge commit
+    new_head = _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip()
+    assert new_head == integ
+    # merge_completed fact emitted
+    from threeway.gate import verify_and_reduce
+    state = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
+    assert state.merge_completed("c1") is not None
+
+
+def test_run_gate_is_idempotent_under_double_invocation(live_repo, seatkit):
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    from threeway import gitcas
+    tree, _ = gitcas.merge_tree(r, base, branch)
+    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge c1")
+    for ev in _valid_events_for(base, branch, integ, privs):
+        store.append(ev, privs[ev.signer.split(":", 1)[0]])
+    r1 = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                  main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    r2 = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                  main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert r1.outcome == "COMPLETED" and r2.outcome == "COMPLETED"
+    # exactly ONE merge_completed fact => no double write
+    from threeway.gate import verify_and_reduce
+    state = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
+    completes = [e for e in store.all_events() if e.kind == "merge_completed"]
+    assert len(completes) == 1
