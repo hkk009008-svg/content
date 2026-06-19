@@ -9,6 +9,39 @@ onto main) -> COMPLETED.
 Slice 1 already implements the CAS + the "stale" REJECTED (predicate freshness check +
 the CAS expected-old precondition). This file proves the two-candidate SERIAL behavior +
 the re-stage path across Pair A and Pair B. Inline harness (no shared conftest).
+
+## Slice 2 DoD coverage
+
+The §11 Slice 2 Definition-of-Done has three clauses. Each is met by passing,
+single-fact-mutation-proven test(s). The coverage spans TWO files — the race +
+idempotency tests live in tests/unit/test_threeway_refstore.py (Task 9); the
+abort->rework (Task 15) and serial re-stage (Task 14) tests live in THIS file:
+
+  1. No lost/duplicated event under a 2-process race
+     GATE: test_genuine_two_process_race_no_loss        [refstore.py — two real
+           spawn Processes over a bare authoritative remote, start-barrier,
+           asserts a real CAS retry occurred, exact-once by identity + every
+           signature verified; a THREAD-based test does NOT satisfy this gate,
+           and if `spawn` is unavailable the gate is UNMET]
+     supporting (refstore.py):
+       - test_concurrent_append_loses_no_event_and_re_signs  (deterministic
+         forced-CAS-loss; pins re-sign-on-retry)
+       - test_same_key_same_request_returns_original_event
+       - test_same_key_different_request_is_rejected
+       - test_invalid_signature_cannot_suppress_a_legitimate_append
+       - test_tampered_stored_idempotency_key_is_not_trusted
+       - test_two_processes_same_key_create_exactly_one_event
+       - test_ambiguous_remote_push_recovers_via_fresh_clone  (effectively-once)
+
+  2. Abort-on-conflict -> rework
+     test_conflicting_candidate_aborts_with_merge_not_clean   [THIS file, Task 15]
+
+  3. Serial merge queue re-stages the loser when `main` advances
+     test_serial_queue_rejects_stale_loser_then_restage_completes  [THIS file, Task 14]
+       load-bearing guard: test_restage_is_load_bearing_stale_base_alone_stays_rejected
+
+Every DoD test above carries a one-line non-vacuity comment naming the single fact
+whose mutation flips the test's outcome (see each test).
 """
 import os
 import subprocess
@@ -140,6 +173,8 @@ def world_conflict(tmp_path, monkeypatch):
 _ALLOW_SHARED = ("shared.txt",)
 
 
+# non-vacuous: make gitcas.merge_tree always return clean=True -> the gate falls through
+# the conflict abort, never emits "merge not clean", and would promote c2 -> this FAILS.
 def test_conflicting_candidate_aborts_with_merge_not_clean(world_conflict):
     # The §11 abort-on-conflict -> rework path across two pairs. Pair A's c1 lands clean
     # and advances main. Pair B's c2 is FRESH onto the new main (staging_base == main.head,
@@ -180,6 +215,9 @@ def test_conflicting_candidate_aborts_with_merge_not_clean(world_conflict):
     assert _head(r) == a_integ            # protected ref UNMOVED on the conflicting candidate
 
 
+# non-vacuous: neuter the stale defenses (the predicate freshness check + the
+# cas_update_ref expected-old precondition) -> the loser c2 overwrites the advanced
+# main instead of being REJECTED "stale" -> the r2-stale / unmoved-ref asserts FAIL.
 def test_serial_queue_rejects_stale_loser_then_restage_completes(world_two_pairs):
     r, base, branch_a, branch_b, reg, privs = world_two_pairs
     store = RefEventStore(r)
