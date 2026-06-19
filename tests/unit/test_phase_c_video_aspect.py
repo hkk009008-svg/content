@@ -285,6 +285,13 @@ class TestRunwayGen4Model:
                  patch("time.sleep"):
                 import phase_c_ffmpeg
                 phase_c_ffmpeg.settings = stub_settings
+                # The RUNWAY_GEN4 branch downloads via performance._net.safe_download
+                # (bound into phase_c_ffmpeg at import) — NOT urllib.request.urlretrieve.
+                # On a fake URL safe_download returns None, which _download_video_or_cascade
+                # treats as a failed download and CASCADES to the gen3a engine — so the last
+                # create() call the test inspects would be gen3a_turbo, not gen4_turbo. Stub it
+                # to "succeed" (return the out path) so the gen4 happy path is exercised.
+                phase_c_ffmpeg.safe_download = lambda url, out: out
                 phase_c_ffmpeg.generate_ai_video(
                     image_path=tmp_image,
                     camera_motion="zoom_in_slow",
