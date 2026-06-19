@@ -151,6 +151,17 @@ def _within_allowed(diff, allowed) -> bool:
     if not allowed:
         return False
     for path in diff:
-        if not any(path == a or path.startswith(a) for a in allowed):
+        if not any(_under(path, a) for a in allowed):
             return False
     return True
+
+
+def _under(path: str, allowed: str) -> bool:
+    # path-segment boundary: "cinema" matches "cinema/..." but NOT "cinemax/...";
+    # an exact-file allow (e.g. "requirements.txt") still matches via ==.
+    # NB: the identical shape in tier._path_tier is INTENTIONALLY left generous —
+    # over-matching there only RAISES the tier (fail-safe). Do not "consistency-fix" it.
+    if path == allowed:
+        return True
+    prefix = allowed if allowed.endswith("/") else allowed + "/"
+    return path.startswith(prefix)
