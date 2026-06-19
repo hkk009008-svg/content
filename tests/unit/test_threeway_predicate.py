@@ -129,3 +129,78 @@ def test_pending_when_release_order_absent():
     events = [e for e in _full_event_set() if e.kind != "release_order"]
     d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == PENDING and "release_order" in d.reason
+
+
+def test_rejects_tier_escalation_when_diff_exceeds_cycle_go():
+    events = _full_event_set()
+    # diff touches CI config -> path-derived T2; cycle_go authorized only T1
+    repo = FakeRepo(diff=[".github/workflows/ci.yml"])
+    # widen allowed_paths so we isolate the tier clause, not scope
+    for e in events:
+        if e.kind == "brief":
+            e.payload["allowed_paths"] = [".github/"]
+    d = evaluate("c1", reduce(events), repo, default_policy())
+    assert d.outcome == REJECTED and "tier_escalation" in d.reason
+
+
+def test_tier_mislabel_below_path_minimum_is_ignored_gate_computes():
+    # candidate claims T0 but diff is CI config (T2) and cycle_go is T1 -> escalation
+    events = _full_event_set()
+    for e in events:
+        if e.kind == "candidate":
+            e.payload["risk_tier_claimed"] = "T0"
+        if e.kind == "brief":
+            e.payload["allowed_paths"] = [".github/"]
+    repo = FakeRepo(diff=[".github/workflows/ci.yml"])
+    d = evaluate("c1", reduce(events), repo, default_policy())
+    assert d.outcome == REJECTED and "tier_escalation" in d.reason
+
+
+def test_rejects_diff_outside_allowed_paths():
+    events = _full_event_set()
+    repo = FakeRepo(diff=["secrets/leak.txt"])
+    d = evaluate("c1", reduce(events), repo, default_policy())
+    assert d.outcome == REJECTED and "allowed_paths" in d.reason
+
+
+def test_rejects_candidate_that_weakened_policy_digest():
+    events = _full_event_set()
+    for e in events:
+        if e.kind == "candidate":
+            e.payload["policy_digest"] = "0" * 64  # not the accepted policy
+        if e.kind in ("cycle_go", "ci_result"):
+            e.payload["policy_digest"] = "0" * 64  # keep them internally consistent
+    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == REJECTED and "policy_digest not accepted" in d.reason
+
+
+def test_pending_when_ci_result_absent():
+    events = [e for e in _full_event_set() if e.kind != "ci_result"]
+    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == PENDING and "ci_result" in d.reason
+
+
+def test_rejects_ci_result_not_pass():
+    events = _full_event_set()
+    for e in events:
+        if e.kind == "ci_result":
+            e.payload["result"] = "FAIL"
+    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == REJECTED and "ci_result not PASS" in d.reason
+
+
+def test_rejects_superseded_brief_version():
+    events = _full_event_set()
+    events.append(_e("brief", 12, brief_version=2,
+                     payload={"brief_id": "b1", "allowed_paths": ["cinema/"]},
+                     signer="overseer:mech:s1"))
+    # candidate is still on version 1, now superseded by version 2
+    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == REJECTED and "superseded" in d.reason
+
+
+def test_rejects_aborted_candidate():
+    events = _full_event_set()
+    events.append(_e("candidate_aborted", 13))
+    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == REJECTED and "aborted" in d.reason
