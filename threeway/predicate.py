@@ -90,7 +90,13 @@ def evaluate(candidate_id, state, repo, policy, main_ref=MAIN_REF) -> Decision:
     if rel.subject_sha != integ:
         return Decision(REJECTED, "release attestation not bound to integration_sha")
 
-    # tier is GATE-COMPUTED, never trusted from the candidate
+    # tier is GATE-COMPUTED, never trusted from the candidate.
+    # fail-closed: a well-formed-but-nonexistent attested SHA must REJECT, not
+    # crash changed_paths (git exit 128 -> CalledProcessError escapes run_gate).
+    if repo.rev_parse(integ) is None:
+        return Decision(REJECTED, "integration_sha is not a known commit")
+    if repo.rev_parse(staging_base) is None:
+        return Decision(REJECTED, "staging_base_sha is not a known commit")
     diff = repo.changed_paths(staging_base, integ)
     brief_tier = brief_ev.payload.get("assigned_tier",
                                       cand.payload.get("risk_tier_claimed", "T0"))
