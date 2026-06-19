@@ -15,41 +15,49 @@ in a fresh worktree off the plan branch. Do **not** re-plan, do **not** re-execu
 ## Exact state (verify with `git log -1` + `git branch` — trust git, not this prose)
 
 - **`main`** == `origin/main` @ `04977b2d` (Slice 1). Plus this handoff commit (local, unpushed).
-- **Plan branch: `docs/threeway-slice2-plan` @ `817a68ca`** — one commit, the Slice 2 plan only
-  (1110 lines). **NOT merged to `main`, NOT pushed.** On `main` the plan file does not exist yet —
-  read it from the branch.
-- **Plan file:** `docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.md`
-  (on the branch above).
+- **Plan branch: `docs/threeway-slice2-plan` @ `e7920e8f`** — two commits (`817a68ca` original plan +
+  `e7920e8f` audit revision). The Slice 2 plan is now **1365 lines**, REVISED per an external audit
+  (3 blockers + 5 hardening issues) and re-reviewed (4 git/python-running agents; Tasks 8/9 approved,
+  Tasks 3/10 blockers fixed + verified). **NOT merged to `main`, NOT pushed.** On `main` the plan files
+  do not exist — read them from the branch.
+- **Plan files (on the branch):** `docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.md`
+  + the deferral stub `…-slice2.5-legacy-bus-migration.md`.
 - `package.json` / `package-lock.json`: the pre-existing unrelated `codex-chatgpt-control`
   working-tree change was **reverted**. **NEVER commit it.**
 - `.venv/` lives only in the **main checkout**; a worktree needs a symlink (see Execution §3).
 
 ## Decisions — BOTH user-APPROVED (already baked into the plan)
 
-- **D-A — sign `brief_version`** as a 13th `_signed_view` field (Chunk 1 Task 3). Closes a real
+- **D-A — sign `brief_version`** as a signed `_signed_view` field (Chunk 1 Task 3). Closes a real
   post-sign authorization-redirect (the predicate reads `cand.brief_version` off the *unsigned*
-  envelope at `predicate.py:74,:100,:143-144`). **Schema policy = NO MIGRATION, RESET** (no persistent
-  threeway events exist: trust root has only `README.md`, no `refs/threeway/events`, Slice-1 stores
-  are ephemeral). **Do NOT bump `schema_version`.**
+  envelope at `predicate.py:74,:100,:143-144`). **Schema policy (REVISED per audit Blocker 3):** add a
+  signed **`signature_version = "threeway-sign/2"`** discriminator (NOT a `schema_version` bump — lower
+  blast radius) + a **fail-closed, NON-DESTRUCTIVE `preflight_bus_init`** (checks local *and* remote
+  `refs/threeway/*`, aborts on any prior state, never deletes). Final signed set = 14 fields.
 - **D-B — legacy `coordination/` mailbox migration (§8.7/§8.8) DEFERRED** to a separately tracked
   **"Slice 2.5: legacy bus migration"** (scope + exact edit sites fixed in the plan's D-B section).
   Its plan doc is authored only after Slice 2's gate is green (§11 boundary rule). **Pair B in
   Slice 2 needs only new threeway keystore seats, not legacy-bus edits.**
 
-## Four robustness requirements the user added — all folded in (verify in the plan before executing)
+## Audit-hardened behaviors — all folded in + re-reviewed (verify in the plan before executing)
 
-1. **Both** a deterministic forced-CAS-loss test (`test_concurrent_append_loses_no_event_and_re_signs`,
-   via the `_before_cas` seam) **and** a genuine two-process race test
-   (`test_genuine_two_process_race_no_loss`, `multiprocessing` spawn + module-level worker;
-   thread-pool fallback documented). Task 9.
-2. **Ambiguous-push idempotency** (effectively-once): `RefEventStore.append` computes
-   `idempotency_key(ev)` once and scans for an existing match at the top of every loop iteration →
-   returns the persisted event instead of double-appending (covers lost-ack / crash-after-CAS /
-   timed-out retry). Tests `test_ambiguous_push_timed_out_retry_is_idempotent` +
-   `test_crash_after_cas_then_retry_no_double_append` (uses an `_after_cas` seam). Task 8/9.
-3. **No-migration schema-reset policy** (Task 3, see D-A above).
-4. **Monotonic CAS cursor** (`advance_cursor` retry loop: refuse `seq <= current`, CAS with
-   `expected_old`, re-read on a lost CAS so the higher value always wins). Task 10.
+The plan was revised against an external audit. Key design moves the implementer must honor:
+1. **`RefEventStore` is dual-mode:** authoritative **remote push-CAS** (spec §8 — `git push
+   --force-with-lease` to a bare bus; fetch + re-seq + re-sign on rejection) for the genuine
+   concurrency tests, and **local update-ref CAS** for co-located/gate use.
+2. **Genuine two-process race is the §11 gate** (`test_genuine_two_process_race_no_loss`): two real
+   `Process`es over a bare remote + a start `Barrier` + **`assert total_retries >= 1`** (proves
+   overlap) + exact-once-by-identity + **every signature verified**. A thread test is NOT a gate
+   substitute; spawn-unavailable ⇒ gate UNMET.
+3. **Idempotency that VERIFIES, not just key-matches (Blocker 1):** `append` recomputes the key from
+   stored fields, **verifies the candidate's signature** against the appender's own derived pubkey
+   (`keys.public_hex(priv)` — add it), compares an actor-scoped **`_request_fingerprint`**, returns on
+   match / raises **`IdempotencyKeyReused`** on key-collision-different-request. Genuine ambiguous push
+   recovery via a **fresh clone** (`test_ambiguous_remote_push_recovers_via_fresh_clone`).
+4. **Bounded retries:** `max_attempts` + jitter + typed `AppendContentionExceeded` /
+   `CursorContentionExceeded`; injectable `sleeper` (tests pass `lambda _: None`).
+5. **Validated monotonic-CAS cursor:** reject negative / beyond-head / no-index-entry; malformed blob
+   → `CursorCorruptionError`; owner-only is a deployment ref-ACL (test-infeasible locally).
 
 ## Plan structure (5 chunks, 19 TDD tasks)
 
@@ -94,9 +102,19 @@ in a fresh worktree off the plan branch. Do **not** re-plan, do **not** re-execu
 - Cursor refs CAN point directly at a blob (git allows it); a cursor = a seq blob, advanced by
   monotonic CAS via `rev_parse_any` (a `rev-parse --verify <ref>` with no peel).
 - `append` re-signs on EVERY CAS retry (`seq` is a signed field); the idempotency scan must sit at the
-  TOP of each loop iteration.
-- Genuine race test = `multiprocessing` spawn + a **module-level** worker (picklable); thread-pool is
-  the documented fallback if the harness can't import the test module in a spawned child.
+  TOP of each loop iteration AND fetch authoritative state first (remote mode).
+- Genuine race test = `multiprocessing` **spawn** + a **module-level** worker (picklable) + a
+  `ctx.Barrier`/`ctx.Queue` passed as `Process` args (works under spawn; a `Pool` cannot pickle a
+  Barrier — use explicit `Process`).
+- **Naming trap (audit-caught):** the new signed field `signature_version` contains the substring
+  `signature`, which trips the existing `assert b"signature" not in sb` at `test_threeway_envelope.py:53`
+  → tighten it to `assert b'"signature"' not in sb` (quoted JSON key). One-line fix, in Task 3.
+- **Remote push-CAS:** create form = `git push <remote> <commit>:<ref>` (no force, create-only);
+  update form = `git push --force-with-lease=<ref>:<expected_old> …` (explicit expected-old). `preflight`
+  must check the **remote** (`git ls-remote`) too — a fresh clone's local `for-each-ref` misses
+  remote-only state (empirically confirmed).
+- **Cursor head-validation** (`seq` must have an `index/<seq>` entry) means cursor tests must `append`
+  events first; advancing on an empty bus now (correctly) raises `ValueError`.
 - Event ids are scoped by `candidate_id` (`id=f"{kind}-{sender}-{candidate_id}"`) — else Pair A/B
   overseer events collide on `events/<brief_id>/<id>.json` and overwrite each other.
 - `build_candidate_events` gains `pair=PAIR_A` + `candidate_id="c1"` kwargs; defaults preserve all
@@ -107,7 +125,8 @@ in a fresh worktree off the plan branch. Do **not** re-plan, do **not** re-execu
 - Do NOT re-author the Slice 2 plan (committed + reviewed).
 - Do NOT re-execute Slice 1.
 - Do NOT commit `package.json` / `package-lock.json`.
-- Do NOT bump `schema_version` (the no-migration reset policy is intentional).
+- Do NOT bump `schema_version`; the discriminator is the new `signature_version` field (lower blast
+  radius). Do NOT make `preflight_bus_init` destructive — it must abort, never delete.
 - Do NOT do the legacy mailbox migration in Slice 2 (it is the separately tracked Slice 2.5).
 
 ## Subagent model = OPUS (standing user directive).
