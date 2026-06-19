@@ -82,6 +82,18 @@ def test_read_blob_at_commit_path_missing_returns_none(tmp_path):
     assert gitcas.read_blob_at(r, head, "index/00000001") is None
 
 
+def test_rev_parse_any_resolves_a_blob_ref_but_rev_parse_does_not(tmp_path):
+    """A cursor ref points DIRECTLY at a blob. rev_parse_any must resolve it (no
+    ^{commit} peel); rev_parse (which peels ^{commit}) must return None for a blob ref —
+    this is WHY rev_parse_any is a separate primitive."""
+    r = _new_repo(tmp_path)
+    ref = "refs/threeway/cursors/operator"
+    blob = gitcas.write_blob(r, b"2\n")
+    assert gitcas.cas_create_or_update_ref(r, ref, blob, None) is True
+    assert gitcas.rev_parse_any(r, ref) == blob       # no peel: resolves the blob OID
+    assert gitcas.rev_parse(r, ref) is None           # ^{commit} peel fails for a blob ref
+
+
 def test_build_tree_extends_parent_and_commits_on_ref(tmp_path):
     r = _new_repo(tmp_path)
     b1 = gitcas.write_blob(r, b'{"e": 1}\n')

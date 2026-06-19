@@ -323,3 +323,90 @@ def test_local_timed_out_retry_is_idempotent(tmp_path):
     first = s.append(_unsigned(id="e1"), p)
     again = s.append(_unsigned(id="e1"), p)
     assert len(s.all_events()) == 1 and again.seq == first.seq
+
+
+# ----------------------------------------------------------------------------
+# Task 10 — per-seat cursor refs (refs/threeway/cursors/<seat>): validated,
+# bounded, monotonic CAS "last seq scanned" pointer.
+# ----------------------------------------------------------------------------
+def test_cursor_starts_at_zero_and_advances(tmp_path):
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair()
+    store = RefEventStore(r)
+    store.append(_unsigned(id="e1"), p); store.append(_unsigned(id="e2"), p)
+    assert store.cursor_seq("operator") == 0
+    store.advance_cursor("operator", 2)
+    assert store.cursor_seq("operator") == 2
+
+
+def test_cursor_advance_rejects_regression(tmp_path):
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair()
+    store = RefEventStore(r)
+    for i in range(1, 6):                                   # seqs 1..5 must exist (head-validation)
+        store.append(_unsigned(id=f"e{i}"), p)
+    store.advance_cursor("operator", 5)
+    assert store.advance_cursor("operator", 3) is False    # no going backward
+    assert store.cursor_seq("operator") == 5
+
+
+def test_cursor_advance_is_monotonic_under_cas_contention(tmp_path):
+    import threeway.refstore as _rs
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair()
+    store = RefEventStore(r); other = RefEventStore(r)
+    for i in range(1, 10):                                  # seqs 1..9 exist; append BEFORE the seam
+        store.append(_unsigned(id=f"e{i}"), p)
+    orig = _rs.gitcas.write_blob
+    state = {"bumped": False}
+    def racing_write(repo, data):                  # seam between this writer's read and CAS
+        oid = orig(repo, data)
+        if not state["bumped"]:
+            state["bumped"] = True
+            other.advance_cursor("operator", 9)    # competitor jumps ahead mid-attempt
+        return oid
+    _rs.gitcas.write_blob = racing_write
+    try:
+        assert store.advance_cursor("operator", 4) is False   # CAS misses; re-reads 9; 4<=9
+    finally:
+        _rs.gitcas.write_blob = orig
+    assert store.cursor_seq("operator") == 9       # highest wins; never regressed
+
+
+def test_cursor_rejects_negative(tmp_path):
+    r = _new_repo(tmp_path); s = RefEventStore(r)
+    with pytest.raises(ValueError):
+        s.advance_cursor("operator", -1)
+
+
+def test_cursor_rejects_forward_jump_beyond_event_head(tmp_path):
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair(); s = RefEventStore(r)
+    s.append(_unsigned(id="e1"), p)                        # only seq 1 exists
+    with pytest.raises(ValueError):
+        s.advance_cursor("operator", 5)                   # no index/00000005 -> reject
+
+
+def test_cursor_rejects_seq_with_no_index_entry(tmp_path):
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair(); s = RefEventStore(r)
+    s.append(_unsigned(id="e1"), p); s.append(_unsigned(id="e2"), p)   # seqs {1,2}
+    with pytest.raises(ValueError):
+        s.advance_cursor("operator", 3)                   # 3 has no event yet
+
+
+def test_cursor_malformed_blob_is_corruption_not_zero(tmp_path):
+    r = _new_repo(tmp_path); s = RefEventStore(r)
+    ref = "refs/threeway/cursors/operator"
+    bad = gitcas.write_blob(r, b"not-an-int\n")
+    gitcas.cas_create_or_update_ref(r, ref, bad, None)
+    with pytest.raises(CursorCorruptionError):
+        s.cursor_seq("operator")                          # must NOT silently read as 0
+
+
+def test_cursor_unicode_digit_blob_is_corruption(tmp_path):
+    # '²'.isdigit() is True but int('²') raises a BARE ValueError; a non-UTF-8 blob
+    # raises UnicodeDecodeError before any guard. Both must surface as
+    # CursorCorruptionError, not a bare error and not a silent 0.
+    r = _new_repo(tmp_path); s = RefEventStore(r)
+    ref = "refs/threeway/cursors/operator"
+    for blob in (b"\xc2\xb2", b"\xff\xfe"):               # '²' (unicode digit), non-UTF-8
+        oid = gitcas.write_blob(r, blob)
+        gitcas.cas_create_or_update_ref(r, ref, oid, gitcas.rev_parse_any(r, ref))
+        with pytest.raises(CursorCorruptionError):
+            s.cursor_seq("operator")                      # NOT a bare ValueError/UnicodeDecodeError

@@ -41,6 +41,13 @@ def rev_parse(repo, ref: str) -> str | None:
     return p.stdout.strip() if p.returncode == 0 else None
 
 
+def rev_parse_any(repo, ref: str) -> str | None:
+    """Resolve <ref> to an OID with NO ^{commit} peel — needed for a ref that points
+    directly at a BLOB (a cursor). rev_parse's ^{commit} peel returns None for a blob ref."""
+    p = _run(repo, "rev-parse", "--verify", ref, check=False)
+    return p.stdout.strip() if p.returncode == 0 else None
+
+
 def changed_paths(repo, base_sha: str, head_sha: str) -> list[str]:
     p = _run(repo, "diff", "--name-only", base_sha, head_sha)
     return [line for line in p.stdout.splitlines() if line]
