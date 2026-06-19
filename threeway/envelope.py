@@ -103,3 +103,36 @@ def verify_event(ev: Event, public_key_hex: str) -> None:
     if not ev.signature:
         raise InvalidSignature("missing signature")
     _keys.verify(public_key_hex, bytes.fromhex(ev.signature), signed_bytes(ev))
+
+
+def to_json_obj(ev: Event) -> dict:
+    obj = {
+        "id": ev.id, "seq": ev.seq, "bus_id": ev.bus_id,
+        "schema_version": ev.schema_version, "kind": ev.kind,
+        "from": ev.sender, "to": ev.recipient, "signer": ev.signer,
+        "brief_id": ev.brief_id, "candidate_id": ev.candidate_id,
+        "subject_sha": ev.subject_sha, "brief_version": ev.brief_version,
+        "causation_id": ev.causation_id,
+        "supersedes_event_id": ev.supersedes_event_id,
+        "revokes_event_id": ev.revokes_event_id,
+        "payload": ev.payload, "payload_digest": payload_digest(ev),
+        # idempotency_key is a DERIVED field (spec §6.2): written for at-rest
+        # completeness, recomputed (not read back) by from_json_obj.
+        "idempotency_key": idempotency_key(ev),
+        "created_at": ev.created_at, "signature": ev.signature,
+    }
+    return obj
+
+
+def from_json_obj(obj: dict) -> Event:
+    return Event(
+        id=obj["id"], seq=obj["seq"], bus_id=obj["bus_id"],
+        schema_version=obj["schema_version"], kind=obj["kind"],
+        sender=obj["from"], recipient=obj["to"], signer=obj["signer"],
+        payload=obj["payload"], brief_id=obj.get("brief_id"),
+        candidate_id=obj.get("candidate_id"), subject_sha=obj.get("subject_sha"),
+        brief_version=obj.get("brief_version"), causation_id=obj.get("causation_id"),
+        supersedes_event_id=obj.get("supersedes_event_id"),
+        revokes_event_id=obj.get("revokes_event_id"),
+        created_at=obj.get("created_at"), signature=obj.get("signature"),
+    )

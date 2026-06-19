@@ -13,6 +13,8 @@ from threeway.envelope import (
     signed_bytes,
     sign_event,
     verify_event,
+    to_json_obj,
+    from_json_obj,
 )
 
 
@@ -92,3 +94,15 @@ def test_verify_raises_on_missing_signature():
     ev = _ev()  # never signed
     with pytest.raises(InvalidSignature):
         verify_event(ev, pub_hex)
+
+
+def test_json_roundtrip_uses_spec_field_names():
+    priv, pub_hex = keys.generate_keypair()
+    ev = _ev()
+    sign_event(ev, priv)
+    obj = to_json_obj(ev)
+    assert obj["from"] == "operator" and obj["to"] == "all"
+    assert "sender" not in obj and "recipient" not in obj
+    back = from_json_obj(obj)
+    verify_event(back, pub_hex)  # signature still verifies after roundtrip
+    assert back.subject_sha == ev.subject_sha and back.seq == ev.seq
