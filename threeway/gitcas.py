@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-from pathlib import Path
 
 # Fixed identity so commit_tree is byte-deterministic across machines/seats.
 _DET_ENV = {

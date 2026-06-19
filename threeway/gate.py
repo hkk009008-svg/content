@@ -59,7 +59,7 @@ from dataclasses import dataclass
 from threeway import gitcas
 from threeway.envelope import Event
 from threeway.keys import load_private
-from threeway.predicate import evaluate, MERGEABLE, REJECTED, PENDING
+from threeway.predicate import evaluate, REJECTED, PENDING
 from threeway.policy import default_policy
 from threeway.store import EventStore
 
