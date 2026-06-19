@@ -63,6 +63,18 @@ def test_verify_and_reduce_rejects_unknown_signer_seat(seatkit, tmp_path):
         verify_and_reduce([ev], registry_dir=reg, bus_id="prod")
 
 
+def test_gate_rejects_unknown_signature_version(seatkit, tmp_path):
+    reg, ks, privs = seatkit
+    from threeway.envelope import Event, sign_event
+    ev = Event(id="e1", seq=1, bus_id="prod", schema_version="threeway/1",
+               kind="candidate", sender="coordinator", recipient="all",
+               signer="coordinator:claude:s1", payload={}, candidate_id="c1",
+               signature_version="threeway-sign/1")   # unaccepted signature profile
+    sign_event(ev, privs["coordinator"])               # validly signed under the old profile
+    with pytest.raises(GateError, match="signature_version"):
+        verify_and_reduce([ev], registry_dir=reg, bus_id="prod")
+
+
 def test_verify_and_reduce_accepts_valid_signed_events(seatkit, tmp_path):
     reg, ks, privs = seatkit
     from threeway.envelope import Event, sign_event
