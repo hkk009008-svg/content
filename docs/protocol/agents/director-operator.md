@@ -75,7 +75,11 @@ of running both is roughly zero.
   operator dispatches spec + code-quality reviewer subagents in
   parallel with director's reviewers (NOT sequential), then sends a
   `verification-report` mailbox event with status (✅ clean / ⚠️ minor /
-  ❌ critical) + file:line refs + disposition (`fold` / `advisory`).
+  ❌ critical / ⛔ unable_to_verify) + file:line refs + disposition (`fold` /
+  `advisory` / `re-dispatch`). `unable_to_verify` means the Lane V run could not
+  reach a conclusion for env/provenance reasons (U1–U5 in the reviewer template);
+  it is NOT a defect verdict — the consumer RE-DISPATCHES in a fixed env and does
+  NOT mark the implementation failed.
   Operator does NOT commit reviewer-fixes; director processes the
   report per Rule #8. Skip on `chore` / `docs` / `test` / `style`.
   Independence enforced by Rule #9.

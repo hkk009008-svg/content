@@ -76,6 +76,7 @@ If you have questions about:
 - Impact findings (callers, risk) or grep-fallback equivalent
 - Files changed (paths only)
 - Verification command output
+- Pin selectors run — the exact pytest node-ids / `xfail-pin` column values you executed (so an independent reviewer can re-run them with `--runxfail` + a one-fact mutation non-vacuity check)
 - Commit SHA — capture from `git log` AFTER post-commit hook activity settles, not from `git commit` stdout. If the project has a post-commit hook that amends another file (e.g., a state snapshot), the SHA from stdout may be stale by one.
 - Self-review findings
 ```

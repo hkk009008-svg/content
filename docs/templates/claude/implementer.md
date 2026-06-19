@@ -69,6 +69,7 @@ If <X happens>, report BLOCKED with what you tried.
 - Impact findings (callers, risk) from grep/Read
 - Files changed (paths only)
 - Verification command output
+- Pin selectors run — the exact pytest node-ids / `xfail-pin` column values you executed (so an independent reviewer can re-run them with `--runxfail` + a one-fact mutation non-vacuity check)
 - Commit SHA — `git commit` stdout's SHA is authoritative as of cycle-8 B-003 Option E (the post-commit hook no longer amends; STATE.md is gitignored and regenerated locally). Use `git log --oneline -3` to double-check if desired, but the SHA from commit stdout matches HEAD.
 - Self-review findings
 ```
