@@ -192,3 +192,60 @@ class RefEventStore:
         if self._remote is not None:
             self._sync()                                   # refresh local ref from authority
         return list(self._iter_local())                    # _iter_local: avoid double-sync
+
+    # ---- per-seat cursors: refs/threeway/cursors/<seat> (spec §8) -------------
+    # A cursor = "last seq scanned," stored as a blob (decimal seq text) the ref
+    # points at DIRECTLY (git allows a ref -> blob). Advanced only by CAS.
+    def _cursor_ref(self, seat: str) -> str:
+        return f"refs/threeway/cursors/{seat}"
+
+    def _read_cursor(self, ref):
+        oid = gitcas.rev_parse_any(self._repo, ref)        # blob, not commit
+        if oid is None:
+            return None, 0
+        raw = gitcas.read_blob(self._repo, oid)
+        # Type ALL malformedness as CursorCorruptionError (never a bare error, never a
+        # silent 0 — silent-gate-degradation bug class). Wrap BOTH the decode and the
+        # int-parse: a non-UTF-8 blob raises UnicodeDecodeError before any guard, and a
+        # Unicode digit ('²'.isdigit() is True) passes isdigit() but int() raises bare.
+        try:
+            val = int(raw.decode("utf-8").strip())
+        except (UnicodeDecodeError, ValueError):
+            raise CursorCorruptionError(f"cursor blob is not a non-negative int: {raw!r}")
+        if val < 0:                                        # malformed -> corruption, not 0
+            raise CursorCorruptionError(f"cursor blob is negative: {val}")
+        return oid, val
+
+    def cursor_seq(self, seat: str) -> int:
+        return self._read_cursor(self._cursor_ref(seat))[1]
+
+    def advance_cursor(self, seat: str, seq: int) -> bool:
+        # LOCAL-ONLY BY DESIGN: the cursor blob is written via the LOCAL
+        # gitcas.cas_create_or_update_ref, NOT push_cas — unlike append(), which
+        # publishes events to the remote authority. A cursor is per-seat "last seq
+        # scanned" progress for THIS clone; remote/multi-host cursor publishing is
+        # deferred Slice-3 work (spec §13). The asymmetry is intentional.
+        # The _sync() + in-range validation below still run against the AUTHORITATIVE
+        # event head: even though the cursor WRITE stays local, a cursor must never be
+        # advanced past events that exist on the authority.
+        #
+        # Owner-only enforcement (spec §8 point 3 "writable only by that seat") is a
+        # DEPLOYMENT ref-ACL concern — it cannot be enforced in a single local repo, so
+        # it is test-infeasible here (the real guard is the bus's ref-ACL layer). The API
+        # takes `seat`; the caller advances only its OWN cursor.
+        if seq < 0:
+            raise ValueError("cursor seq must be non-negative")
+        tip = self._sync()                                 # authoritative event head
+        valid = set(gitcas.list_index_seqs(self._repo, tip)) if tip else set()
+        if seq != 0 and seq not in valid:
+            raise ValueError(f"cursor seq {seq} has no index entry / is beyond the event head")
+        ref = self._cursor_ref(seat)
+        for attempt in range(self._max_attempts):
+            cur_oid, cur = self._read_cursor(ref)
+            if seq <= cur:
+                return False                               # monotonic: regression / no-op
+            new_oid = gitcas.write_blob(self._repo, f"{seq}\n".encode())
+            if gitcas.cas_create_or_update_ref(self._repo, ref, new_oid, cur_oid):
+                return True
+            self._sleep(self._backoff(attempt))            # CAS lost a concurrent advance; re-read
+        raise CursorContentionExceeded(f"cursor CAS lost for {seat}")
