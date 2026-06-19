@@ -37,6 +37,11 @@ def _public_hex(pub: Ed25519PublicKey) -> str:
     return raw.hex()
 
 
+def public_hex(priv: Ed25519PrivateKey) -> str:
+    """Raw Ed25519 public-key hex derived from a private key (the registry .pub format)."""
+    return _public_hex(priv.public_key())
+
+
 def private_to_hex(priv: Ed25519PrivateKey) -> str:
     from cryptography.hazmat.primitives import serialization
     raw = priv.private_bytes(
