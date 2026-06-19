@@ -88,6 +88,8 @@ Invariants:
   naming the failing command. Never record a defect under `unable_to_verify`.
 - `reviewed_head != reviewed_commit` ⇒ forced `unable_to_verify` with
   `unverifiable_reason: "U4"` — you cannot prove you read the right code.
+- `working_tree_clean: false` co-occurs ONLY with `unable_to_verify`
+  (`unverifiable_reason: "U3"`); a `pass` requires a clean tree over the reviewed paths.
 - Every command you relied on appears in `commands[]` with its real `exit_code`. A pytest
   run's `summary` is the exact pytest tail line, never a paraphrase.
 - A W2 independent-pass find that is not tied to an enumerated requirement sets
@@ -235,10 +237,9 @@ synthesis, not a passthrough of either subagent's json.
 ## Hardening notes — provenance for the reviewer-template additions
 
 The Canonical-vocabulary, Independence, RESULT SCHEMA, Evidence-preamble (incl. pin
-re-execution), Reviewer-conflict, and 3-way-verdict additions are hardened in per ADR-031,
+re-execution), Reviewer-conflict, and 3-way-verdict additions are codified per ADR-031,
 from the adversarial design pass `wf_b89b9c6c-128` over an external "Level 4 of 5" assessment of
 the live Slice-2 verification dispatch. The keystone is Evidence-preamble step 7 (re-run the
 implementer's pins with `--runxfail` + a mutation non-vacuity check): a machine-readable result
 schema of *pasted* evidence is ceremony unless the pins are actually executed (ADR-027/028). If
 you trim this template, do NOT trim the four "include verbatim" blocks or step 7.
-```

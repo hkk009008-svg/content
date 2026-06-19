@@ -606,6 +606,9 @@ Operator's `verification-report` event MAY include a structured
 - **(b) Standalone fix commit.** Always available as fallback —
   parallel-execution timing can foreclose (a).
 - **(c) NO ACTION (informational only).** Cosmetic / observation-only.
+- **(d) RE-DISPATCH (`unable_to_verify` only).** The run did not conclude (U1–U5);
+  the receiving seat changes NO implementation status and re-dispatches a fresh
+  cold-context Lane V in a fixed env, consuming only the re-run's conclusive verdict.
 
 ### Severity-vs-option advisory matrix (R-Q2-1)
 
@@ -617,6 +620,7 @@ Advisory, not binding — receiving seat retains discretion.
 | IMPORTANT | (a) if fold-able; else (b) | Same-file ≤5 LoC adjacent commit preferred fold. |
 | MINOR | (a) or (b) per scope | Sub-2-LoC mechanical → (a); structural / multi-file → (b). |
 | INFORMATIONAL | (c) acceptable | Cosmetic / docs / observation-only. |
+| **unable_to_verify** | **(d) RE-DISPATCH** | Never (a)/(b)/(c) — code unjudged. Cap 2 re-dispatches then ESCALATE; persistent UTV → R-VERIFY-TIER(B) test-infeasible; fail-closed wave gate. |
 
 ### Receiving seat's response
 
