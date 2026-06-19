@@ -113,3 +113,6 @@ STATUS.md
 coordination/presence/
 .claude/presence-seat.*
 .codex/presence-seat.*
+
+# Manual feature worktrees (subagent-driven execution)
+.worktrees/
