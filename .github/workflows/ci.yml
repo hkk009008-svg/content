@@ -80,7 +80,12 @@ jobs:
   pytest-unit:
     name: pytest tests/unit/
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Raised 15→40: the unit suite is designed to run offline in ~1 min (see env note
+    # below), but tests currently making real network calls push it to ~27 min, timing
+    # out at 15 (the job is killed mid-run, never a real pass/fail). Interim bump so the
+    # suite completes; restoring the offline-~1-min invariant (mock the network-touching
+    # tests) is a tracked follow-up, after which this returns to 15.
+    timeout-minutes: 40
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
       # The unit suite asserts keys-PRESENT behavior: llm/ensemble.py
