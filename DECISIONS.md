@@ -1310,3 +1310,60 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   -> `205 passed, 2 xfailed in 2.74s`.
 - **Cross-refs:** `docs/superpowers/briefs/2026-06-15-idgate-failopen.md`;
   `docs/REMEDIATION-INVENTORY.md` row `idgate-failopen`; ADR-028.
+
+## ADR-030 — Cross-provider seat topology Slice 1: signed-JSON event store, single-writer, gate-recomputed merge to a TEST ref
+
+- **Status:** ACCEPTED (Slice 1 implemented on branch `threeway-slice1`; spec §11 Slice 1
+  gate MET — adversarial suite green). Slice 2 (ref-topology) and Slice 3 (strategic loop +
+  T2/T3 co-sign) deferred.
+- **Context:** the spec
+  (`docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md`) and plan
+  (`docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice1.md`) define a
+  cross-provider seat topology where a builder (one provider) and its primary verifier
+  (a different provider) cannot collude, enforced by a mechanical merge-gate over signed
+  facts. Slice 1 proves the gate end-to-end at the smallest honest scope: one pair,
+  single-writer, promoting to a protected TEST ref.
+- **Decisions:**
+  1. **Separate signed-JSON event store, NOT the markdown bus (§6.2).** Slice 1 runs on its
+     own append-only store under `coordination/threeway/` (`threeway.store.EventStore`), with
+     a private kind vocabulary (`threeway.__init__.THREEWAY_KINDS`) distinct from the markdown
+     bus's `coordination/mailbox/kinds.txt`. The existing "four files to keep in sync" coupling
+     of the markdown coordination layer is therefore UNTOUCHED — the new topology does not
+     widen it.
+  2. **Single-writer monotonic `seq` for Slice 1; append-CAS ref topology deferred to Slice 2
+     (§8).** The store assigns `seq = max(existing) + 1` and names files `<seq:08d>-<id>.json`
+     so lexical order is seq order. The multi-writer hardening (one git commit per event on
+     `refs/threeway/events` + index ref + expected-old-OID append-CAS push loop) is Slice 2;
+     the public read/iter API is intended to stay stable across that swap.
+  3. **Ed25519 (`cryptography`) public-key signatures + RFC 8785 JCS canonicalization for the
+     signed byte image (§6.2).** Public keys are the committed trust root
+     (`coordination/threeway/keys/<seat>.pub`); private keys live OUTSIDE the repo in a
+     keystore (`THREEWAY_KEYSTORE`). Public-key (not HMAC) signing is mandatory so the
+     signature *verifier* — the merge-gate — cannot forge a *signer*. The signature binds a
+     fixed 12-field subset (`envelope._signed_view`) over canonical bytes, so a timed-out retry
+     of the same logical fact re-signs to identical bytes.
+  4. **`co_sign_satisfied` returns `False` for T2/T3 (deferred to Slice 3).** Slice 1 implements
+     the T0/T1 co-sign clauses only; for an escalated effective tier the predicate's co-sign
+     clause is unsatisfiable, so an escalated change SAFELY cannot promote yet (returning
+     `False` is fail-safe, not fail-open). T2 (other-pair operator co_sign) and T3 (new-session
+     re_verify + two human_approval) land in Slice 3, which needs Pair B / the human relay.
+  5. **The gate recomputes the merge and CAS-writes a protected TEST ref, never executing
+     candidate code (§6.3/§6.4).** On MERGEABLE the gate RECOMPUTES the trusted merge from the
+     signed `staging_base_sha`/`branch_sha` (never trusting the candidate's `integration_sha`),
+     requires the recompute to equal the attested `integration_sha`, then does an exact-SHA
+     compare-and-swap on `refs/threeway/test-main` (write only if the ref still equals
+     `staging_base`). At-most-once is doubly guaranteed (idempotency check + CAS expected-old).
+     `threeway.gitcas` never checks out a working tree, never reads candidate workflow files,
+     never runs candidate code — it is object-store plumbing only.
+- **Evidence:** rework circuit-breaker (`feat(threeway): ≤2 rework circuit-breaker (§9)`) +
+  the spec §11 adversarial gate suite (`tests/unit/test_threeway_gate_adversarial.py`, 12
+  scenarios: clean-merge COMPLETED + 10 single-fact mutations that must NOT advance the ref +
+  crash-recovery idempotency).
+  Full focused verification:
+  `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q`
+  -> `93 passed`. `scripts/ci_smoke.py` -> OK (no ceremony detected).
+- **Cross-refs:** spec
+  `docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md` §11/§6.2/§6.3/§6.4/§8/§9;
+  plan `docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice1.md`;
+  `threeway/` package (`__init__`, `canon`, `keys`, `envelope`, `store`, `reducer`, `policy`,
+  `tier`, `gitcas`, `predicate`, `gate`, `loop`, `rework`, `keys_bootstrap`).
