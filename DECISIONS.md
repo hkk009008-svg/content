@@ -1367,3 +1367,66 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   plan `docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice1.md`;
   `threeway/` package (`__init__`, `canon`, `keys`, `envelope`, `store`, `reducer`, `policy`,
   `tier`, `gitcas`, `predicate`, `gate`, `loop`, `rework`, `keys_bootstrap`).
+
+## ADR-031 — The verification dispatch is a self-executing, fail-aware, machine-consumable contract
+
+- **Status:** ACCEPTED (implemented on branch `feat/harden-verification-dispatch`:
+  `docs/templates/claude/reviewer.md` rewrite, `director-operator.md` + `implementer.md` both
+  trees, `scripts/check_no_ceremony.py` R5). Plan
+  `docs/superpowers/plans/2026-06-19-harden-verification-dispatch.md`. DEFERRED: the `scripts/`
+  JSON consumer + fabrication-detection re-run + R6.
+- **Context:** an external "Level 4 of 5" assessment of the live Slice-2 verification dispatch
+  named 5 weaknesses (prose-only output; over-anchoring to expected impl details; weak evidence
+  capture; under-specified trailer; absent failure-handling). An adversarial design pass
+  (`wf_b89b9c6c-128`: 5 per-weakness designers + 2 cross-cutting critics) confirmed all five AND
+  found the keystone the assessment MISSED: in a repo whose anti-ceremony doctrine (ADR-027/028)
+  turns on EXECUTING strict-xfail pins with `--runxfail`, the reviewer was never required to
+  re-run the implementer's pins — so a machine-readable schema of *pasted* evidence would
+  relocate ceremony into JSON, not remove it.
+- **Decisions:**
+  1. **One canonical verdict enum:** `pass | issues | unable_to_verify`. Emoji (✅/⚠️/❌/⛔) and
+     seat `GO/NITS/FAIL` are HUMAN RENDER of it via a documented 1:1 map — no fifth vocabulary.
+     Severity is a SEPARATE axis (`issues[].severity`); a single reviewer's verdict is binary,
+     the operator synthesis derives the minor/critical band.
+  2. **`reviewer-result/1` machine-readable schema**, emitted as the LAST thing in every reviewer
+     reply (MANDATORY at the subagent level; word-cap exempt). The mailbox-level merged block
+     stays OPTIONAL until a `scripts/` consumer exists — a schema no instrument executes is itself
+     ceremony.
+  3. **An Evidence preamble the reviewer RUNS, not asserts:** `rev-parse HEAD` == reviewed SHA,
+     `status --short` empty, base availability, file provenance via `git show <SHA>:<path>`, the
+     literal pytest summary + exit code, and — the keystone — **re-run each named pin with
+     `--runxfail` + a one-fact mutation non-vacuity check.** Every command records its `exit_code`
+     (operationalizes R-EVIDENCE / R-MEASURE). `implementer.md` (both trees) now emits the pin
+     selectors so the reviewer has the handle.
+  4. **`unable_to_verify` (U1–U5: no venv / tests-can't-run / dirty tree / HEAD≠SHA /
+     base-unavailable) is a distinct disposition from a NO-GO** — the run did not conclude, the
+     code is unjudged. It propagates to the reviewer verdict, the operator `verification-report`
+     status (both trees), and the disposition matrix as **RE-DISPATCH** (cap 2 then escalate to
+     the user-principal; persistent UTV → R-VERIFY-TIER(B) `test-infeasible`; fail-closed wave
+     gate). W4: the reviewer NAMES the existing `Co-Authored-By` trailer; **no `Verified-by`
+     trailer** is introduced (the reviewer is read-only/cold; a verification trailer would be
+     status-without-evidence ceremony, and the mailbox `verification-report` already records
+     who-verified-what).
+  5. **Mechanical guard now, consumer later.** `check_no_ceremony.py` **R5** forbids
+     `unable_to_verify` as an inventory row `status` (else it bypasses `wave_gate_check`'s
+     severity/provisional-only blocking — an ADR-027 hole) and runs inside `ci_smoke` (ADR-028
+     hard-wiring). DEFERRED to a tracked follow-up: a `scripts/` consumer that parses
+     `reviewer-result/1`, RE-RUNS the reported pytest to detect a fabricated summary, maps
+     reviewer-severity→inventory-severity, and adds **R6** (a `pass` report cites an executed
+     `--runxfail` run). R6 ships WITH the consumer, not before.
+  6. **Also folded (found by the completeness critic, not in the assessment):** M-COLD-CONTEXT
+     (Rule #9 independence + CC-2 verify-before-asserting + "dispatch on Opus" are now
+     verbatim-include blocks in the template the subagent actually reads); M-DISAGREE
+     (reviewer-conflict resolution: conservative dominates, `unable_to_verify` dominates both,
+     genuine contradiction escalates); M-FLAKY-PARTIAL (a non-reproducible run is a finding,
+     never retried-to-green).
+- **Evidence:** plan `docs/superpowers/plans/2026-06-19-harden-verification-dispatch.md`; design
+  pass `wf_b89b9c6c-128`. R5 non-vacuity: a crafted UTV status row → 1 violation at the status
+  cell, real inventory clean. `.venv/bin/python scripts/check_no_ceremony.py` → R1/R5 PASS (R3/R4
+  also PASS — FIX-1/FIX-2 have since landed); `scripts/ci_smoke.py` → OK.
+- **Cross-refs:** ADR-027 (execute the oracle), ADR-028 (ceremony forbidden + detector);
+  `docs/templates/claude/reviewer.md`; `docs/protocol/{claude,agents}/director-operator.md`;
+  `docs/templates/{claude,agents}/implementer.md`; `scripts/check_no_ceremony.py` (R5);
+  CLAUDE.md R-EVIDENCE / R-MEASURE / R-VERIFY-TIER. Reciprocal upstream: the live Slice-2
+  dispatch's one-line review contract shows plan-authoring guidance should require a NAMED
+  reviewer output contract — folded into the deferred follow-up.
