@@ -87,7 +87,11 @@ of running both is roughly zero.
   operator dispatches spec + code-quality reviewer subagents in
   parallel with director's reviewers (NOT sequential), then sends a
   `verification-report` mailbox event with status (✅ clean / ⚠️ minor /
-  ❌ critical) + file:line refs + disposition (`fold` / `advisory`).
+  ❌ critical / ⛔ unable_to_verify) + file:line refs + disposition (`fold` /
+  `advisory` / `re-dispatch`). `unable_to_verify` means the Lane V run could not
+  reach a conclusion for env/provenance reasons (U1–U5 in the reviewer template);
+  it is NOT a defect verdict — the consumer RE-DISPATCHES in a fixed env and does
+  NOT mark the implementation failed.
   Operator does NOT commit reviewer-fixes; director processes the
   report per Rule #8. Skip on `chore` / `docs` / `test` / `style`.
   Independence enforced by Rule #9.
@@ -678,7 +682,9 @@ findings sets per Rule #9 §"Parallelism" structural independence.
 **Stage 5: Verification-report mailbox event.**
 Operator synthesizes both reviewers' findings into a structured
 `verification-report` event to director-seat:
-- Status (✅ READY TO SHIP / ⚠️ minor concerns / ❌ blocking)
+- Status (✅ READY TO SHIP / ⚠️ minor concerns / ❌ blocking / ⛔ unable_to_verify —
+  verification did not run to a conclusion; re-dispatch in a fixed env, do NOT treat
+  as a blocking defect)
 - Per-finding catalog with severity + source + description +
   disposition recommendation
 - Cumulative v4.1 telemetry update (dispatch count + tokens + findings
@@ -690,7 +696,12 @@ Operator synthesizes both reviewers' findings into a structured
 Director-seat processes the verification-report per Rule #8 mailbox
 authority (next-session awareness gate if cycle-spanning; same-session
 processing if intra-cycle). Disposition: FOLD inline (fix-on-received-
-findings if N≥2; standalone fix commit) / DEFER / NO ACTION.
+findings if N≥2; standalone fix commit) / DEFER / NO ACTION / RE-DISPATCH
+(`unable_to_verify` only — the receiving seat changes NO implementation status:
+it re-dispatches a fresh cold-context Lane V in a corrected environment (build
+venv / clean worktree / checkout the reviewed SHA / fetch the base) and consumes
+only the re-run's conclusive verdict; the inventory row stays in its prior state,
+typically `open`).
 
 ### Working criteria (dogfood for v5.2)
 
@@ -821,6 +832,7 @@ default option choice without binding the receiving seat:
 | **IMPORTANT** | option (a) preferred if fold-able; else (b) | Fold-in is fast close path when adjacent work is naturally compatible. |
 | **MINOR** | either (a) or (b) per scope | Sub-2-LoC mechanical fix → (a); structural OR multi-file → (b). |
 | **INFORMATIONAL** | option (c) NO ACTION acceptable | Cosmetic / documentation / observation-only findings. |
+| **unable_to_verify** | **RE-DISPATCH in a fixed env** | Never (a)/(b)/(c) — the code is unjudged. Cap at 2 re-dispatches, then ESCALATE to the user-principal; a persistently un-runnable env gets an R-VERIFY-TIER(B) `test-infeasible` label. A CRITICAL row stuck in UTV holds the wave gate open (fail-closed). |
 
 The matrix is **advisory, not binding** — receiving seat retains
 discretion. R-Q2-1's refinement of "CRITICAL never (a) fold" to

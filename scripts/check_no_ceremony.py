@@ -18,6 +18,8 @@ Rules:
                            SKIP (dep genuinely absent) -> hard; dep present -> WARN (latent)
   R3  gate-executes-pins   scripts/wave_gate_check.py must EXECUTE the pins, not read status  [FIX-1]
   R4  ci-runs-runxfail     a CI workflow must run the pin suite with --runxfail               [FIX-2]
+  R5  utv-not-a-row-status  `unable_to_verify` is a reviewer/operator VERDICT, never an inventory
+                           row `status` — else it bypasses wave_gate_check blocking (ADR-027)  [ADR-032]
 
 This script never modifies anything and never relaxes a gate; it only ADDS signal.
 It is NOT itself a status-reader — it parses/executes against live source.
@@ -153,6 +155,65 @@ def rule_ci_runs_runxfail() -> tuple[str, list[str]]:
     ]
 
 
+def _inventory_data_rows(text: str) -> list[list[str]]:
+    """Stripped pipe-delimited cells of each DATA row in the inventory table.
+
+    Skips the `| id | subsystem | ... |` header, the `|---|` separator, and any
+    non-table line. Robust to the surrounding markdown.
+    """
+    rows: list[list[str]] = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s.startswith("|"):
+            continue
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        if set("".join(cells)) <= set("-: "):  # |---|:--| separator row
+            continue
+        lowered = [c.lower() for c in cells]
+        if lowered[0] == "id" and "subsystem" in lowered:  # header
+            continue
+        rows.append(cells)
+    return rows
+
+
+def _utv_status_violations(text: str) -> list[str]:
+    """Rows where any cell is EXACTLY `unable_to_verify` (case-insensitive).
+
+    UTV is a verdict token; legitimately it can only ever be a standalone status
+    cell, never embedded in prose — so an exact full-cell match is high-precision
+    and immune to column miscounting from stray pipes in free-text cells.
+    """
+    bad: list[str] = []
+    for cells in _inventory_data_rows(text):
+        rid = cells[0] if cells else "<?>"
+        for i, c in enumerate(cells):
+            if c.lower() == "unable_to_verify":
+                bad.append(
+                    f"row {rid!r}: cell #{i} == 'unable_to_verify' — UTV is a reviewer/operator "
+                    "verdict, never a row status (it would bypass wave_gate_check blocking)"
+                )
+    return bad
+
+
+def rule_utv_not_a_row_status() -> tuple[str, list[str]]:
+    """R5 — `unable_to_verify` must never be an inventory row status (ADR-027 / ADR-032).
+
+    wave_gate_check.py tallies any status string but blocks only on severity/provisional,
+    so a UTV row status would be silently NON-blocking — green-washing an unverified row.
+    UTV is the reviewer/operator could-not-conclude VERDICT; the row stays in its prior
+    state (typically `open`) and the receiving seat RE-DISPATCHES in a fixed env.
+    """
+    inv = ROOT / "docs" / "REMEDIATION-INVENTORY.md"
+    if not inv.exists():
+        return "PASS", ["docs/REMEDIATION-INVENTORY.md absent"]
+    violations = _utv_status_violations(inv.read_text())
+    if violations:
+        return "FAIL", violations
+    return "PASS", ["no inventory row uses unable_to_verify as a status (it is a verdict only)"]
+
+
 def main() -> int:
     print("CEREMONY CHECK — forbid appearance-of-verification-without-substance (ADR-027 / ADR-028)\n")
     hard_fail = False
@@ -178,6 +239,12 @@ def main() -> int:
     r4_status, r4 = rule_ci_runs_runxfail()
     print(f"R4 ci-runs-runxfail ....... {r4_status}  {r4[0]}")
     hard_fail |= r4_status == "FAIL"
+
+    r5_status, r5 = rule_utv_not_a_row_status()
+    print(f"R5 utv-not-a-row-status ... {r5_status}  {r5[0]}")
+    for v in r5[1:]:
+        print(f"     ! {v}")
+    hard_fail |= r5_status == "FAIL"
 
     print()
     if hard_fail:
