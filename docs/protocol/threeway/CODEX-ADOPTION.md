@@ -53,7 +53,7 @@ From the spec §4 / [`threeway/loop.py:43-52`](../../../threeway/loop.py):
 |---|---|---|---|
 | `director` | **builder** (own branch) | A | a Codex `live-seat` (`CODEX_SEAT=director`) — its behavior source is already `director2` per `SEAT_BEHAVIOR_SOURCE` |
 | `operator2` | **primary verifier** (read-only repo) | B | a Codex `live-seat` (`CODEX_SEAT=operator2`) — behavior source `operator`; pair with the `lane-v-verifier` role agent |
-| `coordinator2` | **executing integrator** (staging refs only) | B | **does not exist in the Codex harness yet** — see §4 (it is Slice 2.5 scope, not a `codex_protocol_model.py` edit) |
+| `coordinator2` | **executing integrator** (staging refs only) | B | **target-state only today** — the current Codex harness does not accept `CODEX_SEAT=coordinator2`; see §4 for the Slice 2.5 work that must make it real |
 
 Codex's builder (`director`) is verified by Claude's `operator`; Codex's verifier (`operator2`)
 verifies Claude's `director2` build; Codex's `coordinator2` integrates Claude-built candidates. That
@@ -62,8 +62,9 @@ integrates Codex-built code.**
 
 > The `CODEX_SEAT` values today are `director | director2 | operator | operator2 | coordinator`
 > (`scripts/codex_protocol_model.py:151-154`). They overlap with the threeway builder/verifier seat
-> names but the threeway bus also needs `coordinator2`, `overseer`, `ci`, `merge-gate` — those are
-> mechanical/strategic, not Codex `live-seat`s, and are provisioned as **keys**, not as harness modes.
+> names but the threeway bus also needs `coordinator2`, `overseer`, `ci`, `merge-gate`. Today
+> `coordinator2` is a target threeway seat and the others are mechanical/strategic identities; none
+> of them is a current Codex harness live-seat until Slice 2.5 adds explicit support.
 
 ## 3. Prerequisite: key provisioning and custody
 
@@ -103,11 +104,13 @@ Per the unified doc §I.5, the `threeway/` package is **wired into nothing** tod
 in order:
 
 1. **Provision keys** (§3) and commit the registry.
-2. **Slice 2.5 — author the real migration plan** from the stub. The concrete Codex edit-sites are
-   the **six seat-list copies** that must change together to make `coordinator`/`coordinator2`
-   first-class receiving seats: `scripts/protocol_mailbox.py:11` (`SEATS`), `coordination/bin/send-event`,
-   `coordination/bin/consume-events`, `scripts/check_coordination.py`, `scripts/status.py:126`
-   (`_MAILBOX_SEATS`). Backfill cursors ISO→scalar `seq`. **Method: shadow read-only projection →
+2. **Slice 2.5 — author the real migration plan** from the stub. The concrete edit-sites must include
+   every hard-coded mailbox/harness seat-list needed to make `coordinator`/`coordinator2`
+   first-class receiving seats: at minimum `scripts/protocol_mailbox.py:11` (`SEATS`),
+   `coordination/bin/send-event`, `coordination/bin/consume-events`, `scripts/check_coordination.py`,
+   `scripts/status.py:126` (`_MAILBOX_SEATS`), and the Codex orientation/harness surfaces that
+   currently reject `coordinator2` (for example `seat_status.py` and `scripts/codex_protocol_model.py`).
+   Backfill cursors ISO→scalar `seq`. **Method: shadow read-only projection →
    single-writer cutover (no dual-write window).** The legacy mailbox stays authoritative until
    cutover.
 3. **Wire CI to emit a signed `ci_result`.** Today `.github/workflows/ci.yml` runs bare `pytest
@@ -144,8 +147,9 @@ The real pattern:
 ## 6. Mode and orientation (unchanged from the existing harness)
 
 - A fresh Codex session is a **readiness bridge** by default and never silently upgrades into a seat
-  (`docs/protocol/codex/continuation.md`). It becomes `director`/`operator2`/`coordinator2` only on
-  explicit user/parent instruction.
+  (`docs/protocol/codex/continuation.md`). In the current harness it can become `director` or
+  `operator2` only on explicit user/parent instruction. `coordinator2` is a target threeway seat and
+  must not be claimed as live until Slice 2.5 adds the corresponding Codex harness/orientation support.
 - On assuming a seat, **find the newest `docs/HANDOFF-<concrete-seat>-*.md` first**, then orient via
   `seat_status.py <seat> --wave <N>` (read-only), then check mail before any protocol decision.
 - All Layer-2 rules in the unified doc apply verbatim through Codex's primitives (Part III): subagents

@@ -79,11 +79,12 @@ stale versus the code, the code wins — fix the doc in the same change that exp
 
 ## Per-provider quick start
 
-- **Codex** — you are a **readiness bridge by default**; become a seat (`director` / `operator2` /
-  `coordinator2`) only on explicit instruction. Your harness already mirrors Layer 2
-  (`scripts/codex_protocol_model.py`, `.codex/agents/*.toml`, `.codex/hooks/`). See
-  `CODEX-ADOPTION.md` for your seats + the migration path. Git: `env -u GIT_INDEX_FILE` for ordinary
-  git/pytest.
+- **Codex** — you are a **readiness bridge by default**; become a current harness seat (`director` or
+  `operator2`) only on explicit instruction. `coordinator2` is a target threeway seat, but it is not a
+  current Codex live-seat until Slice 2.5 wires it into the harness/orientation surfaces. Your harness
+  already mirrors Layer 2 (`scripts/codex_protocol_model.py`, `.codex/agents/*.toml`, `.codex/hooks/`).
+  See `CODEX-ADOPTION.md` for your seats + the migration path. Git: `env -u GIT_INDEX_FILE` for
+  ordinary git/pytest.
 - **Claude** — `CLAUDE.md` + `docs/protocol/claude/` are your mechanics; you hold `director2` /
   `operator` / `coordinator`. Use the `Agent`/`Workflow`/`Skill` tools as your Layer-2 primitives.
 - **Antigravity (agy)** — you hold **no seat**. Operate as a read-only observer or a human-relayed
