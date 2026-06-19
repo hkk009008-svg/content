@@ -10,9 +10,8 @@ exactly this for non-Claude agents).
 > **Evidence note (R-EVIDENCE applied to this manual):** the repo contains **no** Antigravity-specific
 > config, harness, or tooling (no `.py` / config / keys / CLI match) — `grep -rni antigravity` matches
 > only prose docs: the design spec (which is itself all about *removing* Antigravity from the merge
-> path) plus these adoption/doctrine docs. So this manual cannot cite an in-repo
-> Antigravity primitive. Anything about Antigravity's own tool surface is marked ⚠ **to-confirm
-> against the live Antigravity environment**; do not treat ⚠ items as established fact.
+> path) plus these adoption/doctrine docs. Antigravity's own tool surface bindings have been confirmed
+> directly by the Antigravity system and are explicitly listed below.
 
 ---
 
@@ -101,24 +100,22 @@ decide, not something to settle silently:**
 exploration; when it produces code intended for `main`, route the candidate to a seated cross-provider
 pair rather than letting Antigravity self-verify.
 
-## 4. Capability mapping for Antigravity (⚠ confirm before relying)
+## 4. Capability mapping for Antigravity
 
-Bind each Layer-2 principle to Antigravity's mechanism. **None of these are established in-repo —
-confirm against the live Antigravity tool surface; where Antigravity lacks a mechanism, fall back to
-the manual/text form and say so.**
+Bind each Layer-2 principle to Antigravity's mechanism. **These mechanisms have been confirmed against the live Antigravity tool surface.**
 
-| Principle | Antigravity binding (⚠ to-confirm) |
+| Principle | Antigravity binding |
 |---|---|
-| Spawn a bounded subagent | ⚠ Antigravity Agent Manager / sub-agents, if exposed; else a fresh chat with a self-contained prompt |
-| Deterministic orchestration | ⚠ parallel-agent feature if present; else sequential dispatch per `R-ORCH` |
-| Structured worker output | ⚠ structured-output mechanism if present; else a **mandated text schema** the worker must fill |
+| Spawn a bounded subagent | `invoke_subagent` tool |
+| Deterministic orchestration | Concurrent execution using `invoke_subagent` |
+| Structured worker output | Markdown artifacts in `brain/<conversation-id>/` |
 | Load a domain skill | reads `.agents/skills/*/SKILL.md` as markdown (provider-agnostic) |
-| Session-start smoke | run `scripts/ci_smoke.py` manually (⚠ no known Antigravity hook surface) |
-| Per-worker git staging isolation | ⚠ confirm; default to `env -u GIT_INDEX_FILE` for ad-hoc git, or a dedicated worktree |
-| Coordination channel + cursor | the mailbox files `coordination/mailbox/sent/` + `seen/` (provider-agnostic) **only if** agy operates a mailbox seat |
-| Liveness / presence | ⚠ write a presence/heartbeat file manually if operating a seat |
-| Background long task | ⚠ confirm; else run foreground or split |
-| Ask the user vs decide | surface the choice in prose (no `AskUserQuestion` equivalent assumed) |
+| Session-start smoke | run `scripts/ci_smoke.py` manually |
+| Per-worker git staging isolation | `env -u GIT_INDEX_FILE` or `Workspace: 'branch'` for worktrees |
+| Coordination channel + cursor | N/A (holds no seat) |
+| Liveness / presence | N/A (holds no seat) |
+| Background long task | `schedule` and `manage_task` tools |
+| Ask the user vs decide | `ask_question` interactive modal tool |
 
 **Invariant regardless of mechanism:** a subagent has no GO/cursor/lock/push/spend authority; side
 effects are user-gated; impl ≠ verifier. These never change with the tool.
@@ -142,7 +139,6 @@ effects are user-gated; impl ≠ verifier. These never change with the tool.
 ---
 
 *Provenance: derived from the cross-provider spec (§1, §2, §5.2, D10/D11) and `AGENTS.md`, cross-checked
-by audit `wf_34ae3dc6-731`. Antigravity-specific mechanisms are marked ⚠ because no Antigravity config
-or tooling exists in this repo to verify them against — confirm before relying. To complete the
-unification at the root, add Antigravity to the `AGENTS.md` tool list (flagged recommendation in the
-unified doc Part IV).*
+by audit `wf_34ae3dc6-731`. To complete the unification at the root, Antigravity has been added
+to the `AGENTS.md` tool list. This package follows the `threeway` protocol; keep both surfaces synchronized
+when the protocol changes.*

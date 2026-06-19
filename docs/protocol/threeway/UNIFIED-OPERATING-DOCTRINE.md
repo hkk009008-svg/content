@@ -10,9 +10,8 @@ those disagree on a fact, they win and this doc is stale — fix it in the same 
 
 This document is the single statement of the rules **all three providers follow**. It exists
 because the user-principal wants one unified system across Claude, Codex, and Antigravity — not
-three disconnected playbooks. It does **not** replace `AGENTS.md` (which already unifies the
-*principle layer* for Claude + Codex); it (a) folds the **three-way signed-bus protocol** and
-**Antigravity** into that model, and (b) gives one **capability-mapping table** so each provider
+three disconnected playbooks. It folds the **three-way signed-bus protocol** and
+**Antigravity** into that model, and gives one **capability-mapping table** so each provider
 binds the shared rules to its own primitives.
 
 ---
@@ -316,23 +315,21 @@ the normal cycle.
 # Part III — Capability mapping (the heart of unification)
 
 Each ENV_MECHANIC below is **one principle** with a per-provider binding. Adopt the principle; use
-your provider's mechanism. **Antigravity bindings marked ⚠ are not yet established in-repo —
-confirm against the live Antigravity tool surface before relying on them** (R-EVIDENCE applied to
-this table).
+your provider's mechanism. Antigravity bindings have been explicitly established and confirmed.
 
 | Capability (principle) | Claude (Claude Code) | Codex (CLI harness) | Antigravity ("agy") |
 |---|---|---|---|
-| **Spawn a bounded subagent** | `Agent` tool (`subagent_type`, `model`) | spawnable role agents `.codex/agents/*.toml` + Codex subagents | ⚠ Antigravity Agent Manager / sub-agents — *confirm the spawn primitive* |
-| **Deterministic multi-agent orchestration** | `Workflow` tool (fan-out/pipeline) | sequential subagent dispatch per `R-ORCH` | ⚠ parallel-agent feature if present; else sequential dispatch — *confirm* |
-| **Structured/validated output from a worker** | `schema` on `Agent`/`Workflow`; reviewer `RESULT SCHEMA` json block | prompt-enforced report format + `apply_patch` | ⚠ structured-output mechanism — *confirm; fall back to a mandated text schema* |
+| **Spawn a bounded subagent** | `Agent` tool (`subagent_type`, `model`) | spawnable role agents `.codex/agents/*.toml` + Codex subagents | `invoke_subagent` tool |
+| **Deterministic multi-agent orchestration** | `Workflow` tool (fan-out/pipeline) | sequential subagent dispatch per `R-ORCH` | concurrent execution via `invoke_subagent` array |
+| **Structured/validated output from a worker** | `schema` on `Agent`/`Workflow`; reviewer `RESULT SCHEMA` json block | prompt-enforced report format + `apply_patch` | Markdown artifacts in `brain/<conversation-id>/` |
 | **Load a domain skill before judging code** | `Skill` tool over `.claude/skills/` | `.agents/skills/` + role TOML references | reads `.agents/skills/*/SKILL.md` as markdown |
-| **Session-start tripwire / smoke** | SessionStart hook → `ci_smoke.py` | `.codex/hooks/session-smoke.sh` (fail-open) | ⚠ run `scripts/ci_smoke.py` manually at session start if no hook surface |
-| **Per-worker staging isolation on a shared tree** | per-seat `GIT_INDEX_FILE`; subagents prefix `env -u GIT_INDEX_FILE` | same `GIT_INDEX_FILE=<git-dir>/index-codex-$CODEX_SEAT`; `.codex/hooks/guard-git-index.sh` enforces | ⚠ use an explicit per-session index env or a worktree — *confirm; default to `env -u GIT_INDEX_FILE` for ad-hoc git* |
-| **Durable coordination channel + read cursor** | mailbox `coordination/mailbox/sent/` + `seen/<seat>.txt` | same mailbox + `coordination/bin/{send-event,consume-events}` | same mailbox files (provider-agnostic) if agy operates a mailbox seat |
-| **Liveness signal separate from intent** | hook-written heartbeat + agent-written presence `.md` | `.codex/hooks/update-state.sh` heartbeat | ⚠ write a presence/heartbeat file manually — *confirm hook surface* |
-| **Background long task without polling** | `run_in_background: true`; harness notifies | background command support | ⚠ confirm; otherwise run foreground or split work |
-| **Ask the user vs decide** | `AskUserQuestion` (only for cross-cutting/policy/hard-to-reverse) | surface the choice in prose | surface the choice in prose |
-| **Cross-cutting edit lock** | `coordination/bin/claim-lock` (4 modules only) | same `claim-lock`/`release-lock` | same mailbox-lock files if operating a mailbox seat |
+| **Session-start tripwire / smoke** | SessionStart hook → `ci_smoke.py` | `.codex/hooks/session-smoke.sh` (fail-open) | run `scripts/ci_smoke.py` manually |
+| **Per-worker staging isolation on a shared tree** | per-seat `GIT_INDEX_FILE`; subagents prefix `env -u GIT_INDEX_FILE` | same `GIT_INDEX_FILE=<git-dir>/index-codex-$CODEX_SEAT`; `.codex/hooks/guard-git-index.sh` enforces | `env -u GIT_INDEX_FILE` or `Workspace: 'branch'` |
+| **Durable coordination channel + read cursor** | mailbox `coordination/mailbox/sent/` + `seen/<seat>.txt` | same mailbox + `coordination/bin/{send-event,consume-events}` | N/A (holds no seat) |
+| **Liveness signal separate from intent** | hook-written heartbeat + agent-written presence `.md` | `.codex/hooks/update-state.sh` heartbeat | N/A (holds no seat) |
+| **Background long task without polling** | `run_in_background: true`; harness notifies | background command support | `schedule` and `manage_task` tools |
+| **Ask the user vs decide** | `AskUserQuestion` (only for cross-cutting/policy/hard-to-reverse) | surface the choice in prose | `ask_question` interactive modal tool |
+| **Cross-cutting edit lock** | `coordination/bin/claim-lock` (4 modules only) | same `claim-lock`/`release-lock` | N/A (holds no seat) |
 
 **Invariant across the table:** the *authority rules never change with the mechanism.* A subagent has
 no GO/cursor/lock/push/spend authority on any provider; side effects are user-gated on any provider;
@@ -344,19 +341,18 @@ impl ≠ verifier on any provider.
 
 - **Codex:** read [`CODEX-ADOPTION.md`](CODEX-ADOPTION.md). Codex already runs a full mirror of the
   Layer-2 doctrine (kernel `scripts/codex_protocol_model.py`, six `.codex/agents/*.toml` role agents,
-  three hooks, the mailbox bus). Its adoption work is the Layer-1 threeway migration for its seats
-  (`director`, `operator2`, `coordinator2`).
+  three hooks, the mailbox bus). Its adoption work is the Layer-1 threeway migration for `director`
+  and `operator2`, plus adding target-state `coordinator2` as a real harness/orientation role during
+  Slice 2.5 before any Codex session may claim that seat live.
 - **Antigravity:** read [`ANTIGRAVITY-ADOPTION.md`](ANTIGRAVITY-ADOPTION.md). Antigravity holds **no
   Layer-1 seat**; it participates as a human-relayed strategic-reasoner (chief axis) and/or
   read-only observer, and adopts the full Layer-2 doctrine for any work an agy session performs.
 - **Claude:** `CLAUDE.md` + `docs/protocol/claude/` are the existing mechanics. Claude occupies
   `director2`, `operator`, `coordinator`.
 
-**Recommended (not yet done):** `AGENTS.md` is the agent-agnostic root but currently names only
-Cursor/Aider/Copilot/Continue/Claude Code/Codex and the *mailbox* four-seat model. To make the
-unification complete at the root, add Antigravity to its tool list and add a one-line pointer to this
-doc + the threeway protocol. Because `AGENTS.md` is load-bearing, that edit is left as a flagged
-recommendation rather than made here.
+**Root integration:** `AGENTS.md` now names Antigravity and points to this `docs/protocol/threeway/`
+package. Keep future changes synchronized with the root router instead of leaving adoption rules only
+in these manuals.
 
 ---
 
