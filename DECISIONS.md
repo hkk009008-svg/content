@@ -1534,3 +1534,69 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   CLAUDE.md R-EVIDENCE / R-MEASURE / R-VERIFY-TIER. Reciprocal upstream: the live Slice-2
   dispatch's one-line review contract shows plan-authoring guidance should require a NAMED
   reviewer output contract — folded into the deferred follow-up.
+
+## ADR-033 — Reviewer-result consumer + R6 built; ADR-032's deferred follow-up discharged
+
+- **Status:** ACCEPTED (implemented on branch `feat/reviewer-result-consumer`, off `main`
+  @ `2a932ac0`). Discharges the DEFERRED follow-up of ADR-032 Decision 5 ("R6 ships WITH the
+  consumer, not before"). New: `scripts/consume_reviewer_result.py` (+ `tests/unit/`
+  `test_consume_reviewer_result.py`, `test_check_no_ceremony_r6.py`); modified:
+  `scripts/check_no_ceremony.py` (R6), `scripts/ci_smoke.py` (smoke wiring).
+- **Context:** ADR-032 shipped the `reviewer-result/1` schema MANDATORY at the subagent level
+  but kept the mailbox-level block OPTIONAL because nothing parsed it — an unconsumed schema is
+  ceremony (ADR-028). This builds the instrument that consumes it, so the schema now has an
+  executing reader.
+- **Decisions:**
+  1. **`scripts/consume_reviewer_result.py`** parses the LAST `reviewer-result/1` json block from
+     a `*verification-report*.md` event (or stdin), validates the invariants (pass⇒issues empty;
+     issues⇒≥1; unable_to_verify⇒issues empty + `unverifiable_reason`∈U1..U5 + `blocked` non-null;
+     `reviewed_head`==`reviewed_commit` unless UTV; `working_tree_clean=false` only with UTV),
+     maps reviewer-severity→inventory-severity (critical→CRITICAL, important→MAJOR, minor→MEDIUM),
+     and PROPOSES (never applies) `REMEDIATION-INVENTORY.md` status transitions for rows that cite
+     the reviewed commit.
+  2. **Fabrication detection is the central value.** The CLI RE-RUNS each pytest command the
+     reviewer claims it ran and diffs the *normalized* summary (counts only — the `in <duration>s`
+     tail and `warning` counts are ignored so honest runs never false-alarm) plus the exit code
+     against the reported values. A mismatch is a HARD FAIL: a reviewer can otherwise paste a fake
+     "N passed" it never executed. The re-runner is shell-injection-safe — it executes ONLY a
+     vetted pytest argv (no shell, refuses `;&|<>$(){}` and backticks); non-pytest commands are
+     skipped, never run.
+  3. **`check_no_ceremony.py` R6 (`report-cites-executed-pin`)** — a `pass` verification-report
+     MUST cite an executed `--runxfail` pin run in `commands[]`; a GO with no pin re-execution is
+     ceremony. High-precision (fires only on a present block with verdict `pass`); inert until
+     reviewers emit blocks (today's mailbox has zero). Parsing is delegated to the consumer so
+     there is ONE parser. Wired into `main()` alongside R5.
+  4. **`ci_smoke` runs the SCHEMA-VALIDATION half only, never the re-run.** Re-running a historical
+     event's pins against today's HEAD would false-alarm (wrong tree), so `smoke_check()` only
+     schema-validates present blocks; the fabrication re-run is the on-demand
+     `consume_reviewer_result.py <event>` CLI (tree at the reviewed commit). Zero blocks → silent 0.
+  5. **The mailbox-level JSON block STAYS OPTIONAL.** Even though a consumer now exists, promoting
+     the merged block to MANDATORY is a SEPARATE future decision — deferred until reviewers emit
+     blocks in practice and the consumer has been exercised on real events. Subagent-level emit
+     remains MANDATORY (unchanged from ADR-032).
+  6. **The re-runner is the security boundary, hardened by adversarial review.** It executes
+     command strings from an UNTRUSTED mailbox, so three independent Lane-V / code-quality passes
+     (Opus) attacked it and an arbitrary-code-execution CLASS was found and closed in four layers:
+     (a) pytest must be EXECUTED — `<python> -m pytest …` or a `pytest` console script — not merely
+     present as a token (`python evil.py pytest` is refused); (b) the `env` prefix may carry only
+     `-u NAME` unsets, never a `NAME=value` assignment (`env PATH=/tmp/evil pytest` injection
+     refused); (c) the launcher must be a bare PATH-resolved name, an in-repo path, or
+     `sys.executable` (an absolute `/tmp/evil/pytest` is refused); (d) targets are confined to
+     repo_root (out-of-repo `conftest.py` refused). Never `shell=True`. Residual vectors all
+     require the attacker to also plant a file on the operator's disk (documented; the re-run is
+     only as trusted as the tree at the reviewed commit). The review also caught an efficacy
+     regression (the launcher guard initially mis-skipped the repo's own
+     `env -u GIT_INDEX_FILE .venv/bin/python -m pytest` idiom) — fixed + pinned.
+- **Evidence:** TDD red→green throughout (incl. RED-first pins for every security finding).
+  `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_consume_reviewer_result.py
+  tests/unit/test_check_no_ceremony_r6.py -q` → `83 passed` (75 consumer incl. 2 real-pytest
+  fabrication integration tests + the security regression pins, + 8 R6).
+  `.venv/bin/python scripts/check_no_ceremony.py` → R6 PASS (inert), exit 0; R6 non-vacuity proven
+  — a crafted `pass` report with no `--runxfail` command → `rule_report_cites_executed_pin` FAIL.
+  `.venv/bin/python scripts/ci_smoke.py` → OK. Neighboring suites
+  (`test_check_doc_claims`/`test_check_coordination`/`test_coordination_bin`/`test_four_seat_coordination`)
+  → `204 passed`.
+- **Cross-refs:** ADR-032 (the schema this consumes), ADR-027 (execute the oracle), ADR-028
+  (ceremony forbidden + detector); `docs/templates/claude/reviewer.md` (the `reviewer-result/1`
+  contract); plan `docs/superpowers/plans/2026-06-19-harden-verification-dispatch.md` (Deferred
+  follow-up, now discharged).
