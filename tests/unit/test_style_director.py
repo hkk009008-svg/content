@@ -365,6 +365,10 @@ def test_openai_construction_failure_falls_back_to_defaults(monkeypatch):
     fake = _fake_settings(openai_api_key="sk-fake")
     monkeypatch.setattr("llm.style_director.settings", fake)
     monkeypatch.setattr(_openai_module, "OpenAI", _raise)
+    # generate_style_rules defaults use_web_research=True, which calls
+    # research_engine.research_cinematography (Tavily → api.tavily.com) before the
+    # OpenAI construction under test. Stub it so the test stays fully offline.
+    monkeypatch.setattr("research_engine.research_cinematography", lambda *a, **k: "")
 
     from llm.style_director import generate_style_rules
     rules = generate_style_rules("TestFilm")
