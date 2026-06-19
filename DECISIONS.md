@@ -1580,8 +1580,9 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
      (a) pytest must be EXECUTED — `<python> -m pytest …` or a `pytest` console script — not merely
      present as a token (`python evil.py pytest` is refused); (b) the `env` prefix may carry only
      `-u NAME` unsets, never a `NAME=value` assignment (`env PATH=/tmp/evil pytest` injection
-     refused); (c) the launcher must be a bare PATH-resolved name, an in-repo path, or
-     `sys.executable` (an absolute `/tmp/evil/pytest` is refused); (d) targets are confined to
+     refused); (c) the launcher must carry a path separator and resolve to an in-repo path or
+     `sys.executable` — a bare PATH-resolved name (the PATH-redirection vector) and an absolute
+     out-of-repo path (`/tmp/evil/pytest`) are both refused; (d) targets are confined to
      repo_root (out-of-repo `conftest.py` refused). Never `shell=True`. Residual vectors all
      require the attacker to also plant a file on the operator's disk (documented; the re-run is
      only as trusted as the tree at the reviewed commit). The review also caught an efficacy
@@ -1589,7 +1590,7 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
      `env -u GIT_INDEX_FILE .venv/bin/python -m pytest` idiom) — fixed + pinned.
 - **Evidence:** TDD red→green throughout (incl. RED-first pins for every security finding).
   `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_consume_reviewer_result.py
-  tests/unit/test_check_no_ceremony_r6.py -q` → `83 passed` (75 consumer incl. 2 real-pytest
+  tests/unit/test_check_no_ceremony_r6.py -q` → `87 passed` (79 consumer incl. 2 real-pytest
   fabrication integration tests + the security regression pins, + 8 R6).
   `.venv/bin/python scripts/check_no_ceremony.py` → R6 PASS (inert), exit 0; R6 non-vacuity proven
   — a crafted `pass` report with no `--runxfail` command → `rule_report_cites_executed_pin` FAIL.
