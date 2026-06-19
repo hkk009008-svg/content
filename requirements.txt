@@ -54,6 +54,7 @@ PyJWT>=2.8
 filelock>=3.15
 python-dotenv>=1.0
 cryptography>=42.0
+rfc8785>=0.1.4
 
 # --- HTTP + general ---
 requests>=2.31
