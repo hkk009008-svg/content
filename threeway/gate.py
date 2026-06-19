@@ -7,6 +7,8 @@ code; it acts only on signed facts + a signed ci_result.
 """
 from __future__ import annotations
 
+import subprocess
+
 from cryptography.exceptions import InvalidSignature
 
 from threeway import LOAD_BEARING_KINDS
@@ -17,6 +19,12 @@ from threeway.reducer import reduce
 
 class GateError(Exception):
     pass
+
+
+# Accepted signature PROFILES (the discriminator is itself signed, so it cannot be
+# forged to claim a weaker profile). A load-bearing event presenting an unaccepted
+# signature_version is rejected BEFORE signature verification continues.
+_ACCEPTED_SIG_VERSIONS = {"threeway-sign/2"}
 
 
 def _seat(signer: str) -> str:
@@ -30,6 +38,8 @@ def verify_and_reduce(events, registry_dir, bus_id: str):
         if ev.kind in LOAD_BEARING_KINDS:
             if ev.bus_id != bus_id:
                 raise GateError(f"bus_id mismatch (replay?): {ev.bus_id!r} != {bus_id!r}")
+            if ev.signature_version not in _ACCEPTED_SIG_VERSIONS:
+                raise GateError(f"unaccepted signature_version: {ev.signature_version!r}")
             seat = _seat(ev.signer)
             try:
                 pub = reg.get(seat)
@@ -92,38 +102,43 @@ def run_gate(candidate_id, store: EventStore, repo, registry_dir, bus_id,
     if state.merge_completed(candidate_id) is not None:
         return GateResult("COMPLETED", "already merged (idempotent)")
 
-    # 3. evaluate the predicate from authoritative state
-    d = evaluate(candidate_id, state, _RepoAdapter(repo), policy, main_ref=main_ref)
-    if d.outcome == REJECTED:
-        return GateResult("REJECTED", d.reason)
-    if d.outcome == PENDING:
-        return GateResult("PENDING", d.reason)
+    # 3. evaluate the predicate from authoritative state. A residual git-plumbing
+    # failure on an attested SHA (e.g. gate-side commit_tree) becomes a REJECTED
+    # GateResult, never an escaping CalledProcessError — run_gate is TOTAL.
+    try:
+        d = evaluate(candidate_id, state, _RepoAdapter(repo), policy, main_ref=main_ref)
+        if d.outcome == REJECTED:
+            return GateResult("REJECTED", d.reason)
+        if d.outcome == PENDING:
+            return GateResult("PENDING", d.reason)
 
-    # 4. MERGEABLE — recompute the trusted merge, never trusting candidate.integration_sha
-    cand = state.candidate(candidate_id)
-    base = cand.payload["staging_base_sha"]
-    branch = cand.payload["branch_sha"]
-    tree, clean = gitcas.merge_tree(repo, base, branch)
-    if not clean:
-        return GateResult("REJECTED", "merge not clean (textual conflict) -> ABORT/REWORK")
-    merge_commit = gitcas.commit_tree(repo, tree, [base, branch],
-                                      f"threeway merge {candidate_id}")
-    # the attested integration_sha MUST equal the trusted recomputed merge
-    if merge_commit != cand.payload["integration_sha"]:
-        return GateResult("REJECTED", "recomputed merge != attested integration_sha")
+        # 4. MERGEABLE — recompute the trusted merge, never trusting candidate.integration_sha
+        cand = state.candidate(candidate_id)
+        base = cand.payload["staging_base_sha"]
+        branch = cand.payload["branch_sha"]
+        tree, clean = gitcas.merge_tree(repo, base, branch)
+        if not clean:
+            return GateResult("REJECTED", "merge not clean (textual conflict) -> ABORT/REWORK")
+        merge_commit = gitcas.commit_tree(repo, tree, [base, branch],
+                                          f"threeway merge {candidate_id}")
+        # the attested integration_sha MUST equal the trusted recomputed merge
+        if merge_commit != cand.payload["integration_sha"]:
+            return GateResult("REJECTED", "recomputed merge != attested integration_sha")
 
-    # 5. exact-SHA CAS: write main only if it still equals staging_base
-    if not gitcas.cas_update_ref(repo, main_ref, merge_commit, base):
-        return GateResult("REJECTED", "stale: CAS expected-old no longer matches main.head")
+        # 5. exact-SHA CAS: write main only if it still equals staging_base
+        if not gitcas.cas_update_ref(repo, main_ref, merge_commit, base):
+            return GateResult("REJECTED", "stale: CAS expected-old no longer matches main.head")
 
-    # 6. emit the signed merge_completed fact (the gate's own credential)
-    gate_priv = load_private(gate_seat)
-    done = Event(
-        id=f"merge-{candidate_id}", seq=0, bus_id=bus_id,
-        schema_version="threeway/1", kind="merge_completed",
-        sender=gate_seat, recipient="all", signer=f"{gate_seat}:mech:gate",
-        payload={"candidate_id": candidate_id, "merged_sha": merge_commit},
-        candidate_id=candidate_id, subject_sha=merge_commit,
-    )
-    store.append(done, gate_priv)
-    return GateResult("COMPLETED", "merged via exact-SHA CAS")
+        # 6. emit the signed merge_completed fact (the gate's own credential)
+        gate_priv = load_private(gate_seat)
+        done = Event(
+            id=f"merge-{candidate_id}", seq=0, bus_id=bus_id,
+            schema_version="threeway/1", kind="merge_completed",
+            sender=gate_seat, recipient="all", signer=f"{gate_seat}:mech:gate",
+            payload={"candidate_id": candidate_id, "merged_sha": merge_commit},
+            candidate_id=candidate_id, subject_sha=merge_commit,
+        )
+        store.append(done, gate_priv)
+        return GateResult("COMPLETED", "merged via exact-SHA CAS")
+    except subprocess.CalledProcessError as e:
+        return GateResult("REJECTED", f"git plumbing failed on attested SHA: {e}")

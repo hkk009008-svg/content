@@ -70,7 +70,7 @@ independence benefit — the independence that matters lives in the **review**. 
 | `docs/protocol/agents/director-operator.md` | modify `:77-78` | Two-tree mirror of the Lane-V status vocab. |
 | `docs/templates/claude/implementer.md` | add to Report Format | Emit pin selectors so M-RERUN-PINS has a handle. |
 | `scripts/check_no_ceremony.py` | add `rule_utv_not_a_row_status` (R5) | Mechanically forbid UTV laundering past the wave gate. |
-| `DECISIONS.md` | append **ADR-031** | Record the schema + UTV disposition + reviewer-executes-pins doctrine. |
+| `DECISIONS.md` | append **ADR-032** | Record the schema + UTV disposition + reviewer-executes-pins doctrine. |
 
 There is **no** `docs/templates/agents/reviewer.md` (verified) — the reviewer template is
 claude-tree-only; the new RESULT SCHEMA section carries an "agents copy, when created, inherits
@@ -227,17 +227,17 @@ and is run by `ci_smoke.py` — verify by executing it.)
 - [ ] **Step 4 (smoke):** `.venv/bin/python scripts/ci_smoke.py` → OK.
 - [ ] **Step 5: Commit** — `feat(ceremony): R5 — unable_to_verify is a verdict, never an inventory row status (wave-gate bypass guard)`.
 
-## Task 4: ADR-031 + close-out
+## Task 4: ADR-032 + close-out
 
 **Files:** Append to `DECISIONS.md`.
 
-- [ ] **Step 1:** Append **ADR-031 — The verification dispatch is a self-executing, fail-aware,
+- [ ] **Step 1:** Append **ADR-032 — The verification dispatch is a self-executing, fail-aware,
   machine-consumable contract** (Context: the Level-4 assessment + the missed keystone; Decision:
   the canonical enum, `reviewer-result/1`, the Evidence preamble incl. pin re-execution, the UTV
   disposition + RE-DISPATCH, R5; the **deferred** consumer + R6 + fabrication re-run, with the
   reason they are deferred not dropped; Evidence: this plan + `wf_b89b9c6c-128`; Cross-refs:
   ADR-027/028, reviewer.md, director-operator.md, R-EVIDENCE/R-MEASURE/R-VERIFY-TIER).
-- [ ] **Step 2: Commit** — `docs(adr): ADR-031 — self-executing fail-aware verification dispatch contract`.
+- [ ] **Step 2: Commit** — `docs(adr): ADR-032 — self-executing fail-aware verification dispatch contract`.
 
 ## Verification / acceptance
 

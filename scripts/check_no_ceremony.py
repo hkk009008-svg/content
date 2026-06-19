@@ -19,7 +19,7 @@ Rules:
   R3  gate-executes-pins   scripts/wave_gate_check.py must EXECUTE the pins, not read status  [FIX-1]
   R4  ci-runs-runxfail     a CI workflow must run the pin suite with --runxfail               [FIX-2]
   R5  utv-not-a-row-status  `unable_to_verify` is a reviewer/operator VERDICT, never an inventory
-                           row `status` — else it bypasses wave_gate_check blocking (ADR-027)  [ADR-031]
+                           row `status` — else it bypasses wave_gate_check blocking (ADR-027)  [ADR-032]
 
 This script never modifies anything and never relaxes a gate; it only ADDS signal.
 It is NOT itself a status-reader — it parses/executes against live source.
@@ -198,7 +198,7 @@ def _utv_status_violations(text: str) -> list[str]:
 
 
 def rule_utv_not_a_row_status() -> tuple[str, list[str]]:
-    """R5 — `unable_to_verify` must never be an inventory row status (ADR-027 / ADR-031).
+    """R5 — `unable_to_verify` must never be an inventory row status (ADR-027 / ADR-032).
 
     wave_gate_check.py tallies any status string but blocks only on severity/provisional,
     so a UTV row status would be silently NON-blocking — green-washing an unverified row.

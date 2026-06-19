@@ -237,7 +237,7 @@ synthesis, not a passthrough of either subagent's json.
 ## Hardening notes — provenance for the reviewer-template additions
 
 The Canonical-vocabulary, Independence, RESULT SCHEMA, Evidence-preamble (incl. pin
-re-execution), Reviewer-conflict, and 3-way-verdict additions are codified per ADR-031,
+re-execution), Reviewer-conflict, and 3-way-verdict additions are codified per ADR-032,
 from the adversarial design pass `wf_b89b9c6c-128` over an external "Level 4 of 5" assessment of
 the live Slice-2 verification dispatch. The keystone is Evidence-preamble step 7 (re-run the
 implementer's pins with `--runxfail` + a mutation non-vacuity check): a machine-readable result

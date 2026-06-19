@@ -3,9 +3,13 @@ signing — the dataclass is mutable only so sign_event can write the signature;
 the signature commits to the fixed _signed_view subset, so post-sign mutation of
 a signed field is detectable by verify_event.
 
-The signature covers canonical bytes over a FIXED subset of fields:
+The signature covers canonical bytes over a FIXED subset of 14 fields:
   {bus_id, schema_version, id, seq, from, to, kind, brief_id, candidate_id,
-   subject_sha, payload_digest, causation_id}
+   subject_sha, payload_digest, causation_id, brief_version, signature_version}
+brief_version is signed because the predicate reads it off the envelope to pick the
+governing brief/cycle_go/supersession version — signing it closes a post-sign
+authorization-redirection vector. signature_version names the signature PROFILE and
+is itself signed so it can't be forged to claim a weaker profile.
 Ephemeral fields (created_at, signature) are excluded so a timed-out retry of the
 same logical fact re-signs to the same bytes. `from`/`to` are stored as
 sender/recipient (Python keyword avoidance) but serialized under their spec names.
@@ -22,11 +26,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from threeway import keys as _keys
 from threeway.canon import canonicalize
 
-# The signature binds exactly the field set assembled in _signed_view() below
+# The signature binds exactly the 14-field set assembled in _signed_view() below
 # (bus_id, schema_version, id, seq, from, to, kind, brief_id, candidate_id,
-# subject_sha, payload_digest, causation_id). _signed_view is the SINGLE source of
-# truth for that set — do not introduce a parallel constant list that can drift
-# from what is actually signed.
+# subject_sha, payload_digest, causation_id, brief_version, signature_version).
+# _signed_view is the SINGLE source of truth for that set — do not introduce a
+# parallel constant list that can drift from what is actually signed.
 
 
 @dataclass
@@ -45,6 +49,7 @@ class Event:
     subject_sha: str | None = None
     brief_version: int | None = None
     causation_id: str | None = None
+    signature_version: str = "threeway-sign/2"   # SIGNED signature-profile discriminator
     supersedes_event_id: str | None = None
     revokes_event_id: str | None = None
     created_at: str | None = None      # ephemeral
@@ -59,14 +64,14 @@ def payload_digest(ev: Event) -> str:
     return hashlib.sha256(canonicalize(ev.payload)).hexdigest()
 
 
-# Fields intentionally NOT in the signed subset (per spec §6.2's fixed signed
-# set): signer, created_at, signature, brief_version, supersedes_event_id,
-# revokes_event_id, and the raw payload (only its digest is signed). The
-# reference IDs (supersedes_event_id/revokes_event_id) are load-bearing for the
-# reducer but the spec fixes the signed set to the 12 fields in _signed_view;
-# do NOT widen this set without a spec revision.
+# Fields intentionally NOT in the signed subset: signer, created_at, signature,
+# supersedes_event_id, revokes_event_id, and the raw payload (only its digest is
+# signed). The reference IDs (supersedes_event_id/revokes_event_id) are load-bearing
+# for the reducer but the signed set is fixed to the 14 fields in _signed_view;
+# do NOT widen this set without a spec revision. (brief_version IS signed — see
+# _signed_view — to close the post-sign authorization-redirection vector.)
 def _signed_view(ev: Event) -> dict:
-    """Return the 12-field dict whose canonical bytes are signed and verified."""
+    """Return the 14-field dict whose canonical bytes are signed and verified."""
     return {
         "bus_id": ev.bus_id,
         "schema_version": ev.schema_version,
@@ -80,6 +85,8 @@ def _signed_view(ev: Event) -> dict:
         "subject_sha": ev.subject_sha,
         "payload_digest": payload_digest(ev),
         "causation_id": ev.causation_id,
+        "brief_version": ev.brief_version,
+        "signature_version": ev.signature_version,
     }
 
 
@@ -113,6 +120,7 @@ def to_json_obj(ev: Event) -> dict:
         "brief_id": ev.brief_id, "candidate_id": ev.candidate_id,
         "subject_sha": ev.subject_sha, "brief_version": ev.brief_version,
         "causation_id": ev.causation_id,
+        "signature_version": ev.signature_version,
         "supersedes_event_id": ev.supersedes_event_id,
         "revokes_event_id": ev.revokes_event_id,
         "payload": ev.payload, "payload_digest": payload_digest(ev),
@@ -132,6 +140,7 @@ def from_json_obj(obj: dict) -> Event:
         payload=obj["payload"], brief_id=obj.get("brief_id"),
         candidate_id=obj.get("candidate_id"), subject_sha=obj.get("subject_sha"),
         brief_version=obj.get("brief_version"), causation_id=obj.get("causation_id"),
+        signature_version=obj.get("signature_version", "threeway-sign/2"),
         supersedes_event_id=obj.get("supersedes_event_id"),
         revokes_event_id=obj.get("revokes_event_id"),
         created_at=obj.get("created_at"), signature=obj.get("signature"),

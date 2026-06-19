@@ -1368,13 +1368,117 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   `threeway/` package (`__init__`, `canon`, `keys`, `envelope`, `store`, `reducer`, `policy`,
   `tier`, `gitcas`, `predicate`, `gate`, `loop`, `rework`, `keys_bootstrap`).
 
-## ADR-031 — The verification dispatch is a self-executing, fail-aware, machine-consumable contract
+## ADR-031 — Cross-provider seat topology Slice 2: `refs/threeway/events` one-commit-per-event bus, dual-mode CAS append, verifying idempotency, validated per-seat cursors
+
+- **Status:** ACCEPTED (Slice 2 implemented on branch `feat/threeway-slice2-exec`; spec §8/§13
+  Slice 2 scope — multi-writer ref topology + Pair B + two-pair concurrency). Builds directly
+  on **ADR-030** (Slice 1), which deferred the ref-topology and Pair B to this slice. The two
+  design questions D-A (`brief_version` signed) and D-B (legacy mailbox migration deferred)
+  were **user-APPROVED 2026-06-19**. Slice 3 (strategic loop + T2/T3 co-sign for an escalated
+  effective tier) remains deferred per ADR-030.
+- **Context:** ADR-030 §2 promised the multi-writer hardening — "one git commit per event on
+  `refs/threeway/events` + index ref + expected-old-OID append-CAS push loop" — behind a stable
+  read/iter API. Slice 2 delivers that, plus Pair B (a second builder/verifier pair) and the
+  two-pair concurrency the gate must survive. The slice was **externally audited before
+  execution**: the audit surfaced three correctness blockers (a thread-as-gate that did not
+  exercise a real second process, a key-match-only idempotency that a forged event could exploit,
+  an unvalidated cursor that could silently reset to 0) and five hardening items, all ADOPTED
+  into the plan and re-reviewed.
+- **Decisions:**
+  1. **`refs/threeway/events` is one git commit per event (`RefEventStore`), replacing the
+     Slice-1 file `EventStore` behind the same `append`/`iter_events`/`all_events` interface
+     (§8).** Each event is written as `events/<brief_id>/<id>.json` plus an `index/<seq:08d>`
+     entry in the same commit, so a single ref walk recovers total seq order without reading the
+     working tree. The Slice-1 public read/iter API promised in ADR-030 §2 is preserved exactly,
+     so callers (predicate, gate, reducer) are agnostic to the storage swap.
+  2. **Dual-mode CAS append — authoritative remote push-CAS, local update-ref CAS for
+     co-located/gate use.** The authoritative path is `git push --force-with-lease` to a bare
+     bus ref; on a lease rejection the appender RE-FETCHES the authoritative head, RE-SEQs to
+     `max(seq)+1`, and **RE-SIGNS** — because `seq` is a *signed* field (envelope `_signed_view`),
+     a re-sequenced event whose signature was not regenerated would fail verification, so the
+     retry loop must re-sign, not just re-number. The local `cas_update_ref` mode (no remote)
+     serves co-located single-host runs and the gate's own recompute path.
+  3. **Effectively-once idempotency that VERIFIES, not just key-matches.** On a candidate whose
+     `idempotency_key` collides with a stored event, the store does NOT trust the key: it
+     RECOMPUTES the key from the stored event's fields, VERIFIES the candidate's signature
+     against the *appender's own* registered pubkey (so a forged event signed by an attacker
+     cannot suppress a legitimate later append), and compares an **actor-scoped canonical request
+     fingerprint**. Match → return the stored event (true at-most-once); key-collision with a
+     *different* request → raise **`IdempotencyKeyReused`** (`threeway/refstore.py:55`) rather
+     than silently dropping or overwriting. This closes the audit's "a forged duplicate can
+     censor a real fact" hole.
+  4. **Bounded retries with jitter + stable typed contention errors.** Both the append loop and
+     the cursor loop retry a bounded number of times with jittered backoff (injectable sleeper
+     for deterministic tests), then raise a *stable typed* `AppendContentionExceeded` /
+     `CursorContentionExceeded` (`threeway/refstore.py:51`/`:59`) — never an opaque git error and
+     never an unbounded spin. Typed errors let callers distinguish "lost the race, retry later"
+     from a real fault.
+  5. **Validated monotonic-CAS per-seat cursors (`refs/threeway/cursors/<seat>`).** A cursor
+     advance is rejected if it is negative, beyond the current head seq, or names a seq with no
+     index entry; a malformed cursor blob raises **`CursorCorruptionError`** rather than silently
+     reading as 0 (the audit's "cursor silently resets, seat re-processes from the start" hole).
+     **Cursor design BOUNDARY (carried from review):** the cursor write uses the LOCAL
+     `cas_create_or_update_ref` (`threeway/gitcas.py:171`), NOT the remote push-CAS path that
+     `append` uses — cursors are per-seat *local* progress by design; remote/multi-host cursor
+     publishing is explicitly DEFERRED to a future slice (spec §13). And **owner-only
+     enforcement** (spec §8: a cursor is "writable only by that seat") is a deployment ref-ACL
+     concern — **test-infeasible** in a single local repo, so it is documented as a deployment
+     requirement rather than asserted by the suite.
+  6. **`brief_version` signed (D-A) + a signed `signature_version` discriminator + fail-closed
+     non-destructive `preflight_bus_init`.** Including `brief_version` in the signed set closes a
+     post-sign authorization-redirection vector (an unsigned brief pointer could be swapped after
+     signing). The signed profile is now **14 fields** (`_signed_view` in
+     `threeway/envelope.py:73`), discriminated by a new **signed** `signature_version =
+     "threeway-sign/2"` so a future profile change is detectable inside the signed bytes;
+     `schema_version` stays the wire-format version and is independent. Bus bring-up runs through
+     a **fail-closed, NON-DESTRUCTIVE** `preflight_bus_init` (`threeway/gitcas.py:231`) that
+     ABORTS if any local or remote `refs/threeway/*` already exists (it never deletes) and
+     fails closed on any git error — so a half-initialized or pre-existing bus can never be
+     silently clobbered or partially trusted.
+  7. **F1/F2 gate hardening.** The scope check is now path-segment-boundary aware (a candidate
+     touching `foo_evil/x` no longer passes a `foo/`-scoped check by prefix); and a nonexistent
+     attested SHA REJECTS via both a predicate guard and a gate-level try/except backstop, so
+     `run_gate` (`threeway/gate.py:95`) stays a TOTAL function (every input yields an explicit
+     decision, never an uncaught exception that strands the bus).
+  8. **Legacy `coordination/` markdown mailbox migration DEFERRED (D-B).** Slice 2's Pair B needs
+     only the new threeway keystore seats; migrating the existing four-files-to-sync markdown bus
+     onto `refs/threeway/events` is tracked as the **Slice 2.5 stub**
+     (`docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md`).
+     This keeps Slice 2 honest-scoped and leaves the markdown coordination layer UNTOUCHED, as in
+     ADR-030.
+  9. **Pair B + two-pair concurrency.** The candidate builder is pair-parametrized and emits
+     per-candidate (and per-attestation-sub-kind) event ids, so two pairs running concurrently do
+     NOT collide on the `events/<brief_id>/<id>.json` tree path. The serial merge-queue re-stages
+     a stale loser (the second pair to reach the gate re-derives against the advanced base); a
+     genuine merge conflict aborts the candidate → rework, never a silent or forced overwrite.
+- **Consequences:** the bus is now multi-writer and host-distributable for *events* (cursors and
+  the legacy markdown bus are not yet, by the boundaries above). The signed profile widened 12 →
+  14 fields, so Slice-1 events do not verify under Slice-2 keys without the `signature_version`
+  discriminator — intended, and the reason the discriminator is itself signed. The "verify, don't
+  key-match" idempotency and the typed bounded-retry contract make the contention paths testable
+  with an injected sleeper and a real second process rather than a thread standing in for a
+  process.
+- **Evidence:**
+  `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q`
+  -> `152 passed` (the §11 Slice-2 suite: genuine 2-process append-contention gate, verifying
+  idempotency, validated-cursor corruption/bounds, F1/F2 scope + nonexistent-SHA, two-pair
+  no-collide + serial-merge-queue re-stage + abort-on-conflict rework). `scripts/ci_smoke.py`
+  -> OK (no ceremony; ARCHITECTURE.md doc-anchor gate green).
+- **Cross-refs:** **ADR-030** (Slice 1 — this slice fulfills its §2 deferral); spec
+  `docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md` §8/§13;
+  plan `docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.md`;
+  Slice 2.5 stub `docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md`;
+  ARCHITECTURE.md §13A (threeway/ subsystem);
+  `threeway/` package (`refstore`, `gitcas`, `envelope`, `keys`, `predicate`, `gate`).
+
+## ADR-032 — The verification dispatch is a self-executing, fail-aware, machine-consumable contract
 
 - **Status:** ACCEPTED (implemented on branch `feat/harden-verification-dispatch`:
   `docs/templates/claude/reviewer.md` rewrite, `director-operator.md` + `implementer.md` both
   trees, `scripts/check_no_ceremony.py` R5). Plan
   `docs/superpowers/plans/2026-06-19-harden-verification-dispatch.md`. DEFERRED: the `scripts/`
-  JSON consumer + fabrication-detection re-run + R6.
+  JSON consumer + fabrication-detection re-run + R6. (Originally drafted as ADR-031; renumbered
+  to 032 on merge because Slice-2's ADR-031 landed on `main` first — git is the tiebreaker.)
 - **Context:** an external "Level 4 of 5" assessment of the live Slice-2 verification dispatch
   named 5 weaknesses (prose-only output; over-anchoring to expected impl details; weak evidence
   capture; under-specified trailer; absent failure-handling). An adversarial design pass

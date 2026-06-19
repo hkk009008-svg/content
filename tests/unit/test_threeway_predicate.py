@@ -6,7 +6,7 @@ suite (Task 14-17).
 """
 from threeway.envelope import Event
 from threeway.policy import default_policy
-from threeway.predicate import evaluate, MERGEABLE, PENDING, REJECTED
+from threeway.predicate import evaluate, MAIN_REF, MERGEABLE, PENDING, REJECTED
 from threeway.reducer import reduce
 
 
@@ -16,12 +16,20 @@ BRANCH = "3" * 40     # branch_sha
 
 
 class FakeRepo:
-    """Stand-in for git: fixed head + a fixed changed-paths map."""
-    def __init__(self, head=BASE, diff=("cinema/foo.py",)):
+    """Stand-in for git: fixed head + a fixed changed-paths map.
+
+    rev_parse_map, when given, models existence: a ref/SHA present in the map
+    resolves to its value, anything absent resolves to None (gitcas.rev_parse's
+    contract for a nonexistent commit). When omitted, every ref resolves to head.
+    """
+    def __init__(self, head=BASE, diff=("cinema/foo.py",), rev_parse_map=None):
         self._head = head
         self._diff = list(diff)
+        self._rev_parse_map = rev_parse_map
 
     def rev_parse(self, ref):
+        if self._rev_parse_map is not None:
+            return self._rev_parse_map.get(ref)
         return self._head
 
     def changed_paths(self, base, head):
@@ -204,3 +212,24 @@ def test_rejects_aborted_candidate():
     events.append(_e("candidate_aborted", 13))
     d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == REJECTED and "aborted" in d.reason
+
+
+def test_rejects_sibling_prefix_path_with_no_trailing_slash():
+    # an allowed prefix WITHOUT a trailing slash must not swallow a sibling dir
+    events = _full_event_set()
+    for e in events:
+        if e.kind == "brief":
+            e.payload["allowed_paths"] = ["cinema"]      # no trailing slash
+    repo = FakeRepo(diff=["cinemax/leak.py"])            # sibling — must REJECT
+    d = evaluate("c1", reduce(events), repo, default_policy())
+    assert d.outcome == REJECTED and "allowed_paths" in d.reason
+
+
+def test_rejects_nonexistent_integration_sha():
+    # main_ref + staging_base resolve (so the :53 stale check passes) but the
+    # attested integration_sha resolves to None -> existence guard must REJECT,
+    # never crash changed_paths on a ghost SHA.
+    events = _full_event_set()
+    repo = FakeRepo(rev_parse_map={MAIN_REF: BASE, BASE: BASE})  # INTEG -> None
+    d = evaluate("c1", reduce(events), repo, default_policy())
+    assert d.outcome == REJECTED and "known commit" in d.reason

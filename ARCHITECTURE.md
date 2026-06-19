@@ -1696,6 +1696,81 @@ the attribute doesn't exist). All project knobs MUST flow through
 
 ---
 
+## 13A. Cross-provider seat topology — `threeway/` merge-bus
+
+A self-contained subsystem (NOT part of the video pipeline) that lets a builder
+seat (one LLM provider) and its primary verifier (a *different* provider) collaborate
+without being able to collude: a mechanical merge-gate promotes a candidate to a
+protected ref only when signed, non-colludable facts satisfy a predicate. Slice 1
+(ADR-030) proved the gate single-writer; Slice 2 (ADR-031) made the bus multi-writer
+and added Pair B. See `DECISIONS.md` ADR-030/ADR-031 and the spec
+`docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md`.
+
+### 13A.1 Event bus — `RefEventStore`
+
+`class RefEventStore` (`threeway/refstore.py:80`) stores one git commit per event on
+`refs/threeway/events`: each commit adds `events/<brief_id>/<id>.json` plus an
+`index/<seq:08d>` entry, so a single ref walk recovers total `seq` order without a
+working tree. It exposes the Slice-1 read/iter contract unchanged — `append`
+(`threeway/refstore.py:122`), `iter_events`, `all_events` — so callers are agnostic
+to the storage swap from the Slice-1 file `EventStore`.
+
+`append` is **dual-mode CAS**: authoritative remote `git push --force-with-lease`
+(re-fetch + re-seq + **re-sign** on lease rejection, because `seq` is a signed field),
+or local `cas_update_ref` for co-located/gate use. Idempotency **verifies** rather than
+key-matches — it recomputes the `idempotency_key` from stored fields and checks the
+candidate's signature against the appender's own pubkey, so a forged duplicate cannot
+censor a real append; a key collision with a different request raises
+`IdempotencyKeyReused`. Bounded jittered retries raise typed
+`AppendContentionExceeded` / `CursorContentionExceeded` (never an opaque git error).
+Per-seat cursors (`refs/threeway/cursors/<seat>`) are validated monotonic-CAS — a
+malformed blob raises `CursorCorruptionError`, never a silent 0. **Boundary:** cursor
+writes use the LOCAL `cas_create_or_update_ref` (`threeway/gitcas.py:171`), NOT remote
+push-CAS — per-seat local progress by design; remote cursor publishing and owner-only
+ref-ACL enforcement are deferred (the latter is deployment-level, test-infeasible in a
+single local repo).
+
+### 13A.2 Merge-gate, predicate, git plumbing
+
+`def run_gate` (`threeway/gate.py:95`) recomputes the trusted merge from the *signed*
+base/branch SHAs (never trusting the candidate's attested integration SHA), CAS-writes
+the protected test ref only on a match, and never checks out or executes candidate
+code. It is a TOTAL function: a nonexistent attested SHA REJECTS (predicate guard +
+gate try/except backstop) instead of raising. `def evaluate`
+(`threeway/predicate.py:39`) is the pure predicate it polls; the scope check is
+path-segment-boundary aware. `threeway/gitcas.py` is object-store plumbing only
+(merge-tree, commit-tree, blob/ref CAS, `push_cas`, and the fail-closed
+non-destructive `preflight_bus_init` (`threeway/gitcas.py:231`) that aborts on any
+pre-existing `refs/threeway/*`).
+
+### 13A.3 Signed envelope + key trust root
+
+Events carry an Ed25519 signature over RFC 8785 (JCS) canonical bytes of a fixed
+**14-field** signed view — `def _signed_view` (`threeway/envelope.py:73`) — which adds
+`brief_version` (D-A: closes a post-sign authorization-redirection vector) and a signed
+`signature_version = "threeway-sign/2"` discriminator to the Slice-1 12-field set;
+`schema_version` stays the independent wire-format version. Public-key (not HMAC)
+signing is mandatory so the signature *verifier* (the gate) cannot forge a *signer*.
+The trust root is one committed `<seat>.pub` per seat under
+`coordination/threeway/keys/`; `class PublicKeyRegistry` (`threeway/keys.py:77`) loads
+them, while private keys live OUTSIDE the repo (`THREEWAY_KEYSTORE`).
+
+### 13A.4 Running the suite
+
+The threeway tests spawn real git subprocesses and a second process for the
+append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` prefix**
+(a seat's per-session `GIT_INDEX_FILE` would otherwise corrupt the temp-repo index):
+
+```
+env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
+```
+
+Slice 1 + Slice 2 together: `152 passed`.
+
+*Last verified: 2026-06-19*
+
+---
+
 ## 14. Frontend — React 19 + Vite
 
 ### 14.1 Stack
