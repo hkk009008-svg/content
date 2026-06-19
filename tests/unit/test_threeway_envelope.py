@@ -50,7 +50,7 @@ def test_signed_bytes_excludes_ephemeral_fields():
     ev = _ev()
     sb = signed_bytes(ev)
     assert b"created_at" not in sb
-    assert b"signature" not in sb
+    assert b'"signature"' not in sb
     # but DOES bind the load-bearing identity fields
     assert ev.subject_sha.encode() in sb
     assert ev.payload_digest.encode() in sb
@@ -76,6 +76,34 @@ def test_verify_fails_if_any_signed_field_is_mutated():
     ev = _ev()
     sign_event(ev, priv)
     ev.subject_sha = "b" * 40  # tamper a signed field
+    with pytest.raises(InvalidSignature):
+        verify_event(ev, pub_hex)
+
+
+def test_verify_fails_if_brief_version_is_mutated():
+    priv, pub_hex = keys.generate_keypair()
+    ev = _ev(brief_version=1)
+    sign_event(ev, priv)
+    ev.brief_version = 2                      # redirect brief/cycle_go/freshness lookups
+    with pytest.raises(InvalidSignature):
+        verify_event(ev, pub_hex)
+
+
+def test_signed_bytes_binds_brief_version():
+    ev = _ev(brief_version=7)
+    assert b"brief_version" in signed_bytes(ev)
+
+
+def test_signed_bytes_binds_signature_version():
+    ev = _ev()
+    assert b"signature_version" in signed_bytes(ev)
+
+
+def test_verify_fails_if_signature_version_is_mutated():
+    priv, pub_hex = keys.generate_keypair()
+    ev = _ev()
+    sign_event(ev, priv)
+    ev.signature_version = "threeway-sign/1"  # forge a weaker signature profile
     with pytest.raises(InvalidSignature):
         verify_event(ev, pub_hex)
 

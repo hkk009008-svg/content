@@ -21,6 +21,12 @@ class GateError(Exception):
     pass
 
 
+# Accepted signature PROFILES (the discriminator is itself signed, so it cannot be
+# forged to claim a weaker profile). A load-bearing event presenting an unaccepted
+# signature_version is rejected BEFORE signature verification continues.
+_ACCEPTED_SIG_VERSIONS = {"threeway-sign/2"}
+
+
 def _seat(signer: str) -> str:
     return signer.split(":", 1)[0]
 
@@ -32,6 +38,8 @@ def verify_and_reduce(events, registry_dir, bus_id: str):
         if ev.kind in LOAD_BEARING_KINDS:
             if ev.bus_id != bus_id:
                 raise GateError(f"bus_id mismatch (replay?): {ev.bus_id!r} != {bus_id!r}")
+            if ev.signature_version not in _ACCEPTED_SIG_VERSIONS:
+                raise GateError(f"unaccepted signature_version: {ev.signature_version!r}")
             seat = _seat(ev.signer)
             try:
                 pub = reg.get(seat)
