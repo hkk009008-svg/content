@@ -18,8 +18,7 @@ THREEWAY_KINDS = frozenset({
     "cycle_go", "release_requested", "release_order", "human_approval", "ci_result",
     "event_sent", "event_acknowledged", "event_rejected", "event_timed_out",
     "event_retried", "dead_letter",
-    # plan extension: the gate emits merge_completed for §6.4/§9 idempotency; it is
-    # architecturally required but not yet in the spec §6.2 kind enum.
+    # the gate emits merge_completed for §6.4/§9 idempotency (listed in the §6.2 kind enum).
     "merge_completed",
 })
 

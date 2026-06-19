@@ -171,7 +171,7 @@ event {
           attestation, attestation_revoked, co_sign, re_verify,
           cycle_go, release_requested, release_order, human_approval, ci_result,
           event_sent, event_acknowledged, event_rejected, event_timed_out, event_retried,
-          dead_letter }
+          dead_letter, merge_completed }
   from: seat_id
   to: seat_id | "all"
   subject_sha: 40-hex | null
@@ -189,8 +189,16 @@ event {
 ```
 
 - **Signatures are mandatory** for every load-bearing kind. The signature covers canonical bytes
-  over `{bus_id, schema_version, id, seq, from, to, kind, brief_id, candidate_id, subject_sha,
-  payload_digest, causation_id}`. JSON canonicalization is **normative**. **Public-key** signatures
+  over a fixed **14-field** subset: `{bus_id, schema_version, id, seq, from, to, kind, brief_id,
+  candidate_id, subject_sha, payload_digest, causation_id, brief_version, signature_version}` — the
+  original 12 plus `brief_version` (D-A: the predicate reads it off the envelope to select the
+  governing brief/cycle_go/supersession version, so signing it closes a post-sign
+  authorization-redirection vector) and `signature_version` (Blocker 3: names the signature
+  *profile* and is itself signed so it cannot be forged to claim a weaker profile). `schema_version`
+  remains the **wire** version (`"threeway/1"`, unchanged); `signature_version` (`"threeway-sign/2"`)
+  names the **signature profile** — i.e. *which* subset is signed and how — and the gate rejects an
+  unaccepted `signature_version` before verifying the signature. JSON canonicalization is
+  **normative**. **Public-key** signatures
   (per-seat keypair) are used so a signature *verifier* cannot forge a signer (HMAC would let the
   merge-gate impersonate any seat). Append-only storage protects *history*; signatures
   authenticate the *author*.
@@ -257,6 +265,15 @@ mergeable(candidate) :=
   AND no effective candidate_aborted for candidate.candidate_id
   # every signature valid; every approval unique, authorized, effective, unrevoked
 ```
+
+The `brief_version matches` clauses on the preliminary/release attestations, and the
+`cycle_go covers (brief_id, brief_version, …)` and `brief_version == latest_non_superseded_version`
+clauses, all bind the predicate to the candidate's `brief_version`. Because `brief_version` is now a
+**signed** envelope field (§6.2), that binding is **cryptographic**, not a plaintext/unsigned
+lookup: an attacker who re-signs nothing cannot redirect a candidate's authorization to a different
+brief version after the fact. This closes the post-sign authorization-redirection vector — a
+candidate's governing brief/cycle_go/supersession version is fixed at signing time and cannot be
+swapped without invalidating the signature.
 
 **Three outcomes** (a failed clause is not always a rejection):
 - **PENDING** — valid so far, but an expected approval / co-sign / CI result has not arrived. The
