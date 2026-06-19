@@ -1,7 +1,7 @@
 # About this document
 
 This file is the **agent-agnostic root** for AI coding tools working in this
-repo (Cursor, Aider, Copilot, Continue, Claude Code, etc.).
+repo (Cursor, Aider, Copilot, Continue, Claude Code, Codex, Antigravity, etc.).
 Everything below is the agent-agnostic project guide — canonical project
 facts plus the discipline that ships clean code here.
 
@@ -63,6 +63,27 @@ board:
 `env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave <wave>`
 and
 `env -u GIT_INDEX_FILE .venv/bin/python scripts/protocol_capacity_board.py --wave <wave> --validate-route coordination/mailbox/sent/<event>.md`.
+
+**Antigravity specifically:** Antigravity ("agy", the Gemini-based agentic IDE)
+reads this file as its agent-agnostic source of truth and translates the
+principles into its own mechanisms. In the **three-way cross-provider protocol**
+(`docs/protocol/threeway/`) it holds **no seat** by design — it is off every
+build / verify / integrate / bus-write path — and participates only as a
+human-relayed strategic-reasoner (the dual-chief app axis) or a read-only
+observer. For any work an Antigravity session does, it follows the same operating
+discipline as every other tool here. Its adoption manual + the per-provider
+capability mapping are in
+`docs/protocol/threeway/ANTIGRAVITY-ADOPTION.md`; note that no Antigravity-specific
+config or tooling exists in-repo yet, so its mechanism bindings are marked
+to-confirm there.
+
+**Running all three providers as one system:** Claude + Codex + Antigravity share
+one operating doctrine. The unified statement of the shared rules, the Layer-1
+(cross-provider protocol) vs Layer-2 (portable doctrine) split, and the
+per-provider capability map live in
+[`docs/protocol/threeway/UNIFIED-OPERATING-DOCTRINE.md`](docs/protocol/threeway/UNIFIED-OPERATING-DOCTRINE.md).
+This file remains the principle root; that doc folds in the signed-bus protocol
+and Antigravity.
 
 **Non-Claude agents:** read this file as your source of truth. Translate
 the principles ("fresh context per task", "two-stage review",
@@ -138,6 +159,7 @@ Keep the manual true as the code evolves (same staleness discipline as `ARCHITEC
 | Full process detail (core / orchestration / director-operator / failure-modes) | [docs/protocol/agents/](docs/protocol/agents/) |
 | Place protocol artifacts in the right folder | [docs/protocol/protocol-assembly-map.md](docs/protocol/protocol-assembly-map.md) |
 | Continue the four-seat process from Codex | [docs/protocol/codex/continuation.md](docs/protocol/codex/continuation.md) |
+| Run Codex/Claude/Antigravity as one unified system on the cross-provider protocol | [docs/protocol/threeway/](docs/protocol/threeway/) |
 | Sub-task / implementer prompt body | [docs/templates/agents/](docs/templates/agents/) |
 | Rule provenance (codified SHAs, empirical basis, beneficiary/consent) | [docs/PROTOCOL-RULES-LOG.md](docs/PROTOCOL-RULES-LOG.md) |
 | The CLAUDE/AGENTS operative-split map | [docs/protocol/migration-map-claudemd-split.md](docs/protocol/migration-map-claudemd-split.md) |
