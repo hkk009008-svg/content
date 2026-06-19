@@ -1,17 +1,27 @@
-# HANDOFF — ADR-033 reviewer-result consumer: SHIPPED, PR #18 open (mergeable)
+# HANDOFF — ADR-033 reviewer-result consumer: ✅ MERGED to main (`fe3411db`)
 
-**Date:** 2026-06-20 · **Branch:** `feat/reviewer-result-consumer` · **HEAD:** `9bb70fc3`
-(6 ahead / 0 behind `origin/main`; remote matches) · **PR:** https://github.com/hkk009008-svg/content/pull/18 (OPEN, MERGEABLE)
+**Date:** 2026-06-20 · **Branch:** `feat/reviewer-result-consumer` · **Status:** ✅ **MERGED to `main`**
+via [PR #18](https://github.com/hkk009008-svg/content/pull/18) (merge commit `fe3411db`). All CI green
+(ARCHITECTURE.md §15 smoke / TypeScript / pytest tests/unit/). **Nothing outstanding.**
 
 ## TL;DR — what's the state
 
-ADR-033 (the deferred follow-up of ADR-032 Decision 5) is **built, independently
-verified, committed, merged with `origin/main`, pushed, and sitting in PR #18 awaiting
-review/merge.** There is **no outstanding implementation work.** The next instance's job
-is to **shepherd PR #18 to merge** (address review feedback if any), nothing more on this
-task.
+ADR-033 (the deferred follow-up of ADR-032 Decision 5) is **DONE and MERGED to `main`**
+(merge `fe3411db`, 2026-06-20). Getting there required fixing several **pre-existing,
+unrelated** failures that a long-broken CI gate had masked — see "Merge journey" below.
+**Nothing outstanding for ADR-033.**
 
-## What landed (6 commits, `2a932ac0..9bb70fc3`)
+## Merge journey — what else had to be fixed to reach green (all pre-existing, unrelated to ADR-033)
+
+Making PR #18's CI actually pass surfaced issues the long-broken pytest gate had hidden:
+- **gen4 stale test** (`a92a2389`) — `test_phase_c_video_aspect.py::TestRunwayGen4Model` mocked `urllib.urlretrieve` while the code moved to `performance._net.safe_download`; on a fake URL it cascaded to the gen3a engine and asserted the wrong model/ratio. Fixed the mock boundary.
+- **CI pytest gate was structurally timing out** — `ci.yml` `pytest-unit` had `timeout-minutes: 15`, but the suite ran ~27 min (tests making real network calls), so the job was killed on **every** branch incl. `main` (its runs all show "cancelled"). A check that can never complete is itself ceremony (ADR-028).
+- **lock-protocol branch-determinism** (`d388aae9`) — `test_lock_protocol.py` assumed git's default branch is `main`; CI defaults to `master`, so the `two_clones` fixture left seatB on the wrong branch and the lock-collision the test asserts never happened. Pinned seatB to `main`+upstream; verified 7 passed under **both** `main` and `master`.
+- **offline-suite restoration** (`6b43320c`, the B2 follow-up) — mocked 6 network-touching tests at the boundary the code actually crosses (`safe_download` / `fal_client` / `urllib.urlopen` / …), taking the suite from ~27 min → **~2 min offline (2947 passed, zero sockets)**, restored the CI timeout 40→15, and wired `check_no_ceremony` into CI. The pytest gate is functional again for the first time in a while.
+
+Final merged range = `2a932ac0..6b43320c` (11 commits + the `origin/main` integration merge `db8d7218`).
+
+## What landed (ADR-033 core, 6 commits, `2a932ac0..9bb70fc3`)
 
 | commit | what |
 |---|---|
@@ -67,8 +77,8 @@ launcher from targets. If you "simplify" this, re-run the C1/C2 security tests �
 - Schema contract: `docs/templates/claude/reviewer.md` (`reviewer-result/1`)
 - The consumer CLI: `.venv/bin/python scripts/consume_reviewer_result.py <event.md>` (re-runs pins; tree must be at the reviewed commit) · `--stdin` also supported
 
-## Next actions (in order)
+## Status: DONE — no actions outstanding
 
-1. **Watch PR #18 → merge** when approved (direct-push-to-main is blocked; PR is the path). If review raises findings, address on this branch + re-run the verification battery above before re-pushing.
-2. After merge: nothing further owed for ADR-033. The broader program-hardening campaign (REMEDIATION-INVENTORY, Slice 2.5 migration-plan authoring) is separate work — see the campaign handoffs, not this one.
+1. ✅ **MERGED to `main`** (`fe3411db`, PR #18). ADR-033 core + the four pre-existing-failure fixes above are all on `main`, CI green. This handoff is now an archival record (its filename still says "pr18-open" — historical).
+2. The broader program-hardening campaign (REMEDIATION-INVENTORY, Slice 2.5 migration-plan authoring) is separate work — see the campaign handoffs, not this one.
 3. (Deferred, no date — do NOT action speculatively) ADR-033 Decision 5: promoting the mailbox-level JSON block to MANDATORY is a future decision, gated on reviewers emitting blocks in practice + the consumer being exercised on real events.
