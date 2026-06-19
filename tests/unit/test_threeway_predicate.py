@@ -204,3 +204,14 @@ def test_rejects_aborted_candidate():
     events.append(_e("candidate_aborted", 13))
     d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == REJECTED and "aborted" in d.reason
+
+
+def test_rejects_sibling_prefix_path_with_no_trailing_slash():
+    # an allowed prefix WITHOUT a trailing slash must not swallow a sibling dir
+    events = _full_event_set()
+    for e in events:
+        if e.kind == "brief":
+            e.payload["allowed_paths"] = ["cinema"]      # no trailing slash
+    repo = FakeRepo(diff=["cinemax/leak.py"])            # sibling — must REJECT
+    d = evaluate("c1", reduce(events), repo, default_policy())
+    assert d.outcome == REJECTED and "allowed_paths" in d.reason
