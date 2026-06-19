@@ -26,7 +26,7 @@ Spec §8 folds two things together: the *new* `threeway/` event bus (this slice'
 - **Shadow then retire** `events/`+`index/` alongside `mailbox/sent/` (read-only projection first), **no dual-write authority** at any point.
 - **Gate:** the legacy-bus checkers (`check_coordination.py`, `status.py`) stay green across the seat additions; cursor backfill is reversible; no event lost in the shadow→authority cutover.
 
-This plan does **not** create the Slice 2.5 plan doc (that is authored after Slice 2's gate is green, per the §11 boundary rule); it records the scope so nothing is dropped.
+Slice 2.5 is now a **separately trackable artifact** (audit Issue 8): the tracking stub `docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md` (identifier `threeway-slice2.5-legacy-bus-migration`) carries owner, scope, non-goals, prerequisites, migration & rollback policy, shadow/canary requirements, the acceptance gate, and the relationship to Slices 2/3. The full TDD plan is authored into it only after Slice 2's gate is green (§11 boundary rule); the stub ensures nothing is dropped and the deferral is reviewable on its own.
 
 ---
 
@@ -60,7 +60,7 @@ This plan does **not** create the Slice 2.5 plan doc (that is authored after Sli
 | `threeway/keys_bootstrap.py` | **modify** (`SEATS` += director2/operator2/coordinator2) | Provision the new seats' keypairs. |
 | `DECISIONS.md` | **append** ADR-031 | Slice-2 design record. |
 | `ARCHITECTURE.md` | **add** a `threeway/` section | The package is currently undocumented in the truth file (0 mentions). |
-| `docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md` | **modify** §6.2/§6.3 | Reconcile `merge_completed` enum + the 13-field signed set. |
+| `docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md` | **modify** §6.2/§6.3 | Reconcile `merge_completed` enum + the 14-field signed set. |
 | `tests/unit/test_threeway_gitcas.py` | **modify** | Cover the new plumbing. |
 | `tests/unit/test_threeway_refstore.py` | **create** | `RefEventStore` + cursors + the 2-process race. |
 | `tests/unit/test_threeway_predicate.py` | **modify** | F1 + F2 unit pins. |
@@ -300,7 +300,7 @@ In `threeway/envelope.py`, append to the dict returned by `_signed_view` (after 
         "brief_version": ev.brief_version,
 ```
 
-Then sync **every `12`/`12-field` occurrence (4 sites)** that the file declares as the single source of truth, so they cannot drift: the module docstring (envelope.py:~6-8), the comment block (envelope.py:~25-29), the `_signed_view` docstring (`"""Return the 12-field dict…"""` at envelope.py:~69), and **move `brief_version` out of** the "intentionally NOT signed" comment (envelope.py:~62-67, which also says "12 fields in `_signed_view`"). Each must now read the 13-field set including `brief_version`. (`idempotency_key` already references `brief_version` as a fallback subject — no change there; `canonicalize` serializes `None` deterministically so null-`brief_version` events still sign/verify.)
+Then sync **every `12`/`12-field` occurrence (4 sites)** that the file declares as the single source of truth, so they cannot drift: the module docstring (envelope.py:~6-8), the comment block (envelope.py:~25-29), the `_signed_view` docstring (`"""Return the 12-field dict…"""` at envelope.py:~69), and **move `brief_version` out of** the "intentionally NOT signed" comment (envelope.py:~62-67). After **this task plus Step 3b** the signed set is **14 fields** = the 12 original + `brief_version` (this step, D-A) + `signature_version` (Step 3b, Blocker 3); update the four prose sites to read **14** and list both new fields. (`idempotency_key` already references `brief_version` as a fallback subject — no change there; `canonicalize` serializes `None` deterministically so null-`brief_version` events still sign/verify.)
 
 - [ ] **Step 4: Run the envelope suite**
 
@@ -314,16 +314,55 @@ git add -- threeway/envelope.py tests/unit/test_threeway_envelope.py
 git commit -m "fix(threeway): sign brief_version — close post-sign authorization redirect (F3/D-A)" -- threeway/envelope.py tests/unit/test_threeway_envelope.py
 ```
 
-**Signature-schema change policy (no migration — reset, because no persistent events exist).** Adding a 13th signed field changes the signed-bytes schema, so events signed under the old 12-field set would not verify under the new one. **There is nothing to migrate:** the threeway bus has **no persisted production events** — the committed trust root `coordination/threeway/keys/` holds only `README.md` (no `.pub`), there is no `refs/threeway/events` ref, and every Slice-1 store is an ephemeral per-test directory (re-built from `seatkit`/`live_repo` fixtures each run). So the policy is an explicit **reset**: the 13-field set is the normative signed schema as of Slice 2; pre-existing signatures (which exist only inside test runs that re-sign live) are not carried forward. The `schema_version` field (`threeway/1`, `__init__.py:11`, itself a signed field) is the forward lever **if** a future signed-set change ever ships against a *deployed* bus — then the gate would dual-verify by `schema_version` or require a bus drain. For Slice 2 that machinery is unnecessary and deliberately not built. **Do NOT bump `schema_version` for this change** — bumping would force-edit every `"threeway/1"` literal across the builders/tests for zero benefit while no old events exist to distinguish. (Record this policy in ADR-031, Task 18.)
+**Signature-schema change policy — VERSION the discriminator + FAIL-CLOSED preflight (revised per audit Blocker 3).** Changing the canonical signed bytes while keeping `schema_version = "threeway/1"` would make an old writer and a new verifier disagree about what `"threeway/1"` means — a mixed-version ambiguity that "no persisted events" reduces in cost but does **not** resolve. Two required changes:
 
-### Task 4: Spec reconciliation (doc-only) — `merge_completed` enum + 13-field signed set
+1. **Add a `signature_version` discriminator (Task 3, Step 3b).** Add a new signed field `signature_version: str = "threeway-sign/2"` to `Event` and **include it in `_signed_view`** (so the 14-field profile = the 12 original + `brief_version` + `signature_version`, and the discriminator itself cannot be forged to claim a weaker profile). `schema_version` stays `"threeway/1"` as the envelope **wire** version (the field shape is unchanged); `signature_version` names the **signature profile** (which subset is signed). Because the field has a default, existing event constructions don't change — only `_signed_view` + serde + the three prose lists. The gate **rejects** any load-bearing event whose `signature_version` is not in the accepted set `{"threeway-sign/2"}` (add this check next to the bus_id check in `gate.verify_and_reduce`), so a stray old-profile event is detectably mis-versioned, never silently mis-verified. *(This is the lower-blast-radius audit option — it avoids churning every `"threeway/1"` literal across ~14 Slice-1 test files. Bumping `schema_version` to `"threeway/2"` is the equivalent alternative.)*
+
+2. **Initialization is FAIL-CLOSED and NON-DESTRUCTIVE (new Task 3c).** "No persisted events" must be *verified at init*, not assumed, and never repaired by deletion. Implement `preflight_bus_init(repo, remote=None)`:
+   - enumerate `refs/threeway/*` **locally** (`git for-each-ref refs/threeway/`) **and on the remote** (`git ls-remote <remote> 'refs/threeway/*'`) when a remote is configured;
+   - **if any `refs/threeway/{events,cursors/*,test-main}` state exists → ABORT** with a stable `BusInitRefusedError` that requires an explicit migration decision (a `force=True`/`--migrated` acknowledgement) before proceeding; **never delete an event or cursor ref**;
+   - absence of `.pub` files in the trust root is **not** accepted as proof of no signed state — only the ref enumeration above is;
+   - if (and only if) no `refs/threeway/*` exists → initialize the `"threeway-sign/2"` signature profile.
+   This is the reset policy stated fail-closed: a fresh deployment proceeds; a deployment with *any* prior bus state stops and asks a human. (Record both in ADR-031, Task 18.)
+
+- [ ] **Step 3b — add the `signature_version` discriminator.** Add `signature_version: str = "threeway-sign/2"` to `Event` (envelope.py), include it in `_signed_view` (now 14 fields), and serialize/deserialize it (`to_json_obj`/`from_json_obj`). Add the reject in `gate.verify_and_reduce`, **inside the `if ev.kind in LOAD_BEARING_KINDS:` block and BEFORE `verify_event`** so every load-bearing event is still signature-verified: `if ev.signature_version not in _ACCEPTED_SIG_VERSIONS: raise GateError(...)`. *(Note: the version reject is a legibility layer; the real forgery defense is the signature itself — an old-12-field-profile event fails `verify_event` directly because the canonical bytes differ, verified empirically. A forged JSON that omits `signature_version` deserializes to the accepted default but still fails `verify_event`.)* Pins: `test_signed_bytes_binds_signature_version`, `test_verify_fails_if_signature_version_is_mutated`, `test_gate_rejects_unknown_signature_version`. **One existing assertion MUST be tightened (the field name `signature_version` contains the substring `signature`):** in `tests/unit/test_threeway_envelope.py:53` change `assert b"signature" not in sb` → `assert b'"signature"' not in sb` (the ephemeral `signature` *field key* is still excluded; the new signed `signature_version` key is tolerated). With that one-line change the full 93-test Slice-1 suite stays green (verified by review); add `tests/unit/test_threeway_envelope.py` to this step's commit. Run the full threeway suite green.
+- [ ] **Step 3c — `preflight_bus_init` (fail-closed, non-destructive).** Tests in a new `tests/unit/test_threeway_preflight.py`:
+
+```python
+def test_preflight_ok_on_empty_repo(tmp_path):
+    r = _new_repo(tmp_path)
+    preflight_bus_init(r)                                   # no refs/threeway/* -> OK, no raise
+
+def test_preflight_aborts_when_events_ref_exists(tmp_path):
+    r = _new_repo(tmp_path)
+    head = _git(r, "rev-parse", "HEAD").stdout.strip()
+    _git(r, "update-ref", "refs/threeway/events", head)     # stray prior state
+    with pytest.raises(BusInitRefusedError):
+        preflight_bus_init(r)
+    # NON-DESTRUCTIVE: the ref still exists after the refusal
+    assert _git(r, "rev-parse", "refs/threeway/events").stdout.strip() == head
+
+def test_preflight_checks_remote_refs(tmp_path):
+    bare = _new_bare(tmp_path / "bus.git"); r = _clone(bare, tmp_path / "c")
+    head = _git(r, "rev-parse", "HEAD").stdout.strip()
+    _git(r, "push", "origin", f"{head}:refs/threeway/events")   # state on the REMOTE only
+    with pytest.raises(BusInitRefusedError):
+        preflight_bus_init(r, remote="origin")              # must inspect the remote, not just local
+
+def test_preflight_force_acknowledges_migration(tmp_path):
+    r = _new_repo(tmp_path)
+    _git(r, "update-ref", "refs/threeway/events", _git(r, "rev-parse", "HEAD").stdout.strip())
+    preflight_bus_init(r, force=True)                       # explicit migration decision -> proceeds, still no delete
+```
+
+### Task 4: Spec reconciliation (doc-only) — `merge_completed` enum + 14-field signed set
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md` (§6.2 lines ~169-174 enum; §6.2 signed-set text ~191-193; §6.3 ~240-256)
 - Modify: `threeway/__init__.py:21-23` (delete the now-resolved gap note)
 
 - [ ] **Step 1: Edit the spec §6.2 kind enum** — append `merge_completed` to the list (currently ends `… event_retried, dead_letter }`).
-- [ ] **Step 2: Edit the spec §6.2 signed-set text** (~lines 191-193) — state 13 fields including `brief_version`, matching Task 3.
+- [ ] **Step 2: Edit the spec §6.2 signed-set text** (~lines 191-193) — state the **14**-field signed set including `brief_version` (D-A) and `signature_version` (Blocker 3), matching Task 3 + Step 3b.
 - [ ] **Step 3: Edit spec §6.3** — note the attestation/predicate brief+version binding is now cryptographic (signed `brief_version`), not a plaintext lookup.
 - [ ] **Step 4: Remove the gap note** at `threeway/__init__.py:21-23` ("not yet in the spec §6.2 kind enum") — the enum now includes it.
 - [ ] **Step 5: Verify smoke + commit**
@@ -333,7 +372,7 @@ Run: `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_
 
 ```bash
 git add -- docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md threeway/__init__.py
-git commit -m "docs(threeway): spec §6.2/§6.3 — add merge_completed enum + 13-field signed set" -- docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md threeway/__init__.py
+git commit -m "docs(threeway): spec §6.2/§6.3 — add merge_completed enum + 14-field signed set" -- docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md threeway/__init__.py
 ```
 
 ---
@@ -358,6 +397,14 @@ def _new_repo(tmp_path):
     (r / "base.txt").write_text("base\n")
     _git(r, "add", "-A"); _git(r, "commit", "-q", "-m", "base")
     return r        # NOTE: returns the repo PATH only (not the fixture's tuple)
+
+def _new_bare(path):                       # the authoritative bus remote (spec §8)
+    _git(path.parent, "init", "--bare", "-q", str(path)); return path
+
+def _clone(bare, dest):                    # a seat's working clone of the authority
+    _git(dest.parent, "clone", "-q", str(bare), str(dest))
+    _git(dest, "config", "user.email", "t@e.st"); _git(dest, "config", "user.name", "t")
+    return dest
 ```
 
 - [ ] **Step 1: Failing test**
@@ -519,14 +566,49 @@ def commit_on(repo, tree_oid: str, parent: str | None, message: str) -> str:
 _ZERO_OID = "0" * 40
 
 def cas_create_or_update_ref(repo, ref: str, new_oid: str, expected_old: str | None) -> bool:
-    """Atomic ref CAS. expected_old=None creates the ref (must not exist, zero-OID old)."""
+    """LOCAL atomic ref CAS (single-repo case). expected_old=None creates the ref."""
     old = expected_old if expected_old is not None else _ZERO_OID
     p = _run(repo, "update-ref", ref, new_oid, old, check=False)
     return p.returncode == 0
+
+
+# ---- remote authoritative-bus primitives (spec §8: expected-old-OID CAS PUSH) ----
+
+def fetch_ref(repo, remote: str, ref: str) -> str | None:
+    """Fetch <ref> from the authoritative remote into the same ref locally; return the
+    fetched tip OID (None if the remote ref does not exist). The retry path MUST call
+    this before reading the tip / scanning idempotency, so it sees authoritative state."""
+    _run(repo, "fetch", "-q", remote, f"+{ref}:{ref}", check=False)
+    return rev_parse(repo, ref)
+
+
+def push_cas(repo, remote: str, commit: str, ref: str, expected_old: str | None) -> bool:
+    """Expected-old-OID CAS PUSH (the real append mechanism). Returns True iff the
+    remote ref was exactly expected_old and is now `commit`. Git rejects a non-ff /
+    lease-mismatch -> False (a competitor advanced it; caller re-fetches + re-seqs +
+    re-signs + retries)."""
+    if expected_old is None:                       # create: must not exist on the remote
+        p = _run(repo, "push", remote, f"{commit}:{ref}", check=False)
+    else:                                          # update: force-with-lease = explicit expected-old
+        p = _run(repo, "push", f"--force-with-lease={ref}:{expected_old}",
+                 remote, f"{commit}:{ref}", check=False)
+    return p.returncode == 0
+
+
+def for_each_ref(repo, pattern: str) -> list[str]:
+    """Local ref names under a glob (e.g. 'refs/threeway/*'). [] if none."""
+    p = _run(repo, "for-each-ref", "--format=%(refname)", pattern, check=False)
+    return [ln for ln in p.stdout.splitlines() if ln]
+
+
+def ls_remote_refs(repo, remote: str, pattern: str) -> list[str]:
+    """Remote ref names under a glob (authoritative-state probe for preflight). [] if none."""
+    p = _run(repo, "ls-remote", remote, pattern, check=False)
+    return [ln.split("\t", 1)[1] for ln in p.stdout.splitlines() if "\t" in ln]
 ```
 
-- [ ] **Step 4: Run → PASS.** Confirm `build_tree_with` leaves no `*.idx` files (the `finally` removes the scratch index).
-- [ ] **Step 5: Commit** (`feat(threeway): gitcas tree/commit/ref-CAS plumbing for the event ref`).
+- [ ] **Step 4: Run → PASS.** Confirm `build_tree_with` leaves no `*.idx` files; add tests for `push_cas` create/update/reject against a `_new_bare` remote + `_clone`, and `fetch_ref`/`for_each_ref`/`ls_remote_refs` against the same.
+- [ ] **Step 5: Commit** (`feat(threeway): gitcas object-store + remote push-CAS plumbing for the event ref`).
 
 ### Task 7: chunk close — gitcas suite + smoke
 
@@ -544,7 +626,11 @@ def cas_create_or_update_ref(repo, ref: str, new_oid: str, expected_old: str | N
 
 **Files:** Create `threeway/refstore.py`; Test `tests/unit/test_threeway_refstore.py`.
 
-**Design:** one commit per event on `refs/threeway/events`; commit tree adds `events/<brief_id>/<id>.json` (the signed event JSON) + `index/<seq>` (`{uuid, path, object_digest}`). `append` reads the tip, allocates `seq = max(index seqs)+1`, sets `ev.seq`, **signs**, builds the extending tree, commits with parent=tip, and CAS-pushes with `expected_old=tip`. On a **lost-CAS** (a competitor advanced the tip) it re-reads the tip, re-allocates `seq`, **re-signs** (seq is in the signed bytes), and retries with bounded backoff. **Ambiguous-push idempotency (effectively-once, spec §6.2):** at the top of every loop iteration `append` scans for an event with the same `idempotency_key` (which excludes `seq` + ephemeral fields, so a re-signed retry of the *same logical fact* has the *same* key); if found it returns the persisted event instead of double-appending — so a push whose ack was lost, a crash-after-CAS-before-return, or a timed-out retry all de-duplicate. This makes `append` safe to retry under ambiguity.
+**Design (revised per audit Blockers 1/2, Issues 5/6).** One commit per event on `refs/threeway/events`; the commit tree adds `events/<brief_id>/<id>.json` (signed event JSON) + `index/<seq>` (`{uuid, path, object_digest}`). `RefEventStore(repo, remote=None, max_attempts=…)` has **two modes**:
+- **Remote (authoritative, spec §8):** `remote` names a bare authoritative bus repo. `append` **fetches** the authoritative `events` ref, reads the tip, allocates `seq`, **signs**, builds the extending tree, commits, and **push-CAS** (`gitcas.push_cas`, force-with-lease `expected_old=tip`). On rejection (a competitor advanced the remote) it **re-fetches authoritative state, re-allocates `seq`, re-signs, and retries**. This is the only mode that can exhibit a genuine 2-process race or an ambiguous push, so the genuine-race + ambiguous-recovery tests (Task 9) use it.
+- **Local (co-located, single shared repo):** `remote=None` → atomic `update-ref` CAS in one repo. The simple unit tests and the in-process gate use this. (§13 multi-host concurrency is future; a single bare authority with co-located clones is *not* multi-host and is in-scope.)
+
+**Idempotency = effectively-once, but key-match ALONE is NOT sufficient (Blocker 1).** Because `idempotency_key` (spec §6.2) omits `to`/`candidate_id`/`causation_id`, two *different* logical requests can collide on one key. So before de-duplicating, `append`: (1) **fetches authoritative state** (remote mode) so the scan sees a push that landed-but-wasn't-acked; (2) finds candidates by **recomputing** `idempotency_key` from each stored event's fields (never trusting the serialized value); (3) **verifies each candidate's signature** against the appender's own public key (derived from `private_key`) — an unsigned/forged event cannot suppress a legitimate append; (4) compares an actor-scoped **canonical request fingerprint** (`_request_fingerprint`, a JCS hash over sender/recipient/kind/brief_id/candidate_id/subject_sha/brief_version/causation_id/payload_digest — *not* the uuid). **Same key + same fingerprint → return the existing event; same key + different fingerprint → raise `IdempotencyKeyReused`.** Retries are **bounded** (`max_attempts`) with exponential backoff + jitter and raise a stable `AppendContentionExceeded` on exhaustion; an injectable `sleeper` lets tests avoid real sleeping (Issue 6).
 
 - [ ] **Step 1: Failing tests (interface parity with `EventStore`)**
 
@@ -555,7 +641,10 @@ Define the file's inline helpers first (no shared conftest). Copy `_env`/`_git`/
 import os, subprocess, pytest
 from threeway import keys
 from threeway.envelope import Event, verify_event
-from threeway.refstore import RefEventStore, BusContentionError
+from threeway.refstore import (RefEventStore, AppendContentionExceeded,
+                               CursorContentionExceeded, CursorCorruptionError,
+                               IdempotencyKeyReused)
+from threeway.envelope import sign_event, to_json_obj, idempotency_key
 
 # _env / _git / _new_repo: copy verbatim from test_threeway_gitcas.py (Task 5 Step 0)
 
@@ -564,8 +653,7 @@ def _unsigned(id="e", kind="attestation", signer="operator:claude:s1", **over):
                 sender="operator", recipient="all", signer=signer, payload={"k": id},
                 brief_id="b1", brief_version=1)
     base.update(over)
-    return Event(**base)
-# ----
+    return Event(**base)        # signature_version defaults to "threeway-sign/2" (Blocker 3)
 
 def test_append_assigns_monotonic_seq_from_one(tmp_path):
     r = _new_repo(tmp_path)
@@ -599,68 +687,107 @@ def test_seq_persists_across_store_reopen(tmp_path):
 - [ ] **Step 3: Implement `RefEventStore`**
 
 ```python
-"""RefEventStore — the spec §8 event-sourced substrate.
+"""RefEventStore — the spec §8 event-sourced substrate (remote push-CAS or local).
 
-One git commit per event on EVENTS_REF; the commit tree adds the signed event
-JSON (events/<brief_id>/<id>.json) and its index entry (index/<seq:08d>).
-seq is allocated from the ref tip and the event is RE-SIGNED on every CAS retry
-(seq is in the signed bytes). Same public interface as threeway.store.EventStore;
-iter_events()/all_events() are RAW readers (no signature verify — that stays the
-gate's chokepoint).
+One git commit per event on EVENTS_REF; the tree adds the signed event JSON
+(events/<brief_id>/<id>.json) + its index entry (index/<seq:08d>). seq is allocated
+from the AUTHORITATIVE tip and the event is RE-SIGNED on every retry (seq is signed).
+iter_events()/all_events() are RAW readers (no signature verify — that's the gate's
+chokepoint); idempotency dedup, however, DOES verify (a forged event must not be able
+to suppress a legitimate append).
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import random
 import time
 
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from threeway import gitcas
-from threeway.envelope import (Event, from_json_obj, idempotency_key,
-                               sign_event, to_json_obj)
+from threeway import gitcas, keys
+from threeway.canon import canonicalize
+from threeway.envelope import (Event, from_json_obj, idempotency_key, payload_digest,
+                               sign_event, to_json_obj, verify_event)
 
 EVENTS_REF = "refs/threeway/events"
-_MAX_RETRIES = 50
+_DEFAULT_MAX_ATTEMPTS = 50
 _BACKOFF_BASE = 0.005
+_BACKOFF_CAP = 0.5
 
 
 class BusContentionError(RuntimeError):
     pass
 
+class AppendContentionExceeded(BusContentionError):
+    pass
+
+class IdempotencyKeyReused(ValueError):
+    pass
+
+
+def _request_fingerprint(ev: Event) -> str:
+    # actor-scoped CANONICAL request hash — the complete logical request, NOT just the
+    # idempotency_key formula (which omits to/candidate_id/causation_id). Excludes uuid,
+    # seq, signature, created_at so a re-minted retry of the same fact still matches.
+    view = {
+        "from": ev.sender, "to": ev.recipient, "kind": ev.kind,
+        "brief_id": ev.brief_id, "candidate_id": ev.candidate_id,
+        "subject_sha": ev.subject_sha, "brief_version": ev.brief_version,
+        "causation_id": ev.causation_id, "payload_digest": payload_digest(ev),
+    }
+    return hashlib.sha256(canonicalize(view)).hexdigest()
+
 
 class RefEventStore:
-    def __init__(self, repo, events_ref: str = EVENTS_REF):
+    def __init__(self, repo, remote: str | None = None, events_ref: str = EVENTS_REF,
+                 max_attempts: int = _DEFAULT_MAX_ATTEMPTS, sleeper=time.sleep):
         self._repo = repo
+        self._remote = remote
         self._ref = events_ref
+        self._max_attempts = max_attempts
+        self._sleep = sleeper                      # test seam: pass lambda _: None
 
-    def _tip(self) -> str | None:
+    def _sync(self) -> str | None:
+        # remote mode: pull AUTHORITATIVE state (Issue 5 — the retry path must fetch
+        # authoritative before scanning idempotency). local mode: the repo IS authority.
+        if self._remote is not None:
+            return gitcas.fetch_ref(self._repo, self._remote, self._ref)
         return gitcas.rev_parse(self._repo, self._ref)
 
-    def _find_by_idempotency_key(self, key: str) -> Event | None:
-        # idempotency_key is seq-independent (spec §6.2: excludes seq + ephemeral
-        # fields), so a re-signed retry of the SAME logical fact has the SAME key.
+    def _find_verified_idempotent(self, target_key: str, my_pub_hex: str) -> Event | None:
+        # Blocker 1: recompute the key from stored fields (never trust the serialized
+        # value), and only a VALIDLY-SIGNED event (by THIS actor's key) can be a match —
+        # a forged/unsigned event with the same key cannot suppress a legitimate append.
         for ev in self.iter_events():
-            if idempotency_key(ev) == key:
-                return ev
+            if idempotency_key(ev) != target_key:
+                continue
+            try:
+                verify_event(ev, my_pub_hex)
+            except InvalidSignature:
+                continue
+            return ev
         return None
+
+    def _backoff(self, attempt: int) -> float:
+        base = min(_BACKOFF_CAP, _BACKOFF_BASE * (2 ** attempt))
+        return base * (0.5 + random.random() * 0.5)            # full-ish jitter
 
     def append(self, ev: Event, private_key: Ed25519PrivateKey,
                _before_cas=None, _after_cas=None) -> Event:
-        # _before_cas / _after_cas: test-only seams (None in production) to drive a
-        # race / simulate a lost ack. AMBIGUOUS-PUSH IDEMPOTENCY: the key is computed
-        # from the logical fields BEFORE seq assignment, so a retry after a push whose
-        # ack was lost (or a crash-after-CAS-before-return) is de-duplicated below.
         target_key = idempotency_key(ev)
-        for attempt in range(_MAX_RETRIES):
-            # effectively-once: if this exact logical fact already landed (a prior CAS
-            # succeeded but we didn't observe it), return the persisted event — never
-            # double-append. This is what makes an ambiguous push safe to retry.
-            existing = self._find_by_idempotency_key(target_key)
+        target_fp = _request_fingerprint(ev)
+        my_pub_hex = keys.public_hex(private_key)              # derive from the priv (add in keys.py)
+        for attempt in range(self._max_attempts):
+            tip = self._sync()                                # authoritative tip
+            existing = self._find_verified_idempotent(target_key, my_pub_hex)
             if existing is not None:
-                return existing
+                if _request_fingerprint(existing) == target_fp:
+                    return existing                           # same actor + same request -> dedup
+                raise IdempotencyKeyReused(                   # same key, DIFFERENT request
+                    f"idempotency_key collides with a different request: {target_key}")
 
-            tip = self._tip()
             seqs = gitcas.list_index_seqs(self._repo, tip) if tip else []
             ev.seq = (max(seqs) + 1) if seqs else 1
             sign_event(ev, private_key)                       # signs over the NEW seq
@@ -676,25 +803,28 @@ class RefEventStore:
             blob_e = gitcas.write_blob(self._repo, event_bytes)
             blob_i = gitcas.write_blob(self._repo, index_bytes)
             base_tree = gitcas.tree_of(self._repo, tip) if tip else None
-            tree = gitcas.build_tree_with(
-                self._repo, base_tree,
-                [(event_path, blob_e), (index_path, blob_i)])
+            tree = gitcas.build_tree_with(self._repo, base_tree,
+                                          [(event_path, blob_e), (index_path, blob_i)])
             commit = gitcas.commit_on(self._repo, tree, tip,
                                       f"threeway event {ev.seq:08d}")
 
             if _before_cas is not None:
                 _before_cas(attempt)                          # competitor slips in here
 
-            if gitcas.cas_create_or_update_ref(self._repo, self._ref, commit, tip):
+            if self._remote is not None:
+                won = gitcas.push_cas(self._repo, self._remote, commit, self._ref, tip)
+            else:
+                won = gitcas.cas_create_or_update_ref(self._repo, self._ref, commit, tip)
+            if won:
                 if _after_cas is not None:
-                    _after_cas(attempt)        # test seam: simulate a lost ack post-CAS
+                    _after_cas(attempt)        # seam: simulate a lost ack AFTER it landed
                 return ev
-            time.sleep(_BACKOFF_BASE * (2 ** min(attempt, 6)))  # re-loop: re-seq + re-sign
-        raise BusContentionError(f"event ref CAS lost {_MAX_RETRIES}x")
+            self._sleep(self._backoff(attempt))               # re-loop: re-fetch + re-seq + re-sign
+        raise AppendContentionExceeded(f"append lost CAS {self._max_attempts}x for {ev.id}")
 
     def iter_events(self):
-        tip = self._tip()
-        if tip is None:
+        tip = gitcas.rev_parse(self._repo, self._ref)         # read local ref (call _sync() first
+        if tip is None:                                       # in remote mode to refresh it)
             return
         for seq in gitcas.list_index_seqs(self._repo, tip):
             idx = gitcas.read_blob_at(self._repo, tip, f"index/{seq:08d}")
@@ -707,10 +837,12 @@ class RefEventStore:
             yield from_json_obj(json.loads(raw))
 
     def all_events(self) -> list[Event]:
+        if self._remote is not None:
+            self._sync()                                      # refresh local ref from authority
         return list(self.iter_events())
 ```
 
-`gitcas.tree_of` (added in Chunk 2 Task 6) resolves `tip^{tree}` to the parent tree OID for `build_tree_with`'s base. **Do NOT** use `gitcas.rev_parse` for this — it hardcodes a `^{commit}` peel, so `rev_parse(repo, f"{tip}^{{tree}}")` becomes `{tip}^{tree}^{commit}` and errors (returns `None`), silently producing an empty base tree and dropping all prior events. The empirical check confirming this is in the technical review.
+Notes for the implementer: (a) add `keys.public_hex(priv)` to `threeway/keys.py` — derive the raw Ed25519 public hex from a private key (`priv.public_key().public_bytes(Raw, Raw).hex()`), matching the registry's `.pub` format. (b) `gitcas.tree_of` (Chunk 2) resolves `tip^{tree}` for `build_tree_with`'s base — do NOT use `gitcas.rev_parse` (its `^{commit}` peel breaks on `^{tree}`). (c) the simple Step-1 tests run in **local mode** (`remote=None`); the genuine-race + ambiguous tests (Task 9) construct `RefEventStore(clone, remote="origin")`.
 
 - [ ] **Step 4: Run → PASS.**
 - [ ] **Step 5: Commit** (`feat(threeway): RefEventStore — one-commit-per-event ref bus with append-CAS`).
@@ -719,19 +851,16 @@ class RefEventStore:
 
 **Files:** Test `tests/unit/test_threeway_refstore.py`.
 
-This task ships FOUR tests covering the §11 Slice 2 DoD's "no lost/duplicated event under a 2-process race" plus the effectively-once contract: **(9a)** a *deterministic forced-CAS-loss* test, **(9b)** a *genuine multi-process race* test, **(9c)** a timed-out-retry idempotency test, **(9d)** a crash-after-CAS-before-ack idempotency test.
+Test imports for this section: add `import multiprocessing as mp` to the file header (the `RefEventStore`/error-type/`idempotency_key`/`sign_event`/`to_json_obj` imports are already in the Task-8 header above).
 
-- [ ] **Step 1a — deterministic forced-CAS-loss (one retry, via the `_before_cas` seam):**
+- [ ] **Step 1a — deterministic forced-CAS-loss (local mode, one retry via the `_before_cas` seam):**
 
 ```python
 def test_concurrent_append_loses_no_event_and_re_signs(tmp_path):
     r = _new_repo(tmp_path)
-    pa, pua = keys.generate_keypair()
-    pb, pub_b = keys.generate_keypair()
-    store = RefEventStore(r)
-    # writer B appears exactly once, during writer A's first build, advancing the tip
-    fired = {"n": 0}
-    competitor = RefEventStore(r)
+    pa, pua = keys.generate_keypair(); pb, pub_b = keys.generate_keypair()
+    store = RefEventStore(r, sleeper=lambda _: None)
+    fired = {"n": 0}; competitor = RefEventStore(r)
     def inject(attempt):
         if fired["n"] == 0:
             fired["n"] += 1
@@ -741,80 +870,165 @@ def test_concurrent_append_loses_no_event_and_re_signs(tmp_path):
     assert sorted(evs) == ["A", "B"]                 # neither lost, neither duplicated
     assert {evs["A"].seq, evs["B"].seq} == {1, 2}    # distinct, contiguous
     assert a.seq == 2                                # A re-seq'd after losing the first CAS
-    verify_event(evs["A"], pua)                      # A re-signed over seq=2 (does not raise)
-    verify_event(evs["B"], pub_b)
+    verify_event(evs["A"], pua); verify_event(evs["B"], pub_b)   # A re-signed over seq=2
 
-def test_append_raises_bus_contention_after_max_retries(tmp_path):
-    r = _new_repo(tmp_path)
-    p, _ = keys.generate_keypair(); op, _ = keys.generate_keypair()
+def test_append_raises_bounded_AppendContentionExceeded(tmp_path):
+    # bounded retries -> a STABLE typed error (not a livelock); no real sleeping in the test
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair(); op, _ = keys.generate_keypair()
     other = RefEventStore(r)
-    def always_steal(attempt):
-        other.append(_unsigned(id=f"x{attempt}"), op)   # advance the tip every attempt
-    with pytest.raises(BusContentionError):
-        RefEventStore(r).append(_unsigned(id="A"), p, _before_cas=always_steal)
+    def always_steal(attempt): other.append(_unsigned(id=f"x{attempt}"), op)
+    store = RefEventStore(r, max_attempts=5, sleeper=lambda _: None)
+    with pytest.raises(AppendContentionExceeded):
+        store.append(_unsigned(id="A"), p, _before_cas=always_steal)
 ```
 
-- [ ] **Step 1b — genuine multi-process race (real OS processes, no seam).** The worker MUST be module-level so `multiprocessing` (spawn) can pickle it. Two real processes append concurrently to the *same* repo; the ref CAS is the only serialization point.
+- [ ] **Step 1b — GENUINE two-process race (REQUIRED for the §11 gate; bare authoritative remote + two real `Process`es + a start `Barrier`; proves overlap by asserting a real CAS retry occurred; exact-once by IDENTITY; every signature verified).** A thread version is NOT a substitute for this gate (Blocker 2) — if the platform cannot `spawn`, this test FAILS and the Slice 2 gate is UNMET; an optional thread test may exist *separately* and is labelled supplementary.
 
 ```python
-import multiprocessing as mp
-
-def _race_worker(args):                       # module-level: picklable under spawn
-    repo, ks, seat, ids = args
+def _race_worker(args):                       # module-level so spawn can pickle it
+    repo, ks, remote, seat, ids, barrier, retry_q = args
     os.environ["THREEWAY_KEYSTORE"] = ks
     from threeway.keys import load_private
     from threeway.refstore import RefEventStore
-    store = RefEventStore(repo); priv = load_private(seat)
+    store = RefEventStore(repo, remote=remote, sleeper=lambda _: None)
+    priv = load_private(seat)
+    attempts = {"n": 0}
+    def count(_a): attempts["n"] += 1         # _before_cas fires once per attempt (incl. retries)
+    barrier.wait()                            # force genuine overlap
     for i in ids:
-        store.append(_unsigned(id=i, signer=f"{seat}:p:s1"), priv)
+        store.append(_unsigned(id=i, signer=f"{seat}:p:s1"), priv, _before_cas=count)
+    retry_q.put(attempts["n"] - len(ids))     # retries = attempts beyond one-per-event
 
 def test_genuine_two_process_race_no_loss(tmp_path):
-    r = _new_repo(tmp_path)
-    ks = tmp_path / "ks"; ks.mkdir()
+    ctx = mp.get_context("spawn")
+    bare = _new_bare(tmp_path / "bus.git")
+    c1 = _clone(bare, tmp_path / "c1"); c2 = _clone(bare, tmp_path / "c2")
+    ks = tmp_path / "ks"; ks.mkdir(); pubs = {}
     for s in ("operator", "operator2"):
-        priv, _ = keys.generate_keypair()
-        (ks / f"{s}.ed25519").write_text(keys.private_to_hex(priv) + "\n")
+        priv, pub = keys.generate_keypair()
+        (ks / f"{s}.ed25519").write_text(keys.private_to_hex(priv) + "\n"); pubs[s] = pub
     N = 8
-    work = [(str(r), str(ks), "operator",  [f"a{i}" for i in range(N)]),
-            (str(r), str(ks), "operator2", [f"b{i}" for i in range(N)])]
-    with mp.get_context("spawn").Pool(2) as pool:
-        pool.map(_race_worker, work)
-    evs = RefEventStore(r).all_events()
-    assert len(evs) == 2 * N                              # nothing lost / duplicated
+    a_ids = [f"a{i}" for i in range(N)]; b_ids = [f"b{i}" for i in range(N)]
+    barrier = ctx.Barrier(2); q = ctx.Queue()
+    p1 = ctx.Process(target=_race_worker,
+                     args=((str(c1), str(ks), "origin", "operator",  a_ids, barrier, q),))
+    p2 = ctx.Process(target=_race_worker,
+                     args=((str(c2), str(ks), "origin", "operator2", b_ids, barrier, q),))
+    p1.start(); p2.start(); p1.join(60); p2.join(60)
+    assert p1.exitcode == 0 and p2.exitcode == 0
+    total_retries = q.get() + q.get()
+    assert total_retries >= 1                              # a REAL race occurred (not serial)
+    evs = RefEventStore(_clone(bare, tmp_path / "v"), remote="origin").all_events()
+    assert {e.id for e in evs} == set(a_ids + b_ids)       # exact-once BY IDENTITY (Issue 4)
+    ikeys = [idempotency_key(e) for e in evs]
+    assert len(set(ikeys)) == len(ikeys) == 2 * N          # no logical duplicate
     assert sorted(e.seq for e in evs) == list(range(1, 2 * N + 1))   # distinct, contiguous
-    assert len({e.id for e in evs}) == 2 * N             # every id present exactly once
+    for e in evs:                                          # EVERY signature verifies (Issue 4)
+        verify_event(e, pubs[e.signer.split(":", 1)[0]])
 ```
 
-> If the CI harness cannot import the test module in a spawned child (sys.path/conftest), fall back to `concurrent.futures.ThreadPoolExecutor` with the same body — each thread still spawns real concurrent `git` processes that genuinely contend on the ref CAS; the assertions are identical. Keep BOTH the deterministic (1a) and the genuine-race (1b) tests — the deterministic one pins the re-sign-on-retry semantics exactly; the genuine one proves the invariant holds under real concurrency.
+> `N=8` (16 racers on one ref) makes ≥1 CAS retry near-certain; if `total_retries` is ever 0 the test fails (it did not prove a race) — raise `N` rather than relaxing the assertion. The two workers use distinct cross-provider signers (`operator`/`operator2`), so this is also a cross-pair race.
 
-- [ ] **Step 1c/1d — ambiguous-push idempotency (effectively-once):**
+- [ ] **Step 1c — Blocker-1 idempotency correctness (key match alone is NOT enough):**
 
 ```python
-def test_ambiguous_push_timed_out_retry_is_idempotent(tmp_path):
-    # the SAME logical fact appended twice (a timed-out retry) lands exactly ONCE
-    r = _new_repo(tmp_path); p, _ = keys.generate_keypair()
-    store = RefEventStore(r)
-    first = store.append(_unsigned(id="e1", kind="attestation"), p)
-    again = store.append(_unsigned(id="e1", kind="attestation"), p)   # identical logical fact
-    assert len(store.all_events()) == 1                  # de-duplicated by idempotency_key
-    assert again.seq == first.seq                        # returned the persisted event
+def test_same_key_same_request_returns_original_event(tmp_path):
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair(); s = RefEventStore(r)
+    first = s.append(_unsigned(id="e1", payload={"k": "x"}), p)
+    again = s.append(_unsigned(id="e1", payload={"k": "x"}), p)   # same actor + same request
+    assert again.id == first.id and again.seq == first.seq and len(s.all_events()) == 1
 
-def test_crash_after_cas_then_retry_no_double_append(tmp_path):
-    # CAS lands but the ack is "lost" (crash post-CAS); the retry must NOT double-append
-    r = _new_repo(tmp_path); p, _ = keys.generate_keypair()
-    store = RefEventStore(r)
-    def boom(attempt): raise RuntimeError("ack lost after CAS")
-    with pytest.raises(RuntimeError):
-        store.append(_unsigned(id="e1", kind="attestation"), p, _after_cas=boom)
-    assert len(store.all_events()) == 1                  # it DID land once
-    store.append(_unsigned(id="e1", kind="attestation"), p)   # retry the same logical fact
-    assert len(store.all_events()) == 1                  # idempotent: still exactly one
+def test_same_key_different_request_is_rejected(tmp_path):
+    # SAME idempotency_key inputs (from/kind/subject/payload) but a DIFFERENT canonical
+    # request (recipient, which the key formula omits) -> reuse must be REJECTED.
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair(); s = RefEventStore(r)
+    s.append(_unsigned(id="e1", recipient="all", payload={"k": "same"}), p)
+    with pytest.raises(IdempotencyKeyReused):
+        s.append(_unsigned(id="e2", recipient="director", payload={"k": "same"}), p)
+
+def test_invalid_signature_cannot_suppress_a_legitimate_append(tmp_path):
+    # a forged event (same key inputs, signed by the WRONG key) must NOT suppress the
+    # legitimate writer's append.
+    r = _new_repo(tmp_path); p, ppub = keys.generate_keypair(); evil, _ = keys.generate_keypair()
+    s = RefEventStore(r)
+    s.append(_unsigned(id="forged", payload={"k": "x"}), evil)    # key K, signed by evil
+    s.append(_unsigned(id="legit",  payload={"k": "x"}), p)       # same K, signed by p
+    legit = [e for e in s.all_events() if e.id == "legit"]
+    assert legit and _verifies(legit[0], ppub)                   # p's append landed + verifies
+
+def test_tampered_stored_idempotency_key_is_not_trusted(tmp_path):
+    # an event whose SERIALIZED idempotency_key was altered to match the target must not be
+    # treated as a dedup hit — append recomputes the key from fields. Use _inject_raw_event
+    # (below) to write a hand-crafted blob whose stored idempotency_key lies.
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair(); s = RefEventStore(r)
+    target = _unsigned(id="t", payload={"k": "real"})
+    obj = to_json_obj(_signed(_unsigned(id="liar", payload={"k": "other"}), p))
+    obj["idempotency_key"] = idempotency_key(target)             # tamper: claims the target key
+    _inject_raw_event(r, "refs/threeway/events", obj)        # EVENTS_REF is a module constant
+    landed = s.append(target, p)                                 # must NOT be suppressed
+    assert any(e.id == "t" for e in s.all_events()) and landed.id == "t"
+
+def _same_fact_worker(args):
+    repo, ks, remote, evid, barrier = args
+    os.environ["THREEWAY_KEYSTORE"] = ks
+    from threeway.keys import load_private
+    from threeway.refstore import RefEventStore
+    s = RefEventStore(repo, remote=remote, sleeper=lambda _: None)
+    barrier.wait()
+    s.append(_unsigned(id=evid, payload={"k": "same"}, signer="operator:p:s1"),
+             load_private("operator"))
+
+def test_two_processes_same_key_create_exactly_one_event(tmp_path):
+    ctx = mp.get_context("spawn")
+    bare = _new_bare(tmp_path / "bus.git")
+    c1 = _clone(bare, tmp_path / "c1"); c2 = _clone(bare, tmp_path / "c2")
+    ks = tmp_path / "ks"; ks.mkdir()
+    priv, _ = keys.generate_keypair()
+    (ks / "operator.ed25519").write_text(keys.private_to_hex(priv) + "\n")
+    target_key = idempotency_key(_unsigned(id="x", payload={"k": "same"}, signer="operator:p:s1"))
+    barrier = ctx.Barrier(2)
+    p1 = ctx.Process(target=_same_fact_worker, args=((str(c1), str(ks), "origin", "dupA", barrier),))
+    p2 = ctx.Process(target=_same_fact_worker, args=((str(c2), str(ks), "origin", "dupB", barrier),))
+    p1.start(); p2.start(); p1.join(60); p2.join(60)
+    assert p1.exitcode == 0 and p2.exitcode == 0
+    evs = RefEventStore(_clone(bare, tmp_path / "v"), remote="origin").all_events()
+    same = [e for e in evs if idempotency_key(e) == target_key]
+    assert len(same) == 1            # exactly one, despite two concurrent writers of the same fact
 ```
 
-- [ ] **Step 2: Run → FAIL** (genuine-race + idempotency tests fail until Task 8's loop has the idempotency scan + re-seq/re-sign).
-- [ ] **Step 3:** The Task-8 `append` already implements both the re-seq/re-sign loop and the `_find_by_idempotency_key` scan; if 9a fails, the re-sign is missing; if 9c/9d fail, the idempotency scan is missing or runs in the wrong place (it must be at the TOP of each loop iteration). Fix `RefEventStore.append`.
-- [ ] **Step 4: Run → PASS.** (1b may take a second or two — real process startup.)
-- [ ] **Step 5: Commit** (`test(threeway): 2-process race (deterministic + genuine) + ambiguous-push idempotency (§11 Slice 2)`).
+Helpers this step needs (define in the test file): `_signed(ev, priv)` = `sign_event(ev, priv); return ev`; `_verifies(ev, pub_hex)` = try `verify_event`/return bool; `_inject_raw_event(repo, ref, obj)` = write `json.dumps(obj).encode()` as an event blob + `index/<next>` entry via `gitcas.write_blob`/`build_tree_with`/`commit_on`/`cas_create_or_update_ref` (a hand-crafted commit on the events ref, bypassing `append` so the stored bytes can lie). Import `to_json_obj`/`sign_event` from `threeway.envelope`.
+
+- [ ] **Step 1d — genuine ambiguous remote push recovers via a FRESH clone (Issue 5):**
+
+```python
+def test_ambiguous_remote_push_recovers_via_fresh_clone(tmp_path):
+    # remote ACCEPTS the push, the client dies before learning; a FRESH clone (no local ref
+    # knowledge) retries and must FETCH authoritative state, find the landed event, dedup.
+    bare = _new_bare(tmp_path / "bus.git"); c1 = _clone(bare, tmp_path / "c1")
+    ks = tmp_path / "ks"; ks.mkdir(); priv, _ = keys.generate_keypair()
+    (ks / "operator.ed25519").write_text(keys.private_to_hex(priv) + "\n")
+    os.environ["THREEWAY_KEYSTORE"] = str(ks)
+    s1 = RefEventStore(c1, remote="origin", sleeper=lambda _: None)
+    def boom(_): raise RuntimeError("connection dropped AFTER the remote accepted")
+    with pytest.raises(RuntimeError):
+        s1.append(_unsigned(id="e1", payload={"k": "x"}, signer="operator:p:s1"), priv, _after_cas=boom)
+    c2 = _clone(bare, tmp_path / "c2")                      # fresh process: no local state
+    RefEventStore(c2, remote="origin", sleeper=lambda _: None).append(
+        _unsigned(id="e1b", payload={"k": "x"}, signer="operator:p:s1"), priv)   # same fact
+    evs = RefEventStore(_clone(bare, tmp_path / "v"), remote="origin").all_events()
+    assert len([e for e in evs if e.payload.get("k") == "x"]) == 1   # landed exactly once
+
+def test_local_timed_out_retry_is_idempotent(tmp_path):
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair(); s = RefEventStore(r)
+    first = s.append(_unsigned(id="e1"), p)
+    again = s.append(_unsigned(id="e1"), p)                 # local timed-out retry of the same fact
+    assert len(s.all_events()) == 1 and again.seq == first.seq
+```
+
+- [ ] **Step 2: Run → FAIL** (until Task 8's append has the fetch-authoritative + verified/fingerprint idempotency + re-seq/re-sign + bounded-retry loop, and `push_cas`/`fetch_ref` exist).
+- [ ] **Step 3:** Fix `RefEventStore.append` / `gitcas` until green. Mutation checks (prove non-vacuous, transient): drop the re-sign → 1a fails; drop the fingerprint compare → `test_same_key_different_request_is_rejected` fails (it would wrongly dedup); drop the signature verify in `_find_verified_idempotent` → `test_invalid_signature_cannot_suppress…` fails; trust the serialized key → `test_tampered…` fails; remove `_sync()` from the retry path → `test_ambiguous_remote_push_recovers…` and `test_two_processes_same_key…` fail.
+- [ ] **Step 4: Run → PASS.** (the spawn tests take a few seconds — real processes + clones.)
+- [ ] **Step 5: Commit** (`test(threeway): genuine 2-process race + verified/fingerprint idempotency + ambiguous-remote recovery (§11 Slice 2)`).
 
 ### Task 10: per-seat cursor refs (`refs/threeway/cursors/<seat>`)
 
@@ -834,8 +1048,10 @@ def test_cursor_starts_at_zero_and_advances(tmp_path):
     assert store.cursor_seq("operator") == 2
 
 def test_cursor_advance_rejects_regression(tmp_path):
-    r = _new_repo(tmp_path)
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair()
     store = RefEventStore(r)
+    for i in range(1, 6):                                   # seqs 1..5 must exist (head-validation)
+        store.append(_unsigned(id=f"e{i}"), p)
     store.advance_cursor("operator", 5)
     assert store.advance_cursor("operator", 3) is False    # no going backward
     assert store.cursor_seq("operator") == 5
@@ -844,8 +1060,10 @@ def test_cursor_advance_is_monotonic_under_cas_contention(tmp_path):
     # a concurrent advance to a HIGHER seq between this writer's read and CAS must not
     # cause a regression: the loser's CAS misses, it re-reads the higher value and no-ops.
     import threeway.refstore as _rs
-    r = _new_repo(tmp_path)
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair()
     store = RefEventStore(r); other = RefEventStore(r)
+    for i in range(1, 10):                                  # seqs 1..9 exist; append BEFORE the seam
+        store.append(_unsigned(id=f"e{i}"), p)             #   so these write_blob calls don't trip it
     orig = _rs.gitcas.write_blob
     state = {"bumped": False}
     def racing_write(repo, data):                  # seam between this writer's read and CAS
@@ -860,10 +1078,37 @@ def test_cursor_advance_is_monotonic_under_cas_contention(tmp_path):
     finally:
         _rs.gitcas.write_blob = orig
     assert store.cursor_seq("operator") == 9       # highest wins; never regressed
+
+# ---- Issue 7: cursor validation (a cursor must point at a REAL, in-range event) ----
+
+def test_cursor_rejects_negative(tmp_path):
+    r = _new_repo(tmp_path); s = RefEventStore(r)
+    with pytest.raises(ValueError):
+        s.advance_cursor("operator", -1)
+
+def test_cursor_rejects_forward_jump_beyond_event_head(tmp_path):
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair(); s = RefEventStore(r)
+    s.append(_unsigned(id="e1"), p)                        # only seq 1 exists
+    with pytest.raises(ValueError):
+        s.advance_cursor("operator", 5)                   # no index/00000005 -> reject
+
+def test_cursor_rejects_seq_with_no_index_entry(tmp_path):
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair(); s = RefEventStore(r)
+    s.append(_unsigned(id="e1"), p); s.append(_unsigned(id="e2"), p)   # seqs {1,2}
+    with pytest.raises(ValueError):
+        s.advance_cursor("operator", 3)                   # 3 has no event yet
+
+def test_cursor_malformed_blob_is_corruption_not_zero(tmp_path):
+    r = _new_repo(tmp_path); s = RefEventStore(r)
+    ref = "refs/threeway/cursors/operator"
+    bad = gitcas.write_blob(r, b"not-an-int\n")
+    gitcas.cas_create_or_update_ref(r, ref, bad, None)
+    with pytest.raises(CursorCorruptionError):
+        s.cursor_seq("operator")                          # must NOT silently read as 0
 ```
 
 - [ ] **Step 2: Run → FAIL.**
-- [ ] **Step 3: Implement** — `advance_cursor` is a **monotonic CAS loop**: read the current cursor, refuse if `seq <= current` (monotonic, no regression), else CAS the new seq blob with `expected_old = current_oid`; on a lost CAS (a concurrent advance moved the cursor) re-read and re-check monotonicity, so the higher value always wins and the loser never overwrites it.
+- [ ] **Step 3: Implement** — `advance_cursor` validates the target, then runs a **bounded monotonic CAS loop**: reject negatives and any `seq` that is not a real in-range event (no `index/<seq>` entry / beyond the event head); refuse `seq <= current` (monotonic); else CAS the new seq blob with `expected_old = current_oid`; on a lost CAS re-read and re-check; on exhaustion raise the stable `CursorContentionExceeded`. A malformed cursor blob is **corruption** (raise), never silently `0`. *(Add `CursorContentionExceeded(BusContentionError)` and `CursorCorruptionError(ValueError)` to `refstore.py`.)*
 
 ```python
     def _cursor_ref(self, seat: str) -> str:
@@ -871,29 +1116,39 @@ def test_cursor_advance_is_monotonic_under_cas_contention(tmp_path):
 
     def _read_cursor(self, ref):
         oid = gitcas.rev_parse_any(self._repo, ref)        # blob, not commit
-        cur = int(gitcas.read_blob(self._repo, oid).decode()) if oid is not None else 0
-        return oid, cur
+        if oid is None:
+            return None, 0
+        raw = gitcas.read_blob(self._repo, oid).decode().strip()
+        if not raw.isdigit():                              # malformed -> corruption, not 0
+            raise CursorCorruptionError(f"cursor blob is not a non-negative int: {raw!r}")
+        return oid, int(raw)
 
     def cursor_seq(self, seat: str) -> int:
         return self._read_cursor(self._cursor_ref(seat))[1]
 
     def advance_cursor(self, seat: str, seq: int) -> bool:
+        if seq < 0:
+            raise ValueError("cursor seq must be non-negative")
+        tip = self._sync()                                 # authoritative event head
+        valid = set(gitcas.list_index_seqs(self._repo, tip)) if tip else set()
+        if seq != 0 and seq not in valid:
+            raise ValueError(f"cursor seq {seq} has no index entry / is beyond the event head")
         ref = self._cursor_ref(seat)
-        for _ in range(_MAX_RETRIES):
+        for _ in range(self._max_attempts):
             cur_oid, cur = self._read_cursor(ref)
             if seq <= cur:
                 return False                               # monotonic: regression / no-op
             new_oid = gitcas.write_blob(self._repo, f"{seq}\n".encode())
             if gitcas.cas_create_or_update_ref(self._repo, ref, new_oid, cur_oid):
                 return True
-            time.sleep(_BACKOFF_BASE)                      # CAS lost a concurrent advance; re-read
-        raise BusContentionError(f"cursor CAS lost for {seat}")
+            self._sleep(self._backoff(0))                  # CAS lost a concurrent advance; re-read
+        raise CursorContentionExceeded(f"cursor CAS lost for {seat}")
 ```
 
-Add `gitcas.rev_parse_any(repo, ref)` — like `rev_parse` but resolves to any object (a blob), `git rev-parse --verify <ref>` without the `^{commit}` peel; `None` on absence. (Add it to `gitcas.py` in this task with a one-line test.) The contention test monkeypatches `threeway.refstore.gitcas.write_blob` to inject a competitor between this writer's read and CAS — keep the patch local (restore in `finally`).
+Add `gitcas.rev_parse_any(repo, ref)` — `git rev-parse --verify <ref>` with no `^{commit}` peel (resolves a blob ref); `None` on absence; one-line gitcas test. **Owner-only enforcement** (spec §8 point 3 "writable only by that seat via ref-level permission") is a **deployment ref-ACL** concern — like the §6.4 keystore isolation it cannot be enforced in a single local repo, so it is **test-infeasible here** and is labelled as such; the API takes `seat` and the caller advances only its own cursor, with the real guard at the bus's ref-ACL layer (record this in ADR-031). The contention test monkeypatches `threeway.refstore.gitcas.write_blob` to inject a competitor between read and CAS — restore in `finally`.
 
 - [ ] **Step 4: Run → PASS.**
-- [ ] **Step 5: Commit** (`feat(threeway): per-seat cursor refs — monotonic CAS advance with re-read on contention`).
+- [ ] **Step 5: Commit** (`feat(threeway): per-seat cursor refs — validated, bounded, monotonic CAS advance`).
 
 ### Task 11: chunk close — refstore suite + smoke
 
@@ -1073,7 +1328,7 @@ def test_serial_queue_rejects_stale_loser_then_restage_completes(world_two_pairs
 **Files:** `tests/unit/test_threeway_slice2_adversarial.py`.
 
 The §11 Slice 2 Definition-of-Done — every clause maps to passing, mutation-proven test(s):
-- [ ] **No lost/duplicated event under a 2-process race** → Task 9, covered by BOTH `test_concurrent_append_loses_no_event_and_re_signs` (deterministic forced-CAS-loss, pins the re-sign-on-retry semantics) AND `test_genuine_two_process_race_no_loss` (real OS processes). Supporting effectively-once robustness: `test_ambiguous_push_timed_out_retry_is_idempotent` + `test_crash_after_cas_then_retry_no_double_append`.
+- [ ] **No lost/duplicated event under a 2-process race** → the GATE test is `test_genuine_two_process_race_no_loss` (Task 9 — two real `Process`es over a bare authoritative remote, start-barrier, asserts a real CAS retry occurred, exact-once by identity + every signature verified). A thread-based test does **not** satisfy this gate; if `spawn` is unavailable the gate is UNMET (audit Blocker 2). `test_concurrent_append_loses_no_event_and_re_signs` (deterministic forced-CAS-loss) pins the re-sign-on-retry semantics; the Blocker-1 idempotency tests (`test_same_key_*`, `test_invalid_signature_cannot_suppress…`, `test_tampered…`, `test_two_processes_same_key_create_exactly_one_event`) + `test_ambiguous_remote_push_recovers_via_fresh_clone` cover effectively-once.
 - [ ] **Abort-on-conflict → rework** → Task 15.
 - [ ] **Serial merge queue re-stages the loser when `main` advances** → Task 14.
 
@@ -1086,7 +1341,7 @@ The §11 Slice 2 Definition-of-Done — every clause maps to passing, mutation-p
 
 **Files:** Append `DECISIONS.md` (ADR-031, after ADR-030); add a `threeway/` section to `ARCHITECTURE.md`.
 
-- [ ] **Step 1: ADR-031** — record the Slice-2 design calls: the `refs/threeway/events` one-commit-per-event topology + expected-old-OID append-CAS (re-seq + **re-sign** on retry); **ambiguous-push idempotency** (effectively-once via `idempotency_key` dedup — a retry of a fact whose ack was lost de-duplicates); per-seat cursor refs as **monotonic CAS-advanced** `seq` blobs (re-read on contention); `brief_version` added to the signed set (D-A) with the **no-persistent-events schema-reset policy** (no migration; `schema_version` is the forward lever); the legacy-mailbox migration deferred (D-B) and **tracked as Slice 2.5**; the serial merge-queue re-stage. Cross-reference ADR-030.
+- [ ] **Step 1: ADR-031** — record the Slice-2 design calls (revised per audit): the `refs/threeway/events` one-commit-per-event topology + **expected-old-OID CAS PUSH to an authoritative bare remote** (remote mode) with re-fetch + re-seq + **re-sign** on rejection, plus a local-CAS mode for co-located use; **effectively-once idempotency that verifies, not just key-matches** — recompute key from stored fields, verify the candidate's signature (forgery can't suppress a legit append), compare an actor-scoped canonical request fingerprint, return on match / `IdempotencyKeyReused` on key-collision-different-request; **bounded retries** with jitter + stable `AppendContentionExceeded`/`CursorContentionExceeded`; **validated monotonic-CAS cursors** (reject negative / beyond-head / no-index-entry; malformed blob = `CursorCorruptionError`; owner-only is deployment ref-ACL, test-infeasible locally); `brief_version` signed (D-A) with the **`signature_version = "threeway-sign/2"` discriminator** (a new signed field; `schema_version` stays the wire version) + **FAIL-CLOSED, NON-DESTRUCTIVE `preflight_bus_init`** (abort on any local/remote `refs/threeway/*`, never delete); the legacy-mailbox migration deferred (D-B) and **tracked as the Slice 2.5 stub**; the serial merge-queue re-stage. Cross-reference ADR-030.
 - [ ] **Step 2: `ARCHITECTURE.md`** — add a concise `threeway/` subsystem section (the package is currently absent — 0 mentions). Cover: the event bus (`refstore.py` / `refs/threeway/events`), the merge-gate (`gate.py`), the predicate (`predicate.py`), key trust root (`coordination/threeway/keys/`), and the mandatory `env -u GIT_INDEX_FILE` test prefix. Use same-line `symbol (path:N)` anchors so `check_doc_claims`/`ci_smoke` gates them.
 - [ ] **Step 3: Verify** `.venv/bin/python scripts/ci_smoke.py` → OK (no stale same-line anchors).
 - [ ] **Step 4: Commit** (`docs(threeway): ADR-031 + ARCHITECTURE.md threeway section`).
