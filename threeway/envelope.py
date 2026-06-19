@@ -1,4 +1,7 @@
-"""Signed, immutable event envelope (spec §6.2).
+"""Signed event envelope (spec §6.2). Events are treated as immutable after
+signing — the dataclass is mutable only so sign_event can write the signature;
+the signature commits to the fixed _signed_view subset, so post-sign mutation of
+a signed field is detectable by verify_event.
 
 The signature covers canonical bytes over a FIXED subset of fields:
   {bus_id, schema_version, id, seq, from, to, kind, brief_id, candidate_id,
@@ -13,6 +16,7 @@ import hashlib
 from dataclasses import dataclass
 from typing import Any
 
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from threeway import keys as _keys
@@ -55,7 +59,14 @@ def payload_digest(ev: Event) -> str:
     return hashlib.sha256(canonicalize(ev.payload)).hexdigest()
 
 
+# Fields intentionally NOT in the signed subset (per spec §6.2's fixed signed
+# set): signer, created_at, signature, brief_version, supersedes_event_id,
+# revokes_event_id, and the raw payload (only its digest is signed). The
+# reference IDs (supersedes_event_id/revokes_event_id) are load-bearing for the
+# reducer but the spec fixes the signed set to the 12 fields in _signed_view;
+# do NOT widen this set without a spec revision.
 def _signed_view(ev: Event) -> dict:
+    """Return the 12-field dict whose canonical bytes are signed and verified."""
     return {
         "bus_id": ev.bus_id,
         "schema_version": ev.schema_version,
@@ -90,6 +101,5 @@ def sign_event(ev: Event, private_key: Ed25519PrivateKey) -> None:
 def verify_event(ev: Event, public_key_hex: str) -> None:
     """Raise cryptography.exceptions.InvalidSignature if the signature is bad."""
     if not ev.signature:
-        from cryptography.exceptions import InvalidSignature
         raise InvalidSignature("missing signature")
     _keys.verify(public_key_hex, bytes.fromhex(ev.signature), signed_bytes(ev))

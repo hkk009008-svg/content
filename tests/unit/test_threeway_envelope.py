@@ -85,3 +85,10 @@ def test_verify_fails_under_wrong_signer_key():
     sign_event(ev, priv)
     with pytest.raises(InvalidSignature):
         verify_event(ev, other_pub)
+
+
+def test_verify_raises_on_missing_signature():
+    _, pub_hex = keys.generate_keypair()
+    ev = _ev()  # never signed
+    with pytest.raises(InvalidSignature):
+        verify_event(ev, pub_hex)
