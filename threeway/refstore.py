@@ -13,6 +13,9 @@ Two modes:
     the extending tree, commits, and PUSH-CAS (force-with-lease against the fetched tip).
     On rejection it re-fetches, re-seqs, re-signs and retries.
   * local (co-located): remote=None -> atomic update-ref CAS in one repo.
+
+The idempotency scan is O(events) per attempt (it re-scans every event to recompute
++ verify keys) — the store therefore assumes a bounded coordination-scale event count.
 """
 from __future__ import annotations
 
@@ -93,7 +96,14 @@ class RefEventStore:
         # recompute the key (never trust the serialized value) + verify the signature
         # against the appender's OWN pubkey so a forged/unsigned event cannot suppress
         # a legitimate append.
-        for ev in self.iter_events():
+        # dedup is scoped to the appender's keypair; one seat ⇒ one signing key
+        # (load_private(seat) loads one key) — a second key under the same `sender`
+        # would legitimately produce a distinct event, not a dup.
+        # Iterate _iter_local (NOT iter_events): append already _sync()s at the loop
+        # top, so this scan must not re-fetch the remote (hot-path: one fetch/attempt).
+        # NOTE: O(events) per attempt — the store assumes a bounded coordination-scale
+        # event count.
+        for ev in self._iter_local():
             if idempotency_key(ev) != target_key:
                 continue
             try:
@@ -107,6 +117,8 @@ class RefEventStore:
         base = min(_BACKOFF_CAP, _BACKOFF_BASE * (2 ** attempt))
         return base * (0.5 + random.random() * 0.5)
 
+    # _before_cas / _after_cas are test seams (Task 9 fault injection:
+    # forced-CAS-loss / lost-ack); None in production.
     def append(self, ev, private_key, _before_cas=None, _after_cas=None):
         target_key = idempotency_key(ev)
         target_fp = _request_fingerprint(ev)
@@ -152,8 +164,10 @@ class RefEventStore:
         raise AppendContentionExceeded(
             f"append lost CAS {self._max_attempts}x for {ev.id}")
 
-    def iter_events(self):
-        # reads the LOCAL ref (call _sync() first in remote mode — all_events does).
+    def _iter_local(self):
+        # reads the LOCAL ref, NO sync. append's idempotency scan uses this directly
+        # (append already _sync()s at the loop top, so it must not re-fetch). Public
+        # readers go through iter_events()/all_events(), which sync first in remote mode.
         tip = gitcas.rev_parse(self._repo, self._ref)
         if tip is None:
             return
@@ -167,7 +181,14 @@ class RefEventStore:
                 continue
             yield from_json_obj(json.loads(raw))
 
+    def iter_events(self):
+        # remote-safe public reader: a direct external caller (not via append, which
+        # already syncs) would otherwise read stale/empty local state in remote mode.
+        if self._remote is not None:
+            self._sync()                                   # refresh local ref from authority
+        yield from self._iter_local()
+
     def all_events(self):
         if self._remote is not None:
             self._sync()                                   # refresh local ref from authority
-        return list(self.iter_events())
+        return list(self._iter_local())                    # _iter_local: avoid double-sync
