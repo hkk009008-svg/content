@@ -68,3 +68,56 @@ def cas_update_ref(repo, ref: str, new_oid: str, expected_old: str) -> bool:
     """Atomic compare-and-swap: set ref to new_oid only if it currently == expected_old."""
     p = _run(repo, "update-ref", ref, new_oid, expected_old, check=False)
     return p.returncode == 0
+
+
+class BusInitRefusedError(Exception):
+    """Raised when preflight finds prior refs/threeway/* state and force is not set.
+
+    Fail-closed: the bus is NOT initialized over existing state unless the operator
+    explicitly acknowledges the migration with force=True. NEVER deletes a ref.
+    """
+
+
+def preflight_bus_init(repo, remote: str | None = None, force: bool = False) -> None:
+    """Fail-closed, NON-DESTRUCTIVE preflight before initializing the event bus.
+
+    Enumerate refs/threeway/* LOCALLY, and (when `remote` is given) on the REMOTE.
+    If any such state exists and `force` is not True, raise BusInitRefusedError —
+    requiring an explicit migration acknowledgement. With force=True, proceed even
+    over prior state. Either way this NEVER deletes a ref (absence of .pub files is
+    NOT proof of no state — only the ref enumeration counts).
+
+    On a clean slate (no refs/threeway/*) it returns normally, initializing the
+    "threeway-sign/2" signature profile (no state to write yet).
+    """
+    if force:
+        return
+    # LOCAL enumeration. Branch on returncode: a git error (rc != 0) leaves state
+    # UNDETERMINABLE — fail CLOSED rather than read empty stdout as "clean slate".
+    local = _run(repo, "for-each-ref", "refs/threeway/", check=False)
+    if local.returncode != 0:
+        raise BusInitRefusedError(
+            f"cannot verify refs/threeway state (git for-each-ref exited "
+            f"{local.returncode}); refusing bus init (fail-closed)."
+        )
+    if local.stdout.strip():
+        raise BusInitRefusedError(
+            "refs/threeway/* already exists locally; refusing to init over prior "
+            "bus state. Pass force=True to acknowledge the migration "
+            "(no ref is ever deleted)."
+        )
+    # REMOTE enumeration (only when a remote is named). Same fail-closed branching:
+    # an unreachable/auth-failed/transient remote (rc != 0) must NOT proceed.
+    if remote is not None:
+        rem = _run(repo, "ls-remote", remote, "refs/threeway/*", check=False)
+        if rem.returncode != 0:
+            raise BusInitRefusedError(
+                f"cannot verify refs/threeway state on remote {remote!r} (git "
+                f"ls-remote exited {rem.returncode}); refusing bus init (fail-closed)."
+            )
+        if rem.stdout.strip():
+            raise BusInitRefusedError(
+                f"refs/threeway/* already exists on remote {remote!r}; refusing to "
+                "init over prior bus state. Pass force=True to acknowledge the "
+                "migration (no ref is ever deleted)."
+            )
