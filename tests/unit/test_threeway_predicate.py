@@ -72,3 +72,60 @@ def test_full_valid_set_is_mergeable():
     state = reduce(_full_event_set())
     d = evaluate("c1", state, FakeRepo(), default_policy())
     assert d.outcome == MERGEABLE, d.reason
+
+
+def test_rejects_when_verifier_same_provider_as_builder():
+    events = _full_event_set()
+    for e in events:
+        if e.kind == "assignment":
+            e.payload["primary_verifier_provider"] = "codex"  # == builder
+    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == REJECTED and "same provider" in d.reason
+
+
+def test_rejects_candidate_not_signed_by_executing_coordinator():
+    events = _full_event_set()
+    for e in events:
+        if e.kind == "candidate":
+            e.signer = "operator:claude:s1"  # not the coordinator
+    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == REJECTED and "executing coordinator" in d.reason
+
+
+def test_go_then_fail_release_leaves_no_effective_go_pending():
+    events = _full_event_set()
+    events.append(_e("attestation", 10, payload={"kind": "release", "verdict": "FAIL"},
+                     subject_sha=INTEG, signer="operator:claude:s1"))
+    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == PENDING and "release GO" in d.reason
+
+
+def test_revoked_release_attestation_is_pending():
+    events = _full_event_set()
+    # revoke the release attestation (e5)
+    events.append(_e("attestation_revoked", 11, revokes_event_id="e5",
+                     signer="operator:claude:s1"))
+    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == PENDING
+
+
+def test_rejects_release_attestation_bound_to_wrong_sha():
+    events = _full_event_set()
+    for e in events:
+        if e.kind == "attestation" and e.payload.get("kind") == "release":
+            e.subject_sha = "9" * 40
+    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == REJECTED and "integration_sha" in d.reason
+
+
+def test_rejects_stale_staging_base_when_main_moved():
+    events = _full_event_set()
+    moved = FakeRepo(head="f" * 40)  # main.head != staging_base
+    d = evaluate("c1", reduce(events), moved, default_policy())
+    assert d.outcome == REJECTED and "stale" in d.reason
+
+
+def test_pending_when_release_order_absent():
+    events = [e for e in _full_event_set() if e.kind != "release_order"]
+    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == PENDING and "release_order" in d.reason
