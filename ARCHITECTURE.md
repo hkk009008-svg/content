@@ -1765,8 +1765,9 @@ append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` pr
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
 ```
 
-Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `245 passed` (incl. the ADR-036 revoke-authority
-+ id-collision + defense-in-depth pins and the ADR-037 event-id-uniqueness pins across gate + both stores).
+Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `248 passed` (incl. the ADR-036 revoke-authority,
+ADR-037 event-id-uniqueness across gate + both stores, and ADR-038 reserved-merge-id + brief_superseded
+authority pins).
 
 *Last verified: 2026-06-21*
 
@@ -1828,8 +1829,11 @@ revocation-aware assignment resolution let a forged non-overseer revoke collapse
 T2/T3 mirror ambiguity into a forged MERGEABLE (and enabled a merge-gate DoS); both are now
 fail-closed. Defense-in-depth from the same review: `co_sign_satisfied` rejects escalated tiers when
 `verifier_provider == builder_provider`; `_mirror_pair_verifier_seat` counts swap-eligible PAIRS
-(not non-null seats); `_t3_cross_provider_re_verify` fail-closes on an empty seat. See
-`DECISIONS.md` ADR-036 + `threeway-revoke-authority-unsigned`.
+(not non-null seats); `_t3_cross_provider_re_verify` fail-closes on an empty seat. The SAME
+`_revoke_authorized` rule also gates `brief_superseded` (the other unsigned reference field), and
+`run_gate` rejects a poisoned reserved `merge-<cid>` id BEFORE its irreversible CAS merge (ADR-038).
+See `DECISIONS.md` ADR-036/037/038 + `threeway-revoke-authority-unsigned`,
+`threeway-brief-supersede-authority`, `threeway-reserved-merge-id-dos`.
 
 ---
 

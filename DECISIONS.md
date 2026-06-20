@@ -1862,3 +1862,37 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   `threeway/gate.py` (`verify_and_reduce` dup-id reject); `threeway/refstore.py` + `threeway/store.py`
   (`EventIdCollision` + the by-id append guard); `threeway/reducer.py` (LOAD-BEARING-scoped
   `seat_by_id`); `docs/REMEDIATION-INVENTORY.md` (`threeway-event-id-not-unique`).
+
+## ADR-038 — Round-5 hardening: reserved merge-id integrity + `brief_superseded` authority (Rule #13 siblings)
+
+- **Status:** ACCEPTED. Closes two MAJOR defects surfaced by the ADR-037 convergence check — one a
+  regression ADR-037 itself introduced, one a Rule #13 sibling ADR-036 missed.
+- **Defect 1 (regression introduced by ADR-037) — `gate.run_gate` reserved merge-id.** The gate
+  mints its completion fact with the PREDICTABLE id `f"merge-{candidate_id}"`. An insider can
+  pre-append a validly-self-signed event (any kind) carrying that id; step-2 idempotency
+  (`state.merge_completed(cid) is None`) does not catch it, the predicate can still reach MERGEABLE,
+  step-5 performs the IRREVERSIBLE main-ref CAS merge, and then step-6's `merge_completed` append hits
+  the NEW ADR-037 `EventIdCollision`. `run_gate`'s `try/except` caught only `CalledProcessError`, so
+  the exception escaped UNCAUGHT after main already moved (pre-ADR-037 it was a benign overwrite).
+  **Fix:** a reserved-id integrity check (step 2b) — if `merge-{cid}` is already present on the bus,
+  REJECT BEFORE the irreversible merge. Converts crash-after-merge into a fail-safe reject-before-merge.
+  **Known residual (lesser):** an insider can still claim a known candidate's reserved id to DoS that
+  candidate's merge (targeted availability). A full fix reserves the `merge-*` id namespace to the
+  gate seat at ingestion — deferred (filed `threeway-reserved-merge-id-dos`).
+- **Defect 2 (Rule #13 sibling of ADR-036) — `brief_superseded` authority.** `supersedes_event_id`
+  is the OTHER unsigned reference field (listed beside `revokes_event_id`, envelope.py:67-69), and the
+  reducer applied it UNCONDITIONALLY, so a forged non-overseer `brief_superseded` silently rolled back
+  the latest brief version. ADR-036 fixed the revoke channel but did not audit this sibling. **Fix:**
+  gate `brief_superseded` through the SAME `_revoke_authorized` rule (overseer, or the superseded
+  brief's own seat), unifying the two unsigned-reference channels under one authority check.
+- **Consequences:** the merge gate no longer crashes post-merge on a poisoned reserved id, and both
+  unsigned reference fields (`revokes_event_id`, `supersedes_event_id`) are now authority-gated. The
+  forged-promotion / merge-DoS CLASS was already closed (ADR-036/037, confirmed across the
+  re-verifications); these were an integrity regression + an integrity sibling.
+- **Evidence:** RED→GREEN pins — `test_run_gate_rejects_poisoned_reserved_merge_id` (gate),
+  `test_forged_nonoverseer_brief_supersede_is_ignored` + `test_overseer_brief_supersede_is_honored`
+  (reducer). `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q` → `248 passed`.
+- **Cross-refs:** **ADR-036** (revoke authority — this extends it to the supersede sibling), **ADR-037**
+  (event-id uniqueness — this fixes its run_gate regression); `threeway/gate.py` (step 2b),
+  `threeway/reducer.py` (`brief_superseded` authority); `docs/REMEDIATION-INVENTORY.md`
+  (`threeway-brief-supersede-authority`, `threeway-reserved-merge-id-dos`).
