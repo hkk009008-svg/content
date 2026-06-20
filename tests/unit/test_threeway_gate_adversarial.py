@@ -113,7 +113,11 @@ def test_rejects_absent_signature(world):
 
 
 def test_rejects_valid_signature_wrong_seat(world):
-    # operator signs a release_order that only the overseer may sign
+    # operator signs a release_order that only the overseer may sign. With record-time
+    # authority filtering (ADR-039) the wrong-seat release_order is IGNORED entirely —
+    # a strictly stronger §11 realization than read-time rejection: the forged fact has
+    # zero effect on effective state, so the candidate is non-promotable (PENDING,
+    # awaiting a legit overseer release_order). The merge MUST NOT happen (main == base).
     def mut(events):
         for e in events:
             if e.kind == "release_order":
@@ -122,14 +126,14 @@ def test_rejects_valid_signature_wrong_seat(world):
     store = EventStore(r / "coordination" / "threeway" / "events")
     events = build_candidate_events(base, branch, integ, privs)
     mut(events)
-    # sign release_order with the operator key so the SIGNATURE verifies (operator is
-    # a registered seat) — the predicate must still REJECT because release_order is an
-    # overseer-only authority (predicate _seat(ro.signer) != "overseer"). §11 criterion.
+    # sign release_order with the operator key so the SIGNATURE verifies (operator is a
+    # registered seat) — but the record-time filter DROPS it from effective state because
+    # release_order is an overseer-only authority, so state.release_order("c1") is None.
     for ev in events:
         store.append(ev, privs[ev.signer.split(":", 1)[0]])
     res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
                    main_ref="refs/threeway/test-main")
-    assert res.outcome == "REJECTED" and "wrong seat" in res.reason
+    assert res.outcome == "PENDING" and "release_order" in res.reason
     assert _head(r) == base
 
 

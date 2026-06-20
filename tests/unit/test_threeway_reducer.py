@@ -47,9 +47,10 @@ def test_candidate_aborted_is_recorded():
 
 def test_latest_non_superseded_brief_version():
     events = [
-        _ev(1, "brief", brief_version=1, payload={"brief_id": "b1"}),
-        _ev(2, "brief", brief_version=2, payload={"brief_id": "b1"}),
-        _ev(3, "brief_superseded", brief_version=1, supersedes_event_id="e1"),
+        _ev(1, "brief", brief_version=1, payload={"brief_id": "b1"}, signer="overseer:mech:s1"),
+        _ev(2, "brief", brief_version=2, payload={"brief_id": "b1"}, signer="overseer:mech:s1"),
+        _ev(3, "brief_superseded", brief_version=1, supersedes_event_id="e1",
+            signer="overseer:mech:s1"),
     ]
     state = reduce(events)
     assert state.latest_brief_version("b1") == 2
@@ -58,31 +59,35 @@ def test_latest_non_superseded_brief_version():
 def test_latest_brief_version_skips_a_superseded_latest():
     # the LATEST version (v2) is superseded -> latest live version is v1
     events = [
-        _ev(1, "brief", brief_version=1, payload={"brief_id": "b1"}),
-        _ev(2, "brief", brief_version=2, payload={"brief_id": "b1"}),
-        _ev(3, "brief_superseded", brief_version=2, supersedes_event_id="e2"),
+        _ev(1, "brief", brief_version=1, payload={"brief_id": "b1"}, signer="overseer:mech:s1"),
+        _ev(2, "brief", brief_version=2, payload={"brief_id": "b1"}, signer="overseer:mech:s1"),
+        _ev(3, "brief_superseded", brief_version=2, supersedes_event_id="e2",
+            signer="overseer:mech:s1"),
     ]
     state = reduce(events)
     assert state.latest_brief_version("b1") == 1
 
 
 def test_brief_accessor_returns_event_or_none():
-    state = reduce([_ev(1, "brief", brief_version=1, payload={"brief_id": "b1"})])
+    state = reduce([_ev(1, "brief", brief_version=1, payload={"brief_id": "b1"},
+                        signer="overseer:mech:s1")])
     assert state.brief("b1", 1) is not None
     assert state.brief("b1", 2) is None
 
 
 def test_release_order_lookup_by_candidate_and_sha():
     state = reduce([_ev(1, "release_order", subject_sha="abc",
-                        payload={"candidate_id": "c1"})])
+                        payload={"candidate_id": "c1"}, signer="overseer:mech:s1")])
     ro = state.release_order("c1")
     assert ro is not None and ro.subject_sha == "abc"
 
 
 def test_cycle_go_lookup_returns_latest():
     events = [
-        _ev(1, "cycle_go", payload={"brief_id": "b1", "brief_version": 1, "tier": "T1"}),
-        _ev(2, "cycle_go", payload={"brief_id": "b1", "brief_version": 1, "tier": "T2"}),
+        _ev(1, "cycle_go", payload={"brief_id": "b1", "brief_version": 1, "tier": "T1"},
+            signer="overseer:mech:s1"),
+        _ev(2, "cycle_go", payload={"brief_id": "b1", "brief_version": 1, "tier": "T2"},
+            signer="overseer:mech:s1"),
     ]
     state = reduce(events)
     assert state.cycle_go("b1", 1).payload["tier"] == "T2"
@@ -90,12 +95,14 @@ def test_cycle_go_lookup_returns_latest():
 
 def test_ci_result_lookup_by_sha():
     state = reduce([_ev(1, "ci_result", subject_sha="sha9",
-                        payload={"result": "PASS", "policy_digest": "p1"})])
+                        payload={"result": "PASS", "policy_digest": "p1"},
+                        signer="ci:mech:s1")])
     assert state.ci_result("sha9").payload["result"] == "PASS"
 
 
 def test_merge_completed_lookup_for_idempotency():
-    state = reduce([_ev(1, "merge_completed", payload={"candidate_id": "c1"})])
+    state = reduce([_ev(1, "merge_completed", payload={"candidate_id": "c1"},
+                        signer="merge-gate:mech:gate")])
     assert state.merge_completed("c1") is not None
 
 
@@ -221,3 +228,98 @@ def test_overseer_brief_supersede_is_honored():
     b2 = _ev(2, "brief", brief_version=2, payload={"brief_id": "b1"}, signer="overseer:mech:s1")
     sup = _ev(3, "brief_superseded", supersedes_event_id="e2", signer="overseer:mech:s1")
     assert reduce([b1, b2, sup]).latest_brief_version("b1") == 1   # v2 superseded by overseer
+
+
+# --- record-time authority filter for the 6 static singleton kinds (ADR-039,
+# defect threeway-reducer-shadow-dos, MAJOR availability) ---
+# The stores auto-assign a monotonic seq, so an insider's higher-seq event appended
+# AFTER the authoritative one would win a plain last-write-wins map slot and shadow
+# the legitimate fact (blocking a legit promotion — a DoS). The reducer must resolve
+# each static singleton to the latest event FROM ITS AUTHORIZED SEAT, never merely
+# the latest seat. A non-authorized event of these kinds is ignored for effective
+# state (it may still exist on the bus). Authority table:
+#   assignment/brief/cycle_go/release_order -> overseer
+#   ci_result -> ci
+#   merge_completed -> the gate seat (default "merge-gate")
+
+def test_nonoverseer_assignment_shadow_does_not_displace():
+    legit = _ev(2, "assignment", payload={"pair": "A", "primary_verifier": "operator"},
+                signer="overseer:mech:s1")
+    shadow = _ev(9, "assignment", payload={"pair": "A", "primary_verifier": "attacker"},
+                 signer="operator:claude:s1")          # higher seq, non-overseer
+    st = reduce([legit, shadow])
+    assert st.assignment("A").signer == "overseer:mech:s1"
+    assert st.assignment("A").payload["primary_verifier"] == "operator"
+
+
+def test_nonci_ci_result_shadow_does_not_displace():
+    legit = _ev(2, "ci_result", subject_sha="sha9",
+                payload={"result": "PASS", "policy_digest": "p1"}, signer="ci:mech:s1")
+    shadow = _ev(9, "ci_result", subject_sha="sha9",
+                 payload={"result": "FAIL", "policy_digest": "p1"},
+                 signer="operator:claude:s1")           # higher seq, non-ci
+    st = reduce([legit, shadow])
+    assert st.ci_result("sha9").signer == "ci:mech:s1"
+    assert st.ci_result("sha9").payload["result"] == "PASS"
+
+
+def test_nonoverseer_release_order_shadow_does_not_displace():
+    legit = _ev(2, "release_order", subject_sha="abc",
+                payload={"candidate_id": "c1"}, signer="overseer:mech:s1")
+    shadow = _ev(9, "release_order", subject_sha="xyz",
+                 payload={"candidate_id": "c1"}, signer="operator:claude:s1")  # higher seq
+    st = reduce([legit, shadow])
+    assert st.release_order("c1").signer == "overseer:mech:s1"
+    assert st.release_order("c1").subject_sha == "abc"
+
+
+def test_nonoverseer_cycle_go_shadow_does_not_displace():
+    legit = _ev(2, "cycle_go",
+                payload={"brief_id": "b1", "brief_version": 1, "tier": "T1"},
+                signer="overseer:mech:s1")
+    shadow = _ev(9, "cycle_go",
+                 payload={"brief_id": "b1", "brief_version": 1, "tier": "FORGED"},
+                 signer="operator:claude:s1")            # higher seq, non-overseer
+    st = reduce([legit, shadow])
+    assert st.cycle_go("b1", 1).signer == "overseer:mech:s1"
+    assert st.cycle_go("b1", 1).payload["tier"] == "T1"
+
+
+def test_nonoverseer_brief_shadow_does_not_displace():
+    legit = _ev(2, "brief", brief_version=1, payload={"brief_id": "b1", "body": "real"},
+                signer="overseer:mech:s1")
+    shadow = _ev(9, "brief", brief_version=1, payload={"brief_id": "b1", "body": "forged"},
+                 signer="operator:claude:s1")            # higher seq, non-overseer
+    st = reduce([legit, shadow])
+    assert st.brief("b1", 1).signer == "overseer:mech:s1"
+    assert st.brief("b1", 1).payload["body"] == "real"
+
+
+def test_nongate_merge_completed_shadow_does_not_displace():
+    legit = _ev(2, "merge_completed", payload={"candidate_id": "c1"},
+                signer="merge-gate:mech:gate")
+    shadow = _ev(9, "merge_completed", payload={"candidate_id": "c1"},
+                 signer="operator:claude:s1")            # higher seq, non-gate seat
+    st = reduce([legit, shadow])
+    assert st.merge_completed("c1").signer == "merge-gate:mech:gate"
+
+
+def test_authorized_assignment_latest_still_wins():
+    # GUARD: prove the filter does not over-drop — two overseer assignments,
+    # higher seq still wins (last-authorized-write-wins preserved).
+    a1 = _ev(2, "assignment", payload={"pair": "A", "primary_verifier": "operator"},
+             signer="overseer:mech:s1")
+    a2 = _ev(9, "assignment", payload={"pair": "A", "primary_verifier": "operatorX"},
+             signer="overseer:mech:s9")          # same authorized seat, higher seq
+    st = reduce([a1, a2])
+    assert st.assignment("A").payload["primary_verifier"] == "operatorX"
+
+
+def test_merge_completed_honors_overridden_gate_seat():
+    # the gate seat name is injectable; merge_completed authority follows it.
+    legit = _ev(2, "merge_completed", payload={"candidate_id": "c1"},
+                signer="custom-gate:mech:gate")
+    shadow = _ev(9, "merge_completed", payload={"candidate_id": "c1"},
+                 signer="merge-gate:mech:gate")   # default name is NOT authorized here
+    st = reduce([legit, shadow], gate_seat="custom-gate")
+    assert st.merge_completed("c1").signer == "custom-gate:mech:gate"

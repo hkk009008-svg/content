@@ -15,6 +15,13 @@ from threeway import LOAD_BEARING_KINDS
 from threeway.envelope import Event
 
 
+# The merge-gate seat name. The six static control-plane singletons resolve to the
+# latest event FROM THEIR AUTHORIZED SEAT (record-time authority filter, ADR-039), so
+# reduce() needs to know which seat is the gate. Default keeps every existing
+# reduce(events) call site working; callers may override via the keyword.
+GATE_SEAT = "merge-gate"
+
+
 def _seat_of(signer: str) -> str:
     return signer.split(":", 1)[0]
 
@@ -120,9 +127,28 @@ class EffectiveState:
                 if e.id not in self._revoked_event_ids]
 
 
-def reduce(events) -> EffectiveState:
+def reduce(events, *, gate_seat: str = GATE_SEAT) -> EffectiveState:
     st = EffectiveState()
     ordered = sorted(events, key=lambda e: e.seq)
+    # ADR-039 (defect threeway-reducer-shadow-dos, availability): the six STATIC
+    # control-plane singletons below are last-write-wins, and the stores auto-assign a
+    # monotonic seq — so an insider's event appended AFTER the authoritative one would
+    # otherwise win the map slot and SHADOW the legitimate fact, blocking a legit
+    # promotion (a DoS). The predicate checks authority on READ, but by then the shadow
+    # has already displaced the fact. So we filter at RECORD time: each singleton's
+    # effective value is the latest event from its AUTHORIZED seat, never merely the
+    # latest seat. Unauthorized events of these kinds are DROPPED for effective state
+    # (they may still exist on the bus). Fail-safe: this only ever DROPS a
+    # non-authoritative event — it never widens what can promote. The forgery class
+    # (ADR-036/037/038) is unaffected (those branches are untouched).
+    _AUTHORIZED_SINGLETON_SEAT = {
+        "assignment": "overseer",
+        "brief": "overseer",
+        "cycle_go": "overseer",
+        "release_order": "overseer",
+        "ci_result": "ci",
+        "merge_completed": gate_seat,
+    }
     # Revoke authority needs the TARGET event's seat. Map each id to the SET of seats that
     # emitted an event with it (ids are signed but not unique) so a collision is detectable,
     # and so the check holds regardless of whether the revoke precedes or follows its target.
@@ -146,6 +172,8 @@ def reduce(events) -> EffectiveState:
         elif k == "candidate_aborted":
             st._aborted_candidates.add(ev.candidate_id)
         elif k == "brief":
+            if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["brief"]:
+                continue
             st._briefs[(ev.brief_id, ev.brief_version)] = ev
         elif k == "brief_superseded":
             # supersedes_event_id is the UNSIGNED sibling of revokes_event_id (envelope.py:67),
@@ -155,19 +183,29 @@ def reduce(events) -> EffectiveState:
             if tgt and _revoke_authorized(_seat_of(ev.signer), seat_by_id.get(tgt)):
                 st._superseded_event_ids.add(tgt)
         elif k == "cycle_go":
+            if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["cycle_go"]:
+                continue
             st._cycle_go[(ev.payload.get("brief_id", ev.brief_id),
                           ev.payload.get("brief_version", ev.brief_version))] = ev
         elif k == "release_order":
+            if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["release_order"]:
+                continue
             st._release_order[ev.payload.get("candidate_id", ev.candidate_id)] = ev
         elif k == "release_requested":
             st._release_requested[ev.payload.get("candidate_id", ev.candidate_id)] = ev
         elif k == "ci_result":
+            if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["ci_result"]:
+                continue
             st._ci_result[ev.subject_sha] = ev
         elif k == "candidate":
             st._candidates[ev.candidate_id] = ev
         elif k == "assignment":
+            if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["assignment"]:
+                continue
             st._assignments[ev.payload.get("pair")] = ev
         elif k == "merge_completed":
+            if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["merge_completed"]:
+                continue
             st._merge_completed[ev.payload.get("candidate_id", ev.candidate_id)] = ev
         elif k == "co_sign":
             st._co_sign[(ev.candidate_id, _seat_of(ev.signer))] = ev
