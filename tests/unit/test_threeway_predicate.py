@@ -323,3 +323,10 @@ def test_t3_pending_with_one_human_approval():
            and e.payload.get("approver_identity") == "chief-chatgpt")]
     d = evaluate("c1", reduce(evs), T3_REPO, default_policy())
     assert d.outcome == PENDING and "co_sign not satisfied for T3" in d.reason
+
+
+def test_revoked_assignment_is_pending():
+    evs = _full_event_set()
+    evs.append(_e("attestation_revoked", 12, revokes_event_id="e2"))   # e2 = the assignment
+    d = evaluate("c1", reduce(evs), FakeRepo(), default_policy())
+    assert d.outcome == PENDING and "no assignment fact for pair" in d.reason

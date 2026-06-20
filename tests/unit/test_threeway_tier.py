@@ -246,3 +246,10 @@ def test_t3_rejects_human_approval_non_affirmative_decision():
 
 def test_t3_rejects_revoked_human_approval():
     assert not _sat("T3", reduce(_t3_ok() + [_revoke(7, target_id="h6")]))
+
+
+def test_t3_rejects_revoked_candidate_pair_assignment():
+    # overseer revokes pair A's (candidate pair) assignment → the T3 re_verify seat
+    # cannot resolve → fail closed. (T2 mirror, via the rev-aware assignments(), is
+    # unaffected since it resolves pair B.)
+    assert not _sat("T3", reduce(_t3_ok() + [_revoke(7, target_id="as1")]))

@@ -1765,7 +1765,7 @@ append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` pr
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
 ```
 
-Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `226 passed`.
+Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `229 passed`.
 
 *Last verified: 2026-06-20*
 

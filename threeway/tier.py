@@ -97,7 +97,7 @@ def _t3_cross_provider_re_verify(state, candidate_id, candidate_pair, builder_pr
     NOTE: the spec's "new session" freshness is NOT enforced — `session` lives only in the
     unsigned signer string; binding it to an overseer challenge is deferred to scope (b)
     (inventory `threeway-signer-unsigned-session`)."""
-    if verifier_provider == builder_provider:
+    if verifier_provider == builder_provider:   # standalone fail-closed mirror of predicate.py independence reject; co_sign_satisfied is public + unit-tested directly
         return False
     assign = state.assignment(candidate_pair)
     if assign is None or _signer_seat(assign.signer) != "overseer":

@@ -75,7 +75,10 @@ class EffectiveState:
         return self._candidates.get(candidate_id)
 
     def assignment(self, pair) -> Event | None:
-        return self._assignments.get(pair)
+        ev = self._assignments.get(pair)
+        if ev is None or ev.id in self._revoked_event_ids:
+            return None
+        return ev
 
     def merge_completed(self, candidate_id) -> Event | None:
         return self._merge_completed.get(candidate_id)

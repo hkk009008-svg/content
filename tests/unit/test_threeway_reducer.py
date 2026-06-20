@@ -142,3 +142,11 @@ def test_assignments_hides_revoked():
     a = _ev(1, "assignment", payload={"pair": "A"}, signer="overseer:mech:s1")
     rev = _ev(2, "attestation_revoked", revokes_event_id="e1")
     assert reduce([a, rev]).assignments() == []
+
+
+def test_assignment_singular_accessor_hides_revoked():
+    a = _ev(1, "assignment", payload={"pair": "A", "primary_verifier": "operator"},
+            signer="overseer:mech:s1")
+    rev = _ev(2, "attestation_revoked", revokes_event_id="e1")   # a.id == "e1"
+    assert reduce([a]).assignment("A") is not None
+    assert reduce([a, rev]).assignment("A") is None
