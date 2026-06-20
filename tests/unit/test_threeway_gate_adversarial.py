@@ -92,8 +92,12 @@ def test_rejects_tampered_integration_sha(world):
     assert _head(r) == base  # NOT advanced
 
 
-def test_rejects_absent_signature(world):
-    # append a load-bearing event but blank its signature -> verify_and_reduce raises
+def test_drops_absent_signature(world):
+    # ADR-040: a load-bearing event with NO signature is DROPPED, not raised — one unsigned event
+    # must not brick run_gate for every candidate. Here the unsigned event is a candidate_aborted
+    # for c1: had it verified it would ABORT the merge, but being unsigned it has zero authority and
+    # is dropped, so the legit promotion still COMPLETES. (Fail-safe: dropping only removes the
+    # forged abort; it can never admit a forged fact or block a legit merge.)
     r, base, branch, integ, reg, ks, privs = world
     store = EventStore(r / "coordination" / "threeway" / "events")
     events = build_candidate_events(base, branch, integ, privs)
@@ -106,10 +110,10 @@ def test_rejects_absent_signature(world):
                 signer="coordinator:claude:s1", payload={}, candidate_id="c1")
     p = r / "coordination" / "threeway" / "events" / "00000999-bad.json"
     p.write_text(json.dumps(to_json_obj(bad)))  # no signature
-    with pytest.raises(GateError):
-        run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
-                 main_ref="refs/threeway/test-main")
-    assert _head(r) == base
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main")
+    assert res.outcome == "COMPLETED", res.reason   # did NOT raise; unsigned abort dropped
+    assert _head(r) == integ                          # legit merge proceeded
 
 
 def test_rejects_valid_signature_wrong_seat(world):
@@ -224,12 +228,16 @@ def test_rejects_diff_outside_allowed_paths(world):
     assert _head(r) == base
 
 
-def test_rejects_replay_from_test_bus(world):
+def test_drops_replay_from_test_bus(world):
+    # ADR-040: the whole promotion is replayed from the WRONG bus (TEST-BUS while the gate runs
+    # 'prod'). Every load-bearing event is DROPPED at the bus_id check, not raised — so NO candidate
+    # fact survives in effective state and the gate returns PENDING ("no candidate fact yet"),
+    # never advancing main. (Dropping a wrong-bus replay can only REMOVE events; it never promotes.)
     r, base, store, reg, privs = _run(world, bus_id="TEST-BUS")
-    with pytest.raises(GateError, match="bus_id"):
-        run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
-                 main_ref="refs/threeway/test-main")
-    assert _head(r) == base
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main")
+    assert res.outcome == "PENDING" and "no candidate" in res.reason   # all events dropped; did NOT raise
+    assert _head(r) == base   # main untouched (fail-closed)
 
 
 def test_crash_after_release_before_cas_recovers_without_double_write(world):

@@ -7,7 +7,7 @@ code; it acts only on signed facts + a signed ci_result.
 """
 from __future__ import annotations
 
-import subprocess
+import logging
 
 from cryptography.exceptions import InvalidSignature
 
@@ -15,6 +15,8 @@ from threeway import LOAD_BEARING_KINDS
 from threeway.envelope import verify_event
 from threeway.keys import PublicKeyRegistry
 from threeway.reducer import reduce
+
+logger = logging.getLogger(__name__)
 
 
 class GateError(Exception):
@@ -39,10 +41,23 @@ def verify_and_reduce(events, registry_dir, bus_id: str, gate_seat: str = "merge
     seen_ids: set[str] = set()
     for ev in events:
         if ev.kind in LOAD_BEARING_KINDS:
+            # ADR-040 (Rule #13 sibling of the reserved-namespace drop, gate.py reserved-id below):
+            # the FOUR read-side checks below are reachable BRICKS — an insider can append a
+            # validly-self-signed LOAD-BEARING event that trips one of them (the stores guard only
+            # id-collision, not bus_id/profile/registry/signature), and the raise escapes OUTSIDE
+            # run_gate's try, crashing run_gate for EVERY candidate (a one-event bus DoS). So we DROP
+            # (skip the event, never add it to verified/seen_ids) with a WARNING, exactly as ADR-039
+            # already did for the reserved-merge- squat. Dropping is strictly safe: a wrong-bus /
+            # bad-profile / unknown-seat / bad-signature event has NO authority anyway, so this can
+            # only REMOVE an event from reduction — never admit a forged fact or newly promote.
             if ev.bus_id != bus_id:
-                raise GateError(f"bus_id mismatch (replay?): {ev.bus_id!r} != {bus_id!r}")
+                logger.warning("dropping load-bearing %s %s: bus_id mismatch (replay?): %r != %r",
+                               ev.kind, ev.id, ev.bus_id, bus_id)
+                continue
             if ev.signature_version not in _ACCEPTED_SIG_VERSIONS:
-                raise GateError(f"unaccepted signature_version: {ev.signature_version!r}")
+                logger.warning("dropping load-bearing %s %s: unaccepted signature_version: %r",
+                               ev.kind, ev.id, ev.signature_version)
+                continue
             seat = _seat(ev.signer)
             # ADR-039: the "merge-" id namespace is reserved for the gate's own merge_completed fact.
             # A non-gate seat presenting a reserved id is an insider squat — DROP it (ignore for
@@ -56,16 +71,24 @@ def verify_and_reduce(events, registry_dir, bus_id: str, gate_seat: str = "merge
                 continue
             try:
                 pub = reg.get(seat)
-            except KeyError as e:
-                raise GateError(f"unknown signer seat: {seat!r}") from e
+            except KeyError:
+                logger.warning("dropping load-bearing %s %s: unknown signer seat: %r",
+                               ev.kind, ev.id, seat)
+                continue
             try:
                 verify_event(ev, pub)
-            except InvalidSignature as e:
-                raise GateError(f"invalid signature on {ev.kind} {ev.id}") from e
+            except InvalidSignature:
+                logger.warning("dropping load-bearing %s %s: invalid signature", ev.kind, ev.id)
+                continue
             # ADR-037: event id is signed but NOT globally unique. A duplicate id across the
             # load-bearing set is a collision/replay (an insider re-using a victim fact's id
             # to shadow it, or a store that kept both copies) — reject fail-closed rather than
             # let the reducer act on an ambiguous id.
+            # ADR-040: this one stays `raise` (unlike the four DROPs above) because it is provably
+            # UNREACHABLE as a brick — the stores' ADR-037 EventIdCollision guard rejects a colliding
+            # append, so two same-id events can never both be stored to reach this set. Keeping it raise
+            # preserves ADR-037's fail-closed-on-ambiguity intent for a hypothetical store bypass
+            # (reachable-brick vs store-guarded-unreachable: drop the former, fail-closed on the latter).
             if ev.id in seen_ids:
                 raise GateError(f"duplicate event id (collision/replay?): {ev.id!r}")
             seen_ids.add(ev.id)
@@ -183,5 +206,12 @@ def run_gate(candidate_id, store: EventStore, repo, registry_dir, bus_id,
             return GateResult("COMPLETED", "merged via exact-SHA CAS")
         except Exception as e:
             return GateResult("COMPLETED", f"merged; completion-fact append degraded: {e}")
-    except subprocess.CalledProcessError as e:
-        return GateResult("REJECTED", f"git plumbing failed on attested SHA: {e}")
+    # ADR-040: broaden the OUTER (pre-CAS) except to catch ANY exception, not just a
+    # CalledProcessError. A validly-signed-but-malformed authoritative candidate (missing
+    # payload key) makes evaluate() raise an uncaught KeyError that would otherwise escape
+    # run_gate; broadening makes the entire pre-CAS region TOTAL — any pre-CAS error becomes a
+    # fail-closed REJECTED (main is unmoved, the crash is before any merge), never an uncaught
+    # crash. The POST-CAS nested try/except above returns BEFORE this outer except is reached,
+    # so its degraded-COMPLETED behavior is unaffected by this broadening.
+    except Exception as e:
+        return GateResult("REJECTED", f"pre-CAS error (malformed candidate or git plumbing): {e}")

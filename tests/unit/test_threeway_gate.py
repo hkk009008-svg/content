@@ -30,49 +30,58 @@ def seatkit(tmp_path, monkeypatch):
     return reg, ks, privs
 
 
-def test_verify_and_reduce_rejects_unsigned_event(seatkit, tmp_path):
+def test_verify_and_reduce_drops_unsigned_event(seatkit, tmp_path):
+    # ADR-040: a load-bearing event with a missing/invalid signature is DROPPED (not raised),
+    # so the fact it would have carried is ABSENT from effective state. Dropping is fail-safe:
+    # an unsigned event has no authority, so this can only REMOVE it, never admit a forged fact.
     reg, ks, privs = seatkit
     from threeway.envelope import Event
     ev = Event(id="e1", seq=1, bus_id="prod", schema_version="threeway/1",
                kind="candidate", sender="coordinator", recipient="all",
-               signer="coordinator:claude:s1", payload={}, candidate_id="c1")
-    # not signed
-    with pytest.raises(GateError):
-        verify_and_reduce([ev], registry_dir=reg, bus_id="prod")
+               signer="coordinator:claude:s1", payload={"pair": "A"}, candidate_id="c1")
+    # not signed -> dropped at the signature check; no raise.
+    state = verify_and_reduce([ev], registry_dir=reg, bus_id="prod")
+    assert state.candidate("c1") is None   # the unsigned candidate never entered effective state
 
 
-def test_verify_and_reduce_rejects_bus_id_mismatch_replay(seatkit, tmp_path):
+def test_verify_and_reduce_drops_bus_id_mismatch_replay(seatkit, tmp_path):
+    # ADR-040: a load-bearing event from the WRONG bus (replay) is DROPPED, not raised — one
+    # forged wrong-bus event must not brick verify_and_reduce for every candidate. The fact is absent.
     reg, ks, privs = seatkit
     from threeway.envelope import Event, sign_event
     ev = Event(id="e1", seq=1, bus_id="TEST-BUS", schema_version="threeway/1",
                kind="candidate", sender="coordinator", recipient="all",
-               signer="coordinator:claude:s1", payload={}, candidate_id="c1")
+               signer="coordinator:claude:s1", payload={"pair": "A"}, candidate_id="c1")
     sign_event(ev, privs["coordinator"])
-    with pytest.raises(GateError, match="bus_id"):
-        verify_and_reduce([ev], registry_dir=reg, bus_id="prod")
+    state = verify_and_reduce([ev], registry_dir=reg, bus_id="prod")
+    assert state.candidate("c1") is None   # wrong-bus replay dropped; never reduced
 
 
-def test_verify_and_reduce_rejects_unknown_signer_seat(seatkit, tmp_path):
+def test_verify_and_reduce_drops_unknown_signer_seat(seatkit, tmp_path):
+    # ADR-040: a load-bearing event signed by an UNKNOWN seat (no registry key) is DROPPED, not
+    # raised. An unknown seat has no authority, so the fact is simply absent.
     reg, ks, privs = seatkit
     from threeway.envelope import Event, sign_event
     ev = Event(id="e1", seq=1, bus_id="prod", schema_version="threeway/1",
                kind="candidate", sender="ghost", recipient="all",
-               signer="ghost:claude:s1", payload={}, candidate_id="c1")
-    sign_event(ev, privs["coordinator"])  # signed by coordinator but claims ghost
-    with pytest.raises(GateError):
-        verify_and_reduce([ev], registry_dir=reg, bus_id="prod")
+               signer="ghost:claude:s1", payload={"pair": "A"}, candidate_id="c1")
+    sign_event(ev, privs["coordinator"])  # signed by coordinator's key but claims ghost
+    state = verify_and_reduce([ev], registry_dir=reg, bus_id="prod")
+    assert state.candidate("c1") is None   # unknown-seat event dropped; never reduced
 
 
-def test_gate_rejects_unknown_signature_version(seatkit, tmp_path):
+def test_gate_drops_unknown_signature_version(seatkit, tmp_path):
+    # ADR-040: a load-bearing event presenting an UNACCEPTED signature_version is DROPPED, not
+    # raised. The fact is absent (a weaker/forged profile has no authority).
     reg, ks, privs = seatkit
     from threeway.envelope import Event, sign_event
     ev = Event(id="e1", seq=1, bus_id="prod", schema_version="threeway/1",
                kind="candidate", sender="coordinator", recipient="all",
-               signer="coordinator:claude:s1", payload={}, candidate_id="c1",
+               signer="coordinator:claude:s1", payload={"pair": "A"}, candidate_id="c1",
                signature_version="threeway-sign/1")   # unaccepted signature profile
     sign_event(ev, privs["coordinator"])               # validly signed under the old profile
-    with pytest.raises(GateError, match="signature_version"):
-        verify_and_reduce([ev], registry_dir=reg, bus_id="prod")
+    state = verify_and_reduce([ev], registry_dir=reg, bus_id="prod")
+    assert state.candidate("c1") is None   # unaccepted-profile event dropped; never reduced
 
 
 def test_verify_and_reduce_accepts_valid_signed_events(seatkit, tmp_path):
@@ -463,9 +472,11 @@ def test_run_gate_backstop_rejects_when_gate_side_plumbing_raises(
     res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
                    main_ref="refs/threeway/test-main", gate_seat="merge-gate")
     # backstop did NOT let the exception escape; this is the gate's reason, not the
-    # predicate guard's ("integration_sha is not a known commit").
+    # predicate guard's ("integration_sha is not a known commit"). ADR-040: the gate-side
+    # recompute is PRE-CAS, so the broadened outer except now reports it as "pre-CAS error
+    # ... git plumbing"; the fail-closed REJECTED (and the unmoved ref) is unchanged.
     assert res.outcome == "REJECTED", res.reason
-    assert "git plumbing failed on attested SHA" in res.reason
+    assert "pre-CAS error" in res.reason and "git plumbing" in res.reason
     # fail-closed: the protected ref did NOT move.
     assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == base
 
@@ -519,3 +530,218 @@ def test_run_gate_idempotent_with_non_default_gate_seat(live_repo, seatkit):
     assert honored.merge_completed("c1") is not None
     dropped = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
     assert dropped.merge_completed("c1") is None
+
+
+# ---------------------------------------------------------------------------
+# ADR-040: run_gate TOTALITY — verify-phase DROP-not-raise + pre-CAS guard.
+#
+# ADR-039 made verify_and_reduce DROP a reserved-`merge-` id squat instead of
+# raising (so one forged event could not brick the whole bus). But FOUR sibling
+# read-side checks were left RAISING (Rule #13 miss): bus_id mismatch, unaccepted
+# signature_version, unknown signer seat, invalid signature. The raise is OUTSIDE
+# run_gate's try, so an insider could append a validly-self-signed LOAD-BEARING
+# event that trips one of these and brick run_gate for EVERY candidate. These
+# tests pin: such a poison is DROPPED (ignored for reduction), the legit merge
+# still proceeds, and run_gate never raises. (A dropped event has no authority,
+# so dropping can only ever REMOVE an event — never admit a forged fact.)
+# ---------------------------------------------------------------------------
+
+def _seed_valid(store, r, privs, candidate_id="c1"):
+    """Stage a complete, signed T1 promotion bound to a real clean merge. Returns integ."""
+    from threeway import gitcas
+    tree, clean = gitcas.merge_tree(r, "refs/threeway/test-main", "feat")
+    assert clean
+    base = _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip()
+    branch = _git(r, "rev-parse", "feat").stdout.strip()
+    integ = gitcas.commit_tree(r, tree, [base, branch], f"threeway merge {candidate_id}")
+    for ev in _valid_events_for(base, branch, integ, privs):
+        store.append(ev, privs[ev.signer.split(":", 1)[0]])
+    return base, branch, integ
+
+
+def test_run_gate_total_under_poison_wrong_bus_id(live_repo, seatkit):
+    # An insider appends a load-bearing co_sign validly self-signed by a registered seat
+    # (operator) but carrying bus_id="EVIL" (an ordinary non-reserved id). Pre-ADR-040 this
+    # RAISED a GateError outside run_gate's try -> run_gate crashes for EVERY candidate.
+    # ADR-040: the wrong-bus event is DROPPED; the legit merge proceeds and main moves.
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    _, _, integ = _seed_valid(store, r, privs)
+    from threeway.envelope import Event
+    poison = Event(id="cosign-operator-c1", seq=0, bus_id="EVIL",
+                   schema_version="threeway/1", kind="co_sign", sender="operator",
+                   recipient="all", signer="operator:claude:s1",
+                   payload={"verdict": "GO"}, candidate_id="c1", subject_sha=integ)
+    store.append(poison, privs["operator"])
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "COMPLETED", res.reason   # did NOT raise; poison dropped
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == integ
+
+
+def test_run_gate_poison_does_not_brick_other_candidates(live_repo, seatkit):
+    # TOTAL-BUS property: with a wrong-bus_id poison present, a SECOND run_gate invocation
+    # (here re-asserting c1; c1 is already merged so this exercises the idempotency path
+    # AFTER verify_and_reduce, which must NOT raise on the poison). The poison cannot brick
+    # the bus for any candidate.
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    _, _, integ = _seed_valid(store, r, privs)
+    from threeway.envelope import Event
+    poison = Event(id="cosign-operator-c1", seq=0, bus_id="EVIL",
+                   schema_version="threeway/1", kind="co_sign", sender="operator",
+                   recipient="all", signer="operator:claude:s1",
+                   payload={"verdict": "GO"}, candidate_id="c1", subject_sha=integ)
+    store.append(poison, privs["operator"])
+    r1 = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                  main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert r1.outcome == "COMPLETED", r1.reason
+    # the poison is STILL on the bus; a re-run must not raise (totality holds per-invocation).
+    r2 = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                  main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert r2.outcome == "COMPLETED", r2.reason   # idempotent, did NOT raise on the poison
+
+
+def test_run_gate_total_under_unknown_signer_seat(live_repo, seatkit):
+    # An insider holds the operator key but stamps signer="ghost:claude:s1" (an unregistered
+    # seat). reg.get("ghost") -> KeyError. Pre-ADR-040 this RAISED outside run_gate's try.
+    # ADR-040: the event is DROPPED (unknown seat has no authority anyway), legit merge completes.
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    _, _, integ = _seed_valid(store, r, privs)
+    from threeway.envelope import Event
+    poison = Event(id="cosign-ghost-c1", seq=0, bus_id="prod",
+                   schema_version="threeway/1", kind="co_sign", sender="ghost",
+                   recipient="all", signer="ghost:claude:s1",
+                   payload={"verdict": "GO"}, candidate_id="c1", subject_sha=integ)
+    store.append(poison, privs["operator"])   # signed with a REGISTERED key but claims 'ghost'
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "COMPLETED", res.reason   # did NOT raise; unknown-seat event dropped
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == integ
+
+
+def test_run_gate_total_under_unaccepted_signature_version(live_repo, seatkit):
+    # A load-bearing event presenting an unaccepted signature_version ("threeway-sign/1").
+    # Pre-ADR-040 this RAISED outside run_gate's try. ADR-040: DROPPED, legit merge completes.
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    _, _, integ = _seed_valid(store, r, privs)
+    from threeway.envelope import Event
+    poison = Event(id="cosign-operator-oldprofile-c1", seq=0, bus_id="prod",
+                   schema_version="threeway/1", kind="co_sign", sender="operator",
+                   recipient="all", signer="operator:claude:s1",
+                   payload={"verdict": "GO"}, candidate_id="c1", subject_sha=integ,
+                   signature_version="threeway-sign/1")
+    store.append(poison, privs["operator"])   # validly signed under the old (unaccepted) profile
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "COMPLETED", res.reason   # did NOT raise; unaccepted-profile event dropped
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == integ
+
+
+def test_run_gate_total_under_malformed_authoritative_candidate(live_repo, seatkit):
+    # ADR-040 Fix 2 (pre-CAS totality): a validly-signed authoritative candidate with a
+    # MISSING payload key makes evaluate() raise an uncaught KeyError that escapes run_gate's
+    # narrow `except subprocess.CalledProcessError`. The broadened outer except catches ANY
+    # pre-CAS error -> REJECTED (fail-closed; main is unmoved, the crash is before any merge).
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    base_sha, branch_sha, integ = _seed_valid(store, r, privs)
+    from threeway.policy import default_policy
+    from threeway.envelope import Event
+    # a HIGHER-seq candidate signed by the assignment's executing_coordinator (coordinator)
+    # becomes authoritative; drop staging_base_sha from its payload -> evaluate() KeyErrors.
+    malformed = Event(id="candidate-coordinator-malformed-c1", seq=0, bus_id="prod",
+                      schema_version="threeway/1", kind="candidate", sender="coordinator",
+                      recipient="all", signer="coordinator:claude:s1",
+                      payload={"pair": "A", "branch_sha": branch_sha,
+                               "integration_sha": integ, "risk_tier_claimed": "T1",
+                               "policy_digest": default_policy().policy_digest()},
+                      candidate_id="c1", subject_sha=integ)   # NO staging_base_sha
+    store.append(malformed, privs["coordinator"])
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "REJECTED", res.reason   # did NOT raise
+    assert "malformed" in res.reason or "pre-CAS" in res.reason
+    # fail-closed: main did NOT move (the crash is pre-CAS).
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == base_sha
+
+
+# ---------------------------------------------------------------------------
+# Residual (i): cross-pair candidate_id reuse DoS — confirmed-but-deferred,
+# pinned strict-xfail so CI tracks it until the candidate_id<->pair-binding
+# slice lands. This is a REAL reproducing scenario, not a vacuous pin.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.xfail(strict=True, reason="threeway-candidate-id-pair-binding-dos residual (i): "
+                   "a legit executing_coordinator of another overseer-assigned pair can reuse a "
+                   "candidate_id declaring its own pair (higher seq) to capture authoritative_candidate "
+                   "and stall the victim's merge at PENDING — availability-only, never promotes; "
+                   "scoped to a follow-up candidate_id<->pair-binding slice")
+def test_cross_pair_candidate_id_reuse_dos_residual(live_repo, seatkit):
+    # Victim: a complete, signed T1 promotion for candidate_id "c1" on pair A (executing
+    # coordinator = 'coordinator'). Attacker: the OVERSEER legitimately assigns pair B to a
+    # different executing coordinator ('coordinator2'); that coordinator then appends a
+    # candidate REUSING id-space for the SAME candidate_id "c1" but declaring pair "B",
+    # at a HIGHER seq. authoritative_candidate("c1") iterates highest-seq-first and matches
+    # the FIRST candidate whose signer-seat == its declared pair's executing_coordinator —
+    # the pair-B shadow qualifies (coordinator2 signs it, pair-B assignment names coordinator2),
+    # so it CAPTURES authority. Its base/branch don't satisfy the victim's evaluate() clauses,
+    # so c1 stalls at non-COMPLETED. Availability-only: the shadow can never PROMOTE (the gate
+    # recomputes the merge from the shadow's own SHAs and the victim's attestations won't bind),
+    # but it can stall the victim. The xpass condition (asserted below) is that c1 COMPLETES;
+    # today it does NOT (the shadow captured authority) -> XFAILs now, XPASSes when the binding fix
+    # makes a candidate_id bind to the pair of its FIRST/authoritative declaration.
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    # register pair-B's executing coordinator ('coordinator2') in both stores so its candidate
+    # both verifies (registry) and signs (keystore) like any legit insider seat.
+    from threeway import keys
+    c2_priv, c2_pub = keys.generate_keypair()
+    (reg / "coordinator2.pub").write_text(c2_pub + "\n")
+    (ks / "coordinator2.ed25519").write_text(keys.private_to_hex(c2_priv) + "\n")
+    privs["coordinator2"] = c2_priv
+
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    base_sha, branch_sha, integ = _seed_valid(store, r, privs)
+
+    from threeway.policy import default_policy
+    from threeway.envelope import Event
+    # overseer LEGITIMATELY assigns pair B to coordinator2 (a real, signed assignment).
+    assign_b = Event(id="assignment-overseer-B", seq=0, bus_id="prod",
+                     schema_version="threeway/1", kind="assignment", sender="overseer",
+                     recipient="all", signer="overseer:mech:s1",
+                     payload={"pair": "B", "builder": "director2",
+                              "builder_provider": "claude",
+                              "primary_verifier": "operator2",
+                              "primary_verifier_provider": "codex",
+                              "executing_coordinator": "coordinator2"},
+                     candidate_id="c1")
+    store.append(assign_b, privs["overseer"])
+    # coordinator2 reuses candidate_id "c1" but declares pair "B" at a higher seq -> captures
+    # authoritative_candidate via the pair-B assignment it legitimately holds.
+    shadow_b = Event(id="candidate-coordinator2-c1", seq=0, bus_id="prod",
+                     schema_version="threeway/1", kind="candidate", sender="coordinator2",
+                     recipient="all", signer="coordinator2:codex:s1",
+                     payload={"pair": "B", "staging_base_sha": "a" * 40,
+                              "branch_sha": "b" * 40, "integration_sha": "c" * 40,
+                              "risk_tier_claimed": "T1",
+                              "policy_digest": default_policy().policy_digest()},
+                     candidate_id="c1", subject_sha="c" * 40)
+    store.append(shadow_b, privs["coordinator2"])
+
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    # XPASS-when-fixed condition: the victim's legit promotion COMPLETES despite the cross-pair
+    # shadow. TODAY the shadow captured authority -> c1 does NOT complete (stalled), so this
+    # assertion FAILS -> the test XFAILs. When candidate_id<->pair binding lands, the pair-A
+    # candidate stays authoritative and c1 COMPLETES -> XPASS (strict -> flips this pin RED to
+    # signal the fix landed and the xfail must be removed).
+    assert res.outcome == "COMPLETED", res.reason
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == integ
