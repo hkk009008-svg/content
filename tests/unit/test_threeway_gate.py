@@ -225,6 +225,32 @@ def test_run_gate_merges_clean_candidate_via_cas(live_repo, seatkit):
     assert state.merge_completed("c1") is not None
 
 
+def test_run_gate_rejects_poisoned_reserved_merge_id(live_repo, seatkit):
+    # ADR-037 regression guard: an insider pre-claims the predictable completion id
+    # 'merge-c1' (any kind). The gate must REJECT BEFORE the irreversible CAS merge — never
+    # let the merge happen and then crash on the merge_completed append (EventIdCollision).
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    from threeway import gitcas
+    tree, clean = gitcas.merge_tree(r, base, branch)
+    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge c1")
+    for ev in _valid_events_for(base, branch, integ, privs):
+        store.append(ev, privs[ev.signer.split(":", 1)[0]])
+    from threeway.envelope import Event
+    poison = Event(id="merge-c1", seq=0, bus_id="prod", schema_version="threeway/1",
+                   kind="co_sign", sender="operator", recipient="all",
+                   signer="operator:claude:s1", payload={"verdict": "GO"},
+                   candidate_id="c1", subject_sha=integ)
+    store.append(poison, privs["operator"])
+    head_before = _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip()
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "REJECTED" and "merge" in res.reason.lower()
+    head_after = _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip()
+    assert head_after == head_before   # rejected BEFORE the irreversible merge
+
+
 def test_run_gate_is_idempotent_under_double_invocation(live_repo, seatkit):
     r, base, branch = live_repo
     reg, ks, privs = seatkit

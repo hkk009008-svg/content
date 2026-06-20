@@ -148,8 +148,12 @@ def reduce(events) -> EffectiveState:
         elif k == "brief":
             st._briefs[(ev.brief_id, ev.brief_version)] = ev
         elif k == "brief_superseded":
-            if ev.supersedes_event_id:
-                st._superseded_event_ids.add(ev.supersedes_event_id)
+            # supersedes_event_id is the UNSIGNED sibling of revokes_event_id (envelope.py:67),
+            # so gate it by the SAME authority rule (ADR-037, Rule #13): only the overseer or
+            # the superseded brief's own signer seat may roll back a brief version.
+            tgt = ev.supersedes_event_id
+            if tgt and _revoke_authorized(_seat_of(ev.signer), seat_by_id.get(tgt)):
+                st._superseded_event_ids.add(tgt)
         elif k == "cycle_go":
             st._cycle_go[(ev.payload.get("brief_id", ev.brief_id),
                           ev.payload.get("brief_version", ev.brief_version))] = ev

@@ -204,3 +204,20 @@ def test_non_load_bearing_event_cannot_contest_id_to_block_self_revoke():
     rev = _ev(3, "attestation_revoked", revokes_event_id="e1",
               signer="operator:claude:s9")                        # operator self-revokes its own GO
     assert reduce([att, shadow, rev]).effective_attestation("c1", "release", "operator") is None
+
+
+def test_forged_nonoverseer_brief_supersede_is_ignored():
+    # Rule #13 sibling of revoke-authority: supersedes_event_id is the OTHER unsigned reference
+    # field (envelope.py:67-69); a non-overseer brief_superseded must NOT roll back an
+    # overseer-signed brief version (same authority rule as a revoke).
+    b1 = _ev(1, "brief", brief_version=1, payload={"brief_id": "b1"}, signer="overseer:mech:s1")
+    b2 = _ev(2, "brief", brief_version=2, payload={"brief_id": "b1"}, signer="overseer:mech:s1")
+    forged = _ev(3, "brief_superseded", supersedes_event_id="e2", signer="operator:claude:s1")
+    assert reduce([b1, b2, forged]).latest_brief_version("b1") == 2   # forged supersede ignored
+
+
+def test_overseer_brief_supersede_is_honored():
+    b1 = _ev(1, "brief", brief_version=1, payload={"brief_id": "b1"}, signer="overseer:mech:s1")
+    b2 = _ev(2, "brief", brief_version=2, payload={"brief_id": "b1"}, signer="overseer:mech:s1")
+    sup = _ev(3, "brief_superseded", supersedes_event_id="e2", signer="overseer:mech:s1")
+    assert reduce([b1, b2, sup]).latest_brief_version("b1") == 1   # v2 superseded by overseer

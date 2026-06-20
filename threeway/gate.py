@@ -110,6 +110,15 @@ def run_gate(candidate_id, store: EventStore, repo, registry_dir, bus_id,
     if state.merge_completed(candidate_id) is not None:
         return GateResult("COMPLETED", "already merged (idempotent)")
 
+    # 2b. reserved-id integrity (ADR-037): the completion fact uses the predictable id
+    # f"merge-{cid}". If that id is already present on the bus (and step 2 confirmed there is
+    # no merge_completed fact), an insider has CLAIMED the reserved id. Reject HERE, BEFORE the
+    # irreversible CAS merge — otherwise the post-merge merge_completed append would hit the
+    # ADR-037 EventIdCollision guard and escape uncaught after main already moved.
+    reserved_id = f"merge-{candidate_id}"
+    if any(e.id == reserved_id for e in store.all_events()):
+        return GateResult("REJECTED", "reserved merge_completed id already present (tamper/replay)")
+
     # 3. evaluate the predicate from authoritative state. A residual git-plumbing
     # failure on an attested SHA (e.g. gate-side commit_tree) becomes a REJECTED
     # GateResult, never an escaping CalledProcessError — run_gate is TOTAL.
