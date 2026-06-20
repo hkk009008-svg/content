@@ -176,3 +176,21 @@ def test_self_revocation_is_honored_across_sessions():
     rev = _ev(2, "attestation_revoked", revokes_event_id="e1",
               signer="operator2:codex:s9")   # same seat, different session → self-revocation
     assert reduce([cs, rev]).co_sign("c1", "operator2") is None
+
+
+def test_id_collision_cannot_forge_self_revocation():
+    # ADR-036 follow-up: event `id` is signed but not globally unique. A decoy re-using a
+    # victim fact's id (attacker's OWN seat, higher seq) must NOT let the decoy's seat forge
+    # a "self-revocation" — a CONTESTED id (>1 signer seat) is overseer-only revocable.
+    victim = _ev(1, "co_sign", payload={"verdict": "GO"}, signer="operator2:codex:s1")  # id e1
+    decoy = _ev(2, "attestation", payload={"kind": "release", "verdict": "GO"},
+                signer="operator:claude:s1", id="e1")          # collides with the victim's id
+    revoke = _ev(3, "attestation_revoked", revokes_event_id="e1", signer="operator:claude:s1")
+    assert reduce([victim, decoy, revoke]).co_sign("c1", "operator2") is not None
+
+
+def test_overseer_can_revoke_contested_id():
+    victim = _ev(1, "co_sign", payload={"verdict": "GO"}, signer="operator2:codex:s1")
+    decoy = _ev(2, "attestation", payload={"kind": "release"}, signer="operator:claude:s1", id="e1")
+    revoke = _ev(3, "attestation_revoked", revokes_event_id="e1", signer="overseer:mech:s1")
+    assert reduce([victim, decoy, revoke]).co_sign("c1", "operator2") is None   # overseer override

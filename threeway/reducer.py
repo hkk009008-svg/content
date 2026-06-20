@@ -18,16 +18,19 @@ def _seat_of(signer: str) -> str:
     return signer.split(":", 1)[0]
 
 
-def _revoke_authorized(revoker_seat: str, target_seat: str | None) -> bool:
+def _revoke_authorized(revoker_seat: str, target_seats) -> bool:
     """ADR-036: `revokes_event_id` is UNSIGNED (envelope.py:67), so an attacker who holds
     ANY registered seat could forge a revoke pointing at another seat's (or the overseer's)
     fact without breaking its signature. A revoke therefore takes effect ONLY from an
     authorized seat — the `overseer` (control-plane override) or the target event's own
     signer seat (self-revocation). Any other seat's revoke is IGNORED. Without this an
     insider could collapse the gate's fail-closed guarantees (forged promotion / merge DoS).
-    `target_seat is None` (target absent from the replay) → only the overseer is honored."""
-    return revoker_seat == "overseer" or (
-        target_seat is not None and revoker_seat == target_seat)
+
+    `target_seats` is the SET of signer seats that emitted an event carrying the revoked id.
+    Event `id` is signed but NOT globally unique, so an insider can re-use a victim's id with
+    its OWN seat to poison the index; a CONTESTED id (>1 seat) is therefore NOT self-revocable
+    — only the overseer may revoke it. None (target absent from the replay) → overseer-only."""
+    return revoker_seat == "overseer" or target_seats == {revoker_seat}
 
 
 @dataclass
@@ -119,9 +122,12 @@ class EffectiveState:
 def reduce(events) -> EffectiveState:
     st = EffectiveState()
     ordered = sorted(events, key=lambda e: e.seq)
-    # Revoke authority needs the TARGET event's seat; index every event's seat up front so
-    # the check holds regardless of whether the revoke precedes or follows its target.
-    seat_by_id = {ev.id: _seat_of(ev.signer) for ev in ordered}
+    # Revoke authority needs the TARGET event's seat. Map each id to the SET of seats that
+    # emitted an event with it (ids are signed but not unique) so a collision is detectable,
+    # and so the check holds regardless of whether the revoke precedes or follows its target.
+    seat_by_id: dict[str, set[str]] = {}
+    for ev in ordered:
+        seat_by_id.setdefault(ev.id, set()).add(_seat_of(ev.signer))
     for ev in ordered:
         k = ev.kind
         if k == "attestation":
