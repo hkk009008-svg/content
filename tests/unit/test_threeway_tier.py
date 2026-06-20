@@ -148,3 +148,90 @@ def test_t2_fail_closed_on_two_mirror_pairs():
 def test_t2_pair_b_direction():
     state = reduce(_roster() + [_cosign(3, signer="operator:claude:s1")])
     assert _sat("T2", state, pair="B", builder="claude", verifier="codex")
+
+
+def _reverify(seq, *, signer, subject_sha=INTEG, verdict="GO", cand="c1"):
+    return Event(id=f"rv{seq}", seq=seq, bus_id="prod", schema_version="threeway/1",
+                 kind="re_verify", sender=signer.split(":")[0], recipient="all", signer=signer,
+                 payload={"verdict": verdict}, candidate_id=cand, brief_id="b1",
+                 brief_version=1, subject_sha=subject_sha)
+
+
+def _human(seq, *, approver, signer="overseer:mech:s1", subject=INTEG,
+           decision="approve", cand="c1"):
+    return Event(id=f"h{seq}", seq=seq, bus_id="prod", schema_version="threeway/1",
+                 kind="human_approval", sender="overseer", recipient="all", signer=signer,
+                 payload={"approver_identity": approver, "integration_sha": subject,
+                          "decision": decision},
+                 candidate_id=cand, brief_id="b1", brief_version=1)
+
+
+def _revoke(seq, *, target_id, cand="c1"):
+    return Event(id=f"rk{seq}", seq=seq, bus_id="prod", schema_version="threeway/1",
+                 kind="attestation_revoked", sender="x", recipient="all",
+                 signer="overseer:mech:s1", payload={}, candidate_id=cand,
+                 brief_id="b1", brief_version=1, revokes_event_id=target_id)
+
+
+def _t3_ok():
+    return _roster() + [
+        _cosign(3, signer="operator2:codex:s1"),
+        _reverify(4, signer="operator:claude:s2"),
+        _human(5, approver="chief-gemini"),
+        _human(6, approver="chief-chatgpt"),
+    ]
+
+
+def test_t3_satisfied_full_set():
+    assert _sat("T3", reduce(_t3_ok()))
+
+
+def test_t3_pending_without_re_verify():
+    assert not _sat("T3", reduce([e for e in _t3_ok() if e.kind != "re_verify"]))
+
+
+def test_t3_rejects_re_verify_from_wrong_seat():
+    evs = _t3_ok(); evs[3] = _reverify(4, signer="operator2:codex:s2")
+    assert not _sat("T3", reduce(evs))
+
+
+def test_t3_rejects_re_verify_wrong_sha():
+    evs = _t3_ok(); evs[3] = _reverify(4, signer="operator:claude:s2", subject_sha=WRONG)
+    assert not _sat("T3", reduce(evs))
+
+
+def test_t3_rejects_non_go_re_verify():
+    evs = _t3_ok(); evs[3] = _reverify(4, signer="operator:claude:s2", verdict="FAIL")
+    assert not _sat("T3", reduce(evs))
+
+
+def test_t3_rejects_revoked_re_verify():
+    assert not _sat("T3", reduce(_t3_ok() + [_revoke(7, target_id="rv4")]))
+
+
+def test_t3_pending_with_one_human_approval():
+    assert not _sat("T3", reduce(_t3_ok()[:5]))
+
+
+def test_t3_rejects_two_human_approvals_same_identity():
+    evs = _t3_ok(); evs[5] = _human(6, approver="chief-gemini")
+    assert not _sat("T3", reduce(evs))
+
+
+def test_t3_rejects_human_approval_not_signed_by_overseer():
+    evs = _t3_ok(); evs[5] = _human(6, approver="chief-chatgpt", signer="director:codex:s1")
+    assert not _sat("T3", reduce(evs))
+
+
+def test_t3_rejects_human_approval_wrong_sha():
+    evs = _t3_ok(); evs[5] = _human(6, approver="chief-chatgpt", subject=WRONG)
+    assert not _sat("T3", reduce(evs))
+
+
+def test_t3_rejects_human_approval_non_affirmative_decision():
+    evs = _t3_ok(); evs[5] = _human(6, approver="chief-chatgpt", decision="reject")
+    assert not _sat("T3", reduce(evs))
+
+
+def test_t3_rejects_revoked_human_approval():
+    assert not _sat("T3", reduce(_t3_ok() + [_revoke(7, target_id="h6")]))
