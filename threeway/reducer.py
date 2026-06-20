@@ -81,13 +81,24 @@ class EffectiveState:
         return self._merge_completed.get(candidate_id)
 
     def co_sign(self, candidate_id, seat) -> Event | None:
-        return self._co_sign.get((candidate_id, seat))
+        ev = self._co_sign.get((candidate_id, seat))
+        if ev is None or ev.id in self._revoked_event_ids:
+            return None
+        return ev
 
     def re_verify(self, candidate_id, seat) -> Event | None:
-        return self._re_verify.get((candidate_id, seat))
+        ev = self._re_verify.get((candidate_id, seat))
+        if ev is None or ev.id in self._revoked_event_ids:
+            return None
+        return ev
 
     def human_approvals(self, candidate_id) -> list[Event]:
-        return [e for (cid, _), e in self._human_approval.items() if cid == candidate_id]
+        return [e for (cid, _), e in self._human_approval.items()
+                if cid == candidate_id and e.id not in self._revoked_event_ids]
+
+    def assignments(self) -> list[Event]:
+        return [e for e in self._assignments.values()
+                if e.id not in self._revoked_event_ids]
 
 
 def reduce(events) -> EffectiveState:

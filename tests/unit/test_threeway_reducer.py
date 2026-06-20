@@ -97,3 +97,48 @@ def test_ci_result_lookup_by_sha():
 def test_merge_completed_lookup_for_idempotency():
     state = reduce([_ev(1, "merge_completed", payload={"candidate_id": "c1"})])
     assert state.merge_completed("c1") is not None
+
+
+INTEG = "2" * 40
+
+
+def test_co_sign_accessor_hides_revoked():
+    cs = _ev(1, "co_sign", payload={"verdict": "GO"}, subject_sha=INTEG,
+             signer="operator2:codex:s1")
+    rev = _ev(2, "attestation_revoked", revokes_event_id="e1")   # cs.id == "e1"
+    assert reduce([cs]).co_sign("c1", "operator2") is not None
+    assert reduce([cs, rev]).co_sign("c1", "operator2") is None
+
+
+def test_re_verify_accessor_hides_revoked():
+    rv = _ev(1, "re_verify", payload={"verdict": "GO"}, subject_sha=INTEG,
+             signer="operator:claude:s2")
+    rev = _ev(2, "attestation_revoked", revokes_event_id="e1")
+    assert reduce([rv, rev]).re_verify("c1", "operator") is None
+
+
+def test_human_approvals_accessor_hides_revoked():
+    h = _ev(1, "human_approval", signer="overseer:mech:s1",
+            payload={"approver_identity": "chief-gemini", "integration_sha": INTEG,
+                     "decision": "approve"})
+    rev = _ev(2, "attestation_revoked", revokes_event_id="e1")
+    assert reduce([h]).human_approvals("c1") != []
+    assert reduce([h, rev]).human_approvals("c1") == []
+
+
+def test_assignments_returns_latest_per_pair():
+    a1 = _ev(1, "assignment", payload={"pair": "A", "primary_verifier": "operator"},
+             signer="overseer:mech:s1")
+    a2 = _ev(2, "assignment", payload={"pair": "B", "primary_verifier": "operator2"},
+             signer="overseer:mech:s1")
+    a1b = _ev(3, "assignment", payload={"pair": "A", "primary_verifier": "operatorX"},
+              signer="overseer:mech:s1")          # same pair, higher seq → supersedes a1
+    got = {e.payload["pair"]: e.payload["primary_verifier"]
+           for e in reduce([a1, a2, a1b]).assignments()}
+    assert got == {"A": "operatorX", "B": "operator2"}   # last-write-wins for A
+
+
+def test_assignments_hides_revoked():
+    a = _ev(1, "assignment", payload={"pair": "A"}, signer="overseer:mech:s1")
+    rev = _ev(2, "attestation_revoked", revokes_event_id="e1")
+    assert reduce([a, rev]).assignments() == []
