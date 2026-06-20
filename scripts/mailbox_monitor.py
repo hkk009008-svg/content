@@ -26,8 +26,8 @@ MODE = "read-only-no-consume"
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _EVENT_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)-"
-    r"(?P<frm>director|director2|operator|operator2|coordinator)"
-    r"-to-(?P<to>director|director2|operator|operator2|all)-"
+    r"(?P<frm>director|director2|operator|operator2|coordinator|coordinator2)"
+    r"-to-(?P<to>director|director2|operator|operator2|coordinator|coordinator2|all)-"
     r"(?P<kind>[a-z0-9-]+)\.md$"
 )
 

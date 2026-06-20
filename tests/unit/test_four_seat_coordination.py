@@ -180,14 +180,15 @@ def test_coordinator_as_sender_lints_clean(tmp_path):
     assert _fatals(issues) == [], [str(i) for i in _fatals(issues)]
 
 
-def test_coordinator_as_target_is_bad_filename(tmp_path):
-    # coordinator is a <from> only — never a <to>; -to-coordinator- is invalid.
+def test_coordinator_as_target_is_valid_filename(tmp_path):
+    # Slice 2.5 (§4b): coordinator is now a first-class <to>; -to-coordinator-
+    # parses cleanly — no bad_filename FATAL. (Old send-only doctrine inverted.)
     root = _make_coord(
         tmp_path,
         events={"2026-06-13T08-00-00Z-director-to-coordinator-fyi.md":
                 "**When:** 2026-06-13T08:00:00Z\n"})
     issues = check_coordination.run(root, now="2026-06-14T00:00:00Z")
-    assert any(i.kind == "bad_filename" for i in _fatals(issues))
+    assert not any(i.kind == "bad_filename" for i in _fatals(issues))
 
 
 def test_coordinator_not_a_role_no_cursor_required(tmp_path):

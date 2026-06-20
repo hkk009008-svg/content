@@ -9,6 +9,7 @@ one fact (drops coordinator2 from one tuple/arm) and asserts the check flips.
 from __future__ import annotations
 
 import importlib
+import re
 import sys
 from pathlib import Path
 
@@ -16,6 +17,8 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+import check_coordination as cc  # noqa: E402
+import mailbox_monitor as mm  # noqa: E402
 import protocol_mailbox  # noqa: E402
 import status  # noqa: E402
 
@@ -93,3 +96,37 @@ def test_canonical_seat_status_roster_equals_root():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     assert set(mod.SEATS) == set(protocol_mailbox.RECEIVING_SEATS)
+
+
+# --- Task 3: event-name regexes accept coordinator/coordinator2 frm+to (§4b) ---
+
+_COORD2_FILE = "2026-06-20T10-00-00Z-coordinator2-to-coordinator-status.md"
+_COORD_FILE = "2026-06-20T10-00-01Z-director-to-coordinator-fyi.md"
+
+
+def test_event_name_re_accepts_coordinator_and_coordinator2():
+    m = cc._EVENT_NAME_RE.match(_COORD2_FILE)
+    assert m and m.group("frm") == "coordinator2" and m.group("to") == "coordinator"
+    m2 = cc._EVENT_NAME_RE.match(_COORD_FILE)
+    assert m2 and m2.group("to") == "coordinator"          # coordinator now a valid <to>
+    # mailbox_monitor mirror must also match (else the event is dropped from the board)
+    assert mm._EVENT_RE.match(_COORD2_FILE)
+
+    # --- non-vacuity: a -to-coordinator2- name must NOT have matched on HEAD ---
+    # Build the OLD pattern (coordinator only, no coordinator2) and confirm it FAILS,
+    # proving the new alternation is what accepts the input (not a generic \w+).
+    old = re.compile(
+        r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)-"
+        r"(?P<frm>director|director2|operator|operator2|coordinator)"
+        r"-to-(?P<to>director|director2|operator|operator2|all)-"
+        r"(?P<kind>[a-z0-9-]+)\.md$")
+    assert old.match(_COORD2_FILE) is None        # the mutation: drop coordinator2 → RED
+
+
+def test_generic_sibling_regexes_left_untouched():
+    # Rule #13: status._EVENT_RE / effectiveness.MAILBOX_RE use generic groups and
+    # already match — assert they still match (we must NOT have narrowed them).
+    import status
+    import protocol_effectiveness_report as eff
+    assert status._EVENT_RE.match(_COORD2_FILE)
+    assert eff.MAILBOX_RE.search(_COORD2_FILE)

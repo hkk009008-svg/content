@@ -50,13 +50,14 @@ from status import count_unread
 # and status._EVENT_RE; mailbox kinds come from protocol_mailbox.KNOWN_KINDS.
 ROLES = SEATS
 
-# `coordinator` is a send-only pseudo-seat: a valid <from> only, never a <to>,
-# no seen cursor (mirror of `all`, which is <to>-only). Deliberately NOT added
-# to ROLES, so no seen/coordinator.txt is expected.
+# `coordinator`/`coordinator2` are first-class <to> targets in the event-name regex
+# above (Slice 2.5 §4b). They are NOT yet in ROLES and have no seen cursor — that
+# reconciliation (widen ROLES + seed seen/coordinator{,2}.txt) lands in the Slice 2.5
+# cursor/ROLES task (Task 5), which removes the remaining send-only special-casing.
 _EVENT_NAME_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)-"
-    r"(?P<frm>director|director2|operator|operator2|coordinator)"
-    r"-to-(?P<to>director|director2|operator|operator2|all)-"
+    r"(?P<frm>director|director2|operator|operator2|coordinator|coordinator2)"
+    r"-to-(?P<to>director|director2|operator|operator2|coordinator|coordinator2|all)-"
     r"(?P<kind>[a-z0-9-]+)\.md$"
 )
 
@@ -82,7 +83,7 @@ _LIVE_SEAT_ARTIFACT_RES = {
         re.compile(
             rf"\bcoordination/mailbox/sent/\d{{4}}-\d{{2}}-\d{{2}}T"
             rf"\d{{2}}-\d{{2}}-\d{{2}}Z-{role}-to-"
-            rf"(?:director|director2|operator|operator2|all)-[a-z0-9-]+\.md\b",
+            rf"(?:director|director2|operator|operator2|coordinator|coordinator2|all)-[a-z0-9-]+\.md\b",
             re.I,
         ),
     )
