@@ -83,8 +83,6 @@ def _event_ts(name: str) -> str:
 
 
 def _is_addressed(name: str, seat: str) -> bool:
-    if seat == "coordinator":
-        return "-to-coordinator-" in name or "-to-all-" in name
     return f"-to-{seat}-" in name or "-to-all-" in name
 
 
@@ -93,7 +91,7 @@ def _mailbox_events(root: Path, seat: str, cursor: str = "", limit: int = 12) ->
     if not sent.exists():
         return []
     names = sorted(p.name for p in sent.glob("*.md") if _is_addressed(p.name, seat))
-    if seat != "coordinator" and cursor and not cursor.startswith("("):
+    if cursor and not cursor.startswith("("):
         cursor_norm = _normalize_cursor(cursor)
         names = [name for name in names if _event_ts(name) > cursor_norm]
     return names[-limit:]
@@ -140,14 +138,9 @@ def _path_listing(root: Path, rel: str, pattern: str = "*") -> str:
 
 def collect_context(root: Path, seat: str, wave: int, smoke: bool = False) -> HandoffContext:
     mailbox = collect_mailbox(root)
-    if seat == "coordinator":
-        cursor = "(not used; coordinator is unpinned)"
-        events = _mailbox_events(root, seat)
-        unread = f"all-scope {len(events)} shown"
-    else:
-        cursor = str(mailbox.get(f"mailbox_{seat}_cursor", "(missing)"))
-        unread = str(mailbox.get(f"mailbox_{seat}_unread", "(missing)"))
-        events = _mailbox_events(root, seat, cursor)
+    cursor = str(mailbox.get(f"mailbox_{seat}_cursor", "(missing)"))
+    unread = str(mailbox.get(f"mailbox_{seat}_unread", "(missing)"))
+    events = _mailbox_events(root, seat, cursor)
 
     _, head, _ = run(["git", "log", "-1", "--format=%h %s"], root)
     _, branch, _ = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], root)

@@ -56,12 +56,15 @@ def make_coord(tmp_path, events=None, cursors=None):
     (root / "mailbox" / "seen").mkdir(parents=True)
     for name, body in (events or {}).items():
         (root / "mailbox" / "sent" / name).write_text(body)
-    # 4-seat protocol: every role in check_coordination.ROLES needs a cursor or
-    # the linter FATALs cursor_missing. Seed all four; per-test overrides apply.
+    # Slice 2.5: every role in check_coordination.ROLES (= RECEIVING_SEATS: the 4
+    # pair seats + both coordinators) needs a cursor or the linter FATALs
+    # cursor_missing. Seed all six; per-test overrides apply.
     default_cursors = {"director": "2026-01-01T00:00:00Z",
                        "director2": "2026-01-01T00:00:00Z",
                        "operator": "2026-01-01T00:00:00Z",
-                       "operator2": "2026-01-01T00:00:00Z"}
+                       "operator2": "2026-01-01T00:00:00Z",
+                       "coordinator": "2026-01-01T00:00:00Z",
+                       "coordinator2": "2026-01-01T00:00:00Z"}
     default_cursors.update(cursors or {})
     for role, ts in default_cursors.items():
         (root / "mailbox" / "seen" / f"{role}.txt").write_text(ts + "\n")

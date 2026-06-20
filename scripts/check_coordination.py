@@ -40,20 +40,18 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from protocol_mailbox import KNOWN_KINDS, SEATS
+from protocol_mailbox import KNOWN_KINDS, RECEIVING_SEATS, SEATS
 from status import count_unread
 
-# 4-seat protocol (two director-operator pairs). `all` is a broadcast TARGET
-# only — NOT a role (no seen/all.txt); every real seat counts `-to-all-` events
-# as addressed to it (see _check_cursors orphan test + status.count_unread).
-# Seat names stay aligned with coordination/bin/{send-event,consume-events}
-# and status._EVENT_RE; mailbox kinds come from protocol_mailbox.KNOWN_KINDS.
-ROLES = SEATS
+# All seats in RECEIVING_SEATS are now addressable receivers WITH a seen cursor
+# (Slice 2.5 §7): coordinator is no longer send-only, and coordinator2 is a new
+# full send/receive seat. `all` stays a broadcast TARGET only (no seen/all.txt);
+# every real seat counts `-to-all-` events as addressed to it (see _check_cursors
+# orphan test + status.count_unread). Seat names stay aligned with
+# coordination/bin/{send-event,consume-events} and status._EVENT_RE; mailbox kinds
+# come from protocol_mailbox.KNOWN_KINDS.
+ROLES = RECEIVING_SEATS
 
-# `coordinator`/`coordinator2` are first-class <to> targets in the event-name regex
-# above (Slice 2.5 §4b). They are NOT yet in ROLES and have no seen cursor — that
-# reconciliation (widen ROLES + seed seen/coordinator{,2}.txt) lands in the Slice 2.5
-# cursor/ROLES task (Task 5), which removes the remaining send-only special-casing.
 _EVENT_NAME_RE = re.compile(
     r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)-"
     r"(?P<frm>director|director2|operator|operator2|coordinator|coordinator2)"
@@ -250,7 +248,8 @@ def _check_coordinator_handoff_theater(docs_root: Path | str | None) -> list[Coo
             continue
         if any(marker in lower for marker in _PENDING_LIVE_SEAT_MARKERS):
             continue
-        missing = [role for role in ROLES if not _has_live_seat_artifact(text, role)]
+        # theater check is about the 4 PAIR seats' real work; coordinators are not cited subjects
+        missing = [role for role in SEATS if not _has_live_seat_artifact(text, role)]
         if missing:
             issues.append(CoordIssue(
                 f"docs/{path.name}",

@@ -73,11 +73,12 @@ mailbox events, claims live-seat authority, or proves assigned work complete.
 
 For a real seat resume, use the seat-specific orientation command instead:
 `python .agents/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave 2`,
-then surface the unread count per Rule #8. Live seats consume and read unread
-events with `coordination/bin/consume-events <seat>` by default before deciding
-the seat is idle, routed, blocked, or ready to verify, unless the user explicitly
-asks for a read-only/no-consume check. Coordinator is unpinned: read
-coordinator/all mailbox state, but never run `consume-events coordinator`.
+then surface the unread count per Rule #8. Every seat — including coordinator and
+coordinator2 (Slice 2.5: now first-class receiving seats with their own seen
+cursor) — consumes and reads unread events with
+`coordination/bin/consume-events <seat>` by default before deciding the seat is
+idle, routed, blocked, or ready to verify, unless the user explicitly asks for a
+read-only/no-consume check.
 
 ## Codex transplant
 

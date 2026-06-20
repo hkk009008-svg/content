@@ -21,9 +21,10 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
 fi
 
 ROLE=${1:-}
-# 4-seat protocol (two director-operator pairs). `all` is a broadcast TARGET,
-# not a consuming role — there is no seen/all.txt; every real seat consumes
-# events addressed to itself OR to `all` (see addressed() below).
+# Consuming roles: the 4 pair seats + both coordinators (Slice 2.5 — coordinator/
+# coordinator2 now consume like any seat, with their own seen cursor). `all` is a
+# broadcast TARGET, not a consuming role — there is no seen/all.txt; every seat
+# consumes events addressed to itself OR to `all` (see addressed() below).
 case "$ROLE" in director|director2|operator|operator2|coordinator|coordinator2) ;; *)
   usage >&2; exit 2;; esac
 shift

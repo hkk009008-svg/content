@@ -9,9 +9,11 @@ four synced vocabulary spots so they cannot drift apart again:
   - coordination/bin/send-event    (FROM/TO enum incl. `all` target)
   - coordination/bin/consume-events(ROLE enum + `-to-(role|all)-` consume)
 
-`coordinator` is a later addition: a send-only pseudo-seat (a valid `from`
-only, never a `to`, no cursor — the mirror of `all`). It lets the read-only
-oversight seat notify the four real seats without becoming a consumer.
+`coordinator` and `coordinator2` are first-class send/receive seats (Slice 2.5):
+each is a valid `from` AND a valid `to` (`-to-coordinator(2)-` parses cleanly),
+and each is in `check_coordination.ROLES` with its own seen cursor — they consume
+like any seat. `all` remains the only broadcast-target-only token (never a sender,
+never a cursor/seen file).
 """
 import os
 import subprocess
@@ -31,11 +33,16 @@ from status import count_unread  # noqa: E402
 SEND_EVENT = _REPO_ROOT / "coordination" / "bin" / "send-event"
 CONSUME_EVENTS = _REPO_ROOT / "coordination" / "bin" / "consume-events"
 
-FOUR_CURSORS = {
+# Slice 2.5: ROLES = RECEIVING_SEATS (the 4 pair seats + both coordinators), so
+# every check_coordination run needs all six seen cursors or it FATALs
+# cursor_missing. Seed all six receiving seats (ISO; Phase A is ISO-only).
+RECEIVING_CURSORS = {
     "director": "2026-06-01T00:00:00Z",
     "director2": "2026-06-01T00:00:00Z",
     "operator": "2026-06-01T00:00:00Z",
     "operator2": "2026-06-01T00:00:00Z",
+    "coordinator": "2026-06-01T00:00:00Z",
+    "coordinator2": "2026-06-01T00:00:00Z",
 }
 
 FIXTURE_KINDS = ("coordination", "decision", "fyi")
@@ -47,7 +54,7 @@ def _make_coord(tmp_path, events=None, cursors=None):
     (root / "mailbox" / "seen").mkdir(parents=True)
     for name, body in (events or {}).items():
         (root / "mailbox" / "sent" / name).write_text(body)
-    cur = dict(FOUR_CURSORS)
+    cur = dict(RECEIVING_CURSORS)
     cur.update(cursors or {})
     for role, ts in cur.items():
         (root / "mailbox" / "seen" / f"{role}.txt").write_text(ts + "\n")
@@ -125,7 +132,7 @@ def repo(tmp_path):
         "\n".join(FIXTURE_KINDS) + "\n",
         encoding="utf-8",
     )
-    for role, ts in FOUR_CURSORS.items():
+    for role, ts in RECEIVING_CURSORS.items():
         (seen / f"{role}.txt").write_text(ts + "\n")
     return tmp_path
 
@@ -191,12 +198,21 @@ def test_coordinator_as_target_is_valid_filename(tmp_path):
     assert not any(i.kind == "bad_filename" for i in _fatals(issues))
 
 
-def test_coordinator_not_a_role_no_cursor_required(tmp_path):
-    # coordinator is NOT in ROLES, so no seen/coordinator.txt is ever expected.
-    assert "coordinator" not in check_coordination.ROLES
-    root = _make_coord(tmp_path)  # only the 4 real cursors exist
+def test_coordinators_are_roles_with_cursors(tmp_path):
+    # Slice 2.5 (§7): coordinator AND coordinator2 are first-class roles WITH a
+    # seen cursor — inverts the OLD send-only doctrine. _make_coord seeds all six
+    # cursors, so a clean tree raises no cursor_missing.
+    assert "coordinator" in check_coordination.ROLES
+    assert "coordinator2" in check_coordination.ROLES
+    root = _make_coord(tmp_path)  # all six cursors seeded
     issues = check_coordination.run(root, now="2026-06-14T00:00:00Z")
     assert not any(i.kind == "cursor_missing" for i in _fatals(issues))
+
+    # --- non-vacuity: drop the coordinator2 cursor → cursor_missing FATAL ---
+    (root / "mailbox" / "seen" / "coordinator2.txt").unlink()
+    issues2 = check_coordination.run(root, now="2026-06-14T00:00:00Z")
+    assert any(i.kind == "cursor_missing" and "coordinator2" in i.message
+               for i in _fatals(issues2))
 
 
 def test_send_event_accepts_coordinator_from(repo):

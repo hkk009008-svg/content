@@ -125,9 +125,14 @@ def test_collect_context_does_not_consume_or_send_mail(tmp_path, monkeypatch) ->
     ]
 
 
-def test_collect_context_handles_coordinator_without_cursor(tmp_path, monkeypatch) -> None:
+def test_collect_context_reads_coordinator_real_cursor(tmp_path, monkeypatch) -> None:
+    # Slice 2.5 (§7): coordinator reads its real seen cursor like any seat — the
+    # OLD "(not used; coordinator is unpinned)" branch is removed.
     sent = tmp_path / "coordination" / "mailbox" / "sent"
     sent.mkdir(parents=True)
+    seen = tmp_path / "coordination" / "mailbox" / "seen"
+    seen.mkdir(parents=True)
+    (seen / "coordinator.txt").write_text("2026-06-15T19:00:00Z\n", encoding="utf-8")
     (sent / "2026-06-15T19-59-27Z-coordinator-to-all-coordination.md").write_text(
         "# Coordinator route\n", encoding="utf-8"
     )
@@ -161,8 +166,7 @@ def test_collect_context_handles_coordinator_without_cursor(tmp_path, monkeypatc
 
     context = draft_handoff.collect_context(tmp_path, "coordinator", wave=2)
 
-    assert context.mailbox_cursor == "(not used; coordinator is unpinned)"
-    assert context.mailbox_unread == "all-scope 2 shown"
+    assert context.mailbox_cursor == "2026-06-15T19:00:00Z"
     assert context.mailbox_events == [
         "2026-06-15T19-59-27Z-coordinator-to-all-coordination.md",
         "2026-06-15T20-04-46Z-operator2-to-all-status.md",

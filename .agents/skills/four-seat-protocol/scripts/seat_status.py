@@ -10,7 +10,7 @@ commits, or advances a cursor (that distinction matters: the real
 `consume-events` stages the cursor file; an orientation check must not).
 
     .venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py <seat> [opts]
-      <seat>            director | director2 | operator | operator2 | coordinator
+      <seat>            director | director2 | operator | operator2 | coordinator | coordinator2
       --wave N          also report `scripts/wave_gate_check.py N`
       --commits N       recent commits to show (default 12)
       --stale-min M     heartbeat older than M minutes => STALE (default 15)
@@ -35,7 +35,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 import protocol_mailbox
-from codex_protocol_model import CENTRAL_INVARIANT, COORDINATOR_INVARIANTS, MODEL_SOURCE
+from codex_protocol_model import CENTRAL_INVARIANT, MODEL_SOURCE
 
 SEATS = protocol_mailbox.RECEIVING_SEATS
 
@@ -115,17 +115,12 @@ def git_log(root: str, n: int):
 
 
 def mailbox(root: str, seat: str):
-    if seat == "coordinator":
-        section("mailbox — coordinator/all scope (live recompute, read-only)")
-    else:
-        section(f"mailbox — unread for '{seat}' (live recompute, read-only)")
+    section(f"mailbox — unread for '{seat}' (live recompute, read-only)")
     seen = os.path.join(root, "coordination", "mailbox", "seen", f"{seat}.txt")
     sent = os.path.join(root, "coordination", "mailbox", "sent")
     cursor_dt = None
     cursor_raw = "(missing)"
-    if seat == "coordinator":
-        cursor_raw = "(not used; coordinator is unpinned)"
-    elif os.path.exists(seen):
+    if os.path.exists(seen):
         with open(seen) as fh:
             cursor_raw = fh.readline().strip()
         cursor_dt = _parse_cursor_ts(cursor_raw)
@@ -146,30 +141,22 @@ def mailbox(root: str, seat: str):
             continue
         if cursor_dt is None or ts > cursor_dt:
             unread.append(f)
-    if seat == "coordinator":
-        print(f"ALL-SCOPE EVENTS: {len(unread)}")
-    else:
-        print(f"UNREAD: {len(unread)}")
+    print(f"UNREAD: {len(unread)}")
     for f in unread[-12:]:  # newest tail, cap the print
         print(f"  • {f}")
     if len(unread) > 12:
         print(f"  … and {len(unread) - 12} older")
-    if unread and seat != "coordinator":
+    if unread:
         print("→ Rule #8: surface this count in your FIRST user-facing turn; "
               "consume via coordination/bin/consume-events " + seat)
-    elif unread:
-        print("→ Coordinator is UNPINNED (no cursor) — this is the ALL-TIME "
-              "-to-coordinator-/-to-all- scope for §6f reconciliation, not "
-              "consumable unread mail.")
-        print(f"→ Harness invariant ({MODEL_SOURCE}): {CENTRAL_INVARIANT}; "
-              f"{COORDINATOR_INVARIANTS[0]}.")
 
 
 def heartbeats(root: str, me: str, stale_min: int):
     section(f"peer heartbeats (STALE > {stale_min}m)")
     now = datetime.now(timezone.utc)
     pres = os.path.join(root, "coordination", "presence")
-    for seat in SEATS:
+    # heartbeats are pair-seat only — coordinators have no presence heartbeat
+    for seat in protocol_mailbox.SEATS:
         if seat == me:
             continue
         hb = os.path.join(pres, f"{seat}-heartbeat.ts")
@@ -216,7 +203,7 @@ def smoke(root: str):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="One-shot seat session-start status.")
-    ap.add_argument("seat", choices=SEATS + ("coordinator",))
+    ap.add_argument("seat", choices=SEATS)
     ap.add_argument("--wave", default=None)
     ap.add_argument("--commits", type=int, default=12)
     ap.add_argument("--stale-min", type=int, default=15)

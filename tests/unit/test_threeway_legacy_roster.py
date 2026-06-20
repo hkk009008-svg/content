@@ -186,3 +186,86 @@ def test_shell_whitelists_match_the_python_root():
     # `_unread_for` call list → that hook's set != root.
     codex_roles = _unread_for_roles(_HOOKS[0])
     assert (codex_roles - {"coordinator2"}) != seats
+
+
+# --- Task 5: ISO cursor seeding + coordinator/coordinator2 in ROLES -----------
+
+def _make_coord_with_coord2(tmp_path):
+    root = tmp_path / "coordination"
+    (root / "mailbox" / "sent").mkdir(parents=True)
+    (root / "mailbox" / "seen").mkdir(parents=True)
+    name = "2026-06-12T10-00-00Z-director-to-coordinator2-coordination.md"
+    (root / "mailbox" / "sent" / name).write_text(
+        "# Director → Coordinator2: subj\n\n"
+        "**When:** 2026-06-12T10:00:00Z · **From:** director (online)\n\nbody\n")
+    for role in cc.ROLES:                       # every ROLES seat needs a cursor
+        (root / "mailbox" / "seen" / f"{role}.txt").write_text("2026-06-12T09:00:00Z\n")
+    return root
+
+
+def test_check_coordination_clean_with_coordinator2_traffic(tmp_path):
+    # ROLES now includes coordinator2 → its seen file is required AND the
+    # -to-coordinator2- filename must parse (Task 3). No FATAL, exit 0.
+    assert "coordinator2" in cc.ROLES and "coordinator" in cc.ROLES
+    root = _make_coord_with_coord2(tmp_path)
+    issues = cc.run(root, since="2026-06-12", now="2026-06-12T12:00:00Z")
+    fatals = [i for i in issues if i.severity == "FATAL"]
+    assert fatals == [], fatals
+
+    # --- non-vacuity: delete the seeded coordinator2 cursor → cursor_missing FATAL ---
+    (root / "mailbox" / "seen" / "coordinator2.txt").unlink()
+    issues2 = cc.run(root, since="2026-06-12", now="2026-06-12T12:00:00Z")
+    assert any(i.kind == "cursor_missing" and "coordinator2" in i.message
+               for i in issues2)
+
+
+def test_live_coordinator_cursors_seeded_iso():
+    seen = Path(__file__).resolve().parent.parent.parent / "coordination" / "mailbox" / "seen"
+    for f in ("coordinator.txt", "coordinator2.txt"):
+        cur = (seen / f).read_text().strip()
+        assert cc._CURSOR_RE.match(cur), f"{f} not ISO (Phase A is ISO-only): {cur!r}"
+
+
+# --- Task 5 review-fix: .claude/.agents seat_status.py structural sync guard ---
+
+_REPO = Path(__file__).resolve().parent.parent.parent
+_SEAT_STATUS_AGENTS = _REPO / ".agents" / "skills" / "four-seat-protocol" / "scripts" / "seat_status.py"
+_SEAT_STATUS_CLAUDE = _REPO / ".claude" / "skills" / "four-seat-protocol" / "scripts" / "seat_status.py"
+
+
+def _normalized_seat_status(path: Path) -> str:
+    """Read a seat_status.py copy, dropping the ONE self-referential docstring
+    usage line that legitimately differs (`.agents/...` vs `.claude/...`). Every
+    other byte must be identical between the canonical (.agents) copy and the
+    .claude mirror — they are both live and hand-maintained, so any divergence is
+    drift (the heartbeats() bug that prompted this guard fixed in only one copy)."""
+    kept = [
+        ln for ln in path.read_text(encoding="utf-8").splitlines()
+        if "skills/four-seat-protocol/scripts/seat_status.py" not in ln
+    ]
+    return "\n".join(kept)
+
+
+def test_seat_status_copies_are_identical_modulo_self_path():
+    # The two copies MUST stay byte-identical except their own usage-path line.
+    agents = _normalized_seat_status(_SEAT_STATUS_AGENTS)
+    claude = _normalized_seat_status(_SEAT_STATUS_CLAUDE)
+    assert agents == claude, (
+        ".agents and .claude seat_status.py have diverged beyond their "
+        "self-referential usage path — a fix landed in only ONE copy (drift)."
+    )
+
+    # Sanity: the normalization dropped exactly the one differing path line, not
+    # the whole docstring — both copies still carry the heartbeats() fix comment.
+    for path in (_SEAT_STATUS_AGENTS, _SEAT_STATUS_CLAUDE):
+        body = path.read_text(encoding="utf-8")
+        assert "for seat in protocol_mailbox.SEATS:" in body
+        assert "heartbeats are pair-seat only" in body
+
+    # --- non-vacuity: simulate a one-copy-only change (the exact drift this guard
+    # exists to catch) by mutating the .claude content in memory → compare flips RED.
+    drifted_claude = claude.replace(
+        "for seat in protocol_mailbox.SEATS:", "for seat in SEATS:", 1
+    )
+    assert drifted_claude != claude, "mutation precondition failed — pattern not present"
+    assert agents != drifted_claude  # if only .claude were reverted, the guard goes RED
