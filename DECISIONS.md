@@ -1840,11 +1840,25 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   gate, and the reducer. The live-bus cutover is unaffected: carrier ids are the unique source
   filename (`legacy_projector.py` `id=p.name`), so no legitimate collision exists. A duplicate id
   now fails LOUD (was silent overwrite/ambiguity).
+- **Refinement (same session, the fix's own re-verification found 3 completeness gaps):** the
+  first cut enforced uniqueness only on the consumer side and per-(brief_id,id). Closed: (1)
+  `refstore.append` now scans by id ACROSS all briefs/kinds (brief_id is attacker-chosen, so the
+  per-(brief_id,id) path check was bypassable); (2) the Slice-1 `store.py` got the SAME id-uniqueness
+  guard (Rule #13 — `EventStore.append` raises `EventIdCollision`), so a dup id can't enter via that
+  substrate and wedge the gate's dup-id reject into a whole-bus DoS; (3) the reducer builds
+  `seat_by_id` from LOAD-BEARING events ONLY — a revoke target is always a load-bearing fact, so a
+  non-load-bearing carrier (which the gate does not de-dup) can no longer CONTEST a victim's id to
+  block its legitimate self-revocation. The forged-promotion class itself was confirmed already
+  closed across the re-verifications (signatures hold; overseer authority intact); these three were
+  DoS / integrity-assist completeness gaps.
 - **Evidence:** RED→GREEN pins — `test_verify_and_reduce_rejects_duplicate_event_id` (gate),
-  `test_append_refuses_colliding_event_id_from_another_seat` (refstore); the store-overwrite was
-  reproduced (read of the storage layout + idempotency path) pre-fix.
-  `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q` → `242 passed`.
+  `test_append_refuses_colliding_event_id_from_another_seat` +
+  `test_append_refuses_same_id_under_different_brief` (refstore),
+  `test_append_refuses_duplicate_event_id` (store.py),
+  `test_non_load_bearing_event_cannot_contest_id_to_block_self_revoke` (reducer); the store-overwrite
+  + the 3 completeness gaps were reproduced end-to-end pre-fix and fail-closed post-fix.
+  `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q` → `245 passed`.
 - **Cross-refs:** **ADR-036** (the revoke-authority fix whose re-verification surfaced this);
-  `threeway/gate.py` (`verify_and_reduce` dup-id reject); `threeway/refstore.py`
-  (`EventIdCollision` + the append path-existence check); `docs/REMEDIATION-INVENTORY.md`
-  (`threeway-event-id-not-unique`).
+  `threeway/gate.py` (`verify_and_reduce` dup-id reject); `threeway/refstore.py` + `threeway/store.py`
+  (`EventIdCollision` + the by-id append guard); `threeway/reducer.py` (LOAD-BEARING-scoped
+  `seat_by_id`); `docs/REMEDIATION-INVENTORY.md` (`threeway-event-id-not-unique`).

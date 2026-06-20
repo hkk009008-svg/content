@@ -1765,8 +1765,8 @@ append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` pr
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
 ```
 
-Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `242 passed` (incl. the ADR-036 revoke-authority
-+ id-collision + defense-in-depth pins and the ADR-037 event-id-uniqueness pins).
+Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `245 passed` (incl. the ADR-036 revoke-authority
++ id-collision + defense-in-depth pins and the ADR-037 event-id-uniqueness pins across gate + both stores).
 
 *Last verified: 2026-06-21*
 
