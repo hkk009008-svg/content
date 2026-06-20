@@ -225,6 +225,44 @@ def test_run_gate_merges_clean_candidate_via_cas(live_repo, seatkit):
     assert state.merge_completed("c1") is not None
 
 
+def test_run_gate_does_not_promote_candidate_shadow(live_repo, seatkit):
+    # ADR-039 candidate shadow-DoS (gate side): a validly-signed shadow candidate from a
+    # NON-coordinator seat (operator), higher seq, carrying ATTACKER base/branch/integ, is on
+    # the bus alongside the legit promotion. The gate's step-4 trusted recompute must use the
+    # AUTHORITATIVE candidate (signed by the assignment's executing_coordinator) and merge the
+    # legit integration_sha — never the shadow's SHAs (a promotion forgery if gate.py recomputed
+    # from the latest-seat candidate). It must also NOT be derailed into PENDING by the shadow.
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    from threeway import gitcas
+    tree, clean = gitcas.merge_tree(r, base, branch)
+    assert clean
+    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge c1")
+    for ev in _valid_events_for(base, branch, integ, privs):
+        store.append(ev, privs[ev.signer.split(":", 1)[0]])
+    # the shadow uses a DISTINCT id (sender=operator) so it does not trip the dup-id guard;
+    # it is a legitimate insider event the gate must IGNORE on authority grounds.
+    from threeway.envelope import Event
+    from threeway.policy import default_policy
+    shadow = Event(id="candidate-operator-c1", seq=0, bus_id="prod",
+                   schema_version="threeway/1", kind="candidate", sender="operator",
+                   recipient="all", signer="operator:claude:s1",
+                   payload={"pair": "A", "staging_base_sha": "a" * 40,
+                            "branch_sha": "b" * 40, "integration_sha": "c" * 40,
+                            "risk_tier_claimed": "T1",
+                            "policy_digest": default_policy().policy_digest()},
+                   candidate_id="c1", subject_sha="c" * 40)
+    store.append(shadow, privs["operator"])
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "COMPLETED", res.reason
+    # main moved to the AUTHORITATIVE integration_sha, never the shadow's "c"*40.
+    new_head = _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip()
+    assert new_head == integ
+    assert new_head != "c" * 40
+
+
 def test_run_gate_rejects_poisoned_reserved_merge_id(live_repo, seatkit):
     # ADR-037 regression guard: an insider pre-claims the predictable completion id
     # 'merge-c1' (any kind). The gate must REJECT BEFORE the irreversible CAS merge — never
@@ -325,3 +363,55 @@ def test_run_gate_backstop_rejects_when_gate_side_plumbing_raises(
     assert "git plumbing failed on attested SHA" in res.reason
     # fail-closed: the protected ref did NOT move.
     assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == base
+
+
+def test_run_gate_idempotent_with_non_default_gate_seat(live_repo, seatkit):
+    """ADR-039 coupling regression: run_gate must thread its gate_seat all the way
+    through verify_and_reduce -> reduce, so the reducer's record-time authority filter
+    (reducer.py:206-209) accepts the gate's OWN merge_completed fact (signed
+    f"{gate_seat}:mech:gate"). If gate_seat is NOT threaded, reduce falls back to the
+    module default GATE_SEAT="merge-gate", DROPS a custom-gate-signed completion fact as
+    unauthorized, and the idempotency no-op (gate.py:110) breaks -> a crash-recovery
+    re-run trips the reserved-merge-id guard (gate.py:119) and REJECTS instead of being a
+    clean at-most-once no-op. Part of the ADR-036/037/038/039 forgery+availability class."""
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    # register a NON-default gate seat in BOTH the public registry (so verify_and_reduce
+    # can verify the load-bearing merge_completed fact) and the keystore (so the gate can
+    # sign it via load_private(gate_seat)).
+    from threeway import keys
+    cg_priv, cg_pub = keys.generate_keypair()
+    (reg / "custom-gate.pub").write_text(cg_pub + "\n")
+    (ks / "custom-gate.ed25519").write_text(keys.private_to_hex(cg_priv) + "\n")
+
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    from threeway import gitcas
+    tree, clean = gitcas.merge_tree(r, base, branch)
+    assert clean
+    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge c1")
+    for ev in _valid_events_for(base, branch, integ, privs):
+        store.append(ev, privs[ev.signer.split(":", 1)[0]])
+
+    r1 = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                  main_ref="refs/threeway/test-main", gate_seat="custom-gate")
+    assert r1.outcome == "COMPLETED", r1.reason
+
+    # crash-recovery re-run: the gate's own custom-gate-signed merge_completed fact must be
+    # HONORED by the reducer -> a clean idempotent no-op, NOT a reserved-id REJECT.
+    r2 = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                  main_ref="refs/threeway/test-main", gate_seat="custom-gate")
+    assert r2.outcome == "COMPLETED", r2.reason
+    assert "idempotent" in r2.reason
+
+    # exactly ONE merge_completed fact => no double merge under the custom seat
+    completes = [e for e in store.all_events() if e.kind == "merge_completed"]
+    assert len(completes) == 1
+
+    # verify_and_reduce itself threads gate_seat so the completion fact is honored; with
+    # the default seat the same bus DROPS it (proving threading is load-bearing).
+    from threeway.gate import verify_and_reduce
+    honored = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod",
+                                gate_seat="custom-gate")
+    assert honored.merge_completed("c1") is not None
+    dropped = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
+    assert dropped.merge_completed("c1") is None

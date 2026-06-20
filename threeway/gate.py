@@ -31,7 +31,7 @@ def _seat(signer: str) -> str:
     return signer.split(":", 1)[0]
 
 
-def verify_and_reduce(events, registry_dir, bus_id: str):
+def verify_and_reduce(events, registry_dir, bus_id: str, gate_seat: str = "merge-gate"):
     reg = PublicKeyRegistry(registry_dir)
     verified = []
     seen_ids: set[str] = set()
@@ -58,7 +58,11 @@ def verify_and_reduce(events, registry_dir, bus_id: str):
                 raise GateError(f"duplicate event id (collision/replay?): {ev.id!r}")
             seen_ids.add(ev.id)
         verified.append(ev)
-    return reduce(verified)
+    # ADR-039: thread the gate seat so the reducer's record-time authority filter accepts
+    # THIS gate's own merge_completed fact (signer seat == gate_seat). Without it reduce()
+    # falls back to its module default and DROPS a non-default gate's completion fact,
+    # breaking run_gate's idempotency no-op + tripping the reserved-id guard on a re-run.
+    return reduce(verified, gate_seat=gate_seat)
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +108,8 @@ def run_gate(candidate_id, store: EventStore, repo, registry_dir, bus_id,
              main_ref, gate_seat="merge-gate", policy=None) -> GateResult:
     policy = policy or default_policy()
     # 1. verify + reduce authoritative bus state (raises GateError on bad sig/replay)
-    state = verify_and_reduce(store.all_events(), registry_dir=registry_dir, bus_id=bus_id)
+    state = verify_and_reduce(store.all_events(), registry_dir=registry_dir, bus_id=bus_id,
+                              gate_seat=gate_seat)
 
     # 2. idempotency: already merged?  no-op.
     if state.merge_completed(candidate_id) is not None:
@@ -129,8 +134,10 @@ def run_gate(candidate_id, store: EventStore, repo, registry_dir, bus_id,
         if d.outcome == PENDING:
             return GateResult("PENDING", d.reason)
 
-        # 4. MERGEABLE — recompute the trusted merge, never trusting candidate.integration_sha
-        cand = state.candidate(candidate_id)
+        # 4. MERGEABLE — recompute the trusted merge, never trusting candidate.integration_sha.
+        # ADR-039: use the SAME authoritative candidate evaluate() approved (signed by the
+        # assignment's executing_coordinator), so a shadow's base/branch can never be merged.
+        cand = state.authoritative_candidate(candidate_id)
         base = cand.payload["staging_base_sha"]
         branch = cand.payload["branch_sha"]
         tree, clean = gitcas.merge_tree(repo, base, branch)

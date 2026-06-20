@@ -37,11 +37,35 @@ def _seat(signer: str) -> str:
 
 
 def evaluate(candidate_id, state, repo, policy, main_ref=MAIN_REF) -> Decision:
-    cand = state.candidate(candidate_id)
-    if cand is None:
+    # ADR-039: resolve the AUTHORITATIVE candidate self-consistently. A locate-only read
+    # first distinguishes "no candidate fact at all" (PENDING) from "a candidate exists but
+    # none is self-consistent with the overseer's assignment". authoritative_candidate()
+    # returns the candidate signed by the executing_coordinator the overseer assigned to the
+    # pair THAT candidate declares — so an insider's higher-seq shadow (bogus pair, or a
+    # non-coordinator signer) is IGNORED, closing the candidate shadow-DoS + pair-redirection.
+    locate = state.candidate(candidate_id)          # any-seat; only to detect "no candidate at all"
+    if locate is None:
         return Decision(PENDING, "no candidate fact yet")
     if state.is_aborted(candidate_id):
         return Decision(REJECTED, "candidate aborted")
+    cand = state.authoritative_candidate(candidate_id)
+    if cand is None:
+        # a candidate exists but none is signed by the assignment's executing coordinator —
+        # the forged/shadow candidate has zero effect; await the real coordinator's candidate.
+        return Decision(PENDING, "no candidate from executing coordinator")
+
+    # assignment is GUARANTEED present & overseer-signed for cand.pair by construction of
+    # authoritative_candidate (it only matches against state.assignment(), which is overseer-
+    # only via the record-time filter). The exec-coordinator-signer guarantee likewise moved
+    # there. We keep a defensive PENDING below (defense-in-depth; never fires in practice).
+    assign = state.assignment(cand.payload["pair"])
+    if assign is None:
+        return Decision(PENDING, "no assignment fact for pair")
+    a = assign.payload
+    builder_provider = a["builder_provider"]
+    verifier_provider = a["primary_verifier_provider"]
+    if verifier_provider == builder_provider:
+        return Decision(REJECTED, "primary verifier same provider as builder")
 
     p = cand.payload
     staging_base = p["staging_base_sha"]
@@ -52,23 +76,6 @@ def evaluate(candidate_id, state, repo, policy, main_ref=MAIN_REF) -> Decision:
     # freshness — exact-SHA CAS precondition
     if repo.rev_parse(main_ref) != staging_base:
         return Decision(REJECTED, "stale: staging_base_sha != main.head")
-
-    # assignment & independence — assignment is an overseer-signed control-plane fact
-    # (without the signer check a builder could forge an assignment that lies about
-    #  its own provider, defeating the independence clause below)
-    assign = state.assignment(pair)
-    if assign is None:
-        return Decision(PENDING, "no assignment fact for pair")
-    if _seat(assign.signer) != "overseer":
-        return Decision(REJECTED, "assignment not signed by overseer")
-    a = assign.payload
-    builder_provider = a["builder_provider"]
-    verifier_provider = a["primary_verifier_provider"]
-    if verifier_provider == builder_provider:
-        return Decision(REJECTED, "primary verifier same provider as builder")
-    # candidate must be signed by the executing coordinator named in assignment
-    if _seat(cand.signer) != a["executing_coordinator"]:
-        return Decision(REJECTED, "candidate not signed by executing coordinator")
 
     # brief — overseer-signed; carries assigned_tier + allowed_paths
     brief_ev = state.brief(cand.brief_id, cand.brief_version)

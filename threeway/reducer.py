@@ -53,7 +53,7 @@ class EffectiveState:
     _release_order: dict[str, Event] = field(default_factory=dict)   # candidate_id -> Event
     _release_requested: dict[str, Event] = field(default_factory=dict)
     _ci_result: dict[str, Event] = field(default_factory=dict)       # subject_sha -> Event
-    _candidates: dict[str, Event] = field(default_factory=dict)      # candidate_id -> Event
+    _candidates: dict[tuple, Event] = field(default_factory=dict)    # (candidate_id, seat) -> Event
     _assignments: dict[str, Event] = field(default_factory=dict)     # pair -> Event
     _merge_completed: dict[str, Event] = field(default_factory=dict) # candidate_id -> Event
     _co_sign: dict[tuple, Event] = field(default_factory=dict)       # (candidate_id, seat) -> Event
@@ -94,8 +94,33 @@ class EffectiveState:
     def ci_result(self, subject_sha) -> Event | None:
         return self._ci_result.get(subject_sha)
 
-    def candidate(self, candidate_id) -> Event | None:
-        return self._candidates.get(candidate_id)
+    def candidate(self, candidate_id, seat=None) -> Event | None:
+        # ADR-039: _candidates is keyed by (candidate_id, signer-seat) so an insider's
+        # validly-signed shadow candidate (same id, different seat) no longer overwrites the
+        # authoritative one in a plain last-write-wins slot. With `seat` given, return that
+        # seat's candidate; with seat=None this is a LOCATE-ONLY query (latest-by-seq across
+        # all seats) used by the predicate solely to detect "no candidate fact at all" —
+        # authority is decided by authoritative_candidate(), never by this latest-seat read.
+        if seat is not None:
+            return self._candidates.get((candidate_id, seat))
+        cands = [e for (cid, _seat), e in self._candidates.items() if cid == candidate_id]
+        if not cands:
+            return None
+        return max(cands, key=lambda e: e.seq)
+
+    def authoritative_candidate(self, candidate_id) -> Event | None:
+        # ADR-039: the effective candidate is the one self-consistent with the overseer's
+        # assignment — signed by the executing_coordinator the overseer assigned to the pair
+        # THAT candidate declares. A shadow candidate (bogus pair, or a pair whose coordinator
+        # != its signer) is NOT self-consistent and is ignored — closing the candidate
+        # shadow-DoS AND the pair-redirection variant. assignment() is already overseer-only
+        # (record-time filter), so a forged assignment can't make a shadow self-consistent.
+        cands = [e for (cid, _seat), e in self._candidates.items() if cid == candidate_id]
+        for c in sorted(cands, key=lambda e: e.seq, reverse=True):
+            a = self.assignment(c.payload.get("pair"))
+            if a is not None and a.payload.get("executing_coordinator") == _seat_of(c.signer):
+                return c
+        return None
 
     def assignment(self, pair) -> Event | None:
         ev = self._assignments.get(pair)
@@ -198,7 +223,7 @@ def reduce(events, *, gate_seat: str = GATE_SEAT) -> EffectiveState:
                 continue
             st._ci_result[ev.subject_sha] = ev
         elif k == "candidate":
-            st._candidates[ev.candidate_id] = ev
+            st._candidates[(ev.candidate_id, _seat_of(ev.signer))] = ev
         elif k == "assignment":
             if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["assignment"]:
                 continue

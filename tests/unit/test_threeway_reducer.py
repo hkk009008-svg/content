@@ -323,3 +323,43 @@ def test_merge_completed_honors_overridden_gate_seat():
                  signer="merge-gate:mech:gate")   # default name is NOT authorized here
     st = reduce([legit, shadow], gate_seat="custom-gate")
     assert st.merge_completed("c1").signer == "custom-gate:mech:gate"
+
+
+# --- ADR-039 candidate shadow-DoS: _candidates is keyed by (candidate_id, seat) and the
+# authoritative candidate is the one self-consistent with the overseer's assignment
+# (signed by the executing_coordinator the overseer assigned to the pair the candidate
+# itself declares). A shadow (bogus pair, or non-coordinator signer) is NOT self-consistent.
+
+def _cand(seq, pair, signer, **over):
+    return _ev(seq, "candidate", payload={
+        "pair": pair, "staging_base_sha": "1" * 40, "branch_sha": "3" * 40,
+        "integration_sha": "2" * 40, "risk_tier_claimed": "T1"},
+        subject_sha="2" * 40, signer=signer, **over)
+
+
+def test_candidate_keyed_by_seat():
+    coord = _cand(2, "A", "coordinator:claude:s1")
+    op = _cand(9, "A", "operator:claude:s1")   # higher seq, different seat
+    st = reduce([coord, op])
+    assert st.candidate("c1", "coordinator").signer == "coordinator:claude:s1"
+    assert st.candidate("c1", "operator").signer == "operator:claude:s1"
+    # one-arg locate still works: latest-by-seq across all seats
+    assert st.candidate("c1").signer == "operator:claude:s1"
+
+
+def test_authoritative_candidate_resolves_to_executing_coordinator():
+    coord = _cand(2, "A", "coordinator:claude:s1")
+    shadow = _cand(9, "A", "operator:claude:s1")   # higher seq, non-coordinator
+    assign = _ev(3, "assignment", payload={
+        "pair": "A", "executing_coordinator": "coordinator"}, signer="overseer:mech:s1")
+    st = reduce([coord, shadow, assign])
+    auth = st.authoritative_candidate("c1")
+    assert auth is not None and auth.signer == "coordinator:claude:s1"
+
+
+def test_authoritative_candidate_none_when_only_noncoordinator():
+    shadow = _cand(9, "A", "operator:claude:s1")   # only a non-coordinator candidate
+    assign = _ev(3, "assignment", payload={
+        "pair": "A", "executing_coordinator": "coordinator"}, signer="overseer:mech:s1")
+    st = reduce([shadow, assign])
+    assert st.authoritative_candidate("c1") is None

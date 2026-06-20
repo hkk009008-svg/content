@@ -92,12 +92,51 @@ def test_rejects_when_verifier_same_provider_as_builder():
 
 
 def test_rejects_candidate_not_signed_by_executing_coordinator():
+    # ADR-039 (hardened candidate resolution): a candidate NOT signed by the assignment's
+    # executing_coordinator is no longer self-consistent, so authoritative_candidate ignores
+    # it entirely. With the ONLY candidate forged to a non-coordinator signer there is no
+    # authoritative candidate at all → PENDING (the gate awaits the real coordinator; the
+    # forged candidate has ZERO effect, no merge happens). This is strictly safer than the
+    # old REJECTED — never weaken production to restore the REJECTED.
     events = _full_event_set()
     for e in events:
         if e.kind == "candidate":
             e.signer = "operator:claude:s1"  # not the coordinator
     d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
-    assert d.outcome == REJECTED and "executing coordinator" in d.reason
+    assert d.outcome == PENDING and "executing coordinator" in d.reason
+
+
+def test_same_pair_candidate_shadow_does_not_displace():
+    # ADR-039: an insider appends a validly-signed shadow candidate for the SAME id, SAME
+    # pair, HIGHER seq, signed by a NON-coordinator seat, carrying attacker base/branch/integ.
+    # It must NOT displace the coordinator's authoritative candidate (availability/DoS + a
+    # promotion-forgery hazard if the gate later merged the shadow's base/branch).
+    events = _full_event_set()
+    events.append(_e("candidate", 20, payload={
+        "pair": "A",
+        "staging_base_sha": "a" * 40, "branch_sha": "b" * 40,
+        "integration_sha": "c" * 40, "risk_tier_claimed": "T1",
+        "policy_digest": default_policy().policy_digest()},
+        subject_sha="c" * 40, signer="operator:claude:s1"))
+    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == MERGEABLE, d.reason
+
+
+def test_bogus_pair_candidate_shadow_does_not_block():
+    # ADR-039 (pair-redirection variant): the shadow declares a BOGUS pair "Z" with no
+    # assignment, HIGHER seq, non-coordinator signer. The naive "read pair from latest
+    # candidate" fix would resolve assignment("Z") → None → PENDING and block the legit
+    # promotion. authoritative_candidate must skip the non-self-consistent shadow and keep
+    # the coordinator's candidate → still MERGEABLE.
+    events = _full_event_set()
+    events.append(_e("candidate", 20, payload={
+        "pair": "Z",
+        "staging_base_sha": "a" * 40, "branch_sha": "b" * 40,
+        "integration_sha": "c" * 40, "risk_tier_claimed": "T1",
+        "policy_digest": default_policy().policy_digest()},
+        subject_sha="c" * 40, signer="operator:claude:s1"))
+    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == MERGEABLE, d.reason
 
 
 def test_go_then_fail_release_leaves_no_effective_go_pending():
@@ -377,4 +416,9 @@ def test_revoked_assignment_is_pending():
     # e2 = the assignment; overseer is authorized to revoke it (ADR-036)
     evs.append(_e("attestation_revoked", 12, revokes_event_id="e2", signer="overseer:mech:s1"))
     d = evaluate("c1", reduce(evs), FakeRepo(), default_policy())
-    assert d.outcome == PENDING and "no assignment fact for pair" in d.reason
+    # ADR-039 reason-string shift (still PENDING / non-merge, security preserved): with the
+    # assignment revoked, NO candidate is self-consistent (authoritative_candidate finds no
+    # overseer assignment for the candidate's pair), so evaluate reports "no candidate from
+    # executing coordinator" rather than the old "no assignment fact for pair". Same fail-closed
+    # outcome — the revoked control-plane fact still blocks the merge.
+    assert d.outcome == PENDING and "executing coordinator" in d.reason
