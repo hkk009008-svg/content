@@ -1672,9 +1672,12 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
 - **Consequences:** the live campaign bus is now event-sourced on the same substrate as the governance
   bus, with `coordinator`/`coordinator2` addressable both ways. There is no dual-write window at any
   phase (Phase A purely additive; shadow read-only in-memory; cutover a single post-success flip).
-  Rollback is the retained read-only `sent/` + the reversible cursor manifest. The two new modules are
-  ADDITIVE and read-only — they import the Slice-2 API and never edit `refstore`/`gitcas`/`envelope`/
-  `reducer`/`gate`/`tier`. Slice 3 is now the only remaining slice. **The LIVE cutover is a SEPARATE
+  Rollback is the retained read-only `sent/` + the reversible cursor manifest. The four new modules are
+  ADDITIVE and import the Slice-2 API without ever editing `refstore`/`gitcas`/`envelope`/`reducer`/
+  `gate`/`tier`: `legacy_projector` and `divergence` are pure read-only projection/compare;
+  `cursor_backfill` rewrites the legacy `seen/*.txt` cursors + the reversible manifest (no refs touched);
+  and `cutover` is the single gated WRITER — the one authoritative authority-flip append to
+  `refs/threeway/events` — NOT read-only. Slice 3 is now the only remaining slice. **The LIVE cutover is a SEPARATE
   post-merge operational act:** this plan ships the tested cutover MACHINERY (`threeway/cutover.py`) but
   does NOT flip the live bus. `run_cutover` returns `CutoverResult(ready_to_flip=True)`; the authority-flip
   marker commit is the operator's deliberate act, run on a quiet bus. **OPERATIONAL note:** the live
