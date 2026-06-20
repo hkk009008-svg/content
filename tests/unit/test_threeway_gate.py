@@ -674,6 +674,43 @@ def test_run_gate_total_under_malformed_authoritative_candidate(live_repo, seatk
 
 
 # ---------------------------------------------------------------------------
+# ADR-041: reduce() TOTALITY against malformed insider input. An insider seat validly
+# self-signs a load-bearing event whose KEYED field is an unhashable JSON list (here a
+# co_sign with candidate_id=["totally","unrelated"]). The field is signed, so no forgery
+# is needed. Pre-ADR-041 reduce() raised TypeError (unhashable type: 'list') which escaped
+# verify_and_reduce -> run_gate's step-1 call (OUTSIDE its try) -> a total-bus brick: ONE
+# such event crashed run_gate for EVERY candidate, including a fully-legit independent one.
+# The fix DROPS the malformed event; the legit merge COMPLETES and the bus stays total.
+# ---------------------------------------------------------------------------
+
+def test_run_gate_total_under_unhashable_keyed_field(live_repo, seatkit):
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    _, _, integ = _seed_valid(store, r, privs)   # a complete, signed, legit T1 promotion for c1
+    from threeway.envelope import Event
+    # an insider appends a VALIDLY-self-signed co_sign whose candidate_id is an unhashable list.
+    # reduce() keys _co_sign by (candidate_id, seat) -> TypeError pre-fix. (Distinct, non-reserved
+    # id so it is not dropped by the reserved-namespace / dup-id guards — only the ADR-041 drop.)
+    poison = Event(id="cosign-poison-unhashable", seq=0, bus_id="prod",
+                   schema_version="threeway/1", kind="co_sign", sender="operator",
+                   recipient="all", signer="operator:claude:s1",
+                   payload={"verdict": "GO"},
+                   candidate_id=["totally", "unrelated"], subject_sha=integ)
+    store.append(poison, privs["operator"])
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "COMPLETED", res.reason   # did NOT raise; poison dropped, legit merge ran
+    # main moved to the legit integration_sha — the poison could not brick the merge (total bus).
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == integ
+    # the poison co_sign is ABSENT from effective state (dropped, never reduced); the legit
+    # state is intact (verify_and_reduce did not raise on the unhashable keyed field).
+    from threeway.gate import verify_and_reduce
+    state = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
+    assert state.merge_completed("c1") is not None
+
+
+# ---------------------------------------------------------------------------
 # Residual (i): cross-pair candidate_id reuse DoS — confirmed-but-deferred,
 # pinned strict-xfail so CI tracks it until the candidate_id<->pair-binding
 # slice lands. This is a REAL reproducing scenario, not a vacuous pin.

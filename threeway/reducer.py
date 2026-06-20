@@ -9,10 +9,13 @@ seat still supersedes the prior one (latest seq wins), which is the intended
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from threeway import LOAD_BEARING_KINDS
 from threeway.envelope import Event
+
+logger = logging.getLogger(__name__)
 
 
 # The merge-gate seat name. The six static control-plane singletons resolve to the
@@ -154,7 +157,37 @@ class EffectiveState:
 
 def reduce(events, *, gate_seat: str = GATE_SEAT) -> EffectiveState:
     st = EffectiveState()
-    ordered = sorted(events, key=lambda e: e.seq)
+    # ADR-041 (defect threeway-reducer-unhashable-key-brick, availability): an insider seat
+    # validly self-signs a load-bearing event whose KEYED field is an unhashable JSON list
+    # (e.g. candidate_id=["x","y"], payload["kind"]/["approver_identity"] a list) or whose
+    # infrastructure field (id/signer/seq) is the wrong type. Those fields are inside the
+    # signed envelope/payload-digest, so the signature is VALID — no forgery. Pre-ADR-041 the
+    # dict-key / set-member / sort raised TypeError/AttributeError that escaped run_gate's
+    # step-1 verify_and_reduce (OUTSIDE its try) -> a total-bus brick (ONE event bricked every
+    # candidate). Apply the SAME drop-not-raise discipline ADR-040 used: a malformed event has
+    # NO authority, so DROP it (with a WARNING) — never let it brick the whole reduction.
+    #
+    # Up-front infrastructure-field filter (BEFORE the sort): id keys seat_by_id AND the later
+    # EffectiveState id-membership queries (`e.id in self._revoked_event_ids`), signer feeds
+    # _seat_of(...).split(":") (AttributeError if non-str), seq is the sort key (TypeError if
+    # non-comparable). After this filter the sort, the seat_by_id loop, and the id-membership
+    # queries are all safe. Kept tight to ONLY these three infra fields; the fold try/except
+    # below covers any other keyed field (present or future). bool subclasses int, harmless for
+    # seq (still sortable). Fail-safe: dropping a malformed event can only REMOVE it from
+    # reduction — it has no authority, so this never widens what can promote.
+    well_formed = []
+    for ev in events:
+        if not isinstance(ev.id, str):
+            logger.warning("dropping event with non-str id (%r): kind=%r", ev.id, ev.kind)
+            continue
+        if not isinstance(ev.signer, str):
+            logger.warning("dropping event %s: non-str signer (%r)", ev.id, ev.signer)
+            continue
+        if not isinstance(ev.seq, int):
+            logger.warning("dropping event %s: non-int seq (%r)", ev.id, ev.seq)
+            continue
+        well_formed.append(ev)
+    ordered = sorted(well_formed, key=lambda e: e.seq)
     # ADR-039 (defect threeway-reducer-shadow-dos, availability): the six STATIC
     # control-plane singletons below are last-write-wins, and the stores auto-assign a
     # monotonic seq — so an insider's event appended AFTER the authoritative one would
@@ -186,56 +219,70 @@ def reduce(events, *, gate_seat: str = GATE_SEAT) -> EffectiveState:
             seat_by_id.setdefault(ev.id, set()).add(_seat_of(ev.signer))
     for ev in ordered:
         k = ev.kind
-        if k == "attestation":
-            seat = _seat_of(ev.signer)
-            att_kind = ev.payload.get("kind", "release")
-            st._attestations[(ev.candidate_id, att_kind, seat)] = ev
-        elif k == "attestation_revoked":
-            tgt = ev.revokes_event_id
-            if tgt and _revoke_authorized(_seat_of(ev.signer), seat_by_id.get(tgt)):
-                st._revoked_event_ids.add(tgt)
-        elif k == "candidate_aborted":
-            st._aborted_candidates.add(ev.candidate_id)
-        elif k == "brief":
-            if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["brief"]:
-                continue
-            st._briefs[(ev.brief_id, ev.brief_version)] = ev
-        elif k == "brief_superseded":
-            # supersedes_event_id is the UNSIGNED sibling of revokes_event_id (envelope.py:67),
-            # so gate it by the SAME authority rule (ADR-037, Rule #13): only the overseer or
-            # the superseded brief's own signer seat may roll back a brief version.
-            tgt = ev.supersedes_event_id
-            if tgt and _revoke_authorized(_seat_of(ev.signer), seat_by_id.get(tgt)):
-                st._superseded_event_ids.add(tgt)
-        elif k == "cycle_go":
-            if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["cycle_go"]:
-                continue
-            st._cycle_go[(ev.payload.get("brief_id", ev.brief_id),
-                          ev.payload.get("brief_version", ev.brief_version))] = ev
-        elif k == "release_order":
-            if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["release_order"]:
-                continue
-            st._release_order[ev.payload.get("candidate_id", ev.candidate_id)] = ev
-        elif k == "release_requested":
-            st._release_requested[ev.payload.get("candidate_id", ev.candidate_id)] = ev
-        elif k == "ci_result":
-            if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["ci_result"]:
-                continue
-            st._ci_result[ev.subject_sha] = ev
-        elif k == "candidate":
-            st._candidates[(ev.candidate_id, _seat_of(ev.signer))] = ev
-        elif k == "assignment":
-            if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["assignment"]:
-                continue
-            st._assignments[ev.payload.get("pair")] = ev
-        elif k == "merge_completed":
-            if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["merge_completed"]:
-                continue
-            st._merge_completed[ev.payload.get("candidate_id", ev.candidate_id)] = ev
-        elif k == "co_sign":
-            st._co_sign[(ev.candidate_id, _seat_of(ev.signer))] = ev
-        elif k == "re_verify":
-            st._re_verify[(ev.candidate_id, _seat_of(ev.signer))] = ev
-        elif k == "human_approval":
-            st._human_approval[(ev.candidate_id, ev.payload.get("approver_identity"))] = ev
+        # ADR-041: wrap the fold body so a malformed-but-validly-signed event (an unhashable
+        # JSON-list dict-key / set-member, e.g. candidate_id=["x"], payload["kind"] a list, or
+        # any odd KEYED field in ANY branch — present OR added later) is DROPPED with a WARNING
+        # instead of raising and bricking the whole reduction. The tuple/dict key is computed
+        # BEFORE the map assignment, so a TypeError there means the event never partially enters
+        # the map — the drop is clean. The up-front id/signer/seq filter already made seat_by_id
+        # and the later id-membership queries safe; this is the future-proof catch-all for the
+        # remaining payload-/reference-derived keys. (Authority/fold semantics are UNCHANGED —
+        # this only ADDs the drop; a well-formed legit event is never caught.)
+        try:
+            if k == "attestation":
+                seat = _seat_of(ev.signer)
+                att_kind = ev.payload.get("kind", "release")
+                st._attestations[(ev.candidate_id, att_kind, seat)] = ev
+            elif k == "attestation_revoked":
+                tgt = ev.revokes_event_id
+                if tgt and _revoke_authorized(_seat_of(ev.signer), seat_by_id.get(tgt)):
+                    st._revoked_event_ids.add(tgt)
+            elif k == "candidate_aborted":
+                st._aborted_candidates.add(ev.candidate_id)
+            elif k == "brief":
+                if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["brief"]:
+                    continue
+                st._briefs[(ev.brief_id, ev.brief_version)] = ev
+            elif k == "brief_superseded":
+                # supersedes_event_id is the UNSIGNED sibling of revokes_event_id (envelope.py:67),
+                # so gate it by the SAME authority rule (ADR-037, Rule #13): only the overseer or
+                # the superseded brief's own signer seat may roll back a brief version.
+                tgt = ev.supersedes_event_id
+                if tgt and _revoke_authorized(_seat_of(ev.signer), seat_by_id.get(tgt)):
+                    st._superseded_event_ids.add(tgt)
+            elif k == "cycle_go":
+                if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["cycle_go"]:
+                    continue
+                st._cycle_go[(ev.payload.get("brief_id", ev.brief_id),
+                              ev.payload.get("brief_version", ev.brief_version))] = ev
+            elif k == "release_order":
+                if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["release_order"]:
+                    continue
+                st._release_order[ev.payload.get("candidate_id", ev.candidate_id)] = ev
+            elif k == "release_requested":
+                st._release_requested[ev.payload.get("candidate_id", ev.candidate_id)] = ev
+            elif k == "ci_result":
+                if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["ci_result"]:
+                    continue
+                st._ci_result[ev.subject_sha] = ev
+            elif k == "candidate":
+                st._candidates[(ev.candidate_id, _seat_of(ev.signer))] = ev
+            elif k == "assignment":
+                if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["assignment"]:
+                    continue
+                st._assignments[ev.payload.get("pair")] = ev
+            elif k == "merge_completed":
+                if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["merge_completed"]:
+                    continue
+                st._merge_completed[ev.payload.get("candidate_id", ev.candidate_id)] = ev
+            elif k == "co_sign":
+                st._co_sign[(ev.candidate_id, _seat_of(ev.signer))] = ev
+            elif k == "re_verify":
+                st._re_verify[(ev.candidate_id, _seat_of(ev.signer))] = ev
+            elif k == "human_approval":
+                st._human_approval[(ev.candidate_id, ev.payload.get("approver_identity"))] = ev
+        except (TypeError, AttributeError, ValueError) as e:
+            logger.warning("dropping malformed event %s (kind=%r) from reduction: %s",
+                           ev.id, k, e)
+            continue
     return st

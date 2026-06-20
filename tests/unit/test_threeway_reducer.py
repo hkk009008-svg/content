@@ -363,3 +363,61 @@ def test_authoritative_candidate_none_when_only_noncoordinator():
         "pair": "A", "executing_coordinator": "coordinator"}, signer="overseer:mech:s1")
     st = reduce([shadow, assign])
     assert st.authoritative_candidate("c1") is None
+
+
+# --- ADR-041: reduce() must be TOTAL against malformed insider input. An insider seat
+# validly self-signs a load-bearing event whose KEYED field is an unhashable JSON list
+# (candidate_id / payload["kind"] / payload["approver_identity"]) or whose infra field
+# (id / signer / seq) is the wrong type. The field is inside the signed envelope/payload-
+# digest, so the signature is VALID (no forgery). Pre-ADR-041 reduce() raised TypeError/
+# AttributeError that escaped run_gate -> a total-bus brick. The fix DROPS the malformed
+# event (no authority -> safe) and a co-present legit event still reduces. ---
+
+def test_reduce_drops_unhashable_candidate_id_keeps_legit():
+    poison = _ev(1, "co_sign", payload={"verdict": "GO"}, candidate_id=["x", "y"],
+                 signer="operator2:codex:s1")
+    legit = _ev(2, "co_sign", payload={"verdict": "GO"}, candidate_id="c1",
+                signer="operator2:codex:s1")
+    st = reduce([poison, legit])                       # must NOT raise
+    assert st.co_sign("c1", "operator2") is not None   # legit survives the drop
+
+
+def test_reduce_drops_unhashable_attestation_kind_keeps_legit():
+    poison = _att(1, "GO", kind_att=["x", "y"], signer="operator:claude:s1")
+    legit = _att(2, "GO", kind_att="release", signer="operator:claude:s1")
+    st = reduce([poison, legit])                       # must NOT raise
+    assert st.effective_attestation("c1", "release", "operator") is not None
+
+
+def test_reduce_drops_unhashable_approver_identity_keeps_legit():
+    poison = _ev(1, "human_approval", signer="overseer:mech:s1",
+                 payload={"approver_identity": ["chief", "gemini"],
+                          "integration_sha": INTEG, "decision": "approve"})
+    legit = _ev(2, "human_approval", signer="overseer:mech:s1",
+                payload={"approver_identity": "chief-gemini",
+                         "integration_sha": INTEG, "decision": "approve"})
+    st = reduce([poison, legit])                       # must NOT raise
+    assert st.human_approvals("c1") != []              # legit approval survives
+
+
+def test_reduce_drops_unhashable_event_id_keeps_legit():
+    poison = _ev(1, "co_sign", payload={"verdict": "GO"}, id=["e", "1"],
+                 signer="operator2:codex:s1")
+    legit = _ev(2, "co_sign", payload={"verdict": "GO"}, signer="operator2:codex:s1")
+    st = reduce([poison, legit])                       # must NOT raise (seat_by_id / id queries safe)
+    assert st.co_sign("c1", "operator2") is not None
+
+
+def test_reduce_drops_nonstr_signer_keeps_legit():
+    poison = _ev(1, "co_sign", payload={"verdict": "GO"}, signer=["operator2", "codex"])
+    legit = _ev(2, "co_sign", payload={"verdict": "GO"}, signer="operator2:codex:s1")
+    st = reduce([poison, legit])                       # must NOT raise (_seat_of split safe)
+    assert st.co_sign("c1", "operator2") is not None
+
+
+def test_reduce_drops_nonint_seq_keeps_legit():
+    poison = _ev("not-an-int", "co_sign", payload={"verdict": "GO"},
+                 signer="operator2:codex:s1", id="e-poison")
+    legit = _ev(2, "co_sign", payload={"verdict": "GO"}, signer="operator2:codex:s1")
+    st = reduce([poison, legit])                       # must NOT raise (sort key safe)
+    assert st.co_sign("c1", "operator2") is not None
