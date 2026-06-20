@@ -263,10 +263,18 @@ def test_run_gate_does_not_promote_candidate_shadow(live_repo, seatkit):
     assert new_head != "c" * 40
 
 
-def test_run_gate_rejects_poisoned_reserved_merge_id(live_repo, seatkit):
-    # ADR-037 regression guard: an insider pre-claims the predictable completion id
-    # 'merge-c1' (any kind). The gate must REJECT BEFORE the irreversible CAS merge — never
-    # let the merge happen and then crash on the merge_completed append (EventIdCollision).
+def test_run_gate_survives_poisoned_reserved_merge_id(live_repo, seatkit):
+    # ADR-039 availability win (supersedes the old ADR-037 reserved-id REJECT): an insider
+    # pre-claims the predictable completion id 'merge-c1' (here a forged co_sign). The OLD
+    # behavior REJECTED the whole candidate — but that handed any insider a per-candidate DoS
+    # (squat the id, block every legit merge forever). The NEW behavior is strictly MORE
+    # available: verify_and_reduce DROPS the squat at ingestion (reserved 'merge-' namespace is
+    # reserved to the gate seat, so a non-gate event with that id is ignored, never reduced),
+    # so the legit merge PROCEEDS and main MOVES. The gate's own post-CAS merge_completed append
+    # then collides with the squatted id (EventIdCollision); because run_gate is TOTAL the
+    # collision degrades to a COMPLETED-with-degraded-reason instead of crashing after main moved.
+    # The squat can no longer block the merge; it only forfeits the completion FACT (recovery
+    # then leans on the main-state idempotency check on a later clean re-run).
     r, base, branch = live_repo
     reg, ks, privs = seatkit
     store = EventStore(r / "coordination" / "threeway" / "events")
@@ -281,12 +289,109 @@ def test_run_gate_rejects_poisoned_reserved_merge_id(live_repo, seatkit):
                    signer="operator:claude:s1", payload={"verdict": "GO"},
                    candidate_id="c1", subject_sha=integ)
     store.append(poison, privs["operator"])
-    head_before = _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip()
     res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
                    main_ref="refs/threeway/test-main", gate_seat="merge-gate")
-    assert res.outcome == "REJECTED" and "merge" in res.reason.lower()
+    # the squat does NOT block the legit merge: it COMPLETED (degraded) and main MOVED to integ.
+    assert res.outcome == "COMPLETED", res.reason
+    assert "degraded" in res.reason
     head_after = _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip()
-    assert head_after == head_before   # rejected BEFORE the irreversible merge
+    assert head_after == integ   # main DID move to the legit merge — the squat can't DoS it
+
+
+def test_run_gate_drops_nongate_reserved_id_event(live_repo, seatkit):
+    # ADR-039 reserved-namespace DROP (read-side): a non-gate seat presenting an event whose id
+    # is in the reserved 'merge-' namespace is an insider squat. verify_and_reduce must IGNORE it
+    # for reduction (drop, not raise — raising would let one forged 'merge-x' brick the gate for
+    # EVERY candidate). Here a forged co_sign GO with id 'merge-c1' from operator must NOT surface
+    # as a co_sign in effective state. (Mutation check: without the drop, state.co_sign would
+    # return it, since each event is validly self-signed.)
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    from threeway import gitcas
+    tree, clean = gitcas.merge_tree(r, base, branch)
+    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge c1")
+    for ev in _valid_events_for(base, branch, integ, privs):
+        store.append(ev, privs[ev.signer.split(":", 1)[0]])
+    from threeway.envelope import Event
+    smuggled = Event(id="merge-c1", seq=0, bus_id="prod", schema_version="threeway/1",
+                     kind="co_sign", sender="operator", recipient="all",
+                     signer="operator:claude:s1", payload={"verdict": "GO"},
+                     candidate_id="c1", subject_sha=integ)
+    store.append(smuggled, privs["operator"])
+    state = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
+    # the smuggled reserved-id co_sign was dropped at ingestion, never reduced.
+    assert state.co_sign("c1", "operator") is None
+
+
+def test_run_gate_total_under_post_cas_append_failure(live_repo, seatkit, monkeypatch):
+    # ADR-039 totality: a post-CAS failure on the merge_completed append (here a non-
+    # CalledProcessError raised by store.append, e.g. a keystore error) must NOT escape after
+    # the irreversible CAS — main already moved. run_gate catches ALL exceptions in the post-CAS
+    # block and degrades to COMPLETED. The pre-CAS recompute path is unaffected (still REJECTs a
+    # CalledProcessError), so we only detonate the FINAL append, after the valid events are stored.
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    from threeway import gitcas
+    tree, clean = gitcas.merge_tree(r, base, branch)
+    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge c1")
+    for ev in _valid_events_for(base, branch, integ, privs):
+        store.append(ev, privs[ev.signer.split(":", 1)[0]])
+
+    # detonate ONLY the merge_completed append (the post-CAS one). The valid events are already
+    # stored above, so wrapping append now affects only the gate's own completion-fact write.
+    real_append = store.append
+    def _boom(ev, private_key):
+        if ev.kind == "merge_completed":
+            raise RuntimeError("keystore unavailable")
+        return real_append(ev, private_key)
+    monkeypatch.setattr(store, "append", _boom)
+
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "COMPLETED", res.reason   # did NOT raise; degraded gracefully
+    assert "degraded" in res.reason
+    # main IS at the merge — the CAS landed before the append blew up (fail-OPEN is correct here:
+    # the merge genuinely happened; only the recording was lost).
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == integ
+
+
+def test_run_gate_main_state_idempotency_without_fact(live_repo, seatkit):
+    # ADR-039 main-state idempotency: after a successful merge, if the merge_completed FACT is
+    # missing (a post-CAS recording failure) but main is ALREADY at the authoritative candidate's
+    # integration_sha, the merge LANDED — run_gate must return COMPLETED via the main-state check,
+    # never a permanent stale REJECT. We simulate the lost fact by deleting the merge_completed
+    # event file from the store after a successful merge, then re-running.
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    events_dir = r / "coordination" / "threeway" / "events"
+    store = EventStore(events_dir)
+    from threeway import gitcas
+    tree, clean = gitcas.merge_tree(r, base, branch)
+    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge c1")
+    for ev in _valid_events_for(base, branch, integ, privs):
+        store.append(ev, privs[ev.signer.split(":", 1)[0]])
+    r1 = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                  main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert r1.outcome == "COMPLETED", r1.reason
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == integ
+
+    # withhold the recorded fact: delete the merge_completed event file (post-CAS-fail simulation).
+    import pathlib
+    removed = 0
+    for p in pathlib.Path(events_dir).glob("*-merge-c1.json"):
+        p.unlink(); removed += 1
+    assert removed == 1, "expected exactly one merge_completed fact to withhold"
+    # sanity: the fact is now gone from effective state.
+    state = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
+    assert state.merge_completed("c1") is None
+
+    # re-run: no fact, but main==integ -> COMPLETED via main-state idempotency, not a stale REJECT.
+    r2 = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                  main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert r2.outcome == "COMPLETED", r2.reason
+    assert "idempotent" in r2.reason
 
 
 def test_run_gate_is_idempotent_under_double_invocation(live_repo, seatkit):
@@ -368,12 +473,11 @@ def test_run_gate_backstop_rejects_when_gate_side_plumbing_raises(
 def test_run_gate_idempotent_with_non_default_gate_seat(live_repo, seatkit):
     """ADR-039 coupling regression: run_gate must thread its gate_seat all the way
     through verify_and_reduce -> reduce, so the reducer's record-time authority filter
-    (reducer.py:206-209) accepts the gate's OWN merge_completed fact (signed
-    f"{gate_seat}:mech:gate"). If gate_seat is NOT threaded, reduce falls back to the
-    module default GATE_SEAT="merge-gate", DROPS a custom-gate-signed completion fact as
-    unauthorized, and the idempotency no-op (gate.py:110) breaks -> a crash-recovery
-    re-run trips the reserved-merge-id guard (gate.py:119) and REJECTS instead of being a
-    clean at-most-once no-op. Part of the ADR-036/037/038/039 forgery+availability class."""
+    accepts the gate's OWN merge_completed fact (signed f"{gate_seat}:mech:gate"). If
+    gate_seat is NOT threaded, reduce falls back to the module default GATE_SEAT="merge-gate"
+    and DROPS a custom-gate-signed completion fact as unauthorized, so the idempotency no-op
+    breaks and a crash-recovery re-run re-merges (or degrades) instead of being a clean
+    at-most-once no-op. Part of the ADR-036/037/038/039 forgery+availability class."""
     r, base, branch = live_repo
     reg, ks, privs = seatkit
     # register a NON-default gate seat in BOTH the public registry (so verify_and_reduce

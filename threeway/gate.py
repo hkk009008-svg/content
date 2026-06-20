@@ -26,6 +26,8 @@ class GateError(Exception):
 # signature_version is rejected BEFORE signature verification continues.
 _ACCEPTED_SIG_VERSIONS = {"threeway-sign/2"}
 
+RESERVED_COMPLETION_PREFIX = "merge-"   # the gate's merge_completed id namespace; reserved to the gate seat
+
 
 def _seat(signer: str) -> str:
     return signer.split(":", 1)[0]
@@ -42,6 +44,13 @@ def verify_and_reduce(events, registry_dir, bus_id: str, gate_seat: str = "merge
             if ev.signature_version not in _ACCEPTED_SIG_VERSIONS:
                 raise GateError(f"unaccepted signature_version: {ev.signature_version!r}")
             seat = _seat(ev.signer)
+            # ADR-039: the "merge-" id namespace is reserved for the gate's own merge_completed fact.
+            # A non-gate seat presenting a reserved id is an insider squat — DROP it (ignore for
+            # reduction) rather than raise. Raising here would let one forged event brick verify_and_reduce
+            # for EVERY candidate (a self-inflicted DoS); the squat is further neutralized by run_gate's
+            # totality + main-state idempotency below (the post-CAS append collision degrades, never crashes).
+            if ev.id.startswith(RESERVED_COMPLETION_PREFIX) and seat != gate_seat:
+                continue
             try:
                 pub = reg.get(seat)
             except KeyError as e:
@@ -115,14 +124,12 @@ def run_gate(candidate_id, store: EventStore, repo, registry_dir, bus_id,
     if state.merge_completed(candidate_id) is not None:
         return GateResult("COMPLETED", "already merged (idempotent)")
 
-    # 2b. reserved-id integrity (ADR-037): the completion fact uses the predictable id
-    # f"merge-{cid}". If that id is already present on the bus (and step 2 confirmed there is
-    # no merge_completed fact), an insider has CLAIMED the reserved id. Reject HERE, BEFORE the
-    # irreversible CAS merge — otherwise the post-merge merge_completed append would hit the
-    # ADR-037 EventIdCollision guard and escape uncaught after main already moved.
-    reserved_id = f"merge-{candidate_id}"
-    if any(e.id == reserved_id for e in store.all_events()):
-        return GateResult("REJECTED", "reserved merge_completed id already present (tamper/replay)")
+    # 2a. main-state idempotency (ADR-039): if main is already at the authoritative candidate's
+    # integration_sha, the merge LANDED — even if no merge_completed fact exists (a post-CAS append
+    # failure). Return COMPLETED so a degraded recording is recoverable on re-run, never a permanent stale REJECT.
+    auth = state.authoritative_candidate(candidate_id)
+    if auth is not None and gitcas.rev_parse(repo, main_ref) == auth.payload.get("integration_sha"):
+        return GateResult("COMPLETED", "main already at integration_sha (idempotent recovery)")
 
     # 3. evaluate the predicate from authoritative state. A residual git-plumbing
     # failure on an attested SHA (e.g. gate-side commit_tree) becomes a REJECTED
@@ -153,16 +160,22 @@ def run_gate(candidate_id, store: EventStore, repo, registry_dir, bus_id,
         if not gitcas.cas_update_ref(repo, main_ref, merge_commit, base):
             return GateResult("REJECTED", "stale: CAS expected-old no longer matches main.head")
 
-        # 6. emit the signed merge_completed fact (the gate's own credential)
-        gate_priv = load_private(gate_seat)
-        done = Event(
-            id=f"merge-{candidate_id}", seq=0, bus_id=bus_id,
-            schema_version="threeway/1", kind="merge_completed",
-            sender=gate_seat, recipient="all", signer=f"{gate_seat}:mech:gate",
-            payload={"candidate_id": candidate_id, "merged_sha": merge_commit},
-            candidate_id=candidate_id, subject_sha=merge_commit,
-        )
-        store.append(done, gate_priv)
-        return GateResult("COMPLETED", "merged via exact-SHA CAS")
+        # 6. POST-CAS — main HAS moved; from here NOTHING may escape (run_gate is TOTAL).
+        # A post-CAS append failure (e.g. an insider squatted the reserved id -> EventIdCollision,
+        # or a keystore error) yields a degraded COMPLETED: main IS merged, and (2a) main-state
+        # idempotency lets the completion fact be re-emitted on a later clean re-run.
+        try:
+            gate_priv = load_private(gate_seat)
+            done = Event(
+                id=f"{RESERVED_COMPLETION_PREFIX}{candidate_id}", seq=0, bus_id=bus_id,
+                schema_version="threeway/1", kind="merge_completed",
+                sender=gate_seat, recipient="all", signer=f"{gate_seat}:mech:gate",
+                payload={"candidate_id": candidate_id, "merged_sha": merge_commit},
+                candidate_id=candidate_id, subject_sha=merge_commit,
+            )
+            store.append(done, gate_priv)
+            return GateResult("COMPLETED", "merged via exact-SHA CAS")
+        except Exception as e:
+            return GateResult("COMPLETED", f"merged; completion-fact append degraded: {e}")
     except subprocess.CalledProcessError as e:
         return GateResult("REJECTED", f"git plumbing failed on attested SHA: {e}")
