@@ -105,7 +105,8 @@ INTEG = "2" * 40
 def test_co_sign_accessor_hides_revoked():
     cs = _ev(1, "co_sign", payload={"verdict": "GO"}, subject_sha=INTEG,
              signer="operator2:codex:s1")
-    rev = _ev(2, "attestation_revoked", revokes_event_id="e1")   # cs.id == "e1"
+    rev = _ev(2, "attestation_revoked", revokes_event_id="e1",
+              signer="overseer:mech:s1")   # cs.id == "e1"; authorized (overseer)
     assert reduce([cs]).co_sign("c1", "operator2") is not None
     assert reduce([cs, rev]).co_sign("c1", "operator2") is None
 
@@ -121,7 +122,7 @@ def test_human_approvals_accessor_hides_revoked():
     h = _ev(1, "human_approval", signer="overseer:mech:s1",
             payload={"approver_identity": "chief-gemini", "integration_sha": INTEG,
                      "decision": "approve"})
-    rev = _ev(2, "attestation_revoked", revokes_event_id="e1")
+    rev = _ev(2, "attestation_revoked", revokes_event_id="e1", signer="overseer:mech:s1")
     assert reduce([h]).human_approvals("c1") != []
     assert reduce([h, rev]).human_approvals("c1") == []
 
@@ -140,13 +141,38 @@ def test_assignments_returns_latest_per_pair():
 
 def test_assignments_hides_revoked():
     a = _ev(1, "assignment", payload={"pair": "A"}, signer="overseer:mech:s1")
-    rev = _ev(2, "attestation_revoked", revokes_event_id="e1")
+    rev = _ev(2, "attestation_revoked", revokes_event_id="e1", signer="overseer:mech:s1")
     assert reduce([a, rev]).assignments() == []
 
 
 def test_assignment_singular_accessor_hides_revoked():
     a = _ev(1, "assignment", payload={"pair": "A", "primary_verifier": "operator"},
             signer="overseer:mech:s1")
-    rev = _ev(2, "attestation_revoked", revokes_event_id="e1")   # a.id == "e1"
+    rev = _ev(2, "attestation_revoked", revokes_event_id="e1",
+              signer="overseer:mech:s1")   # a.id == "e1"; authorized (overseer)
     assert reduce([a]).assignment("A") is not None
     assert reduce([a, rev]).assignment("A") is None
+
+
+# --- revoke authority (ADR-036): revokes_event_id is UNSIGNED, so a revoke takes effect
+# only from the overseer (control-plane override) or the target's own signer seat
+# (self-revocation). Any other seat's revoke is IGNORED. ---
+
+def test_unauthorized_seat_revoke_is_ignored():
+    a = _ev(1, "assignment", payload={"pair": "A"}, signer="overseer:mech:s1")
+    rev = _ev(2, "attestation_revoked", revokes_event_id="e1",
+              signer="operatorB:codex:s1")   # not overseer, not the target's seat
+    assert reduce([a, rev]).assignments() != []   # forged revoke has no authority → ignored
+
+
+def test_overseer_revoke_of_other_seats_fact_is_honored():
+    cs = _ev(1, "co_sign", payload={"verdict": "GO"}, signer="operator2:codex:s1")
+    rev = _ev(2, "attestation_revoked", revokes_event_id="e1", signer="overseer:mech:s1")
+    assert reduce([cs, rev]).co_sign("c1", "operator2") is None   # overseer may revoke anything
+
+
+def test_self_revocation_is_honored_across_sessions():
+    cs = _ev(1, "co_sign", payload={"verdict": "GO"}, signer="operator2:codex:s1")
+    rev = _ev(2, "attestation_revoked", revokes_event_id="e1",
+              signer="operator2:codex:s9")   # same seat, different session → self-revocation
+    assert reduce([cs, rev]).co_sign("c1", "operator2") is None

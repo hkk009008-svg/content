@@ -18,6 +18,18 @@ def _seat_of(signer: str) -> str:
     return signer.split(":", 1)[0]
 
 
+def _revoke_authorized(revoker_seat: str, target_seat: str | None) -> bool:
+    """ADR-036: `revokes_event_id` is UNSIGNED (envelope.py:67), so an attacker who holds
+    ANY registered seat could forge a revoke pointing at another seat's (or the overseer's)
+    fact without breaking its signature. A revoke therefore takes effect ONLY from an
+    authorized seat — the `overseer` (control-plane override) or the target event's own
+    signer seat (self-revocation). Any other seat's revoke is IGNORED. Without this an
+    insider could collapse the gate's fail-closed guarantees (forged promotion / merge DoS).
+    `target_seat is None` (target absent from the replay) → only the overseer is honored."""
+    return revoker_seat == "overseer" or (
+        target_seat is not None and revoker_seat == target_seat)
+
+
 @dataclass
 class EffectiveState:
     # (candidate_id, att_kind, seat) -> latest attestation Event
@@ -106,15 +118,20 @@ class EffectiveState:
 
 def reduce(events) -> EffectiveState:
     st = EffectiveState()
-    for ev in sorted(events, key=lambda e: e.seq):
+    ordered = sorted(events, key=lambda e: e.seq)
+    # Revoke authority needs the TARGET event's seat; index every event's seat up front so
+    # the check holds regardless of whether the revoke precedes or follows its target.
+    seat_by_id = {ev.id: _seat_of(ev.signer) for ev in ordered}
+    for ev in ordered:
         k = ev.kind
         if k == "attestation":
             seat = _seat_of(ev.signer)
             att_kind = ev.payload.get("kind", "release")
             st._attestations[(ev.candidate_id, att_kind, seat)] = ev
         elif k == "attestation_revoked":
-            if ev.revokes_event_id:
-                st._revoked_event_ids.add(ev.revokes_event_id)
+            tgt = ev.revokes_event_id
+            if tgt and _revoke_authorized(_seat_of(ev.signer), seat_by_id.get(tgt)):
+                st._revoked_event_ids.add(tgt)
         elif k == "candidate_aborted":
             st._aborted_candidates.add(ev.candidate_id)
         elif k == "brief":

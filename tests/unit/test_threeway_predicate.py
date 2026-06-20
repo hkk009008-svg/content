@@ -280,6 +280,53 @@ def test_t2_pending_with_provider_spoofed_cosign():
     assert d.outcome == PENDING and "co_sign not satisfied for T2" in d.reason
 
 
+# --- ADR-036: forged-revoke cannot defeat the fail-closed mirror resolution. The mirror
+# set is revocation-aware (Slice 3), and revokes_event_id is unsigned, so without a revoke-
+# authority check any insider seat could revoke a rival/legit overseer-signed assignment to
+# either forge a promotion (collapse ambiguity onto a seat it controls) or deny a valid one.
+
+def _t2_two_mirror_exploit_events():
+    """A T2 candidate (pair A) with TWO genuinely swap-eligible mirror pairs — B (verifier
+    operator2) and C (verifier operatorB) — so resolution is ambiguous and fails closed.
+    The attacker controls operatorB and pre-positions its own co_sign GO."""
+    evs = _t2_event_set()   # pair B assignment (e10) + operator2 co_sign (e11)
+    evs.append(_e("assignment", 12, payload={
+        "pair": "C", "builder": "directorC", "builder_provider": "claude",
+        "primary_verifier": "operatorB", "primary_verifier_provider": "codex",
+        "executing_coordinator": "coordinatorC"}, signer="overseer:mech:s1"))
+    evs.append(_e("co_sign", 13, payload={"verdict": "GO"}, subject_sha=INTEG,
+                  signer="operatorB:codex:s1"))   # attacker's own co_sign
+    return evs
+
+
+def test_forged_nonoverseer_revoke_cannot_collapse_t2_mirror_ambiguity():
+    evs = _t2_two_mirror_exploit_events()
+    # genuine ambiguity (two mirrors) must fail closed
+    assert evaluate("c1", reduce(evs), T2_REPO, default_policy()).outcome == PENDING
+    # attacker forges a non-overseer revoke of the RIVAL mirror's overseer-signed assignment;
+    # it must be ignored, so the gate stays PENDING (no forged promotion).
+    evs.append(_e("attestation_revoked", 14, revokes_event_id="e10",
+                  signer="operatorB:codex:s1"))
+    assert evaluate("c1", reduce(evs), T2_REPO, default_policy()).outcome == PENDING
+
+
+def test_forged_nonoverseer_revoke_cannot_deny_legit_mirror():
+    evs = _t2_event_set()   # single legit mirror → MERGEABLE
+    assert evaluate("c1", reduce(evs), T2_REPO, default_policy()).outcome == MERGEABLE
+    # a non-overseer seat must not revoke the overseer-signed mirror assignment (merge DoS)
+    evs.append(_e("attestation_revoked", 12, revokes_event_id="e10",
+                  signer="operator:claude:s1"))   # not overseer, not the target's seat
+    assert evaluate("c1", reduce(evs), T2_REPO, default_policy()).outcome == MERGEABLE
+
+
+def test_overseer_revoke_of_mirror_assignment_denies_promotion():
+    evs = _t2_event_set()
+    evs.append(_e("attestation_revoked", 12, revokes_event_id="e10",
+                  signer="overseer:mech:s1"))   # authorized control-plane revoke
+    d = evaluate("c1", reduce(evs), T2_REPO, default_policy())
+    assert d.outcome == PENDING and "co_sign not satisfied for T2" in d.reason
+
+
 def _t3_event_set():
     evs = _full_event_set()
     for e in evs:
@@ -327,6 +374,7 @@ def test_t3_pending_with_one_human_approval():
 
 def test_revoked_assignment_is_pending():
     evs = _full_event_set()
-    evs.append(_e("attestation_revoked", 12, revokes_event_id="e2"))   # e2 = the assignment
+    # e2 = the assignment; overseer is authorized to revoke it (ADR-036)
+    evs.append(_e("attestation_revoked", 12, revokes_event_id="e2", signer="overseer:mech:s1"))
     d = evaluate("c1", reduce(evs), FakeRepo(), default_policy())
     assert d.outcome == PENDING and "no assignment fact for pair" in d.reason
