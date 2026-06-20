@@ -2,6 +2,7 @@
 from threeway.policy import default_policy
 from threeway.tier import classify_diff, effective_tier, co_sign_satisfied, tier_rank
 from threeway.reducer import reduce
+from threeway.envelope import Event
 
 
 P = default_policy()
@@ -37,13 +38,113 @@ def test_effective_tier_is_max_of_claimed_and_path_derived():
     assert effective_tier("T0", [".github/workflows/ci.yml"], P) == "T2"
 
 
+INTEG = "2" * 40
+WRONG = "9" * 40
+
+
+def _assign(seq, *, pair, builder_provider, verifier_seat, verifier_provider,
+            signer="overseer:mech:s1"):
+    return Event(id=f"as{seq}", seq=seq, bus_id="prod", schema_version="threeway/1",
+                 kind="assignment", sender="overseer", recipient="all", signer=signer,
+                 payload={"pair": pair, "builder_provider": builder_provider,
+                          "primary_verifier": verifier_seat,
+                          "primary_verifier_provider": verifier_provider},
+                 brief_id="b1", brief_version=1)
+
+
+def _roster():
+    return [_assign(1, pair="A", builder_provider="codex",
+                    verifier_seat="operator", verifier_provider="claude"),
+            _assign(2, pair="B", builder_provider="claude",
+                    verifier_seat="operator2", verifier_provider="codex")]
+
+
+def _sat(tier, state, *, pair="A", builder="codex", verifier="claude", cand="c1"):
+    return co_sign_satisfied(tier, state, cand, candidate_pair=pair,
+                             builder_provider=builder, verifier_provider=verifier,
+                             integration_sha=INTEG)
+
+
 def test_t0_t1_cosign_satisfied_without_extra_artifacts():
-    state = reduce([])
-    assert co_sign_satisfied("T0", state, candidate_id="c1", builder_provider="codex")
-    assert co_sign_satisfied("T1", state, candidate_id="c1", builder_provider="codex")
+    state = reduce(_roster())
+    assert _sat("T0", state)
+    assert _sat("T1", state)
 
 
-def test_t2_t3_not_satisfiable_in_slice1():
-    state = reduce([])
-    assert not co_sign_satisfied("T2", state, candidate_id="c1", builder_provider="codex")
-    assert not co_sign_satisfied("T3", state, candidate_id="c1", builder_provider="codex")
+def test_t2_t3_pending_without_any_artifacts():
+    state = reduce(_roster())
+    assert not _sat("T2", state)
+    assert not _sat("T3", state)
+
+
+def _cosign(seq, *, signer, subject_sha=INTEG, verdict="GO", cand="c1"):
+    return Event(id=f"cs{seq}", seq=seq, bus_id="prod", schema_version="threeway/1",
+                 kind="co_sign", sender=signer.split(":")[0], recipient="all", signer=signer,
+                 payload={"verdict": verdict}, candidate_id=cand, brief_id="b1",
+                 brief_version=1, subject_sha=subject_sha)
+
+
+def test_t2_satisfied_by_mirror_pair_operator():
+    state = reduce(_roster() + [_cosign(3, signer="operator2:codex:s1")])
+    assert _sat("T2", state)
+
+
+def test_t2_rejects_cosign_from_primary_verifier_seat():
+    state = reduce(_roster() + [_cosign(3, signer="operator:claude:s1")])
+    assert not _sat("T2", state)
+
+
+def test_t2_rejects_provider_spoof_by_primary_verifier():
+    state = reduce(_roster() + [_cosign(3, signer="operator:codex:s9")])
+    assert not _sat("T2", state)
+
+
+def test_t2_rejects_cosign_from_builder_director():
+    state = reduce(_roster() + [_cosign(3, signer="director:codex:s1")])
+    assert not _sat("T2", state)
+
+
+def test_t2_rejects_cosign_from_coordinator():
+    state = reduce(_roster() + [_cosign(3, signer="coordinator2:codex:s1")])
+    assert not _sat("T2", state)
+
+
+def test_t2_rejects_cosign_bound_to_wrong_sha():
+    state = reduce(_roster() + [_cosign(3, signer="operator2:codex:s1", subject_sha=WRONG)])
+    assert not _sat("T2", state)
+
+
+def test_t2_rejects_non_go_cosign():
+    state = reduce(_roster() + [_cosign(3, signer="operator2:codex:s1", verdict="NITS")])
+    assert not _sat("T2", state)
+
+
+def test_t2_rejects_when_mirror_assignment_not_overseer_signed():
+    roster = [_assign(1, pair="A", builder_provider="codex", verifier_seat="operator",
+                      verifier_provider="claude"),
+              _assign(2, pair="B", builder_provider="claude", verifier_seat="operator2",
+                      verifier_provider="codex", signer="director:codex:s1")]
+    state = reduce(roster + [_cosign(3, signer="operator2:codex:s1")])
+    assert not _sat("T2", state)
+
+
+def test_t2_rejects_wrong_family_other_pair():
+    roster = [_assign(1, pair="A", builder_provider="codex", verifier_seat="operator",
+                      verifier_provider="claude"),
+              _assign(2, pair="B", builder_provider="claude", verifier_seat="operatorB",
+                      verifier_provider="claude")]
+    state = reduce(roster + [_cosign(3, signer="operatorB:claude:s1")])
+    assert not _sat("T2", state)
+
+
+def test_t2_fail_closed_on_two_mirror_pairs():
+    roster = _roster() + [_assign(3, pair="C", builder_provider="claude",
+                                  verifier_seat="operatorC", verifier_provider="codex")]
+    state = reduce(roster + [_cosign(4, signer="operator2:codex:s1"),
+                             _cosign(5, signer="operatorC:codex:s1")])
+    assert not _sat("T2", state)
+
+
+def test_t2_pair_b_direction():
+    state = reduce(_roster() + [_cosign(3, signer="operator:claude:s1")])
+    assert _sat("T2", state, pair="B", builder="claude", verifier="codex")
