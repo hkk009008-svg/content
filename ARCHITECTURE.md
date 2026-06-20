@@ -1765,11 +1765,12 @@ append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` pr
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
 ```
 
-Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `271 passed, 1 xfailed` (incl. the ADR-036
+Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `307 passed, 1 xfailed` (incl. the ADR-036
 revoke-authority, ADR-037 event-id-uniqueness across gate + both stores, ADR-038 reserved-merge-id +
 brief_superseded authority, the ADR-039 availability-hardening pins — authority-aware reducer,
-self-consistent candidate resolution — and the ADR-040 totality-completion pins — verify-phase
-drop-not-raise + pre-CAS exception guard, with the cross-pair `candidate_id` reuse residual
+self-consistent candidate resolution — the ADR-040 totality-completion pins — verify-phase
+drop-not-raise + pre-CAS exception guard — and the ADR-041 step-1 totality pins — the `well_formed`
+envelope guard + reducer fold/skip guards, with the cross-pair `candidate_id` reuse residual
 strict-xfailed).
 
 *Last verified: 2026-06-21*
@@ -1841,16 +1842,16 @@ See `DECISIONS.md` ADR-036/037/038 + `threeway-revoke-authority-unsigned`,
 ### 13A.7 Availability hardening — authority-aware reducer + TOTAL run_gate (ADR-039)
 
 The reducer is now **authority-aware at record time**: `reduce()`
-(`threeway/reducer.py:155`) folds each of the six static control-plane singletons
+(`threeway/reducer.py:169`) folds each of the six static control-plane singletons
 (`assignment`/`brief`/`cycle_go`/`release_order` → `overseer`, `ci_result` → `ci`,
 `merge_completed` → the threaded gate seat) ONLY from its authorized signer-seat, DROPPING a
 non-authorized shadow before the predicate ever reads it — so a higher-seq insider event can no
 longer displace an authoritative fact and DoS a legitimate merge. `def authoritative_candidate`
-(`threeway/reducer.py:111`) resolves the effective candidate self-consistently (its signer-seat
+(`threeway/reducer.py:114`) resolves the effective candidate self-consistently (its signer-seat
 must equal the `executing_coordinator` of the overseer-signed assignment for the pair THAT
 candidate declares), so a bogus-pair or non-coordinator shadow candidate is ignored; the predicate
 and `run_gate` both resolve via it and can never disagree. `def run_gate`
-(`threeway/gate.py:142`) is now TOTAL and recoverable: the post-CAS `merge_completed` append is
+(`threeway/gate.py:158`) is now TOTAL and recoverable: the post-CAS `merge_completed` append is
 wrapped so NO exception escapes the irreversible CAS (a failure degrades to
 `COMPLETED("…append degraded…")`), main-state idempotency returns COMPLETED when main is already at
 the authoritative `integration_sha` (a degraded recording recovers on re-run), and the reserved
@@ -1871,7 +1872,7 @@ reduction and `seen_ids`) plus a `logger.warning`, generalizing ADR-039's reserv
 all four siblings; the duplicate-id check STAYS `raise` (store-guarded-UNREACHABLE — the ADR-037
 `EventIdCollision` guard rejects a colliding append). Dropping can only REMOVE an event from
 reduction, never admit a forged fact or newly promote, so the forgery class stays green. (2) The
-pre-CAS region of `def run_gate` (`threeway/gate.py:142`) is now fail-closed: its outer except is
+pre-CAS region of `def run_gate` (`threeway/gate.py:158`) is now fail-closed: its outer except is
 broadened from `subprocess.CalledProcessError` to `except Exception → REJECTED`, so a
 validly-signed-but-malformed authoritative candidate (missing payload key) can no longer escape as an
 uncaught `KeyError` — any pre-CAS error fails closed with main unmoved (the post-CAS
@@ -1880,6 +1881,29 @@ degraded-`COMPLETED` nest is unchanged). **Open residual:** `threeway-candidate-
 executing_coordinator of another pair can reuse a victim's `candidate_id` to stall (availability-only,
 never a forged promotion); scoped to a follow-up `candidate_id`↔pair-binding slice. See `DECISIONS.md`
 ADR-040 + `threeway-verify-phase-brick-dos`, `threeway-candidate-id-pair-binding-dos`.
+
+**`run_gate` step 1 is now TOTAL too (ADR-041).** ADR-040 closed `run_gate`'s VERIFY-phase raises and
+pre-CAS region, but `run_gate` STEP 1 — `verify_and_reduce` (`threeway/gate.py:38`) → `reduce`
+(`threeway/reducer.py:169`), which runs OUTSIDE `run_gate`'s try — still dereferenced many
+insider-controlled envelope fields as dict/set keys, sort keys, and via attribute access (`.startswith`
+on id, `_seat` split on the UNSIGNED signer, set membership on `kind`/`signature_version`), so a single
+validly-self-signed (or at-rest-planted, since `from_json_obj` does no type validation) load-bearing
+event with an unhashable/wrong-typed field raised UNCAUGHT — a single-insider total-bus brick, a layer
+surfaced only after the prior was fixed. A `well_formed(ev) -> bool` envelope-structural guard
+(`threeway/envelope.py:135`) — true iff every structurally-dereferenced field is the expected type
+(`kind`/`id`/`signer`/`signature_version`/`bus_id` `str`, `seq` `int`, `payload` `dict`, the optional
+id/sha/version fields `str`/`int`-or-`None`) — DROPS a structurally-malformed event (with a WARNING) at
+BOTH `verify_and_reduce`'s loop top (before the `kind` membership test) and `reduce()`'s up-front
+filter, so no insider-controlled field can brick the gate via an unhashable/wrong-typed key or attribute
+access, and the earlier narrow per-field guards consolidate into one structural check. Payload-VALUE
+keys (kind-specific, not covered by `well_formed`) stay guarded by `reduce()`'s fold-loop `try/except
+(TypeError, AttributeError, ValueError) → drop+warn` and `authoritative_candidate`'s
+(`threeway/reducer.py:114`) `isinstance(pair, str)` skip-in-loop. Every guard only DROPS a malformed
+event (no authority); a legit event (incl. `event_sent` carriers) always passes — nothing newly
+promotes, and the forgery class (ADR-036/037/038) + ADR-039/040 stay green. Closing certification re-ran
+the full brick catalogue (35 envelope-field poisons + 15 payload-value probes) end-to-end through live
+`run_gate` — all fail-closed or drop-then-complete, zero uncaught raises. See `DECISIONS.md` ADR-041 +
+`threeway-step1-not-total-malformed-input`.
 
 ---
 

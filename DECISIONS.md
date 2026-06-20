@@ -2038,3 +2038,66 @@ un-writable under a squat) remains MINOR/observability-only.
 **Evidence.** Commit `1f3e65a4`; `tests/unit/test_threeway_*.py` → 271 passed, 1 xfailed (the
 residual); `scripts/ci_smoke.py` OK; `scripts/check_no_ceremony.py` clean. Adversarial review run
 `wf_30e51cdf-f6b`.
+
+---
+
+## ADR-041 — Make `run_gate` step 1 TOTAL: a `well_formed(ev)` envelope guard + reducer fold/skip guards (ADR-040 follow-up, completes the availability class)
+
+**Context.** ADR-040 made `run_gate`'s VERIFY-phase four explicit `raise` checks and its pre-CAS
+region total. Its mandated whole-implementation adversarial review (`wf_30e51cdf-f6b`) plus a chain
+of fresh-eyes certifications then found that `run_gate` STEP 1 (`verify_and_reduce` → `reduce`,
+which runs OUTSIDE `run_gate`'s try) dereferences many INSIDER-CONTROLLED fields in ways that raise
+UNCAUGHT — a sequence of single-insider total-bus brick layers, each surfaced only after the prior
+was fixed (the campaign's "each fix reveals the next layer" pattern):
+- `reduce()` used insider fields as dict/set keys → `TypeError: unhashable type` on a list-valued
+  `candidate_id` / `payload["kind"]` / `payload["approver_identity"]`, and on a non-int `seq` (sort
+  key) / non-str `id`/`signer`.
+- `EffectiveState.authoritative_candidate` (run_gate step 2a, outside the try) used
+  `candidate.payload["pair"]` as an `assignment` key → `TypeError` on a list pair.
+- `verify_and_reduce` dereferenced `id` (`.startswith`), `signer` (`_seat` split), and
+  `signature_version` (set membership) — and `signer` is UNSIGNED, so a validly-self-signed event
+  with a list signer crashes it.
+- `if ev.kind in LOAD_BEARING_KINDS:` (the membership test that GATES the per-event block, in both
+  `verify_and_reduce` and `reduce`) → `TypeError` on an unhashable `kind`, firing BEFORE any inner
+  guard.
+All are availability/DoS only (graceful, fail-closed pre-CAS — main never moves; no forged
+promotion). Reachable via a validly-self-signed event (unsigned `signer`) and via the at-rest JSON
+path (`from_json_obj` does NO type validation), and `reduce()` is also a public function callable
+directly with no signature check.
+
+**Decision.** Apply the ADR-040 drop-not-raise discipline to STEP 1, systematically rather than
+per-field:
+1. **`well_formed(ev) -> bool` (`threeway/envelope.py`)** — true iff every structurally-dereferenced
+   envelope field is the expected type: `kind`/`id`/`signer`/`signature_version`/`bus_id` are `str`,
+   `seq` is `int`, `payload` is `dict`, and
+   `candidate_id`/`subject_sha`/`brief_id`/`revokes_event_id`/`supersedes_event_id` are `str`-or-`None`,
+   `brief_version` `int`-or-`None`.
+2. **Applied at the TOP of `verify_and_reduce`'s loop** (before the `kind` membership test) and as
+   **`reduce()`'s up-front filter** — a malformed event is DROPPED with a WARNING (it has no
+   authority). This makes the `kind` membership test, the sort, `seat_by_id`, every envelope-keyed
+   fold branch, and `authoritative_candidate`'s `.get` all type-safe, and CONSOLIDATES the earlier
+   narrow per-field guards into one structural check.
+3. **Payload-VALUE keys** (`payload["kind"]`, `payload["candidate_id"]`,
+   `payload["approver_identity"]`, `payload["pair"]`, …) — kind-specific and not covered by
+   `well_formed` — stay guarded by `reduce()`'s fold-loop `try/except (TypeError, AttributeError,
+   ValueError) → drop+warn` and `authoritative_candidate`'s `isinstance(pair, str)` skip-in-loop.
+
+**Fail-safe invariant (verified).** Every guard only ever DROPS a structurally-malformed event
+(which has no authority); a legit event passes and is never dropped (valid `event_sent` carriers
+pass too — cutover unaffected). Nothing newly MERGEABLE; the forgery class (ADR-036/037/038) and
+ADR-039/040 stay green. Each guard mutation-tested non-vacuous (RED when reverted).
+
+**Evidence.** Commits `eb0b1000` (reduce up-front filter + fold try/except), `584e9f8c`
+(authoritative_candidate pair skip), `600e50e6` (verify-phase id/signer/sig_version), `be9c04f0`
+(the comprehensive `well_formed`, closing the `kind`/`payload` bricks and consolidating). Closing
+certification re-ran the full brick catalogue (35 envelope-field poisons + 15 payload-value probes +
+the predicate-internal probes) end-to-end through live `run_gate` — all fail-closed or
+drop-then-complete, zero uncaught raises — and re-confirmed the forgery class closed.
+`tests/unit/test_threeway_*.py` → 307 passed, 1 xfailed; `scripts/ci_smoke.py` OK;
+`scripts/check_no_ceremony.py` clean.
+
+**Residual (NOT closed; tracked).** `threeway-candidate-id-pair-binding-dos` (MAJOR, open,
+strict-xfail `test_cross_pair_candidate_id_reuse_dos_residual`): a legitimate executing_coordinator
+of another overseer-assigned pair can reuse a victim's `candidate_id` to capture
+`authoritative_candidate` and stall the victim's merge — availability-only (never promotes), scoped
+to a follow-up `candidate_id`↔pair-binding slice.
