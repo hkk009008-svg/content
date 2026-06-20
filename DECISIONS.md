@@ -1896,3 +1896,85 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   (event-id uniqueness — this fixes its run_gate regression); `threeway/gate.py` (step 2b),
   `threeway/reducer.py` (`brief_superseded` authority); `docs/REMEDIATION-INVENTORY.md`
   (`threeway-brief-supersede-authority`, `threeway-reserved-merge-id-dos`).
+
+## ADR-039 — Availability hardening: authority-aware reducer, self-consistent candidate resolution, and a TOTAL run_gate (closes the insider availability/DoS class)
+
+**Context.** The forgery/forged-promotion class is closed (ADR-036/037/038). A round-6
+adversarial sweep (`wf_8002d3e7-e7e`) found a distinct **availability/DoS** class: a single
+registered insider seat can *block a legitimate merge* (not forge one). One systematic root:
+`reduce()` recorded control-plane singletons via **unauthenticated last-write-wins**, with
+authority checked only at *read* time — so a higher-seq event from a non-authorized seat
+displaces the authoritative fact before the predicate ever reads it. Threat model: one insider
+seat (validly signs as that seat); `overseer`/`ci`/gate seat trusted; cannot forge another
+seat's signature.
+
+**Decision 1 — record-time authority filter for static singletons (reducer).** `reduce()`
+folds each of the six static control-plane singletons into its map ONLY if the event's
+signer-seat is the authorized seat: `assignment`/`brief`/`cycle_go`/`release_order` →
+`overseer`, `ci_result` → `ci`, `merge_completed` → the gate seat (`GATE_SEAT="merge-gate"`,
+threaded as a `reduce(events, *, gate_seat=...)` keyword so a non-default gate seat is honored).
+A non-authorized event of these kinds is DROPPED (never enters the slot), so a shadow cannot
+displace first. This is consistent with the predicate's existing read-time seat checks — it
+moves the guarantee earlier. *Refinement (§11):* because a wrong-seat singleton is now IGNORED
+rather than seen-then-rejected, a forged-only singleton yields PENDING (awaiting the legit fact)
+instead of REJECTED — a strictly STRONGER §11 realization (the forged fact has zero effect; the
+merge still cannot happen) and the more-available outcome (a forged release_order can no longer
+poison a candidate into a permanent REJECTED dead-state). The predicate's read-time wrong-seat
+REJECTs are retained as defense-in-depth.
+
+**Decision 2 — self-consistent candidate authority (reducer + predicate).** `_candidates` is
+re-keyed `(candidate_id, signer-seat)`; `candidate(cid, seat=None)` returns a specific seat's
+candidate or (seat=None) the latest-across-seats locate-only read; and a new
+`EffectiveState.authoritative_candidate(cid)` returns the candidate whose signer-seat equals the
+`executing_coordinator` of the *overseer-signed assignment for the pair THAT candidate declares*
+(self-consistent). The predicate and `run_gate` both resolve the candidate via
+`authoritative_candidate`, so they can never disagree about which candidate is effective.
+*Deviation from the slice plan's literal design 2(a):* the plan said "read `pair` from the latest
+candidate of any seat to locate the assignment." That is insufficient — `pair` is
+attacker-controlled, so a higher-seq shadow candidate with a BOGUS pair derails assignment
+resolution (→ `assignment(bogus)`=None → PENDING) and still blocks the legit candidate, and it
+creates a forgery hazard if `run_gate` merges the shadow's base/branch. The self-consistency rule
+closes both: a bogus-pair or non-coordinator shadow is never self-consistent and is ignored. Also
+folds in the gate_seat threading from Decision 1's filter (a non-default gate seat's own
+`merge_completed` would otherwise be dropped, breaking idempotency).
+
+**Decision 3 — TOTAL, recoverable run_gate + reserved `merge-*` namespace (gate).** (a)
+`verify_and_reduce` DROPS (ignores, does NOT raise) a load-bearing event whose id is in the
+reserved `merge-` namespace from a non-gate seat — *deviation from the plan's literal "raise at
+ingestion," which would let one forged `merge-*` event brick verify_and_reduce for EVERY candidate
+(a self-inflicted total DoS).* (b) Main-state idempotency: `run_gate` returns COMPLETED when main
+is already at the authoritative candidate's `integration_sha`, so a post-CAS recording failure is
+recoverable on re-run, never a permanent `stale` REJECT. (c) Totality: the post-CAS
+`merge_completed` append is wrapped so NO exception escapes after the irreversible CAS — a post-CAS
+append failure yields a degraded `COMPLETED("merged; completion-fact append degraded: …")`; the
+PRE-CAS recompute stays under `except CalledProcessError → REJECTED` (fail-closed, main unmoved).
+The ADR-038 step-2b pre-CAS reserved-id REJECT is REMOVED — subsumed by (a)+(b)+(c), which are
+strictly MORE available (a squatted reserved id no longer blocks the legit merge; the post-CAS
+collision degrades instead of crashing).
+
+**Decision 4 — fail-safe invariant.** Every change only ever DROPS a non-authoritative/shadow
+event or makes the gate fail-safe; none widens what can promote. The forgery class
+(ADR-036/037/038) is untouched and stays green. Verified: each guard mutation-tested non-vacuous
+(RED when reverted) in the per-task spec reviews; the degraded-COMPLETED path is reachable only
+after the CAS verified `merge_commit == attested integration_sha` AND `main == staging_base`, so
+it can never merge an unauthorized SHA.
+
+**Residuals (flagged for the whole-implementation adversarial review; NOT closed here).** (i) An
+attacker who is a *legitimate executing_coordinator of another active pair* AND reuses the exact
+`candidate_id` could still present a self-consistent shadow — a `candidate_id`↔pair-binding issue
+beyond the shadow class. (ii) When an insider squats `merge-{cid}`, the merge still completes but
+the `merge_completed` FACT is permanently un-writable (id taken); recovery relies on main-state
+idempotency. Full closure of (ii) would need a store-level id-namespace reservation (reject a
+non-gate `merge-*` append at the source), out of this slice's scope.
+
+**Evidence.** Commits `3f7c6a6b`, `fea57c6b`, `f8003b3b`; `tests/unit/test_threeway_*.py` → 266
+passed; `scripts/ci_smoke.py` OK; `scripts/check_no_ceremony.py` clean. Acceptance→test map:
+shadow-displacement (all 6 static kinds) → `test_threeway_reducer.py` shadow tests; candidate
+shadow (same-pair + bogus-pair) stays MERGEABLE →
+`test_threeway_predicate.py::test_same_pair_candidate_shadow_does_not_displace` /
+`::test_bogus_pair_candidate_shadow_does_not_block`; gate-only merge_completed + reserved-namespace
+drop → `test_threeway_gate.py::test_run_gate_drops_nongate_reserved_id_event` /
+`::test_run_gate_survives_poisoned_reserved_merge_id`; run_gate total →
+`::test_run_gate_total_under_post_cas_append_failure`; main-state idempotency →
+`::test_run_gate_main_state_idempotency_without_fact`; forgery class unaffected → existing
+ADR-036/037/038 pins stay green.

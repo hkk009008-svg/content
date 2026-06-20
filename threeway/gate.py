@@ -49,6 +49,9 @@ def verify_and_reduce(events, registry_dir, bus_id: str, gate_seat: str = "merge
             # reduction) rather than raise. Raising here would let one forged event brick verify_and_reduce
             # for EVERY candidate (a self-inflicted DoS); the squat is further neutralized by run_gate's
             # totality + main-state idempotency below (the post-CAS append collision degrades, never crashes).
+            # Note: this drop happens BEFORE signature verification — a reserved-id event from a non-gate
+            # seat is ignored regardless of whether its signature is valid; the drop is strictly safe
+            # (it can only remove an event from the reduced set, never admit a forged one).
             if ev.id.startswith(RESERVED_COMPLETION_PREFIX) and seat != gate_seat:
                 continue
             try:
@@ -127,6 +130,9 @@ def run_gate(candidate_id, store: EventStore, repo, registry_dir, bus_id,
     # 2a. main-state idempotency (ADR-039): if main is already at the authoritative candidate's
     # integration_sha, the merge LANDED — even if no merge_completed fact exists (a post-CAS append
     # failure). Return COMPLETED so a degraded recording is recoverable on re-run, never a permanent stale REJECT.
+    # No None==None false-positive: an `auth` that passed the record-time authority filter always carries a
+    # real integration_sha, and rev_parse of a live main_ref is non-None — the `auth is not None` guard plus
+    # both operands being real SHAs means the equality can only hold when main genuinely sits at that SHA.
     auth = state.authoritative_candidate(candidate_id)
     if auth is not None and gitcas.rev_parse(repo, main_ref) == auth.payload.get("integration_sha"):
         return GateResult("COMPLETED", "main already at integration_sha (idempotent recovery)")

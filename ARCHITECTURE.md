@@ -1732,7 +1732,7 @@ single local repo).
 
 ### 13A.2 Merge-gate, predicate, git plumbing
 
-`def run_gate` (`threeway/gate.py:95`) recomputes the trusted merge from the *signed*
+`def run_gate` (`threeway/gate.py:119`) recomputes the trusted merge from the *signed*
 base/branch SHAs (never trusting the candidate's attested integration SHA), CAS-writes
 the protected test ref only on a match, and never checks out or executes candidate
 code. It is a TOTAL function: a nonexistent attested SHA REJECTS (predicate guard +
@@ -1765,9 +1765,10 @@ append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` pr
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
 ```
 
-Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `248 passed` (incl. the ADR-036 revoke-authority,
-ADR-037 event-id-uniqueness across gate + both stores, and ADR-038 reserved-merge-id + brief_superseded
-authority pins).
+Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `266 passed` (incl. the ADR-036 revoke-authority,
+ADR-037 event-id-uniqueness across gate + both stores, ADR-038 reserved-merge-id + brief_superseded
+authority, and the ADR-039 availability-hardening pins — authority-aware reducer, self-consistent
+candidate resolution, TOTAL run_gate).
 
 *Last verified: 2026-06-21*
 
@@ -1834,6 +1835,29 @@ fail-closed. Defense-in-depth from the same review: `co_sign_satisfied` rejects 
 `run_gate` rejects a poisoned reserved `merge-<cid>` id BEFORE its irreversible CAS merge (ADR-038).
 See `DECISIONS.md` ADR-036/037/038 + `threeway-revoke-authority-unsigned`,
 `threeway-brief-supersede-authority`, `threeway-reserved-merge-id-dos`.
+
+### 13A.7 Availability hardening — authority-aware reducer + TOTAL run_gate (ADR-039)
+
+The reducer is now **authority-aware at record time**: `reduce()`
+(`threeway/reducer.py:155`) folds each of the six static control-plane singletons
+(`assignment`/`brief`/`cycle_go`/`release_order` → `overseer`, `ci_result` → `ci`,
+`merge_completed` → the threaded gate seat) ONLY from its authorized signer-seat, DROPPING a
+non-authorized shadow before the predicate ever reads it — so a higher-seq insider event can no
+longer displace an authoritative fact and DoS a legitimate merge. `def authoritative_candidate`
+(`threeway/reducer.py:111`) resolves the effective candidate self-consistently (its signer-seat
+must equal the `executing_coordinator` of the overseer-signed assignment for the pair THAT
+candidate declares), so a bogus-pair or non-coordinator shadow candidate is ignored; the predicate
+and `run_gate` both resolve via it and can never disagree. `def run_gate`
+(`threeway/gate.py:119`) is now TOTAL and recoverable: the post-CAS `merge_completed` append is
+wrapped so NO exception escapes the irreversible CAS (a failure degrades to
+`COMPLETED("…append degraded…")`), main-state idempotency returns COMPLETED when main is already at
+the authoritative `integration_sha` (a degraded recording recovers on re-run), and the reserved
+`merge-*` id namespace is DROPPED (not raised) for non-gate seats in `verify_and_reduce` — the
+ADR-038 step-2b pre-CAS reject is removed as subsumed. Every change only DROPS a
+non-authoritative/shadow event or fails the gate safe; none widens what can promote, and the
+forgery class (ADR-036/037/038) stays green. See `DECISIONS.md` ADR-039 +
+`threeway-reducer-shadow-dos`, `threeway-merge-completed-no-seat-check`,
+`threeway-run-gate-not-total`, `threeway-reserved-merge-id-dos`.
 
 ---
 
