@@ -852,3 +852,145 @@ def test_cross_pair_candidate_id_reuse_dos_residual(live_repo, seatkit):
     # signal the fix landed and the xfail must be removed).
     assert res.outcome == "COMPLETED", res.reason
     assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == integ
+
+
+# ---------------------------------------------------------------------------
+# ADR-041 (Rule #13, 5th-layer brick): verify_and_reduce dereferences id (.startswith),
+# signer (_seat split) and signature_version (set membership) at the TOP of its
+# load-bearing block — and that runs at run_gate STEP 1, OUTSIDE run_gate's try, BEFORE
+# reduce()'s type filter. A non-str id/signer or unhashable signature_version raises
+# UNCAUGHT there (AttributeError / TypeError) -> a TOTAL-BUS brick: ONE planted event
+# crashes run_gate for EVERY candidate, including a fully-legit independent one. `signer`
+# is UNSIGNED (not in the 14-field signed view), so an insider can validly sign an event
+# as itself and overwrite signer freely while the signature still verifies. The fix DROPS
+# such a malformed event up-front; the legit merge COMPLETES and the bus stays total.
+#
+# Plant pattern: append the poison with valid str fields (so store.append signs + names
+# the file), then rewrite the AT-REST JSON's target field to a list. from_json_obj does no
+# type validation, so all_events() yields the malformed in-memory Event; for signer the
+# signature still verifies (signer is excluded from signed_bytes).
+# ---------------------------------------------------------------------------
+
+import json as _json
+
+
+def _poison_atrest_field(store, ev_id, field, value):
+    """Rewrite one field of an already-appended event's at-rest JSON to `value`.
+
+    Returns nothing; all_events() will subsequently yield the malformed Event
+    (from_json_obj does no type validation)."""
+    import pathlib
+    hits = list(pathlib.Path(store._dir).glob(f"*-{ev_id}.json"))
+    assert len(hits) == 1, f"expected exactly one stored event for id {ev_id!r}, found {hits}"
+    obj = _json.loads(hits[0].read_text())
+    obj[field] = value
+    hits[0].write_text(_json.dumps(obj, indent=2, ensure_ascii=False))
+
+
+def test_run_gate_total_under_nonstr_signer(live_repo, seatkit):
+    # `signer` is UNSIGNED (excluded from the 14-field signed view, envelope.py:67). An insider
+    # validly signs a load-bearing co_sign as its own registered seat, then sets signer to a LIST.
+    # The signature STILL verifies (signer is not in signed_bytes), but verify_and_reduce's
+    # _seat(ev.signer) -> ev.signer.split(":", 1) raises AttributeError UNCAUGHT at run_gate step 1
+    # (OUTSIDE its try) -> total-bus brick. The ADR-041 up-front type-safety drop fixes it.
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    _, _, integ = _seed_valid(store, r, privs)   # complete, signed, legit T1 promotion for c1
+    from threeway.envelope import Event
+    poison = Event(id="cosign-nonstr-signer-c1", seq=0, bus_id="prod",
+                   schema_version="threeway/1", kind="co_sign", sender="operator",
+                   recipient="all", signer="operator:claude:s1",
+                   payload={"verdict": "GO"}, candidate_id="c1", subject_sha=integ)
+    store.append(poison, privs["operator"])   # validly self-signed by registered operator seat
+    # AFTER signing, overwrite the at-rest signer with a LIST (signer is unsigned -> still verifies).
+    _poison_atrest_field(store, "cosign-nonstr-signer-c1", "signer", ["operator", "claude", "s1"])
+
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "COMPLETED", res.reason   # did NOT raise; poison dropped, legit merge ran
+    # main moved to the legit integration_sha — the list-signer poison could not brick the merge.
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == integ
+    # the malformed co_sign is ABSENT from effective state; the legit completion fact is present.
+    from threeway.gate import verify_and_reduce
+    state = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
+    assert state.merge_completed("c1") is not None
+
+
+def test_run_gate_total_under_nonstr_signer_not_bricking_other_candidate(live_repo, seatkit):
+    # TOTAL-BUS property: the list-signer poison must not brick run_gate for an UNRELATED candidate.
+    # We run_gate a candidate id that has no events ("c2"): pre-fix verify_and_reduce raises
+    # AttributeError on the poison BEFORE c2 is even evaluated -> c2's gate crashes too. Post-fix the
+    # poison is dropped and c2 returns a clean PENDING (no events -> not mergeable), never a crash.
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    _, _, integ = _seed_valid(store, r, privs)   # legit promotion for c1 (unrelated to c2)
+    from threeway.envelope import Event
+    poison = Event(id="cosign-nonstr-signer-c2brick", seq=0, bus_id="prod",
+                   schema_version="threeway/1", kind="co_sign", sender="operator",
+                   recipient="all", signer="operator:claude:s1",
+                   payload={"verdict": "GO"}, candidate_id="c1", subject_sha=integ)
+    store.append(poison, privs["operator"])
+    _poison_atrest_field(store, "cosign-nonstr-signer-c2brick", "signer", ["operator", "claude", "s1"])
+
+    # an entirely independent candidate c2 (no events) must NOT be bricked by the c1-area poison.
+    res = run_gate("c2", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome in ("PENDING", "REJECTED"), res.reason   # did NOT raise; total bus holds
+    # c1's main ref is untouched by the c2 gate run.
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == base
+
+
+def test_run_gate_total_under_nonstr_id(live_repo, seatkit):
+    # A non-str `id` (a LIST) makes verify_and_reduce's ev.id.startswith(RESERVED_COMPLETION_PREFIX)
+    # raise AttributeError UNCAUGHT at run_gate step 1 (OUTSIDE its try) -> total-bus brick. The
+    # ADR-041 up-front drop fixes it. (id is signed, but no forgery is needed: an insider can sign a
+    # str id then rewrite the at-rest JSON; from_json_obj does no type validation, so this is the
+    # same insider-controlled at-rest vector the stores do not guard.)
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    _, _, integ = _seed_valid(store, r, privs)
+    from threeway.envelope import Event
+    poison = Event(id="cosign-nonstr-id-c1", seq=0, bus_id="prod",
+                   schema_version="threeway/1", kind="co_sign", sender="operator",
+                   recipient="all", signer="operator:claude:s1",
+                   payload={"verdict": "GO"}, candidate_id="c1", subject_sha=integ)
+    store.append(poison, privs["operator"])   # appended with a valid str id (file is named after it)
+    _poison_atrest_field(store, "cosign-nonstr-id-c1", "id", ["not", "a", "string"])
+
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "COMPLETED", res.reason   # did NOT raise; poison dropped, legit merge ran
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == integ
+    from threeway.gate import verify_and_reduce
+    state = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
+    assert state.merge_completed("c1") is not None
+
+
+def test_run_gate_total_under_unhashable_signature_version(live_repo, seatkit):
+    # An unhashable `signature_version` (a LIST) makes verify_and_reduce's
+    # `ev.signature_version not in _ACCEPTED_SIG_VERSIONS` (a set membership test) raise
+    # TypeError: unhashable type: 'list' UNCAUGHT at run_gate step 1 (OUTSIDE its try) -> total-bus
+    # brick. signature_version IS signed, but the at-rest JSON is insider-controlled and from_json_obj
+    # does no type validation; the ADR-041 up-front drop fixes it regardless of signature validity.
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    _, _, integ = _seed_valid(store, r, privs)
+    from threeway.envelope import Event
+    poison = Event(id="cosign-listsigver-c1", seq=0, bus_id="prod",
+                   schema_version="threeway/1", kind="co_sign", sender="operator",
+                   recipient="all", signer="operator:claude:s1",
+                   payload={"verdict": "GO"}, candidate_id="c1", subject_sha=integ)
+    store.append(poison, privs["operator"])
+    _poison_atrest_field(store, "cosign-listsigver-c1", "signature_version", ["threeway-sign/2"])
+
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "COMPLETED", res.reason   # did NOT raise; poison dropped, legit merge ran
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == integ
+    from threeway.gate import verify_and_reduce
+    state = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
+    assert state.merge_completed("c1") is not None

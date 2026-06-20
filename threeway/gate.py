@@ -41,6 +41,18 @@ def verify_and_reduce(events, registry_dir, bus_id: str, gate_seat: str = "merge
     seen_ids: set[str] = set()
     for ev in events:
         if ev.kind in LOAD_BEARING_KINDS:
+            # ADR-041 (Rule #13): verify_and_reduce dereferences id (.startswith), signer (_seat split), and
+            # signature_version (set membership) BELOW — and it runs at run_gate step 1, OUTSIDE run_gate's try,
+            # BEFORE reduce()'s type filter. A non-str id/signer or unhashable signature_version would raise
+            # uncaught here → a total-bus brick. `signer` is UNSIGNED, so an insider can set it freely with a
+            # valid signature. Drop such a malformed event (same drop-not-raise discipline as the four checks
+            # below; a malformed event has no authority). This is the symmetric guard the ADR-040 drops needed.
+            if not (isinstance(ev.id, str) and isinstance(ev.signer, str)
+                    and isinstance(ev.signature_version, str)):
+                logger.warning("threeway gate: dropping load-bearing event with non-str id/signer/signature_version "
+                               "(id=%r, signer=%r, sig_version=%r, kind=%r)",
+                               ev.id, ev.signer, ev.signature_version, ev.kind)
+                continue
             # ADR-040 (Rule #13 sibling of the reserved-namespace drop, gate.py reserved-id below):
             # the FOUR read-side checks below are reachable BRICKS — an insider can append a
             # validly-self-signed LOAD-BEARING event that trips one of them (the stores guard only
