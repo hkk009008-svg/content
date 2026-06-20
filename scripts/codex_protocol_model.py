@@ -101,6 +101,7 @@ import protocol_mailbox  # noqa: E402
 SEATS = protocol_mailbox.SEATS               # 4 real seats; coordinators are NOT pair seats
 DIRECTOR_SEATS = ("director", "director2")   # pair tuple — stays literal
 OPERATOR_SEATS = ("operator", "operator2")
+COORDINATOR_SEATS = ("coordinator", "coordinator2")  # on-demand oversight seats — both bind coordinator mode
 SEAT_BEHAVIOR_SOURCE = {
     "director": "director2",
     "director2": "director2",
@@ -146,13 +147,13 @@ RUNTIME_ENV_VARIABLES = (
     ),
     (
         "CODEX_AGENT_ROLE",
-        "readiness-bridge | director | director2 | operator | operator2 | coordinator | verifier/specialist role",
+        "readiness-bridge | director | director2 | operator | operator2 | coordinator | coordinator2 | verifier/specialist role",
         "names the part this Codex instance plays in the four-seat whole",
     ),
     (
         "CODEX_SEAT",
-        "director | director2 | operator | operator2 | coordinator",
-        "binds a live seat; coordinator is a compatibility alias for coordinator mode and remains unpinned",
+        "director | director2 | operator | operator2 | coordinator | coordinator2",
+        "binds a live seat; coordinator and coordinator2 are compatibility aliases for coordinator mode and remain unpinned",
     ),
     (
         "CODEX_BEHAVIOR_SOURCE",
@@ -489,7 +490,7 @@ def _mode_from_role(role: str) -> str:
     """Infer a runtime mode from an explicit role when CODEX_AGENT_MODE is unset."""
     if role in SEATS:
         return "live-seat"
-    if role == "coordinator":
+    if role in COORDINATOR_SEATS:
         return "coordinator"
     if role in SPAWNED_ROLE_AGENT_ROLES:
         return "subagent"
@@ -502,7 +503,7 @@ def _mode_from_seat(seat: str) -> str:
     """Infer a runtime mode from CODEX_SEAT compatibility spellings."""
     if seat in SEATS:
         return "live-seat"
-    if seat == "coordinator":
+    if seat in COORDINATOR_SEATS:
         return "coordinator"
     return ""
 
@@ -536,8 +537,8 @@ def infer_runtime_env(environ: Mapping[str, str] | None = None) -> dict[str, str
 
     if mode == "live-seat" and seat in SEATS:
         seat_display = seat
-    elif mode == "coordinator" and seat == "coordinator":
-        seat_display = "coordinator"
+    elif mode == "coordinator" and seat in COORDINATOR_SEATS:
+        seat_display = seat
     elif seat:
         seat_display = f"(ignored: {seat})"
     else:

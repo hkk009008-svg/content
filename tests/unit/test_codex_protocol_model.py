@@ -372,6 +372,32 @@ def test_runtime_env_contract_accepts_coordinator_seat_compatibility_alias() -> 
     assert "(ignored: coordinator)" not in text
 
 
+def test_runtime_env_contract_binds_coordinator2_to_coordinator_mode() -> None:
+    # FIX 1 (Slice 2.5 §7): CODEX_SEAT=coordinator2 must bind coordinator mode,
+    # symmetric with `coordinator` — not fall through to readiness-bridge.
+    # NON-VACUITY: dropping "coordinator2" from COORDINATOR_SEATS (so
+    # _mode_from_seat returns "") makes _mode_from_seat fall through to
+    # readiness-bridge and seat_display becomes "(ignored: coordinator2)" —
+    # both asserts below flip RED.
+    env = {"CODEX_SEAT": "coordinator2"}
+    inferred = model.infer_runtime_env(env)
+    assert inferred["CODEX_AGENT_MODE"] == "coordinator"
+    assert inferred["CODEX_SEAT"] == "coordinator2"
+    # mirrors the coordinator capacity contract — same oversight mode
+    assert inferred["CODEX_CAPABILITY_MODE"] == "capacity-max"
+    assert inferred["CODEX_MUTATION_SCOPE"] == "coordination-only"
+    assert inferred["CODEX_AUTHORITY_SCOPE"] == "all-scope-reconcile"
+
+    text = model.render_runtime_env_contract(env)
+    assert "CODEX_AGENT_MODE=coordinator" in text
+    assert "CODEX_SEAT=coordinator2" in text
+    assert "(ignored: coordinator2)" not in text
+
+    # an explicit CODEX_AGENT_ROLE=coordinator2 also infers coordinator mode
+    role_env = {"CODEX_AGENT_ROLE": "coordinator2"}
+    assert model.infer_runtime_env(role_env)["CODEX_AGENT_MODE"] == "coordinator"
+
+
 def test_runtime_env_contract_codifies_side_effect_policy() -> None:
     text = model.render_runtime_env_contract(
         {

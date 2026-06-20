@@ -310,3 +310,33 @@ def test_main_stdout_only_does_not_write_artifact(tmp_path, monkeypatch, capsys)
     assert rc == 0
     assert "(stdout-only; no artifact written)" in out
     assert "synthetic summary" in out
+
+
+def test_mailbox_cursor_unread_scalar_cursor_is_ref_bus_tracked() -> None:
+    # FIX 3 (Slice 2.5 §4c, ADR-034 Decision 5): mailbox_cursor_unread had the
+    # identical scalar-blind lexical compare. Post-cutover the cursor is a scalar
+    # seq, not an ISO ts — the lexical `event.timestamp > cursor` mis-counts.
+    events = [
+        report.parse_mailbox_filename(
+            "2026-06-15T19-59-27Z-coordinator-to-operator2-coordination.md"
+        ),
+        report.parse_mailbox_filename(
+            "2026-06-15T20-04-46Z-director2-to-operator2-status.md"
+        ),
+    ]
+
+    # control: an ISO cursor older than both surfaces both — non-vacuous seed.
+    count, names = report.mailbox_cursor_unread("operator2", "2026-06-15T19:00:00Z", events)
+    assert count == 2
+    assert names == [
+        "2026-06-15T19-59-27Z-coordinator-to-operator2-coordination.md",
+        "2026-06-15T20-04-46Z-director2-to-operator2-status.md",
+    ]
+
+    # scalar seq "1" is lexically LESS than every "2026-..." ts, so WITHOUT the
+    # `cursor.strip().isdigit()` short-circuit the lexical compare counts BOTH
+    # events as unread (spurious "2"). The guard returns (0, []).
+    # NON-VACUITY: drop the guard -> this flips to (2, [...]) -> RED.
+    count_scalar, names_scalar = report.mailbox_cursor_unread("operator2", "1", events)
+    assert count_scalar == 0
+    assert names_scalar == []

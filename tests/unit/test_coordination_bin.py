@@ -53,8 +53,8 @@ CANONICAL_KINDS = (
 
 EVENT_NAME_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z-"
-    r"(director|director2|operator|operator2|coordinator)-to-"
-    r"(director|director2|operator|operator2|all)-[a-z0-9-]+\.md$"
+    r"(director|director2|operator|operator2|coordinator|coordinator2)-to-"
+    r"(director|director2|operator|operator2|coordinator|coordinator2|all)-[a-z0-9-]+\.md$"
 )
 
 

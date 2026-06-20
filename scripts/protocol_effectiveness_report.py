@@ -504,6 +504,15 @@ def mailbox_cursor_unread(
     events: list[MailboxFilename],
 ) -> tuple[int, list[str]]:
     """Return unread count and filenames without mutating the cursor."""
+    # A scalar `seq` cursor (post Slice-2.5 backfill) is not an ISO wall-clock:
+    # the lexical `event.timestamp > cursor` compare below mis-counts against
+    # the ISO filenames (e.g. a small seq "1" < every "2026-..." ts -> counts
+    # ALL events as unread). Unread for a migrated seat is tracked on the
+    # ref-bus (RefEventStore seq>cursor_seq), not this legacy filename path —
+    # so a scalar cursor surfaces zero legacy unread here, matching
+    # status.count_unread / seat_status / mailbox_monitor / draft_handoff.
+    if cursor and cursor.strip().isdigit():
+        return 0, []
     cursor_norm = normalize_ts(cursor)
     unread = [
         event.filename

@@ -171,3 +171,36 @@ def test_collect_context_reads_coordinator_real_cursor(tmp_path, monkeypatch) ->
         "2026-06-15T19-59-27Z-coordinator-to-all-coordination.md",
         "2026-06-15T20-04-46Z-operator2-to-all-status.md",
     ]
+
+
+def test_mailbox_events_scalar_cursor_is_ref_bus_tracked(tmp_path) -> None:
+    # FIX 2 (Slice 2.5 §4a, I-1): post-cutover the seen cursor is a scalar seq,
+    # not an ISO ts. The OLD lexical compare `_event_ts(name) > cursor` silently
+    # drops EVERY event ("2026-..." > "42" is False) — a false "no unread".
+    # The scalar short-circuit must instead treat a scalar cursor as
+    # ref-bus-tracked and return an empty list (no legacy unread surfaced here).
+    sent = tmp_path / "coordination" / "mailbox" / "sent"
+    sent.mkdir(parents=True)
+    (sent / "2026-06-15T19-59-27Z-coordinator-to-all-coordination.md").write_text(
+        "# Coordinator route\n", encoding="utf-8"
+    )
+    (sent / "2026-06-15T20-04-46Z-operator2-to-all-status.md").write_text(
+        "# Operator2 status\n", encoding="utf-8"
+    )
+
+    # control: an ISO cursor older than both events still surfaces both —
+    # proves the events ARE addressed and the seed is non-vacuous.
+    iso = draft_handoff._mailbox_events(tmp_path, "operator2", "2026-06-15T19:00:00Z")
+    assert iso == [
+        "2026-06-15T19-59-27Z-coordinator-to-all-coordination.md",
+        "2026-06-15T20-04-46Z-operator2-to-all-status.md",
+    ]
+
+    # scalar `seq` cursor: ref-bus-tracked -> no legacy unread surfaced here.
+    # NON-VACUITY: the scalar seq "1" is lexically LESS than the ISO filenames
+    # ("1" < "2026-..."), so WITHOUT the `cursor.strip().isdigit()` guard the
+    # lexical compare `_event_ts(name) > "1"` keeps BOTH events (a spurious
+    # "2 unread" for a seat whose unread is actually tracked on the ref-bus) —
+    # the exact mis-count FIX 2 removes. Dropping the guard makes this RED
+    # (returns the 2 events instead of []).
+    assert draft_handoff._mailbox_events(tmp_path, "operator2", "1") == []
