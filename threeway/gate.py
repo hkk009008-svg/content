@@ -34,6 +34,7 @@ def _seat(signer: str) -> str:
 def verify_and_reduce(events, registry_dir, bus_id: str):
     reg = PublicKeyRegistry(registry_dir)
     verified = []
+    seen_ids: set[str] = set()
     for ev in events:
         if ev.kind in LOAD_BEARING_KINDS:
             if ev.bus_id != bus_id:
@@ -49,6 +50,13 @@ def verify_and_reduce(events, registry_dir, bus_id: str):
                 verify_event(ev, pub)
             except InvalidSignature as e:
                 raise GateError(f"invalid signature on {ev.kind} {ev.id}") from e
+            # ADR-037: event id is signed but NOT globally unique. A duplicate id across the
+            # load-bearing set is a collision/replay (an insider re-using a victim fact's id
+            # to shadow it, or a store that kept both copies) — reject fail-closed rather than
+            # let the reducer act on an ambiguous id.
+            if ev.id in seen_ids:
+                raise GateError(f"duplicate event id (collision/replay?): {ev.id!r}")
+            seen_ids.add(ev.id)
         verified.append(ev)
     return reduce(verified)
 

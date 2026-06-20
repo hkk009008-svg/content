@@ -13,6 +13,7 @@ from threeway.refstore import (
     AppendContentionExceeded,
     CursorContentionExceeded,
     CursorCorruptionError,
+    EventIdCollision,
     IdempotencyKeyReused,
     RefEventStore,
 )
@@ -96,6 +97,20 @@ def _unsigned(id="e", kind="attestation", signer="operator:claude:s1", **over):
                 brief_id="b1", brief_version=1)
     base.update(over)
     return Event(**base)        # signature_version defaults to "threeway-sign/2"
+
+
+def test_append_refuses_colliding_event_id_from_another_seat(tmp_path):
+    # ADR-037: events/<brief_id>/<id>.json must be globally unique; a second seat re-using
+    # a victim's (brief_id,id) must NOT overwrite the victim's stored fact.
+    r = _new_repo(tmp_path)
+    pa, _ = keys.generate_keypair()      # victim seat
+    pb, _ = keys.generate_keypair()      # attacker seat
+    store = RefEventStore(r)
+    store.append(_unsigned(id="X", kind="co_sign", signer="operator:claude:s1",
+                           payload={"verdict": "GO"}), pa)
+    with pytest.raises(EventIdCollision):
+        store.append(_unsigned(id="X", kind="attestation", signer="director:codex:s1",
+                               payload={"kind": "release", "verdict": "GO"}), pb)
 
 
 def test_append_assigns_monotonic_seq_from_one(tmp_path):

@@ -86,6 +86,26 @@ def test_verify_and_reduce_accepts_valid_signed_events(seatkit, tmp_path):
     assert state.candidate("c1") is not None
 
 
+def test_verify_and_reduce_rejects_duplicate_event_id(seatkit, tmp_path):
+    # ADR-037: event id is signed but NOT globally unique; a duplicate id across the
+    # load-bearing set is a collision/replay (an insider re-using a victim fact's id to
+    # shadow it) and must fail closed.
+    reg, ks, privs = seatkit
+    from threeway.envelope import Event, sign_event
+    victim = Event(id="DUP", seq=1, bus_id="prod", schema_version="threeway/1",
+                   kind="co_sign", sender="operator", recipient="all",
+                   signer="operator:claude:s1", payload={"verdict": "GO"},
+                   candidate_id="c1", subject_sha="2" * 40)
+    sign_event(victim, privs["operator"])
+    decoy = Event(id="DUP", seq=2, bus_id="prod", schema_version="threeway/1",
+                  kind="attestation", sender="director", recipient="all",
+                  signer="director:claude:s1", payload={"kind": "release", "verdict": "GO"},
+                  candidate_id="c1", subject_sha="2" * 40)
+    sign_event(decoy, privs["director"])   # each event validly signed by its OWN seat
+    with pytest.raises(GateError, match="duplicate event id"):
+        verify_and_reduce([victim, decoy], registry_dir=reg, bus_id="prod")
+
+
 # ---------------------------------------------------------------------------
 # Trust-boundary invariants (PURE test-only additions — guard the gate's
 # signature-verification trust boundary as the reducer grows).

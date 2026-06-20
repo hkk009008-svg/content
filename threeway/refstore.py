@@ -56,6 +56,12 @@ class IdempotencyKeyReused(ValueError):
     pass
 
 
+class EventIdCollision(ValueError):
+    # ADR-037: event `id` must be globally unique. A colliding (brief_id,id) from another
+    # seat (or a different request) would OVERWRITE the victim's stored blob — refuse it.
+    pass
+
+
 class CursorContentionExceeded(BusContentionError):   # used by a later (cursor) task
     pass
 
@@ -131,11 +137,16 @@ class RefEventStore:
                     return existing
                 raise IdempotencyKeyReused(
                     f"idempotency_key collides with a different request: {target_key}")
+            # ADR-037: event id must be globally unique. An idempotent re-append by US was
+            # already returned above, so a pre-existing path here is a genuine collision —
+            # refuse rather than OVERWRITE another seat's (or a different request's) fact.
+            event_path = f"events/{ev.brief_id}/{ev.id}.json"
+            if tip is not None and gitcas.read_blob_at(self._repo, tip, event_path) is not None:
+                raise EventIdCollision(f"event id already present: {event_path}")
             seqs = gitcas.list_index_seqs(self._repo, tip) if tip else []
             ev.seq = (max(seqs) + 1) if seqs else 1
             sign_event(ev, private_key)                    # signs over the NEW seq
             event_bytes = json.dumps(to_json_obj(ev), ensure_ascii=False).encode()
-            event_path = f"events/{ev.brief_id}/{ev.id}.json"
             digest = hashlib.sha256(event_bytes).hexdigest()
             index_bytes = json.dumps(
                 {"uuid": ev.id, "path": event_path, "object_digest": digest},
