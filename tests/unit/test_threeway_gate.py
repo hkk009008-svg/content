@@ -711,6 +711,76 @@ def test_run_gate_total_under_unhashable_keyed_field(live_repo, seatkit):
 
 
 # ---------------------------------------------------------------------------
+# ADR-041 (read-path completion): the reduce()-side totality fix is NOT enough. A
+# validly-self-signed `candidate` whose payload["pair"] is an unhashable JSON list PASSES
+# reduce() (the candidate fold keys only on (candidate_id, _seat_of(signer)) — both well-
+# formed — so it enters _candidates). The brick is later: run_gate step-2a calls
+# state.authoritative_candidate(candidate_id) OUTSIDE run_gate's try, and that loop calls
+# self.assignment(c.payload.get("pair")) -> self._assignments.get([...]) -> TypeError
+# (unhashable type: 'list') UNCAUGHT -> escapes run_gate. Iterating highest-seq-first, a
+# high-seq poison candidate is reached before the legit one and bricks the victim's merge
+# permanently (insider-targeted availability DoS, same class this slice closes). The fix
+# SKIPS a candidate whose pair is not a str inside the loop (in-loop continue, not a wrap),
+# so the legit candidate is still found and the merge COMPLETES.
+# ---------------------------------------------------------------------------
+
+def test_run_gate_total_under_unhashable_candidate_pair(live_repo, seatkit):
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    _, _, integ = _seed_valid(store, r, privs)   # legit c1 promotion (coordinator-signed candidate)
+    from threeway.envelope import Event
+    from threeway.policy import default_policy
+    # an insider (operator) validly self-signs a HIGHER-seq candidate for the SAME id c1 whose
+    # payload["pair"] is an unhashable list. Distinct, non-reserved id so it survives the
+    # dup-id / reserved-namespace guards and reaches _candidates. authoritative_candidate()
+    # iterates highest-seq-first -> hits this poison before the legit candidate.
+    poison = Event(id="candidate-operator-listpair-c1", seq=0, bus_id="prod",
+                   schema_version="threeway/1", kind="candidate", sender="operator",
+                   recipient="all", signer="operator:claude:s1",
+                   payload={"pair": ["A", "B"], "staging_base_sha": "a" * 40,
+                            "branch_sha": "b" * 40, "integration_sha": "c" * 40,
+                            "risk_tier_claimed": "T1",
+                            "policy_digest": default_policy().policy_digest()},
+                   candidate_id="c1", subject_sha="c" * 40)
+    store.append(poison, privs["operator"])
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "COMPLETED", res.reason   # did NOT raise; poison skipped, legit merge ran
+    # main moved to the legit integration_sha — the list-pair poison could not brick the merge.
+    new_head = _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip()
+    assert new_head == integ
+    assert new_head != "c" * 40
+
+
+def test_authoritative_candidate_skips_unhashable_pair(live_repo, seatkit):
+    # Reducer-level: authoritative_candidate returns the LEGIT candidate (does not raise) when a
+    # higher-seq list-pair poison candidate is present for the same id.
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    _, _, integ = _seed_valid(store, r, privs)
+    from threeway.envelope import Event
+    from threeway.policy import default_policy
+    from threeway.gate import verify_and_reduce
+    poison = Event(id="candidate-operator-listpair2-c1", seq=0, bus_id="prod",
+                   schema_version="threeway/1", kind="candidate", sender="operator",
+                   recipient="all", signer="operator:claude:s1",
+                   payload={"pair": ["A", "B"], "staging_base_sha": "a" * 40,
+                            "branch_sha": "b" * 40, "integration_sha": "c" * 40,
+                            "risk_tier_claimed": "T1",
+                            "policy_digest": default_policy().policy_digest()},
+                   candidate_id="c1", subject_sha="c" * 40)
+    store.append(poison, privs["operator"])
+    state = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
+    auth = state.authoritative_candidate("c1")   # must NOT raise TypeError
+    assert auth is not None
+    # the legit (coordinator-signed, str-pair) candidate is authoritative, never the list-pair poison.
+    assert auth.payload.get("pair") == "A"
+    assert auth.signer.split(":", 1)[0] == "coordinator"
+
+
+# ---------------------------------------------------------------------------
 # Residual (i): cross-pair candidate_id reuse DoS — confirmed-but-deferred,
 # pinned strict-xfail so CI tracks it until the candidate_id<->pair-binding
 # slice lands. This is a REAL reproducing scenario, not a vacuous pin.

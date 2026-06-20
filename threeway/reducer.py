@@ -120,7 +120,18 @@ class EffectiveState:
         # (record-time filter), so a forged assignment can't make a shadow self-consistent.
         cands = [e for (cid, _seat), e in self._candidates.items() if cid == candidate_id]
         for c in sorted(cands, key=lambda e: e.seq, reverse=True):
-            a = self.assignment(c.payload.get("pair"))
+            # ADR-041 (read-path totality): a validly-self-signed candidate PASSES reduce() even
+            # with an unhashable payload["pair"] (the fold keys on (candidate_id, seat), not pair).
+            # self.assignment(pair) would then raise TypeError on a list/dict pair UNCAUGHT — this
+            # call is on run_gate's step-2a, OUTSIDE its try, so it bricks the whole bus. SKIP a
+            # candidate whose pair is not a str (in-loop continue, NOT a wrap): a non-str pair can
+            # never be self-consistent with any assignment, so skipping is fail-safe and lets
+            # iteration proceed to the legit candidate. A wrap would abort iteration and turn the
+            # brick into a permanent graceful-REJECTED (the legit candidate never reached).
+            pair = c.payload.get("pair")
+            if not isinstance(pair, str):
+                continue
+            a = self.assignment(pair)
             if a is not None and a.payload.get("executing_coordinator") == _seat_of(c.signer):
                 return c
         return None
