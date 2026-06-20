@@ -96,8 +96,10 @@ DURABLE_STATE_ARTIFACTS = (
     "Operator verification reports",
 )
 
-SEATS = ("director", "director2", "operator", "operator2")
-DIRECTOR_SEATS = ("director", "director2")
+import protocol_mailbox  # noqa: E402
+
+SEATS = protocol_mailbox.SEATS               # 4 real seats; coordinators are NOT pair seats
+DIRECTOR_SEATS = ("director", "director2")   # pair tuple — stays literal
 OPERATOR_SEATS = ("operator", "operator2")
 SEAT_BEHAVIOR_SOURCE = {
     "director": "director2",

@@ -16,9 +16,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import protocol_mailbox
 from status import collect_mailbox
 
-SEATS = ("director", "director2", "operator", "operator2", "coordinator")
+SEATS = protocol_mailbox.RECEIVING_SEATS
 
 
 @dataclass(frozen=True)
@@ -115,7 +116,9 @@ def _peer_heartbeats(root: Path, seat: str) -> list[str]:
     if not presence.exists():
         return ["(presence directory missing)"]
     peers = []
-    for peer in ("director", "director2", "operator", "operator2"):
+    # Heartbeats are pair-seat only — coordinators have no presence heartbeat;
+    # iterate the 4 REAL seats (protocol_mailbox.SEATS), NOT the receiving roster.
+    for peer in protocol_mailbox.SEATS:
         if peer == seat:
             continue
         path = presence / f"{peer}-heartbeat.ts"

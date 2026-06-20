@@ -123,7 +123,11 @@ def latest_adr(text: str) -> Optional[tuple[int, str]]:
 # ---------------------------------------------------------------------------
 
 _STATUS_ORDER = ["live", "wired", "stubbed", "parked", "dead"]
-_MAILBOX_SEATS = ("director", "director2", "operator", "operator2")
+# scripts/ is on sys.path when status.py runs (own dir as a script, or inserted
+# by the importing sibling/test); protocol_mailbox imports only pathlib.
+import protocol_mailbox  # noqa: E402
+
+_MAILBOX_SEATS = protocol_mailbox.RECEIVING_SEATS
 
 
 def render_manifest(components: Optional[list]) -> list[str]:

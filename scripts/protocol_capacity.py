@@ -10,7 +10,20 @@ import re
 from typing import Any
 
 
-SEAT_ORDER = ("coordinator", "director", "director2", "operator", "operator2")
+import protocol_mailbox  # noqa: E402
+
+# SEAT_ORDER = the standing capacity ACTORS the coverage gate (G1, :504) and WIP gate
+# (G2, :521) require to own exactly one packet per active cycle. coordinator is a
+# standing actor; coordinator2 is NOT — it is an on-demand oversight seat (Slice 2.5
+# Option B: coordinator2 is an accepted-but-optional owner, decoupling "valid owner"
+# from "mandatory coverage actor"). Coordinator-first ordering is load-bearing for the
+# owner-iteration at :166/:504/:521. Root-derived (D1) for the 4 pair seats.
+SEAT_ORDER = ("coordinator", *protocol_mailbox.SEATS)
+# VALID_OWNERS = the acceptance whitelist for a packet's owner / next_recipient
+# (:381/:393). It DOES include coordinator2 and equals the protocol_mailbox root, so a
+# coordinator2-owned or -addressed packet is accepted WITHOUT being forced into the
+# per-cycle coverage requirement.
+VALID_OWNERS = protocol_mailbox.RECEIVING_SEATS
 PACKET_TYPES = {
     "director-implementation",
     "director-brief",
@@ -365,7 +378,7 @@ def _parse_packet(
     local_issues: list[str] = []
     if missing:
         local_issues.append("missing required fields: " + ", ".join(missing))
-    if data.get("owner") not in SEAT_ORDER:
+    if data.get("owner") not in VALID_OWNERS:
         local_issues.append(f"invalid owner {data.get('owner')!r}")
     if data.get("packet_type") not in PACKET_TYPES:
         local_issues.append(f"invalid packet_type {data.get('packet_type')!r}")
@@ -377,7 +390,7 @@ def _parse_packet(
         if not _is_str_list(data.get(field)):
             local_issues.append(f"{field} must be a list of strings")
     next_recipient = data.get("next_recipient")
-    if next_recipient is not None and next_recipient not in SEAT_ORDER:
+    if next_recipient is not None and next_recipient not in VALID_OWNERS:
         local_issues.append(f"invalid next_recipient {next_recipient!r}")
     if "scope_files" in data and not _is_str_list(data.get("scope_files")):
         local_issues.append("scope_files must be a list of strings")

@@ -18,7 +18,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SEATS = ("director", "director2", "operator", "operator2")
+import protocol_mailbox
+
+SEATS = protocol_mailbox.RECEIVING_SEATS
 MODE = "read-only-no-consume"
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -172,7 +174,14 @@ def collect_monitor_state(
             "unread_count": len(unread),
             "latest_unread": unread[-1]["filename"] if unread else None,
             "broadcast_receipt": _broadcast_receipt(cursor, latest_broadcast),
-            "heartbeat": _heartbeat(root, seat, now_dt, stale_min),
+            # Heartbeats are pair-seat only — coordinators have no presence
+            # heartbeat by doctrine (matches draft_handoff._peer_heartbeats);
+            # use an n/a sentinel so they are never heartbeat-attention flagged.
+            "heartbeat": (
+                _heartbeat(root, seat, now_dt, stale_min)
+                if seat in protocol_mailbox.SEATS
+                else {"state": "n/a", "raw": "", "age": "n/a", "sha": None}
+            ),
         }
 
     receipt_summary = {"consumed": 0, "unread": 0, "unknown": 0}
@@ -204,7 +213,7 @@ def collect_monitor_state(
     heartbeat_attention = [
         f"{seat}={seat_state['heartbeat']['state']}"
         for seat, seat_state in seats.items()
-        if seat_state["heartbeat"]["state"] != "ONLINE"
+        if seat_state["heartbeat"]["state"] not in ("ONLINE", "n/a")
     ]
     if heartbeat_attention:
         alerts.append("heartbeat attention: " + ", ".join(heartbeat_attention))

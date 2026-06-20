@@ -23,9 +23,10 @@ from codex_protocol_model import (
     render_start_session_inhabitance,
     render_surface_summary,
 )
+import protocol_mailbox
 from status import collect_mailbox
 
-SEATS = ("director", "director2", "operator", "operator2")
+SEATS = protocol_mailbox.RECEIVING_SEATS
 
 
 def run(cmd: list[str], cwd: Path, timeout: int = 120) -> tuple[int, str, str]:

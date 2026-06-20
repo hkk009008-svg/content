@@ -67,7 +67,9 @@ def test_snapshot_reports_unread_latest_event_and_preserves_cursors(tmp_path: Pa
         encoding="utf-8"
     )
     assert after == before
-    assert not (root / "coordination/mailbox/seen/coordinator.txt").exists()
+    # NOTE: coordinator legitimately has a seeded cursor now — under the Slice 2.5
+    # consolidated roster (monitor.SEATS == protocol_mailbox.RECEIVING_SEATS),
+    # _repo() seeds seen/coordinator.txt. The former `not exists` assertion is gone.
 
 
 def test_latest_coordinator_broadcast_receipt_split_is_cursor_based(tmp_path: Path) -> None:
@@ -89,7 +91,12 @@ def test_latest_coordinator_broadcast_receipt_split_is_cursor_based(tmp_path: Pa
     assert state["seats"]["operator"]["broadcast_receipt"] == "consumed"
     assert state["seats"]["director2"]["broadcast_receipt"] == "unread"
     assert state["seats"]["operator2"]["broadcast_receipt"] == "unread"
-    assert state["receipt_summary"] == {"consumed": 2, "unread": 2, "unknown": 0}
+    # Slice 2.5 consolidated roster: both coordinators are first-class receiving
+    # seats now; _repo() seeds their cursors at 04:00 (< the 04:05 broadcast) so
+    # both read "unread" and the split totals 6, not 4.
+    assert state["seats"]["coordinator"]["broadcast_receipt"] == "unread"
+    assert state["seats"]["coordinator2"]["broadcast_receipt"] == "unread"
+    assert state["receipt_summary"] == {"consumed": 2, "unread": 4, "unknown": 0}
 
 
 def test_heartbeat_freshness_is_reported_without_affecting_receipt(tmp_path: Path) -> None:
@@ -107,6 +114,40 @@ def test_heartbeat_freshness_is_reported_without_affecting_receipt(tmp_path: Pat
     assert state["seats"]["operator2"]["heartbeat"]["state"] == "UNPARSEABLE"
 
 
+def test_coordinator_heartbeat_is_na_and_never_attention_flagged(tmp_path: Path) -> None:
+    # Slice 2.5 widened monitor.SEATS to the 6-seat RECEIVING_SEATS for the
+    # receipt/unread dimension, but heartbeats are pair-seat-only by doctrine
+    # (coordinators have no presence heartbeat file). Seed heartbeats for the 4
+    # pair seats and NONE for coordinator/coordinator2.
+    #
+    # NON-VACUITY: reverting the decouple (computing _heartbeat for coordinators)
+    # makes them MISSING — both then reappear in heartbeat_attention and the two
+    # coordinator assertions below flip RED. Verified by temporarily restoring the
+    # unconditional _heartbeat call: coordinator/coordinator2 went MISSING and the
+    # "heartbeat attention:" alert listed coordinator2=MISSING/coordinator=MISSING.
+    root = _repo(tmp_path)
+    _heartbeat(root, "director", "2026-06-16T04:20:00Z abc1234")
+    _heartbeat(root, "operator", "2026-06-16T04:20:00Z def5678")
+    _heartbeat(root, "director2", "2026-06-16T04:20:00Z 9abcd01")
+    _heartbeat(root, "operator2", "2026-06-16T04:20:00Z 2345678")
+
+    state = monitor.collect_monitor_state(root, now=NOW, stale_min=15)
+
+    # Coordinators carry the non-applicable sentinel, never a computed state.
+    assert state["seats"]["coordinator"]["heartbeat"]["state"] == "n/a"
+    assert state["seats"]["coordinator2"]["heartbeat"]["state"] == "n/a"
+
+    # The 4 pair seats keep their real heartbeat behavior (all ONLINE here).
+    for seat in ("director", "operator", "director2", "operator2"):
+        assert state["seats"][seat]["heartbeat"]["state"] == "ONLINE"
+
+    # No alert mentions either coordinator for heartbeat attention.
+    heartbeat_alerts = [a for a in state["alerts"] if a.startswith("heartbeat attention:")]
+    for alert in heartbeat_alerts:
+        assert "coordinator=" not in alert
+        assert "coordinator2=" not in alert
+
+
 def test_render_snapshot_surfaces_read_only_mode_and_active_alerts(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     _event(root, "2026-06-16T04-05-00Z-coordinator-to-all-coordination.md")
@@ -117,7 +158,9 @@ def test_render_snapshot_surfaces_read_only_mode_and_active_alerts(tmp_path: Pat
 
     assert "mode: read-only; no cursor consumption; no mailbox send" in rendered
     assert "latest coordinator broadcast: 2026-06-16T04-05-00Z-coordinator-to-all-coordination.md" in rendered
-    assert "receipt split: consumed=0 unread=4 unknown=0" in rendered
+    # Slice 2.5 consolidated roster: monitor.SEATS now = RECEIVING_SEATS (6 seats),
+    # so _repo()'s seeded 04:00 cursors leave all 6 unread vs the 04:05 broadcast.
+    assert "receipt split: consumed=0 unread=6 unknown=0" in rendered
     assert "director   unread=1" in rendered
     assert "heartbeat=STALE" in rendered
     assert "ALERTS" in rendered

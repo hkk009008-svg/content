@@ -6,11 +6,12 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import protocol_mailbox
 from mailbox_monitor import collect_monitor_state, render_snapshot
 
 
 SEAT_STATUS = ".agents/skills/four-seat-protocol/scripts/seat_status.py"
-SEATS = ("director", "director2", "operator", "operator2", "coordinator")
+SEATS = protocol_mailbox.RECEIVING_SEATS
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 

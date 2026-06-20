@@ -34,9 +34,10 @@ _SCRIPTS_DIR = _REPO_ROOT / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+import protocol_mailbox
 from codex_protocol_model import CENTRAL_INVARIANT, COORDINATOR_INVARIANTS, MODEL_SOURCE
 
-SEATS = ("director", "director2", "operator", "operator2")
+SEATS = protocol_mailbox.RECEIVING_SEATS
 
 
 def run(cmd, cwd=None):
