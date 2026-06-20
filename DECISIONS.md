@@ -1601,3 +1601,94 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   (ceremony forbidden + detector); `docs/templates/claude/reviewer.md` (the `reviewer-result/1`
   contract); plan `docs/superpowers/plans/2026-06-19-harden-verification-dispatch.md` (Deferred
   follow-up, now discharged).
+
+## ADR-034 — Cross-provider seat topology Slice 2.5: legacy `coordination/` mailbox migrated onto `refs/threeway/events` as carrier events, in-memory shadow, single authority-flip cutover; coordinator + coordinator2 become receiving seats
+
+- **Status:** ACCEPTED (Slice 2.5 implemented per the design spec
+  `docs/superpowers/specs/2026-06-20-threeway-slice2.5-legacy-bus-migration-design.md` and the plan
+  `docs/superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md`).
+  Discharges **ADR-031 Decision 8** (the D-B deferral of the legacy-mailbox migration). The §11 boundary
+  to plan/execute this was satisfied by Slice 2's green gate (`152 passed`, merged at `2a932ac0`).
+  Slice 3 (`co_sign_satisfied` true for T2/T3 — `threeway/tier.py:32-43`) remains deferred.
+- **Context:** ADR-030/031 shipped the additive `threeway/` ref-bus but left the LIVE human-operated
+  markdown mailbox (`coordination/`, the `send-event`/`consume-events`/`check_coordination.py`/`status.py`
+  bus the 4-seat campaign runs on — 768 `sent/*.md` events) on the old substrate. The legacy vocabulary
+  (`coordination/mailbox/kinds.txt`, 25 human-coordination kinds) is 100% disjoint from the threeway
+  governance kinds, so `reduce()` (`threeway/reducer.py`, no `else`) would silently drop every legacy
+  event if folded through it. The migration also had to make `coordinator` (today send-only) and a new
+  `coordinator2` first-class RECEIVING seats without ever opening a dual-write-authority window on a bus
+  with seats actively running.
+- **Decisions:**
+  1. **Carrier-event model — legacy events ride the existing non-load-bearing `event_sent` kind, never
+     `reduce()`.** Each `sent/*.md` is projected to a `threeway.envelope.Event` with `kind="event_sent"`
+     (already in `THREEWAY_KINDS`, `threeway/__init__.py`); the original legacy kind, subject, `When:`,
+     `Cursor at send:`, recipient, and full body bytes go into `payload`. No new kinds, no `kinds.txt`
+     change, no governance semantics. Because `event_sent` is NOT in `LOAD_BEARING_KINDS`, the gate's
+     `verify_and_reduce` (`threeway/gate.py:38`) never reads a carrier's signer — the migration-importer
+     identity needs no `PublicKeyRegistry` entry, and a carrier structurally cannot masquerade as a
+     governance attestation.
+  2. **`subject_sha = sha256(source_filename)` to keep idempotency INJECTIVE.** `idempotency_key`
+     (`threeway/envelope.py`) is `sha256(sender:kind:subj:payload_digest)`; without a per-file subject the
+     ~125 byte-identical same-`(sender,kind)` `status`/`ack` events would collide and the cutover would
+     drop one. Filenames are unique even within a same-second group, so this is the single shared
+     load-bearing invariant under both injectivity and the §6 total order. `brief_id="legacy-import"`
+     namespaces all 768 carriers under `events/legacy-import/`.
+  3. **"Shadow" is an IN-MEMORY projection (D2) — zero `refs/threeway/events` writes until cutover.** The
+     projector (`threeway/legacy_projector.py`) is a pure read-only function; the divergence-check
+     (`threeway/divergence.py`) compares the projected event SET against the live mailbox on the RAW set
+     (never `reduce()`/`EffectiveState`). "No dual-write authority" is therefore STRUCTURAL, not merely
+     policy — pinned observable: a full shadow leaves `gitcas.rev_parse(repo, EVENTS_REF)` unchanged
+     (design §8 clause #6).
+  4. **Single authority-flip cutover (D2/§5c).** After ≥1 zero-divergence shadow cycle + a one-pair canary:
+     fail-closed `preflight_bus_init(force=False)` (`threeway/gitcas.py:231`) → 768 sequential
+     `RefEventStore.append()` carrier appends in the `(filename ts, full filename)` total order → 6
+     cursor backfills → ONE explicit authority-flip act. The 768 appends are non-atomic CAS, so a failure
+     tears down the partial `refs/threeway/events` prefix (no reader sees a half-backfilled bus). Before
+     the flip, legacy `sent/` is authoritative; after it, the ref-bus is, and `sent/` is RETAINED
+     read-only as the rollback source (the forward projector is lossy w.r.t. markdown framing, so rollback
+     re-designates the retained tree + restores the cursor manifest — no byte-regeneration claim).
+  5. **ISO → scalar `seq` cursors, reversible via a committed manifest (D4).** Each seat's ISO high-water
+     `seen/<seat>.txt` maps to the highest `seq` whose event ts ≤ the ISO cursor under the total order;
+     `advance_cursor` (`threeway/refstore.py:222`) materializes `refs/threeway/cursors/<seat>`. `_CURSOR_RE`
+     (`scripts/check_coordination.py:68`) and the other cursor parsers loosen to accept the scalar in
+     lockstep, ATOMICALLY in Phase C (no intermediate commit ever has a scalar cursor under an ISO-only
+     regex). `coordination/mailbox/.migration/cursor-backfill.json` archives the original ISO values +
+     the ISO→seq map, so restoring it rewrites `seen/*.txt` byte-for-byte.
+  6. **coordinator + coordinator2 become RECEIVING seats; the ~12-copy roster consolidates to one root
+     (D1).** `scripts/protocol_mailbox.py` is the single Python roster root (`RECEIVING_SEATS`); every
+     Python copy imports it; the 4 shell whitelist sites stay hand-synced but are guarded by a
+     token-extraction test asserting shell-list == Python root. The send-only special-casing for
+     coordinator is removed in lockstep with the prose (D5: prose-matches-code is a repo invariant).
+     coordinator2's cursor seeds at the bus head (zero spurious backlog); `self`-address stays refused.
+     **Option B roster decouple (execution-surfaced, user-approved):** `SEAT_ORDER` (`scripts/protocol_capacity.py`)
+     is the standing capacity COVERAGE actor set (coordinator + the 4 pair seats — drives the G1/G2
+     capacity gates), kept DISTINCT from a NEW `VALID_OWNERS` (= the `protocol_mailbox` receiving root incl
+     coordinator2), the owner/recipient ACCEPTANCE whitelist. coordinator2 is therefore an
+     accepted-but-OPTIONAL owner, NOT a mandatory per-cycle scheduling actor — a roster refactor must not
+     silently impose new mandatory staffing. **Coordinators are pair-seat-EXCLUDED for heartbeats +
+     capacity coverage, but full RECEIVERS for mail/cursors:** `seat_status.heartbeats()` and the
+     `mailbox_monitor` heartbeat snapshot iterate `protocol_mailbox.SEATS` (the 4 pair seats —
+     coordinators have no presence heartbeat), while receipt/cursor/unread iterate `RECEIVING_SEATS` (6).
+- **Consequences:** the live campaign bus is now event-sourced on the same substrate as the governance
+  bus, with `coordinator`/`coordinator2` addressable both ways. There is no dual-write window at any
+  phase (Phase A purely additive; shadow read-only in-memory; cutover a single post-success flip).
+  Rollback is the retained read-only `sent/` + the reversible cursor manifest. The two new modules are
+  ADDITIVE and read-only — they import the Slice-2 API and never edit `refstore`/`gitcas`/`envelope`/
+  `reducer`/`gate`/`tier`. Slice 3 is now the only remaining slice. **The LIVE cutover is a SEPARATE
+  post-merge operational act:** this plan ships the tested cutover MACHINERY (`threeway/cutover.py`) but
+  does NOT flip the live bus. `run_cutover` returns `CutoverResult(ready_to_flip=True)`; the authority-flip
+  marker commit is the operator's deliberate act, run on a quiet bus. **OPERATIONAL note:** the live
+  cutover append loop is O(n²) (`RefEventStore` re-verifies all priors per append) — ~50 min for 768
+  events with no progress output; this is expected, NOT a hang.
+- **Evidence:**
+  `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q` → `191 passed`
+  (Slice 1 + Slice 2 + the Slice-2.5 roster/projector/divergence/cursor-backfill/cutover suites).
+  `scripts/ci_smoke.py` → OK (no ceremony; §13A doc-anchor gate green; non-vacuity proven —
+  `legacy_projector.py:9999` → `DOC-ANCHOR DRIFT` / `out_of_bounds`, reverted to `:63`).
+  `scripts/check_no_ceremony.py` → clean (zero xfail/skip/importorskip introduced).
+- **Cross-refs:** **ADR-031** (Slice 2 — this slice discharges its Decision 8 / D-B deferral); design spec
+  `docs/superpowers/specs/2026-06-20-threeway-slice2.5-legacy-bus-migration-design.md`; plan
+  `docs/superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md`;
+  the now-SUPERSEDED tracking stub
+  `docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md`;
+  ARCHITECTURE.md §13A.5 (legacy-bus projection); `threeway/legacy_projector.py`, `threeway/divergence.py`.

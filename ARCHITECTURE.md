@@ -1765,9 +1765,32 @@ append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` pr
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
 ```
 
-Slice 1 + Slice 2 together: `152 passed`.
+Slice 1 + Slice 2 + Slice 2.5 together: `191 passed`.
 
-*Last verified: 2026-06-19*
+*Last verified: 2026-06-20*
+
+### 13A.5 Legacy mailbox projection — `legacy_projector` + `divergence` (Slice 2.5)
+
+The live `coordination/` markdown campaign bus is migrated onto `refs/threeway/events` as
+**carrier events**. `def project` (`threeway/legacy_projector.py:63`) is a pure read-only
+function: each `coordination/mailbox/sent/<ts>-<from>-to-<to>-<kind>.md` becomes a
+`threeway.envelope.Event` with `kind="event_sent"` (the non-load-bearing carrier — the gate skips
+it, `reduce()` never folds it), the original kind/subject/body carried in `payload`,
+`subject_sha=sha256(source_filename)` (so idempotency stays injective over byte-identical events),
+and `brief_id="legacy-import"`. `def diverge` (`threeway/divergence.py:40`) compares the
+projected event SET against the live mailbox on the RAW set (never `reduce()`), with a non-empty
+floor (`projected count == live sent count`). Neither module writes `refs/threeway/events`; the bus
+is written ONCE, at the cutover (`preflight_bus_init` → 768 ordered `append`s → 6 cursor backfills →
+a single authority-flip), with the retained read-only `sent/` as rollback.
+
+**Cursor format (Slice 2.5):** cursors migrate ISO→scalar `seq`. `_CURSOR_RE`
+(`scripts/check_coordination.py:68`) loosens from ISO-only to accept the scalar in lockstep with the
+other parsers; `def advance_cursor` (`threeway/refstore.py:222`) materializes
+`refs/threeway/cursors/<seat>` via the LOCAL `cas_create_or_update_ref`
+(`threeway/gitcas.py:171`) exactly as in §13A.1. `coordination/mailbox/.migration/cursor-backfill.json` archives the original
+ISO values + the ISO→seq map for byte-reversible rollback. `coordinator` and `coordinator2` are now
+first-class RECEIVING seats; the ~12-copy seat roster consolidates to the single root
+`scripts/protocol_mailbox.py` plus a shell-sync guard. See `DECISIONS.md` ADR-034.
 
 ---
 

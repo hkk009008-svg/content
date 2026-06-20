@@ -1,6 +1,10 @@
 # Slice 2.5 — Legacy `coordination/` Mailbox Migration (TRACKING STUB)
 
-> **Status: DEFERRED / NOT STARTED.** This is the separately-tracked deferral artifact for spec
+> **Status: SUPERSEDED.** The full design + TDD plan now live in
+> `docs/superpowers/specs/2026-06-20-threeway-slice2.5-legacy-bus-migration-design.md` and
+> `docs/superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md`
+> (this stub's edit-site inventory was ~3× undercounted; see the design spec §4). Retained for history.
+> This was the separately-tracked deferral artifact for spec
 > §8.7/§8.8 (audit Issue 8 / Decision D-B). It is a *tracking stub*, not an implementation plan —
 > the full TDD plan is authored only after the **Slice 2 gate is green** (spec §11 boundary rule).
 > Identifier: **`threeway-slice2.5-legacy-bus-migration`**.
