@@ -253,3 +253,40 @@ def test_t3_rejects_revoked_candidate_pair_assignment():
     # cannot resolve → fail closed. (T2 mirror, via the rev-aware assignments(), is
     # unaffected since it resolves pair B.)
     assert not _sat("T3", reduce(_t3_ok() + [_revoke(7, target_id="as1")]))
+
+
+# --- Slice 3 review hardening (defense-in-depth; not attacker-reachable in the signed
+# 2-pair topology, but restores fail-closed symmetry the review found missing). ---
+
+def test_t2_rejects_same_provider_builder_verifier():
+    # Even if a malformed same-provider "mirror" exists, an escalated promotion must reject
+    # when builder and verifier share a provider (no cross-provider independence). The sole
+    # production caller is gated upstream (predicate.py:67), but co_sign_satisfied is public.
+    roster = [_assign(1, pair="A", builder_provider="codex", verifier_seat="operator",
+                      verifier_provider="codex"),
+              _assign(2, pair="B", builder_provider="codex", verifier_seat="operator2",
+                      verifier_provider="codex")]
+    state = reduce(roster + [_cosign(3, signer="operator2:codex:s1")])
+    assert not _sat("T2", state, builder="codex", verifier="codex")
+
+
+def test_t2_fail_closed_when_two_eligible_pairs_one_seatless():
+    # Spec rule is "EXACTLY ONE mirror PAIR or fail closed". A second swap-eligible pair
+    # whose primary_verifier is empty must NOT be silently dropped to resolve the other.
+    roster = _roster() + [_assign(3, pair="C", builder_provider="claude",
+                                  verifier_seat="", verifier_provider="codex")]
+    state = reduce(roster + [_cosign(4, signer="operator2:codex:s1")])
+    assert not _sat("T2", state)
+
+
+def test_t3_rejects_empty_primary_verifier_seat():
+    # An empty-string primary_verifier in the candidate-pair assignment must fail closed,
+    # symmetric with the T2 mirror seat guard — an empty-token re_verify must not match.
+    roster = [_assign(1, pair="A", builder_provider="codex", verifier_seat="",
+                      verifier_provider="claude"),
+              _assign(2, pair="B", builder_provider="claude", verifier_seat="operator2",
+                      verifier_provider="codex")]
+    evs = roster + [_cosign(3, signer="operator2:codex:s1"),
+                    _reverify(4, signer=":x:s2"),   # _seat_of -> "" matches the empty seat
+                    _human(5, approver="chief-gemini"), _human(6, approver="chief-chatgpt")]
+    assert not _sat("T3", reduce(evs))

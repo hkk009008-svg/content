@@ -45,6 +45,10 @@ def co_sign_satisfied(tier: str, state, candidate_id: str, *, candidate_pair: st
     unsigned signer-string provider/session. Ambiguity fails CLOSED. False is fail-safe."""
     if tier in ("T0", "T1"):
         return True
+    # escalated tiers require cross-provider independence (defense-in-depth: predicate.py:67
+    # rejects this upstream, but co_sign_satisfied is public + unit-tested directly).
+    if verifier_provider == builder_provider:
+        return False
     if not _t2_mirror_cosign(state, candidate_id, candidate_pair,
                              builder_provider, verifier_provider, integration_sha):
         return False
@@ -64,7 +68,10 @@ def _mirror_pair_verifier_seat(state, candidate_pair, builder_provider,
     are the exact swap: builder_provider == OUR verifier_provider AND
     primary_verifier_provider == OUR builder_provider. Fail-CLOSED: returns None unless
     EXACTLY ONE such pair exists (zero → not yet assigned; >1 → ambiguous co-signer)."""
-    seats = set()
+    # Count swap-eligible PAIRS (spec: "EXACTLY ONE mirror pair or fail closed"), NOT
+    # non-null seats — a second eligible pair that omits its seat must still register as
+    # ambiguity rather than be silently dropped to resolve the other.
+    mirror_seats = []
     for assign in state.assignments():
         if _signer_seat(assign.signer) != "overseer":
             continue
@@ -73,10 +80,11 @@ def _mirror_pair_verifier_seat(state, candidate_pair, builder_provider,
             continue
         if (ap.get("builder_provider") == verifier_provider
                 and ap.get("primary_verifier_provider") == builder_provider):
-            seat = ap.get("primary_verifier")
-            if seat:
-                seats.add(seat)
-    return next(iter(seats)) if len(seats) == 1 else None
+            mirror_seats.append(ap.get("primary_verifier"))
+    if len(mirror_seats) != 1:          # zero → not assigned; >1 → ambiguous co-signer
+        return None
+    seat = mirror_seats[0]
+    return seat if seat else None       # a single eligible-but-seatless pair → fail closed
 
 
 def _t2_mirror_cosign(state, candidate_id, candidate_pair, builder_provider,
@@ -103,6 +111,8 @@ def _t3_cross_provider_re_verify(state, candidate_id, candidate_pair, builder_pr
     if assign is None or _signer_seat(assign.signer) != "overseer":
         return False
     seat = assign.payload.get("primary_verifier")
+    if not seat:                        # malformed/empty assignment seat → fail closed (symmetric with T2)
+        return False
     ev = state.re_verify(candidate_id, seat)
     return (ev is not None
             and ev.payload.get("verdict") == "GO"
