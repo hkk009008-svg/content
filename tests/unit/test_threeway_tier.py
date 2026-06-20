@@ -145,6 +145,17 @@ def test_t2_fail_closed_on_two_mirror_pairs():
     assert not _sat("T2", state)
 
 
+def test_t2_rejects_self_mirror_candidate_pair():
+    # Degenerate roster: the candidate's OWN pair A is provider-swap-eligible
+    # (builder_provider == primary_verifier_provider == "codex"). The `pair !=
+    # candidate_pair` skip in _mirror_pair_verifier_seat is the ONLY thing preventing
+    # pair A's own operator from self-satisfying the mirror co-sign here.
+    roster = [_assign(1, pair="A", builder_provider="codex",
+                      verifier_seat="operator", verifier_provider="codex")]
+    state = reduce(roster + [_cosign(2, signer="operator:codex:s1")])
+    assert not _sat("T2", state, pair="A", builder="codex", verifier="codex")
+
+
 def test_t2_pair_b_direction():
     state = reduce(_roster() + [_cosign(3, signer="operator:claude:s1")])
     assert _sat("T2", state, pair="B", builder="claude", verifier="codex")
