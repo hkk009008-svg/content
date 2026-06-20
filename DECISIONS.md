@@ -1746,3 +1746,53 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   `threeway/envelope.py:67-90` (the unsigned `signer` exclusion);
   `docs/REMEDIATION-INVENTORY.md` (`threeway-signer-unsigned-session`,
   `threeway-human-approval-overseer-asserted`).
+
+## ADR-036 — Revocation authority: an `attestation_revoked` takes effect only from the `overseer` or the target's own signer seat (closes the Slice-3 forged-revoke promotion/DoS)
+
+- **Status:** ACCEPTED. Closes a CRITICAL surfaced by the Slice-3 whole-implementation
+  adversarial review (independently reproduced end-to-end against HEAD).
+- **Context / root cause:** `revokes_event_id` is EXCLUDED from the 14-field signed view
+  (`envelope.py:67`), and `reduce()` previously honored EVERY `attestation_revoked` —
+  `st._revoked_event_ids.add(ev.revokes_event_id)` — with no authority check. Because
+  `attestation_revoked` is a `LOAD_BEARING_KIND` the gate verifies its signature, but ANY
+  registered insider seat can mint its OWN validly-signed revoke and re-point its (unsigned)
+  `revokes_event_id` at ANY target without breaking the signature.
+- **Why Slice 3 made it CRITICAL:** ADR-035's `co_sign_satisfied` made assignment resolution
+  revocation-aware (`assignments()` / singular `assignment()`), as spec §6.1 requires (the
+  predicate must read only EFFECTIVE facts). That correct change converted the latent revoke
+  gap into a forged-PROMOTION primitive: with ≥2 swap-eligible mirror pairs the gate fails
+  closed (PENDING), but a forged non-overseer revoke of a RIVAL mirror's overseer-signed
+  assignment collapses the ambiguity onto a seat the attacker controls → MERGEABLE. It also
+  enables a 2-pair merge-gate DoS (revoke the only legit mirror → PENDING). This defeats the
+  Slice-3 acceptance promise "ambiguity yields PENDING, never an erroneous MERGEABLE".
+- **Decision:** in `reduce()`, honor a revoke iff the revoker seat is authorized for the
+  target — `_revoke_authorized(revoker_seat, target_seat)` returns true only when
+  `revoker == "overseer"` (control-plane override) OR `revoker == target's own signer seat`
+  (self-revocation). The target's seat is resolved from a one-pass `id -> seat` index so the
+  check is order-independent. Both seats are gate-authenticated, so the unsigned
+  `revokes_event_id` link is no longer exploitable: pointing a revoke at a fact you do not own
+  is simply IGNORED. NO envelope/spec change — `revokes_event_id` stays unsigned; the
+  cryptographic binding (an overseer-issued challenge in the SIGNED payload) remains scope (b).
+- **Also hardened (same review, defense-in-depth; not attacker-reachable in the signed 2-pair
+  topology but restoring fail-closed symmetry):** (i) `co_sign_satisfied` rejects escalated
+  tiers when `verifier_provider == builder_provider` (was only checked in the T3 helper);
+  (ii) `_mirror_pair_verifier_seat` counts swap-eligible PAIRS, not non-null seats, so a
+  second eligible-but-seatless pair still registers as ambiguity; (iii) `_t3_cross_provider_
+  re_verify` fail-closes on an empty `primary_verifier` seat (symmetric with the T2 guard).
+- **Consequences:** revocation is now an authenticated authority channel like every other
+  control-plane fact (`predicate.py`'s overseer/ci seat checks). Legitimate self-revocation
+  (an operator revoking its own attestation) and overseer revocation are preserved; only
+  cross-seat forged revokes are rejected. One existing test that encoded the loose behavior
+  (`test_revoked_assignment_is_pending` — non-overseer revoking an overseer assignment) was
+  re-pointed to the overseer (authorized) path; four accessor tests had their revokes made
+  overseer-signed.
+- **Evidence:** new RED→GREEN pins — reducer `test_unauthorized_seat_revoke_is_ignored`;
+  predicate `test_forged_nonoverseer_revoke_cannot_collapse_t2_mirror_ambiguity` +
+  `test_forged_nonoverseer_revoke_cannot_deny_legit_mirror`; tier
+  `test_t2_rejects_same_provider_builder_verifier`,
+  `test_t2_fail_closed_when_two_eligible_pairs_one_seatless`,
+  `test_t3_rejects_empty_primary_verifier_seat`.
+  `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q` → `238 passed`.
+- **Cross-refs:** **ADR-035** (the slice that surfaced this); `threeway/reducer.py`
+  (`_revoke_authorized` + `reduce`); `threeway/tier.py` (the three hardening guards);
+  `docs/REMEDIATION-INVENTORY.md` (`threeway-revoke-authority-unsigned`).

@@ -1765,9 +1765,10 @@ append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` pr
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
 ```
 
-Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `229 passed`.
+Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `238 passed` (incl. the ADR-036 revoke-authority
++ defense-in-depth pins).
 
-*Last verified: 2026-06-20*
+*Last verified: 2026-06-21*
 
 ### 13A.5 Legacy mailbox projection — `legacy_projector` + `divergence` (Slice 2.5)
 
@@ -1812,6 +1813,18 @@ the re_verify "new session" freshness is NOT enforced (session is unsigned —
 not two independent human signatures (`threeway-human-approval-overseer-asserted`); assignments have
 no dedicated supersede fact (same-pair re-assignment is last-write-wins, revocation via
 `attestation_revoked`). See `DECISIONS.md` ADR-035.
+
+**Revocation authority (ADR-036).** `revokes_event_id` is unsigned (envelope.py:67), so revocation
+must be authorized or an insider could forge a revoke of another seat's fact. `reduce()`
+(`threeway/reducer.py`) honors an `attestation_revoked` only when `_revoke_authorized` holds — the
+revoker seat is the `overseer` (control-plane override) or the target event's OWN signer seat
+(self-revocation) — resolved via an order-independent `id→seat` index. Without this, Slice-3's
+revocation-aware assignment resolution let a forged non-overseer revoke collapse the fail-closed
+T2/T3 mirror ambiguity into a forged MERGEABLE (and enabled a merge-gate DoS); both are now
+fail-closed. Defense-in-depth from the same review: `co_sign_satisfied` rejects escalated tiers when
+`verifier_provider == builder_provider`; `_mirror_pair_verifier_seat` counts swap-eligible PAIRS
+(not non-null seats); `_t3_cross_provider_re_verify` fail-closes on an empty seat. See
+`DECISIONS.md` ADR-036 + `threeway-revoke-authority-unsigned`.
 
 ---
 
