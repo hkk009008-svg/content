@@ -208,7 +208,10 @@ def test_send_event_accepts_coordinator_from(repo):
     assert any("-coordinator-to-director-coordination.md" in n for n in names)
 
 
-def test_send_event_rejects_coordinator_as_target(repo):
-    # coordinator is a FROM-only pseudo-seat — never a valid TO.
+def test_send_event_accepts_coordinator_as_target(repo):
+    # Slice 2.5: coordinator is now a first-class receiving seat — a valid TO.
+    # (Inverts the OLD send-only doctrine: this send formerly exited 2.)
     r = _run(SEND_EVENT, ["director", "coordinator", "fyi", "x"], repo)
-    assert r.returncode != 0
+    assert r.returncode == 0, r.stderr
+    names = sorted(p.name for p in (repo / "coordination/mailbox/sent").iterdir())
+    assert any("-director-to-coordinator-fyi.md" in n for n in names)

@@ -130,3 +130,59 @@ def test_generic_sibling_regexes_left_untouched():
     import protocol_effectiveness_report as eff
     assert status._EVENT_RE.match(_COORD2_FILE)
     assert eff.MAILBOX_RE.search(_COORD2_FILE)
+
+
+# --- Task 4: shell whitelists ↔ Python root sync guard (spec §8 clause #2) ---
+
+_BIN = Path(__file__).resolve().parent.parent.parent / "coordination" / "bin"
+
+
+def _case_arm_tokens(path: Path, var: str) -> set[str]:
+    """Extract the seat tokens from a `case "$VAR" in <a>|<b>|...) ;;` arm.
+    Reads the LOAD-BEARING arm, never a usage/echo string. NB: this extractor
+    assumes seat tokens stay `[a-z0-9]` with no spaces around the `|` — true for
+    the whole roster; a seat name with `_`/`-`/uppercase would silently truncate."""
+    text = path.read_text()
+    m = re.search(rf'case "\${var}"\s+in\s+([a-z0-9|]+)\)', text)
+    assert m, f"no case arm for ${var} in {path.name}"
+    return set(m.group(1).split("|"))
+
+
+_HOOKS = [
+    Path(__file__).resolve().parent.parent.parent / ".codex" / "hooks" / "update-state.sh",
+    Path(__file__).resolve().parent.parent.parent / ".claude" / "hooks" / "update-state.sh",
+]
+
+
+def _unread_for_roles(path: Path) -> set[str]:
+    """Extract the `<role>` tokens from every `_unread_for <role>` CALL in an
+    update-state.sh (the LOAD-BEARING per-seat unread computation, spec §8 clause
+    #2 — NOT the STATE.md prose line, which is a separate string). Roster-agnostic:
+    matches any `[a-z0-9]` token after a `_unread_for ` CALL (the `\\s+` excludes the
+    `_unread_for()` definition), so it sees a future seat AND catches a typo'd token
+    (which then fails the set-equality) instead of silently ignoring it."""
+    text = path.read_text()
+    return set(re.findall(r"_unread_for\s+([a-z0-9]+)", text))
+
+
+def test_shell_whitelists_match_the_python_root():
+    seats = set(protocol_mailbox.RECEIVING_SEATS)        # 4 + both coordinators
+    # send-event FROM = every sender (= RECEIVING_SEATS; `all` is target-only, not a sender)
+    assert _case_arm_tokens(_BIN / "send-event", "FROM") == seats
+    # send-event TO = receivers + the `all` broadcast target
+    assert _case_arm_tokens(_BIN / "send-event", "TO") == seats | {"all"}
+    # consume-events ROLE = every CONSUMING seat (coordinators now consume; `all` never does)
+    assert _case_arm_tokens(_BIN / "consume-events", "ROLE") == seats
+    # spec §8 clause #2 also covers the two update-state.sh files: the `_unread_for`
+    # call list must compute unread for EVERY receiving seat (= seats; `all` is a
+    # target, never has a cursor/unread count).
+    for hook in _HOOKS:
+        assert _unread_for_roles(hook) == seats, hook
+
+    # --- non-vacuity: drop coordinator2 from the send-event TO arm → guard RED ---
+    to_tokens = _case_arm_tokens(_BIN / "send-event", "TO")
+    assert (to_tokens - {"coordinator2"}) != (seats | {"all"})
+    # --- non-vacuity (the second extractor): drop coordinator2 from ONE hook's
+    # `_unread_for` call list → that hook's set != root.
+    codex_roles = _unread_for_roles(_HOOKS[0])
+    assert (codex_roles - {"coordinator2"}) != seats

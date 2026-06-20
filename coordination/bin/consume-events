@@ -3,7 +3,7 @@
 # newest event addressed to it (or an explicit --to target), and stage the
 # cursor file (explicit pathspec; never commits).
 #
-#   usage: consume-events <director|director2|operator|operator2> [--to <ISO-UTC timestamp>]
+#   usage: consume-events <director|director2|operator|operator2|coordinator|coordinator2> [--to <ISO-UTC timestamp>]
 #
 # This is the ONLY sanctioned writer of seen/*.txt under protocol v6.0: the
 # cursor file is the single source of truth, and the advance rides the seat's
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: consume-events <director|director2|operator|operator2> [--to <timestamp>]"
+  echo "usage: consume-events <director|director2|operator|operator2|coordinator|coordinator2> [--to <timestamp>]"
 }
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
@@ -24,7 +24,7 @@ ROLE=${1:-}
 # 4-seat protocol (two director-operator pairs). `all` is a broadcast TARGET,
 # not a consuming role — there is no seen/all.txt; every real seat consumes
 # events addressed to itself OR to `all` (see addressed() below).
-case "$ROLE" in director|director2|operator|operator2) ;; *)
+case "$ROLE" in director|director2|operator|operator2|coordinator|coordinator2) ;; *)
   usage >&2; exit 2;; esac
 shift
 TARGET=""

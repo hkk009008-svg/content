@@ -21,13 +21,13 @@ fi
 FROM=$1; TO=$2; KIND=$3; shift 3; SUBJECT="$*"
 ROOT=$(git rev-parse --show-toplevel)
 
-# Seats: 4-seat protocol (two director-operator pairs). `all` is a broadcast
-# TARGET only — never a sender. `coordinator` is the mirror: a send-only pseudo-
-# seat — a valid <from>, never a <to>, no seen cursor (read-only oversight seat).
-# Keep in sync with consume-events, check_coordination.py (_EVENT_NAME_RE frm)
-# and scripts/status.py.
-case "$FROM" in director|director2|operator|operator2|coordinator) ;; *) echo "send-event: bad <from>: $FROM (director|director2|operator|operator2|coordinator)" >&2; exit 2;; esac
-case "$TO"   in director|director2|operator|operator2|all) ;; *) echo "send-event: bad <to>: $TO (director|director2|operator|operator2|all)" >&2; exit 2;; esac
+# Seats: 4-seat protocol (two director-operator pairs) + both coordinators
+# (Slice 2.5: coordinator/coordinator2 are now first-class send/receive seats).
+# `all` is a broadcast TARGET only — never a sender. Keep in sync with
+# consume-events, check_coordination.py (_EVENT_NAME_RE frm) and
+# scripts/status.py.
+case "$FROM" in director|director2|operator|operator2|coordinator|coordinator2) ;; *) echo "send-event: bad <from>: $FROM (director|director2|operator|operator2|coordinator|coordinator2)" >&2; exit 2;; esac
+case "$TO"   in director|director2|operator|operator2|coordinator|coordinator2|all) ;; *) echo "send-event: bad <to>: $TO (director|director2|operator|operator2|coordinator|coordinator2|all)" >&2; exit 2;; esac
 [ "$FROM" != "$TO" ] || { echo "send-event: refusing self-addressed event" >&2; exit 2; }
 
 KIND_FILE="$ROOT/coordination/mailbox/kinds.txt"

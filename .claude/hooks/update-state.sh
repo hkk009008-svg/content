@@ -212,12 +212,14 @@ _unread_for() {                       # $1 = role (director|operator)
   done
   echo "$count"
 }
-UNREAD_DIR=0; UNREAD_OP=0; UNREAD_DIR2=0; UNREAD_OP2=0
+UNREAD_DIR=0; UNREAD_OP=0; UNREAD_DIR2=0; UNREAD_OP2=0; UNREAD_C=0; UNREAD_C2=0
 if [ -d "coordination/mailbox/sent" ]; then
   UNREAD_DIR=$(_unread_for director)
   UNREAD_OP=$(_unread_for operator)
   UNREAD_DIR2=$(_unread_for director2)
   UNREAD_OP2=$(_unread_for operator2)
+  UNREAD_C=$(_unread_for coordinator)
+  UNREAD_C2=$(_unread_for coordinator2)
 fi
 
 TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -233,7 +235,7 @@ cat > STATE.md <<EOF
 - **Working tree:** ${WT_STATE}
 - **Smoke:** ${SMOKE_RESULT} (last run ${TIMESTAMP})
 - **Pytest:** ${PYTEST_LINE}
-- **Unread mailbox:** director=${UNREAD_DIR}, operator=${UNREAD_OP}, director2=${UNREAD_DIR2}, operator2=${UNREAD_OP2}
+- **Unread mailbox:** director=${UNREAD_DIR}, operator=${UNREAD_OP}, director2=${UNREAD_DIR2}, operator2=${UNREAD_OP2}, coordinator=${UNREAD_C}, coordinator2=${UNREAD_C2}
 - **Updated:** ${TIMESTAMP} (after HEAD \`${HEAD_SHA}\`)
 EOF
 

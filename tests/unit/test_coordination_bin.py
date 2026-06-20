@@ -126,6 +126,14 @@ def test_send_event_writes_convention_file_and_stages(repo):
     assert files[0] in r.stdout
 
 
+def test_send_event_accepts_coordinator2_as_to(repo):
+    r = _run(SEND_EVENT, ["director", "coordinator2", "fyi", "heads up"], repo,
+             stdin="body\n")
+    assert r.returncode == 0, r.stderr        # was exit 2 "bad <to>" on HEAD
+    files = [p.name for p in (repo / "coordination" / "mailbox" / "sent").iterdir()]
+    assert len(files) == 1 and files[0].endswith("-director-to-coordinator2-fyi.md")
+
+
 def test_send_event_rejects_unknown_kind(repo):
     r = _run(SEND_EVENT, ["operator", "director", "Bogus_Kind", "x"], repo)
     assert r.returncode != 0
