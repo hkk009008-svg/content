@@ -1765,10 +1765,12 @@ append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` pr
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
 ```
 
-Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `266 passed` (incl. the ADR-036 revoke-authority,
-ADR-037 event-id-uniqueness across gate + both stores, ADR-038 reserved-merge-id + brief_superseded
-authority, and the ADR-039 availability-hardening pins — authority-aware reducer, self-consistent
-candidate resolution, TOTAL run_gate).
+Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `271 passed, 1 xfailed` (incl. the ADR-036
+revoke-authority, ADR-037 event-id-uniqueness across gate + both stores, ADR-038 reserved-merge-id +
+brief_superseded authority, the ADR-039 availability-hardening pins — authority-aware reducer,
+self-consistent candidate resolution — and the ADR-040 totality-completion pins — verify-phase
+drop-not-raise + pre-CAS exception guard, with the cross-pair `candidate_id` reuse residual
+strict-xfailed).
 
 *Last verified: 2026-06-21*
 
@@ -1848,7 +1850,7 @@ longer displace an authoritative fact and DoS a legitimate merge. `def authorita
 must equal the `executing_coordinator` of the overseer-signed assignment for the pair THAT
 candidate declares), so a bogus-pair or non-coordinator shadow candidate is ignored; the predicate
 and `run_gate` both resolve via it and can never disagree. `def run_gate`
-(`threeway/gate.py:119`) is now TOTAL and recoverable: the post-CAS `merge_completed` append is
+(`threeway/gate.py:142`) is now TOTAL and recoverable: the post-CAS `merge_completed` append is
 wrapped so NO exception escapes the irreversible CAS (a failure degrades to
 `COMPLETED("…append degraded…")`), main-state idempotency returns COMPLETED when main is already at
 the authoritative `integration_sha` (a degraded recording recovers on re-run), and the reserved
@@ -1858,6 +1860,26 @@ non-authoritative/shadow event or fails the gate safe; none widens what can prom
 forgery class (ADR-036/037/038) stays green. See `DECISIONS.md` ADR-039 +
 `threeway-reducer-shadow-dos`, `threeway-merge-completed-no-seat-check`,
 `threeway-run-gate-not-total`, `threeway-reserved-merge-id-dos`.
+
+**`run_gate` totality is now COMPLETE (ADR-040).** The slice's whole-implementation adversarial
+review (`wf_30e51cdf-f6b`) found `run_gate` was still non-total in two places. (1) The read-side
+`verify_and_reduce` (`threeway/gate.py:38`) RAISED on four ingestion checks — wrong `bus_id`,
+unaccepted `signature_version`, unknown signer seat, invalid signature — OUTSIDE `run_gate`'s
+try-block, so one insider-appended validly-signed load-bearing poison event bricked the gate for
+EVERY candidate. Those four reachable brick-raises are now a DROP (the event is excluded from
+reduction and `seen_ids`) plus a `logger.warning`, generalizing ADR-039's reserved-`merge-` drop to
+all four siblings; the duplicate-id check STAYS `raise` (store-guarded-UNREACHABLE — the ADR-037
+`EventIdCollision` guard rejects a colliding append). Dropping can only REMOVE an event from
+reduction, never admit a forged fact or newly promote, so the forgery class stays green. (2) The
+pre-CAS region of `def run_gate` (`threeway/gate.py:142`) is now fail-closed: its outer except is
+broadened from `subprocess.CalledProcessError` to `except Exception → REJECTED`, so a
+validly-signed-but-malformed authoritative candidate (missing payload key) can no longer escape as an
+uncaught `KeyError` — any pre-CAS error fails closed with main unmoved (the post-CAS
+degraded-`COMPLETED` nest is unchanged). **Open residual:** `threeway-candidate-id-pair-binding-dos`
+(MAJOR, xfail-pinned `test_cross_pair_candidate_id_reuse_dos_residual`) — a legitimate
+executing_coordinator of another pair can reuse a victim's `candidate_id` to stall (availability-only,
+never a forged promotion); scoped to a follow-up `candidate_id`↔pair-binding slice. See `DECISIONS.md`
+ADR-040 + `threeway-verify-phase-brick-dos`, `threeway-candidate-id-pair-binding-dos`.
 
 ---
 

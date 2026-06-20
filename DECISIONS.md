@@ -1978,3 +1978,63 @@ drop → `test_threeway_gate.py::test_run_gate_drops_nongate_reserved_id_event` 
 `::test_run_gate_total_under_post_cas_append_failure`; main-state idempotency →
 `::test_run_gate_main_state_idempotency_without_fact`; forgery class unaffected → existing
 ADR-036/037/038 pins stay green.
+
+---
+
+## ADR-040 — Complete `run_gate` totality: verify-phase drop-not-raise + pre-CAS exception guard (ADR-039 follow-up)
+
+**Context.** ADR-039 claimed "a TOTAL `run_gate` closes the insider availability/DoS class." The
+slice's mandated whole-implementation adversarial review (`wf_30e51cdf-f6b`, 13 agents, every
+exploit reproduced end-to-end through the live gate) found the claim was not yet met: `run_gate` had
+two non-total paths an insider could trigger. The forgery/integrity class (ADR-036/037/038) was
+re-confirmed CLOSED (every non-fail-safe outcome was availability-only, never a forged promotion).
+
+**Finding 1 (CRITICAL) — verify-phase total-bus brick.** `verify_and_reduce` RAISED `GateError` on
+four read-side checks — `bus_id` mismatch, unaccepted `signature_version`, unknown signer seat,
+invalid signature — and that call sits OUTSIDE `run_gate`'s try-block. The stores do NO
+`bus_id`/`signature_version`/registry validation at append (only id-collision), so one
+insider-appended, validly-self-signed load-bearing event with any of those poisons made
+`verify_and_reduce` raise on every `run_gate` invocation — an uncaught crash that permanently bricked
+the gate for EVERY candidate on the bus. This is the SAME shape ADR-039 Decision 3(a) recognized for
+the reserved-`merge-` id check and fixed with drop-not-raise — but that fix was applied only to the
+reserved-id line, leaving its three structural siblings raising (a Rule #13 symmetric-check miss).
+
+**Finding 2 (MAJOR) — pre-CAS crash.** A validly-signed authoritative candidate with a missing
+required payload key (`staging_base_sha`/`branch_sha`/`integration_sha`) raised an uncaught
+`KeyError` in `evaluate()` that escaped `run_gate`'s narrow `except subprocess.CalledProcessError` (a
+targeted per-candidate DoS; fail-closed — main unmoved).
+
+**Decision.** (1) In `verify_and_reduce`, convert the four reachable brick-raises to a DROP (the
+event is excluded from reduction and from `seen_ids`) plus a `logger.warning` for observability — so
+a poison event is IGNORED and the legit events still reduce, the legit merge proceeds, and OTHER
+candidates are unaffected. Generalizes ADR-039 Decision 3(a)'s drop-not-raise to all four sibling
+ingestion checks. (2) The duplicate-id check STAYS `raise GateError`: it is
+store-guarded-UNREACHABLE (the stores' ADR-037 `EventIdCollision` guard rejects a colliding append,
+so two same-id events can never both be stored), and keeping it raise preserves ADR-037's
+fail-closed-on-ambiguity for a hypothetical store bypass — the principled dichotomy is
+*reachable-brick → drop, store-guarded-unreachable → raise*. (3) Broaden `run_gate`'s outer (pre-CAS)
+except from `subprocess.CalledProcessError` to `except Exception → REJECTED` (the entire pre-CAS
+region is before any ref move → fail-closed, main unmoved); the post-CAS nested `try → degraded
+COMPLETED` is unchanged.
+
+**Fail-safe invariant (verified).** Dropping can only ever REMOVE an event from reduction; it can
+never admit a forged event or make anything newly MERGEABLE. A legitimate blocking fact
+(`candidate_aborted`/`attestation_revoked`) is correctly-signed, right-bus, registered-seat → it
+passes all four checks and is never dropped (still blocks); only an unauthenticated event drops, and
+it had zero authority anyway. The forgery class stays green; each guard mutation-tested non-vacuous
+(RED when reverted) in the Task-5 spec review.
+
+**Residual filed (NOT closed here).** The adversarial review confirmed end-to-end the ADR-039
+Residual (i) cross-pair `candidate_id` reuse DoS: an attacker who is the LEGITIMATE
+executing_coordinator of another overseer-assigned pair can reuse a victim's `candidate_id`, declare
+their own pair at a higher seq, capture `authoritative_candidate`, and stall the victim's merge at a
+non-merge outcome — availability-only (the attacker cannot forge the other pair's verifier
+attestations, so it never promotes). Filed as inventory row
+`threeway-candidate-id-pair-binding-dos` (MAJOR, open) with a strict-xfail pin
+`test_cross_pair_candidate_id_reuse_dos_residual`; scoped to a follow-up `candidate_id`<->pair-binding
+slice (pair-namespaced candidate ids or first-writer-wins). The reserved-id-squat residual (ii, fact
+un-writable under a squat) remains MINOR/observability-only.
+
+**Evidence.** Commit `1f3e65a4`; `tests/unit/test_threeway_*.py` → 271 passed, 1 xfailed (the
+residual); `scripts/ci_smoke.py` OK; `scripts/check_no_ceremony.py` clean. Adversarial review run
+`wf_30e51cdf-f6b`.
