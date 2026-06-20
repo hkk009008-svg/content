@@ -1695,3 +1695,54 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   the now-SUPERSEDED tracking stub
   `docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md`;
   ARCHITECTURE.md §13A.5 (legacy-bus projection); `threeway/legacy_projector.py`, `threeway/divergence.py`.
+
+## ADR-035 — Cross-provider seat topology Slice 3: tiered co-sign `co_sign_satisfied` enforces T2/T3, with all identity grounded on overseer-signed assignment facts + the key-bound seat token, never the unsigned `signer` string
+
+- **Status:** ACCEPTED (Slice 3 implements the merge-gate tier machinery — scope (a) — for the
+  cross-provider spec §11; the §11 boundary to plan/execute this was satisfied by Slice 2.5's green
+  gate, ADR-034). This is the LAST of the originally-deferred slices; the residual work below is
+  scope (b), a separate future slice.
+- **Context:** ADR-030/031/034 shipped the `threeway/` signed event-store, gate, and the live-bus
+  migration, but left `threeway.tier.co_sign_satisfied` a Slice-2.5 stub (always-false for the
+  escalated tiers). With the bus event-sourced, escalated-tier promotion (§7.2) needed a real,
+  fail-safe T2/T3 predicate so cross-family approvals can actually gate a merge.
+- **Root cause that shaped the design:** the `signer` string carries a provider/session tail that is
+  EXCLUDED from the 14-field signed view (`envelope.py:67`), so provider and session are spoofable —
+  a predicate must never read them for identity. Trustworthy identity therefore comes only from the
+  overseer-signed `assignment` facts (who plays which seat in which pair) plus the key-bound seat
+  TOKEN that verifies the event signature.
+- **Decision:**
+  1. **T2 — mirror-pair operator `co_sign`, fail-closed on ambiguity.** `_mirror_pair_verifier_seat`
+     resolves, from the signed `assignment` facts, the unique pair != candidate-pair whose providers
+     are the D3 role-swap of the candidate pair (`builder_provider == our verifier_provider` AND
+     `primary_verifier_provider == our builder_provider`), then matches that pair's `primary_verifier`
+     seat via the key-bound `state.co_sign(candidate_id, seat)`. A `co_sign` GO bound to the
+     `integration_sha` is required. **Zero or >1 resolved mirror → PENDING (fail-closed)** — never a
+     silent pass.
+  2. **T3 — cross-provider re_verify + two SHA-bound overseer human_approvals.** T3 adds a `re_verify`
+     GO from the candidate pair's OWN `primary_verifier` seat (the cross-provider operator), bound to
+     the `integration_sha`, behind a defense-in-depth independence guard; plus two DISTINCT,
+     SHA-bound, affirmative (`decision == "approve"`) `human_approval` facts signed by the `overseer`.
+  3. **All effective accessors are revocation-aware** (co_sign / re_verify / human_approvals /
+     assignments drop events superseded by `attestation_revoked`); security params are keyword-only;
+     and the predicate is fail-SAFE end to end — any insufficiency or missing artifact → PENDING.
+- **Deferred to scope (b)** (filed in `docs/REMEDIATION-INVENTORY.md`): (i) the re_verify "new
+  session" freshness is NOT enforced because session is unsigned (`threeway-signer-unsigned-session`,
+  MAJOR); (ii) "two distinct human_approval" is two overseer-asserted labels, not two independent
+  human signatures (`threeway-human-approval-overseer-asserted`, MINOR); (iii) assignments have no
+  dedicated supersede fact — same-pair re-assignment is last-write-wins, revoke via
+  `attestation_revoked`.
+- **Consequences:** escalated tiers can now promote once the cross-family approvals exist, gated on
+  SIGNED identity only. Scope (b) remains a separate future slice: dual-chief approval apps, overseer
+  brief distribution, the LIVE emission of `co_sign`/`re_verify`/`human_approval` facts, the re_verify
+  freshness challenge (an overseer-issued nonce in the signed payload), and per-approver human auth
+  (allowed-approver roster / dual-chief relay keys).
+- **Evidence:**
+  `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q` → `226 passed`
+  (Slice 1 + Slice 2 + Slice 2.5 + the Slice-3 T2/T3 + provider-spoof + self-mirror-guard suites).
+  `scripts/ci_smoke.py` → OK; `scripts/check_no_ceremony.py` → clean.
+- **Cross-refs:** **ADR-034** (Slice 2.5 — this slice satisfies its §11 boundary and discharges the
+  final deferral); ARCHITECTURE.md §13A.6 (tiered co-sign); `threeway/tier.py`;
+  `threeway/envelope.py:67-90` (the unsigned `signer` exclusion);
+  `docs/REMEDIATION-INVENTORY.md` (`threeway-signer-unsigned-session`,
+  `threeway-human-approval-overseer-asserted`).

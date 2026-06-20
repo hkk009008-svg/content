@@ -1765,7 +1765,7 @@ append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` pr
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
 ```
 
-Slice 1 + Slice 2 + Slice 2.5 together: `191 passed`.
+Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `226 passed`.
 
 *Last verified: 2026-06-20*
 
@@ -1791,6 +1791,27 @@ other parsers; `def advance_cursor` (`threeway/refstore.py:222`) materializes
 ISO values + the ISO→seq map for byte-reversible rollback. `coordinator` and `coordinator2` are now
 first-class RECEIVING seats; the ~12-copy seat roster consolidates to the single root
 `scripts/protocol_mailbox.py` plus a shell-sync guard. See `DECISIONS.md` ADR-034.
+
+### 13A.6 Tiered co-sign — `co_sign_satisfied` T2/T3 (Slice 3)
+
+`def co_sign_satisfied` (`threeway/tier.py`) gates escalated-tier promotion (§7.2), with all
+identity grounded on SIGNED facts — never the unsigned `signer` string (its provider/session tail
+is excluded from the 14-field signed view, envelope.py:67-90; only the key-bound seat token is
+trustworthy). **T2** requires a `co_sign` GO bound to `integration_sha` from the MIRROR pair's
+operator: `def _mirror_pair_verifier_seat` resolves, from the overseer-signed `assignment` facts,
+the unique pair != candidate-pair whose providers are the D3 role-swap (`builder_provider ==
+our verifier_provider` AND `primary_verifier_provider == our builder_provider`) and matches its
+`primary_verifier` seat via the key-bound `state.co_sign(candidate_id, seat)`; **ambiguity (zero or
+>1 mirror) fails CLOSED**. **T3** adds a `re_verify` GO from the candidate pair's own
+`primary_verifier` seat (cross-provider operator) bound to `integration_sha`, plus two distinct,
+SHA-bound, affirmative (`decision=="approve"`) `human_approval` facts signed by the `overseer`. All
+effective accessors (co_sign/re_verify/human_approvals/assignments) drop revoked events. Any missing
+artifact → PENDING (fail-safe). **Scope-(a) limitations** (deferred to the scope-(b) strategic loop):
+the re_verify "new session" freshness is NOT enforced (session is unsigned —
+`threeway-signer-unsigned-session`); "two distinct human_approval" is two overseer-asserted labels,
+not two independent human signatures (`threeway-human-approval-overseer-asserted`); assignments have
+no dedicated supersede fact (same-pair re-assignment is last-write-wins, revocation via
+`attestation_revoked`). See `DECISIONS.md` ADR-035.
 
 ---
 
