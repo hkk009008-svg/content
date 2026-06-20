@@ -421,3 +421,33 @@ def test_reduce_drops_nonint_seq_keeps_legit():
     legit = _ev(2, "co_sign", payload={"verdict": "GO"}, signer="operator2:codex:s1")
     st = reduce([poison, legit])                       # must NOT raise (sort key safe)
     assert st.co_sign("c1", "operator2") is not None
+
+
+# --- Task-10 (ADR-041, comprehensive well_formed): the `kind in LOAD_BEARING_KINDS` set test
+# (gate.py AND reducer.py's seat_by_id loop) GATES ENTRY to the isinstance block, so an
+# unhashable list/dict kind bricks FIRST, before any per-field guard. The well_formed up-front
+# filter covers kind (and payload, bus_id, the id-reference fields) too. ---
+
+def test_reduce_drops_unhashable_kind_keeps_legit():
+    poison = _ev(1, ["co", "sign"], payload={"verdict": "GO"}, id="e-listkind",
+                 signer="operator2:codex:s1")   # kind is a LIST -> seat_by_id `kind in ...` brick
+    legit = _ev(2, "co_sign", payload={"verdict": "GO"}, signer="operator2:codex:s1")
+    st = reduce([poison, legit])                       # must NOT raise (kind-membership test safe)
+    assert st.co_sign("c1", "operator2") is not None
+
+
+def test_reduce_drops_nondict_payload_candidate_authoritative_safe():
+    # A `candidate` whose payload is a LIST is the genuine non-dict-payload brick: the candidate
+    # fold keys only on (candidate_id, seat) so it would ENTER _candidates, and authoritative_candidate()
+    # then calls c.payload.get("pair") -> .get on a LIST -> AttributeError UNCAUGHT (run_gate step-2a,
+    # OUTSIDE its try) -> total-bus brick. well_formed requires payload be a dict, so the malformed
+    # candidate is DROPPED up front, never entering _candidates; authoritative_candidate resolves the
+    # legit one without raising. (RED pre-fix: AttributeError 'list' has no attribute 'get'.)
+    legit = _cand(5, "A", "coordinator:claude:s1", id="e-legit-cand")
+    assign = _ev(3, "assignment", payload={"pair": "A", "executing_coordinator": "coordinator"},
+                 signer="overseer:mech:s1", id="e-assign")
+    poison = _ev(9, "candidate", payload=["not", "a", "dict"], id="e-listpayload-cand",
+                 signer="operator:claude:s1")   # higher seq -> reached first by authoritative_candidate
+    st = reduce([legit, assign, poison])               # must NOT raise (payload guaranteed dict)
+    auth = st.authoritative_candidate("c1")            # must NOT raise (poison dropped)
+    assert auth is not None and auth.signer == "coordinator:claude:s1"

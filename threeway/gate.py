@@ -12,7 +12,7 @@ import logging
 from cryptography.exceptions import InvalidSignature
 
 from threeway import LOAD_BEARING_KINDS
-from threeway.envelope import verify_event
+from threeway.envelope import verify_event, well_formed
 from threeway.keys import PublicKeyRegistry
 from threeway.reducer import reduce
 
@@ -40,19 +40,23 @@ def verify_and_reduce(events, registry_dir, bus_id: str, gate_seat: str = "merge
     verified = []
     seen_ids: set[str] = set()
     for ev in events:
+        # ADR-041 (comprehensive envelope guard, consolidates the prior per-field drops):
+        # verify_and_reduce uses the `kind in LOAD_BEARING_KINDS` set-membership test below (which
+        # bricks on an unhashable list/dict kind BEFORE the load-bearing block even begins) and then
+        # dereferences id (.startswith), signer (_seat split) and signature_version (set membership) —
+        # all at run_gate step 1, OUTSIDE run_gate's try, BEFORE reduce()'s filter. A wrong-typed
+        # envelope field would raise UNCAUGHT here → a total-bus brick (ONE planted event crashes
+        # run_gate for EVERY candidate). `signer`/`payload`/etc. are insider-controllable (signer is
+        # UNSIGNED; from_json_obj does no type validation on the at-rest JSON), so this one structural
+        # guard, applied to EVERY event (load-bearing or carrier) FIRST, makes the kind test and every
+        # later deref type-safe. Drop-not-raise: a malformed event has no authority, so dropping can
+        # only REMOVE it from reduction — never admit a forged fact or newly promote. Subsumes the
+        # narrow Task-9 id/signer/signature_version drop (now redundant). A valid carrier passes.
+        if not well_formed(ev):
+            logger.warning("threeway gate: dropping malformed-envelope event (id=%r kind=%r signer=%r)",
+                           getattr(ev, "id", None), getattr(ev, "kind", None), getattr(ev, "signer", None))
+            continue
         if ev.kind in LOAD_BEARING_KINDS:
-            # ADR-041 (Rule #13): verify_and_reduce dereferences id (.startswith), signer (_seat split), and
-            # signature_version (set membership) BELOW — and it runs at run_gate step 1, OUTSIDE run_gate's try,
-            # BEFORE reduce()'s type filter. A non-str id/signer or unhashable signature_version would raise
-            # uncaught here → a total-bus brick. `signer` is UNSIGNED, so an insider can set it freely with a
-            # valid signature. Drop such a malformed event (same drop-not-raise discipline as the four checks
-            # below; a malformed event has no authority). This is the symmetric guard the ADR-040 drops needed.
-            if not (isinstance(ev.id, str) and isinstance(ev.signer, str)
-                    and isinstance(ev.signature_version, str)):
-                logger.warning("threeway gate: dropping load-bearing event with non-str id/signer/signature_version "
-                               "(id=%r, signer=%r, sig_version=%r, kind=%r)",
-                               ev.id, ev.signer, ev.signature_version, ev.kind)
-                continue
             # ADR-040 (Rule #13 sibling of the reserved-namespace drop, gate.py reserved-id below):
             # the FOUR read-side checks below are reachable BRICKS — an insider can append a
             # validly-self-signed LOAD-BEARING event that trips one of them (the stores guard only

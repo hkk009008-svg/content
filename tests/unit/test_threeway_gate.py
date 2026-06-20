@@ -969,6 +969,67 @@ def test_run_gate_total_under_nonstr_id(live_repo, seatkit):
     assert state.merge_completed("c1") is not None
 
 
+# ---------------------------------------------------------------------------
+# Task-10 (ADR-041, comprehensive well_formed): a 6th total-bus brick. The
+# `kind in LOAD_BEARING_KINDS` SET-MEMBERSHIP test (gate.py AND reducer.py) GATES ENTRY to
+# the block holding every isinstance guard, so an UNHASHABLE list/dict `kind` raises
+# TypeError FIRST — BEFORE any per-field check can run. Prior per-field guards (id/signer/
+# signature_version) lived INSIDE that block, unreachable when kind itself is unhashable.
+# The well_formed envelope check (applied to EVERY event up front) covers kind too.
+# ---------------------------------------------------------------------------
+
+def test_run_gate_total_under_unhashable_kind(live_repo, seatkit):
+    # An UNHASHABLE `kind` (a LIST) makes `ev.kind in LOAD_BEARING_KINDS` raise
+    # TypeError: unhashable type: 'list' UNCAUGHT — and that test GATES ENTRY to the
+    # load-bearing block, so it bricks FIRST, before any per-field isinstance guard runs.
+    # Plant the same at-rest way the nonstr-id/signer tests do: append a valid str-kind event
+    # (so store.append signs + names the file), then rewrite the at-rest JSON's kind to a list;
+    # from_json_obj does no type validation, so all_events() yields the malformed Event.
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    _, _, integ = _seed_valid(store, r, privs)   # complete, signed, legit T1 promotion for c1
+    from threeway.envelope import Event
+    poison = Event(id="cosign-listkind-c1", seq=0, bus_id="prod",
+                   schema_version="threeway/1", kind="co_sign", sender="operator",
+                   recipient="all", signer="operator:claude:s1",
+                   payload={"verdict": "GO"}, candidate_id="c1", subject_sha=integ)
+    store.append(poison, privs["operator"])   # validly self-signed by registered operator seat
+    # AFTER signing, overwrite the at-rest kind with a LIST (kind IS signed, but the at-rest JSON
+    # is insider-controlled and from_json_obj does no type validation; the well_formed drop fixes
+    # it regardless of whether the signature would still verify).
+    _poison_atrest_field(store, "cosign-listkind-c1", "kind", ["co", "sign"])
+
+    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "COMPLETED", res.reason   # did NOT raise; poison dropped, legit merge ran
+    # main moved to the legit integration_sha — the list-kind poison could not brick the merge.
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == integ
+    from threeway.gate import verify_and_reduce
+    state = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
+    assert state.merge_completed("c1") is not None
+
+
+def test_run_gate_total_under_unhashable_kind_not_bricking_other_candidate(live_repo, seatkit):
+    # TOTAL-BUS property: the list-kind poison must not brick run_gate for an UNRELATED candidate.
+    r, base, branch = live_repo
+    reg, ks, privs = seatkit
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    _, _, integ = _seed_valid(store, r, privs)
+    from threeway.envelope import Event
+    poison = Event(id="cosign-listkind-c2brick", seq=0, bus_id="prod",
+                   schema_version="threeway/1", kind="co_sign", sender="operator",
+                   recipient="all", signer="operator:claude:s1",
+                   payload={"verdict": "GO"}, candidate_id="c1", subject_sha=integ)
+    store.append(poison, privs["operator"])
+    _poison_atrest_field(store, "cosign-listkind-c2brick", "kind", ["co", "sign"])
+
+    res = run_gate("c2", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome in ("PENDING", "REJECTED"), res.reason   # did NOT raise; total bus holds
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == base
+
+
 def test_run_gate_total_under_unhashable_signature_version(live_repo, seatkit):
     # An unhashable `signature_version` (a LIST) makes verify_and_reduce's
     # `ev.signature_version not in _ACCEPTED_SIG_VERSIONS` (a set membership test) raise

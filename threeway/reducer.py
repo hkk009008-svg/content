@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass, field
 
 from threeway import LOAD_BEARING_KINDS
-from threeway.envelope import Event
+from threeway.envelope import Event, well_formed
 
 logger = logging.getLogger(__name__)
 
@@ -178,27 +178,25 @@ def reduce(events, *, gate_seat: str = GATE_SEAT) -> EffectiveState:
     # candidate). Apply the SAME drop-not-raise discipline ADR-040 used: a malformed event has
     # NO authority, so DROP it (with a WARNING) — never let it brick the whole reduction.
     #
-    # Up-front infrastructure-field filter (BEFORE the sort): id keys seat_by_id AND the later
-    # EffectiveState id-membership queries (`e.id in self._revoked_event_ids`), signer feeds
-    # _seat_of(...).split(":") (AttributeError if non-str), seq is the sort key (TypeError if
-    # non-comparable). After this filter the sort, the seat_by_id loop, and the id-membership
-    # queries are all safe. Kept tight to ONLY these three infra fields; the fold try/except
-    # below covers any other keyed field (present or future). bool subclasses int, harmless for
-    # seq (still sortable). Fail-safe: dropping a malformed event can only REMOVE it from
-    # reduction — it has no authority, so this never widens what can promote.
-    well_formed = []
+    # Up-front COMPREHENSIVE envelope filter (BEFORE the sort), consolidating the prior narrow
+    # id/signer/seq drop: well_formed(ev) checks EVERY structurally-dereferenced envelope field's
+    # type. kind keys the `kind in LOAD_BEARING_KINDS` test in the seat_by_id loop and the fold
+    # (TypeError if unhashable); id keys seat_by_id AND the later EffectiveState id-membership
+    # queries (`e.id in self._revoked_event_ids`); signer feeds _seat_of(...).split(":")
+    # (AttributeError if non-str); seq is the sort key (TypeError if non-comparable); payload must
+    # be a dict for the .get(...) folds. After this filter the sort, the seat_by_id loop (incl. its
+    # own `kind in LOAD_BEARING_KINDS`), and the envelope-keyed fold branches are all type-safe.
+    # The fold try/except below still covers PAYLOAD-VALUE keys (payload["kind"]/["approver_identity"]).
+    # bool subclasses int, harmless for seq. Fail-safe: dropping a malformed event can only REMOVE it
+    # from reduction — it has no authority, so this never widens what can promote.
+    ordered = []
     for ev in events:
-        if not isinstance(ev.id, str):
-            logger.warning("dropping event with non-str id (%r): kind=%r", ev.id, ev.kind)
+        if not well_formed(ev):
+            logger.warning("dropping malformed-envelope event (id=%r kind=%r signer=%r)",
+                           getattr(ev, "id", None), getattr(ev, "kind", None), getattr(ev, "signer", None))
             continue
-        if not isinstance(ev.signer, str):
-            logger.warning("dropping event %s: non-str signer (%r)", ev.id, ev.signer)
-            continue
-        if not isinstance(ev.seq, int):
-            logger.warning("dropping event %s: non-int seq (%r)", ev.id, ev.seq)
-            continue
-        well_formed.append(ev)
-    ordered = sorted(well_formed, key=lambda e: e.seq)
+        ordered.append(ev)
+    ordered = sorted(ordered, key=lambda e: e.seq)
     # ADR-039 (defect threeway-reducer-shadow-dos, availability): the six STATIC
     # control-plane singletons below are last-write-wins, and the stores auto-assign a
     # monotonic seq — so an insider's event appended AFTER the authoritative one would

@@ -132,6 +132,31 @@ def to_json_obj(ev: Event) -> dict:
     return obj
 
 
+def well_formed(ev: "Event") -> bool:
+    """True iff every structurally-dereferenced envelope field is the expected type.
+    The gate/reducer use these as set/dict keys, sort keys, and for attribute access
+    (.split on signer, .startswith on id, .get on payload) at run_gate step 1/2a — OUTSIDE
+    run_gate's try — so a wrong-typed field would raise UNCAUGHT (a total-bus DoS). An insider
+    can plant any well-formed JSON (from_json_obj does no type validation) and `signer` is
+    UNSIGNED, so this structural guard is load-bearing. A malformed event has no authority;
+    callers DROP it. Payload VALUES (payload['pair'] etc.) are checked separately at use."""
+    return (
+        isinstance(ev.kind, str)
+        and isinstance(ev.id, str)
+        and isinstance(ev.signer, str)
+        and isinstance(ev.signature_version, str)
+        and isinstance(ev.bus_id, str)
+        and isinstance(ev.seq, int)            # bool is an int subclass — harmless for a sort key
+        and isinstance(ev.payload, dict)
+        and (ev.candidate_id is None or isinstance(ev.candidate_id, str))
+        and (ev.subject_sha is None or isinstance(ev.subject_sha, str))
+        and (ev.brief_id is None or isinstance(ev.brief_id, str))
+        and (ev.brief_version is None or isinstance(ev.brief_version, int))
+        and (ev.revokes_event_id is None or isinstance(ev.revokes_event_id, str))
+        and (ev.supersedes_event_id is None or isinstance(ev.supersedes_event_id, str))
+    )
+
+
 def from_json_obj(obj: dict) -> Event:
     return Event(
         id=obj["id"], seq=obj["seq"], bus_id=obj["bus_id"],

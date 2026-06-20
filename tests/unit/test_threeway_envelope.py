@@ -15,6 +15,7 @@ from threeway.envelope import (
     verify_event,
     to_json_obj,
     from_json_obj,
+    well_formed,
 )
 
 
@@ -134,3 +135,52 @@ def test_json_roundtrip_uses_spec_field_names():
     back = from_json_obj(obj)
     verify_event(back, pub_hex)  # signature still verifies after roundtrip
     assert back.subject_sha == ev.subject_sha and back.seq == ev.seq
+
+
+# --- Task-10 (ADR-041): well_formed(ev) — True iff every structurally-dereferenced
+# envelope field is the expected type. The gate/reducer use these as set/dict keys, sort
+# keys, and for attribute access at run_gate step 1/2a OUTSIDE run_gate's try, so a
+# wrong-typed field would raise UNCAUGHT (a total-bus DoS). A malformed event has no
+# authority; callers DROP it. These tests pin the predicate directly. ---
+
+def test_well_formed_true_for_a_fully_valid_event():
+    assert well_formed(_ev()) is True
+
+
+def test_well_formed_true_with_all_optional_ref_fields_none():
+    ev = _ev(candidate_id=None, subject_sha=None, brief_id=None, brief_version=None,
+             revokes_event_id=None, supersedes_event_id=None)
+    assert well_formed(ev) is True
+
+
+def test_well_formed_true_with_optional_ref_fields_populated():
+    ev = _ev(candidate_id="c1", subject_sha="a" * 40, brief_id="b1", brief_version=2,
+             revokes_event_id="e9", supersedes_event_id="e8")
+    assert well_formed(ev) is True
+
+
+@pytest.mark.parametrize("field,value", [
+    ("kind", ["co", "sign"]),               # unhashable -> bricks `kind in LOAD_BEARING_KINDS`
+    ("kind", {"k": 1}),
+    ("id", ["not", "a", "string"]),         # .startswith / dict-key brick
+    ("signer", ["operator", "claude"]),     # _seat split brick
+    ("signature_version", ["threeway-sign/2"]),  # set-membership brick
+    ("bus_id", ["prod"]),
+    ("seq", "not-an-int"),                   # sort-key brick
+    ("payload", ["not", "a", "dict"]),       # .get fold brick
+    ("payload", "stringnotdict"),
+    ("candidate_id", 12345),                 # non-str, non-None reference field
+    ("subject_sha", 123),
+    ("brief_id", ["b1"]),
+    ("brief_version", "1"),                  # non-int, non-None
+    ("revokes_event_id", ["e1"]),
+    ("supersedes_event_id", 7),
+])
+def test_well_formed_false_for_each_wrong_typed_field(field, value):
+    ev = _ev(**{field: value})
+    assert well_formed(ev) is False
+
+
+def test_well_formed_seq_bool_is_accepted_int_subclass():
+    # bool is an int subclass — harmless for a sort key, so well_formed accepts it.
+    assert well_formed(_ev(seq=True)) is True
