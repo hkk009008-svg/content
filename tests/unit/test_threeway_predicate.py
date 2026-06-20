@@ -233,3 +233,93 @@ def test_rejects_nonexistent_integration_sha():
     repo = FakeRepo(rev_parse_map={MAIN_REF: BASE, BASE: BASE})  # INTEG -> None
     d = evaluate("c1", reduce(events), repo, default_policy())
     assert d.outcome == REJECTED and "known commit" in d.reason
+
+
+def _pair_b_assignment(seq):
+    return _e("assignment", seq, payload={
+        "pair": "B", "builder": "director2", "builder_provider": "claude",
+        "primary_verifier": "operator2", "primary_verifier_provider": "codex",
+        "executing_coordinator": "coordinator2"}, signer="overseer:mech:s1")
+
+
+def _t2_event_set():
+    evs = _full_event_set()
+    for e in evs:
+        if e.kind == "brief":
+            e.payload["allowed_paths"] = [".github/"]
+            e.payload["assigned_tier"] = "T2"
+        elif e.kind == "candidate":
+            e.payload["risk_tier_claimed"] = "T2"
+        elif e.kind == "cycle_go":
+            e.payload["tier"] = "T2"
+    evs.append(_pair_b_assignment(10))
+    evs.append(_e("co_sign", 11, payload={"verdict": "GO"}, subject_sha=INTEG,
+                  signer="operator2:codex:s1"))
+    return evs
+
+
+T2_REPO = FakeRepo(diff=(".github/workflows/ci.yml",))
+
+
+def test_t2_mergeable_with_mirror_cosign():
+    d = evaluate("c1", reduce(_t2_event_set()), T2_REPO, default_policy())
+    assert d.outcome == MERGEABLE, d.reason
+
+
+def test_t2_pending_without_cosign():
+    evs = [e for e in _t2_event_set() if e.kind != "co_sign"]
+    d = evaluate("c1", reduce(evs), T2_REPO, default_policy())
+    assert d.outcome == PENDING and "co_sign not satisfied for T2" in d.reason
+
+
+def test_t2_pending_with_provider_spoofed_cosign():
+    evs = _t2_event_set()
+    evs[-1] = _e("co_sign", 11, payload={"verdict": "GO"}, subject_sha=INTEG,
+                 signer="operator:codex:s9")
+    d = evaluate("c1", reduce(evs), T2_REPO, default_policy())
+    assert d.outcome == PENDING and "co_sign not satisfied for T2" in d.reason
+
+
+def _t3_event_set():
+    evs = _full_event_set()
+    for e in evs:
+        if e.kind == "brief":
+            e.payload["allowed_paths"] = ["coordination/threeway/keys/"]
+            e.payload["assigned_tier"] = "T3"
+        elif e.kind == "candidate":
+            e.payload["risk_tier_claimed"] = "T3"
+        elif e.kind == "cycle_go":
+            e.payload["tier"] = "T3"
+    evs += [
+        _pair_b_assignment(10),
+        _e("co_sign", 11, payload={"verdict": "GO"}, subject_sha=INTEG,
+           signer="operator2:codex:s1"),
+        _e("re_verify", 12, payload={"verdict": "GO"}, subject_sha=INTEG,
+           signer="operator:claude:s2"),
+        _e("human_approval", 13, payload={"approver_identity": "chief-gemini",
+           "integration_sha": INTEG, "decision": "approve"}, signer="overseer:mech:s1"),
+        _e("human_approval", 14, payload={"approver_identity": "chief-chatgpt",
+           "integration_sha": INTEG, "decision": "approve"}, signer="overseer:mech:s1"),
+    ]
+    return evs
+
+
+T3_REPO = FakeRepo(diff=("coordination/threeway/keys/operator.pub",))
+
+
+def test_t3_mergeable_with_full_cross_family_set():
+    d = evaluate("c1", reduce(_t3_event_set()), T3_REPO, default_policy())
+    assert d.outcome == MERGEABLE, d.reason
+
+
+def test_t3_pending_without_re_verify():
+    evs = [e for e in _t3_event_set() if e.kind != "re_verify"]
+    d = evaluate("c1", reduce(evs), T3_REPO, default_policy())
+    assert d.outcome == PENDING and "co_sign not satisfied for T3" in d.reason
+
+
+def test_t3_pending_with_one_human_approval():
+    evs = [e for e in _t3_event_set() if not (e.kind == "human_approval"
+           and e.payload.get("approver_identity") == "chief-chatgpt")]
+    d = evaluate("c1", reduce(evs), T3_REPO, default_policy())
+    assert d.outcome == PENDING and "co_sign not satisfied for T3" in d.reason
