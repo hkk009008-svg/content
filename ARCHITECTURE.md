@@ -1765,8 +1765,8 @@ append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` pr
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
 ```
 
-Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `238 passed` (incl. the ADR-036 revoke-authority
-+ defense-in-depth pins).
+Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `240 passed` (incl. the ADR-036 revoke-authority
++ id-collision + defense-in-depth pins).
 
 *Last verified: 2026-06-21*
 
@@ -1818,7 +1818,9 @@ no dedicated supersede fact (same-pair re-assignment is last-write-wins, revocat
 must be authorized or an insider could forge a revoke of another seat's fact. `reduce()`
 (`threeway/reducer.py`) honors an `attestation_revoked` only when `_revoke_authorized` holds — the
 revoker seat is the `overseer` (control-plane override) or the target event's OWN signer seat
-(self-revocation) — resolved via an order-independent `id→seat` index. Without this, Slice-3's
+(self-revocation) — resolved via an order-independent, collision-aware `id→{seats}` index (a
+CONTESTED id, ≥2 signer seats from a decoy re-using a victim's id, is overseer-only revocable, since
+event `id` is signed but not globally unique — see `threeway-event-id-not-unique`). Without this, Slice-3's
 revocation-aware assignment resolution let a forged non-overseer revoke collapse the fail-closed
 T2/T3 mirror ambiguity into a forged MERGEABLE (and enabled a merge-gate DoS); both are now
 fail-closed. Defense-in-depth from the same review: `co_sign_satisfied` rejects escalated tiers when

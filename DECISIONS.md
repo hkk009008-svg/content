@@ -1766,10 +1766,11 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   enables a 2-pair merge-gate DoS (revoke the only legit mirror → PENDING). This defeats the
   Slice-3 acceptance promise "ambiguity yields PENDING, never an erroneous MERGEABLE".
 - **Decision:** in `reduce()`, honor a revoke iff the revoker seat is authorized for the
-  target — `_revoke_authorized(revoker_seat, target_seat)` returns true only when
-  `revoker == "overseer"` (control-plane override) OR `revoker == target's own signer seat`
-  (self-revocation). The target's seat is resolved from a one-pass `id -> seat` index so the
-  check is order-independent. Both seats are gate-authenticated, so the unsigned
+  target — `_revoke_authorized(revoker_seat, target_seats)` returns true only when
+  `revoker == "overseer"` (control-plane override) OR the revoked id belongs unambiguously to
+  the revoker (`target_seats == {revoker}`, self-revocation). The target's seat set is resolved
+  from a one-pass `id -> {seats}` index so the check is order-independent AND collision-aware
+  (see Follow-up). Both seats are gate-authenticated, so the unsigned
   `revokes_event_id` link is no longer exploitable: pointing a revoke at a fact you do not own
   is simply IGNORED. NO envelope/spec change — `revokes_event_id` stays unsigned; the
   cryptographic binding (an overseer-issued challenge in the SIGNED payload) remains scope (b).
@@ -1786,13 +1787,26 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
   (`test_revoked_assignment_is_pending` — non-overseer revoking an overseer assignment) was
   re-pointed to the overseer (authorized) path; four accessor tests had their revokes made
   overseer-signed.
-- **Evidence:** new RED→GREEN pins — reducer `test_unauthorized_seat_revoke_is_ignored`;
+- **Follow-up (same session, caught by the fix's own adversarial re-verification):** the first
+  cut resolved the target seat via a SCALAR `id→seat` last-write-wins index. Because event `id`
+  is signed-but-not-globally-unique, an insider could append a validly-self-signed DECOY re-using
+  a victim fact's id at a higher seq, poisoning the index to its own seat and re-forging the
+  "self-revocation" (re-opening both CRITICALs). Independently reproduced, then closed: the index
+  now maps `id → SET of signer seats`, and `_revoke_authorized` treats a CONTESTED id (>1 seat) as
+  NOT self-revocable (overseer-only). This makes the reducer self-defending regardless of the gate.
+  This closes the revoke channel ONLY; the underlying event-`id` non-uniqueness independently
+  enables a store/gate integrity vector (a colliding id shadowing another seat's stored fact) —
+  filed separately as `threeway-event-id-not-unique` (root fix: enforce id-uniqueness in
+  `verify_and_reduce` + refuse colliding appends in `refstore`).
+- **Evidence:** new RED→GREEN pins — reducer `test_unauthorized_seat_revoke_is_ignored`,
+  `test_id_collision_cannot_forge_self_revocation`, `test_overseer_can_revoke_contested_id`;
   predicate `test_forged_nonoverseer_revoke_cannot_collapse_t2_mirror_ambiguity` +
   `test_forged_nonoverseer_revoke_cannot_deny_legit_mirror`; tier
   `test_t2_rejects_same_provider_builder_verifier`,
   `test_t2_fail_closed_when_two_eligible_pairs_one_seatless`,
-  `test_t3_rejects_empty_primary_verifier_seat`.
-  `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q` → `238 passed`.
+  `test_t3_rejects_empty_primary_verifier_seat`. Both the seat-string and id-collision exploits
+  reproduced end-to-end pre-fix and fail-closed post-fix.
+  `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q` → `240 passed`.
 - **Cross-refs:** **ADR-035** (the slice that surfaced this); `threeway/reducer.py`
   (`_revoke_authorized` + `reduce`); `threeway/tier.py` (the three hardening guards);
-  `docs/REMEDIATION-INVENTORY.md` (`threeway-revoke-authority-unsigned`).
+  `docs/REMEDIATION-INVENTORY.md` (`threeway-revoke-authority-unsigned`, `threeway-event-id-not-unique`).
