@@ -1,7 +1,9 @@
 """Run: env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_store.py -q"""
+import pytest
+
 from threeway import keys
 from threeway.envelope import Event, sign_event
-from threeway.store import EventStore
+from threeway.store import EventStore, EventIdCollision
 
 
 def _unsigned(seq, kind="attestation", **over):
@@ -56,3 +58,13 @@ def test_seq_persists_across_store_reopen(tmp_path):
     EventStore(tmp_path / "events").append(_unsigned(1), priv)
     e2 = EventStore(tmp_path / "events").append(_unsigned(2), priv)
     assert e2.seq == 2
+
+
+def test_append_refuses_duplicate_event_id(tmp_path):
+    # ADR-037: event id must be globally unique (the gate/reducer key on id alone); the
+    # store must refuse a colliding id rather than persist a second blob for it.
+    priv, _ = keys.generate_keypair()
+    store = EventStore(tmp_path / "events")
+    store.append(_unsigned(1, id="DUP"), priv)
+    with pytest.raises(EventIdCollision):
+        store.append(_unsigned(2, id="DUP"), priv)

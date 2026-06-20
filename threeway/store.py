@@ -21,6 +21,12 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from threeway.envelope import Event, from_json_obj, sign_event, to_json_obj
 
 
+class EventIdCollision(ValueError):
+    # ADR-037: event `id` must be globally unique (the gate/reducer key on id alone). A
+    # colliding id would persist a second blob the consumers treat as a duplicate — refuse it.
+    pass
+
+
 class EventStore:
     def __init__(self, events_dir: str | Path):
         self._dir = Path(events_dir)
@@ -31,6 +37,11 @@ class EventStore:
         return (max(seqs) + 1) if seqs else 1
 
     def append(self, ev: Event, private_key: Ed25519PrivateKey) -> Event:
+        # ADR-037: event id must be globally unique (Rule #13 — mirror the refstore guard).
+        # Files are <seq>-<id>.json; a colliding id would persist a second blob the gate
+        # rejects as a duplicate. Refuse it here rather than corrupt the bus.
+        if any(p.name.split("-", 1)[-1] == f"{ev.id}.json" for p in self._dir.glob("*.json")):
+            raise EventIdCollision(f"event id already present: {ev.id!r}")
         ev.seq = self._next_seq()
         sign_event(ev, private_key)
         path = self._dir / f"{ev.seq:08d}-{ev.id}.json"

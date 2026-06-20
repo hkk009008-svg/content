@@ -194,3 +194,13 @@ def test_overseer_can_revoke_contested_id():
     decoy = _ev(2, "attestation", payload={"kind": "release"}, signer="operator:claude:s1", id="e1")
     revoke = _ev(3, "attestation_revoked", revokes_event_id="e1", signer="overseer:mech:s1")
     assert reduce([victim, decoy, revoke]).co_sign("c1", "operator2") is None   # overseer override
+
+
+def test_non_load_bearing_event_cannot_contest_id_to_block_self_revoke():
+    # ADR-037: seat_by_id is built from LOAD-BEARING events only, so a non-load-bearing carrier
+    # re-using a victim's id cannot contest it and block the victim's legitimate self-revoke.
+    att = _att(1, "GO")                                           # operator release GO, id e1
+    shadow = _ev(2, "event_sent", signer="director:codex:s1", id="e1")   # non-LB, colliding id
+    rev = _ev(3, "attestation_revoked", revokes_event_id="e1",
+              signer="operator:claude:s9")                        # operator self-revokes its own GO
+    assert reduce([att, shadow, rev]).effective_attestation("c1", "release", "operator") is None

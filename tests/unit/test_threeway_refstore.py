@@ -113,6 +113,18 @@ def test_append_refuses_colliding_event_id_from_another_seat(tmp_path):
                                payload={"kind": "release", "verdict": "GO"}), pb)
 
 
+def test_append_refuses_same_id_under_different_brief(tmp_path):
+    # ADR-037: id must be GLOBALLY unique (gate/reducer key on id alone), not per-brief —
+    # brief_id is attacker-chosen, so a per-(brief_id,id) check is bypassable.
+    r = _new_repo(tmp_path)
+    pa, _ = keys.generate_keypair()
+    pb, _ = keys.generate_keypair()
+    store = RefEventStore(r)
+    store.append(_unsigned(id="DUP", brief_id="briefA", signer="operator:claude:s1"), pa)
+    with pytest.raises(EventIdCollision):
+        store.append(_unsigned(id="DUP", brief_id="briefB", signer="director:codex:s1"), pb)
+
+
 def test_append_assigns_monotonic_seq_from_one(tmp_path):
     r = _new_repo(tmp_path); priv, _ = keys.generate_keypair()
     store = RefEventStore(r)

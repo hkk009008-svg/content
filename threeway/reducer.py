@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from threeway import LOAD_BEARING_KINDS
 from threeway.envelope import Event
 
 
@@ -125,9 +126,13 @@ def reduce(events) -> EffectiveState:
     # Revoke authority needs the TARGET event's seat. Map each id to the SET of seats that
     # emitted an event with it (ids are signed but not unique) so a collision is detectable,
     # and so the check holds regardless of whether the revoke precedes or follows its target.
+    # Built from LOAD-BEARING events ONLY: a revoke target is always a load-bearing fact, so a
+    # non-load-bearing carrier (which the gate does not de-dup) must not be able to CONTEST a
+    # victim's id and block its legitimate self-revocation (ADR-037).
     seat_by_id: dict[str, set[str]] = {}
     for ev in ordered:
-        seat_by_id.setdefault(ev.id, set()).add(_seat_of(ev.signer))
+        if ev.kind in LOAD_BEARING_KINDS:
+            seat_by_id.setdefault(ev.id, set()).add(_seat_of(ev.signer))
     for ev in ordered:
         k = ev.kind
         if k == "attestation":

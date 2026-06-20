@@ -137,12 +137,14 @@ class RefEventStore:
                     return existing
                 raise IdempotencyKeyReused(
                     f"idempotency_key collides with a different request: {target_key}")
-            # ADR-037: event id must be globally unique. An idempotent re-append by US was
-            # already returned above, so a pre-existing path here is a genuine collision —
-            # refuse rather than OVERWRITE another seat's (or a different request's) fact.
+            # ADR-037: event id must be GLOBALLY unique — the gate (seen_ids) and reducer
+            # (seat_by_id) key on id ALONE, so uniqueness must be brief- AND kind-agnostic. A
+            # per-(brief_id,id) path check is bypassable (brief_id is attacker-chosen), so scan
+            # by id across the whole bus. Our idempotent re-append was already returned above,
+            # so any other event carrying this id is a genuine collision — refuse, never OVERWRITE.
+            if any(e.id == ev.id for e in self._iter_local()):
+                raise EventIdCollision(f"event id already present: {ev.id!r}")
             event_path = f"events/{ev.brief_id}/{ev.id}.json"
-            if tip is not None and gitcas.read_blob_at(self._repo, tip, event_path) is not None:
-                raise EventIdCollision(f"event id already present: {event_path}")
             seqs = gitcas.list_index_seqs(self._repo, tip) if tip else []
             ev.seq = (max(seqs) + 1) if seqs else 1
             sign_event(ev, private_key)                    # signs over the NEW seq
