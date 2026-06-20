@@ -59,7 +59,14 @@ _EVENT_NAME_RE = re.compile(
     r"(?P<kind>[a-z0-9-]+)\.md$"
 )
 
-_CURSOR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+# Cursor CONTENT is transitionally a scalar `seq` (post Slice-2.5 backfill) OR an
+# ISO-UTC timestamp (pre-backfill, Phase-A-seeded). NB: this gates the cursor FILE
+# CONTENT only — the event-FILENAME regexes (_EVENT_NAME_RE / _EVENT_RE) stay
+# dash-ISO and are deliberately NOT loosened (Rule #13: different parser, on-disk
+# filenames are always ISO).
+_ISO_CURSOR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+_CURSOR_RE = re.compile(
+    r"^(?:\d+|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)$")   # scalar seq OR ISO
 
 # A commit whose entire changeset is seen/*.txt is a standalone cursor advance —
 # cursor advances should ride the next substantive commit (capacity audit
@@ -128,24 +135,29 @@ def _check_cursors(coord_root: Path, now: str,
         cur = cf.read_text().strip()
         if not _CURSOR_RE.match(cur):
             issues.append(CoordIssue(rel, "cursor_unparseable", "FATAL",
-                                     f"{role} cursor not an ISO UTC timestamp: {cur!r}"))
+                                     f"{role} cursor not a seq or ISO UTC ts: {cur!r}"))
             continue
-        if cur > now:
-            issues.append(CoordIssue(rel, "cursor_future", "FATAL",
-                                     f"{role} cursor {cur} is in the future (now {now})"))
-            continue
-        # The watermark should be the timestamp of a real event addressed to
-        # this role — in sent/ OR archive/ (events move there after
-        # consumption). Older-than-everything is also allowed; anything else
-        # that matches no event is a hand-typed orphan.
-        all_names = names + _event_names(coord_root, "archive")
-        addressed = [m.group("ts") for m in map(_EVENT_NAME_RE.match, all_names)
-                     if m and m.group("to") in (role, "all")]
-        cur_dash = _dash(cur)
-        if addressed and cur_dash not in addressed and cur_dash > min(addressed):
-            issues.append(CoordIssue(
-                rel, "cursor_orphan", "ADVISORY",
-                f"{role} cursor {cur} matches no event addressed to {role}"))
+        # The future-check + orphan-vs-event compares below are ISO-lexical; a
+        # scalar `seq` cursor has no wall-clock and cannot be "future" or
+        # "orphan" (its seq↔event mapping is the projection layer's job, not
+        # this legacy checker's). Skip both for a scalar.
+        if _ISO_CURSOR_RE.match(cur):
+            if cur > now:
+                issues.append(CoordIssue(rel, "cursor_future", "FATAL",
+                                         f"{role} cursor {cur} is in the future (now {now})"))
+                continue
+            # The watermark should be the timestamp of a real event addressed to
+            # this role — in sent/ OR archive/ (events move there after
+            # consumption). Older-than-everything is also allowed; anything else
+            # that matches no event is a hand-typed orphan.
+            all_names = names + _event_names(coord_root, "archive")
+            addressed = [m.group("ts") for m in map(_EVENT_NAME_RE.match, all_names)
+                         if m and m.group("to") in (role, "all")]
+            cur_dash = _dash(cur)
+            if addressed and cur_dash not in addressed and cur_dash > min(addressed):
+                issues.append(CoordIssue(
+                    rel, "cursor_orphan", "ADVISORY",
+                    f"{role} cursor {cur} matches no event addressed to {role}"))
     return issues
 
 

@@ -33,6 +33,11 @@ _EVENT_RE = re.compile(
 
 
 def _parse_iso(ts: str) -> datetime | None:
+    # A scalar `seq` cursor (post Slice-2.5 backfill) is NOT an ISO wall-clock:
+    # strptime raises ValueError → None, and the callers (_unread_events /
+    # _broadcast_receipt) already early-return on None, so a scalar cursor is
+    # intentionally treated as "ref-bus-tracked, not monitored here" — no FATAL,
+    # no over-count. (ISO cursors parse normally; the loosening is caller-side.)
     try:
         return datetime.strptime(ts.strip(), "%Y-%m-%dT%H:%M:%SZ").replace(
             tzinfo=timezone.utc

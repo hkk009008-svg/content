@@ -58,8 +58,13 @@ _EVENT_RE = re.compile(
 
 
 def _normalize_ts(ts: str) -> str:
-    """Normalize a timestamp to dash form: colons → dashes."""
+    """Colon→dash for ISO cursors; a scalar `seq` cursor passes through unchanged
+    (it is not a wall-clock and is compared by the projection layer, not here)."""
     return ts.replace(":", "-")
+
+
+def _is_iso_cursor(ts: str) -> bool:
+    return bool(re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$", ts.replace(":", "-")))
 
 
 def count_unread(cursor_ts: str, event_filenames: list[str], seat: str) -> int:
@@ -69,8 +74,14 @@ def count_unread(cursor_ts: str, event_filenames: list[str], seat: str) -> int:
     Normalization: cursor may use colons (T20:38:34Z); filenames always use
     dashes (T20-38-34Z). Both are normalized to dashes before comparison.
     Malformed filenames are silently skipped.
+
+    A scalar `seq` cursor (post Slice-2.5 backfill) returns 0 here — the
+    authoritative unread count for a migrated seat comes from the ref-bus
+    (RefEventStore seq>cursor_seq), not this legacy filename path.
     """
     cursor_norm = _normalize_ts(cursor_ts)
+    if not _is_iso_cursor(cursor_ts):
+        return 0          # scalar-seq cursor: unread is computed on the ref-bus, not here
     count = 0
     for fname in event_filenames:
         m = _EVENT_RE.match(fname)

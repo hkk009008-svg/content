@@ -123,6 +123,14 @@ def mailbox(root: str, seat: str):
     if os.path.exists(seen):
         with open(seen) as fh:
             cursor_raw = fh.readline().strip()
+        if cursor_raw.strip().isdigit():
+            # scalar `seq` cursor (post Slice-2.5 backfill): unread is tracked on
+            # the ref-bus (RefEventStore seq>cursor_seq), NOT recomputed from
+            # filenames here. Short-circuit BEFORE _parse_cursor_ts so the
+            # `cursor_dt is None` "count everything" branch is never reached.
+            print(f"cursor: {cursor_raw}")
+            print("UNREAD: 0 / ref-bus-tracked")
+            return
         cursor_dt = _parse_cursor_ts(cursor_raw)
     print(f"cursor: {cursor_raw}")
     if not os.path.isdir(sent):

@@ -202,7 +202,11 @@ _unread_for() {                       # $1 = role (director|operator)
   local role="$1" cf cur curkey count=0 f ts
   cf="coordination/mailbox/seen/${role}.txt"
   [ -f "$cf" ] || { echo 0; return; }
-  cur=$(tr -d '[:space:]' < "$cf")            # 2026-05-30T00:37:53Z
+  cur=$(tr -d '[:space:]' < "$cf")            # ISO 2026-05-30T00:37:53Z  OR  a scalar seq
+  case "$cur" in
+    *[!0-9]*) ;;                              # contains a non-digit -> ISO, fall through
+    *) echo 0; return;;                       # all-digit scalar seq (Slice 2.5) -> unread tracked on the ref-bus
+  esac
   curkey=$(printf '%s' "$cur" | tr ':' '-')   # -> 2026-05-30T00-37-53Z (match filename token form)
   for f in coordination/mailbox/sent/*-to-"${role}"-*.md coordination/mailbox/sent/*-to-all-*.md; do
     [ -e "$f" ] || continue
