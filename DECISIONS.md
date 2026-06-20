@@ -1810,3 +1810,41 @@ bottom. Do not edit prior entries — supersede via Status field instead.*
 - **Cross-refs:** **ADR-035** (the slice that surfaced this); `threeway/reducer.py`
   (`_revoke_authorized` + `reduce`); `threeway/tier.py` (the three hardening guards);
   `docs/REMEDIATION-INVENTORY.md` (`threeway-revoke-authority-unsigned`, `threeway-event-id-not-unique`).
+
+## ADR-037 — Event ids are globally unique: the gate rejects duplicate ids and the store refuses a colliding-id append
+
+- **Status:** ACCEPTED. Closes `threeway-event-id-not-unique`, the foundational root cause behind
+  the ADR-036 follow-up (the revoke index was poisonable because event ids aren't unique).
+- **Context / root cause:** event `id` IS in the 14-field signed view (envelope.py:78) — so each
+  event commits to its id — but uniqueness is enforced NOWHERE. `gate.verify_and_reduce` verified
+  each signature independently with no dup-id check; `refstore.append` dedups by `idempotency_key`
+  (subject_sha/brief_version) scoped to the appender's OWN key, never by id, and `build_tree_with`
+  overwrites `events/<brief_id>/<id>.json` with no path-existence check. So an insider holding ONE
+  seat could append a validly-self-signed event RE-USING another seat's `(brief_id,id)`: in the
+  `refstore` it OVERWRITES the victim's stored blob (the victim's fact silently vanishes); in the
+  Slice-1 `store` (`<seq>-<id>.json`, both persist) it yields two events with one id. Either way
+  this re-opens forged-promotion / merge-DoS WITHOUT any revoke (e.g. shadow a rival mirror
+  assignment or a release attestation) — the same class ADR-036 set out to close, one layer down.
+- **Decision (defense in depth, two layers):**
+  1. **Read side — `gate.verify_and_reduce` rejects a duplicate id** across the load-bearing set
+     (`raise GateError`), fail-closed, mirroring its existing bad-sig / bus-mismatch / unknown-seat
+     rejections. Catches the Slice-1 store's both-copies-persist case and any read-path duplicate.
+  2. **Write side — `refstore.append` refuses a colliding append.** After the idempotency check
+     (which already returns OUR idempotent re-append), a pre-existing `events/<brief_id>/<id>.json`
+     at the synced tip is a genuine collision → `raise EventIdCollision` instead of overwriting.
+     The check is re-evaluated each CAS attempt (concurrency-safe) and kind-agnostic (also protects
+     against a non-load-bearing carrier shadowing a load-bearing blob).
+- **Consequences:** event-id uniqueness is now an enforced invariant, not an assumption. Combined
+  with ADR-036's collision-aware reducer (which stays as in-process defense-in-depth, since `reduce`
+  is callable without the gate), the forged-promotion / merge-DoS class is closed at the store, the
+  gate, and the reducer. The live-bus cutover is unaffected: carrier ids are the unique source
+  filename (`legacy_projector.py` `id=p.name`), so no legitimate collision exists. A duplicate id
+  now fails LOUD (was silent overwrite/ambiguity).
+- **Evidence:** RED→GREEN pins — `test_verify_and_reduce_rejects_duplicate_event_id` (gate),
+  `test_append_refuses_colliding_event_id_from_another_seat` (refstore); the store-overwrite was
+  reproduced (read of the storage layout + idempotency path) pre-fix.
+  `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q` → `242 passed`.
+- **Cross-refs:** **ADR-036** (the revoke-authority fix whose re-verification surfaced this);
+  `threeway/gate.py` (`verify_and_reduce` dup-id reject); `threeway/refstore.py`
+  (`EventIdCollision` + the append path-existence check); `docs/REMEDIATION-INVENTORY.md`
+  (`threeway-event-id-not-unique`).
