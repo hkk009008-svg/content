@@ -113,7 +113,14 @@ def evaluate(candidate_id, state, repo, policy, main_ref=MAIN_REF) -> Decision:
     if cg.payload.get("policy_digest") != cand.payload["policy_digest"]:
         return Decision(REJECTED, "cycle_go policy_digest mismatch")
 
-    if not co_sign_satisfied(eff_tier, state, candidate_id, builder_provider):
+    # tier-specific extra approvals (Slice 3). All identity inputs are from the
+    # overseer-signed assignment (builder_provider/verifier_provider, lines 65-66)
+    # and the candidate's integration_sha — never from an unsigned signer string.
+    if not co_sign_satisfied(eff_tier, state, candidate_id,
+                             candidate_pair=pair,
+                             builder_provider=builder_provider,
+                             verifier_provider=verifier_provider,
+                             integration_sha=integ):
         return Decision(PENDING, f"co_sign not satisfied for {eff_tier}")
 
     # release key — the OVERSEER's release_order, bound to THIS candidate + sha.
