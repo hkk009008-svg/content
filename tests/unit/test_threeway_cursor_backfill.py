@@ -1,0 +1,118 @@
+"""Run: env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_cursor_backfill.py -q"""
+import json
+from pathlib import Path
+
+from threeway.cursor_backfill import (
+    total_order, iso_to_seq_map, backfill, restore_from_manifest,
+)
+
+# Three events; two share a SECOND (the same-second tiebreak must be total).
+_NAMES = [
+    "2026-06-17T19-55-31Z-operator-to-director-status.md",
+    "2026-06-17T20-00-00Z-director-to-operator-decision.md",
+    "2026-06-17T20-00-00Z-operator-to-director-ack.md",     # same second as above
+]
+
+
+def _seed(root: Path, cursors: dict):
+    sent = root / "coordination" / "mailbox" / "sent"
+    seen = root / "coordination" / "mailbox" / "seen"
+    sent.mkdir(parents=True); seen.mkdir(parents=True)
+    for n in _NAMES:
+        # body is irrelevant to the backfill (it reads only sent/ FILENAMES + seen/ cursors)
+        (sent / n).write_text("# x\n")
+    for seat, iso in cursors.items():
+        (seen / f"{seat}.txt").write_text(iso + "\n")
+    return root
+
+
+def test_total_order_is_total_under_same_second(tmp_path):
+    order = total_order(_NAMES)
+    # 3 distinct seqs despite a same-second collision (tiebreak = full filename)
+    assert [fn for _, fn in order] == sorted(_NAMES)
+    assert len(order) == 3
+
+
+def test_iso_maps_to_highest_seq_at_or_before_cursor(tmp_path):
+    # director cursor at 20:00:00Z -> highest event ts <= that.
+    # The two 20:00:00Z events tiebreak by filename; "...decision.md" sorts before
+    # "...operator-to-director-ack.md", so the at-or-before set is {seq1, seq2} and
+    # the highest is seq 2 (decision) ... wait: ack also == 20:00:00Z, so both
+    # qualify -> highest seq among ts<=cursor is the LAST of the two by filename.
+    m = iso_to_seq_map(_NAMES, {"director": "2026-06-17T20:00:00Z"})
+    order = total_order(_NAMES)                 # [(ts,fn)...] seq = idx+1
+    last_le = max(seq for seq, (ts, fn) in enumerate(order, 1)
+                  if ts <= "2026-06-17T20-00-00Z")
+    assert m["director"] == last_le             # exact §6 rule, recomputed independently
+
+
+def test_iso_with_no_event_at_or_before_is_seq_zero(tmp_path):
+    m = iso_to_seq_map(_NAMES, {"operator": "2020-01-01T00:00:00Z"})
+    assert m["operator"] == 0                   # seq-0 floor (advance_cursor allows 0)
+
+
+def test_backfill_then_restore_is_byte_reversible(tmp_path):
+    # 7a (byte-reversibility). MUTATION (documented): after backfill, flip one byte
+    # of an archived ISO in the manifest, THEN restore -> the restored seen/<seat>.txt
+    # bytes != the captured original -> the round-trip assertion flips RED.
+    root = _seed(tmp_path, {"director": "2026-06-17T20:00:00Z",
+                            "operator": "2026-06-17T19:55:31Z"})
+    seen = root / "coordination" / "mailbox" / "seen"
+    before = {p.name: p.read_bytes() for p in seen.iterdir()}
+    backfill(root)
+    # cursors are now scalar seqs
+    assert (seen / "director.txt").read_text().strip().isdigit()
+    restore_from_manifest(root)
+    after = {p.name: p.read_bytes() for p in seen.iterdir()}
+    assert after == before                      # byte-for-byte round trip
+
+    # --- the documented single-byte mutation must break the round-trip ---
+    # NB: restore_from_manifest restores from obj["original_bytes"][<filename>] — so the
+    # mutation MUST perturb that field (NOT original_iso, which restore never reads, or
+    # the mutation would be a no-op and this test would falsely pass on broken restore).
+    backfill(root)
+    man = root / "coordination" / "mailbox" / ".migration" / "cursor-backfill.json"
+    obj = json.loads(man.read_text())
+    raw = obj["original_bytes"]["director.txt"]          # latin-1 str of the EXACT bytes
+    obj["original_bytes"]["director.txt"] = ("X" if raw[0] != "X" else "Y") + raw[1:]  # flip one byte
+    man.write_text(json.dumps(obj))
+    restore_from_manifest(root)
+    assert (seen / "director.txt").read_bytes() != before["director.txt"]
+
+
+def test_map_recomputes_purely_from_sent_and_order(tmp_path):
+    # 7b (map reproducibility). MUTATION (documented): perturb one event ts so its seq
+    # bucket changes -> the recomputed map diverges from the archived map -> RED.
+    root = _seed(tmp_path, {"director": "2026-06-17T20:00:00Z"})
+    backfill(root)
+    man = json.loads((root / "coordination" / "mailbox" / ".migration"
+                      / "cursor-backfill.json").read_text())
+    sent_names = sorted(p.name for p in
+                        (root / "coordination" / "mailbox" / "sent").iterdir())
+    recomputed = iso_to_seq_map(sent_names, man["original_iso"])
+    assert recomputed == man["iso_to_seq"]      # archived map == purely-recomputed map
+
+
+def test_backfill_is_idempotent_preserves_original_anchor(tmp_path):
+    # Idempotency / archive-once. The cutover (Task 13) is RETRYABLE — it re-calls
+    # backfill() after tearing down a partial events ref. A SECOND backfill must NOT
+    # re-archive: by then the seen/*.txt are already scalar seqs, so re-reading them as
+    # "original" would clobber the real-ISO rollback anchor with the scalar values.
+    #
+    # NON-VACUITY: on the PRE-FIX code the second backfill() overwrites the manifest with
+    # original_bytes={"director.txt":"<seq>\n"} (the scalar), so restore would yield the
+    # SCALAR bytes (e.g. "2\n") != the ORIGINAL ISO -> this assertion goes RED. (Confirmed
+    # RED by scratch-reverting the `if man.exists(): ... return` guard.) The fix makes the
+    # second call re-apply the archived map and return, leaving original_bytes untouched.
+    root = _seed(tmp_path, {"director": "2026-06-17T20:00:00Z",
+                            "operator": "2026-06-17T19:55:31Z"})
+    seen = root / "coordination" / "mailbox" / "seen"
+    before = {p.name: p.read_bytes() for p in seen.iterdir()}   # the ORIGINAL ISO bytes
+    backfill(root)                              # cursors -> scalar; manifest archives ISO
+    assert (seen / "director.txt").read_text().strip().isdigit()
+    backfill(root)                              # 2nd call: must NOT re-archive the scalars
+    # the cursors are still scalar (re-applied from the archived map), not re-ISO'd
+    assert (seen / "director.txt").read_text().strip().isdigit()
+    restore_from_manifest(root)
+    after = {p.name: p.read_bytes() for p in seen.iterdir()}
+    assert after == before                      # rollback anchor still the ORIGINAL ISO
