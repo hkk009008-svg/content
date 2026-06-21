@@ -1,7 +1,11 @@
 """Run: env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_cursor_backfill.py -q"""
 import json
+import os
 from pathlib import Path
 
+import pytest
+
+import threeway.cursor_backfill as cb
 from threeway.cursor_backfill import (
     total_order, iso_to_seq_map, backfill, restore_from_manifest,
 )
@@ -116,3 +120,65 @@ def test_backfill_is_idempotent_preserves_original_anchor(tmp_path):
     restore_from_manifest(root)
     after = {p.name: p.read_bytes() for p in seen.iterdir()}
     assert after == before                      # rollback anchor still the ORIGINAL ISO
+
+
+# ----------------------------------------------------------------------------
+# ADR-047 — manifest write must be ATOMIC and the readers robust to corruption.
+# run_cutover step 5b (cutover.py:168) does NOT tear down on a backfill failure — it
+# relies on "retry resumes cheaply". A crash/ENOSPC mid `man.write_text(json.dumps(...))`
+# left a TRUNCATED manifest, and BOTH readers (backfill resume + restore_from_manifest)
+# did a bare `json.loads` -> JSONDecodeError -> retry AND rollback both wedged, with no
+# auto-recovery. Fix: atomic tmp+os.replace (a crash leaves NO committed manifest, and the
+# cursor rewrite runs AFTER the write so seen/*.txt stay ISO -> a retry resumes via fresh
+# archive); plus a clear typed CursorBackfillManifestError on any corrupt manifest.
+# ----------------------------------------------------------------------------
+def test_crash_during_atomic_manifest_write_leaves_no_committed_manifest_and_retry_resumes(tmp_path, monkeypatch):
+    root = _seed(tmp_path, {"director": "2026-06-17T20:00:00Z",
+                            "operator": "2026-06-17T19:55:31Z"})
+    man = root / "coordination" / "mailbox" / ".migration" / "cursor-backfill.json"
+    seen = root / "coordination" / "mailbox" / "seen"
+    def _boom(*a, **k):
+        raise RuntimeError("simulated crash at the atomic commit step")
+    monkeypatch.setattr(os, "replace", _boom)          # crash at the tmp->final rename
+    with pytest.raises(RuntimeError):
+        cb.backfill(root)
+    assert not man.exists()                             # no committed/truncated manifest
+    assert (seen / "director.txt").read_text().strip() == "2026-06-17T20:00:00Z"  # cursors still ISO
+    monkeypatch.undo()
+    cb.backfill(root)                                  # retry resumes cleanly (fresh archive)
+    assert man.exists()
+    assert (seen / "director.txt").read_text().strip().isdigit()
+
+
+def test_corrupt_manifest_backfill_raises_clear_typed_error(tmp_path):
+    root = _seed(tmp_path, {"director": "2026-06-17T20:00:00Z",
+                            "operator": "2026-06-17T19:55:31Z"})
+    man = root / "coordination" / "mailbox" / ".migration" / "cursor-backfill.json"
+    cb.backfill(root)
+    good = man.read_text()
+    man.write_text(good[: len(good) // 2])             # truncate -> not valid JSON
+    with pytest.raises(cb.CursorBackfillManifestError):
+        cb.backfill(root)                              # resume must raise the TYPED error
+
+
+def test_corrupt_manifest_restore_raises_clear_typed_error(tmp_path):
+    root = _seed(tmp_path, {"director": "2026-06-17T20:00:00Z"})
+    man = root / "coordination" / "mailbox" / ".migration" / "cursor-backfill.json"
+    cb.backfill(root)
+    good = man.read_text()
+    man.write_text(good[: len(good) // 2])
+    with pytest.raises(cb.CursorBackfillManifestError):
+        cb.restore_from_manifest(root)
+
+
+def test_keyincomplete_manifest_raises_clear_typed_error(tmp_path):
+    # schema-VALID but a required key MISSING (older/hand-edited manifest) must also raise
+    # the typed error, not a bare KeyError in the resume/rollback read.
+    root = _seed(tmp_path, {"director": "2026-06-17T20:00:00Z"})
+    man = root / "coordination" / "mailbox" / ".migration" / "cursor-backfill.json"
+    cb.backfill(root)
+    obj = json.loads(man.read_text())
+    del obj["iso_to_seq"]
+    man.write_text(json.dumps(obj))
+    with pytest.raises(cb.CursorBackfillManifestError):
+        cb.backfill(root)

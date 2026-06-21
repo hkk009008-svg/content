@@ -2372,3 +2372,42 @@ legit event malformed. Nothing newly promotes; the forgery/availability classes 
 pre-fix (KeyError/JSONDecodeError) and GREEN after (the bad blob is skipped; reads and a fresh append both
 succeed). Full refstore suite 30 passed/0. Independent Lane-V re-verification pending. Artifact:
 `logs/audit-wf_48aefc7d-589-threeway-residual-surfaces.json`.
+
+## ADR-047 — Atomic cursor-backfill manifest write + diagnosable corrupt-manifest handling (closes a cutover resume/rollback wedge)
+
+**Context.** `run_cutover` step 5b (`threeway/cutover.py:162-168`) deliberately does NOT tear down on a
+`cursor_backfill.backfill` failure — it relies on the documented "retry resumes cheaply" invariant. But
+`backfill` wrote its rollback/resume manifest NON-atomically (`man.write_text(json.dumps(...))`, a truncating
+open+write+close), and BOTH readers — the resume branch in `backfill` and `restore_from_manifest` — did a bare
+`json.loads`. A crash / kill / ENOSPC partway through the write left a TRUNCATED-but-existent manifest; on
+retry the resume branch raised `json.JSONDecodeError` and could NEVER complete, AND `restore_from_manifest`
+raised the same — so the cutover's automated resume AND its rollback were BOTH wedged, violating the exact
+invariant step 5b relies on (operator-recoverable only by hand-deleting the manifest). A schema-valid-but-
+key-missing manifest was a sibling vector (bare `KeyError`). Surfaced + reproduced end-to-end against HEAD by
+the residual-surface audit `wf_48aefc7d-589` (finder CB-1 + the main-read M1 candidate, both confirmed;
+isolated worktree repro RED).
+
+**Decision.** Two coordinated changes in `threeway/cursor_backfill.py`:
+1. **Atomic write** — `_atomic_write_text(path, text)` writes a sibling `.tmp` then `os.replace` (atomic
+   within a filesystem). The manifest write runs BEFORE any cursor rewrite, so a crash at the write leaves NO
+   committed manifest and the `seen/*.txt` stay ISO → a retry takes the fresh-archive branch and resumes
+   cleanly. The real crash scenario can no longer PRODUCE a truncated manifest.
+2. **Diagnosable reads** — `_load_manifest(path)` parses + validates (JSON, object, schema, the three
+   required keys) and raises a single clear typed `CursorBackfillManifestError` (a `ValueError` subclass) on
+   ANY corruption, instead of a bare `JSONDecodeError`/`KeyError`. Both `backfill`'s resume branch and
+   `restore_from_manifest` route through it, so residual external/FS corruption is a diagnosable, catchable
+   failure pointing to manual recovery — not an opaque wedge.
+
+**Why safe.** The success path is behavior-identical (same manifest content; a valid manifest loads to the
+same dict). The atomic write only changes WHEN bytes become visible (all-or-nothing). `CursorBackfillManifestError`
+subclasses `ValueError`, preserving the prior `restore_from_manifest` schema-mismatch error contract. There is
+no auto-re-derive on corruption (which could clobber an already-scalar cursor) — the safe response is the typed
+error. The cutover happy path + the idempotency/byte-reversibility pins stay green.
+
+**Verification.** TDD red→green: 4 new pins in `tests/unit/test_threeway_cursor_backfill.py` —
+`test_crash_during_atomic_manifest_write_leaves_no_committed_manifest_and_retry_resumes` (monkeypatch
+`os.replace` to raise → no committed manifest, cursors still ISO, retry resumes), corrupt-manifest backfill +
+restore raise the typed error, and schema-valid-key-missing raises the typed error — RED pre-fix
+(RuntimeError-not-raised / JSONDecodeError / KeyError), GREEN after. cursor_backfill suite 10 passed/0; cutover
++ legacy-cursor 14 passed/0. Independent Lane-V pending. Artifact:
+`logs/audit-wf_48aefc7d-589-threeway-residual-surfaces.json`.

@@ -8,11 +8,53 @@ same-second group, so the order is total and reproducible from sent/ alone.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
 _TS = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)-")   # leading filename ts token
 _SCHEMA = "cursor-backfill/1"
+
+
+class CursorBackfillManifestError(ValueError):
+    """The cursor-backfill manifest is corrupt/partial — unparseable JSON, a non-object,
+    a wrong/missing schema, or a missing required key. Raised as a SINGLE clear typed
+    error instead of a bare json.JSONDecodeError/KeyError so the cutover's resume
+    (`backfill`) and rollback (`restore_from_manifest`) paths fail DIAGNOSABLY rather than
+    as an opaque wedge (ADR-047)."""
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write text atomically: a sibling temp file + os.replace (atomic within a
+    filesystem). A crash/ENOSPC mid-write can then never leave a TRUNCATED manifest that
+    wedges the readers' json.loads — the final path is either the prior state or the
+    COMPLETE new content, never a torn prefix (ADR-047)."""
+    tmp = path.parent / (path.name + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+def _load_manifest(path: Path) -> dict:
+    """Parse + validate the manifest; raise CursorBackfillManifestError on ANY corruption
+    (unparseable JSON, non-object, wrong/missing schema, or a missing/!dict required key)
+    instead of a bare JSONDecodeError/KeyError. With `_atomic_write_text` a crash can no
+    longer PRODUCE a corrupt manifest; this guards external/FS corruption and any
+    pre-atomicity artifact, and makes recovery inspectable (delete the corrupt manifest to
+    re-derive while seen/*.txt are still ISO)."""
+    try:
+        obj = json.loads(path.read_text())
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise CursorBackfillManifestError(
+            f"cursor-backfill manifest is not valid JSON at {path}: {e}") from e
+    if not isinstance(obj, dict) or obj.get("schema") != _SCHEMA:
+        got = obj.get("schema") if isinstance(obj, dict) else "<non-object>"
+        raise CursorBackfillManifestError(
+            f"cursor-backfill manifest schema {got!r} != expected {_SCHEMA!r} at {path}")
+    for key in ("original_bytes", "original_iso", "iso_to_seq"):
+        if not isinstance(obj.get(key), dict):
+            raise CursorBackfillManifestError(
+                f"cursor-backfill manifest missing/!dict key {key!r} at {path}")
+    return obj
 
 
 def _mailbox_base(coord_root: Path) -> Path:
@@ -76,7 +118,7 @@ def backfill(coord_root: Path) -> None:
     seen = _seen_dir(coord_root)
     man = _manifest_path(coord_root)
     if man.exists():
-        obj = json.loads(man.read_text())
+        obj = _load_manifest(man)           # ADR-047: typed error on a corrupt/partial manifest
         for seat, seq in obj["iso_to_seq"].items():
             (seen / f"{seat}.txt").write_text(f"{seq}\n")
         return
@@ -85,7 +127,11 @@ def backfill(coord_root: Path) -> None:
     original_iso = {p.stem: p.read_text().strip() for p in seen.iterdir() if p.suffix == ".txt"}
     seq_map = iso_to_seq_map(sent_names, original_iso)
     man.parent.mkdir(parents=True, exist_ok=True)
-    man.write_text(json.dumps({
+    # ADR-047: write the manifest ATOMICALLY (tmp + os.replace) BEFORE rewriting any
+    # cursor, so a crash here leaves NO committed manifest (the seen/*.txt are still ISO)
+    # and a retry resumes via the fresh-archive branch — never a truncated manifest that
+    # wedges both the resume and the rollback readers.
+    _atomic_write_text(man, json.dumps({
         "schema": _SCHEMA,
         # EXACT original file bytes (latin-1 round-trippable) so restore is byte-perfect,
         # plus the human-readable stripped ISO + the recomputable map (the §8 7b check).
@@ -102,12 +148,7 @@ def restore_from_manifest(coord_root: Path) -> None:
     path = _manifest_path(coord_root)
     if not path.exists():
         raise FileNotFoundError(f"no cursor-backfill manifest at {path}; nothing to restore")
-    obj = json.loads(path.read_text())
-    schema = obj.get("schema")
-    if schema != _SCHEMA:
-        raise ValueError(
-            f"cursor-backfill manifest schema {schema!r} != expected {_SCHEMA!r} at {path}"
-        )
+    obj = _load_manifest(path)              # ADR-047: typed error on corrupt/partial/wrong-schema
     seen = _seen_dir(coord_root)
     for fname, text in obj["original_bytes"].items():
         (seen / fname).write_bytes(text.encode("latin-1"))
