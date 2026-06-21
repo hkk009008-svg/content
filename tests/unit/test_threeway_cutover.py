@@ -221,3 +221,42 @@ def test_pretry_validation_failure_restores_bus_under_force(tmp_path, monkeypatc
         run_cutover(r, root, importer, force=True)
     # RESTORED to the exact pre-run OID — pre-fix this stayed at the appended-over value.
     assert gitcas.rev_parse(r, EVENTS_REF) == pre
+
+
+_D_RERUN_NAMES = [
+    "2026-06-17T10-00-00Z-operator-to-director-a.md",
+    "2026-06-17T11-00-00Z-operator-to-director-b.md",
+    "2026-06-17T12-00-00Z-operator-to-director-c.md",
+    "2026-06-17T13-00-00Z-operator-to-director-d.md",
+    "2026-06-17T14-00-00Z-operator-to-director-e.md",
+]
+
+
+def _seed_coord_rerun(root):
+    sent = root / "coordination" / "mailbox" / "sent"; sent.mkdir(parents=True)
+    seen = root / "coordination" / "mailbox" / "seen"; seen.mkdir(parents=True)
+    for n in _D_RERUN_NAMES:
+        (sent / n).write_text(
+            "# subj\n\n**From:** operator\n**When:** " + n[:11] + n[11:20].replace("-", ":") + "\n\nbody\n")
+    (seen / "director.txt").write_text("2026-06-17T12:00:00Z\n")   # covers seq 1-3 (true seq 3, head 5)
+    for s in ("director2", "operator", "operator2", "coordinator", "coordinator2"):
+        (seen / f"{s}.txt").write_text("2026-06-17T14:00:00Z\n")   # head
+    return root
+
+
+def test_force_rerun_does_not_overadvance_cursor_ref_from_scalar_seen(tmp_path):
+    # ADR-049: on a force=True RE-RUN the prior run's step-5b backfill has rewritten
+    # seen/*.txt to SCALAR seqs. Step 4 must NOT re-read them as ISO and lexicographically
+    # over-advance the cursor ref past unread events (`"2026-..." <= "3"` is True -> head).
+    # NON-VACUITY: with step 4 re-deriving from the scalar seen (pre-fix), director's "3"
+    # maps to the head seq 5 and advance_cursor pushes the ref 3 -> 5; the fix sources the
+    # ISO-derived seq from the prior run's archived manifest (3) -> the ref stays at 3.
+    r = _new_repo(tmp_path); root = _seed_coord_rerun(r)
+    importer, _ = keys.generate_keypair()
+    run_cutover(r, root, importer, force=False)            # first run
+    store = RefEventStore(r)
+    assert store.cursor_seq("director") == 3               # true seq from the 12:00 ISO cursor
+    seen = root / "coordination" / "mailbox" / "seen"
+    assert (seen / "director.txt").read_text().strip() == "3"   # step 5b rewrote it to scalar
+    run_cutover(r, root, importer, force=True)             # documented "acknowledge prior bus" path
+    assert store.cursor_seq("director") == 3               # NOT over-advanced to the head (5)

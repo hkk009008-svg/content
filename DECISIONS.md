@@ -2448,3 +2448,43 @@ edit-in-place merge run under `GIT_CONFIG_GLOBAL` with `merge.renames=true` then
 (`(9bb1…,True)` != `(a856…,False)`) and GREEN after (identical `(tree, clean)`). Full gitcas suite 20
 passed/0 (existing clean/conflict `merge_tree` pins unaffected → semantics unchanged). Independent Lane-V
 pending. Artifact: `logs/audit-wf_48aefc7d-589-threeway-residual-surfaces.json`.
+
+## ADR-049 — Cutover force-rerun cursor over-advance: source the seq-map from the archived manifest + reject non-ISO cursors
+
+**Context.** `run_cutover` step 4 materializes each seat's cursor by reading `seen/<seat>.txt` as ISO
+timestamps and mapping them to seqs via `cursor_backfill.iso_to_seq_map`. But step 5b's `backfill` REWRITES
+those `seen/*.txt` to SCALAR seqs. So on a `force=True` RE-RUN — the documented "acknowledge a pre-existing
+`refs/threeway/*`" path — step 4 re-reads the now-SCALAR cursors as if they were ISO: `iso_to_seq_map` does
+`iso[:11]+iso[11:].replace(":","-")` on a scalar like `"3"` → `"3"`, then `ts <= "3"` is lexicographically
+TRUE for every `"2026-..."` event (any scalar with leading digit ≥ `'3'`), so the seat maps to the HEAD seq
+and `advance_cursor` (monotonic-forward) pushes the cursor REF past unread events — a silent read-state /
+authority loss (the cursor ref diverges from `seen/*.txt`, marking unread events as read). Reproduced
+end-to-end against HEAD by the residual-surface audit `wf_48aefc7d-589` (director cursor REF over-advanced
+3 → 5). MAJOR (requires the documented-but-uncommon `force=True` re-run; integrity/forgery class unaffected;
+only seats with a scalar leading digit ≥ `'3'` over-advance, `'1'`/`'2'` map to 0).
+
+**Decision.** Two coordinated changes:
+1. **Source from the archived manifest on re-run** (`threeway/cutover.py` step 4 + `cursor_backfill.archived_seq_map`):
+   if the cursor-backfill manifest already exists (a prior run reached step 5b and archived the ISO-derived
+   `iso_to_seq`), source the authoritative seqs from it instead of re-deriving from the now-scalar `seen/*.txt`;
+   otherwise (first run) compute from the still-ISO seen cursors. The manifest's map is the correct first-run,
+   ISO-derived result.
+2. **Reject non-ISO cursors loudly** (`cursor_backfill.iso_to_seq_map`): each cursor value must match the ISO
+   timestamp shape (`YYYY-MM-DDThh:mm:ssZ`) or be empty (→ seq 0). A non-ISO value (a scalar) now raises
+   `CursorBackfillManifestError` rather than being silently lexicographically compared — defense-in-depth that
+   turns any future scalar-misfeed into a loud, fail-safe error (silent-gate-degradation class). The two layers
+   are complementary: even with (1) bypassed, (2) makes the re-run fail SAFE (raise → teardown) instead of
+   silently over-advancing (mutation-confirmed).
+
+**Why safe.** First-run behavior is unchanged (manifest absent → the ISO path, with ISO values that pass the
+new shape check). The re-run now uses the same seqs the first run computed (the archived map), so a cursor
+never advances past where its true ISO cursor placed it. `advance_cursor`'s monotonic-forward contract is
+untouched. `CursorBackfillManifestError` subclasses `ValueError`. Cutover teardown/idempotency pins stay green.
+
+**Verification.** TDD: integration pin
+`test_threeway_cutover.py::test_force_rerun_does_not_overadvance_cursor_ref_from_scalar_seen` (first run sets
+director cursor 3 + rewrites seen to scalar "3"; force=True re-run must keep it at 3, not the head 5) + unit
+pins `test_iso_to_seq_map_rejects_non_iso_cursor`, `test_archived_seq_map_returns_manifest_iso_to_seq`.
+Mutation-proven non-vacuous: forcing step 4 down the pre-fix path reddens the integration pin. cursor_backfill
++ cutover suites 21 passed/0. Independent Lane-V pending. Artifact:
+`logs/audit-wf_48aefc7d-589-threeway-residual-surfaces.json`.

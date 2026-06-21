@@ -150,7 +150,15 @@ def run_cutover(repo, coord_root, importer_key, *, force: bool = False) -> Cutov
     try:
         carrier_names = [ev.payload["source_filename"] for ev in carriers]
         cursor_backfill.total_order(carrier_names)        # validates totality (raises on a bad name)
-        seq_map = cursor_backfill.iso_to_seq_map(carrier_names, _read_iso_cursors(coord_root))
+        # ADR-049: on a force=True RE-RUN after a prior run reached step 5b, seen/*.txt hold
+        # SCALAR seqs (the prior backfill rewrote them) — re-deriving via iso_to_seq_map would
+        # lexicographically over-advance the cursor refs past unread events. If the prior run
+        # archived the ISO->seq map (manifest exists), source the authoritative seqs from it;
+        # else (first run) compute from the still-ISO seen cursors.
+        if cursor_backfill._manifest_path(coord_root).exists():
+            seq_map = cursor_backfill.archived_seq_map(coord_root)
+        else:
+            seq_map = cursor_backfill.iso_to_seq_map(carrier_names, _read_iso_cursors(coord_root))
         for seat in _SEATS:
             seq = seq_map.get(seat, 0)
             store.advance_cursor(seat, seq)               # seq==0 allowed (refstore:236-240)

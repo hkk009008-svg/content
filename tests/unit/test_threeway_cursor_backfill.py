@@ -171,6 +171,23 @@ def test_corrupt_manifest_restore_raises_clear_typed_error(tmp_path):
         cb.restore_from_manifest(root)
 
 
+def test_iso_to_seq_map_rejects_non_iso_cursor(tmp_path):
+    # ADR-049 defense: a non-ISO (e.g. already-SCALAR) cursor must RAISE loudly, not be
+    # lexicographically compared against timestamps (which silently mis-advances).
+    with pytest.raises(cb.CursorBackfillManifestError):
+        cb.iso_to_seq_map(_NAMES, {"director": "3"})
+
+
+def test_archived_seq_map_returns_manifest_iso_to_seq(tmp_path):
+    # ADR-049: after backfill archives the manifest, archived_seq_map returns the correct
+    # ISO-derived seqs — the cutover RE-RUN uses this instead of re-reading the scalar seen/*.txt.
+    root = _seed(tmp_path, {"director": "2026-06-17T20:00:00Z"})
+    cb.backfill(root)
+    man = json.loads((root / "coordination" / "mailbox" / ".migration"
+                      / "cursor-backfill.json").read_text())
+    assert cb.archived_seq_map(root) == man["iso_to_seq"]
+
+
 def test_keyincomplete_manifest_raises_clear_typed_error(tmp_path):
     # schema-VALID but a required key MISSING (older/hand-edited manifest) must also raise
     # the typed error, not a bare KeyError in the resume/rollback read.

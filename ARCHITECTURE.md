@@ -1725,14 +1725,14 @@ censor a real append; a key collision with a different request raises
 `AppendContentionExceeded` / `CursorContentionExceeded` (never an opaque git error).
 Per-seat cursors (`refs/threeway/cursors/<seat>`) are validated monotonic-CAS — a
 malformed blob raises `CursorCorruptionError`, never a silent 0. **Boundary:** cursor
-writes use the LOCAL `cas_create_or_update_ref` (`threeway/gitcas.py:171`), NOT remote
+writes use the LOCAL `cas_create_or_update_ref` (`threeway/gitcas.py:185`), NOT remote
 push-CAS — per-seat local progress by design; remote cursor publishing and owner-only
 ref-ACL enforcement are deferred (the latter is deployment-level, test-infeasible in a
 single local repo).
 
 ### 13A.2 Merge-gate, predicate, git plumbing
 
-`def run_gate` (`threeway/gate.py:119`) recomputes the trusted merge from the *signed*
+`def run_gate` (`threeway/gate.py:158`) recomputes the trusted merge from the *signed*
 base/branch SHAs (never trusting the candidate's attested integration SHA), CAS-writes
 the protected test ref only on a match, and never checks out or executes candidate
 code. It is a TOTAL function: a nonexistent attested SHA REJECTS (predicate guard +
@@ -1740,7 +1740,7 @@ gate try/except backstop) instead of raising. `def evaluate`
 (`threeway/predicate.py:39`) is the pure predicate it polls; the scope check is
 path-segment-boundary aware. `threeway/gitcas.py` is object-store plumbing only
 (merge-tree, commit-tree, blob/ref CAS, `push_cas`, and the fail-closed
-non-destructive `preflight_bus_init` (`threeway/gitcas.py:231`) that aborts on any
+non-destructive `preflight_bus_init` (`threeway/gitcas.py:245`) that aborts on any
 pre-existing `refs/threeway/*`).
 
 ### 13A.3 Signed envelope + key trust root
@@ -1793,7 +1793,7 @@ a single authority-flip), with the retained read-only `sent/` as rollback.
 (`scripts/check_coordination.py:68`) loosens from ISO-only to accept the scalar in lockstep with the
 other parsers; `def advance_cursor` (`threeway/refstore.py:222`) materializes
 `refs/threeway/cursors/<seat>` via the LOCAL `cas_create_or_update_ref`
-(`threeway/gitcas.py:171`) exactly as in §13A.1. `coordination/mailbox/.migration/cursor-backfill.json` archives the original
+(`threeway/gitcas.py:185`) exactly as in §13A.1. `coordination/mailbox/.migration/cursor-backfill.json` archives the original
 ISO values + the ISO→seq map for byte-reversible rollback. `coordinator` and `coordinator2` are now
 first-class RECEIVING seats; the ~12-copy seat roster consolidates to the single root
 `scripts/protocol_mailbox.py` plus a shell-sync guard. See `DECISIONS.md` ADR-034.

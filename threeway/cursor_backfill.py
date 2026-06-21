@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 _TS = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)-")   # leading filename ts token
+_ISO = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")    # a seen/*.txt ISO cursor value
 _SCHEMA = "cursor-backfill/1"
 
 
@@ -83,11 +84,25 @@ def total_order(sent_names: list[str]) -> list[tuple[str, str]]:
 
 
 def iso_to_seq_map(sent_names: list[str], iso_cursors: dict[str, str]) -> dict[str, int]:
-    """seat -> highest seq whose event ts <= the seat's ISO cursor (0 if none)."""
+    """seat -> highest seq whose event ts <= the seat's ISO cursor (0 if none).
+
+    ADR-049: each cursor value MUST be an ISO timestamp (YYYY-MM-DDThh:mm:ssZ) or empty. A
+    non-ISO value (e.g. an already-SCALAR seq left in seen/*.txt by a prior backfill) would
+    be lexicographically compared against the filename timestamps and SILENTLY over- or
+    under-advance the cursor (`"2026-..." <= "3"` is True) — reject it LOUDLY instead
+    (silent-gate-degradation class)."""
     order = total_order(sent_names)
     out: dict[str, int] = {}
     for seat, iso in iso_cursors.items():
-        iso_dash = iso[:11] + iso[11:].replace(":", "-")     # ISO colon -> filename dash form
+        s = iso.strip()
+        if s == "":
+            out[seat] = 0                                    # no cursor yet -> seq 0
+            continue
+        if not _ISO.match(s):
+            raise CursorBackfillManifestError(
+                f"cursor for {seat!r} is not an ISO timestamp: {iso!r} — a scalar seq here "
+                f"would lexicographically mis-advance the cursor (ADR-049)")
+        iso_dash = s[:11] + s[11:].replace(":", "-")         # ISO colon -> filename dash form
         seq = 0
         for i, (ts, _fn) in enumerate(order, start=1):
             if ts <= iso_dash:
@@ -152,3 +167,13 @@ def restore_from_manifest(coord_root: Path) -> None:
     seen = _seen_dir(coord_root)
     for fname, text in obj["original_bytes"].items():
         (seen / fname).write_bytes(text.encode("latin-1"))
+
+
+def archived_seq_map(coord_root: Path) -> dict:
+    """Return the seat->seq map archived by a prior backfill (the manifest's iso_to_seq).
+    The cutover's cursor step uses this on a force=True RE-RUN: by then seen/*.txt hold
+    SCALAR seqs (the prior run's backfill rewrote them), so re-deriving via iso_to_seq_map
+    would lexicographically OVER-advance every cursor past unread events (ADR-049). The
+    manifest's iso_to_seq is the correct ISO-derived map from the first run. Raises
+    CursorBackfillManifestError if the manifest is corrupt (ADR-047)."""
+    return dict(_load_manifest(_manifest_path(coord_root))["iso_to_seq"])
