@@ -57,8 +57,22 @@ def merge_tree(repo, base_sha: str, branch_sha: str) -> tuple[str | None, bool]:
     """Return (tree_oid, clean). clean is driven by the EXIT CODE: merge-tree
     exits 1 on conflict but STILL prints a (conflict-marked) tree OID — using that
     OID would merge conflict markers into source. So clean=False on non-zero exit.
+
+    ADR-048 — byte-determinism: pin the merge ALGORITHM config via highest-precedence
+    `-c` flags so the result is HOST-INDEPENDENT. `_DET_ENV` pins only the COMMIT identity
+    (commit_tree/commit_on); nothing else pinned the merge algorithm, so two seats with a
+    different ambient `merge.renames` / `merge.renameLimit` / `diff.algorithm` (from
+    ~/.gitconfig or GIT_CONFIG_*) computed DIFFERENT (tree, clean) for identical inputs —
+    seats then disagreed on mergeability and `integration_sha`. A command-line `-c` overrides
+    config from EVERY source (files and env), so these make the merge deterministic. The
+    fixed-high renameLimit ensures the rename-detection threshold can never silently flip an
+    individual seat on a large diff.
     """
-    p = _run(repo, "merge-tree", "--write-tree", base_sha, branch_sha, check=False)
+    p = _run(repo,
+             "-c", "merge.renames=true",
+             "-c", "merge.renameLimit=999999",
+             "-c", "diff.algorithm=histogram",
+             "merge-tree", "--write-tree", base_sha, branch_sha, check=False)
     tree = p.stdout.splitlines()[0].strip() if p.stdout.strip() else None
     return tree, (p.returncode == 0)
 

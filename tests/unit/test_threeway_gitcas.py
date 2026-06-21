@@ -260,3 +260,42 @@ def test_cas_update_ref_succeeds_on_matching_old_and_fails_on_stale(repo):
     assert gitcas.cas_update_ref(r, "refs/threeway/test-main", merge, base) is True
     # second CAS with the now-stale expected-old must fail
     assert gitcas.cas_update_ref(r, "refs/threeway/test-main", base, base) is False
+
+
+def _rename_edit_repo(tmp_path):
+    """base orig.txt; branch A renames orig.txt->renamed.txt + edits its TOP; branch B
+    edits orig.txt's BOTTOM in place. With rename detection ON the merge is CLEAN (B's edit
+    follows the rename); with it OFF it is a modify/delete CONFLICT — so the (tree, clean)
+    result depends on the merge.renames config, the exact ambient-config-determinism vector."""
+    r = tmp_path / "rr"; r.mkdir()
+    _git(r, "init", "-q"); _git(r, "config", "user.email", "t@e.st"); _git(r, "config", "user.name", "t")
+    (r / "orig.txt").write_text("".join(f"line{i}\n" for i in range(1, 13)))
+    _git(r, "add", "-A"); _git(r, "commit", "-q", "-m", "base")
+    base = _git(r, "rev-parse", "HEAD").stdout.strip()
+    _git(r, "checkout", "-q", "-b", "ra", base)
+    _git(r, "mv", "orig.txt", "renamed.txt")
+    p = r / "renamed.txt"; ls = p.read_text().splitlines(keepends=True); ls[0] = "A-EDIT\n"; p.write_text("".join(ls))
+    _git(r, "add", "-A"); _git(r, "commit", "-q", "-m", "A rename+edit")
+    a = _git(r, "rev-parse", "HEAD").stdout.strip()
+    _git(r, "checkout", "-q", "-b", "rb", base)
+    p = r / "orig.txt"; ls = p.read_text().splitlines(keepends=True); ls[-1] = "B-EDIT\n"; p.write_text("".join(ls))
+    _git(r, "add", "-A"); _git(r, "commit", "-q", "-m", "B edit")
+    b = _git(r, "rev-parse", "HEAD").stdout.strip()
+    return r, a, b
+
+
+def test_merge_tree_is_deterministic_under_ambient_merge_config(tmp_path, monkeypatch):
+    # ADR-048: merge_tree must pin the merge ALGORITHM so two seats with DIFFERENT ambient
+    # merge.renames (from ~/.gitconfig or GIT_CONFIG_*) compute the SAME (tree, clean) for
+    # identical inputs — the byte-deterministic merge-gate contract. Pre-fix _DET_ENV pins
+    # only commit identity; nothing pins the merge algorithm -> the two runs below diverge.
+    r, a, b = _rename_edit_repo(tmp_path)
+    def _under(renames):
+        cfg = tmp_path / f"gc-{renames}"
+        cfg.write_text(f"[merge]\n\trenames = {renames}\n")
+        monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))   # the exact ambient-config channel
+        return gitcas.merge_tree(r, a, b)
+    res_true = _under("true")
+    res_false = _under("false")
+    assert res_true == res_false, (
+        f"merge_tree non-deterministic under ambient merge.renames: {res_true} != {res_false}")

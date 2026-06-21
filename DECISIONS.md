@@ -2411,3 +2411,40 @@ restore raise the typed error, and schema-valid-key-missing raises the typed err
 (RuntimeError-not-raised / JSONDecodeError / KeyError), GREEN after. cursor_backfill suite 10 passed/0; cutover
 + legacy-cursor 14 passed/0. Independent Lane-V pending. Artifact:
 `logs/audit-wf_48aefc7d-589-threeway-residual-surfaces.json`.
+
+## ADR-048 — Pin the merge-tree algorithm config for host-independent determinism (close merge-tree non-determinism)
+
+**Context.** The merge gate's contract is byte-determinism: every seat must recompute the SAME integration
+tree and the SAME mergeability verdict from the signed bus state (`run_gate` recomputes the merge and refuses
+a coordinator's claimed `integration_sha` mismatch). `gitcas.merge_tree` ran `git merge-tree --write-tree`
+with NO merge-algorithm config pinned. `_DET_ENV` (`threeway/gitcas.py:13-21`) pins only AUTHOR/COMMITTER
+identity for `commit_tree`/`commit_on`; `_env` strips only `GIT_INDEX_FILE`. So the merge ALGORITHM was
+governed by ambient host config — `merge.renames`, `merge.renameLimit`, `diff.algorithm` from `~/.gitconfig`,
+`/etc/gitconfig`, or `GIT_CONFIG_*`. Two seats whose ambient config differed (e.g. `merge.renames=true` vs
+`false`) computed DIFFERENT `(tree, clean)` for IDENTICAL `(base, branch)` — one seat would MERGE while
+another REJECTED the same candidate, and even when both called it clean their recomputed `integration_sha`
+trees differed. `merge.renameLimit` additionally disables rename detection silently above a file-count
+threshold, so a large-diff candidate could flip a single seat with no config change. Surfaced + reproduced
+end-to-end against HEAD by the residual-surface audit `wf_48aefc7d-589` (a rename+edit vs edit-in-place merge
+under `GIT_CONFIG_GLOBAL` injection; finder + 3 refuters could not refute; isolated worktree repro RED).
+
+**Decision.** Pin the merge-algorithm config on the `merge_tree` invocation via highest-precedence
+command-line `-c` flags: `-c merge.renames=true -c merge.renameLimit=999999 -c diff.algorithm=histogram`. A
+command-line `-c` overrides config from EVERY source (files and env), so the merge result is host-independent
+regardless of any ambient `~/.gitconfig` or `GIT_CONFIG_*`. The fixed-high `renameLimit` ensures the
+rename-detection threshold can never silently flip an individual seat on a large diff.
+
+**Why safe.** The pins set explicit, canonical values (rename detection ON — git's default — with a generous
+limit; `histogram` diff, a deterministic widely-available algorithm); they do not change merge SEMANTICS for
+the no-ambient-config case (the existing clean/conflict `merge_tree` pins stay green), only remove the
+host-config variance. `-c` is scoped to this one call; `_env` is untouched (avoiding any `safe.directory` /
+global-config-isolation risk for the other plumbing calls). Cross-git-VERSION determinism (the merge engine
+itself changing across major git releases) remains an environmental residual — a git-version floor is the
+deployment-layer mitigation, documented not code-enforced.
+
+**Verification.** TDD red→green: new pin
+`test_threeway_gitcas.py::test_merge_tree_is_deterministic_under_ambient_merge_config` (a rename+edit vs
+edit-in-place merge run under `GIT_CONFIG_GLOBAL` with `merge.renames=true` then `false`) was RED pre-fix
+(`(9bb1…,True)` != `(a856…,False)`) and GREEN after (identical `(tree, clean)`). Full gitcas suite 20
+passed/0 (existing clean/conflict `merge_tree` pins unaffected → semantics unchanged). Independent Lane-V
+pending. Artifact: `logs/audit-wf_48aefc7d-589-threeway-residual-surfaces.json`.
