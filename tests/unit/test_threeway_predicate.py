@@ -40,7 +40,7 @@ def _e(kind, seq, **over):
     base = dict(
         id=f"e{seq}", seq=seq, bus_id="prod", schema_version="threeway/1",
         kind=kind, sender="x", recipient="all", signer="x:p:s1", payload={},
-        candidate_id="c1", brief_id="b1", brief_version=1,
+        candidate_id="A:c1", brief_id="b1", brief_version=1,
     )
     base.update(over)
     return Event(**base)
@@ -69,16 +69,16 @@ def _full_event_set():
         _e("ci_result", 7, subject_sha=INTEG, payload={
             "result": "PASS", "policy_digest": default_policy().policy_digest()},
            signer="ci:mech:s1"),
-        _e("release_requested", 8, payload={"candidate_id": "c1"},
+        _e("release_requested", 8, payload={"candidate_id": "A:c1"},
            subject_sha=INTEG, signer="coordinator:claude:s1"),
-        _e("release_order", 9, payload={"candidate_id": "c1"},
+        _e("release_order", 9, payload={"candidate_id": "A:c1"},
            subject_sha=INTEG, signer="overseer:mech:s1"),
     ]
 
 
 def test_full_valid_set_is_mergeable():
     state = reduce(_full_event_set())
-    d = evaluate("c1", state, FakeRepo(), default_policy())
+    d = evaluate("A:c1", state, FakeRepo(), default_policy())
     assert d.outcome == MERGEABLE, d.reason
 
 
@@ -87,7 +87,7 @@ def test_rejects_when_verifier_same_provider_as_builder():
     for e in events:
         if e.kind == "assignment":
             e.payload["primary_verifier_provider"] = "codex"  # == builder
-    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == REJECTED and "same provider" in d.reason
 
 
@@ -102,7 +102,7 @@ def test_rejects_candidate_not_signed_by_executing_coordinator():
     for e in events:
         if e.kind == "candidate":
             e.signer = "operator:claude:s1"  # not the coordinator
-    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == PENDING and "executing coordinator" in d.reason
 
 
@@ -118,7 +118,7 @@ def test_same_pair_candidate_shadow_does_not_displace():
         "integration_sha": "c" * 40, "risk_tier_claimed": "T1",
         "policy_digest": default_policy().policy_digest()},
         subject_sha="c" * 40, signer="operator:claude:s1"))
-    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == MERGEABLE, d.reason
 
 
@@ -135,7 +135,7 @@ def test_bogus_pair_candidate_shadow_does_not_block():
         "integration_sha": "c" * 40, "risk_tier_claimed": "T1",
         "policy_digest": default_policy().policy_digest()},
         subject_sha="c" * 40, signer="operator:claude:s1"))
-    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == MERGEABLE, d.reason
 
 
@@ -143,7 +143,7 @@ def test_go_then_fail_release_leaves_no_effective_go_pending():
     events = _full_event_set()
     events.append(_e("attestation", 10, payload={"kind": "release", "verdict": "FAIL"},
                      subject_sha=INTEG, signer="operator:claude:s1"))
-    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == PENDING and "release GO" in d.reason
 
 
@@ -152,7 +152,7 @@ def test_revoked_release_attestation_is_pending():
     # revoke the release attestation (e5)
     events.append(_e("attestation_revoked", 11, revokes_event_id="e5",
                      signer="operator:claude:s1"))
-    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == PENDING
 
 
@@ -161,20 +161,20 @@ def test_rejects_release_attestation_bound_to_wrong_sha():
     for e in events:
         if e.kind == "attestation" and e.payload.get("kind") == "release":
             e.subject_sha = "9" * 40
-    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == REJECTED and "integration_sha" in d.reason
 
 
 def test_rejects_stale_staging_base_when_main_moved():
     events = _full_event_set()
     moved = FakeRepo(head="f" * 40)  # main.head != staging_base
-    d = evaluate("c1", reduce(events), moved, default_policy())
+    d = evaluate("A:c1", reduce(events), moved, default_policy())
     assert d.outcome == REJECTED and "stale" in d.reason
 
 
 def test_pending_when_release_order_absent():
     events = [e for e in _full_event_set() if e.kind != "release_order"]
-    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == PENDING and "release_order" in d.reason
 
 
@@ -186,7 +186,7 @@ def test_rejects_tier_escalation_when_diff_exceeds_cycle_go():
     for e in events:
         if e.kind == "brief":
             e.payload["allowed_paths"] = [".github/"]
-    d = evaluate("c1", reduce(events), repo, default_policy())
+    d = evaluate("A:c1", reduce(events), repo, default_policy())
     assert d.outcome == REJECTED and "tier_escalation" in d.reason
 
 
@@ -199,14 +199,14 @@ def test_tier_mislabel_below_path_minimum_is_ignored_gate_computes():
         if e.kind == "brief":
             e.payload["allowed_paths"] = [".github/"]
     repo = FakeRepo(diff=[".github/workflows/ci.yml"])
-    d = evaluate("c1", reduce(events), repo, default_policy())
+    d = evaluate("A:c1", reduce(events), repo, default_policy())
     assert d.outcome == REJECTED and "tier_escalation" in d.reason
 
 
 def test_rejects_diff_outside_allowed_paths():
     events = _full_event_set()
     repo = FakeRepo(diff=["secrets/leak.txt"])
-    d = evaluate("c1", reduce(events), repo, default_policy())
+    d = evaluate("A:c1", reduce(events), repo, default_policy())
     assert d.outcome == REJECTED and "allowed_paths" in d.reason
 
 
@@ -217,13 +217,13 @@ def test_rejects_candidate_that_weakened_policy_digest():
             e.payload["policy_digest"] = "0" * 64  # not the accepted policy
         if e.kind in ("cycle_go", "ci_result"):
             e.payload["policy_digest"] = "0" * 64  # keep them internally consistent
-    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == REJECTED and "policy_digest not accepted" in d.reason
 
 
 def test_pending_when_ci_result_absent():
     events = [e for e in _full_event_set() if e.kind != "ci_result"]
-    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == PENDING and "ci_result" in d.reason
 
 
@@ -232,7 +232,7 @@ def test_rejects_ci_result_not_pass():
     for e in events:
         if e.kind == "ci_result":
             e.payload["result"] = "FAIL"
-    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == REJECTED and "ci_result not PASS" in d.reason
 
 
@@ -242,14 +242,14 @@ def test_rejects_superseded_brief_version():
                      payload={"brief_id": "b1", "allowed_paths": ["cinema/"]},
                      signer="overseer:mech:s1"))
     # candidate is still on version 1, now superseded by version 2
-    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == REJECTED and "superseded" in d.reason
 
 
 def test_rejects_aborted_candidate():
     events = _full_event_set()
     events.append(_e("candidate_aborted", 13))
-    d = evaluate("c1", reduce(events), FakeRepo(), default_policy())
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == REJECTED and "aborted" in d.reason
 
 
@@ -260,7 +260,7 @@ def test_rejects_sibling_prefix_path_with_no_trailing_slash():
         if e.kind == "brief":
             e.payload["allowed_paths"] = ["cinema"]      # no trailing slash
     repo = FakeRepo(diff=["cinemax/leak.py"])            # sibling — must REJECT
-    d = evaluate("c1", reduce(events), repo, default_policy())
+    d = evaluate("A:c1", reduce(events), repo, default_policy())
     assert d.outcome == REJECTED and "allowed_paths" in d.reason
 
 
@@ -270,7 +270,7 @@ def test_rejects_nonexistent_integration_sha():
     # never crash changed_paths on a ghost SHA.
     events = _full_event_set()
     repo = FakeRepo(rev_parse_map={MAIN_REF: BASE, BASE: BASE})  # INTEG -> None
-    d = evaluate("c1", reduce(events), repo, default_policy())
+    d = evaluate("A:c1", reduce(events), repo, default_policy())
     assert d.outcome == REJECTED and "known commit" in d.reason
 
 
@@ -301,13 +301,13 @@ T2_REPO = FakeRepo(diff=(".github/workflows/ci.yml",))
 
 
 def test_t2_mergeable_with_mirror_cosign():
-    d = evaluate("c1", reduce(_t2_event_set()), T2_REPO, default_policy())
+    d = evaluate("A:c1", reduce(_t2_event_set()), T2_REPO, default_policy())
     assert d.outcome == MERGEABLE, d.reason
 
 
 def test_t2_pending_without_cosign():
     evs = [e for e in _t2_event_set() if e.kind != "co_sign"]
-    d = evaluate("c1", reduce(evs), T2_REPO, default_policy())
+    d = evaluate("A:c1", reduce(evs), T2_REPO, default_policy())
     assert d.outcome == PENDING and "co_sign not satisfied for T2" in d.reason
 
 
@@ -315,7 +315,7 @@ def test_t2_pending_with_provider_spoofed_cosign():
     evs = _t2_event_set()
     evs[-1] = _e("co_sign", 11, payload={"verdict": "GO"}, subject_sha=INTEG,
                  signer="operator:codex:s9")
-    d = evaluate("c1", reduce(evs), T2_REPO, default_policy())
+    d = evaluate("A:c1", reduce(evs), T2_REPO, default_policy())
     assert d.outcome == PENDING and "co_sign not satisfied for T2" in d.reason
 
 
@@ -341,28 +341,28 @@ def _t2_two_mirror_exploit_events():
 def test_forged_nonoverseer_revoke_cannot_collapse_t2_mirror_ambiguity():
     evs = _t2_two_mirror_exploit_events()
     # genuine ambiguity (two mirrors) must fail closed
-    assert evaluate("c1", reduce(evs), T2_REPO, default_policy()).outcome == PENDING
+    assert evaluate("A:c1", reduce(evs), T2_REPO, default_policy()).outcome == PENDING
     # attacker forges a non-overseer revoke of the RIVAL mirror's overseer-signed assignment;
     # it must be ignored, so the gate stays PENDING (no forged promotion).
     evs.append(_e("attestation_revoked", 14, revokes_event_id="e10",
                   signer="operatorB:codex:s1"))
-    assert evaluate("c1", reduce(evs), T2_REPO, default_policy()).outcome == PENDING
+    assert evaluate("A:c1", reduce(evs), T2_REPO, default_policy()).outcome == PENDING
 
 
 def test_forged_nonoverseer_revoke_cannot_deny_legit_mirror():
     evs = _t2_event_set()   # single legit mirror → MERGEABLE
-    assert evaluate("c1", reduce(evs), T2_REPO, default_policy()).outcome == MERGEABLE
+    assert evaluate("A:c1", reduce(evs), T2_REPO, default_policy()).outcome == MERGEABLE
     # a non-overseer seat must not revoke the overseer-signed mirror assignment (merge DoS)
     evs.append(_e("attestation_revoked", 12, revokes_event_id="e10",
                   signer="operator:claude:s1"))   # not overseer, not the target's seat
-    assert evaluate("c1", reduce(evs), T2_REPO, default_policy()).outcome == MERGEABLE
+    assert evaluate("A:c1", reduce(evs), T2_REPO, default_policy()).outcome == MERGEABLE
 
 
 def test_overseer_revoke_of_mirror_assignment_denies_promotion():
     evs = _t2_event_set()
     evs.append(_e("attestation_revoked", 12, revokes_event_id="e10",
                   signer="overseer:mech:s1"))   # authorized control-plane revoke
-    d = evaluate("c1", reduce(evs), T2_REPO, default_policy())
+    d = evaluate("A:c1", reduce(evs), T2_REPO, default_policy())
     assert d.outcome == PENDING and "co_sign not satisfied for T2" in d.reason
 
 
@@ -394,20 +394,20 @@ T3_REPO = FakeRepo(diff=("coordination/threeway/keys/operator.pub",))
 
 
 def test_t3_mergeable_with_full_cross_family_set():
-    d = evaluate("c1", reduce(_t3_event_set()), T3_REPO, default_policy())
+    d = evaluate("A:c1", reduce(_t3_event_set()), T3_REPO, default_policy())
     assert d.outcome == MERGEABLE, d.reason
 
 
 def test_t3_pending_without_re_verify():
     evs = [e for e in _t3_event_set() if e.kind != "re_verify"]
-    d = evaluate("c1", reduce(evs), T3_REPO, default_policy())
+    d = evaluate("A:c1", reduce(evs), T3_REPO, default_policy())
     assert d.outcome == PENDING and "co_sign not satisfied for T3" in d.reason
 
 
 def test_t3_pending_with_one_human_approval():
     evs = [e for e in _t3_event_set() if not (e.kind == "human_approval"
            and e.payload.get("approver_identity") == "chief-chatgpt")]
-    d = evaluate("c1", reduce(evs), T3_REPO, default_policy())
+    d = evaluate("A:c1", reduce(evs), T3_REPO, default_policy())
     assert d.outcome == PENDING and "co_sign not satisfied for T3" in d.reason
 
 
@@ -415,7 +415,7 @@ def test_revoked_assignment_is_pending():
     evs = _full_event_set()
     # e2 = the assignment; overseer is authorized to revoke it (ADR-036)
     evs.append(_e("attestation_revoked", 12, revokes_event_id="e2", signer="overseer:mech:s1"))
-    d = evaluate("c1", reduce(evs), FakeRepo(), default_policy())
+    d = evaluate("A:c1", reduce(evs), FakeRepo(), default_policy())
     # ADR-039 reason-string shift (still PENDING / non-merge, security preserved): with the
     # assignment revoked, NO candidate is self-consistent (authoritative_candidate finds no
     # overseer assignment for the candidate's pair), so evaluate reports "no candidate from

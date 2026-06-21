@@ -187,11 +187,11 @@ def test_conflicting_candidate_aborts_with_merge_not_clean(world_conflict):
 
     # 1. Pair A's c1 lands cleanly (merge(base, branch_a) is clean -- only branch_a moved
     #    shared.txt vs base). main advances to a_integ (shared.txt="A").
-    a_integ = _stage(r, base, branch_a, "c1")
+    a_integ = _stage(r, base, branch_a, "A:c1")
     seen = _populate(store, build_candidate_events(base, branch_a, a_integ, privs,
                                                    pair=PAIR_A, candidate_id="c1",
                                                    allowed_paths=_ALLOW_SHARED), privs)
-    r1 = run_gate("c1", store, r, registry_dir=reg, bus_id="prod", main_ref=MAIN)
+    r1 = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod", main_ref=MAIN)
     assert r1.outcome == "COMPLETED", r1.reason
     new_main = _head(r); assert new_main == a_integ
 
@@ -207,7 +207,7 @@ def test_conflicting_candidate_aborts_with_merge_not_clean(world_conflict):
                                             allowed_paths=_ALLOW_SHARED), privs, seen)
 
     # 3. The gate aborts on the conflict and leaves the protected ref unmoved.
-    r2 = run_gate("c2", store, r, registry_dir=reg, bus_id="prod", main_ref=MAIN)
+    r2 = run_gate("B:c2", store, r, registry_dir=reg, bus_id="prod", main_ref=MAIN)
     assert r2.outcome == "REJECTED", r2.reason
     # the reason proves freshness PASSED and the CONFLICT (not staleness) aborted it:
     assert "merge not clean" in r2.reason, r2.reason
@@ -222,8 +222,8 @@ def test_serial_queue_rejects_stale_loser_then_restage_completes(world_two_pairs
     r, base, branch_a, branch_b, reg, privs = world_two_pairs
     store = RefEventStore(r)
     # Both candidates stage onto the SAME base — they race for the one main slot.
-    a_integ = _stage(r, base, branch_a, "c1")
-    b_integ = _stage(r, base, branch_b, "c2")
+    a_integ = _stage(r, base, branch_a, "A:c1")
+    b_integ = _stage(r, base, branch_b, "B:c2")
     seen = _populate(store, build_candidate_events(base, branch_a, a_integ, privs,
                                                    pair=PAIR_A, candidate_id="c1",
                                                    allowed_paths=_ALLOW), privs)
@@ -232,13 +232,13 @@ def test_serial_queue_rejects_stale_loser_then_restage_completes(world_two_pairs
                                             allowed_paths=_ALLOW), privs, seen)
 
     # Pair A's c1 wins the slot: the gate promotes it via exact-SHA CAS, main -> a_integ.
-    r1 = run_gate("c1", store, r, registry_dir=reg, bus_id="prod", main_ref=MAIN)
+    r1 = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod", main_ref=MAIN)
     assert r1.outcome == "COMPLETED", r1.reason
     new_main = _head(r); assert new_main == a_integ
 
     # Pair B's c2 is now stale: its staging_base (base) != main.head (a_integ). The gate
     # REJECTs "stale" and does NOT move the ref — no double-write on the loser.
-    r2 = run_gate("c2", store, r, registry_dir=reg, bus_id="prod", main_ref=MAIN)
+    r2 = run_gate("B:c2", store, r, registry_dir=reg, bus_id="prod", main_ref=MAIN)
     assert r2.outcome == "REJECTED" and "stale" in r2.reason, r2.reason
     assert _head(r) == new_main                        # gate did NOT write on the loser
 
@@ -249,11 +249,11 @@ def test_serial_queue_rejects_stale_loser_then_restage_completes(world_two_pairs
     _git(r, "cherry-pick", branch_b)
     branch_b2 = _git(r, "rev-parse", "HEAD").stdout.strip()
     assert branch_b2 != branch_b
-    b2_integ = _stage(r, new_main, branch_b2, "c2b")
+    b2_integ = _stage(r, new_main, branch_b2, "B:c2b")
     _populate(store, build_candidate_events(new_main, branch_b2, b2_integ, privs,
                                             pair=PAIR_B, candidate_id="c2b",
                                             allowed_paths=_ALLOW), privs, seen)
-    r3 = run_gate("c2b", store, r, registry_dir=reg, bus_id="prod", main_ref=MAIN)
+    r3 = run_gate("B:c2b", store, r, registry_dir=reg, bus_id="prod", main_ref=MAIN)
     assert r3.outcome == "COMPLETED", r3.reason
     assert _head(r) == b2_integ
 
@@ -265,21 +265,21 @@ def test_restage_is_load_bearing_stale_base_alone_stays_rejected(world_two_pairs
     # re-stage); the gate must keep REJECTing "stale" and never move main.
     r, base, branch_a, branch_b, reg, privs = world_two_pairs
     store = RefEventStore(r)
-    a_integ = _stage(r, base, branch_a, "c1")
-    b_integ = _stage(r, base, branch_b, "c2")
+    a_integ = _stage(r, base, branch_a, "A:c1")
+    b_integ = _stage(r, base, branch_b, "B:c2")
     seen = _populate(store, build_candidate_events(base, branch_a, a_integ, privs,
                                                    pair=PAIR_A, candidate_id="c1",
                                                    allowed_paths=_ALLOW), privs)
     _populate(store, build_candidate_events(base, branch_b, b_integ, privs,
                                             pair=PAIR_B, candidate_id="c2",
                                             allowed_paths=_ALLOW), privs, seen)
-    assert run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+    assert run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
                     main_ref=MAIN).outcome == "COMPLETED"
     new_main = _head(r); assert new_main == a_integ
 
     # Re-invoke the gate on c2's loser facts WITHOUT re-staging (stale base survives):
     # still REJECTED "stale", main unmoved. So r3's COMPLETED is load-bearing on the
     # re-stage, not an artifact that would land on a stale base too.
-    r_again = run_gate("c2", store, r, registry_dir=reg, bus_id="prod", main_ref=MAIN)
+    r_again = run_gate("B:c2", store, r, registry_dir=reg, bus_id="prod", main_ref=MAIN)
     assert r_again.outcome == "REJECTED" and "stale" in r_again.reason, r_again.reason
     assert _head(r) == new_main

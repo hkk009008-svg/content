@@ -2100,4 +2100,66 @@ drop-then-complete, zero uncaught raises — and re-confirmed the forgery class 
 strict-xfail `test_cross_pair_candidate_id_reuse_dos_residual`): a legitimate executing_coordinator
 of another overseer-assigned pair can reuse a victim's `candidate_id` to capture
 `authoritative_candidate` and stall the victim's merge — availability-only (never promotes), scoped
-to a follow-up `candidate_id`↔pair-binding slice.
+to a follow-up `candidate_id`↔pair-binding slice. **CLOSED by ADR-042.**
+
+## ADR-042 — Close `threeway-candidate-id-pair-binding-dos`: structural pair-namespaced candidate ids (ADR-039 Residual (i))
+
+**Context.** ADR-041 left ONE tracked residual: `candidate_id` is a free-form, globally-shared
+namespace, so TWO different overseer-assigned pairs (A and B) could each be **self-consistent** for
+the SAME `candidate_id` (self-consistency = the candidate's signer-seat equals the
+`executing_coordinator` the overseer assigned to the pair the candidate declares). A LEGITIMATE
+executing_coordinator of pair B could thus reuse a victim's `candidate_id`, declare pair B, capture
+`authoritative_candidate`, and stall the victim's pair-A merge. Availability-only (it can never forge
+pair A's verifier attestations, so it never promotes — the integrity class ADR-036/037/038 is
+unaffected), but a real per-candidate insider DoS via the normal append path.
+
+**First attempt (first-writer-wins) — REJECTED by adversarial re-verification.** The initial fix bound
+a `candidate_id` to the pair of its FIRST self-consistent declaration (earliest `seq`, tracked in a
+`_candidate_first_seq` map), reasoning that `append()` reassigns `seq` monotonically before signing
+(`store.py:45`/`refstore.py:149`) so an insider can never out-rank an already-declared candidate. The
+plan's mandated whole-implementation adversarial review (workflow `wf_01844a2a-03a`, 5 Opus attack
+dimensions, each reproduced end-to-end through the real Ed25519 gate) **CONFIRMED a MAJOR flaw: it only
+INVERTED the race.** It closed the attacker-declares-LATER case but reopened the symmetric
+attacker-declares-EARLIER case — a legit pair-B coordinator who declares the victim's `candidate_id`
+for pair B BEFORE the victim wins the lowest `first_seq`, captures authority, and stalls the victim
+(reproduced; availability-only). **An order-based tiebreak cannot close a shared-namespace collision —
+whoever controls the order wins.** (Integrity and totality were verified solid in that same review and
+are orthogonal to the tiebreak.)
+
+**Decision (the complete, order-INDEPENDENT fix).** Bind `candidate_id` to exactly ONE pair
+**structurally** by pair-namespacing the id:
+1. Candidate ids are `"<pair>:<local>"` (e.g. `"A:c1"`). `threeway/loop.py::build_candidate_events`
+   auto-namespaces a bare local id by its pair; emitters/callers drive the gate with the full id.
+2. `EffectiveState.authoritative_candidate` (`threeway/reducer.py`) adds an eligibility clause: a
+   candidate is authoritative only if its DECLARED `payload["pair"]` equals the candidate_id's
+   **namespace** (`_pair_namespace(cid)` = the prefix before the first `":"`; a non-str/un-namespaced
+   id → None → no candidate is authoritative). Combined with the existing self-consistency check, this
+   means a `candidate_id` can only be claimed by the pair named in its own namespace — a coordinator of
+   ANY other pair declares a non-matching pair and is ineligible, **regardless of declare order**. The
+   `_candidate_first_seq` machinery is removed (the `(seq, seat)` pick is now only a defensive
+   deterministic tiebreak; within one namespace pair exactly one seat is self-consistent).
+
+**Why this closes the CLASS, not the instance.** The binding is a pure function of the victim's own
+id (its namespace prefix), which the attacker cannot change for the victim's id. So neither declare
+order helps: the attacker's reused-id candidate must declare its own pair, which never matches the
+victim's namespace. assignment() is overseer-only (record-time filter), so an attacker cannot forge a
+pair-A assignment naming itself; declaring pair A while signing as another seat fails self-consistency.
+
+**Fail-safe / no-widening invariant (verified).** The namespace clause only ever NARROWS eligibility
+(it can REMOVE a candidate from authority, never add one), so nothing newly promotes; the integrity
+class (ADR-036/037/038) and ADR-039/040/041 stay green. `run_gate` stays TOTAL — `authoritative_candidate`
+runs at `gate.py:175` outside `run_gate`'s try, and the ADR-041 `isinstance(pair, str)` skip plus the
+`_pair_namespace` None-guard keep it raise-free on malformed/at-rest-planted candidates.
+
+**Evidence.** Reducer + emitter change with the `_candidate_first_seq` attempt fully removed; the
+strict-xfail residual pin replaced by two positive regression tests pinning BOTH declare orders
+(`test_cross_pair_namespace_blocks_reuse_attacker_declares_earlier` / `_later`). Mutation-proof
+(executed): removing the `if pair != ns` clause turns the attacker-EARLIER test RED (`REJECTED`) while
+the later test stays green — proving the namespace clause is the specific mechanism closing the
+attacker-earlier direction. `tests/unit/test_threeway_*.py` → 309 passed, 0 xfailed; `scripts/ci_smoke.py`
+OK; `scripts/check_no_ceremony.py` clean. Re-certification: workflow `wf_28567ca6-c41` (4 Opus attack
+dimensions — namespace-bypass both directions, namespace edge cases, integrity, totality+regression —
+each reproduced through the real gate). META-LESSON (continuing ADR-039/040/041): adversarially
+re-verify your OWN security fix end-to-end through the real gate — the first-writer-wins attempt LOOKED
+correct (its xfail flipped, mutation-proofs passed) yet only moved the race; the multi-agent attack is
+what surfaced the inverted-race layer.

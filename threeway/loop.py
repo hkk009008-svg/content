@@ -70,7 +70,12 @@ def build_candidate_events(staging_base, branch_sha, integration_sha, privs,
     pd = default_policy().policy_digest()
     coord_signer = f"{pair.coordinator}:{pair.coordinator_provider}:s1"
     verifier_signer = f"{pair.primary_verifier}:{pair.verifier_provider}:s1"
-    cid = candidate_id
+    # ADR-042: candidate ids are pair-namespaced ("<pair>:<local>") so a candidate_id binds to
+    # exactly ONE pair — the merge-gate's authoritative_candidate enforces declared-pair ==
+    # namespace, closing the cross-pair candidate_id reuse DoS. Accept a bare local id and
+    # namespace it by this pair, or pass an already-namespaced id through unchanged. The gate must
+    # be driven with the FULL namespaced id (this returned value's candidate_id).
+    cid = candidate_id if ":" in candidate_id else f"{pair.pair}:{candidate_id}"
     events = [
         _e("brief", "overseer", "overseer:mech:s1",
            {"brief_id": "b1", "assigned_tier": tier,

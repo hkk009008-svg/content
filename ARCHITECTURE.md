@@ -1842,12 +1842,12 @@ See `DECISIONS.md` ADR-036/037/038 + `threeway-revoke-authority-unsigned`,
 ### 13A.7 Availability hardening — authority-aware reducer + TOTAL run_gate (ADR-039)
 
 The reducer is now **authority-aware at record time**: `reduce()`
-(`threeway/reducer.py:169`) folds each of the six static control-plane singletons
+(`threeway/reducer.py:205`) folds each of the six static control-plane singletons
 (`assignment`/`brief`/`cycle_go`/`release_order` → `overseer`, `ci_result` → `ci`,
 `merge_completed` → the threaded gate seat) ONLY from its authorized signer-seat, DROPPING a
 non-authorized shadow before the predicate ever reads it — so a higher-seq insider event can no
 longer displace an authoritative fact and DoS a legitimate merge. `def authoritative_candidate`
-(`threeway/reducer.py:114`) resolves the effective candidate self-consistently (its signer-seat
+(`threeway/reducer.py:127`) resolves the effective candidate self-consistently (its signer-seat
 must equal the `executing_coordinator` of the overseer-signed assignment for the pair THAT
 candidate declares), so a bogus-pair or non-coordinator shadow candidate is ignored; the predicate
 and `run_gate` both resolve via it and can never disagree. `def run_gate`
@@ -1884,7 +1884,7 @@ ADR-040 + `threeway-verify-phase-brick-dos`, `threeway-candidate-id-pair-binding
 
 **`run_gate` step 1 is now TOTAL too (ADR-041).** ADR-040 closed `run_gate`'s VERIFY-phase raises and
 pre-CAS region, but `run_gate` STEP 1 — `verify_and_reduce` (`threeway/gate.py:38`) → `reduce`
-(`threeway/reducer.py:169`), which runs OUTSIDE `run_gate`'s try — still dereferenced many
+(`threeway/reducer.py:205`), which runs OUTSIDE `run_gate`'s try — still dereferenced many
 insider-controlled envelope fields as dict/set keys, sort keys, and via attribute access (`.startswith`
 on id, `_seat` split on the UNSIGNED signer, set membership on `kind`/`signature_version`), so a single
 validly-self-signed (or at-rest-planted, since `from_json_obj` does no type validation) load-bearing
@@ -1898,12 +1898,30 @@ filter, so no insider-controlled field can brick the gate via an unhashable/wron
 access, and the earlier narrow per-field guards consolidate into one structural check. Payload-VALUE
 keys (kind-specific, not covered by `well_formed`) stay guarded by `reduce()`'s fold-loop `try/except
 (TypeError, AttributeError, ValueError) → drop+warn` and `authoritative_candidate`'s
-(`threeway/reducer.py:114`) `isinstance(pair, str)` skip-in-loop. Every guard only DROPS a malformed
+(`threeway/reducer.py:127`) `isinstance(pair, str)` skip-in-loop. Every guard only DROPS a malformed
 event (no authority); a legit event (incl. `event_sent` carriers) always passes — nothing newly
 promotes, and the forgery class (ADR-036/037/038) + ADR-039/040 stay green. Closing certification re-ran
 the full brick catalogue (35 envelope-field poisons + 15 payload-value probes) end-to-end through live
 `run_gate` — all fail-closed or drop-then-complete, zero uncaught raises. See `DECISIONS.md` ADR-041 +
 `threeway-step1-not-total-malformed-input`.
+
+**The candidate_id↔pair binding is now STRUCTURAL (ADR-042).** ADR-041's one tracked residual —
+`threeway-candidate-id-pair-binding-dos` — was that `candidate_id` is a free-form, globally-shared
+namespace, so TWO overseer-assigned pairs could each be self-consistent for the SAME id; a legit
+executing_coordinator of pair B could reuse a victim's id, declare pair B, capture
+`authoritative_candidate` (`threeway/reducer.py:127`), and stall the victim's pair-A merge
+(availability-only — it can never forge pair A's attestations, so it never promotes). A first attempt
+(first-writer-wins, earliest-`seq`) only INVERTED the race — its mandated adversarial review
+(`wf_01844a2a-03a`) reproduced the symmetric attacker-declares-EARLIER DoS through the real gate. The
+complete fix is **pair-namespaced candidate ids**: ids are `"<pair>:<local>"` (e.g. `"A:c1"`;
+`build_candidate_events` auto-namespaces), and `authoritative_candidate` requires a candidate's DECLARED
+`payload["pair"]` to equal the id's namespace (`_pair_namespace`, the prefix before the first `":"`).
+This binds a `candidate_id` to exactly ONE pair as a pure function of its own id — a coordinator of any
+OTHER pair declares a non-matching pair and is ineligible regardless of declare order — closing the DoS
+in BOTH directions. The clause only NARROWS eligibility (never widens what promotes); `run_gate` stays
+TOTAL (the `isinstance(pair, str)` skip + the `_pair_namespace` None-guard). Two positive tests pin both
+declare orders; mutation-proof: dropping the namespace clause turns the attacker-earlier test RED. See
+`DECISIONS.md` ADR-042 + `threeway-candidate-id-pair-binding-dos`.
 
 ---
 

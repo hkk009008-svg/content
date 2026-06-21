@@ -338,31 +338,31 @@ def _cand(seq, pair, signer, **over):
 
 
 def test_candidate_keyed_by_seat():
-    coord = _cand(2, "A", "coordinator:claude:s1")
-    op = _cand(9, "A", "operator:claude:s1")   # higher seq, different seat
+    coord = _cand(2, "A", "coordinator:claude:s1", candidate_id="A:c1")
+    op = _cand(9, "A", "operator:claude:s1", candidate_id="A:c1")   # higher seq, different seat
     st = reduce([coord, op])
-    assert st.candidate("c1", "coordinator").signer == "coordinator:claude:s1"
-    assert st.candidate("c1", "operator").signer == "operator:claude:s1"
+    assert st.candidate("A:c1", "coordinator").signer == "coordinator:claude:s1"
+    assert st.candidate("A:c1", "operator").signer == "operator:claude:s1"
     # one-arg locate still works: latest-by-seq across all seats
-    assert st.candidate("c1").signer == "operator:claude:s1"
+    assert st.candidate("A:c1").signer == "operator:claude:s1"
 
 
 def test_authoritative_candidate_resolves_to_executing_coordinator():
-    coord = _cand(2, "A", "coordinator:claude:s1")
-    shadow = _cand(9, "A", "operator:claude:s1")   # higher seq, non-coordinator
+    coord = _cand(2, "A", "coordinator:claude:s1", candidate_id="A:c1")
+    shadow = _cand(9, "A", "operator:claude:s1", candidate_id="A:c1")   # higher seq, non-coordinator
     assign = _ev(3, "assignment", payload={
         "pair": "A", "executing_coordinator": "coordinator"}, signer="overseer:mech:s1")
     st = reduce([coord, shadow, assign])
-    auth = st.authoritative_candidate("c1")
+    auth = st.authoritative_candidate("A:c1")
     assert auth is not None and auth.signer == "coordinator:claude:s1"
 
 
 def test_authoritative_candidate_none_when_only_noncoordinator():
-    shadow = _cand(9, "A", "operator:claude:s1")   # only a non-coordinator candidate
+    shadow = _cand(9, "A", "operator:claude:s1", candidate_id="A:c1")   # only a non-coordinator candidate
     assign = _ev(3, "assignment", payload={
         "pair": "A", "executing_coordinator": "coordinator"}, signer="overseer:mech:s1")
     st = reduce([shadow, assign])
-    assert st.authoritative_candidate("c1") is None
+    assert st.authoritative_candidate("A:c1") is None
 
 
 # --- ADR-041: reduce() must be TOTAL against malformed insider input. An insider seat
@@ -443,11 +443,12 @@ def test_reduce_drops_nondict_payload_candidate_authoritative_safe():
     # OUTSIDE its try) -> total-bus brick. well_formed requires payload be a dict, so the malformed
     # candidate is DROPPED up front, never entering _candidates; authoritative_candidate resolves the
     # legit one without raising. (RED pre-fix: AttributeError 'list' has no attribute 'get'.)
-    legit = _cand(5, "A", "coordinator:claude:s1", id="e-legit-cand")
+    legit = _cand(5, "A", "coordinator:claude:s1", id="e-legit-cand", candidate_id="A:c1")
     assign = _ev(3, "assignment", payload={"pair": "A", "executing_coordinator": "coordinator"},
                  signer="overseer:mech:s1", id="e-assign")
     poison = _ev(9, "candidate", payload=["not", "a", "dict"], id="e-listpayload-cand",
+                 candidate_id="A:c1",
                  signer="operator:claude:s1")   # higher seq -> reached first by authoritative_candidate
     st = reduce([legit, assign, poison])               # must NOT raise (payload guaranteed dict)
-    auth = st.authoritative_candidate("c1")            # must NOT raise (poison dropped)
+    auth = st.authoritative_candidate("A:c1")          # must NOT raise (poison dropped)
     assert auth is not None and auth.signer == "coordinator:claude:s1"

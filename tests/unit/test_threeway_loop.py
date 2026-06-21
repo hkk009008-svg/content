@@ -62,7 +62,7 @@ def test_build_candidate_events_for_pair_b():
     assert a.payload["executing_coordinator"] == "coordinator2"
     cand = next(e for e in evs if e.kind == "candidate")
     assert cand.signer.split(":", 1)[0] == "coordinator2"
-    assert cand.candidate_id == "c2"
+    assert cand.candidate_id == "B:c2"  # ADR-042: auto pair-namespaced (pair=B, "c2")
 
 
 def test_two_pairs_have_disjoint_event_ids_and_per_candidate_release_order():
@@ -73,7 +73,8 @@ def test_two_pairs_have_disjoint_event_ids_and_per_candidate_release_order():
     assert {e.id for e in a}.isdisjoint({e.id for e in b})           # no tree-path collision
     ro_a = next(e for e in a if e.kind == "release_order")
     ro_b = next(e for e in b if e.kind == "release_order")
-    assert ro_a.payload["candidate_id"] == "c1" and ro_b.payload["candidate_id"] == "c2"
+    # ADR-042: candidate_id auto pair-namespaced — "c1"→"A:c1", "c2"→"B:c2"
+    assert ro_a.payload["candidate_id"] == "A:c1" and ro_b.payload["candidate_id"] == "B:c2"
 
 
 def test_both_attestations_survive_in_refstore(tmp_path):

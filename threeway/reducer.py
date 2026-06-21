@@ -29,6 +29,19 @@ def _seat_of(signer: str) -> str:
     return signer.split(":", 1)[0]
 
 
+def _pair_namespace(candidate_id) -> str | None:
+    """ADR-042: the pair a candidate_id is structurally BOUND to. Candidate ids are
+    pair-namespaced ``"<pair>:<local>"`` (e.g. ``"A:c1"``); the bound pair is the prefix
+    before the first ``":"``. Returns None for a non-str or un-namespaced id — such an id
+    binds to NO pair and can never be authoritative (fail-safe). This binding is what makes
+    `authoritative_candidate` order-independent: a candidate_id can only be claimed by the
+    pair named in its own namespace, so a coordinator of a DIFFERENT pair can never capture
+    it by reusing the id (regardless of declare order)."""
+    if isinstance(candidate_id, str) and ":" in candidate_id:
+        return candidate_id.split(":", 1)[0]
+    return None
+
+
 def _revoke_authorized(revoker_seat: str, target_seats) -> bool:
     """ADR-036: `revokes_event_id` is UNSIGNED (envelope.py:67), so an attacker who holds
     ANY registered seat could forge a revoke pointing at another seat's (or the overseer's)
@@ -56,7 +69,7 @@ class EffectiveState:
     _release_order: dict[str, Event] = field(default_factory=dict)   # candidate_id -> Event
     _release_requested: dict[str, Event] = field(default_factory=dict)
     _ci_result: dict[str, Event] = field(default_factory=dict)       # subject_sha -> Event
-    _candidates: dict[tuple, Event] = field(default_factory=dict)    # (candidate_id, seat) -> Event
+    _candidates: dict[tuple, Event] = field(default_factory=dict)    # (candidate_id, seat) -> latest Event
     _assignments: dict[str, Event] = field(default_factory=dict)     # pair -> Event
     _merge_completed: dict[str, Event] = field(default_factory=dict) # candidate_id -> Event
     _co_sign: dict[tuple, Event] = field(default_factory=dict)       # (candidate_id, seat) -> Event
@@ -118,23 +131,46 @@ class EffectiveState:
         # != its signer) is NOT self-consistent and is ignored — closing the candidate
         # shadow-DoS AND the pair-redirection variant. assignment() is already overseer-only
         # (record-time filter), so a forged assignment can't make a shadow self-consistent.
-        cands = [e for (cid, _seat), e in self._candidates.items() if cid == candidate_id]
-        for c in sorted(cands, key=lambda e: e.seq, reverse=True):
+        #
+        # ADR-042 (threeway-candidate-id-pair-binding-dos): self-consistency ALONE is not a
+        # UNIQUE binding — TWO different overseer-assigned pairs (A and B) could each be
+        # self-consistent for the SAME candidate_id, so a LEGITIMATE executing_coordinator of
+        # pair B could reuse a victim's candidate_id (declaring pair B) and capture authority,
+        # stalling the victim's pair-A merge (availability-only — it can never forge pair A's
+        # attestations, so it never promotes). An order-based tiebreak (latest-seq, or
+        # first-writer-wins) only MOVES the race (declare-later vs declare-earlier), never closes
+        # it. So bind STRUCTURALLY: candidate ids are pair-namespaced ("<pair>:<local>") and a
+        # candidate is eligible only if its DECLARED pair == the candidate_id's namespace. That
+        # binds a candidate_id to exactly ONE pair independent of declare order — a coordinator of
+        # any OTHER pair declares a non-matching pair and is ineligible, so it can NEVER capture a
+        # victim's id. Within the bound pair, only that pair's assigned executing_coordinator is
+        # self-consistent (one seat), so at most one candidate is eligible; the (seq, seat) tiebreak
+        # is defensive determinism for the implausible multi-eligible case. Closes the DoS in BOTH
+        # directions; supersedes the order-dependent first-writer-wins attempt.
+        ns = _pair_namespace(candidate_id)
+        if ns is None:
+            return None   # un-namespaced id binds to no pair — no candidate can be authoritative
+        best = None
+        for (cid, seat), c in self._candidates.items():
+            if cid != candidate_id:
+                continue
             # ADR-041 (read-path totality): a validly-self-signed candidate PASSES reduce() even
             # with an unhashable payload["pair"] (the fold keys on (candidate_id, seat), not pair).
             # self.assignment(pair) would then raise TypeError on a list/dict pair UNCAUGHT — this
             # call is on run_gate's step-2a, OUTSIDE its try, so it bricks the whole bus. SKIP a
-            # candidate whose pair is not a str (in-loop continue, NOT a wrap): a non-str pair can
-            # never be self-consistent with any assignment, so skipping is fail-safe and lets
-            # iteration proceed to the legit candidate. A wrap would abort iteration and turn the
-            # brick into a permanent graceful-REJECTED (the legit candidate never reached).
+            # candidate whose pair is not a str: a non-str pair can never match the namespace nor be
+            # self-consistent, so skipping is fail-safe and lets the loop reach the legit candidate.
             pair = c.payload.get("pair")
             if not isinstance(pair, str):
                 continue
+            if pair != ns:
+                continue   # ADR-042: declared pair must match the id's pair-namespace
             a = self.assignment(pair)
-            if a is not None and a.payload.get("executing_coordinator") == _seat_of(c.signer):
-                return c
-        return None
+            if a is None or a.payload.get("executing_coordinator") != _seat_of(c.signer):
+                continue
+            if best is None or (c.seq, seat) < (best.seq, _seat_of(best.signer)):
+                best = c
+        return best
 
     def assignment(self, pair) -> Event | None:
         ev = self._assignments.get(pair)
@@ -275,6 +311,10 @@ def reduce(events, *, gate_seat: str = GATE_SEAT) -> EffectiveState:
                     continue
                 st._ci_result[ev.subject_sha] = ev
             elif k == "candidate":
+                # keyed by (candidate_id, signer-seat) so a validly-signed shadow candidate (same
+                # id, different seat) does not overwrite the authoritative one (ADR-039). ADR-042
+                # binds the candidate_id to ONE pair structurally via authoritative_candidate's
+                # namespace check, so no seq/first-writer tiebreak state is needed here.
                 st._candidates[(ev.candidate_id, _seat_of(ev.signer))] = ev
             elif k == "assignment":
                 if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["assignment"]:

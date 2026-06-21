@@ -47,7 +47,7 @@ def world(tmp_path, monkeypatch):
     tree, _ = gitcas.merge_tree(r, base, branch)
     # IMPORTANT: stage with the SAME message the gate recomputes with, so the
     # exact-SHA equality check passes for the clean-merge cases.
-    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge c1")
+    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge A:c1")
     return r, base, branch, integ, reg, ks, privs
 
 
@@ -72,7 +72,7 @@ def _run(world, mutate=None, bus_id="prod"):
 
 def test_clean_change_merges(world):
     r, base, store, reg, privs = _run(world)
-    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+    res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
                    main_ref="refs/threeway/test-main")
     assert res.outcome == "COMPLETED"
     assert _head(r) != base  # advanced
@@ -86,7 +86,7 @@ def test_rejects_tampered_integration_sha(world):
             if e.kind == "candidate":
                 e.payload["integration_sha"] = "d" * 40  # not the real merge
     r, base, store, reg, privs = _run(world, mut)
-    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+    res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
                    main_ref="refs/threeway/test-main")
     assert res.outcome == "REJECTED"
     assert _head(r) == base  # NOT advanced
@@ -107,10 +107,10 @@ def test_drops_absent_signature(world):
     import json
     bad = Event(id="bad", seq=999, bus_id="prod", schema_version="threeway/1",
                 kind="candidate_aborted", sender="coordinator", recipient="all",
-                signer="coordinator:claude:s1", payload={}, candidate_id="c1")
+                signer="coordinator:claude:s1", payload={}, candidate_id="A:c1")
     p = r / "coordination" / "threeway" / "events" / "00000999-bad.json"
     p.write_text(json.dumps(to_json_obj(bad)))  # no signature
-    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+    res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
                    main_ref="refs/threeway/test-main")
     assert res.outcome == "COMPLETED", res.reason   # did NOT raise; unsigned abort dropped
     assert _head(r) == integ                          # legit merge proceeded
@@ -135,7 +135,7 @@ def test_rejects_valid_signature_wrong_seat(world):
     # release_order is an overseer-only authority, so state.release_order("c1") is None.
     for ev in events:
         store.append(ev, privs[ev.signer.split(":", 1)[0]])
-    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+    res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
                    main_ref="refs/threeway/test-main")
     assert res.outcome == "PENDING" and "release_order" in res.reason
     assert _head(r) == base
@@ -150,9 +150,9 @@ def test_rejects_old_go_then_fail(world):
                             signer="operator:claude:s1",
                             payload={"kind": "release", "verdict": "FAIL"},
                             subject_sha=events[2].payload["integration_sha"],
-                            candidate_id="c1", brief_id="b1", brief_version=1))
+                            candidate_id="A:c1", brief_id="b1", brief_version=1))
     r, base, store, reg, privs = _run(world, mut)
-    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+    res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
                    main_ref="refs/threeway/test-main")
     assert res.outcome == "PENDING"
     assert _head(r) == base
@@ -173,7 +173,7 @@ def test_rejects_candidate_modifying_ci_workflow(world):
     events = build_candidate_events(base, branch2, integ2, privs,
                                     allowed_paths=("cinema/", ".github/"))
     _populate(store, events, privs)
-    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+    res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
                    main_ref="refs/threeway/test-main")
     assert res.outcome == "REJECTED" and "tier_escalation" in res.reason
     assert _head(r) == base
@@ -185,7 +185,7 @@ def test_rejects_stage_ref_moved_after_attestation(world):
     _git(r, "commit", "--allow-empty", "-qm", "drift")
     drift = _git(r, "rev-parse", "HEAD").stdout.strip()
     _git(r, "update-ref", "refs/threeway/test-main", drift)
-    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+    res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
                    main_ref="refs/threeway/test-main")
     assert res.outcome == "REJECTED" and "stale" in res.reason
     assert _head(r) == drift  # untouched
@@ -210,7 +210,7 @@ def test_rejects_tier_mislabeled_below_minimum(world):
     events = build_candidate_events(base, b2, i2, privs, tier="T0",
                                     allowed_paths=("cinema/", ".github/"))
     _populate(store, events, privs)
-    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+    res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
                    main_ref="refs/threeway/test-main")
     assert res.outcome == "REJECTED" and "tier_escalation" in res.reason
     assert _head(r) == base
@@ -222,7 +222,7 @@ def test_rejects_diff_outside_allowed_paths(world):
     # allowed_paths excludes cinema/, but the diff is cinema/foo.py
     events = build_candidate_events(base, branch, integ, privs, allowed_paths=("docs/",))
     _populate(store, events, privs)
-    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+    res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
                    main_ref="refs/threeway/test-main")
     assert res.outcome == "REJECTED" and "allowed_paths" in res.reason
     assert _head(r) == base
@@ -234,7 +234,7 @@ def test_drops_replay_from_test_bus(world):
     # fact survives in effective state and the gate returns PENDING ("no candidate fact yet"),
     # never advancing main. (Dropping a wrong-bus replay can only REMOVE events; it never promotes.)
     r, base, store, reg, privs = _run(world, bus_id="TEST-BUS")
-    res = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+    res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
                    main_ref="refs/threeway/test-main")
     assert res.outcome == "PENDING" and "no candidate" in res.reason   # all events dropped; did NOT raise
     assert _head(r) == base   # main untouched (fail-closed)
@@ -243,10 +243,10 @@ def test_drops_replay_from_test_bus(world):
 def test_crash_after_release_before_cas_recovers_without_double_write(world):
     # run twice; the CAS expected-old + merge_completed make the 2nd a no-op
     r, base, store, reg, privs = _run(world)
-    a = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+    a = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
                  main_ref="refs/threeway/test-main")
     head_after_first = _head(r)
-    b = run_gate("c1", store, r, registry_dir=reg, bus_id="prod",
+    b = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
                  main_ref="refs/threeway/test-main")
     assert a.outcome == "COMPLETED" and b.outcome == "COMPLETED"
     assert _head(r) == head_after_first  # no second write
