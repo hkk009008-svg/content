@@ -299,3 +299,7 @@ def test_merge_tree_is_deterministic_under_ambient_merge_config(tmp_path, monkey
     res_false = _under("false")
     assert res_true == res_false, (
         f"merge_tree non-deterministic under ambient merge.renames: {res_true} != {res_false}")
+    # ADR-048 also pins the VALUE (renames=true -> rename-FOLLOWING): the rename+edit vs
+    # edit-in-place merge must be CLEAN. Asserting clean here makes the pinned direction
+    # load-bearing — flipping the pin to false (rename-blind) would conflict and redden this.
+    assert res_true[1] is True, "pinned merge.renames=true must follow the rename (clean merge)"
