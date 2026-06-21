@@ -53,18 +53,20 @@ From the spec §4 / [`threeway/loop.py:43-52`](../../../threeway/loop.py):
 |---|---|---|---|
 | `director` | **builder** (own branch) | A | a Codex `live-seat` (`CODEX_SEAT=director`) — its behavior source is already `director2` per `SEAT_BEHAVIOR_SOURCE` |
 | `operator2` | **primary verifier** (read-only repo) | B | a Codex `live-seat` (`CODEX_SEAT=operator2`) — behavior source `operator`; pair with the `lane-v-verifier` role agent |
-| `coordinator2` | **executing integrator** (staging refs only) | B | **target-state only today** — the current Codex harness does not accept `CODEX_SEAT=coordinator2`; see §4 for the Slice 2.5 work that must make it real |
+| `coordinator2` | **executing integrator** (staging refs only) | B | `CODEX_SEAT=coordinator2` binds **coordinator mode** today — a compatibility alias, unpinned (`scripts/codex_protocol_model.py:104,155-156`); `seat_status.py` + `protocol_mailbox.RECEIVING_SEATS` accept it. The LIVE signed-bus **integrator role** (staging refs → main) is the target-state — see §4 (gated on cutover + merge-gate runner) |
 
 Codex's builder (`director`) is verified by Claude's `operator`; Codex's verifier (`operator2`)
 verifies Claude's `director2` build; Codex's `coordinator2` integrates Claude-built candidates. That
 is the cross-provider independence property in practice — **a Codex seat never primarily verifies or
 integrates Codex-built code.**
 
-> The `CODEX_SEAT` values today are `director | director2 | operator | operator2 | coordinator`
-> (`scripts/codex_protocol_model.py:151-154`). They overlap with the threeway builder/verifier seat
-> names but the threeway bus also needs `coordinator2`, `overseer`, `ci`, `merge-gate`. Today
-> `coordinator2` is a target threeway seat and the others are mechanical/strategic identities; none
-> of them is a current Codex harness live-seat until Slice 2.5 adds explicit support.
+> The `CODEX_SEAT` values today are `director | director2 | operator | operator2 | coordinator |
+> coordinator2` (`scripts/codex_protocol_model.py:154-156`); `coordinator` and `coordinator2` both
+> bind **coordinator mode** as unpinned compatibility aliases. They overlap with the threeway
+> builder/verifier seat names; the threeway bus additionally needs `overseer`, `ci`, `merge-gate`,
+> which are mechanical/strategic identities, not Codex harness live-seats. `coordinator2` is already
+> an accepted Codex seat (mode-bound); what remains target-state is its **live signed-bus integrator
+> role** (staging refs → main), gated on the cutover + merge-gate runner — see §4.
 
 ## 3. Prerequisite: key provisioning and custody
 
@@ -99,29 +101,41 @@ Set `THREEWAY_KEYSTORE` to point at the seat-local keystore; Codex loads its key
 
 ## 4. The adoption path (sequenced — there is no switch to flip)
 
-Per the unified doc §I.5, the `threeway/` package is **wired into nothing** today, and the design
-**forbids dual-write** (`docs/superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md:70`, audited). So adoption is the migration,
-in order:
+Per the unified doc §I.5, the `threeway/` package is **built, hardened, and test-green (341 passed)
+but wired into nothing** today — no live seat/harness/CI emits a threeway event; the legacy mailbox
+bus is still the live coordination substrate. The design **forbids dual-write** (spec §8 item 8 +
+Slice-2.5 design spec §D2, audited). So adoption is the migration, in order:
 
 1. **Provision keys** (§3) and commit the registry.
-2. **Slice 2.5 — author the real migration plan** from the stub. The concrete edit-sites must include
-   every hard-coded mailbox/harness seat-list needed to make `coordinator`/`coordinator2`
-   first-class receiving seats: at minimum `scripts/protocol_mailbox.py:11` (`SEATS`),
-   `coordination/bin/send-event`, `coordination/bin/consume-events`, `scripts/check_coordination.py`,
-   `scripts/status.py:126` (`_MAILBOX_SEATS`), and the Codex orientation/harness surfaces that
-   currently reject `coordinator2` (for example `seat_status.py` and `scripts/codex_protocol_model.py`).
-   Backfill cursors ISO→scalar `seq`. **Method: shadow read-only projection →
+2. **Slice 2.5 — execute the cutover.** The receiving-seat plumbing is already **DONE**: the
+   oversight-inclusive roster lives in `protocol_mailbox.RECEIVING_SEATS`
+   (`scripts/protocol_mailbox.py:17` — the 4 pair seats + both coordinators), every Python roster copy
+   imports it as its source of truth (`scripts/status.py:141` `_MAILBOX_SEATS`), and the Codex
+   orientation/harness surfaces accept `coordinator2` (`.claude/skills/four-seat-protocol/scripts/seat_status.py`
+   + `scripts/codex_protocol_model.py:104,155-156`). The migration **substrate is BUILT + hardened**
+   (ADR-034/044/045): `threeway/legacy_projector.py` (shadow projection), `threeway/divergence.py`,
+   `threeway/cursor_backfill.py` (ISO→scalar `seq`, atomic manifest per ADR-047), and
+   `threeway/cutover.py` (single authority-flip). The residual is therefore NOT seat-list edits but the
+   **LIVE signed-bus integrator wiring + the cursor-backfill EXECUTION** — i.e. running the single
+   authority-flip cutover (`threeway/cutover.py`), which has NOT been executed and is **gated on explicit
+   user confirmation** (DECISIONS.md ADR-045). **Method: shadow read-only projection →
    single-writer cutover (no dual-write window).** The legacy mailbox stays authoritative until
    cutover.
 3. **Wire CI to emit a signed `ci_result`.** Today `.github/workflows/ci.yml` runs bare `pytest
    tests/unit/` and signs nothing. A real `ci_result` (signed by the `ci` seat, binding
    `integration_sha` + `policy_digest`, `result: PASS`) must be produced by the unprivileged runner
-   and appended to the bus before the gate's predicate can pass (`threeway/predicate.py:138-147`).
+   and appended to the bus before the gate's predicate can pass (`threeway/predicate.py:152-161`).
 4. **Deploy the merge-gate** as a dedicated protected runner holding the only protected-`main`
    credential, invoking `threeway.gate.run_gate(...)`. Note: `run_gate` is an **in-process function**
-   today (`threeway/gate.py:95`) — there is no daemon yet; the runner is what's missing.
-5. **Slice 3** — the strategic loop, overseer distribution, `cycle_go`/`release_order`, and the T2
-   other-pair-operator co-sign that makes `co_sign_satisfied` true for escalated tiers.
+   today (`threeway/gate.py:158`) — and it is **TOTAL: it never raises after the CAS** (ADR-039/040/041);
+   there is no daemon yet; the runner is what's missing.
+5. **Slice 3 — runtime only; the gate machinery is already BUILT + enforcing** (ADR-035). The
+   merge-gate tier check `co_sign_satisfied` (`threeway/tier.py:39`) is fail-closed and already gates
+   T2 (other-pair operator co-sign) and T3 (re_verify freshness-nonce challenge + two key-bound
+   `human_approvals` from an overseer-signed `approver_roster`, ADR-043). What is unbuilt is the
+   strategic-loop **runtime** (scope b): the dual-chief apps, overseer fact emission
+   (`cycle_go`/`release_order`/`approver_roster`), and key provisioning that make those signed facts
+   exist at run time.
 
 Only after this is the signed bus the live substrate. Until then, Codex coordinates on the **legacy
 mailbox bus** exactly as it does today.
@@ -130,12 +144,12 @@ mailbox bus** exactly as it does today.
 
 When Codex operates a threeway seat against the live bus, it constructs and signs **its own** events
 — it does **not** call `build_candidate_events` (that is a whole-loop *test/demo fixture* in
-`threeway/loop.py` that fabricates all nine events for all seats as unsigned; the docstring says so).
-The real pattern:
+`threeway/loop.py` that fabricates ONE pair's nine loop facts — a `PairConfig` `PAIR_A`/`PAIR_B`, not
+all seats — as unsigned; the docstring says so). The real pattern:
 
 - Build an `Event` (`threeway/envelope.py`), set the `signer` to your seat, then **append + sign**:
   `store.append(event, load_private(my_seat))` — `append` signs with the seat key and assigns `seq`
-  (`threeway/store.py:33-40`; `RefEventStore.append` for the ref bus, `threeway/refstore.py:122`).
+  (`threeway/store.py:39-50`; `RefEventStore.append` for the ref bus, `threeway/refstore.py:132`).
 - Each seat signs only the facts it owns (`predicate.py` enforces this by seat): the Codex
   `director` does **not** sign the candidate (the coordinator does) or the attestations (the operator
   does). A Codex `coordinator2` signs the `candidate`; a Codex `operator2` signs `attestation`
@@ -147,9 +161,12 @@ The real pattern:
 ## 6. Mode and orientation (unchanged from the existing harness)
 
 - A fresh Codex session is a **readiness bridge** by default and never silently upgrades into a seat
-  (`docs/protocol/codex/continuation.md`). In the current harness it can become `director` or
-  `operator2` only on explicit user/parent instruction. `coordinator2` is a target threeway seat and
-  must not be claimed as live until Slice 2.5 adds the corresponding Codex harness/orientation support.
+  (`docs/protocol/codex/continuation.md`). In the current harness it can become `director`,
+  `operator2`, or `coordinator2` only on explicit user/parent instruction. `coordinator2` already
+  binds **coordinator mode** (an unpinned compatibility alias, `scripts/codex_protocol_model.py:104,155-156`);
+  what is not yet live is its **signed-bus integrator role**, which arrives with the cutover +
+  merge-gate runner (§4) — so a `coordinator2` Codex session today coordinates on the legacy mailbox
+  bus, not the signed bus.
 - On assuming a seat, **find the newest `docs/HANDOFF-<concrete-seat>-*.md` first**, then orient via
   `seat_status.py <seat> --wave <N>` (read-only), then check mail before any protocol decision.
 - All Layer-2 rules in the unified doc apply verbatim through Codex's primitives (Part III): subagents
@@ -167,7 +184,7 @@ The real pattern:
   verification). The merge-gate recomputes the merge anyway and rejects a mismatch.
 - **No dual-write.** Do not "read old tasks from the mailbox and write new ones to the threeway bus."
 - **Keys never touch candidate-executing environments** (§3).
-- **The `ci_result` is real evidence, not a fixture.** The fixture in `loop.py:99` does not satisfy
+- **The `ci_result` is real evidence, not a fixture.** The fixture in `loop.py:104-105` does not satisfy
   the gate; CI must produce a signed one.
 
 ---

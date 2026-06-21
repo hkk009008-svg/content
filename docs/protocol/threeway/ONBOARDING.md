@@ -25,9 +25,8 @@ ANY work:
    - AGENTS.md                                             (agent-agnostic principle root)
    - for any normative detail: docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md
 
-   If those files are not in your checkout, they live on branch `docs/threeway-adoption-manuals`
-   (PR #19). Run `git fetch origin` then read them from `origin/docs/threeway-adoption-manuals`,
-   e.g. `git show origin/docs/threeway-adoption-manuals:docs/protocol/threeway/ONBOARDING.md`.
+   These live under `docs/protocol/threeway/` on `main`. If your checkout predates them, run
+   `git fetch origin && git checkout origin/main -- docs/protocol/threeway`.
 
 2. Before acting, state back to the user:
    - Your provider, and which seat(s) you may hold (see the seat table in the unified doctrine §I.2).
@@ -59,7 +58,10 @@ stale versus the code, the code wins — fix the doc in the same change that exp
 1. **`ONBOARDING.md`** (this file) — the map + the non-negotiables.
 2. **`UNIFIED-OPERATING-DOCTRINE.md`** — the heart. Layer 1 (the cross-provider protocol: seats,
    bus, merge-gate) vs Layer 2 (the portable rules every provider follows), plus the **capability
-   map** that tells your provider which primitive implements each rule.
+   map** that tells your provider which primitive implements each rule. Currency note: the
+   `threeway/` package the build-status section (§I.5) routes to is now BUILT, hardened, and
+   test-green — but WIRED INTO NOTHING; the legacy mailbox bus is still the live substrate, and
+   keys are not provisioned (the hard blocker for going live).
 3. **Your provider manual** — Codex / Antigravity / Claude specifics.
 4. **`ARCHITECTURE-DIAGRAM.md`** — the canonical topology picture.
 5. **`AGENTS.md`** — the agent-agnostic principle root (already names all three providers).
@@ -80,11 +82,13 @@ stale versus the code, the code wins — fix the doc in the same change that exp
 ## Per-provider quick start
 
 - **Codex** — you are a **readiness bridge by default**; become a current harness seat (`director` or
-  `operator2`) only on explicit instruction. `coordinator2` is a target threeway seat, but it is not a
-  current Codex live-seat until Slice 2.5 wires it into the harness/orientation surfaces. Your harness
-  already mirrors Layer 2 (`scripts/codex_protocol_model.py`, `.codex/agents/*.toml`, `.codex/hooks/`).
-  See `CODEX-ADOPTION.md` for your seats + the migration path. Git: `env -u GIT_INDEX_FILE` for
-  ordinary git/pytest.
+  `operator2`) only on explicit instruction. `CODEX_SEAT=coordinator2` now binds coordinator MODE — a
+  compatibility alias, unpinned — in the Codex harness (`scripts/codex_protocol_model.py:104,155-156`);
+  `seat_status.py` and `protocol_mailbox.RECEIVING_SEATS` (`scripts/protocol_mailbox.py:17`) accept it.
+  What remains target-state is the LIVE signed-bus INTEGRATOR role (staging refs -> main), gated on the
+  cutover + merge-gate runner. Your harness already mirrors Layer 2 (`scripts/codex_protocol_model.py`,
+  `.codex/agents/*.toml`, `.codex/hooks/`). See `CODEX-ADOPTION.md` for your seats + the migration path.
+  Git: `env -u GIT_INDEX_FILE` for ordinary git/pytest.
 - **Claude** — `CLAUDE.md` + `docs/protocol/claude/` are your mechanics; you hold `director2` /
   `operator` / `coordinator`. Use the `Agent`/`Workflow`/`Skill` tools as your Layer-2 primitives.
 - **Antigravity (agy)** — you hold **no seat**. Operate as a read-only observer or a human-relayed

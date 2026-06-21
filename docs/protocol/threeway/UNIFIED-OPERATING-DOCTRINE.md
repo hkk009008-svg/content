@@ -92,11 +92,13 @@ verification and the *executing* integration of its own work.
   *strategic* key; the per-SHA `release_order` is the *merge* key.
 
 The merge-gate **re-evaluates the full predicate itself** from authoritative bus state and **never
-trusts the trigger or runs candidate code** (`threeway/gate.py:95-144`,
-`threeway/predicate.py:39-153`). Authority is checked **by seat**, not by signature validity alone
-(`predicate.py:120-127`): `overseer` signs brief/assignment/cycle_go/release_order, the executing
-coordinator signs the candidate, the named primary verifier signs attestations, `ci` signs
-`ci_result`.
+trusts the trigger or runs candidate code** (`run_gate` at `threeway/gate.py:158`; `evaluate` at
+`threeway/predicate.py:39`, spanning 39-167). `run_gate` is **TOTAL** — it never raises after the CAS
+(ADR-039/040/041; non-str `candidate_id` and malformed bus events are guarded fail-closed). Authority
+is checked **by seat**, not by signature validity alone (`predicate.py:136`): `overseer` signs
+brief/assignment/cycle_go/release_order (signer checks `predicate.py:84` brief / `:116` cycle_go /
+`:140` release_order), the executing coordinator signs the candidate, the named primary verifier signs
+attestations, `ci` signs `ci_result` (`predicate.py:152-161`).
 
 ## I.5 Build status — what is and is NOT real yet (verify before relying)
 
@@ -106,25 +108,51 @@ coordinator signs the candidate, the named primary verifier signs attestations, 
 - **The package is wired into NOTHING.** `import threeway` appears only inside `threeway/` and
   `tests/` — no live seat, harness, or CI emits a threeway event today. The live coordination
   substrate is still the **legacy mailbox bus**.
-- **Slice 2.5 (legacy-bus migration) is a DEFERRED tracking stub**, not an implementation plan
-  ([plan](../../superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md)).
-- **Slice 3 (strategic loop + T2/T3 co-sign) is unbuilt** — `co_sign_satisfied` returns False for
-  T2/T3, so escalated tiers cannot promote yet.
-- **Keys are not provisioned** — `coordination/threeway/keys/` holds only a README; no `.pub` files
-  exist. The merge-gate protected runner is design intent, not deployed.
+- **Slice 2.5 (legacy-bus migration substrate) is BUILT + hardened, not yet cut over.** The substrate
+  — `legacy_projector.py`, `divergence.py`, `cursor_backfill.py`, `cutover.py` — is built and
+  test-green (341 passed)
+  ([plan](../../superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md)).
+  The single authority-flip **cutover has NOT been executed** — gated on explicit user confirmation
+  (DECISIONS.md ADR-045). Cutover substrate was hardened in ADR-044/045 (atomic `_teardown`, dedup
+  drop fixes, pre-cursor-try strand gap closed); two dormant cutover gaps (total-order congruence +
+  seen-filename→seat-key) are tracked open for a follow-up round.
+- **Slice 3 (tiered T2/T3 co-sign machinery) is BUILT + enforcing (ADR-035).** `co_sign_satisfied`
+  (`threeway/tier.py:39`) gates **T2** (other-pair operator co-sign) and **T3** (re_verify
+  freshness-nonce challenge + two key-bound `human_approvals` from an overseer-signed `approver_roster`,
+  ADR-043). It does **NOT** return False for T2/T3; it is **fail-closed** — True only when the required
+  signed facts exist. The merge-gate tier machinery is enforcing. Only the strategic-loop **runtime**
+  (scope b: dual-chief apps, overseer fact emission, key provisioning) is unbuilt.
+- **Keys are NOT provisioned** — `coordination/threeway/keys/` holds only a README; no `.pub` files
+  exist. This is the **hard blocker for going live**. The merge-gate protected runner is design intent,
+  not deployed.
+- **Forgery hardening (ADR-036/037/038):** revoke-authority + collision-aware index (ADR-036);
+  event-id uniqueness at the gate and both stores (ADR-037); reserved merge-id + `brief_superseded`
+  sibling (ADR-038) — closing the forgery / merge-DoS class.
+- **Availability hardening (ADR-039/040/041):** authority-aware reducer (ADR-039); **TOTAL `run_gate`**
+  that never raises after the CAS (ADR-040); `well_formed` event guard (ADR-041).
+- **Identity + residual surfaces:** pair-namespaced `candidate_id = "<pair>:<local>"` (ADR-042);
+  residual-surface hardening ADR-046..049 (refstore/store reader totality vs a malformed blob; atomic
+  cursor-backfill manifest; host-independent merge-tree determinism; cutover force-rerun cursor fix —
+  all Lane-V verified).
 
 **Therefore "adopting the protocol" means executing the remaining migration in order, not flipping a
 switch.** See each provider's adoption manual for the sequenced path.
 
 ## I.6 Load-bearing Layer-1 invariants (memorize)
 
-1. **No dual-write authority at any point** (spec §8 item 8, line 400; Slice 2.5 line 70, *audited*). Migration is
-   **shadow read-only projection → single-writer cutover**. The legacy mailbox stays authoritative
-   until cutover; the new bus shadows it. Never "read old from mailbox, write new to the bus."
+1. **No dual-write authority at any point** (spec §8 item 8, line 400; Slice 2.5 design §D2, line 47,
+   *audited*). Migration is **shadow read-only projection → single-writer cutover**. The legacy mailbox
+   stays authoritative until cutover; the new bus shadows it (in-memory projection — zero ref-bus
+   mutation until cutover, per ADR-034/D2). Never "read old from mailbox, write new to the bus."
 2. **The builder's provider never primarily verifies or executes integration of its own work.**
 3. **The merge-gate is the sole writer of protected `main`** and **never executes candidate code**;
-   it recomputes the merge and refuses to trust the coordinator's claimed `integration_sha`.
-4. **Every load-bearing fact is signed; authority is by seat.**
+   it recomputes the merge and refuses to trust the coordinator's claimed `integration_sha`. `run_gate`
+   is TOTAL and fail-closed (ADR-039/040/041).
+4. **Every load-bearing fact is signed; authority is by seat** — including the **revoke authority**
+   channel (ADR-036); event ids are unique at the gate and both stores (ADR-037); merge ids are
+   reserved with a `brief_superseded` sibling (ADR-038); candidate ids are pair-namespaced
+   `"<pair>:<local>"` (ADR-042). T3 promotion additionally requires a re_verify freshness nonce + two
+   key-bound approvals from an overseer-signed roster (ADR-043).
 5. **Antigravity is off every Layer-1 write/verify/integrate/bus path** (§1, D11).
 
 ---

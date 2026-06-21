@@ -7,8 +7,13 @@ in both (see *What this corrects* below). The **normative truth** is the spec
 and the `threeway/` package — consult them for any detail; when this diagram and they disagree,
 they win.
 
-> **Status:** this depicts the *target* topology. The `threeway/` package (Slice 1+2) is built but
-> **wired into nothing** today; the live substrate is still the legacy mailbox bus. See
+> **Status:** this depicts the *target* topology. The `threeway/` package — Slice 1+2 (signed bus,
+> effective-state reducer, gate, RefEventStore), Slice 2.5 (legacy-bus migration substrate), and
+> Slice 3 (tiered T2/T3 co-sign machinery) — is BUILT, hardened, and test-green but **wired into
+> nothing** today: no live seat/harness/CI emits a threeway event; the legacy mailbox bus is still
+> the live coordination substrate. The single authority-flip cutover has NOT been executed (gated on
+> explicit user confirmation, DECISIONS.md ADR-045), and **keys are NOT provisioned**
+> (`coordination/threeway/keys/` holds only a README) — the hard blocker for going live. See
 > [`UNIFIED-OPERATING-DOCTRINE.md`](UNIFIED-OPERATING-DOCTRINE.md) §I.5.
 
 ## Topology
@@ -88,8 +93,11 @@ flowchart TB
   NoteInd["Cross-Provider Independence:<br/>the builder's provider is NEVER the primary verifier<br/>or executing integrator of its own work"]:::note
   NoteInd -.- DA
   NoteInd -.- OA
-  NoteTier["Gate-computed tiers: T0/T1 shown.<br/>T2 adds the OTHER pair's operator co_sign.<br/>T3 adds re_verify + two human_approval.<br/>Slice 3, not yet active."]:::note
+  NoteTier["Gate-computed tiers: T0/T1 shown.<br/>T2 adds the OTHER pair's operator co_sign.<br/>T3 adds nonce-fresh re_verify + two key-bound human_approvals (ADR-043).<br/>Slice-3 tier machinery is BUILT + enforced (co_sign_satisfied, tier.py:39); only live fact-emission (scope b) is pending."]:::note
   NoteTier -.- Gate
+  NoteHard["Bus + gate are forgery-hardened: revoke-authority + event-id uniqueness + reserved merge-id (ADR-036/037/038);<br/>run_gate is TOTAL (authority-aware reducer, never raises after the CAS; ADR-039/040/041);<br/>candidate_id is pair-namespaced '&lt;pair&gt;:&lt;local&gt;' (ADR-042)."]:::note
+  NoteHard -.- Bus
+  NoteHard -.- Gate
 ```
 
 ## Legend

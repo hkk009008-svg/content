@@ -34,8 +34,11 @@ the protocol, for Antigravity, largely means *honoring the boundary*.
 
 > **Do not** replicate the external ChatGPT plan that cast Antigravity as a read-only "strategic hub"
 > or "overseer" that signs `cycle_go`/`release_order`. That inverts the design: those facts are
-> `overseer`-signed and signer-checked (`threeway/predicate.py:109,126`), the overseer is mechanical,
-> and Antigravity signs nothing.
+> `overseer`-signed and signer-checked (`threeway/predicate.py:116` (cycle_go), `:140` (release_order)),
+> the overseer is mechanical, and Antigravity signs nothing. Those signer checks are now reinforced by
+> the per-approver, key-bound `human_approval` and the overseer-only `re_verify_challenge` /
+> `approver_roster` (ADR-043) — so even the high-risk T3 approval inputs are overseer-signed, never
+> agy-signed.
 
 ## 2. The two roles Antigravity *may* play
 
@@ -126,9 +129,13 @@ effects are user-gated; impl ≠ verifier. These never change with the tool.
    the overseer and does not emit `cycle_go`, `release_order`, `human_approval`, attestations, or any
    signed fact.
 2. **Never push to `main`** and never integrate a candidate. Only the mechanical merge-gate writes
-   protected `main`.
+   protected `main` — a posture now hardened by the **TOTAL** `run_gate` (`threeway/gate.py:158`, never
+   raises after the CAS) and the **authority-aware effective-state reducer** (ADR-039..041), so no
+   non-overseer write or insider race can substitute for the merge-gate. The **cutover substrate** that
+   would flip live authority onto this bus is **BUILT + hardened but user-gated** (ADR-044/045; the
+   single authority-flip has NOT been executed) — agy never triggers it.
 3. **No dual-write.** Do not read old tasks from the mailbox while writing new ones to the threeway
-   bus (forbidden for every provider, spec §8.8).
+   bus (forbidden for every provider, spec §8 item 8).
 4. **Self-verification is not verification.** Antigravity-built code reaching `main` must be verified
    by a different provider (§3 caveat) — surface this to the user rather than self-approving.
 5. **Strategic output is advisory prose, relayed by a human** — never a direct instruction to a seat

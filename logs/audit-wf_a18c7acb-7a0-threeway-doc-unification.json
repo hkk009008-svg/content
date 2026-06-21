@@ -1,0 +1,738 @@
+{
+  "summary": "Exhaustive per-doc currency audit + cross-doc/truth-source consistency audit of the docs/protocol/threeway suite, to ground an accurate refresh to HEAD",
+  "agentCount": 8,
+  "logs": [
+    "Verify complete: 6/6 doc audits + activation facts -> consistency"
+  ],
+  "result": {
+    "per_doc": [
+      {
+        "doc": "docs/protocol/threeway/README.md",
+        "stale_count": 3,
+        "items": [
+          {
+            "location": "line 21 (Status block) — \"Slice 2.5 (migration) is a deferred stub\"",
+            "kind": "status_claim",
+            "quote": "Slice 2.5 (migration) is a\ndeferred stub and Slice 3 (strategic loop) is unbuilt.",
+            "verdict": "stale",
+            "current_truth": "Slice 2.5 substrate is BUILT, not a deferred stub. The migration modules now exist: `ls threeway/` → cutover.py, legacy_projector.py, cursor_backfill.py, divergence.py all present. cutover.py docstring: \"The single authoritative cutover (Slice 2.5 §5c)\" with run_cutover() at threeway/cutover.py:107 and _teardown() at :78 (grep confirmed). It was hardened by ADR-044 (non-atomic _teardown fix + refstore dedup revoke/supersede) and ADR-045 (pre-cursor-try strand guard), both ACCEPTED in DECISIONS.md (lines 2247, 2309). DECISIONS.md:2337 states the live cutover \"remains gated on explicit user confirmation\" — i.e. built and verified but NOT yet executed/live. The accurate status is \"built (Slice 2.5 substrate) but not yet executed — the authority-flip is gated on explicit user confirmation.\"",
+            "fix": "Replace \"Slice 2.5 (migration) is a deferred stub\" with: \"Slice 2.5 (legacy-bus migration) substrate is BUILT and verified (threeway/cutover.py run_cutover/_teardown, legacy_projector.py, cursor_backfill.py, divergence.py; hardened by ADR-044/045) but NOT yet executed — the single authority-flip cutover is gated on explicit user confirmation.\"",
+            "severity": "critical"
+          },
+          {
+            "location": "line 21 (Status block) — \"Slice 3 (strategic loop) is unbuilt\"",
+            "kind": "status_claim",
+            "quote": "Slice 3 (strategic loop) is unbuilt.",
+            "verdict": "stale",
+            "current_truth": "The Slice-3 merge-gate tier machinery (scope a) is BUILT and ACCEPTED. DECISIONS.md:1699 ADR-035 \"Slice 3: tiered co-sign co_sign_satisfied enforces T2/T3\" Status: ACCEPTED. threeway/tier.py:39 defines co_sign_satisfied with live T2 (line 55) and T3 (line 57-61, _two_distinct_human_approvals) branches — it no longer returns False for escalated tiers. ADR-036/037/038 hardened the forgery class; ADR-039/040/041 made run_gate TOTAL; ADR-042 added pair-namespaced candidate ids; ADR-043 closed two scope-(b) deferrals (re_verify freshness CHALLENGE + per-approver key-bound human_approval / approver_roster — tier.py:151 state.approver_roster confirmed). Only the strategic-loop RUNTIME (scope b: dual-chief approval apps, overseer brief distribution, LIVE emission of co_sign/re_verify/human_approval facts) remains unbuilt (ADR-035 \"scope (b) remains a separate future slice\"). So \"Slice 3 is unbuilt\" is wrong; the bulk (tier machinery) is built and merged.",
+            "fix": "Replace \"Slice 3 (strategic loop) is unbuilt\" with: \"Slice 3 merge-gate tier machinery is BUILT and merged (ADR-035; threeway/tier.py co_sign_satisfied enforces T2/T3, hardened by ADR-036..043). Only the strategic-loop runtime — dual-chief approval apps, overseer brief distribution, and LIVE emission of co_sign/re_verify/human_approval facts (scope b) — remains unbuilt.\"",
+            "severity": "critical"
+          },
+          {
+            "location": "line 20 — \"the `threeway/` package (Slice 1+2)\"",
+            "kind": "status_claim",
+            "quote": "the `threeway/` package (Slice 1+2) is built but **wired into\nnothing**",
+            "verdict": "missing_nuance",
+            "current_truth": "The parenthetical \"(Slice 1+2)\" undercounts what the package now holds. `ls threeway/` shows Slice 2.5 (cutover.py, legacy_projector.py, cursor_backfill.py, divergence.py) and Slice 3 (tier.py co_sign_satisfied T2/T3) modules are all present and merged. The \"wired into nothing\" half is CURRENT: `grep -rln 'import threeway\\|from threeway' --include='*.py' . | grep -vE 'threeway/|/tests/|test_'` returns EMPTY — no live seat/harness/CI imports threeway. So the package is built and wired-into-nothing, but it is now Slice 1+2+2.5+3-machinery, not just Slice 1+2.",
+            "fix": "Change \"(Slice 1+2)\" to \"(Slices 1, 2, 2.5 substrate, and Slice-3 tier machinery)\" or drop the slice parenthetical and let the per-slice status below carry the detail. Keep \"wired into nothing\" — it is verified current.",
+            "severity": "major"
+          }
+        ],
+        "missing_content": [
+          {
+            "topic": "The migration spec (Slice 2.5 legacy-bus migration design) is not listed as a truth source",
+            "why_needed": "The README's Status block makes Slice 2.5 claims but the truth sources (lines 15-17) only list the 2026-06-19 topology spec. The Slice-2.5 substrate is now built per a dedicated spec that should be the authority for any 2.5 status claim.",
+            "where_to_add": "Truth sources block (after line 15), or in the Status block as the citation for the corrected Slice-2.5 status.",
+            "evidence": "docs/superpowers/specs/2026-06-20-threeway-slice2.5-legacy-bus-migration-design.md EXISTS (file present); cutover.py docstring cites \"(Slice 2.5 §5c)\" / \"(spec §5a)\" pointing at it."
+          },
+          {
+            "topic": "ADR-039..045 reshaped the package since Jun 20 and are uncited",
+            "why_needed": "The README's status framing predates these ADRs. ADR-039/040/041 (authority-aware reducer + TOTAL run_gate, never raises after CAS, well_formed envelope guard), ADR-042 (pair-namespaced candidate_id = \"<pair>:<local>\"), ADR-043 (T3 re_verify freshness challenge + per-approver key-bound human_approval), ADR-044/045 (cutover substrate built + hardened) are the load-bearing facts that make the current Slice-2.5/Slice-3 status what it is. A reader of this router should know the substrate has advanced.",
+            "where_to_add": "Status block (lines 19-22) — fold a one-line \"see ADR-039..045 / DECISIONS.md\" pointer, or add DECISIONS.md to truth sources.",
+            "evidence": "DECISIONS.md headers verified: ADR-039 (line 1900), ADR-040 (1984), ADR-041 (2044), ADR-042 (2105), ADR-043 (2167), ADR-044 (2247), ADR-045 (2309)."
+          },
+          {
+            "topic": "ARCHITECTURE.md §13A is the truth-layer section and is not pointed to",
+            "why_needed": "ARCHITECTURE.md §13A now documents the full threeway subsystem including §13A.5 (Slice 2.5 legacy mailbox projection), §13A.6 (Slice 3 tiered co-sign), §13A.7 (ADR-039 availability hardening). It is the canonical truth-layer source and would anchor any status claim better than prose.",
+            "where_to_add": "Truth sources block (lines 14-17) alongside the spec and package.",
+            "evidence": "grep ARCHITECTURE.md: \"## 13A. Cross-provider seat topology — threeway/ merge-bus\" (line 1699); subsections 13A.5 (1778), 13A.6 (1801), 13A.7 (1856)."
+          },
+          {
+            "topic": "Keys-not-provisioned status is implied by 'wired into nothing' but not stated in README",
+            "why_needed": "A reader deciding whether the protocol is operable needs to know keys are not provisioned (no .pub files), which is a hard blocker the README only references indirectly via §I.5. The current README Status omits it.",
+            "where_to_add": "Status block (line 19-22), as a one-line caveat.",
+            "evidence": "ls coordination/threeway/keys/ → only README.md; find coordination -name '*.pub' → empty (no public keys provisioned). Matches §I.5's still-current \"Keys are not provisioned\" line."
+          },
+          {
+            "topic": "coordinator2 is now a recognized CODEX_SEAT compatibility alias",
+            "why_needed": "Strengthens line 10's coordinator2 claim and the migration narrative — the Codex harness now recognizes coordinator2 as a live-seat alias for coordinator mode, evidence that the seat topology is encoded in tooling, not just docs.",
+            "where_to_add": "Optional — could be a footnote on the CODEX-ADOPTION row (line 10); primarily belongs in CODEX-ADOPTION.md itself.",
+            "evidence": "scripts/codex_protocol_model.py:104 COORDINATOR_SEATS = (\"coordinator\", \"coordinator2\"); :156 \"coordinator and coordinator2 are compatibility aliases for coordinator mode and remain unpinned\"."
+          }
+        ],
+        "overall": "README.md is a pure router/index doc — it carries NO code file:line anchors (grep for .py:NNN patterns returned empty), so there is nothing to anchor-check; the run_gate gate.py:95→:158 drift the prompt flagged lives in OTHER manuals, not here. All 11 internal links/pointers resolve at HEAD (5 table docs, 3 truth-source paths, the §I.5 pointer, verified via ls + relative-path existence checks). All mechanism/seat claims are CURRENT: Codex seats (director/operator2/coordinator2), Antigravity no-seat, the six load-bearing reads, and the seat→provider mapping all match the spec §4 + UNIFIED-OPERATING-DOCTRINE §I.2. The ONE problem area is the Status block (lines 19-22), which is materially STALE on two of four claims as of the Jun-21 ADR work: (1) \\\"Slice 2.5 (migration) is a deferred stub\\\" is WRONG — the migration substrate is BUILT and verified (cutover.py run_cutover/_teardown, legacy_projector.py, cursor_backfill.py, divergence.py all present; ADR-044/045), merely gated on user confirmation, not executed; (2) \\\"Slice 3 (strategic loop) is unbuilt\\\" is WRONG — the Slice-3 tier machinery is BUILT and ACCEPTED (ADR-035; tier.py co_sign_satisfied enforces T2/T3, hardened by ADR-036..043), only the strategic-loop runtime (scope b: dual-chief apps, overseer distribution, live fact emission) remains unbuilt. The \\\"wired into nothing\\\"/legacy-bus-live and the implied keys-not-provisioned facts remain CURRENT (grep for threeway importers outside package/tests → empty; no .pub files). Two CRITICAL status fixes, three MAJOR (slice-parenthetical undercount, the §I.5 co-staleness flag, the missing migration-spec truth source); the rest is current and should NOT be touched. CAUTION for the refresh: the pointed-to UNIFIED-OPERATING-DOCTRINE §I.5 carries the IDENTICAL stale Slice-2.5/Slice-3 lines — fix both in the same pass or the pointer aims at stale detail."
+      },
+      {
+        "doc": "docs/protocol/threeway/ONBOARDING.md",
+        "stale_count": 2,
+        "items": [
+          {
+            "location": "lines 28-30 (copy-paste prompt, fallback-branch instruction)",
+            "kind": "pointer",
+            "quote": "If those files are not in your checkout, they live on branch `docs/threeway-adoption-manuals` (PR #19). Run `git fetch origin` then read them from `origin/docs/threeway-adoption-manuals`, e.g. `git show origin/docs/threeway-adoption-manuals:docs/protocol/threeway/ONBOARDING.md`.",
+            "verdict": "stale",
+            "current_truth": "The adoption manuals are now MERGED to main and the fallback branch no longer exists. `git ls-tree origin/main --name-only docs/protocol/threeway/` lists ONBOARDING.md/UNIFIED-OPERATING-DOCTRINE.md/CODEX-ADOPTION.md/ANTIGRAVITY-ADOPTION.md/ARCHITECTURE-DIAGRAM.md/README.md (all on origin/main). `git ls-remote --heads origin | grep threeway-adoption` returns EMPTY (branch deleted). `git log --oneline -- docs/protocol/threeway/ONBOARDING.md` shows the file was introduced by PR #19 (970ce907) and last amended by PR #22 (f0b81a61), both merged. The `git show origin/docs/threeway-adoption-manuals:...` command would now FAIL.",
+            "fix": "Replace the fallback paragraph with a note that these docs are on `main` (e.g. \"These files live under `docs/protocol/threeway/` on `main`; if your checkout predates them, `git fetch origin && git checkout origin/main -- docs/protocol/threeway/`\"). Drop the dead PR #19 / `docs/threeway-adoption-manuals` reference.",
+            "severity": "major"
+          },
+          {
+            "location": "lines 82-85 (Per-provider quick start, Codex)",
+            "kind": "status_claim",
+            "quote": "`coordinator2` is a target threeway seat, but it is not a current Codex live-seat until Slice 2.5 wires it into the harness/orientation surfaces.",
+            "verdict": "missing_nuance",
+            "current_truth": "The HARNESS binding has since landed. `grep -n coordinator2 scripts/codex_protocol_model.py` shows `COORDINATOR_SEATS = (\"coordinator\", \"coordinator2\")` (line 104) and CODEX_SEAT whitelists coordinator2 (lines 150,155-156): \"coordinator and coordinator2 are compatibility aliases for coordinator mode and remain unpinned\". `protocol_mailbox.py:17-18` lists coordinator2 in RECEIVING_SEATS/SENDERS. This binding landed in commit 09838d72 (2026-06-20 16:59, \"close Slice 2.5 whole-impl integration gaps — coordinator2 codex binding\"), which is a DESCENDANT of this doc's last edit f0b81a61 (2026-06-20 07:42, verified via `git merge-base --is-ancestor f0b81a61 09838d72` → true). So `CODEX_SEAT=coordinator2` now resolves to coordinator MODE today — \"not wired into the harness/orientation surfaces\" is no longer true. What remains target-state is the LIVE EXECUTING-INTEGRATOR role (staging refs → main), which is gated on the cutover/merge-gate runner (built, not executed).",
+            "fix": "Re-scope to: coordinator2 now binds coordinator MODE in the Codex harness (compatibility alias, unpinned) as of commit 09838d72; what is still target-state is the live executing-integrator function, which depends on the Slice 2.5 cutover + merge-gate runner being executed (built, not live). Separate \"harness-bound\" from \"live integrator role\".",
+            "severity": "major"
+          }
+        ],
+        "missing_content": [
+          {
+            "topic": "coordinator2 harness binding now landed (commit 09838d72)",
+            "why_needed": "The Codex quick-start (lines 82-85) still implies coordinator2 is unwired in the harness. Readers acting as Codex will mis-judge what `CODEX_SEAT=coordinator2` does today — it now resolves to coordinator mode (compatibility alias), while only the live executing-integrator role is target-state. The doc should distinguish harness-binding (done) from the live integrator function (cutover/merge-gate-gated).",
+            "where_to_add": "Per-provider quick start, the Codex bullet (lines 82-85).",
+            "evidence": "scripts/codex_protocol_model.py:104,150-156 (COORDINATOR_SEATS incl coordinator2; CODEX_SEAT whitelist); protocol_mailbox.py:17-18 (RECEIVING_SEATS/SENDERS incl coordinator2); commit 09838d72 \"coordinator2 codex binding\", a descendant of the doc's last edit f0b81a61."
+          },
+          {
+            "topic": "Slice 2.5 migration SUBSTRATE is now BUILT (not just a deferred stub)",
+            "why_needed": "ONBOARDING's reading order points at UNIFIED-OPERATING-DOCTRINE §I.5 as the build-status source, but §I.5 still says \"Slice 2.5 ... is a DEFERRED tracking stub.\" That is now stale: threeway/cutover.py (run_cutover/_teardown), legacy_projector.py, cursor_backfill.py, divergence.py all exist (ADR-044/045). A one-line currency note in ONBOARDING (or a fix to the doctrine it points at) prevents an onboarding session from trusting the stale build-status claim it is routed to.",
+            "where_to_add": "Reading order item 2 / or a short \"current build state\" pointer; primary fix belongs in UNIFIED-OPERATING-DOCTRINE §I.5 which this file delegates to.",
+            "evidence": "`ls threeway/` shows cutover.py, legacy_projector.py, cursor_backfill.py, divergence.py; threeway/cutover.py header \"The single authoritative cutover (Slice 2.5 §5c)\"; DECISIONS.md ADR-044/045 (cutover substrate built + hardened). NOTE: substrate is built, NOT yet executed/live (no live-flip status marker in cutover.py)."
+          },
+          {
+            "topic": "Slice 3 T2/T3 co-sign is now BUILT (co_sign_satisfied no longer returns False)",
+            "why_needed": "Same routing problem: §I.5 (which this file points at) says \"Slice 3 ... is unbuilt — co_sign_satisfied returns False for T2/T3.\" HEAD contradicts this. An onboarding reader who acts on the routed §I.5 claim will under-rely on a built mechanism.",
+            "where_to_add": "Same as above — pointer-currency note; root fix in the doctrine §I.5.",
+            "evidence": "threeway/tier.py:39 co_sign_satisfied returns True for T2 (mirror co-sign) and T3 (cross-provider re_verify + two human approvals); reducer.py:75-82 carries _co_sign/_re_verify/_human_approval/_re_verify_challenge/_approver_roster; DECISIONS.md ADR-042 (pair-namespaced candidate ids) + ADR-043 (re_verify freshness challenge + per-approver key-bound human_approval)."
+          },
+          {
+            "topic": "ADR-039..045 exist (authority-aware reducer + TOTAL run_gate; cutover hardening)",
+            "why_needed": "ONBOARDING's non-negotiables lean on \"run_gate is the mechanical merge-gate\" semantics; the strongest current guarantee — run_gate is now TOTAL and never raises after CAS (ADR-039/040/041) — backs invariant 3 (\"merge-gate never executes candidate code\") and is the kind of load-bearing fact an onboarding reader should know exists. ONBOARDING need not restate it, but its routed doctrine should, and a pointer would help.",
+            "where_to_add": "Optional one-line currency pointer to DECISIONS.md ADR-039..045 near the non-negotiables, or rely on the doctrine being refreshed.",
+            "evidence": "DECISIONS.md ADR-039 (line 1900), ADR-040 (1984), ADR-041 (2044), ADR-042 (2105), ADR-043 (2167), ADR-044 (2247), ADR-045 (2309) all present via grep. run_gate now at threeway/gate.py:158 (was cited gate.py:95 in older docs/DECISIONS.md:1441)."
+          }
+        ],
+        "overall": "ONBOARDING.md is a high-level MAP, not a fact-table — it carries NO file:line anchors (verified: grep for `.py:NN`/`:NN-NN` returns empty), so item-1 of the audit (anchor drift) is N/A here. Its mechanism/seat/rule claims are all CURRENT and match the 2026-06-19 spec: chiefs = Gemini Deep Think + ChatGPT Pro, Antigravity off Layer-1, single mechanical merge-gate sole writer to main, no-dual-write, impl≠verifier, Claude=director2/operator/coordinator, and the §I.2 seat-table pointer resolves. All 11 internal pointer targets exist. TWO substantive staleness items: (1) MAJOR — the PR #19 / `docs/threeway-adoption-manuals` fallback (lines 28-30) is dead: the manuals are merged to origin/main and that branch is gone from origin (the file itself was last amended via PR #22); the `git show origin/docs/threeway-adoption-manuals:...` command would now fail. (2) MAJOR/missing-nuance — the Codex quick-start says coordinator2 \\\"is not a current Codex live-seat until Slice 2.5 wires it into the harness/orientation surfaces,\\\" but the harness binding landed AFTER this doc (commit 09838d72, a descendant of the doc's last edit) and `CODEX_SEAT=coordinator2` now resolves to coordinator mode as a compatibility alias; only the live executing-integrator role remains target-state. Beyond ONBOARDING itself, the bigger drift is in UNIFIED-OPERATING-DOCTRINE §I.5 (which ONBOARDING routes readers to): it still calls Slice 2.5 a \\\"deferred stub\\\" and Slice 3 \\\"unbuilt / co_sign_satisfied returns False\\\" — both contradicted by HEAD (cutover substrate built per ADR-044/045; T2/T3 co_sign built in tier.py:39 per ADR-042/043). For a unification refresh: fix the two ONBOARDING items in place; the ADR-039..045 / Slice-2.5-built / Slice-3-built facts are correctly delegated to the doctrine and should be carried there (and the run_gate anchor updated from gate.py:95 → gate.py:158 wherever a manual cites it)."
+      },
+      {
+        "doc": "docs/protocol/threeway/UNIFIED-OPERATING-DOCTRINE.md",
+        "stale_count": 6,
+        "items": [
+          {
+            "location": "§I.5 line 111 — \"Build status\" bullet on Slice 3",
+            "kind": "status_claim",
+            "quote": "**Slice 3 (strategic loop + T2/T3 co-sign) is unbuilt** — `co_sign_satisfied` returns False for T2/T3, so escalated tiers cannot promote yet.",
+            "verdict": "stale",
+            "current_truth": "Slice 3 is BUILT and ACCEPTED (DECISIONS.md ADR-035, header line 1699: \"Slice 3: tiered co-sign co_sign_satisfied enforces T2/T3\"; status text line 1701 \"ACCEPTED ... This is the LAST of the originally-deferred slices\"). co_sign_satisfied does NOT return False for T2/T3: verified via $ sed -n '39,61p' threeway/tier.py → T0/T1 return True (line 53); T2 returns True after _t2_mirror_cosign (line 56); T3 evaluates _t3_cross_provider_re_verify + _two_distinct_human_approvals (lines 58-61). The ADR-043 re_verify freshness CHALLENGE (overseer nonce, tier.py:101-138) and per-approver key-bound human_approval / approver_roster (tier.py:141-153) are live. Only scope-(b) was residual, and ADR-043 closed it.",
+            "fix": "Rewrite to: \"Slice 3 (tiered T2/T3 co-sign) is BUILT (ADR-035). `co_sign_satisfied` (threeway/tier.py:39) returns True for T0/T1, enforces a mirror-pair operator co-sign for T2, and for T3 additionally requires an ADR-043 freshness-challenge re_verify (overseer nonce) + two distinct key-bound human_approvals from an overseer-signed approver_roster. The strategic loop (overseer cycle_go distribution / dual-chief order) remains the unexecuted/un-wired part.\"",
+            "severity": "critical"
+          },
+          {
+            "location": "§I.5 line 109-110 — \"Slice 2.5\" bullet",
+            "kind": "status_claim",
+            "quote": "**Slice 2.5 (legacy-bus migration) is a DEFERRED tracking stub**, not an implementation plan ([plan](../../superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md)).",
+            "verdict": "stale",
+            "current_truth": "Slice 2.5 is IMPLEMENTED, not a deferred stub. DECISIONS.md ADR-034 (line 1605) status (line 1607): \"ACCEPTED (Slice 2.5 implemented per the design spec ...2026-06-20-threeway-slice2.5-legacy-bus-migration-design.md...)\". The substrate exists and was built: verified via $ ls threeway/{cutover,legacy_projector,cursor_backfill,divergence}.py → all present. The migration is BUILT but NOT YET EXECUTED/live (no refs/threeway/events writes outside pkg/tests — verified via $ grep -rn 'refs/threeway/events' --include='*.py' . | grep -v /threeway/ | grep -v /tests/ → no output). The linked plan is the Jun-19 stub; the real implementation plan is docs/superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md (172KB, verified via $ ls -la).",
+            "fix": "Rewrite to: \"Slice 2.5 (legacy-bus migration) is BUILT but NOT yet executed/live (ADR-034). The migration substrate — threeway/{legacy_projector,divergence,cursor_backfill,cutover}.py — exists and passes its suite; the in-memory shadow projection and single-flip cutover (threeway/cutover.py run_cutover) are implemented. The cutover has not been RUN, so the legacy mailbox is still authoritative.\" Repoint the link to the Jun-20 implementation plan.",
+            "severity": "critical"
+          },
+          {
+            "location": "§I.4 line 97 — merge-gate predicate-recompute clause",
+            "kind": "mechanism_claim",
+            "quote": "The merge-gate **re-evaluates the full predicate itself** from authoritative bus state and **never trusts the trigger or runs candidate code** (`threeway/gate.py:95-144`, `threeway/predicate.py:39-153`).",
+            "verdict": "wrong_anchor",
+            "current_truth": "gate.py:95-144 is the wrong region. Verified via $ awk 'NR==95;NR==144' threeway/gate.py + $ grep -n '^def ' threeway/gate.py → line 95 is inside verify_and_reduce (the read-side verify+reduce, def at gate.py:38, ending ~117); lines 118-157 are module imports / GateResult dataclass (141) / _RepoAdapter (146). The predicate-recompute + \"never runs candidate code\" + exact-SHA CAS logic is in run_gate, def at gate.py:158 (docstring 120-130 describes exactly: \"verify+reduce -> idempotency no-op -> evaluate the predicate -> on MERGEABLE RECOMPUTE the trusted merge (never trusting candidate.integration_sha)\"). run_gate moved (was cited gate.py:95 in older manuals). predicate.py:39-153 — evaluate() starts at line 39 (correct) but runs to line 167 (returns MERGEABLE at 167); 39-153 cuts the function off mid-body.",
+            "fix": "Change anchor to `threeway/gate.py:158-239` (run_gate) for the recompute/CAS/no-candidate-code behavior — and `threeway/gate.py:38-117` (verify_and_reduce) for the verify+reduce read side; predicate anchor to `threeway/predicate.py:39-167` (the full evaluate()).",
+            "severity": "major"
+          },
+          {
+            "location": "§I.4 line 98 — \"Authority is checked by seat\" clause",
+            "kind": "mechanism_claim",
+            "quote": "Authority is checked **by seat**, not by signature validity alone (`predicate.py:120-127`)",
+            "verdict": "wrong_anchor",
+            "current_truth": "The \"by seat, not by signature validity alone\" comment is at predicate.py:134-136, not 120-127. Verified via $ grep -n 'by seat' threeway/predicate.py → 136: \"# so authority must be checked by seat, not by signature validity alone.\" Lines 120-127 (verified via $ awk 'NR>=120&&NR<=127' threeway/predicate.py) are the cycle_go policy_digest check (120-121) and the start of the Slice-3 co_sign_satisfied call (123-127). The per-seat signer checks the prose enumerates (overseer signs brief/assignment/cycle_go/release_order; coordinator signs candidate; verifier signs attestations; ci signs ci_result) span predicate.py:84 (brief), 116 (cycle_go), 140 (release_order), 157 (ci_result).",
+            "fix": "Change anchor to `predicate.py:134-141` (the by-seat authority comment + release_order seat check); optionally cite the seat-check cluster at predicate.py:84/116/140/157.",
+            "severity": "major"
+          },
+          {
+            "location": "§I.6 line 121 — invariant #1 no-dual-write spec anchors",
+            "kind": "rule_claim",
+            "quote": "**No dual-write authority at any point** (spec §8 item 8, line 400; Slice 2.5 line 70, *audited*).",
+            "verdict": "wrong_anchor",
+            "current_truth": "The \"spec §8 item 8, line 400\" half is CORRECT: verified via $ sed -n '400p' docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md → \"one-time backfill. No dual-write authority at any point.\" (the tail of §8 item 8 \"Migration\"). The \"Slice 2.5 line 70\" half is WRONG: verified via $ sed -n '70p' docs/superpowers/specs/2026-06-20-threeway-slice2.5-legacy-bus-migration-design.md → that line is a seat-inventory table row (scripts/codex_protocol_model.py SEATS). The no-dual-write statements in the Slice-2.5 spec are at lines 22, 40, 47 (D2), and 272 — verified via $ grep -n 'dual-write\\|dual write\\|no dual' on that file. D2 (line 47) is the load-bearing one: \"Makes 'no dual-write authority' structurally true (zero ref-bus mutation until cutover).\"",
+            "fix": "Replace \"Slice 2.5 line 70\" with the Slice-2.5 spec D2 anchor: \"Slice 2.5 spec D2, line 47 (in-memory projection makes no-dual-write structural); pinned observable at clause #6, line 240.\"",
+            "severity": "major"
+          },
+          {
+            "location": "§I.5 line 110 — Slice 2.5 plan link target",
+            "kind": "pointer",
+            "quote": "[plan](../../superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md)",
+            "verdict": "stale",
+            "current_truth": "The Jun-19 plan file exists ($ ls → 4732 bytes) but it is the DEFERRED stub, superseded by the Jun-20 implementation plan docs/superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md (172709 bytes, verified via $ ls -la). Linking the stub reinforces the stale 'deferred stub' status claim.",
+            "fix": "Repoint to the Jun-20 implementation plan: ../../superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md",
+            "severity": "minor"
+          }
+        ],
+        "missing_content": [
+          {
+            "topic": "ADR-039/040/041 — availability hardening: authority-aware reducer + TOTAL run_gate",
+            "why_needed": "The doc's §I.4 says run_gate 'never trusts the trigger or runs candidate code' but omits the load-bearing availability property that landed after the manuals were written: run_gate is now TOTAL (never raises after CAS; well_formed envelope guard at step 1; pre-CAS exception guard). This closed an entire insider availability/DoS class and is a Layer-1 invariant operators must know.",
+            "where_to_add": "§I.4 (merge-gate paragraph) and §I.6 invariants — add 'run_gate is TOTAL: it returns a GateResult, never raising after the CAS write; malformed bus events are dropped not raised (well_formed guard, envelope.py:141, gate.py:55), and the pre-CAS region is exception-guarded.'",
+            "evidence": "DECISIONS.md ADR-039 (line 1900 'authority-aware reducer ... TOTAL run_gate'), ADR-040 (1984 'verify-phase drop-not-raise + pre-CAS exception guard'), ADR-041 (2044 'well_formed(ev) envelope guard'). Code: gate.py:55 well_formed guard; gate.py:214 '# POST-CAS ... run_gate is TOTAL'; gate.py:231-239 outer pre-CAS except returns REJECTED not raises. $ grep -n 'TOTAL\\|well_formed\\|run_gate is TOTAL' threeway/gate.py."
+          },
+          {
+            "topic": "ADR-042 — pair-namespaced candidate ids (candidate_id = \"<pair>:<local>\")",
+            "why_needed": "The doc never states the candidate_id shape, yet it is a structural Layer-1 invariant (a candidate binds to its pair by prefix, closing the candidate-id pair-binding DoS). Anyone reading/writing bus facts needs it.",
+            "where_to_add": "§I.6 invariants (add as a structural-binding invariant) or §I.4 tactical loop.",
+            "evidence": "DECISIONS.md ADR-042 (line 2105 'structural pair-namespaced candidate ids'). Code: loop.py:73 '# ADR-042: candidate ids are pair-namespaced (\"<pair>:<local>\")', loop.py:78 cid = ... f\"{pair.pair}:{candidate_id}\"; reducer.py:34,147 same. $ grep -n 'pair-namespaced\\|<pair>:<local>' threeway/loop.py threeway/reducer.py."
+          },
+          {
+            "topic": "ADR-043 — T3 re_verify freshness CHALLENGE (overseer nonce) + per-approver key-bound human_approval (approver_roster)",
+            "why_needed": "Once §I.5 is corrected to say Slice 3 is built, the doc should carry the T3 mechanism: a re_verify must echo the overseer's re_verify_challenge nonce (defeats stale-replay), and human_approval is per-approver key-bound against an overseer-signed approver_roster (overseer no longer holds approver keys). This is the security core of escalated-tier promotion.",
+            "where_to_add": "§I.4 strategic loop OR a short Slice-3 subsection under §I.5.",
+            "evidence": "DECISIONS.md ADR-043 (line 2167 're_verify freshness challenge + per-approver key-bound human_approval'). Code: tier.py:101-138 _t3_cross_provider_re_verify (challenge nonce echo, fail-closed on missing/mismatched nonce); tier.py:141-153 _two_distinct_human_approvals reads state.approver_roster. $ sed -n '101,153p' threeway/tier.py."
+          },
+          {
+            "topic": "ADR-044/045 — cutover substrate BUILT + hardened (threeway/cutover.py)",
+            "why_needed": "The doc's 'two buses' framing implies migration is a future stub; in fact the cutover machinery is built and hardened. Operators executing the migration need to know run_cutover/_teardown exist, that _teardown is now atomic (best-effort-per-ref + chain-not-mask), the pre-cursor-try strand gap is closed, and refstore dedup now includes revoke/supersede targets.",
+            "where_to_add": "§I.5 (build-status list) — add a 'Cutover substrate' row; and §I.3 'two buses' note that the migration path is built-not-run.",
+            "evidence": "DECISIONS.md ADR-044 (line 2247 'non-atomic _teardown ... refstore dedup dropping a distinct-target revoke/supersede'), ADR-045 (line 2309 'guard the pre-cursor-try validation'). Code: $ grep -n 'def run_cutover\\|def _teardown' threeway/cutover.py → _teardown:78, run_cutover:107. envelope.py + refstore.py dedup keys include revokes_event_id/supersedes_event_id (ADR-044 Decision 2)."
+          },
+          {
+            "topic": "Slice 2.5 migration substrate files now EXIST (legacy_projector / divergence / cursor_backfill / cutover)",
+            "why_needed": "§I.5 lists the threeway/ package contents as if it stops at Slice 2 (signed bus + reducer + gate + RefEventStore). The four migration modules now exist and are the concrete artifacts of the corrected Slice-2.5 status. A reader auditing 'what is real' should see them named.",
+            "where_to_add": "§I.5 first bullet (extend the package-contents parenthetical) and/or §I.3.",
+            "evidence": "$ ls -la threeway/{legacy_projector,divergence,cursor_backfill,cutover}.py → all present (legacy_projector.py 4708B, divergence.py 7560B, cursor_backfill.py 5104B, cutover.py 9430B). Imports verified inside-package-only (no live wiring)."
+          },
+          {
+            "topic": "ADR-036/037/038 — Slice-3 forgery hardening (revocation authority, event-id uniqueness, reserved merge-id + brief_superseded)",
+            "why_needed": "These landed with Slice 3 and are load-bearing Layer-1 invariants the doc's §I.6 omits: attestation_revoked is authenticated (overseer or target's own signer only); event ids are globally unique (gate rejects duplicates, store refuses colliding append); the reserved merge-id is integrity-guarded. They close the forged-promotion / merge-DoS class the doc currently doesn't mention.",
+            "where_to_add": "§I.6 invariants (add a 'forgery/replay hardening' invariant) — referencing ADR-036/037/038.",
+            "evidence": "DECISIONS.md ADR-036 (line 1750 revocation authority), ADR-037 (1814 'Event ids are globally unique'), ADR-038 (1866 'reserved merge-id integrity + brief_superseded authority'). Code: gate.py:100-109 ADR-037 duplicate-id reject (raise); gate.py:103 ADR-040 note on the unreachable-brick raise."
+          },
+          {
+            "topic": "Availability-hardening slice plan exists (Round-6 insider availability/DoS class scoped)",
+            "why_needed": "For an operator the doc should point to the live forward-work artifact for the control-plane availability hardening, paralleling how it points to the (now-stale) Slice-2.5 stub.",
+            "where_to_add": "§I.5 (build-status list, forward-work note).",
+            "evidence": "$ ls -la docs/superpowers/plans/2026-06-21-threeway-control-plane-availability-hardening.md → present (16350B). MEMORY index notes Round-6 opened the insider availability/DoS class scoped to this slice; ADR-039..041 are the landed portion."
+          }
+        ],
+        "overall": "The portable Layer-2 doctrine (Parts II, III, the §II.G rule table, the capability map) is accurate and current — those sections need no changes. The staleness is concentrated in Part I §I.4–I.6, where the build-status snapshot was frozen at Slice 2 and has been overtaken hard by work landed Jun 20–21. Two CRITICAL status errors: §I.5 says Slice 3 is 'unbuilt' / 'co_sign_satisfied returns False for T2/T3' (it is BUILT and ACCEPTED, ADR-035; tier.py:39 enforces real T2/T3 logic), and §I.5 calls Slice 2.5 a 'deferred tracking stub' (it is IMPLEMENTED, ADR-034 — built but not yet executed). Two MAJOR wrong-anchor drifts: gate.py:95-144 should be run_gate at gate.py:158-239 (run_gate moved, as the known-since item flagged), and predicate.py:120-127 for 'authority by seat' should be predicate.py:134-141. One MAJOR rule-anchor drift: the §I.6 no-dual-write 'Slice 2.5 line 70' anchor points at a seat-inventory row, not the no-dual-write statement (D2 line 47 is correct). The verifiably-CURRENT items the refresh should NOT touch: the seat table + loop.py:43-52 anchor, the 'wired into NOTHING' claim, keys-not-provisioned, the two-buses table, coordinator2-as-Codex, all internal pointers (except the §I.5 plan link), and the Antigravity capability bindings. Missing content the doc should now carry: ADR-039/040/041 (TOTAL run_gate + well_formed guard), ADR-042 (pair-namespaced candidate_id), ADR-043 (T3 freshness-challenge + per-approver roster), ADR-044/045 (cutover substrate built+hardened), ADR-036/037/038 (forgery hardening), and the four new migration modules' existence. Net: the doc's spirit ('do not treat as live infrastructure yet') stays correct — nothing is wired live and keys are unprovisioned — but its slice-by-slice ledger and three file:line anchors are stale and must be refreshed against ADR-034..045."
+      },
+      {
+        "doc": "docs/protocol/threeway/CODEX-ADOPTION.md",
+        "stale_count": 13,
+        "items": [
+          {
+            "location": "§4 step 4, line 122",
+            "kind": "anchor",
+            "quote": "`run_gate` is an **in-process function** today (`threeway/gate.py:95`)",
+            "verdict": "wrong_anchor",
+            "current_truth": "`def run_gate` is at threeway/gate.py:158, not :95. Line 95 is `verify_event(ev, pub)` inside an earlier function. Verified via `grep -n 'def run_gate' threeway/gate.py` -> 158; `sed -n '95p' threeway/gate.py` -> `                verify_event(ev, pub)`.",
+            "fix": "Change `threeway/gate.py:95` to `threeway/gate.py:158`. (Matches the known-since 'run_gate moved' note.)",
+            "severity": "major"
+          },
+          {
+            "location": "§2 table row 3, line 56",
+            "kind": "status_claim",
+            "quote": "**target-state only today** — the current Codex harness does not accept `CODEX_SEAT=coordinator2`; see §4 for the Slice 2.5 work that must make it real",
+            "verdict": "stale",
+            "current_truth": "The Codex harness NOW accepts coordinator2. scripts/codex_protocol_model.py:104 `COORDINATOR_SEATS = (\"coordinator\", \"coordinator2\")  # both bind coordinator mode`; line 155 lists CODEX_SEAT value `coordinator2`; line 156 'coordinator and coordinator2 are compatibility aliases for coordinator mode and remain unpinned'. Verified via `grep -n 'coordinator2' scripts/codex_protocol_model.py`.",
+            "fix": "Rewrite the cell: coordinator2 is now an accepted CODEX_SEAT value that binds coordinator mode (a compatibility alias, unpinned) per codex_protocol_model.py:104,155-156. Distinguish 'harness accepts the seat-name' (DONE) from 'the threeway INTEGRATOR role/live bus is wired' (still target-state).",
+            "severity": "critical"
+          },
+          {
+            "location": "§2 blockquote, lines 63-64",
+            "kind": "anchor",
+            "quote": "The `CODEX_SEAT` values today are `director | director2 | operator | operator2 | coordinator` (`scripts/codex_protocol_model.py:151-154`).",
+            "verdict": "stale",
+            "current_truth": "Two problems. (1) The value list is stale: it now also includes `coordinator2` (codex_protocol_model.py:155 enumerates `director | director2 | operator | operator2 | coordinator | coordinator2`). (2) The anchor is off: the CODEX_SEAT env tuple is at lines 154-157 (label at 154, value string at 155); line 151 is inside the CODEX_AGENT_ROLE tuple. Verified via `sed -n '148,162p' scripts/codex_protocol_model.py`.",
+            "fix": "Update the enumerated values to include `coordinator2` and change the anchor `:151-154` to `:154-157` (or cite line 155 for the value string).",
+            "severity": "critical"
+          },
+          {
+            "location": "§2 blockquote, lines 64-67",
+            "kind": "status_claim",
+            "quote": "Today `coordinator2` is a target threeway seat and the others are mechanical/strategic identities; none of them is a current Codex harness live-seat until Slice 2.5 adds explicit support.",
+            "verdict": "stale",
+            "current_truth": "coordinator2 already has explicit Codex-harness support as a coordinator-mode alias (codex_protocol_model.py:104,156) and is accepted by seat_status.py (choices=SEATS where SEATS=protocol_mailbox.RECEIVING_SEATS includes coordinator2). The 'Slice 2.5 adds explicit support' precondition for the seat NAME has substantially landed; what remains is the live signed-bus INTEGRATOR wiring, not harness acceptance.",
+            "fix": "Reword to: coordinator2 is now an accepted harness identity (coordinator-mode alias, unpinned); the remaining gap is the live threeway integrator wiring (the signed ref-bus), not seat-name acceptance.",
+            "severity": "major"
+          },
+          {
+            "location": "§4 step 2, line 112",
+            "kind": "status_claim",
+            "quote": "the Codex orientation/harness surfaces that currently reject `coordinator2` (for example `seat_status.py` and `scripts/codex_protocol_model.py`).",
+            "verdict": "stale",
+            "current_truth": "Neither named surface rejects coordinator2 anymore. seat_status.py:40 `SEATS = protocol_mailbox.RECEIVING_SEATS`, :214 `ap.add_argument(\"seat\", choices=SEATS)`, docstring :13 lists coordinator2 — RECEIVING_SEATS includes coordinator2 (protocol_mailbox.py:17). codex_protocol_model.py:104,155-156 accepts coordinator2. Verified via `grep -n 'coordinator2\\|choices\\|SEATS' .claude/skills/four-seat-protocol/scripts/seat_status.py` and `grep -n 'RECEIVING_SEATS' scripts/protocol_mailbox.py`.",
+            "fix": "Remove these two as 'surfaces that reject coordinator2' — they already accept it. The remaining edit-sites are the legacy-bus checkers and the cursor backfill, not seat-name acceptance in these two.",
+            "severity": "critical"
+          },
+          {
+            "location": "§4 step 2, lines 109-112",
+            "kind": "status_claim",
+            "quote": "every hard-coded mailbox/harness seat-list needed to make `coordinator`/`coordinator2` first-class receiving seats: at minimum `scripts/protocol_mailbox.py:11` (`SEATS`) ... `scripts/status.py:126` (`_MAILBOX_SEATS`) ...",
+            "verdict": "stale",
+            "current_truth": "coordinator/coordinator2 are ALREADY first-class receiving seats. protocol_mailbox.py:17 `RECEIVING_SEATS = (*SEATS, \"coordinator\", \"coordinator2\")`; :18 SENDERS includes both; status.py:141 `_MAILBOX_SEATS = protocol_mailbox.RECEIVING_SEATS`. So the receiving-seat plumbing the step prescribes is done. Verified via `grep -n 'RECEIVING_SEATS\\|SENDERS' scripts/protocol_mailbox.py` and `grep -n '_MAILBOX_SEATS' scripts/status.py`.",
+            "fix": "Reframe step 2: coordinator/coordinator2 receiving-seat membership has landed (protocol_mailbox.RECEIVING_SEATS). The residual migration work is the cursor ISO->seq backfill + the shadow->cutover authority flip (threeway/cursor_backfill.py, threeway/cutover.py both now exist), not adding the seats to the mailbox rosters.",
+            "severity": "major"
+          },
+          {
+            "location": "§4 step 2, line 112",
+            "kind": "anchor",
+            "quote": "`scripts/status.py:126` (`_MAILBOX_SEATS`)",
+            "verdict": "wrong_anchor",
+            "current_truth": "_MAILBOX_SEATS is defined at scripts/status.py:141, not :126. Verified via `grep -n '_MAILBOX_SEATS' scripts/status.py` -> 141 (def), 247/362/367/518 (uses).",
+            "fix": "Change `scripts/status.py:126` to `scripts/status.py:141`.",
+            "severity": "minor"
+          },
+          {
+            "location": "§4 step 3, line 119",
+            "kind": "anchor",
+            "quote": "appended to the bus before the gate's predicate can pass (`threeway/predicate.py:138-147`).",
+            "verdict": "wrong_anchor",
+            "current_truth": "Lines 138-147 are the release_order block (`ro = state.release_order(...)`, overseer-signer + subject_sha checks). The ci_result predicate (signed by `ci`, result PASS, policy_digest) is at predicate.py:152-161. Verified via `grep -n 'ci_result\\|result.*PASS' threeway/predicate.py` -> 152-161; `sed -n '138,147p'` shows release_order.",
+            "fix": "Change `threeway/predicate.py:138-147` to `threeway/predicate.py:152-161` (the ci_result block).",
+            "severity": "major"
+          },
+          {
+            "location": "§5 bullet 1, line 138",
+            "kind": "anchor",
+            "quote": "`append` signs with the seat key and assigns `seq` (`threeway/store.py:33-40`; `RefEventStore.append` for the ref bus, `threeway/refstore.py:122`).",
+            "verdict": "wrong_anchor",
+            "current_truth": "Two off anchors. EventStore.append is at store.py:39-50 (def at 39, ev.seq=self._next_seq() at 45, sign_event at 46); the cited :33-40 begins in __init__ (line 33 = `self._dir.mkdir(...)`) and ends before the signing/seq lines. RefEventStore.append is at refstore.py:132, not :122 (line 122 is a `continue` inside `_find_verified_idempotent`). Verified via `grep -n 'def append' threeway/store.py threeway/refstore.py` -> store.py:39, refstore.py:132.",
+            "fix": "Change `threeway/store.py:33-40` to `threeway/store.py:39-50` and `threeway/refstore.py:122` to `threeway/refstore.py:132`.",
+            "severity": "major"
+          },
+          {
+            "location": "§5 intro, lines 132-133",
+            "kind": "mechanism_claim",
+            "quote": "`build_candidate_events` (that is a whole-loop *test/demo fixture* in `threeway/loop.py` that fabricates all nine events for all seats as unsigned; the docstring says so).",
+            "verdict": "missing_nuance",
+            "current_truth": "build_candidate_events (loop.py:67) builds 9 events as UNSIGNED — correct on count and unsigned — but the docstring (loop.py:1-3) says it 'assembles the six-step loop's facts for ONE pair', NOT 'all seats'. It builds for one PairConfig (PAIR_A default); 'all nine events for all seats' overstates it. Verified via `sed -n '1,3p;67,112p' threeway/loop.py`.",
+            "fix": "Change 'fabricates all nine events for all seats' to 'fabricates all nine loop events for ONE pair'. (The 9-events/unsigned facts are correct.)",
+            "severity": "minor"
+          },
+          {
+            "location": "§6 first bullet, lines 149-152",
+            "kind": "status_claim",
+            "quote": "`coordinator2` is a target threeway seat and must not be claimed as live until Slice 2.5 adds the corresponding Codex harness/orientation support.",
+            "verdict": "stale",
+            "current_truth": "Harness/orientation support for the coordinator2 seat-name has largely landed: codex_protocol_model.py:104,155-156 (alias for coordinator mode, unpinned) and seat_status.py accepts it. continuation.md still describes coordinator generically (line 20-21 names only director/director2/operator/operator2 as live seats; coordinator/coordinator2 bind coordinator mode unpinned). The accurate residual is: don't claim coordinator2 as a live threeway INTEGRATOR until the signed bus is wired — not 'until the harness adds the seat name.'",
+            "fix": "Reword: coordinator2 is now an accepted coordinator-mode harness identity (unpinned); what is not yet live is the threeway INTEGRATOR role against the signed ref-bus. Keep the 'don't claim live integrator' caution, drop the 'harness doesn't support the name' premise.",
+            "severity": "major"
+          },
+          {
+            "location": "§7 last bullet, line 171",
+            "kind": "anchor",
+            "quote": "The fixture in `loop.py:99` does not satisfy the gate; CI must produce a signed one.",
+            "verdict": "wrong_anchor",
+            "current_truth": "The ci_result fixture entry inside build_candidate_events is at loop.py:104-105 (`_e(\"ci_result\", \"ci\", \"ci:mech:s1\", {\"result\": \"PASS\", ...})`). Line 99 is the attestation-release event (`id=f\"attestation-release-...\"`). Verified via `grep -n 'ci_result' threeway/loop.py` -> 104; `sed -n '99p;104,105p' threeway/loop.py`.",
+            "fix": "Change `loop.py:99` to `loop.py:104-105` (the ci_result fixture line). Optionally cite the whole fixture as `loop.py:67` (build_candidate_events) for the 'whole-loop demo fixture' framing.",
+            "severity": "minor"
+          },
+          {
+            "location": "§6 second bullet, line 154; §4 step 2 line 112; §1 line 39",
+            "kind": "pointer",
+            "quote": "orient via `seat_status.py <seat> --wave <N>` (read-only)",
+            "verdict": "broken_link",
+            "current_truth": "There is no bare `seat_status.py` at repo root. It lives at `.claude/skills/four-seat-protocol/scripts/seat_status.py` (and `.agents/skills/four-seat-protocol/scripts/seat_status.py`). continuation.md:69 invokes it as `.agents/skills/four-seat-protocol/scripts/seat_status.py`. Verified via `find . -name seat_status.py`.",
+            "fix": "Root the path: `.claude/skills/four-seat-protocol/scripts/seat_status.py <seat> --wave <N>` (or `.agents/...` per Codex's own usage). The §1 mention 'the four-seat-protocol skill's seat_status.py' is acceptable but the §4/§6 bare names are unrooted.",
+            "severity": "minor"
+          }
+        ],
+        "missing_content": [
+          {
+            "topic": "ADR-039/040/041 — run_gate is now TOTAL (never raises after CAS; well_formed envelope guard)",
+            "why_needed": "§7 hard-rules and §5 describe the gate but never state its defining availability property: run_gate is total (returns GateResult, never propagates an exception once driven), with a well_formed(ev) drop-not-raise envelope guard and a TOTAL post-CAS region. This is the most load-bearing recent change to the gate a Codex integrator must rely on.",
+            "where_to_add": "§4 step 4 (merge-gate) and/or §7 (hard rules) — add a sentence: 'run_gate is TOTAL (ADR-040/041): it returns a GateResult and never raises after the CAS; a malformed bus event is dropped (well_formed guard at gate.py:48-55), it does not brick the gate.'",
+            "evidence": "DECISIONS.md ADR-039 (line 1900), ADR-040 (1984), ADR-041 (2044); gate.py:48-55 well_formed drop, gate.py:158 run_gate, gate.py:214 'POST-CAS — from here NOTHING may escape (run_gate is TOTAL)'. Verified via grep in DECISIONS.md and sed of gate.py."
+          },
+          {
+            "topic": "ADR-042 — pair-namespaced candidate ids (candidate_id = \"<pair>:<local>\")",
+            "why_needed": "§5 and §7 discuss candidate signing but never mention that candidate_id is now structurally pair-namespaced (the merge-gate must be driven with the FULL namespaced id). A Codex coordinator2 building a candidate or driving the gate needs this; it is directly relevant to 'how a Codex seat emits events'.",
+            "where_to_add": "§5 (how a Codex seat emits events) — add a bullet: 'candidate_id is pair-namespaced \"<pair>:<local>\" (ADR-042); a bare local id is namespaced by your pair, and the gate must be driven with the full namespaced id.'",
+            "evidence": "DECISIONS.md ADR-042 (line 2105); loop.py:74-79 'ADR-042: candidate ids are pair-namespaced ... cid = candidate_id if \":\" in candidate_id else f\"{pair.pair}:{candidate_id}\"'. Verified via sed of loop.py and grep DECISIONS.md."
+          },
+          {
+            "topic": "ADR-043 — T3 re_verify freshness CHALLENGE (overseer nonce) + per-approver key-bound human_approval (approver_roster)",
+            "why_needed": "§4 step 5 (Slice 3) mentions T2 co-sign and cycle_go/release_order but omits the T3 escalation mechanisms that now exist in the reducer: the overseer freshness nonce challenge for re_verify and the per-approver key-bound human_approval keyed by (candidate_id, seat) against an approver_roster. A Codex seat operating under T3 needs to know these fold overseer-only at record time.",
+            "where_to_add": "§4 step 5 (Slice 3) — add: 'T3 escalation also uses an overseer freshness CHALLENGE (nonce) for re_verify and per-approver key-bound human_approval against an overseer-signed approver_roster (ADR-043), both overseer-authority at record time.'",
+            "evidence": "DECISIONS.md ADR-043 (line 2167); reducer.py:76-82 (_re_verify, _human_approval keyed by (candidate_id, seat), _re_verify_challenge overseer nonce, _approver_roster), reducer.py:278-279 (re_verify_challenge/approver_roster -> 'overseer'). Verified via grep of reducer.py."
+          },
+          {
+            "topic": "ADR-044/045 — cutover substrate is BUILT (threeway/cutover.py run_cutover/_teardown) and hardened, but NOT yet executed",
+            "why_needed": "§4 step 2 says 'author the real migration plan from the stub' and 'there is no switch to flip' — but the cutover substrate now EXISTS as code (threeway/cutover.py with run_cutover at :107 and _teardown at :78, plus legacy_projector.py, cursor_backfill.py, divergence.py). The file should tell a Codex integrator the substrate is built (not just a stub), what run_cutover does, and that it is gated on explicit user confirmation and not yet executed/live.",
+            "where_to_add": "§4 step 2 — replace 'author the real migration plan from the stub' with the current state: the migration substrate (projector + divergence + cursor_backfill + cutover.run_cutover) is BUILT and hardened (ADR-044 atomic _teardown + refstore dedup includes revoke/supersede target; ADR-045 pre-cursor-try strand guarded); it is NOT yet executed — gated on explicit user confirmation with the ADR-044 operational preconditions.",
+            "evidence": "DECISIONS.md ADR-044 (line 2247), ADR-045 (2309, 'remains gated on explicit user confirmation' at 2337); threeway/cutover.py run_cutover:107 _teardown:78; legacy_projector.py:63 project, divergence.py:40 diverge, cursor_backfill.py:65 backfill/100 restore_from_manifest; refstore.py:77-85 dedup INCLUDES revokes_event_id/supersedes_event_id (ADR-044). threeway is imported only by tests (grep of imports outside threeway/ + tests/ returns none) -> built, not wired/live. Verified via ls, grep, sed."
+          },
+          {
+            "topic": "Slice 2.5 migration modules now EXIST (legacy_projector, divergence, cursor_backfill) and ARCHITECTURE §13A documents them",
+            "why_needed": "§4 step 2 describes the migration method abstractly ('shadow read-only projection -> cutover') as future work, but the concrete modules are now present and ARCHITECTURE.md §13A.5 ('Legacy mailbox projection') documents project/diverge plus the once-only bus write (768 appends + 6 cursor backfills). The Codex adoption manual should point to §13A.5 as the truth layer and name the modules.",
+            "where_to_add": "§4 step 2 and §1 (what Codex already has) — add legacy_projector.py / divergence.py / cursor_backfill.py / cutover.py to the present-substrate inventory and cite ARCHITECTURE.md §13A.5.",
+            "evidence": "ARCHITECTURE.md §13A.5 (line 1778+) 'Legacy mailbox projection — legacy_projector + divergence (Slice 2.5)', legacy_projector.py:63 project, divergence.py:40 diverge, '768 ordered appends -> 6 cursor backfills' at §13A.5; migration design spec 2026-06-20 §5c. Verified via grep ARCHITECTURE.md and sed of the modules."
+          },
+          {
+            "topic": "coordinator2 is already a first-class RECEIVING/SENDING seat on the legacy bus",
+            "why_needed": "The file repeatedly frames coordinator2 mailbox membership as pending Slice 2.5 work (§4 step 2, §2 blockquote), but protocol_mailbox.RECEIVING_SEATS/SENDERS already include coordinator and coordinator2, and status.py + seat_status.py consume that roster. The manual should record this as DONE so a Codex coordinator2 knows it can send/receive on the legacy bus today.",
+            "where_to_add": "§2 and §4 step 2 — note that coordinator/coordinator2 already send AND receive on the legacy mailbox (protocol_mailbox.RECEIVING_SEATS), so the residual is cursor backfill + the signed-bus cutover, not roster membership.",
+            "evidence": "protocol_mailbox.py:17 RECEIVING_SEATS=(*SEATS,'coordinator','coordinator2'), :18 SENDERS; status.py:141 _MAILBOX_SEATS=protocol_mailbox.RECEIVING_SEATS; seat_status.py:40 SEATS=protocol_mailbox.RECEIVING_SEATS,:214 choices=SEATS. Verified via grep."
+          }
+        ],
+        "overall": "CODEX-ADOPTION.md is directionally sound on its core thesis (Layer-2 doctrine is live for Codex; the remaining work is the Layer-1 signed-bus migration, which is built-but-not-executed) and most of its inventory counts and mechanism claims are CURRENT (12 invariants, 16 env vars, 4 modes, 3 hooks, 6 agents; key-bootstrap single-invocation + nine seats; keystore default :66; CI signs nothing; per-seat signing authority; no-dual-write method). But it carries a cluster of STALE coordinator2 status claims and several drifted file:line anchors. The single most important defect is that the harness now ACCEPTS coordinator2 (codex_protocol_model.py:104,155-156 as a coordinator-mode alias; seat_status.py choices; protocol_mailbox.RECEIVING_SEATS) — yet the file states in three places (§2 table, §2 blockquote, §4 step 2, §6) that coordinator2 is rejected / unsupported / not a receiving seat. That is now wrong and would mislead a Codex session. Anchors that drifted: run_gate gate.py:95->158 (CRITICAL, matches the known-since note), ci_result predicate :138-147->152-161, RefEventStore.append refstore.py:122->132, EventStore.append store.py:33-40->39-50, _MAILBOX_SEATS status.py:126->141, ci_result fixture loop.py:99->104-105, and the bare unrooted seat_status.py path. Biggest content GAPS: the file predates / never absorbed ADR-039..045 — run_gate totality (039/040/041), pair-namespaced candidate_id (042), T3 re_verify freshness challenge + per-approver human_approval (043), and the cutover substrate being BUILT+hardened (044/045) with legacy_projector/divergence/cursor_backfill/cutover now existing and documented in ARCHITECTURE §13A.5. Recommend a refresh that (1) rewrites all coordinator2-rejected claims to 'accepted as coordinator-mode alias; live integrator wiring still pending', (2) fixes the seven drifted anchors, (3) adds the ADR-039..045 facts, and (4) repoints the migration narrative at the 2026-06-20 design spec + the now-existing substrate modules."
+      },
+      {
+        "doc": "docs/protocol/threeway/ANTIGRAVITY-ADOPTION.md",
+        "stale_count": 2,
+        "items": [
+          {
+            "location": "line 38 (§1, blockquote)",
+            "kind": "anchor",
+            "quote": "those facts are `overseer`-signed and signer-checked (`threeway/predicate.py:109,126`)",
+            "verdict": "wrong_anchor",
+            "current_truth": "At HEAD predicate.py:109 is the `cand.payload.get(\"risk_tier_claimed\", \"T0\"))` continuation of brief_tier, and predicate.py:126 is the `if not co_sign_satisfied(eff_tier, state, candidate_id,` call — NEITHER is a signer check. The actual overseer signer checks (`if _seat(...signer) != \"overseer\"`) are at predicate.py:84 (brief), :116 (cycle_go), :140 (release_order). Verified via `awk 'NR>=108 && NR<=127' threeway/predicate.py` and `grep -n 'overseer' threeway/predicate.py` → matches at 84,116,140.",
+            "fix": "Change the anchor to `threeway/predicate.py:116,140` (cycle_go + release_order signer checks) or `threeway/predicate.py:84,116,140` to cover brief/cycle_go/release_order overseer signer-checks. The substantive claim (overseer-signed + signer-checked) is correct; only the line numbers drifted.",
+            "severity": "major"
+          },
+          {
+            "location": "line 131 (§5 rule 3)",
+            "kind": "rule_claim",
+            "quote": "No dual-write. ... (forbidden for every provider, spec §8.8).",
+            "verdict": "wrong_anchor",
+            "current_truth": "The spec's §8 (\"The git-native bus\") is a numbered list of 8 items, not numbered subsections §8.1–§8.8. \"No dual-write authority at any point\" is §8 item 8 (\"Migration\"), at spec line 400. There is no subsection literally numbered §8.8. Verified via `awk 'NR>=395 && NR<=400' spec` and the §8 item headers. UNIFIED-OPERATING-DOCTRINE.md §I.6 cites this correctly as \"spec §8 item 8, line 400\".",
+            "fix": "Change \"spec §8.8\" to \"spec §8 item 8 (line 400)\" to match the sibling doctrine's citation form. The no-dual-write rule itself is correct and current.",
+            "severity": "minor"
+          }
+        ],
+        "missing_content": [
+          {
+            "topic": "ADR-039/040/041 — authority-aware reducer + TOTAL run_gate (run_gate never raises after CAS; well_formed envelope guard)",
+            "why_needed": "This doc's §1/§5 lean on 'only the mechanical merge-gate writes protected main' and 'overseer-signed + signer-checked' as the safety basis for Antigravity holding no seat. HEAD now has a hardened availability/DoS posture (run_gate is TOTAL: gate.py:165-166 guards non-str candidate_id, gate.py:188-239 wraps the whole pre-CAS region so any error becomes a fail-closed REJECTED, gate.py:214-230 post-CAS NOTHING escapes). The reducer is authority-aware (record-time overseer-only filters, reducer.py:273-279). An Antigravity reader/relayer reasoning about why it is safe for code to flow through the gate should know the gate is now provably total. Verified: ADR-039 DECISIONS.md:1900, ADR-040:1984, ADR-041:2044; gate.py run_gate at :158 (NOT the :95 the older manuals cited).",
+            "where_to_add": "A one-line forward-reference in §5 rule 2 ('Only the mechanical merge-gate writes protected main') or a new bullet in §1, pointing to ADR-039..041 for the TOTAL/authority-aware guarantees.",
+            "evidence": "`grep -n 'def run_gate' threeway/gate.py` → 158; `awk 'NR>=158 && NR<=239' threeway/gate.py` shows the isinstance guard, broadened outer except, and post-CAS degraded-COMPLETED; `grep -n 'ADR-039\\|ADR-040\\|ADR-041' DECISIONS.md`."
+          },
+          {
+            "topic": "ADR-042 — pair-namespaced candidate ids (candidate_id = \"<pair>:<local>\")",
+            "why_needed": "§4's 'Coordination channel + cursor | N/A (holds no seat)' and §5's no-seat framing are about identity binding; the candidate-id structural binding is now load-bearing for why a shadow/cross-pair candidate cannot be merged. A complete adoption manual that explains the merge path Antigravity's code would traverse should note the candidate_id shape. Verified: reducer.py:34,147 and loop.py:73 document `\"<pair>:<local>\"`; ADR-042 DECISIONS.md:2105.",
+            "where_to_add": "§3 caveat clause 2 ('enters as a candidate that a cross-provider operator verifies') — note the candidate_id is pair-namespaced.",
+            "evidence": "`grep -n '<pair>:<local>' threeway/*.py` → reducer.py:34,147, loop.py:73; `grep -n 'ADR-042' DECISIONS.md` → 2105."
+          },
+          {
+            "topic": "ADR-043 — T3 re_verify freshness CHALLENGE (overseer nonce) + per-approver key-bound human_approval (approver_roster)",
+            "why_needed": "This doc forbids Antigravity from emitting `human_approval` and attestations (§5 rule 1) but does not reflect that human_approval is now KEY-BOUND per approver seat (reducer keys _human_approval by (candidate_id, signer-SEAT), reducer.py:77-80) and gated by an overseer-signed approver_roster + freshness nonce. This strengthens the 'Antigravity signs nothing' rationale: even a relayed human approval must be key-bound. Verified: reducer.py:81-82 (_re_verify_challenge, _approver_roster), :278-279 (overseer-only), ADR-043 DECISIONS.md:2167.",
+            "where_to_add": "§5 rule 1 (the list of signed facts agy must never emit) — note human_approval is now per-approver key-bound, and re_verify_challenge/approver_roster are overseer-only.",
+            "evidence": "`grep -n 'approver_roster\\|re_verify_challenge\\|human_approval' threeway/reducer.py` → 77-82,201-216,278-279; `grep -n 'ADR-043' DECISIONS.md` → 2167."
+          },
+          {
+            "topic": "ADR-044/045 + threeway/cutover.py — the migration cutover substrate is now BUILT (run_cutover/_teardown) and hardened, but the live cutover is gated on explicit user confirmation (NOT executed)",
+            "why_needed": "§3 contrasts 'Legacy mailbox (live today)' vs 'Three-way signed-bus end-state (post-migration)' but treats the migration as abstract/future. HEAD now has threeway/cutover.py (run_cutover at :107, _teardown at :78), legacy_projector.py, cursor_backfill.py, divergence.py — the Slice 2.5 substrate is built (non-atomic teardown fixed, pre-cursor-try strand fixed, refstore dedup includes revoke/supersede target). The doc should reflect that the migration is built-and-gated, not unbuilt, so an agy reader/relayer summarizing migration status to a human is accurate. Verified: `ls threeway/cutover.py legacy_projector.py cursor_backfill.py divergence.py` all present; ADR-044 DECISIONS.md:2247, ADR-045:2309; live cutover 'remains gated on explicit user confirmation' (DECISIONS.md:2337).",
+            "where_to_add": "§3 caveat clause 2 (the 'post-migration' end-state) — add that the cutover substrate (threeway/cutover.py run_cutover/_teardown) is now built+hardened (ADR-044/045) but the live single-writer flip is user-gated and not yet executed.",
+            "evidence": "`ls threeway/cutover.py threeway/legacy_projector.py threeway/cursor_backfill.py threeway/divergence.py` → all exist; `grep -n 'def run_cutover\\|def _teardown' threeway/cutover.py` → 107,78; `grep -n 'ADR-044\\|ADR-045' DECISIONS.md`; ADR-045 tail line 2337 'remains gated on explicit user confirmation'."
+          },
+          {
+            "topic": "coordinator2 is now a REAL compatibility-alias seat (CODEX_SEAT=coordinator2 binds coordinator mode)",
+            "why_needed": "The doc names 'coordinator2' in the no-seat list (line 26) which is correct, but the manuals predate coordinator2 becoming a first-class addressable seat. A precise adoption manual should reflect that coordinator2 is now a live compatibility alias (scripts/codex_protocol_model.py:104,156: 'compatibility aliases for coordinator mode'), confirming the seat exists for Antigravity to correctly disclaim. Minor — the existing line is already accurate, so this is a nuance, not a correction.",
+            "where_to_add": "Optional footnote on §1 line 26 where coordinator2 is listed.",
+            "evidence": "`grep -n 'coordinator2' scripts/codex_protocol_model.py` → 104 (COORDINATOR_SEATS), 156 ('compatibility aliases for coordinator mode')."
+          },
+          {
+            "topic": "Build-status snapshot (Slice 2.5 / Slice 3 / keys-provisioned / ci_result runner)",
+            "why_needed": "This doc carries almost no build-status of its own (it defers to UNIFIED-OPERATING-DOCTRINE §I.5), which is reasonable. BUT §I.5 of the sibling doctrine is itself stale at HEAD (it still says 'Slice 2.5 is a DEFERRED tracking stub' and 'Slice 3 is unbuilt — co_sign_satisfied returns False' — both false now: cutover.py is built, and co_sign_satisfied is implemented per ADR-035/036/043). Since this ANTIGRAVITY doc tells the reader to 'Read first: UNIFIED-OPERATING-DOCTRINE.md', it inherits that staleness by reference. The agy doc should either carry a minimal accurate status line or the refresh should fix §I.5. Keys remain genuinely not-provisioned (coordination/threeway/keys/ has only a README per §I.5; keys_bootstrap.py is a CLI to provision, not provisioned state).",
+            "where_to_add": "Either a one-line accurate status note in §3 of this doc, OR flag that the 'Read first' target (§I.5) needs its own refresh so agy readers do not inherit stale Slice-2.5/Slice-3 status.",
+            "evidence": "co_sign_satisfied is implemented (predicate.py:126 calls it; ADR-035 DECISIONS.md:1699, ADR-043:2167); cutover.py built (`ls` above); UNIFIED-OPERATING-DOCTRINE.md:109-114 still claims 'DEFERRED tracking stub' / 'Slice 3 unbuilt' / 'co_sign_satisfied returns False' — contradicted by HEAD code."
+          }
+        ],
+        "overall": "The ANTIGRAVITY-ADOPTION.md file is substantially CURRENT on its core thesis and mechanism claims — the seat roster (incl. coordinator2), the no-Antigravity-CLI design (D11), the overseer-mechanical / dual-chiefs-as-apps facts, the no-dual-write rule, the §4 capability map (verbatim-consistent with UNIFIED Part III), all internal pointers, and the R-EVIDENCE 'no Antigravity code' note all verify clean against HEAD. ONE real anchor drift: line 38 cites `threeway/predicate.py:109,126` for the overseer signer-check, but those two lines are NOT signer checks at HEAD (109 = risk_tier_claimed continuation; 126 = the co_sign_satisfied call) — the actual overseer signer checks are at predicate.py:116 (cycle_go) and :140 (release_order), with :84 for the brief. One minor citation-form issue: 'spec §8.8' should be 'spec §8 item 8 (line 400)'. The bigger gap is MISSING CONTENT: this doc predates and does not carry the ADR-039..045 hardening (TOTAL run_gate, authority-aware reducer, pair-namespaced candidate_id, key-bound per-approver human_approval + overseer nonce, and the BUILT-but-user-gated cutover substrate threeway/cutover.py/legacy_projector.py/cursor_backfill.py/divergence.py). Note also that the 'Read first' sibling §I.5 of UNIFIED-OPERATING-DOCTRINE.md is itself stale (claims Slice 2.5 a deferred stub and co_sign_satisfied returns False — both false at HEAD), so this doc inherits stale build-status by reference even though it carries little status of its own. Net: 1 major (wrong anchor), 1 minor (anchor form), several missing-content additions; no false mechanism/status claims in the doc's own prose."
+      },
+      {
+        "doc": "docs/protocol/threeway/ARCHITECTURE-DIAGRAM.md",
+        "stale_count": 3,
+        "items": [
+          {
+            "location": "line 10-12 (Status callout)",
+            "kind": "status_claim",
+            "quote": "The `threeway/` package (Slice 1+2) is built but **wired into nothing** today; the live substrate is still the legacy mailbox bus.",
+            "verdict": "missing_nuance",
+            "current_truth": "The 'wired into nothing / legacy mailbox bus is live' core is CONFIRMED current (UNIFIED §I.5: 'The package is wired into NOTHING'; 'live coordination substrate is still the legacy mailbox bus'). BUT '(Slice 1+2)' is now understated: HEAD has Slice 2.5 migration substrate BUILT (threeway/cutover.py run_cutover/_teardown, legacy_projector.py, divergence.py, cursor_backfill.py all exist — verified via `ls -la threeway/cutover.py threeway/divergence.py threeway/legacy_projector.py threeway/cursor_backfill.py`) and Slice 3 tier machinery BUILT (threeway/tier.py co_sign_satisfied). What is NOT done is EXECUTING the cutover (DECISIONS.md ADR-044 line 1682: 'does NOT flip the live bus... ready_to_flip=True; the authority-flip... gated on explicit user confirmation', ADR-045 line 2337).",
+            "fix": "Reword to: 'The `threeway/` package — Slice 1+2 (signed bus, reducer, gate), Slice 2.5 (legacy-bus migration substrate: cutover/projector/divergence/cursor-backfill), and Slice 3 (tiered T2/T3 co-sign machinery) — is built but wired into nothing today; no live seat/harness/CI emits a threeway event. The cutover that flips authority to the new bus is built but NOT yet executed (gated on explicit user confirmation; keys unprovisioned). The live substrate is still the legacy mailbox bus.'",
+            "severity": "major"
+          },
+          {
+            "location": "line 91-92 (NoteTier in mermaid) + line 30 echo",
+            "kind": "status_claim",
+            "quote": "Gate-computed tiers: T0/T1 shown.<br/>T2 adds the OTHER pair's operator co_sign.<br/>T3 adds re_verify + two human_approval.<br/>Slice 3, not yet active.",
+            "verdict": "stale",
+            "current_truth": "'Slice 3, not yet active' is STALE. The Slice-3 merge-gate tier machinery (scope-a) is BUILT and enforcing: threeway/tier.py:39 `co_sign_satisfied` returns True for T0/T1, requires a mirror-pair operator co_sign for T2 (tier.py:55-56), and for T3 requires `_t3_cross_provider_re_verify` (freshness-nonce-bound, ADR-043) + `_two_distinct_human_approvals` (per-approver key-bound roster, ADR-043) (tier.py:57-61). DECISIONS.md ADR-035 (line 1699) Status=ACCEPTED ('Slice 3 implements the merge-gate tier machinery'); ADR-043 (line 2167) CLOSED the two Slice-3 scope-(b) deferrals (re_verify freshness CHALLENGE + per-approver key-bound human_approval). ARCHITECTURE.md §13A.6 documents it as built. What is NOT active is the LIVE EMISSION of co_sign/re_verify/human_approval facts (scope-b: dual-chief apps, key provisioning, cutover). Verified via `grep -n 'co_sign_satisfied\\|T2\\|T3\\|re_verify\\|human_approval' threeway/tier.py` and `grep -n 'ADR-035\\|ADR-043' DECISIONS.md`.",
+            "fix": "Change the last line to: 'Slice-3 tier machinery is BUILT and enforced by the gate (T2 mirror-pair co_sign; T3 freshness-nonce re_verify + two key-bound human_approvals, ADR-043) — but the live emission of those facts and key provisioning are not yet done (scope-b cutover).' Apply the same nuance to the bottom-of-page status if echoed.",
+            "severity": "major"
+          },
+          {
+            "location": "line 86 (Bus->Gate edge) + line 118-120 (read 4) + What-this-corrects #3 (line 133)",
+            "kind": "rule_claim",
+            "quote": "needs BOTH release_requested and release_order, release GO, ci_result PASS, valid sigs, in-scope diff",
+            "verdict": "missing_nuance",
+            "current_truth": "The two-trigger requirement matches the SPEC (§5.1 step 6 line 120-121 and §6.3 line 297: 'the merge-gate acts only when both exist'). HOWEVER the CURRENT predicate.py code does NOT have an explicit `release_requested` gating CLAUSE — `grep -c release_requested threeway/predicate.py` -> 0. Instead the coordinator's authority is represented structurally by the AUTHORITATIVE candidate (predicate.py:51 `state.authoritative_candidate` — the candidate signed by the overseer-assigned executing coordinator, ADR-039), and the release_order is the overseer's separate trigger (predicate.py:137). `release_requested` IS a real coordinator-signed fact (loop.py docstring: 'candidate + release_requested are the pair's COORDINATOR'; reducer.py:333-334 folds it) but it is not itself the gating clause today. So 'BOTH triggers' is accurate at the SPEC/intent level but the code expresses the coordinator trigger via the authoritative candidate, not a release_requested predicate check.",
+            "fix": "Optional precision note: keep 'two triggers' (spec-true), but add a footnote that in the current code the coordinator's trigger is the overseer-assigned authoritative `candidate` fact (predicate.py:51, ADR-039), with `release_requested` carried as a coordinator fact in the model; the overseer's `release_order` is the second, separately-checked trigger (predicate.py:137).",
+            "severity": "minor"
+          }
+        ],
+        "missing_content": [
+          {
+            "topic": "ADR-039/040/041 — availability hardening: authority-aware reducer + TOTAL run_gate",
+            "why_needed": "The diagram's Gate node says 'never trusts coordinator SHA' but does not capture that run_gate is now TOTAL (never raises after CAS; drops-not-raises forged/malformed events; well_formed envelope guard) — a load-bearing availability property that closes the insider DoS class. This is the dominant post-Jun-20 hardening of the very node the diagram features.",
+            "where_to_add": "A short line in the Gate node or a new yellow note: 'run_gate is TOTAL — a forged/malformed fact is dropped (never promotes, never crashes); ADR-039/040/041.'",
+            "evidence": "DECISIONS.md ADR-039 (line 1900) 'a TOTAL run_gate', ADR-040 (1984), ADR-041 (2044 'well_formed(ev) envelope guard'). gate.py:187 'never an escaping CalledProcessError — run_gate is TOTAL'. ARCHITECTURE.md §13A.7 (line 1856)."
+          },
+          {
+            "topic": "ADR-042 — pair-namespaced candidate ids (candidate_id = '<pair>:<local>')",
+            "why_needed": "The diagram shows candidate_id flowing through the bus (branch_sha/integration_sha facts) but never states the candidate_id binding rule. The pair-namespace ('A:c1') is what STRUCTURALLY prevents a cross-pair candidate-id hijack/DoS — a load-bearing identity invariant for the very candidate/attestation facts the diagram draws.",
+            "where_to_add": "A 'What to notice' bullet or a yellow note near the Bus/candidate facts: 'candidate_id is pair-namespaced (\"<pair>:<local>\"); a candidate is authoritative only if its declared pair == the id namespace (ADR-042).'",
+            "evidence": "loop.py:73 'ADR-042: candidate ids are pair-namespaced (\"<pair>:<local>\")'. reducer.py:34-35, :147. DECISIONS.md ADR-042 (line 2105)."
+          },
+          {
+            "topic": "ADR-043 — T3 re_verify freshness CHALLENGE (overseer nonce) + per-approver key-bound human_approval (approver_roster)",
+            "why_needed": "The NoteTier says T3 = 're_verify + two human_approval' but omits that T3 is now hardened: re_verify must echo the overseer's freshness nonce (replayed stale re_verify fails), and the two human_approvals must come from two DISTINCT key-bound roster seats (a compromised overseer can no longer assert two labels for one human). This is the closure of the two Slice-3 scope-(b) deferrals and changes what T3 actually requires.",
+            "where_to_add": "Expand the NoteTier T3 line or the (revised) status note: 'T3 = nonce-fresh re_verify (overseer challenge) + two SHA-bound human_approvals from distinct key-bound roster seats (ADR-043).'",
+            "evidence": "tier.py:101-141 (_t3_cross_provider_re_verify nonce echo, _two_distinct_human_approvals roster). DECISIONS.md ADR-043 (line 2167). ARCHITECTURE.md §13A.6 'T3 freshness + per-approver auth are now key-bound (ADR-043).'"
+          },
+          {
+            "topic": "ADR-044/045 + cutover substrate BUILT (threeway/cutover.py run_cutover/_teardown), legacy_projector/divergence/cursor_backfill exist",
+            "why_needed": "The Status callout claims the package is 'Slice 1+2' and the substrate is 'still the legacy mailbox bus' with no mention that the Slice-2.5 migration substrate (shadow projection + single-writer cutover) is now BUILT and hardened — non-atomic teardown fixed (ADR-044), pre-cursor-try strand guarded (ADR-045), refstore dedup includes revoke/supersede target. The diagram should distinguish 'migration substrate built but cutover not yet executed' from 'nothing exists yet.'",
+            "where_to_add": "In the revised Status callout (and optionally a yellow note): note that the cutover path (preconditions_for_flip -> run_cutover) is built+hardened but NOT executed; the flip is gated on explicit user confirmation.",
+            "evidence": "ls threeway/{cutover,legacy_projector,divergence,cursor_backfill}.py -> all present. cutover.py:78 _teardown, :107 run_cutover. DECISIONS.md ADR-044 (line 2247), ADR-045 (line 2309), ADR-034 line 1682 'does NOT flip the live bus... ready_to_flip=True'. ARCHITECTURE.md §13A.5."
+          },
+          {
+            "topic": "ADR-036/037/038 — revocation authority, event-id uniqueness, reserved merge-id (Slice-3 forgery hardening)",
+            "why_needed": "The diagram emphasizes 'signed bus facts' and gate evaluation but does not mention that revocation is an AUTHORITY-checked channel (only overseer or the target's own signer seat can revoke), that event ids are now globally unique (gate + store reject duplicates), and that the reserved merge-<cid> id is rejected before the irreversible CAS. These close a forgery/merge-DoS class on exactly the bus facts and gate the diagram draws.",
+            "where_to_add": "A yellow note near the Bus or a 'What to notice' bullet on fact integrity: 'Revocation is authority-checked (overseer or own-signer only, ADR-036); event ids are unique at gate+store (ADR-037); the reserved merge-id is rejected pre-CAS (ADR-038).'",
+            "evidence": "DECISIONS.md ADR-036 (line 1750), ADR-037 (1814), ADR-038. reducer.py:47-57 _revoke_authorized. ARCHITECTURE.md §13A.6 'Revocation authority (ADR-036)'."
+          },
+          {
+            "topic": "Keys-not-provisioned status",
+            "why_needed": "The diagram depicts a fully signature-gated topology but does not surface that NO chief/seat keys are provisioned yet (coordination/threeway/keys/ holds only a README, zero .pub files), which is why escalated tiers fail-closed in practice and the protected CI runner is undeployed. A reader of the 'target topology' diagram needs the one-line caveat that signatures aren't wired to real keys yet.",
+            "where_to_add": "Add to the revised Status callout: 'Keys are not provisioned (coordination/threeway/keys/ has only a README; no .pub files) — so escalated tiers fail-closed and the protected runner is undeployed.'",
+            "evidence": "ls coordination/threeway/keys/ -> only README.md; `find coordination/threeway/keys -name '*.pub'` -> empty. UNIFIED §I.5 'Keys are not provisioned'."
+          }
+        ],
+        "overall": "docs/protocol/threeway/ARCHITECTURE-DIAGRAM.md is structurally SOUND and its one concrete code anchor (threeway/loop.py:43-52) is precisely current at HEAD; all link targets (spec, UNIFIED-OPERATING-DOCTRINE.md §I.5) and all spec section refs (§4/§5.1/§6.3/§6.4/§9) resolve; every seat->provider mapping, the overseer-signs/gate-evaluates split, the CAS/recompute/never-runs-candidate-code mechanics, and the two-release-trigger semantics all match the code/spec. It does NOT carry the stale gate.py:95 anchor (that drift lives only in the manuals). TWO real staleness items: (1) the NoteTier 'Slice 3, not yet active' is STALE — the Slice-3 tier machinery (tier.py co_sign_satisfied T2/T3) is BUILT and enforced, with ADR-043 having closed the T3 freshness+per-approver deferrals; what is unbuilt is the LIVE EMISSION of those facts. (2) the Status callout's 'Slice 1+2 ... wired into nothing' understates HEAD: Slice 2.5 migration substrate and Slice 3 are both built (cutover.py/legacy_projector.py/divergence.py/cursor_backfill.py exist), with the cutover hardened (ADR-044/045) but NOT yet executed and keys NOT provisioned — the correct status is 'built across Slices 1/2/2.5/3 but not yet cut over to live; legacy mailbox still authoritative.' One MINOR precision nuance: the 'needs BOTH release_requested and release_order' claim is spec-true but the current code expresses the coordinator trigger via the authoritative candidate fact (ADR-039), not a release_requested predicate clause. The biggest gap is MISSING CONTENT: the diagram predates and never mentions ADR-036..045 (revoke-authority/id-uniqueness/reserved-merge-id forgery hardening; pair-namespaced candidate_id; TOTAL run_gate; T3 nonce+roster hardening; cutover substrate) — six topics that materially harden the exact bus/gate/tier elements the diagram draws and should be folded in as yellow notes / 'What to notice' bullets when refreshing."
+      }
+    ],
+    "activation": {
+      "steps": [
+        {
+          "step": "Key provisioning — per-seat Ed25519 keypairs (.pub trust root committed under coordination/threeway/keys/)",
+          "status": "not_built",
+          "evidence": "Bootstrap CLI EXISTS but has NEVER been run: threeway/keys_bootstrap.py:13-29 (SEATS tuple of 9 incl ci, merge-gate, overseer + per-pair seats; writes <seat>.pub to registry, <seat>.ed25519 to keystore). ZERO .pub committed: verified via `$ git ls-files | grep -c '\\.pub$'` -> 0, and `$ git ls-files coordination/threeway/keys/` -> only README.md. Trust-root contract: coordination/threeway/keys/README.md (one <seat>.pub per seat, these ARE committed; private NEVER committed). Keystore default ~/.threeway/keys (threeway/keys.py:66). The gate loads pubs via PublicKeyRegistry (threeway/keys.py:77 per ARCHITECTURE.md:1755). Without committed .pub files, verify_and_reduce drops every load-bearing event as unknown-seat (ADR-040) -> no candidate can ever promote. This is the hard blocker for going live.",
+          "next_action": "Run `python -m threeway.keys_bootstrap --registry coordination/threeway/keys --keystore \"$THREEWAY_KEYSTORE\"` on a TRUSTED host that does NOT execute candidate code (spec §6.4); commit the 9 .pub files; distribute each private .ed25519 to the matching seat's off-repo keystore ONLY. Note coordination/threeway/keys/ is itself T3-classified (threeway/policy.py:17), so committing the trust root is a T3 act.",
+          "user_gated": true
+        },
+        {
+          "step": "Legacy->bus cutover — run_cutover flips refs/threeway/events to the LIVE coordination substrate",
+          "status": "built",
+          "evidence": "Fully built + hardened, NOT executed/live. threeway/cutover.py:107 run_cutover (preflight_bus_init fail-closed -> snapshot all 7 refs -> sign+append carriers -> backfill 6 cursors -> returns CutoverResult(ready_to_flip=True); it does NOT flip — the authority-flip marker commit is the caller's separate act, cutover.py:39-43,170-173). NO production caller: `$ grep -rn 'run_cutover' --include='*.py' .` -> only tests/unit/test_threeway_cutover.py + the def. ADR-044 hardening (DECISIONS.md:2247): _teardown now best-effort-per-ref + TeardownError chained from original (cutover.py:78-104). ADR-045 (DECISIONS.md:2309): pre-cursor validation moved inside teardown guard (cutover.py:149-160). DECISIONS.md ADR-031 D-B / ADR-034 + docs/HANDOFF-threeway-adr042: 'authority-flip onto refs/threeway/events was NOT run — the live coordination/ bus is still on ISO cursors.' Tests green: 46 passed (cutover+gate). ADR-044 preconditions_for_flip (DECISIONS.md:2300-2306): (1) freeze the coordination tree for the flip window (no concurrent refs/threeway/* writer), (2) a clean `divergence` check, (3) a force=True dry-run asserting ready_to_flip, (4) an OUT-OF-BAND pre-run ref snapshot, (5) chief/overseer key provisioning. Rollback = retained read-only sent/ + reversible cursor manifest (coordination/mailbox/.migration/cursor-backfill.json, ARCHITECTURE.md:1796). NOT inherently irreversible (rollback exists) but the live flip is the one gated WRITER.",
+          "next_action": "Gated chain after key provisioning: freeze the bus, run `divergence.diverge` clean, run run_cutover(force=True) dry-run to assert ready_to_flip, capture out-of-band ref snapshot, THEN execute run_cutover for real (~50 min O(n^2) append loop over ~768 events, NO progress output — expected, not a hang; cutover.py:108-110) and make the caller's authority-flip marker commit. No production driver script exists — one must be written or the operator drives it manually.",
+          "user_gated": true
+        },
+        {
+          "step": "CI emitting a signed ci_result event",
+          "status": "not_built",
+          "evidence": "CI signs NOTHING today. `$ grep -niE 'threeway|ci_result|sign|ed25519|keystore|merge.?gate' .github/workflows/ci.yml` -> single hit at line 90, a COMMENT noting the suite runs the real-subprocess test_threeway_* git-CAS tests. Only one workflow exists (`$ ls .github/workflows/` -> ci.yml). The pytest-unit job just runs `pytest tests/unit/` with dummy LLM keys (ci.yml:80-128); no ci-key load, no event append, no ci_result emission. The ci_result event/seat IS modeled (threeway/loop.py:104-106 builds it ci-signed; keys_bootstrap SEATS includes 'ci') but the real GitHub Actions pipeline never produces a signed one.",
+          "next_action": "Add a CI step that, post-pass, loads the ci private key from a secret keystore and appends a signed ci_result event (result=PASS, policy_digest, subject_sha=integration_sha) to refs/threeway/events. Blocked on key provisioning (the ci.pub must be in the committed registry first) AND on the bus being live (cutover).",
+          "user_gated": false
+        },
+        {
+          "step": "Merge-gate runner/daemon — run_gate wired to a production caller",
+          "status": "not_built",
+          "evidence": "run_gate is in-process/library-only, NO production caller. Moved as the manuals noted: now threeway/gate.py:158 (was cited gate.py:95). `$ grep -rn 'run_gate' --include='*.py' .` -> every non-def hit is under tests/unit/ (test_threeway_gate*.py, test_threeway_slice2_adversarial.py) or internal comments in predicate.py/reducer.py/envelope.py/gate.py. `$ grep -rn 'RefEventStore|run_gate|verify_and_reduce|from threeway' --include='*.py' .` filtered to non-test/non-pkg -> ZERO hits (no web_server.py, no daemon, no cron, no scripts/ caller). run_gate IS production-quality + TOTAL (gate.py:158-234: never raises after CAS, well_formed guard, ADR-039/040/041); it just has nothing invoking it on the live bus.",
+          "next_action": "Write a merge-gate daemon/runner (or CLI) that constructs RefEventStore(repo), calls run_gate(candidate_id, store, repo, registry_dir=coordination/threeway/keys, bus_id='prod', main_ref, gate_seat='merge-gate') on a trigger (e.g. release_requested), and executes the merge on a clean GateResult. Requires the merge-gate.pub in the registry + the live bus.",
+          "user_gated": false
+        },
+        {
+          "step": "Slice 3 strategic loop + T2/T3 co_sign_satisfied (does it return False for T2/T3 today?)",
+          "status": "partial",
+          "evidence": "co_sign_satisfied does NOT return False for T2/T3 unconditionally — it is fully implemented and fail-closed. threeway/tier.py:39-61: T0/T1 -> True; T2 -> requires cross-provider independence + _t2_mirror_cosign (mirror pair's verifier GO bound to integration_sha, tier.py:90-98); T3 -> adds _t3_cross_provider_re_verify with overseer nonce freshness (ADR-043, tier.py:101-138) + _two_distinct_human_approvals on key-bound roster seats (ADR-043, tier.py:141-170). Live probe `$ python -c '...co_sign_satisfied...'` -> T0:True, T1:True, T2(no facts):False, T3(no facts):False, T2(same-provider):False — i.e. it returns True ONLY when the required signed facts exist, fail-closed otherwise. Identity from overseer-signed assignments + key-bound seat token, never the unsigned signer tail (tier.py:32-36). Confirmed wired into the gate path (run_gate -> verify_and_reduce -> predicate.py:126 -> co_sign_satisfied) and exercised E2E: test_run_gate_completes_full_t3_through_signed_gate passes (within the 329-passed threeway suite). PARTIAL because the tactical event builders (threeway/loop.py build_candidate_events) are a library for tests/demo with no live driver, and the scope-(b) STRATEGIC loop (overseer emitter that issues fresh re_verify_challenge nonces + approver_roster, and same-pair assignment supersede — ARCHITECTURE.md:1816-1818,1820-1834) is not built as a running process; ADR-043 closed the T3 freshness/per-approver GATE LOGIC but the nonce-EMITTER discipline rests on the overseer (tier.py:112-118).",
+          "next_action": "No code fix needed for the gate predicate (built + green). To go live: build the scope-(b) overseer/strategic emitter that issues fresh per-cycle re_verify_challenge nonces + approver_roster facts and handles same-pair assignment supersession, and provision each chief approver's <chief>.pub (else T3 human_approvals drop as unknown-seat -> T3 stays PENDING, ARCHITECTURE.md:1830-1833).",
+          "user_gated": false
+        }
+      ],
+      "flip_preconditions": [
+        "Key provisioning DONE: run `python -m threeway.keys_bootstrap` on a trusted non-candidate-executing host; commit all 9 <seat>.pub to coordination/threeway/keys/ (currently 0 committed — README.md only); distribute private .ed25519 keys to off-repo keystores. Hard blocker — without it every load-bearing event drops as unknown-seat. (threeway/keys_bootstrap.py:13; verified `git ls-files | grep -c .pub` -> 0)",
+        "Chief/overseer approver keys provisioned: each T3 human approver needs its own <chief>.pub in the registry or its approval is dropped and T3 stays PENDING (ARCHITECTURE.md:1830-1833).",
+        "Freeze the coordination tree for the flip window — no concurrent refs/threeway/* writer (ADR-044 op precondition, DECISIONS.md:2302).",
+        "Clean `divergence.diverge` check: projected event set == live sent count (threeway/divergence.py:40; ARCHITECTURE.md:1786-1788).",
+        "Successful force=True DRY-RUN of run_cutover asserting ready_to_flip (DECISIONS.md:2303).",
+        "Out-of-band pre-run ref snapshot captured (belt-and-suspenders beyond cutover's internal _snapshot_refs; DECISIONS.md:2303-2304).",
+        "Explicit USER confirmation of the live flip — DECISIONS.md:2306 + 2337: 'The live flip remains GATED on explicit user confirmation' / 'remains gated on explicit user confirmation with the ADR-044 operational preconditions unchanged.'",
+        "Expect a ~50-min O(n^2) append loop over ~768 events with NO progress output during the real run — do not abort as a hang (cutover.py:108-110)."
+      ],
+      "notes": "VERDICT: The signed bus is BUILT, hardened, and fully test-green (329 passed in the threeway suite; verified `$ env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q` -> 329 passed) but is NOT the live coordination substrate. The live coordination/ bus still runs on legacy ISO-cursor markdown mailboxes. Three not_built integration seams (CI signing, merge-gate runner, key provisioning) plus the user-gated cutover stand between BUILT and LIVE.\n\nCRITICAL PATH (ordering): (1) key provisioning [user-gated, T3] is the root blocker — nothing verifies without committed .pub files; (2) then the cutover [user-gated, ~50min, reversible via retained sent/ + cursor manifest]; (3) CI signing + merge-gate runner can be built in parallel but only function once keys + live bus exist.\n\nCORRECTIONS to the manuals' 'known-since' list — all VERIFIED true at HEAD (73c285a2):\n- run_gate moved gate.py:95 -> threeway/gate.py:158 — CONFIRMED (`$ grep -n 'def run_gate' threeway/gate.py`).\n- coordinator2 is a CODEX_SEAT compatibility alias — CONFIRMED, but the file is scripts/codex_protocol_model.py (NOT repo-root codex_protocol_model.py as the prompt stated): COORDINATOR_SEATS=('coordinator','coordinator2') at scripts/codex_protocol_model.py:104; 'coordinator and coordinator2 are compatibility aliases for coordinator mode' at :156.\n- ADR-042 pair-namespaced candidate_id = '<pair>:<local>' — CONFIRMED (threeway/loop.py:78).\n- ADR-043 re_verify freshness nonce + per-approver key-bound human_approval roster — CONFIRMED (threeway/tier.py:101-170).\n- ADR-044/045 cutover hardening — CONFIRMED (threeway/cutover.py:78-104 best-effort teardown; :149-160 pre-try validation inside guard; DECISIONS.md:2247,2309).\n- cutover.py/legacy_projector.py/cursor_backfill.py/divergence.py all EXIST, Slice-2.5 substrate built not executed — CONFIRMED (`$ ls threeway/`).\n\nKEY FINDING on the prompt's explicit question 'does co_sign_satisfied return False for T2/T3 today?': NO. It is fully implemented (tier.py:39) and fail-closed — returns True for T0/T1, and True for T2/T3 only when the required signed mirror-cosign / re_verify-with-nonce / two-key-bound-human-approvals facts exist; False otherwise. Live probe confirmed T2/T3 -> False only on an empty/same-provider state. It is NOT a stub.\n\nloop.py is a tactical EVENT-BUILDER library (build_candidate_events), not a running strategic loop/daemon; the scope-(b) strategic loop (overseer nonce/roster emitter + same-pair assignment supersede) is the remaining unbuilt orchestration piece per ARCHITECTURE.md §13A.6.\n\nSmoke/suite caveat: ARCHITECTURE.md §13A.4 footer says '307 passed, 1 xfailed' (Last verified 2026-06-21) but the live suite now shows 329 passed/0 — a minor doc-count drift (peer commit bfd5efbe per HEAD commit msg); the substrate itself is green, the doc footer is the only stale claim observed and is non-load-bearing for activation."
+    },
+    "consistency": {
+      "contradictions": [
+        {
+          "topic": "Build status — Slice 2.5 migration described as a deferred stub",
+          "source_a": "docs/protocol/threeway/README.md:20-21 (Status block) — \"Slice 2.5 (migration) is a deferred stub\"; UNIFIED-OPERATING-DOCTRINE.md:109-110 §I.5 — \"Slice 2.5 (legacy-bus migration) is a DEFERRED tracking stub, not an implementation plan\"; ARCHITECTURE-DIAGRAM.md:10 \"(Slice 1+2)\"",
+          "source_b": "Truth-sources: `ls threeway/` → cutover.py, legacy_projector.py, cursor_backfill.py, divergence.py all present; threeway/cutover.py:1 docstring \"The single authoritative cutover (Slice 2.5 §5c)\", run_cutover at :107, _teardown at :78. DECISIONS.md:1607 ADR-034 Status: \"ACCEPTED (Slice 2.5 implemented per the design spec)\". ARCHITECTURE.md §13A.5 (:1778) documents legacy_projector + divergence as built; §13A.4 (:1768) \"Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: 307 passed, 1 xfailed\".",
+          "nature": "The manuals call Slice 2.5 a deferred/un-implemented stub; the package and DECISIONS show the migration SUBSTRATE is fully built, merged, and adversarially hardened (ADR-044/045) — only the live cutover EXECUTION is pending (gated on user confirmation, DECISIONS.md:2337).",
+          "which_is_right": "Truth-sources win. Verified via `ls threeway/` (4 migration modules present), `grep -n 'def run_cutover\\|def _teardown' threeway/cutover.py` → 107/78, and DECISIONS.md ADR-034 Status ACCEPTED + ADR-044/045 ACCEPTED (lines 1607/2247/2309). The accurate state is BUILT, NOT YET EXECUTED.",
+          "resolution": "Replace \"Slice 2.5 (migration) is a deferred stub\" with \"Slice 2.5 migration substrate is BUILT (threeway/cutover.py, legacy_projector.py, cursor_backfill.py, divergence.py) and hardened (ADR-044/045); the one-time authority-flip cutover is NOT yet executed — gated on explicit user confirmation (DECISIONS.md:2337).\" Same edit in README:21, UNIFIED §I.5:109-110, and broaden ARCHITECTURE-DIAGRAM.md:10 \"(Slice 1+2)\" → \"(Slice 1+2+2.5+3-machinery)\".",
+          "severity": "critical"
+        },
+        {
+          "topic": "Build status — Slice 3 strategic loop / T2/T3 co-sign described as unbuilt",
+          "source_a": "docs/protocol/threeway/README.md:21 — \"Slice 3 (strategic loop) is unbuilt\"; UNIFIED-OPERATING-DOCTRINE.md:111 §I.5 — \"Slice 3 (strategic loop + T2/T3 co-sign) is unbuilt — co_sign_satisfied returns False for T2/T3, so escalated tiers cannot promote yet\"; ARCHITECTURE-DIAGRAM.md:91 — \"Slice 3, not yet active\"",
+          "source_b": "Truth-sources: `sed -n '39,61p' threeway/tier.py` → co_sign_satisfied returns True for T0/T1 (:46), evaluates _t2_mirror_cosign for T2 (:53-56), and _t3_cross_provider_re_verify + _two_distinct_human_approvals for T3 (:58-61) — it does NOT return False for escalated tiers. DECISIONS.md:1701 ADR-035 Status ACCEPTED \"Slice 3 implements the merge-gate tier machinery (scope a)\". ADR-043 (DECISIONS.md:2167) CLOSED both scope-(b) T3 deferrals. ARCHITECTURE.md §13A.6 (:1801).",
+          "nature": "The manuals claim Slice 3 is unbuilt and co_sign_satisfied hard-returns False for T2/T3; the code enforces live T2/T3 tier logic and the ADR is ACCEPTED.",
+          "which_is_right": "Truth-sources win. The literal claim \"co_sign_satisfied returns False for T2/T3\" is FALSE per `sed -n '39,61p' threeway/tier.py`. The Slice-3 merge-gate tier machinery (scope a) is BUILT + ACCEPTED (ADR-035); only scope-(b) RUNTIME emission (dual-chief apps, overseer brief distribution, LIVE emission of co_sign/re_verify/human_approval facts, key provisioning) remains unbuilt.",
+          "resolution": "Replace with: \"Slice 3 merge-gate tier machinery (scope a) is BUILT + enforcing — co_sign_satisfied gates T2 (other pair's operator co_sign) and T3 (re_verify freshness challenge + two key-bound human_approvals), ADR-035/043. Only the strategic-loop RUNTIME (scope b: dual-chief apps, overseer fact emission, key provisioning) is unbuilt.\" Same edit in README:21, UNIFIED §I.5:111, and ARCHITECTURE-DIAGRAM.md:91 \"Slice 3, not yet active\" → \"Slice-3 tier machinery active; live fact-emission (scope b) pending.\"",
+          "severity": "critical"
+        },
+        {
+          "topic": "CODEX harness rejects CODEX_SEAT=coordinator2 (target-state-only)",
+          "source_a": "CODEX-ADOPTION.md:56 (§2 table row 3) — coordinator2 \"target-state only today — the current Codex harness does not accept CODEX_SEAT=coordinator2\"; :63-67 (blockquote) \"CODEX_SEAT values today are director|director2|operator|operator2|coordinator\" + \"none ... is a current Codex harness live-seat until Slice 2.5 adds explicit support\"; :112 (§4 step 2) names \"surfaces that currently reject coordinator2 (seat_status.py and codex_protocol_model.py)\"; :151-152 (§6); ONBOARDING.md:83-84",
+          "source_b": "Truth-sources: `grep -n coordinator2 scripts/codex_protocol_model.py` → :104 COORDINATOR_SEATS=(\"coordinator\",\"coordinator2\"); :155 CODEX_SEAT value list includes coordinator2; :156 \"coordinator and coordinator2 are compatibility aliases for coordinator mode and remain unpinned\". `grep -n 'RECEIVING_SEATS' scripts/protocol_mailbox.py` → :17 RECEIVING_SEATS=(*SEATS,\"coordinator\",\"coordinator2\"). seat_status.py argparse choices=SEATS=protocol_mailbox.RECEIVING_SEATS (includes coordinator2).",
+          "nature": "The manuals say the Codex harness/orientation surfaces reject coordinator2 and it is target-state-only; the harness now binds coordinator2 as a coordinator-mode alias and the mailbox/seat_status surfaces accept it.",
+          "which_is_right": "Truth-sources win. codex_protocol_model.py:104/155-156 and protocol_mailbox.py:17 accept coordinator2 today (this binding landed in commit 09838d72, a descendant of the docs' last edit). The accurate residual is that coordinator2 must not be claimed as a live signed-bus INTEGRATOR (the executing-coordinator role on refs/threeway/events), not that the harness rejects the seat NAME.",
+          "resolution": "Rewrite all four passages: \"CODEX_SEAT=coordinator2 now resolves to coordinator MODE today (codex_protocol_model.py:104,155-156, unpinned alias); seat_status.py and protocol_mailbox.py accept it (RECEIVING_SEATS, protocol_mailbox.py:17). What remains target-state is the LIVE signed-bus INTEGRATOR role (staging refs→main), gated on the cutover/merge-gate runner.\" Update the CODEX §2 value-list to include coordinator2 and ONBOARDING.md:83-84 likewise.",
+          "severity": "critical"
+        },
+        {
+          "topic": "run_gate anchor — cited at gate.py:95 / gate.py:95-144",
+          "source_a": "CODEX-ADOPTION.md:122 (§4 step 4) — \"run_gate is an in-process function today (threeway/gate.py:95)\"; UNIFIED-OPERATING-DOCTRINE.md:97 §I.4 — \"never trusts the trigger or runs candidate code (threeway/gate.py:95-144, threeway/predicate.py:39-153)\"",
+          "source_b": "Truth-sources: `grep -n 'def run_gate' threeway/gate.py` → 158. `sed -n '95p' threeway/gate.py` → \"verify_event(ev, pub)\" (inside verify_and_reduce, def at :38). gate.py:118-157 are module imports / GateResult dataclass (:141) / _RepoAdapter (:146). predicate.evaluate is def at :39 but runs to :167 (returns MERGEABLE at 167); 39-153 cuts it mid-body.",
+          "nature": "Both manuals cite the run_gate / predicate-recompute logic at gate.py:95(-144); run_gate moved to gate.py:158 and line 95 is now inside an unrelated read-side function.",
+          "which_is_right": "Truth-sources win. run_gate is at gate.py:158 (verified `grep -n 'def run_gate'`); the predicate-recompute + never-runs-candidate-code + exact-SHA CAS logic lives in run_gate (docstring at gate.py:120-130). predicate.evaluate spans 39-167, not 39-153.",
+          "resolution": "Update CODEX §4 step 4:122 to \"(threeway/gate.py:158)\" and UNIFIED §I.4:97 to \"(threeway/gate.py:158 run_gate, threeway/predicate.py:39-167 evaluate)\".",
+          "severity": "major"
+        },
+        {
+          "topic": "CODEX_SEAT env-tuple anchor — cited at codex_protocol_model.py:151-154",
+          "source_a": "CODEX-ADOPTION.md:63-64 (§2 blockquote) — \"The CODEX_SEAT values today are director|director2|operator|operator2|coordinator (scripts/codex_protocol_model.py:151-154)\"",
+          "source_b": "Truth-sources: `sed -n '148,162p' scripts/codex_protocol_model.py` → line 154 is the CODEX_SEAT label, line 155 the value string \"director|director2|operator|operator2|coordinator|coordinator2\", line 156 the description. Line 151 is inside the CODEX_AGENT_ROLE tuple, not CODEX_SEAT.",
+          "nature": "Wrong anchor AND stale value list: cited 151-154 points partly at CODEX_AGENT_ROLE; the CODEX_SEAT value string at :155 now also includes coordinator2.",
+          "which_is_right": "Truth-sources win. CODEX_SEAT env tuple is at lines 154-157 (label :154, value :155); the value enumeration includes coordinator2. Verified via `sed -n '148,162p' scripts/codex_protocol_model.py`.",
+          "resolution": "Fix anchor to (scripts/codex_protocol_model.py:154-156) and add coordinator2 to the enumerated value list (consistent with the §2-table fix).",
+          "severity": "critical"
+        },
+        {
+          "topic": "ci_result predicate-clause anchor — cited at predicate.py:138-147",
+          "source_a": "CODEX-ADOPTION.md:119 (§4 step 3) — a signed ci_result \"must be ... appended to the bus before the gate's predicate can pass (threeway/predicate.py:138-147)\"",
+          "source_b": "Truth-sources: `sed -n '137,161p' threeway/predicate.py` → lines 138-147 are the release_order block (ro=state.release_order, overseer-signer + subject_sha checks). The ci_result clause (signed by ci, result PASS, policy_digest) is at predicate.py:152-161.",
+          "nature": "The ci_result claim points at the release_order region, not the ci_result region.",
+          "which_is_right": "Truth-sources win. ci_result predicate logic is at predicate.py:152-161 (\"ci = state.ci_result(integ)\", _seat(ci.signer)!='ci', result!='PASS'). Verified via `sed -n '152,161p' threeway/predicate.py`.",
+          "resolution": "Change CODEX §4 step 3:119 anchor to (threeway/predicate.py:152-161).",
+          "severity": "major"
+        },
+        {
+          "topic": "store.append / refstore.append anchors — cited store.py:33-40 and refstore.py:122",
+          "source_a": "CODEX-ADOPTION.md:137-138 (§5 bullet 1) — \"append signs with the seat key and assigns seq (threeway/store.py:33-40; RefEventStore.append for the ref bus, threeway/refstore.py:122)\"",
+          "source_b": "Truth-sources: `grep -n 'def append' threeway/store.py threeway/refstore.py` → store.py:39, refstore.py:132. store.py:33 is `self._dir.mkdir(...)` (inside __init__); the signing/seq lines are ev.seq=self._next_seq() at :45 and sign_event at :46. refstore.py:122 is a `continue` inside _find_verified_idempotent.",
+          "nature": "Both append anchors are off: EventStore.append is at store.py:39-50 (not 33-40), RefEventStore.append at refstore.py:132 (not :122).",
+          "which_is_right": "Truth-sources win. Verified via `grep -n 'def append' threeway/store.py threeway/refstore.py` → 39 and 132.",
+          "resolution": "Change CODEX §5 anchors to (threeway/store.py:39-50; ... threeway/refstore.py:132).",
+          "severity": "major"
+        },
+        {
+          "topic": "ci_result fixture anchor + 'all nine events for all seats' — cited loop.py:99 / build_candidate_events",
+          "source_a": "CODEX-ADOPTION.md:170-171 (§7) — \"The fixture in loop.py:99 does not satisfy the gate\"; :132-133 (§5 intro) — build_candidate_events \"fabricates all nine events for all seats as unsigned\"",
+          "source_b": "Truth-sources: `grep -n 'ci_result' threeway/loop.py` → 104 (the ci_result fixture entry); `sed -n '99p' threeway/loop.py` is the attestation-release id, not ci_result. `sed -n '1,5p;67,69p' threeway/loop.py` → build_candidate_events docstring says it \"assembles the six-step loop's facts for ONE pair\" (PairConfig PAIR_A/PAIR_B), not 'all seats'.",
+          "nature": "§7 points the ci_result fixture at loop.py:99 (wrong line, that is attestation-release); §5 overstates the fixture scope as 'all nine events for all seats' when it builds one pair's loop.",
+          "which_is_right": "Truth-sources win. ci_result fixture entry is loop.py:104-105; build_candidate_events builds ONE pair's events (PAIR_A by default), not all seats. Verified via `grep -n 'ci_result' threeway/loop.py` → 104 and the loop.py:1-3 docstring.",
+          "resolution": "Change §7:171 anchor to (loop.py:104); soften §5:132-133 to \"builds one pair's nine loop facts as UNSIGNED (PairConfig PAIR_A/PAIR_B; the docstring says so).\"",
+          "severity": "minor"
+        },
+        {
+          "topic": "_MAILBOX_SEATS anchor — cited status.py:126",
+          "source_a": "CODEX-ADOPTION.md:111 (§4 step 2) — \"scripts/status.py:126 (_MAILBOX_SEATS)\"",
+          "source_b": "Truth-sources: `grep -n '_MAILBOX_SEATS' scripts/status.py` → 141 (def), 247/362/367/518 (uses).",
+          "nature": "_MAILBOX_SEATS is defined at status.py:141, not :126.",
+          "which_is_right": "Truth-sources win. Verified via `grep -n '_MAILBOX_SEATS' scripts/status.py` → 141.",
+          "resolution": "Change CODEX §4 step 2:111 anchor to (scripts/status.py:141).",
+          "severity": "minor"
+        },
+        {
+          "topic": "CODEX §4 step 2 prescribes making coordinator/coordinator2 receiving seats as future work — already done",
+          "source_a": "CODEX-ADOPTION.md:108-112 (§4 step 2) — lists \"every hard-coded mailbox/harness seat-list needed to make coordinator/coordinator2 first-class receiving seats: at minimum scripts/protocol_mailbox.py:11 (SEATS) ... scripts/status.py:126 (_MAILBOX_SEATS) ... surfaces that currently reject coordinator2\"",
+          "source_b": "Truth-sources: protocol_mailbox.py:17 RECEIVING_SEATS=(*SEATS,\"coordinator\",\"coordinator2\"); :18 SENDERS includes both; status.py:141 _MAILBOX_SEATS=protocol_mailbox.RECEIVING_SEATS. The receiving-seat plumbing is already done.",
+          "nature": "The step describes the receiving-seat plumbing as pending Slice-2.5 work; it has already landed.",
+          "which_is_right": "Truth-sources win. coordinator/coordinator2 are already first-class receiving seats (protocol_mailbox.py:17-18, status.py:141). Verified via `grep -n 'RECEIVING_SEATS\\|SENDERS' scripts/protocol_mailbox.py` and `grep -n '_MAILBOX_SEATS' scripts/status.py`.",
+          "resolution": "Rewrite §4 step 2 to mark the receiving-seat plumbing DONE (protocol_mailbox.py:17, status.py:141, seat_status.py choices) and scope the residual to the LIVE signed-bus integrator wiring + cursor backfill execution (the cutover), not seat-list edits.",
+          "severity": "major"
+        },
+        {
+          "topic": "No-dual-write invariant spec anchor — cited 'Slice 2.5 line 70, audited'",
+          "source_a": "UNIFIED-OPERATING-DOCTRINE.md:121 (§I.6 invariant 1) — \"No dual-write authority at any point (spec §8 item 8, line 400; Slice 2.5 line 70, audited)\"",
+          "source_b": "Truth-sources: `sed -n '70p' docs/superpowers/specs/2026-06-20-threeway-slice2.5-legacy-bus-migration-design.md` → \"| scripts/continuation_readiness.py:28 | SEATS | 4 | iterated :86 |\" (a seat-inventory table row). The no-dual-write statements in that spec are at lines 22, 40, 47 (D2 — the load-bearing one), 240, 272. The \"spec §8 item 8, line 400\" half is CORRECT (`sed -n '400p' ...2026-06-19...design.md` → \"...one-time backfill. No dual-write authority at any point.\").",
+          "nature": "The 2026-06-19 spec citation is right; the 'Slice 2.5 line 70' citation points at an unrelated seat-inventory row.",
+          "which_is_right": "Truth-sources win. Slice-2.5 spec line 70 is NOT the no-dual-write line; D2 at line 47 is the load-bearing structural statement (\"Makes 'no dual-write authority' structurally true (zero ref-bus mutation until cutover)\"). Verified via `sed -n '70p'` and `grep -n 'dual-write' ...slice2.5...design.md`.",
+          "resolution": "Change UNIFIED §I.6:121 to \"(spec §8 item 8, line 400; Slice 2.5 design §D2, line 47, audited)\".",
+          "severity": "major"
+        },
+        {
+          "topic": "Predicate per-seat / 'by seat' anchor — cited predicate.py:120-127",
+          "source_a": "UNIFIED-OPERATING-DOCTRINE.md:98 (§I.4) — \"Authority is checked by seat, not by signature validity alone (predicate.py:120-127)\"",
+          "source_b": "Truth-sources: `grep -n 'by seat' threeway/predicate.py` → 136 (\"# so authority must be checked by seat, not by signature validity alone\"). predicate.py:120-127 are the cycle_go policy_digest check (:120-121) and the start of the co_sign_satisfied call (:123-127). The per-seat signer checks are at predicate.py:84 (brief), :116 (cycle_go), :140 (release_order), :157 (ci_result).",
+          "nature": "The 'by seat' comment anchor points at the cycle_go/co_sign region rather than the comment's actual location and the signer-check sites.",
+          "which_is_right": "Truth-sources win. The 'by seat' rationale comment is at predicate.py:136; the enumerated overseer/ci signer checks are at :84/:116/:140/:157. Verified via `grep -n 'by seat\\|overseer\\|ci' threeway/predicate.py`.",
+          "resolution": "Change UNIFIED §I.4:98 anchor to (predicate.py:136; signer checks at :84/:116/:140/:157).",
+          "severity": "major"
+        },
+        {
+          "topic": "Antigravity — cycle_go/release_order signer checks cited at predicate.py:109,126",
+          "source_a": "ANTIGRAVITY-ADOPTION.md:37-38 (§1 blockquote) — those facts are \"overseer-signed and signer-checked (threeway/predicate.py:109,126)\"",
+          "source_b": "Truth-sources: `sed -n '108,127p' threeway/predicate.py` → :109 is \"cand.payload.get('risk_tier_claimed','T0'))\" (brief_tier continuation); :126 is \"if not co_sign_satisfied(eff_tier, state, candidate_id,\" — NEITHER is a signer check. The overseer signer checks (_seat(...signer)!='overseer') are at predicate.py:84 (brief), :116 (cycle_go), :140 (release_order).",
+          "nature": "Both cited lines are non-signer-check lines (a tier default and the co_sign call), not the cycle_go/release_order signer checks the prose claims.",
+          "which_is_right": "Truth-sources win. The actual cycle_go/release_order overseer-signer checks are predicate.py:116 and :140 (brief at :84). Verified via `grep -n 'overseer' threeway/predicate.py` → 84,116,140.",
+          "resolution": "Change ANTIGRAVITY §1:37 anchor to (threeway/predicate.py:116 cycle_go, :140 release_order — overseer-signer-checked).",
+          "severity": "major"
+        },
+        {
+          "topic": "No-dual-write cited as spec '§8.8'",
+          "source_a": "ANTIGRAVITY-ADOPTION.md:131 (§5 rule 3) — \"No dual-write ... (forbidden for every provider, spec §8.8)\"",
+          "source_b": "Truth-sources: `sed -n '366p;395,400p' docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md` → §8 \"The git-native bus\" is a numbered LIST of 8 items, not subsections §8.1-§8.8. \"No dual-write authority at any point\" is §8 item 8 (\"Migration\"), at line 400. There is no subsection literally numbered §8.8. UNIFIED §I.6:121 cites this correctly as \"spec §8 item 8, line 400\".",
+          "nature": "ANTIGRAVITY cites a non-existent subsection §8.8; the sibling UNIFIED doc cites the same fact correctly, so the two docs are internally inconsistent in their citation form.",
+          "which_is_right": "Truth-sources + sibling UNIFIED doc win. The correct citation is \"spec §8 item 8, line 400\". Verified via `grep -n '## 8\\|item 8' ...2026-06-19...design.md` and `sed -n '400p'`.",
+          "resolution": "Change ANTIGRAVITY §5:131 to \"(forbidden for every provider, spec §8 item 8)\" to match UNIFIED §I.6.",
+          "severity": "minor"
+        },
+        {
+          "topic": "ONBOARDING fallback-branch instruction points to a deleted branch / would fail",
+          "source_a": "ONBOARDING.md:28-30 (copy-paste prompt) — \"If those files are not in your checkout, they live on branch docs/threeway-adoption-manuals (PR #19) ... git show origin/docs/threeway-adoption-manuals:docs/protocol/threeway/ONBOARDING.md\"",
+          "source_b": "Truth-sources: `git ls-remote --heads origin | grep threeway-adoption` → EMPTY (branch deleted); `git ls-tree origin/main --name-only docs/protocol/threeway/` → all six manuals present on origin/main. The prescribed `git show origin/docs/threeway-adoption-manuals:...` would now FAIL.",
+          "nature": "The onboarding prompt instructs a fallback to a branch that no longer exists; the manuals are merged to main.",
+          "which_is_right": "Truth-sources win. The adoption manuals are on origin/main and the fallback branch is gone. Verified via `git ls-remote --heads origin | grep threeway-adoption` (empty) and `git ls-tree origin/main --name-only docs/protocol/threeway/` (all present).",
+          "resolution": "Delete or rewrite ONBOARDING.md:28-30: the manuals are on main; if missing, \"run git fetch origin && git checkout origin/main -- docs/protocol/threeway/\". Remove the dead branch/PR#19 reference.",
+          "severity": "major"
+        },
+        {
+          "topic": "Slice-2.5 plan link points at the deferred Jun-19 stub, not the Jun-20 implementation plan",
+          "source_a": "UNIFIED-OPERATING-DOCTRINE.md:110 (§I.5) — [plan](../../superpowers/plans/2026-06-19-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md); CODEX-ADOPTION.md:103 (§4) cites \"plans/2026-06-19-...:70, audited\"",
+          "source_b": "Truth-sources: `ls -la` → the Jun-19 plan is 4732 bytes (the DEFERRED stub); the real implementation plan is docs/superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md (172709 bytes). On the Jun-19 stub, `sed -n '70p'` is \"The legacy-bus checkers ... stay green\" (NOT the dual-write line; dual-write is at the stub's lines 39/74).",
+          "nature": "Both manuals link/anchor the superseded Jun-19 stub; CODEX additionally cites stub:70 for the no-dual-write claim, but that line is a checkers bullet.",
+          "which_is_right": "Truth-sources win. The implementing plan is the Jun-20 172KB file; linking the 4.7KB Jun-19 stub reinforces the stale 'deferred stub' status and the CODEX :70 anchor is wrong (dual-write is at stub:39/74, or better the Jun-20 design §D2:47). Verified via `ls -la` both plans and `sed -n '70p'`/`grep -n 'dual-write'` on the stub.",
+          "resolution": "Repoint UNIFIED §I.5:110 and CODEX §4:103 to the Jun-20 implementation plan (or the Slice-2.5 design spec §D2:47 for the no-dual-write claim); drop the stub:70 anchor.",
+          "severity": "minor"
+        },
+        {
+          "topic": "Two-trigger ('release_requested') gating — diagram/spec say BOTH triggers; predicate code has no release_requested clause",
+          "source_a": "ARCHITECTURE-DIAGRAM.md:86 (Bus→Gate edge), :118-120 (read 4), :133 (corrects #3) — \"needs BOTH release_requested and release_order\"; matches spec §6.3 (line 297) and UNIFIED §I.4 trigger description",
+          "source_b": "Truth-sources: `grep -c release_requested threeway/predicate.py` → 0 — the predicate has NO explicit release_requested gating clause. The coordinator's authority is expressed structurally via the AUTHORITATIVE candidate (predicate.py:51 state.authoritative_candidate, ADR-039/042); release_order is the overseer's separate trigger (predicate.py:137). release_requested IS a real coordinator-signed fact (reducer.py:112 folds it) but is not the gating clause.",
+          "nature": "The diagram (and spec/intent) state two explicit triggers; the current predicate code expresses the coordinator trigger via the authoritative candidate, not a release_requested check — a code/spec-intent gap, not a code/code contradiction.",
+          "which_is_right": "Both are 'right' at different layers: the SPEC/intent two-trigger model holds, but the CODE realizes the coordinator trigger structurally (authoritative_candidate, predicate.py:51) rather than via a release_requested predicate clause (count 0). Verified via `grep -c release_requested threeway/predicate.py` → 0 and `grep -n 'authoritative_candidate' threeway/predicate.py` → 51.",
+          "resolution": "Add a one-line note in ARCHITECTURE-DIAGRAM read 4 (:118) and UNIFIED §I.4: \"In v1 the coordinator trigger is enforced structurally via the overseer-bound authoritative candidate (predicate.py:51), not a separate release_requested predicate clause; release_requested remains a folded coordinator fact (reducer.py:112).\"",
+          "severity": "minor"
+        }
+      ],
+      "verdict": "The three adoption manuals do NOT agree with the truth-sources or fully with each other. The SEAT->PROVIDER->layer table is the one thing that is consistent everywhere (UNIFIED §I.2, CODEX §2, ANTIGRAVITY §1, ARCHITECTURE-DIAGRAM, spec §4 D2/D5, and threeway/loop.py PAIR_A/PAIR_B all agree); the per-seat 'who signs' authority (overseer brief/cycle_go/release_order, ci ci_result, coordinator candidate) is also consistent with predicate.py and spec §6.3. Beyond those, 18 contradictions were found and verified against HEAD. The dominant, repo-wide problem is STALE BUILD STATUS: README, UNIFIED §I.5, and ARCHITECTURE-DIAGRAM uniformly assert Slice 2.5 is a 'deferred stub' and Slice 3 is 'unbuilt' (with the literal-false claim that co_sign_satisfied returns False for T2/T3), but `ls threeway/` + tier.py + DECISIONS ADR-034/035/043/044/045 + ARCHITECTURE.md §13A prove both slices' substrate is BUILT, merged, hardened, and passing 307 tests — only the live cutover EXECUTION and the Slice-3 scope-(b) fact-emission RUNTIME remain. A second cluster (3 critical + several major) is the coordinator2 harness story: all four touchpoints (CODEX §2/§4/§6, ONBOARDING) claim the Codex harness rejects CODEX_SEAT=coordinator2, but codex_protocol_model.py:104/155-156 and protocol_mailbox.py:17 now bind it as an unpinned coordinator-mode alias. A third cluster is anchor rot: run_gate (gate.py:95→158), store/refstore append, ci_result predicate clause, the 'by seat' comment, the Antigravity signer-check lines, _MAILBOX_SEATS, loop.py ci_result fixture, and the Slice-2.5 spec/plan no-dual-write citation all point at lines that moved. One internal cross-doc inconsistency: ANTIGRAVITY §5 cites the no-dual-write rule as 'spec §8.8' (no such subsection) while sibling UNIFIED §I.6 cites it correctly as 'spec §8 item 8, line 400'. The package itself remains correct and self-consistent and is still wired into nothing live (import grep empty) — the docs are the stale layer, exactly as CLAUDE.md/ARCHITECTURE.md predict. Truth-sources win in every case; the unifying edits are listed per-row."
+    }
+  }
+}

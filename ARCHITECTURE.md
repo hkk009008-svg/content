@@ -1765,13 +1765,16 @@ append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` pr
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
 ```
 
-Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `307 passed, 1 xfailed` (incl. the ADR-036
+Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `341 passed, 0 xfailed` (incl. the ADR-036
 revoke-authority, ADR-037 event-id-uniqueness across gate + both stores, ADR-038 reserved-merge-id +
 brief_superseded authority, the ADR-039 availability-hardening pins — authority-aware reducer,
 self-consistent candidate resolution — the ADR-040 totality-completion pins — verify-phase
 drop-not-raise + pre-CAS exception guard — and the ADR-041 step-1 totality pins — the `well_formed`
-envelope guard + reducer fold/skip guards, with the cross-pair `candidate_id` reuse residual
-strict-xfailed).
+envelope guard + reducer fold/skip guards; ADR-042 pair-namespaced `candidate_id` — the prior
+cross-pair reuse residual, now CLOSED (not xfailed); ADR-043 T3 re_verify freshness nonce +
+per-approver `approver_roster`; ADR-044/045 cutover-substrate hardening; and ADR-046–049
+residual-surface hardening — refstore/store reader totality, atomic cursor-backfill manifest,
+host-independent merge-tree determinism, and the cutover force-rerun cursor fix).
 
 *Last verified: 2026-06-21*
 

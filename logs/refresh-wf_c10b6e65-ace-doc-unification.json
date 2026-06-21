@@ -1,0 +1,157 @@
+{
+  "summary": "Refresh the 6 docs/protocol/threeway manuals to HEAD (ADR-034..049): fix drifted anchors, correct stale build-status, resolve cross-doc contradictions, fold in missing ADR content — one implementer per doc + two-lens review",
+  "agentCount": 8,
+  "logs": [],
+  "result": {
+    "refreshed": [
+      {
+        "doc": "docs/protocol/threeway/README.md",
+        "edits_made": 1,
+        "anchors_fixed": [
+          "No code anchors in this file (pure router/index). New file-path links verified to resolve at HEAD: docs/superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md (exists), ARCHITECTURE.md §13A header confirmed at line 1699 via sed, DECISIONS.md ADR-049 present (grep -c '^## ADR-049' = 1, confirming the ADR-034..049 range)."
+        ],
+        "status_claims_corrected": [
+          "Replaced 'Slice 2.5 (migration) is a deferred stub' with CANON: Slice 2.5 migration substrate is BUILT + hardened (ADR-044/045) but the single authority-flip cutover has NOT been executed — gated on explicit user confirmation (DECISIONS.md ADR-045).",
+          "Replaced 'Slice 3 (strategic loop) is unbuilt' with CANON: Slice 3 merge-gate tier machinery is BUILT + enforcing (ADR-035); only the strategic-loop RUNTIME (scope b: dual-chief apps, overseer fact emission, key provisioning) is unbuilt.",
+          "Broadened '(Slice 1+2)' to enumerate Slice 1+2 / Slice 2.5 / Slice 3 tier machinery; KEPT 'wired into nothing' (verified current — no live seat/harness/CI emits a threeway event; legacy mailbox bus still live).",
+          "Added keys-not-provisioned blocker: coordination/threeway/keys/ holds only a README (verified via ls — no .pub files) — the hard blocker for going live."
+        ],
+        "content_added": [
+          "Truth-sources block: added Slice-2.5 migration plan (Jun-20) link, and ARCHITECTURE.md §13A + DECISIONS.md (ADR-034..049) as truth sources — per fix (3)."
+        ],
+        "notes": "All 6 table links and existing pointers (protocol spec, threeway/ package, AGENTS.md/CLAUDE.md/codex continuation, §I.5 cross-ref) left untouched per instructions. §I.5 anchor confirmed still present in UNIFIED-OPERATING-DOCTRINE.md (line 101). CANON build-status wording used verbatim. Verified against HEAD before/after: ARCHITECTURE.md §13A=line 1699; DECISIONS.md ADR-034 (1605), ADR-035 (1699), ADR-044 (2247), ADR-045 (2309), ADR-049 (2452); keys dir = README.md only; Jun-20 plan exists. Single Edit; no reorder, no table-link changes."
+      },
+      {
+        "doc": "docs/protocol/threeway/ONBOARDING.md",
+        "edits_made": 3,
+        "anchors_fixed": [
+          "scripts/codex_protocol_model.py:104 — verified: COORDINATOR_SEATS = (\"coordinator\", \"coordinator2\")  # both bind coordinator mode",
+          "scripts/codex_protocol_model.py:155-156 — verified: CODEX_SEAT enumerates coordinator2; 'compatibility aliases for coordinator mode and remain unpinned'",
+          "scripts/protocol_mailbox.py:17 — verified: RECEIVING_SEATS = (*SEATS, \"coordinator\", \"coordinator2\")"
+        ],
+        "status_claims_corrected": [
+          "Codex quick-start: coordinator2 was wrongly labeled 'not a current Codex live-seat until Slice 2.5 wires it' — replaced with CANON status (CODEX_SEAT=coordinator2 binds coordinator MODE now, compatibility alias/unpinned, accepted by codex_protocol_model.py:104,155-156 + protocol_mailbox.py:17; only the LIVE signed-bus INTEGRATOR role staging refs->main remains target-state, gated on cutover + merge-gate runner)",
+          "Reading-order §2 entry: added currency note that the threeway/ package §I.5 routes to is now BUILT, hardened, test-green but WIRED INTO NOTHING; legacy mailbox bus still the live substrate"
+        ],
+        "content_added": [
+          "Copy-paste prompt fallback: replaced the dead-branch paragraph (docs/threeway-adoption-manuals + PR #19, branch confirmed absent: git branch -a grep count = 0) with 'These live under docs/protocol/threeway/ on main. If your checkout predates them, run git fetch origin && git checkout origin/main -- docs/protocol/threeway.' — dead branch/PR#19 reference dropped"
+        ],
+        "notes": "All 3 prompted fixes applied in place via Edit; doc voice/structure/headings preserved, no sections reordered or rewritten. Verification at HEAD (a590294e): (1) dead branch docs/threeway-adoption-manuals absent (git branch -a grep -c = 0); the 6 threeway manuals are tracked on main (git ls-files docs/protocol/threeway/ = 6, including ONBOARDING.md). (2) coordinator2 CANON anchors all resolve to the named symbols (sed -n confirmed lines 104, 155-156, 17 verbatim). (3) UNIFIED §I.5 build-status section exists (grep UNIFIED-OPERATING-DOCTRINE.md:101 '## I.5 Build status'). Fix 3 (optional currency note) was applied since it adds value and the §I.5 target was confirmed present. No code anchors existed in this file before; the two anchors I introduced (codex_protocol_model.py, protocol_mailbox.py) match the CANON line numbers exactly."
+      },
+      {
+        "doc": "docs/protocol/threeway/UNIFIED-OPERATING-DOCTRINE.md",
+        "edits_made": 3,
+        "anchors_fixed": [
+          "run_gate: threeway/gate.py:95-144 -> threeway/gate.py:158 (verified $ sed -n '158p' threeway/gate.py -> def run_gate)",
+          "evaluate: threeway/predicate.py:39-153 -> threeway/predicate.py:39 spanning 39-167 (verified :39 -> def evaluate, :167 -> return Decision(MERGEABLE, 'all clauses hold'))",
+          "by-seat authority: predicate.py:120-127 -> predicate.py:136 (verified :136 -> '# so authority must be checked by seat, not by signature validity alone.')",
+          "added signer-check anchors predicate.py:84 (brief), :116 (cycle_go), :140 (release_order), :152-161 (ci_result) -- all verified at HEAD",
+          "co_sign_satisfied: threeway/tier.py:39 (verified :39 -> def co_sign_satisfied)",
+          "no-dual-write: 'Slice 2.5 line 70' -> 'Slice 2.5 design §D2, line 47' (verified design spec line 47 -> D2 'no dual-write authority structural'); kept 'spec §8 item 8, line 400' (verified -> 'No dual-write authority at any point.')",
+          "§I.5 plan link repointed from 2026-06-19 to 2026-06-20 Slice-2.5 implementation plan (verified file exists)"
+        ],
+        "status_claims_corrected": [
+          "Slice 2.5: 'DEFERRED tracking stub, not an implementation plan' -> 'BUILT + hardened (legacy_projector/divergence/cursor_backfill/cutover, 341 passed), cutover NOT executed, gated on user confirmation (ADR-045)'",
+          "Slice 3: 'unbuilt — co_sign_satisfied returns False for T2/T3, so escalated tiers cannot promote yet' (FALSE) -> 'BUILT + enforcing (ADR-035), gates T2/T3, fail-closed (True only when required signed facts exist), does NOT return False; only the strategic-loop runtime (scope b) is unbuilt'",
+          "Keys: kept 'not provisioned' but elevated to 'hard blocker for going live' per CANON",
+          "run_gate now stated TOTAL (never raises after CAS, ADR-039/040/041) in both §I.4 and §I.6"
+        ],
+        "content_added": [
+          "§I.5: folded in ADR-036/037/038 (forgery: revoke-authority+collision-aware index, event-id uniqueness, reserved merge-id+brief_superseded)",
+          "§I.5: folded in ADR-039/040/041 (availability: authority-aware reducer, TOTAL run_gate, well_formed guard)",
+          "§I.5: folded in ADR-042 (pair-namespaced candidate_id), ADR-043 (T3 nonce + approver_roster), ADR-044/045 (cutover substrate hardening + 2 dormant gaps tracked), ADR-046..049 (residual surfaces, Lane-V verified)",
+          "§I.6 invariant 1: in-memory shadow projection note (ADR-034/D2, zero ref-bus mutation until cutover)",
+          "§I.6 invariant 3: run_gate is TOTAL and fail-closed (ADR-039/040/041)",
+          "§I.6 invariant 4: revoke-authority (036), event-id uniqueness (037), reserved merge-id+brief_superseded (038), pair-namespaced candidate_id (042), T3 nonce+roster (043)"
+        ],
+        "notes": "All work scoped to Part I per instructions. Part II (Layer-2 doctrine), the capability tables (Part III), seat table (§I.2), and two-buses table (§I.3) were left untouched — §I.2 and §I.3 were spot-checked against CANON and already match (director=Codex/build, director2=Claude/build, operator=Claude/verify, operator2=Codex/verify, coordinator=Claude/integrate, coordinator2=Codex/integrate, merge-gate+overseer mechanical, dual chief Gemini DeepThink+ChatGPT Pro, Antigravity no seat). Post-edit grep confirms all 7 new anchors resolve to their named symbols at HEAD and all 5 stale anchors (gate.py:95-144, 39-153, predicate.py:120-127, 'Slice 2.5 line 70', 'DEFERRED tracking stub'/'returns False for') are absent. HEAD = a590294e. coordinator2 was NOT described as 'rejects' anywhere in the touched sections; no correction needed there. File path: /Users/hyungkoookkim/Content/docs/protocol/threeway/UNIFIED-OPERATING-DOCTRINE.md"
+      },
+      {
+        "doc": "docs/protocol/threeway/CODEX-ADOPTION.md",
+        "edits_made": 11,
+        "anchors_fixed": [
+          "§2 blockquote: codex_protocol_model.py:151-154 -> :154-156 (CODEX_SEAT value list, verified line 154-156 holds director|...|coordinator2)",
+          "§2 table row3 + §6: added scripts/codex_protocol_model.py:104,155-156 (COORDINATOR_SEATS both bind coordinator mode)",
+          "§4 step2: scripts/protocol_mailbox.py:11 (SEATS) -> scripts/protocol_mailbox.py:17 (RECEIVING_SEATS, verified)",
+          "§4 step2: scripts/status.py:126 (_MAILBOX_SEATS) -> scripts/status.py:141 (_MAILBOX_SEATS = protocol_mailbox.RECEIVING_SEATS, verified)",
+          "§4 step2 + §1: bare seat_status.py -> .claude/skills/four-seat-protocol/scripts/seat_status.py (file confirmed present)",
+          "§4 step3: threeway/predicate.py:138-147 -> :152-161 (ci_result check, verified)",
+          "§4 step4: threeway/gate.py:95 -> :158 (run_gate def, verified) + noted TOTAL/never-raises ADR-039/040/041",
+          "§5: threeway/store.py:33-40 -> :39-50 (EventStore.append def at :39, verified)",
+          "§5: threeway/refstore.py:122 -> :132 (RefEventStore.append; def is at :133, :132 is its doc-comment block per CANON verbatim anchor)",
+          "§7: threeway/loop.py:99 -> :104-105 (ci_result fixture event, verified)",
+          "no-dual-write citation: plan-path:70 -> spec §8 item 8 + Slice-2.5 design spec §D2 (CANON form)"
+        ],
+        "status_claims_corrected": [
+          "coordinator2 is NO LONGER described as 'rejected' / 'target-state only' / 'not a live-seat until Slice 2.5' in §2 table row3, §2 blockquote, §4 step2, and §6 — replaced with CANON: CODEX_SEAT=coordinator2 binds coordinator mode now (unpinned compatibility alias, codex_protocol_model.py:104,155-156); seat_status.py + protocol_mailbox.RECEIVING_SEATS accept it; only the LIVE signed-bus integrator role (staging refs -> main) is target-state, gated on cutover + merge-gate runner",
+          "§4 step2 reframed: receiving-seat plumbing is DONE (RECEIVING_SEATS at protocol_mailbox.py:17, status.py:141 imports it, codex harness accepts coordinator2); migration substrate is BUILT+hardened (legacy_projector.py / divergence.py / cursor_backfill.py / cutover.py all confirmed present; ADR-034/044/045) — NOT 'author the plan from the stub'; residual = LIVE integrator wiring + cursor-backfill EXECUTION (the single authority-flip cutover, NOT executed, gated on user confirmation per DECISIONS.md ADR-045)",
+          "§4 step4: run_gate marked TOTAL (never raises after the CAS, ADR-039/040/041)",
+          "§4 step5 (Slice 3): reframed from 'unbuilt loop' to 'gate machinery already BUILT + enforcing' (ADR-035) — co_sign_satisfied (tier.py:39) fail-closed, already gates T2 + T3 (re_verify nonce + two key-bound human_approvals from overseer-signed approver_roster, ADR-043); only the strategic-loop RUNTIME (scope b) is unbuilt",
+          "§4 intro: 'wired into nothing' kept (matches CANON) but qualified with 'built, hardened, and test-green (341 passed)' so it does not read as nothing-built; legacy mailbox still the live substrate",
+          "§5 intro: 'fabricates all nine events for all seats' -> 'fabricates ONE pair's nine loop facts — a PairConfig PAIR_A/PAIR_B, not all seats' (confirmed by build_candidate_events docstring + ADR-042 pair-namespacing)"
+        ],
+        "content_added": [
+          "§4 step2: folded ADR-034/044/045 (migration substrate BUILT+hardened), ADR-047 (atomic cursor-backfill manifest), DECISIONS.md ADR-045 (cutover gated on user confirmation)",
+          "§4 step4: folded ADR-039/040/041 (run_gate TOTAL / authority-aware reducer)",
+          "§4 step5: folded ADR-035 (tier machinery built+enforcing) + ADR-043 (T3 re_verify nonce + per-approver approver_roster)",
+          "§5 intro: folded ADR-042 (pair-namespaced candidate_id <pair>:<local>) via the PairConfig PAIR_A/PAIR_B framing",
+          "CANON build-status sentence (built/hardened/test-green 341 passed but wired into nothing; legacy mailbox is the live substrate) folded into §4 intro"
+        ],
+        "notes": "All 13 named stale items addressed across §2 (table row3 + blockquote), §4 (steps 2/3/4/5 + intro), §5 (intro + append anchors), §6, §7. §1 'what Codex already has' and the §2 seat table verified against CANON (loop.py:43-52 PairConfig confirms director=Codex/A, operator2=Codex/B, coordinator2=Codex/B). Every changed file:line anchor re-verified against HEAD via sed/grep (cited per item in anchors_fixed). Two anchors are within-one-line of the exact def by CANON mandate: predicate.py:152 is the '# CI evidence' comment heading the ci_result checks at :153-161 (CANON permits 'predicate.py:152-161 (or :157)'); refstore.py:132 is the doc-comment block immediately above 'def append' at :133 (CANON specifies :132 verbatim for cross-doc agreement). store.py:39 + gate.py:158 + tier.py:39 + loop.py:104-105 + protocol_mailbox.py:17 + status.py:141 + codex_protocol_model.py:104/155/156 all land exactly on their named symbols. ci_smoke.py passes (R2 WARN is a pre-existing cv2-importorskip advisory unrelated to this change). No sections reordered or rewritten beyond the specified fixes; doc voice/structure preserved. Edits made on branch main (working-tree only, not committed — user did not request a commit). Full path: /Users/hyungkoookkim/Content/docs/protocol/threeway/CODEX-ADOPTION.md"
+      },
+      {
+        "doc": "docs/protocol/threeway/ANTIGRAVITY-ADOPTION.md",
+        "edits_made": 3,
+        "anchors_fixed": [
+          "§1 blockquote: threeway/predicate.py:109,126 -> threeway/predicate.py:116 (cycle_go), :140 (release_order) — verified at HEAD: :116 = `if _seat(cg.signer) != \"overseer\":`, :140 = `if _seat(ro.signer) != \"overseer\":`",
+          "Folded new anchor threeway/gate.py:158 (TOTAL run_gate) into §5 rule 2 — verified at HEAD: :158 = `def run_gate(...)`"
+        ],
+        "status_claims_corrected": [
+          "§5 rule 3: 'spec §8.8' -> 'spec §8 item 8' to match the sibling UNIFIED-OPERATING-DOCTRINE.md (line 121 uses 'spec §8 item 8, line 400')",
+          "§5 rule 2: strengthened 'only the mechanical merge-gate writes protected main' with the TOTAL run_gate (gate.py:158, never raises after CAS) + authority-aware effective-state reducer (ADR-039..041); added that the cutover substrate is BUILT+hardened but user-gated (ADR-044/045) and the single authority-flip has NOT been executed"
+        ],
+        "content_added": [
+          "§1 blockquote: reinforced 'agy signs nothing' with the per-approver key-bound human_approval and overseer-only re_verify_challenge/approver_roster (ADR-043) — high-risk T3 approval inputs are overseer-signed, never agy-signed",
+          "§5 rule 2: ADR-039..041 reducer/TOTAL-run_gate hardening of the merge-gate sole-writer claim + ADR-044/045 cutover-substrate built-but-user-gated note"
+        ],
+        "notes": "All edits applied in place with the Edit tool; doc voice/structure/headings preserved, no reordering. The §4 capability table and the no-seat thesis (§1) were left current per instructions. Verified each changed file:line anchor resolves to its named symbol at HEAD via sed/grep (predicate.py:116=cg.signer overseer check, predicate.py:140=ro.signer overseer check, gate.py:158=def run_gate). Confirmed no stale 'predicate.py:109,126' or 'spec §8.8' references remain in the target file. Cross-doc 'spec §8 item 8' wording now matches the sibling UNIFIED-OPERATING-DOCTRINE.md. Absolute path: /Users/hyungkoookkim/Content/docs/protocol/threeway/ANTIGRAVITY-ADOPTION.md"
+      },
+      {
+        "doc": "docs/protocol/threeway/ARCHITECTURE-DIAGRAM.md",
+        "edits_made": 3,
+        "anchors_fixed": [
+          "co_sign_satisfied resolves to threeway/tier.py:39 (verified: sed -n '39p' threeway/tier.py -> 'def co_sign_satisfied(tier: str, state, candidate_id: str, *, candidate_pair: str,')",
+          "loop.py:43-52 left unchanged (current): line 43 = 'PAIR_A = PairConfig(' (verified)"
+        ],
+        "status_claims_corrected": [
+          "NoteTier 'Slice 3, not yet active' -> 'Slice-3 tier machinery is BUILT + enforced (co_sign_satisfied, tier.py:39); only live fact-emission (scope b) is pending'; T3 wording upgraded to 'nonce-fresh re_verify + two key-bound human_approvals (ADR-043)' per CANON",
+          "Status callout '(Slice 1+2) ... wired into nothing' -> broadened to Slices 1+2 / 2.5 / 3-machinery BUILT+hardened+test-green but wired into nothing; added cutover-not-executed (DECISIONS.md ADR-045) + keys-NOT-provisioned (coordination/threeway/keys/ holds only a README) as the hard live blocker"
+        ],
+        "content_added": [
+          "New yellow note NoteHard attached to Bus + Gate: forgery hardening ADR-036/037/038 (revoke-authority, event-id uniqueness, reserved merge-id); run_gate TOTAL authority-aware reducer ADR-039/040/041; pair-namespaced candidate_id '<pair>:<local>' ADR-042"
+        ],
+        "notes": "All three prescribed fixes applied in place; doc voice/structure/headings preserved, nothing reordered or rewritten beyond the targeted spans. The single code anchor in the diagram (loop.py:43-52) was already current and kept verbatim. Verified keys claim: ls -A coordination/threeway/keys/ -> README.md only. tier.py:39 confirmed as co_sign_satisfied definition. ADR references (036-043) are prose, not file:line anchors, so no symbol resolution required. The mermaid NoteHard uses HTML entities (&lt;pair&gt;:&lt;local&gt;) so the angle brackets render rather than parse as mermaid markup."
+      }
+    ],
+    "reviews": [
+      {
+        "lens": "doc-conformance",
+        "pass": true,
+        "findings": [],
+        "summary": "PASS — independently verified the just-refreshed docs/protocol/threeway/ suite (6 files: README, ONBOARDING, UNIFIED-OPERATING-DOCTRINE, ARCHITECTURE-DIAGRAM, CODEX-ADOPTION, ANTIGRAVITY-ADOPTION) against HEAD a590294e. No defects found.\n\n(1) ANCHORS — every file:line anchor in the suite resolves to its named symbol at HEAD (verified via sed against source). All task spot-checks confirmed: run_gate gate.py:158; cas_create_or_update_ref gitcas.py:185; preflight_bus_init gitcas.py:245; EventStore.append store.py:39; RefEventStore.append refstore.py:132; predicate by-seat authority predicate.py:136; ci_result clauses predicate.py:152-161; co_sign_satisfied tier.py:39 (docstring confirms fail-closed, does NOT return False for T2/T3 — matches doctrine); seats loop.py:43-52. Also verified every other anchor cited in the suite: predicate.py:39 (evaluate, spans 39-167 — final MERGEABLE return at 167, next def at 170, matches the \"spanning 39-167\" claim); predicate.py:84 (brief signer), :116 (cycle_go signer), :140 (release_order signer); store.py:39-50; keys.py:3-13 (custody docstring), keys.py:66 (default keystore), keys_bootstrap.py:16-29 (--seats plural, all-nine-in-one-pass); loop.py:104-105 (ci_result fixture line, docstring confirms UNSIGNED test/demo fixture for ONE pair — matches CODEX doc claim); scripts/codex_protocol_model.py:104 (COORDINATOR_SEATS both bind coordinator mode) + :154-156/:155-156 (CODEX_SEAT env, \"compatibility aliases... unpinned\"); scripts/protocol_mailbox.py:17 (RECEIVING_SEATS exact); scripts/status.py:141 (_MAILBOX_SEATS = protocol_mailbox.RECEIVING_SEATS).\n\n(2) STALE CLAIMS — exhaustive case-insensitive sweep across all 6 files found ZERO surviving stale claims: no \"deferred stub\", no \"Slice 3 unbuilt\", no \"co_sign_satisfied returns False\", no \"coordinator2 rejected/target-state-only\", no \"spec §8.8\", no \"gate.py:95\", no dead PR#19/branch claims. The two near-matches are correct/non-stale: UNIFIED:122 affirms co_sign \"does NOT return False for T2/T3\" (the corrected claim), and the coordinator2 \"target-state\" language correctly scopes the LIVE integrator role as target-state while affirming coordinator2 is already an accepted mode-bound alias (matches source). Corroborating source state verified: DECISIONS.md highest ADR = ADR-049 (README's ADR-034..049 range accurate); ARCHITECTURE.md §13A exists at line 1699; coordination/threeway/keys/ holds only README.md (the \"keys NOT provisioned / hard blocker\" claim is accurate across all docs).\n\n(3) LINKS — all 15 distinct relative markdown link targets resolve from the suite dir (AGENTS.md, ARCHITECTURE.md, CLAUDE.md, DECISIONS.md, codex_protocol_model.py, threeway/, threeway/loop.py, the slice-2.5 plan, the topology spec, ../codex/continuation.md, and the 5 intra-suite docs) — verified via filesystem existence checks.\n\nSuite files (absolute): /Users/hyungkoookkim/Content/docs/protocol/threeway/{README.md,ONBOARDING.md,UNIFIED-OPERATING-DOCTRINE.md,ARCHITECTURE-DIAGRAM.md,CODEX-ADOPTION.md,ANTIGRAVITY-ADOPTION.md}."
+      },
+      {
+        "lens": "unification-consistency (cross-doc agreement + agreement with truth-sources: threeway/loop.py:43-52, spec §8 item 8)",
+        "pass": true,
+        "summary": "All four required cross-doc consistency checks PASS, and the load-bearing facts are verified against the truth-sources. (1) Seat->provider table is identical across README, UNIFIED §I.2, CODEX §2, ANTIGRAVITY §1, ARCHITECTURE-DIAGRAM, and matches threeway/loop.py:43-52 exactly: Pair-A director=Codex / operator=Claude / coordinator=Claude; Pair-B director2=Claude / operator2=Codex / coordinator2=Codex; Codex's three Layer-1 seats = director, operator2, coordinator2 (README:10, UNIFIED:65-67). (2) Build-status statements agree everywhere: 'wired into nothing' (README:23-24, UNIFIED:108-110, CODEX:105, ONBOARDING:63, ARCHITECTURE-DIAGRAM:13 — verified: import threeway only under threeway/ and tests/); Slice 2.5 cutover BUILT-but-NOT-executed/ADR-045-gated (README:25-26, UNIFIED:115, CODEX:120, ANTIGRAVITY:136, ARCHITECTURE-DIAGRAM:14); Slice-3 tier BUILT+enforcing(ADR-035)/scope-b pending (README:27, UNIFIED:119-124, CODEX:132-136, ARCHITECTURE-DIAGRAM:96); keys NOT provisioned (README:29, UNIFIED:125-126, ARCHITECTURE-DIAGRAM:16 — verified: coordination/threeway/keys/ holds only README.md, no .pub). (3) coordinator2 status stated consistently as 'binds coordinator MODE now (compatibility alias, unpinned); live signed-bus integrator role is target-state' (ONBOARDING:84, CODEX:56/64-67/165-168, UNIFIED:373) — code cites at scripts/codex_protocol_model.py:104,154-156 verified faithful. (4) No-dual-write citation form matches: 'spec §8 item 8' in UNIFIED:143 and ANTIGRAVITY:138 (and CODEX:106); UNIFIED's '(spec §8 item 8, line 400)' anchor verified against the spec — line 400 reads 'No dual-write authority at any point.' No residual cross-doc contradictions found.",
+        "findings": [
+          {
+            "where": "docs/protocol/threeway/UNIFIED-OPERATING-DOCTRINE.md:125-126, ARCHITECTURE-DIAGRAM.md:15-16, README.md:28-29 vs CODEX-ADOPTION.md / ANTIGRAVITY-ADOPTION.md / ONBOARDING.md",
+            "problem": "Non-blocking observation (NOT a contradiction): the 'keys are NOT provisioned / coordination/threeway/keys/ holds only a README' fact is restated verbatim in 3 of 6 docs (README, UNIFIED §I.5, ARCHITECTURE-DIAGRAM) but is carried as a prerequisite-step rather than a restated status in CODEX (§3 'key provisioning' / §4 step 1) and is absent from ONBOARDING and (appropriately) not Antigravity's concern. All references agree; none contradict. Verified true: ls coordination/threeway/keys/ -> only README.md, no .pub files.",
+            "fix": "No change required. If maximal symmetry is desired, ONBOARDING §reading-order currency note (line 63) could append 'keys not provisioned (hard blocker)' to mirror the other status surfaces, but this is optional polish, not a consistency defect."
+          }
+        ]
+      }
+    ]
+  }
+}
