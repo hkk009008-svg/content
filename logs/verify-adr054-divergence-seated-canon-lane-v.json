@@ -1,0 +1,36 @@
+{
+  "artifact": "Lane-V verification record — ADR-054 (divergence checker seated-set canonicalization)",
+  "commit_under_review": "babd428e",
+  "inventory_row": "threeway-divergence-seen-stem-phantom-key",
+  "rule_family": "seen/-filename seat-key (Rule-13 sibling of ADR-051)",
+  "verifier": {
+    "kind": "independent lane-v-verifier subagent (isolated git worktree)",
+    "agent_id": "a38a3d69dcdfbf8d6",
+    "model": "sonnet",
+    "trust": "re-derived GO/NITS/FAIL from the actual diff + fresh runs + mutation; did not trust the implementer report"
+  },
+  "verdict": "GO",
+  "evidence": {
+    "full_threeway_suite": "env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q -> 356 passed, 1 skipped, 0 xfailed (84.16s)",
+    "ci_smoke": "OK (R1/R3/R4/R5/R6 PASS; R2 WARN = pre-existing cv2 importorskip latent, not introduced by this commit)",
+    "check_no_ceremony": "no ceremony detected",
+    "non_vacuity_mutation": {
+      "method": "reverted divergence.py seated-set to `{f.stem for f in seen.glob(\"*.txt\")}` (restored _seen_value) in the isolated worktree",
+      "pin": "tests/unit/test_threeway_divergence.py::test_stray_nonroster_seen_file_reported_not_coined_as_phantom_MUTATION",
+      "reverted_result": "RED — AssertionError: [] ; assert True is False ; where True = Report(ok=True, drifts=[]).ok",
+      "fixed_result": "GREEN",
+      "conclusion": "pin is non-vacuous; the phantom-vacuous-agreement failure mode is real and the fix catches it"
+    },
+    "scope_match": [
+      "_seen_value fully removed (grep -rn _seen_value --include=*.py -> exit 1, no matches)",
+      "seated set + cursor value both read via canonical_seat_cursors (divergence.py:113-121 and :139)",
+      "seen_cursors.get(seat) or None preserves empty-cursor-file -> None",
+      "def diverge at threeway/divergence.py:33 == ARCHITECTURE.md §13A.5 anchor"
+    ],
+    "rule13_sibling_sweep": "no other seen/ enumeration coins seat keys via .stem / glob(*.txt) in divergence.py, cutover.py, cursor_backfill.py; the remaining seen.iterdir() at cursor_backfill.py:195 keys by literal filename for byte rollback (line 196 uses canonical_seat_cursors for seat-keyed work) — not a hole",
+    "read_only_contract": "SeatCursorError reachable from diverge() -> emits `seated: malformed seen/ roster (...)` drift, does NOT raise; missing seen/ handled by is_dir() guard (both confirmed by execution)",
+    "regression_spot_checks": "test_broadcast_only_seat_is_checked_not_skipped_MUTATION and test_zero_drift_on_faithful_fixture both pass on fixed code",
+    "lock": "no cross-cutting lock held for this commit"
+  },
+  "disposition": "inventory row reconciled fixed -> verified on this GO (solo-mode: independent fresh-subagent Lane-V is the convergence pass; ADR-027 cite-executed-pins satisfied)"
+}

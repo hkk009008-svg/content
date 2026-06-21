@@ -2714,5 +2714,8 @@ POST-FIX (GREEN). The existing `test_broadcast_only_seat_is_checked_not_skipped_
 the seated set coming from `seen/`) stays green because `canonical_seat_cursors` reads the same `seen/`
 dir. Full threeway suite after the fix:
 `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q` →
-`356 passed, 1 skipped, 0 xfailed`; `ci_smoke` + `check_no_ceremony` clean. Independent Lane-V owed before
-the inventory row moves `fixed` → `verified`.
+`356 passed, 1 skipped, 0 xfailed`; `ci_smoke` + `check_no_ceremony` clean. Independent Lane-V **GO**
+(fresh `lane-v-verifier` subagent `a38a3d69` in an isolated worktree; it independently re-ran the
+mutation — reverting the seated-set derivation reddened the pin → non-vacuous — and confirmed the
+Rule-13 sweep clean and the read-only catch-not-crash contract reachable;
+`logs/verify-adr054-divergence-seated-canon-lane-v.json`) → inventory row reconciled `fixed` → `verified`.
