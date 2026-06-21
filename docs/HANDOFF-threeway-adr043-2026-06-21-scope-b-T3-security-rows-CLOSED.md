@@ -1,9 +1,10 @@
-# HANDOFF — Threeway scope-(b) T3 SECURITY rows CLOSED (ADR-043), commit local (push pending)
+# HANDOFF — Threeway scope-(b) T3 SECURITY rows CLOSED (ADR-043), PUSHED
 
 **Date:** 2026-06-21
-**Committed:** `main` @ `d67aa146` — 1 commit, built directly on `main` (consistent with the prior
-threeway slices). **NOT pushed** (1 commit ahead of `origin/main`; push held for user confirmation —
-the recommendation was to land the defect-closure and STOP before the irreversible live cutover).
+**Merged + pushed:** `origin/main` @ `bd31fbe1` — 2 commits (`d67aa146` fix + `bd31fbe1` this handoff),
+built directly on `main` (consistent with the prior threeway slices), clean fast-forward
+`01b282c1..bd31fbe1`. `main == origin/main == bd31fbe1`, 0 unpushed. The live cutover was deliberately
+NOT taken (the recommendation was to land the defect-closure and STOP before the irreversible flip).
 **Verification at handoff:** `tests/unit/test_threeway_*.py` → **321 passed**; `scripts/ci_smoke.py` OK;
 `scripts/check_no_ceremony.py` clean; tree clean except a pre-existing, unrelated `.claude/settings.json`
 toggle (excluded from the commit).
