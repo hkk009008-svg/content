@@ -1112,11 +1112,16 @@ def _ev3(kind, sender, signer, payload, *, eid, subject_sha=None):
                  candidate_id="A:c1", brief_id="b1", brief_version=1, subject_sha=subject_sha)
 
 
-def _seed_full_t3(r, base, branch, integ, privs):
+def _seed_full_t3(r, base, branch, integ, privs, *, drop_ids=frozenset()):
     """Append a complete, correctly-signed T3 promotion for A:c1: the base set (T3 brief/cycle_go,
     allowed under coordination/threeway/keys/) + mirror co_sign + re_verify echoing the overseer
     freshness nonce + overseer re_verify_challenge + overseer approver_roster + two chief
-    human_approvals signed by distinct key-bound chief seats. Returns the EventStore."""
+    human_approvals signed by distinct key-bound chief seats. Returns the EventStore.
+
+    drop_ids: event ids to OMIT from the appended set. The clause-drop negatives below pass a
+    single ADR-043 event id here to prove that clause is load-bearing in the GATE path
+    (run_gate -> verify_and_reduce -> predicate -> co_sign_satisfied), not merely in the
+    no-signature reduce() unit path the tier suite exercises."""
     from threeway.loop import build_candidate_events, PAIR_A
     store = EventStore(r / "coordination" / "threeway" / "events")
     base_set = build_candidate_events(base, branch, integ, privs, tier="T3",
@@ -1143,6 +1148,8 @@ def _seed_full_t3(r, base, branch, integ, privs):
              eid="human_approval-chief-chatgpt-A:c1"),
     ]
     for ev in list(base_set) + extra:
+        if ev.id in drop_ids:
+            continue   # clause-drop negative: omit one ADR-043 event to pin its gate-level enforcement
         store.append(ev, privs[ev.signer.split(":", 1)[0]])
     return store
 
@@ -1175,6 +1182,55 @@ def test_run_gate_t3_pending_when_chief_keys_unregistered(live_repo_t3, seatkit)
     store = _seed_full_t3(r, base, branch, integ, privs)
     (reg / "chief-gemini.pub").unlink()
     (reg / "chief-chatgpt.pub").unlink()
+    res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "PENDING", res.reason
+    assert "co_sign not satisfied" in res.reason
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == base
+
+
+# --- ADR-043 clause-drop negatives, GATE-level. The committed positive above proves the FULL
+# signed set COMPLETES; the chief-keys-unregistered negative trips an EARLIER, verify-stage drop
+# (ADR-040 unknown-seat), NOT the predicate's T3 clause. These two drop ONE specific ADR-043 event
+# from the otherwise-complete set and assert the predicate itself holds the merge at PENDING through
+# the real run_gate -> verify_and_reduce path. They are the gate-level analogues of the reduce()-only
+# pins test_t3_pending_without_challenge / test_t3_pending_with_one_human_approval in the tier suite,
+# and are the only committed tests that would catch a regression silently dropping a T3 clause from
+# the gate path (the positive + the chief-keys negative both still pass under such a regression). ---
+
+def test_run_gate_t3_pending_when_re_verify_challenge_dropped(live_repo_t3, seatkit):
+    # Drop the overseer's re_verify_challenge: the re_verify can no longer be proven fresh (no nonce
+    # to echo), so co_sign_satisfied(T3) fails -> Decision(PENDING, "co_sign not satisfied for T3").
+    # Fail-closed: main MUST NOT move.
+    from threeway import gitcas
+    r, base, branch = live_repo_t3
+    reg, ks, privs = seatkit
+    tree, clean = gitcas.merge_tree(r, base, branch)
+    assert clean
+    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge A:c1")
+    store = _seed_full_t3(r, base, branch, integ, privs,
+                          drop_ids={"re_verify_challenge-overseer-A:c1"})
+    res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "PENDING", res.reason
+    assert "co_sign not satisfied" in res.reason
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == base
+
+
+def test_run_gate_t3_pending_when_one_human_approval_dropped(live_repo_t3, seatkit):
+    # Drop ONE of the two chief human_approvals (chief-gemini): only a single key-bound approver
+    # remains, so the two-distinct-approver clause fails and co_sign_satisfied(T3) returns False ->
+    # PENDING. This pins the >=2 requirement specifically (chief-chatgpt's approval is still present,
+    # so a regression weakening the count to >=1 would COMPLETE and this test would catch it).
+    # Fail-closed: main MUST NOT move.
+    from threeway import gitcas
+    r, base, branch = live_repo_t3
+    reg, ks, privs = seatkit
+    tree, clean = gitcas.merge_tree(r, base, branch)
+    assert clean
+    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge A:c1")
+    store = _seed_full_t3(r, base, branch, integ, privs,
+                          drop_ids={"human_approval-chief-gemini-A:c1"})
     res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
                    main_ref="refs/threeway/test-main", gate_seat="merge-gate")
     assert res.outcome == "PENDING", res.reason
