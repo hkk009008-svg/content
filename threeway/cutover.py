@@ -141,11 +141,16 @@ def run_cutover(repo, coord_root, importer_key, *, force: bool = False) -> Cutov
     #     carrier filenames validates totality (raises on a non-event filename) before we
     #     advance any cursor; iso_to_seq_map recomputes the same order internally from the
     #     raw names + the seat ISO cursors (its real Phase-B signature).
-    carrier_names = [ev.payload["source_filename"] for ev in carriers]
-    cursor_backfill.total_order(carrier_names)            # validates totality (raises on a bad name)
-    seq_map = cursor_backfill.iso_to_seq_map(carrier_names, _read_iso_cursors(coord_root))
+    #     These validation/seq-map steps run AFTER the bus has been appended over, so they
+    #     MUST sit inside the teardown guard too (ADR-045, a Rule-13 sibling of ADR-044):
+    #     a total_order ValueError (bad carrier name) or a _read_iso_cursors OSError
+    #     (unreadable seen/*.txt) would otherwise strand the half-built events ref with no
+    #     restore. cursors={} stays outside (a pure init that cannot raise).
     cursors = {}
     try:
+        carrier_names = [ev.payload["source_filename"] for ev in carriers]
+        cursor_backfill.total_order(carrier_names)        # validates totality (raises on a bad name)
+        seq_map = cursor_backfill.iso_to_seq_map(carrier_names, _read_iso_cursors(coord_root))
         for seat in _SEATS:
             seq = seq_map.get(seat, 0)
             store.advance_cursor(seat, seq)               # seq==0 allowed (refstore:236-240)

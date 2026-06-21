@@ -194,3 +194,30 @@ def test_teardown_clean_restore_stays_silent(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cutover.subprocess, "run", _ok)
     cutover._teardown(tmp_path, snapshot, RuntimeError("x"))   # must NOT raise
+
+
+def test_pretry_validation_failure_restores_bus_under_force(tmp_path, monkeypatch):
+    # ADR-045 (Rule-13 sibling of ADR-044): total_order / iso_to_seq_map /
+    # _read_iso_cursors run AFTER the append loop (the bus is already appended over) but
+    # were OUTSIDE both teardown-guarded try blocks. A raise there (a bad carrier name ->
+    # total_order ValueError, or an unreadable seen/*.txt -> _read_iso_cursors OSError)
+    # stranded the half-built events ref with NO _teardown.
+    # NON-VACUITY: pre-fix the validation sits before `try:`, so the injected ValueError
+    # propagates uncaught -> EVENTS_REF stays at the appended-over RUN value != pre -> RED.
+    # The fix moves the validation inside the cursor try, so the same except restores it.
+    r = _new_repo(tmp_path); root = _seed_coord(r)
+    head = _git(r, "rev-parse", "HEAD").stdout.strip()
+    _git(r, "update-ref", EVENTS_REF, head)                 # legitimate force=True pre-existing bus
+    pre = gitcas.rev_parse(r, EVENTS_REF)
+    importer, _ = keys.generate_keypair()
+
+    from threeway import cutover
+
+    def _boom(_names):
+        raise ValueError("injected total_order failure")
+    monkeypatch.setattr(cutover.cursor_backfill, "total_order", _boom)
+
+    with pytest.raises(ValueError, match="injected total_order failure"):
+        run_cutover(r, root, importer, force=True)
+    # RESTORED to the exact pre-run OID — pre-fix this stayed at the appended-over value.
+    assert gitcas.rev_parse(r, EVENTS_REF) == pre

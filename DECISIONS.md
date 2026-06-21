@@ -2305,3 +2305,33 @@ concurrent `refs/threeway/*` writer — belt-and-suspenders now that teardown is
 chief/overseer key provisioning. The live flip remains GATED on explicit user confirmation. Residual not driven
 (named, no silent caps): refstore REMOTE push-CAS under concurrent multi-writer contention; backfill
 partial-then-retry resumability end-to-end; gitcas merge-tree determinism beyond the fixtures.
+
+## ADR-045 — Complete cutover-sequence teardown coverage: guard the pre-cursor-try validation (Rule-13 sibling of ADR-044)
+
+**Context.** ADR-044's own adversarial Lane-V re-verification (`wf_be151f19-aa7`, worktree mutators +
+Rule-13 sweep) returned GO on both ADR-044 fixes (5 isolating mutations, non-vacuity proven) but surfaced a
+distinct, pre-existing half-flip gap two lines from the fix: in `run_cutover`, the cursor-backfill validation
+steps `carrier_names = [...]`, `cursor_backfill.total_order(carrier_names)` and
+`cursor_backfill.iso_to_seq_map(carrier_names, _read_iso_cursors(coord_root))` ran AFTER the append loop
+(the events ref is already appended over) but OUTSIDE both teardown-guarded `try` blocks. A raise there — a
+bad carrier filename → `total_order` ValueError, or an unreadable `seen/*.txt` → `_read_iso_cursors` OSError
+— propagated with NO `_teardown`, stranding the half-built events ref (half-flipped bus, no restore). This is
+the same strand-state class ADR-044 hardened `_teardown` against, just at a step the snapshot/restore guard
+did not yet enclose — Rule #13 (audit all siblings on the same fence; fold the fix).
+
+**Decision.** Move the three validation/seq-map steps INSIDE the cursor `try` so the same `except Exception
+as original: _teardown(repo, snapshot, original); raise` path runs on any failure there. `cursors = {}` stays
+outside the `try` as a pure init that cannot raise. No behavior change on the success path; the only change is
+that a pre-cursor-loop failure now restores the snapshot instead of stranding the bus.
+
+**Why safe.** Strictly widens teardown coverage (a previously-unguarded failure window is now guarded);
+the success path is byte-identical; `total_order`/`iso_to_seq_map` are pure validators with no side effects
+to roll back, so wrapping them only adds the restore. The happy-path and contention pins from ADR-044 stay
+green.
+
+**Verification.** TDD red→green: new pin `test_threeway_cutover.py::test_pretry_validation_failure_restores_bus_under_force`
+(monkeypatch `cursor_backfill.total_order` to raise under a `force=True` pre-existing bus) was RED pre-fix
+(events ref left at the appended-over RUN value, not `pre`) and GREEN after (restored to `pre`, the injected
+ValueError re-raised); the ADR-044 teardown pins stay green; full threeway suite 329 passed / 0; ci_smoke OK.
+Surfaced by `wf_be151f19-aa7`. This completes the cutover-sequence teardown coverage; the live cutover
+remains gated on explicit user confirmation with the ADR-044 operational preconditions unchanged.
