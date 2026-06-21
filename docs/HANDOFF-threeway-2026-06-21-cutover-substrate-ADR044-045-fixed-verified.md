@@ -77,10 +77,14 @@ dialog.
   layered-defect lesson held for a fourth time this session (composition→store-dedup→teardown→pre-try).
 - **`logs/` is gitignored; audit artifacts are committed via `git add -f`** (matches the tracked
   `logs/discovery-wf_*.json`). `git status` won't show a new `logs/*.json` as untracked.
-- **Test-count variance is environmental, not a regression.** Session-start collected 321; after the audits
-  ran (43 agents provisioning keys + /tmp repros) the baseline read 323; +5 new tests → 329 (then +1 ADR-045
-  → on the 329 figure the pre-try pin is included). Always reconcile via `git diff --name-only HEAD` (only
-  the touched files) rather than trusting a raw collect count across an audit-mutated tree.
+- **Test-count reconciled to a concurrent PEER commit, not environment.** Session-start collected 321; a
+  concurrent same-identity commit `bfd5efbe` (test-only: +2 gate-level T3 negatives in
+  `tests/unit/test_threeway_gate.py`, 15:59Z, NO overlap with my files) raised the baseline to 323; +5
+  ADR-044 tests + 1 ADR-045 test → **329** (321+2+5+1, exactly). It sits between my handoff `99d92795` and my
+  fix `d3a157e1`, so my fixes built on top of it (clean FF pushes, no file overlap). LESSON: a mid-session
+  baseline shift is a peer-commit signal FIRST — check `git log` for an interposed commit before blaming the
+  environment. Reconcile via `git diff --name-only HEAD` (it showed only my files) — that habit prevented
+  building on a false picture even while my first *explanation* of the +2 was wrong.
 - **`idempotency_key` is load-bearing across ADR-037/038/044** — change it only with the Rule-13 dedup-
   surface sweep (gate `seen_ids` keys on id-alone; Slice-1 `store.py` has no request-content dedup; remote
   CAS shares the same computed keys). The Lane-V sweep confirmed the surface is exactly
