@@ -9,12 +9,12 @@ they win.
 
 > **Status:** this depicts the *target* topology. The `threeway/` package — Slice 1+2 (signed bus,
 > effective-state reducer, gate, RefEventStore), Slice 2.5 (legacy-bus migration substrate), and
-> Slice 3 (tiered T2/T3 co-sign machinery) — is BUILT, hardened, and test-green but **wired into
-> nothing** today: no live seat/harness/CI emits a threeway event; the legacy mailbox bus is still
-> the live coordination substrate. The single authority-flip cutover has NOT been executed (gated on
-> explicit user confirmation, DECISIONS.md ADR-045), and **keys are NOT provisioned**
-> (`coordination/threeway/keys/` holds only a README) — the hard blocker for going live. See
-> [`UNIFIED-OPERATING-DOCTRINE.md`](UNIFIED-OPERATING-DOCTRINE.md) §I.5.
+> Slice 3 (tiered T2/T3 co-sign machinery) — is BUILT, hardened, test-green, and wired into
+> **ready-not-live dry-run/preflight surfaces**. No live authority has moved: the legacy mailbox bus is
+> still authoritative, the single authority-flip cutover has NOT been executed (gated on explicit user
+> confirmation, DECISIONS.md ADR-045), and production keys are NOT provisioned
+> (`coordination/threeway/keys/` holds only a README). See
+> [`UNIFIED-OPERATING-DOCTRINE.md`](UNIFIED-OPERATING-DOCTRINE.md) §I.5 and [`RUNBOOK.md`](RUNBOOK.md).
 
 ## Topology
 

@@ -72,12 +72,12 @@ verification and the *executing* integration of its own work.
 
 ## I.3 The two buses (do not confuse them)
 
-| | Legacy mailbox bus (live today) | Three-way signed bus (built, not yet live) |
+| | Legacy mailbox bus (live today) | Three-way signed bus (ready-not-live today) |
 |---|---|---|
 | Location | `coordination/mailbox/` (`sent/`, `seen/<seat>.txt`) | `coordination/threeway/` + git ref `refs/threeway/events` |
 | Record | timestamp-named markdown events | immutable **signed** JSON facts, monotonic `seq` |
 | Signatures | none | **mandatory** Ed25519 per seat (`threeway/keys.py`) |
-| Authority | the current live coordination substrate | the *future* substrate after migration |
+| Authority | the current live coordination substrate | dry-run/shadow surfaces only until the user-gated cutover |
 
 ## I.4 The two loops (spec §5)
 
@@ -105,12 +105,18 @@ attestations, `ci` signs `ci_result` (`predicate.py:152-161`).
 - **Slice 1 + Slice 2 = built and merged.** The `threeway/` package (signed JSON bus, effective-state
   reducer, gate-computed tier, mechanical exact-SHA merge-gate, `RefEventStore` on
   `refs/threeway/events`) exists and passes its adversarial gate suite.
-- **The package is wired into NOTHING.** `import threeway` appears only inside `threeway/` and
-  `tests/` — no live seat, harness, or CI emits a threeway event today. The live coordination
-  substrate is still the **legacy mailbox bus**.
+- **The package is wired into ready-not-live surfaces, not live authority.** Runtime wrappers now
+  exist for readiness (`scripts/threeway_readiness.py`), explicit append
+  (`scripts/threeway_append_event.py`), signed CI-result artifact generation
+  (`scripts/threeway_ci_result.py`), gate dry-run (`scripts/threeway_gate_runner.py`), and read-only
+  cutover preflight (`scripts/threeway_cutover_check.py`). Codex+Claude hooks print fail-open
+  readiness, `STATE.md` gets a readiness line, and `.github/workflows/threeway-ci-dry-run.yml` can
+  manually upload a signed dry-run `ci_result`. These are pre-live surfaces: no live seat/harness/CI
+  appends to the authoritative bus, and the live coordination substrate is still the **legacy mailbox
+  bus**.
 - **Slice 2.5 (legacy-bus migration substrate) is BUILT + hardened, not yet cut over.** The substrate
   — `legacy_projector.py`, `divergence.py`, `cursor_backfill.py`, `cutover.py` — is built and
-  test-green (341 passed)
+  test-green (current threeway suite: 360 passed, 1 skipped)
   ([plan](../../superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md)).
   The single authority-flip **cutover has NOT been executed** — gated on explicit user confirmation
   (DECISIONS.md ADR-045). Cutover substrate was hardened in ADR-044/045 (atomic `_teardown`, dedup
@@ -122,9 +128,12 @@ attestations, `ci` signs `ci_result` (`predicate.py:152-161`).
   ADR-043). It does **NOT** return False for T2/T3; it is **fail-closed** — True only when the required
   signed facts exist. The merge-gate tier machinery is enforcing. Only the strategic-loop **runtime**
   (scope b: dual-chief apps, overseer fact emission, key provisioning) is unbuilt.
-- **Keys are NOT provisioned** — `coordination/threeway/keys/` holds only a README; no `.pub` files
-  exist. This is the **hard blocker for going live**. The merge-gate protected runner is design intent,
-  not deployed.
+- **Production keys are NOT provisioned** — `coordination/threeway/keys/` holds only a README; no
+  production `.pub` files exist. `threeway.keys_bootstrap.SEATS` now covers the full runtime signing
+  roster (`director`, `operator`, `coordinator`, `director2`, `operator2`, `coordinator2`,
+  `overseer`, `ci`, `merge-gate`, `chief-gemini`, `chief-chatgpt`) for a future key ceremony. This is
+  the **hard blocker for going live**. The protected merge-gate runner remains a future deployment
+  task; the current wrapper refuses protected `main` and defaults to the test ref.
 - **Forgery hardening (ADR-036/037/038):** revoke-authority + collision-aware index (ADR-036);
   event-id uniqueness at the gate and both stores (ADR-037); reserved merge-id + `brief_superseded`
   sibling (ADR-038) — closing the forgery / merge-DoS class.

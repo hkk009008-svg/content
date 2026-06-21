@@ -23,7 +23,8 @@ _SCHEMA = "cursor-backfill/1"
 
 # The fixed 6-seat cursor roster (THE single source — cutover imports this as its _SEATS so
 # the snapshot/advance loop and the seen/ canonicalization agree). Distinct from
-# keys_bootstrap.SEATS, which is the wider 9-entry SIGNING roster (adds overseer/ci/merge-gate).
+# keys_bootstrap.SEATS, which is the wider runtime signing roster (pair seats plus
+# overseer/ci/merge-gate/chief approvers).
 SEATS = ("director", "director2", "operator", "operator2", "coordinator", "coordinator2")
 
 

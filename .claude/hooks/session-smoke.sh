@@ -16,9 +16,19 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)" || exit 0
 [ -n "$ROOT" ] && cd "$ROOT" 2>/dev/null || exit 0
 
 PY="$ROOT/.venv/bin/python"
+_threeway_hook_summary() {
+  if [ -x "$PY" ] && [ -f "$ROOT/scripts/threeway_readiness.py" ]; then
+    "$PY" scripts/threeway_readiness.py --hook-summary 2>/dev/null \
+      || echo "threeway ready-not-live: hook failed open"
+  else
+    echo "threeway ready-not-live: hook failed open (readiness unavailable)"
+  fi
+}
+
 if [ ! -x "$PY" ]; then
   echo "⚠️  §15 smoke SKIPPED — project venv missing at .venv/bin/python."
   echo "    Bootstrap with: /opt/homebrew/bin/python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt"
+  _threeway_hook_summary
   exit 0
 fi
 
@@ -42,4 +52,5 @@ else
   echo "    Fix one before non-trivial work (R-START). Tail:"
   echo "$out" | tail -6 | sed 's/^/      /'
 fi
+_threeway_hook_summary
 exit 0

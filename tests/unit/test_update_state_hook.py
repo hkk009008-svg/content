@@ -86,3 +86,4 @@ def test_state_regen_uses_default_index_when_seat_index_is_bad():
         )
         state = (tmp / "STATE.md").read_text(encoding="utf-8")
         assert "- **Working tree:** clean" in state
+        assert "- **Threeway readiness:** threeway: ready-not-live" in state

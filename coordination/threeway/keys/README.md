@@ -9,7 +9,12 @@ PRIVATE keys are NEVER committed. They live in the keystore dir (env
 (hex of the 32-byte raw seed). A private key must never be present in an
 environment that executes candidate code (spec §6.4).
 
-Slice-1 seats: `director` (Codex, builder), `operator` (Claude, primary
-verifier), `coordinator` (Claude, executing integrator), `overseer`
-(release_order + cycle_go), `merge-gate` (merge-completed), `ci` (signs
-ci_result). Generate with `python -m threeway.keys_bootstrap` (Task 16).
+Default runtime signing roster: `director`, `operator`, `coordinator`,
+`director2`, `operator2`, `coordinator2`, `overseer`, `ci`, `merge-gate`,
+`chief-gemini`, and `chief-chatgpt`. The chief seats are the key-bound T3
+human-approval signers; they need committed public keys before live operation.
+
+Generate a non-production registry/keystore pair with
+`python -m threeway.keys_bootstrap --registry <tmp-registry> --keystore <tmp-keystore>`.
+Do not generate production public keys into this repo without an explicit live
+provisioning ceremony, and never commit private keys.

@@ -133,7 +133,8 @@ effects are user-gated; impl ≠ verifier. These never change with the tool.
    raises after the CAS) and the **authority-aware effective-state reducer** (ADR-039..041), so no
    non-overseer write or insider race can substitute for the merge-gate. The **cutover substrate** that
    would flip live authority onto this bus is **BUILT + hardened but user-gated** (ADR-044/045; the
-   single authority-flip has NOT been executed) — agy never triggers it.
+   single authority-flip has NOT been executed). The current scripts and CI workflow are
+   ready-not-live dry-run/preflight surfaces only — agy never triggers a live cutover or bus append.
 3. **No dual-write.** Do not read old tasks from the mailbox while writing new ones to the threeway
    bus (forbidden for every provider, spec §8 item 8).
 4. **Self-verification is not verification.** Antigravity-built code reaching `main` must be verified

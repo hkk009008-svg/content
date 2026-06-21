@@ -82,8 +82,12 @@ one operating doctrine. The unified statement of the shared rules, the Layer-1
 (cross-provider protocol) vs Layer-2 (portable doctrine) split, and the
 per-provider capability map live in
 [`docs/protocol/threeway/UNIFIED-OPERATING-DOCTRINE.md`](docs/protocol/threeway/UNIFIED-OPERATING-DOCTRINE.md).
-This file remains the principle root; that doc folds in the signed-bus protocol
-and Antigravity.
+Ready-not-live operation is executable through `scripts/threeway_readiness.py`,
+the dry-run wrappers, fail-open hooks, and
+[`docs/protocol/threeway/RUNBOOK.md`](docs/protocol/threeway/RUNBOOK.md); the
+legacy mailbox remains authoritative until a future explicit user-gated
+authority-flip cutover. This file remains the principle root; that doc folds in
+the signed-bus protocol and Antigravity.
 
 **Non-Claude agents:** read this file as your source of truth. Translate
 the principles ("fresh context per task", "two-stage review",

@@ -53,7 +53,7 @@ From the spec §4 / [`threeway/loop.py:43-52`](../../../threeway/loop.py):
 |---|---|---|---|
 | `director` | **builder** (own branch) | A | a Codex `live-seat` (`CODEX_SEAT=director`) — its behavior source is already `director2` per `SEAT_BEHAVIOR_SOURCE` |
 | `operator2` | **primary verifier** (read-only repo) | B | a Codex `live-seat` (`CODEX_SEAT=operator2`) — behavior source `operator`; pair with the `lane-v-verifier` role agent |
-| `coordinator2` | **executing integrator** (staging refs only) | B | `CODEX_SEAT=coordinator2` binds **coordinator mode** today — a compatibility alias, unpinned (`scripts/codex_protocol_model.py:104,155-156`); `seat_status.py` + `protocol_mailbox.RECEIVING_SEATS` accept it. The LIVE signed-bus **integrator role** (staging refs → main) is the target-state — see §4 (gated on cutover + merge-gate runner) |
+| `coordinator2` | **executing integrator** (staging refs only) | B | `CODEX_SEAT=coordinator2` binds **coordinator mode** today — a compatibility alias, unpinned (`scripts/codex_protocol_model.py:104,155-156`); `seat_status.py` + `protocol_mailbox.RECEIVING_SEATS` accept it. The LIVE signed-bus **integrator role** (staging refs → main) is the target-state — see §4 (gated on production-key ceremony + authority-flip cutover) |
 
 Codex's builder (`director`) is verified by Claude's `operator`; Codex's verifier (`operator2`)
 verifies Claude's `director2` build; Codex's `coordinator2` integrates Claude-built candidates. That
@@ -66,7 +66,7 @@ integrates Codex-built code.**
 > builder/verifier seat names; the threeway bus additionally needs `overseer`, `ci`, `merge-gate`,
 > which are mechanical/strategic identities, not Codex harness live-seats. `coordinator2` is already
 > an accepted Codex seat (mode-bound); what remains target-state is its **live signed-bus integrator
-> role** (staging refs → main), gated on the cutover + merge-gate runner — see §4.
+> role** (staging refs → main), gated on production-key ceremony + authority-flip cutover — see §4.
 
 ## 3. Prerequisite: key provisioning and custody
 
@@ -80,10 +80,10 @@ invocation** (`threeway/keys_bootstrap.py:16-29`) — *not* one call per seat, a
     --keystore "$THREEWAY_KEYSTORE"
 ```
 
-This generates **all nine** seats in one pass (`director, operator, coordinator, director2,
-operator2, coordinator2, overseer, ci, merge-gate`), writing `<seat>.pub` to the registry and
-`<seat>.ed25519` to the keystore (default `~/.threeway/keys` per `threeway/keys.py:66`). To restrict,
-use the **plural** `--seats director operator2 ...`.
+This generates **all eleven** runtime signing seats in one pass (`director, operator, coordinator,
+director2, operator2, coordinator2, overseer, ci, merge-gate, chief-gemini, chief-chatgpt`), writing
+`<seat>.pub` to the registry and `<seat>.ed25519` to the keystore (default `~/.threeway/keys` per
+`threeway/keys.py:66`). To restrict, use the **plural** `--seats director operator2 ...`.
 
 **Generation ≠ custody — this is the load-bearing distinction (`threeway/keys.py:3-13`; spec §6.2 key isolation + §12 key management):**
 
@@ -101,10 +101,12 @@ Set `THREEWAY_KEYSTORE` to point at the seat-local keystore; Codex loads its key
 
 ## 4. The adoption path (sequenced — there is no switch to flip)
 
-Per the unified doc §I.5, the `threeway/` package is **built, hardened, and test-green (341 passed)
-but wired into nothing** today — no live seat/harness/CI emits a threeway event; the legacy mailbox
-bus is still the live coordination substrate. The design **forbids dual-write** (spec §8 item 8 +
-Slice-2.5 design spec §D2, audited). So adoption is the migration, in order:
+Per the unified doc §I.5, the `threeway/` package is **built, hardened, test-green, and wired into
+ready-not-live dry-run surfaces** today. That means Codex/Claude hooks can report readiness, CI can
+manually produce a signed dry-run `ci_result` artifact, and wrappers can sign/append explicit events
+to a named pre-live store or dry-run the gate. It does **not** mean live authority moved: the legacy
+mailbox bus is still the live coordination substrate. The design **forbids dual-write** (spec §8 item
+8 + Slice-2.5 design spec §D2, audited). So adoption is the migration, in order:
 
 1. **Provision keys** (§3) and commit the registry.
 2. **Slice 2.5 — execute the cutover.** The receiving-seat plumbing is already **DONE**: the
@@ -121,14 +123,18 @@ Slice-2.5 design spec §D2, audited). So adoption is the migration, in order:
    user confirmation** (DECISIONS.md ADR-045). **Method: shadow read-only projection →
    single-writer cutover (no dual-write window).** The legacy mailbox stays authoritative until
    cutover.
-3. **Wire CI to emit a signed `ci_result`.** Today `.github/workflows/ci.yml` runs bare `pytest
-   tests/unit/` and signs nothing. A real `ci_result` (signed by the `ci` seat, binding
-   `integration_sha` + `policy_digest`, `result: PASS`) must be produced by the unprivileged runner
-   and appended to the bus before the gate's predicate can pass (`threeway/predicate.py:152-161`).
+3. **Promote CI from dry-run artifact to live bus fact.** Today `.github/workflows/ci.yml` still signs
+   nothing. The manual-only `.github/workflows/threeway-ci-dry-run.yml` proves artifact construction by
+   using an ephemeral runner key and `scripts/threeway_ci_result.py`, but it deliberately does not
+   append to the bus. A live `ci_result` (signed by the `ci` seat, binding `integration_sha` +
+   `policy_digest`, `result: PASS`) must be produced by the unprivileged runner and appended to the bus
+   before the gate's predicate can pass (`threeway/predicate.py:152-161`).
 4. **Deploy the merge-gate** as a dedicated protected runner holding the only protected-`main`
-   credential, invoking `threeway.gate.run_gate(...)`. Note: `run_gate` is an **in-process function**
-   today (`threeway/gate.py:158`) — and it is **TOTAL: it never raises after the CAS** (ADR-039/040/041);
-   there is no daemon yet; the runner is what's missing.
+   credential, invoking `threeway.gate.run_gate(...)`. `scripts/threeway_gate_runner.py` is currently
+   a ready-not-live wrapper: default dry-run/test ref, refuses protected `main`, and has no production
+   override. Note: `run_gate` is an **in-process function** today (`threeway/gate.py:158`) — and it is
+   **TOTAL: it never raises after the CAS** (ADR-039/040/041); there is no daemon yet; the protected
+   runner is what's missing.
 5. **Slice 3 — runtime only; the gate machinery is already BUILT + enforcing** (ADR-035). The
    merge-gate tier check `co_sign_satisfied` (`threeway/tier.py:39`) is fail-closed and already gates
    T2 (other-pair operator co-sign) and T3 (re_verify freshness-nonce challenge + two key-bound
@@ -164,9 +170,9 @@ all seats — as unsigned; the docstring says so). The real pattern:
   (`docs/protocol/codex/continuation.md`). In the current harness it can become `director`,
   `operator2`, or `coordinator2` only on explicit user/parent instruction. `coordinator2` already
   binds **coordinator mode** (an unpinned compatibility alias, `scripts/codex_protocol_model.py:104,155-156`);
-  what is not yet live is its **signed-bus integrator role**, which arrives with the cutover +
-  merge-gate runner (§4) — so a `coordinator2` Codex session today coordinates on the legacy mailbox
-  bus, not the signed bus.
+  what is not yet live is its **signed-bus integrator role**, which arrives only after the production
+  key ceremony and authority-flip cutover (§4) — so a `coordinator2` Codex session today coordinates
+  on the legacy mailbox bus, not the signed bus.
 - On assuming a seat, **find the newest `docs/HANDOFF-<concrete-seat>-*.md` first**, then orient via
   `seat_status.py <seat> --wave <N>` (read-only), then check mail before any protocol decision.
 - All Layer-2 rules in the unified doc apply verbatim through Codex's primitives (Part III): subagents

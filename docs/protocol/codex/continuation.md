@@ -53,8 +53,13 @@ Readiness bridge:
 
 ```bash
 .venv/bin/python scripts/continuation_readiness.py
+env -u GIT_INDEX_FILE .venv/bin/python scripts/threeway_readiness.py --state-line
 env -u GIT_INDEX_FILE git log --oneline -5
 ```
+
+The threeway readiness line is pre-live signal only: it reports key/CI/gate/cutover
+blockers while the legacy mailbox remains authoritative. It is not a signed-bus
+GO and must not consume mail, append events, or flip authority.
 
 Live seat:
 
@@ -67,6 +72,7 @@ Coordinator:
 
 ```bash
 .venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py coordinator --wave 2
+env -u GIT_INDEX_FILE .venv/bin/python scripts/threeway_readiness.py --state-line
 env -u GIT_INDEX_FILE git log --oneline -5
 .venv/bin/python scripts/wave_gate_check.py 2
 .venv/bin/python scripts/ci_smoke.py

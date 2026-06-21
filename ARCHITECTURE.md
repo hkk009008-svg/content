@@ -1706,6 +1706,13 @@ protected ref only when signed, non-colludable facts satisfy a predicate. Slice 
 and added Pair B. See `DECISIONS.md` ADR-030/ADR-031 and the spec
 `docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md`.
 
+Current adoption state: ready-not-live. The protocol has dry-run/preflight
+entrypoints (`scripts/threeway_readiness.py`, `scripts/threeway_append_event.py`,
+`scripts/threeway_ci_result.py`, `scripts/threeway_gate_runner.py`,
+`scripts/threeway_cutover_check.py`), fail-open Codex/Claude hook summaries, and a
+manual dry-run CI workflow, but the legacy mailbox remains authoritative. Production
+`.pub` keys and the authority-flip cutover are still future user-gated operations.
+
 ### 13A.1 Event bus — `RefEventStore`
 
 `class RefEventStore` (`threeway/refstore.py:80`) stores one git commit per event on
@@ -1753,7 +1760,11 @@ Events carry an Ed25519 signature over RFC 8785 (JCS) canonical bytes of a fixed
 signing is mandatory so the signature *verifier* (the gate) cannot forge a *signer*.
 The trust root is one committed `<seat>.pub` per seat under
 `coordination/threeway/keys/`; `class PublicKeyRegistry` (`threeway/keys.py:77`) loads
-them, while private keys live OUTSIDE the repo (`THREEWAY_KEYSTORE`).
+them, while private keys live OUTSIDE the repo (`THREEWAY_KEYSTORE`). The bootstrap
+roster (`threeway/keys_bootstrap.py`) covers all runtime signing seats: the two pair
+triples, `overseer`, `ci`, `merge-gate`, `chief-gemini`, and `chief-chatgpt`. In the
+current ready-not-live state, `coordination/threeway/keys/` contains only its README;
+production public keys are intentionally not committed yet.
 
 ### 13A.4 Running the suite
 
@@ -1765,7 +1776,8 @@ append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` pr
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
 ```
 
-Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `341 passed, 0 xfailed` (incl. the ADR-036
+Slice 1 + Slice 2 + Slice 2.5 + Slice 3 plus ready-not-live wrappers: `360 passed,
+1 skipped, 0 xfailed` (incl. the ADR-036
 revoke-authority, ADR-037 event-id-uniqueness across gate + both stores, ADR-038 reserved-merge-id +
 brief_superseded authority, the ADR-039 availability-hardening pins — authority-aware reducer,
 self-consistent candidate resolution — the ADR-040 totality-completion pins — verify-phase
@@ -1774,9 +1786,25 @@ envelope guard + reducer fold/skip guards; ADR-042 pair-namespaced `candidate_id
 cross-pair reuse residual, now CLOSED (not xfailed); ADR-043 T3 re_verify freshness nonce +
 per-approver `approver_roster`; ADR-044/045 cutover-substrate hardening; and ADR-046–049
 residual-surface hardening — refstore/store reader totality, atomic cursor-backfill manifest,
-host-independent merge-tree determinism, and the cutover force-rerun cursor fix).
+host-independent merge-tree determinism, the cutover force-rerun cursor fix; and the ready-not-live
+readiness/runtime-script/workflow pins).
 
-*Last verified: 2026-06-21*
+*Last verified: 2026-06-22*
+
+### 13A.4a Ready-not-live executable surfaces
+
+`scripts/threeway_readiness.py` is the read-only reporter for the adoption phase. It emits JSON,
+a `STATE.md` line, or a hook summary; checks runtime script/workflow presence, key-roster support,
+missing production registry keys, `refs/threeway/events` state, legacy divergence, gate-runner
+presence, CI dry-run presence, and an inactive authority flip.
+
+`scripts/threeway_append_event.py` signs and appends an explicit event JSON to a named pre-live
+file store only after signer/kind authority checks and a private-key-to-registry public-key match.
+`scripts/threeway_ci_result.py` builds a signed `ci_result` artifact binding `integration_sha`,
+`policy_digest`, result, and evidence-manifest digest. `scripts/threeway_gate_runner.py` defaults
+to dry-run/test refs and refuses protected `main`; `scripts/threeway_cutover_check.py` is read-only
+and never calls `run_cutover`. `.github/workflows/threeway-ci-dry-run.yml` is `workflow_dispatch`
+only and uploads a signed dry-run `ci_result` artifact; it does not append to the bus.
 
 ### 13A.5 Legacy mailbox projection — `legacy_projector` + `divergence` (Slice 2.5)
 

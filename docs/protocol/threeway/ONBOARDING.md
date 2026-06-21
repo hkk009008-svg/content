@@ -59,9 +59,9 @@ stale versus the code, the code wins — fix the doc in the same change that exp
 2. **`UNIFIED-OPERATING-DOCTRINE.md`** — the heart. Layer 1 (the cross-provider protocol: seats,
    bus, merge-gate) vs Layer 2 (the portable rules every provider follows), plus the **capability
    map** that tells your provider which primitive implements each rule. Currency note: the
-   `threeway/` package the build-status section (§I.5) routes to is now BUILT, hardened, and
-   test-green — but WIRED INTO NOTHING; the legacy mailbox bus is still the live substrate, and
-   keys are not provisioned (the hard blocker for going live).
+   `threeway/` package the build-status section (§I.5) routes to is now BUILT, hardened,
+   test-green, and wired into ready-not-live dry-run surfaces. The legacy mailbox bus is still
+   authoritative; production keys are not provisioned; the live cutover is still user-gated.
 3. **Your provider manual** — Codex / Antigravity / Claude specifics.
 4. **`ARCHITECTURE-DIAGRAM.md`** — the canonical topology picture.
 5. **`AGENTS.md`** — the agent-agnostic principle root (already names all three providers).
@@ -86,9 +86,11 @@ stale versus the code, the code wins — fix the doc in the same change that exp
   compatibility alias, unpinned — in the Codex harness (`scripts/codex_protocol_model.py:104,155-156`);
   `seat_status.py` and `protocol_mailbox.RECEIVING_SEATS` (`scripts/protocol_mailbox.py:17`) accept it.
   What remains target-state is the LIVE signed-bus INTEGRATOR role (staging refs -> main), gated on the
-  cutover + merge-gate runner. Your harness already mirrors Layer 2 (`scripts/codex_protocol_model.py`,
-  `.codex/agents/*.toml`, `.codex/hooks/`). See `CODEX-ADOPTION.md` for your seats + the migration path.
-  Git: `env -u GIT_INDEX_FILE` for ordinary git/pytest.
+  production-key ceremony and authority-flip cutover. Your harness already mirrors Layer 2
+  (`scripts/codex_protocol_model.py`, `.codex/agents/*.toml`, `.codex/hooks/`) and now surfaces
+  fail-open threeway readiness in session smoke and `STATE.md`. See `CODEX-ADOPTION.md` and
+  `RUNBOOK.md` for your seats + the migration path. Git: `env -u GIT_INDEX_FILE` for ordinary
+  git/pytest.
 - **Claude** — `CLAUDE.md` + `docs/protocol/claude/` are your mechanics; you hold `director2` /
   `operator` / `coordinator`. Use the `Agent`/`Workflow`/`Skill` tools as your Layer-2 primitives.
 - **Antigravity (agy)** — you hold **no seat**. Operate as a read-only observer or a human-relayed

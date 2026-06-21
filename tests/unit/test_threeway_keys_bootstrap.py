@@ -4,24 +4,30 @@ from threeway import keys_bootstrap
 PAIR_A = {"director", "operator", "coordinator"}
 PAIR_B = {"director2", "operator2", "coordinator2"}
 INFRA = {"overseer", "ci", "merge-gate"}
+CHIEFS = {"chief-gemini", "chief-chatgpt"}
+ALL_RUNTIME_SIGNING_SEATS = PAIR_A | PAIR_B | INFRA | CHIEFS
 
 
-def test_seats_include_pair_b():
+def test_seats_include_all_runtime_signing_seats():
     seats = set(keys_bootstrap.SEATS)
     # Pair-B seats are now provisioned.
     assert PAIR_B.issubset(seats)
     # Pair-A seats and the infra seats remain present.
     assert PAIR_A.issubset(seats)
     assert INFRA.issubset(seats)
+    # T3 human-approval chiefs are runtime signing seats too.
+    assert CHIEFS.issubset(seats)
+    assert len(keys_bootstrap.SEATS) == len(seats)
+    assert seats == ALL_RUNTIME_SIGNING_SEATS
 
 
-def test_bootstrap_writes_pair_b_keypairs(tmp_path):
+def test_bootstrap_writes_default_runtime_keypairs(tmp_path):
     reg = tmp_path / "registry"
     ks = tmp_path / "keystore"
     rc = keys_bootstrap.main(["--registry", str(reg), "--keystore", str(ks)])
     assert rc == 0
 
-    for seat in PAIR_B:
+    for seat in ALL_RUNTIME_SIGNING_SEATS:
         pub_path = reg / f"{seat}.pub"
         priv_path = ks / f"{seat}.ed25519"
         assert pub_path.exists(), f"missing public key for {seat}"

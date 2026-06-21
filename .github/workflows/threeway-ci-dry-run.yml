@@ -1,0 +1,78 @@
+name: Threeway CI Dry Run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dry-run:
+    name: signed ci_result artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      THREEWAY_BUS_ID: dry-run-${{ github.run_id }}
+      THREEWAY_POLICY_DIGEST: dry-run-policy-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate ephemeral dry-run keys
+        run: |
+          python -m threeway.keys_bootstrap \
+            --registry "$RUNNER_TEMP/threeway-registry" \
+            --keystore "$RUNNER_TEMP/threeway-keystore" \
+            --seats ci
+
+      - name: Run threeway tests
+        run: python -m pytest tests/unit/test_threeway_*.py -q
+
+      - name: Build evidence manifest
+        run: |
+          mkdir -p "$RUNNER_TEMP/threeway-artifacts"
+          cat > "$RUNNER_TEMP/threeway-artifacts/evidence-manifest.json" <<EOF
+          {
+            "workflow": "threeway-ci-dry-run",
+            "run_id": "${{ github.run_id }}",
+            "integration_sha": "${{ github.sha }}",
+            "commands": [
+              "python -m pytest tests/unit/test_threeway_*.py -q"
+            ]
+          }
+          EOF
+
+      - name: Sign dry-run ci_result
+        env:
+          THREEWAY_KEYSTORE: ${{ runner.temp }}/threeway-keystore
+        run: |
+          python scripts/threeway_ci_result.py \
+            --keystore "$RUNNER_TEMP/threeway-keystore" \
+            --bus-id "$THREEWAY_BUS_ID" \
+            --candidate-id "dry-run:${{ github.run_id }}" \
+            --integration-sha "${{ github.sha }}" \
+            --policy-digest "$THREEWAY_POLICY_DIGEST" \
+            --result PASS \
+            --evidence-manifest "$RUNNER_TEMP/threeway-artifacts/evidence-manifest.json" \
+            --output "$RUNNER_TEMP/threeway-artifacts/ci-result.json"
+
+      - name: Upload dry-run ci_result
+        uses: actions/upload-artifact@v6
+        with:
+          name: threeway-ci-result-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/threeway-artifacts/ci-result.json
+            ${{ runner.temp }}/threeway-artifacts/evidence-manifest.json
+          if-no-files-found: error

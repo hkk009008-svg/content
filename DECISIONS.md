@@ -2588,3 +2588,61 @@ Independent Lane-V GO (wf_7c8fa7bd-9f0, 3/3 unanimous + mutation-proven against 
 `logs/verify-wf_7c8fa7bd-9f0-cutover-residual-lane-v.json`). Lane-V NITs closed in the follow-up: an
 E2E empty-seen→seq-0 opt-in pin (`test_cutover_empty_seen_file_is_explicit_seq_zero_optin`) + a
 `total_order` docstring clarification (the idempotent double-filter via `ordered_event_names`).
+
+## ADR-052 — Threeway ready-not-live adoption surfaces (dry-run scripts, hooks, and manual CI artifact)
+
+**Status.** ACCEPTED. This is an adaptation-phase step, not the live authority flip.
+
+**Context.** ADR-030/031/034/035/044/045/050/051 built and hardened the signed bus, ref store,
+cutover substrate, and tiered co-sign machinery, but live authority still belongs to the legacy
+mailbox. The next safe step was to make the protocol executable in a dry-run/pre-live workflow
+without committing production keys, appending to the live bus, or letting any wrapper write protected
+`main`.
+
+**Decision.**
+
+1. **Key roster support now includes every runtime signing seat.** `threeway.keys_bootstrap.SEATS`
+   covers `director`, `operator`, `coordinator`, `director2`, `operator2`, `coordinator2`,
+   `overseer`, `ci`, `merge-gate`, `chief-gemini`, and `chief-chatgpt`. The production registry still
+   contains no `.pub` files; `coordination/threeway/keys/README.md` makes the future key ceremony
+   boundary explicit.
+2. **Ready-not-live scripts are executable but bounded.** `scripts/threeway_readiness.py` is read-only
+   and emits JSON/state-line/hook-summary readiness. `scripts/threeway_append_event.py` signs and
+   appends only explicit event JSON after signer/kind authority and registry-key checks; there is no
+   private-key fallback. `scripts/threeway_ci_result.py` signs a `ci_result` artifact binding
+   `integration_sha`, `policy_digest`, result, and evidence manifest digest. `scripts/threeway_gate_runner.py`
+   defaults to `refs/threeway/test-main` and refuses protected `main`. `scripts/threeway_cutover_check.py`
+   is read-only and never calls `run_cutover`.
+3. **Hooks and CI expose readiness without changing authority.** Codex and Claude session-smoke hooks
+   print fail-open threeway readiness. Codex and Claude update-state hooks add a readiness line to
+   `STATE.md`. `.github/workflows/threeway-ci-dry-run.yml` is `workflow_dispatch` only; it runs the
+   threeway tests, uses an ephemeral runner-side `ci` key, signs a dry-run `ci_result`, uploads the
+   artifact, and never appends to the bus.
+4. **Docs now state the current boundary.** `docs/protocol/threeway/` is updated from "wired into
+   nothing" to "wired into ready-not-live dry-run surfaces; legacy mailbox remains authoritative."
+   `docs/protocol/threeway/RUNBOOK.md` records readiness, dry-run CI, gate dry-run, key-ceremony
+   prerequisites, and future live-cutover steps.
+
+**Why safe.** No production `.pub` files or private keys are committed. No workflow has push/PR
+triggers or appends to the bus. The gate wrapper refuses protected `main` until a future explicit
+production flag is designed in a separate user-gated task. The cutover checker only reads mailbox and
+ref state. The readiness hooks are fail-open and informational.
+
+**Verification.**
+
+- `env -u GIT_INDEX_FILE /Users/hyungkoookkim/Content/.venv/bin/python -m pytest tests/unit/test_threeway_*.py -q`
+  → `360 passed, 1 skipped in 75.94s`.
+- `env -u GIT_INDEX_FILE /Users/hyungkoookkim/Content/.venv/bin/python -m pytest tests/unit/test_codex_protocol_artifacts.py tests/unit/test_update_state_hook.py tests/unit/test_threeway_runtime_scripts.py tests/unit/test_threeway_readiness.py tests/unit/test_threeway_keys_bootstrap.py -q`
+  → `34 passed in 1.20s`.
+- `env -u GIT_INDEX_FILE /Users/hyungkoookkim/Content/.venv/bin/python scripts/ci_smoke.py`
+  → `RESULT: no ceremony detected ... OK` (with the existing `cv2 importorskip` warning).
+- `env -u GIT_INDEX_FILE /Users/hyungkoookkim/Content/.venv/bin/python scripts/check_no_ceremony.py`
+  → `RESULT: no ceremony detected` (same existing `cv2 importorskip` warning).
+- `env -u GIT_INDEX_FILE /Users/hyungkoookkim/Content/.venv/bin/python scripts/threeway_readiness.py --state-line`
+  → `threeway: ready-not-live status=BLOCKED blockers=1 authority_flip=inactive`.
+- `env -u GIT_INDEX_FILE /Users/hyungkoookkim/Content/.venv/bin/python scripts/threeway_readiness.py --hook-summary`
+  → `threeway ready-not-live: BLOCKED; blockers=1; no authority flip; legacy mailbox authoritative`.
+
+**Future live prerequisites.** Production key ceremony, zero-divergence shadow proof, live CI
+`ci_result` bus append, protected merge-gate runner, and the single explicit user-gated authority
+flip remain separate operations.

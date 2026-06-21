@@ -38,6 +38,9 @@ flowchart TD
 | Live seat checklists | `.agents/skills/` | `.agents/skills/seat-operator/SKILL.md` | Seat actions are reusable runtime instructions with clear trigger rules. |
 | Spawnable Codex roles | `.codex/agents/*.toml` | `.codex/agents/protocol-operator.toml` | Role prompts are executable agent modules and should stay near Codex agent configuration. |
 | Session guardrails | `.codex/hooks.json` and `.codex/hooks/` | `guard-git-index.sh`, `session-smoke.sh` | Hooks are lifecycle/tool boundaries, not protocol prose or mailbox state. |
+| Threeway readiness and dry-run wrappers | `scripts/` | `threeway_readiness.py`, `threeway_gate_runner.py`, `threeway_ci_result.py` | Ready-not-live protocol truth must be executable and fail-open in hooks; live authority remains separate. |
+| Threeway public-key trust root | `coordination/threeway/keys/` | `README.md`, future `<seat>.pub` files | Public keys are the committed trust root after a key ceremony; private keys never live in the repo. |
+| Threeway dry-run CI workflow | `.github/workflows/` | `threeway-ci-dry-run.yml` | Workflow-dispatch-only artifact generation belongs with CI, and must not append to the bus. |
 | Mailbox events | `coordination/mailbox/sent/` | `*-operator2-to-all-verification-report.md` | Inter-seat protocol speech must be durable and commit-addressable. |
 | Mailbox read cursors | `coordination/mailbox/seen/` | `coordination/mailbox/seen/director.txt` | Per-seat consumed-up-to timestamps are the single read-state truth. |
 | Shared-file locks | `coordination/locks/` | `2-web_server.py.lock` when active | Locks are temporary ownership claims over shared implementation surfaces. |
@@ -58,6 +61,9 @@ Codex-only rule?            -> docs/protocol/codex/
 Seat action checklist?      -> .agents/skills/
 Spawnable role prompt?      -> .codex/agents/
 Lifecycle/index guardrail?  -> .codex/hooks*
+Threeway readiness wrapper? -> scripts/
+Threeway public keys?       -> coordination/threeway/keys/
+Threeway CI dry run?        -> .github/workflows/
 Actual protocol event?      -> coordination/mailbox/sent/
 Read cursor?                -> coordination/mailbox/seen/
 Lock/ownership state?       -> coordination/locks/
