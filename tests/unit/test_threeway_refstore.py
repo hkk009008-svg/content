@@ -125,6 +125,64 @@ def test_append_refuses_same_id_under_different_brief(tmp_path):
         store.append(_unsigned(id="DUP", brief_id="briefB", signer="director:codex:s1"), pb)
 
 
+# ----------------------------------------------------------------------------
+# ADR-046 — _iter_local must be TOTAL against a malformed stored blob.
+# A single malformed raw event/index blob on the bus (an insider with push access,
+# NO forgery) must be DROPPED, never raise: _iter_local feeds append()'s idempotency
+# + id-collision scans AND gate.run_gate's all_events() materialize (gate.py:168,
+# OUTSIDE run_gate's try), so an uncaught raise here wedges EVERY append and EVERY
+# gate run — a one-event total-bus DoS. This makes the gate's well_formed drop
+# guarantee hold at the DESERIALIZATION source, not just for already-built Events.
+# ----------------------------------------------------------------------------
+def test_malformed_event_blob_is_dropped_not_wedging_reads_or_append(tmp_path):
+    r = _new_repo(tmp_path); priv, _ = keys.generate_keypair()
+    store = RefEventStore(r)
+    store.append(_unsigned(id="good1"), priv)
+    # a validly-committed raw event blob that OMITS the required "payload" key ->
+    # from_json_obj(obj["payload"]) raises KeyError on the un-guarded reader.
+    _inject_raw_event(r, "refs/threeway/events", {
+        "id": "bad", "seq": 99, "bus_id": "prod", "schema_version": "threeway/1",
+        "kind": "attestation", "from": "operator", "to": "all",
+        "signer": "operator:claude:s1", "brief_id": "b1",
+    })
+    assert [e.id for e in store.all_events()] == ["good1"]      # bad blob skipped, no raise
+    store.append(_unsigned(id="good2"), priv)                   # scans iterate _iter_local
+    assert sorted(e.id for e in store.all_events()) == ["good1", "good2"]
+
+
+def test_wrongtyped_event_field_is_dropped_by_well_formed(tmp_path):
+    # Deserializes (all keys present) but a wrong-typed field (payload is a list, not a
+    # dict) must be dropped via well_formed, else the gate/reducer raise downstream.
+    r = _new_repo(tmp_path); priv, _ = keys.generate_keypair()
+    store = RefEventStore(r)
+    store.append(_unsigned(id="good1"), priv)
+    _inject_raw_event(r, "refs/threeway/events", {
+        "id": "wrongtype", "seq": 99, "bus_id": "prod", "schema_version": "threeway/1",
+        "kind": "attestation", "from": "operator", "to": "all",
+        "signer": "operator:claude:s1", "brief_id": "b1",
+        "payload": ["not", "a", "dict"],
+    })
+    assert [e.id for e in store.all_events()] == ["good1"]
+
+
+def test_malformed_index_entry_is_dropped(tmp_path):
+    # Sibling vector: a non-JSON (or path-less) index blob must be dropped, not raise on
+    # the entry parse / entry["path"] deref.
+    r = _new_repo(tmp_path); priv, _ = keys.generate_keypair()
+    store = RefEventStore(r)
+    store.append(_unsigned(id="good1"), priv)
+    ref = "refs/threeway/events"
+    tip = gitcas.rev_parse(r, ref)
+    seq = max(gitcas.list_index_seqs(r, tip)) + 1
+    blob_i = gitcas.write_blob(r, b"{ this is not valid json")
+    tree = gitcas.build_tree_with(r, gitcas.tree_of(r, tip), [(f"index/{seq:08d}", blob_i)])
+    commit = gitcas.commit_on(r, tree, tip, "bad index")
+    assert gitcas.cas_create_or_update_ref(r, ref, commit, tip) is True
+    assert [e.id for e in store.all_events()] == ["good1"]
+    store.append(_unsigned(id="good2"), priv)
+    assert sorted(e.id for e in store.all_events()) == ["good1", "good2"]
+
+
 def test_append_assigns_monotonic_seq_from_one(tmp_path):
     r = _new_repo(tmp_path); priv, _ = keys.generate_keypair()
     store = RefEventStore(r)

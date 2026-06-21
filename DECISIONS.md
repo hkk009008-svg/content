@@ -2335,3 +2335,40 @@ green.
 ValueError re-raised); the ADR-044 teardown pins stay green; full threeway suite 329 passed / 0; ci_smoke OK.
 Surfaced by `wf_be151f19-aa7`. This completes the cutover-sequence teardown coverage; the live cutover
 remains gated on explicit user confirmation with the ADR-044 operational preconditions unchanged.
+
+## ADR-046 — Make `RefEventStore._iter_local` TOTAL against a malformed stored blob (Rule-13 sibling of ADR-041; closes a deserialization-time total-bus DoS)
+
+**Context.** ADR-040/041 made `run_gate` total against a malformed insider event via a `well_formed(ev)`
+drop-not-raise guard — but that guard runs only on *already-deserialized* `Event` objects.
+`RefEventStore._iter_local` deserializes raw stored blobs with a bare `from_json_obj(json.loads(raw))`
+(and `entry["path"]` for the index entry), and `from_json_obj` (`threeway/envelope.py:166`) dereferences
+nine required keys with NO presence/type check. A single malformed blob on the bus — an insider with push
+access committing a raw event blob that omits `payload`, or a non-JSON / path-less index entry; NO forgery —
+therefore raised an uncaught `KeyError`/`JSONDecodeError` the instant `_iter_local` reached it. `_iter_local`
+feeds `append()`'s idempotency + id-collision scans AND `gate.run_gate`'s `store.all_events()` materialize
+(`threeway/gate.py:168`), which is OUTSIDE `run_gate`'s try — so one bad blob wedged EVERY append and EVERY
+gate run: a one-event total-bus DoS. The reassuring `gate.py:164` comment ("Bus EVENTS are already
+totality-guarded by `well_formed`") was false for this deserialization-time crash — `well_formed` guards
+already-built Events, the crash happens upstream during deserialization. Surfaced + reproduced end-to-end
+against HEAD by the residual-surface audit `wf_48aefc7d-589` (finder + 3 refuters could not refute; isolated
+worktree repro RED).
+
+**Decision.** Make `_iter_local` drop-not-raise at the deserialization source: wrap the index-entry parse
+(`json.loads(idx)` + `entry["path"]` + `isinstance(path, str)`) and the event parse
+(`from_json_obj(json.loads(raw))`) each in `except (ValueError, KeyError, TypeError): continue`
+(`JSONDecodeError` is a `ValueError` subclass), and additionally `if not well_formed(ev): continue` to drop a
+present-but-wrong-typed field. A malformed blob is thus INVISIBLE to every reader and scan, exactly as the
+gate already assumes — extending the ADR-041 `well_formed` contract upstream to the source (`well_formed`
+added to the refstore import).
+
+**Why safe.** Strictly subtractive: it only DROPS a blob that could not have been a valid authority anyway (a
+malformed blob carries no signature/seat the predicate would honor). A legitimate event is never malformed
+(it is built by `append` + `sign_event`), so no real event is hidden, and an attacker cannot make an existing
+legit event malformed. Nothing newly promotes; the forgery/availability classes (ADR-036..045) stay green.
+
+**Verification.** TDD red→green: 3 new pins in `tests/unit/test_threeway_refstore.py`
+(`test_malformed_event_blob_is_dropped_not_wedging_reads_or_append`,
+`test_wrongtyped_event_field_is_dropped_by_well_formed`, `test_malformed_index_entry_is_dropped`) were RED
+pre-fix (KeyError/JSONDecodeError) and GREEN after (the bad blob is skipped; reads and a fresh append both
+succeed). Full refstore suite 30 passed/0. Independent Lane-V re-verification pending. Artifact:
+`logs/audit-wf_48aefc7d-589-threeway-residual-surfaces.json`.

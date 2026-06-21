@@ -36,6 +36,7 @@ from threeway.envelope import (
     sign_event,
     to_json_obj,
     verify_event,
+    well_formed,
 )
 
 EVENTS_REF = "refs/threeway/events"
@@ -192,11 +193,32 @@ class RefEventStore:
             idx = gitcas.read_blob_at(self._repo, tip, f"index/{seq:08d}")
             if idx is None:
                 continue
-            entry = json.loads(idx)
-            raw = gitcas.read_blob_at(self._repo, tip, entry["path"])
+            # DROP-NOT-RAISE (ADR-046): a malformed stored blob — an index entry or event
+            # blob that is not JSON, omits a from_json_obj-required key, or carries a
+            # wrong-typed field — must be INVISIBLE here, never an uncaught raise. _iter_local
+            # feeds append()'s idempotency + id-collision scans and gate.run_gate's
+            # all_events() materialize (gate.py:168, OUTSIDE run_gate's try), so a single
+            # malformed blob would otherwise wedge EVERY append and EVERY gate run (a
+            # one-event total-bus DoS). This extends the gate/reducer well_formed drop
+            # contract (envelope.py:141) to the DESERIALIZATION source. An insider with bus
+            # push access can plant such a blob; it has no authority, so we skip it.
+            try:
+                entry = json.loads(idx)
+                path = entry["path"]
+                if not isinstance(path, str):
+                    continue
+            except (ValueError, KeyError, TypeError):    # JSONDecodeError <: ValueError
+                continue
+            raw = gitcas.read_blob_at(self._repo, tip, path)
             if raw is None:
                 continue
-            yield from_json_obj(json.loads(raw))
+            try:
+                ev = from_json_obj(json.loads(raw))
+            except (ValueError, KeyError, TypeError):
+                continue
+            if not well_formed(ev):
+                continue
+            yield ev
 
     def iter_events(self):
         # remote-safe public reader: a direct external caller (not via append, which
