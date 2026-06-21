@@ -18,7 +18,7 @@ from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from threeway.envelope import Event, from_json_obj, sign_event, to_json_obj
+from threeway.envelope import Event, from_json_obj, sign_event, to_json_obj, well_formed
 
 
 class EventIdCollision(ValueError):
@@ -52,7 +52,17 @@ class EventStore:
 
     def iter_events(self):
         for path in sorted(self._dir.glob("*.json")):
-            yield from_json_obj(json.loads(path.read_text()))
+            # DROP-NOT-RAISE (Rule-13 sibling of ADR-046): mirror RefEventStore._iter_local —
+            # a malformed file blob (non-JSON, missing a from_json_obj-required key, or a
+            # wrong-typed field) must be INVISIBLE, never an uncaught raise that would wedge a
+            # reader/scan if a live caller is ever wired to this (currently dormant) Slice-1 store.
+            try:
+                ev = from_json_obj(json.loads(path.read_text()))
+            except (ValueError, KeyError, TypeError, UnicodeDecodeError):  # JSONDecodeError <: ValueError
+                continue
+            if not well_formed(ev):
+                continue
+            yield ev
 
     def all_events(self) -> list[Event]:
         return list(self.iter_events())

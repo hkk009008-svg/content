@@ -68,3 +68,18 @@ def test_append_refuses_duplicate_event_id(tmp_path):
     store.append(_unsigned(1, id="DUP"), priv)
     with pytest.raises(EventIdCollision):
         store.append(_unsigned(2, id="DUP"), priv)
+
+
+def test_malformed_file_blob_is_dropped_not_raised(tmp_path):
+    # Rule-13 sibling of ADR-046: a malformed file on disk must be DROPPED by iter_events,
+    # never raise — mirrors RefEventStore._iter_local so a single bad file cannot wedge a
+    # reader/scan if a live caller is ever wired to this (currently dormant) Slice-1 store.
+    store = EventStore(tmp_path / "events")
+    priv, _ = keys.generate_keypair()
+    store.append(_unsigned(1, id="good"), priv)
+    d = tmp_path / "events"
+    (d / "00000098-nopayload.json").write_text(                 # missing required "payload"
+        '{"id":"x","seq":1,"bus_id":"prod","schema_version":"threeway/1",'
+        '"kind":"attestation","from":"operator","to":"all","signer":"operator:claude:s1"}')
+    (d / "00000099-bad.json").write_text("{ not valid json")    # non-JSON
+    assert [e.id for e in store.iter_events()] == ["good"]      # both bad files skipped, no raise
