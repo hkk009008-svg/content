@@ -1,5 +1,12 @@
 # Codex — Three-Way Protocol Adoption Manual
 
+> ⚠ **Post-adaptation review (read before your next turn):**
+> [`reviews/2026-06-22-codex-adaptation-review.md`](reviews/2026-06-22-codex-adaptation-review.md) —
+> the prior adaptation turn's activation scripts used a fabricated event schema (`event_type`/`subject`)
+> and prematurely marked the bus "live"; the review covers what was wrong, what was corrected
+> (`36c72878` / ADR-052), and the realignment rules (read the package before emitting events; status is
+> an artifact; the cutover is a gated one-way door).
+
 **Read first:** [`UNIFIED-OPERATING-DOCTRINE.md`](UNIFIED-OPERATING-DOCTRINE.md) (the shared rules) and
 the spec
 [`docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md`](../../superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md)
