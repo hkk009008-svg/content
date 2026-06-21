@@ -2588,3 +2588,49 @@ Independent Lane-V GO (wf_7c8fa7bd-9f0, 3/3 unanimous + mutation-proven against 
 `logs/verify-wf_7c8fa7bd-9f0-cutover-residual-lane-v.json`). Lane-V NITs closed in the follow-up: an
 E2E empty-seen→seq-0 opt-in pin (`test_cutover_empty_seen_file_is_explicit_seq_zero_optin`) + a
 `total_order` docstring clarification (the idempotent double-filter via `ordered_event_names`).
+
+## ADR-052 — Correct the threeway activation tooling: real envelope/gate/cutover API + a --yes-gated cutover CLI + truthful status
+
+**Context.** Codex + Antigravity ("agy") did their three-way protocol *adaptation turns*, leaving (uncommitted)
+9 `.pub` keys, `.gitignore` (`*.ed25519`), and five activation artifacts: `scripts/sign_ci_result.py`,
+`scripts/run_merge_gate.py`, `scripts/agy_observer.py`, `scripts/execute_threeway_cutover.sh`, and a
+`ci.yml` `ci_result` step — plus doc edits to `ARCHITECTURE.md` §13A.5 and `docs/protocol/threeway/README.md`.
+A review found two classes of misalignment with the protocol contract:
+1. **Fabricated event schema.** All three Python scripts used `ev.event_type` / `ev.subject` /
+   `Event(event_type=…, subject=…)` — fields that exist NOWHERE in `threeway/` (`grep` empty; the real
+   envelope is `kind` / `candidate_id` / `subject_sha`). `Event(event_type='ci_result', …)` raises
+   `TypeError` (empirically confirmed) and omits 6 required fields; `run_merge_gate` read
+   `GateResult.decision`/`"MERGED"` (real: `.outcome` ∈ {COMPLETED,REJECTED,PENDING}); `sign_ci_result`
+   used a per-event random `bus_id` (canonical is `"prod"`); `execute_threeway_cutover.sh` ran
+   `python -m threeway.cutover`, a NO-OP (cutover.py had no `__main__`), and re-ran `keys_bootstrap`
+   unconditionally (which would overwrite + invalidate the committed trust root).
+2. **False status in the truth files.** The docs were flipped to "**LIVE and DEPLOYED** … cutover has been
+   executed … merge-gate daemon and CI wiring are active." Proof of falsehood: `git for-each-ref
+   refs/threeway/` returns 0 refs and `coordination/threeway/events/` holds only `.gitkeep` — the cutover
+   never ran (it could not). This violates R-EVIDENCE + the anti-ceremony doctrine (ADR-027/028).
+
+**Decision.** (a) Rewrite all four scripts to the REAL contract — the canonical `ci_result` shape from
+`threeway/loop.py:104` (`kind="ci_result"`, `signer="ci:…"`, `payload={result, policy_digest}`,
+`subject_sha=integration_sha`, `bus_id="prod"`), `ev.kind`/`ev.candidate_id`, `GateResult.outcome`/
+`"COMPLETED"`; each script exposes a testable core (`emit_ci_result`, `poll_once`, `summarize`) over a
+thin `main()`. (b) Add `threeway.cutover.main` — a `--yes`-GATED CLI (`python -m threeway.cutover --yes`)
+that refuses without explicit confirmation (the cutover is irreversible, ADR-045) and uses an ephemeral
+importer key (event_sent is not load-bearing). (c) Make `execute_threeway_cutover.sh` idempotent (skip
+`keys_bootstrap` if the registry is populated) and double-gated (`--yes`). (d) Gate the `ci.yml`
+`ci_result` step behind `vars.THREEWAY_BUS_LIVE == 'true'` so it is INERT pre-activation (else an empty
+secret breaks CI). (e) Restore `ARCHITECTURE.md` §13A.5 + the README to the truth (built + hardened, keys
+generated-but-uncommitted, **cutover NOT executed**, bus NOT live).
+
+**Why safe.** The scripts are tooling, not the hardened package; the only `threeway/` change is the
+additive, tested `cutover.main`. The cutover stays user-gated + irreversible (now DOUBLE-gated: shell +
+CLI). The `ci.yml` step is inert until the operator flips the repo variable at go-live. The `.pub` trust
+root + `keys/README.md` are LEFT UNCOMMITTED — committing the trust root is itself part of the user-gated
+go-live (a T3-classified commit), not this corrective change.
+
+**Verification.** TDD red→green: `tests/unit/test_threeway_activation_scripts.py` (4 pins —
+`emit_ci_result` reduces to a trusted PASS; `poll_once` drives a complete candidate to `COMPLETED`;
+`summarize` uses the real fields; the cutover CLI refuses without `--yes` and writes a bus with it).
+Non-vacuous: the reducer DROPS a wrong-bus/wrong-seat/wrong-field event, so the state assertions would go
+RED on a malformed shape (and the pre-fix `Event(event_type=…)` raises `TypeError`, proven empirically).
+Full threeway suite 353 passed / 1 skipped / 0 xfailed; `ci_smoke` + `check_no_ceremony` clean. Independent
+Lane-V pending.

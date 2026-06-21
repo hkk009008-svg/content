@@ -20,6 +20,7 @@ token.pickle
 vertex-ai-key.json
 *-key.json
 *.pem
+*.ed25519
 
 # Media Output (Prevents git from hanging on large video files)
 *.mp4

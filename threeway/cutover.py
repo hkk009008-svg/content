@@ -14,10 +14,12 @@ the projector + backfill can never disagree about which mailbox they are migrati
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
-from threeway import cursor_backfill, gitcas, legacy_projector
+from threeway import cursor_backfill, gitcas, keys, legacy_projector
 from threeway.gitcas import preflight_bus_init
 from threeway.refstore import EVENTS_REF, RefEventStore
 
@@ -191,3 +193,35 @@ def run_cutover(repo, coord_root, importer_key, *, force: bool = False) -> Cutov
     #     (The marker/doctrine commit is the caller's; this returns the GO signal —
     #     ready_to_flip, not the flip itself.)
     return CutoverResult(appended=appended, cursors=cursors, ready_to_flip=True)
+
+
+def main(argv=None) -> int:
+    """CLI entry: `python -m threeway.cutover --repo . --coord-root . --yes`.
+
+    The single authority-flip cutover is IRREVERSIBLE (DECISIONS.md ADR-045): it REFUSES without an
+    explicit --yes, so even an accidental `python -m threeway.cutover` cannot fire it. The importer
+    key is EPHEMERAL — `event_sent` carriers are not load-bearing, so the gate never reads their
+    signature (a registry entry is intentionally unnecessary; see run_cutover step 3)."""
+    ap = argparse.ArgumentParser(
+        description="Execute the Slice 2.5 legacy->signed-bus cutover (IRREVERSIBLE).")
+    ap.add_argument("--repo", default=".", help="git repo holding refs/threeway/*")
+    ap.add_argument("--coord-root", default=".",
+                    help="root containing coordination/ (or the coordination dir itself)")
+    ap.add_argument("--force", action="store_true",
+                    help="acknowledge a pre-existing refs/threeway/* (documented force re-run)")
+    ap.add_argument("--yes", action="store_true",
+                    help="REQUIRED: confirm the irreversible authority flip")
+    args = ap.parse_args(argv)
+    if not args.yes:
+        print("REFUSING: the legacy->signed-bus cutover is IRREVERSIBLE (ADR-045). "
+              "Re-run with --yes to confirm.")
+        return 2
+    importer, _ = keys.generate_keypair()   # ephemeral: event_sent is not load-bearing
+    res = run_cutover(Path(args.repo), Path(args.coord_root), importer, force=args.force)
+    print(f"Cutover complete: appended {res.appended} carrier events; "
+          f"cursors backfilled for {len(res.cursors)} seats; ready_to_flip={res.ready_to_flip}.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

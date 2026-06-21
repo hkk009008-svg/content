@@ -18,13 +18,22 @@ unified system on top of the cross-provider three-way protocol.
 - Verified-truth + decisions: [`ARCHITECTURE.md`](../../../ARCHITECTURE.md) §13A · [`DECISIONS.md`](../../../DECISIONS.md) (ADR-034..049)
 - Principle root: [`AGENTS.md`](../../../AGENTS.md) · Claude mechanics: [`CLAUDE.md`](../../../CLAUDE.md) · Codex mechanics: [`docs/protocol/codex/continuation.md`](../codex/continuation.md)
 
-**Status (verify before relying):** the `threeway/` package — Slice 1+2 (signed bus, effective-state
-reducer, gate, RefEventStore), Slice 2.5 (legacy-bus migration substrate), and Slice 3 (tiered T2/T3
-co-sign machinery) — is BUILT, hardened, and test-green but **wired into nothing**: no live
-seat/harness/CI emits a threeway event; the live coordination substrate is still the legacy mailbox
-bus. Slice 2.5 migration substrate is built + hardened (ADR-044/045) but the single authority-flip
-cutover has NOT been executed — gated on explicit user confirmation (DECISIONS.md ADR-045). Slice 3
-merge-gate tier machinery is built + enforcing (ADR-035); only the strategic-loop RUNTIME (scope b:
-dual-chief apps, overseer fact emission, key provisioning) is unbuilt. Keys are NOT provisioned
-(`coordination/threeway/keys/` holds only a README) — the hard blocker for going live. "Adoption" =
-executing the sequenced migration, not flipping a switch. See `UNIFIED-OPERATING-DOCTRINE.md` §I.5.
+**Status (verify before relying — `git for-each-ref refs/threeway/` is the live oracle):** the
+`threeway/` package — Slice 1+2 (signed bus, effective-state reducer, gate, RefEventStore), Slice 2.5
+(legacy-bus migration substrate), and Slice 3 (tiered T2/T3 co-sign machinery) — is BUILT, hardened,
+and test-green, but the bus is **NOT yet live**: `refs/threeway/events` does not exist and the live
+coordination substrate is still the legacy mailbox bus.
+
+What has changed toward go-live (NOT yet a flip):
+- **Keys generated** into `coordination/threeway/keys/` (`<seat>.pub` for all 9 signing seats) — the
+  prior hard blocker. NOTE: these are still **uncommitted** here; committing the `.pub` trust root is
+  itself part of the user-gated go-live (a T3-classified commit), and private `*.ed25519` keys are
+  gitignored and live only in the keystore dir.
+- **Activation tooling** exists: `scripts/sign_ci_result.py` (CI signs `ci_result`),
+  `scripts/run_merge_gate.py` (the merge-gate daemon over `threeway.gate.run_gate`),
+  `scripts/agy_observer.py` (Antigravity read-only bus summary), `scripts/execute_threeway_cutover.sh`
+  (key provisioning + cutover driver), and a CI step in `.github/workflows/ci.yml`.
+
+The single authority-flip cutover has **NOT been executed** (irreversible; gated on explicit user
+confirmation — DECISIONS.md ADR-045). "Adoption" = executing the sequenced, user-gated migration, not
+flipping this status line. See `UNIFIED-OPERATING-DOCTRINE.md` §I.5.
