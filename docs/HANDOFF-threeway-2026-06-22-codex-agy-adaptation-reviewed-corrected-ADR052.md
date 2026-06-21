@@ -1,8 +1,9 @@
 # HANDOFF — Codex + agy three-way adaptation REVIEWED & CORRECTED (ADR-052) + per-provider review docs
 
 **Date:** 2026-06-22
-**HEAD:** `main` @ `fd469e22`. **3 commits UNPUSHED** (`36c72878` → `d7ebd145` → `fd469e22`);
-`origin/main` @ `a2940863`. **Push is user-deferred** (user said "handoff", not "push").
+**HEAD:** `main` @ `a4af1f5e` (this handoff) — **PUSHED to `origin/main`, 0 unpushed** (the ADR-052
+stack `36c72878` → `d7ebd145` → `fd469e22` → this handoff is on origin). A follow-up commit then
+flipped this status line from "unpushed" to "pushed".
 **Verification at handoff:** full threeway suite **353 passed / 1 skipped / 0 xfailed**; `ci_smoke` +
 `check_no_ceremony` clean; the ADR-052 fix is **independently Lane-V GO** (`wf_cb50fa27-3e5`, 3/3 lenses,
 no FAIL). `git for-each-ref refs/threeway/` → **0 refs (bus NOT live; cutover NOT executed)**.
@@ -25,7 +26,7 @@ Two user requests this session, both done + verified:
 The earlier part of the day (ADR-050/051 cutover residual gaps) is on `origin/main` already — see
 `docs/HANDOFF-threeway-2026-06-22-residual-gaps-ADR050-051-closed-lane-v-go.md`.
 
-## 1. What landed this session (the 3 UNPUSHED commits)
+## 1. What landed this session (3 commits, now on `origin/main`)
 
 | Commit | What |
 |---|---|
@@ -75,7 +76,7 @@ The tooling is now correct, but activation is a deliberate, irreversible, user-c
    O(n²) append at live scale — expected, not a hang).
 5. Deploy the merge-gate runner (`scripts/run_merge_gate.py`); start agy's read-only observer if wanted.
 
-Also: **push the 3 commits** (user-deferred). And the deferred `divergence.py:110` follow-up.
+Also still open: the deferred `divergence.py:110` follow-up (the ADR-052 stack is already on origin).
 
 ## 6. Sharp edges (durable, from this session)
 
