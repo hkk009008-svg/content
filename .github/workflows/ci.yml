@@ -1,7 +1,9 @@
-# Landed per the 2026-05-24 handoff. Three independent jobs run in parallel;
-# all must pass for the workflow to succeed. Mirrors the three local checks
-# documented in ARCHITECTURE.md §15 + OPERATIONS.md §7. Concurrency cancels
-# older runs on the same branch (saves minutes on rapid pushes).
+# Landed per the 2026-05-24 handoff. Three independent verification jobs run
+# in parallel; all must pass for the workflow to succeed. A fourth manual-only
+# threeway signer job can emit ci_result after those jobs pass during go-live.
+# Mirrors the three local checks documented in ARCHITECTURE.md §15 +
+# OPERATIONS.md §7. Concurrency cancels older runs on the same branch (saves
+# minutes on rapid pushes).
 #
 # 2026-06-10 (STRATEGIC_REVIEW-2026-06-10 P0-1 / NF-1): the pytest job was
 # 0-for-289 since landing — bare `pytest` cannot import root modules
@@ -27,7 +29,9 @@
 #   - §15 smoke: OK
 #
 # Security review (per .claude security_reminder_hook):
-#   - No untrusted-input interpolation in `run:` blocks.
+#   - No untrusted-input interpolation in `run:` blocks. The manual
+#     threeway integration SHA is passed through an env var, validated as
+#     a 40-char lowercase hex SHA, then shell-quoted before signing.
 #   - Only `${{ github.workflow }}` + `${{ github.ref }}` in `concurrency:`
 #     group key, which is the canonical GitHub pattern; ref is not used in
 #     any shell command.
@@ -39,6 +43,16 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      integration_sha:
+        description: Exact CAS-merged integration commit SHA to test and sign
+        required: true
+        type: string
+      integration_ref:
+        description: Fetchable branch, tag, or ref whose HEAD is integration_sha
+        required: true
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -53,6 +67,22 @@ jobs:
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.integration_ref || github.sha }}
+
+      - name: Verify threeway integration checkout
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          INTEGRATION_SHA: ${{ inputs.integration_sha }}
+        run: |
+          case "$INTEGRATION_SHA" in
+            *[!0-9a-f]*|'')
+              echo "integration_sha must be a lowercase 40-hex Git SHA" >&2
+              exit 1
+              ;;
+          esac
+          test "${#INTEGRATION_SHA}" -eq 40
+          test "$(git rev-parse HEAD)" = "$INTEGRATION_SHA"
 
       - uses: actions/setup-python@v6
         with:
@@ -106,6 +136,22 @@ jobs:
       ANTHROPIC_API_KEY: ci-dummy-not-a-real-key
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.integration_ref || github.sha }}
+
+      - name: Verify threeway integration checkout
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          INTEGRATION_SHA: ${{ inputs.integration_sha }}
+        run: |
+          case "$INTEGRATION_SHA" in
+            *[!0-9a-f]*|'')
+              echo "integration_sha must be a lowercase 40-hex Git SHA" >&2
+              exit 1
+              ;;
+          esac
+          test "${#INTEGRATION_SHA}" -eq 40
+          test "$(git rev-parse HEAD)" = "$INTEGRATION_SHA"
 
       - uses: actions/setup-python@v6
         with:
@@ -141,33 +187,28 @@ jobs:
       - name: Run no-ceremony detector
         run: python scripts/check_no_ceremony.py
 
-      # Inert until go-live: only fires once the operator sets repo variable
-      # THREEWAY_BUS_LIVE=true (alongside committing the .pub trust root + running the cutover).
-      # Without this gate the step runs on every build pre-activation — with no live bus and an
-      # empty THREEWAY_CI_KEY secret, load_private('ci') would fail and break CI.
-      #
-      # ACTIVATION-TIME REQUIREMENT (do NOT flip THREEWAY_BUS_LIVE until resolved): the gate keys
-      # ci_result by the candidate's integration_sha (the CAS-merged commit the coordinator computes),
-      # NOT the branch HEAD. github.sha below is the pushed/PR-head commit, which on a real PR is
-      # != integration_sha -> the gate's ci_result(integ) lookup would miss and the candidate would
-      # stay PENDING forever. Wire CI to run on + sign the integration commit (or pass the real
-      # integration_sha) before enabling this step. See reviews/2026-06-22-codex-adaptation-review.md.
-      - name: Emit threeway ci_result
-        if: success() && vars.THREEWAY_BUS_LIVE == 'true'
-        env:
-          THREEWAY_KEYSTORE: ${{ runner.temp }}/threeway_keys
-          CI_PRIVATE_KEY: ${{ secrets.THREEWAY_CI_KEY }}
-        run: |
-          mkdir -p $THREEWAY_KEYSTORE
-          echo "$CI_PRIVATE_KEY" > $THREEWAY_KEYSTORE/ci.ed25519
-          python scripts/sign_ci_result.py --integration-sha ${{ github.sha }} --result PASS
-
   tsc:
     name: TypeScript --noEmit
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.integration_ref || github.sha }}
+
+      - name: Verify threeway integration checkout
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          INTEGRATION_SHA: ${{ inputs.integration_sha }}
+        run: |
+          case "$INTEGRATION_SHA" in
+            *[!0-9a-f]*|'')
+              echo "integration_sha must be a lowercase 40-hex Git SHA" >&2
+              exit 1
+              ;;
+          esac
+          test "${#INTEGRATION_SHA}" -eq 40
+          test "$(git rev-parse HEAD)" = "$INTEGRATION_SHA"
 
       - uses: actions/setup-node@v6
         with:
@@ -182,3 +223,46 @@ jobs:
       - name: TypeScript noEmit check
         working-directory: web
         run: npx tsc --noEmit
+
+  threeway-ci-result:
+    name: Emit threeway ci_result
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [smoke, pytest-unit, tsc]
+    if: github.event_name == 'workflow_dispatch' && vars.THREEWAY_BUS_LIVE == 'true' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      INTEGRATION_SHA: ${{ inputs.integration_sha }}
+    steps:
+      # Signing runs from trusted main after the integration SHA has passed all
+      # test jobs above. The ci private key never runs candidate-controlled code.
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install signing dependencies
+        run: pip install -r requirements.txt
+
+      - name: Emit signed ci_result for tested integration SHA
+        env:
+          THREEWAY_KEYSTORE: ${{ runner.temp }}/threeway_keys
+          CI_PRIVATE_KEY: ${{ secrets.THREEWAY_CI_KEY }}
+        run: |
+          case "$INTEGRATION_SHA" in
+            *[!0-9a-f]*|'')
+              echo "integration_sha must be a lowercase 40-hex Git SHA" >&2
+              exit 1
+              ;;
+          esac
+          test "${#INTEGRATION_SHA}" -eq 40
+          mkdir -p "$THREEWAY_KEYSTORE"
+          printf '%s\n' "$CI_PRIVATE_KEY" > "$THREEWAY_KEYSTORE/ci.ed25519"
+          python scripts/sign_ci_result.py --integration-sha "$INTEGRATION_SHA" --result PASS --remote origin

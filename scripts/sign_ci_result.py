@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Emit a signed `ci_result` event to the threeway signed bus (the CI seat's fact).
 
-Usage: sign_ci_result.py --integration-sha <sha> [--result PASS|FAIL] [--repo-dir .]
+Usage: sign_ci_result.py --integration-sha <sha> [--result PASS|FAIL] [--repo-dir .] [--remote origin]
 
 `ci_result` is reduced/keyed by `subject_sha` (= the integration sha), must be signed by the
 trusted `ci` seat, and carries {result, policy_digest} (see threeway/predicate.py:152-161 and
@@ -59,13 +59,15 @@ def main(argv=None) -> int:
     ap.add_argument("--integration-sha", required=True, help="the exact integration commit SHA tested")
     ap.add_argument("--result", default="PASS", choices=["PASS", "FAIL"])
     ap.add_argument("--repo-dir", default=".", help="git repo holding refs/threeway/*")
+    ap.add_argument("--remote", default=None,
+                    help="authoritative bus remote for RefEventStore push-CAS (for CI runners)")
     args = ap.parse_args(argv)
     try:
         private_key = load_private("ci")
     except Exception as e:
         print(f"Error loading CI private key: {e}", file=sys.stderr)
         return 1
-    store = RefEventStore(Path(args.repo_dir))
+    store = RefEventStore(Path(args.repo_dir), remote=args.remote)
     ev = emit_ci_result(store, args.integration_sha, args.result, private_key)
     print(f"Signed + emitted ci_result ({args.result}) for {args.integration_sha} (seq {ev.seq}).")
     return 0

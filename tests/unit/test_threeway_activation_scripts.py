@@ -7,6 +7,7 @@ reducer/gate (non-vacuous: a wrong bus_id / signer-seat / field makes verify_and
 event, so the state assertions go RED).
 """
 import os
+from pathlib import Path
 import subprocess
 
 import pytest
@@ -24,6 +25,18 @@ def _env():
 def _git(repo, *a):
     return subprocess.run(["git", "-C", str(repo), *a], check=True,
                           capture_output=True, text=True, env=_env())
+
+
+def _new_bare(path):
+    _git(path.parent, "init", "--bare", "-q", str(path))
+    return path
+
+
+def _clone(bare, dest):
+    _git(dest.parent, "clone", "-q", str(bare), str(dest))
+    _git(dest, "config", "user.email", "t@e.st")
+    _git(dest, "config", "user.name", "t")
+    return dest
 
 
 @pytest.fixture()
@@ -72,6 +85,44 @@ def test_sign_ci_result_emits_a_reducible_pass_for_the_sha(seatkit, tmp_path):
     assert ci is not None, "ci_result was dropped by the reducer (wrong bus/signer/field)"
     assert ci.payload["result"] == "PASS"
     assert ci.payload["policy_digest"] == default_policy().policy_digest()
+
+
+def test_sign_ci_result_cli_pushes_to_the_authoritative_remote_bus(seatkit, tmp_path):
+    from scripts import sign_ci_result
+    reg, ks, privs = seatkit
+    remote = _new_bare(tmp_path / "bus.git")
+    runner = _clone(remote, tmp_path / "runner")
+    sha = "e" * 40
+
+    rc = sign_ci_result.main([
+        "--repo-dir", str(runner),
+        "--remote", "origin",
+        "--integration-sha", sha,
+        "--result", "PASS",
+    ])
+
+    assert rc == 0
+    viewer = _clone(remote, tmp_path / "viewer")
+    from threeway.refstore import RefEventStore
+    state = verify_and_reduce(RefEventStore(viewer, remote="origin").all_events(),
+                              registry_dir=reg, bus_id="prod")
+    assert state.ci_result(sha) is not None
+
+
+def test_ci_workflow_signs_only_an_explicit_threeway_integration_sha():
+    workflow = Path(".github/workflows/ci.yml").read_text()
+
+    assert "workflow_dispatch:" in workflow
+    assert "integration_sha:" in workflow
+    assert "integration_ref:" in workflow
+    assert "ref: ${{ inputs.integration_ref || github.sha }}" in workflow
+    assert 'test "$(git rev-parse HEAD)" = "$INTEGRATION_SHA"' in workflow
+    assert "needs: [smoke, pytest-unit, tsc]" in workflow
+    assert "github.ref == 'refs/heads/main'" in workflow
+    assert "INTEGRATION_SHA: ${{ inputs.integration_sha }}" in workflow
+    assert 'test "${#INTEGRATION_SHA}" -eq 40' in workflow
+    assert 'python scripts/sign_ci_result.py --integration-sha "$INTEGRATION_SHA" --result PASS --remote origin' in workflow
+    assert "--integration-sha ${{ github.sha }}" not in workflow
 
 
 # --------------------------------------------------------------------------- run_merge_gate

@@ -2647,3 +2647,38 @@ probes — bus_id and signer-seat — both went RED, proving non-vacuity; no FAI
 in the follow-up: the ARCHITECTURE.md restore phrasing corrected (above), the §13A.4 test count refreshed
 341→353, and the ci.yml integration_sha limitation documented. Artifact:
 `logs/verify-wf_cb50fa27-3e5-activation-tooling-lane-v.json`.
+
+## ADR-053 — Wire inert threeway CI signing to the real integration SHA and authoritative bus ref
+
+**Context.** ADR-052 intentionally left the CI `ci_result` step inert because it still passed
+`github.sha` as `--integration-sha`. The gate keys `ci_result` by the candidate's CAS-merged
+`integration_sha`, not by the PR/push head, so enabling that step would leave candidates PENDING. A
+second activation gap was in the same path: `scripts/sign_ci_result.py` appended through a local
+`RefEventStore(repo)`, which is fine for local tests but would write only the disposable CI clone unless
+CI used the remote authoritative bus path.
+
+**Decision.** Keep normal push/PR CI behavior unchanged, and add a go-live-only manual
+`workflow_dispatch` path. For that manual path, all three CI jobs check out a fetchable
+`integration_ref`, validate the supplied `integration_sha` as 40 lowercase hex, assert the checked-out
+`HEAD` equals that exact SHA, and then test that checkout. A separate `threeway-ci-result` job runs only
+after `smoke`, `pytest-unit`, and `tsc` all pass, only when `vars.THREEWAY_BUS_LIVE == 'true'`, and only
+from `refs/heads/main`. The signing job checks out trusted `main` code (the workflow commit), validates
+the same SHA, loads only the CI private key, and calls `scripts/sign_ci_result.py --integration-sha
+"$INTEGRATION_SHA" --result PASS --remote origin`. `sign_ci_result.py` now exposes `--remote`, passing it to
+`RefEventStore(repo, remote=...)` so append uses the expected-old-OID push-CAS path for
+`refs/threeway/events`.
+
+**Why safe.** The CI key no longer runs candidate-controlled signing code: candidate/integration code is
+checked out by the test jobs, while the signer job checks out trusted `main` after the test jobs finish.
+The signer job has `contents: write`; the ordinary test jobs do not need that permission. The path remains
+fully inert until go-live because it requires manual dispatch, `THREEWAY_BUS_LIVE=true`, a committed public
+trust root, the cutover, and a configured CI private key.
+
+**Verification.** TDD red→green:
+`tests/unit/test_threeway_activation_scripts.py::test_sign_ci_result_cli_pushes_to_the_authoritative_remote_bus`
+first failed with `unrecognized arguments: --remote origin`, and
+`tests/unit/test_threeway_activation_scripts.py::test_ci_workflow_signs_only_an_explicit_threeway_integration_sha`
+first failed because `workflow_dispatch:` was absent; after the fetchability hardening, the same pin first
+failed because `integration_ref:` was absent. Focused result after the fix:
+`env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_activation_scripts.py -q` →
+`6 passed in 2.04s`.

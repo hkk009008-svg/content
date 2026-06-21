@@ -128,10 +128,14 @@ Slice-2.5 design spec §D2, audited). So adoption is the migration, in order:
    user confirmation** (DECISIONS.md ADR-045). **Method: shadow read-only projection →
    single-writer cutover (no dual-write window).** The legacy mailbox stays authoritative until
    cutover.
-3. **Wire CI to emit a signed `ci_result`.** Today `.github/workflows/ci.yml` runs bare `pytest
-   tests/unit/` and signs nothing. A real `ci_result` (signed by the `ci` seat, binding
-   `integration_sha` + `policy_digest`, `result: PASS`) must be produced by the unprivileged runner
-   and appended to the bus before the gate's predicate can pass (`threeway/predicate.py:152-161`).
+3. **Enable the inert CI `ci_result` signer at go-live.** `.github/workflows/ci.yml` now has a
+   manual `workflow_dispatch` path that runs the smoke/unit/tsc jobs against a fetchable
+   `integration_ref` and asserts the checked-out `HEAD` equals the explicit `integration_sha`.
+   It then emits a signed `ci_result` only from trusted `main` code, behind
+   `vars.THREEWAY_BUS_LIVE == 'true'`, after all three jobs pass. The signed fact binds
+   `integration_sha` + `policy_digest`, `result: PASS`, and is appended to the authoritative
+   remote bus with `scripts/sign_ci_result.py --remote origin`. This remains inert until go-live:
+   normal push/PR CI does not sign bus facts.
 4. **Deploy the merge-gate** as a dedicated protected runner holding the only protected-`main`
    credential, invoking `threeway.gate.run_gate(...)`. Note: `run_gate` is an **in-process function**
    today (`threeway/gate.py:158`) — and it is **TOTAL: it never raises after the CAS** (ADR-039/040/041);

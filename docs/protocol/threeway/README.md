@@ -15,7 +15,7 @@ unified system on top of the cross-provider three-way protocol.
 - Protocol spec: [`docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md`](../../superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md)
 - Slice-2.5 migration plan: [`docs/superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md`](../../superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md)
 - The package: [`threeway/`](../../../threeway/)
-- Verified-truth + decisions: [`ARCHITECTURE.md`](../../../ARCHITECTURE.md) §13A · [`DECISIONS.md`](../../../DECISIONS.md) (ADR-034..049)
+- Verified-truth + decisions: [`ARCHITECTURE.md`](../../../ARCHITECTURE.md) §13A · [`DECISIONS.md`](../../../DECISIONS.md) (ADR-034..053)
 - Principle root: [`AGENTS.md`](../../../AGENTS.md) · Claude mechanics: [`CLAUDE.md`](../../../CLAUDE.md) · Codex mechanics: [`docs/protocol/codex/continuation.md`](../codex/continuation.md)
 
 **Status (verify before relying — `git for-each-ref refs/threeway/` is the live oracle):** the
@@ -29,10 +29,13 @@ What has changed toward go-live (NOT yet a flip):
   prior hard blocker. NOTE: these are still **uncommitted** here; committing the `.pub` trust root is
   itself part of the user-gated go-live (a T3-classified commit), and private `*.ed25519` keys are
   gitignored and live only in the keystore dir.
-- **Activation tooling** exists: `scripts/sign_ci_result.py` (CI signs `ci_result`),
+- **Activation tooling** exists: `scripts/sign_ci_result.py` (CI signs `ci_result`, including
+  remote bus append for the go-live workflow),
   `scripts/run_merge_gate.py` (the merge-gate daemon over `threeway.gate.run_gate`),
   `scripts/agy_observer.py` (Antigravity read-only bus summary), `scripts/execute_threeway_cutover.sh`
-  (key provisioning + cutover driver), and a CI step in `.github/workflows/ci.yml`.
+  (key provisioning + cutover driver), and an inert, manually-triggered ci-result signer job in
+  `.github/workflows/ci.yml` that requires a fetchable `integration_ref` plus the exact tested
+  `integration_sha`.
 
 The single authority-flip cutover has **NOT been executed** (irreversible; gated on explicit user
 confirmation — DECISIONS.md ADR-045). "Adoption" = executing the sequenced, user-gated migration, not
