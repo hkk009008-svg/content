@@ -1,6 +1,8 @@
 """Run: env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_legacy_projector.py -q"""
 import hashlib
 
+import pytest
+
 from threeway.envelope import idempotency_key
 from threeway.legacy_projector import project
 
@@ -114,3 +116,24 @@ def test_subject_sha_empty_collides_two_identical_bodies_MUTATION(tmp_path):
     assert idempotency_key(a) == idempotency_key(b)   # both discriminators gone -> collide
     # ...therefore the live subject_sha=sha256(filename) is defense-in-depth ON TOP OF the
     # payload source_filename; together they keep idempotency_key injective over the corpus.
+
+
+def test_project_skips_clean_nonevent_but_raises_on_tsprefixed_malformed(tmp_path):
+    # ADR-050: "which sent/ files become carrier events" is ONE classifier, shared with
+    # cursor_backfill so the append-seq numbering (here) and the cursor-seq numbering (there)
+    # are provably the same function of sent/. The classifier is THREE-way:
+    #   - a CLEAN non-event file (no leading dash-ts token) is SKIPPED;
+    #   - a ts-prefixed .md that fails the full <ts>-<from>-to-<to>-<kind> grammar (a
+    #     suspected-but-unparseable event) RAISES — it must NOT be silently dropped during
+    #     the irreversible cutover (pre-fix project() silently skipped BOTH).
+    from threeway.legacy_projector import MalformedEventFilename
+    sent = _sent(tmp_path)
+    n_ok = _write(sent, "2026-06-01T10-00-00Z", "operator", "director", "status")
+    (sent / "README.md").write_text("not an event\n")                  # clean non-event -> skip
+    evs = project(sent)
+    assert [e.payload["source_filename"] for e in evs] == [n_ok]        # README skipped, event kept
+
+    # a ts-prefixed but non-roster sender -> looks like an event, fails the grammar -> RAISE
+    (sent / "2026-06-01T11-00-00Z-stranger-to-director-foo.md").write_text("x\n")
+    with pytest.raises(MalformedEventFilename):
+        project(sent)

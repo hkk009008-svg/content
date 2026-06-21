@@ -188,6 +188,50 @@ def test_archived_seq_map_returns_manifest_iso_to_seq(tmp_path):
     assert cb.archived_seq_map(root) == man["iso_to_seq"]
 
 
+def test_canonical_seat_cursors_rejects_case_collision(tmp_path):
+    # ADR-051: two seen/ files mapping to the SAME canonical roster seat (Operator.txt +
+    # operator.txt) must RAISE — FS-dependent iterdir() order would otherwise silently
+    # last-write-wins differently per host. Skipped on a case-insensitive FS where the two
+    # names cannot coexist as distinct files.
+    seen = tmp_path / "seen"; seen.mkdir()
+    (seen / "operator.txt").write_text("2026-06-17T20:00:00Z\n")
+    try:
+        (seen / "Operator.txt").write_text("2026-06-17T19:00:00Z\n")
+    except OSError:
+        pytest.skip("filesystem rejected the case-variant filename")
+    if len(list(seen.iterdir())) < 2:
+        pytest.skip("case-insensitive filesystem: the two names are one file, no collision")
+    with pytest.raises(cb.SeatCursorError):
+        cb.canonical_seat_cursors(seen)
+
+
+def test_backfill_numbers_over_projector_event_set_skip_clean_raise_malformed(tmp_path):
+    # ADR-050: the cursor seq numbering must use the SAME event set + order as the
+    # projector's append order. Pre-fix backfill() numbered over _sent_names() = ALL .md via
+    # the loose _TS regex, so:
+    #   - a CLEAN non-event .md (README.md, no leading ts) made _TS raise -> spurious abort;
+    #   - a ts-prefixed-but-malformed .md was COUNTED here but SKIPPED by the projector ->
+    #     every later seq shifted +1 -> the archived iso_to_seq diverged from the appended
+    #     index -> a force-rerun (which reads archived_seq_map) over-advanced the cursor refs.
+    from threeway.legacy_projector import MalformedEventFilename
+
+    # (a) a clean non-event file is skipped, NOT counted -> director (cursor covers all 3
+    #     events) still maps to seq 3.  Pre-fix this RAISED (total_order _TS miss on README).
+    root = _seed(tmp_path / "clean", {"director": "2026-06-17T20:00:00Z"})
+    (root / "coordination" / "mailbox" / "sent" / "README.md").write_text("not an event\n")
+    backfill(root)
+    man = json.loads((root / "coordination" / "mailbox" / ".migration"
+                      / "cursor-backfill.json").read_text())
+    assert man["iso_to_seq"]["director"] == len(_NAMES)            # README not counted -> 3, no +1
+
+    # (b) a ts-prefixed-but-malformed file -> RAISE (never silently counted -> seq shift).
+    root2 = _seed(tmp_path / "malformed", {"director": "2026-06-17T20:00:00Z"})
+    (root2 / "coordination" / "mailbox" / "sent"
+     / "2026-06-17T21-00-00Z-stranger-to-director-foo.md").write_text("x\n")
+    with pytest.raises(MalformedEventFilename):
+        backfill(root2)
+
+
 def test_keyincomplete_manifest_raises_clear_typed_error(tmp_path):
     # schema-VALID but a required key MISSING (older/hand-edited manifest) must also raise
     # the typed error, not a bare KeyError in the resume/rollback read.

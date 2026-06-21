@@ -2488,3 +2488,99 @@ pins `test_iso_to_seq_map_rejects_non_iso_cursor`, `test_archived_seq_map_return
 Mutation-proven non-vacuous: forcing step 4 down the pre-fix path reddens the integration pin. cursor_backfill
 + cutover suites 21 passed/0. Independent Lane-V pending. Artifact:
 `logs/audit-wf_48aefc7d-589-threeway-residual-surfaces.json`.
+
+## ADR-050 — Unify the cutover total-order derivation to one shared carrier-event classifier (close total-order congruence)
+
+**Context.** "The §6 total order" of the legacy→ref-bus cutover was computed by THREE code paths
+with TWO different filename predicates. The APPEND order (`legacy_projector.project`) admitted only
+files matching the full `_EVENT_NAME_RE` grammar (`<ts>-<from>-to-<to>-<kind>.md`, roster-scoped),
+silently skipping the rest. The CURSOR numbering (`cursor_backfill._sent_names` → `total_order`) took
+EVERY `.md` and gated each on the loose `_TS` regex (a leading ts token only), raising on a no-ts file
+but COUNTING a ts-prefixed file. A `sent/` file that matched `_TS` but not `_EVENT_NAME_RE` (e.g. a
+non-roster sender `2026-…Z-stranger-to-director-foo.md`) was therefore SKIPPED by the projector (no
+appended seq) yet COUNTED by the cursor numbering — shifting every later seq +1 in the archived
+`iso_to_seq`. Because ADR-049's `force=True` re-run sources the authoritative cursor refs from exactly
+that archived map (`archived_seq_map`), the off-by-N propagated to the live cursor refs (cursors point
+off after cutover). Conversely a clean non-event `.md` (e.g. `README.md`, no ts) made the cursor
+path's `total_order` RAISE while the projector silently skipped it — a spurious mid-cutover abort.
+MAJOR, dormant (the live cutover is user-gated + un-executed). Confirmed present by inspection in the
+residual-surface audit `wf_48aefc7d-589` + Lane-V "D"; reproduced end-to-end against HEAD by the new
+pins below. Inventory row `threeway-cutover-total-order-congruence`.
+
+**Decision.** Collapse the two predicates into ONE shared classifier so congruence holds by
+construction, not by coincidence. `legacy_projector` gains `is_event_filename` / `ts_of` /
+`ordered_event_names` + the `MalformedEventFilename` exception; `project()` is refactored onto
+`ordered_event_names`. `cursor_backfill` imports `ordered_event_names`/`ts_of`, rewrites `_sent_names`
++ `total_order` onto them, and drops its local `_TS` regex. The classifier is THREE-way and applied
+identically by BOTH layers: a fully-grammatical name is an event; a ts-prefixed `.md` that fails the
+grammar RAISES `MalformedEventFilename`; any other file (no leading dash-ts, or not `.md`) is skipped.
+
+**Skip-vs-raise contract (deliberate, surfaced).** This TIGHTENS the projector's prior "silently skip
+every non-grammar file" contract: a file that *looks* like a carrier event (timestamp-prefixed `.md`
+in the mailbox `sent/`) but fails the grammar now ABORTS the cutover rather than vanishing. Rationale:
+silently dropping a suspected event during a one-way, irreversible migration is precisely the
+data-integrity failure this campaign exists to prevent; a clean non-event file (no ts) stays a skip.
+The projector docstring records the live corpus has zero non-grammar files, so on clean input this is
+a no-op safety net.
+
+**Why safe.** On a clean corpus (all-grammar `sent/`, the live case) the appended set, order, and seqs
+are byte-identical to pre-fix — `ordered_event_names` reproduces the old `(ts, name)` sort over the
+same set. The only behavior changes are on edge inputs the live corpus does not contain: a clean
+non-event `.md` is now skipped by BOTH layers (was: spurious cursor-path abort), and a ts-prefixed
+malformed `.md` now aborts BOTH layers loudly (was: silent +1 cursor shift). `MalformedEventFilename`
+subclasses `ValueError`. No import cycle (`cursor_backfill` → `legacy_projector` → `envelope`; no
+back-edge). All prior projector/backfill/cutover/divergence/no-dual-write pins stay green.
+
+**Verification.** TDD red→green. New pins: `test_threeway_legacy_projector.py::
+test_project_skips_clean_nonevent_but_raises_on_tsprefixed_malformed`; `test_threeway_cursor_backfill.py::
+test_backfill_numbers_over_projector_event_set_skip_clean_raise_malformed`; `test_threeway_cutover.py::
+test_cutover_succeeds_and_cursors_congruent_with_stray_nonevent_file` (asserts the archived
+`iso_to_seq` == the appended ref cursor for every seat) + `…::
+test_cutover_raises_on_tsprefixed_malformed_filename_not_silent_shift`. Each confirmed RED on pre-fix
+code (the congruence pin RED via the no-ts ValueError abort; the malformed pin RED via a silent
+success). Full threeway suite 348 passed / 1 skipped / 0 xfailed; `ci_smoke` + `check_no_ceremony`
+clean. Independent Lane-V pending (artifact to be appended on GO). ARCHITECTURE §13A.5 re-anchored.
+
+## ADR-051 — Canonicalize cutover seat-cursor keys against the roster + loud-fail a missing seat (close the seen/-filename seat-key family)
+
+**Context.** The cutover built its `seat → cursor` map from `seen/*.txt` with `{p.stem: …}` and a
+suffix-only filter, in TWO sites (`cutover._read_iso_cursors` + `cursor_backfill.backfill`'s
+`original_iso`). `p.stem` mis-splits a multi-dot name (`operator.foo.txt` → phantom key
+`operator.foo`); a non-canonical case (`Operator.txt`) yields key `Operator`, which the lowercase
+roster never matches; and on a case-sensitive FS two case-variants resolve by FS-dependent `iterdir`
+order (last-write-wins differently per host). Worst, `cutover.py` then did `seq_map.get(seat, 0)`:
+any roster seat whose `seen/*.txt` was missing or misnamed silently got cursor 0 and RE-PROCESSED the
+ENTIRE migrated bus, with no error. MAJOR, dormant (live cutover un-executed). Confirmed by inspection
+in audit `wf_48aefc7d-589` + Lane-V "D"; reproduced E2E by the new pins. Inventory row
+`threeway-cutover-seen-filename-seat-key`.
+
+**Decision.** One shared reader, `cursor_backfill.canonical_seat_cursors(seen_dir)` (+ the roster
+constant `cursor_backfill.SEATS` and the `SeatCursorError` exception), used by BOTH the cutover's
+step-4 read and the backfill's archive read. It strips exactly `.txt`, lowercases to the canonical
+roster seat, and RAISES `SeatCursorError` on a stray non-roster file or a case-collision — never coins
+a phantom key. `cutover._SEATS` now aliases `cursor_backfill.SEATS` (single source). The step-4 cursor
+loop replaces `seq_map.get(seat, 0)` with an explicit membership check: a roster seat absent from the
+seq map is a LOUD `SeatCursorError`, not a silent cursor-0 full-bus reprocess. An operator who genuinely
+wants a seat to start at 0 asserts it explicitly via an empty `seen/<seat>.txt` (present-with-value-""
+→ seq 0, the legitimate path).
+
+**Rule-13 sibling (filed, not folded).** `divergence.py:110` (`{f.stem for f in seen.glob('*.txt')}`)
+has the same phantom-key/case fragility, but it is the READ-ONLY divergence checker, not the
+irreversible cutover write-path; folding the cutover fix into the checker would change checker
+semantics + tests. Filed as a separate lower-stakes inventory row rather than scope-creeping this fix.
+
+**Why safe.** The normal cutover (all 6 lowercase `seen/<seat>.txt` present) is unchanged: every file
+canonicalizes to itself and all 6 seats are in the seq map. The new raises fire only on inputs the
+clean corpus does not contain (stray/case-variant filenames, a missing seat). `SeatCursorError`
+subclasses `ValueError`; the loud-missing check sits inside the existing step-4 teardown guard, so a
+raise restores the bus. `original_bytes` stays keyed by the literal filename, so byte-perfect rollback
+is untouched. All prior cutover/backfill pins stay green.
+
+**Verification.** TDD red→green. New pins: `test_threeway_cutover.py::
+test_read_iso_cursors_canonicalizes_seat_filename_case`, `…::
+test_read_iso_cursors_rejects_phantom_nonroster_filename`, `…::
+test_cutover_raises_on_missing_seat_cursor_not_silent_full_reprocess`; `test_threeway_cursor_backfill.py::
+test_canonical_seat_cursors_rejects_case_collision` (skips on a case-insensitive FS). Each confirmed
+RED on pre-fix code (phantom `{'Operator': …}` key; silent success with the missing seat at cursor 0).
+Full threeway suite 348 passed / 1 skipped / 0 xfailed; `ci_smoke` + `check_no_ceremony` clean.
+Independent Lane-V pending (artifact to be appended on GO).

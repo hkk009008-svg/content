@@ -27,6 +27,52 @@ _EVENT_NAME_RE = re.compile(
     r"(?P<kind>[a-z0-9-]+)\.md$"
 )
 
+# A leading dash-form timestamp token — the cheap "this LOOKS like a carrier event"
+# discriminator. A sent/ .md with this prefix that nonetheless fails the full _EVENT_NAME_RE
+# grammar is a SUSPECTED event (raise — never silently drop during the irreversible cutover);
+# a file without it is clearly not an event (skip). Shared with cursor_backfill so the append
+# order and the cursor numbering classify every filename identically (ADR-050).
+_TS_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z-")
+
+
+class MalformedEventFilename(ValueError):
+    """A sent/ filename looks like a carrier event (leading dash-ts token + .md) but does
+    not match the full <ts>-<from>-to-<to>-<kind> grammar. The irreversible cutover must NOT
+    silently drop it (legacy_projector) NOR silently count it in the cursor numbering
+    (cursor_backfill); BOTH layers raise this, so the append-seq numbering and the cursor-seq
+    numbering stay provably congruent (ADR-050)."""
+
+
+def is_event_filename(name: str) -> bool:
+    """True iff `name` is a fully-grammatical carrier-event filename — THE single source of
+    truth for 'which sent/ files become events', shared by project() (append order) and
+    cursor_backfill (cursor numbering)."""
+    return bool(_EVENT_NAME_RE.match(name))
+
+
+def ts_of(name: str) -> str:
+    """The spec §6 primary sort key: the filename's leading ts group. The caller guarantees
+    `name` is an event filename (is_event_filename)."""
+    return _EVENT_NAME_RE.match(name).group("ts")
+
+
+def ordered_event_names(names) -> list[str]:
+    """Filter an iterable of sent/ filenames to the carrier events, in spec §6 total order
+    ((ts, full filename) — total even within a same-second group). THE shared classifier:
+    a fully-grammatical name is kept; a ts-prefixed .md that fails the grammar RAISES
+    MalformedEventFilename (a suspected-but-unparseable event must abort the cutover, never
+    be silently dropped/counted); any other file (no leading dash-ts, or not .md) is skipped."""
+    events: list[str] = []
+    for n in names:
+        if is_event_filename(n):
+            events.append(n)
+        elif n.endswith(".md") and _TS_PREFIX.match(n):
+            raise MalformedEventFilename(
+                f"sent/ filename looks like a carrier event but fails the grammar: {n!r}")
+        # else: clearly not an event -> skip
+    return sorted(events, key=lambda n: (ts_of(n), n))
+
+
 # best-effort body parsers — two corpus formats exist (YAML frontmatter vs the
 # **When:**·**From:** H1 header). These feed payload fields ONLY; routing comes from
 # the FILENAME (never the body). Absent -> None, never an error.
@@ -61,20 +107,18 @@ def _cursor(body: str) -> str | None:
 
 
 def project(sent_dir) -> list[Event]:
-    """Read every sent/*.md whose name matches the grammar -> carrier Events, in the
-    spec §6 total order (filename ts, then full filename). Filenames that do not match
-    the grammar are skipped (the live corpus has zero such files; a stray non-event
-    .md must not become a carrier)."""
+    """Read every sent/*.md that is a carrier event -> carrier Events, in the spec §6 total
+    order (filename ts, then full filename). Membership + order come from the SHARED
+    classifier (ordered_event_names), so this append order is provably congruent with the
+    cursor backfill's seq numbering (ADR-050). A clean non-event .md is skipped (a stray
+    non-event must not become a carrier); a ts-prefixed .md that fails the carrier grammar
+    RAISES MalformedEventFilename (a suspected-but-unparseable event must not be silently
+    dropped during the irreversible cutover)."""
     sent = Path(sent_dir)
-    files = sorted(
-        (p for p in sent.iterdir() if p.name.endswith(".md") and _EVENT_NAME_RE.match(p.name)),
-        # total order: (ts group, full filename). ts is a prefix of the name, but key
-        # on (ts, name) explicitly so the contract is legible and same-second groups
-        # break on full filename deterministically.
-        key=lambda p: (_EVENT_NAME_RE.match(p.name).group("ts"), p.name),
-    )
+    names = ordered_event_names(p.name for p in sent.iterdir())
     events: list[Event] = []
-    for p in files:
+    for name in names:
+        p = sent / name
         m = _EVENT_NAME_RE.match(p.name)
         body = p.read_text(encoding="utf-8", errors="replace")
         # NB: subject_sha = sha256(SOURCE FILENAME), the §5a injectivity keystone.

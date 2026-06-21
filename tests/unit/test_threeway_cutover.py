@@ -1,4 +1,5 @@
 """Run: env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_cutover.py -q"""
+import json
 import os
 import subprocess
 
@@ -221,6 +222,75 @@ def test_pretry_validation_failure_restores_bus_under_force(tmp_path, monkeypatc
         run_cutover(r, root, importer, force=True)
     # RESTORED to the exact pre-run OID — pre-fix this stayed at the appended-over value.
     assert gitcas.rev_parse(r, EVENTS_REF) == pre
+
+
+def test_cutover_succeeds_and_cursors_congruent_with_stray_nonevent_file(tmp_path):
+    # ADR-050: a CLEAN non-event .md in sent/ (e.g. a stray note) must be skipped by BOTH
+    # the projector (append order) and the cursor backfill (seq numbering), so the cutover
+    # succeeds AND the manifest's archived iso_to_seq stays congruent with the appended ref
+    # cursors. NON-VACUITY: pre-fix backfill()'s _sent_names()+total_order raised ValueError
+    # on the no-ts file -> run_cutover aborted at step 5b -> this test goes RED.
+    r = _new_repo(tmp_path); root = _seed_coord(r)
+    (root / "coordination" / "mailbox" / "sent" / "NOTES.md").write_text("stray note, not an event\n")
+    importer, _ = keys.generate_keypair()
+    res = run_cutover(r, root, importer, force=False)
+    assert res.appended == len(_NAMES)                      # the stray was NOT appended
+    store = RefEventStore(r)
+    man = json.loads((root / "coordination" / "mailbox" / ".migration"
+                      / "cursor-backfill.json").read_text())
+    # the archived cursor numbering == the authoritative appended ref cursor for every seat
+    assert man["iso_to_seq"]
+    for seat, seq in man["iso_to_seq"].items():
+        assert store.cursor_seq(seat) == seq
+
+
+def test_cutover_raises_on_tsprefixed_malformed_filename_not_silent_shift(tmp_path):
+    # ADR-050: a ts-prefixed .md that fails the carrier grammar (looks like an event) must
+    # ABORT the cutover loudly — never be silently skipped by the projector while counted by
+    # the cursor numbering (pre-fix that shifted every later seq +1, and a force-rerun then
+    # over-advanced the authoritative cursor refs past unread events). NON-VACUITY: pre-fix
+    # run_cutover SUCCEEDS (projector skips it, backfill counts it) -> no raise -> RED.
+    from threeway.legacy_projector import MalformedEventFilename
+    r = _new_repo(tmp_path); root = _seed_coord(r)
+    (root / "coordination" / "mailbox" / "sent"
+     / "2026-06-17T21-00-00Z-stranger-to-director-foo.md").write_text(
+        "# x\n\n**From:** stranger\n**When:** 2026-06-17T21:00:00Z\n\nbody\n")
+    importer, _ = keys.generate_keypair()
+    with pytest.raises(MalformedEventFilename):
+        run_cutover(r, root, importer, force=False)
+
+
+def test_read_iso_cursors_canonicalizes_seat_filename_case(tmp_path):
+    # ADR-051: a seen/<Seat>.txt with non-canonical case must map to the lowercase roster
+    # seat, NOT a phantom key. Pre-fix p.stem yielded "Operator" (phantom) -> the real
+    # "operator" then fell back to a silent cursor 0.
+    from threeway import cutover
+    seen = tmp_path / "coordination" / "mailbox" / "seen"; seen.mkdir(parents=True)
+    (seen / "Operator.txt").write_text("2026-06-17T20:00:00Z\n")
+    assert cutover._read_iso_cursors(tmp_path) == {"operator": "2026-06-17T20:00:00Z"}
+
+
+def test_read_iso_cursors_rejects_phantom_nonroster_filename(tmp_path):
+    # ADR-051: a stray seen/ .txt whose stem is not a roster seat (operator.foo.txt, which
+    # p.stem mis-parses to "operator.foo") must RAISE, not become a phantom seat key.
+    from threeway import cutover
+    from threeway.cursor_backfill import SeatCursorError
+    seen = tmp_path / "coordination" / "mailbox" / "seen"; seen.mkdir(parents=True)
+    (seen / "operator.foo.txt").write_text("2026-06-17T20:00:00Z\n")
+    with pytest.raises(SeatCursorError):
+        cutover._read_iso_cursors(tmp_path)
+
+
+def test_cutover_raises_on_missing_seat_cursor_not_silent_full_reprocess(tmp_path):
+    # ADR-051: a roster seat with NO seen/<seat>.txt must be a LOUD error, never a silent
+    # seq_map.get(seat, 0) that sets cursor 0 and re-processes the ENTIRE migrated bus.
+    # NON-VACUITY: pre-fix run_cutover SUCCEEDS with the missing seat silently at cursor 0.
+    from threeway.cursor_backfill import SeatCursorError
+    r = _new_repo(tmp_path); root = _seed_coord(r)
+    (root / "coordination" / "mailbox" / "seen" / "operator2.txt").unlink()   # drop one real seat
+    importer, _ = keys.generate_keypair()
+    with pytest.raises(SeatCursorError):
+        run_cutover(r, root, importer, force=False)
 
 
 _D_RERUN_NAMES = [

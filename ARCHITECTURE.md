@@ -1781,12 +1781,16 @@ host-independent merge-tree determinism, and the cutover force-rerun cursor fix)
 ### 13A.5 Legacy mailbox projection — `legacy_projector` + `divergence` (Slice 2.5)
 
 The live `coordination/` markdown campaign bus is migrated onto `refs/threeway/events` as
-**carrier events**. `def project` (`threeway/legacy_projector.py:63`) is a pure read-only
+**carrier events**. `def project` (`threeway/legacy_projector.py:109`) is a pure read-only
 function: each `coordination/mailbox/sent/<ts>-<from>-to-<to>-<kind>.md` becomes a
 `threeway.envelope.Event` with `kind="event_sent"` (the non-load-bearing carrier — the gate skips
 it, `reduce()` never folds it), the original kind/subject/body carried in `payload`,
 `subject_sha=sha256(source_filename)` (so idempotency stays injective over byte-identical events),
-and `brief_id="legacy-import"`. `def diverge` (`threeway/divergence.py:40`) compares the
+and `brief_id="legacy-import"`. "Which sent/ files are events, in what order" is the SHARED
+classifier `ordered_event_names` (ADR-050): a clean non-event `.md` is skipped, a ts-prefixed `.md`
+that fails the carrier grammar RAISES `MalformedEventFilename` (never silently dropped during the
+irreversible cutover), and `cursor_backfill` numbers the cursors over that SAME set/order so the
+append-seq and cursor-seq numberings are provably congruent. `def diverge` (`threeway/divergence.py:40`) compares the
 projected event SET against the live mailbox on the RAW set (never `reduce()`), with a non-empty
 floor (`projected count == live sent count`). Neither module writes `refs/threeway/events`; the bus
 is written ONCE, at the cutover (`preflight_bus_init` → 768 ordered `append`s → 6 cursor backfills →

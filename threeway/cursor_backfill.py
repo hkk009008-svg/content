@@ -12,9 +12,27 @@ import os
 import re
 from pathlib import Path
 
-_TS = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)-")   # leading filename ts token
+# THE shared carrier-event classifier/order (ADR-050): the cursor numbering below derives its
+# event set + §6 order from the SAME source as legacy_projector's append order, so the two can
+# never disagree about which sent/ files are events (the loose local _TS regex this replaces
+# counted ts-prefixed-but-malformed files the projector skipped -> a +1 seq shift).
+from threeway.legacy_projector import ordered_event_names, ts_of
+
 _ISO = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")    # a seen/*.txt ISO cursor value
 _SCHEMA = "cursor-backfill/1"
+
+# The fixed 6-seat cursor roster (THE single source — cutover imports this as its _SEATS so
+# the snapshot/advance loop and the seen/ canonicalization agree). Distinct from
+# keys_bootstrap.SEATS, which is the wider 9-entry SIGNING roster (adds overseer/ci/merge-gate).
+SEATS = ("director", "director2", "operator", "operator2", "coordinator", "coordinator2")
+
+
+class SeatCursorError(ValueError):
+    """A seen/*.txt legacy cursor file cannot be unambiguously attributed to a roster seat —
+    a stray non-roster filename (operator.foo.txt, stranger.txt) or two case-variant files
+    colliding on one canonical seat (Operator.txt + operator.txt, whose resolution is
+    FS-dependent iterdir order). The irreversible cutover must refuse rather than coin a
+    phantom seat key or silently last-write-wins (ADR-051)."""
 
 
 class CursorBackfillManifestError(ValueError):
@@ -67,20 +85,22 @@ def _mailbox_base(coord_root: Path) -> Path:
 
 
 def _sent_names(coord_root: Path) -> list[str]:
+    # ADR-050: ONLY carrier-event names, in §6 order — the SAME set/order the projector
+    # appends, via the shared classifier (a clean non-event .md is skipped, a ts-prefixed
+    # malformed one raises). Pre-fix this returned every .md, so backfill numbered the
+    # cursors over a different set than the appended bus.
     d = _mailbox_base(coord_root) / "sent"
-    return sorted(p.name for p in d.iterdir() if p.name.endswith(".md"))
+    return ordered_event_names(p.name for p in d.iterdir())
 
 
 def total_order(sent_names: list[str]) -> list[tuple[str, str]]:
-    """[(ts_token, filename)] in (ts, filename) order; seq = index+1. NB: tiebreak on
-    the FULL filename keeps a same-second group total (the load-bearing invariant)."""
-    keyed = []
-    for n in sent_names:
-        m = _TS.match(n)
-        if not m:                                   # a non-event file in sent/ is a hard error
-            raise ValueError(f"sent/ filename has no leading ts token: {n!r}")
-        keyed.append((m.group(1), n))
-    return sorted(keyed, key=lambda t: (t[0], t[1]))
+    """[(ts_token, filename)] in spec §6 (ts, filename) order; seq = index+1. Membership +
+    order come from the SHARED carrier-event classifier (legacy_projector.ordered_event_names),
+    so the cursor numbering is provably the SAME function of sent/ as the projector's append
+    order (ADR-050): a clean non-event name is skipped, a ts-prefixed-malformed name RAISES
+    MalformedEventFilename. NB: the tiebreak on the FULL filename keeps a same-second group
+    total (the load-bearing invariant)."""
+    return [(ts_of(n), n) for n in ordered_event_names(sent_names)]
 
 
 def iso_to_seq_map(sent_names: list[str], iso_cursors: dict[str, str]) -> dict[str, int]:
@@ -119,6 +139,35 @@ def _manifest_path(coord_root: Path) -> Path:
     return _mailbox_base(coord_root) / ".migration" / "cursor-backfill.json"
 
 
+def canonical_seat_cursors(seen_dir: Path) -> dict[str, str]:
+    """seen/<seat>.txt -> stripped cursor value, keyed by the CANONICAL lowercase roster seat.
+    THE single source of truth for reading the legacy seen/ cursors, shared by the cutover's
+    step-4 read (_read_iso_cursors) and the backfill's archive read, so they can never
+    disagree (ADR-051).
+
+    RAISES SeatCursorError on a stray non-roster file (operator.foo.txt — p.stem mis-splits
+    it to a phantom 'operator.foo') or a case-collision (Operator.txt + operator.txt, whose
+    resolution is FS-dependent). A clean single .txt per seat is normalized to its lowercase
+    roster key, so seen/Operator.txt is the 'operator' cursor — never a phantom 'Operator'
+    that later falls back to a silent cursor 0."""
+    out: dict[str, str] = {}
+    for p in sorted(seen_dir.iterdir()):
+        if p.suffix != ".txt":
+            continue
+        stem = p.name[: -len(".txt")]              # strip exactly .txt (p.stem mis-splits a.b.txt)
+        canon = stem.lower()
+        if canon not in SEATS:
+            raise SeatCursorError(
+                f"seen/ has a non-roster cursor file {p.name!r} (stem {stem!r} is not a roster "
+                f"seat); refusing to coin a phantom seat key during the irreversible cutover")
+        if canon in out:
+            raise SeatCursorError(
+                f"seen/ has case-colliding cursor files for seat {canon!r} (e.g. {p.name!r}); "
+                f"FS-dependent iterdir order would resolve this differently per host")
+        out[canon] = p.read_text().strip()
+    return out
+
+
 def backfill(coord_root: Path) -> None:
     """Rewrite each seen/<seat>.txt ISO cursor to its scalar seq; archive the EXACT
     original bytes + the iso_to_seq map to the manifest (rollback = restore).
@@ -138,8 +187,11 @@ def backfill(coord_root: Path) -> None:
             (seen / f"{seat}.txt").write_text(f"{seq}\n")
         return
     sent_names = _sent_names(coord_root)
+    # original_bytes stays keyed by the LITERAL filename (byte-perfect rollback target);
+    # original_iso is keyed by the CANONICAL roster seat (ADR-051) — raising on a stray/
+    # case-colliding seen/*.txt rather than archiving a phantom seat into the manifest.
     original_bytes = {p.name: p.read_bytes() for p in seen.iterdir() if p.suffix == ".txt"}
-    original_iso = {p.stem: p.read_text().strip() for p in seen.iterdir() if p.suffix == ".txt"}
+    original_iso = canonical_seat_cursors(seen)
     seq_map = iso_to_seq_map(sent_names, original_iso)
     man.parent.mkdir(parents=True, exist_ok=True)
     # ADR-047: write the manifest ATOMICALLY (tmp + os.replace) BEFORE rewriting any

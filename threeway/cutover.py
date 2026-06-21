@@ -21,7 +21,9 @@ from threeway import cursor_backfill, gitcas, legacy_projector
 from threeway.gitcas import preflight_bus_init
 from threeway.refstore import EVENTS_REF, RefEventStore
 
-_SEATS = ("director", "director2", "operator", "operator2", "coordinator", "coordinator2")
+# The fixed cursor roster lives in cursor_backfill (single source, ADR-051) — so this
+# snapshot/advance loop and the seen/ canonicalization can never disagree about the seats.
+_SEATS = cursor_backfill.SEATS
 
 
 def _cursor_ref(seat: str) -> str:
@@ -50,8 +52,9 @@ def _sent_dir(coord_root):
 
 
 def _read_iso_cursors(coord_root) -> dict:
-    seen = cursor_backfill._seen_dir(coord_root)
-    return {p.stem: p.read_text().strip() for p in seen.iterdir() if p.suffix == ".txt"}
+    # ADR-051: canonical, roster-validated seat keys (shared with cursor_backfill.backfill) so
+    # a stray/case-variant seen/*.txt can't coin a phantom key or silently drop a real seat.
+    return cursor_backfill.canonical_seat_cursors(cursor_backfill._seen_dir(coord_root))
 
 
 def _snapshot_refs(repo) -> dict:
@@ -160,8 +163,17 @@ def run_cutover(repo, coord_root, importer_key, *, force: bool = False) -> Cutov
         else:
             seq_map = cursor_backfill.iso_to_seq_map(carrier_names, _read_iso_cursors(coord_root))
         for seat in _SEATS:
-            seq = seq_map.get(seat, 0)
-            store.advance_cursor(seat, seq)               # seq==0 allowed (refstore:236-240)
+            # ADR-051: a roster seat MISSING from the seq map means its seen/<seat>.txt was
+            # absent — refuse loudly rather than seq_map.get(seat, 0), which would set cursor 0
+            # and silently re-process the ENTIRE migrated bus. (An explicit empty seen/<seat>.txt
+            # is present-with-value-"" -> seq 0, the legitimate "this seat starts at 0" assertion.)
+            if seat not in seq_map:
+                raise cursor_backfill.SeatCursorError(
+                    f"seat {seat!r} has no cursor in the backfill seq map; refusing to silently "
+                    f"set cursor 0 and re-process the entire migrated bus (ADR-051). Create an "
+                    f"explicit empty seen/{seat}.txt to assert cursor 0, or restore its cursor.")
+            seq = seq_map[seat]                            # seq==0 allowed (refstore:236-240)
+            store.advance_cursor(seat, seq)
             cursors[seat] = store.cursor_seq(seat)
     except Exception as original:
         _teardown(repo, snapshot, original)
