@@ -293,6 +293,21 @@ def test_cutover_raises_on_missing_seat_cursor_not_silent_full_reprocess(tmp_pat
         run_cutover(r, root, importer, force=False)
 
 
+def test_cutover_empty_seen_file_is_explicit_seq_zero_optin(tmp_path):
+    # ADR-051: a seat with an EMPTY seen/<seat>.txt is the explicit "this seat starts at 0"
+    # opt-in — it is PRESENT in the seq map (value "") -> seq 0, so the loud missing-seat check
+    # does NOT fire and the cutover completes with that seat at cursor 0. This is the escape
+    # hatch that distinguishes a deliberate seq-0 (empty file) from the loud error of a seat
+    # with NO file (test_cutover_raises_on_missing_seat_cursor_not_silent_full_reprocess).
+    r = _new_repo(tmp_path); root = _seed_coord(r)
+    (root / "coordination" / "mailbox" / "seen" / "operator2.txt").write_text("")   # empty -> seq-0 opt-in
+    importer, _ = keys.generate_keypair()
+    res = run_cutover(r, root, importer, force=False)
+    store = RefEventStore(r)
+    assert store.cursor_seq("operator2") == 0               # explicit seq-0, NOT a loud error
+    assert res.appended == len(_NAMES)                      # cutover completed normally
+
+
 _D_RERUN_NAMES = [
     "2026-06-17T10-00-00Z-operator-to-director-a.md",
     "2026-06-17T11-00-00Z-operator-to-director-b.md",

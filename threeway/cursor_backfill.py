@@ -98,8 +98,10 @@ def total_order(sent_names: list[str]) -> list[tuple[str, str]]:
     order come from the SHARED carrier-event classifier (legacy_projector.ordered_event_names),
     so the cursor numbering is provably the SAME function of sent/ as the projector's append
     order (ADR-050): a clean non-event name is skipped, a ts-prefixed-malformed name RAISES
-    MalformedEventFilename. NB: the tiebreak on the FULL filename keeps a same-second group
-    total (the load-bearing invariant)."""
+    MalformedEventFilename. Accepts EITHER raw sent/ names or an already-classified list —
+    ordered_event_names is idempotent, so a caller that pre-filters via _sent_names does not
+    double-count. NB: the tiebreak on the FULL filename keeps a same-second group total (the
+    load-bearing invariant)."""
     return [(ts_of(n), n) for n in ordered_event_names(sent_names)]
 
 

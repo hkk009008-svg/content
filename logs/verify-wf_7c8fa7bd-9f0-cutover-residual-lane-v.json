@@ -1,0 +1,47 @@
+{
+  "run_id": "wf_7c8fa7bd-9f0",
+  "what": "Independent Lane-V of efdf8e33 — ADR-050 total-order congruence + ADR-051 seat-key canonicalization (the 2 deferred dormant cutover-substrate residual gaps).",
+  "commit_under_review": "efdf8e33",
+  "diff_range": "efdf8e33~1..efdf8e33 (2b82b527..efdf8e33)",
+  "method": "3 independent Sonnet lane-v-verifier agents (effort=high), each re-deriving GO/NITS/FAIL from the diff + a FRESH full threeway suite, never trusting the author report. Two ran in isolated git worktrees and mutation-tested every new guard by reverting the COUPLED production files to the pre-fix state (git checkout efdf8e33~1 -- <files>) and confirming the pin goes RED, then restoring. The third (read-only) was an adversarial completeness critic.",
+  "model": "claude-sonnet (per standing subagent-model policy)",
+  "verdict": "GO (unanimous 3/3)",
+  "fresh_test_result_at_review": "348 passed / 1 skipped / 0 xfailed / 0 failed (the 1 skip = test_canonical_seat_cursors_rejects_case_collision, self-guarded pytest.skip on a case-insensitive FS).",
+  "lenses": [
+    {
+      "lens": "congruence (ADR-050)",
+      "verdict": "GO",
+      "key_findings": "ordered_event_names/is_event_filename/ts_of in legacy_projector is THE single source for both the projector append order and cursor_backfill seq numbering; loose _TS regex fully removed; no import cycle; all 4 ADR-050 pins RED on pre-fix, GREEN on fix; projector contract-tighten safe for all real callers."
+    },
+    {
+      "lens": "seat-key (ADR-051)",
+      "verdict": "GO",
+      "key_findings": "canonical_seat_cursors strips exactly .txt, lowercases to roster, rejects stray/case-collision; used by BOTH cutover._read_iso_cursors and cursor_backfill.backfill; cursor loop raises SeatCursorError on a missing roster seat; empty seen/<seat>.txt -> seq 0 preserved; original_bytes byte-perfect restore intact; SEATS order preserved; force-rerun archived_seq_map interaction clean. All 3 ADR-051 pins RED on pre-fix, GREEN on fix."
+    },
+    {
+      "lens": "completeness critic (read-only)",
+      "verdict": "GO",
+      "key_findings": "No unguarded live numbering/seat-key sites missed; divergence.py:110 correctly scoped out (read-only checker, diverge() only called from tests, never from cutover.py); no new silent-gate-degradation or money/gate-source-mismatch introduced; all 7 live pins pass under --runxfail; no xfail markers introduced."
+    }
+  ],
+  "mutation_evidence_summary": "Every one of the 7 new ADR-050/051 pins confirmed RED against the actual pre-fix code (efdf8e33~1) and GREEN on the fix, across two independent verifiers using coupled-file reverts. Non-vacuity established for: malformed-raise, congruent-stray, projector classifier, backfill numbering (ADR-050); seat-case canonicalization, phantom-nonroster reject, missing-seat loud-fail (ADR-051).",
+  "findings_disposition": [
+    {
+      "severity": "MINOR/NIT",
+      "item": "divergence.py:110 (f.stem phantom-key/case fragility in the read-only divergence checker)",
+      "disposition": "Already filed as the separate open row threeway-divergence-seen-stem-phantom-key (Rule-13 sibling, correctly NOT folded into the irreversible-cutover fix). No action this commit. All 3 verifiers confirmed the scope-out + disclosure are correct."
+    },
+    {
+      "severity": "NIT",
+      "item": "No integration-level pin for the empty seen/<seat>.txt -> seq-0 opt-in path through run_cutover (only unit-level coverage).",
+      "disposition": "FIXED in the NIT follow-up: added test_cutover_empty_seen_file_is_explicit_seq_zero_optin (E2E)."
+    },
+    {
+      "severity": "NIT",
+      "item": "total_order docstring implied callers pass raw names, but they pass pre-filtered names (idempotent double-filter, harmless).",
+      "disposition": "FIXED in the NIT follow-up: clarified the docstring to state it accepts raw OR pre-classified names (ordered_event_names is idempotent)."
+    }
+  ],
+  "post_nit_fix_test_result": "349 passed / 1 skipped (the new opt-in pin added) / 0 xfailed; ci_smoke + check_no_ceremony clean.",
+  "outcome": "Inventory rows threeway-cutover-total-order-congruence + threeway-cutover-seen-filename-seat-key reconciled fixed -> verified."
+}

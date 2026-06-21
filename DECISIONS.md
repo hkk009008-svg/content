@@ -2539,7 +2539,8 @@ test_cutover_succeeds_and_cursors_congruent_with_stray_nonevent_file` (asserts t
 test_cutover_raises_on_tsprefixed_malformed_filename_not_silent_shift`. Each confirmed RED on pre-fix
 code (the congruence pin RED via the no-ts ValueError abort; the malformed pin RED via a silent
 success). Full threeway suite 348 passed / 1 skipped / 0 xfailed; `ci_smoke` + `check_no_ceremony`
-clean. Independent Lane-V pending (artifact to be appended on GO). ARCHITECTURE §13A.5 re-anchored.
+clean. Independent Lane-V GO (wf_7c8fa7bd-9f0, 3/3 unanimous lenses + mutation-proven against pre-fix
+code; `logs/verify-wf_7c8fa7bd-9f0-cutover-residual-lane-v.json`). ARCHITECTURE §13A.5 re-anchored.
 
 ## ADR-051 — Canonicalize cutover seat-cursor keys against the roster + loud-fail a missing seat (close the seen/-filename seat-key family)
 
@@ -2583,4 +2584,7 @@ test_cutover_raises_on_missing_seat_cursor_not_silent_full_reprocess`; `test_thr
 test_canonical_seat_cursors_rejects_case_collision` (skips on a case-insensitive FS). Each confirmed
 RED on pre-fix code (phantom `{'Operator': …}` key; silent success with the missing seat at cursor 0).
 Full threeway suite 348 passed / 1 skipped / 0 xfailed; `ci_smoke` + `check_no_ceremony` clean.
-Independent Lane-V pending (artifact to be appended on GO).
+Independent Lane-V GO (wf_7c8fa7bd-9f0, 3/3 unanimous + mutation-proven against pre-fix code;
+`logs/verify-wf_7c8fa7bd-9f0-cutover-residual-lane-v.json`). Lane-V NITs closed in the follow-up: an
+E2E empty-seen→seq-0 opt-in pin (`test_cutover_empty_seen_file_is_explicit_seq_zero_optin`) + a
+`total_order` docstring clarification (the idempotent double-filter via `ordered_event_names`).
