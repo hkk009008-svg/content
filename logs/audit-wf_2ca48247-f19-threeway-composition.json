@@ -1,0 +1,42 @@
+{
+  "artifact": "threeway-composition-audit",
+  "run_id": "wf_2ca48247-f19",
+  "task_id": "wf1srwzte",
+  "date": "2026-06-21",
+  "head_at_audit": "ef7ef0b9",
+  "question": "Does the COMPOSITION of ADR-036..043 (the fully-assembled threeway control plane), audited holistically rather than per-fix, admit an emergent forged-promotion or merge-DoS that the per-ADR certification passes (each scoped to one fix's diff) never looked for?",
+  "verdict": "NO EMERGENT COMPOSITION GAP CONFIRMED",
+  "confirmed_count": 0,
+  "total_candidates": 2,
+  "recommended_inventory_rows": [],
+  "method": {
+    "shape": "5 map-slice readers (barrier) -> 5 adversarial find lenses -> 3-skeptic adversarial refute per candidate -> synthesis",
+    "agents": 17,
+    "subagent_tokens": 1749920,
+    "tool_uses": 380,
+    "duration_ms": 2446856,
+    "model": "opus (all agents)",
+    "r_verify_tier": "genuinely-new question stated BEFORE launch (whole-system composition, not re-run of any single ADR cert)"
+  },
+  "key_findings": [
+    "Drove the REAL gate (run_gate + verify_and_reduce via the seatkit signing fixture) end-to-end on a full T3 set for the FIRST time — no committed test does this — and it merged correctly.",
+    "Strongest cross-fix attack class (ADR-036/037 revoke+collision machinery turned against ADR-043's NEW overseer singletons re_verify_challenge and approver_roster) was driven through the real gate and FAILS CLOSED in every case: _revoke_authorized gates the two new singletons because their ids enter seat_by_id as overseer-only; non-overseer revoke ignored; colliding-id squat blocked by store.append EventIdCollision or fails closed with GateError per ADR-037.",
+    "Both prior INFO candidates independently re-refuted: no forged-promotion bypass across the composition; the 'build-pipeline seat doubles as approver' concern is a roster-CONSTRUCTION policy question for the overseer (same class as ADR-043's documented nonce-rotation precondition), NOT a code gap — confirmed by driving run_gate with operator2 (the T2 mirror co-signer) ALSO rostered as a T3 human: merges with two genuinely-distinct key-bound seats, as designed."
+  ],
+  "attack_classes_exercised_through_real_gate": [
+    "baseline T3 end-to-end merge [NEW coverage]",
+    "ADR-036-revoke x ADR-043-roster forged downgrade",
+    "ADR-036-revoke x ADR-043-challenge availability DoS",
+    "ADR-037 colliding-id squat on a new ADR-043 singleton",
+    "ADR-036-revoke x ADR-039-assignment x T2-mirror-cosign break (insider AND overseer)",
+    "T2-cosigner-seat x T3-human-roster independence overlap"
+  ],
+  "not_covered_no_silent_caps": [
+    "cutover.py / divergence.py / legacy_projector.py / cursor_backfill.py — Slice-2.5 migration + one-shot authority-flip substrate, NOT driven (structurally disjoint from the promotion-authority surface — legacy carriers project to the non-load-bearing event_sent kind, never reduced, no write path by construction — so it cannot host a forged-promotion composition gap, BUT its one-shot authority-FLIP + partial-bus-teardown correctness is its own concern for the LIVE CUTOVER).",
+    "refstore.py REMOTE push-CAS append loop + idempotency-dedup-verify under concurrent multi-writer contention (tests use the local EventStore only).",
+    "multi-candidate / cross-pair concurrent run_gate interleaving (every probe was single-candidate single-invocation).",
+    "overseer key-compromise blast radius (out of trust model by design — overseer is the root for roster/challenge/assignment/release; ADR-043 narrows but does not eliminate it).",
+    "gitcas merge-tree/commit-tree determinism under tree states beyond the clean-merge and textual-conflict fixtures."
+  ],
+  "implication": "The promotion/authority CORE of the assembled control plane is certified clean at the composition level (first-ever end-to-end real-gate T3 merge). This is a positive input to the live-cutover GO/NO-GO. It does NOT certify the cutover substrate itself (cutover.py one-shot flip + divergence + legacy projector), which is the explicit residual for the next pass before any flip."
+}
