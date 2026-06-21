@@ -2682,3 +2682,37 @@ first failed because `workflow_dispatch:` was absent; after the fetchability har
 failed because `integration_ref:` was absent. Focused result after the fix:
 `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_activation_scripts.py -q` →
 `6 passed in 2.04s`.
+
+## ADR-054 — Canonicalize the divergence checker's seated-set against the roster (close the seen/-filename seat-key family; Rule-13 sibling of ADR-051)
+
+**Context.** ADR-051 fixed the cutover/backfill seat-cursor keying (`canonical_seat_cursors`) but
+explicitly filed its Rule-13 sibling — `threeway-divergence-seen-stem-phantom-key` — separately, because
+the divergence checker is a different module with different stakes. The checker derived its seated set
+with `seated = {f.stem for f in seen.glob("*.txt")}`. `Path.stem` strips only the LAST suffix, so a stray
+non-roster file `operator.foo.txt` coins a phantom seat `"operator.foo"`, and `f.stem` is case-fragile
+(`Operator.txt` → `"Operator"`). Unlike the one-way cutover (where this corrupts the migrated bus), the
+checker is READ-ONLY, so the failure mode is a SILENT FALSE-GREEN: a phantom seat enters the per-seat
+cursor loop seeing only broadcasts and VACUOUSLY agrees, while a case-variant file makes the real seat's
+cursor clause SKIP (`_seen_value("operator")` can't find `Operator.txt`). Either way a malformed seen/
+roster is tolerated without a drift — the opposite of what a verification pass must do.
+
+**Decision.** Source BOTH the seated set AND each seat's cursor value from the SAME shared
+`cursor_backfill.canonical_seat_cursors(seen)` reader the cutover/backfill already use (the single source
+of truth from ADR-051): it strips exactly `.txt`, lowercases to the roster seat, and rejects a
+stray/case-colliding file. `divergence._seen_value` is retired in favor of reading values from that
+reader's `{seat: value}` map (`seen_cursors.get(seat) or None`, preserving the empty-file → None
+behavior). Because the checker must SURFACE corruption rather than abort (the cutover RAISES on the
+irreversible write-path; a read-only pass must not crash and thereby suppress ALL other drift detection),
+its `SeatCursorError` is caught and emitted as a `seated: malformed seen/ roster (...)` drift. A
+`seen.is_dir()` guard preserves the prior glob-on-missing-dir totality (empty seated set, no crash).
+
+**Why safe / non-vacuous.** TDD pin
+`test_threeway_divergence.py::test_stray_nonroster_seen_file_reported_not_coined_as_phantom_MUTATION`:
+a faithful fixture + a stray `seen/operator.foo.txt` yielded `Report(ok=True, drifts=[])` PRE-FIX (the
+phantom vacuously agreed — RED on the assertion that a drift must be reported) and a `seated:` drift
+POST-FIX (GREEN). The existing `test_broadcast_only_seat_is_checked_not_skipped_MUTATION` (which depends on
+the seated set coming from `seen/`) stays green because `canonical_seat_cursors` reads the same `seen/`
+dir. Full threeway suite after the fix:
+`env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q` →
+`356 passed, 1 skipped, 0 xfailed`; `ci_smoke` + `check_no_ceremony` clean. Independent Lane-V owed before
+the inventory row moves `fixed` → `verified`.

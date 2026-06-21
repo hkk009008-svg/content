@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from threeway.cursor_backfill import SeatCursorError, canonical_seat_cursors
 from threeway.legacy_projector import _EVENT_NAME_RE
 
 # self-consistency body parsers (best-effort; both corpus formats)
@@ -22,14 +23,6 @@ _YAML_FROM_RE = re.compile(r"^from:\s*(\w+)\s*$", re.M)
 class Report:
     ok: bool
     drifts: list[str] = field(default_factory=list)
-
-
-def _seen_value(seen_dir: Path, seat: str) -> str | None:
-    f = seen_dir / f"{seat}.txt"
-    if not f.exists():
-        return None
-    v = f.read_text().strip()
-    return v or None
 
 
 def _colon_ts(dash_ts: str) -> str:
@@ -107,7 +100,25 @@ def diverge(projected_events, sent_dir, seen_dir) -> Report:
     # Phase A seeds ALL receiving seats, INCLUDING the broadcast-only coordinators that
     # are never a direct (non-`all`) recipient on disk. Deriving from disk `to` tokens
     # alone would silently SKIP those seats (vacuous agreement, not verified agreement).
-    seated = {f.stem for f in seen.glob("*.txt")}
+    #
+    # Source BOTH the seated set and each seat's cursor value from the SHARED canonical
+    # roster reader (the cutover/backfill's single source of truth), not from `f.stem`.
+    # Rule-13 sibling of ADR-051: `f.stem` mis-splits a stray non-roster file
+    # (operator.foo.txt -> a phantom 'operator.foo' seat that vacuously agrees) and is
+    # case-fragile (Operator.txt -> 'Operator', which then SKIPS the real seat's cursor
+    # clause) — both silent false-greens in a verification pass. canonical_seat_cursors
+    # validates against the lowercase roster and returns {seat: value}, so a malformed
+    # roster cannot coin a phantom or drop a real seat. READ-ONLY contract: its loud
+    # SeatCursorError (which the one-way cutover RAISES) becomes a REPORTED drift here.
+    if seen.is_dir():
+        try:
+            seen_cursors = canonical_seat_cursors(seen)
+        except SeatCursorError as exc:
+            drifts.append(f"seated: malformed seen/ roster ({exc})")
+            seen_cursors = {}
+    else:
+        seen_cursors = {}
+    seated = set(seen_cursors)
     disk_addressed: dict[str, list[str]] = {}     # seat -> [colon_ts...] from DISK
     for name in sorted(on_disk):
         m = _EVENT_NAME_RE.match(name)
@@ -125,7 +136,7 @@ def diverge(projected_events, sent_dir, seen_dir) -> Report:
     seats = sorted(seated | set(disk_addressed) |
                    {e.recipient for e in projected_events if e.recipient != "all"})
     for seat in seats:
-        cur = _seen_value(seen, seat)
+        cur = seen_cursors.get(seat) or None   # '' (empty cursor file) -> None, as before
         if cur is None:
             continue  # un-seeded seat: cursor clause not applicable (Phase A seeds these)
         # LEGACY (disk): strictly-greater unread = on-disk events addressed to seat with ts > cursor

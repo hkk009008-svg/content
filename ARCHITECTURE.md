@@ -1765,7 +1765,7 @@ append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` pr
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
 ```
 
-Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `353 passed, 1 skipped, 0 xfailed` (incl. the ADR-036
+Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `356 passed, 1 skipped, 0 xfailed` (incl. the ADR-036
 revoke-authority, ADR-037 event-id-uniqueness across gate + both stores, ADR-038 reserved-merge-id +
 brief_superseded authority, the ADR-039 availability-hardening pins — authority-aware reducer,
 self-consistent candidate resolution — the ADR-040 totality-completion pins — verify-phase
@@ -1775,8 +1775,9 @@ cross-pair reuse residual, now CLOSED (not xfailed); ADR-043 T3 re_verify freshn
 per-approver `approver_roster`; ADR-044/045 cutover-substrate hardening; ADR-046–049
 residual-surface hardening — refstore/store reader totality, atomic cursor-backfill manifest,
 host-independent merge-tree determinism, and the cutover force-rerun cursor fix; ADR-050/051
-cutover total-order congruence + seat-key canonicalization; and ADR-052 activation-tooling
-correction — the 1 skip is `test_canonical_seat_cursors_rejects_case_collision`, self-guarded on a
+cutover total-order congruence + seat-key canonicalization; ADR-052 activation-tooling
+correction; ADR-053 CI integration-sha wiring; and ADR-054 divergence seated-set canonicalization
+(Rule-13 sibling of ADR-051) — the 1 skip is `test_canonical_seat_cursors_rejects_case_collision`, self-guarded on a
 case-insensitive FS).
 
 *Last verified: 2026-06-22*
@@ -1793,7 +1794,7 @@ and `brief_id="legacy-import"`. "Which sent/ files are events, in what order" is
 classifier `ordered_event_names` (ADR-050): a clean non-event `.md` is skipped, a ts-prefixed `.md`
 that fails the carrier grammar RAISES `MalformedEventFilename` (never silently dropped during the
 irreversible cutover), and `cursor_backfill` numbers the cursors over that SAME set/order so the
-append-seq and cursor-seq numberings are provably congruent. `def diverge` (`threeway/divergence.py:40`) compares the
+append-seq and cursor-seq numberings are provably congruent. `def diverge` (`threeway/divergence.py:33`) compares the
 projected event SET against the live mailbox on the RAW set (never `reduce()`), with a non-empty
 floor (`projected count == live sent count`). Neither module writes `refs/threeway/events`; the bus
 is written ONCE, at the cutover (`preflight_bus_init` → 768 ordered `append`s → 6 cursor backfills →

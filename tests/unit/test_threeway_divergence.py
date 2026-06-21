@@ -116,6 +116,27 @@ def test_cursor_clause_isolated_with_bijection_intact_MUTATION(tmp_path):
     assert any(d.startswith("cursor[operator]") for d in rep.drifts), rep.drifts
 
 
+def test_stray_nonroster_seen_file_reported_not_coined_as_phantom_MUTATION(tmp_path):
+    # Rule-13 sibling of ADR-051 (the cutover seen-filename-seat-key fix). The seated set was
+    # derived via `f.stem`, which mis-splits a stray NON-ROSTER cursor file
+    # (seen/operator.foo.txt -> a PHANTOM 'operator.foo' seat) and is case-fragile
+    # (Operator.txt -> 'Operator'). A phantom seat enters the loop seeing only broadcasts ->
+    # it VACUOUSLY agrees, so a corrupt seen/ roster is silently tolerated (a FALSE-GREEN),
+    # exactly the failure mode the inventory row flags. The checker must instead REPORT the
+    # malformed roster as a drift (READ-ONLY contract: surface, never crash like the one-way
+    # cutover, which RAISES).
+    sent, seen = _fixture(tmp_path)
+    projected = project(sent)
+    assert diverge(projected, sent, seen).ok is True          # control: faithful -> zero drift
+    # MUTATION (one fact): drop a stray non-roster cursor file into seen/.
+    (seen / "operator.foo.txt").write_text("2099-01-01T00:00:00Z\n")
+    rep = diverge(projected, sent, seen)
+    # PRE-FIX: `f.stem` coins phantom 'operator.foo' that vacuously agrees -> ok=True (BUG: RED).
+    # POST-FIX: the shared canonical roster reader rejects the non-roster stem -> reported drift.
+    assert rep.ok is False, rep.drifts
+    assert any(d.startswith("seated:") for d in rep.drifts), rep.drifts
+
+
 def test_broadcast_only_seat_is_checked_not_skipped_MUTATION(tmp_path):
     # COVERAGE-GAP pin (Slice 2.5): a seated seat that receives ONLY broadcasts and is
     # NEVER a direct (non-`all`) recipient — in the live corpus that is `coordinator` AND
