@@ -2618,8 +2618,17 @@ that refuses without explicit confirmation (the cutover is irreversible, ADR-045
 importer key (event_sent is not load-bearing). (c) Make `execute_threeway_cutover.sh` idempotent (skip
 `keys_bootstrap` if the registry is populated) and double-gated (`--yes`). (d) Gate the `ci.yml`
 `ci_result` step behind `vars.THREEWAY_BUS_LIVE == 'true'` so it is INERT pre-activation (else an empty
-secret breaks CI). (e) Restore `ARCHITECTURE.md` §13A.5 + the README to the truth (built + hardened, keys
-generated-but-uncommitted, **cutover NOT executed**, bus NOT live).
+secret breaks CI). (e) Restore the truth in the docs: the codex/agy false `ARCHITECTURE.md` §13A.5 edit was
+UNCOMMITTED, so it was dropped via a working-tree `git checkout HEAD` (back to the already-correct committed
+§13A.5 — hence ARCHITECTURE.md is NOT in commit `36c72878`'s diff; the §13A.4 test-count refresh to 353
+landed in the follow-up Lane-V reconciliation); the README *was* rewritten in `36c72878` (built + hardened,
+keys generated-but-uncommitted, **cutover NOT executed**, bus NOT live).
+
+**Known activation-time limitation (not blocking; the step is inert).** The `ci.yml` step passes
+`github.sha` as `--integration-sha`, but the gate keys `ci_result` by the candidate's *integration_sha*
+(the CAS-merged commit), which on a real PR is NOT the branch HEAD — so as wired the gate would never find
+the ci_result (candidate stays PENDING). Documented in the step's comment + the codex review; CI must be
+wired to run on / sign the integration commit before `THREEWAY_BUS_LIVE` is flipped.
 
 **Why safe.** The scripts are tooling, not the hardened package; the only `threeway/` change is the
 additive, tested `cutover.main`. The cutover stays user-gated + irreversible (now DOUBLE-gated: shell +
@@ -2632,5 +2641,9 @@ go-live (a T3-classified commit), not this corrective change.
 `summarize` uses the real fields; the cutover CLI refuses without `--yes` and writes a bus with it).
 Non-vacuous: the reducer DROPS a wrong-bus/wrong-seat/wrong-field event, so the state assertions would go
 RED on a malformed shape (and the pre-fix `Event(event_type=…)` raises `TypeError`, proven empirically).
-Full threeway suite 353 passed / 1 skipped / 0 xfailed; `ci_smoke` + `check_no_ceremony` clean. Independent
-Lane-V pending.
+Full threeway suite 353 passed / 1 skipped / 0 xfailed; `ci_smoke` + `check_no_ceremony` clean.
+Independent Lane-V GO (wf_cb50fa27-3e5, 3 lenses: api GO / safety NITS / completeness NITS; mutation
+probes — bus_id and signer-seat — both went RED, proving non-vacuity; no FAIL). The NITs were reconciled
+in the follow-up: the ARCHITECTURE.md restore phrasing corrected (above), the §13A.4 test count refreshed
+341→353, and the ci.yml integration_sha limitation documented. Artifact:
+`logs/verify-wf_cb50fa27-3e5-activation-tooling-lane-v.json`.

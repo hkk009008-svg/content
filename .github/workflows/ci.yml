@@ -145,6 +145,13 @@ jobs:
       # THREEWAY_BUS_LIVE=true (alongside committing the .pub trust root + running the cutover).
       # Without this gate the step runs on every build pre-activation — with no live bus and an
       # empty THREEWAY_CI_KEY secret, load_private('ci') would fail and break CI.
+      #
+      # ACTIVATION-TIME REQUIREMENT (do NOT flip THREEWAY_BUS_LIVE until resolved): the gate keys
+      # ci_result by the candidate's integration_sha (the CAS-merged commit the coordinator computes),
+      # NOT the branch HEAD. github.sha below is the pushed/PR-head commit, which on a real PR is
+      # != integration_sha -> the gate's ci_result(integ) lookup would miss and the candidate would
+      # stay PENDING forever. Wire CI to run on + sign the integration commit (or pass the real
+      # integration_sha) before enabling this step. See reviews/2026-06-22-codex-adaptation-review.md.
       - name: Emit threeway ci_result
         if: success() && vars.THREEWAY_BUS_LIVE == 'true'
         env:

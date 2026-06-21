@@ -128,6 +128,14 @@ uncommitted on purpose** — committing it is part of the user-gated go-live, no
 8. **Wire not-yet-live integrations behind an explicit gate** (a repo variable / feature flag), never on
    the always-on success path.
 
+### Open activation-time item you must resolve before go-live (Lane-V wf_cb50fa27-3e5)
+The `ci.yml` step passes `github.sha` as `--integration-sha`. The gate keys `ci_result` by the candidate's
+**integration_sha** — the CAS-merged commit the coordinator computes — which on a real PR is **not** the
+branch HEAD (`github.sha`). As wired, the gate's `ci_result(integ)` lookup would miss and the candidate
+would sit `PENDING` forever. The step is currently inert (gated on `THREEWAY_BUS_LIVE`); before you flip
+that variable, wire CI to run on **and sign** the integration commit (or pass the real integration_sha),
+not the branch HEAD. This is an activation-runtime design choice — surface the options to the user.
+
 ### Self-conformance check before you call an adaptation step "done"
 - [ ] Did I read the `Event` dataclass / the producing function before constructing or parsing events?
 - [ ] Do my events use `kind` / `candidate_id` / `subject_sha` and `bus_id="prod"` — and do they

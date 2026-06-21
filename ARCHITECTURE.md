@@ -1765,18 +1765,21 @@ append-contention gate. Run them with the **mandatory `env -u GIT_INDEX_FILE` pr
 env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_*.py -q
 ```
 
-Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `341 passed, 0 xfailed` (incl. the ADR-036
+Slice 1 + Slice 2 + Slice 2.5 + Slice 3 together: `353 passed, 1 skipped, 0 xfailed` (incl. the ADR-036
 revoke-authority, ADR-037 event-id-uniqueness across gate + both stores, ADR-038 reserved-merge-id +
 brief_superseded authority, the ADR-039 availability-hardening pins — authority-aware reducer,
 self-consistent candidate resolution — the ADR-040 totality-completion pins — verify-phase
 drop-not-raise + pre-CAS exception guard — and the ADR-041 step-1 totality pins — the `well_formed`
 envelope guard + reducer fold/skip guards; ADR-042 pair-namespaced `candidate_id` — the prior
 cross-pair reuse residual, now CLOSED (not xfailed); ADR-043 T3 re_verify freshness nonce +
-per-approver `approver_roster`; ADR-044/045 cutover-substrate hardening; and ADR-046–049
+per-approver `approver_roster`; ADR-044/045 cutover-substrate hardening; ADR-046–049
 residual-surface hardening — refstore/store reader totality, atomic cursor-backfill manifest,
-host-independent merge-tree determinism, and the cutover force-rerun cursor fix).
+host-independent merge-tree determinism, and the cutover force-rerun cursor fix; ADR-050/051
+cutover total-order congruence + seat-key canonicalization; and ADR-052 activation-tooling
+correction — the 1 skip is `test_canonical_seat_cursors_rejects_case_collision`, self-guarded on a
+case-insensitive FS).
 
-*Last verified: 2026-06-21*
+*Last verified: 2026-06-22*
 
 ### 13A.5 Legacy mailbox projection — `legacy_projector` + `divergence` (Slice 2.5)
 

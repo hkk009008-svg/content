@@ -1,0 +1,30 @@
+{
+  "run_id": "wf_cb50fa27-3e5",
+  "what": "Independent Lane-V of 36c72878 (ADR-052) — the corrected threeway activation tooling (sign_ci_result, run_merge_gate, agy_observer, execute_threeway_cutover, threeway.cutover.main CLI, ci.yml gate, doc-truth restore).",
+  "commit_under_review": "36c72878",
+  "method": "3 independent Sonnet lane-v-verifier agents (effort=high), api + safety in isolated worktrees, completeness read-only; each re-derived the verdict from the diff + a fresh full threeway suite, and mutation-tested the new pins.",
+  "model": "claude-sonnet (per standing subagent-model policy)",
+  "verdict": "GO (api) / NITS (safety) / NITS (completeness) — no FAIL; fix is sound.",
+  "fresh_test_result": "353 passed / 1 skipped / 0 xfailed (and --runxfail: same, no xfail masking).",
+  "mutation_evidence": [
+    {"probe": "sign_ci_result bus_id 'prod' -> 'wrong-bus'", "result": "reducer DROPS the event (bus_id mismatch) -> state.ci_result(sha) is None -> pin RED", "restored": true},
+    {"probe": "sign_ci_result signer seat 'ci' -> 'nobody'", "result": "assertion signer seat == 'ci' RED", "restored": true},
+    {"probe": "Event(event_type=...) construction", "result": "TypeError (no such field) — the pre-fix fabricated schema cannot even construct"}
+  ],
+  "checks_confirmed": [
+    "No fabricated fields (event_type / ev.subject / Event(event_type=) / GateResult.decision / 'MERGED' / random bus_id) anywhere in the 4 scripts or threeway/cutover.py (only an agy_observer docstring mention).",
+    "ci_result shape matches threeway/loop.py:104 exactly.",
+    "run_merge_gate reads ev.kind/ev.candidate_id and maps GateResult.outcome=='COMPLETED'->merged.",
+    "execute_threeway_cutover.sh: refuses without --yes (exit 2, no python), idempotent (skips re-key when registry populated), set -euo pipefail.",
+    "threeway.cutover.main refuses without --yes (returns 2, writes NO refs/threeway/*); runs with --yes.",
+    "ci.yml ci_result step gated behind vars.THREEWAY_BUS_LIVE == 'true' (inert pre-activation).",
+    "The .pub trust root is NOT committed by 36c72878; *.ed25519 gitignored.",
+    "Docs tell the truth: README 'bus NOT yet live / cutover NOT executed'; git for-each-ref refs/threeway/ empty."
+  ],
+  "nits_reconciled": [
+    {"severity": "NIT", "finding": "ADR-052 + commit message said 'Restore ARCHITECTURE.md §13A.5' but ARCHITECTURE.md is not in 36c72878's diff (restored via working-tree git checkout, no diff).", "disposition": "ADR-052 prose corrected to state the restore was a working-tree checkout."},
+    {"severity": "MINOR", "finding": "ci.yml passes github.sha as --integration-sha, but the gate keys ci_result by the candidate integration_sha (the merge commit), not the branch HEAD -> on a real PR the gate would never find the ci_result.", "disposition": "Documented as an activation-time requirement in the ci.yml step comment + the codex review doc + ADR-052 (the step is inert until THREEWAY_BUS_LIVE is flipped; not blocking)."},
+    {"severity": "NIT", "finding": "ARCHITECTURE.md §13A.4 still recorded the stale '341 passed, 0 xfailed' (pre ADR-050/051/052).", "disposition": "Refreshed to '353 passed, 1 skipped, 0 xfailed' + footer to 2026-06-22 + ADR-050/051/052 folded into the parenthetical."}
+  ],
+  "outcome": "36c72878 is GO with all 3 NITs reconciled in the follow-up. The activation tooling now matches the real contract; go-live remains fully user-gated."
+}
