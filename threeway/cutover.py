@@ -68,20 +68,40 @@ def _snapshot_refs(repo) -> dict:
     return snap
 
 
-def _teardown(repo, snapshot: dict) -> None:
-    # NON-DESTRUCTIVE: restore every ref to its captured PRE-RUN state. A ref that did
-    # not exist pre-run (oid is None) is deleted (it can only hold commits THIS run made);
-    # a ref that DID exist is reset to its prior OID (so a pre-existing bus under force=True
-    # survives a mid-cutover failure intact). A failed RESTORE is surfaced (check=True) —
-    # silently leaving a ref at a half-built state would defeat the non-destructive intent;
-    # a delete of an absent ref stays best-effort (check=False).
+class TeardownError(RuntimeError):
+    """One or more refs could not be restored to their pre-run state during teardown.
+    Raised CHAINED from the original cutover failure (`raise ... from original`) so the
+    real cause is surfaced, never masked — and only after a best-effort pass over EVERY
+    ref, so one stuck ref does not strand the rest (ADR-044)."""
+
+
+def _teardown(repo, snapshot: dict, original: BaseException | None = None) -> None:
+    # NON-DESTRUCTIVE + BEST-EFFORT-PER-REF: restore every ref to its captured PRE-RUN
+    # state. A ref that did not exist pre-run (oid is None) is deleted (it can only hold
+    # commits THIS run made); a ref that DID exist is reset to its prior OID (so a
+    # pre-existing bus under force=True survives a mid-cutover failure intact). A single
+    # ref's restore failure (e.g. a concurrent writer holding refs/threeway/events.lock ->
+    # git exit 128) MUST NOT abort the loop — every OTHER ref still gets restored — NOR
+    # mask the original cutover failure. Failures are aggregated and raised as a
+    # TeardownError CHAINED FROM `original`; a fully-successful teardown stays silent so
+    # the caller's bare `raise` re-raises the original cause unchanged. A delete of an
+    # absent ref stays best-effort (check=False) and never contributes a failure.
+    failures = []
     for ref, oid in snapshot.items():
-        if oid is None:
-            subprocess.run(["git", "-C", str(repo), "update-ref", "-d", ref],
-                           capture_output=True, env=gitcas._env(), check=False)
-        else:
-            subprocess.run(["git", "-C", str(repo), "update-ref", ref, oid],
-                           capture_output=True, env=gitcas._env(), check=True)
+        try:
+            if oid is None:
+                subprocess.run(["git", "-C", str(repo), "update-ref", "-d", ref],
+                               capture_output=True, env=gitcas._env(), check=False)
+            else:
+                subprocess.run(["git", "-C", str(repo), "update-ref", ref, oid],
+                               capture_output=True, env=gitcas._env(), check=True)
+        except subprocess.CalledProcessError as exc:
+            failures.append((ref, exc))
+    if failures:
+        refs = ", ".join(ref for ref, _ in failures)
+        raise TeardownError(
+            f"teardown could not restore {len(failures)} ref(s) to pre-run state: {refs}"
+        ) from original
 
 
 def run_cutover(repo, coord_root, importer_key, *, force: bool = False) -> CutoverResult:
@@ -111,9 +131,10 @@ def run_cutover(repo, coord_root, importer_key, *, force: bool = False) -> Cutov
         for ev in carriers:
             store.append(ev, importer_key)
             appended += 1
-    except Exception:
+    except Exception as original:
         # (5) on ANY append failure, restore every ref to its pre-run snapshot.
-        _teardown(repo, snapshot)
+        #     _teardown surfaces any restore failure CHAINED from `original` (never masks).
+        _teardown(repo, snapshot, original)
         raise
 
     # (4) backfill all 6 seats' cursors from the §6 ISO->seq map. total_order over the
@@ -129,8 +150,8 @@ def run_cutover(repo, coord_root, importer_key, *, force: bool = False) -> Cutov
             seq = seq_map.get(seat, 0)
             store.advance_cursor(seat, seq)               # seq==0 allowed (refstore:236-240)
             cursors[seat] = store.cursor_seq(seat)
-    except Exception:
-        _teardown(repo, snapshot)
+    except Exception as original:
+        _teardown(repo, snapshot, original)
         raise
 
     # (5b) ALSO rewrite the legacy seen/*.txt to scalar + archive the reversible manifest.

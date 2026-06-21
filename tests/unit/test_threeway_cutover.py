@@ -146,3 +146,51 @@ def test_teardown_restores_preexisting_bus_on_failure_under_force(tmp_path, monk
 
     # RESTORED to the exact pre-run OID — NOT deleted (which the pre-fix code would do).
     assert gitcas.rev_parse(r, EVENTS_REF) == pre
+
+
+def test_teardown_best_effort_continues_and_chains_original_cause(tmp_path, monkeypatch):
+    # ADR-044: a single ref-restore failure (e.g. a concurrent writer holding
+    # refs/threeway/events.lock -> git exit 128) must NOT (a) abort the restore loop
+    # leaving every later cursor ref un-restored, nor (b) MASK the original cutover
+    # failure by propagating its own CalledProcessError in place of the real cause.
+    # NON-VACUITY: pre-fix _teardown was a bare loop, check=True on the FIRST (events)
+    # ref, so a raise there skipped every later cursor ref AND replaced the original
+    # exception -> the `attempted` and __cause__ assertions below are RED on pre-fix code.
+    from threeway import cutover
+    EVENTS = EVENTS_REF
+    CUR = "refs/threeway/cursors/director"
+    snapshot = {EVENTS: "a" * 40, CUR: "b" * 40}   # both pre-existing -> restore branch (check=True)
+    attempted = []
+
+    def _fake_run(cmd, *a, **kw):
+        ref = cmd[5] if cmd[4] == "-d" else cmd[4]
+        attempted.append(ref)
+        if ref == EVENTS:
+            raise subprocess.CalledProcessError(128, cmd, stderr=b"cannot lock ref: File exists")
+        class _R:                                  # a successful git update-ref
+            returncode = 0
+        return _R()
+
+    monkeypatch.setattr(cutover.subprocess, "run", _fake_run)
+    original = RuntimeError("ORIGINAL cursor failure")
+    with pytest.raises(cutover.TeardownError) as ei:
+        cutover._teardown(tmp_path, snapshot, original)
+    assert ei.value.__cause__ is original              # (b) original preserved, not masked
+    assert CUR in attempted, "loop aborted on first failure -> later refs not restored"  # (a)
+    assert EVENTS in str(ei.value)                      # the failing ref is surfaced
+
+
+def test_teardown_clean_restore_stays_silent(tmp_path, monkeypatch):
+    # When every restore succeeds, _teardown must NOT raise, so the caller's bare
+    # `raise` re-raises the ORIGINAL cause unchanged (the existing happy-path contract,
+    # which test_teardown_restores_preexisting_bus_on_failure_under_force relies on).
+    from threeway import cutover
+    snapshot = {EVENTS_REF: "a" * 40, "refs/threeway/cursors/director": "b" * 40}
+
+    def _ok(cmd, *a, **kw):
+        class _R:
+            returncode = 0
+        return _R()
+
+    monkeypatch.setattr(cutover.subprocess, "run", _ok)
+    cutover._teardown(tmp_path, snapshot, RuntimeError("x"))   # must NOT raise

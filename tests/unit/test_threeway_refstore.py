@@ -294,6 +294,46 @@ def test_tampered_stored_idempotency_key_is_not_trusted(tmp_path):
     assert any(e.id == "t" for e in s.all_events()) and landed.id == "t"
 
 
+# ----------------------------------------------------------------------------
+# ADR-044 — dedup must not drop a revoke/supersede of a DIFFERENT target.
+# revokes_event_id / supersedes_event_id are top-level Event fields OUTSIDE the
+# payload (envelope.py:67-69), so payload_digest does not cover them. Pre-fix the
+# idempotency_key + _request_fingerprint both OMIT them, so a second overseer revoke
+# of victim-e2 (identical sender/kind/payload to a prior revoke of victim-e1) is
+# silently deduped to the first and never lands -> victim-e2 stays effective.
+# ----------------------------------------------------------------------------
+def test_distinct_revoke_target_is_not_deduped(tmp_path):
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair(); s = RefEventStore(r)
+    s.append(_unsigned(id="r1", kind="attestation_revoked", payload={"k": "x"},
+                       revokes_event_id="victim-e1"), p)
+    s.append(_unsigned(id="r2", kind="attestation_revoked", payload={"k": "x"},
+                       revokes_event_id="victim-e2"), p)
+    ids = {e.id for e in s.all_events()}
+    assert ids == {"r1", "r2"}, f"second distinct-target revoke was dropped: {ids}"
+
+
+def test_distinct_supersede_target_is_not_deduped(tmp_path):
+    r = _new_repo(tmp_path); p, _ = keys.generate_keypair(); s = RefEventStore(r)
+    s.append(_unsigned(id="s1", kind="brief_superseded", payload={"k": "x"},
+                       supersedes_event_id="brief-e1"), p)
+    s.append(_unsigned(id="s2", kind="brief_superseded", payload={"k": "x"},
+                       supersedes_event_id="brief-e2"), p)
+    ids = {e.id for e in s.all_events()}
+    assert ids == {"s1", "s2"}, f"second distinct-target supersede was dropped: {ids}"
+
+
+def test_idempotency_key_distinguishes_revoke_and_supersede_target():
+    a = _unsigned(id="x", kind="attestation_revoked", revokes_event_id="e1")
+    b = _unsigned(id="x", kind="attestation_revoked", revokes_event_id="e2")
+    assert idempotency_key(a) != idempotency_key(b)
+    c = _unsigned(id="y", kind="brief_superseded", supersedes_event_id="e1")
+    d = _unsigned(id="y", kind="brief_superseded", supersedes_event_id="e2")
+    assert idempotency_key(c) != idempotency_key(d)
+    # a genuine retry of the SAME revoke target still dedups (same key)
+    a2 = _unsigned(id="x", kind="attestation_revoked", revokes_event_id="e1")
+    assert idempotency_key(a) == idempotency_key(a2)
+
+
 def _same_fact_worker(args):
     repo, ks, remote, evid, barrier = args
     os.environ["THREEWAY_KEYSTORE"] = ks

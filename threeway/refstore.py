@@ -74,11 +74,15 @@ def _request_fingerprint(ev: Event) -> str:
     # actor-scoped CANONICAL request hash — the COMPLETE logical request, not just the
     # idempotency_key formula (which omits to/candidate_id/causation_id). Excludes uuid,
     # seq, signature, created_at so a re-minted retry of the same fact still matches.
+    # INCLUDES the load-bearing revokes_event_id/supersedes_event_id (ADR-044) so a
+    # revoke/supersede of a DIFFERENT target is a distinct request, never deduped to a prior.
     view = {
         "from": ev.sender, "to": ev.recipient, "kind": ev.kind,
         "brief_id": ev.brief_id, "candidate_id": ev.candidate_id,
         "subject_sha": ev.subject_sha, "brief_version": ev.brief_version,
         "causation_id": ev.causation_id, "payload_digest": payload_digest(ev),
+        "revokes_event_id": ev.revokes_event_id,
+        "supersedes_event_id": ev.supersedes_event_id,
     }
     return hashlib.sha256(canonicalize(view)).hexdigest()
 

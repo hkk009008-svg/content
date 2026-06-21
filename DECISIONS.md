@@ -2243,3 +2243,65 @@ no_new_promotion=true and regression GREEN across all dimensions.**
 **Still deferred (unchanged).** The scope-(b) strategic loop's OPERATIONAL layer (dual-chief apps, live
 emission of co_sign/re_verify/human_approval + the overseer nonce/roster emitter) and the live cutover
 onto `refs/threeway/events`. This ADR closes the two SECURITY rows; it does not wire the live driver.
+
+## ADR-044 — Cutover-substrate hardening: non-atomic `_teardown` (half-flip + masked cause) + refstore dedup dropping a distinct-target revoke/supersede
+
+**Context.** After the two scope-(b) SECURITY rows closed (ADR-043) and the whole assembled control plane
+passed a holistic cross-ADR *composition* audit (`wf_2ca48247-f19`, 0 emergent forged-promotion/merge-DoS
+gaps), a follow-up *cutover-substrate correctness* audit (`wf_ce0bba9f-0ac`, 6 recovery lenses driving the
+REAL `cutover`/`divergence`/`backfill`/`refstore` machinery with injected failures) surfaced two confirmed
+MAJOR defects the per-fix passes never looked for — one in the flip's recovery path, one in the store's
+dedup layer the composition audit (which tested at the gate/reducer layer) could not see.
+
+**Decision 1 — `_teardown` best-effort-per-ref + chain-not-mask (`threeway/cutover.py`).**
+`_teardown` was a bare loop restoring each snapshot ref (EVENTS_REF first) with `check=True`. A single
+restore failure — realistically a concurrent writer holding `refs/threeway/events.lock` during the
+~50-min cutover window (`run_cutover` docstring warns of it) — raised `CalledProcessError` that (A) aborted
+the loop, leaving every later cursor ref un-restored (half-torn-down `refs/threeway/*`), and (B) propagated
+out of the except-handler's `_teardown(...); raise`, MASKING the original cutover failure. Now `_teardown`
+catches each ref's `CalledProcessError`, CONTINUES restoring the rest, and AGGREGATEs failures into a new
+`TeardownError` raised CHAINED from the original cause (`raise TeardownError(...) from original`); a fully
+clean teardown stays silent so the caller's bare `raise` re-raises the original unchanged. The two callers
+now bind `except Exception as original` and pass it. Recoverable harm only (the authority-flip marker is
+the caller's separate commit, so legacy `sent/` stays authoritative throughout; a `force=True` re-run after
+the lock clears completes idempotently, dup-free) — MAJOR, not CRITICAL.
+
+**Decision 2 — dedup keys include the load-bearing reference ids (`threeway/envelope.py` + `refstore.py`).**
+`idempotency_key` and `_request_fingerprint` both OMITTED `revokes_event_id`/`supersedes_event_id` (top-level
+Event fields OUTSIDE the payload, envelope.py:67-69, so `payload_digest` does not cover them). Two overseer
+revokes of DIFFERENT targets, identical in sender/kind/payload/candidate, produced the SAME key + fingerprint,
+so `RefEventStore.append` deduped the second to the first — it never landed, and its target's attestation
+stayed effective toward quorum (identical twin hole for `brief_superseded`). Now both `revokes_event_id` and
+`supersedes_event_id` are in BOTH the `idempotency_key` formula and the `_request_fingerprint` view, so a
+revoke/supersede of a different target is a DISTINCT request that always lands. Both fields are `None` for
+every non-revoke/supersede event, so those events' dedup identity is unchanged and a genuine same-target retry
+still dedups. The `_request_fingerprint` half is two-layer defense-in-depth (once `idempotency_key`
+distinguishes the target, the fingerprint path is not reached for this case — not independently reddenable,
+same shape as ADR-043's two-layer note). Cousin of `threeway-event-id-not-unique` (ADR-037, the id-collision
+dedup) and `threeway-brief-supersede-authority` (ADR-038, the authority half of the same unsigned-reference
+channels). Pre-flip is the ideal window: the bus is not live, so no persisted at-rest `idempotency_key` (a
+DERIVED field, always recomputed and never trusted — refstore.py:102) is invalidated.
+
+**Why safe.** Decision 1 only ADDS recovery robustness (best-effort restore strictly restores ≥ as many refs
+as before; chaining preserves, never hides, the original); the happy-path teardown contract is unchanged
+(`test_teardown_restores_preexisting_bus_on_failure_under_force` stays green). Decision 2 only NARROWS dedup
+(more distinct requests land, never fewer), is `None`-inert for all non-revoke/supersede events, and touches
+no signed view — `revokes/supersedes_event_id` remain unsigned (their crypto binding is a separate scope-(b)
+concern). Neither touches `run_gate` totality or the 14-field signed set.
+
+**Verification.** TDD red→green: 5 new tests (`test_threeway_cutover.py` ::test_teardown_best_effort_continues_and_chains_original_cause
+/ ::test_teardown_clean_restore_stays_silent; `test_threeway_refstore.py` ::test_distinct_revoke_target_is_not_deduped
+/ ::test_distinct_supersede_target_is_not_deduped / ::test_idempotency_key_distinguishes_revoke_and_supersede_target)
+RED on pre-fix code, GREEN after; full threeway suite 328 passed / 0 failed; `ci_smoke` + `check_no_ceremony`
+clean. Each test asserts the specific property (TeardownError type + `__cause__ is original` + later-ref-attempted;
+both ids landing) so a fix missing any layer still reddens. Audit evidence:
+`logs/audit-wf_ce0bba9f-0ac-threeway-cutover-substrate.json` (both reproduced against the real machinery,
+2/3 refuters failed to refute each). Adversarial Lane-V re-verification of this fix: pending.
+
+**Flip-readiness (from the audit).** With both fixed, the substrate is CONDITIONALLY SAFE to flip. The audit's
+operational preconditions still stand and are NOT code: freeze the coordination tree for the flip window (no
+concurrent `refs/threeway/*` writer — belt-and-suspenders now that teardown is best-effort), a clean
+`divergence` check, a `force=True` dry-run asserting `ready_to_flip`, an OUT-OF-BAND pre-run ref snapshot, and
+chief/overseer key provisioning. The live flip remains GATED on explicit user confirmation. Residual not driven
+(named, no silent caps): refstore REMOTE push-CAS under concurrent multi-writer contention; backfill
+partial-then-retry resumability end-to-end; gitcas merge-tree determinism beyond the fixtures.

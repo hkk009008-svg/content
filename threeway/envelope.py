@@ -97,7 +97,13 @@ def signed_bytes(ev: Event) -> bytes:
 def idempotency_key(ev: Event) -> str:
     subj = ev.subject_sha if ev.subject_sha is not None else (
         str(ev.brief_version) if ev.brief_version is not None else "")
-    raw = f"{ev.sender}:{ev.kind}:{subj}:{payload_digest(ev)}"
+    # revokes_event_id / supersedes_event_id are load-bearing top-level fields OUTSIDE the
+    # payload (:67-69), so payload_digest does not cover them. Include them here (ADR-044)
+    # so a revoke/supersede of a DIFFERENT target is a DISTINCT request and is never deduped
+    # to a prior one. Both are None for every non-revoke/supersede event, so those events'
+    # dedup identity is unchanged.
+    raw = (f"{ev.sender}:{ev.kind}:{subj}:{payload_digest(ev)}"
+           f":{ev.revokes_event_id or ''}:{ev.supersedes_event_id or ''}")
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
