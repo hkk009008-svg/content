@@ -158,6 +158,12 @@ class _RepoAdapter:
 def run_gate(candidate_id, store: EventStore, repo, registry_dir, bus_id,
              main_ref, gate_seat="merge-gate", policy=None) -> GateResult:
     policy = policy or default_policy()
+    # ADR-043 (§5 totality): a non-str candidate_id ARGUMENT (driver/caller misuse) would raise
+    # TypeError on the step-2 `merge_completed` dict lookup — which is OUTSIDE the try below — so
+    # guard it here. A non-str id can name no candidate; REJECT fail-closed rather than crash.
+    # (Bus EVENTS are already totality-guarded by well_formed; this covers the gate's OWN argument.)
+    if not isinstance(candidate_id, str):
+        return GateResult("REJECTED", "candidate_id argument is not a str")
     # 1. verify + reduce authoritative bus state (raises GateError on bad sig/replay)
     state = verify_and_reduce(store.all_events(), registry_dir=registry_dir, bus_id=bus_id,
                               gate_seat=gate_seat)

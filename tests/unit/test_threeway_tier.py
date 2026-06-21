@@ -161,20 +161,42 @@ def test_t2_pair_b_direction():
     assert _sat("T2", state, pair="B", builder="claude", verifier="codex")
 
 
-def _reverify(seq, *, signer, subject_sha=INTEG, verdict="GO", cand="c1"):
+# ADR-043: the overseer's freshness challenge nonce (test fixture). The re_verify must echo it.
+NONCE = "ovr-nonce-7f3a"
+
+
+def _reverify(seq, *, signer, subject_sha=INTEG, verdict="GO", nonce=NONCE, cand="c1"):
     return Event(id=f"rv{seq}", seq=seq, bus_id="prod", schema_version="threeway/1",
                  kind="re_verify", sender=signer.split(":")[0], recipient="all", signer=signer,
-                 payload={"verdict": verdict}, candidate_id=cand, brief_id="b1",
-                 brief_version=1, subject_sha=subject_sha)
+                 payload={"verdict": verdict, "challenge_nonce": nonce}, candidate_id=cand,
+                 brief_id="b1", brief_version=1, subject_sha=subject_sha)
 
 
-def _human(seq, *, approver, signer="overseer:mech:s1", subject=INTEG,
-           decision="approve", cand="c1"):
+def _challenge(seq, *, nonce=NONCE, subject_sha=INTEG, signer="overseer:mech:s1", cand="c1"):
+    # ADR-043: overseer-signed re_verify_challenge carrying the freshness nonce, bound to the sha.
+    return Event(id=f"ch{seq}", seq=seq, bus_id="prod", schema_version="threeway/1",
+                 kind="re_verify_challenge", sender="overseer", recipient="all", signer=signer,
+                 payload={"nonce": nonce}, candidate_id=cand, brief_id="b1", brief_version=1,
+                 subject_sha=subject_sha)
+
+
+def _human(seq, *, seat, approver=None, subject=INTEG, decision="approve", cand="c1"):
+    # ADR-043: each approval is signed by a distinct KEY-BOUND approver SEAT (the roster
+    # entry), not relayed by the overseer. approver_identity is now an informational label.
     return Event(id=f"h{seq}", seq=seq, bus_id="prod", schema_version="threeway/1",
-                 kind="human_approval", sender="overseer", recipient="all", signer=signer,
-                 payload={"approver_identity": approver, "integration_sha": subject,
+                 kind="human_approval", sender=seat, recipient="all", signer=f"{seat}:relay:s1",
+                 payload={"approver_identity": approver or seat, "integration_sha": subject,
                           "decision": decision},
                  candidate_id=cand, brief_id="b1", brief_version=1)
+
+
+def _appr_roster(seq, *, approvers=("chief-gemini", "chief-chatgpt"),
+                 signer="overseer:mech:s1", cand="c1"):
+    # ADR-043: overseer-signed roster of allowed approver SEATS for this candidate.
+    return Event(id=f"ar{seq}", seq=seq, bus_id="prod", schema_version="threeway/1",
+                 kind="approver_roster", sender="overseer", recipient="all", signer=signer,
+                 payload={"approvers": list(approvers)}, candidate_id=cand,
+                 brief_id="b1", brief_version=1)
 
 
 def _revoke(seq, *, target_id, cand="c1"):
@@ -185,11 +207,15 @@ def _revoke(seq, *, target_id, cand="c1"):
 
 
 def _t3_ok():
+    # index map (used by the rejects-tests below): [0,1]=roster [2]=cosign [3]=reverify
+    # [4]=human5 [5]=human6 [6]=challenge [7]=roster
     return _roster() + [
         _cosign(3, signer="operator2:codex:s1"),
         _reverify(4, signer="operator:claude:s2"),
-        _human(5, approver="chief-gemini"),
-        _human(6, approver="chief-chatgpt"),
+        _human(5, seat="chief-gemini"),
+        _human(6, seat="chief-chatgpt"),
+        _challenge(7),
+        _appr_roster(8),
     ]
 
 
@@ -217,42 +243,124 @@ def test_t3_rejects_non_go_re_verify():
 
 
 def test_t3_rejects_revoked_re_verify():
-    assert not _sat("T3", reduce(_t3_ok() + [_revoke(7, target_id="rv4")]))
+    assert not _sat("T3", reduce(_t3_ok() + [_revoke(9, target_id="rv4")]))
 
 
-def test_t3_pending_with_one_human_approval():
-    assert not _sat("T3", reduce(_t3_ok()[:5]))
+# --- ADR-043 freshness (threeway-signer-unsigned-session): the re_verify must echo the
+# overseer's signed challenge nonce, so a stale/replayed re_verify cannot satisfy a fresh
+# challenge. Mutation-proof: dropping the nonce check in _t3_cross_provider_re_verify
+# reddens test_t3_rejects_re_verify_with_stale_nonce + _missing_nonce. ---
+
+def test_t3_pending_without_challenge():
+    # no overseer freshness challenge → re_verify cannot be proven fresh → fail closed.
+    assert not _sat("T3", reduce([e for e in _t3_ok() if e.kind != "re_verify_challenge"]))
 
 
-def test_t3_rejects_two_human_approvals_same_identity():
-    evs = _t3_ok(); evs[5] = _human(6, approver="chief-gemini")
+def test_t3_rejects_re_verify_with_stale_nonce():
+    # THE freshness pin: a re_verify echoing the WRONG (stale/guessed) nonce fails the current
+    # challenge — a replayed prior-session re_verify carries an old nonce and cannot satisfy.
+    evs = _t3_ok(); evs[3] = _reverify(4, signer="operator:claude:s2", nonce="stale-nonce")
     assert not _sat("T3", reduce(evs))
 
 
-def test_t3_rejects_human_approval_not_signed_by_overseer():
-    evs = _t3_ok(); evs[5] = _human(6, approver="chief-chatgpt", signer="director:codex:s1")
+def test_t3_rejects_re_verify_missing_nonce():
+    evs = _t3_ok()
+    evs[3] = Event(id="rv4", seq=4, bus_id="prod", schema_version="threeway/1",
+                   kind="re_verify", sender="operator", recipient="all",
+                   signer="operator:claude:s2", payload={"verdict": "GO"},  # no challenge_nonce
+                   candidate_id="c1", brief_id="b1", brief_version=1, subject_sha=INTEG)
+    assert not _sat("T3", reduce(evs))
+
+
+def test_t3_rejects_challenge_bound_to_wrong_sha():
+    evs = _t3_ok(); evs[6] = _challenge(7, subject_sha=WRONG)
+    assert not _sat("T3", reduce(evs))
+
+
+def test_t3_rejects_forged_nonoverseer_challenge():
+    # a freshness challenge from a non-overseer seat (even carrying the right nonce) is DROPPED
+    # at record time (authority filter) → no effective challenge → fail closed.
+    evs = _t3_ok(); evs[6] = _challenge(7, signer="operator:claude:s1")
+    assert not _sat("T3", reduce(evs))
+
+
+def test_t3_rejects_empty_challenge_nonce():
+    evs = _t3_ok()
+    evs[6] = _challenge(7, nonce=""); evs[3] = _reverify(4, signer="operator:claude:s2", nonce="")
+    assert not _sat("T3", reduce(evs))
+
+
+# --- ADR-043 per-approver auth (threeway-human-approval-overseer-asserted): T3 distinctness is
+# on the KEY-BOUND signer seat from the overseer-signed roster, not the payload label. ---
+
+def test_t3_pending_without_roster():
+    # no overseer approver roster → no key-bound approvers authorized → fail closed.
+    assert not _sat("T3", reduce([e for e in _t3_ok() if e.kind != "approver_roster"]))
+
+
+def test_t3_pending_with_one_human_approval():
+    assert not _sat("T3", reduce([e for e in _t3_ok() if e.id != "h6"]))
+
+
+def test_t3_rejects_two_human_approvals_same_seat():
+    # THE per-approver pin: two approvals from ONE chief seat (distinct labels) = ONE key-bound
+    # approver. A compromised overseer cannot assert two humans for one keyholder (it lacks the
+    # chiefs' private keys). Defense-in-depth: the reducer collapses same-seat approvals AND tier
+    # counts distinct seats; either layer alone closes it.
+    evs = _t3_ok(); evs[5] = _human(6, seat="chief-gemini", approver="chief-chatgpt-label")
+    assert not _sat("T3", reduce(evs))
+
+
+def test_t3_rejects_two_overseer_relayed_labels():
+    # The ORIGINAL vuln (threeway-human-approval-overseer-asserted): a compromised overseer
+    # signing TWO distinct approver_identity LABELS used to satisfy "two distinct humans". Now
+    # both approvals collapse to the single key-bound 'overseer' seat AND overseer is not on the
+    # roster → fail closed. Mutation-proof: removing the roster-membership gate reddens
+    # test_t3_rejects_human_approval_not_on_roster.
+    evs = _t3_ok()
+    evs[4] = _human(5, seat="overseer", approver="chief-gemini")
+    evs[5] = _human(6, seat="overseer", approver="chief-chatgpt")
+    assert not _sat("T3", reduce(evs))
+
+
+def test_t3_rejects_human_approval_not_on_roster():
+    # an approval from a seat NOT on the overseer roster does not count.
+    evs = _t3_ok(); evs[5] = _human(6, seat="director")
+    assert not _sat("T3", reduce(evs))
+
+
+def test_t3_rejects_forged_nonoverseer_roster():
+    # a roster from a non-overseer seat (an insider adding its own seat) is DROPPED at record
+    # time → no effective roster → fail closed.
+    evs = _t3_ok()
+    evs[7] = _appr_roster(8, approvers=("director", "chief-gemini"), signer="director:codex:s1")
+    assert not _sat("T3", reduce(evs))
+
+
+def test_t3_rejects_roster_with_one_approver():
+    evs = _t3_ok(); evs[7] = _appr_roster(8, approvers=("chief-gemini",))
     assert not _sat("T3", reduce(evs))
 
 
 def test_t3_rejects_human_approval_wrong_sha():
-    evs = _t3_ok(); evs[5] = _human(6, approver="chief-chatgpt", subject=WRONG)
+    evs = _t3_ok(); evs[5] = _human(6, seat="chief-chatgpt", subject=WRONG)
     assert not _sat("T3", reduce(evs))
 
 
 def test_t3_rejects_human_approval_non_affirmative_decision():
-    evs = _t3_ok(); evs[5] = _human(6, approver="chief-chatgpt", decision="reject")
+    evs = _t3_ok(); evs[5] = _human(6, seat="chief-chatgpt", decision="reject")
     assert not _sat("T3", reduce(evs))
 
 
 def test_t3_rejects_revoked_human_approval():
-    assert not _sat("T3", reduce(_t3_ok() + [_revoke(7, target_id="h6")]))
+    assert not _sat("T3", reduce(_t3_ok() + [_revoke(9, target_id="h6")]))
 
 
 def test_t3_rejects_revoked_candidate_pair_assignment():
     # overseer revokes pair A's (candidate pair) assignment → the T3 re_verify seat
     # cannot resolve → fail closed. (T2 mirror, via the rev-aware assignments(), is
     # unaffected since it resolves pair B.)
-    assert not _sat("T3", reduce(_t3_ok() + [_revoke(7, target_id="as1")]))
+    assert not _sat("T3", reduce(_t3_ok() + [_revoke(9, target_id="as1")]))
 
 
 # --- Slice 3 review hardening (defense-in-depth; not attacker-reachable in the signed
@@ -288,5 +396,6 @@ def test_t3_rejects_empty_primary_verifier_seat():
                       verifier_provider="codex")]
     evs = roster + [_cosign(3, signer="operator2:codex:s1"),
                     _reverify(4, signer=":x:s2"),   # _seat_of -> "" matches the empty seat
-                    _human(5, approver="chief-gemini"), _human(6, approver="chief-chatgpt")]
+                    _human(5, seat="chief-gemini"), _human(6, seat="chief-chatgpt"),
+                    _challenge(7), _appr_roster(8)]
     assert not _sat("T3", reduce(evs))

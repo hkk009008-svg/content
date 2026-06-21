@@ -1809,15 +1809,29 @@ the unique pair != candidate-pair whose providers are the D3 role-swap (`builder
 our verifier_provider` AND `primary_verifier_provider == our builder_provider`) and matches its
 `primary_verifier` seat via the key-bound `state.co_sign(candidate_id, seat)`; **ambiguity (zero or
 >1 mirror) fails CLOSED**. **T3** adds a `re_verify` GO from the candidate pair's own
-`primary_verifier` seat (cross-provider operator) bound to `integration_sha`, plus two distinct,
-SHA-bound, affirmative (`decision=="approve"`) `human_approval` facts signed by the `overseer`. All
-effective accessors (co_sign/re_verify/human_approvals/assignments) drop revoked events. Any missing
-artifact → PENDING (fail-safe). **Scope-(a) limitations** (deferred to the scope-(b) strategic loop):
-the re_verify "new session" freshness is NOT enforced (session is unsigned —
-`threeway-signer-unsigned-session`); "two distinct human_approval" is two overseer-asserted labels,
-not two independent human signatures (`threeway-human-approval-overseer-asserted`); assignments have
-no dedicated supersede fact (same-pair re-assignment is last-write-wins, revocation via
+`primary_verifier` seat (cross-provider operator) bound to `integration_sha` AND echoing the overseer's
+freshness nonce (ADR-043, below), plus two distinct, SHA-bound, affirmative (`decision=="approve"`)
+`human_approval` facts signed by two distinct KEY-BOUND approver seats on the overseer's roster (ADR-043).
+All effective accessors (co_sign/re_verify/human_approvals/assignments) drop revoked events. Any missing
+artifact → PENDING (fail-safe). **Scope-(a) residual** (deferred to the scope-(b) strategic loop):
+assignments have no dedicated supersede fact (same-pair re-assignment is last-write-wins, revocation via
 `attestation_revoked`). See `DECISIONS.md` ADR-035.
+
+**T3 freshness + per-approver auth are now key-bound (ADR-043).** The two Slice-3 scope-(b) deferrals are
+CLOSED. `re_verify` freshness: an overseer-signed `re_verify_challenge` carries an unguessable `nonce`
+bound to candidate+`integration_sha`; `_t3_cross_provider_re_verify` requires the re_verify's payload
+`challenge_nonce` to equal it (the nonce is in the signed `payload_digest`, so a replayed stale re_verify
+carries an old nonce and fails the current challenge — freshness is verifiable from signed facts, resting
+on the overseer issuing fresh nonces, which the gate enforces the binding of but cannot itself generate).
+`human_approval` distinctness: an overseer-signed `approver_roster` lists allowed approver SEATS;
+`reduce()` keys `_human_approval` by `(candidate_id, signer-seat)` and `_two_distinct_human_approvals`
+requires ≥2 distinct roster seats — so a compromised overseer can no longer assert two labels for one
+human (it lacks the chiefs' keys). Both new kinds fold overseer-only at record time and are
+load-bearing. **Operational precondition:** each chief approver seat needs its OWN registry key
+(`coordination/threeway/keys/<chief>.pub`) or its approval is dropped as unknown-seat (ADR-040) and T3
+stays PENDING (fail-closed) — provisioned in the scope-(b) cutover; pinned by
+`test_run_gate_{completes_full_t3_through_signed_gate,t3_pending_when_chief_keys_unregistered}`. See
+`DECISIONS.md` ADR-043 + `threeway-signer-unsigned-session`, `threeway-human-approval-overseer-asserted`.
 
 **Revocation authority (ADR-036).** `revokes_event_id` is unsigned (envelope.py:67), so revocation
 must be authorized or an insider could forge a revoke of another seat's fact. `reduce()`
@@ -1909,7 +1923,7 @@ the full brick catalogue (35 envelope-field poisons + 15 payload-value probes) e
 `threeway-candidate-id-pair-binding-dos` — was that `candidate_id` is a free-form, globally-shared
 namespace, so TWO overseer-assigned pairs could each be self-consistent for the SAME id; a legit
 executing_coordinator of pair B could reuse a victim's id, declare pair B, capture
-`authoritative_candidate` (`threeway/reducer.py:127`), and stall the victim's pair-A merge
+`authoritative_candidate` (`threeway/reducer.py:132`), and stall the victim's pair-A merge
 (availability-only — it can never forge pair A's attestations, so it never promotes). A first attempt
 (first-writer-wins, earliest-`seq`) only INVERTED the race — its mandated adversarial review
 (`wf_01844a2a-03a`) reproduced the symmetric attacker-declares-EARLIER DoS through the real gate. The

@@ -2163,3 +2163,83 @@ each reproduced through the real gate). META-LESSON (continuing ADR-039/040/041)
 re-verify your OWN security fix end-to-end through the real gate — the first-writer-wins attempt LOOKED
 correct (its xfail flipped, mutation-proofs passed) yet only moved the race; the multi-agent attack is
 what surfaced the inverted-race layer.
+
+## ADR-043 — Close the two scope-(b) T3 deferrals: re_verify freshness challenge + per-approver key-bound human_approval
+
+**Context.** Slice 3 (ADR-035) shipped the T2/T3 tiered co-sign with two KNOWN, tracked deferrals
+(both `open (deferred to scope (b))` in the inventory):
+- `threeway-signer-unsigned-session` (MAJOR): the T3 `re_verify` "new session" freshness was only
+  asserted via the UNSIGNED signer-string session (`signer` is excluded from the 14-field signed view,
+  envelope.py:67), so a stale/replayed re_verify GO was indistinguishable from a fresh one at the
+  crypto layer.
+- `threeway-human-approval-overseer-asserted` (MINOR): T3 "two distinct human_approval" was two
+  overseer-asserted `approver_identity` LABELS signed by a SINGLE overseer relay key — a
+  compromised/mistaken overseer could assert two labels for one human; distinctness was not key-bound.
+
+These are the SECURITY core of scope (b); their fixes are self-contained protocol changes that do NOT
+require the external dual-chief app / live-emission layer (which stays deferred with the live cutover).
+
+**Decision.** Two additive overseer-authority event kinds + new T3 predicate clauses, with NO change to
+the 14-field signed view (the payload is already bound via the signed `payload_digest`, so data placed
+in a payload is cryptographically committed):
+
+1. **Freshness challenge.** New kind `re_verify_challenge` (overseer-signed) carries an unguessable
+   `nonce` bound to the candidate + `integration_sha`. `tier._t3_cross_provider_re_verify` now requires
+   the overseer's challenge to exist, be bound to this sha, and the re_verify's payload `challenge_nonce`
+   to equal the challenge nonce. The nonce lives in the re_verify's OWN payload (bound by
+   `payload_digest`), so the verifier cannot forge/alter it; a replayed stale re_verify carries an old
+   nonce and fails the current challenge. Freshness is now verifiable from SIGNED facts.
+
+2. **Per-approver key-bound auth.** New kind `approver_roster` (overseer-signed) lists allowed approver
+   SEATS. `reducer` now keys `_human_approval` by `(candidate_id, signer-SEAT)` — the key-bound identity
+   — not the attacker-influenceable `approver_identity` label, so two approvals from one keyholder
+   collapse. `tier._two_distinct_human_approvals` now requires ≥2 distinct roster SEATS (was ≥2
+   overseer-relayed labels). A compromised overseer can no longer assert two humans for one keyholder:
+   it can designate the roster but it does NOT hold the chiefs' private keys, so two distinct approvals
+   require two distinct keyholders to actually sign.
+
+Both new kinds fold **overseer-only at record time** (reducer `_AUTHORIZED_SINGLETON_SEAT`, ADR-039
+pattern) and are in `LOAD_BEARING_KINDS`. Plus a §5 totality one-liner: `run_gate` rejects a non-str
+`candidate_id` ARGUMENT (driver/caller misuse — the `merge_completed` lookup is outside its try) — closes
+the ADR-042 §5 INFO loose thread.
+
+**Why this closes the rows (and only NARROWS).** Both clauses ADD fail-closed requirements on top of the
+prior T3 path (which required NO challenge and NO roster), so the new path is strictly narrower —
+anything that promoted before AND lacks a fresh challenge / key-bound roster now FAILS; nothing newly
+promotes. The forgery/integrity class (ADR-036/037/038) and the availability/totality class
+(ADR-039/040/041/042) stay green. `run_gate` stays TOTAL: the new payload-value derefs (nonce/approvers/
+challenge_nonce) live only in the tier functions, which run inside `run_gate`'s broad pre-CAS except, and
+read via `.get()` + `isinstance` (never as dict/set keys); `well_formed` already guards the new kinds'
+envelope-field derefs at step 1.
+
+**Evidence.** 4 source files (`__init__.py` kinds, `reducer.py` state+fold+accessors, `tier.py` 2 clauses,
+`gate.py` §5 guard) + 3 migrated test files + 2 new real-gate tests. **Executed mutation-proofs:** (A)
+removing the nonce-echo check reddens `test_t3_rejects_re_verify_with_stale_nonce`/`_missing_nonce`; (C)
+disabling the roster-membership gate reddens `test_t3_rejects_human_approval_not_on_roster`; (D) disabling
+the challenge authority filter reddens `test_t3_rejects_forged_nonoverseer_challenge`. (B) confirmed the
+per-approver fix is defense-in-depth: the reducer's per-seat keying collapses same-seat approvals even if
+the tier layer is mutated. `tests/unit/test_threeway_*.py` → 321 passed; `scripts/ci_smoke.py` OK;
+`scripts/check_no_ceremony.py` clean. **Re-certification** (`wf_d3c80806-ad9`, 5 Opus adversarial
+dimensions + independent verifiers, each driving the REAL signed gate): **0 confirmed bypasses,
+no_new_promotion=true and regression GREEN across all dimensions.**
+
+**Re-cert findings (all addressed, none a bypass).**
+- MAJOR (operational, fail-closed): per-approver auth introduces a NEW liveness precondition — each
+  chief approver seat needs its OWN committed registry key (`coordination/threeway/keys/<chief>.pub`),
+  or `verify_and_reduce` DROPS its approval as an unknown signer seat (ADR-040) and the T3 candidate is
+  stuck PENDING. This NEVER widens promotion (it only fails closed), but the operational layer (scope-(b)
+  dual-chief apps) MUST provision chief keys or all T3 promotions brick. ADDRESSED: two real-gate tests
+  (`test_run_gate_completes_full_t3_through_signed_gate` proves the COMPLETED path with chiefs registered;
+  `test_run_gate_t3_pending_when_chief_keys_unregistered` locks the requirement as a regression guard) +
+  this note. The chief seats must be added to the production registry as part of the scope-(b) cutover.
+- INFO: the freshness guarantee is challenge-response, so it rests on the overseer issuing fresh,
+  unguessable, non-reused nonces — the gate enforces the binding, not the overseer's nonce-rotation
+  discipline (the gate cannot generate entropy). Docstring corrected to not overstate it as
+  unconditionally cryptographic; fresh-nonce emission is a scope-(b) emitter responsibility.
+- INFO: the roster authorizes any overseer-named seat — "distinctness" is KEY-distinctness, not
+  human-vs-machine. That is the correct, irreducible trust floor (two distinct keyholders); whether the
+  rostered seats are dedicated human approvers is an overseer policy concern, not a gate property.
+
+**Still deferred (unchanged).** The scope-(b) strategic loop's OPERATIONAL layer (dual-chief apps, live
+emission of co_sign/re_verify/human_approval + the overseer nonce/roster emitter) and the live cutover
+onto `refs/threeway/events`. This ADR closes the two SECURITY rows; it does not wire the live driver.

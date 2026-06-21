@@ -74,7 +74,12 @@ class EffectiveState:
     _merge_completed: dict[str, Event] = field(default_factory=dict) # candidate_id -> Event
     _co_sign: dict[tuple, Event] = field(default_factory=dict)       # (candidate_id, seat) -> Event
     _re_verify: dict[tuple, Event] = field(default_factory=dict)
-    _human_approval: dict[tuple, Event] = field(default_factory=dict)  # (candidate_id, approver) -> Event
+    # ADR-043: human_approval is keyed by (candidate_id, signer-SEAT) — the KEY-BOUND
+    # identity — NOT the attacker-influenceable payload approver_identity LABEL, so two
+    # approvals from one approver collapse to one and distinctness is genuinely per-keyholder.
+    _human_approval: dict[tuple, Event] = field(default_factory=dict)  # (candidate_id, seat) -> Event
+    _re_verify_challenge: dict[str, Event] = field(default_factory=dict)  # candidate_id -> Event (overseer nonce)
+    _approver_roster: dict[str, Event] = field(default_factory=dict)      # candidate_id -> Event (overseer roster)
 
     # ---- effective queries used by the predicate ----
     def effective_attestation(self, candidate_id, att_kind, seat) -> Event | None:
@@ -197,6 +202,22 @@ class EffectiveState:
         return [e for (cid, _), e in self._human_approval.items()
                 if cid == candidate_id and e.id not in self._revoked_event_ids]
 
+    def re_verify_challenge(self, candidate_id) -> Event | None:
+        # ADR-043: the overseer's freshness nonce for this candidate's T3 re_verify. Resolved
+        # overseer-only at record time (like assignment/cycle_go), revoke-aware on read.
+        ev = self._re_verify_challenge.get(candidate_id)
+        if ev is None or ev.id in self._revoked_event_ids:
+            return None
+        return ev
+
+    def approver_roster(self, candidate_id) -> Event | None:
+        # ADR-043: the overseer-designated set of allowed human-approver SEATS for this
+        # candidate. Overseer-only at record time, revoke-aware on read.
+        ev = self._approver_roster.get(candidate_id)
+        if ev is None or ev.id in self._revoked_event_ids:
+            return None
+        return ev
+
     def assignments(self) -> list[Event]:
         return [e for e in self._assignments.values()
                 if e.id not in self._revoked_event_ids]
@@ -251,6 +272,11 @@ def reduce(events, *, gate_seat: str = GATE_SEAT) -> EffectiveState:
         "release_order": "overseer",
         "ci_result": "ci",
         "merge_completed": gate_seat,
+        # ADR-043: the freshness challenge + approver roster are overseer authority facts —
+        # a forged non-overseer challenge (planting a known nonce) or roster (adding the
+        # attacker's own seat) must be DROPPED at record time, never shadow the overseer's.
+        "re_verify_challenge": "overseer",
+        "approver_roster": "overseer",
     }
     # Revoke authority needs the TARGET event's seat. Map each id to the SET of seats that
     # emitted an event with it (ids are signed but not unique) so a collision is detectable,
@@ -328,8 +354,21 @@ def reduce(events, *, gate_seat: str = GATE_SEAT) -> EffectiveState:
                 st._co_sign[(ev.candidate_id, _seat_of(ev.signer))] = ev
             elif k == "re_verify":
                 st._re_verify[(ev.candidate_id, _seat_of(ev.signer))] = ev
+            elif k == "re_verify_challenge":
+                # ADR-043: overseer-only freshness nonce, keyed by candidate_id (latest
+                # overseer challenge wins). A non-overseer challenge has no authority — drop it.
+                if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["re_verify_challenge"]:
+                    continue
+                st._re_verify_challenge[ev.candidate_id] = ev
             elif k == "human_approval":
-                st._human_approval[(ev.candidate_id, ev.payload.get("approver_identity"))] = ev
+                # ADR-043: key by signer SEAT (key-bound), not the payload approver_identity
+                # LABEL — two approvals from one keyholder collapse, so T3 distinctness is per-key.
+                st._human_approval[(ev.candidate_id, _seat_of(ev.signer))] = ev
+            elif k == "approver_roster":
+                # ADR-043: overseer-only allowed-approver roster, keyed by candidate_id.
+                if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["approver_roster"]:
+                    continue
+                st._approver_roster[ev.candidate_id] = ev
         except (TypeError, AttributeError, ValueError) as e:
             logger.warning("dropping malformed event %s (kind=%r) from reduction: %s",
                            ev.id, k, e)

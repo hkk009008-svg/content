@@ -102,9 +102,20 @@ def _t3_cross_provider_re_verify(state, candidate_id, candidate_pair, builder_pr
                                  verifier_provider, integration_sha) -> bool:
     """A re_verify GO over integration_sha from the candidate pair's OWN primary_verifier
     (the cross-provider, non-builder family operator), resolved from the signed assignment.
-    NOTE: the spec's "new session" freshness is NOT enforced — `session` lives only in the
-    unsigned signer string; binding it to an overseer challenge is deferred to scope (b)
-    (inventory `threeway-signer-unsigned-session`)."""
+
+    ADR-043 (threeway-signer-unsigned-session): freshness is now VERIFIABLE from SIGNED facts,
+    not asserted via the unsigned signer session. The re_verify must echo the nonce from the
+    overseer's `re_verify_challenge` for this candidate+sha, in the re_verify's OWN payload —
+    which is bound by `payload_digest` (a signed field), so the verifier cannot forge or alter
+    it. A replayed STALE re_verify (from a prior session/cycle) carries the wrong nonce and fails
+    the CURRENT challenge; only a re_verify produced in response to this challenge satisfies it.
+    Fail-CLOSED on a missing/mismatched challenge or nonce. PRECONDITION (challenge-response is
+    only as strong as the challenger): the gate is the verifier and cannot generate entropy, so
+    the freshness guarantee rests on the overseer issuing a FRESH, unguessable, non-reused nonce
+    for each re-verification it demands — the gate enforces the binding (echo == current
+    challenge), not the overseer's nonce-rotation discipline. A reused/low-entropy nonce weakens
+    freshness without the gate being able to detect it; emitting fresh nonces is an overseer
+    (scope-(b) emitter) responsibility. See DECISIONS.md ADR-043."""
     if verifier_provider == builder_provider:   # standalone fail-closed mirror of predicate.py independence reject; co_sign_satisfied is public + unit-tested directly
         return False
     assign = state.assignment(candidate_pair)
@@ -113,26 +124,47 @@ def _t3_cross_provider_re_verify(state, candidate_id, candidate_pair, builder_pr
     seat = assign.payload.get("primary_verifier")
     if not seat:                        # malformed/empty assignment seat → fail closed (symmetric with T2)
         return False
+    # freshness challenge — overseer-signed (record-time authority filter), bound to this sha.
+    challenge = state.re_verify_challenge(candidate_id)
+    if challenge is None or challenge.subject_sha != integration_sha:
+        return False                    # no fresh overseer challenge for this candidate+sha
+    nonce = challenge.payload.get("nonce")
+    if not nonce:                       # malformed/empty challenge nonce → fail closed
+        return False
     ev = state.re_verify(candidate_id, seat)
     return (ev is not None
             and ev.payload.get("verdict") == "GO"
-            and ev.subject_sha == integration_sha)
+            and ev.subject_sha == integration_sha
+            and ev.payload.get("challenge_nonce") == nonce)
 
 
 def _two_distinct_human_approvals(state, candidate_id, integration_sha) -> bool:
-    """Two distinct approver identities, each an overseer-relayed, SHA-bound, affirmative
-    human_approval (spec §12). NOTE: in scope (a) these are two overseer-asserted labels,
-    not two cryptographically-independent human signatures (inventory
-    `threeway-human-approval-overseer-asserted`; per-approver auth is scope (b))."""
-    approvers = set()
+    """Two distinct KEY-BOUND human approvers, each on the overseer's allowed-approver roster,
+    each a SHA-bound affirmative human_approval (spec §12).
+
+    ADR-043 (threeway-human-approval-overseer-asserted): distinctness is now on the signer SEAT
+    (the key-bound identity the gate verifies against <seat>.pub), NOT the attacker-influenceable
+    payload `approver_identity` label. The overseer designates WHO may approve via a signed
+    `approver_roster`, but it does NOT hold the approvers' private keys — so it can no longer
+    assert two labels for one human: two distinct approvals require two distinct keyholders to
+    actually sign. Fail-CLOSED without an overseer roster, or a roster naming < 2 approvers."""
+    roster = state.approver_roster(candidate_id)
+    if roster is None:
+        return False                    # no overseer-designated roster → fail closed
+    allowed = roster.payload.get("approvers")
+    if not isinstance(allowed, list):
+        return False                    # malformed roster → fail closed
+    allowed_seats = {a for a in allowed if isinstance(a, str)}
+    if len(allowed_seats) < 2:
+        return False                    # roster cannot authorize two distinct approvers
+    approver_seats = set()
     for ev in state.human_approvals(candidate_id):
-        if _signer_seat(ev.signer) != "overseer":
+        seat = _signer_seat(ev.signer)  # the KEY-BOUND identity, not the unsigned label
+        if seat not in allowed_seats:
             continue
         if ev.payload.get("integration_sha") != integration_sha:
             continue
         if ev.payload.get("decision") != "approve":
             continue
-        approver = ev.payload.get("approver_identity")
-        if approver:
-            approvers.add(approver)
-    return len(approvers) >= 2
+        approver_seats.add(seat)
+    return len(approver_seats) >= 2

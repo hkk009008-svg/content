@@ -21,7 +21,11 @@ def seatkit(tmp_path, monkeypatch):
     ks = tmp_path / "ks"
     reg.mkdir(); ks.mkdir()
     privs = {}
-    for seat in ("director", "operator", "coordinator", "overseer", "ci", "merge-gate"):
+    # operator2 = mirror pair-B primary_verifier (T2 co_sign); chief-* = ADR-043 key-bound
+    # T3 human approvers (each needs its OWN registry key or its approval is dropped as an
+    # unknown signer seat — the operational precondition pinned by the T3 gate tests below).
+    for seat in ("director", "operator", "operator2", "coordinator", "overseer", "ci",
+                 "merge-gate", "chief-gemini", "chief-chatgpt"):
         priv, pub = keys.generate_keypair()
         (reg / f"{seat}.pub").write_text(pub + "\n")
         (ks / f"{seat}.ed25519").write_text(keys.private_to_hex(priv) + "\n")
@@ -1071,3 +1075,108 @@ def test_run_gate_total_under_unhashable_signature_version(live_repo, seatkit):
     from threeway.gate import verify_and_reduce
     state = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
     assert state.merge_completed("A:c1") is not None
+
+
+# ---------------------------------------------------------------------------
+# ADR-043 end-to-end: full T3 promotion through the SIGNATURE-VERIFYING gate.
+# The tier/predicate unit suites use the no-signature reduce() path; these drive
+# the real verify_and_reduce so the chief-key registry requirement is exercised.
+# ---------------------------------------------------------------------------
+@pytest.fixture()
+def live_repo_t3(tmp_path):
+    """Like live_repo but the builder branch touches a T3 path (coordination/threeway/keys/),
+    so the gate-computed effective tier is T3 — exercising the ADR-043 freshness + per-approver
+    clauses on the real signed path."""
+    r = tmp_path / "repo"; r.mkdir()
+    _git(r, "init", "-q")
+    _git(r, "config", "user.email", "t@e.st"); _git(r, "config", "user.name", "t")
+    (r / "base.txt").write_text("base\n")
+    _git(r, "add", "-A"); _git(r, "commit", "-qm", "base")
+    base = _git(r, "rev-parse", "HEAD").stdout.strip()
+    _git(r, "update-ref", "refs/threeway/test-main", base)
+    _git(r, "checkout", "-q", "-b", "feat")
+    (r / "coordination" / "threeway" / "keys").mkdir(parents=True)
+    (r / "coordination" / "threeway" / "keys" / "newseat.pub").write_text("deadbeef\n")
+    _git(r, "add", "-A"); _git(r, "commit", "-qm", "feat-t3")
+    branch = _git(r, "rev-parse", "HEAD").stdout.strip()
+    return r, base, branch
+
+
+_T3_NONCE = "ovr-nonce-gate"
+
+
+def _ev3(kind, sender, signer, payload, *, eid, subject_sha=None):
+    from threeway.envelope import Event
+    return Event(id=eid, seq=0, bus_id="prod", schema_version="threeway/1", kind=kind,
+                 sender=sender, recipient="all", signer=signer, payload=payload,
+                 candidate_id="A:c1", brief_id="b1", brief_version=1, subject_sha=subject_sha)
+
+
+def _seed_full_t3(r, base, branch, integ, privs):
+    """Append a complete, correctly-signed T3 promotion for A:c1: the base set (T3 brief/cycle_go,
+    allowed under coordination/threeway/keys/) + mirror co_sign + re_verify echoing the overseer
+    freshness nonce + overseer re_verify_challenge + overseer approver_roster + two chief
+    human_approvals signed by distinct key-bound chief seats. Returns the EventStore."""
+    from threeway.loop import build_candidate_events, PAIR_A
+    store = EventStore(r / "coordination" / "threeway" / "events")
+    base_set = build_candidate_events(base, branch, integ, privs, tier="T3",
+                                      allowed_paths=("coordination/threeway/keys/",), pair=PAIR_A)
+    extra = [
+        _ev3("assignment", "overseer", "overseer:mech:s1",
+             {"pair": "B", "builder": "director2", "builder_provider": "claude",
+              "primary_verifier": "operator2", "primary_verifier_provider": "codex",
+              "executing_coordinator": "coordinator2"}, eid="assignment-overseer-Bmirror"),
+        _ev3("co_sign", "operator2", "operator2:codex:s1", {"verdict": "GO"},
+             eid="co_sign-operator2-A:c1", subject_sha=integ),
+        _ev3("re_verify", "operator", "operator:claude:s2",
+             {"verdict": "GO", "challenge_nonce": _T3_NONCE},
+             eid="re_verify-operator-A:c1", subject_sha=integ),
+        _ev3("re_verify_challenge", "overseer", "overseer:mech:s1", {"nonce": _T3_NONCE},
+             eid="re_verify_challenge-overseer-A:c1", subject_sha=integ),
+        _ev3("approver_roster", "overseer", "overseer:mech:s1",
+             {"approvers": ["chief-gemini", "chief-chatgpt"]}, eid="approver_roster-overseer-A:c1"),
+        _ev3("human_approval", "chief-gemini", "chief-gemini:relay:s1",
+             {"approver_identity": "chief-gemini", "integration_sha": integ, "decision": "approve"},
+             eid="human_approval-chief-gemini-A:c1"),
+        _ev3("human_approval", "chief-chatgpt", "chief-chatgpt:relay:s1",
+             {"approver_identity": "chief-chatgpt", "integration_sha": integ, "decision": "approve"},
+             eid="human_approval-chief-chatgpt-A:c1"),
+    ]
+    for ev in list(base_set) + extra:
+        store.append(ev, privs[ev.signer.split(":", 1)[0]])
+    return store
+
+
+def test_run_gate_completes_full_t3_through_signed_gate(live_repo_t3, seatkit):
+    from threeway import gitcas
+    r, base, branch = live_repo_t3
+    reg, ks, privs = seatkit
+    tree, clean = gitcas.merge_tree(r, base, branch)
+    assert clean
+    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge A:c1")
+    store = _seed_full_t3(r, base, branch, integ, privs)
+    res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "COMPLETED", res.reason
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == integ
+
+
+def test_run_gate_t3_pending_when_chief_keys_unregistered(live_repo_t3, seatkit):
+    # ADR-043 operational precondition (re-cert MAJOR): the chief approver seats must have their
+    # OWN registry keys, or verify_and_reduce DROPS their human_approvals as unknown-seat (ADR-040)
+    # and the T3 candidate is stuck PENDING — fail-CLOSED (never a wrong promotion), but a real
+    # liveness requirement. Removing the chief pubs from the registry keeps it PENDING.
+    from threeway import gitcas
+    r, base, branch = live_repo_t3
+    reg, ks, privs = seatkit
+    tree, clean = gitcas.merge_tree(r, base, branch)
+    assert clean
+    integ = gitcas.commit_tree(r, tree, [base, branch], "threeway merge A:c1")
+    store = _seed_full_t3(r, base, branch, integ, privs)
+    (reg / "chief-gemini.pub").unlink()
+    (reg / "chief-chatgpt.pub").unlink()
+    res = run_gate("A:c1", store, r, registry_dir=reg, bus_id="prod",
+                   main_ref="refs/threeway/test-main", gate_seat="merge-gate")
+    assert res.outcome == "PENDING", res.reason
+    assert "co_sign not satisfied" in res.reason
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == base

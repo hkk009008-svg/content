@@ -366,6 +366,10 @@ def test_overseer_revoke_of_mirror_assignment_denies_promotion():
     assert d.outcome == PENDING and "co_sign not satisfied for T2" in d.reason
 
 
+# ADR-043: the overseer's T3 freshness nonce (predicate-test fixture).
+T3_NONCE = "ovr-nonce-pred"
+
+
 def _t3_event_set():
     evs = _full_event_set()
     for e in evs:
@@ -380,12 +384,18 @@ def _t3_event_set():
         _pair_b_assignment(10),
         _e("co_sign", 11, payload={"verdict": "GO"}, subject_sha=INTEG,
            signer="operator2:codex:s1"),
-        _e("re_verify", 12, payload={"verdict": "GO"}, subject_sha=INTEG,
-           signer="operator:claude:s2"),
-        _e("human_approval", 13, payload={"approver_identity": "chief-gemini",
-           "integration_sha": INTEG, "decision": "approve"}, signer="overseer:mech:s1"),
-        _e("human_approval", 14, payload={"approver_identity": "chief-chatgpt",
-           "integration_sha": INTEG, "decision": "approve"}, signer="overseer:mech:s1"),
+        # ADR-043: re_verify echoes the overseer's freshness nonce (signed via payload_digest).
+        _e("re_verify", 12, payload={"verdict": "GO", "challenge_nonce": T3_NONCE},
+           subject_sha=INTEG, signer="operator:claude:s2"),
+        _e("re_verify_challenge", 13, payload={"nonce": T3_NONCE}, subject_sha=INTEG,
+           signer="overseer:mech:s1"),
+        # ADR-043: approvals are key-bound to distinct roster SEATS, not overseer-relayed labels.
+        _e("approver_roster", 14, payload={"approvers": ["chief-gemini", "chief-chatgpt"]},
+           signer="overseer:mech:s1"),
+        _e("human_approval", 15, payload={"approver_identity": "chief-gemini",
+           "integration_sha": INTEG, "decision": "approve"}, signer="chief-gemini:relay:s1"),
+        _e("human_approval", 16, payload={"approver_identity": "chief-chatgpt",
+           "integration_sha": INTEG, "decision": "approve"}, signer="chief-chatgpt:relay:s1"),
     ]
     return evs
 
