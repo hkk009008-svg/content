@@ -108,23 +108,28 @@ attestations, `ci` signs `ci_result` (`predicate.py:152-161`).
 - **The package is wired into NOTHING.** `import threeway` appears only inside `threeway/` and
   `tests/` — no live seat, harness, or CI emits a threeway event today. The live coordination
   substrate is still the **legacy mailbox bus**.
-- **Slice 2.5 (legacy-bus migration substrate) is BUILT + hardened, not yet cut over.** The substrate
-  — `legacy_projector.py`, `divergence.py`, `cursor_backfill.py`, `cutover.py` — is built and
-  test-green (341 passed)
+- **Slice 2.5 (legacy-bus migration substrate) is BUILT + hardened, and CUT OVER (2026-06-22).** The
+  substrate — `legacy_projector.py`, `divergence.py`, `cursor_backfill.py`, `cutover.py` — is built and
+  test-green (356 passed)
   ([plan](../../superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md)).
-  The single authority-flip **cutover has NOT been executed** — gated on explicit user confirmation
-  (DECISIONS.md ADR-045). Cutover substrate was hardened in ADR-044/045 (atomic `_teardown`, dedup
-  drop fixes, pre-cursor-try strand gap closed); two dormant cutover gaps (total-order congruence +
-  seen-filename→seat-key) are tracked open for a follow-up round.
+  The single authority-flip **cutover WAS executed** under explicit user confirmation (DECISIONS.md
+  ADR-045): `refs/threeway/events` now holds the 768 migrated `event_sent` carriers + 6 backfilled seat
+  cursors, pushed to `origin` (oracle: `git for-each-ref refs/threeway/`). Cutover substrate was hardened
+  in ADR-044/045 (atomic `_teardown`, dedup drop fixes, pre-cursor-try strand gap closed); the two
+  formerly-dormant cutover gaps (total-order congruence ADR-050; seen-filename→seat-key ADR-051, plus its
+  read-only `divergence` sibling ADR-054) are now CLOSED + verified.
 - **Slice 3 (tiered T2/T3 co-sign machinery) is BUILT + enforcing (ADR-035).** `co_sign_satisfied`
   (`threeway/tier.py:39`) gates **T2** (other-pair operator co-sign) and **T3** (re_verify
   freshness-nonce challenge + two key-bound `human_approvals` from an overseer-signed `approver_roster`,
   ADR-043). It does **NOT** return False for T2/T3; it is **fail-closed** — True only when the required
   signed facts exist. The merge-gate tier machinery is enforcing. Only the strategic-loop **runtime**
-  (scope b: dual-chief apps, overseer fact emission, key provisioning) is unbuilt.
-- **Keys are NOT provisioned** — `coordination/threeway/keys/` holds only a README; no `.pub` files
-  exist. This is the **hard blocker for going live**. The merge-gate protected runner is design intent,
-  not deployed.
+  (scope b: dual-chief apps, overseer fact emission, seat→bus wiring) is unbuilt.
+- **Keys ARE provisioned and the bus is CUT OVER** — the former "hard blocker for going live" is
+  CLEARED. `coordination/threeway/keys/` holds the 9 `.pub` trust-root files (committed `d2a50f98`);
+  private `*.ed25519` keys live only in the keystore; `THREEWAY_CI_KEY` is set and
+  `THREEWAY_BUS_LIVE=true`. The REMAINING blocker for a live strategic LOOP (scope b): no seat/harness
+  emits or consumes bus events yet, and the merge-gate runner — though it runs clean against the live
+  bus (`--run-once` → 0 candidates) — is not yet a deployed sole-writer daemon.
 - **Forgery hardening (ADR-036/037/038):** revoke-authority + collision-aware index (ADR-036);
   event-id uniqueness at the gate and both stores (ADR-037); reserved merge-id + `brief_superseded`
   sibling (ADR-038) — closing the forgery / merge-DoS class.

@@ -15,28 +15,32 @@ unified system on top of the cross-provider three-way protocol.
 - Protocol spec: [`docs/superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md`](../../superpowers/specs/2026-06-19-cross-provider-seat-topology-design.md)
 - Slice-2.5 migration plan: [`docs/superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md`](../../superpowers/plans/2026-06-20-cross-provider-seat-topology-slice2.5-legacy-bus-migration.md)
 - The package: [`threeway/`](../../../threeway/)
-- Verified-truth + decisions: [`ARCHITECTURE.md`](../../../ARCHITECTURE.md) §13A · [`DECISIONS.md`](../../../DECISIONS.md) (ADR-034..053)
+- Verified-truth + decisions: [`ARCHITECTURE.md`](../../../ARCHITECTURE.md) §13A · [`DECISIONS.md`](../../../DECISIONS.md) (ADR-034..054)
 - Principle root: [`AGENTS.md`](../../../AGENTS.md) · Claude mechanics: [`CLAUDE.md`](../../../CLAUDE.md) · Codex mechanics: [`docs/protocol/codex/continuation.md`](../codex/continuation.md)
 
 **Status (verify before relying — `git for-each-ref refs/threeway/` is the live oracle):** the
 `threeway/` package — Slice 1+2 (signed bus, effective-state reducer, gate, RefEventStore), Slice 2.5
 (legacy-bus migration substrate), and Slice 3 (tiered T2/T3 co-sign machinery) — is BUILT, hardened,
-and test-green, but the bus is **NOT yet live**: `refs/threeway/events` does not exist and the live
-coordination substrate is still the legacy mailbox bus.
+and test-green, and **the bus has been CUT OVER (2026-06-22) and is LIVE**: `refs/threeway/events`
+holds the **768** migrated legacy-mailbox events as `event_sent` carriers + **6** backfilled seat
+cursors, pushed to `origin` (`git ls-remote origin 'refs/threeway/*'`). The retained
+`coordination/mailbox/sent/` is now read-only rollback.
 
-What has changed toward go-live (NOT yet a flip):
-- **Keys generated** into `coordination/threeway/keys/` (`<seat>.pub` for all 9 signing seats) — the
-  prior hard blocker. NOTE: these are still **uncommitted** here; committing the `.pub` trust root is
-  itself part of the user-gated go-live (a T3-classified commit), and private `*.ed25519` keys are
-  gitignored and live only in the keystore dir.
-- **Activation tooling** exists: `scripts/sign_ci_result.py` (CI signs `ci_result`, including
-  remote bus append for the go-live workflow),
-  `scripts/run_merge_gate.py` (the merge-gate daemon over `threeway.gate.run_gate`),
-  `scripts/agy_observer.py` (Antigravity read-only bus summary), `scripts/execute_threeway_cutover.sh`
-  (key provisioning + cutover driver), and an inert, manually-triggered ci-result signer job in
-  `.github/workflows/ci.yml` that requires a fetchable `integration_ref` plus the exact tested
-  `integration_sha`.
+What IS and is NOT live (be precise — this is bus *infrastructure*, not a live strategic loop):
+- **LIVE — bus infrastructure.** 768-event signed bus + 6 cursors on `origin`; the `.pub` trust root
+  committed (`d2a50f98`); the `THREEWAY_CI_KEY` secret set and the `THREEWAY_BUS_LIVE=true` repo
+  variable flipped, so the manual `workflow_dispatch` ci-result signer job is armed; the merge-gate
+  runner (`scripts/run_merge_gate.py`) runs clean against the live bus (0 candidates → no-op).
+- **NOT live — the strategic-loop RUNTIME (scope b).** No live seat / harness / web / pipeline path
+  emits or consumes bus events (`import threeway` appears only in `threeway/`, `tests/`, and the three
+  go-live scripts). Overseer fact emission (briefs/cycle_go/assignments/release_orders), seat→bus
+  wiring, and the merge-gate daemon as the *deployed* sole-writer of `main` are **UNBUILT**. Until
+  scope b lands, seats still coordinate via the legacy mailbox + direct `main` commits; that activity
+  does **not** appear on the frozen bus (the no-dual-write invariant requires the *runtime*, not ad-hoc
+  mailbox writes, to be the bus producer).
 
-The single authority-flip cutover has **NOT been executed** (irreversible; gated on explicit user
-confirmation — DECISIONS.md ADR-045). "Adoption" = executing the sequenced, user-gated migration, not
-flipping this status line. See `UNIFIED-OPERATING-DOCTRINE.md` §I.5.
+Activation tooling: `scripts/sign_ci_result.py`, `scripts/run_merge_gate.py`, `scripts/agy_observer.py`,
+`scripts/execute_threeway_cutover.sh`, and the `.github/workflows/ci.yml` `threeway-ci-result` job
+(fetchable `integration_ref` + exact tested `integration_sha`). The single authority-flip cutover was
+executed under explicit user confirmation (DECISIONS.md ADR-045). "Adoption" of the live loop = building
+scope b, not flipping a switch. See `UNIFIED-OPERATING-DOCTRINE.md` §I.5.
