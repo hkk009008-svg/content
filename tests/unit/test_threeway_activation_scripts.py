@@ -209,7 +209,8 @@ def test_cutover_cli_refuses_without_yes_then_runs_with_yes(tmp_path):
 # sys.path only — it does not reach a freshly-spawned subprocess. These pins run the scripts the way
 # CI actually does, so the import-path defect is visible.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_ACTIVATION_SCRIPTS = ["sign_ci_result.py", "run_merge_gate.py", "agy_observer.py"]
+_ACTIVATION_SCRIPTS = ["sign_ci_result.py", "run_merge_gate.py", "agy_observer.py",
+                       "overseer_emit.py", "bootstrap_emit.py"]
 
 
 def _bare_env():
