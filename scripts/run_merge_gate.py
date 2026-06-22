@@ -33,7 +33,8 @@ _RELEASE_KINDS = ("release_requested", "release_order")
 _STOP = False
 
 
-def _handle_stop(signum, frame):
+def _handle_stop(_signum, _frame):
+    # Async-signal-safe: only flip the flag (no I/O); the loop observes it at the next top.
     global _STOP
     _STOP = True
 
@@ -88,7 +89,9 @@ def main(argv=None) -> int:
     print("merge-gate daemon started.")
     while True:
         if _STOP:
-            print("merge-gate daemon stopped")
+            # Requested clean shutdown -> exit 0 (NOT 130/143): a supervisor must read this
+            # as a normal stop, not a crash to restart-as-failure.
+            print("merge-gate daemon stopped.")
             return 0
         try:
             store = RefEventStore(Path(args.repo_dir), remote=args.remote)
