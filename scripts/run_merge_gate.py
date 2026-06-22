@@ -9,6 +9,7 @@ predicate, CAS-merges the candidate's integration_sha onto main. run_gate is TOT
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 import time
 from pathlib import Path
@@ -25,6 +26,16 @@ from threeway.keys import load_private
 from threeway.refstore import RefEventStore
 
 _RELEASE_KINDS = ("release_requested", "release_order")
+
+# Module-level stop flag, flipped by a SIGTERM/SIGINT handler so the daemon can be
+# shut down between poll iterations WITHOUT aborting an in-flight poll_once (which
+# could leave the CAS merge half-done). Checked only at the TOP of the loop body.
+_STOP = False
+
+
+def _handle_stop(signum, frame):
+    global _STOP
+    _STOP = True
 
 
 def collect_candidate_ids(store) -> set:
@@ -48,24 +59,39 @@ def poll_once(store, *, repo, registry_dir, bus_id, main_ref):
     return out
 
 
-def main(argv=None) -> int:
+def _build_argparser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="Threeway merge-gate daemon.")
     ap.add_argument("--repo-dir", default=".")
     ap.add_argument("--registry-dir", default="coordination/threeway/keys")
     ap.add_argument("--bus-id", default="prod")
-    ap.add_argument("--main-ref", default="refs/heads/main")
+    # SAFETY (ADR-056 DD-1): default to the protected TEST ref, NEVER real refs/heads/main.
+    # The library predicate default is already the safe test-main; the daemon must not
+    # override it back to production main. An operator may still pass --main-ref explicitly.
+    ap.add_argument("--main-ref", default="refs/threeway/test-main")
+    # DD-3: when set, the RefEventStore is a clone of the live authoritative bus repo
+    # (push/fetch CAS against this remote); None = local co-located bus.
+    ap.add_argument("--remote", default=None, help="authoritative bus remote (live bus); default local")
     ap.add_argument("--interval", type=int, default=10, help="polling interval seconds")
     ap.add_argument("--run-once", action="store_true")
-    args = ap.parse_args(argv)
+    return ap
+
+
+def main(argv=None) -> int:
+    args = _build_argparser().parse_args(argv)
     try:
         load_private("merge-gate")   # precondition: we hold the merge-gate credential
     except Exception as e:
         print(f"FATAL: could not load merge-gate credential: {e}", file=sys.stderr)
         return 1
+    signal.signal(signal.SIGTERM, _handle_stop)
+    signal.signal(signal.SIGINT, _handle_stop)
     print("merge-gate daemon started.")
     while True:
+        if _STOP:
+            print("merge-gate daemon stopped")
+            return 0
         try:
-            store = RefEventStore(Path(args.repo_dir))
+            store = RefEventStore(Path(args.repo_dir), remote=args.remote)
             for cid, res in poll_once(store, repo=Path(args.repo_dir),
                                       registry_dir=args.registry_dir, bus_id=args.bus_id,
                                       main_ref=args.main_ref):
