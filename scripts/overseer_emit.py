@@ -134,6 +134,11 @@ def main(argv=None) -> int:
         print(f"Error loading overseer key: {e}", file=sys.stderr); return 1
     except AppendContentionExceeded as e:
         print(f"Bus contention, not emitted: {e}", file=sys.stderr); return 1
+    except ValueError as e:
+        # EventIdCollision / IdempotencyKeyReused (a fact with this id/key is already on the
+        # bus) and a malformed keystore (bytes.fromhex) are all ValueErrors — fail loud with a
+        # clean message instead of a traceback (a human-operated CLI must not dump a stack).
+        print(f"Not emitted: {e}", file=sys.stderr); return 1
     print(f"Emitted {ev.kind} for {ev.candidate_id} (seq {ev.seq}).")
     return 0
 

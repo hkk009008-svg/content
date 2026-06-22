@@ -152,3 +152,16 @@ def test_re_verify_challenge_mints_fresh_nonce(seatkit, tmp_path):
     ch = state.re_verify_challenge("A:c1")
     assert ch is not None and ch.subject_sha == "deadbeef"  # envelope
     assert isinstance(ch.payload["nonce"], str) and len(ch.payload["nonce"]) >= 16  # minted
+
+
+def test_reemit_same_id_different_payload_exits_clean_not_traceback(seatkit, tmp_path, capsys):
+    # A second fact with the same deterministic id but a CHANGED payload must fail loud
+    # (clean rc 1 + a stderr message), NOT raise an uncaught EventIdCollision traceback.
+    # (Identical re-emit is idempotent rc 0 via the store; this pins the changed-payload path.)
+    reg, ks, privs = seatkit; repo = _new_repo(tmp_path)
+    from scripts.overseer_emit import main
+    base = ["release_order", "--candidate-id", "A:c1", "--repo-dir", str(repo), "--remote", ""]
+    assert main([*base, "--integration-sha", "deadbeef"]) == 0
+    rc = main([*base, "--integration-sha", "feedface"])   # same id, different subject_sha
+    assert rc == 1
+    assert "Not emitted" in capsys.readouterr().err
