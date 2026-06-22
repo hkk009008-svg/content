@@ -9,6 +9,7 @@ event, so the state assertions go RED).
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
@@ -197,3 +198,38 @@ def test_cutover_cli_refuses_without_yes_then_runs_with_yes(tmp_path):
     rc = cutover.main(["--repo", str(r), "--coord-root", str(r), "--yes"])
     assert rc == 0
     assert "refs/threeway/events" in _git(r, "for-each-ref", "refs/threeway/").stdout
+
+
+# --------------------------------------------------------- bare-subprocess invocation contract
+# CI's `threeway-ci-result` job (.github/workflows/ci.yml) and the documented merge-gate /
+# observer runbooks invoke these as `python scripts/X.py ...` from the repo root — no PYTHONPATH,
+# no `python -m`. Running a file puts scripts/ on sys.path[0] (NOT the repo root), so a module-level
+# `from threeway... import` raises ModuleNotFoundError. The in-process tests above never catch this:
+# they `from scripts import X` under pytest, whose pyproject pythonpath=["."] patches the IN-PROCESS
+# sys.path only — it does not reach a freshly-spawned subprocess. These pins run the scripts the way
+# CI actually does, so the import-path defect is visible.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_ACTIVATION_SCRIPTS = ["sign_ci_result.py", "run_merge_gate.py", "agy_observer.py"]
+
+
+def _bare_env():
+    """A clean env for a real `python scripts/X.py`: GIT_INDEX_FILE stripped (seat-index hygiene)
+    and PYTHONPATH stripped, so the script must put the repo root on sys.path ITSELF — a developer
+    shell that exports PYTHONPATH=. must not mask the defect that CI (with no PYTHONPATH) would hit."""
+    e = dict(os.environ)
+    e.pop("GIT_INDEX_FILE", None)
+    e.pop("PYTHONPATH", None)
+    return e
+
+
+@pytest.mark.parametrize("script", _ACTIVATION_SCRIPTS)
+def test_activation_script_runs_as_a_bare_subprocess(script):
+    # --help exits 0 only AFTER the module-level `from threeway... import` runs, so a missing
+    # repo-root bootstrap surfaces here as ModuleNotFoundError (rc != 0).
+    proc = subprocess.run(
+        [sys.executable, f"scripts/{script}", "--help"],
+        cwd=_REPO_ROOT, capture_output=True, text=True, env=_bare_env(),
+    )
+    assert "ModuleNotFoundError" not in proc.stderr, (
+        f"{script} crashed on a bare `python scripts/{script}` (CI's invocation form):\n{proc.stderr}")
+    assert proc.returncode == 0, f"{script} --help exited {proc.returncode}:\n{proc.stderr}"

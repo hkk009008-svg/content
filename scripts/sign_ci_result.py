@@ -14,6 +14,13 @@ import argparse
 import sys
 from pathlib import Path
 
+# Bootstrap sys.path so a bare `python scripts/sign_ci_result.py` (CI's threeway-ci-result job +
+# the documented runbooks) imports the repo-root `threeway` package regardless of CWD: running a
+# file puts scripts/ on sys.path[0], not the repo root. Mirrors scripts/ci_smoke.py.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from threeway.envelope import Event
 from threeway.keys import load_private
 from threeway.policy import default_policy

@@ -2719,3 +2719,43 @@ dir. Full threeway suite after the fix:
 mutation — reverting the seated-set derivation reddened the pin → non-vacuous — and confirmed the
 Rule-13 sweep clean and the read-only catch-not-crash contract reachable;
 `logs/verify-adr054-divergence-seated-canon-lane-v.json`) → inventory row reconciled `fixed` → `verified`.
+
+## ADR-055 — Make the threeway activation scripts self-bootstrap sys.path (close the bare-`python scripts/X.py` ModuleNotFoundError; follow-up to ADR-052/053)
+
+**Context.** ADR-052 authored `scripts/sign_ci_result.py`, `scripts/run_merge_gate.py`, and
+`scripts/agy_observer.py`, and ADR-053 wired the signer into the `threeway-ci-result` CI job, which runs
+`python scripts/sign_ci_result.py --integration-sha "$INTEGRATION_SHA" --result PASS --remote origin` with
+no `PYTHONPATH`, no working-directory override, and no `python -m`. All three scripts `import` the
+repo-root `threeway` package at module load, but — unlike every other root-importing script in `scripts/`
+(canonically `scripts/ci_smoke.py:51-55`) — they omitted the `sys.path` bootstrap. Running a file puts
+`scripts/` on `sys.path[0]`, NOT the repo root, so a bare invocation dies with
+`ModuleNotFoundError: No module named 'threeway'` before argparse runs. The defect was latent because the
+existing pins exercised the scripts in-process (`from scripts import sign_ci_result`) under pytest, whose
+`pyproject` `pythonpath=["."]` patches the in-process `sys.path` only — it never reaches a spawned
+subprocess. With `THREEWAY_BUS_LIVE=true` and the bus live on origin, the next `workflow_dispatch`
+reaching the signer step would crash instead of signing the `ci_result`.
+
+**Decision.** Fix the root cause at the scripts, not the call-site: add the standard repo-root `sys.path`
+bootstrap (`_REPO_ROOT = Path(__file__).resolve().parent.parent; sys.path.insert(0, ...)` guarded by a
+membership check) ahead of the `from threeway... import` lines in all three scripts, mirroring
+`scripts/ci_smoke.py`. Rejected the ADR-053-suggested alternatives — adding `PYTHONPATH: .` to the
+`ci.yml` step `env:` or switching to `python -m` — because each patches only the one CI call-site (leaving
+the documented `run_merge_gate.py` / `agy_observer.py` runbooks and any future caller still broken), and
+because it would make the threeway step *inconsistent* with how the `smoke` / `pytest-unit` jobs already
+run their sibling scripts (`ci_smoke.py`, `wave_gate_check.py`, `check_no_ceremony.py`) bare and
+self-bootstrapping. The bootstrap fixes CI, the runbooks, and future callers in one place, and leaves the
+`ci.yml` `run:` command (and its `test_ci_workflow_signs_only_an_explicit_threeway_integration_sha`
+string assertion) untouched.
+
+**Why safe / non-vacuous.** TDD red→green. New pin
+`tests/unit/test_threeway_activation_scripts.py::test_activation_script_runs_as_a_bare_subprocess`
+(parametrized over all three scripts) spawns `python scripts/X.py --help` from the repo root with a clean
+env (`GIT_INDEX_FILE` and `PYTHONPATH` both stripped, so a dev shell exporting `PYTHONPATH=.` cannot mask
+it) and asserts rc==0 and no `ModuleNotFoundError`. It first failed RED on all three with the exact
+`No module named 'threeway'` traceback, and passed GREEN after the bootstrap. `--help` exits 0 only after
+the module-level `threeway` import runs, so the pin is non-vacuous: reverting any one bootstrap reddens
+that parameter. Full result:
+`env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_activation_scripts.py -q` →
+`9 passed`; `scripts/ci_smoke.py` and `scripts/check_no_ceremony.py` both exit 0. No
+`docs/REMEDIATION-INVENTORY.md` row applies (that campaign tracks cinema-pipeline defects, not threeway
+go-live tooling), so there is no inventory status to reconcile.

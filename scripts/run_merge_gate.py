@@ -13,6 +13,13 @@ import sys
 import time
 from pathlib import Path
 
+# Bootstrap sys.path so a bare `python scripts/run_merge_gate.py` (the documented merge-gate runner)
+# imports the repo-root `threeway` package regardless of CWD: running a file puts scripts/ on
+# sys.path[0], not the repo root. Mirrors scripts/ci_smoke.py.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from threeway.gate import run_gate
 from threeway.keys import load_private
 from threeway.refstore import RefEventStore
