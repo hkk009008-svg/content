@@ -48,6 +48,21 @@ def _cmd_brief(a) -> Event:
                         brief_version=a.brief_version, bus_id=a.bus_id)
 
 
+def _cmd_assignment(a) -> Event:
+    payload = {"pair": a.pair, "builder": a.builder, "builder_provider": a.builder_provider,
+               "primary_verifier": a.primary_verifier,
+               "primary_verifier_provider": a.primary_verifier_provider,
+               "executing_coordinator": a.executing_coordinator}
+    return _build_event("assignment", payload, a.candidate_id, bus_id=a.bus_id)
+
+
+def _cmd_cycle_go(a) -> Event:
+    payload = {"brief_id": a.brief_id, "brief_version": a.brief_version,
+               "tier": a.tier, "policy_digest": a.policy_digest}
+    return _build_event("cycle_go", payload, a.candidate_id,
+                        brief_id=a.brief_id, brief_version=a.brief_version, bus_id=a.bus_id)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Threeway overseer signing CLI.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -64,6 +79,19 @@ def main(argv=None) -> int:
     pb.add_argument("--assigned-tier", required=True, choices=["T0", "T1", "T2", "T3"])
     pb.add_argument("--allowed-paths", nargs="+", required=True)
     pb.set_defaults(fn=_cmd_brief)
+
+    pa = sub.add_parser("assignment"); _common(pa)
+    for f in ("pair", "builder", "builder-provider", "primary-verifier",
+              "primary-verifier-provider", "executing-coordinator"):
+        pa.add_argument(f"--{f}", required=True)
+    pa.set_defaults(fn=_cmd_assignment)
+
+    pc = sub.add_parser("cycle_go"); _common(pc)
+    pc.add_argument("--brief-id", default="b1")
+    pc.add_argument("--brief-version", type=int, default=1)
+    pc.add_argument("--tier", required=True, choices=["T0", "T1", "T2", "T3"])
+    pc.add_argument("--policy-digest", required=True)
+    pc.set_defaults(fn=_cmd_cycle_go)
 
     args = ap.parse_args(argv)
     if (args.remote or "").lower() in ("", "none"):

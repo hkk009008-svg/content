@@ -89,3 +89,32 @@ def test_brief_signed_with_nonoverseer_key_is_dropped(seatkit, tmp_path, monkeyp
           "--repo-dir", str(repo), "--remote", ""])
     state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
     assert state.brief("b1", 1) is None   # signature mismatch vs registry "overseer" pubkey -> dropped
+
+
+def test_assignment_round_trips(seatkit, tmp_path):
+    reg, ks, privs = seatkit; repo = _new_repo(tmp_path)
+    from scripts.overseer_emit import main
+    assert main(["assignment", "--candidate-id", "A:c1", "--pair", "A",
+                 "--builder", "director", "--builder-provider", "codex",
+                 "--primary-verifier", "operator", "--primary-verifier-provider", "claude",
+                 "--executing-coordinator", "coordinator",
+                 "--repo-dir", str(repo), "--remote", ""]) == 0
+    state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
+    a = state.assignment("A")
+    assert a is not None and a.signer.split(":", 1)[0] == "overseer"
+    assert a.payload["builder_provider"] == "codex"
+    assert a.payload["primary_verifier_provider"] == "claude"
+    assert a.payload["executing_coordinator"] == "coordinator"
+
+
+def test_cycle_go_round_trips(seatkit, tmp_path):
+    reg, ks, privs = seatkit; repo = _new_repo(tmp_path)
+    from threeway.policy import default_policy
+    from scripts.overseer_emit import main
+    pd = default_policy().policy_digest()
+    assert main(["cycle_go", "--candidate-id", "A:c1", "--brief-id", "b1",
+                 "--brief-version", "1", "--tier", "T1", "--policy-digest", pd,
+                 "--repo-dir", str(repo), "--remote", ""]) == 0
+    state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
+    cg = state.cycle_go("b1", 1)
+    assert cg is not None and cg.payload["tier"] == "T1" and cg.payload["policy_digest"] == pd
