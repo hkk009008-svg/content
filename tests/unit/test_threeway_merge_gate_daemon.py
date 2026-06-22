@@ -105,3 +105,12 @@ def test_stop_flag_exits_clean_without_running_iteration(monkeypatch, capsys):
     assert rc == 0
     assert called["n"] == 0
     assert "merge-gate daemon stopped" in capsys.readouterr().out
+
+
+def test_wrapper_passes_test_ref_and_no_pythonpath():
+    text = (_REPO_ROOT / "scripts/run_merge_gate.sh").read_text()  # absolute, CWD-independent
+    assert "refs/threeway/test-main" in text          # DD-1 safety boundary
+    assert "--registry-dir coordination/threeway/keys" in text
+    assert "--remote origin" in text                  # DD-3 live bus
+    assert "refs/heads/main" not in text              # never real main
+    assert "PYTHONPATH" not in text                   # DD-2: rely on ADR-055 self-bootstrap
