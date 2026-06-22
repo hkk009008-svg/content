@@ -1948,6 +1948,18 @@ TOTAL (the `isinstance(pair, str)` skip + the `_pair_namespace` None-guard). Two
 declare orders; mutation-proof: dropping the namespace clause turns the attacker-earlier test RED. See
 `DECISIONS.md` ADR-042 + `threeway-candidate-id-pair-binding-dos`.
 
+### 13A.8 Minimal operable mechanical-seat runtime (scope-b sub-project 1, ADR-056)
+
+**Bus LIVE; seat-runtime: sub-project 1 operable (human-driven); sub-project 2 (real wiring) + hardening track pending.**
+
+Three new scripts make a T1 brief→merge end-to-end operable, human-driven, against the protected TEST ref only:
+
+- `scripts/overseer_emit.py` — overseer signing CLI; 6 subcommands (`brief`, `assignment`, `cycle_go`, `release_order`, `approver_roster`, `re_verify_challenge`). Constructs an `Event(seq=0)` and delegates signing to `RefEventStore.append` (DD-5). Defaults `--remote origin`; catches `AppendContentionExceeded` / `ValueError` → clean exit-1 (DD-4).
+- `scripts/bootstrap_emit.py` — temporary interactive-seat shim; emits `candidate`, `attestation`, and `release_requested` as the non-overseer seats. Removed by sub-project 2 (real seat↔bus wiring).
+- `scripts/run_merge_gate.sh` — standing daemon wrapper; passes `--main-ref refs/threeway/test-main` and `--remote origin` to `run_merge_gate.py`; relies on ADR-055 sys.path self-bootstrap (no import-path env export, DD-2). Safety boundary: writes ONLY `refs/threeway/test-main`, never `refs/heads/main` (DD-1, user-ratified 2026-06-23; `run_merge_gate.py:71` default).
+
+The E2E walking-skeleton (`tests/unit/test_threeway_e2e_walking_skeleton.py`) drives all three CLIs + the daemon (`--run-once`) against a temp repo and asserts the test ref advances and `merge_completed` is emitted. See `DECISIONS.md` ADR-056.
+
 ---
 
 ## 14. Frontend — React 19 + Vite

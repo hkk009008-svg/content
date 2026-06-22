@@ -102,7 +102,7 @@ The CLI constructs the `Event` with `seq=0` and calls `store.append(ev, private_
 | `tests/unit/test_threeway_bootstrap_emit.py` | shim CLI round-trip pins | **Create** |
 | `tests/unit/test_threeway_merge_gate_daemon.py` | daemon default/remote/shutdown pins + wrapper guard | **Create** |
 | `tests/unit/test_threeway_activation_scripts.py` | add the two new scripts to the bare-subprocess pin | **Modify** |
-| `tests/integration/test_threeway_e2e_walking_skeleton.py` | full T1 brief→merge via subprocesses + daemon | **Create** |
+| `tests/unit/test_threeway_e2e_walking_skeleton.py` | full T1 brief→merge via subprocesses + daemon | **Create** |
 | `DECISIONS.md` | ADR-056 (DD-1..DD-5) | **Modify** (append; never edit prior ADRs) |
 | `ARCHITECTURE.md` | record the operable runtime + the 3 new scripts | **Modify** |
 | `docs/superpowers/specs/2026-06-22-…-design.md` | fix the two stale anchors found (re_verify fold 357-362; sys.path 19-22) | **Modify** |
@@ -686,8 +686,8 @@ def test_wrapper_passes_test_ref_and_no_pythonpath():
 ```bash
 #!/usr/bin/env bash
 # Standing merge-gate daemon (threeway scope-b sub-project 1).
-# Writes the protected TEST ref refs/threeway/test-main (NEVER refs/heads/main; ADR-056 DD-1).
-# Relies on ADR-055 sys.path self-bootstrap in run_merge_gate.py (no PYTHONPATH export; DD-2).
+# Writes the protected TEST ref refs/threeway/test-main (NEVER real production main; ADR-056 DD-1).
+# Relies on ADR-055 sys.path self-bootstrap in run_merge_gate.py (no import-path env export; DD-2).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 exec .venv/bin/python scripts/run_merge_gate.py \
@@ -730,7 +730,7 @@ Run: `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_
 ### Task 9: full T1 brief→merge via real CLI subprocesses + daemon `--run-once`
 
 **Files:**
-- Create: `tests/integration/test_threeway_e2e_walking_skeleton.py`
+- Create: `tests/unit/test_threeway_e2e_walking_skeleton.py`
 
 **This is the "operable" acceptance proof.** Drive the CLIs as **subprocesses** (the way they actually run), against a temp repo + local bus (no origin). Sequence mirrors spec §4: overseer brief/assignment/cycle_go → bootstrap candidate + preliminary attestation → CI signer `ci_result` → bootstrap release attestation + release_requested → overseer release_order → daemon `--run-once`.
 
@@ -791,7 +791,7 @@ def test_t1_brief_to_merge_walking_skeleton(seatkit, live_repo):
     state = verify_and_reduce(RefEventStore(r).all_events(), registry_dir=str(reg), bus_id="prod")
     assert state.merge_completed(cid) is not None
 ```
-> **Watch items when implementing:** (a) `sign_ci_result.py` needs the `ci` key in the keystore (seatkit provides it) and finds the candidate by `integration_sha` — ensure the candidate is emitted before the CI signer runs (it is, step 2). (b) The `policy_digest` the CLIs use must match across candidate/cycle_go/ci_result — all derive from `default_policy().policy_digest()`, so they agree. (c) Place the file in `tests/integration/` — **confirmed collected** (`pyproject.toml:34 testpaths = ["tests"]`; the dir already exists with collected tests). Do NOT move it; keep it matching the file-structure table.
+> **Watch items when implementing:** (a) `sign_ci_result.py` needs the `ci` key in the keystore (seatkit provides it) and finds the candidate by `integration_sha` — ensure the candidate is emitted before the CI signer runs (it is, step 2). (b) The `policy_digest` the CLIs use must match across candidate/cycle_go/ci_result — all derive from `default_policy().policy_digest()`, so they agree. (c) **RELOCATED to `tests/unit/`** during implementation — CI runs `pytest tests/unit/` only (`tests/integration/` is excluded as cloud-creds-only); the E2E is hermetic (temp repo, no origin) so `tests/unit/` is correct. Keep it matching the file-structure table (updated to `tests/unit/`).
 
 - [ ] **Step 2: run → FAIL** first (most likely a predicate PENDING/REJECTED — read `res.reason` by temporarily logging the daemon output). Iterate using the verified predicate chain (§"Verified anchors") until MERGEABLE.
 - [ ] **Step 3 (GREEN): make it pass.** Do NOT weaken the gate — fix the emit sequence/args until the real predicate is satisfied. The ref must advance to `integ` and `merge_completed` must exist.

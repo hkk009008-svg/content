@@ -70,7 +70,7 @@ hardening track, and the confirmed framing items are carried as spec content her
     `reducer.py:367-371`): payload `{approvers: [seats]}` (allowed approver **seats**); keyed by envelope
     `candidate_id`.
   - `re_verify_challenge` (NOT in loop.py — consumers `tier.py:131` `challenge.payload.get("nonce")` and
-    `tier.py:129` `challenge.subject_sha`, fold `reducer.py:357-360`): payload `{nonce}`; **envelope**
+    `tier.py:129` `challenge.subject_sha`, fold `reducer.py:357-362`): payload `{nonce}`; **envelope**
     `subject_sha`=integration_sha; keyed by envelope `candidate_id`. The CLI MINTS a fresh unguessable
     nonce via `secrets.token_hex(...)` (the ADR-043 freshness precondition: the overseer must issue
     fresh, non-reused nonces; the gate enforces only the echo binding).
@@ -92,8 +92,8 @@ hardening track, and the confirmed framing items are carried as spec content her
   `merge-gate daemon stopped` (never abort mid-`run_gate` — it is already TOTAL). The wrapper script is
   the other new deliverable.
 
-### 3.3 CI signer — ALREADY FIXED (ADR-055, `e45f2cf6`); verify & preserve, no new code owed
-- The `ModuleNotFoundError` crash is already fixed: `scripts/sign_ci_result.py:17-22` self-bootstraps
+### 3.3 CI signer — DONE (ADR-055, `e45f2cf6`); verify & preserve, no new code owed
+- The `ModuleNotFoundError` crash is already fixed: `scripts/sign_ci_result.py:19-22` self-bootstraps
   the repo root onto `sys.path` (chosen over a ci.yml `PYTHONPATH:` so `run_merge_gate.py` and
   `agy_observer.py` get the same treatment). A bare-subprocess pin already exists —
   `tests/unit/test_threeway_activation_scripts.py::test_activation_script_runs_as_a_bare_subprocess`

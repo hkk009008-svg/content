@@ -2759,3 +2759,56 @@ that parameter. Full result:
 `9 passed`; `scripts/ci_smoke.py` and `scripts/check_no_ceremony.py` both exit 0. No
 `docs/REMEDIATION-INVENTORY.md` row applies (that campaign tracks cinema-pipeline defects, not threeway
 go-live tooling), so there is no inventory status to reconcile.
+
+## ADR-056 — Minimal operable mechanical-seat runtime (threeway scope-b, sub-project 1)
+
+**Context.** The threeway signed bus is live as infrastructure (ADR cutover) but the strategic-loop
+runtime was unbuilt — no producer emitted or consumed bus events. This sub-project builds the smallest
+runtime that makes a T1 candidate flow brief→merge end-to-end, driven by a human operator, against the
+protected TEST ref `refs/threeway/test-main` (never production main). Plan:
+`docs/superpowers/plans/2026-06-23-threeway-scope-b-mechanical-seat-runtime.md`.
+
+**Decisions (DD-1..DD-5)** — resolving spec-vs-code drift found by re-deriving anchors against HEAD:
+
+**DD-1 (USER-RATIFIED 2026-06-23).** The merge-gate daemon (`scripts/run_merge_gate.py`) now defaults
+`--main-ref` to `refs/threeway/test-main`, not `refs/heads/main`. The library predicate default
+(`threeway/predicate.py:26` `MAIN_REF`) is already the safe test ref; the daemon previously overrode it
+to production main (`run_merge_gate.py:56` pre-fix), so a bare invocation could promote real main. The
+wrapper also passes the test ref explicitly, and a guard test
+(`tests/unit/test_threeway_merge_gate_daemon.py::test_wrapper_passes_test_ref_and_no_pythonpath`) asserts
+the safe default and that the wrapper never names `refs/heads/main`. Promotion of real
+`refs/heads/main` is deferred to the hardening track. This changed an existing CLI's default behavior —
+ratified by the user.
+
+**DD-2.** `scripts/run_merge_gate.sh` relies on the ADR-055 sys.path self-bootstrap in
+`scripts/run_merge_gate.py`; it does NOT export PYTHONPATH (the spec's older §3.2 suggestion was
+superseded by §3.3 + ADR-055).
+
+**DD-3.** `--remote` was added to `scripts/run_merge_gate.py` (default `None` = local bus) so the
+standing daemon can poll the live origin bus; the wrapper passes `--remote origin`.
+
+**DD-4.** The signing CLIs default `--remote origin` and treat `""` / `"none"` as local; both catch
+`AppendContentionExceeded` and `ValueError` (id-collision / idempotency-key-reuse / malformed key) →
+a clean exit-1 message instead of a traceback (a human-operated CLI must fail loud, not dump a stack).
+
+**DD-5.** Signing is `RefEventStore.append`'s responsibility — the CLIs construct the `Event` with
+`seq=0` and never call `sign_event` themselves (the store assigns the real seq then signs;
+pre-signing would sign a stale seq=0).
+
+**Deferred design note.** `scripts/overseer_emit.py` uses a deterministic event id
+(`f"{kind}-overseer-{candidate_id}"`), mirroring the canonical `loop.py` builder, so exactly one fact
+per kind per candidate is emittable (a second with a changed payload exits cleanly per DD-4). A
+multi-round `re_verify_challenge` (a fresh nonce each round) would need a distinct or overridable id —
+deferred; the T1 walking-skeleton does not use `re_verify_challenge` (it is T3).
+
+**Why safe / non-vacuous.** A T1 brief→merge is operable, human-driven, against `refs/threeway/test-main`;
+production `refs/heads/main` is untouched. The E2E walking-skeleton
+(`tests/unit/test_threeway_e2e_walking_skeleton.py`) drives the real CLIs as subprocesses + the daemon
+(`--run-once`) against a temp repo; asserts `refs/threeway/test-main` advances to the correct
+`integration_sha` and `merge_completed` is emitted. Per-task commits dual-reviewed (spec + code
+quality); operator Lane-V pass owed before marked verified.
+
+**Consequences.** The §7 hardening track (CI attestor, per-principal approver keys, external trust
+anchor, ref-ACL enforcement, liveness/recovery, key rotation, richer attestations) and the §7
+automation-track overseer-plan auto-decompose layer and sub-project 2 (real seat↔bus wiring; removes
+`scripts/bootstrap_emit.py`) remain pending.
