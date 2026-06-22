@@ -63,6 +63,11 @@ def _cmd_cycle_go(a) -> Event:
                         brief_id=a.brief_id, brief_version=a.brief_version, bus_id=a.bus_id)
 
 
+def _cmd_release_order(a) -> Event:
+    return _build_event("release_order", {"candidate_id": a.candidate_id}, a.candidate_id,
+                        subject_sha=a.integration_sha, bus_id=a.bus_id)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Threeway overseer signing CLI.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -92,6 +97,10 @@ def main(argv=None) -> int:
     pc.add_argument("--tier", required=True, choices=["T0", "T1", "T2", "T3"])
     pc.add_argument("--policy-digest", required=True)
     pc.set_defaults(fn=_cmd_cycle_go)
+
+    pr = sub.add_parser("release_order"); _common(pr)
+    pr.add_argument("--integration-sha", required=True)
+    pr.set_defaults(fn=_cmd_release_order)
 
     args = ap.parse_args(argv)
     if (args.remote or "").lower() in ("", "none"):

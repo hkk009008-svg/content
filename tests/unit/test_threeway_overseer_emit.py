@@ -118,3 +118,15 @@ def test_cycle_go_round_trips(seatkit, tmp_path):
     state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
     cg = state.cycle_go("b1", 1)
     assert cg is not None and cg.payload["tier"] == "T1" and cg.payload["policy_digest"] == pd
+
+
+def test_release_order_subject_sha_on_envelope_not_payload(seatkit, tmp_path):
+    reg, ks, privs = seatkit; repo = _new_repo(tmp_path)
+    from scripts.overseer_emit import main
+    assert main(["release_order", "--candidate-id", "A:c1",
+                 "--integration-sha", "deadbeef", "--repo-dir", str(repo), "--remote", ""]) == 0
+    state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
+    ro = state.release_order("A:c1")
+    assert ro is not None and ro.signer.split(":", 1)[0] == "overseer"
+    assert ro.subject_sha == "deadbeef"          # envelope
+    assert ro.payload == {"candidate_id": "A:c1"}  # subject_sha NOT in payload
