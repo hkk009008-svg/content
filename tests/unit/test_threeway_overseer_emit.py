@@ -130,3 +130,25 @@ def test_release_order_subject_sha_on_envelope_not_payload(seatkit, tmp_path):
     assert ro is not None and ro.signer.split(":", 1)[0] == "overseer"
     assert ro.subject_sha == "deadbeef"          # envelope
     assert ro.payload == {"candidate_id": "A:c1"}  # subject_sha NOT in payload
+
+
+def test_approver_roster_round_trips(seatkit, tmp_path):
+    reg, ks, privs = seatkit; repo = _new_repo(tmp_path)
+    from scripts.overseer_emit import main
+    assert main(["approver_roster", "--candidate-id", "A:c1",
+                 "--approvers", "chief-gemini", "chief-chatgpt",
+                 "--repo-dir", str(repo), "--remote", ""]) == 0
+    state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
+    r = state.approver_roster("A:c1")
+    assert r is not None and r.payload["approvers"] == ["chief-gemini", "chief-chatgpt"]
+
+
+def test_re_verify_challenge_mints_fresh_nonce(seatkit, tmp_path):
+    reg, ks, privs = seatkit; repo = _new_repo(tmp_path)
+    from scripts.overseer_emit import main
+    assert main(["re_verify_challenge", "--candidate-id", "A:c1",
+                 "--integration-sha", "deadbeef", "--repo-dir", str(repo), "--remote", ""]) == 0
+    state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
+    ch = state.re_verify_challenge("A:c1")
+    assert ch is not None and ch.subject_sha == "deadbeef"  # envelope
+    assert isinstance(ch.payload["nonce"], str) and len(ch.payload["nonce"]) >= 16  # minted

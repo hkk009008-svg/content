@@ -7,6 +7,7 @@ payload/envelope shapes built by threeway.loop.build_candidate_events (the impli
 spec — a wrong key name makes the reducer/predicate silently drop the fact).
 """
 import argparse
+import secrets
 import sys
 from pathlib import Path
 
@@ -68,6 +69,19 @@ def _cmd_release_order(a) -> Event:
                         subject_sha=a.integration_sha, bus_id=a.bus_id)
 
 
+def _cmd_approver_roster(a) -> Event:
+    return _build_event("approver_roster", {"approvers": list(a.approvers)},
+                        a.candidate_id, bus_id=a.bus_id)
+
+
+def _cmd_re_verify_challenge(a) -> Event:
+    # ADR-043 freshness: the overseer mints a fresh, unguessable nonce; the gate enforces
+    # only the echo binding. secrets.token_hex (NOT random) satisfies the freshness precondition.
+    nonce = a.nonce or secrets.token_hex(16)
+    return _build_event("re_verify_challenge", {"nonce": nonce}, a.candidate_id,
+                        subject_sha=a.integration_sha, bus_id=a.bus_id)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Threeway overseer signing CLI.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -101,6 +115,15 @@ def main(argv=None) -> int:
     pr = sub.add_parser("release_order"); _common(pr)
     pr.add_argument("--integration-sha", required=True)
     pr.set_defaults(fn=_cmd_release_order)
+
+    pr2 = sub.add_parser("approver_roster"); _common(pr2)
+    pr2.add_argument("--approvers", nargs="+", required=True, help="allowed approver SEATS")
+    pr2.set_defaults(fn=_cmd_approver_roster)
+
+    pv = sub.add_parser("re_verify_challenge"); _common(pv)
+    pv.add_argument("--integration-sha", required=True)
+    pv.add_argument("--nonce", default=None, help="omit to mint a fresh one (recommended)")
+    pv.set_defaults(fn=_cmd_re_verify_challenge)
 
     args = ap.parse_args(argv)
     if (args.remote or "").lower() in ("", "none"):
