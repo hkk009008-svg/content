@@ -59,6 +59,11 @@ Scope-b = two independent subsystems:
   interactive-seat fact shim), and an end-to-end walking-skeleton test. Operating model = human-operated
   CLIs, "minimal operable" (per-principal keys + independent attestor are fast-follows). Spec:
   `docs/superpowers/specs/2026-06-22-threeway-scope-b-mechanical-seat-runtime-design.md`.
+- **Automation track (fast-follow, ABOVE sub-project 1):** the **`overseer-plan` auto-decompose layer** —
+  ingests ONE structured chief decision + bus state and emits the correct ORDERED sequence of overseer
+  facts (dry-run+confirm; overseer-authority facts only; idempotent), instead of the operator
+  hand-issuing each `overseer_emit`. First step toward the fully-automated overseer (deferred Approach B).
+  Spec §7. Its trigger logic = the overseer-action trigger table (each `PENDING "no <overseer fact>"`).
 - **Sub-project 2 (separate, later):** real seat↔bus wiring (interactive seats emit/consume bus events
   instead of the mailbox); removes `bootstrap_emit.py`.
 - **Hardening track (gates production sign-off):** the §2 genuine gaps above.
@@ -71,11 +76,14 @@ an optional fast-follow.**
 
 ## 4. NEXT (in order)
 
-1. **`writing-plans`** on the sub-project-1 spec → implementation plan (the brainstorming terminal step;
-   not run this session per user direction).
+1. **`writing-plans` — DONE** (peer-created, currently **untracked WIP**):
+   `docs/superpowers/plans/2026-06-23-threeway-scope-b-mechanical-seat-runtime.md` — 10 tasks / 6 chunks
+   at HEAD `84397381`, records design decisions as **ADR-056**. Commit it (it's not mine to commit) then
+   execute.
 2. Implement sub-project 1 (TDD, campaign discipline). NOTE: §3.3 CI work is already done (ADR-055) —
    start with `overseer_emit.py` + the daemon wrapper/clean-shutdown + `bootstrap_emit.py` + the E2E test.
-3. Then the hardening track, then sub-project 2.
+3. Then the **automation track** (`overseer-plan` auto-decompose, §3 above), the **hardening track**,
+   and **sub-project 2** — in whatever order the chiefs prioritize.
 
 Also open (not blocking):
 - **Seat consolidation** (answered this session): retire 4 redundant running seats (Codex `director2`,

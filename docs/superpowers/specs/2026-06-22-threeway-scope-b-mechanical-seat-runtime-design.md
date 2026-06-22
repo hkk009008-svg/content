@@ -157,6 +157,20 @@ hardening track, and the confirmed framing items are carried as spec content her
 - Richer attestation payloads: policy version, toolchain digest, evidence hash, expiry; bind tree-OID
   separately (review G4).
 
+**Deferred → automation track (fast-follow, ABOVE this sub-project):**
+- **`overseer-plan` auto-decompose layer.** A tool above `overseer_emit` that ingests ONE structured
+  chief decision (a defined decision-schema = the chief-output contract) + the current bus state, and
+  emits the correct ORDERED sequence of overseer facts — instead of the operator hand-issuing each
+  `overseer_emit`. Constraints: (a) **dry-run + explicit confirm** before signing — preserves the human
+  checkpoint on the release key (`release_order`); (b) emits ONLY overseer-authority facts and SURFACES
+  the non-overseer facts still owed (candidate / attestation / ci) for the seats or `bootstrap_emit`;
+  (c) **idempotent** — re-reads the bus, never re-emits a fact already present. Turns "chief decision →
+  you relay → operator hand-emits N facts" into "chief decision → you relay → `overseer-plan` emits the
+  sequence on confirm." Deferred from minimal because it removes a per-fact human checkpoint and needs
+  the structured-decision schema defined first; it is the first step toward the fully-automated overseer
+  (the deferred Approach B). Its trigger logic is exactly the overseer-action trigger table (each
+  predicate `PENDING "no <overseer fact>"` → emit that fact).
+
 **Deferred → sub-project 2:** real seat↔bus wiring (interactive seats emit/consume bus events instead
 of the mailbox); `bootstrap_emit.py` is removed when this lands.
 
