@@ -2908,3 +2908,69 @@ Lane-V pass owed before marked verified (impl≠verifier).
 
 **Consequences.** `overseer_plan` now covers the full tier range for the overseer-authority facts. The
 §7 hardening track and sub-project 2 (real seat↔bus wiring) remain pending per chief prioritization.
+
+## ADR-059 — `candidate_aborted` read-time abort authority (close the forge / cross-pair abort DoS)
+
+**Context.** While grounding the C1 rework-breaker (handoff `2026-06-23-session-wrap`), an audit of the
+reducer's fold branches against `_AUTHORIZED_SINGLETON_SEAT` found `candidate_aborted` was the LONE
+load-bearing singleton with NO authority filter. The fold (`threeway/reducer.py:344`) recorded an abort
+for ANY validly-signed seat, and `EffectiveState.is_aborted` was bare set-membership; the predicate
+(`threeway/predicate.py:49`) REJECTs any candidate where `is_aborted` is True. So any keyholder (any
+operator / ci / other-pair coordinator) could append a validly-signed `candidate_aborted` for ANY
+`candidate_id` → that candidate is permanently REJECTed → cross-pair merge DoS. Same forge/availability
+class as ADR-036/037/038. Severity CRITICAL (authority/availability); current live-exploitability LOW
+(the gate targets the protected TEST ref only, interactive seats offline) but it MUST close before any
+real-`main` promotion and is the precondition for C1 (the rework breaker must count only AUTHORIZED aborts).
+
+**Decision — abort authority = the candidate's bound-pair `executing_coordinator`, resolved at READ.**
+(User-decided 2026-06-23.) Mirrors `authoritative_candidate` (ADR-039/042):
+
+- **DD-1 — record all, resolve at read.** The fold cannot resolve authority at record time, because the
+  authorizing seat depends on the pair's overseer `assignment`, which may arrive in any event order. So
+  the reducer records ALL aborts as `_aborted_by: dict[candidate_id → set(signer-seats)]`
+  (`threeway/reducer.py:69`), and `is_aborted` (`:95`) resolves authority on READ: effective iff the
+  bound-pair `executing_coordinator` is among the aborting seats. The bound pair is the candidate_id's
+  namespace (`_pair_namespace`, the `"<pair>:"` prefix); its coordinator is
+  `assignment(ns).payload["executing_coordinator"]`. This is the same record-all / resolve-at-read shape
+  as `candidate`.
+- **DD-2 — fail-safe; only narrows.** No abort fact / un-namespaced id / no assignment for the bound pair
+  / non-str `executing_coordinator` → `is_aborted` returns False. The change can ONLY ever DROP an
+  unauthorized abort — it never widens what can abort nor what can promote, and an AUTHORIZED abort still
+  REJECTs (no availability regression for legitimate reworks). `assignment()` is overseer-only at record
+  time, so a forged assignment cannot redirect abort authority.
+- **DD-3 — read-path totality (ADR-041).** `is_aborted` is on `run_gate`'s step-2 path; a raise here would
+  brick the bus. The `isinstance(coordinator, str)` guard prevents an unhashable/non-str
+  `executing_coordinator` from raising at read time; the unhashable-`candidate_id` fold case stays covered
+  by `reduce()`'s `(TypeError, AttributeError, ValueError)` drop-and-warn.
+- **DD-4 — executing-coordinator-only (overseer-abort intentionally NOT granted).** Default scope per the
+  user's decision. Overseer-abort is a possible future extension (the overseer can already roll a brief via
+  `brief_superseded`); it is deliberately NOT added here. Revisit only on user/chief direction.
+
+**Why non-vacuous.** RED-first: 7 new forged/cross-pair/no-assignment/un-namespaced/forged-assignment pins
+FAILED against the unfixed reducer (`candidate aborted`/`REJECTED`), GREEN after the fix. Mutation: replacing
+the `is_aborted` authority tail with `return True` reddens exactly those 7 pins (executed; restored).
+Full threeway suite **404 passed, 1 skipped**; ci_smoke OK; check_no_ceremony clean (R2 cv2 WARN pre-existing,
+unrelated). Pins: `tests/unit/test_threeway_reducer.py` (`test_authorized_abort_is_recorded`,
+`test_forged_abort_from_non_coordinator_is_ignored`, `test_cross_pair_coordinator_abort_is_ignored`,
+`test_abort_without_assignment_is_ignored`, `test_unnamespaced_abort_is_ignored`,
+`test_abort_before_assignment_still_authorized`, `test_forged_assignment_cannot_redirect_abort_authority`);
+`tests/unit/test_threeway_predicate.py` (`test_rejects_authorized_aborted_candidate`,
+`test_forged_abort_from_operator_does_not_reject`, `test_cross_pair_coordinator_abort_does_not_reject`).
+
+**Verification.** Solo Tier-A (core-reducer security; no peer seat online): adversarial Lane-V via 5
+independent non-author verifiers (`wf_4b612e08-fa2`, lenses: authority-forge / ordering-read-time /
+fail-safe-totality / fail-safe-direction / regression-pin-integrity). **Verdict GO** (4 GO + 1 NITS; zero
+FAIL/CRITICAL/MAJOR). Each verifier independently reproduced the exploit (monkeypatch `is_aborted` to bare
+membership → all 5 forge paths fire) and confirmed the fix blocks all 5; full unit suite 3205 passed,
+1 skipped. The only actionable NIT was a doc-anchor (`:338`→`:344`, fixed here). Two `fail-safe-totality`
+NITs (a direct-call `is_aborted([list])` TypeError; a post-reduce non-dict-payload AttributeError) are
+TEST-API-only and UNREACHABLE on the bus — blocked by `run_gate`'s `isinstance(candidate_id, str)` guard,
+`well_formed`'s payload-dict filter, and `run_gate`'s outer `except Exception`; and the unhashable-id raise
+is NOT a regression (the pre-fix `candidate_id in set` raised identically). Verdict recorded in
+`logs/verify-adr059-candidate-aborted-authority-lane-v.json`. **Ratification owed to the user.**
+
+**Scope / deferral.** This is C1 Part 1. Part 2 — wiring the rework circuit-breaker
+(`threeway/rework.py:should_escalate`, currently UNWIRED; it counts RAW aborts) to count only AUTHORIZED
+aborts via the fixed `is_aborted`/`_aborted_by`, plus a coordinator-signed abort-emit CLI and an
+`overseer_plan` ESCALATE-on-`should_escalate` refusal — remains deferred. Leaving it is safe: `should_escalate`
+has no live callers (verified), so the loose raw count is unreachable.

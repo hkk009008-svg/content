@@ -246,11 +246,31 @@ def test_rejects_superseded_brief_version():
     assert d.outcome == REJECTED and "superseded" in d.reason
 
 
-def test_rejects_aborted_candidate():
+def test_rejects_authorized_aborted_candidate():
+    # ADR-059: an abort signed by pair A's executing_coordinator (the overseer-assigned
+    # "coordinator" in _full_event_set) is authoritative -> the candidate is REJECTED.
     events = _full_event_set()
-    events.append(_e("candidate_aborted", 13))
+    events.append(_e("candidate_aborted", 13, signer="coordinator:claude:s1"))
     d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
     assert d.outcome == REJECTED and "aborted" in d.reason
+
+
+def test_forged_abort_from_operator_does_not_reject():
+    # ADR-059 (forge / cross-pair abort DoS): a validly-signed abort from a seat that is NOT
+    # pair A's executing_coordinator (here an operator) must NOT abort the candidate —
+    # otherwise any keyholder could permanently merge-DoS any candidate. Still MERGEABLE.
+    events = _full_event_set()
+    events.append(_e("candidate_aborted", 13, signer="operator:claude:s1"))
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == MERGEABLE, d.reason
+
+
+def test_cross_pair_coordinator_abort_does_not_reject():
+    # ADR-059: coordinator2 (pair B's coordinator) cannot abort pair-A candidate A:c1.
+    events = _full_event_set()
+    events.append(_e("candidate_aborted", 13, signer="coordinator2:claude:s1"))
+    d = evaluate("A:c1", reduce(events), FakeRepo(), default_policy())
+    assert d.outcome == MERGEABLE, d.reason
 
 
 def test_rejects_sibling_prefix_path_with_no_trailing_slash():

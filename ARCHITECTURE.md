@@ -1934,7 +1934,7 @@ the full brick catalogue (35 envelope-field poisons + 15 payload-value probes) e
 `threeway-candidate-id-pair-binding-dos` — was that `candidate_id` is a free-form, globally-shared
 namespace, so TWO overseer-assigned pairs could each be self-consistent for the SAME id; a legit
 executing_coordinator of pair B could reuse a victim's id, declare pair B, capture
-`authoritative_candidate` (`threeway/reducer.py:132`), and stall the victim's pair-A merge
+`authoritative_candidate` (`threeway/reducer.py:159`), and stall the victim's pair-A merge
 (availability-only — it can never forge pair A's attestations, so it never promotes). A first attempt
 (first-writer-wins, earliest-`seq`) only INVERTED the race — its mandated adversarial review
 (`wf_01844a2a-03a`) reproduced the symmetric attacker-declares-EARLIER DoS through the real gate. The
@@ -1947,6 +1947,23 @@ in BOTH directions. The clause only NARROWS eligibility (never widens what promo
 TOTAL (the `isinstance(pair, str)` skip + the `_pair_namespace` None-guard). Two positive tests pin both
 declare orders; mutation-proof: dropping the namespace clause turns the attacker-earlier test RED. See
 `DECISIONS.md` ADR-042 + `threeway-candidate-id-pair-binding-dos`.
+
+**`candidate_aborted` now carries READ-time abort authority (ADR-059).** It was the LONE load-bearing
+singleton with no authority filter — the fold (`threeway/reducer.py:344`) recorded an abort for ANY
+validly-signed seat, and `is_aborted` was bare set-membership, so any keyholder (any operator / ci /
+other-pair coordinator) could append a validly-signed `candidate_aborted` for ANY `candidate_id` →
+`predicate.py:49` permanently REJECTs it (cross-pair merge DoS, same forge/availability class as
+ADR-036/037/038). The fix mirrors `authoritative_candidate`'s read-time model: the reducer records ALL
+aborts as `_aborted_by: candidate_id → {signer-seats}` (`threeway/reducer.py:69`), and `is_aborted`
+(`threeway/reducer.py:95`) is effective iff the candidate's bound-pair `executing_coordinator` (the
+overseer-assigned coordinator for the id's `_pair_namespace`) is among the aborting seats. Authority is
+resolved at READ because the authorizing assignment may arrive in any order. Fail-safe — no abort fact /
+no namespace / no assignment / non-str coordinator → `False`; it only ever DROPS unauthorized aborts,
+never widens what can abort. `assignment()` is overseer-only at record time, so a forged assignment can't
+redirect abort authority. Mutation-proof: dropping the authority check turns the forged-abort pins RED.
+The rework circuit-breaker (`threeway/rework.py` `should_escalate`) still counts RAW aborts and is
+currently UNWIRED — making it count only AUTHORIZED aborts is the deferred C1 Part 2. See `DECISIONS.md`
+ADR-059 + `threeway-candidate-aborted-no-authority`.
 
 ### 13A.8 Minimal operable mechanical-seat runtime (scope-b sub-project 1, ADR-056)
 

@@ -62,7 +62,11 @@ class EffectiveState:
     # (candidate_id, att_kind, seat) -> latest attestation Event
     _attestations: dict[tuple, Event] = field(default_factory=dict)
     _revoked_event_ids: set[str] = field(default_factory=set)
-    _aborted_candidates: set[str] = field(default_factory=set)
+    # ADR-059: candidate_id -> the SET of signer-seats that emitted a candidate_aborted for
+    # it. Authority is resolved on READ (is_aborted), like authoritative_candidate — the fold
+    # cannot resolve cross-event authority at record time because the authorizing seat depends
+    # on the pair's assignment, which may arrive in any order.
+    _aborted_by: dict[str, set[str]] = field(default_factory=dict)
     _superseded_event_ids: set[str] = field(default_factory=set)
     _briefs: dict[tuple, Event] = field(default_factory=dict)        # (brief_id, version) -> Event
     _cycle_go: dict[tuple, Event] = field(default_factory=dict)      # (brief_id, version) -> Event
@@ -89,7 +93,30 @@ class EffectiveState:
         return ev
 
     def is_aborted(self, candidate_id) -> bool:
-        return candidate_id in self._aborted_candidates
+        # ADR-059 (defect threeway-candidate-aborted-no-authority, forge / cross-pair abort
+        # DoS): candidate_aborted was the LONE load-bearing singleton with no authority filter
+        # — any keyholder could append a validly-signed abort for ANY candidate_id and the
+        # predicate would permanently REJECT it (same forge/availability class as ADR-036/037/038).
+        # Abort authority = the candidate's bound-pair executing_coordinator (user-decided
+        # 2026-06-23), resolved here at READ exactly like authoritative_candidate: the bound pair
+        # is the candidate_id's namespace; its coordinator is the overseer-assigned
+        # executing_coordinator. An abort is effective iff that coordinator is among the seats
+        # that aborted. Fail-safe — no abort fact / no namespace / no assignment / non-str
+        # coordinator -> False: this only ever DROPS unauthorized aborts, never widens what can
+        # abort. assignment() is overseer-only at record time, so a forged assignment can't
+        # redirect abort authority. isinstance guard keeps a malformed (non-str) coordinator from
+        # raising at read time (ADR-041 read-path totality).
+        seats = self._aborted_by.get(candidate_id)
+        if not seats:
+            return False
+        ns = _pair_namespace(candidate_id)
+        if ns is None:
+            return False
+        a = self.assignment(ns)
+        if a is None:
+            return False
+        coordinator = a.payload.get("executing_coordinator")
+        return isinstance(coordinator, str) and coordinator in seats
 
     def brief(self, brief_id, version) -> Event | None:
         return self._briefs.get((brief_id, version))
@@ -309,7 +336,12 @@ def reduce(events, *, gate_seat: str = GATE_SEAT) -> EffectiveState:
                 if tgt and _revoke_authorized(_seat_of(ev.signer), seat_by_id.get(tgt)):
                     st._revoked_event_ids.add(tgt)
             elif k == "candidate_aborted":
-                st._aborted_candidates.add(ev.candidate_id)
+                # ADR-059: record ALL aborts with their signer-seat; authority is resolved on
+                # READ in is_aborted (the per-pair coordinator can't be checked at record time —
+                # the authorizing assignment may not have arrived yet). This is the same
+                # record-all / resolve-at-read shape as `candidate` (ADR-039/042). The unhashable
+                # candidate_id case is covered by the surrounding try/except (drop + WARNING).
+                st._aborted_by.setdefault(ev.candidate_id, set()).add(_seat_of(ev.signer))
             elif k == "brief":
                 if _seat_of(ev.signer) != _AUTHORIZED_SINGLETON_SEAT["brief"]:
                     continue

@@ -1,0 +1,79 @@
+{
+  "adr": "ADR-059",
+  "defect": "threeway-candidate-aborted-no-authority",
+  "run_id": "wf_4b612e08-fa2",
+  "protocol": "solo Tier-A adversarial Lane-V (5 independent non-author verifiers, read-only, model=sonnet)",
+  "subject_diff": [
+    "threeway/reducer.py",
+    "tests/unit/test_threeway_reducer.py",
+    "tests/unit/test_threeway_predicate.py",
+    "ARCHITECTURE.md"
+  ],
+  "overall_verdict": "GO",
+  "overall_note": "4 GO + 1 NITS; zero FAIL/CRITICAL/MAJOR. Only actionable NIT = doc-anchor :338->:344 (fixed). Two fail-safe-totality NITs confirmed test-API-only + unreachable on the bus + not-a-regression.",
+  "verifiers": [
+    {
+      "lens": "authority-forge",
+      "verdict": "GO",
+      "findings": [],
+      "tests_run": "env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_reducer.py tests/unit/test_threeway_predicate.py -v \u2192 82 passed in 0.05s\\nenv -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/ -q \u2192 3205 passed, 1 skipped in 220s\\n/tmp/test_mutation_probe.py (monkeypatch is_aborted to bare set-membership) \u2192 5 mutant probes PASSED (exploit confirmed), 5 real-code probes PASSED (fix blocks all 5)",
+      "summary": "Verified authority/forge lens against the candidate_aborted no-authority fix. The fix replaces bare set-membership in is_aborted (threeway/reducer.py:95-119) with a read-time authority check: an abort is effective only if the candidate_id's bound-pair executing_coordinator (from the overseer-only assignment) is among the aborting seats. Five adversarial paths were probed by monkeypatching is_aborted back to the pre-fix form: operator-signed abort, coordinator2 (cross-pair) abort, ci-signed abort, merge-gate-signed abort, and a forged-assignment-then-operator-abort \u2014 every one returned is_aborted=True under the mutant (exploit confirmed non-vacuous) and is_aborted=False under the real fix (all blocked). The assignment fold at reducer.py:377-380 is overseer-only at record time (_AUTHORIZED_SINGLETON_SEAT[\"assignment\"]=\"overseer\"), so a forged non-overseer assignment is dropped before it can redirect abort authority. The overseer-cannot-abort result (is_aborted=False for an overseer-signed abort) is correct-as-designed per user decision 2026-06-23 (executing-coordinator-only scope; DD-4 in ADR-059). The rework.py raw-abort counter is intentionally deferred C1 Part 2, is currently unwired (no callers in gate.py, loop.py, or predicate.py), and does not affect the abort-authority gate. ARCHITECTURE.md line references (:69, :95, :159, :338) are accurate. Full unit suite: 3205 passed, 1 skipped, 0 failures."
+    },
+    {
+      "lens": "ordering-readtime",
+      "verdict": "GO",
+      "findings": [],
+      "tests_run": "env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_reducer.py tests/unit/test_threeway_predicate.py -q \u2192 82 passed in 0.06s\n\nMutation probe (authority check removed, /tmp/muttest_pkg copy): 5 FAILED / 77 passed \u2014 tests test_forged_abort_from_non_coordinator_is_ignored, test_cross_pair_coordinator_abort_is_ignored, test_forged_assignment_cannot_redirect_abort_authority, test_forged_abort_from_operator_does_not_reject, test_cross_pair_coordinator_abort_does_not_reject all went RED, confirming non-vacuous.\n\nOrdering probe script (/tmp/ordering_probe.py, 8 scenarios): All 8 passed.",
+      "summary": "I verified all ordering/read-time edge cases independently. The fix correctly resolves abort authority at READ time (is_aborted, reducer.py:95\u2013122) using _aborted_by: dict[candidate_id \u2192 set(seats)] populated unconditionally at fold time (reducer.py:344), then cross-referenced at query time against assignment(ns).payload['executing_coordinator']. Every ordering scenario \u2014 abort before assignment, abort with no candidate fact, two overseer reassignments (latest wins), revoked assignment (\u2192 False), wrong-pair assignment (\u2192 False), un-namespaced id (\u2192 False), multiple non-coordinator aborters (\u2192 False), and namespace derived from id not from payload \u2014 was probed and passed. Mutation (removing `coordinator in seats`) turned 5 tests RED, proving non-vacuousness. The single live call site is predicate.py:49; rework.py counts raw aborts but is confirmed UNWIRED (zero production callers). No stale _aborted_candidates references remain."
+    },
+    {
+      "lens": "failsafe-totality",
+      "verdict": "GO",
+      "findings": [
+        {
+          "severity": "NIT",
+          "claim": "is_aborted() can raise TypeError if called directly with an unhashable candidate_id (e.g., a list) \u2014 self._aborted_by.get([list]) raises TypeError.",
+          "evidence": "Probe /tmp/probe_failsafe.py P1: `state.is_aborted(['A','c1'])` raised `TypeError: unhashable type: 'list'`. HOWEVER this is NOT reachable from the production bus path: (a) run_gate/gate.py line ~165 guards: `if not isinstance(candidate_id, str): return GateResult('REJECTED', ...)` before any call to evaluate(); (b) evaluate() is the only production call site (predicate.py:49); (c) evaluate() sits inside run_gate's outer `try/except Exception` (gate.py ~line 189-240), so even a hypothetical raise would yield GateResult('REJECTED', ...) not an uncaught crash. Confirmed by /tmp/probe2_reachability.py R1: run_gate(['A','c1']) returned GateResult(outcome='REJECTED', ...) without raising."
+        },
+        {
+          "severity": "NIT",
+          "claim": "is_aborted() raises AttributeError if assignment.payload is mutated to a non-dict post-reduce (a.payload.get(...) on a list raises AttributeError).",
+          "evidence": "Probe /tmp/probe_failsafe.py P5: forcibly setting event.payload to a list via object.__setattr__ then calling is_aborted raised AttributeError. NOT reachable from bus: well_formed() (envelope.py:141) requires isinstance(ev.payload, dict) and filters malformed events BEFORE the fold. Confirmed by /tmp/probe2_reachability.py R2: well_formed(non-dict payload)=False. No production code mutates stored event payloads after reduce(). Both raises are TEST-API-only; the production run_gate call path is fully protected."
+        }
+      ],
+      "tests_run": "env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_reducer.py tests/unit/test_threeway_predicate.py -q\n\u2192 82 passed in 0.05s\n\nenv -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_gate_adversarial.py -q\n\u2192 12 passed in 2.66s\n\nenv -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/ -q\n\u2192 3205 passed, 1 skipped, 10 warnings in 209.21s\n\nNon-vacuous RED proof (mutation probe /tmp/mutation_probe.py \u2014 pre-fix is_aborted = bare set-membership):\n  test_forged_abort_from_non_coordinator_is_ignored: is_aborted=True \u2192 RED (test expects False)\n  test_cross_pair_coordinator_abort_is_ignored: is_aborted=True \u2192 RED (test expects False)\n  test_abort_without_assignment_is_ignored: is_aborted=True \u2192 RED (test expects False)\n  test_authorized_abort_is_recorded: is_aborted=True \u2192 GREEN (still passes, correct)\n\nFail-safe probe /tmp/probe_failsafe.py:\n  P1 TypeError from is_aborted([list]): reachability blocked by run_gate isinstance guard (R1 PASS)\n  P2 is_aborted(None): safely returns False\n  P3 reduce(candidate_aborted cid=None): safely stores under None key, is_aborted(None)=False\n  P4 non-str executing_coordinator (list/dict/int/None/True): isinstance guard returns False, no raise\n  P5 non-dict payload (direct mutation): AttributeError \u2014 unreachable from bus (well_formed filter)\n  P6 _pair_namespace(list/dict/int/None/''/no-colon): all return None safely\n  P7 fold with unhashable cid via __setattr__: well_formed=False, fold never reached\n  P8 all str candidate_id combos across 4 state variants: no raise\n  P9 assignment keyed by None (missing pair in payload): is_aborted('A:c1')=False, no raise",
+      "summary": "The new is_aborted() and its fold branch are fail-safe on all bus-reachable inputs. The five-layer defense is intact: (1) well_formed() rejects unhashable/non-str candidate_id and non-dict payload before the fold; (2) run_gate's isinstance(candidate_id, str) guard blocks non-str ids before evaluate(); (3) all five early-exit False paths in is_aborted (no seats entry, None namespace, None assignment, None coordinator, non-str coordinator) handle every plausible edge case without raising; (4) the fold's surrounding try/except catches any residual TypeError/AttributeError; (5) run_gate's outer except Exception catches anything that reaches evaluate(). Two theoretical raises (unhashable cid direct-call, mutated payload direct-call) exist only as test-API surface \u2014 both are multiply blocked before the production bus path. Three new authority-check tests are non-vacuous: all go RED when the coordinator guard is removed. Full suite: 3205 passed, 0 failures."
+    },
+    {
+      "lens": "failsafe-direction",
+      "verdict": "GO",
+      "findings": [
+        {
+          "severity": "NIT",
+          "claim": "The namespace None-guard in is_aborted (reducer.py:112-114) is defense-in-depth, not the primary gate.",
+          "evidence": "Mutation 2 removed lines 113-114 ('if ns is None: return False') and all 82 tests still passed. The primary guard is `self.assignment(ns)` returning None when ns is None (dict key miss), which fires the `if a is None: return False` branch. The explicit ns-None check is correct belt-and-suspenders but not load-bearing \u2014 the ARCHITECTURE.md claim 'Fail-safe: no ... namespace ... -> False' is satisfied by the assignment lookup, not exclusively by the explicit guard. This is harmless and not a defect."
+        },
+        {
+          "severity": "NIT",
+          "claim": "rework.py:10 counts raw (unauthorized) aborts \u2014 the deferred C1 Part 2 \u2014 is NOT wired into gate.py/run_gate.",
+          "evidence": "grep -n 'rework' /Users/hyungkoookkim/Content/threeway/gate.py returned no output. ARCHITECTURE.md explicitly discloses this: 'currently UNWIRED'. Not a regression introduced by this fix, and scoped to a deferred item."
+        }
+      ],
+      "tests_run": "env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_reducer.py tests/unit/test_threeway_predicate.py -v \u2192 82 passed in 0.07s\n\nMutation 1 (bare set-membership, no authority filter): 4 forged-abort tests FAILED (FAIL = RED as required)\n  test_forged_abort_from_non_coordinator_is_ignored FAILED\n  test_cross_pair_coordinator_abort_is_ignored FAILED\n  test_forged_abort_from_operator_does_not_reject FAILED\n  test_cross_pair_coordinator_abort_does_not_reject FAILED\n\nMutation 2 (remove ns-None guard only): 82 passed \u2014 confirms ns-None guard is defense-in-depth, not primary gate.\n\nKey pins (production tree):\n  test_rejects_authorized_aborted_candidate PASSED \u2014 authorized abort still REJECTs (no availability regression)\n  test_forged_abort_from_operator_does_not_reject PASSED \u2014 operator forged abort now MERGEable (DoS closed)\n  test_cross_pair_coordinator_abort_does_not_reject PASSED \u2014 cross-pair coord abort now MERGEable\n  test_full_valid_set_is_mergeable PASSED \u2014 clean full-valid set unaffected",
+      "summary": "The fix replaces _aborted_candidates (bare set) with _aborted_by (dict[candidate_id -> set(signer-seats)]) and adds read-time authority resolution in is_aborted: abort is effective only when the candidate's pair-namespaced executing_coordinator (from the overseer-only assignment event) is among the aborting seats. The fix exclusively NARROWS: a forged (non-coordinator) abort now returns False where it previously returned True, and a real authorized abort still returns True. No path outside the abort mechanism was touched \u2014 revoke, brief_superseded, and assignment-authority branches are unchanged (confirmed by diff line-by-line grep). Mutation probing confirmed non-vacuity: stripping the authority check flips all four forged-abort pins RED. The rework.py raw-count circuit-breaker remains unwired and was explicitly disclosed as deferred; it is not a regression introduced by this fix."
+    },
+    {
+      "lens": "regression-pin-integrity",
+      "verdict": "NITS",
+      "findings": [
+        {
+          "severity": "NIT",
+          "claim": "ARCHITECTURE.md cites reducer.py:338 as the fold write site, but the actual _aborted_by.setdefault(...) write is at line 344; line 338 is the elif k == 'candidate_aborted': branch header.",
+          "evidence": "grep -n '_aborted_by.setdefault' threeway/reducer.py -> line 344; sed -n '338p' threeway/reducer.py -> 'elif k == \"candidate_aborted\":'. The ARCHITECTURE.md new paragraph reads '(_fold_, threeway/reducer.py:338)'. Both lines are within the same branch so the anchor is not broken, but the prose says 'fold' and points to the branch header rather than the write line."
+        }
+      ],
+      "tests_run": "env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/ -k threeway -q --tb=no -> 404 passed, 1 skipped, 2803 deselected (two independent runs: 108.88s + 137.20s). Mutation probe: /tmp/test_mutant_probe.py with monkeypatched EffectiveState.is_aborted replaced by 'return True for any abort fact' -> 5 FAILED (forged-operator, cross-pair-coord, no-assignment, unnamespaced, forged-assignment-redirect) + 1 PASSED (authorized abort control) -> pins are NON-VACUOUS. env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_reducer.py tests/unit/test_threeway_predicate.py -v -> 82 passed (all PASSED, 0 FAILED).",
+      "summary": "The fix correctly replaces bare set-membership is_aborted with a read-time authority check: _aborted_by records all abort signer-seats; is_aborted resolves the candidate_id's pair namespace, looks up the overseer-assigned executing_coordinator, and returns True only if that coordinator is in the aborting set. Five independent forged-abort scenarios (operator, cross-pair coordinator, no-assignment, unnamespaced id, forged-assignment redirect) all go RED under the authority-stripped mutant and pass GREEN on real code, proving non-vacuousness. All 8 new reducer tests and 3 new predicate tests are correctly pointed at authorized-abort semantics, not weakened. rework.py should_escalate/rework_count have zero production callers so the C1 Part 2 deferral introduces no live regression. The single NIT is a cosmetic ARCHITECTURE.md anchor off-by-6 (cites :338 the elif branch header; the write is at :344)."
+    }
+  ]
+}

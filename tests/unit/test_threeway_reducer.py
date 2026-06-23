@@ -40,9 +40,84 @@ def test_distinct_signers_tracked_separately():
     assert state.effective_attestation("c1", "release", "operator2").payload["verdict"] == "FAIL"
 
 
-def test_candidate_aborted_is_recorded():
-    state = reduce([_ev(1, "candidate_aborted")])
-    assert state.is_aborted("c1")
+def _assignment(seq, pair="A", coordinator="coordinator", **o):
+    # overseer-signed assignment binding `pair` to its executing_coordinator (ADR-059 authority source)
+    return _ev(seq, "assignment",
+               payload={"pair": pair, "executing_coordinator": coordinator},
+               signer="overseer:mech:s1", **o)
+
+
+def test_authorized_abort_is_recorded():
+    # ADR-059: an abort signed by the bound pair's overseer-assigned executing_coordinator
+    # IS effective (is_aborted True). The candidate_id "A:c1" is pair-namespaced to "A".
+    events = [
+        _assignment(1, pair="A", coordinator="coordinator"),
+        _ev(2, "candidate_aborted", candidate_id="A:c1", signer="coordinator:claude:s1"),
+    ]
+    assert reduce(events).is_aborted("A:c1")
+
+
+def test_forged_abort_from_non_coordinator_is_ignored():
+    # ADR-059 (forge / cross-pair abort DoS): an abort from a seat that is NOT the bound
+    # pair's executing_coordinator (here an operator keyholder) is recorded but NOT effective.
+    # Without the read-time authority filter, any keyholder could permanently REJECT any candidate.
+    events = [
+        _assignment(1, pair="A", coordinator="coordinator"),
+        _ev(2, "candidate_aborted", candidate_id="A:c1", signer="operator:claude:s1"),
+    ]
+    assert not reduce(events).is_aborted("A:c1")
+
+
+def test_cross_pair_coordinator_abort_is_ignored():
+    # ADR-059: coordinator2 (the OTHER pair's executing_coordinator) cannot abort a pair-A
+    # candidate — abort authority is bound to the candidate_id's own pair namespace.
+    events = [
+        _assignment(1, pair="A", coordinator="coordinator"),
+        _ev(2, "candidate_aborted", candidate_id="A:c1", signer="coordinator2:claude:s1"),
+    ]
+    assert not reduce(events).is_aborted("A:c1")
+
+
+def test_abort_without_assignment_is_ignored():
+    # ADR-059 fail-safe: no assignment for the bound pair -> no abort authority -> not aborted.
+    events = [_ev(1, "candidate_aborted", candidate_id="A:c1", signer="coordinator:claude:s1")]
+    assert not reduce(events).is_aborted("A:c1")
+
+
+def test_unnamespaced_abort_is_ignored():
+    # ADR-059 fail-safe: an un-namespaced candidate_id binds to NO pair, so no seat has
+    # abort authority over it (mirrors authoritative_candidate's namespace requirement).
+    events = [
+        _assignment(1, pair="A", coordinator="coordinator"),
+        _ev(2, "candidate_aborted", candidate_id="c1", signer="coordinator:claude:s1"),
+    ]
+    assert not reduce(events).is_aborted("c1")
+
+
+def test_abort_before_assignment_still_authorized():
+    # ADR-059: authority resolves at READ, so an abort appended BEFORE its pair's assignment
+    # is still effective once the assignment exists (order-independent, like authoritative_candidate).
+    events = [
+        _ev(1, "candidate_aborted", candidate_id="A:c1", signer="coordinator:claude:s1"),
+        _assignment(2, pair="A", coordinator="coordinator"),
+    ]
+    assert reduce(events).is_aborted("A:c1")
+
+
+def test_forged_assignment_cannot_redirect_abort_authority():
+    # ADR-059: assignment is overseer-only at record time, so a NON-overseer "assignment"
+    # naming the attacker's own seat as executing_coordinator is dropped -> cannot grant
+    # abort authority. Here a forged assignment (operator-signed) names "operator" as
+    # coordinator; the real overseer assignment names "coordinator". An operator abort
+    # must still be ignored.
+    events = [
+        _assignment(1, pair="A", coordinator="coordinator"),  # real, overseer-signed
+        _ev(2, "assignment",
+            payload={"pair": "A", "executing_coordinator": "operator"},
+            signer="operator:claude:s1"),                     # forged, dropped at record time
+        _ev(3, "candidate_aborted", candidate_id="A:c1", signer="operator:claude:s1"),
+    ]
+    assert not reduce(events).is_aborted("A:c1")
 
 
 def test_latest_non_superseded_brief_version():
