@@ -1,0 +1,86 @@
+{
+  "artifact": "Lane-V verification record — ADR-056 (threeway scope-b sub-project 1: minimal operable mechanical-seat runtime)",
+  "date": "2026-06-23",
+  "commit_under_review": "affe1454",
+  "diff_range": "e45f2cf6..affe1454",
+  "subproject": "threeway scope-b sub-project 1 — overseer_emit.py + bootstrap_emit.py + run_merge_gate.py(daemon hardening) + run_merge_gate.sh + E2E walking-skeleton",
+  "plan": "docs/superpowers/plans/2026-06-23-threeway-scope-b-mechanical-seat-runtime.md",
+  "verifier": {
+    "kind": "independent Lane-V workflow — 5 cold-context dimension verifiers + 1 sequential mutation-execution agent + 3 adversarial refuters",
+    "workflow_run_id": "wf_1f903155-0cc",
+    "workflow_script": ".claude/.../workflows/scripts/threeway-scope-b-sp1-lane-v-wf_1f903155-0cc.js (auto-persisted by the Workflow tool)",
+    "model": "sonnet (per standing directive; opus opt-in only)",
+    "trust": "re-derived GO/NITS/FAIL from the actual diff + fresh runs + 18 executed mutations; did NOT trust the implementer report or commit messages; reviewer prompts were cold-context (no implementer findings cited — Rule #9)",
+    "non_authorship": "verifier session did not author any of the commits under review (impl != verifier satisfied); all peers offline/stale => solo verify, Tier-A co-sign N/A"
+  },
+  "verdict": "GO (with NITS)",
+  "verdict_basis": "no CRITICAL/MAJOR findings across all 5 dimensions; no scope violations; all 6 plan acceptance criteria backed by real, non-vacuous tests; every load-bearing safety/authority property proven load-bearing by a RED-as-expected mutation; the 3 stayed-green mutations were each adversarially refuted (high confidence) as non-defects.",
+  "evidence": {
+    "full_threeway_suite": "env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/ -k threeway -q -> 376 passed, 1 skipped, 2803 deselected (118.20s)",
+    "ci_smoke": "OK (R1/R3/R4/R5/R6 PASS; R2 WARN = pre-existing cv2 importorskip latent; one stale-SHA WARN at DECISIONS.md:2718 a38a3d69 = PRE-EXISTING in the ADR-054 block, NOT introduced by this slice — confirmed via git show e45f2cf6:DECISIONS.md)",
+    "check_no_ceremony": "no ceremony detected (no NEW non-strict xfail / status-only assertion / invisible-green from this slice)",
+    "scope_match": [
+      "zero changes to threeway/ library code or production pipeline (cinema/web_server) — all 14 changed files are new scripts + new tests + docs",
+      "no real refs/heads/main promotion code anywhere in the diff (grep clean)",
+      "no sub-project-2 seat<->bus wiring, no hardening-track, no automation-track creep"
+    ]
+  },
+  "mutation_table": {
+    "method": "single sequential agent applied each recipe to the named source file, ran the named pin, recorded RED/GREEN, then restored via git checkout HEAD -- <file>; final git status == only the pre-existing seen/.migration cutover artifacts (tree_clean=true)",
+    "executed": 18,
+    "red_as_expected": 15,
+    "stayed_green_refuted": 3,
+    "keystone_DD1": {
+      "property": "DD-1 (SAFETY-CRITICAL): run_merge_gate.py --main-ref default = refs/threeway/test-main, never refs/heads/main",
+      "mutation": "default refs/threeway/test-main -> refs/heads/main",
+      "pin": "test_threeway_merge_gate_daemon.py::test_default_main_ref_is_test_main_not_real_main",
+      "result": "RED-as-expected (ns.main_ref was refs/heads/main) -> the guard is load-bearing"
+    },
+    "red_as_expected_list": [
+      "DD-1 daemon --main-ref default (above)",
+      "wrapper passes --main-ref refs/threeway/test-main (changed to refs/heads/main -> RED)",
+      "DD-2 wrapper exports NO PYTHONPATH (added export -> RED)",
+      "stop-at-top: _STOP checked before poll_once (moved after -> RED, poll_once ran)",
+      "clean stop exits 0 not 130 (return 130 -> RED)",
+      "overseer-key enforcement: brief signed with operator key -> dropped (RED)",
+      "non-overseer-key drop pin: removing the keystore-overwrite makes brief admitted -> RED (overwrite is the load-bearing step)",
+      "release_order subject_sha on ENVELOPE not payload (moved to payload -> RED)",
+      "re_verify_challenge nonce >= 16 hex (shortened to 11 -> RED)",
+      "preliminary attestation subject_sha == branch_sha (swapped -> RED)",
+      "release attestation subject_sha == integration_sha (swapped -> RED)",
+      "bootstrap _append seat-key from ev.signer (forced overseer key -> candidate dropped -> RED)",
+      "two attestations have distinct ids (collision -> loop.py:116 assert fires -> RED)",
+      "bootstrap unresolvable-ref clean rc=1 (removed handler -> uncaught -> RED)",
+      "E2E release_order is mandatory (dropped emit -> ref did NOT advance, no merge_completed -> RED)"
+    ],
+    "stayed_green_refuted_list": [
+      {
+        "mutation": "remove brief_version from cycle_go payload",
+        "pin": "test_cycle_go_round_trips",
+        "refutation": "brief_version IS present in the payload (overseer_emit.py:61); reducer fallback never masks a live bug; the only gap is the test does not independently assert payload['brief_version'] -> optional test-strengthening NIT, not a defect (high confidence)"
+      },
+      {
+        "mutation": "pre-sign before store.append",
+        "pin": "test_brief_round_trips_authority_correct",
+        "refutation": "store.append always re-signs over the real seq, so pre-signing is redundant-not-harmful; the test is a round-trip authority pin (catches wrong key/payload/drop), not a sole-signing-step pin; DD-5 is enforced by code+comment (overseer_emit.py:32) -> non-defect (high confidence)"
+      },
+      {
+        "mutation": "release_requested signer coordinator -> verifier",
+        "pin": "test_bootstrap_emit_seat_facts_round_trip",
+        "refutation": "release_requested is a SIGNAL-ONLY daemon trigger; predicate.py never consults it; collect_candidate_ids does a raw scan and run_gate re-verifies authority (run_merge_gate.py:42-44); reducer intentionally omits it from _AUTHORIZED_SINGLETON_SEAT -> a forged one only wastes a gate run; missing signer-assert is an optional pin, not a security hole (high confidence)"
+      }
+    ]
+  },
+  "nits": [
+    "MINOR test_threeway_overseer_emit.py: add assert cg.payload['brief_version']==1 (cycle_go payload pin); add an AppendContentionExceeded rc=1 pin (DD-4 contention path untested)",
+    "NIT test_threeway_overseer_emit.py: only brief has an explicit wrong-key mutation pin; add one for release_order/re_verify_challenge for the envelope-split facts",
+    "MINOR test_threeway_bootstrap_emit.py: assert state.release_requested('A:c1').signer seat == 'coordinator' (one-liner makes the coordinator-key claim mutation-testable)",
+    "NIT test_threeway_bootstrap_emit.py: add an unclean-merge (conflicting branch) fixture for the shared ValueError handler",
+    "NIT test_threeway_merge_gate_daemon.py: the .sh wrapper is content-scanned but never subprocess-executed; add a run_merge_gate.sh --run-once smoke",
+    "NIT run_merge_gate.py:105-106: per-iteration except swallows infra errors with no structured persistent-failure signal (monitoring gap, not correctness)",
+    "MINOR/NIT test_threeway_e2e_walking_skeleton.py: redundant monkeypatch.setenv(THREEWAY_KEYSTORE) (add clarifying comment); pass --remote '' explicitly to sign_ci_result for symmetry; add an explicit assert that real refs/heads/main is unchanged",
+    "NIT (PRE-EXISTING, out-of-scope) DECISIONS.md:2718: stale-looking SHA a38a3d69 in the ADR-054 block is a subagent run-id, not a commit; ci_smoke false-positives it",
+    "NIT spec sys.path anchor: design spec says sign_ci_result.py:19-22; executable bootstrap is :20-22 (line 19 is a comment)"
+  ],
+  "disposition": "Sub-project 1 is operable + verified. NITS are non-blocking optional test-strengthening + one pre-existing out-of-scope doc nit; none require an xfail pin (no confirmed unfixed DEFECT — the 3 vacuous-pin candidates were refuted as non-defects). Next phase (hardening track / sub-project 2 / automation track) is a chief/user prioritization decision per the plan."
+}
