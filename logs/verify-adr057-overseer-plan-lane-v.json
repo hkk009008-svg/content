@@ -1,0 +1,72 @@
+{
+  "artifact": "Lane-V verification record — ADR-057 (overseer_plan auto-decompose layer, threeway scope-b automation track)",
+  "date": "2026-06-23",
+  "subproject": "threeway scope-b automation track — scripts/overseer_plan.py (layer ABOVE the verified overseer_emit)",
+  "spec": "docs/superpowers/specs/2026-06-23-overseer-plan-auto-decompose-design.md",
+  "plan": "docs/superpowers/plans/2026-06-23-overseer-plan-auto-decompose.md",
+  "commits": {
+    "plan": "948fea50",
+    "feat": "dafe103f",
+    "activation_pin": "c02b8049",
+    "docs_adr057": "4f6d5b2a",
+    "lane_v_fix": "bac52067 (final; verified HEAD)"
+  },
+  "lane_v": {
+    "kind": "independent Lane-V workflow — 3 cold-context verifiers + 1 sequential mutation-execution agent + 3 adversarial refuters",
+    "workflow_run_id": "wf_daa9df85-89b",
+    "model": "sonnet",
+    "diff_range_reviewed": "b4eae43a..4f6d5b2a",
+    "verdict": "NITS (3 dimensions all NITS; no CRITICAL/MAJOR; scope clean; DD-1..DD-5 implemented)",
+    "mutations_executed": 13,
+    "red_as_expected": 10,
+    "stayed_green_vacuous": 3,
+    "findings_actioned": [
+      {
+        "severity": "MINOR",
+        "site": "scripts/overseer_plan.py _emit_argv('brief')",
+        "issue": "dropped --brief-version → a brief_version!=1 decision emits brief@v1 while cycle_go is v2 → predicate.brief(cid, v2) stays None → that candidate is blocked / re-emit-loops",
+        "fix": "forward --brief-version str(ver) in the brief arm (mirrors cycle_go)"
+      },
+      {
+        "severity": "MINOR",
+        "site": "tests/unit/test_threeway_overseer_plan.py idempotency pin",
+        "issue": "partially vacuous — passed even if plan() never early-exits, because RefEventStore absorbs duplicate-id emits (executed mutation #6 STAYED-GREEN proved this; an adversarial agent wrongly argued non-vacuity by reasoning about UNMUTATED control flow — executed evidence overruled it)",
+        "fix": "spy on overseer_emit.main and assert 0 calls on the second run (test_confirm_idempotent_second_run_calls_no_emit)"
+      },
+      {
+        "severity": "NIT",
+        "site": "scripts/overseer_plan.py _EMITTABLE",
+        "issue": "dead constant — defined but never read; the Q4 guard was enforced only by plan()'s hardcoded ifs + _emit_argv ValueError (misleading)",
+        "fix": "plan() now derives emittable FROM _EMITTABLE via a presence map → constant is load-bearing AND the Q4 guard is mutation-catchable through it"
+      }
+    ],
+    "coverage_pins_added": "T2 reject, empty allowed_paths reject, plan-all-present->[], brief_version=2 round-trip+idempotent, --bus-id forward-to-emit, emit-failure rc1, signer-seat assertions on assignment+cycle_go"
+  },
+  "fix_mutation_evidence": {
+    "method": "cp-backup mutation harness; each mutation applied, targeted pin run, restored from backup",
+    "M1": "revert brief-version forwarding -> test_confirm_brief_version_2_round_trips_and_is_idempotent RED (1 failed)",
+    "M2": "plan() ignores presence (emittable=list(_EMITTABLE)) -> test_confirm_idempotent_second_run_calls_no_emit RED (spy caught the re-emit; 1 failed)",
+    "M3": "add release_order to _EMITTABLE -> test_confirm_emits_overseer_facts_never_release_order RED (KeyError; _EMITTABLE now load-bearing; 1 failed)",
+    "restore": "full pin file 15 passed"
+  },
+  "reverify_6c": {
+    "kind": "fresh non-author lane-v-verifier (§6c fix-diff re-read; impl != verifier — author fixed, non-author re-verifies)",
+    "agent_id": "ad1e052077a6beb85",
+    "model": "sonnet",
+    "diff_range": "4f6d5b2a..bac52067",
+    "verdict": "GO",
+    "confirmed": [
+      "(a) brief arm forwards --brief-version (overseer_emit.py:97 accepts it)",
+      "(b) _EMITTABLE read by plan() (overseer_plan.py:88); release_order excluded; Q4 guard holds (KeyError + _emit_argv ValueError)",
+      "(c) idempotency pin spies overseer_emit.main, asserts 0 calls on 2nd run — non-vacuous",
+      "(d) scope clean: git diff -- scripts/overseer_emit.py EMPTY; no non-overseer emission; no release_order; no refs/heads/main",
+      "(e) 15/15 pins pass; check_no_ceremony clean"
+    ]
+  },
+  "gates": {
+    "threeway_suite": "392 passed, 1 skipped (was 386 pre-fix; +6 new pins)",
+    "ci_smoke": "OK (lone stale-SHA WARN is pre-existing a38a3d69 in ADR-054, out of scope)",
+    "check_no_ceremony": "clean (no new ceremony)"
+  },
+  "disposition": "VERIFIED. overseer_plan auto-decompose layer (T0/T1) is operable + independently verified. NEXT (chief prioritization): T3 extension (emit approver_roster + re_verify_challenge; decompose the co_sign-not-satisfied PENDING), the §7 hardening track, or sub-project 2 (real seat<->bus wiring)."
+}
