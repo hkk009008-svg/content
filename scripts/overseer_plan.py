@@ -22,6 +22,7 @@ from scripts import overseer_emit
 from threeway.gate import verify_and_reduce
 from threeway.policy import default_policy
 from threeway.refstore import RefEventStore
+from threeway.rework import REWORK_CAP, should_escalate
 
 SCHEMA = "overseer-decision/1"
 _TIERS = ("T0", "T1", "T2", "T3")
@@ -77,10 +78,15 @@ def _policy_digest(decision) -> str:
     return decision["policy_digest"] or default_policy().policy_digest()
 
 
-def plan(decision, state):
+def plan(decision, state, *, escalate=False):
     """Return (emittable, owed).
     emittable: absent overseer facts among (brief, assignment, cycle_go), canonical order.
-    owed: [(fact, owner)] for everything else still missing (release_order + non-overseer facts)."""
+    owed: [(fact, owner)] for everything else still missing (release_order + non-overseer facts).
+
+    escalate (ADR-060): when the rework circuit-breaker is tripped (> REWORK_CAP AUTHORIZED reworks
+    for this brief version), WITHHOLD a new `cycle_go` — the fact that authorizes another cycle.
+    This is the fail-safe / requirement-ADDING direction (ADR-058 DD-1): the breaker can only HALT
+    auto-progression, never advance it. The other emittable overseer facts are unaffected."""
     cid = decision["candidate_id"]
     bid = decision["brief_id"]
     ver = decision["brief_version"]
@@ -102,7 +108,8 @@ def plan(decision, state):
         "approver_roster":     (state.approver_roster(cid),     is_t3),
         "re_verify_challenge": (state.re_verify_challenge(cid), is_t3 and integ is not None),
     }
-    emittable = [f for f in _EMITTABLE if _spec[f][1] and _spec[f][0] is None]
+    emittable = [f for f in _EMITTABLE if _spec[f][1] and _spec[f][0] is None
+                 and not (escalate and f == "cycle_go")]   # ADR-060: breaker withholds a new cycle_go
 
     owed = []
     if cand is None:
@@ -204,7 +211,14 @@ def main(argv=None) -> int:
 
     remote = None if (args.remote or "").lower() in ("", "none") else args.remote
     state = _read_state(args.repo_dir, args.registry_dir, remote, args.bus_id)
-    emittable, owed = plan(decision, state)
+    # ADR-060: the rework circuit-breaker. Count only AUTHORIZED reworks for this brief version;
+    # when tripped, withhold the new cycle_go and surface ESCALATE for chief review.
+    escalate = should_escalate(state, decision["brief_id"], decision["brief_version"])
+    emittable, owed = plan(decision, state, escalate=escalate)
+    if escalate:
+        print(f"⚠ ESCALATE: > {REWORK_CAP} authorized reworks for "
+              f"{decision['brief_id']} v{decision['brief_version']} — withholding cycle_go "
+              f"(chief manual review required; emit a new brief_version to resume).")
     _print_plan(emittable, owed, confirm=args.confirm)
 
     if not args.confirm:

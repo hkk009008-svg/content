@@ -316,3 +316,93 @@ def test_confirm_t2_does_not_emit_t3_facts(seatkit, tmp_path):
     assert state.approver_roster("A:c1") is None         # T3-only facts, NOT emitted at T2
     assert state.re_verify_challenge("A:c1") is None
     assert state.cycle_go("b1", 1).payload["tier"] == "T2"
+
+
+# ── ADR-060 (C1 Part 2): rework-breaker ESCALATE-refusal ──────────────────────
+
+def _append_authorized_reworks(repo, privs, n, *, brief_id="b1", brief_version=1, pair="A",
+                               coordinator="coordinator"):
+    """Put `n` AUTHORIZED rework cycles on the bus: one overseer assignment + n (candidate, abort)
+    pairs signed by the pair's executing_coordinator. Lets should_escalate(state) see real reworks."""
+    from threeway.envelope import Event
+    store = RefEventStore(Path(repo), remote=None)
+
+    def _ev(kind, sender, signer, cid, payload, eid):
+        return Event(id=eid, seq=0, bus_id="prod", schema_version="threeway/1", kind=kind,
+                     sender=sender, recipient="all", signer=signer, payload=payload,
+                     brief_id=brief_id, brief_version=brief_version, candidate_id=cid)
+
+    store.append(_ev("assignment", "overseer", "overseer:mech:s1", f"{pair}:assign",
+                     {"pair": pair, "builder": "director", "builder_provider": "codex",
+                      "primary_verifier": "operator", "primary_verifier_provider": "claude",
+                      "executing_coordinator": coordinator}, f"assignment-overseer-{pair}"),
+                 privs["overseer"])
+    csigner = f"{coordinator}:claude:s1"
+    for i in range(n):
+        cid = f"{pair}:r{i}"
+        # distinct payloads per candidate so each fact has a distinct idempotency_key
+        # (candidate_id is not in the idempotency fingerprint — envelope.py:105)
+        store.append(_ev("candidate", coordinator, csigner, cid,
+                         {"pair": pair, "integration_sha": f"integ{i}"},
+                         f"candidate-{coordinator}-{cid}"), privs[coordinator])
+        store.append(_ev("candidate_aborted", coordinator, csigner, cid, {"candidate_id": cid},
+                         f"candidate_aborted-{coordinator}-{cid}"), privs[coordinator])
+
+
+def test_plan_withholds_cycle_go_on_escalation(tmp_path):
+    # ADR-060: when the rework breaker is tripped, plan() withholds a NEW cycle_go (the
+    # gate-progressing fact) — fail-safe / requirement-adding direction (ADR-058 DD-1). The other
+    # emittable overseer facts are unaffected.
+    from scripts.overseer_plan import load_decision, plan
+    d = load_decision(str(_decision_file(tmp_path)))
+    normal, _ = plan(d, reduce([]))
+    assert "cycle_go" in normal                              # baseline: emittable on an empty bus
+    escalated, _ = plan(d, reduce([]), escalate=True)
+    assert "cycle_go" not in escalated                       # withheld under escalation
+    assert "brief" in escalated and "assignment" in escalated
+
+
+def test_main_escalates_and_withholds_cycle_go_on_repeated_reworks(seatkit, tmp_path, capsys):
+    # NON-VACUOUS wiring: main() computes should_escalate from the live bus. With >REWORK_CAP
+    # authorized reworks for the decision's brief, it prints ESCALATE and the WOULD EMIT line
+    # omits cycle_go (the assignment is already present from the rework setup, so only `brief` remains).
+    reg, ks, privs = seatkit
+    repo = _new_repo(tmp_path)
+    _append_authorized_reworks(repo, privs, 3)
+    from scripts.overseer_plan import main
+    rc = main(["--decision", str(_decision_file(tmp_path)), "--repo-dir", str(repo),
+               "--registry-dir", str(reg), "--remote", "none"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "ESCALATE" in out
+    emit_line = next(l for l in out.splitlines() if "WOULD EMIT" in l)
+    assert "cycle_go" not in emit_line and "brief" in emit_line
+
+
+def test_main_does_not_escalate_below_cap(seatkit, tmp_path, capsys):
+    # NON-VACUOUS contrast: exactly REWORK_CAP (2) authorized reworks does NOT escalate, so cycle_go
+    # is still offered — proving main() actually evaluates the breaker rather than always-withholding.
+    reg, ks, privs = seatkit
+    repo = _new_repo(tmp_path)
+    _append_authorized_reworks(repo, privs, 2)
+    from scripts.overseer_plan import main
+    rc = main(["--decision", str(_decision_file(tmp_path)), "--repo-dir", str(repo),
+               "--registry-dir", str(reg), "--remote", "none"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "ESCALATE" not in out
+    emit_line = next(l for l in out.splitlines() if "WOULD EMIT" in l)
+    assert "cycle_go" in emit_line
+
+
+def test_main_confirm_does_not_emit_cycle_go_when_escalating(seatkit, tmp_path):
+    # NON-VACUOUS: under escalation, --confirm must NOT emit a cycle_go fact onto the bus.
+    reg, ks, privs = seatkit
+    repo = _new_repo(tmp_path)
+    _append_authorized_reworks(repo, privs, 3)
+    from scripts.overseer_plan import main
+    assert main(["--decision", str(_decision_file(tmp_path)), "--repo-dir", str(repo),
+                 "--registry-dir", str(reg), "--remote", "none", "--confirm"]) == 0
+    state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
+    assert state.cycle_go("b1", 1) is None                   # cycle_go WITHHELD by the breaker
+    assert state.brief("b1", 1) is not None                  # brief still emitted

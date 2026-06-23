@@ -81,6 +81,55 @@ def test_bootstrap_emit_seat_facts_round_trip(seatkit, live_repo):
     assert state.release_requested("A:c1") is not None    # METHOD — call with the cid
 
 
+def test_bootstrap_emit_candidate_aborted_is_authoritative(seatkit, live_repo):
+    # ADR-060 C1 Part 2: the coordinator-signed candidate_aborted emit lands an abort that the
+    # ADR-059 authority gate ACCEPTS — once the overseer assignment binds pair A to "coordinator",
+    # is_aborted("A:c1") is True (the CLI always signs with the named pair's coordinator key).
+    reg, ks, privs = seatkit
+    r, base, branch = live_repo
+    from scripts.bootstrap_emit import main as bmain
+    from scripts.overseer_emit import main as omain
+    otail = ["--repo-dir", str(r), "--remote", "", "--bus-id", "prod"]
+    assert omain(["assignment", "--candidate-id", "A:c1", "--pair", "A",
+                  "--builder", "director", "--builder-provider", "codex",
+                  "--primary-verifier", "operator", "--primary-verifier-provider", "claude",
+                  "--executing-coordinator", "coordinator", *otail]) == 0
+    assert bmain(["candidate_aborted", "--candidate-id", "A:c1", "--pair", "A",
+                  "--brief-id", "b1", "--brief-version", "1",
+                  "--repo-dir", str(r), "--remote", ""]) == 0
+    state = verify_and_reduce(RefEventStore(r).all_events(),
+                              registry_dir=str(reg), bus_id="prod")
+    assert state.is_aborted("A:c1")                     # authoritative coordinator abort
+    assert "A:c1" in state.aborted_candidate_ids()
+
+
+def test_bootstrap_emit_candidate_aborted_namespaces_bare_id(seatkit, live_repo):
+    # a bare local id is pair-namespaced (consistent with the candidate subcommand) so the abort
+    # binds to the same pair-namespaced candidate the gate uses.
+    reg, ks, privs = seatkit
+    r, base, branch = live_repo
+    from scripts.bootstrap_emit import main as bmain
+    assert bmain(["candidate_aborted", "--candidate-id", "c9", "--pair", "A",
+                  "--brief-id", "b1", "--brief-version", "1",
+                  "--repo-dir", str(r), "--remote", ""]) == 0
+    state = verify_and_reduce(RefEventStore(r).all_events(),
+                              registry_dir=str(reg), bus_id="prod")
+    assert "A:c9" in state.aborted_candidate_ids()      # namespaced by pair A
+
+
+def test_candidate_aborted_bad_repo_dir_exits_clean_rc1(seatkit, tmp_path, capsys):
+    # totality: candidate_aborted skips the _candidate_set pre-flight (it references no tree), so a
+    # non-git --repo-dir surfaces at the git write. It must return a clean rc 1, not a traceback.
+    reg, ks, privs = seatkit
+    not_a_repo = tmp_path / "nope"; not_a_repo.mkdir()
+    from scripts.bootstrap_emit import main
+    rc = main(["candidate_aborted", "--candidate-id", "A:c1", "--pair", "A",
+               "--brief-id", "b1", "--brief-version", "1",
+               "--repo-dir", str(not_a_repo), "--remote", ""])
+    assert rc == 1
+    assert "Not emitted" in capsys.readouterr().err
+
+
 def test_unresolvable_ref_exits_clean_rc1(seatkit, live_repo, capsys):
     # An error path must return rc 1 with a clean message (main honors its -> int contract
     # in-process), NOT raise SystemExit / a traceback.

@@ -7,6 +7,7 @@ attestations (pair PRIMARY_VERIFIER key) — so a human can drive a full brief->
 flow today. Reuses threeway.loop.build_candidate_events for the canonical shapes.
 """
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,6 +16,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from threeway import gitcas
+from threeway.envelope import Event
 from threeway.keys import load_private
 from threeway.loop import PAIR_A, PAIR_B, build_candidate_events
 from threeway.refstore import AppendContentionExceeded, RefEventStore
@@ -57,6 +59,30 @@ def _pick(events, kind, phase=None):
     raise ValueError(f"builder produced no {kind}/{phase} event")
 
 
+def _abort_event(a) -> Event:
+    """Build a COORDINATOR-signed candidate_aborted for a (pair-namespaced) candidate.
+
+    The CLI always signs with the named pair's coordinator key, so it can only ever emit an
+    AUTHORIZED abort (the abort authority = the bound-pair executing_coordinator; ADR-059). No
+    staging-base/branch is needed — an abort references no tree. The id mirrors loop._e's
+    `{kind}-{sender}-{cid}` scheme so distinct candidates' aborts never share a store path.
+    """
+    pair = _PAIRS[a.pair]
+    cid = a.candidate_id if ":" in a.candidate_id else f"{pair.pair}:{a.candidate_id}"
+    # payload carries candidate_id so each candidate's abort has a DISTINCT idempotency_key —
+    # candidate_id is NOT in the idempotency fingerprint (envelope.py:105), so an empty-payload
+    # abort would collide across candidates and RefEventStore would silently dedup the second one
+    # (a lost abort). Mirrors release_requested's per-candidate disambiguation (loop.py:107). The
+    # fold keys on the top-level candidate_id, not payload, so this is fold-neutral.
+    return Event(
+        id=f"candidate_aborted-{pair.coordinator}-{cid}", seq=0, bus_id=a.bus_id,
+        schema_version="threeway/1", kind="candidate_aborted", sender=pair.coordinator,
+        recipient="all", signer=f"{pair.coordinator}:{pair.coordinator_provider}:s1",
+        payload={"candidate_id": cid}, brief_id=a.brief_id, brief_version=a.brief_version,
+        candidate_id=cid,
+    )
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Threeway interactive-seat bootstrap emitter (TEMPORARY).")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -77,13 +103,28 @@ def main(argv=None) -> int:
     pat.add_argument("--phase", required=True, choices=["preliminary", "release"])
     pat.set_defaults(kind="attestation")
 
+    # candidate_aborted: coordinator-signed rework abort (ADR-060). No staging-base/branch — an
+    # abort references no tree — so it gets its own arg set, not _common.
+    pab = sub.add_parser("candidate_aborted")
+    pab.add_argument("--candidate-id", required=True)
+    pab.add_argument("--pair", default="A", choices=["A", "B"])
+    pab.add_argument("--brief-id", default="b1")
+    pab.add_argument("--brief-version", type=int, default=1)
+    pab.add_argument("--bus-id", default="prod")
+    pab.add_argument("--repo-dir", default=".")
+    pab.add_argument("--remote", default="origin")
+    pab.set_defaults(kind="candidate_aborted")
+
     args = ap.parse_args(argv)
     if (args.remote or "").lower() in ("", "none"):
         args.remote = None
     phase = getattr(args, "phase", None)
     try:
-        _, events = _candidate_set(args)
-        ev = _pick(events, args.kind, phase)
+        if args.cmd == "candidate_aborted":
+            ev = _abort_event(args)
+        else:
+            _, events = _candidate_set(args)
+            ev = _pick(events, args.kind, phase)
         _append(args, ev)
     except FileNotFoundError as e:
         print(f"Error loading seat key: {e}", file=sys.stderr); return 1
@@ -91,6 +132,10 @@ def main(argv=None) -> int:
         print(f"Bus contention, not emitted: {e}", file=sys.stderr); return 1
     except ValueError as e:
         print(f"Not emitted: {e}", file=sys.stderr); return 1
+    except subprocess.CalledProcessError as e:
+        # totality: a non-git --repo-dir surfaces here (git write exits 128). The candidate path
+        # pre-flights via _candidate_set; candidate_aborted has no pre-flight, so catch it here.
+        print(f"Not emitted: git failed ({e})", file=sys.stderr); return 1
     print(f"Emitted {ev.kind}{'/' + phase if phase else ''} for {ev.candidate_id} (seq {ev.seq}).")
     return 0
 

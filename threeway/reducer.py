@@ -118,6 +118,12 @@ class EffectiveState:
         coordinator = a.payload.get("executing_coordinator")
         return isinstance(coordinator, str) and coordinator in seats
 
+    def aborted_candidate_ids(self) -> list:
+        # ADR-060: candidate_ids with >=1 recorded abort (authorized OR not). The rework breaker
+        # iterates these and re-checks authority via is_aborted — so this accessor never widens
+        # authority; it only exposes which ids to consider.
+        return list(self._aborted_by.keys())
+
     def brief(self, brief_id, version) -> Event | None:
         return self._briefs.get((brief_id, version))
 

@@ -2913,7 +2913,7 @@ Lane-V pass owed before marked verified (impl≠verifier).
 
 **Context.** While grounding the C1 rework-breaker (handoff `2026-06-23-session-wrap`), an audit of the
 reducer's fold branches against `_AUTHORIZED_SINGLETON_SEAT` found `candidate_aborted` was the LONE
-load-bearing singleton with NO authority filter. The fold (`threeway/reducer.py:344`) recorded an abort
+load-bearing singleton with NO authority filter. The fold (`threeway/reducer.py:350`) recorded an abort
 for ANY validly-signed seat, and `EffectiveState.is_aborted` was bare set-membership; the predicate
 (`threeway/predicate.py:49`) REJECTs any candidate where `is_aborted` is True. So any keyholder (any
 operator / ci / other-pair coordinator) could append a validly-signed `candidate_aborted` for ANY
@@ -2969,8 +2969,53 @@ TEST-API-only and UNREACHABLE on the bus — blocked by `run_gate`'s `isinstance
 is NOT a regression (the pre-fix `candidate_id in set` raised identically). Verdict recorded in
 `logs/verify-adr059-candidate-aborted-authority-lane-v.json`. **Ratification owed to the user.**
 
-**Scope / deferral.** This is C1 Part 1. Part 2 — wiring the rework circuit-breaker
-(`threeway/rework.py:should_escalate`, currently UNWIRED; it counts RAW aborts) to count only AUTHORIZED
-aborts via the fixed `is_aborted`/`_aborted_by`, plus a coordinator-signed abort-emit CLI and an
-`overseer_plan` ESCALATE-on-`should_escalate` refusal — remains deferred. Leaving it is safe: `should_escalate`
-has no live callers (verified), so the loose raw count is unreachable.
+**Scope / deferral.** This is C1 Part 1. Part 2 — wiring the rework circuit-breaker to count only
+AUTHORIZED aborts via the fixed `is_aborted`/`_aborted_by`, plus a coordinator-signed abort-emit CLI and an
+`overseer_plan` ESCALATE-on-`should_escalate` refusal — **was completed in ADR-060 (below).**
+
+## ADR-060 — wire the rework circuit-breaker on authority-aware aborts (C1 Part 2)
+
+**Context.** ADR-059 made `candidate_aborted` carry read-time authority but left the rework
+circuit-breaker (`threeway/rework.py`) UNWIRED — `rework_count`/`should_escalate` counted RAW abort
+events (no authority filter) and had zero live callers. This wires the breaker so a brief that keeps
+failing escalates to humans, WITHOUT letting a forged abort trip it (a forced-ESCALATE merge-DoS).
+
+**Decisions (DD-1..DD-3).**
+
+**DD-1 — count over reduced STATE, tied to the authoritative candidate.** `rework_count(state,
+brief_id, brief_version)` (signature changed from `(events, ...)`) counts DISTINCT candidate_ids that
+are (a) authoritatively aborted (`state.is_aborted`, ADR-059) AND (b) whose AUTHORITATIVE candidate
+(`state.authoritative_candidate`) belongs to that brief_id/brief_version. Counting over reduced state —
+not raw events — is doubly fail-safe: a forged abort fails the authority check, and an abort with no
+real candidate fails the candidate check, so neither can trip the breaker nor inflate a rival
+brief-version's count. brief_id + brief_version are in the signed envelope view (`envelope.py:83/88`),
+so the version association is tamper-evident. New accessor `EffectiveState.aborted_candidate_ids()`
+exposes the abort keys (it never widens authority — `rework_count` re-checks `is_aborted`).
+
+**DD-2 — coordinator-signed abort-emit CLI** (`scripts/bootstrap_emit.py candidate_aborted`). Always
+signs with the named pair's coordinator key, so it can only ever emit an AUTHORIZED abort. The payload
+carries `{"candidate_id": cid}` so each candidate's abort has a DISTINCT idempotency_key — candidate_id
+is NOT in the idempotency fingerprint (`envelope.py:105`), so an empty-payload abort would collide
+across candidates and `RefEventStore` would silently dedup (lose) the second one. Mirrors
+`release_requested`'s per-candidate disambiguation. Error paths (bad key / contention / bad repo-dir
+git failure) return clean rc 1.
+
+**DD-3 — `overseer_plan` ESCALATE-refusal, fail-safe direction.** `main()` computes
+`should_escalate(state, brief_id, brief_version)`; `plan()` gains `escalate=False` and, when tripped,
+WITHHOLDS a new `cycle_go` (the gate-progressing fact) and prints `⚠ ESCALATE`. This is the
+requirement-ADDING / fail-safe direction (ADR-058 DD-1): the breaker can only HALT auto-progression,
+never advance it. The other emittable overseer facts and the Q4 `release_order` guard (DD-4) are
+unaffected. Below `REWORK_CAP` (strict `>`, cap 2) `cycle_go` is still offered (non-vacuous wiring).
+
+**Why non-vacuous.** TDD RED→GREEN per component (rework: 7 pins; abort CLI: 3 pins incl idempotency +
+bad-repo totality; overseer_plan: 4 pins incl a below-cap contrast). Executed mutations: dropping the
+`is_aborted` authority filter reddens the forged-abort pin; breaking the brief_version match reddens the
+version-scoping pin; dropping the `cycle_go` withhold reddens the escalation pins (and the mutant emits
+a cycle_go). Full threeway suite **415 passed, 1 skipped**; ci_smoke OK; check_no_ceremony clean.
+
+**Verification.** Solo Tier-A adversarial Lane-V via 5 independent non-author verifiers (`wf_556f8109-0bd`,
+lenses: breaker-authority-forge / brief-version-integrity / abort-cli-idempotency-totality /
+escalate-refusal-failsafe-direction / regression-pin-integrity). **Verdict GO** (3 GO + 2 NITS; zero
+FAIL/CRITICAL/MAJOR; full unit suite 3216 passed). NITs addressed in the same change: a `candidate_aborted`
+bad-repo-dir traceback → now caught (clean rc 1, +pin); a stale-doc note; a test comment. Verdict recorded
+in `logs/verify-adr060-rework-breaker-lane-v.json`. **Ratification owed to the user.**

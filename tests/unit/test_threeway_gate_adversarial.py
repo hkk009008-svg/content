@@ -255,18 +255,42 @@ def test_crash_after_release_before_cas_recovers_without_double_write(world):
 
 
 def test_one_rework_cycle_completes_then_third_escalates(world):
+    # ADR-060: should_escalate counts only AUTHORIZED reworks over REDUCED state, through the real
+    # signed store + verify_and_reduce. Three pair-A candidates of brief b1/v1, each aborted by the
+    # pair's executing_coordinator -> escalate only on the third (> REWORK_CAP).
+    from threeway.envelope import Event
     from threeway.rework import should_escalate
     r, base, branch, integ, reg, ks, privs = world
     store = EventStore(r / "coordination" / "threeway" / "events")
-    # two aborts (rework) then check escalation on a third
-    from threeway.envelope import Event
-    def abort(seq, cid):
-        return Event(id=f"ab{seq}", seq=0, bus_id="prod", schema_version="threeway/1",
-                     kind="candidate_aborted", sender="coordinator", recipient="all",
-                     signer="coordinator:claude:s1", payload={}, brief_id="b1",
-                     brief_version=1, candidate_id=cid)
-    store.append(abort(1, "c1"), privs["coordinator"])
-    store.append(abort(2, "c2"), privs["coordinator"])
-    assert not should_escalate(store.all_events(), "b1", 1)
-    store.append(abort(3, "c3"), privs["coordinator"])
-    assert should_escalate(store.all_events(), "b1", 1)
+    # one overseer assignment binds pair A to executing_coordinator "coordinator"
+    assignment = next(e for e in build_candidate_events(base, branch, integ, privs)
+                      if e.kind == "assignment")
+    store.append(assignment, privs["overseer"])
+
+    def candidate(cid):
+        return Event(id=f"candidate-coordinator-{cid}", seq=0, bus_id="prod",
+                     schema_version="threeway/1", kind="candidate", sender="coordinator",
+                     recipient="all", signer="coordinator:claude:s1", payload={"pair": "A"},
+                     brief_id="b1", brief_version=1, candidate_id=cid)
+
+    def abort(cid):
+        # payload={} is safe HERE because this test uses EventStore (Slice-1, store.py), which has
+        # NO idempotency dedup. The live RefEventStore DOES dedup by idempotency_key (payload_digest
+        # included, candidate_id NOT), so the production abort emit carries payload={"candidate_id": cid}
+        # to disambiguate (bootstrap_emit._abort_event).
+        return Event(id=f"candidate_aborted-coordinator-{cid}", seq=0, bus_id="prod",
+                     schema_version="threeway/1", kind="candidate_aborted", sender="coordinator",
+                     recipient="all", signer="coordinator:claude:s1", payload={},
+                     brief_id="b1", brief_version=1, candidate_id=cid)
+
+    def escalates():
+        state = verify_and_reduce(store.all_events(), registry_dir=reg, bus_id="prod")
+        return should_escalate(state, "b1", 1)
+
+    for cid in ("A:c1", "A:c2"):
+        store.append(candidate(cid), privs["coordinator"])
+        store.append(abort(cid), privs["coordinator"])
+    assert not escalates()
+    store.append(candidate("A:c3"), privs["coordinator"])
+    store.append(abort("A:c3"), privs["coordinator"])
+    assert escalates()

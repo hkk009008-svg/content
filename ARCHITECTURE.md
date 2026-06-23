@@ -1934,7 +1934,7 @@ the full brick catalogue (35 envelope-field poisons + 15 payload-value probes) e
 `threeway-candidate-id-pair-binding-dos` — was that `candidate_id` is a free-form, globally-shared
 namespace, so TWO overseer-assigned pairs could each be self-consistent for the SAME id; a legit
 executing_coordinator of pair B could reuse a victim's id, declare pair B, capture
-`authoritative_candidate` (`threeway/reducer.py:159`), and stall the victim's pair-A merge
+`authoritative_candidate` (`threeway/reducer.py:165`), and stall the victim's pair-A merge
 (availability-only — it can never forge pair A's attestations, so it never promotes). A first attempt
 (first-writer-wins, earliest-`seq`) only INVERTED the race — its mandated adversarial review
 (`wf_01844a2a-03a`) reproduced the symmetric attacker-declares-EARLIER DoS through the real gate. The
@@ -1949,7 +1949,7 @@ declare orders; mutation-proof: dropping the namespace clause turns the attacker
 `DECISIONS.md` ADR-042 + `threeway-candidate-id-pair-binding-dos`.
 
 **`candidate_aborted` now carries READ-time abort authority (ADR-059).** It was the LONE load-bearing
-singleton with no authority filter — the fold (`threeway/reducer.py:344`) recorded an abort for ANY
+singleton with no authority filter — the fold (`threeway/reducer.py:350`) recorded an abort for ANY
 validly-signed seat, and `is_aborted` was bare set-membership, so any keyholder (any operator / ci /
 other-pair coordinator) could append a validly-signed `candidate_aborted` for ANY `candidate_id` →
 `predicate.py:49` permanently REJECTs it (cross-pair merge DoS, same forge/availability class as
@@ -1961,9 +1961,14 @@ resolved at READ because the authorizing assignment may arrive in any order. Fai
 no namespace / no assignment / non-str coordinator → `False`; it only ever DROPS unauthorized aborts,
 never widens what can abort. `assignment()` is overseer-only at record time, so a forged assignment can't
 redirect abort authority. Mutation-proof: dropping the authority check turns the forged-abort pins RED.
-The rework circuit-breaker (`threeway/rework.py` `should_escalate`) still counts RAW aborts and is
-currently UNWIRED — making it count only AUTHORIZED aborts is the deferred C1 Part 2. See `DECISIONS.md`
-ADR-059 + `threeway-candidate-aborted-no-authority`.
+The rework circuit-breaker is now WIRED on this authority (ADR-060, C1 Part 2): `rework.should_escalate`/
+`rework_count` take the REDUCED state and count only DISTINCT candidates that are authoritatively aborted
+(`is_aborted`) AND whose authoritative candidate matches the target brief_id/brief_version — so a forged
+abort can neither trip the breaker (a forced-ESCALATE merge-DoS) nor inflate a rival version's count. A
+coordinator-signed abort-emit CLI (`scripts/bootstrap_emit.py candidate_aborted`, payload carries
+`candidate_id` for idempotency-key distinctness) and an `overseer_plan` ESCALATE-refusal (withholds a new
+`cycle_go` when the breaker trips — fail-safe / requirement-adding, ADR-058 DD-1) complete the wiring. See
+`DECISIONS.md` ADR-059 + ADR-060 + `threeway-candidate-aborted-no-authority`.
 
 ### 13A.8 Minimal operable mechanical-seat runtime (scope-b sub-project 1, ADR-056)
 

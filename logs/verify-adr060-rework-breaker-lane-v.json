@@ -1,0 +1,72 @@
+{
+  "adr": "ADR-060",
+  "item": "C1 Part 2 \u2014 wire the rework circuit-breaker on authority-aware aborts",
+  "run_id": "wf_556f8109-0bd",
+  "protocol": "solo Tier-A adversarial Lane-V (5 independent non-author verifiers, read-only, model=sonnet)",
+  "subject_diff": [
+    "threeway/rework.py",
+    "threeway/reducer.py",
+    "scripts/bootstrap_emit.py",
+    "scripts/overseer_plan.py",
+    "tests/unit/test_threeway_rework.py",
+    "tests/unit/test_threeway_bootstrap_emit.py",
+    "tests/unit/test_threeway_overseer_plan.py",
+    "tests/unit/test_threeway_gate_adversarial.py"
+  ],
+  "overall_verdict": "GO",
+  "overall_note": "3 GO + 2 NITS; zero FAIL/CRITICAL/MAJOR. NITs addressed post-verdict: candidate_aborted bad-repo-dir traceback -> caught (clean rc1 + pin); stale ARCHITECTURE/DECISIONS breaker prose -> updated; gate_adversarial abort() payload comment added.",
+  "verifiers": [
+    {
+      "lens": "breaker-authority-forge",
+      "verdict": "GO",
+      "findings": [],
+      "tests_run": "env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_rework.py tests/unit/test_threeway_gate_adversarial.py tests/unit/test_threeway_overseer_plan.py tests/unit/test_threeway_bootstrap_emit.py -q \u2192 46 passed in 19.47s (0 failed, 0 errors, 0 xfail/xpass)",
+      "summary": "The breaker authority gate holds against every adversarial path tried. Forged aborts (operator-signed, coordinator2-signed, pair-A coordinator against pair-B candidates) contribute 0 to rework_count because is_aborted() resolves authority at read time via the overseer-signed assignment, and the fold in reducer.py only accumulates signer-seats into _aborted_by without record-time filtering \u2014 authority is checked by rework_count on every cid it iterates. The legit path (3 authorized reworks) correctly trips the breaker (> REWORK_CAP strict), the boundary (2 == REWORK_CAP) does not escalate, and plan()'s cycle_go withhold is directionally fail-safe with no second emittable-building path that could reintroduce it. Non-vacuousness confirmed: stripping is_aborted() from rework_count makes all three forged-abort scenarios return count=3 and escalate=True (RED), and stripping brief_version makes v2 return count=3 instead of 0 (RED). Deflation via revocation is structurally impossible because _aborted_by is a fold-time accumulator with no revoke path. brief_version is in the signed envelope so it cannot be tampered post-signing."
+    },
+    {
+      "lens": "breaker-brief-version-integrity",
+      "verdict": "GO",
+      "findings": [],
+      "tests_run": "env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_rework.py tests/unit/test_threeway_overseer_plan.py tests/unit/test_threeway_bootstrap_emit.py tests/unit/test_threeway_gate_adversarial.py -v --tb=short: 46 passed in 18.23s. Re-run with --runxfail (no strict-xfail pins present): 46 passed in 17.45s. No vacuity risk.",
+      "summary": "Every brief-version / count-integrity attack vector I probed was closed. The count is derived exclusively from the AUTHORITATIVE CANDIDATE's signed brief_id/brief_version (not from the abort event's envelope brief_version), so an abort carrying a wrong brief_version cannot redirect the count to a different version. A shadow-only abort (no authoritative candidate) produces zero count. The same candidate aborted twice counts once (the _aborted_by fold is a set per cid). A forged abort from a non-coordinator seat is blocked by the is_aborted authority re-check in rework_count. Cross-pair aborts (pair-B coordinator targeting pair-A candidate) are blocked by the namespace binding in is_aborted. The payload inclusion of candidate_id in bootstrap_emit._abort_event disambiguates idempotency_key across distinct candidates, preventing RefEventStore dedup of the second abort (an empty-payload abort would collide). Both brief_id and brief_version appear in _signed_view() at envelope.py:83/88 and are therefore tamper-evident. The mutation probe confirmed test_reworks_scoped_to_brief_version goes RED when the brief_version guard is removed from rework_count. All 46 tests pass."
+    },
+    {
+      "lens": "abort-cli-idempotency-totality",
+      "verdict": "NITS",
+      "findings": [
+        {
+          "severity": "NIT",
+          "claim": "candidate_aborted main() does not catch subprocess.CalledProcessError, leaking a traceback when --repo-dir points to a non-git directory. The old subcommands (candidate, release_requested, attestation) are protected because _candidate_set calls gitcas.rev_parse(check=False) first, which returns None -> ValueError -> caught. candidate_aborted skips _candidate_set entirely and goes directly to _append -> gitcas.write_blob(check=True) -> CalledProcessError uncaught.",
+          "evidence": "$ env -u GIT_INDEX_FILE .venv/bin/python -c \"from scripts.bootstrap_emit import main; main(['candidate_aborted','--candidate-id','A:c1','--pair','A','--brief-id','b1','--brief-version','1','--repo-dir','/tmp/not_a_git_repo_xyz','--remote',''])\" 2>&1\nTraceback ... subprocess.CalledProcessError: Command '['git', '-C', '/tmp/not_a_git_repo_xyz', 'hash-object', ...]' returned non-zero exit status 128.\nContrast: old 'candidate' subcommand on same bad dir -> 'Not emitted: cannot resolve staging-base ref' rc=1 (clean). The brief says 'error paths (bad key, contention) return clean rc 1, not a traceback'; bad repo-dir is not among the stated cases, but the totality is incomplete. scripts/bootstrap_emit.py:128-133 catches FileNotFoundError, AppendContentionExceeded, ValueError \u2014 not subprocess.CalledProcessError."
+        }
+      ],
+      "tests_run": "env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_bootstrap_emit.py tests/unit/test_threeway_rework.py tests/unit/test_threeway_overseer_plan.py tests/unit/test_threeway_gate_adversarial.py::test_one_rework_cycle_completes_then_third_escalates --runxfail -q -> 35 passed\\nenv -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/ -q -> 3216 passed, 1 skipped, 0 failures",
+      "summary": "The candidate_aborted subcommand correctly disambiguates aborts for distinct candidates via payload={\\\"candidate_id\\\": cid}, which makes payload_digest (and hence idempotency_key) distinct per candidate. Mutation probe confirmed the fix is load-bearing: empty-payload aborts for A:c1 and A:c2 produce identical idempotency keys (silent dedup of the second abort), while the fix produces distinct keys. Same-candidate retries dedup correctly. Signing always uses pair.coordinator via _abort_event hardwiring; _append derives the seat from ev.signer, loading only the coordinator's private key \u2014 no other key can be used. Bare candidate IDs are correctly pair-namespaced. One NIT: the subprocess.CalledProcessError path from gitcas.write_blob is uncaught in main() for candidate_aborted (old subcommands have a pre-flight _candidate_set check that raises ValueError early on invalid repos), so a bad --repo-dir produces a traceback rather than a clean rc=1 message. This is outside the brief's stated error cases (bad key, contention) but violates the general totality guarantee."
+    },
+    {
+      "lens": "escalate-refusal-failsafe-direction",
+      "verdict": "GO",
+      "findings": [],
+      "tests_run": "env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_rework.py tests/unit/test_threeway_overseer_plan.py tests/unit/test_threeway_gate_adversarial.py::test_one_rework_cycle_completes_then_third_escalates -v -> 31 passed. env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_bootstrap_emit.py -v -> 4 passed. env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/ -q -> 3216 passed, 3 skipped, 0 failures.",
+      "summary": "Every escalate-refusal invariant holds. Under escalation, plan() withholds only cycle_go via the single-fact filter `not (escalate and f == \"cycle_go\")` at overseer_plan.py:112 \u2014 brief, assignment, approver_roster, and re_verify_challenge are all unaffected (confirmed by mutation probe and T3 probe). The release_order DD-4 guard is structurally unchanged: it is absent from _EMITTABLE and raises ValueError in _emit_argv if somehow reached. The breaker is non-vacuous: test_main_does_not_escalate_below_cap confirms that at exactly REWORK_CAP=2 reworks, cycle_go is still offered (not always-withheld). The --confirm path cannot emit cycle_go under escalation because it iterates only `emittable`, which already excludes cycle_go; test_main_confirm_does_not_emit_cycle_go_when_escalating confirms state.cycle_go is None after confirmation. The escalate computation at main():216 reads decision[\"brief_id\"]/decision[\"brief_version\"], not hardcoded values. The ESCALATE print at lines 218-221 fires before _print_plan. All 3216 tests pass with no regressions."
+    },
+    {
+      "lens": "regression-pin-integrity",
+      "verdict": "NITS",
+      "findings": [
+        {
+          "severity": "MINOR",
+          "claim": "ARCHITECTURE.md lines 1964-1966 and DECISIONS.md lines 2972-2976 both describe the rework circuit-breaker as 'still counts RAW aborts', 'currently UNWIRED', and 'should_escalate has no live callers' \u2014 all three statements are now false after this diff lands.",
+          "evidence": "ARCHITECTURE.md:1964: 'The rework circuit-breaker (threeway/rework.py should_escalate) still counts RAW aborts and is currently UNWIRED'. DECISIONS.md:2972-2976: 'Part 2 remains deferred. Leaving it is safe: should_escalate has no live callers (verified), so the loose raw count is unreachable.' Both are prose descriptions not gated by check_doc_claims (ci_smoke passes; `env -u GIT_INDEX_FILE .venv/bin/python scripts/ci_smoke.py` exits OK). DECISIONS.md also has no ADR-060 entry (`grep -c 'ADR-060' DECISIONS.md` \u2192 0). The unstaged diff implements C1 Part 2 entirely, so the deferred-note and the 'UNWIRED' prose must be updated in the same commit."
+        },
+        {
+          "severity": "NIT",
+          "claim": "test_one_rework_cycle_completes_then_third_escalates in test_threeway_gate_adversarial.py uses payload={} for abort events appended to EventStore (store.py) \u2014 correct for that test \u2014 but the comment explaining WHY payload must carry candidate_id (idempotency_key disambiguation) is only present in _abort_event() in bootstrap_emit.py and _append_authorized_reworks() in test_threeway_overseer_plan.py. The adversarial test's abort() helper has no such comment, making the payload={} vs payload={'candidate_id':cid} discrepancy invisible to a reader.",
+          "evidence": "tests/unit/test_threeway_gate_adversarial.py:276-280: abort() has payload={} with no explanation. EventStore (threeway/store.py:39) has no idempotency dedup, so empty payload is safe there. RefEventStore (threeway/refstore.py:134) deduplicates by idempotency_key which includes payload_digest; confirmed: idempotency_key with payload={} collides across distinct candidates (both keys = b853e1f2457248f9\u2026), while payload={'candidate_id':'A:c1'} vs {'candidate_id':'A:c2'} are distinct (898c0f59\u2026 vs e56eaa88\u2026). The absence of a comment leaves a future reader who copies the helper into a RefEventStore context at risk."
+        }
+      ],
+      "tests_run": "env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/ -k threeway -q \u2192 415 passed, 1 skipped, 2803 deselected in 132.57s\n\nenv -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/ -k threeway --runxfail -q \u2192 415 passed, 1 skipped (no strict-xfail pins in threeway suite; the 1 skip is a pytest.skip, not xfail)\n\nenv -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_rework.py tests/unit/test_threeway_overseer_plan.py tests/unit/test_threeway_bootstrap_emit.py tests/unit/test_threeway_gate_adversarial.py -v \u2192 46 passed in 14.38s\n\nMUTATION 1 \u2014 drop is_aborted authority filter in rework_count (rework.py:20): run from /tmp/muttest with local pyproject.toml \u2192 FAILED tests/unit/test_threeway_rework.py::test_forged_aborts_from_non_coordinator_do_not_count (assert 3 == 0) + FAILED test_cross_pair_coordinator_aborts_do_not_count (assert 3 == 0). 2 RED. NON-VACUOUS.\n\nMUTATION 2 \u2014 drop brief_version match in rework_count (rework.py:23): run from /tmp/muttest \u2192 FAILED tests/unit/test_threeway_rework.py::test_reworks_scoped_to_brief_version (assert 3 == 0 for rework_count(state,'b1',2)). 1 RED. NON-VACUOUS.\n\nMUTATION 3 \u2014 remove cycle_go withhold in overseer_plan.py plan() (overseer_plan.py:111): run from /tmp/muttest \u2192 FAILED test_plan_withholds_cycle_go_on_escalation + test_main_escalates_and_withholds_cycle_go_on_repeated_reworks + test_main_confirm_does_not_emit_cycle_go_when_escalating. 3 RED. NON-VACUOUS.",
+      "summary": "All three mutation probes are non-vacuous: dropping the is_aborted authority filter, dropping the brief_version match, and removing the cycle_go withhold each flip distinct tests RED. All callers of should_escalate/rework_count across threeway/, scripts/, and tests/ now pass EffectiveState (not raw events); no stale caller was found. The old raw-events tests were correctly replaced with authority-aware state-based tests. The idempotency_key payload-based disambiguation in bootstrap_emit._abort_event is verified correct (empty-payload aborts collide in RefEventStore; payload={'candidate_id':cid} makes them distinct). Two prose staleness issues in ARCHITECTURE.md (lines 1964-1966) and DECISIONS.md (lines 2972-2976) describe the pre-fix state as current and must be updated in the same commit; no ADR-060 entry exists in DECISIONS.md. No correctness or security defect was found in the implementation."
+    }
+  ]
+}
