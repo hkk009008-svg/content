@@ -154,20 +154,92 @@ def test_confirm_emits_overseer_facts_never_release_order(seatkit, tmp_path):
     assert state.brief("b1", 1) is not None
     assert state.brief("b1", 1).signer.split(":", 1)[0] == "overseer"
     assert state.assignment("A") is not None
+    assert state.assignment("A").signer.split(":", 1)[0] == "overseer"
     assert state.cycle_go("b1", 1) is not None
+    assert state.cycle_go("b1", 1).signer.split(":", 1)[0] == "overseer"
     assert state.release_order("A:c1") is None           # Q4 GUARD: overseer_plan never emits it
 
 
 # ── Task 4: idempotency ───────────────────────────────────────────────────────
 
-def test_confirm_idempotent_second_run_is_noop(seatkit, tmp_path):
+def test_confirm_idempotent_second_run_calls_no_emit(seatkit, tmp_path, monkeypatch):
+    # NON-VACUOUS: a spy on overseer_emit.main proves the SECOND run early-exits at plan() level
+    # (emittable == []) rather than re-emitting and relying on refstore dedup to hide it (the count
+    # check alone is vacuous — refstore absorbs duplicate ids regardless of whether plan() early-exits).
+    reg, ks, privs = seatkit
+    repo = _new_repo(tmp_path)
+    from scripts import overseer_plan
+    args = ["--decision", str(_decision_file(tmp_path)), "--repo-dir", str(repo),
+            "--registry-dir", str(reg), "--remote", "", "--confirm"]
+    assert overseer_plan.main(args) == 0
+    n_after_first = len(_events(repo))
+    assert n_after_first == 3                             # brief + assignment + cycle_go
+    calls = []
+    real_main = overseer_plan.overseer_emit.main
+    monkeypatch.setattr(overseer_plan.overseer_emit, "main",
+                        lambda argv: calls.append(argv[0]) or real_main(argv))
+    assert overseer_plan.main(args) == 0                  # second run
+    assert calls == []                                   # plan() returned [] -> overseer_emit NOT called
+    assert len(_events(repo)) == n_after_first            # and the bus is unchanged
+
+
+def test_load_decision_rejects_t2(tmp_path):
+    from scripts.overseer_plan import load_decision, DecisionError
+    with pytest.raises(DecisionError):
+        load_decision(str(_decision_file(tmp_path, tier="T2")))
+
+
+def test_load_decision_rejects_empty_allowed_paths(tmp_path):
+    from scripts.overseer_plan import load_decision, DecisionError
+    with pytest.raises(DecisionError):
+        load_decision(str(_decision_file(tmp_path, allowed_paths=[])))
+
+
+def test_plan_all_present_emits_nothing(seatkit, tmp_path):
+    reg, ks, privs = seatkit
+    repo = _new_repo(tmp_path)
+    from scripts.overseer_plan import load_decision, main, plan
+    args = ["--decision", str(_decision_file(tmp_path)), "--repo-dir", str(repo),
+            "--registry-dir", str(reg), "--remote", "", "--confirm"]
+    assert main(args) == 0
+    state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
+    emittable, _ = plan(load_decision(str(_decision_file(tmp_path))), state)
+    assert emittable == []                               # all three present -> nothing emittable
+
+
+def test_confirm_brief_version_2_round_trips_and_is_idempotent(seatkit, tmp_path):
+    # Regression for the _emit_argv('brief') brief_version-forwarding bug: a v2 decision must emit
+    # brief@v2 (not the argparse v1 default), else plan() never sees it present and re-emits forever.
+    reg, ks, privs = seatkit
+    repo = _new_repo(tmp_path)
+    from scripts.overseer_plan import main
+    args = ["--decision", str(_decision_file(tmp_path, brief_version=2)), "--repo-dir", str(repo),
+            "--registry-dir", str(reg), "--remote", "", "--confirm"]
+    assert main(args) == 0
+    state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
+    assert state.brief("b1", 2) is not None               # emitted at v2, not the v1 default (the bug)
+    n = len(_events(repo))
+    assert main(args) == 0
+    assert len(_events(repo)) == n                         # idempotent: plan() sees brief@v2 present
+
+
+def test_confirm_forwards_bus_id_to_emit(seatkit, tmp_path):
+    # DD-5: --bus-id is forwarded to the emit, so the write namespace == the read namespace.
     reg, ks, privs = seatkit
     repo = _new_repo(tmp_path)
     from scripts.overseer_plan import main
     args = ["--decision", str(_decision_file(tmp_path)), "--repo-dir", str(repo),
-            "--registry-dir", str(reg), "--remote", "", "--confirm"]
+            "--registry-dir", str(reg), "--remote", "", "--bus-id", "test", "--confirm"]
     assert main(args) == 0
-    n_after_first = len(_events(repo))
-    assert n_after_first == 3                             # brief + assignment + cycle_go
-    assert main(args) == 0                                # second run: nothing emittable
-    assert len(_events(repo)) == n_after_first            # zero new events; no EventIdCollision failure
+    briefs = [e for e in _events(repo) if e.kind == "brief"]
+    assert briefs and all(e.bus_id == "test" for e in briefs)   # emitted on the 'test' bus namespace
+
+
+def test_confirm_emit_failure_returns_rc1(seatkit, tmp_path, monkeypatch):
+    reg, ks, privs = seatkit
+    repo = _new_repo(tmp_path)
+    from scripts import overseer_plan
+    monkeypatch.setattr(overseer_plan.overseer_emit, "main", lambda argv: 1)  # every emit "fails"
+    args = ["--decision", str(_decision_file(tmp_path)), "--repo-dir", str(repo),
+            "--registry-dir", str(reg), "--remote", "", "--confirm"]
+    assert overseer_plan.main(args) == 1

@@ -79,13 +79,13 @@ def plan(decision, state):
     pv = decision["assignment"]["primary_verifier"]
     pair = decision["assignment"]["pair"]
 
-    emittable = []
-    if state.brief(bid, ver) is None:
-        emittable.append("brief")
-    if state.assignment(pair) is None:
-        emittable.append("assignment")
-    if state.cycle_go(bid, ver) is None:
-        emittable.append("cycle_go")
+    # _EMITTABLE is the authoritative set of overseer facts overseer_plan may emit (release_order is
+    # deliberately NOT in it — DD-4). An unknown fact listed in _EMITTABLE raises a KeyError here — a
+    # loud guard against ever adding release_order or a non-overseer fact to the emittable set.
+    _present = {"brief": state.brief(bid, ver),
+                "assignment": state.assignment(pair),
+                "cycle_go": state.cycle_go(bid, ver)}
+    emittable = [f for f in _EMITTABLE if _present[f] is None]
 
     owed = []
     cand = state.candidate(cid)
@@ -113,7 +113,7 @@ def _emit_argv(fact, decision, repo_dir, remote, bus_id):
     tail = ["--repo-dir", repo_dir, "--remote", remote, "--bus-id", bus_id]
     if fact == "brief":
         return ["brief", "--candidate-id", cid, "--brief-id", bid, "--assigned-tier", tier,
-                "--allowed-paths", *decision["allowed_paths"], *tail]
+                "--brief-version", str(ver), "--allowed-paths", *decision["allowed_paths"], *tail]
     if fact == "assignment":
         return ["assignment", "--candidate-id", cid, "--pair", asg["pair"],
                 "--builder", asg["builder"], "--builder-provider", asg["builder_provider"],
