@@ -92,12 +92,6 @@ def test_load_decision_missing_field_is_decision_error(tmp_path):
         load_decision(str(p))
 
 
-def test_load_decision_rejects_t3(tmp_path):
-    from scripts.overseer_plan import load_decision, DecisionError
-    with pytest.raises(DecisionError):
-        load_decision(str(_decision_file(tmp_path, tier="T3")))
-
-
 def test_main_bad_decision_returns_rc2(tmp_path):
     from scripts.overseer_plan import main
     bad = _decision_dict(); del bad["assignment"]
@@ -183,12 +177,6 @@ def test_confirm_idempotent_second_run_calls_no_emit(seatkit, tmp_path, monkeypa
     assert len(_events(repo)) == n_after_first            # and the bus is unchanged
 
 
-def test_load_decision_rejects_t2(tmp_path):
-    from scripts.overseer_plan import load_decision, DecisionError
-    with pytest.raises(DecisionError):
-        load_decision(str(_decision_file(tmp_path, tier="T2")))
-
-
 def test_load_decision_rejects_empty_allowed_paths(tmp_path):
     from scripts.overseer_plan import load_decision, DecisionError
     with pytest.raises(DecisionError):
@@ -243,3 +231,88 @@ def test_confirm_emit_failure_returns_rc1(seatkit, tmp_path, monkeypatch):
     args = ["--decision", str(_decision_file(tmp_path)), "--repo-dir", str(repo),
             "--registry-dir", str(reg), "--remote", "", "--confirm"]
     assert overseer_plan.main(args) == 1
+
+
+# ── T3 extension (ADR-058) ────────────────────────────────────────────────────
+
+def _seed_candidate(repo, privs, integ="integ_sha_xyz", tier="T3"):
+    """Append a coordinator-signed candidate@A:c1 so plan() sees integration_sha (re_verify_challenge
+    becomes emittable). reduce/verify do not validate the SHAs as real git objects."""
+    from threeway.loop import build_candidate_events, PAIR_A
+    store = RefEventStore(Path(repo))
+    for ev in build_candidate_events("base", "branch", integ, {}, tier=tier,
+                                     pair=PAIR_A, candidate_id="A:c1"):
+        if ev.kind == "candidate":
+            store.append(ev, privs["coordinator"])
+    return integ
+
+
+def test_load_decision_accepts_t2_without_approvers(tmp_path):
+    from scripts.overseer_plan import load_decision
+    assert load_decision(str(_decision_file(tmp_path, tier="T2")))["tier"] == "T2"
+
+
+def test_load_decision_t3_requires_two_distinct_approvers(tmp_path):
+    from scripts.overseer_plan import load_decision, DecisionError
+    with pytest.raises(DecisionError):
+        load_decision(str(_decision_file(tmp_path, tier="T3")))                          # no approvers
+    with pytest.raises(DecisionError):
+        load_decision(str(_decision_file(tmp_path, tier="T3", approvers=["only-one"])))  # < 2
+    d = load_decision(str(_decision_file(tmp_path, tier="T3",
+                                         approvers=["chief-gemini", "chief-chatgpt"])))
+    assert d["approvers"] == ["chief-gemini", "chief-chatgpt"]
+
+
+def test_plan_t3_empty_bus_emits_roster_not_challenge(tmp_path):
+    from scripts.overseer_plan import load_decision, plan
+    d = load_decision(str(_decision_file(tmp_path, tier="T3",
+                                         approvers=["chief-gemini", "chief-chatgpt"])))
+    emittable, owed = plan(d, reduce([]))
+    assert emittable == ["brief", "assignment", "cycle_go", "approver_roster"]  # no candidate -> no challenge
+    owed_facts = {f for f, _ in owed}
+    assert {"co_sign", "re_verify", "human_approval"} <= owed_facts
+
+
+def test_plan_t3_with_candidate_makes_challenge_emittable(seatkit, tmp_path):
+    reg, ks, privs = seatkit
+    repo = _new_repo(tmp_path)
+    _seed_candidate(repo, privs)
+    from scripts.overseer_plan import load_decision, plan
+    state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
+    d = load_decision(str(_decision_file(tmp_path, tier="T3",
+                                         approvers=["chief-gemini", "chief-chatgpt"])))
+    emittable, _ = plan(d, state)
+    assert "re_verify_challenge" in emittable and "approver_roster" in emittable
+
+
+def test_confirm_t3_emits_roster_and_challenge_never_release_order(seatkit, tmp_path):
+    reg, ks, privs = seatkit
+    repo = _new_repo(tmp_path)
+    integ = _seed_candidate(repo, privs)
+    from scripts.overseer_plan import main
+    dpath = _decision_file(tmp_path, tier="T3", approvers=["chief-gemini", "chief-chatgpt"])
+    assert main(["--decision", str(dpath), "--repo-dir", str(repo),
+                 "--registry-dir", str(reg), "--remote", "", "--confirm"]) == 0
+    state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
+    roster = state.approver_roster("A:c1")
+    assert roster is not None and roster.signer.split(":", 1)[0] == "overseer"
+    assert roster.payload["approvers"] == ["chief-gemini", "chief-chatgpt"]
+    ch = state.re_verify_challenge("A:c1")
+    assert ch is not None and ch.subject_sha == integ
+    assert isinstance(ch.payload["nonce"], str) and len(ch.payload["nonce"]) >= 16  # minted
+    assert state.cycle_go("b1", 1).payload["tier"] == "T3"
+    assert state.release_order("A:c1") is None           # Q4 GUARD holds at T3 too
+
+
+def test_confirm_t2_does_not_emit_t3_facts(seatkit, tmp_path):
+    reg, ks, privs = seatkit
+    repo = _new_repo(tmp_path)
+    _seed_candidate(repo, privs, tier="T2")
+    from scripts.overseer_plan import main
+    dpath = _decision_file(tmp_path, tier="T2")
+    assert main(["--decision", str(dpath), "--repo-dir", str(repo),
+                 "--registry-dir", str(reg), "--remote", "", "--confirm"]) == 0
+    state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
+    assert state.approver_roster("A:c1") is None         # T3-only facts, NOT emitted at T2
+    assert state.re_verify_challenge("A:c1") is None
+    assert state.cycle_go("b1", 1).payload["tier"] == "T2"

@@ -2862,3 +2862,49 @@ bare-subprocess activation pin. operator Lane-V pass owed before marked verified
 **Consequences.** The T3 extension (emit `approver_roster` + `re_verify_challenge`; decompose the
 `co_sign not satisfied` PENDING) is a clean fast-follow; the §7 hardening track and sub-project 2 remain
 pending per chief prioritization.
+
+## ADR-058 — `overseer-plan` T3 extension (all tiers; emit approver_roster + re_verify_challenge)
+
+**Context.** ADR-057's `overseer_plan` handled T0/T1 and rejected T2/T3. The predicate collapses every
+higher-tier requirement into one `PENDING "co_sign not satisfied"` (`threeway/predicate.py:131`), which
+`threeway/tier.py:co_sign_satisfied` decomposes. This extends `overseer_plan` to all tiers by teaching it
+that decomposition. Spec: `docs/superpowers/specs/2026-06-23-overseer-plan-t3-extension-design.md`.
+
+**Decisions (DD-1..DD-5).**
+
+**DD-1 — generalize the DD-4 safety boundary by DIRECTION, not by naming one fact.** `overseer_plan`
+auto-emits overseer facts that only ADD a requirement or PUBLISH a decision (`brief`, `assignment`,
+`cycle_go`, `approver_roster`, `re_verify_challenge`); it NEVER emits the one fact that REMOVES the final
+gate (`release_order`, which authorizes the merge). `approver_roster` (publishes the allowed approvers) and
+`re_verify_challenge` (demands a fresh re-attestation) can only make the gate STRICTER, so auto-emitting
+them is fail-safe. `release_order` stays a manual `overseer_emit` act (ADR-057 DD-4, carried).
+
+**DD-2 — `re_verify_challenge` is progressive.** It is emittable only when a `candidate` exists on the bus
+(its `integration_sha` is the challenge `subject_sha`; `tier.py:128-131` echo-binds it) AND the challenge
+is absent. Gated in `plan()` like `release_order`'s `integration_sha` dependency — but the challenge IS
+auto-emitted (it only adds a requirement; DD-1).
+
+**DD-3 — single-round challenge.** `overseer_emit` keys `re_verify_challenge` on the fixed id
+`re_verify_challenge-overseer-{cid}` (ADR-056 deferred-note), so exactly one challenge per candidate is
+emittable; `overseer_plan`'s idempotency emits it once. A multi-round re-challenge (fresh nonce, new id)
+remains deferred. `overseer_emit` mints the nonce (`secrets.token_hex`); `overseer_plan` passes no `--nonce`.
+
+**DD-4 — `approvers[]` is a required T3 decision field.** The roster must name ≥2 distinct seats
+(`tier.py:158` fails closed on <2). Validated at `load_decision` for T3; ignored for T0/T1/T2.
+
+**DD-5 — single signing path preserved (ADR-057 DD-5).** The two new facts are emitted via
+`overseer_emit.main(["approver_roster", …])` / `(["re_verify_challenge", …])`; no re-implemented shapes.
+
+**Owed surface (tier-aware, surfaced NEVER emitted by overseer_plan).** T2/T3 add `co_sign`
+(mirror-pair primary_verifier); T3 adds `re_verify` (candidate-pair primary_verifier) and two
+`human_approval`s (rostered chiefs) — `overseer_plan` holds none of those keys.
+
+**Why safe / non-vacuous.** `_EMITTABLE` drives the emittable set and EXCLUDES `release_order` (Q4 guard);
+the two T3 facts are tier-gated in `plan()`. Mutation-proven (`tests/unit/test_threeway_overseer_plan.py`):
+MA approver_roster-eligible-at-all-tiers → T2 pin RED; MB drop the integ-gate → empty-bus pin RED;
+MC weaken approvers-validation → requires-2 pin RED; MD add `release_order` to `_EMITTABLE` → KeyError →
+T3 confirm pin RED. 19 pins green; threeway suite 396 passed; ci_smoke + check_no_ceremony clean. operator
+Lane-V pass owed before marked verified (impl≠verifier).
+
+**Consequences.** `overseer_plan` now covers the full tier range for the overseer-authority facts. The
+§7 hardening track and sub-project 2 (real seat↔bus wiring) remain pending per chief prioritization.

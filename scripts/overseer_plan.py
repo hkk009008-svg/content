@@ -24,11 +24,14 @@ from threeway.policy import default_policy
 from threeway.refstore import RefEventStore
 
 SCHEMA = "overseer-decision/1"
-_TIERS_SUPPORTED = ("T0", "T1")
+_TIERS = ("T0", "T1", "T2", "T3")
 _ASSIGNMENT_FIELDS = ("pair", "builder", "builder_provider", "primary_verifier",
                       "primary_verifier_provider", "executing_coordinator")
-# overseer facts overseer_plan may EMIT; release_order is deliberately excluded (DD-4).
-_EMITTABLE = ("brief", "assignment", "cycle_go")
+# Ordered set of overseer facts overseer_plan may EMIT. release_order is deliberately EXCLUDED — it
+# AUTHORIZES the merge (DD-4, generalized in ADR-058 DD-1: overseer_plan emits only requirement-ADDING /
+# decision-PUBLISHING facts, never the gate-REMOVING one). approver_roster + re_verify_challenge are
+# T3-only and gated in plan(); both can only make the gate STRICTER, so auto-emitting them is fail-safe.
+_EMITTABLE = ("brief", "assignment", "cycle_go", "approver_roster", "re_verify_challenge")
 
 
 class DecisionError(ValueError):
@@ -49,9 +52,13 @@ def load_decision(path) -> dict:
     for f in ("candidate_id", "brief_id", "tier", "allowed_paths", "assignment"):
         if f not in raw:
             raise DecisionError(f"decision missing required field: {f!r}")
-    if raw["tier"] not in _TIERS_SUPPORTED:
-        raise DecisionError(f"tier {raw['tier']!r} unsupported — overseer_plan handles T0/T1 only "
-                            "(T2/T3 approver_roster/re_verify_challenge are a documented fast-follow)")
+    if raw["tier"] not in _TIERS:
+        raise DecisionError(f"tier {raw['tier']!r} invalid — must be one of {_TIERS}")
+    if raw["tier"] == "T3":
+        approvers = raw.get("approvers")
+        if not isinstance(approvers, list) or len({a for a in approvers if isinstance(a, str)}) < 2:
+            raise DecisionError("a T3 decision requires 'approvers': a list of >=2 distinct seats "
+                                "(the overseer approver_roster must authorize 2 distinct human approvals)")
     if not isinstance(raw["allowed_paths"], list) or not raw["allowed_paths"]:
         raise DecisionError("allowed_paths must be a non-empty list")
     asg = raw["assignment"]
@@ -62,6 +69,7 @@ def load_decision(path) -> dict:
             raise DecisionError(f"assignment missing required field: {f!r}")
     raw.setdefault("brief_version", 1)
     raw.setdefault("policy_digest", None)
+    raw.setdefault("approvers", [])
     return raw
 
 
@@ -78,33 +86,61 @@ def plan(decision, state):
     ver = decision["brief_version"]
     pv = decision["assignment"]["primary_verifier"]
     pair = decision["assignment"]["pair"]
+    tier = decision["tier"]
+    is_t3 = tier == "T3"
 
-    # _EMITTABLE is the authoritative set of overseer facts overseer_plan may emit (release_order is
-    # deliberately NOT in it — DD-4). An unknown fact listed in _EMITTABLE raises a KeyError here — a
-    # loud guard against ever adding release_order or a non-overseer fact to the emittable set.
-    _present = {"brief": state.brief(bid, ver),
-                "assignment": state.assignment(pair),
-                "cycle_go": state.cycle_go(bid, ver)}
-    emittable = [f for f in _EMITTABLE if _present[f] is None]
+    cand = state.candidate(cid)
+    integ = cand.payload.get("integration_sha") if cand else None
+
+    # (present, eligible) per emittable overseer fact, keyed by _EMITTABLE (release_order is NOT a key,
+    # so it can never be emitted — the Q4 guard; an unknown key here raises a loud KeyError). The two
+    # T3 facts are eligible only at T3; re_verify_challenge also needs the candidate's integration_sha.
+    _spec = {
+        "brief":               (state.brief(bid, ver),          True),
+        "assignment":          (state.assignment(pair),         True),
+        "cycle_go":            (state.cycle_go(bid, ver),       True),
+        "approver_roster":     (state.approver_roster(cid),     is_t3),
+        "re_verify_challenge": (state.re_verify_challenge(cid), is_t3 and integ is not None),
+    }
+    emittable = [f for f in _EMITTABLE if _spec[f][1] and _spec[f][0] is None]
 
     owed = []
-    cand = state.candidate(cid)
     if cand is None:
         owed.append(("candidate", "coordinator"))
     if state.effective_attestation(cid, "preliminary", pv) is None:
         owed.append(("attestation:preliminary", pv))
     if state.effective_attestation(cid, "release", pv) is None:
         owed.append(("attestation:release", pv))
-    if cand is not None:
-        integ = cand.payload.get("integration_sha")
-        if integ and state.ci_result(integ) is None:
-            owed.append(("ci_result", "ci"))
+    if integ and state.ci_result(integ) is None:
+        owed.append(("ci_result", "ci"))
+    # tier-specific NON-overseer approvals — overseer_plan never holds these keys (DD-1)
+    if tier in ("T2", "T3"):
+        owed.append(("co_sign", "mirror-pair primary_verifier"))
+    if is_t3:
+        if state.re_verify(cid, pv) is None:
+            owed.append(("re_verify", pv))
+        for _ in range(max(0, 2 - _rostered_approvals(state, cid, integ))):
+            owed.append(("human_approval", "rostered chief"))
     if state.release_order(cid) is None:
         owed.append(("release_order", "overseer-manual"))  # DD-4: surfaced, NEVER emitted here
     return emittable, owed
 
 
-def _emit_argv(fact, decision, repo_dir, remote, bus_id):
+def _rostered_approvals(state, cid, integ):
+    """Count distinct rostered, sha-bound, affirmative human_approvals already present (mirrors
+    tier._two_distinct_human_approvals' filters; for the owed-surface progress count only)."""
+    roster = state.approver_roster(cid)
+    allowed = set(roster.payload.get("approvers", [])) if roster else set()
+    seats = set()
+    for ev in state.human_approvals(cid):
+        seat = ev.signer.split(":", 1)[0]
+        if (seat in allowed and ev.payload.get("integration_sha") == integ
+                and ev.payload.get("decision") == "approve"):
+            seats.add(seat)
+    return len(seats)
+
+
+def _emit_argv(fact, decision, repo_dir, remote, bus_id, integ=None):
     cid = decision["candidate_id"]
     bid = decision["brief_id"]
     tier = decision["tier"]
@@ -123,6 +159,13 @@ def _emit_argv(fact, decision, repo_dir, remote, bus_id):
     if fact == "cycle_go":
         return ["cycle_go", "--candidate-id", cid, "--brief-id", bid, "--brief-version", str(ver),
                 "--tier", tier, "--policy-digest", _policy_digest(decision), *tail]
+    if fact == "approver_roster":
+        return ["approver_roster", "--candidate-id", cid,
+                "--approvers", *decision["approvers"], *tail]
+    if fact == "re_verify_challenge":
+        # overseer_emit mints a fresh nonce when --nonce is omitted; integ is the candidate's
+        # integration_sha (the challenge subject_sha the gate echo-binds).
+        return ["re_verify_challenge", "--candidate-id", cid, "--integration-sha", integ, *tail]
     raise ValueError(f"{fact!r} is not an overseer_plan-emittable fact")  # release_order never reaches here
 
 
@@ -166,10 +209,12 @@ def main(argv=None) -> int:
 
     if not args.confirm:
         return 0
+    cand = state.candidate(decision["candidate_id"])
+    integ = cand.payload.get("integration_sha") if cand else None
     for fact in emittable:
         # Reuse overseer_emit (one signing path). Pass the RAW --remote so overseer_emit applies its own
         # ""/none -> None normalization; forward --bus-id so the write namespace == the read namespace.
-        rc = overseer_emit.main(_emit_argv(fact, decision, args.repo_dir, args.remote, args.bus_id))
+        rc = overseer_emit.main(_emit_argv(fact, decision, args.repo_dir, args.remote, args.bus_id, integ))
         if rc != 0:
             print(f"overseer_plan: emit of {fact!r} failed (rc {rc}); stopping.", file=sys.stderr)
             return 1
