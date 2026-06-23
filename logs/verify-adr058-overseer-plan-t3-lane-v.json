@@ -1,0 +1,33 @@
+{
+  "artifact": "Lane-V verification record — ADR-058 (overseer_plan T3 extension)",
+  "date": "2026-06-23",
+  "commit_under_review": "d6dd058a",
+  "diff_range": "12e5f3f4..d6dd058a",
+  "spec": "docs/superpowers/specs/2026-06-23-overseer-plan-t3-extension-design.md",
+  "verifier": {
+    "kind": "independent non-author lane-v-verifier (impl != verifier; author implemented in main context)",
+    "agent_id": "a5e073072cee43f9a",
+    "model": "sonnet",
+    "trust": "re-derived the tier decomposition vs threeway/tier.py; independently executed the key mutations; did not trust the commit message"
+  },
+  "verdict": "GO (no NITS)",
+  "confirmed": [
+    "tier decomposition correct: the only OVERSEER-emittable T3 facts are approver_roster (tier.py:151) + re_verify_challenge (tier.py:128-131); co_sign/re_verify/human_approval are non-overseer -> surfaced as owed, never emitted",
+    "re_verify_challenge gated on a candidate (integration_sha) — overseer_plan.py:103 `is_t3 and integ is not None`",
+    "Q4 guard structural across tiers: release_order absent from _EMITTABLE + _spec; reaches a KeyError before _emit_argv",
+    "approvers validation: T3 requires >=2 distinct (overseer_plan.py:58-61); T2 needs none",
+    "scope clean: git diff 12e5f3f4..d6dd058a -- threeway/ scripts/overseer_emit.py is EMPTY (0 bytes); only 5 files changed; no refs/heads/main"
+  ],
+  "independent_mutations": [
+    {"mutation": "add release_order to _EMITTABLE", "pins": ["test_confirm_emits_overseer_facts_never_release_order", "test_confirm_t3_emits_roster_and_challenge_never_release_order"], "outcome": "RED (KeyError at overseer_plan.py:105 _spec[f] lookup, before _emit_argv) — Q4 guard load-bearing at every tier"},
+    {"mutation": "approver_roster eligible at all tiers (is_t3 -> True)", "pin": "test_confirm_t2_does_not_emit_t3_facts", "outcome": "RED — T3-gating load-bearing"}
+  ],
+  "implementer_mutations_pre_lane_v": "MA tier-gating, MB integ-gate, MC approvers-validation, MD release_order-in-_EMITTABLE — all RED-as-expected (cited in ADR-058)",
+  "gates": {
+    "overseer_plan+activation_suites": "31 passed",
+    "full_threeway_suite": "396 passed, 1 skipped",
+    "ci_smoke": "OK",
+    "check_no_ceremony": "clean (R2 cv2 WARN pre-existing/unrelated)"
+  },
+  "disposition": "VERIFIED. overseer_plan now covers all tiers (T0-T3) for the overseer-authority facts. Automation track (ADR-057 base + ADR-058 T3) COMPLETE + verified. NEXT (chief prioritization): sub-project 2 (real seat<->bus wiring; removes bootstrap_emit) or the §7 hardening track (gates real-main promotion)."
+}
