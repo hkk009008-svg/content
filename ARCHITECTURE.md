@@ -1957,8 +1957,9 @@ Three new scripts make a T1 brief→merge end-to-end operable, human-driven, aga
 - `scripts/overseer_emit.py` — overseer signing CLI; 6 subcommands (`brief`, `assignment`, `cycle_go`, `release_order`, `approver_roster`, `re_verify_challenge`). Constructs an `Event(seq=0)` and delegates signing to `RefEventStore.append` (DD-5). Defaults `--remote origin`; catches `AppendContentionExceeded` / `ValueError` → clean exit-1 (DD-4).
 - `scripts/bootstrap_emit.py` — temporary interactive-seat shim; emits `candidate`, `attestation`, and `release_requested` as the non-overseer seats. Removed by sub-project 2 (real seat↔bus wiring).
 - `scripts/run_merge_gate.sh` — standing daemon wrapper; passes `--main-ref refs/threeway/test-main` and `--remote origin` to `run_merge_gate.py`; relies on ADR-055 sys.path self-bootstrap (no import-path env export, DD-2). Safety boundary: writes ONLY `refs/threeway/test-main`, never `refs/heads/main` (DD-1, user-ratified 2026-06-23; `run_merge_gate.py:71` default).
+- `scripts/overseer_plan.py` — **automation track (ADR-057)**: auto-decompose layer ABOVE `overseer_emit`. Reads an `overseer-decision/1` JSON file + the live bus and, on `--confirm`, emits the overseer facts emittable now (`brief`/`assignment`/`cycle_go`) by reusing `overseer_emit.main` (one signing path); dry-run by default; NEVER emits `release_order` (surfaced for a deliberate manual emit, DD-4). Idempotent — `plan (scripts/overseer_plan.py:72)` plans only the ABSENT facts; T0/T1 scope (T3 facts a documented fast-follow).
 
-The E2E walking-skeleton (`tests/unit/test_threeway_e2e_walking_skeleton.py`) drives all three CLIs + the daemon (`--run-once`) against a temp repo and asserts the test ref advances and `merge_completed` is emitted. See `DECISIONS.md` ADR-056.
+The E2E walking-skeleton (`tests/unit/test_threeway_e2e_walking_skeleton.py`) drives all three CLIs + the daemon (`--run-once`) against a temp repo and asserts the test ref advances and `merge_completed` is emitted. See `DECISIONS.md` ADR-056. The `overseer_plan` automation layer (ADR-057) sits above `overseer_emit`; see `DECISIONS.md` ADR-057.
 
 ---
 

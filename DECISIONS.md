@@ -2812,3 +2812,53 @@ quality); operator Lane-V pass owed before marked verified.
 anchor, ref-ACL enforcement, liveness/recovery, key rotation, richer attestations) and the §7
 automation-track overseer-plan auto-decompose layer and sub-project 2 (real seat↔bus wiring; removes
 `scripts/bootstrap_emit.py`) remain pending.
+
+## ADR-057 — `overseer-plan` auto-decompose layer (threeway scope-b automation track, T0/T1)
+
+**Context.** Sub-project 1 (ADR-056) gave the overseer a human-operated signing CLI
+(`scripts/overseer_emit.py`), but an operator relaying a chief decision must still hand-issue each
+overseer fact in turn. The automation track (sub-project-1 spec §7) defers a layer ABOVE `overseer_emit`
+that ingests one structured chief decision + the current bus and emits the correct ordered sequence of
+overseer facts. This ADR builds that layer at minimal-operable scope. Spec:
+`docs/superpowers/specs/2026-06-23-overseer-plan-auto-decompose-design.md`; plan:
+`docs/superpowers/plans/2026-06-23-overseer-plan-auto-decompose.md`.
+
+**Decisions (DD-1..DD-5).**
+
+**DD-1 — "advance" invocation model (not "full plan").** `scripts/overseer_plan.py` emits, each run, every
+overseer fact emittable *given the current bus*; re-run as the candidate progresses. Chosen because
+`release_order` is gated on `integration_sha` (`threeway/predicate.py:137-143`), which only exists after the
+non-overseer candidate+merge step — the overseer facts are inherently interleaved with non-overseer ones,
+so a single upfront burst is impossible. Mirrors the overseer-action trigger table 1:1 and is naturally
+idempotent.
+
+**DD-2 — JSON decision file as the input contract** (`overseer-decision/1`). Persistent, reviewable,
+diff-able; the advance model re-reads it each run with zero re-typing. Passed via `--decision <path>`
+(explicit path avoids colon-in-`candidate_id` filename issues); convention `coordination/threeway/decisions/`.
+
+**DD-3 — T0/T1 scope.** Emits only the always-required overseer facts' emittable subset
+(`brief`/`assignment`/`cycle_go`). The predicate collapses all higher-tier requirements into one
+`PENDING "co_sign not satisfied"` (`threeway/predicate.py:131`), so deciding which T3 overseer fact
+(`approver_roster`/`re_verify_challenge`) is owed needs `tier.py`-internal reasoning — a documented
+fast-follow. A T2/T3 decision file is rejected with a clear message.
+
+**DD-4 — `release_order` is never auto-emitted.** It authorizes the merge, so it stays a deliberate manual
+act via `overseer_emit release_order`; `overseer_plan` only ever SURFACES it as owed. Faithful to the
+spec §7 "preserves the human checkpoint on the release key"; smallest blast radius. Mutation-tested:
+forcing `release_order` into the emittable set reddens
+`tests/unit/test_threeway_overseer_plan.py::test_confirm_emits_overseer_facts_never_release_order`.
+
+**DD-5 — single signing path: reuse `overseer_emit.main(argv)`.** `overseer_plan` builds the argv for each
+owed fact and calls `overseer_emit.main([...])` — it does NOT re-implement signing or fact shapes, so the
+emitted facts are identical to the Lane-V-verified `overseer_emit` output. `--bus-id` is forwarded so the
+bus read and the bus write share one namespace.
+
+**Why safe / non-vacuous.** Dry-run is the default (a default run leaves the bus byte-unchanged); `--confirm`
+emits the three overseer facts (authority-correct = `overseer`) and never `release_order`; re-running is a
+no-op (the planner reads the bus and plans only ABSENT facts). The Q4 guard and the loader/planner/dry-run
+contracts are pinned by `tests/unit/test_threeway_overseer_plan.py`; `overseer_plan.py` is covered by the
+bare-subprocess activation pin. operator Lane-V pass owed before marked verified (impl≠verifier).
+
+**Consequences.** The T3 extension (emit `approver_roster` + `re_verify_challenge`; decompose the
+`co_sign not satisfied` PENDING) is a clean fast-follow; the §7 hardening track and sub-project 2 remain
+pending per chief prioritization.
