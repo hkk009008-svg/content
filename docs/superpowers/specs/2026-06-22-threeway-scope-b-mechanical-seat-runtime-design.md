@@ -171,8 +171,7 @@ hardening track, and the confirmed framing items are carried as spec content her
   (the deferred Approach B). Its trigger logic is exactly the overseer-action trigger table (each
   predicate `PENDING "no <overseer fact>"` → emit that fact).
 
-**Deferred → sub-project 2:** real seat↔bus wiring (interactive seats emit/consume bus events instead
-of the mailbox); `bootstrap_emit.py` is removed when this lands.
+**DONE (sub-project 2, ADR-061):** real seat↔bus wiring — interactive seats emit via `scripts/seat_emit.py` and read via `scripts/consume_bus.py`; `bootstrap_emit.py` retired.
 
 ## 8. Carried decisions (from the 2026-06-22 review verification)
 - **Fault model (review B5):** within a pair the verifier and integrator share a provider, so the

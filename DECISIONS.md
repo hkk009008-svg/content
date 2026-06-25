@@ -3019,3 +3019,46 @@ escalate-refusal-failsafe-direction / regression-pin-integrity). **Verdict GO** 
 FAIL/CRITICAL/MAJOR; full unit suite 3216 passed). NITs addressed in the same change: a `candidate_aborted`
 bad-repo-dir traceback → now caught (clean rc 1, +pin); a stale-doc note; a test comment. Verdict recorded
 in `logs/verify-adr060-rework-breaker-lane-v.json`. **Ratification owed to the user.**
+
+## ADR-061 — Retire `bootstrap_emit.py` shim; `seat_emit` + `consume_bus` are the live seat↔bus path (threeway scope-b, sub-project 2)
+
+**Context.** Sub-project 1 (ADR-056) shipped a human-driven bootstrap: `scripts/bootstrap_emit.py`
+accepted any `--signer` argument and emitted T1 facts on behalf of whichever seat the operator
+named. This was an explicit temporary shim — it derived the signing key from the caller-supplied
+`--signer` string, introducing a key-injection hole: a typo or a deliberate substitution could emit
+facts signed by the wrong seat key.
+
+**Decision — retire the shim; interactive seats emit directly.**
+
+**DD-1 — `scripts/seat_emit.py` replaces `bootstrap_emit.py` for T1 emission (SP2 2b).** Each seat
+invokes `seat_emit.py <seat> <event_kind>` with an explicit seat argument — the emitting seats are
+`coordinator`/`coordinator2` (`candidate`, `release_requested`, `candidate_aborted`) and
+`operator`/`operator2` (`attestation`). The script loads `load_private(<seat>)` validated against a
+static seat↔kind authority table before signing — the seat identity is resolved at key-load time, not
+inferred from a free-form string. Authority violations (e.g. `director`, which may not emit) exit rc 2
+and emit zero events, keeping the gate as the sole trust boundary (a wrong-seat invocation fails fast
+rather than producing a malformed bus event).
+
+**DD-2 — `scripts/consume_bus.py` is the seat read-side (SP2 2a).** Reads bus events past a
+per-seat cursor, enabling interactive seats to query bus state without mailbox polling. Together with
+`seat_emit.py`, this closes the interactive-seat portion of the T1 read/write loop.
+
+**DD-3 — T2/T3 emission deferred.** The shim retirement covers T1 facts only: `candidate`,
+`attestation`, `release_requested`, `candidate_aborted`. The T2/T3 facts
+(`attestation_revoked`, `co_sign`, `re_verify`) emitted by non-overseer seats remain a deferred
+follow-on and are surfaced in `overseer_plan` as owed.
+
+**DD-4 — ADR-060 DD-2 abort-emit CLI repointed.** The coordinator-signed abort-emit CLI (ADR-060
+DD-2) now invokes `scripts/seat_emit.py coordinator candidate_aborted` instead of the retired
+`scripts/bootstrap_emit.py candidate_aborted`. The payload and idempotency-key behaviour are
+unchanged.
+
+**Scope / implementing commits.** SP2 2a (`consume_bus.py` + read tests), 2b (`seat_emit.py` +
+authority-table tests), 2c (E2E walking-skeleton runs on seat_emit + consume_bus, no bootstrap_emit),
+2d (this commit: delete shim + orphaned test, repoint activation pin, doc-sync).
+
+**Why non-vacuous.** The activation-script pin (`test_threeway_activation_scripts.py`) now exercises
+`consume_bus.py --help` and `seat_emit.py --help` as bare subprocesses (rc 0 via ADR-055
+self-bootstrap); deleting `bootstrap_emit.py` turns the old pin RED (collection error on import);
+migrated coverage lives in `test_threeway_seat_emit.py` (2b) and `test_threeway_consume_bus.py` (2a).
+Full threeway unit suite green post-commit.

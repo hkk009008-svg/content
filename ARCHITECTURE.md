@@ -1965,19 +1965,19 @@ The rework circuit-breaker is now WIRED on this authority (ADR-060, C1 Part 2): 
 `rework_count` take the REDUCED state and count only DISTINCT candidates that are authoritatively aborted
 (`is_aborted`) AND whose authoritative candidate matches the target brief_id/brief_version — so a forged
 abort can neither trip the breaker (a forced-ESCALATE merge-DoS) nor inflate a rival version's count. A
-coordinator-signed abort-emit CLI (`scripts/bootstrap_emit.py candidate_aborted`, payload carries
+coordinator-signed abort-emit CLI (`scripts/seat_emit.py coordinator candidate_aborted`, payload carries
 `candidate_id` for idempotency-key distinctness) and an `overseer_plan` ESCALATE-refusal (withholds a new
 `cycle_go` when the breaker trips — fail-safe / requirement-adding, ADR-058 DD-1) complete the wiring. See
 `DECISIONS.md` ADR-059 + ADR-060 + `threeway-candidate-aborted-no-authority`.
 
 ### 13A.8 Minimal operable mechanical-seat runtime (scope-b sub-project 1, ADR-056)
 
-**Bus LIVE; seat-runtime: sub-project 1 operable (human-driven); sub-project 2 (real wiring) + hardening track pending.**
+**Bus LIVE; seat-runtime: sub-project 1 operable (human-driven); sub-project 2 (real seat↔bus wiring, ADR-061) DONE — hardening track pending.**
 
 Three new scripts make a T1 brief→merge end-to-end operable, human-driven, against the protected TEST ref only:
 
 - `scripts/overseer_emit.py` — overseer signing CLI; 6 subcommands (`brief`, `assignment`, `cycle_go`, `release_order`, `approver_roster`, `re_verify_challenge`). Constructs an `Event(seq=0)` and delegates signing to `RefEventStore.append` (DD-5). Defaults `--remote origin`; catches `AppendContentionExceeded` / `ValueError` → clean exit-1 (DD-4).
-- `scripts/bootstrap_emit.py` — temporary interactive-seat shim; emits `candidate`, `attestation`, and `release_requested` as the non-overseer seats. Removed by sub-project 2 (real seat↔bus wiring).
+- `scripts/seat_emit.py` — per-seat signed T1 emission (`candidate`, `attestation`, `release_requested`, `candidate_aborted`); the seat signs with its OWN key (closes the retired shim's signer-derived key-injection hole). Read side: `scripts/consume_bus.py` (reads bus events past a per-seat cursor). The `bootstrap_emit.py` shim was retired in sub-project 2 (ADR-061).
 - `scripts/run_merge_gate.sh` — standing daemon wrapper; passes `--main-ref refs/threeway/test-main` and `--remote origin` to `run_merge_gate.py`; relies on ADR-055 sys.path self-bootstrap (no import-path env export, DD-2). Safety boundary: writes ONLY `refs/threeway/test-main`, never `refs/heads/main` (DD-1, user-ratified 2026-06-23; `run_merge_gate.py:71` default).
 - `scripts/overseer_plan.py` — **automation track (ADR-057/058)**: auto-decompose layer ABOVE `overseer_emit`. Reads an `overseer-decision/1` JSON file + the live bus and, on `--confirm`, emits the overseer facts emittable now (`brief`/`assignment`/`cycle_go`, plus T3 `approver_roster` + `re_verify_challenge`) by reusing `overseer_emit.main` (one signing path); dry-run by default; NEVER emits `release_order` (surfaced for a deliberate manual emit — DD-4, generalized in ADR-058: only requirement-ADDING facts are auto-emitted, never the gate-REMOVING one). Idempotent — `plan (scripts/overseer_plan.py:80)` plans only the ABSENT + tier-eligible facts; all tiers (T0–T3); the tier-specific non-overseer approvals (`co_sign`/`re_verify`/`human_approval`) are surfaced as owed.
 
