@@ -5,7 +5,7 @@ temp keys, local subprocesses, no cloud creds — so CI (`pytest tests/unit/`) r
 tests/integration/ dir is reserved for cloud-credential tests excluded from CI.
 
 Task 9: E2E walking-skeleton — T1 brief->merge through the REAL CLIs as subprocesses.
-Drives a full T1 candidate brief->merge via overseer_emit / bootstrap_emit /
+Drives a full T1 candidate brief->merge via overseer_emit / seat_emit /
 sign_ci_result / run_merge_gate --run-once against a temp repo + local bus.
 Asserts refs/threeway/test-main advances to the recomputed integ and merge_completed
 is emitted. [ADR-056]
@@ -114,7 +114,7 @@ def test_t1_brief_to_merge_walking_skeleton(seatkit, live_repo):
     pd = default_policy().policy_digest()
 
     # Pre-compute the integration SHA using the same deterministic formula as
-    # bootstrap_emit / build_candidate_events so all CLI calls agree on the integ SHA.
+    # seat_emit / build_candidate_events so all CLI calls agree on the integ SHA.
     tree, clean = gitcas.merge_tree(r, base, branch)
     assert clean, "live_repo feat branch must merge cleanly against base"
     integ = gitcas.commit_tree(r, tree, [base, branch], f"threeway merge {cid}")
@@ -148,8 +148,8 @@ def test_t1_brief_to_merge_walking_skeleton(seatkit, live_repo):
          *L, repo=r, ks=ks)
 
     # 2. Interactive-seat facts (candidate + preliminary attestation) ------
-    _run("bootstrap_emit.py", "candidate", *B, repo=r, ks=ks)
-    _run("bootstrap_emit.py", "attestation", "--phase", "preliminary", *B, repo=r, ks=ks)
+    _run("seat_emit.py", "coordinator", "candidate", *B, repo=r, ks=ks)
+    _run("seat_emit.py", "operator", "attestation", "--phase", "preliminary", *B, repo=r, ks=ks)
 
     # 3. CI signer --------------------------------------------------------
     # sign_ci_result defaults --remote to None (local mode) — same local bus as the
@@ -160,8 +160,8 @@ def test_t1_brief_to_merge_walking_skeleton(seatkit, live_repo):
          repo=r, ks=ks)
 
     # 4. Release attestation + release_requested + release_order ----------
-    _run("bootstrap_emit.py", "attestation", "--phase", "release", *B, repo=r, ks=ks)
-    _run("bootstrap_emit.py", "release_requested", *B, repo=r, ks=ks)
+    _run("seat_emit.py", "operator", "attestation", "--phase", "release", *B, repo=r, ks=ks)
+    _run("seat_emit.py", "coordinator", "release_requested", *B, repo=r, ks=ks)
 
     _run("overseer_emit.py", "release_order",
          "--candidate-id", cid, "--integration-sha", integ,
@@ -196,3 +196,44 @@ def test_t1_brief_to_merge_walking_skeleton(seatkit, live_repo):
         f"merge_completed not found in effective state for {cid!r}.\n"
         f"Daemon stdout:\n{proc.stdout}\nDaemon stderr:\n{proc.stderr}"
     )
+
+    # 8. A real seat reads the whole flow off the bus via consume_bus -----
+    proc = _run("consume_bus.py", "coordinator", "--repo-dir", str(r), "--remote", "", repo=r, ks=ks)
+    kinds = sorted(line.split("\t")[1] for line in proc.stdout.splitlines() if line.strip())
+    assert kinds == sorted([
+        "brief", "assignment", "cycle_go", "candidate", "attestation", "attestation",
+        "ci_result", "release_requested", "release_order", "merge_completed",
+    ])
+    n = len(RefEventStore(r).all_events())
+    assert RefEventStore(r).cursor_seq("coordinator") == n          # advanced to the snapshot tip
+    _run("consume_bus.py", "operator", "--repo-dir", str(r), "--remote", "", repo=r, ks=ks)
+    assert RefEventStore(r).cursor_seq("operator") == n             # a second seat also advances
+
+
+def test_missing_release_attestation_stays_pending(seatkit, live_repo):
+    reg, ks, privs = seatkit
+    r, base, branch = live_repo
+    cid = "A:c1"; pd = default_policy().policy_digest()
+    tree, clean = gitcas.merge_tree(r, base, branch)
+    integ = gitcas.commit_tree(r, tree, [base, branch], f"threeway merge {cid}")
+    L = ["--repo-dir", str(r), "--remote", ""]
+    B = ["--candidate-id", cid, "--pair", "A", "--staging-base", base, "--branch", branch, *L]
+    _run("overseer_emit.py", "brief", "--candidate-id", cid, "--brief-id", "b1",
+         "--assigned-tier", "T1", "--allowed-paths", "cinema/", *L, repo=r, ks=ks)
+    _run("overseer_emit.py", "assignment", "--candidate-id", cid, "--pair", "A",
+         "--builder", "director", "--builder-provider", "codex",
+         "--primary-verifier", "operator", "--primary-verifier-provider", "claude",
+         "--executing-coordinator", "coordinator", *L, repo=r, ks=ks)
+    _run("overseer_emit.py", "cycle_go", "--candidate-id", cid, "--brief-id", "b1",
+         "--tier", "T1", "--policy-digest", pd, *L, repo=r, ks=ks)
+    _run("seat_emit.py", "coordinator", "candidate", *B, repo=r, ks=ks)
+    _run("seat_emit.py", "operator", "attestation", "--phase", "preliminary", *B, repo=r, ks=ks)
+    _run("sign_ci_result.py", "--integration-sha", integ, "--result", "PASS", "--repo-dir", str(r), repo=r, ks=ks)
+    # NB: NO release attestation emitted.
+    _run("seat_emit.py", "coordinator", "release_requested", *B, repo=r, ks=ks)
+    _run("overseer_emit.py", "release_order", "--candidate-id", cid, "--integration-sha", integ, *L, repo=r, ks=ks)
+    _run("run_merge_gate.py", "--repo-dir", str(r), "--registry-dir", str(reg),
+         "--bus-id", "prod", "--main-ref", "refs/threeway/test-main", "--run-once", repo=r, ks=ks)
+    state = verify_and_reduce(RefEventStore(r).all_events(), registry_dir=str(reg), bus_id="prod")
+    assert state.merge_completed(cid) is None                       # gate PENDING, not COMPLETED
+    assert _git(r, "rev-parse", "refs/threeway/test-main").stdout.strip() == base   # ref did NOT advance
