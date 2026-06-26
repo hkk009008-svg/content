@@ -14,6 +14,9 @@ assert _SPEC.loader is not None
 seat_status = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(seat_status)
 
+# Resolvable now: seat_status's module load inserted scripts/ onto sys.path.
+import bus_unread  # noqa: E402
+
 
 def _write_event(root: Path, filename: str) -> None:
     sent = root / "coordination/mailbox/sent"
@@ -73,6 +76,52 @@ def test_live_seat_mailbox_still_reports_unread_from_cursor(tmp_path: Path) -> N
     assert "2026-06-15T11-00-00Z-director-to-operator-status.md" in out
     assert "2026-06-15T12-00-00Z-director-to-all-status.md" in out
     assert "consume via coordination/bin/consume-events operator" in out
+
+
+def _write_scalar_cursor(root: Path, seat: str, seq: str) -> None:
+    seen = root / "coordination/mailbox/seen"
+    seen.mkdir(parents=True, exist_ok=True)
+    (seen / f"{seat}.txt").write_text(f"{seq}\n")
+
+
+def test_scalar_cursor_mailbox_surfaces_live_bus_count(tmp_path: Path, monkeypatch) -> None:
+    # De-degrade (ADR-062): a migrated (scalar-cursor) seat's real unread lives on the
+    # signed ref-bus, NOT the legacy sent/*.md filename path (which returns 0 for a scalar
+    # cursor — a silent under-report). The scalar branch must print the REAL ref-bus count,
+    # not the old hard-coded "UNREAD: 0 / ref-bus-tracked".
+    _write_scalar_cursor(tmp_path, "operator", "765")
+    monkeypatch.setattr(bus_unread, "bus_unread_count", lambda root, seat, **k: 3)
+
+    out = _render_mailbox(tmp_path, "operator")
+
+    assert "cursor: 765" in out
+    assert "UNREAD: 3 / ref-bus" in out
+    assert "ref-bus-tracked" not in out  # the old degraded fixed-0 string is gone
+
+
+def test_scalar_cursor_mailbox_empty_bus_is_real_zero(tmp_path: Path, monkeypatch) -> None:
+    # A reachable-but-empty bus is a REAL 0 (distinct from the None/error sentinel below).
+    _write_scalar_cursor(tmp_path, "operator", "765")
+    monkeypatch.setattr(bus_unread, "bus_unread_count", lambda root, seat, **k: 0)
+
+    out = _render_mailbox(tmp_path, "operator")
+
+    assert "UNREAD: 0 / ref-bus" in out
+    assert "ref-bus-tracked" not in out
+
+
+def test_scalar_cursor_mailbox_bus_error_is_visible_not_silent_zero(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # silent-gate-degradation guard: a bus ERROR (bus_unread_count -> None) must surface a
+    # VISIBLE "(unavailable: ref-bus)" sentinel — NEVER a silent/misleading 0.
+    _write_scalar_cursor(tmp_path, "operator", "765")
+    monkeypatch.setattr(bus_unread, "bus_unread_count", lambda root, seat, **k: None)
+
+    out = _render_mailbox(tmp_path, "operator")
+
+    assert "(unavailable: ref-bus)" in out
+    assert "UNREAD: 0" not in out
 
 
 def test_heartbeats_are_pair_seat_only_no_coordinators(tmp_path: Path) -> None:

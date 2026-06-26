@@ -34,6 +34,7 @@ _SCRIPTS_DIR = _REPO_ROOT / "scripts"
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+import bus_unread  # de-degrade: real ref-bus unread for migrated (scalar) cursors
 import protocol_mailbox
 from codex_protocol_model import CENTRAL_INVARIANT, MODEL_SOURCE
 
@@ -123,13 +124,22 @@ def mailbox(root: str, seat: str):
     if os.path.exists(seen):
         with open(seen) as fh:
             cursor_raw = fh.readline().strip()
-        if cursor_raw.strip().isdigit():
-            # scalar `seq` cursor (post Slice-2.5 backfill): unread is tracked on
-            # the ref-bus (RefEventStore seq>cursor_seq), NOT recomputed from
-            # filenames here. Short-circuit BEFORE _parse_cursor_ts so the
-            # `cursor_dt is None` "count everything" branch is never reached.
+        if bus_unread.is_migrated_cursor(cursor_raw):
+            # Migrated (Slice-2.5) seat: real unread lives on the signed ref-bus, NOT the
+            # legacy sent/*.md filename path (which returns 0 for a scalar cursor — a silent
+            # under-report). Short-circuit BEFORE _parse_cursor_ts so the `cursor_dt is None`
+            # "count everything" branch is never reached. None => a VISIBLE "(unavailable)"
+            # sentinel, never a silent 0 (silent-gate-degradation). Mirrors scripts/status.py
+            # collect_mailbox; the LIVE cursor is the ref (store.cursor_seq), not this scalar.
             print(f"cursor: {cursor_raw}")
-            print("UNREAD: 0 / ref-bus-tracked")
+            n = bus_unread.bus_unread_count(root, seat)
+            if n is None:
+                print("UNREAD: (unavailable: ref-bus)")
+            else:
+                print(f"UNREAD: {n} / ref-bus")
+                if n:
+                    print("→ Rule #8: surface this count in your FIRST user-facing turn; "
+                          "consume via scripts/consume_bus.py " + seat)
             return
         cursor_dt = _parse_cursor_ts(cursor_raw)
     print(f"cursor: {cursor_raw}")

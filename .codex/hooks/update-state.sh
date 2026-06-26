@@ -204,7 +204,11 @@ _unread_for() {                       # $1 = role (director|operator)
   cur=$(tr -d '[:space:]' < "$cf")            # ISO 2026-05-30T00:37:53Z  OR  a scalar seq
   case "$cur" in
     *[!0-9]*) ;;                              # contains a non-digit -> ISO, fall through
-    *) echo 0; return;;                       # all-digit scalar seq (Slice 2.5) -> unread tracked on the ref-bus
+    # De-degrade (ADR-062): an all-digit scalar seq (Slice 2.5 migrated seat) has its real
+    # unread on the signed ref-bus, NOT in sent/*.md. Emit a LABEL, never a silent "0" that
+    # misreads as 'no unread' in STATE.md. The live count is one command away: the bus-aware
+    # scripts/status.py mailbox-unread <role> (or seat_status.py). STATE.md is local-only.
+    *) echo "ref-bus"; return;;
   esac
   curkey=$(printf '%s' "$cur" | tr ':' '-')   # -> 2026-05-30T00-37-53Z (match filename token form)
   for f in coordination/mailbox/sent/*-to-"${role}"-*.md coordination/mailbox/sent/*-to-all-*.md; do

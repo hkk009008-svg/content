@@ -3118,3 +3118,38 @@ de-degrade site has a test that a scalar cursor surfaces the real bus count (and
 visible sentinel, never a silent 0). `consume-events` has a test that a scalar cursor is refused WITHOUT
 mutating the cursor file. Live validation: per-seat `status.py mailbox-unread` reads the real `prod` bus
 in ~0.5s with correct addressee filtering.
+
+## ADR-063 — De-degrade the two adjacent unread surfaces ADR-062 left out (seat_status dashboard; STATE.md hook)
+
+**Context.** ADR-062 (DD-2) de-degraded FIVE legacy unread surfaces to the live ref-bus but left two
+adjacent surfaces on the silent/degraded path. A completeness audit (2026-06-26) confirmed both:
+(1) `seat_status.py` — the one-shot session-start orientation dashboard, present in TWO mirror copies
+(`.claude/skills/four-seat-protocol/scripts/` and `.agents/skills/...`, identical except the usage-path
+docstring) — printed a hard-coded `UNREAD: 0 / ref-bus-tracked` for a scalar cursor: labeled, but the
+prominent `0` still misreads as "no unread"; (2) `.codex/hooks/update-state.sh` (and its Claude twin
+`.claude/hooks/update-state.sh`) wrote a bare `0` for a migrated seat into the gitignored, local-only
+STATE.md.
+
+**DD-1 — `seat_status.mailbox` routes a migrated cursor to `bus_unread` (full de-degrade).** It now
+detects a scalar cursor via `bus_unread.is_migrated_cursor` and prints `bus_unread.bus_unread_count`'s
+real ref-bus count (`UNREAD: <n> / ref-bus`), mirroring `status.collect_mailbox`: `None` → a visible
+`UNREAD: (unavailable: ref-bus)` (never a silent 0), a reachable-but-empty bus → a real `0`. Both mirror
+copies got the identical change; the line-12 usage-path docstring stays the only intended difference.
+
+**DD-2 — `update-state.sh` LABELS the migrated value instead of wiring `status.py`.** The scalar branch
+of `_unread_for` now emits a `ref-bus` LABEL (was `0`) into STATE.md. Wiring the bus-aware
+`scripts/status.py mailbox-unread` was considered and REJECTED for THIS surface: STATE.md is
+gitignored / local-only / never committed / human-read (no numeric parser), the hook is a perf-sensitive
+PostToolUse path whose design history (B-003 Option E, v5.7–v5.9) is deliberately pure-bash-and-git, and
+in a fresh worktree the hook has no `.venv` to call (it would degrade to a fallback anyway). The label is
+the robust, deterministic floor that kills the misleading 0; the real live count is one command away via
+the now-fixed `seat_status.py` / `status.py mailbox-unread`. Applied identically to both hook copies
+(their `_unread_for` bodies are byte-identical).
+
+**Why non-vacuous.** `tests/unit/test_seat_status.py` pins the scalar path three ways (live count
+surfaces as `UNREAD: <n> / ref-bus`; a reachable-empty bus is a real 0; a bus error → `(unavailable:
+ref-bus)`, never a silent 0) — each RED against the prior `ref-bus-tracked` string before the wiring.
+`tests/unit/test_unread_count.py` pins the hook's scalar branch against the REAL awk-sliced `_unread_for`
+(scalar cursor → `ref-bus`, not `0`) plus a Python-mirror guard that also fixes a latent mirror bug (a
+non-ISO cursor lexically over-counts every ISO filename). The frozen skill-eval snapshot under
+`.claude/skill-eval/` is intentionally NOT synced (editing a baseline corrupts the old-vs-new eval).
