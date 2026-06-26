@@ -197,3 +197,24 @@ def test_unread_events_scalar_cursor_bus_error_is_none_not_silent_empty(tmp_path
     # A bus ERROR must return None (caller surfaces a visible sentinel), never a silent [].
     monkeypatch.setattr(monitor.bus_unread, "bus_unread_events", lambda root, seat, **k: None)
     assert monitor._unread_events([], "765", "operator", root=tmp_path) is None
+
+
+def test_scalar_cursor_marks_ref_bus_source(tmp_path: Path, monkeypatch) -> None:
+    root = _repo(tmp_path)
+    _cursor(root, "operator", "765")
+    monkeypatch.setattr(monitor.bus_unread, "bus_unread_events", lambda root, seat, **k: [])
+
+    state = monitor.collect_monitor_state(root, now=NOW)
+
+    assert state["seats"]["operator"]["unread_source"] == "ref-bus"
+
+
+def test_scalar_cursor_bus_error_marks_ref_bus_unavailable(tmp_path: Path, monkeypatch) -> None:
+    root = _repo(tmp_path)
+    _cursor(root, "operator", "765")
+    monkeypatch.setattr(monitor.bus_unread, "bus_unread_events", lambda root, seat, **k: None)
+
+    state = monitor.collect_monitor_state(root, now=NOW)
+
+    assert state["seats"]["operator"]["unread_count"] == "(unavailable: ref-bus)"
+    assert state["seats"]["operator"]["unread_source"] == "ref-bus-unavailable"

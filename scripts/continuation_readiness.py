@@ -23,6 +23,7 @@ from codex_protocol_model import (
     render_start_session_inhabitance,
     render_surface_summary,
 )
+import bus_unread
 import protocol_mailbox
 from status import collect_mailbox
 
@@ -90,6 +91,30 @@ def render_mailbox(root: Path) -> None:
             f"cursor={data.get(f'mailbox_{seat}_cursor', '(missing)')}"
         )
     print("if acting as a seat, surface unread count first, then use consume-events intentionally")
+
+
+def render_threeway_bus(root: Path) -> None:
+    section("Threeway Bus")
+    code, local_tip, local_err = run(
+        ["git", "for-each-ref", "refs/threeway/events", "--format=%(objectname)"],
+        root,
+    )
+    tip = local_tip.strip() if code == 0 and local_tip.strip() else "(unavailable: ref-bus)"
+    print(f"local events ref: {tip}")
+    code, remote_tip, remote_err = run(
+        ["git", "ls-remote", "origin", "refs/threeway/events"],
+        root,
+        timeout=20,
+    )
+    if code == 0 and remote_tip.strip():
+        print(f"remote events ref: {remote_tip.split()[0]}")
+    else:
+        print("remote events ref: (unavailable: ref-bus)")
+    print("unread bus counts:")
+    for seat in SEATS:
+        count = bus_unread.bus_unread_count(root, seat)
+        rendered = "(unavailable: ref-bus)" if count is None else str(count)
+        print(f"{seat:<9} {rendered}")
 
 
 def render_wave(root: Path, wave: int) -> None:
@@ -175,6 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     render_codex(root)
     render_git(root, args.commits)
     render_mailbox(root)
+    render_threeway_bus(root)
     render_wave(root, args.wave)
     if not args.skip_ceremony:
         render_ceremony(root)
