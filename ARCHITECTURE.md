@@ -1821,6 +1821,15 @@ reads only the blobs past the cursor (O(unread) — `all_events()` over the live
 runtime estimate) so the per-seat dashboard read stays sub-second. `coordination/bin/consume-events` refuses a scalar cursor (rc 2 →
 use `scripts/consume_bus.py`), never writing an ISO ts back over a scalar (which would un-migrate it).
 
+**Completeness follow-up (ADR-063):** two adjacent surfaces ADR-062 left out were de-degraded the same
+way. The session-start orientation dashboard `seat_status.py` (both the `.claude/skills/` and
+`.agents/skills/` mirror copies, identical except their usage-path docstring) — `seat_status.mailbox`
+reports the real `bus_unread.bus_unread_count` for a migrated cursor (`None` → `UNREAD: (unavailable:
+ref-bus)`), not the prior hard-coded `0`. The local-only, gitignored STATE.md hook `update-state.sh`
+(both the `.claude/hooks/` and `.codex/hooks/` copies) emits a `ref-bus` label for a migrated seat instead
+of a silent 0; wiring the bus-aware `status.py` was rejected for that perf-sensitive, pure-bash,
+venv-free hook (the live count is available via `seat_status.py` / `status.py mailbox-unread`).
+
 ### 13A.6 Tiered co-sign — `co_sign_satisfied` T2/T3 (Slice 3)
 
 `def co_sign_satisfied` (`threeway/tier.py`) gates escalated-tier promotion (§7.2), with all

@@ -30,12 +30,18 @@ from pathlib import Path
 # while a second test validates the bash function itself via subprocess.
 # ---------------------------------------------------------------------------
 
-def _unread_for(mailbox_sent_dir: Path, seen_dir: Path, role: str) -> int:
-    """Python mirror of the bash _unread_for() in update-state.sh (v5.7 M2)."""
+def _unread_for(mailbox_sent_dir: Path, seen_dir: Path, role: str):
+    """Python mirror of the bash _unread_for() in update-state.sh (v5.7 M2).
+
+    Returns an int unread count for an ISO cursor, or the string "ref-bus" label for a
+    migrated (scalar-seq) cursor (de-degrade, ADR-062): such a seat's real unread lives on
+    the signed ref-bus, so the legacy sent/*.md filename path is short-circuited here."""
     cf = seen_dir / f"{role}.txt"
     if not cf.exists():
         return 0
-    cur = cf.read_text().strip()               # e.g. 2026-05-30T08:00:00Z
+    cur = cf.read_text().strip()               # e.g. 2026-05-30T08:00:00Z  OR a scalar seq
+    if cur.isdigit():                          # scalar seq (Slice-2.5) -> unread is on the ref-bus
+        return "ref-bus"
     curkey = cur.replace(":", "-")             # e.g. 2026-05-30T08-00-00Z
     count = 0
     for f in mailbox_sent_dir.glob(f"*-to-{role}-*.md"):
@@ -118,6 +124,24 @@ def test_unread_python_operator_is_1():
             f"Expected operator unread=1, got {result}. "
             "Only the 09:30 dir→op event is addressed to operator and after cursor."
         )
+
+
+def test_unread_python_scalar_cursor_is_labeled_not_filename_count():
+    """De-degrade (ADR-062): a migrated (scalar-seq) cursor must NOT be run through the
+    sent/*.md filename path. Real unread lives on the ref-bus; the mirror returns the
+    "ref-bus" LABEL (never a misleading numeric 0, and never the lexical over-count the
+    naive filename compare would yield for a non-ISO cursor)."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        sent = tmp / "sent"
+        seen = tmp / "seen"
+        sent.mkdir(); seen.mkdir()
+        (seen / "director.txt").write_text("765\n")  # scalar seq => migrated seat
+        # Events that the legacy filename compare would over-count for a non-ISO cursor:
+        (sent / "2026-05-30T09-00-00Z-operator-to-director-x.md").write_text("x")
+        (sent / "2026-05-30T10-00-00Z-operator-to-director-y.md").write_text("y")
+        result = _unread_for(sent, seen, "director")
+        assert result == "ref-bus", f"expected 'ref-bus' label for scalar cursor; got {result!r}"
 
 
 def test_unread_python_no_cursor_is_0():
@@ -206,6 +230,40 @@ def _run_real_unread_for(workdir: Path, role: str) -> int:
         capture_output=True, text=True, check=True
     )
     return int(result.stdout.strip())
+
+
+def _run_real_unread_for_raw(workdir: Path, role: str) -> str:
+    """Like _run_real_unread_for, but returns the RAW stdout (the scalar branch now
+    emits a non-numeric "ref-bus" label, so int() would choke)."""
+    script = (
+        "set -euo pipefail\n"
+        "export LC_ALL=C\n"
+        f'cd "{workdir}"\n'
+        f"{_extract_unread_for()}\n"
+        f'_unread_for "{role}"\n'
+    )
+    result = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, check=True
+    )
+    return result.stdout.strip()
+
+
+def test_unread_real_hook_scalar_cursor_is_labeled_not_zero():
+    """The REAL hook _unread_for, for a migrated (scalar-seq) cursor, emits the bus-aware
+    "ref-bus" LABEL — NOT the old silent "0" that misreads as 'no unread' in STATE.md."""
+    with tempfile.TemporaryDirectory() as td:
+        wd = Path(td)
+        mb = wd / "coordination" / "mailbox"
+        (mb / "sent").mkdir(parents=True)
+        (mb / "seen").mkdir(parents=True)
+        (mb / "seen" / "director.txt").write_text("765\n")  # scalar => migrated
+        # An event the legacy filename path would have processed — must be short-circuited.
+        (mb / "sent" / "2026-05-30T09-00-00Z-operator-to-director-x.md").write_text("x")
+        result = _run_real_unread_for_raw(wd, "director")
+        assert result == "ref-bus", (
+            f"expected 'ref-bus' label for a scalar cursor; got {result!r}. "
+            "The scalar branch must short-circuit the sent/*.md path and label the value."
+        )
 
 
 def _cursor_mtime_0700() -> float:
