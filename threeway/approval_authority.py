@@ -82,3 +82,13 @@ def event_by_id(events, event_id: str):
     if len(matches) != 1:
         return None
     return matches[0]
+
+
+def rostered_approvers(state, candidate_id: str) -> set[str]:
+    roster = state.approver_roster(candidate_id)
+    if roster is None:
+        return set()
+    approvers = roster.payload.get("approvers")
+    if not isinstance(approvers, list):
+        return set()
+    return {seat for seat in approvers if isinstance(seat, str)}
