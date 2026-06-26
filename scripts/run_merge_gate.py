@@ -69,6 +69,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     # The library predicate default is already the safe test-main; the daemon must not
     # override it back to production main. An operator may still pass --main-ref explicitly.
     ap.add_argument("--main-ref", default="refs/threeway/test-main")
+    ap.add_argument("--allow-protected-main", action="store_true")
     # DD-3: when set, the RefEventStore is a clone of the live authoritative bus repo
     # (push/fetch CAS against this remote); None = local co-located bus.
     ap.add_argument("--remote", default=None, help="authoritative bus remote (live bus); default local")
@@ -77,8 +78,27 @@ def _build_argparser() -> argparse.ArgumentParser:
     return ap
 
 
+def _is_protected_main_ref(ref: str) -> bool:
+    return ref == "refs/heads/main"
+
+
+def _protected_main_preflight(args) -> tuple[bool, str]:
+    if not _is_protected_main_ref(args.main_ref):
+        return True, "not protected main"
+    if not args.allow_protected_main:
+        return False, "refusing protected main without --allow-protected-main"
+    return False, (
+        "protected-main deployment controls unavailable from local repo; "
+        "test-infeasible without branch protection/ref-ACL attestation"
+    )
+
+
 def main(argv=None) -> int:
     args = _build_argparser().parse_args(argv)
+    ok, reason = _protected_main_preflight(args)
+    if not ok:
+        print(reason, file=sys.stderr)
+        return 2 if "without --allow-protected-main" in reason else 1
     try:
         load_private("merge-gate")   # precondition: we hold the merge-gate credential
     except Exception as e:

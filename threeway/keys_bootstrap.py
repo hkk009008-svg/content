@@ -10,7 +10,12 @@ from pathlib import Path
 
 from threeway import keys
 
-SEATS = ("director", "operator", "coordinator", "director2", "operator2", "coordinator2", "overseer", "ci", "merge-gate")
+SEATS = (
+    "director", "operator", "coordinator",
+    "director2", "operator2", "coordinator2",
+    "overseer", "ci", "merge-gate",
+    "chief-gemini", "chief-chatgpt",
+)
 
 
 def main(argv=None) -> int:

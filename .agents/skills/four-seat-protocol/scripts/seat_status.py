@@ -132,12 +132,14 @@ def mailbox(root: str, seat: str):
             # sentinel, never a silent 0 (silent-gate-degradation). Mirrors scripts/status.py
             # collect_mailbox; the LIVE cursor is the ref (store.cursor_seq), not this scalar.
             print(f"cursor: {cursor_raw}")
-            n = bus_unread.bus_unread_count(root, seat)
-            if n is None:
+            evs = bus_unread.bus_unread_events(root, seat)
+            if evs is None:
                 print("UNREAD: (unavailable: ref-bus)")
             else:
-                print(f"UNREAD: {n} / ref-bus")
-                if n:
+                print(f"UNREAD: {len(evs)} / ref-bus")
+                for ev in evs[-12:]:
+                    print(f"  * {bus_unread.format_unread(ev)}")
+                if evs:
                     print("→ Rule #8: surface this count in your FIRST user-facing turn; "
                           "consume via scripts/consume_bus.py " + seat)
             return

@@ -72,12 +72,12 @@ verification and the *executing* integration of its own work.
 
 ## I.3 The two buses (do not confuse them)
 
-| | Legacy mailbox bus (live today) | Three-way signed bus (built, not yet live) |
+| | Free-form mailbox channel | Three-way signed ref-bus |
 |---|---|---|
 | Location | `coordination/mailbox/` (`sent/`, `seen/<seat>.txt`) | `coordination/threeway/` + git ref `refs/threeway/events` |
-| Record | timestamp-named markdown events | immutable **signed** JSON facts, monotonic `seq` |
+| Record | timestamp-named markdown coordination artifacts | immutable **signed** JSON facts, monotonic `seq` |
 | Signatures | none | **mandatory** Ed25519 per seat (`threeway/keys.py`) |
-| Authority | the current live coordination substrate | the *future* substrate after migration |
+| Authority | human coordination, handoffs, verify requests, and free-form four-seat protocol notes | load-bearing three-way protocol facts |
 
 ## I.4 The two loops (spec §5)
 
@@ -105,9 +105,10 @@ attestations, `ci` signs `ci_result` (`predicate.py:152-161`).
 - **Slice 1 + Slice 2 = built and merged.** The `threeway/` package (signed JSON bus, effective-state
   reducer, gate-computed tier, mechanical exact-SHA merge-gate, `RefEventStore` on
   `refs/threeway/events`) exists and passes its adversarial gate suite.
-- **The package is wired into NOTHING.** `import threeway` appears only inside `threeway/` and
-  `tests/` — no live seat, harness, or CI emits a threeway event today. The live coordination
-  substrate is still the **legacy mailbox bus**.
+- **The signed bus is the load-bearing substrate for three-way facts; the mailbox remains human
+  coordination.** T1/T2/T3 principal-safe CLIs now emit signed facts locally and are proved against
+  `refs/threeway/test-main`; free-form mailbox artifacts still carry human handoffs and verify
+  requests. Verified via `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_t2_t3_emitters_e2e.py -q` -> 6 passed in 41.34s.
 - **Slice 2.5 (legacy-bus migration substrate) is BUILT + hardened, and CUT OVER (2026-06-22).** The
   substrate — `legacy_projector.py`, `divergence.py`, `cursor_backfill.py`, `cutover.py` — is built and
   test-green (356 passed)
@@ -118,18 +119,21 @@ attestations, `ci` signs `ci_result` (`predicate.py:152-161`).
   in ADR-044/045 (atomic `_teardown`, dedup drop fixes, pre-cursor-try strand gap closed); the two
   formerly-dormant cutover gaps (total-order congruence ADR-050; seen-filename→seat-key ADR-051, plus its
   read-only `divergence` sibling ADR-054) are now CLOSED + verified.
-- **Slice 3 (tiered T2/T3 co-sign machinery) is BUILT + enforcing (ADR-035).** `co_sign_satisfied`
+- **Slice 3 (tiered T2/T3 co-sign machinery and principal-safe emitters) is BUILT + enforcing.** `co_sign_satisfied`
   (`threeway/tier.py:39`) gates **T2** (other-pair operator co-sign) and **T3** (re_verify
   freshness-nonce challenge + two key-bound `human_approvals` from an overseer-signed `approver_roster`,
   ADR-043). It does **NOT** return False for T2/T3; it is **fail-closed** — True only when the required
-  signed facts exist. The merge-gate tier machinery is enforcing. Only the strategic-loop **runtime**
-  (scope b: dual-chief apps, overseer fact emission, seat→bus wiring) is unbuilt.
-- **Keys ARE provisioned and the bus is CUT OVER** — the former "hard blocker for going live" is
-  CLEARED. `coordination/threeway/keys/` holds the 9 `.pub` trust-root files (committed `d2a50f98`);
-  private `*.ed25519` keys live only in the keystore; `THREEWAY_CI_KEY` is set and
-  `THREEWAY_BUS_LIVE=true`. The REMAINING blocker for a live strategic LOOP (scope b): no seat/harness
-  emits or consumes bus events yet, and the merge-gate runner — though it runs clean against the live
-  bus (`--run-once` → 0 candidates) — is not yet a deployed sole-writer daemon.
+  signed facts exist. `scripts/seat_emit.py`, `scripts/chief_emit.py`, and `scripts/overseer_emit.py`
+  emit `co_sign`, `re_verify`, `human_approval`, `attestation_revoked`, and `brief_superseded` through
+  principal-safe CLI paths. Verified via
+  `env -u GIT_INDEX_FILE .venv/bin/python scripts/threeway_mechanism_ledger.py --check` -> exit 0.
+- **Keys ARE provisioned and the bus is CUT OVER** — the former hard blocker is CLEARED.
+  `threeway.keys_bootstrap.SEATS` now provisions the 11 signing seats, including `chief-gemini` and
+  `chief-chatgpt`; private `*.ed25519` keys live only in the keystore; `THREEWAY_CI_KEY` is set and
+  `THREEWAY_BUS_LIVE=true`. The REMAINING blocker for protected `main`: deployment-verifiable
+  branch-protection/ref-ACL controls and the protected merge-gate runner. Local `refs/heads/main`
+  attempts fail closed. Verified via
+  `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_run_merge_gate_protected_main.py -q` -> 2 passed in 0.03s.
 - **Forgery hardening (ADR-036/037/038):** revoke-authority + collision-aware index (ADR-036);
   event-id uniqueness at the gate and both stores (ADR-037); reserved merge-id + `brief_superseded`
   sibling (ADR-038) — closing the forgery / merge-DoS class.

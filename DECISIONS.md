@@ -3153,3 +3153,30 @@ ref-bus)`, never a silent 0) — each RED against the prior `ref-bus-tracked` st
 (scalar cursor → `ref-bus`, not `0`) plus a Python-mirror guard that also fixes a latent mirror bug (a
 non-ISO cursor lexically over-counts every ISO filename). The frozen skill-eval snapshot under
 `.claude/skill-eval/` is intentionally NOT synced (editing a baseline corrupts the old-vs-new eval).
+
+## ADR-064: Threeway T2/T3 emitter completion and protected-main boundary
+
+Date: 2026-06-26
+
+Decision:
+- The signed ref-bus is the load-bearing state source for threeway facts; the free-form mailbox remains the human coordination channel.
+- T2/T3 non-overseer facts are emitted through principal-safe CLIs using dynamic bus-state authority checks.
+- Chief human approvals are key-bound to rostered approver seats.
+- Revocation/supersession facts have principal-safe seat/chief/overseer CLI paths.
+- `refs/heads/main` remains fail-closed without deployment-verifiable protected-main controls.
+
+Evidence:
+- `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_t2_t3_emitters_e2e.py -q`:
+
+```text
+......                                                                   [100%]
+6 passed in 41.34s
+```
+
+- `env -u GIT_INDEX_FILE .venv/bin/python scripts/threeway_mechanism_ledger.py --check` -> exit 0
+- `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_run_merge_gate_protected_main.py -q`:
+
+```text
+..                                                                       [100%]
+2 passed in 0.03s
+```

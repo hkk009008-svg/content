@@ -16,7 +16,11 @@ CENTRAL_INVARIANT = "durable shared state beats chat memory"
 ACTIVE_KERNEL_INVARIANTS = (
     (
         "durable shared state beats chat memory",
-        "read git, mailbox bodies, cursors, locks, logs, gate evidence, and operator reports before stale prose",
+        "read git, signed ref-bus facts, mailbox bodies, cursors, locks, logs, gate evidence, and operator reports before stale prose",
+    ),
+    (
+        "threeway signed ref-bus is load-bearing",
+        "the signed three-way ref-bus is the load-bearing state source for three-way facts; free-form mailbox remains the human coordination channel",
     ),
     (
         "mailbox-first decisions",
@@ -88,6 +92,7 @@ HARNESS_COMPONENTS = (
 DURABLE_STATE_ARTIFACTS = (
     "Git commits",
     "Committed files",
+    "Signed three-way ref-bus facts",
     "Mailbox sent/ + seen cursors",
     "Mailbox bodies",
     "Lock files",
@@ -237,9 +242,10 @@ START_SESSION_STEPS = (
     "the newest docs/HANDOFF-<seat-or-coordinator>-*.md from that same concrete "
     "role before seat_status.py or git log; if none exists, state that and continue.",
     "Run scripts/continuation_readiness.py to load the Codex Harness Model.",
+    "Treat the signed three-way ref-bus as the load-bearing state source for three-way facts; the free-form mailbox remains the human coordination channel.",
     "Always check mail before protocol decisions: refresh live mailbox state "
     "and read relevant mailbox bodies before acting or writing state.",
-    "Use durable shared state first: git commits, mailbox bodies, cursors, locks, logs, and gate evidence.",
+    "Use durable shared state first: git commits, signed ref-bus facts, mailbox bodies, cursors, locks, logs, and gate evidence.",
     "Guardrail: do not consume cursors, send mailbox events, claim locks, push, or spend from readiness bridge mode.",
     "Treat built-in role agents as core agent modules and agentNN.toml files as guardrail extensions.",
     "Escalate into a live seat or coordinator only when the user or parent prompt explicitly names that role.",

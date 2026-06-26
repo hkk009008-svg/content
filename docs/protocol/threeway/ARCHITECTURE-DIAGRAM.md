@@ -7,14 +7,14 @@ in both (see *What this corrects* below). The **normative truth** is the spec
 and the `threeway/` package — consult them for any detail; when this diagram and they disagree,
 they win.
 
-> **Status:** this depicts the *target* topology. The `threeway/` package — Slice 1+2 (signed bus,
-> effective-state reducer, gate, RefEventStore), Slice 2.5 (legacy-bus migration substrate), and
-> Slice 3 (tiered T2/T3 co-sign machinery) — is BUILT, hardened, and test-green but **wired into
-> nothing** today: no live seat/harness/CI emits a threeway event; the legacy mailbox bus is still
-> the live coordination substrate. The single authority-flip cutover has NOT been executed (gated on
-> explicit user confirmation, DECISIONS.md ADR-045), and **keys are NOT provisioned**
-> (`coordination/threeway/keys/` holds only a README) — the hard blocker for going live. See
-> [`UNIFIED-OPERATING-DOCTRINE.md`](UNIFIED-OPERATING-DOCTRINE.md) §I.5.
+> **Status:** this depicts the target protected-main topology. The `threeway/` package — signed bus,
+> reducer, gate, RefEventStore, cutover substrate, and T2/T3 machinery — is built and hardened. The
+> signed ref-bus is the load-bearing source for three-way facts, and T1/T2/T3 local CLI emission is
+> proved against `refs/threeway/test-main`; the free-form mailbox remains the human coordination
+> channel. Protected `refs/heads/main` deployment remains fail-closed until branch-protection/ref-ACL
+> controls and a protected merge-gate runner are verifiable. See
+> [`UNIFIED-OPERATING-DOCTRINE.md`](UNIFIED-OPERATING-DOCTRINE.md) §I.5 and
+> [`MECHANISM-LEDGER.md`](MECHANISM-LEDGER.md).
 
 ## Topology
 

@@ -60,8 +60,10 @@ stale versus the code, the code wins — fix the doc in the same change that exp
    bus, merge-gate) vs Layer 2 (the portable rules every provider follows), plus the **capability
    map** that tells your provider which primitive implements each rule. Currency note: the
    `threeway/` package the build-status section (§I.5) routes to is now BUILT, hardened, and
-   test-green — but WIRED INTO NOTHING; the legacy mailbox bus is still the live substrate, and
-   keys are not provisioned (the hard blocker for going live).
+   test-green. The signed ref-bus is the load-bearing substrate for three-way facts; the
+   free-form mailbox remains the human coordination channel. T1/T2/T3 principal-safe emitters
+   exist for local/test-main operation, while protected-main deployment still requires the
+   fail-closed merge-gate boundary and deployment controls.
 3. **Your provider manual** — Codex / Antigravity / Claude specifics.
 4. **`ARCHITECTURE-DIAGRAM.md`** — the canonical topology picture.
 5. **`AGENTS.md`** — the agent-agnostic principle root (already names all three providers).

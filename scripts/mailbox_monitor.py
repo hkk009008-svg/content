@@ -191,6 +191,10 @@ def collect_monitor_state(
     for seat in SEATS:
         cursor = _read_cursor(root, seat)
         unread = _unread_events(events, cursor, seat, root=root)
+        if bus_unread.is_migrated_cursor(cursor):
+            unread_source = "ref-bus-unavailable" if unread is None else "ref-bus"
+        else:
+            unread_source = "legacy-mailbox"
         if unread is None:                       # migrated seat, ref-bus unavailable
             unread_count, latest_unread = "(unavailable: ref-bus)", None
         else:
@@ -199,6 +203,7 @@ def collect_monitor_state(
         seats[seat] = {
             "cursor": cursor,
             "unread_count": unread_count,
+            "unread_source": unread_source,
             "latest_unread": latest_unread,
             "broadcast_receipt": _broadcast_receipt(cursor, latest_broadcast),
             # Heartbeats are pair-seat only — coordinators have no presence
@@ -286,6 +291,7 @@ def render_snapshot(state: dict) -> str:
             f"{seat:<11}unread={seat_state['unread_count']} "
             f"latest={seat_state['latest_unread'] or '-'} "
             f"cursor={seat_state['cursor']} "
+            f"source={seat_state['unread_source']} "
             f"receipt={seat_state['broadcast_receipt']} "
             f"heartbeat={heartbeat['state']} age={heartbeat['age']}"
         )

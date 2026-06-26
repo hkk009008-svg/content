@@ -82,6 +82,50 @@ def _cmd_re_verify_challenge(a) -> Event:
                         subject_sha=a.integration_sha, bus_id=a.bus_id)
 
 
+def _events(repo_dir, remote):
+    return RefEventStore(Path(repo_dir), remote=(remote or None)).all_events()
+
+
+def _find_event(a, event_id):
+    matches = [ev for ev in _events(a.repo_dir, a.remote) if ev.id == event_id]
+    if len(matches) != 1:
+        raise ValueError(f"target event id not found or ambiguous: {event_id}")
+    return matches[0]
+
+
+def _cmd_brief_superseded(a) -> Event:
+    target = _find_event(a, a.supersedes_event_id)
+    if target.kind != "brief":
+        raise ValueError("brief_superseded target must be a brief")
+    ev = _build_event(
+        "brief_superseded",
+        {"supersedes_event_id": a.supersedes_event_id},
+        a.candidate_id,
+        brief_id=target.brief_id,
+        brief_version=target.brief_version,
+        bus_id=a.bus_id,
+        ev_id=f"brief_superseded-overseer-{a.supersedes_event_id}",
+    )
+    ev.supersedes_event_id = a.supersedes_event_id
+    return ev
+
+
+def _cmd_attestation_revoked(a) -> Event:
+    target = _find_event(a, a.revokes_event_id)
+    ev = _build_event(
+        "attestation_revoked",
+        {},
+        a.candidate_id,
+        brief_id=target.brief_id,
+        brief_version=target.brief_version,
+        subject_sha=target.subject_sha,
+        bus_id=a.bus_id,
+        ev_id=f"attestation_revoked-overseer-{a.revokes_event_id}",
+    )
+    ev.revokes_event_id = a.revokes_event_id
+    return ev
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Threeway overseer signing CLI.")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -124,6 +168,14 @@ def main(argv=None) -> int:
     pv.add_argument("--integration-sha", required=True)
     pv.add_argument("--nonce", default=None, help="omit to mint a fresh one (recommended)")
     pv.set_defaults(fn=_cmd_re_verify_challenge)
+
+    ps = sub.add_parser("brief_superseded"); _common(ps)
+    ps.add_argument("--supersedes-event-id", required=True)
+    ps.set_defaults(fn=_cmd_brief_superseded)
+
+    pv2 = sub.add_parser("attestation_revoked"); _common(pv2)
+    pv2.add_argument("--revokes-event-id", required=True)
+    pv2.set_defaults(fn=_cmd_attestation_revoked)
 
     args = ap.parse_args(argv)
     if (args.remote or "").lower() in ("", "none"):

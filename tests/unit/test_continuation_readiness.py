@@ -57,6 +57,32 @@ def test_main_identifies_readiness_bridge_role(tmp_path, monkeypatch, capsys):
     assert "no seat claim, cursor consumption, mailbox send, or inventory edit" in out
 
 
+def test_render_threeway_bus_surfaces_unavailable_sentinel(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(readiness, "run", lambda cmd, cwd, timeout=120: (1, "", "no ref"))
+    monkeypatch.setattr(readiness.bus_unread, "bus_unread_count", lambda root, seat: None)
+
+    readiness.render_threeway_bus(tmp_path)
+
+    out = capsys.readouterr().out
+    assert "Threeway Bus" in out
+    assert "(unavailable: ref-bus)" in out
+    assert "director" in out
+
+
+def test_main_renders_threeway_bus_section(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(readiness, "repo_root", lambda: tmp_path)
+    monkeypatch.setattr(readiness, "render_codex", lambda root: None)
+    monkeypatch.setattr(readiness, "render_git", lambda root, commits: None)
+    monkeypatch.setattr(readiness, "render_mailbox", lambda root: None)
+    monkeypatch.setattr(readiness, "render_threeway_bus", lambda root: print("## Threeway Bus\nsentinel"))
+    monkeypatch.setattr(readiness, "render_wave", lambda root, wave: None)
+    monkeypatch.setattr(readiness, "render_ceremony", lambda root: None)
+    monkeypatch.setattr(readiness, "render_environment", lambda root, smoke: None)
+
+    assert readiness.main(["--skip-ceremony"]) == 0
+    assert "Threeway Bus" in capsys.readouterr().out
+
+
 def test_render_codex_reports_harness_model_artifacts(tmp_path, monkeypatch, capsys):
     for key in (
         "CODEX_AGENT_MODE",

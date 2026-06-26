@@ -13,19 +13,29 @@ if str(_REPO_ROOT) not in sys.path:                      # ADR-055 self-bootstra
     sys.path.insert(0, str(_REPO_ROOT))
 
 from threeway import gitcas                              # noqa: E402
+from threeway.approval_authority import (                # noqa: E402
+    current_reverify_challenge_nonce,
+    event_by_id,
+    required_mirror_cosigner,
+    required_re_verifier,
+    resolve_candidate_context,
+    signer_seat,
+)
 from threeway.envelope import Event                      # noqa: E402
+from threeway.gate import verify_and_reduce              # noqa: E402
 from threeway.keys import load_private                   # noqa: E402
 from threeway.loop import PAIR_A, PAIR_B, build_candidate_events  # noqa: E402
 from threeway.refstore import AppendContentionExceeded, RefEventStore  # noqa: E402
 
 SEATS = ("director", "director2", "operator", "operator2", "coordinator", "coordinator2")
 
-# Static seat↔kind authority (T1 facts only; T2/T3 emission is a deferred follow-on).
 AUTHORITY = {
-    "coordinator":  {"candidate", "release_requested", "candidate_aborted"},
-    "coordinator2": {"candidate", "release_requested", "candidate_aborted"},
-    "operator":     {"attestation"},
-    "operator2":    {"attestation"},
+    "coordinator":  {"candidate", "release_requested", "candidate_aborted", "attestation_revoked"},
+    "coordinator2": {"candidate", "release_requested", "candidate_aborted", "attestation_revoked"},
+    "operator":     {"attestation", "co_sign", "re_verify", "attestation_revoked"},
+    "operator2":    {"attestation", "co_sign", "re_verify", "attestation_revoked"},
+    "director":     {"attestation_revoked"},
+    "director2":    {"attestation_revoked"},
 }
 # The seat determines the pair (and thus the canonical event signer). No --pair-vs-seat conflict.
 SEAT_PAIR = {"coordinator": PAIR_A, "operator": PAIR_A, "coordinator2": PAIR_B, "operator2": PAIR_B}
@@ -78,6 +88,57 @@ def _build_event(a) -> Event:
     return ev
 
 
+def _state_and_events(a):
+    store = RefEventStore(Path(a.repo_dir), remote=(a.remote or None))
+    events = store.all_events()
+    state = verify_and_reduce(events, registry_dir=a.registry_dir, bus_id=a.bus_id)
+    return store, events, state
+
+
+def _dynamic_event(a) -> Event:
+    store, events, state = _state_and_events(a)
+    if a.fact in {"co_sign", "re_verify"}:
+        ctx = resolve_candidate_context(state, a.candidate_id)
+        if a.fact == "co_sign":
+            required = required_mirror_cosigner(state, ctx)
+            if required != a.seat:
+                raise PermissionError(f"required co_sign seat is {required or '(none)'}, not {a.seat}")
+            return Event(
+                id=f"co_sign-{a.seat}-{ctx.candidate_id}", seq=0, bus_id=a.bus_id,
+                schema_version="threeway/1", kind="co_sign", sender=a.seat, recipient="all",
+                signer=f"{a.seat}:{PROVIDER[a.seat]}:{a.session}", payload={"verdict": a.verdict},
+                brief_id=ctx.brief_id, brief_version=ctx.brief_version,
+                candidate_id=ctx.candidate_id, subject_sha=ctx.integration_sha,
+            )
+        required = required_re_verifier(state, ctx)
+        if required != a.seat:
+            raise PermissionError(f"required re_verify seat is {required}, not {a.seat}")
+        nonce = current_reverify_challenge_nonce(state, ctx)
+        if nonce is None:
+            raise PermissionError("no current re_verify_challenge for candidate integration_sha")
+        return Event(
+            id=f"re_verify-{a.seat}-{ctx.candidate_id}", seq=0, bus_id=a.bus_id,
+            schema_version="threeway/1", kind="re_verify", sender=a.seat, recipient="all",
+            signer=f"{a.seat}:{PROVIDER[a.seat]}:{a.session}",
+            payload={"verdict": a.verdict, "challenge_nonce": nonce},
+            brief_id=ctx.brief_id, brief_version=ctx.brief_version,
+            candidate_id=ctx.candidate_id, subject_sha=ctx.integration_sha,
+        )
+    if a.fact == "attestation_revoked":
+        target = event_by_id(events, a.revokes_event_id)
+        if target is None or signer_seat(target.signer) != a.seat:
+            raise PermissionError("seat may only revoke its own prior fact")
+        return Event(
+            id=f"attestation_revoked-{a.seat}-{a.revokes_event_id}", seq=0, bus_id=a.bus_id,
+            schema_version="threeway/1", kind="attestation_revoked", sender=a.seat,
+            recipient="all", signer=f"{a.seat}:{PROVIDER.get(a.seat, 'seat')}:{a.session}",
+            payload={}, brief_id=target.brief_id, brief_version=target.brief_version,
+            candidate_id=target.candidate_id, subject_sha=target.subject_sha,
+            revokes_event_id=a.revokes_event_id,
+        )
+    raise ValueError(f"unsupported dynamic fact {a.fact}")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="A seat emits its own signed T1 bus fact.")
     ap.add_argument("seat", choices=SEATS)                # all 6 — body rejects non-emitters with rc2
@@ -94,6 +155,9 @@ def main(argv=None) -> int:
     ap.add_argument("--bus-id", default="prod")
     ap.add_argument("--repo-dir", default=".")
     ap.add_argument("--remote", default="origin")
+    ap.add_argument("--registry-dir", default="coordination/threeway/keys")
+    ap.add_argument("--verdict", default="GO", choices=["GO", "NITS", "FAIL"])
+    ap.add_argument("--revokes-event-id", default=None)
     a = ap.parse_args(argv)
     a.session = a.session or "s1"
 
@@ -101,7 +165,15 @@ def main(argv=None) -> int:
     if a.fact not in AUTHORITY.get(a.seat, set()):
         print(f"seat {a.seat} may not emit {a.fact}", file=sys.stderr)
         return 2
-    if a.fact != "candidate_aborted" and (a.staging_base is None or a.branch is None):
+    if a.fact in {"co_sign", "re_verify"}:
+        if ":" not in a.candidate_id:
+            print(f"{a.fact} requires pair-namespaced --candidate-id", file=sys.stderr)
+            return 2
+    elif a.fact == "attestation_revoked":
+        if not a.revokes_event_id:
+            print("attestation_revoked requires --revokes-event-id", file=sys.stderr)
+            return 2
+    elif a.fact != "candidate_aborted" and (a.staging_base is None or a.branch is None):
         print(f"{a.fact} requires --staging-base and --branch", file=sys.stderr)
         return 2
     if a.fact == "attestation" and a.phase is None:
@@ -109,9 +181,14 @@ def main(argv=None) -> int:
         return 2
 
     try:
-        ev = _build_event(a)
+        if a.fact in {"co_sign", "re_verify", "attestation_revoked"}:
+            ev = _dynamic_event(a)
+        else:
+            ev = _build_event(a)
         store = RefEventStore(Path(a.repo_dir), remote=(a.remote or None))
         store.append(ev, load_private(a.seat))           # <-- EXPLICIT seat key, not signer-derived
+    except PermissionError as e:
+        print(str(e), file=sys.stderr); return 2
     except FileNotFoundError as e:
         print(f"Error loading seat key: {e}", file=sys.stderr); return 1
     except AppendContentionExceeded as e:

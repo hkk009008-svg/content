@@ -1,7 +1,11 @@
 # Codex Continuation Adapter
 
 This is the short Codex adapter for the executable harness kernel in
-`scripts/codex_protocol_model.py`. The active invariant is: durable shared state beats chat memory. Read git, mailbox bodies, cursors, locks, logs, gate evidence, and operator reports before trusting stale prose.
+`scripts/codex_protocol_model.py`. The active invariant is: durable shared state beats chat memory. Read git, signed ref-bus facts, mailbox bodies, cursors, locks, logs, gate evidence, and operator reports before trusting stale prose.
+
+The signed three-way ref-bus is the load-bearing state source for three-way
+facts. The free-form mailbox remains the human coordination channel and must
+still be checked before four-seat protocol decisions.
 
 All Codex seats, including coordinator, must actively eliminate ceremony and
 theater behavior. Status notes, routes, handoffs, receipts, and no-op reports
