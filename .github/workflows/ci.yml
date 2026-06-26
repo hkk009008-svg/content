@@ -175,7 +175,7 @@ jobs:
         # If your PR changes this count, the diff or the brief explains why.
         # Root-module importability comes from [tool.pytest.ini_options]
         # pythonpath in pyproject.toml — bare `pytest` here relies on it.
-        run: pytest tests/unit/ --tb=short -q
+        run: pytest tests/unit/ --tb=short -q --cov=. --cov-report=xml --cov-report=term
 
       - name: Run executable Wave 1 pin gate
         # ADR-027: the wave gate executes inventory selectors via pytest --runxfail.
