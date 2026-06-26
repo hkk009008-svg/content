@@ -1,0 +1,27 @@
+{
+  "iso_to_seq": {
+    "coordinator": 764,
+    "coordinator2": 764,
+    "director": 768,
+    "director2": 767,
+    "operator": 765,
+    "operator2": 766
+  },
+  "original_bytes": {
+    "coordinator.txt": "2026-06-17T19:39:53Z\n",
+    "coordinator2.txt": "2026-06-17T19:39:53Z\n",
+    "director.txt": "2026-06-17T19:55:31Z\n",
+    "director2.txt": "2026-06-17T19:55:13Z\n",
+    "operator.txt": "2026-06-17T19:47:35Z\n",
+    "operator2.txt": "2026-06-17T19:48:04Z\n"
+  },
+  "original_iso": {
+    "coordinator": "2026-06-17T19:39:53Z",
+    "coordinator2": "2026-06-17T19:39:53Z",
+    "director": "2026-06-17T19:55:31Z",
+    "director2": "2026-06-17T19:55:13Z",
+    "operator": "2026-06-17T19:47:35Z",
+    "operator2": "2026-06-17T19:48:04Z"
+  },
+  "schema": "cursor-backfill/1"
+}
