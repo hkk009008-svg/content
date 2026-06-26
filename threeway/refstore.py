@@ -182,14 +182,18 @@ class RefEventStore:
         raise AppendContentionExceeded(
             f"append lost CAS {self._max_attempts}x for {ev.id}")
 
-    def _iter_local(self):
+    def _iter_local(self, min_seq: int = -1):
         # reads the LOCAL ref, NO sync. append's idempotency scan uses this directly
         # (append already _sync()s at the loop top, so it must not re-fetch). Public
         # readers go through iter_events()/all_events(), which sync first in remote mode.
+        # min_seq: skip index entries at/below this seq WITHOUT reading their blobs — the
+        # O(unread) path for cursor-relative readers (default -1 => read every event).
         tip = gitcas.rev_parse(self._repo, self._ref)
         if tip is None:
             return
         for seq in gitcas.list_index_seqs(self._repo, tip):
+            if seq <= min_seq:                             # O(unread): no blob read below the floor
+                continue
             idx = gitcas.read_blob_at(self._repo, tip, f"index/{seq:08d}")
             if idx is None:
                 continue
@@ -231,6 +235,14 @@ class RefEventStore:
         if self._remote is not None:
             self._sync()                                   # refresh local ref from authority
         return list(self._iter_local())                    # _iter_local: avoid double-sync
+
+    def iter_events_since(self, min_seq: int):
+        """LOCAL events with seq > min_seq, reading ONLY their blobs (O(unread), not O(all)) —
+        the cursor-relative reader for dashboards (bus_unread.py). Same drop-not-raise +
+        well_formed contract as _iter_local. LOCAL-ONLY (no _sync): per-seat cursors are
+        per-clone/local by design (advance_cursor is local-only, refstore:261-289); a remote
+        reader uses iter_events()."""
+        yield from self._iter_local(min_seq)
 
     # ---- per-seat cursors: refs/threeway/cursors/<seat> (spec §8) -------------
     # A cursor = "last seq scanned," stored as a blob (decimal seq text) the ref

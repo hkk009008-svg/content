@@ -47,15 +47,18 @@ def bus_unread_events(repo_root, seat: str, *, bus_id: str = "prod") -> list | N
     try:
         store = RefEventStore(Path(repo_root), remote=None)   # remote=None => no _sync => LOCAL ONLY
         cursor = store.cursor_seq(seat)
-        events = store.all_events()
+        # O(unread): read only the blobs past the cursor, NOT the whole bus. all_events()
+        # over the live bus is ~14s (subprocess git per blob); a dashboard calls this once
+        # per seat, so the seq>cursor floor (iter_events_since) is load-bearing for the
+        # "status.py NEVER hangs" contract. The seq gate lives in iter_events_since (pinned
+        # non-vacuous in test_threeway_refstore.py); here we apply only the bus_id+addressee
+        # domain filters.
+        events = list(store.iter_events_since(cursor))
     except Exception:
         # Dashboard never-crash + silent-degradation guard: a corrupt cursor blob or a
         # non-bus repo surfaces as None, never a traceback and never a misleading 0.
         return None
-    return [
-        ev for ev in events
-        if ev.seq > cursor and ev.bus_id == bus_id and ev.recipient in (seat, "all")
-    ]
+    return [ev for ev in events if ev.bus_id == bus_id and ev.recipient in (seat, "all")]
 
 
 def bus_unread_count(repo_root, seat: str, *, bus_id: str = "prod") -> int | None:

@@ -94,7 +94,9 @@ def test_counts_addressed_events_at_cursor_zero(seatkit, live_repo):
 
 
 def test_cursor_hides_already_seen_events(seatkit, live_repo):
-    # NON-VACUOUS cursor filter. MUTATION TARGET: `ev.seq > cursor` -> `ev.seq >= 0` reddens this.
+    # End-to-end cursor-relative count: events at/below the cursor must NOT re-surface.
+    # The seq>cursor GATE lives in RefEventStore.iter_events_since (pinned non-vacuous in
+    # test_threeway_refstore.py::test_iter_events_since_*); this is its integration proof.
     r, base, branch = live_repo
     last = _append_all(r, build_candidate_events(base, branch, "0" * 40, {}, pair=PAIR_A, candidate_id="c1"))
     RefEventStore(r).advance_cursor("coordinator", last.seq)   # consume everything to the tip

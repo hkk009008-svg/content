@@ -201,6 +201,36 @@ def test_iter_events_returns_in_seq_order_and_verifies(tmp_path):
     verify_event(evs[0], pub)                     # signed over its assigned seq
 
 
+def test_iter_events_since_yields_only_past_floor(tmp_path):
+    # O(unread) cursor-relative reader (ADR-062): iter_events_since(min_seq) yields only
+    # events with seq > min_seq. The dashboards call this instead of all_events() so a
+    # migrated seat's unread costs O(unread tail), not O(whole bus) (~14s on the live bus).
+    r = _new_repo(tmp_path); priv, _ = keys.generate_keypair()
+    store = RefEventStore(r)
+    for i in range(1, 6):
+        store.append(_unsigned(id=f"e{i}"), priv)            # seqs 1..5
+    assert [e.seq for e in store.iter_events_since(3)] == [4, 5]   # strictly greater
+    assert [e.seq for e in store.iter_events_since(5)] == []       # nothing past the tip
+    assert [e.seq for e in store.iter_events_since(0)] == [1, 2, 3, 4, 5]  # floor 0 = all
+
+
+def test_iter_events_since_does_not_read_blobs_at_or_below_floor(tmp_path, monkeypatch):
+    # The floor must SKIP blob reads (the perf contract), not read-then-filter. MUTATION
+    # TARGET: `seq <= min_seq: continue` -> read-all-then-filter would read index/00000001..3
+    # here and redden this.
+    r = _new_repo(tmp_path); priv, _ = keys.generate_keypair()
+    store = RefEventStore(r)
+    for i in range(1, 6):
+        store.append(_unsigned(id=f"e{i}"), priv)            # seqs 1..5
+    seen_paths: list[str] = []
+    orig = gitcas.read_blob_at
+    monkeypatch.setattr(gitcas, "read_blob_at",
+                        lambda repo, c, path: (seen_paths.append(path), orig(repo, c, path))[1])
+    list(store.iter_events_since(3))
+    assert not any(f"{s:08d}" in p for s in (1, 2, 3) for p in seen_paths)  # old blobs untouched
+    assert any("00000004" in p for p in seen_paths)                        # the unread tail IS read
+
+
 def test_seq_persists_across_store_reopen(tmp_path):
     r = _new_repo(tmp_path); priv, _ = keys.generate_keypair()
     RefEventStore(r).append(_unsigned(id="e1"), priv)
