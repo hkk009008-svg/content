@@ -255,7 +255,7 @@ def test_consume_events_refuses_scalar_migrated_cursor_without_mutation(repo):
     seen = repo / "coordination" / "mailbox" / "seen" / "director.txt"
     seen.write_text("768\n")
     r = _run(CONSUME_EVENTS, ["director"], repo)
-    assert r.returncode != 0, r.stdout
+    assert r.returncode == 2, r.stdout          # the explicit refusal rc, not just any nonzero
     assert "consume_bus.py" in r.stderr
     assert seen.read_text() == "768\n"          # cursor UNCHANGED — not regressed to an ISO ts
     assert _staged(repo) == []                  # nothing staged

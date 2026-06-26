@@ -196,13 +196,12 @@ def test_mailbox_events_scalar_cursor_is_ref_bus_tracked(tmp_path) -> None:
         "2026-06-15T20-04-46Z-operator2-to-all-status.md",
     ]
 
-    # scalar `seq` cursor: ref-bus-tracked -> no legacy unread surfaced here.
-    # NON-VACUITY: the scalar seq "1" is lexically LESS than the ISO filenames
-    # ("1" < "2026-..."), so WITHOUT the `cursor.strip().isdigit()` guard the
-    # lexical compare `_event_ts(name) > "1"` keeps BOTH events (a spurious
-    # "2 unread" for a seat whose unread is actually tracked on the ref-bus) —
-    # the exact mis-count FIX 2 removes. Dropping the guard makes this RED
-    # (returns the 2 events instead of []).
+    # scalar `seq` cursor (post-de-degrade, ADR-062): the migrated path now reads the signed
+    # ref-bus, NOT the legacy ISO filenames. tmp_path is not a bus repo -> empty bus -> [].
+    # WITHOUT the scalar branch the OLD lexical compare `_event_ts(name) > "1"` ("1" < "2026-...")
+    # would keep BOTH ISO events (a spurious "2 unread"); the scalar branch routes to the bus
+    # instead. (The populated-bus read is covered by
+    # test_mailbox_events_scalar_cursor_surfaces_ref_bus_events.)
     assert draft_handoff._mailbox_events(tmp_path, "operator2", "1") == []
 
 

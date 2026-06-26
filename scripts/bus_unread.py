@@ -10,8 +10,9 @@ de-degrade — it reads the signed bus LOCALLY (no network) and returns the real
 mirroring ``consume_bus.py``'s filter exactly (``seq > cursor`` ∧ ``bus_id`` ∧ addressed).
 
 Design contract:
-* LOCAL ONLY — ``RefEventStore(remote=None)`` never ``_sync()``s (refstore.py:226), so a
-  dashboard with a "NEVER hangs" constraint (status.py) can call this without a network.
+* LOCAL ONLY — ``RefEventStore(remote=None)`` never ``_sync()``s (every ``_sync`` call site
+  guards on ``self._remote is not None``), so a dashboard with a "NEVER hangs" constraint
+  (status.py) can call this without a network round-trip.
 * The live cursor is ``store.cursor_seq(seat)`` (the ref-bus head the seat advances via
   consume_bus), NOT the frozen ``seen/*.txt`` scalar (a migration-time sentinel that goes
   stale as the seat consumes). Reading the seen scalar would re-over-count everything since.

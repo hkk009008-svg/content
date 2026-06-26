@@ -3098,7 +3098,9 @@ existing tests) are preserved when no repo is supplied.
 **DD-3 — `RefEventStore.iter_events_since(min_seq)` makes the read O(unread), not O(bus).** `all_events()`
 over the live 768-event bus is ~14s (a subprocess `git cat-file` per blob); a dashboard reads once per
 seat (6×). `iter_events_since` uses the cheap sorted `list_index_seqs` to SKIP the blobs at/below the
-cursor, reading only the unread tail — the live per-seat dashboard read drops from ~14s to ~0.5s. The
+cursor, reading only the unread tail — the live per-seat dashboard read drops from ~14s to ~0.5s (both
+ad-hoc runtime estimates on the live bus, not a committed-instrument measurement and not a gate
+threshold; the algorithmic O(unread) win is what the test pins, not the wall-clock number). The
 `seq > cursor` gate now lives here (additive; `_iter_local` gained a `min_seq=-1` default that leaves its
 four existing callers unchanged).
 
