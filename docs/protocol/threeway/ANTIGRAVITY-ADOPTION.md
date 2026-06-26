@@ -15,11 +15,10 @@ The agent-agnostic root contract is [`AGENTS.md`](../../../AGENTS.md) — **Anti
 its source of truth and translate its principles into Antigravity's own mechanisms** (AGENTS.md says
 exactly this for non-Claude agents).
 
-> **Evidence note (R-EVIDENCE applied to this manual):** the repo contains **no** Antigravity-specific
-> config, harness, or tooling (no `.py` / config / keys / CLI match) — `grep -rni antigravity` matches
-> only prose docs: the design spec (which is itself all about *removing* Antigravity from the merge
-> path) plus these adoption/doctrine docs. Antigravity's own tool surface bindings have been confirmed
-> directly by the Antigravity system and are explicitly listed below.
+> **Evidence note (R-EVIDENCE applied to this manual):** Antigravity's protocol harness and tool
+> surface bindings are formally codified in the project skill at
+> `.agents/skills/antigravity-harness/SKILL.md`. This skill serves as the active config ensuring
+> Antigravity honors the Layer-1 boundaries while executing the Layer-2 operating doctrine.
 
 ---
 

@@ -73,9 +73,9 @@ human-relayed strategic-reasoner (the dual-chief app axis) or a read-only
 observer. For any work an Antigravity session does, it follows the same operating
 discipline as every other tool here. Its adoption manual + the per-provider
 capability mapping are in
-`docs/protocol/threeway/ANTIGRAVITY-ADOPTION.md`; note that no Antigravity-specific
-config or tooling exists in-repo yet, so its mechanism bindings are marked
-to-confirm there.
+`docs/protocol/threeway/ANTIGRAVITY-ADOPTION.md`; note that the Antigravity-specific
+protocol harness is fully codified in the `.agents/skills/antigravity-harness/SKILL.md` skill,
+which maps the unified doctrine strictly to Antigravity's tool primitives.
 
 **Running all three providers as one system:** Claude + Codex + Antigravity share
 one operating doctrine. The unified statement of the shared rules, the Layer-1
