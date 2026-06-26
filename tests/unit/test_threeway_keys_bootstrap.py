@@ -4,6 +4,7 @@ from threeway import keys_bootstrap
 PAIR_A = {"director", "operator", "coordinator"}
 PAIR_B = {"director2", "operator2", "coordinator2"}
 INFRA = {"overseer", "ci", "merge-gate"}
+CHIEFS = {"chief-gemini", "chief-chatgpt"}
 
 
 def test_seats_include_pair_b():
@@ -13,6 +14,11 @@ def test_seats_include_pair_b():
     # Pair-A seats and the infra seats remain present.
     assert PAIR_A.issubset(seats)
     assert INFRA.issubset(seats)
+
+
+def test_chief_approver_keys_are_explicitly_provisioned_by_default():
+    seats = set(keys_bootstrap.SEATS)
+    assert CHIEFS.issubset(seats)
 
 
 def test_bootstrap_writes_pair_b_keypairs(tmp_path):
@@ -36,3 +42,13 @@ def test_bootstrap_writes_pair_b_keypairs(tmp_path):
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
         Ed25519PublicKey.from_public_bytes(raw)  # raises if invalid
+
+
+def test_bootstrap_writes_chief_keypairs(tmp_path):
+    reg = tmp_path / "registry"
+    ks = tmp_path / "keystore"
+    rc = keys_bootstrap.main(["--registry", str(reg), "--keystore", str(ks)])
+    assert rc == 0
+    for seat in CHIEFS:
+        assert (reg / f"{seat}.pub").exists()
+        assert (ks / f"{seat}.ed25519").exists()
