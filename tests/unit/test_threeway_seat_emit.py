@@ -150,3 +150,114 @@ def test_coordinator2_candidate_round_trips_pair_b(seatkit, live_repo):
     state = verify_and_reduce(RefEventStore(r).all_events(), registry_dir=str(reg), bus_id="prod")
     cand = state.candidate("B:c1")
     assert cand is not None and cand.signer.split(":", 1)[0] == "coordinator2"
+
+
+def _prepare_t2_candidate(reg, r, base, branch):
+    from scripts.overseer_emit import main as omain
+    common = ["--repo-dir", str(r), "--remote", ""]
+    assert omain(["assignment", "--candidate-id", "A:c1", "--pair", "A",
+                  "--builder", "director", "--builder-provider", "codex",
+                  "--primary-verifier", "operator", "--primary-verifier-provider", "claude",
+                  "--executing-coordinator", "coordinator", *common]) == 0
+    assert omain(["assignment", "--candidate-id", "B:c1", "--pair", "B",
+                  "--builder", "director2", "--builder-provider", "claude",
+                  "--primary-verifier", "operator2", "--primary-verifier-provider", "codex",
+                  "--executing-coordinator", "coordinator2", *common]) == 0
+    assert _run(["coordinator", "candidate", "--candidate-id", "c1", "--pair", "A",
+                 "--staging-base", base, "--branch", branch, *common])[0] == 0
+    state = verify_and_reduce(RefEventStore(r).all_events(), registry_dir=str(reg), bus_id="prod")
+    integ = state.authoritative_candidate("A:c1").payload["integration_sha"]
+    return common, integ
+
+
+def test_t2_cosign_wrong_seat_is_rc2_zero_events(seatkit, live_repo):
+    reg, ks = seatkit
+    r, base, branch = live_repo
+    common, integ = _prepare_t2_candidate(reg, r, base, branch)
+    n0 = len(RefEventStore(r).all_events())
+    rc, _, err = _run(["operator", "co_sign", "--candidate-id", "A:c1",
+                       "--registry-dir", str(reg), *common])
+    assert rc == 2
+    assert "required co_sign seat is operator2" in err
+    assert len(RefEventStore(r).all_events()) == n0
+
+
+def test_t2_cosign_round_trips_from_required_mirror_seat(seatkit, live_repo):
+    reg, ks = seatkit
+    r, base, branch = live_repo
+    common, integ = _prepare_t2_candidate(reg, r, base, branch)
+    rc, _, err = _run(["operator2", "co_sign", "--candidate-id", "A:c1",
+                       "--registry-dir", str(reg), *common])
+    assert rc == 0, err
+    state = verify_and_reduce(RefEventStore(r).all_events(), registry_dir=str(reg), bus_id="prod")
+    ev = state.co_sign("A:c1", "operator2")
+    cand = state.authoritative_candidate("A:c1")
+    assert ev is not None
+    assert ev.payload["verdict"] == "GO"
+    assert ev.subject_sha == cand.payload["integration_sha"]
+
+
+def _prepare_t3_challenge(reg, r, base, branch):
+    from scripts.overseer_emit import main as omain
+    common, integ = _prepare_t2_candidate(reg, r, base, branch)
+    assert omain(["re_verify_challenge", "--candidate-id", "A:c1",
+                  "--integration-sha", integ, *common]) == 0
+    challenge = verify_and_reduce(
+        RefEventStore(r).all_events(), registry_dir=str(reg), bus_id="prod"
+    ).re_verify_challenge("A:c1")
+    return common, challenge.payload["nonce"]
+
+
+def test_reverify_echoes_challenge_nonce_not_unsigned_nonce(seatkit, live_repo):
+    reg, ks = seatkit
+    r, base, branch = live_repo
+    common, nonce = _prepare_t3_challenge(reg, r, base, branch)
+    rc, _, err = _run(["operator", "re_verify", "--candidate-id", "A:c1",
+                       "--registry-dir", str(reg), *common])
+    assert rc == 0, err
+    state = verify_and_reduce(RefEventStore(r).all_events(), registry_dir=str(reg), bus_id="prod")
+    ev = state.re_verify("A:c1", "operator")
+    assert ev is not None
+    assert ev.payload["challenge_nonce"] == nonce
+    assert "nonce" not in ev.payload
+
+
+def test_reverify_without_challenge_is_rc2_zero_events(seatkit, live_repo):
+    reg, ks = seatkit
+    r, base, branch = live_repo
+    common, integ = _prepare_t2_candidate(reg, r, base, branch)
+    n0 = len(RefEventStore(r).all_events())
+    rc, _, err = _run(["operator", "re_verify", "--candidate-id", "A:c1",
+                       "--registry-dir", str(reg), *common])
+    assert rc == 2
+    assert "no current re_verify_challenge" in err
+    assert len(RefEventStore(r).all_events()) == n0
+
+
+def test_seat_can_revoke_own_prior_fact(seatkit, live_repo):
+    reg, ks = seatkit
+    r, base, branch = live_repo
+    common = ["--candidate-id", "c1", "--pair", "A", "--staging-base", base, "--branch", branch,
+              "--repo-dir", str(r), "--remote", ""]
+    assert _run(["operator", "attestation", "--phase", "release", *common])[0] == 0
+    target = [e for e in RefEventStore(r).all_events() if e.kind == "attestation"][-1]
+    rc, _, err = _run(["operator", "attestation_revoked", "--candidate-id", "A:c1",
+                       "--revokes-event-id", target.id, "--repo-dir", str(r), "--remote", ""])
+    assert rc == 0, err
+    state = verify_and_reduce(RefEventStore(r).all_events(), registry_dir=str(reg), bus_id="prod")
+    assert state.effective_attestation("A:c1", "release", "operator") is None
+
+
+def test_seat_cannot_revoke_another_seats_fact(seatkit, live_repo):
+    reg, ks = seatkit
+    r, base, branch = live_repo
+    common = ["--candidate-id", "c1", "--pair", "A", "--staging-base", base, "--branch", branch,
+              "--repo-dir", str(r), "--remote", ""]
+    assert _run(["operator", "attestation", "--phase", "release", *common])[0] == 0
+    target = [e for e in RefEventStore(r).all_events() if e.kind == "attestation"][-1]
+    n0 = len(RefEventStore(r).all_events())
+    rc, _, err = _run(["operator2", "attestation_revoked", "--candidate-id", "A:c1",
+                       "--revokes-event-id", target.id, "--repo-dir", str(r), "--remote", ""])
+    assert rc == 2
+    assert "may only revoke its own prior fact" in err
+    assert len(RefEventStore(r).all_events()) == n0
