@@ -165,3 +165,33 @@ def test_reemit_same_id_different_payload_exits_clean_not_traceback(seatkit, tmp
     rc = main([*base, "--integration-sha", "feedface"])   # same id, different subject_sha
     assert rc == 1
     assert "Not emitted" in capsys.readouterr().err
+
+
+def test_brief_superseded_marks_prior_brief_version_inactive(seatkit, tmp_path):
+    reg, ks, privs = seatkit
+    repo = _new_repo(tmp_path)
+    from scripts.overseer_emit import main
+    assert main(["brief", "--candidate-id", "A:c1", "--brief-id", "b1",
+                 "--brief-version", "1", "--assigned-tier", "T1",
+                 "--allowed-paths", "cinema/", "--repo-dir", str(repo), "--remote", ""]) == 0
+    target = [e for e in _events(repo) if e.kind == "brief"][-1]
+    rc = main(["brief_superseded", "--candidate-id", "A:c1",
+               "--supersedes-event-id", target.id, "--repo-dir", str(repo), "--remote", ""])
+    assert rc == 0
+    state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
+    assert state.latest_brief_version("b1") is None
+
+
+def test_overseer_can_revoke_load_bearing_fact(seatkit, tmp_path):
+    reg, ks, privs = seatkit
+    repo = _new_repo(tmp_path)
+    from scripts.overseer_emit import main
+    assert main(["approver_roster", "--candidate-id", "A:c1",
+                 "--approvers", "chief-gemini", "chief-chatgpt",
+                 "--repo-dir", str(repo), "--remote", ""]) == 0
+    target = [e for e in _events(repo) if e.kind == "approver_roster"][-1]
+    assert main(["attestation_revoked", "--candidate-id", "A:c1",
+                 "--revokes-event-id", target.id,
+                 "--repo-dir", str(repo), "--remote", ""]) == 0
+    state = verify_and_reduce(_events(repo), registry_dir=str(reg), bus_id="prod")
+    assert state.approver_roster("A:c1") is None
