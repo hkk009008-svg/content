@@ -7,8 +7,9 @@ from scripts import threeway_mechanism_ledger as ledger
 def test_ledger_covers_every_load_bearing_kind():
     rows = ledger.collect_mechanisms()
     assert set(rows) == set(LOAD_BEARING_KINDS)
-    assert rows["co_sign"].status == "partial"
-    assert rows["human_approval"].status == "partial"
+    assert {row.status for row in rows.values()} == {"live"}
+    assert rows["co_sign"].status == "live"
+    assert rows["human_approval"].status == "live"
     assert rows["brief"].status == "live"
 
 

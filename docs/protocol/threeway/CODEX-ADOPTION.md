@@ -87,10 +87,10 @@ invocation** (`threeway/keys_bootstrap.py:16-29`) — *not* one call per seat, a
     --keystore "$THREEWAY_KEYSTORE"
 ```
 
-This generates **all nine** seats in one pass (`director, operator, coordinator, director2,
-operator2, coordinator2, overseer, ci, merge-gate`), writing `<seat>.pub` to the registry and
-`<seat>.ed25519` to the keystore (default `~/.threeway/keys` per `threeway/keys.py:66`). To restrict,
-use the **plural** `--seats director operator2 ...`.
+This generates **all eleven** signing seats in one pass (`director, operator, coordinator, director2,
+operator2, coordinator2, overseer, ci, merge-gate, chief-gemini, chief-chatgpt`), writing
+`<seat>.pub` to the registry and `<seat>.ed25519` to the keystore (default `~/.threeway/keys` per
+`threeway/keys.py:66`). To restrict, use the **plural** `--seats director operator2 ...`.
 
 **Generation ≠ custody — this is the load-bearing distinction (`threeway/keys.py:3-13`; spec §6.2 key isolation + §12 key management):**
 
@@ -108,10 +108,12 @@ Set `THREEWAY_KEYSTORE` to point at the seat-local keystore; Codex loads its key
 
 ## 4. The adoption path (sequenced — there is no switch to flip)
 
-Per the unified doc §I.5, the `threeway/` package is **built, hardened, and test-green (341 passed)
-but wired into nothing** today — no live seat/harness/CI emits a threeway event; the legacy mailbox
-bus is still the live coordination substrate. The design **forbids dual-write** (spec §8 item 8 +
-Slice-2.5 design spec §D2, audited). So adoption is the migration, in order:
+Per the unified doc §I.5, the `threeway/` package is **built, hardened, and test-green**. The signed
+ref-bus is now the load-bearing state source for three-way facts, and the free-form mailbox remains the
+human coordination channel. T1/T2/T3 principal-safe emitters are available as local CLIs and are proved
+against `refs/threeway/test-main`; protected `refs/heads/main` remains fail-closed without deployment
+controls. Verified via `env -u GIT_INDEX_FILE .venv/bin/python -m pytest tests/unit/test_threeway_t2_t3_emitters_e2e.py -q` -> 6 passed in 41.34s. The design **forbids dual-write** (spec §8 item 8 +
+Slice-2.5 design spec §D2, audited). So adoption is the deployment path, in order:
 
 1. **Provision keys** (§3) and commit the registry.
 2. **Slice 2.5 — execute the cutover.** The receiving-seat plumbing is already **DONE**: the
@@ -140,16 +142,16 @@ Slice-2.5 design spec §D2, audited). So adoption is the migration, in order:
    credential, invoking `threeway.gate.run_gate(...)`. Note: `run_gate` is an **in-process function**
    today (`threeway/gate.py:158`) — and it is **TOTAL: it never raises after the CAS** (ADR-039/040/041);
    there is no daemon yet; the runner is what's missing.
-5. **Slice 3 — runtime only; the gate machinery is already BUILT + enforcing** (ADR-035). The
+5. **Slice 3 — emitter runtime complete for local/test-main; protected deployment remains.** The
    merge-gate tier check `co_sign_satisfied` (`threeway/tier.py:39`) is fail-closed and already gates
    T2 (other-pair operator co-sign) and T3 (re_verify freshness-nonce challenge + two key-bound
-   `human_approvals` from an overseer-signed `approver_roster`, ADR-043). What is unbuilt is the
-   strategic-loop **runtime** (scope b): the dual-chief apps, overseer fact emission
-   (`cycle_go`/`release_order`/`approver_roster`), and key provisioning that make those signed facts
-   exist at run time.
+   `human_approvals` from an overseer-signed `approver_roster`, ADR-043). `scripts/seat_emit.py`,
+   `scripts/chief_emit.py`, and `scripts/overseer_emit.py` now emit those facts through
+   principal-safe CLI paths. Verified via
+   `env -u GIT_INDEX_FILE .venv/bin/python scripts/threeway_mechanism_ledger.py --check` -> exit 0.
 
-Only after this is the signed bus the live substrate. Until then, Codex coordinates on the **legacy
-mailbox bus** exactly as it does today.
+Codex still coordinates human work through the free-form mailbox. Three-way promotion facts belong on
+the signed ref-bus; protected-main release remains a deployment-controlled merge-gate action.
 
 ## 5. How a Codex seat emits threeway events (for when wiring lands)
 
