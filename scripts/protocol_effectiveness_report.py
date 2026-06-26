@@ -23,6 +23,7 @@ from typing import Any
 
 from protocol_mailbox import COORDINATION_KINDS, SEATS
 from status import collect_mailbox
+import bus_unread  # de-degrade: real ref-bus unread for migrated (scalar) cursors
 
 INVENTORY_COLS = (
     "id",
@@ -502,17 +503,23 @@ def mailbox_cursor_unread(
     seat: str,
     cursor: str,
     events: list[MailboxFilename],
+    repo_root: Path | None = None,
 ) -> tuple[int, list[str]]:
-    """Return unread count and filenames without mutating the cursor."""
-    # A scalar `seq` cursor (post Slice-2.5 backfill) is not an ISO wall-clock:
-    # the lexical `event.timestamp > cursor` compare below mis-counts against
-    # the ISO filenames (e.g. a small seq "1" < every "2026-..." ts -> counts
-    # ALL events as unread). Unread for a migrated seat is tracked on the
-    # ref-bus (RefEventStore seq>cursor_seq), not this legacy filename path —
-    # so a scalar cursor surfaces zero legacy unread here, matching
-    # status.count_unread / seat_status / mailbox_monitor / draft_handoff.
+    """Return unread count and filenames without mutating the cursor.
+
+    For a migrated (scalar) cursor, unread lives on the signed ref-bus, not the legacy
+    ISO filenames (the lexical `event.timestamp > cursor` compare mis-counts a scalar).
+    With *repo_root* given, return the REAL ref-bus unread (count + descriptors) — ADR-062;
+    without it (pure call) return (0, []), the legacy empty. A bus ERROR also yields (0, [])
+    here: the report's authoritative 'reported_unread' (from status) carries the sentinel.
+    """
     if cursor and cursor.strip().isdigit():
-        return 0, []
+        if repo_root is None:
+            return 0, []
+        evs = bus_unread.bus_unread_events(repo_root, seat)
+        if evs is None:
+            return 0, []
+        return len(evs), [bus_unread.format_unread(ev) for ev in evs]
     cursor_norm = normalize_ts(cursor)
     unread = [
         event.filename
@@ -790,7 +797,7 @@ def collect_report(root: Path, wave: int, commit_limit: int, event_limit: int, g
     seat_utilization: list[dict[str, Any]] = []
     for seat in SEATS:
         cursor = str(mailbox_data.get(f"mailbox_{seat}_cursor", ""))
-        computed_unread, unread_names = mailbox_cursor_unread(seat, cursor, parsed_events)
+        computed_unread, unread_names = mailbox_cursor_unread(seat, cursor, parsed_events, repo_root=root)
         reported_unread = mailbox_data.get(f"mailbox_{seat}_unread", computed_unread)
         unread_splits[seat] = {
             "cursor": cursor,

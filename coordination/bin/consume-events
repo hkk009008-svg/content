@@ -63,6 +63,17 @@ SENT="$ROOT/coordination/mailbox/sent"
 SEEN="$ROOT/coordination/mailbox/seen/$ROLE.txt"
 CUR=$(head -1 "$SEEN")
 
+# A scalar `seq` cursor means this seat is migrated to the signed ref-bus (Slice-2.5).
+# The ISO dash/colon math below would corrupt it, and writing an ISO timestamp back
+# would UN-migrate the cursor. Refuse and redirect to the bus consumer (ADR-062).
+case "$CUR" in
+  ''|*[!0-9]*) ;;                        # empty or non-numeric -> legacy ISO cursor; proceed
+  *) echo "consume-events: $ROLE is migrated to the signed ref-bus (scalar cursor $CUR);" \
+          "use 'scripts/consume_bus.py $ROLE' to read/advance — refusing to write an ISO" \
+          "timestamp over a scalar cursor (would un-migrate it)" >&2
+     exit 2;;
+esac
+
 dash()  { echo "${1:0:11}$(echo "${1:11:8}" | tr ':' '-')Z"; }
 colon() { echo "${1:0:11}$(echo "${1:11:8}" | tr '-' ':')Z"; }
 

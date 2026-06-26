@@ -19,6 +19,7 @@ from pathlib import Path
 
 
 import protocol_mailbox
+import bus_unread  # de-degrade: real ref-bus unread for migrated (scalar) cursors
 
 SEATS = protocol_mailbox.RECEIVING_SEATS
 MODE = "read-only-no-consume"
@@ -93,7 +94,23 @@ def _read_cursor(root: Path, seat: str) -> str:
         return f"(unavailable: {exc})"
 
 
-def _unread_events(events: list[dict], cursor: str, seat: str) -> list[dict]:
+def _unread_events(
+    events: list[dict], cursor: str, seat: str, root: Path | None = None
+) -> list[dict] | None:
+    if bus_unread.is_migrated_cursor(cursor):
+        # Migrated seat: unread is on the signed ref-bus, not the legacy sent/*.md path
+        # (ADR-062). None => bus error -> caller surfaces a visible sentinel (never a
+        # silent 0). A reachable-but-empty bus is a real []. root=None (pure call) keeps
+        # the legacy empty so non-repo callers are unaffected.
+        if root is None:
+            return []
+        evs = bus_unread.bus_unread_events(root, seat)
+        if evs is None:
+            return None
+        return [
+            {"to": ev.recipient, "ts": str(ev.seq), "filename": bus_unread.format_unread(ev)}
+            for ev in evs
+        ]
     cursor_dash = _colon_to_dash(cursor)
     if _parse_iso(cursor) is None:
         return []
@@ -173,11 +190,16 @@ def collect_monitor_state(
     seats = {}
     for seat in SEATS:
         cursor = _read_cursor(root, seat)
-        unread = _unread_events(events, cursor, seat)
+        unread = _unread_events(events, cursor, seat, root=root)
+        if unread is None:                       # migrated seat, ref-bus unavailable
+            unread_count, latest_unread = "(unavailable: ref-bus)", None
+        else:
+            unread_count = len(unread)
+            latest_unread = unread[-1]["filename"] if unread else None
         seats[seat] = {
             "cursor": cursor,
-            "unread_count": len(unread),
-            "latest_unread": unread[-1]["filename"] if unread else None,
+            "unread_count": unread_count,
+            "latest_unread": latest_unread,
             "broadcast_receipt": _broadcast_receipt(cursor, latest_broadcast),
             # Heartbeats are pair-seat only — coordinators have no presence
             # heartbeat by doctrine (matches draft_handoff._peer_heartbeats);

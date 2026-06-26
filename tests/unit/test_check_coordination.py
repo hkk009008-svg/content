@@ -262,6 +262,31 @@ def test_unread_report_counts_per_role(tmp_path):
     assert len(op) == 1 and "1" in op[0].message
 
 
+def test_unread_report_scalar_cursor_reads_ref_bus(tmp_path, monkeypatch):
+    # De-degrade (ADR-062): a migrated (scalar) cursor reports the REAL ref-bus unread,
+    # not the legacy filename path's silent 0.
+    import check_coordination as cc
+    root = make_coord(tmp_path, events={GOOD_EVENT_NAME: GOOD_EVENT_BODY},
+                      cursors={"operator": "765"})
+    monkeypatch.setattr(cc.bus_unread, "bus_unread_count", lambda repo, seat, **k: 3)
+    issues = cc.run(root, since=SINCE, now=NOW)
+    op = [i for i in issues
+          if i.kind == "unread" and i.message.startswith("operator:")]
+    assert len(op) == 1 and "3" in op[0].message
+
+
+def test_unread_report_scalar_cursor_bus_error_is_visible_not_silent_zero(tmp_path, monkeypatch):
+    # A bus ERROR (None) must surface a VISIBLE "unavailable", never a silent 0.
+    import check_coordination as cc
+    root = make_coord(tmp_path, events={GOOD_EVENT_NAME: GOOD_EVENT_BODY},
+                      cursors={"operator": "765"})
+    monkeypatch.setattr(cc.bus_unread, "bus_unread_count", lambda repo, seat, **k: None)
+    issues = cc.run(root, since=SINCE, now=NOW)
+    op = [i for i in issues
+          if i.kind == "unread" and i.message.startswith("operator:")]
+    assert len(op) == 1 and "unavailable" in op[0].message
+
+
 def test_main_exit_codes(tmp_path, capsys):
     clean = make_coord(
         tmp_path / "clean",

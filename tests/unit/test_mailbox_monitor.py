@@ -178,3 +178,22 @@ def test_main_json_outputs_machine_readable_snapshot(tmp_path: Path, capsys) -> 
     assert payload["mode"] == "read-only-no-consume"
     assert payload["seats"]["director"]["unread_count"] == 1
     assert payload["latest_coordinator_broadcast"]["ts"] == "2026-06-16T04:05:00Z"
+
+
+def test_unread_events_scalar_cursor_reads_ref_bus(tmp_path: Path, monkeypatch) -> None:
+    # De-degrade (ADR-062): a migrated (scalar) cursor reads the signed ref-bus, not the
+    # legacy sent/*.md path (which returned []). With a repo root + reachable bus, real
+    # events surface, shaped so the caller's len()/[-1]["filename"] still work.
+    class _Ev:
+        seq = 7; kind = "candidate"; sender = "coordinator"
+        recipient = "all"; candidate_id = "A:c1"; brief_id = "b1"
+
+    monkeypatch.setattr(monitor.bus_unread, "bus_unread_events", lambda root, seat, **k: [_Ev()])
+    out = monitor._unread_events([], "765", "operator", root=tmp_path)
+    assert out is not None and len(out) == 1 and "seq7" in out[0]["filename"]
+
+
+def test_unread_events_scalar_cursor_bus_error_is_none_not_silent_empty(tmp_path: Path, monkeypatch) -> None:
+    # A bus ERROR must return None (caller surfaces a visible sentinel), never a silent [].
+    monkeypatch.setattr(monitor.bus_unread, "bus_unread_events", lambda root, seat, **k: None)
+    assert monitor._unread_events([], "765", "operator", root=tmp_path) is None

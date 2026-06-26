@@ -340,3 +340,16 @@ def test_mailbox_cursor_unread_scalar_cursor_is_ref_bus_tracked() -> None:
     count_scalar, names_scalar = report.mailbox_cursor_unread("operator2", "1", events)
     assert count_scalar == 0
     assert names_scalar == []
+
+
+def test_mailbox_cursor_unread_scalar_with_repo_reads_ref_bus(tmp_path, monkeypatch) -> None:
+    # De-degrade (ADR-062): with a repo_root, a migrated (scalar) cursor returns the REAL
+    # ref-bus unread (count + descriptors), not the legacy (0, []). The pure-call contract
+    # above (no repo_root -> (0, [])) is preserved.
+    class _Ev:
+        seq = 5; kind = "status"; sender = "director2"
+        recipient = "all"; candidate_id = None; brief_id = None
+
+    monkeypatch.setattr(report.bus_unread, "bus_unread_events", lambda repo, seat, **k: [_Ev()])
+    count, names = report.mailbox_cursor_unread("operator2", "1", [], repo_root=tmp_path)
+    assert count == 1 and names == ["seq5:status:director2->all"]

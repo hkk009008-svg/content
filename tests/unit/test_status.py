@@ -469,6 +469,31 @@ class TestMailboxUnreadSubcommand:
         assert rc == 0
         assert capsys.readouterr().out.strip() == "3"
 
+    def test_scalar_cursor_bus_error_reports_unavailable_not_silent_zero(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        # De-degrade (ADR-062): for a migrated (scalar) cursor, a bus ERROR (corrupt
+        # cursor blob -> bus_unread_count returns None) must surface a VISIBLE
+        # "(unavailable: ref-bus)" sentinel — NEVER a silent 0 (silent-gate-degradation).
+        # (A reachable-but-empty bus is a real 0; only an ERROR is the sentinel — that
+        # distinction is pinned in test_bus_unread.py.)
+        self._seed(tmp_path, operator_cursor="765")          # scalar => migrated seat
+        monkeypatch.setattr(status, "_REPO_ROOT", tmp_path)
+        monkeypatch.setattr(status.bus_unread, "bus_unread_count", lambda root, seat, **k: None)
+        rc = main(["mailbox-unread", "operator"])
+        assert rc == 0
+        assert capsys.readouterr().out.strip() == "(unavailable: ref-bus)"
+
+    def test_scalar_cursor_surfaces_live_bus_count(self, tmp_path, monkeypatch, capsys):
+        # When the bus IS reachable, a migrated seat's unread is the real ref-bus count
+        # (mirroring consume_bus), not the legacy 0.
+        self._seed(tmp_path, operator_cursor="765")
+        monkeypatch.setattr(status, "_REPO_ROOT", tmp_path)
+        monkeypatch.setattr(status.bus_unread, "bus_unread_count", lambda root, seat, **k: 4)
+        rc = main(["mailbox-unread", "operator"])
+        assert rc == 0
+        assert capsys.readouterr().out.strip() == "4"
+
     def test_invalid_seat_errors(self, tmp_path, monkeypatch):
         self._seed(tmp_path)
         monkeypatch.setattr(status, "_REPO_ROOT", tmp_path)

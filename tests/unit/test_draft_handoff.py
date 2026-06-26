@@ -204,3 +204,29 @@ def test_mailbox_events_scalar_cursor_is_ref_bus_tracked(tmp_path) -> None:
     # the exact mis-count FIX 2 removes. Dropping the guard makes this RED
     # (returns the 2 events instead of []).
     assert draft_handoff._mailbox_events(tmp_path, "operator2", "1") == []
+
+
+def test_mailbox_events_scalar_cursor_surfaces_ref_bus_events(tmp_path, monkeypatch) -> None:
+    # De-degrade (ADR-062): a migrated (scalar) cursor must surface the REAL recent
+    # ref-bus events, not the legacy "[] = nothing" silent under-report.
+    sent = tmp_path / "coordination" / "mailbox" / "sent"
+    sent.mkdir(parents=True)
+
+    class _Ev:
+        seq = 9; kind = "release_order"; sender = "coordinator"
+        recipient = "all"; candidate_id = None; brief_id = "b1"
+
+    monkeypatch.setattr(draft_handoff.bus_unread, "bus_unread_events",
+                        lambda root, seat, **k: [_Ev()])
+    assert draft_handoff._mailbox_events(tmp_path, "operator2", "766") == [
+        "seq9:release_order:coordinator->all:b1"
+    ]
+
+
+def test_mailbox_events_scalar_cursor_bus_error_surfaces_sentinel(tmp_path, monkeypatch) -> None:
+    # A bus ERROR (None) must surface a VISIBLE sentinel in the draft, never a silent [].
+    sent = tmp_path / "coordination" / "mailbox" / "sent"
+    sent.mkdir(parents=True)
+    monkeypatch.setattr(draft_handoff.bus_unread, "bus_unread_events",
+                        lambda root, seat, **k: None)
+    assert draft_handoff._mailbox_events(tmp_path, "operator2", "766") == ["(unavailable: ref-bus)"]

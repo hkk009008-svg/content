@@ -247,6 +247,20 @@ def test_consume_events_advances_to_newest_and_stages(repo):
     assert "2026-06-01T00:00:00Z -> 2026-06-12T11:00:00Z" in r.stdout
 
 
+def test_consume_events_refuses_scalar_migrated_cursor_without_mutation(repo):
+    # ADR-062: a scalar seen cursor means the seat is migrated to the signed ref-bus.
+    # consume-events must REFUSE before any ISO dash/colon math — and must NOT write an
+    # ISO timestamp over the scalar (which would un-migrate the cursor) — redirecting to
+    # the bus consumer. The refusal fires on the cursor alone (no events needed).
+    seen = repo / "coordination" / "mailbox" / "seen" / "director.txt"
+    seen.write_text("768\n")
+    r = _run(CONSUME_EVENTS, ["director"], repo)
+    assert r.returncode != 0, r.stdout
+    assert "consume_bus.py" in r.stderr
+    assert seen.read_text() == "768\n"          # cursor UNCHANGED — not regressed to an ISO ts
+    assert _staged(repo) == []                  # nothing staged
+
+
 def test_consume_events_explicit_target(repo):
     _seed_events(repo)
     r = _run(CONSUME_EVENTS, ["director", "--to", "2026-06-12T10:00:00Z"], repo)

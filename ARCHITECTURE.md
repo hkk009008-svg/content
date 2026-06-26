@@ -1801,13 +1801,25 @@ is written ONCE, at the cutover (`preflight_bus_init` → 768 ordered `append`s 
 a single authority-flip), with the retained read-only `sent/` as rollback.
 
 **Cursor format (Slice 2.5):** cursors migrate ISO→scalar `seq`. `_CURSOR_RE`
-(`scripts/check_coordination.py:68`) loosens from ISO-only to accept the scalar in lockstep with the
-other parsers; `def advance_cursor` (`threeway/refstore.py:222`) materializes
+(`scripts/check_coordination.py:69`) loosens from ISO-only to accept the scalar in lockstep with the
+other parsers; `def advance_cursor` (`threeway/refstore.py:273`) materializes
 `refs/threeway/cursors/<seat>` via the LOCAL `cas_create_or_update_ref`
 (`threeway/gitcas.py:185`) exactly as in §13A.1. `coordination/mailbox/.migration/cursor-backfill.json` archives the original
 ISO values + the ISO→seq map for byte-reversible rollback. `coordinator` and `coordinator2` are now
 first-class RECEIVING seats; the ~12-copy seat roster consolidates to the single root
 `scripts/protocol_mailbox.py` plus a shell-sync guard. See `DECISIONS.md` ADR-034.
+
+**Migrated-seat unread = the live ref-bus (ADR-062):** the five legacy unread surfaces
+(`status.collect_mailbox`, `check_coordination._unread_report`,
+`protocol_effectiveness_report.mailbox_cursor_unread`, `mailbox_monitor._unread_events`,
+`draft_handoff._mailbox_events`) compute unread from `sent/*.md` ISO filenames, which a scalar cursor
+cannot be lexically compared against — so for a migrated seat they now read the REAL unread from the
+signed bus via `scripts/bus_unread.py` (LOCAL `RefEventStore(remote=None)`, the live
+`refs/threeway/cursors/<seat>` head, NOT the frozen `seen/*.txt` sentinel), not a silent 0. A bus error
+surfaces a visible "(unavailable: ref-bus)" sentinel. `def iter_events_since` (`threeway/refstore.py:239`)
+reads only the blobs past the cursor (O(unread) — `all_events()` over the live bus is ~14s) so the
+per-seat dashboard read stays ~0.5s. `coordination/bin/consume-events` refuses a scalar cursor (rc 2 →
+use `scripts/consume_bus.py`), never writing an ISO ts back over a scalar (which would un-migrate it).
 
 ### 13A.6 Tiered co-sign — `co_sign_satisfied` T2/T3 (Slice 3)
 

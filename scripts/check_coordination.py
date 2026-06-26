@@ -42,6 +42,7 @@ from pathlib import Path
 
 from protocol_mailbox import KNOWN_KINDS, RECEIVING_SEATS, SEATS
 from status import count_unread
+import bus_unread  # de-degrade: real ref-bus unread for migrated (scalar) cursors
 
 # All seats in RECEIVING_SEATS are now addressable receivers WITH a seen cursor
 # (Slice 2.5 §7): coordinator is no longer send-only, and coordinator2 is a new
@@ -192,16 +193,24 @@ def _check_events(coord_root: Path, since: str,
     return issues
 
 
-def _unread_report(coord_root: Path, names: list[str]) -> list[CoordIssue]:
+def _unread_report(coord_root: Path, names: list[str],
+                   repo_root: Path | None = None) -> list[CoordIssue]:
     issues: list[CoordIssue] = []
     for role in ROLES:
         cf = coord_root / "mailbox" / "seen" / f"{role}.txt"
         if not cf.exists():
             continue
         cur = cf.read_text().strip()
-        n = count_unread(cur, names, role)
-        issues.append(CoordIssue(f"mailbox/seen/{role}.txt", "unread", "INFO",
-                                 f"{role}: {n} unread event(s)"))
+        if bus_unread.is_migrated_cursor(cur):
+            # Migrated seat: real unread is on the signed ref-bus, not the legacy
+            # sent/*.md path (count_unread returns 0 for a scalar) — ADR-062. None =>
+            # a VISIBLE "unavailable", never a silent 0.
+            n = bus_unread.bus_unread_count(repo_root, role) if repo_root is not None else None
+            msg = (f"{role}: {n} unread event(s)" if n is not None
+                   else f"{role}: unread unavailable (ref-bus)")
+        else:
+            msg = f"{role}: {count_unread(cur, names, role)} unread event(s)"
+        issues.append(CoordIssue(f"mailbox/seen/{role}.txt", "unread", "INFO", msg))
     return issues
 
 
@@ -284,7 +293,10 @@ def run(coord_root: Path | str, since: str = "2026-06-11",
     issues: list[CoordIssue] = []
     issues += _check_cursors(coord_root, now, names)
     issues += _check_events(coord_root, since, names)
-    issues += _unread_report(coord_root, names)
+    # The bus lives at the git repo root; coord_root is <repo>/coordination, so its
+    # parent is the repo root unless an explicit git_root is given (ADR-062).
+    bus_repo_root = Path(git_root) if git_root else coord_root.parent
+    issues += _unread_report(coord_root, names, bus_repo_root)
     if git_root is not None:
         issues += _check_standalone_cursor_commits(git_root)
     issues += _check_coordinator_handoff_theater(docs_root)

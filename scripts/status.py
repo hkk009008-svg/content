@@ -137,6 +137,7 @@ _STATUS_ORDER = ["live", "wired", "stubbed", "parked", "dead"]
 # scripts/ is on sys.path when status.py runs (own dir as a script, or inserted
 # by the importing sibling/test); protocol_mailbox imports only pathlib.
 import protocol_mailbox  # noqa: E402
+import bus_unread  # noqa: E402  — de-degrade: real ref-bus unread for migrated (scalar) cursors
 
 _MAILBOX_SEATS = protocol_mailbox.RECEIVING_SEATS
 
@@ -367,7 +368,14 @@ def collect_mailbox(repo_root: Path) -> dict:
     for seat in _MAILBOX_SEATS:
         cursor = _read_cursor(seen_dir / f"{seat}.txt")
         try:
-            unread = count_unread(cursor, event_filenames, seat)
+            if bus_unread.is_migrated_cursor(cursor):
+                # Migrated (Slice-2.5) seat: real unread lives on the signed ref-bus,
+                # NOT the legacy sent/*.md filename path (count_unread returns 0 for a
+                # scalar cursor — a silent under-report). None => visible sentinel.
+                n = bus_unread.bus_unread_count(repo_root, seat)
+                unread = n if n is not None else "(unavailable: ref-bus)"
+            else:
+                unread = count_unread(cursor, event_filenames, seat)
         except Exception as e:
             unread = f"(unavailable: {e})"
         data[f"mailbox_{seat}_cursor"] = cursor

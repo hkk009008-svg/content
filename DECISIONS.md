@@ -3062,3 +3062,57 @@ authority-table tests), 2c (E2E walking-skeleton runs on seat_emit + consume_bus
 self-bootstrap); deleting `bootstrap_emit.py` turns the old pin RED (collection error on import);
 migrated coverage lives in `test_threeway_seat_emit.py` (2b) and `test_threeway_consume_bus.py` (2a).
 Full threeway unit suite green post-commit.
+
+## ADR-062 — De-degrade legacy unread surfaces to the live ref-bus; `consume-events` refuses scalar cursors (Slice-2.5 follow-up)
+
+**Context.** The Slice-2.5 cutover (ADR-034) migrated each seat's `coordination/mailbox/seen/<seat>.txt`
+cursor from an ISO timestamp to a scalar `seq` SENTINEL, with the live cursor moving to the git ref
+`refs/threeway/cursors/<seat>`. The legacy "unread" surfaces compute unread by lexically comparing
+`sent/*.md` ISO filenames against the cursor; for a scalar cursor that compare mis-counts, so each was
+made to short-circuit to 0/[]/skip for a scalar (`status.count_unread`, `check_coordination._unread_report`,
+`protocol_effectiveness_report.mailbox_cursor_unread`, `mailbox_monitor._unread_events`,
+`draft_handoff._mailbox_events`). That removed the mis-count but left a SILENT UNDER-REPORT: a migrated
+seat shows 0 unread on every dashboard even when the signed bus has events addressed to it (the
+silent-gate-degradation bug class). Separately, `coordination/bin/consume-events` was never migrated: for
+a scalar cursor its ISO dash/colon math fails, and on the write path it would stamp an ISO timestamp back
+over the scalar — UN-migrating the cursor.
+
+**Decision — read the real unread from the signed ref-bus; refuse to corrupt a migrated cursor.**
+
+**DD-1 — `scripts/bus_unread.py` is the de-degrade keystone.** `bus_unread_count`/`bus_unread_events`
+read the signed bus LOCALLY (`RefEventStore(remote=None)` never `_sync()`s — no network, honoring
+status.py's "NEVER hangs" contract) and return the real unread for a migrated seat, mirroring
+`consume_bus.py`'s filter (`seq > cursor` ∧ `bus_id` ∧ recipient ∈ {seat, "all"}). The LIVE cursor is
+`store.cursor_seq(seat)` (`refs/threeway/cursors/<seat>`), NOT the frozen `seen/*.txt` scalar (a
+migration-time sentinel that goes stale as the seat consumes). It returns `None` on a corrupt/unavailable
+bus so callers render a visible "(unavailable)" sentinel — never a silent 0; a reachable-but-empty bus
+is a real 0.
+
+**DD-2 — the five legacy surfaces route migrated cursors to `bus_unread`.** Each detects a scalar cursor
+(`is_migrated_cursor`) and reports the live ref-bus unread instead of 0/[]; the ISO path is unchanged.
+`status.collect_mailbox`'s fix propagates to `continuation_readiness` and to
+`protocol_effectiveness_report`'s authoritative `reported_unread`. `mailbox_cursor_unread` and
+`mailbox_monitor._unread_events` gained an opt-in repo/root parameter so their pure-call contracts (and
+existing tests) are preserved when no repo is supplied.
+
+**DD-3 — `RefEventStore.iter_events_since(min_seq)` makes the read O(unread), not O(bus).** `all_events()`
+over the live 768-event bus is ~14s (a subprocess `git cat-file` per blob); a dashboard reads once per
+seat (6×). `iter_events_since` uses the cheap sorted `list_index_seqs` to SKIP the blobs at/below the
+cursor, reading only the unread tail — the live per-seat dashboard read drops from ~14s to ~0.5s. The
+`seq > cursor` gate now lives here (additive; `_iter_local` gained a `min_seq=-1` default that leaves its
+four existing callers unchanged).
+
+**DD-4 — `consume-events` refuses a scalar (migrated) cursor.** It exits rc 2 redirecting to
+`scripts/consume_bus.py`, before any ISO math, and never writes an ISO timestamp over the scalar (which
+would un-migrate the cursor). `consume_bus.py` is the sanctioned reader/advancer for migrated seats.
+
+**Scope / implementing commits.** keystone `bus_unread.py` (+ mutation-pinned tests);
+`RefEventStore.iter_events_since`; the five de-degrade wirings + `consume-events` refusal; the cursor
+migration commit + this ADR + ARCHITECTURE §13A.5 doc-sync.
+
+**Why non-vacuous.** `iter_events_since`'s floor is pinned by `test_iter_events_since_*` (a read-blob spy
+proves blobs at/below the floor are NOT read — mutating the `seq <= min_seq` skip reddens it). Each
+de-degrade site has a test that a scalar cursor surfaces the real bus count (and a bus ERROR surfaces a
+visible sentinel, never a silent 0). `consume-events` has a test that a scalar cursor is refused WITHOUT
+mutating the cursor file. Live validation: per-seat `status.py mailbox-unread` reads the real `prod` bus
+in ~0.5s with correct addressee filtering.

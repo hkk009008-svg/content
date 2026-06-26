@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 import protocol_mailbox
+import bus_unread  # de-degrade: real ref-bus events for migrated (scalar) cursors
 from status import collect_mailbox
 
 SEATS = protocol_mailbox.RECEIVING_SEATS
@@ -92,12 +93,15 @@ def _mailbox_events(root: Path, seat: str, cursor: str = "", limit: int = 12) ->
         return []
     # A scalar `seq` cursor (post Slice-2.5 backfill) is not a wall-clock ISO ts:
     # the lexical `_event_ts(name) > cursor` compare below would drop every event
-    # ("2026-..." > "42" is False). Unread for a migrated seat is tracked on the
+    # ("2026-..." > "42" is False). Unread for a migrated seat lives on the signed
     # ref-bus (RefEventStore seq>cursor_seq), not this legacy filename path — so
-    # treat a scalar cursor as ref-bus-tracked and surface no legacy unread here,
-    # exactly as status.count_unread / seat_status / mailbox_monitor do.
-    if cursor and cursor.strip().isdigit():
-        return []
+    # surface the REAL recent ref-bus events (ADR-062) instead of a silent []. A bus
+    # ERROR (None) surfaces a visible sentinel; a reachable-but-empty bus is a real [].
+    if bus_unread.is_migrated_cursor(cursor):
+        evs = bus_unread.bus_unread_events(root, seat)
+        if evs is None:
+            return ["(unavailable: ref-bus)"]
+        return [bus_unread.format_unread(ev) for ev in evs][-limit:]
     names = sorted(p.name for p in sent.glob("*.md") if _is_addressed(p.name, seat))
     if cursor and not cursor.startswith("("):
         cursor_norm = _normalize_cursor(cursor)
