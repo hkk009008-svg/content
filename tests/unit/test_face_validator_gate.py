@@ -416,3 +416,137 @@ class TestArcfaceScoreSkipGuard:
         assert "ArcFace failed" not in captured.out, (
             "Detected old exception-path log — explicit None guard missing"
         )
+
+
+# ===================================================================
+# 6. TestShouldHaltBranchesPairB — should_halt() branch characterization
+#    (Pair-B: pins the budget/min-n/composite-only/conjunctive decision
+#     tree, including the arc-floor boundary and the two bypass paths.
+#     Decisions are driven by max(scores, key=composite); halt_min_n=4,
+#     halt_max_n=8 defaults.)
+# ===================================================================
+
+
+class TestShouldHaltBranchesPairB:
+    def test_empty_scores_returns_no_candidates(self):
+        """Spec 1: empty list → halt=False, reason mentions 'no candidates'."""
+        decision = should_halt([])
+        assert decision.halt is False
+        assert "no candidates" in decision.reason
+
+    def test_below_min_n_continues(self):
+        """n < halt_min_n → halt=False, reason mentions 'below halt_min_n'."""
+        scores = [_make_score(0.99), _make_score(0.98), _make_score(0.97)]  # n=3
+        decision = should_halt(scores, halt_min_n=4, halt_max_n=8)
+        assert decision.halt is False
+        assert "below halt_min_n" in decision.reason
+
+    @pytest.mark.parametrize("halt_rule", ["composite_only", "conjunctive"])
+    def test_budget_exhausted_unconditional_all_modes(self, halt_rule):
+        """Spec 2: n >= halt_max_n → halt=True 'budget exhausted' for ALL halt_rule modes,
+        even with composites well below threshold (budget halt precedes the rule branch)."""
+        scores = [_make_score(0.10) for _ in range(8)]  # n=8 == halt_max_n
+        decision = should_halt(scores, halt_rule=halt_rule, halt_min_n=4, halt_max_n=8)
+        assert decision.halt is True
+        assert "budget exhausted" in decision.reason
+        assert decision.best is not None
+
+    def test_composite_only_at_or_above_threshold_halts(self):
+        """Spec 3a: 4<=n<8, composite_only (default), best.composite >= 0.92 → halt=True."""
+        scores = [_make_score(0.93), _make_score(0.50), _make_score(0.40), _make_score(0.30)]
+        decision = should_halt(
+            scores, halt_threshold_composite=0.92, halt_min_n=4, halt_max_n=8
+        )
+        assert decision.halt is True
+        assert "composite threshold met" in decision.reason
+        assert decision.best.composite == pytest.approx(0.93)
+
+    def test_composite_only_below_threshold_continues(self):
+        """Spec 3b: 4<=n<8, composite_only (default), best.composite < 0.92 → halt=False."""
+        scores = [_make_score(0.91), _make_score(0.50), _make_score(0.40), _make_score(0.30)]
+        decision = should_halt(
+            scores, halt_threshold_composite=0.92, halt_min_n=4, halt_max_n=8
+        )
+        assert decision.halt is False
+        assert "composite below threshold" in decision.reason
+
+    def test_conjunctive_arc_just_below_floor_continues(self):
+        """Spec 4 (headline arc-floor boundary gap): conjunctive, composite >= 0.92 but
+        best.arc_score just below halt_threshold_arc (0.85), has_character=True and
+        best.has_arc=True → halt=False; reason shows composite_ok=True / arc_ok=False."""
+        best = _make_score(0.95, arc=0.849)  # arc one notch below the 0.85 floor
+        scores = [best, _make_score(0.50, arc=0.99), _make_score(0.40), _make_score(0.30)]
+        decision = should_halt(
+            scores,
+            halt_threshold_composite=0.92,
+            halt_threshold_arc=0.85,
+            halt_min_n=4,
+            halt_max_n=8,
+            has_character=True,
+            halt_rule="conjunctive",
+        )
+        assert decision.halt is False
+        assert decision.best is best  # max-composite candidate, not the high-arc filler
+        assert "composite_ok=True" in decision.reason
+        assert "arc_ok=False" in decision.reason
+
+    def test_conjunctive_both_pass_halts(self):
+        """Spec 5: conjunctive, composite >= 0.92 AND arc >= 0.85 → halt=True;
+        reason contains 'arc=' and '>= 0.85'."""
+        best = _make_score(0.95, arc=0.88)
+        scores = [best, _make_score(0.50), _make_score(0.40), _make_score(0.30)]
+        decision = should_halt(
+            scores,
+            halt_threshold_composite=0.92,
+            halt_threshold_arc=0.85,
+            halt_min_n=4,
+            halt_max_n=8,
+            has_character=True,
+            halt_rule="conjunctive",
+        )
+        assert decision.halt is True
+        assert "arc=" in decision.reason
+        assert ">= 0.85" in decision.reason
+
+    def test_conjunctive_bypass_non_character(self):
+        """Spec 6: conjunctive arc-floor BYPASS — composite >= 0.92 with has_character=False
+        → halt=True even with a terrible arc; reason contains 'arc floor bypassed'."""
+        best = _make_score(0.95, arc=0.10)  # arc would fail the floor, but no identity to gate
+        scores = [best, _make_score(0.50), _make_score(0.40), _make_score(0.30)]
+        decision = should_halt(
+            scores,
+            halt_threshold_composite=0.92,
+            halt_threshold_arc=0.85,
+            halt_min_n=4,
+            halt_max_n=8,
+            has_character=False,
+            halt_rule="conjunctive",
+        )
+        assert decision.halt is True
+        assert "arc floor bypassed" in decision.reason
+
+    def test_conjunctive_bypass_missing_identity_no_misleading_arc(self):
+        """Spec 7: conjunctive arc-floor BYPASS via missing identity — best.has_arc=False
+        (arc_score 0.0) with has_character=True → halt=True; reason contains
+        'arc floor bypassed' and NOT a misleading 'arc=0.000 >= 0.85'."""
+        best = CandidateScore(
+            image_path="/fake/img.jpg",
+            seed=0,
+            arc_score=0.0,
+            composite=0.95,
+            has_arc=False,  # no ArcFace measurement → floor auto-satisfied
+        )
+        scores = [best, _make_score(0.50), _make_score(0.40), _make_score(0.30)]
+        decision = should_halt(
+            scores,
+            halt_threshold_composite=0.92,
+            halt_threshold_arc=0.85,
+            halt_min_n=4,
+            halt_max_n=8,
+            has_character=True,
+            halt_rule="conjunctive",
+        )
+        assert decision.halt is True
+        assert decision.best is best
+        assert "arc floor bypassed" in decision.reason
+        assert "arc=0.000 >= 0.85" not in decision.reason
