@@ -799,6 +799,11 @@ hardening pass.
   keep such observations in memory and then to turn those rules into codified
   state.
 
+- **R-HOT-TREE** — Never trust a refs snapshot older than your last step. The HEAD can move multiple times during a single burst of work. Always execute `git log --oneline -3` and check the latest mailbox events right before writing your commit or making a gate decision. Basis: Session-12 (ADR-027) where the shared tree HEAD moved 12x under the coordinator, leading to potential stale contexts.
+- **R-WIP-POLLUTION** — Do NOT run auto-fix scripts (like `check_doc_claims.py --fix`) mid-burst over a peer's uncommitted WIP. The lane owner is strictly responsible for fixing anchors upon touch. Always use `env -u GIT_INDEX_FILE` and strict pathspecs when staging commits. Basis: Session-12 (ADR-027) where transient peer WIP almost triggered an accidental overwrite of the architecture doc.
+- **R-GATE-EVIDENCE** — Do not cite `wave_gate_check` output alone as `R-EVIDENCE`. The gate script reads the inventory string, it does not execute tests. To claim correctness, the coordinator MUST cite the underlying executed regression pins or the operator's formal GO event. Basis: Session-12 (ADR-027) critique where the wave gate was incorrectly treated as a correctness proof.
+- **R-VERIFY-THEN-PUSH** — Never push pre-GO. Pushing unverified fixes risks NITS arriving directly on the remote origin, fracturing the verification history. Always wait for the operator's verification GO before executing the push. Basis: Session-12 where a `web_research` fix pushed pre-GO (per user override) came back as NITS on origin, realizing the exact risk verify-then-push prevents.
+
 ## Retirement criteria
 
 A rule unused for 5 consecutive sessions → flagged for review.

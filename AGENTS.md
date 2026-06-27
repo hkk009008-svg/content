@@ -338,6 +338,30 @@ empirical basis, beneficiary/consent) is in docs/PROTOCOL-RULES-LOG.md.
   (async-OK via workflow+mailbox, no session restart). **Tier B** (no) = awareness
   heads-up, 48h proceed-if-no-objection. Unsure → Tier A.
 
+# Protocol Optimizations & Session Lessons (ADR-027)
+
+The following optimizations and guardrails emerged from real session forensics (Session-12 / ADR-027) to resolve friction in multi-seat concurrent loops. Apply these continuously:
+
+## R-HOT-TREE (Re-verify on Hot Shared Tree)
+Scope: both
+Trigger: acting on a repository where peer seats are concurrently active.
+Action: Never trust a refs snapshot older than your last step. The HEAD can move multiple times during a single burst of work. Always execute `git log --oneline -3` and check the latest mailbox events right before writing your commit or making a gate decision.
+
+## R-WIP-POLLUTION (Live Peer WIP in Working Tree)
+Scope: both
+Trigger: observing uncommitted changes to shared files (e.g., `ARCHITECTURE.md`, `cinema_pipeline.py`) that you did not author.
+Action: Do NOT run auto-fix scripts (like `check_doc_claims.py --fix`) mid-burst over a peer's WIP. The lane owner is strictly responsible for fixing anchors upon touch (R-START). To avoid accidental pollution, always use `env -u GIT_INDEX_FILE` and strict pathspecs when staging commits.
+
+## R-GATE-EVIDENCE (Gate Met ≠ Correctness Proof)
+Scope: coordinator
+Trigger: determining if a Wave Gate has been met.
+Action: Do not cite `wave_gate_check` output alone as `R-EVIDENCE`. The gate script reads the inventory string, it does not execute tests. To claim correctness, you MUST cite the underlying executed regression pins or the operator's formal GO event.
+
+## R-VERIFY-THEN-PUSH
+Scope: director / coordinator
+Trigger: deciding whether to push production code to origin.
+Action: Never push pre-GO. Pushing unverified fixes risks NITS arriving directly on the remote origin, fracturing the verification history. Always wait for the operator's verification GO before executing the push.
+
 # Coordinating with CLAUDE.md
 
 This file (`AGENTS.md`) and `CLAUDE.md` are sibling documents. They share
