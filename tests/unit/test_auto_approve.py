@@ -1334,3 +1334,166 @@ class TestFromProjectTierAwareCompositeDefault:
                                  "auto_approve": {"image_min_composite": 0.42}}}
         )
         assert cfg.image_min_composite == 0.42
+
+
+# ---------------------------------------------------------------------------
+# TestCheckGateFiveDecisionStates (Pair-B characterization) — pins the FIVE
+# terminal decision states of check_gate's try-block and outer except.
+#
+# Targets cinema/auto_approve.py:664 — specifically the predicate-raise
+# handling at :722-743 (deferred vs preserve-veto split) and the outer
+# module-error except at :754-767. Each test controls the rule list by
+# monkeypatching the chosen gate's module-level _rules_for_image builder and
+# passes minimal real-ish shot_state/project/takes dicts.
+#
+# These pin the ACTUAL current behavior (characterization). All five states
+# matched the documented intent at the cited lines — no defect found.
+# ---------------------------------------------------------------------------
+
+
+class TestCheckGateFiveDecisionStates:
+    """Characterization of check_gate's five decision states.
+
+    Uses the "image" gate as the controllable gate: each test monkeypatches
+    cinema.auto_approve._rules_for_image so the rule list is deterministic.
+    """
+
+    def _enabled_config(self) -> AutoApproveConfig:
+        """A minimal enabled config (defaults are conservative-on)."""
+        return AutoApproveConfig(enabled=True)
+
+    # --- State 1: config.enabled is False --------------------------------
+
+    def test_state1_disabled_config_short_circuits(self):
+        """enabled=False → auto_approved False, vetoes/rule_names == ['disabled']."""
+        decision = check_gate(
+            "image",
+            shot_state=_make_shot(),
+            project=_make_project(),
+            takes=[],
+            config=AutoApproveConfig(enabled=False),
+        )
+        assert decision.auto_approved is False
+        assert decision.vetoes == ["disabled"]
+        assert decision.rule_names == ["disabled"]
+        assert decision.deferred is False
+
+    # --- State 2: unknown gate (enabled config) --------------------------
+
+    def test_state2_unknown_gate_returns_unknown_gate_veto(self):
+        """A gate not in plan/image/motion/final with an enabled config →
+        auto_approved False, 'unknown gate' in vetoes[0], rule_names ==
+        ['unknown_gate']."""
+        decision = check_gate(
+            "bogus_gate",  # type: ignore[arg-type]  # intentionally not a real Gate
+            shot_state=_make_shot(),
+            project=_make_project(),
+            takes=[],
+            config=self._enabled_config(),
+        )
+        assert decision.auto_approved is False
+        assert "unknown gate" in decision.vetoes[0]
+        assert decision.rule_names == ["unknown_gate"]
+
+    # --- State 3: predicate raises with NO prior veto → deferred ---------
+
+    def test_state3_predicate_raises_no_prior_veto_defers(self, monkeypatch):
+        """Single rule whose predicate raises (no prior veto) → auto_approved
+        False, deferred True, 'eval error' in vetoes[0] (lines :728-739)."""
+        from cinema import auto_approve as aa_mod
+
+        def _raises(ctx):
+            raise RuntimeError("boom inside predicate")
+
+        raising_rule = aa_mod.VetoRule(
+            name="raises_rule",
+            predicate=_raises,
+            reason_template="should-not-surface-as-veto",
+        )
+        monkeypatch.setattr(
+            aa_mod, "_rules_for_image", lambda cfg: [raising_rule]
+        )
+
+        decision = check_gate(
+            "image",
+            shot_state=_make_shot(),
+            project=_make_project(),
+            takes=[],
+            config=self._enabled_config(),
+        )
+        assert decision.auto_approved is False
+        assert decision.deferred is True
+        assert "eval error" in decision.vetoes[0]
+        assert decision.rule_names == ["raises_rule"]
+        # The crashed rule's reason_template must NOT leak into the vetoes.
+        assert "should-not-surface-as-veto" not in decision.vetoes[0]
+
+    # --- State 4: THE PRESERVE PATH — real veto fired, then crash --------
+
+    def test_state4_real_veto_then_predicate_crash_stays_veto(self, monkeypatch):
+        """A substantive veto fires, THEN a later predicate crashes → the
+        decision stays a REAL veto (deferred False), the crashed rule is
+        skipped (continue at :743), and only the fired rule's reason_template
+        and name are recorded."""
+        from cinema import auto_approve as aa_mod
+
+        fired_rule = aa_mod.VetoRule(
+            name="fired_rule",
+            predicate=lambda ctx: True,  # substantive veto fires first
+            reason_template="substantive-veto-reason",
+        )
+
+        def _raises(ctx):
+            raise RuntimeError("crash AFTER a real veto")
+
+        crash_rule = aa_mod.VetoRule(
+            name="crash_rule",
+            predicate=_raises,
+            reason_template="crash-reason-should-not-surface",
+        )
+        monkeypatch.setattr(
+            aa_mod, "_rules_for_image", lambda cfg: [fired_rule, crash_rule]
+        )
+
+        decision = check_gate(
+            "image",
+            shot_state=_make_shot(),
+            project=_make_project(),
+            takes=[],
+            config=self._enabled_config(),
+        )
+        assert decision.auto_approved is False
+        # The crux: a REAL veto, NOT masked as deferred.
+        assert decision.deferred is False
+        assert "substantive-veto-reason" in decision.vetoes
+        # The crashed rule is skipped entirely.
+        assert "crash-reason-should-not-surface" not in decision.vetoes
+        assert decision.rule_names == ["fired_rule"]
+
+    # --- State 5: outer module_error (config build raises) ---------------
+
+    def test_state5_config_build_raises_module_error(self, monkeypatch):
+        """config=None + AutoApproveConfig.from_project raising → the outer
+        except (lines :754-767): auto_approved False, deferred True,
+        rule_names == ['module_error']."""
+        from cinema import auto_approve as aa_mod
+
+        def _boom(project):
+            raise RuntimeError("from_project blew up")
+
+        # from_project is a classmethod; replacing the class attribute with a
+        # plain function means `AutoApproveConfig.from_project(project)` (the
+        # call site at :687) invokes _boom(project) and raises.
+        monkeypatch.setattr(aa_mod.AutoApproveConfig, "from_project", _boom)
+
+        decision = check_gate(
+            "image",
+            shot_state=_make_shot(),
+            project=_make_project(),
+            takes=[],
+            config=None,  # forces the from_project() call inside the try-block
+        )
+        assert decision.auto_approved is False
+        assert decision.deferred is True
+        assert decision.rule_names == ["module_error"]
+        assert "module error" in decision.vetoes[0].lower()
