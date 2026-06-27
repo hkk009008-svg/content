@@ -262,3 +262,62 @@ class TestAssessCoherence:
         assert 0.0 <= result.color_drift <= 1.0
         assert 0.0 <= result.lighting_consistency <= 1.0
         assert 0.0 <= result.composition_similarity <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# assess_coherence — unreadable-image contract (characterization)
+#
+# Pins the guards at coherence_analyzer.py:240-243 and the _invalid_coherence
+# builder at :205. The contract callers depend on: when an input image cannot
+# be decoded, the analyzer must NOT silently hand back 0.0 as if it were a real
+# "zero coherence" measurement — it must flag valid=False and explain which
+# input failed in `error`, so callers can distinguish "unreadable" from
+# "genuinely incoherent shots".
+# ---------------------------------------------------------------------------
+
+
+def _save_tiny_valid_image(path):
+    """Write a minimal but decodable BGR image to ``path`` (per-brief 8x8 black)."""
+    img = np.zeros((8, 8, 3), dtype=np.uint8)
+    assert cv2.imwrite(path, img), f"failed to write fixture image to {path}"
+    return path
+
+
+class TestAssessCoherenceUnreadableContract:
+    def test_nonexistent_current_image_is_invalid_zero_scored(self, tmp_path):
+        cv2 = pytest.importorskip("cv2")  # R2 convention
+        missing_current = str(tmp_path / "does_not_exist_current.png")
+        real_previous = _save_tiny_valid_image(str(tmp_path / "prev.png"))
+
+        result = assess_coherence(missing_current, real_previous)
+
+        assert result.valid is False
+        # 0.0 is the sentinel, NOT a real measurement — callers must gate on valid.
+        assert result.overall_coherence_score == 0.0
+        assert "current_image" in result.error
+
+    def test_unreadable_previous_image_with_real_current_is_invalid(self, tmp_path):
+        cv2 = pytest.importorskip("cv2")  # R2 convention
+        # current_image is a genuinely decodable image so the first guard passes
+        # and the failure is attributed to previous_image specifically.
+        real_current = _save_tiny_valid_image(str(tmp_path / "curr.png"))
+        missing_previous = str(tmp_path / "does_not_exist_prev.png")
+
+        result = assess_coherence(real_current, missing_previous)
+
+        assert result.valid is False
+        assert result.overall_coherence_score == 0.0
+        assert "previous_image" in result.error
+
+    def test_two_real_tiny_images_are_valid(self, tmp_path):
+        cv2 = pytest.importorskip("cv2")  # R2 convention
+        # Sibling sanity: with both inputs decodable the analyzer reports
+        # valid=True, so the False cases above are meaningfully distinguished.
+        real_current = _save_tiny_valid_image(str(tmp_path / "curr.png"))
+        real_previous = _save_tiny_valid_image(str(tmp_path / "prev.png"))
+
+        result = assess_coherence(real_current, real_previous)
+
+        assert result.valid is True
+        assert result.error == ""
+        assert 0.0 <= result.overall_coherence_score <= 1.0
