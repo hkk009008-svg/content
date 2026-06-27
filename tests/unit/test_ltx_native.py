@@ -360,6 +360,52 @@ def test_native_empty_200_body_falls_back_to_fal(monkeypatch, tmp_path):
     assert result == out, "empty 200 body did not recover via the FAL fallback"
 
 
+def test_native_empty_200_no_fal_available_base64_branch_returns_none(monkeypatch, tmp_path):
+    """Empty-200 guard on the BASE64 branch, with NO fallback available.
+
+    Direct _native_generate call (not via generate_video) exercising the path the
+    sibling empty-200 tests do NOT: FAL_AVAILABLE is False, so the image-URL step
+    takes the `else` base64 branch (open(image_path,'rb') -> data: URI) instead of
+    fal_client.upload_file. The real temp .jpg only needs to be openable.
+
+    With urlopen returning an EMPTY 200 body, the :258-263 guard raises
+    RuntimeError before any file is written. That RuntimeError is NOT an HTTPError /
+    URLError-group / OSError, so it falls to the broad `except Exception`; with no
+    fal_key AND FAL_AVAILABLE False, that branch's `if self.fal_key and FAL_AVAILABLE`
+    is False -> returns None (the documented intent). So:
+      - NO file is left at output_path (the empty body is never written), and
+      - the method returns None (failure -> caller cascades), not a false success.
+    """
+    monkeypatch.setattr(ltx_native, "FAL_AVAILABLE", False)   # force the base64 branch + no fallback
+    api = _make_api(ltx_key="ltx-key")                        # fal_key="" -> no FAL fallback
+
+    # A real, openable tiny temp image (base64 branch does open(image_path,'rb')).
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"\xff\xd8\xff\xe0tiny-jpeg-bytes\xff\xd9")
+    out_path = tmp_path / "out.mp4"
+
+    cm = _urlopen_cm(b"")                                     # empty 200 body
+    urlopen_mock = MagicMock(return_value=cm)
+    monkeypatch.setattr(ltx_native.urllib.request, "urlopen", urlopen_mock)
+
+    result = api._native_generate(
+        image_path=str(img),
+        prompt="x",
+        output_path=str(out_path),
+        num_frames=24,
+        resolution={"width": 768, "height": 512},
+    )
+
+    # Pin the empty-200 / no-fallback contract on the base64 branch:
+    assert not out_path.exists(), "a 0-byte output file was written for an empty 200 body"
+    # Documented intent (:258-261): the empty body must NOT be a false success.
+    # ACTUAL behavior here matches intent — the RuntimeError reaches `except Exception`,
+    # and with no fal_key + FAL_AVAILABLE False it returns None (no propagation),
+    # so no xfail is needed.
+    assert result is None, f"empty 200 body was reported as success: result={result!r}"
+    urlopen_mock.assert_called_once()                        # the native HTTP attempt did happen
+
+
 # ---------------------------------------------------------------------------
 # G(ltx)1 FIXED: native HTTP 5xx → triggers FAL fallback (transient server error)
 # ---------------------------------------------------------------------------
