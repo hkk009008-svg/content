@@ -327,3 +327,153 @@ def test_generate_video_timeout_override_reaches_poll_task(tmp_path):
     assert mock_poll.call_args.kwargs.get("timeout") == 600, (
         f"Expected override timeout=600 to reach poll_task; got {mock_poll.call_args.kwargs.get('timeout')}"
     )
+
+
+# ---------------------------------------------------------------------------
+# poll_task — characterization (kling_native.py:170; backoff [3,5,8,12,15] at :190,226-229)
+#
+# poll_task loops: time.sleep(interval) FIRST, then requests.get(...).  So the
+# number of recorded sleeps == the number of polls.  The first sleep uses
+# initial_interval (default 3); thereafter `interval` is driven by
+# backoff_schedule = [3, 5, 8, 12, 15], advancing the index by one each
+# non-terminal poll until it pins at the last element (15) — it never exceeds
+# 15.  With the default initial_interval==schedule[0]==3, the observed sleep
+# sequence is 3, 5, 8, 12, 15, 15, 15, ... which matches the docstring intent at
+# :175 ("3s -> 5s -> 8s -> 12s -> 15s (capped)").
+#
+# All HTTP and waiting is mocked: kling_native.time.sleep (record args, no real
+# wait) and kling_native.requests.get (scripted {"code":0,"data":{...}} dicts).
+# ---------------------------------------------------------------------------
+
+def _poll_resp(status, *, code=0, msg=None) -> MagicMock:
+    """Return a mock requests.Response for a single poll_task GET.
+
+    Shapes the body as Kling does: {"code": <int>, "data": {"task_status": ...}}.
+    raise_for_status() is a no-op (HTTP 200). When msg is given it is attached as
+    task_status_msg (the failure-reason field poll_task surfaces).
+    """
+    resp = MagicMock()
+    resp.raise_for_status.return_value = None
+    data = {"task_status": status}
+    if msg is not None:
+        data["task_status_msg"] = msg
+    resp.json.return_value = {"code": code, "data": data}
+    return resp
+
+
+def test_poll_task_succeed_returns_data_dict():
+    """status 'succeed' -> poll_task returns the inner `data` dict verbatim."""
+    api = _make_api()
+    succeed_data = {
+        "task_status": "succeed",
+        "task_result": {"videos": [{"url": "https://example.com/v.mp4"}]},
+    }
+    resp = MagicMock()
+    resp.raise_for_status.return_value = None
+    resp.json.return_value = {"code": 0, "data": succeed_data}
+
+    with (
+        patch.object(kling_native.time, "sleep") as mock_sleep,
+        patch.object(kling_native.requests, "get", return_value=resp),
+    ):
+        result = api.poll_task("task-ok")
+
+    assert result == succeed_data
+    # The FIRST sleep uses initial_interval (default 3), before the schedule advances.
+    assert mock_sleep.call_args_list[0].args[0] == 3
+
+
+def test_poll_task_backoff_plateaus_at_15():
+    """BACKOFF PLATEAU: intervals climb 3,5,8,12,15 then stay pinned at 15.
+
+    Scripts several non-terminal ('processing'/'unknown') polls before 'succeed'.
+    Because each loop sleeps once then polls once, the recorded sleep sequence is
+    one-per-poll. It must climb through the schedule [3,5,8,12,15] and then
+    PLATEAU at 15 — never exceeding 15 no matter how many extra polls occur.
+    """
+    # 7 non-terminal polls + 1 succeed = 8 polls = 8 recorded sleeps.
+    responses = [
+        _poll_resp("processing"),
+        _poll_resp("processing"),
+        _poll_resp("processing"),
+        _poll_resp("processing"),
+        _poll_resp("processing"),
+        _poll_resp("unknown"),
+        _poll_resp("unknown"),
+        _poll_resp("succeed"),
+    ]
+
+    api = _make_api()
+    with (
+        patch.object(kling_native.time, "sleep") as mock_sleep,
+        patch.object(kling_native.requests, "get", side_effect=responses),
+    ):
+        api.poll_task("task-backoff")
+
+    intervals = [c.args[0] for c in mock_sleep.call_args_list]
+
+    # At least the first five intervals climb exactly through the schedule.
+    assert intervals[:5] == [3, 5, 8, 12, 15], (
+        f"Expected backoff to climb [3,5,8,12,15]; got {intervals!r}"
+    )
+    # Every subsequent interval plateaus at 15 — and never exceeds it.
+    assert all(i == 15 for i in intervals[5:]), (
+        f"Expected intervals after the 5th to stay pinned at 15; got {intervals!r}"
+    )
+    assert max(intervals) == 15, f"No interval may exceed 15; got {intervals!r}"
+    # Full pinned sequence for this exact script (8 polls).
+    assert intervals == [3, 5, 8, 12, 15, 15, 15, 15], (
+        f"Unexpected sleep sequence: {intervals!r}"
+    )
+
+
+def test_poll_task_failed_raises_runtimeerror_with_reason():
+    """status 'failed' -> RuntimeError whose message includes task_status_msg."""
+    api = _make_api()
+    failed = _poll_resp("failed", msg="content moderation block")
+
+    with (
+        patch.object(kling_native.time, "sleep"),
+        patch.object(kling_native.requests, "get", return_value=failed),
+        pytest.raises(RuntimeError, match="content moderation block"),
+    ):
+        api.poll_task("task-fail")
+
+
+def test_poll_task_nonzero_result_code_raises_runtimeerror():
+    """result code != 0 -> RuntimeError (message carries the offending code)."""
+    api = _make_api()
+    resp = MagicMock()
+    resp.raise_for_status.return_value = None
+    resp.json.return_value = {"code": 1207, "message": "task not found"}
+
+    with (
+        patch.object(kling_native.time, "sleep"),
+        patch.object(kling_native.requests, "get", return_value=resp),
+        pytest.raises(RuntimeError, match="1207"),
+    ):
+        api.poll_task("task-bad-code")
+
+
+def test_poll_task_never_completes_raises_timeouterror():
+    """A status that never reaches a terminal state -> TimeoutError.
+
+    sleep is mocked (no real wait); poll_task tracks elapsed by summing the
+    intervals it 'slept', so a small timeout is reached deterministically after
+    a few loops. With timeout=10 the intervals are 3 (elapsed 3) -> 5 (elapsed 8)
+    -> 8 (elapsed 16 >= 10), so it bails on the 3rd iteration with TimeoutError.
+    """
+    api = _make_api()
+    stuck = _poll_resp("processing")  # returned for every call
+
+    with (
+        patch.object(kling_native.time, "sleep") as mock_sleep,
+        patch.object(kling_native.requests, "get", return_value=stuck),
+        pytest.raises(TimeoutError, match="timed out"),
+    ):
+        api.poll_task("task-stuck", timeout=10)
+
+    # Sanity: it actually entered the poll loop (didn't bail before sleeping).
+    assert mock_sleep.call_count >= 1
+    # And it never slept longer than the cap while spinning.
+    assert max(c.args[0] for c in mock_sleep.call_args_list) <= 15
