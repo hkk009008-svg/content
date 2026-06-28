@@ -7,13 +7,16 @@ max-quality clip. Companion to the context doc
 
 ## What this is
 
-The max-tier test = run `scripts/run_veo_dialogue_max.py` (`quality_tier=max`)
-and get a validated `pulid_max.json` queue → N=8 best-of → SUPIR 4K → VEO_NATIVE
-shots → assembled video, with **no** `prompt_outputs_failed_validation`.
+The max-tier test = run `scripts/run_max_harness.py` — a 3-stage chain:
+**(1)** `generate_ai_broll_max` N=8 best-of keyframe on the live pod (fp16 FLUX +
+PuLID LoRA-less + FaceDetailer + ReActor + SUPIR 4K; validated `pulid_max.json`
+queue, **no** `prompt_outputs_failed_validation`) → **(2)** one `VEO_NATIVE`
+image→video clip with synced native audio (Veo 3.1 Vertex, 8s/720p) → **(3)**
+an ffprobe verdict: PASS iff the final mp4 has BOTH a video and an audio stream.
 
 It previously hard-failed because the pod is provisioned production-only. The
-offline prep below (branch `feat/max-tier-provisioning`, 4 commits off `main`
-`5425f9e`) closes the code-side gaps and makes provisioning repeatable; the
+offline prep below (the four prep commits are now on `main`, last being
+`9850b7b`) closes the code-side gaps and makes provisioning repeatable; the
 pod-side steps still need an operator with the pod up + (for gated weights) a
 Hugging Face token.
 
@@ -87,31 +90,40 @@ would still dangle-and-fall-back on those shots. See
 ## Step 3 — Run the test
 
 ```bash
-# fp8 first-run (default precision):
-.venv/bin/python scripts/run_veo_dialogue_max.py
+# true-max (fp16) — run_max_harness.py DEFAULTS to fp16; needs --max-fp16 provisioning (fp16 weights):
+.venv/bin/python scripts/run_max_harness.py
 
-# true-max (fp16) — only after --max-fp16 provisioning:
-MAX_MODEL_PRECISION=fp16 .venv/bin/python scripts/run_veo_dialogue_max.py
+# fp8 path (lighter; the harness defaults to fp16, so request fp8 explicitly):
+MAX_MODEL_PRECISION=fp8 .venv/bin/python scripts/run_max_harness.py
 ```
 
-(Precision also resolvable via `params['max_model_precision']`. fp8 is the
-default; fp16 is the full-capability flag and needs the fp16 weights present.)
+(Precision is read at call-time via `MAX_MODEL_PRECISION` by
+`quality_max._apply_model_precision`. `run_max_harness.py` **defaults to fp16**
+— the full-capability path, which needs the fp16 weights present; set
+`MAX_MODEL_PRECISION=fp8` for the lighter first-run.)
 
-Watch `logs/veo_e2e_max.log` for: `[quality_max] model precision: …` →
-`[quality_max] Pod /object_info: N node classes available` → `queue_prompt`
-success (no `prompt_outputs_failed_validation`) → `N_max=8` best-of with
-`seed=… composite=…` → SUPIR 4K → 2 `VEO_NATIVE` shots → assembled video.
+Watch the run's stdout (the harness writes `logs/max_harness_keyframe.jpg` +
+`logs/max_harness_final.mp4`) for: the `MAX-TIER FULL HARNESS` banner →
+`[STAGE 1] generate_ai_broll_max — N=8 best-of on the pod` (queues `pulid_max.json`,
+no `prompt_outputs_failed_validation`; ArcFace-scored, full N=8) →
+`[STAGE 1] OK — keyframe at …` → `[STAGE 2] VeoNativeAPI generate_video — vertex …
+8s/720p, audio=True` → `[STAGE 3] final ffprobe` → `VERDICT: ✅ PASS`.
 
 ## Step 4 — Success criteria
 
-- **No** `prompt_outputs_failed_validation` (the whole point — the workflow
-  queues).
-- N=8 best-of runs; composite ~0.92–0.97 (the real 0.97 max gate engages, per
-  `8cf0f07`).
-- Final video at higher resolution than production; compare fidelity to the
-  production baseline (`domain/projects/aa777d858e71/exports/final_cinema.mp4`).
+- **Stage 1 — keyframe.** `generate_ai_broll_max` returns a path and
+  `logs/max_harness_keyframe.jpg` exists (pod reachable, not all candidates
+  failed; **no** `prompt_outputs_failed_validation` on the pod queue). N=8 runs to
+  completion — note the aesthetic scorer is absent locally, so composite is
+  **ArcFace-driven** and there is **no 0.97 early-halt**; the full N=8 executes.
+- **Stage 2 — Veo clip.** Requires the **Vertex** backend (native audio is
+  Vertex-only; the harness ABORTs otherwise), 8s/720p, `generate_audio=True`.
+- **Verdict (`ffprobe` gate).** `VERDICT: ✅ PASS` (exit 0) = `logs/max_harness_final.mp4`
+  exists with BOTH a video **and** an audio stream. `⚠️ PARTIAL` (exit 1) = video but
+  no audio; `❌ FAIL` (exit 4) = no usable video; `ABORT` = keyframe failed (exit 2)
+  or Veo backend not Vertex (exit 3).
 
-## What the prep branch changed (`feat/max-tier-provisioning`)
+## What the prep branch changed (now merged to `main`)
 
 | Commit | Change |
 |---|---|

@@ -16,17 +16,17 @@
 
 The implementer has zero session context. These facts were grep-verified; **re-verify line numbers at your HEAD** (they drift), but the shapes hold:
 
-- **Read-only endpoint pattern** = `api_get_project` (`web_server.py:480-485`): `@app.route("/api/projects/<pid>", methods=["GET"])`, `project = load_project(pid)`, `if not project: return jsonify({"error": "Project not found"}), 404`, else `return jsonify(...)`. **Mirror THIS (GET), not the POST mutators** — no `@_project_lock_guard`, no `_reject_if_project_busy`. `load_project`, `jsonify`, `request`, `app` are already imported in `web_server.py`.
-- **`load_project(pid)` returns a plain `dict` or `None`** (`domain/project_manager.py:679`). Shots/takes are **dicts** at runtime (Pydantic models in `domain/models.py` are validation-only, all `extra="allow"`). Read with `.get()`.
+- **Read-only endpoint pattern** = `api_get_project` (`web_server.py:500-505`): `@app.route("/api/projects/<pid>", methods=["GET"])`, `project = load_project(pid)`, `if not project: return jsonify({"error": "Project not found"}), 404`, else `return jsonify(...)`. **Mirror THIS (GET), not the POST mutators** — no `@_project_lock_guard`, no `_reject_if_project_busy`. `load_project`, `jsonify`, `request`, `app` are already imported in `web_server.py`.
+- **`load_project(pid)` returns a plain `dict` or `None`** (`domain/project_manager.py:700`). Shots/takes are **dicts** at runtime (Pydantic models in `domain/models.py` are validation-only, all `extra="allow"`). Read with `.get()`.
 - **Project has NO top-level `shots`.** Shots are `project["scenes"][i]["shots"][j]`. Iterate: `[sh for sc in project.get("scenes", []) for sh in sc.get("shots", [])]`.
 - **Take shape** (dict): `take["metadata"]` (dict: `identity_score`, `motion_fidelity`, `lipsync_score`, `lipsync_cascade`, …), `take["cascade_metadata"]` (dict: `engine`, `score?`, `threshold?`, `fallback?`, `attempts?`). Read: `take.get("cascade_metadata", {}).get("engine", "")`.
 - **Take lists on a shot:** `keyframe_takes`, `motion_takes`, `postprocess_variants`, `performance_takes` (+ `approved_*_take_id`). `auto_approve_audit` is a list of `{gate, auto_approved, vetoes, rule_names, timestamp}` (an `extra` key; read `shot.get("auto_approve_audit") or []`).
-- **coherence_score is NOT on take.metadata** (grep-confirmed). It lands in `shot["diagnostics"][*]["scores"]["coherence"]` (written by `diagnose_clip`, `cinema/shots/controller.py:1867`) and the live SSE (`web_services.py:82`). **The scorecard reads coherence defensively** (see Task 2); Task 1 optionally persists it.
+- **coherence_score is NOT on take.metadata** (grep-confirmed). It lands in `shot["diagnostics"][*]["scores"]["coherence"]` (written by `diagnose_clip`, `cinema/shots/controller.py:2273`; coherence write at `:2375`) and the live SSE (`web_services.py:84`). **The scorecard reads coherence defensively** (see Task 2); Task 1 optionally persists it.
 - **Quality bars are distributed (NOT in `config/settings.py`):**
   - Gate bars: `AutoApproveConfig.from_project(project)` (`cinema/auto_approve.py`) — tier-aware resolved values (`motion_min_identity=0.85`, `motion_min_motion_score=0.7`, `final_min_lipsync=0.8`, image composite default `0.97` max / `0.60` production). **Use `.from_project(project)` — it applies tier + project overrides.**
   - Coherence floor `0.6` and lipsync gate `0.65` are inline `global_settings.get("coherence_threshold", 0.6)` / `.get("lipsync_validation_threshold", 0.65)` literals.
   - LoRA: `prep/lora_quality.py` module consts `PASS_THRESHOLD=0.6`, `NET_NEGATIVE_BASELINE=0.45`.
-- **LoRA status:** `get_lora_status(project_dir, char_id) -> dict` (`prep/lora_training.py:251`) with keys `status`, `quality_score`, `best_strength`, `rejected`, `quality_warning`, `lora_path`. **Takes a project DIR**, resolve via `get_project_dir(pid)` (`domain/project_manager.py:1066`). `validate_lora_quality` returns a `LoraQualityResult` dataclass (use `dataclasses.asdict`).
+- **LoRA status:** `get_lora_status(project_dir, char_id) -> dict` (`prep/lora_training.py:251`) with keys `status`, `quality_score`, `best_strength`, `rejected`, `quality_warning`, `lora_path`. **Takes a project DIR**, resolve via `get_project_dir(pid)` (`domain/project_manager.py:1099`). `validate_lora_quality` returns a `LoraQualityResult` dataclass (use `dataclasses.asdict`).
 - **pipeline_status.toml** uses `[[component]]` tables with `id`/`title`/`status`/`anchor`/`note` (`status` ∈ live|wired|stubbed|parked|dead). Parse with stdlib `tomllib` (raw rows — no anchor validation needed for the UI).
 - **pytest convention** (`tests/unit/test_reassemble_endpoint.py`): `from web_server import app`; `client` fixture sets `app.config["TESTING"]=True`, yields `app.test_client()`; **patch `web_server.load_project`** (where it's used); class-grouped tests; local `_make_project(...)` dict-builder. Runner: `.venv/bin/python -m pytest`.
 - **Frontend has NO test runner** (no vitest/jest/testing-library, zero `*.test.tsx`). Frontend verification = `cd web && npx tsc --noEmit` + `npm run build`. Do NOT stand up a test harness (scope creep).
@@ -78,7 +78,7 @@ def test_coherence_persisted_to_take_metadata():
 
 - [ ] **Step 3: Run it, verify FAIL.** `.venv/bin/python -m pytest tests/unit/test_capability_scorecard.py::test_coherence_persisted_to_take_metadata -v` → FAIL.
 
-- [ ] **Step 4: Persist via `_mutate_shot`.** At the discovered site, write the value onto the take and persist (mirror `_finalize_motion_take`'s `take["metadata"]["motion_fidelity"] = ...` at `:1055`, then the `_mutate_shot(shot_id, _mutator)` save at `:1124`). Example shape:
+- [ ] **Step 4: Persist via `_mutate_shot`.** At the discovered site, write the value onto the take and persist (mirror `_finalize_motion_take`'s `take["metadata"]["motion_fidelity"] = ...` at `:1443`, then the `_mutate_shot(shot_id, _mutator)` save at `:1531`; `_finalize_motion_take` itself is defined at `:1385`). Example shape:
 
 ```python
 def _mutator(_scene: dict, shot: dict):

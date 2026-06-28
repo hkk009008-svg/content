@@ -828,7 +828,7 @@ if quality_tier == "max":
 ```
 
 `quality_tier` is sourced from `settings.get("quality_tier", "production")`
-at [cinema/shots/controller.py:670](cinema/shots/controller.py:670). Operator
+at [cinema/shots/controller.py:683](cinema/shots/controller.py:683). Operator
 picks via UI Advanced Settings; no per-shot heuristic.
 
 ### 8.2 Production tier — `phase_c_assembly.py`
@@ -900,7 +900,7 @@ Workflow file: [pulid_max.json](pulid_max.json) (cached at module level with
 `_inject_post_passes` so the best-of-N `copy.deepcopy` fan-out inherits portrait
 dims. 16:9 / ctx-less = no-op (same gate as §8.2 — now OPEN post-T10).
 
-**Adaptive halt loop** ([quality_max.py:1168-1206](quality_max.py:1168)):
+**Adaptive halt loop** ([quality_max.py:1208-1246](quality_max.py:1208)):
 ```
 while len(scores) < n_max:
     starting_index = len(scores)
@@ -920,7 +920,7 @@ speedup at workers=4 on a 4-candidate batch: ~3.9× wall-clock. `pool.map`
 yields in submission order so log + scores ordering is stable regardless
 of workers count.
 
-**Halt rule** ([face_validator_gate.py:227-315](face_validator_gate.py:227)) — mode
+**Halt rule** ([face_validator_gate.py:228-315](face_validator_gate.py:228)) — mode
 selected by the `max_halt_rule` config enum, passed as `should_halt(halt_rule=...)`:
 - `n >= halt_min_n (default 4) AND best.composite >= halt_threshold_composite (default 0.92)`
 - OR `n >= halt_max_n (default 8)` (budget halt — **unconditional for all modes**)
@@ -1027,8 +1027,8 @@ effect (zero face-lock), mutually exclusive by tier**:
   on `has_character`/file-presence at [quality_max.py:1060](quality_max.py:1060),
   not `shot_type`), so the PuLID node + uploaded reference are physically present
   but **inert**, and the best-of-N identity rescue is dead — the +0.15 PuLID-boost
-  retry at [quality_max.py:1214](quality_max.py:1214) gates on
-  [`needs_regenerate`](face_validator_gate.py:326), whose `arc_score <
+  retry at [quality_max.py:1253](quality_max.py:1253) gates on
+  [`needs_regenerate`](face_validator_gate.py:327), whose `arc_score <
   regenerate_floor_arc` test never holds at `regenerate_floor_arc=0.0` (and its
   `has_character` guard passes for a char-bearing shot, so the `0.0` floor — not
   the guard — is the operative kill). The char LoRA fires only if the project explicitly
@@ -1052,8 +1052,8 @@ Status: **FIXED 2026-06-13 (`cf32ca3`, operator2 impl; director2 verifies)** —
 core seam (`classify_shot_type` → return `"wide"` when the landscape bucket matches a
 char-bearing shot) re-engages identity in both tiers, but **two downstream consumers branch
 on the `shot_type=="landscape"` string** and were re-keyed in `cf32ca3`: the
-LTX-4K branch ([`phase_c_ffmpeg.py:423`](phase_c_ffmpeg.py:423)) → `"4k" if shot_type in ("landscape","wide")`,
-and the Veo ambient-audio flag ([`phase_c_ffmpeg.py:382`](phase_c_ffmpeg.py:382)) **guarded-broadened**
+LTX-4K branch ([`phase_c_ffmpeg.py:433`](phase_c_ffmpeg.py:433)) → `"4k" if shot_type in ("landscape","wide")`,
+and the Veo ambient-audio flag ([`phase_c_ffmpeg.py:392`](phase_c_ffmpeg.py:392)) **guarded-broadened**
 (wide gets Veo ambient *unless* overlay-dialogue — `has_dialogue and not dialogue_native_audio` — so no
 double-voice on a genuine wide+overlay-dialogue shot; director2 Pair-B call). A seam-only fix would have
 re-introduced a 4K-loss + a narrow silent-clip regression (caught by the director-1 co-sign's independent
@@ -1127,25 +1127,25 @@ prompt + camera into a search string, first containment match wins; default `med
 the 5 top-level keys, but `normalize_shot_type` may produce it from caller-side
 shot type strings.)
 
-### 9.4 `generate_ai_video` dispatch ([phase_c_ffmpeg.py:57-989](phase_c_ffmpeg.py:57))
+### 9.4 `generate_ai_video` dispatch ([phase_c_ffmpeg.py:58-995](phase_c_ffmpeg.py:58))
 
 | Engine | File:line | Adapter | Auth |
 |---|---|---|---|
-| `KLING_NATIVE` | :281 | `kling_native.KlingNativeAPI` | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
-| `SORA_NATIVE` | :320 | `sora_native.SoraNativeAPI` | OPENAI_API_KEY |
-| `VEO_NATIVE` | :366 | `veo_native.VeoNativeAPI` | Vertex AI or GEMINI_API_KEY |
-| `LTX` | :405 | `ltx_native.LTXVideoAPI` | LTX_API_KEY OR FAL_KEY |
-| `RUNWAY_GEN4` | :451 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
-| `SORA_2` | :512 | inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")` | FAL_KEY |
-| `VEO` | :570 | inline `fal_client.subscribe("fal-ai/veo3.1/reference-to-video")` | FAL_KEY (gated by `_veo_quota_blocked`) |
-| `KLING_3_0` | :660 | inline `fal_client.subscribe("fal-ai/kling-video/v3/pro/...")` | FAL_KEY |
-| `FAL_SVD` | :765 | inline `fal_client.subscribe("fal-ai/fast-svd")` | FAL_KEY; **not in any cascade** |
-| `RUNWAY` | :844 | inline `runwayml` SDK (`gen3a_turbo`) | RUNWAYML_API_SECRET |
-| `SEEDANCE` | :886 | inline `requests.post("https://api.seedance.ai/v1/video/generate")` | SEEDANCE_API_KEY |
+| `KLING_NATIVE` | :291 | `kling_native.KlingNativeAPI` | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
+| `SORA_NATIVE` | :330 | `sora_native.SoraNativeAPI` | OPENAI_API_KEY |
+| `VEO_NATIVE` | :376 | `veo_native.VeoNativeAPI` | Vertex AI or GEMINI_API_KEY |
+| `LTX` | :415 | `ltx_native.LTXVideoAPI` | LTX_API_KEY OR FAL_KEY |
+| `RUNWAY_GEN4` | :461 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
+| `SORA_2` | :522 | inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")` | FAL_KEY |
+| `VEO` | :579 | inline `fal_client.subscribe("fal-ai/veo3.1/reference-to-video")` | FAL_KEY (gated by `_veo_quota_blocked`) |
+| `KLING_3_0` | :668 | inline `fal_client.subscribe("fal-ai/kling-video/v3/pro/...")` | FAL_KEY |
+| `FAL_SVD` | :772 | inline `fal_client.subscribe("fal-ai/fast-svd")` | FAL_KEY; **not in any cascade** |
+| `RUNWAY` | :851 | inline `runwayml` SDK (`gen3a_turbo`) | RUNWAYML_API_SECRET |
+| `SEEDANCE` | :893 | inline `requests.post("https://api.seedance.ai/v1/video/generate")` | SEEDANCE_API_KEY |
 
 ### 9.5 Default cascade (when `video_fallbacks=None`)
 
-[phase_c_ffmpeg.py:161-164](phase_c_ffmpeg.py:161):
+[phase_c_ffmpeg.py:171-174](phase_c_ffmpeg.py:171):
 ```python
 fallback_list = [
     "KLING_NATIVE", "SORA_NATIVE", "RUNWAY_GEN4",
@@ -1173,8 +1173,8 @@ The Seedance status poll retries transient per-iteration timeouts
 **TTL-based** (commit `feccf61`):
 - Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:23](phase_c_ffmpeg.py:23))
 - TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:24](phase_c_ffmpeg.py:24))
-- Check: `_veo_quota_blocked()` ([:36-42](phase_c_ffmpeg.py:36))
-- Set on 429/quota error ([:648-651](phase_c_ffmpeg.py:648))
+- Check: `_veo_quota_blocked()` ([:37-42](phase_c_ffmpeg.py:37))
+- Set on 429/quota error ([:657](phase_c_ffmpeg.py:657))
 - Gates only the `VEO` (FAL) branch — NOT `VEO_NATIVE`
 
 ### 9.7 Helper functions in `phase_c_ffmpeg.py`
@@ -1325,8 +1325,8 @@ Key helpers (all in [`cinema/shots/controller.py`](cinema/shots/controller.py)):
 - `_dialogue_voice_mode` (`:121`) — resolves mode from `global_settings`.
 - `_resolve_dialogue_routing` (`:134`) — sets primary/fallbacks per mode.
 - `_should_tag_audio_embedded` (`:184`) — gates the `audio_embedded` tag.
-- `_clamp_veo_duration` (`:257`) — clamps speech length to Veo-supported duration.
-- `_resolve_f1b_audio` (`:271`) — picks per-shot vs. scene-level TTS audio.
+- `_clamp_veo_duration` (`:270`) — clamps speech length to Veo-supported duration.
+- `_resolve_f1b_audio` (`:284`) — picks per-shot vs. scene-level TTS audio.
 
 Assembler dedup: `cinema_pipeline.py:_build_scene_packages` (`:709`) counts both
 `audio_embedded` and `dialogue_audio_in_clip` (`:734`) to decide TTS suppression.
@@ -1426,8 +1426,8 @@ Verified by id-comparison:
 | Path | File:line |
 |---|---|
 | `identity.get_shared_validator()` | [identity/__init__.py:62](identity/__init__.py:62) |
-| `phase_c_vision._get_shared_validator()` | [phase_c_vision.py:17](phase_c_vision.py:17) |
-| `face_validator_gate._get_validator()` | [face_validator_gate.py:104-119](face_validator_gate.py:104) |
+| `phase_c_vision._get_shared_validator()` | [phase_c_vision.py:36](phase_c_vision.py:36) |
+| `face_validator_gate._get_validator()` | [face_validator_gate.py:105-119](face_validator_gate.py:105) |
 | `performance.identity_gate._get_validator()` | [performance/identity_gate.py:34-40](performance/identity_gate.py:34) |
 
 ### 11.4 Per-shot thresholds ([identity/types.py:95-101](identity/types.py:95))
@@ -1444,13 +1444,13 @@ Verified by id-comparison:
 interpolates from `mode` to `lenient` over retries.
 
 Project-wide `identity_strictness` setting (default 0.60) overrides per-shot
-defaults at [cinema/shots/controller.py:810](cinema/shots/controller.py:810).
+defaults at [cinema/shots/controller.py:824](cinema/shots/controller.py:824).
 
 ### 11.5 Rolling-stats update sites (4 sites total)
 
 `IdentityValidator.history` accumulates from:
 
-1. **Keyframe validation** — `cinema/shots/controller.py:817` and `:853`
+1. **Keyframe validation** — `cinema/shots/controller.py:831` and `:867`
 2. **N=8 best-of grading** — `face_validator_gate._arcface_score` → `validate_image(threshold=0.0)`
 3. **Performance gate scoring** — `performance/identity_gate._arcface_score` → `validate_image(threshold=0.0)`
 4. **Continuity video validation** — `domain/continuity_engine.py:630` → `validate_video`
@@ -1678,8 +1678,8 @@ post-failure (reactive vocabulary lookup, not upfront constraint builder).
 Consumers (as of T6, 2026-06-06):
 - `ChiefDirector.evaluate_generation_quality` — uses first failing character's reason.
 - `build_remediation_advisory` (new, `llm/negative_prompts.py:55`) — called from
-  `generate_keyframe_take` (defined at `cinema/shots/controller.py:622`; call at :846) and `diagnose_clip`
-  (`cinema/shots/controller.py:2184`); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
+  `generate_keyframe_take` (defined at `cinema/shots/controller.py:622`; call at :854) and `diagnose_clip`
+  (`cinema/shots/controller.py:2325`); returns `{failure_reason, suggested_negative_prompt, suggested_pulid_adjustment, source}`.
 
 ### 13.8 `config/settings.py`
 

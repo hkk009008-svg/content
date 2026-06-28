@@ -87,11 +87,11 @@ Strategic direction and open work are tracked in
 **CI:** Three jobs run on every push to `main` and every pull request —
 `ARCHITECTURE.md §15` singleton/ctx smoke, `pytest tests/unit/`, and
 `tsc --noEmit`. See [.github/workflows/ci.yml](.github/workflows/ci.yml).
-**Known defect:** the pytest job has never passed (collection-time sys.path
-gap — CI runs bare `pytest`; local runs use `python -m pytest`); fix is
-session 1 of the 2026-06-10 strategic-review roadmap (NF-1). The suite
-itself is green when run correctly: 1,964 pass / 0 fail local at `4b7135c`
-(2026-06-10).
+**CI status:** the pytest job collects and passes — the collection-time
+sys.path gap was closed in `0326f24a` (NF-1 of the 2026-06-10 strategic
+review) by adding `[tool.pytest.ini_options] pythonpath = ["."]` to
+`pyproject.toml`. See [.github/workflows/ci.yml](.github/workflows/ci.yml)
+for the live suite and its current pass count.
 
 Last architecture verification: see the `*Last verified: ...*` footer in
 [ARCHITECTURE.md](ARCHITECTURE.md).

@@ -19,7 +19,7 @@ The user-principal asked for a comprehensive test suite to "reveal what is worki
 
 **Non-goals**
 
-- This does **not** replace or modify the existing **1280 tests / 56 files** under `tests/unit` + `tests/integration` (mostly unit/logic). It is an additive, separately-organized layer.
+- This does **not** replace or modify the existing unit+integration suite (**1280 tests / 56 files at this spec's 2026-06-01 writing; since grown well past that**) under `tests/unit` + `tests/integration` (mostly unit/logic). It is an additive, separately-organized layer.
 - It does not aim for line-coverage targets; it aims for *intent coverage* (manual claims → assertions) and *capability coverage* (quality bars → measured outcomes).
 
 ## 2. Locked scope decisions (from brainstorming)
@@ -115,22 +115,21 @@ Photorealism  PASS  aesthetic 5.4 ≥ 5.0  (judge advisory: 7/10)
 ...
 ```
 
-**Stub/gap policy** (the "not working as intended" half). Accepted-but-not-wired stubs + dead code get explicit tests in `stubs_and_gaps/` that **assert the current stub behavior** and carry ledger `status="INTENDED_NOT_WIRED"`, surfacing in the scorecard's *gap section* (louder than a silent `xfail`). Confirmed targets from the digests:
+**Stub/gap policy** (the "not working as intended" half). Accepted-but-not-wired stubs + dead code get explicit tests in `stubs_and_gaps/` that **assert the current stub behavior** and carry ledger `status="INTENDED_NOT_WIRED"`, surfacing in the scorecard's *gap section* (louder than a silent `xfail`). Confirmed targets:
 
-- `validate_lora_quality` → `LORA_VALIDATION_SKIPPED = -1.0` (stub).
-- `storyboard_mode` — flagged possibly-stubbed / zero end-to-end readers in `pipeline_status.toml`; assert path-selection predicate, flag live wiring as gap.
-- `hires_fix_enabled`/`hires_fix_denoise`, `max_halt_rule` beyond `composite_only` — accepted-but-not-wired; assert no-op.
-- `evaluate_generation_quality` — zero callers (dead); assert no call sites.
-- `EXPERIMENTS_DB_PATH` declared but never wired (`data/experiments.db` always used).
+- `max_halt_rule == "budget_only"` — accepted but falls back to `composite_only` (not independently wired); assert the fallback. (`composite_only` + `conjunctive` ARE dispatched — `face_validator_gate.py:272`.)
+- ~~`EXPERIMENTS_DB_PATH` declared but never wired~~ — **now wired** (`cost_tracker.py:220` reads `os.environ.get("EXPERIMENTS_DB_PATH", "data/experiments.db")` since T7; D-config-1 resolved). No remaining stub here.
 
-When a stub gets wired, its test breaks → signal to update code **and** ledger together.
+> **Reconciliation 2026-06-28:** the original 2026-06-01 list also named `validate_lora_quality`, `storyboard_mode`, `hires_fix_*`, and `evaluate_generation_quality` as not-wired/dead — **all four have since been WIRED and tested** (`pipeline_status.toml` `status="wired"` for `lora_validation` / `storyboard_mode` / `hires_fix`; `evaluate_generation_quality` has a live call site at `cinema/shots/controller.py:2411`). Removed so the suite does not author tests asserting *stub* behavior for features that are now live. The same drift hit `max_halt_rule`: `conjunctive` is now dispatched too — only `budget_only` remains deferred.
+
+When a stub gets wired, its test breaks → signal to update code **and** ledger together. **(Better still: read `docs/pipeline_status.toml` at runtime rather than re-listing stubs in prose — that registry is what drifted out from under this list.)**
 
 ## 7. Existing-coverage gap analysis (drives priority)
 
-From the coverage survey (1280 tests / 56 files):
+From the coverage survey (1280 tests / 56 files, as of 2026-06-01):
 
-- **Well-covered:** `domain/models.py`, `domain/project_manager.py`.
-- **No behavioral/internal-logic tests (highest leverage):** `identity/validator.py` (truly 0 references), `style_director.py` (appears only as a stub-module registration), `kling_native.py` / `sora_native.py` / `ltx_native.py` (mocked-out at collection via `_stub_module`; no behavioral tests).
+- **Well-covered:** `domain/models.py`, `domain/project_manager.py`; and (since this survey) `identity/validator.py` (76 behavioral tests in `tests/unit/test_identity_validator.py`) and `style_director.py` (behavioral tests in `tests/unit/test_style_director.py`).
+- **Partial (offline characterization now exists; error/retry/quota branches still thin):** `kling_native.py` / `sora_native.py` / `ltx_native.py` — now have offline HTTP/SDK-mocked tests (`tests/unit/test_{kling,sora,ltx}_native.py`), but non-happy-path branches remain untested. *(Originally listed here as zero-behavioral-test; the testcov campaign closed the basics — re-baseline before prioritizing.)*
 - **Partial / contract-only (internal logic untested):** `domain/scene_decomposer.py` — its `API_REGISTRY` + `PURPOSE_API_RANKING` are exercised by `test_dialogue_routing.py` (~10 tests), but `decompose`/`_fallback_decompose` are not; `lip_sync.py` — `test_f1b_dialogue_lipsync.py` covers the call-contract (that `generate_motion_take` invokes lip-sync, mocked) but not internal logic.
 - **Thin / happy-path only:** `llm/chief_director.py` (parse paths via `test_chief_director_parse.py`; the ChiefDirector's own veto-*decision* composition is untested — `test_auto_approve.py` exercises the *gate's* consumption in `cinema/auto_approve.py`, not the LLM layer), `cinema_pipeline.py` (only indirect orchestration), `coherence_analyzer.py`, `identity/types.py`, `phase_c_assembly.py`, the cascade *error/fallback* paths (order tested; retry counts / quota-vs-timeout classification not), end-to-end orchestration.
 - *Per ADR-013, the `grep -rln <module> tests/` + file:line evidence for each bucket above is transcribed into `_ledger.py` at slice 1 — this §7 list drives the §8 priority order, so its anchors live with the ledger.*
