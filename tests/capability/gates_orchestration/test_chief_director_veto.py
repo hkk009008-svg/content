@@ -62,20 +62,29 @@ def test_except_fallback_mutation_level_tiering(capability_record):
     def _bad_json(*a, **k):
         return "}{ not valid json"
 
-    # coherence_result=None: all scores are < 0.70 so identity_passed=False (no ACCEPT
-    # short-circuit) regardless of coherence; None also skips the prompt-builder's
-    # coherence_info block (which reads color_drift/lighting_consistency, llm/chief_director.py:517-524).
-    cases = {0.60: 1, 0.45: 2, 0.30: 3}
-    for score, expected_level in cases.items():
+    def _level(identity_score, coherence_result):
         cd = ChiefDirector(project={})
         cd.client = object()        # truthy -> skip the no-client early return
         cd._call_llm = _bad_json    # returns garbage -> json.loads raises -> except-fallback
         out = cd.evaluate_generation_quality(
             image_path=None, reference_path=None, identity_result=None,
-            coherence_result=None, identity_score=score,
+            coherence_result=coherence_result, identity_score=identity_score,
         )
-        assert out["decision"] == "RETRY"
-        assert out["mutation_level"] == expected_level, (score, out)
+        assert out["decision"] == "RETRY", out
+        return out["mutation_level"]
+
+    # numeric tiering: identity < 0.70 fails -> identity_passed=False -> no ACCEPT
+    # short-circuit; coherence_result=None skips the prompt-builder's coherence_info
+    # block (reads color_drift/lighting_consistency, llm/chief_director.py:517-524).
+    assert _level(0.60, None) == 1
+    assert _level(0.45, None) == 2
+    assert _level(0.30, None) == 3
+    # None identity (skipped): identity_passed=True, so coherent must be False to avoid
+    # the ACCEPT short-circuit — hence a FULL coherence mock the prompt-builder can read.
+    full_coherence = types.SimpleNamespace(
+        overall_coherence_score=0.30, color_drift=0.10,
+        lighting_consistency=0.90, recommendations=[])
+    assert _level(None, full_coherence) == 1
     capability_record(claim_id="CD-03", passed=True)
 
 

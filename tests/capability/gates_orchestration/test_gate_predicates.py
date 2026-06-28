@@ -5,8 +5,6 @@ no torch/DeepFace/network. We pass ``config=AutoApproveConfig(...)`` explicitly 
 the from_project tier-aware default (production -> 0.60) never confuses a
 threshold assertion (cinema/auto_approve.py:137).
 """
-import math
-
 import pytest
 
 from cinema.auto_approve import (
@@ -132,7 +130,7 @@ def test_shot_over_budget_edges(capability_record):
     assert _shot_over_budget({"spent_usd": 1.0}, proj(float("nan"), 1), 1.5) is True
     # zero budget -> no cap -> False
     assert _shot_over_budget({"spent_usd": 9999.0}, proj(0, 1), 1.5) is False
-    # zero total_shots -> cannot compute per-shot cap -> False
+    # zero total_shots (empty scenes) -> cannot compute per-shot cap -> False
     assert _shot_over_budget({"spent_usd": 999.0}, proj(10, 0), 1.5) is False
     # over the multiplier*per-shot cap -> True  (per_shot=10, 1.5*10=15, spent 100>15)
     assert _shot_over_budget({"spent_usd": 100.0}, proj(10, 1), 1.5) is True

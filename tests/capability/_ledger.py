@@ -60,7 +60,7 @@ LEDGER: list[Claim] = [
           "_best_take_identity max finite identity_score; 0.0 for empty/non-finite-only"),
     Claim("GATE-09", "gates_orchestration", "spec §4 Gates / cinema/auto_approve.py:471", "offline", "asserted",
           "_best_take_motion_score prefers motion_fidelity over motion_score; 0.0 for empty"),
-    Claim("GATE-10", "gates_orchestration", "spec §4 Gates / cinema/auto_approve.py:524", "offline", "asserted",
+    Claim("GATE-10", "gates_orchestration", "spec §4 Gates / cinema/auto_approve.py:525", "offline", "asserted",
           "_best_take_lipsync non-finite score fails closed -> 0.0 (not 1.0 N/A)"),
     Claim("GATE-11", "gates_orchestration", "spec §4 Gates / cinema/auto_approve.py:618", "offline", "asserted",
           "_shot_over_budget: NaN budget->True; 0 budget->False; 0 total_shots->False; over-cap->True"),
