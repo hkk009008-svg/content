@@ -191,3 +191,15 @@ def test_nulllifecycle_wait_for_gate_always_true(capability_record):
     assert lc.wait_for_gate("PLAN_REVIEW", lambda: False) is True
     assert lc.wait_for_gate("PLAN_REVIEW", lambda: True) is True
     capability_record(claim_id="GATE-15", passed=True)
+
+
+@pytest.mark.offline
+def test_gates_offline_claims_are_exercised():
+    """Guard against silent ledger drift: the set of offline 'asserted' claims in the
+    gates_orchestration dimension must equal exactly the claims these test files record.
+    @pytest.mark.offline so CI's `-m offline` filter does not skip the guard."""
+    import _ledger  # top-level via conftest sys.path shim
+    offline_asserted = {c.claim_id for c in _ledger.by_dimension("gates_orchestration")
+                        if c.tier == "offline" and c.status == "asserted"}
+    expected = {f"GATE-{i:02d}" for i in range(1, 16)} | {f"CD-{i:02d}" for i in range(1, 7)}
+    assert offline_asserted == expected
