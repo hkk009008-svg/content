@@ -19,7 +19,10 @@ from cinema.auto_approve import (
     _best_take_motion_score,
     _best_take_lipsync,
     _shot_over_budget,
+    check_gate,
+    record_director_review_on_shots,
 )
+from cinema.lifecycle import NullLifecycle
 
 
 def _rule_names(rules):
@@ -134,3 +137,57 @@ def test_shot_over_budget_edges(capability_record):
     # over the multiplier*per-shot cap -> True  (per_shot=10, 1.5*10=15, spent 100>15)
     assert _shot_over_budget({"spent_usd": 100.0}, proj(10, 1), 1.5) is True
     capability_record(claim_id="GATE-11", passed=True)
+
+
+# --- gate firing + record-review + lifecycle trap (GATE-12..15) ---
+
+@pytest.mark.offline
+def test_motion_gate_fires_on_low_motion_fidelity(capability_record):
+    # identity_score high (0.99 >= 0.85 passes the identity rule) isolates the motion rule;
+    # motion_fidelity 0.5 < 0.7 fires motion_score_below_threshold.
+    dec = check_gate(
+        "motion",
+        shot_state={},
+        project={},
+        takes=[{"metadata": {"identity_score": 0.99, "motion_fidelity": 0.5}}],
+        config=AutoApproveConfig(),
+    )
+    assert dec.auto_approved is False
+    assert "motion_score_below_threshold" in dec.rule_names
+    capability_record(claim_id="GATE-12", passed=True)
+
+
+@pytest.mark.offline
+def test_final_gate_fires_on_upstream_auto_approval(capability_record):
+    # lipsync_score 1.0 passes the lipsync rule (1.0 >= 0.8) so the only veto is the
+    # safety-net: an upstream gate auto-approved this shot -> require a human at final.
+    dec = check_gate(
+        "final",
+        shot_state={"plan_auto_approved": True},
+        project={},
+        takes=[{"metadata": {"lipsync_score": 1.0}}],
+        config=AutoApproveConfig(),
+    )
+    assert dec.auto_approved is False
+    assert "final_upstream_was_auto_approved" in dec.rule_names
+    capability_record(claim_id="GATE-13", passed=True)
+
+
+@pytest.mark.offline
+def test_record_director_review_skips_non_dict_items(capability_record):
+    shots = [None, {"id": "a"}, 42]
+    record_director_review_on_shots(shots, {"decision": "APPROVED", "violations": []})
+    assert shots[0] is None and shots[2] == 42        # non-dicts untouched
+    assert shots[1]["director_review"]["decision"] == "APPROVED"
+    capability_record(claim_id="GATE-14", passed=True)
+
+
+@pytest.mark.offline
+def test_nulllifecycle_wait_for_gate_always_true(capability_record):
+    # The always-True trap: NullLifecycle.wait_for_gate returns True regardless of the
+    # predicate (cinema/lifecycle.py:89) — so using it OUTSIDE a test/headless context
+    # silently skips gate enforcement. This isolates that contract (no ReviewController stack).
+    lc = NullLifecycle()
+    assert lc.wait_for_gate("PLAN_REVIEW", lambda: False) is True
+    assert lc.wait_for_gate("PLAN_REVIEW", lambda: True) is True
+    capability_record(claim_id="GATE-15", passed=True)
