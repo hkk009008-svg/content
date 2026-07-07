@@ -25,30 +25,31 @@ inventory transitions remain user-gated.
 
 `operator2` has no unread mailbox work and no current Lane V action.
 
-Current refresh evidence:
+Route-state refresh evidence captured immediately before this handoff-only
+commit:
 
 ```text
 .venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py operator2 --wave 5
--> HEAD f568817e operator2(handoff): Tier-3 audio DSP NITS standby
--> vs origin/main: 20 ahead, 0 behind
+-> HEAD 83d9a608 test(capability): gates_orchestration review polish (Lane-V NITS + code-quality must-fixes)
+-> vs origin/main: 19 ahead, 0 behind
 -> operator2 unread: 0 / ref-bus
 -> Wave 5 gate: MET counts={}
 ```
 
+After this artifact is committed, `git log -1` should show the docs-only
+handoff commit `operator2(handoff): Tier-3 audio DSP NITS standby`; that commit
+does not change mailbox, test, production, or NITS ownership.
+
 Recent relevant commits:
 
 ```text
-f568817e operator2(handoff): Tier-3 audio DSP NITS standby
+<this handoff commit> operator2(handoff): Tier-3 audio DSP NITS standby
 83d9a608 test(capability): gates_orchestration review polish (Lane-V NITS + code-quality must-fixes)
 cb3e467c operator(verify): GO Pair-A Tier-3 apply-correction Lane-V -> director [testcov T3]
 720d3db0 operator2(verify): NITS Pair-B Tier-3 audio DSP
 143b61e8 operator2(handoff): testcov Tier-3 Lane V pending
 4d819c21 director2(verify-request): Pair-B Tier-3 batch -> operator2 Lane-V [testcov T3]
 ```
-
-`f568817e` is this docs-only handoff. The last non-handoff route state remains
-`83d9a608`; no mailbox, test, production, or NITS ownership changed in this
-handoff commit.
 
 This handoff supersedes the older same-seat pending handoff:
 

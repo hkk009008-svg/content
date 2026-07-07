@@ -93,6 +93,16 @@ def test_ffmpeg_success_returns_output_path():
     run.assert_called_once()
 
 
+def test_ffmpeg_missing_output_falls_back_to_original():
+    with patch("subprocess.run") as run, \
+         patch.object(effects.os.path, "exists", return_value=False), \
+         patch.object(effects.os.path, "getsize") as getsize:
+        result = apply_voice_effect("/in.wav", "/out.mp3", effect="telephone")
+    assert result == "/in.wav"      # missing output -> fallback (effects.py:277-280)
+    run.assert_called_once()
+    getsize.assert_not_called()
+
+
 def test_ffmpeg_empty_output_falls_back_to_original():
     # ffmpeg "ran" but produced a missing/0-byte file -> return original (effects.py:280)
     with patch("subprocess.run"), \
