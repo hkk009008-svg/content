@@ -3,7 +3,7 @@
 READ FIRST AS `director` (Pair-A). Current git, mailbox bodies, ref-bus
 cursor, gate output, and capacity packets override this prose if they diverge.
 
-Generated: `2026-07-07T09:14:48Z`
+Generated: `2026-07-07T09:16:09Z`
 Seat: `director`
 Repo: `/Users/hyungkoookkim/Content`
 
@@ -63,12 +63,14 @@ b25dc8d3 director2(verify-request): route audio DSP NITS fix to operator2
 coordination/mailbox/sent/2026-07-07T09-12-52Z-director2-to-operator2-verify-request.md
 ```
 
-Final pre-response live churn then added a staged, not-yet-committed Pair-B GO
-report owned by `operator2`:
+Final pre-response live churn then committed the Pair-B GO report and corrected
+the stale pre-amend fix SHA in the director2 route:
 
 ```text
+54d4959d operator2(verify): GO Audio DSP NITS fix
 coordination/mailbox/sent/2026-07-07T09-14-04Z-operator2-to-director2-verification-report.md
 VERDICT: GO
+474add0a director2(verify-request): correct audio DSP NITS route SHA
 ```
 
 ## Mailbox And Gate State
@@ -77,8 +79,8 @@ Fresh director status:
 
 ```text
 .venv/bin/python .agents/skills/four-seat-protocol/scripts/seat_status.py director --wave 5
--> HEAD b25dc8d3 director2(verify-request): route audio DSP NITS fix to operator2
--> vs origin/main: 22 ahead, 0 behind
+-> HEAD 474add0a director2(verify-request): correct audio DSP NITS route SHA
+-> vs origin/main: 25 ahead, 0 behind
 -> director unread: 0 / ref-bus
 -> Wave 5 gate: MET counts={}
 ```
@@ -87,7 +89,7 @@ Mailbox monitor:
 
 ```text
 env -u GIT_INDEX_FILE .venv/bin/python scripts/mailbox_monitor.py --once
--> generated_at: 2026-07-07T09:13:38Z
+-> generated_at: 2026-07-07T09:16:09Z
 -> director/director2/operator/operator2/coordinator/coordinator2 unread=0
 -> latest coordinator broadcast: 2026-06-26T23-10-00Z
 -> alerts: stale heartbeats only
@@ -145,7 +147,6 @@ user explicitly routes work there:
 
 ```text
  M .claude/settings.json
-A  coordination/mailbox/sent/2026-07-07T09-14-04Z-operator2-to-director2-verification-report.md
 ?? .coverage
 ?? codex-plugin-cc-main/
 ?? coverage.xml
@@ -176,7 +177,7 @@ Next lawful protocol action is outside Pair-A:
 continue as director2
 ```
 
-Director2 should consume the staged operator2 GO report if it remains current:
+Director2 should consume the committed operator2 GO report if it remains current:
 
 ```text
 coordination/mailbox/sent/2026-07-07T09-14-04Z-operator2-to-director2-verification-report.md
@@ -184,4 +185,4 @@ VERDICT: GO
 ```
 
 Coordinator closeout should wait until director2 records/consumes that Pair-B
-GO, or until operator2's staged report is explicitly superseded.
+GO, or until the operator2 GO report is explicitly superseded.
