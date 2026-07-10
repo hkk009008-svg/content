@@ -1550,11 +1550,33 @@ class ShotController:
         if record_cost:
             try:
                 video_id = self.project.get("id", "")
+                # Key the record on the cascade WINNER, not the requested
+                # primary — a SEEDANCE win behind a cheaper primary otherwise
+                # accumulates at the primary's price and defeats both the
+                # precheck and the post-hoc budget gate (money-gate review
+                # 2026-07-11; mirrors the lipsync winner-keyed record below).
+                _motion_engine = (
+                    (take.get("cascade_metadata") or {}).get("engine")
+                    or target_api
+                )
+                _cost_kwargs = {}
+                if str(_motion_engine).upper() == "SEEDANCE":
+                    # Per-second-billed engine with shot-type-dependent
+                    # durations; API_COST_USD["SEEDANCE"] is per ~5s, so
+                    # recompute for the requested duration (8s action clips
+                    # under-record by 38% on the flat figure).
+                    from cost_tracker import API_COST_USD
+                    from phase_c_ffmpeg import SEEDANCE_DURATIONS
+                    _dur = SEEDANCE_DURATIONS.get(resolved_shot_type, 4)
+                    _cost_kwargs["cost_usd"] = round(
+                        API_COST_USD["SEEDANCE"] / 5.0 * _dur, 4
+                    )
                 self.cost_tracker.record_api_call(
-                    target_api,
+                    _motion_engine,
                     operation="motion_generation",
                     shot_id=shot_id,
                     video_id=video_id,
+                    **_cost_kwargs,
                 )
             except Exception:
                 logger.warning(

@@ -105,10 +105,9 @@ Authoritative list (every variable consumed by the pipeline):
 | Var | Required? | Used by |
 |---|---|---|
 | `KLING_ACCESS_KEY` + `KLING_SECRET_KEY` | Recommended (primary video) | KLING_NATIVE engine — JWT auth |
-| `FAL_KEY` | Recommended (used by many cascades) | FAL routes: Sora, Veo (fal proxy), Kling 3.0, LTX (proxy), Hedra, all lipsync engines, music, FLUX image fallback |
+| `FAL_KEY` | Recommended (used by many cascades) | FAL routes: Seedance (action primary since 2026-07-11), Sora, Veo (fal proxy), Kling 3.0, LTX (proxy), Hedra, all lipsync engines, music, FLUX image fallback |
 | `LTX_API_KEY` | Optional | LTX_NATIVE direct (preferred over FAL proxy) |
 | `RUNWAYML_API_SECRET` | Optional | RUNWAY_GEN4, RUNWAY (gen3a_turbo), Act-One performance |
-| `SEEDANCE_API_KEY` | Optional | SEEDANCE engine (action cascade only) |
 
 ### Audio + performance capture
 

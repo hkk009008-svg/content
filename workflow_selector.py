@@ -33,7 +33,7 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "ip_adapter_weight": 0.25, # Minimal style transfer — face is priority
         "denoise_default": 0.25,   # Lower denoise = tighter temporal consistency in img2img
         "target_api": "KLING_NATIVE",  # Best face: subject binding + face_consistency
-        "video_fallbacks": ["RUNWAY_GEN4", "SORA_NATIVE", "KLING_3_0"],
+        "video_fallbacks": ["RUNWAY_GEN4", "SEEDANCE", "KLING_3_0"],
         "description": "Close-up portrait — max face fidelity, 25 steps, DPM++ 2M + PAG",
     },
     "medium": {
@@ -49,7 +49,7 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "ip_adapter_weight": 0.30, # Balanced style transfer
         "denoise_default": 0.35,
         "target_api": "KLING_NATIVE",  # Good face + scene balance
-        "video_fallbacks": ["RUNWAY_GEN4", "SORA_NATIVE", "LTX"],
+        "video_fallbacks": ["RUNWAY_GEN4", "SEEDANCE", "LTX"],
         "description": "Medium shot — balanced face + scene, 20 steps, DPM++ 2M + PAG",
     },
     "wide": {
@@ -80,10 +80,14 @@ WORKFLOW_TEMPLATES: Dict[str, Dict] = {
         "controlnet_depth_strength": 0.30,  # Light spatial guidance — allow motion freedom
         "ip_adapter_weight": 0.25, # Light style transfer — don't constrain action
         "denoise_default": 0.40,
-        "target_api": "SORA_NATIVE",    # Best motion physics, body momentum, cloth sim
-        # SEEDANCE last — its multi-reference (up to 9 images) is the only
-        # cascade member that handles multi-character action shots well.
-        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "LTX", "SEEDANCE"],
+        # SEEDANCE primary since the Sora sunset (OpenAI retires Sora 2 +
+        # the Videos API on 2026-09-24): #1 on the AA i2v arena (2026-07),
+        # and its multi-reference input (up to 9 images) binds
+        # multi-character action shots — the old SEEDANCE-last niche.
+        "target_api": "SEEDANCE",
+        # SORA_NATIVE stays first fallback (best motion physics) until the
+        # shutdown date; after it, the call errors fast and cascades on.
+        "video_fallbacks": ["SORA_NATIVE", "KLING_NATIVE", "RUNWAY_GEN4", "LTX"],
         "description": "Action/movement — motion-stable, 20 steps, DPM++ 2M + PAG",
     },
     "landscape": {
@@ -185,7 +189,7 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "supir_cfg_scale": 2.8,
         "final_resolution": (3840, 2160),
         "target_api": "KLING_NATIVE",
-        "video_fallbacks": ["RUNWAY_GEN4", "SORA_NATIVE", "VEO_NATIVE"],
+        "video_fallbacks": ["RUNWAY_GEN4", "SEEDANCE", "VEO_NATIVE"],
         "description": "MAX portrait — 4-layer identity, full CN+Redux, N=8 halt@0.92, all post-passes",
     },
     "medium": {
@@ -231,7 +235,7 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "supir_cfg_scale": 2.8,
         "final_resolution": (3840, 2160),
         "target_api": "KLING_NATIVE",
-        "video_fallbacks": ["RUNWAY_GEN4", "SORA_NATIVE", "LTX"],
+        "video_fallbacks": ["RUNWAY_GEN4", "SEEDANCE", "LTX"],
         "description": "MAX medium — same identity stack, slightly relaxed thresholds",
     },
     "wide": {
@@ -322,9 +326,10 @@ MAX_QUALITY_TEMPLATES: Dict[str, Dict] = {
         "supir_steps": 40,
         "supir_cfg_scale": 2.8,
         "final_resolution": (3840, 2160),
-        "target_api": "SORA_NATIVE",
-        # SEEDANCE last — multi-reference fallback for multi-character action.
-        "video_fallbacks": ["KLING_NATIVE", "RUNWAY_GEN4", "LTX", "SEEDANCE"],
+        # SEEDANCE primary since the Sora sunset (2026-09-24) — see the
+        # production-template action entry for the full rationale.
+        "target_api": "SEEDANCE",
+        "video_fallbacks": ["SORA_NATIVE", "KLING_NATIVE", "RUNWAY_GEN4", "LTX"],
         "description": "MAX action — softer guidance for motion, lower CN strength to allow movement",
     },
     "landscape": {

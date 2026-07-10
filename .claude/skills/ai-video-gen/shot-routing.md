@@ -89,8 +89,8 @@ pag_scale:                 2.0    # Lower — motion needs softness not crispnes
 controlnet_depth_strength: 0.30   # Light spatial guidance
 ip_adapter_weight:         0.25
 denoise_default:           0.40
-target_api:                SORA_NATIVE  # Best motion physics, body momentum, cloth
-video_fallbacks:           ['KLING_NATIVE', 'RUNWAY_GEN4', 'LTX', 'SEEDANCE']  # Seedance last — its multi-reference (up to 9 images) handles multi-character action
+target_api:                SEEDANCE  # #1 AA i2v arena (2026-07); multi-ref (≤9 images) binds multi-character; Sora retires 2026-09-24
+video_fallbacks:           ['SORA_NATIVE', 'KLING_NATIVE', 'RUNWAY_GEN4', 'LTX']  # Sora first fallback until the sunset, then errors fast and cascades
 ```
 
 ### Landscape (Pure environment, no characters)
@@ -168,9 +168,10 @@ This creates a feedback loop: poor identity scores automatically tighten PuLID o
 2. **Kling** — $$  (subject binding premium)
 3. **Veo** — $$$  (reference images add cost)
 4. **Runway** — $$$  (10s fixed, moderate cost)
-5. **Sora** — $$$$  (highest cost, best motion)
+5. **Sora** — $$$$  (best motion; retires 2026-09-24)
+6. **Seedance** — $$$$$  (~$1.51 per 5s clip @720p standard; #1 arena quality, multi-reference)
 
-**Cost strategy**: Use LTX for all wide/landscape/environment shots. Reserve Sora for scenes where physics/motion quality is critical. Kling is the best value for character-driven shots.
+**Cost strategy**: Use LTX for all wide/landscape/environment shots. Reserve Seedance (Sora until its sunset) for scenes where physics/motion quality or multi-character binding is critical. Kling is the best value for character-driven shots.
 
 ---
 

@@ -77,7 +77,7 @@ Schema:
   "purpose":                string,  // one of: dialogue_close_up | talking_head_full | action_motion | static_portrait | establishing_shot | macro_detail | style_locked_sequence | product_hero | product_in_scene | product_reveal_motion
   "shot_type":              string,  // one of: portrait | medium | wide | action | landscape
   "suggested_image_api":    string,  // FLUX_DEV | HIDREAM_I1 | SD3_5_LARGE
-  "suggested_video_api":    string,  // KLING_NATIVE | SORA_NATIVE | VEO_NATIVE | LTX | RUNWAY_GEN4 | AUTO
+  "suggested_video_api":    string,  // KLING_NATIVE | SEEDANCE | SORA_NATIVE | VEO_NATIVE | LTX | RUNWAY_GEN4 | AUTO
   "suggested_lipsync":      string,  // HEDRA_C3 | SYNC_SO_V3 | MUSETALK | OMNIHUMAN_V1_5 | LATENTSYNC | null
   "negative_constraints":   string,  // what to avoid: "plastic skin, identity drift, oversaturated, deformed hands, off-brand product, mis-shaped logo"
   "identity_anchor":        string,  // critical visual features to preserve — for objects: brand color, logo, distinctive geometry; for characters: face/hair/build
@@ -96,7 +96,7 @@ GUIDELINES (apply rigorously):
 2. PURPOSE → API RECOMMENDATION:
    - dialogue_close_up: video_api=KLING_NATIVE or VEO_NATIVE; lipsync=HEDRA_C3
    - talking_head_full: video_api=VEO_NATIVE; lipsync=HEDRA_C3 or OMNIHUMAN_V1_5
-   - action_motion: video_api=SORA_NATIVE; lipsync=null
+   - action_motion: video_api=SEEDANCE (multi-character: it binds up to 9 refs; Sora retires 2026-09-24); lipsync=null
    - static_portrait: video_api=KLING_NATIVE; lipsync=null
    - establishing_shot: video_api=LTX or VEO_NATIVE; lipsync=null
    - macro_detail: video_api=SORA_NATIVE or LTX; lipsync=null
@@ -124,7 +124,7 @@ GUIDELINES (apply rigorously):
    weren't requested.
 
 8. LANGUAGE: regardless of the project's dialogue language, the image_prompt
-   and video_prompt fields MUST remain in English. FLUX, Sora, Kling, Hedra
+   and video_prompt fields MUST remain in English. FLUX, Seedance, Sora, Kling, Hedra
    and all other generation engines are trained predominantly on English
    captions — Korean / Japanese / Mandarin prompts produce visibly worse
    output even when the project's dialogue is non-English. The
@@ -152,8 +152,8 @@ GUIDELINES (apply rigorously):
      logo, mis-shaped product silhouette, wrong proportions, plastic-looking
      metallic surface, missing brand mark."
    - For commercial pieces, lean toward HIDREAM_I1 (image) and SORA_NATIVE
-     (video reveal) — they preserve product geometry better than the
-     character-focused engines.
+     (video reveal; SEEDANCE after the 2026-09-24 Sora sunset) — they preserve
+     product geometry better than the character-focused engines.
 
 Output ONLY the JSON. Nothing else."""
 

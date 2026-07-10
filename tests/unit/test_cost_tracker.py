@@ -747,6 +747,21 @@ class TestVerifiedPricePins:
         # production calls): "$0.08 per image". The old 0.04 was the non-max tier.
         assert API_COST_USD["FLUX_KONTEXT"] == 0.08
 
+    def test_seedance_price_is_the_verified_2026_07_11_value(self):
+        from cost_tracker import API_COST_USD
+        # fal.ai model page for bytedance/seedance-2.0 i2v/r2v (standard 720p,
+        # read 2026-07-11): $0.3024/s → $1.512 per ~5s clip. The pre-migration
+        # 0.30 was ~5x low and would under-gate the new action-primary route.
+        assert API_COST_USD["SEEDANCE"] == 1.51
+
+    def test_seedance_registry_cost_matches_api_cost_usd(self):
+        # API_REGISTRY.per_shot_cost is the LLM-facing planning figure; drift
+        # from the gated API_COST_USD figure lets the planner and the budget
+        # gate disagree about the same engine.
+        from cost_tracker import API_COST_USD
+        from domain.scene_decomposer import API_REGISTRY
+        assert API_REGISTRY["SEEDANCE"]["per_shot_cost"] == API_COST_USD["SEEDANCE"]
+
 
 class TestApiCostUsdCompleteness:
     """Every dispatched video engine must be priced, else would_exceed() returns

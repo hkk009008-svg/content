@@ -25,13 +25,26 @@ _VEO_QUOTA_TTL_S: int = 1800  # 30 minutes — Google Veo quotas typically reset
 
 # Providers that can produce 9:16 portrait video (aspect-aware via Phase-3 T3-T6, or
 # keyframe-driven). Portrait projects filter the cascade to this set. EXCLUDED:
-# LTX (native-only/pod-gated, not aspect-wired), FAL_SVD (not aspect-wired), SEEDANCE
-# (intentionally left 16:9). Note: the Kling dispatch keys are KLING_NATIVE + KLING_3_0
+# LTX (native-only/pod-gated, not aspect-wired), FAL_SVD (not aspect-wired).
+# SEEDANCE joined 2026-07-11: the fal-based dispatch passes fal_aspect_ratio()
+# and Seedance 2.0's aspect_ratio enum includes 9:16 (fal /api schema).
+# Note: the Kling dispatch keys are KLING_NATIVE + KLING_3_0
 # (there is no bare "KLING"); there is no Hedra branch in this module.
 PORTRAIT_CAPABLE = frozenset({
     "VEO_NATIVE", "VEO", "SORA_NATIVE", "SORA_2",
-    "KLING_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "RUNWAY",
+    "KLING_NATIVE", "KLING_3_0", "RUNWAY_GEN4", "RUNWAY", "SEEDANCE",
 })
+
+# Seconds requested per shot type from the fal Seedance endpoints (duration
+# enum: 4-15s ints; mirrors _sora_durations). Module-level because the cost
+# record in cinema/shots/controller.py recomputes the per-clip cost from it —
+# API_COST_USD["SEEDANCE"] is a per-~5s figure, so an 8s action clip would
+# otherwise under-record by 38% (money-gate review 2026-07-11).
+SEEDANCE_DURATIONS = {"action": 8, "wide": 8, "landscape": 8, "portrait": 4, "medium": 4}
+
+# Once-per-run structural flag: SEEDANCE is the default-cascade head and the
+# action primary, so a missing fal client degrades the whole run, not one clip.
+_FAL_MISSING_WARNED = False
 
 
 def _veo_quota_blocked() -> bool:
@@ -167,9 +180,11 @@ def generate_ai_video(
         if video_fallbacks:
             fallback_list = video_fallbacks
         else:
-            # Default cascade: all engines in quality order
+            # Default cascade: all engines in quality order. SEEDANCE added
+            # 2026-07-11 (fal-based, action primary) so the default chain
+            # keeps a top-quality member after the Sora sunset (2026-09-24).
             fallback_list = [
-                "KLING_NATIVE", "SORA_NATIVE", "RUNWAY_GEN4",
+                "SEEDANCE", "KLING_NATIVE", "SORA_NATIVE", "RUNWAY_GEN4",
                 "LTX", "VEO_NATIVE", "KLING_3_0", "SORA_2", "VEO", "RUNWAY",
             ]
 
@@ -891,103 +906,103 @@ def generate_ai_video(
             return try_next_api()
             
     elif target_api.upper() == "SEEDANCE":
-        # Seedance 2.0 (ByteDance) — supports up to 9 reference images for multi-character
-        # Best for: multi-character scenes, complex interactions, long duration (20s)
-        seedance_key = settings.seedance_api_key
-        if seedance_key:
+        # Seedance 2.0 (ByteDance) via fal.ai — action-tier primary since the
+        # Sora sunset (OpenAI retires Sora 2 + the Videos API on 2026-09-24).
+        # #1 on the AA i2v arena (2026-07). reference-to-video accepts up to
+        # 9 reference images — binds multi-character shots no other cascade
+        # member handles. Schema: fal.ai/models/bytedance/seedance-2.0/*/api.
+        fal_key = settings.fal_key
+        if fal_key and FAL_AVAILABLE:
             try:
-                import requests
-                import base64
-                logger.info("Generating via Seedance 2.0 API (multi-ref capable)", extra={"engine": "SEEDANCE"})
-
-                # Encode the source image
-                with open(image_path, "rb") as f:
-                    img_b64 = base64.b64encode(f.read()).decode("utf-8")
-
-                url = "https://api.seedance.ai/v1/video/generate"
-                payload = {
-                    "model": "seedance-2.0",
-                    "prompt": f"Smooth {camera_motion}. Cinematic lighting. Photorealistic. High definition.",
-                    "reference_images": [{"image": img_b64, "type": "subject"}],
-                    "aspect_ratio": "16:9",
-                    "duration": 5,
-                    "quality": "high",
-                }
-
-                # If we have a character reference, add it as identity reference
-                if character_id:
-                    char_ref = None
-                    if os.path.exists("characters.json"):
-                        with open("characters.json", "r") as f:
-                            chars = json.load(f)
-                        char_data = chars.get(character_id, {})
-                        char_ref = char_data.get("reference_image")
-                    if char_ref and os.path.exists(char_ref):
-                        with open(char_ref, "rb") as f:
-                            face_b64 = base64.b64encode(f.read()).decode("utf-8")
-                        payload["reference_images"].append({"image": face_b64, "type": "identity"})
-                        logger.info(
-                            "Seedance: injected identity reference",
-                            extra={"engine": "SEEDANCE", "character_id": character_id},
-                        )
-
-                headers = {
-                    "Authorization": f"Bearer {seedance_key}",
-                    "Content-Type": "application/json",
-                }
-                resp = requests.post(url, json=payload, headers=headers, timeout=30)
-                resp.raise_for_status()
-                task_id = resp.json().get("task_id") or resp.json().get("id")
-                if not task_id:
-                    # No task id → polling /status/None can never succeed; the old
-                    # code burned up to 120×5s on it before cascading. Raise into the
-                    # outer except → immediate try_next_api().
-                    raise ValueError(f"Seedance POST returned no task_id; body={resp.text[:200]}")
-                logger.info("Seedance task queued — polling", extra={"engine": "SEEDANCE", "task_id": task_id})
-
-                # Poll for completion
-                poll_url = f"https://api.seedance.ai/v1/video/status/{task_id}"
-                for _ in range(120):  # 120 polls ~= 10 min nominal; bounded ~70 min worst-case (5s sleep + 30s req timeout/iter)
-                    time.sleep(5)
-                    try:
-                        poll_resp = requests.get(poll_url, headers=headers, timeout=30).json()
-                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-                        # One stalled status poll must not abandon a job that
-                        # may still be completing remotely (paid work); the
-                        # 120x5s loop is the real deadline.
-                        continue
-                    status = poll_resp.get("status", "")
-                    if status in ("completed", "success"):
-                        video_url = poll_resp.get("video_url") or poll_resp.get("output", {}).get("video_url")
-                        if video_url:
-                            if not _download_video_or_cascade(video_url, "SEEDANCE"):
-                                return try_next_api()
-                            logger.info(
-                                "Seedance video downloaded",
-                                extra={"engine": "SEEDANCE", "output_mp4": output_mp4},
-                            )
-                            if not _accept_or_reject(output_mp4, _aspect):
+                # Upload identity refs beyond the keyframe → reference-to-video
+                # (multi-ref identity binding); none → image-to-video (exact
+                # keyframe start frame, tightest temporal continuity).
+                ref_urls = []
+                if multi_angle_refs:
+                    for ref_path in multi_angle_refs[:8]:
+                        if os.path.exists(ref_path):
+                            try:
+                                ref_urls.append(fal_client.upload_file(ref_path))
+                            except (OSError, RuntimeError) as e:
                                 logger.warning(
-                                    "Aspect backstop: wrong orientation — rejecting → cascade",
-                                    extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
+                                    "Failed to upload ref image",
+                                    extra={"engine": "SEEDANCE", "ref_path": ref_path, "error": str(e)},
                                 )
-                                return try_next_api()
-                            _record_video_cascade(target_api.upper())
-                            return output_mp4
-                        break
-                    elif status in ("failed", "error"):
+
+                keyframe_url = fal_client.upload_file(image_path)
+
+                seedance_duration = SEEDANCE_DURATIONS.get(shot_type, 4)
+
+                seedance_prompt = (
+                    f"MOTION: Smooth cinematic {camera_motion}, natural acceleration and deceleration, "
+                    f"no abrupt speed changes. "
+                    f"SUBJECT: Maintain rigid facial bone structure — zero face deformation between frames. "
+                    f"Same hair, skin, clothing texture in every frame. "
+                    f"PHYSICS: Natural body movement with weight and momentum, realistic directional motion blur, "
+                    f"consistent gravity, cloth physics responding to movement. "
+                    f"TEMPORAL: Consistent inter-frame luminance, stable color temperature, "
+                    f"no flickering or sudden lighting shifts. "
+                    f"QUALITY: Photorealistic cinematic footage, natural film grain, high definition."
+                )
+
+                arguments = {
+                    "prompt": seedance_prompt,
+                    # 720p: the arena-ranked tier; 1080p is ~2.2x the per-second
+                    # price and SeedVR upscales downstream anyway.
+                    "resolution": "720p",
+                    "duration": seedance_duration,
+                    "aspect_ratio": fal_aspect_ratio(_aspect),
+                    # Assembly owns audio (TTS/BGM/foley); fal charges the same
+                    # either way, but a baked-in track would fight the mix.
+                    "generate_audio": False,
+                }
+                if ref_urls:
+                    endpoint = "bytedance/seedance-2.0/reference-to-video"
+                    arguments["image_urls"] = [keyframe_url] + ref_urls  # keyframe first; ≤9 total
+                else:
+                    endpoint = "bytedance/seedance-2.0/image-to-video"
+                    arguments["image_url"] = keyframe_url
+
+                logger.info(
+                    "fal.ai Seedance 2.0 %s" % ("reference-to-video" if ref_urls else "image-to-video"),
+                    extra={"engine": "SEEDANCE", "ref_count": len(ref_urls), "duration_s": seedance_duration},
+                )
+                result = fal_client.subscribe(
+                    endpoint,
+                    client_timeout=FAL_TIMEOUT_VIDEO_S,
+                    arguments=arguments,
+                    with_logs=True,
+                )
+
+                video_url = result.get("video", {}).get("url")
+                if video_url:
+                    if not _download_video_or_cascade(video_url, "SEEDANCE"):
+                        return try_next_api()
+                    logger.info("Seedance success", extra={"engine": "SEEDANCE", "output_mp4": output_mp4})
+                    if not _accept_or_reject(output_mp4, _aspect):
                         logger.warning(
-                            "Seedance generation failed",
-                            extra={"engine": "SEEDANCE", "status": poll_resp.get("status"), "error": poll_resp.get("error")},
+                            "Aspect backstop: wrong orientation — rejecting → cascade",
+                            extra={"engine": target_api.upper(), "aspect_ratio": _aspect},
                         )
-                        break
+                        return try_next_api()
+                    _record_video_cascade(target_api.upper())
+                    return output_mp4
 
                 return try_next_api()
+
             except Exception as e:
                 logger.warning("Seedance API error", extra={"engine": "SEEDANCE", "error": str(e)})
                 return try_next_api()
         else:
-            logger.warning("SEEDANCE_API_KEY missing — re-routing", extra={"engine": "SEEDANCE"})
+            global _FAL_MISSING_WARNED
+            if not _FAL_MISSING_WARNED:
+                _FAL_MISSING_WARNED = True
+                logger.warning(
+                    "STRUCTURAL: fal client unavailable — SEEDANCE (default-cascade "
+                    "head + action primary) is disabled for this entire run",
+                    extra={"engine": "SEEDANCE"},
+                )
+            logger.warning("FAL_KEY missing for Seedance — cascading", extra={"engine": "SEEDANCE"})
             return try_next_api()
     
     else:

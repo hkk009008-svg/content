@@ -59,7 +59,6 @@ class Settings:
     fal_key: str
     ltx_api_key: str
     runwayml_api_secret: str
-    seedance_api_key: str
 
     # Audio / TTS
     elevenlabs_api_key: str
@@ -108,7 +107,6 @@ class Settings:
             fal_key=_env("FAL_KEY"),
             ltx_api_key=_env("LTX_API_KEY"),
             runwayml_api_secret=_env("RUNWAYML_API_SECRET"),
-            seedance_api_key=_env("SEEDANCE_API_KEY"),
             elevenlabs_api_key=_env("ELEVENLABS_API_KEY"),
             cartesia_api_key=_env("CARTESIA_API_KEY"),
             stability_api_key=_env("STABILITY_API_KEY"),

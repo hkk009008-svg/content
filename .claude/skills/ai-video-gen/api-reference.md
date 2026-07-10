@@ -35,6 +35,8 @@
 
 ## Sora 2 Native (`sora_native.py`)
 
+**⚠️ Sunset**: OpenAI retires Sora 2 and the Videos API on **2026-09-24** — action primary moved to Seedance 2.0 (fal) on 2026-07-11; Sora remains a fallback until shutdown.
+
 **Auth**: OpenAI API key via `OPENAI_API_KEY`
 
 **SDK**: `openai.OpenAI` client
@@ -167,8 +169,9 @@ When native APIs fail, these FAL endpoints provide redundancy:
 | API | FAL Model ID | Notes |
 |-----|-------------|-------|
 | Kling | `fal-ai/kling-video/v3/pro/image-to-video` | Subject binding supported |
-| Sora | `fal-ai/sora-2/image-to-video` | 25s continuous generation |
+| Sora | `fal-ai/sora-2/image-to-video` | 25s continuous generation (retires 2026-09-24) |
 | Veo | `fal-ai/veo3.1/reference-to-video` | Reference images supported |
+| Seedance | `bytedance/seedance-2.0/image-to-video` | Action primary; 4-15s, 480p-4k, 9:16 OK; `.../reference-to-video` takes ≤9 ref images ($0.3024/s @720p standard) |
 
 All FAL proxies use `FAL_KEY` environment variable and `fal_client.subscribe()` with polling.
 

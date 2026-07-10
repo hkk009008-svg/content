@@ -39,14 +39,15 @@ API_REGISTRY = {
 
     # --- VIDEO — Native API integrations ---
     "KLING_NATIVE":  {"label": "Kling 3.0 Native",     "category": "native",    "description": "Best faces — subject binding + face_consistency", "modality": "video", "best_for": ["dialogue_close_up", "static_portrait", "style_locked_sequence"], "per_shot_cost": 0.35, "quality_score": 0.86, "latency_s": 90, "status": "live"},
-    "SORA_NATIVE":   {"label": "Sora 2 Native",        "category": "native",    "description": "Best motion physics — body momentum, cloth sim", "modality": "video", "best_for": ["action_motion", "macro_detail"], "per_shot_cost": 0.50, "quality_score": 0.88, "latency_s": 120, "status": "live"},
+    "SORA_NATIVE":   {"label": "Sora 2 Native",        "category": "native",    "description": "Best motion physics — body momentum, cloth sim (OpenAI retires Sora 2 + Videos API 2026-09-24)", "modality": "video", "best_for": ["action_motion", "macro_detail"], "per_shot_cost": 0.50, "quality_score": 0.88, "latency_s": 120, "status": "live"},
     "VEO_NATIVE":    {"label": "Veo 3.1 Native",       "category": "native",    "description": "Native audio + reference images, 1080p", "modality": "video", "best_for": ["dialogue_close_up", "talking_head_full", "establishing_shot"], "per_shot_cost": 0.40, "quality_score": 0.85, "latency_s": 100, "status": "live", "native_audio": True},
     "RUNWAY_GEN4":   {"label": "Runway Gen-4",         "category": "native",    "description": "Style lock with 3 references, turbo preview", "modality": "video", "best_for": ["style_locked_sequence", "dialogue_close_up"], "per_shot_cost": 0.30, "quality_score": 0.82, "latency_s": 75, "status": "live"},
     "LTX":           {"label": "LTX Video 2.3",        "category": "native",    "description": "4K, keyframe interpolation, cheapest (~$0.06/s)", "modality": "video", "best_for": ["establishing_shot", "macro_detail"], "per_shot_cost": 0.06, "quality_score": 0.74, "latency_s": 60, "status": "live"},
 
     # --- VIDEO — FAL proxy fallbacks ---
     "KLING_3_0":     {"label": "Kling (FAL Proxy)",    "category": "fal_proxy", "description": "Kling via FAL — reliable fallback", "modality": "video", "best_for": ["dialogue_close_up"], "per_shot_cost": 0.40, "quality_score": 0.84, "latency_s": 110, "status": "live"},
-    "SORA_2":        {"label": "Sora 2 (FAL Proxy)",   "category": "fal_proxy", "description": "Sora via FAL — 25s continuous", "modality": "video", "best_for": ["action_motion"], "per_shot_cost": 0.55, "quality_score": 0.87, "latency_s": 130, "status": "live"},
+    "SORA_2":        {"label": "Sora 2 (FAL Proxy)",   "category": "fal_proxy", "description": "Sora via FAL — 25s continuous (retires with the 2026-09-24 Sora sunset)", "modality": "video", "best_for": ["action_motion"], "per_shot_cost": 0.55, "quality_score": 0.87, "latency_s": 130, "status": "live"},
+    "SEEDANCE":      {"label": "Seedance 2.0 (FAL)",   "category": "fal_proxy", "description": "ByteDance via FAL — #1 AA i2v arena (2026-07); multi-reference (up to 9 images) binds multi-character shots; action primary since the Sora sunset", "modality": "video", "best_for": ["action_motion"], "per_shot_cost": 1.51, "quality_score": 0.90, "latency_s": 120, "status": "live"},
     "VEO":           {"label": "Veo (FAL Proxy)",      "category": "fal_proxy", "description": "Veo via FAL — 4 reference images", "modality": "video", "best_for": ["dialogue_close_up", "establishing_shot"], "per_shot_cost": 0.45, "quality_score": 0.83, "latency_s": 115, "status": "live"},
     "RUNWAY":        {"label": "Runway (FAL Proxy)",   "category": "fal_proxy", "description": "Runway via FAL — legacy fallback", "modality": "video", "best_for": ["style_locked_sequence"], "per_shot_cost": 0.32, "quality_score": 0.80, "latency_s": 80, "status": "live"},
 
@@ -120,10 +121,10 @@ PURPOSE_TAGS = [
 PURPOSE_API_RANKING = {
     "dialogue_close_up":    ["HEDRA_C3", "KLING_NATIVE", "VEO_NATIVE", "SYNC_SO_V3", "LATENTSYNC", "MUSETALK"],
     "talking_head_full":    ["HEDRA_C3", "RUNWAY_ACT_ONE", "OMNIHUMAN_V1_5", "VEO_NATIVE", "SYNC_SO_V3"],
-    "action_motion":        ["SORA_NATIVE", "SORA_2", "KLING_NATIVE", "RUNWAY_GEN4"],
+    "action_motion":        ["SEEDANCE", "SORA_NATIVE", "SORA_2", "KLING_NATIVE", "RUNWAY_GEN4"],
     "static_portrait":      ["KLING_NATIVE", "RUNWAY_GEN4", "FLUX_DEV", "HIDREAM_I1"],
     "establishing_shot":    ["LTX", "VEO_NATIVE"],
-    "macro_detail":         ["SORA_NATIVE", "LTX", "FLUX_DEV", "HIDREAM_I1"],
+    "macro_detail":         ["SORA_NATIVE", "SEEDANCE", "LTX", "FLUX_DEV", "HIDREAM_I1"],
     "style_locked_sequence":["RUNWAY_GEN4", "KLING_NATIVE", "VEO_NATIVE"],
     "narration":            ["ELEVENLABS_V3", "CARTESIA_SONIC_2", "OPENAI_AUDIO", "F5_TTS"],
     "music_score":          ["SUNO_V5", "ELEVENLABS_MUSIC", "STABLE_AUDIO_2"],
@@ -136,10 +137,11 @@ PURPOSE_API_RANKING = {
     # - product_in_scene blends with character-shot routing; pick engines that
     #   handle BOTH face and product (Kling Native is strongest here).
     # - product_reveal_motion is the most demanding — needs Sora's physics for
-    #   light glints + smooth rotation. Mochi 2 is a close second.
-    "product_hero":             ["HIDREAM_I1", "FLUX_DEV", "SORA_NATIVE", "SD3_5_LARGE", "LTX"],
-    "product_in_scene":         ["KLING_NATIVE", "VEO_NATIVE", "RUNWAY_GEN4", "SORA_NATIVE"],
-    "product_reveal_motion":    ["SORA_NATIVE", "KLING_NATIVE", "RUNWAY_GEN4"],
+    #   light glints + smooth rotation. Mochi 2 is a close second. SEEDANCE
+    #   trails each Sora slot as its post-sunset successor (2026-09-24).
+    "product_hero":             ["HIDREAM_I1", "FLUX_DEV", "SORA_NATIVE", "SEEDANCE", "SD3_5_LARGE", "LTX"],
+    "product_in_scene":         ["KLING_NATIVE", "VEO_NATIVE", "RUNWAY_GEN4", "SORA_NATIVE", "SEEDANCE"],
+    "product_reveal_motion":    ["SORA_NATIVE", "SEEDANCE", "KLING_NATIVE", "RUNWAY_GEN4"],
 }
 
 
@@ -149,7 +151,7 @@ PURPOSE_API_RANKING = {
 # provider owns which API.
 BILLING_PROVIDERS = {
     "FAL_AI": [
-        "KLING_3_0", "SORA_2", "VEO", "RUNWAY",
+        "KLING_3_0", "SORA_2", "VEO", "RUNWAY", "SEEDANCE",
         "MUSETALK", "OMNIHUMAN_V1_5", "LATENTSYNC", "SYNC_V2",
         "SYNC_SO_V3", "HEDRA_C3", "KLING_LIPSYNC_2", "PIXVERSE_LS2", "RUNWAY_ACT_ONE",
         "SEEDVR2",

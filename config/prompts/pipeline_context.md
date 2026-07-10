@@ -11,21 +11,22 @@ ensures all components are aligned.
 
 | Shot Type | Primary API | Why | Fallback Chain |
 |-----------|------------|-----|----------------|
-| Portrait / close-up / headshot / 85mm | KLING_NATIVE | Subject binding + face_consistency = strongest identity lock | Runway Gen-4 → Sora → Kling FAL |
-| Medium / waist-up / 50mm / two-shot | KLING_NATIVE | Good face + scene balance, subject binding available | Runway Gen-4 → Sora → LTX |
+| Portrait / close-up / headshot / 85mm | KLING_NATIVE | Subject binding + face_consistency = strongest identity lock | Runway Gen-4 → Seedance → Kling FAL |
+| Medium / waist-up / 50mm / two-shot | KLING_NATIVE | Good face + scene balance, subject binding available | Runway Gen-4 → Seedance → LTX |
 | Wide / establishing / 24mm / full shot | LTX | 4K support, camera motion params, cheapest, depth-aware | Veo → Kling → Runway |
-| Action / tracking / chase / dynamic | SORA_NATIVE | Best motion physics, cloth simulation, body momentum | Kling → Runway → LTX |
+| Action / tracking / chase / dynamic | SEEDANCE | #1 arena i2v (2026-07); multi-reference (≤9 images) binds multi-character action; Sora retires 2026-09-24 | Sora → Kling → Runway → LTX |
 | Landscape / aerial / drone / panoramic | LTX | 4K, no face needed, lowest cost, best environments | Veo → Kling |
-| Dialogue close-up / speaker to camera | VEO_NATIVE | Best base-video realism; per-shot TTS is lip-synced onto it as an overlay by default (see §2) | Kling → Sora (silent) → overlay |
+| Dialogue close-up / speaker to camera | VEO_NATIVE | Best base-video realism; per-shot TTS is lip-synced onto it as an overlay by default (see §2) | Kling → Seedance (silent) → overlay |
 
 CAMERA MOTION GUIDANCE:
 - KLING_NATIVE: zoom_in_slow, dolly_in_rapid (face-focused motions)
-- SORA_NATIVE: pan_right, pan_left, tracking shots (dynamic motion)
+- SEEDANCE: prompt-driven motion — tracking, chase, multi-character dynamics
+- SORA_NATIVE: pan_right, pan_left, tracking shots (dynamic motion; retires 2026-09-24)
 - LTX: 15 native camera_motion params — any complex camera move
 - VEO_NATIVE: static or slow motions ONLY (cleanest lip-sync — overlay or native)
 - RUNWAY_GEN4: zoom_in_slow, static_drone (style-lock motions)
 
-COST ORDER (cheapest → most expensive): LTX ($) → Kling ($$) → Veo ($$$) → Runway ($$$) → Sora ($$$$)
+COST ORDER (cheapest → most expensive): LTX ($) → Kling ($$) → Veo ($$$) → Runway ($$$) → Sora ($$$$) → Seedance ($$$$$, ~$1.51/5s clip at 720p)
 
 ═══════════════════════════════════════════════════════════════
 2. DIALOGUE LIP-SYNC — how dialogue scenes are handled
@@ -41,7 +42,7 @@ OVERLAY FLOW (default):
   Video generated (silent) → per-shot TTS synthesized → lip-sync overlay applied
   - Base video engine: VEO_NATIVE primary (best realism; static/slow motion).
     If Veo's RAI filter blocks the face, the base video falls through to the
-    silent cascade (Kling → Sora → …); the overlay still fires on whatever
+    silent cascade (Kling → Seedance → …); the overlay still fires on whatever
     silent video was produced.
   - Overlay engines are live (MuseTalk, LatentSync, sync.so v3); the pipeline
     selects one at runtime — you do not choose it.

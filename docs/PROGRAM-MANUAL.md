@@ -118,7 +118,7 @@ One orchestrator — `cinema_pipeline.CinemaPipeline` (`cinema_pipeline.py:49`) 
 
 ### 1.4 Headline capabilities
 
-- **Multi-API video generation with a fallback cascade.** A single entry point, `generate_ai_video` (`phase_c_ffmpeg.py:58`), routes each shot to an optimal engine and fails over through an ordered list — `KLING_NATIVE → SORA_NATIVE → RUNWAY_GEN4 → LTX → VEO_NATIVE → KLING_3_0 → SORA_2 → VEO (FAL) → RUNWAY` (`phase_c_ffmpeg.py:171`) — so one vendor outage doesn't stall a render. Eleven-plus engines are integrated behind native SDKs and FAL proxies; the winning engine's provenance is recorded on every take.
+- **Multi-API video generation with a fallback cascade.** A single entry point, `generate_ai_video` (`phase_c_ffmpeg.py:58`), routes each shot to an optimal engine and fails over through an ordered list — `SEEDANCE → KLING_NATIVE → SORA_NATIVE → RUNWAY_GEN4 → LTX → VEO_NATIVE → KLING_3_0 → SORA_2 → VEO (FAL) → RUNWAY` (`phase_c_ffmpeg.py:175`; SEEDANCE leads since the 2026-07-11 Sora-sunset migration) — so one vendor outage doesn't stall a render. Eleven-plus engines are integrated behind native SDKs and FAL proxies; the winning engine's provenance is recorded on every take.
 
 - **Character consistency.** Keyframes are face-locked with PuLID in a ComfyUI workflow; an `IdentityValidator` (`identity/validator.py`) scores every generated frame against the character's reference embedding (GhostFaceNet/ArcFace), and a rolling-stats feedback loop adapts the PuLID weight per character (`workflow_selector.py:545`). Locations stay consistent via a persisted per-location seed (`domain/location_manager.py`).
 
@@ -1108,10 +1108,10 @@ The router classifies each shot via `classify_shot_type` (`workflow_selector.py:
 
 | shot_type | Primary video API | Fallback cascade |
 |---|---|---|
-| portrait | `KLING_NATIVE` | RUNWAY_GEN4 → SORA_NATIVE → KLING_3_0 |
-| medium | `KLING_NATIVE` | RUNWAY_GEN4 → SORA_NATIVE → LTX |
+| portrait | `KLING_NATIVE` | RUNWAY_GEN4 → SEEDANCE → KLING_3_0 |
+| medium | `KLING_NATIVE` | RUNWAY_GEN4 → SEEDANCE → LTX |
 | wide | `LTX` | VEO_NATIVE → KLING_NATIVE → RUNWAY_GEN4 |
-| action | `SORA_NATIVE` | KLING_NATIVE → RUNWAY_GEN4 → LTX → SEEDANCE |
+| action | `SEEDANCE` | SORA_NATIVE → KLING_NATIVE → RUNWAY_GEN4 → LTX |
 | landscape | `LTX` | VEO_NATIVE → KLING_NATIVE |
 
 The cascade is fault-tolerant: `generate_ai_video` (`phase_c_ffmpeg.py:58`) tries the primary, and on failure walks the fallback list (`try_next_api`, `phase_c_ffmpeg.py:165`), skipping already-attempted engines. On total exhaustion it sleeps 30 s and retries up to `cascade_retry_limit` (default 1).
@@ -1788,10 +1788,9 @@ Set in `.env` (loaded once at import via `load_dotenv`, frozen into the `Setting
 | `OPENAI_API_KEY` | Yes | — | LLMEnsemble fallback, style director, dialogue writer, scene decompose |
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Optional | — | Gemini judge / Veo Gemini-fallback path |
 | `KLING_ACCESS_KEY` + `KLING_SECRET_KEY` | Recommended | — | KLING_NATIVE (JWT auth); primary video engine |
-| `FAL_KEY` | Recommended | — | Sora, Veo-proxy, Kling 3.0, LTX-proxy, Hedra, all lipsync, music, FLUX image fallback |
+| `FAL_KEY` | Recommended | — | Seedance (action primary since 2026-07-11), Sora, Veo-proxy, Kling 3.0, LTX-proxy, Hedra, all lipsync, music, FLUX image fallback |
 | `LTX_API_KEY` | Optional | — | LTX native (preferred over FAL proxy) |
 | `RUNWAYML_API_SECRET` | Optional | — | Runway Gen-4 / gen3a_turbo, Act-One performance |
-| `SEEDANCE_API_KEY` | Optional | — | Seedance engine (action cascade only; speculative endpoint — D-video-2) |
 | `ELEVENLABS_API_KEY` | Yes (audio) | — | TTS narration + dialogue voiceover |
 | `CARTESIA_API_KEY` | Optional | — | Cartesia Sonic 2 (Korean dialogue) |
 | `STABILITY_API_KEY` | Optional | — | Stable Audio foley/BGM |
@@ -2087,7 +2086,7 @@ The Pydantic models in `domain/models.py` are validation-only and omit several l
 | ID | Truth |
 |---|---|
 | D-video-1 | `classify_shot_type` never returns `close_up`, yet `MOTION_FIDELITY_FLOORS` has a `close_up` key (with a comment acknowledging the inconsistency) — that floor is unreachable |
-| D-video-2 | Seedance uses a speculative `api.seedance.ai` REST endpoint; "live" in `API_REGISTRY` but unverified |
+| D-video-2 | **RESOLVED 2026-07-11** — Seedance dispatch rewired to the verified fal endpoints (`bytedance/seedance-2.0/image-to-video`, `.../reference-to-video` keyframe-first ≤9 refs) and promoted to action primary for the Sora sunset (2026-09-24); `SEEDANCE_API_KEY` deleted, rides `FAL_KEY` |
 | D-video-3 | `VEO_NATIVE` has no quota-cooldown guard (only the FAL-proxy `VEO` branch sets the TTL flag) |
 | D-image-1 | **RESOLVED** — `should_halt` now dispatches `composite_only` AND `conjunctive` (`face_validator_gate.py:272`); only `budget_only` remains deferred, falling back to composite-only behavior (`face_validator_gate.py:303`) |
 | D-image-3 | **RESOLVED 2026-06-13 (ADR-025)** — production `pulid.json` now uses `ApplyPulidFlux` / `PulidFluxModelLoader` (FLUX-native), matching max; was SDXL-era `ApplyPulid` / `PulidModelLoader` (a FLUX no-op, validated OFF 0.6205 → ON 0.8779). The upscale-node divergence remains: production 500–502 Real-ESRGAN vs max 500–503 SUPIR — same IDs, different subsystems |

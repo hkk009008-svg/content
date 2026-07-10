@@ -190,7 +190,13 @@ class TestCascadeIntegration:
         """Action shots should prefer APIs with good motion handling."""
         template = WORKFLOW_TEMPLATES["action"]
         target = template["target_api"]
-        # SORA_NATIVE is good for motion
-        assert target == "SORA_NATIVE", (
-            f"Action target should be SORA_NATIVE for motion, got {target}"
+        # SEEDANCE is action primary since the 2026-07-11 Sora-sunset
+        # migration (#1 AA i2v arena; Sora retires 2026-09-24).
+        assert target == "SEEDANCE", (
+            f"Action target should be SEEDANCE for motion, got {target}"
+        )
+        # Sora keeps the best-motion fallback slot until its shutdown.
+        assert template["video_fallbacks"][0] == "SORA_NATIVE", (
+            f"SORA_NATIVE should lead action fallbacks until the 2026-09-24 "
+            f"sunset, got {template['video_fallbacks']}"
         )

@@ -59,7 +59,7 @@ API_COST_USD: dict[str, float] = {
     "RUNWAY_GEN4":   0.50,
     "RUNWAY":        0.40,
     "FAL_SVD":       0.20,    # per ~5s clip via fal-ai/fast-svd (conservative estimate; calibrate against fal.ai invoice)
-    "SEEDANCE":      0.30,    # per ~5s clip via Seedance 2.0 (conservative estimate; calibrate against Seedance invoice)
+    "SEEDANCE":      1.51,    # per ~5s clip: fal bytedance/seedance-2.0 standard 720p = $0.3024/s (fal model page, read 2026-07-11; r2v-with-video-input bills 0.6x; calibrate against fal invoice)
     # Performance-capture APIs (per ~5s clip; mirrors performance/* _cost_log estimates).
     "ACT_ONE":        0.25,    # Runway Act-One retargeting, approx $0.05/s.
     "LIVE_PORTRAIT":  0.04,    # ComfyUI LivePortrait amortized GPU cost.
@@ -421,7 +421,7 @@ class CostTracker:
             "LTX": "ltx", "RUNWAY": "runway",
             "COMFYUI": "comfyui", "QUALITY_MAX": "comfyui",
             "POLLINATIONS": "pollinations",
-            "FLUX": "fal", "HIDREAM": "fal",
+            "FLUX": "fal", "HIDREAM": "fal", "SEEDANCE": "fal",
         }
         provider = "unknown"
         for prefix, prov in _provider_map.items():

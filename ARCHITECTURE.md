@@ -550,8 +550,8 @@ at [domain/project_manager.py:71](domain/project_manager.py:71).
 
 | Function | Provider | Tooling |
 |---|---|---|
-| `decompose_scene` ([domain/scene_decomposer.py:436](domain/scene_decomposer.py:436)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
-| `competitive_decompose_scene` ([domain/scene_decomposer.py:626](domain/scene_decomposer.py:626)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
+| `decompose_scene` ([domain/scene_decomposer.py:438](domain/scene_decomposer.py:438)) | **GPT-4o only**, via `web_research.run_with_tools` (Tavily + Firecrawl, `max_tool_rounds=2`) | fallback to `_fallback_decompose` |
+| `competitive_decompose_scene` ([domain/scene_decomposer.py:628](domain/scene_decomposer.py:628)) | `LLMEnsemble.competitive_generate(task_type="decompose", ...)` — Anthropic + OpenAI in parallel + judge | fallback to single-model |
 
 **Persona:** CineDecompose v1.0 with 5 hard constraints:
 - HC1 IDENTITY_FIREWALL — LLM must NEVER describe face/hair/skin/eye color
@@ -1086,18 +1086,20 @@ bound, completed the 8-keyword set, and hardened the regen-floor anchor chain.*
 
 | Shot type | `target_api` | `video_fallbacks` |
 |---|---|---|
-| `portrait` | `KLING_NATIVE` | `["RUNWAY_GEN4", "SORA_NATIVE", "KLING_3_0"]` |
-| `medium` | `KLING_NATIVE` | `["RUNWAY_GEN4", "SORA_NATIVE", "LTX"]` |
+| `portrait` | `KLING_NATIVE` | `["RUNWAY_GEN4", "SEEDANCE", "KLING_3_0"]` |
+| `medium` | `KLING_NATIVE` | `["RUNWAY_GEN4", "SEEDANCE", "LTX"]` |
 | `wide` | `LTX` | `["VEO_NATIVE", "KLING_NATIVE", "RUNWAY_GEN4"]` |
-| `action` | `SORA_NATIVE` | `["KLING_NATIVE", "RUNWAY_GEN4", "LTX", "SEEDANCE"]` |
+| `action` | `SEEDANCE` | `["SORA_NATIVE", "KLING_NATIVE", "RUNWAY_GEN4", "LTX"]` |
 | `landscape` | `LTX` | `["VEO_NATIVE", "KLING_NATIVE"]` |
 
 A parallel `MAX_QUALITY_TEMPLATES` dict at [workflow_selector.py:144-376](workflow_selector.py:144)
 mirrors these with different fallback orderings.
 
-**SEEDANCE appears only in the `action` cascade** (last fallback). It is
-NOT a general multi-character fallback. Two-character dialogue shots
-classify as `medium` and route Kling → Runway → Sora → LTX.
+**SEEDANCE is the `action` primary and the portrait/medium second fallback**
+(2026-07-11 Sora-sunset migration — OpenAI retires Sora 2 + the Videos API on
+2026-09-24; `SORA_NATIVE` stays first action fallback until then, erroring
+fast and cascading after). Two-character dialogue shots classify as `medium`
+and route Kling → Runway → Seedance → LTX.
 
 ### 9.2 `classify_shot_type` keyword map ([workflow_selector.py:417-461](workflow_selector.py:417))
 
@@ -1127,34 +1129,34 @@ prompt + camera into a search string, first containment match wins; default `med
 the 5 top-level keys, but `normalize_shot_type` may produce it from caller-side
 shot type strings.)
 
-### 9.4 `generate_ai_video` dispatch ([phase_c_ffmpeg.py:58-995](phase_c_ffmpeg.py:58))
+### 9.4 `generate_ai_video` dispatch ([phase_c_ffmpeg.py:71-1010](phase_c_ffmpeg.py:71))
 
 | Engine | File:line | Adapter | Auth |
 |---|---|---|---|
-| `KLING_NATIVE` | :291 | `kling_native.KlingNativeAPI` | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
-| `SORA_NATIVE` | :330 | `sora_native.SoraNativeAPI` | OPENAI_API_KEY |
-| `VEO_NATIVE` | :376 | `veo_native.VeoNativeAPI` | Vertex AI or GEMINI_API_KEY |
-| `LTX` | :415 | `ltx_native.LTXVideoAPI` | LTX_API_KEY OR FAL_KEY |
-| `RUNWAY_GEN4` | :461 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
-| `SORA_2` | :522 | inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")` | FAL_KEY |
-| `VEO` | :579 | inline `fal_client.subscribe("fal-ai/veo3.1/reference-to-video")` | FAL_KEY (gated by `_veo_quota_blocked`) |
-| `KLING_3_0` | :668 | inline `fal_client.subscribe("fal-ai/kling-video/v3/pro/...")` | FAL_KEY |
-| `FAL_SVD` | :772 | inline `fal_client.subscribe("fal-ai/fast-svd")` | FAL_KEY; **not in any cascade** |
-| `RUNWAY` | :851 | inline `runwayml` SDK (`gen3a_turbo`) | RUNWAYML_API_SECRET |
-| `SEEDANCE` | :893 | inline `requests.post("https://api.seedance.ai/v1/video/generate")` | SEEDANCE_API_KEY |
+| `KLING_NATIVE` | :306 | `kling_native.KlingNativeAPI` | JWT HS256 (KLING_ACCESS_KEY + KLING_SECRET_KEY) |
+| `SORA_NATIVE` | :345 | `sora_native.SoraNativeAPI` | OPENAI_API_KEY |
+| `VEO_NATIVE` | :391 | `veo_native.VeoNativeAPI` | Vertex AI or GEMINI_API_KEY |
+| `LTX` | :430 | `ltx_native.LTXVideoAPI` | LTX_API_KEY OR FAL_KEY |
+| `RUNWAY_GEN4` | :476 | inline `runwayml` SDK (`gen4_turbo`) | RUNWAYML_API_SECRET |
+| `SORA_2` | :537 | inline `fal_client.subscribe("fal-ai/sora-2/image-to-video")` | FAL_KEY |
+| `VEO` | :594 | inline `fal_client.subscribe("fal-ai/veo3.1/reference-to-video")` | FAL_KEY (gated by `_veo_quota_blocked`) |
+| `KLING_3_0` | :683 | inline `fal_client.subscribe("fal-ai/kling-video/v3/pro/...")` | FAL_KEY |
+| `FAL_SVD` | :787 | inline `fal_client.subscribe("fal-ai/fast-svd")` | FAL_KEY; **not in any cascade** |
+| `RUNWAY` | :866 | inline `runwayml` SDK (`gen3a_turbo`) | RUNWAYML_API_SECRET |
+| `SEEDANCE` | :908 | inline `fal_client.subscribe("bytedance/seedance-2.0/image-to-video")`, or `.../reference-to-video` when multi-angle refs exist (keyframe first, ≤9 images) | FAL_KEY |
 
 ### 9.5 Default cascade (when `video_fallbacks=None`)
 
-[phase_c_ffmpeg.py:171-174](phase_c_ffmpeg.py:171):
+[phase_c_ffmpeg.py:186-189](phase_c_ffmpeg.py:186):
 ```python
 fallback_list = [
-    "KLING_NATIVE", "SORA_NATIVE", "RUNWAY_GEN4",
+    "SEEDANCE", "KLING_NATIVE", "SORA_NATIVE", "RUNWAY_GEN4",
     "LTX", "VEO_NATIVE", "KLING_3_0", "SORA_2", "VEO", "RUNWAY",
 ]
 ```
 
-`FAL_SVD` and `SEEDANCE` are reachable only via explicit `target_api=` or the
-`action` cascade.
+`FAL_SVD` is reachable only via explicit `target_api=`. `SEEDANCE` (since the
+2026-07-11 fal migration) leads the default cascade and is the `action` primary.
 
 **FAL client timeouts (2026-06-10):** every production `fal_client.subscribe`
 call — the inline engines above plus lipsync, LTX, assembly FLUX fallbacks,
@@ -1165,16 +1167,16 @@ waits **indefinitely** without it, and on expiry it cancels the remote job and
 raises `FalClientTimeoutError`, which the provider cascades route around).
 AST-enforced for all current and future call sites by
 [tests/unit/test_fal_subscribe_timeouts.py](tests/unit/test_fal_subscribe_timeouts.py).
-The Seedance status poll retries transient per-iteration timeouts
-(`requests.get(..., timeout=30)`; the 120×5s loop is the deadline).
+The Seedance dispatch rides `fal_client.subscribe` like the other fal engines
+(2026-07-11 migration; its former `api.seedance.ai` REST poll loop is gone).
 
 ### 9.6 VEO quota gate
 
 **TTL-based** (commit `feccf61`):
 - Variable: `_VEO_QUOTA_EXHAUSTED_UNTIL: float = 0.0` ([phase_c_ffmpeg.py:23](phase_c_ffmpeg.py:23))
 - TTL: `_VEO_QUOTA_TTL_S: int = 1800` (30 min) ([:24](phase_c_ffmpeg.py:24))
-- Check: `_veo_quota_blocked()` ([:37-42](phase_c_ffmpeg.py:37))
-- Set on 429/quota error ([:657](phase_c_ffmpeg.py:657))
+- Check: `_veo_quota_blocked()` ([:50-56](phase_c_ffmpeg.py:50))
+- Set on 429/quota error ([:671](phase_c_ffmpeg.py:671))
 - Gates only the `VEO` (FAL) branch — NOT `VEO_NATIVE`
 
 ### 9.7 Helper functions in `phase_c_ffmpeg.py`
