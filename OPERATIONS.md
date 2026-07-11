@@ -143,6 +143,7 @@ Authoritative list (every variable consumed by the pipeline):
 | `EXPERIMENTS_DB_PATH` | `data/experiments.db` | SQLite cost tracker DB |
 | `PERFORMANCE_CACHE_DIR` | `data/cache/driving` | Content-hash cache for Mode-B driving videos |
 | `MOTION_GATE_SAMPLES` | `8` | Number of frame pairs sampled by `motion_gate.score_motion_fidelity` |
+| `IDENTITY_EMBED_MODEL` | `GhostFaceNet` | DeepFace embedding backbone for identity QC (single chokepoint: `identity.validator.EMBED_MODEL`). ⚠️ All calibrated identity thresholds assume GhostFaceNet scores — non-default values (e.g. `Buffalo_L`, non-commercial license) fire a structural warning and need a pod re-calibration pass before the gates are meaningful. |
 | `WEB_BIND_HOST` | `127.0.0.1` | Flask bind. Set to `0.0.0.0` for LAN access (then tighten `WEB_CORS_ORIGINS`). |
 | `WEB_CORS_ORIGINS` | `localhost-only dev origins` | Comma-separated origin allowlist. `*` opts back into the pre-hardening wide-open behavior. |
 

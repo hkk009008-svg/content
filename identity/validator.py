@@ -40,6 +40,35 @@ try:
 except ImportError:
     DEEPFACE_AVAILABLE = False
 
+# Embedding backbone for ALL identity QC. character_manager and
+# continuity_engine import this constant — single write-site (the string was
+# previously hardcoded at three sites). IMPORTANT: every calibrated identity
+# threshold in the repo (workflow-template validation floors, the
+# face_validator_gate arc floors, the rolling-stats PuLID deltas) is
+# calibrated on GhostFaceNet score distributions. Selecting another DeepFace
+# model (e.g. Buffalo_L — NON-COMMERCIAL model license — or a future
+# AdaFace/CVLFace adapter, P5 in docs/RESEARCH-2026-07-10-component-upgrades.md)
+# INVALIDATES those thresholds until re-calibrated on the pod.
+def _resolve_embed_model() -> str:
+    try:
+        from config.settings import settings
+        model = (settings.identity_embed_model or "GhostFaceNet").strip()
+    except Exception:
+        model = "GhostFaceNet"
+    if model != "GhostFaceNet":
+        import warnings
+        warnings.warn(
+            f"[identity] STRUCTURAL: IDENTITY_EMBED_MODEL={model!r} — every "
+            "calibrated identity threshold assumes GhostFaceNet score "
+            "distributions; gates are UNCALIBRATED for this model until a "
+            "pod measurement pass re-derives them.",
+            stacklevel=2,
+        )
+    return model
+
+
+EMBED_MODEL = _resolve_embed_model()
+
 
 # Type alias for the vision-LLM fallback hook.
 # Returns {"confidence": float, "issues": list[str], ...}.
@@ -132,7 +161,7 @@ def _represent_deterministic(image_path: str) -> list:
     """
     with _cv2_single_thread():
         return DeepFace.represent(
-            img_path=image_path, model_name="GhostFaceNet", enforce_detection=False
+            img_path=image_path, model_name=EMBED_MODEL, enforce_detection=False
         )
 
 

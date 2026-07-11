@@ -428,11 +428,11 @@ def compute_face_embedding(image_path: str) -> Optional[np.ndarray]:
     if not DEEPFACE_AVAILABLE:
         return None
     try:
-        from identity.validator import cv2_single_thread
+        from identity.validator import cv2_single_thread, EMBED_MODEL
         with cv2_single_thread():  # determinism: serialize the OpenCV align race
             embeddings = DeepFace.represent(
                 img_path=image_path,
-                model_name="GhostFaceNet",
+                model_name=EMBED_MODEL,
                 enforce_detection=False,
             )
         if embeddings:

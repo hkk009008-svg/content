@@ -134,7 +134,7 @@ class CharacterContinuityTracker:
             return {"passed": True, "results": {}}
 
         import cv2
-        from identity.validator import cv2_single_thread
+        from identity.validator import cv2_single_thread, EMBED_MODEL
 
         # Extract 3 frames for robustness
         cap = cv2.VideoCapture(video_path)
@@ -183,7 +183,7 @@ class CharacterContinuityTracker:
                         with cv2_single_thread():
                             face_emb_list = DeepFace.represent(
                                 img_path=temp_face,
-                                model_name="GhostFaceNet",
+                                model_name=EMBED_MODEL,
                                 enforce_detection=False,
                             )
                         if not face_emb_list:

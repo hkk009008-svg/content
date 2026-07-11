@@ -59,6 +59,10 @@ class Settings:
     fal_key: str
     ltx_api_key: str
     runwayml_api_secret: str
+    # Identity-QC embedding backbone (DeepFace model_name). Default GhostFaceNet
+    # — ALL calibrated identity thresholds assume its score distribution; see
+    # identity/validator.py EMBED_MODEL before changing.
+    identity_embed_model: str
 
     # Audio / TTS
     elevenlabs_api_key: str
@@ -107,6 +111,7 @@ class Settings:
             fal_key=_env("FAL_KEY"),
             ltx_api_key=_env("LTX_API_KEY"),
             runwayml_api_secret=_env("RUNWAYML_API_SECRET"),
+            identity_embed_model=_env("IDENTITY_EMBED_MODEL", "GhostFaceNet"),
             elevenlabs_api_key=_env("ELEVENLABS_API_KEY"),
             cartesia_api_key=_env("CARTESIA_API_KEY"),
             stability_api_key=_env("STABILITY_API_KEY"),
